@@ -96,7 +96,8 @@ class MainWindow(QMainWindow):
         
         # 结果查看器信号
         self.result_viewer.signals.item_selected.connect(self._on_item_selected)
-        self.result_viewer.signals.item_double_clicked.connect(self._on_item_double_clicked)
+        # 移除对已移除的item_double_clicked信号的连接
+        # self.result_viewer.signals.item_double_clicked.connect(self._on_item_double_clicked)
         
         # 处理线程信号
         if self.processing_thread:
@@ -215,9 +216,3 @@ class MainWindow(QMainWindow):
     def _on_item_selected(self, file_name):
         """处理项目选择事件"""
         self.detail_viewer.show_details(file_name, self.results)
-    
-    def _on_item_double_clicked(self, item, column):
-        """处理项目双击事件"""
-        # 如果是父节点，展开/折叠
-        if item.parent() is None:
-            item.setExpanded(not item.isExpanded())

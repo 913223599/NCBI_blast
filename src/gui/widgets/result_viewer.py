@@ -13,7 +13,7 @@ from Bio.Blast import NCBIXML
 class ResultViewerSignals(QObject):
     """结果查看器信号类"""
     item_selected = pyqtSignal(str)  # 信号：项目已选择
-    item_double_clicked = pyqtSignal(object, int)  # 信号：项目被双击
+    # 移除item_double_clicked信号，因为现在使用单击事件
 
 
 class ResultViewerWidget(QGroupBox):
@@ -39,7 +39,7 @@ class ResultViewerWidget(QGroupBox):
     def _connect_signals(self):
         """连接信号"""
         self.result_tree.itemSelectionChanged.connect(self._on_item_selected)
-        self.result_tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        # 移除双击信号连接，因为现在使用单击事件
     
     def _on_item_selected(self):
         """处理项目选择事件"""
@@ -50,24 +50,20 @@ class ResultViewerWidget(QGroupBox):
             if item.parent() is None:
                 file_name = item.text(0)
                 self.signals.item_selected.emit(file_name)
+                
+                # 单击时展开/折叠
+                is_expanded = not item.isExpanded()
+                item.setExpanded(is_expanded)
+                
+                # 如果是展开状态且还没有加载详细信息，则加载详细信息
+                if is_expanded and item.childCount() > 0:
+                    child = item.child(0)
+                    # 检查是否已加载详细信息（通过检查子节点的列数）
+                    if child.columnCount() == 3 and child.text(0) == '':
+                        # 加载并显示详细信息
+                        self._load_detail_info(item, file_name)
     
-    def _on_item_double_clicked(self, item, column):
-        """处理项目双击事件"""
-        # 如果是父节点，展开/折叠
-        if item.parent() is None:
-            file_name = item.text(0)
-            # 切换展开状态
-            is_expanded = not item.isExpanded()
-            item.setExpanded(is_expanded)
-            
-            # 如果是展开状态且还没有加载详细信息，则加载详细信息
-            if is_expanded and item.childCount() > 0:
-                child = item.child(0)
-                # 检查是否已加载详细信息（通过检查子节点的列数）
-                if child.columnCount() == 3 and child.text(0) == '':
-                    # 加载并显示详细信息
-                    self._load_detail_info(item, file_name)
-        self.signals.item_double_clicked.emit(item, column)
+    # 移除_on_item_double_clicked方法，因为现在使用单击事件
     
     def _load_detail_info(self, parent_item, file_name):
         """加载并显示详细信息"""
