@@ -4,7 +4,6 @@ from .batch_processor import BatchProcessor
 from .executor import BlastExecutor
 from .hybrid_blast import HybridBlastProcessor
 from .local_blast import LocalBlastExecutor, LocalBatchProcessor
-from .optimized_config import get_optimized_config, print_config_recommendations
 from .parser import BlastResultParser
 from .result_cache import BlastResultCache, CachedBlastProcessor
 
@@ -15,8 +14,6 @@ __all__ = [
     'LocalBlastExecutor',
     'LocalBatchProcessor',
     'HybridBlastProcessor',
-    'get_optimized_config',
-    'print_config_recommendations',
     'BlastResultCache',
     'CachedBlastProcessor'
 ]

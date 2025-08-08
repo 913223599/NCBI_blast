@@ -75,33 +75,3 @@ def get_optimized_config(config_type='remote'):
     }
     
     return configs.get(config_type, REMOTE_BLAST_CONFIG)
-
-
-def print_config_recommendations():
-    """
-    打印配置建议
-    """
-    print("BLAST配置优化建议")
-    print("=" * 30)
-    
-    print("\n远程BLAST优化:")
-    print("- 减少hitlist_size到50-100以提高响应速度")
-    print("- 使用较大的word_size (28 for blastn)")
-    print("- 设置合适的并发线程数 (3-5)")
-    print("- 添加请求间隔避免服务器限制")
-    
-    print("\n本地BLAST优化:")
-    print("- 确保有足够的内存和存储空间")
-    print("- 使用SSD硬盘以提高数据库访问速度")
-    print("- 设置合适的num_threads参数")
-    print("- 定期更新本地数据库")
-    
-    print("\n混合模式优化:")
-    print("- 优先使用本地BLAST处理")
-    print("- 对于本地未命中的序列使用远程BLAST")
-    print("- 实现结果缓存避免重复查询")
-    print("- 根据序列特征动态选择处理方式")
-
-
-if __name__ == "__main__":
-    print_config_recommendations()
