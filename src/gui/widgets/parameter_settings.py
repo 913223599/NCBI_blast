@@ -155,19 +155,6 @@ class ParameterSettingsWidget(QGroupBox):
         descriptions_layout.addWidget(self.descriptions_spinbox)
         right_layout.addRow("描述数量 (DESCRIPTIONS):", descriptions_layout)
         
-        # 注释掉max_hsps设置，因为qblast不支持该参数
-        max_hsps_layout = QHBoxLayout()
-        self.max_hsps_enabled = QCheckBox()
-        self.max_hsps_enabled.setChecked(False)
-        self.max_hsps_enabled.setEnabled(False)  # 禁用整个控件，因为qblast不支持该参数
-        self.max_hsps_spinbox = QSpinBox()
-        self.max_hsps_spinbox.setRange(1, 100)   # 设置max_hsps范围为1-100
-        self.max_hsps_spinbox.setValue(1)        # 默认max_hsps设为1
-        self.max_hsps_spinbox.setEnabled(False)  # 默认禁用
-        max_hsps_layout.addWidget(self.max_hsps_enabled)
-        max_hsps_layout.addWidget(self.max_hsps_spinbox)
-        right_layout.addRow("最大HSP数 (MAX_HSPS):", max_hsps_layout)
-        
         # 混合模式参数
         right_layout.addRow(QLabel("混合模式参数:"))
         self.prefer_local_checkbox = QCheckBox("优先使用本地BLAST")
