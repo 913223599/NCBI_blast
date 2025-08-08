@@ -1,0 +1,9 @@
+﻿Parameter,Definition,Type,Allowed values,Default value,Applicable for
+CMD *,Operation to perform,String,Get,None,All programs
+RID *,BLAST search request identifier,String,The Request ID (RID) returned when the search was submitted,None,All programs
+FORMAT_TYPE,Report type,String,"HTML, , , , , , , . For tabular output useTextXML2XML2_SJSONSAJSON2JSON2_SSAMText",HTML,All programs
+,,,FORMAT_TYPE=Text&amp;ALIGNMENT_VIEW=Tabular. For tabular output useCSV,,
+,,,FORMAT_TYPE=CSV&amp;ALIGNMENT_VIEW=Tabular.,,
+DESCRIPTIONS,Number of descriptions to print,Integer,Integer greater than zero.,100,"All programs, HTML,Text formats"
+ALIGNMENTS,Number of alignments to print,Integer,Integer greater than zero.,100,"All programs, HTML,Text formats"
+NCBI_GI,Show NCBI GIs in report,String,true or false,FALSE,"blastn, tblastn, tblastx"

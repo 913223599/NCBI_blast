@@ -101,7 +101,7 @@ class ResultViewerWidget(QGroupBox):
         
         if blast_record.alignments:
             for alignment in blast_record.alignments:
-                title = alignment.title[:100] + "..." if len(alignment.title) > 100 else alignment.title
+                title = alignment.title.split(" ", 1)[1] if " " in alignment.title else alignment.title  # 移除“gi|...|”部分
                 item = QTreeWidgetItem(parent_item, [title, '', ''])
                 item.setData(0, Qt.ItemDataRole.UserRole, alignment)
         else:
