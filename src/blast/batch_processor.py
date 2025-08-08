@@ -102,7 +102,7 @@ class BatchProcessor:
                 blast_params['descriptions'] = self.advanced_settings['descriptions']
             
             # 执行BLAST搜索，传递参数
-            result_handle = self.blast_executor.execute_blast_search(
+            result_handle = self.blast_executor.execute_with_retry(
                 sequence, 
                 **blast_params
             )

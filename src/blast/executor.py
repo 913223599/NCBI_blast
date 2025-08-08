@@ -97,7 +97,7 @@ class BlastExecutor:
             print(f"执行BLAST搜索时出错: {e}")
             raise e
     
-    def execute_with_retry(self, sequence, program="blastn", database="nt", max_retries=3):
+    def execute_with_retry(self, sequence, program="blastn", database="nt", max_retries=3, **kwargs):
         """
         带重试机制的BLAST搜索执行
         
@@ -106,6 +106,14 @@ class BlastExecutor:
             program (str): BLAST程序类型，默认为"blastn"
             database (str): 数据库，默认为"nt"
             max_retries (int): 最大重试次数，默认为3
+            **kwargs: 其他BLAST参数，支持的参数包括:
+                     - hitlist_size: 返回结果数量
+                     - word_size: 词大小
+                     - evalue: 期望值阈值
+                     - matrix_name: 打分矩阵
+                     - filter: 过滤器设置
+                     - alignments: 比对数量
+                     - descriptions: 描述数量
             
         Returns:
             result_handle: BLAST搜索结果句柄
@@ -113,7 +121,7 @@ class BlastExecutor:
         retries = 0
         while retries < max_retries:
             try:
-                return self.execute_blast_search(sequence, program, database)
+                return self.execute_blast_search(sequence, program, database, **kwargs)
             except Exception as e:
                 retries += 1
                 if retries >= max_retries:

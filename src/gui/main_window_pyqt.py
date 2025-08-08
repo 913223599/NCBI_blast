@@ -95,6 +95,7 @@ class MainWindow(QMainWindow):
         
         # 结果查看器信号
         self.result_viewer.signals.item_selected.connect(self._on_item_selected)
+        self.result_viewer.signals.retry_blast.connect(self._retry_blast)  # 连接重试BLAST信号
         # 移除对已移除的item_double_clicked信号的连接
         # self.result_viewer.signals.item_double_clicked.connect(self._on_item_double_clicked)
         
@@ -221,3 +222,59 @@ class MainWindow(QMainWindow):
     def _on_item_selected(self, file_name):
         """处理项目选择事件"""
         self.detail_viewer.show_details(file_name, self.results)
+
+    def _retry_blast(self, file_name):
+        """重试BLAST搜索"""
+        if self.is_processing:
+            QMessageBox.warning(self, "警告", "正在处理中，请等待完成")
+            return
+        
+        # 查找对应的文件路径
+        file_path = None
+        for result in self.results:
+            result_file_name = Path(result.get("file", "")).name
+            if result_file_name == file_name:
+                file_path = result.get("file")
+                break
+        
+        if not file_path:
+            QMessageBox.warning(self, "重试失败", f"未找到文件 {file_name} 的路径信息")
+            return
+        
+        try:
+            max_workers = self.parameter_settings.get_thread_count()
+            if max_workers < 1 or max_workers > 10:
+                raise ValueError("线程数必须在1-10之间")
+        except ValueError as e:
+            QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
+            return
+        
+        # 获取高级参数设置
+        advanced_settings = self.parameter_settings.get_advanced_settings()
+        
+        # 更新界面状态
+        self.is_processing = True
+        self.control_panel.enable_start_button(False)
+        self.control_panel.enable_stop_button(True)
+        self.control_panel.update_progress(0)
+        self.control_panel.set_status(f"正在重试: {file_name}")
+        
+        # 创建并启动处理线程，传递高级参数
+        self.batch_processor = BatchProcessor(
+            max_workers=max_workers,
+            advanced_settings=advanced_settings
+        )
+        
+        # 只处理需要重试的单个文件
+        self.processing_thread = ProcessingThread(self.batch_processor, [file_path])
+        
+        # 连接线程信号
+        self.processing_thread.task_started.connect(self._on_task_start)
+        self.processing_thread.progress_updated.connect(self._on_progress_update)
+        self.processing_thread.result_received.connect(self._on_result_received)
+        self.processing_thread.all_tasks_completed.connect(self._on_all_tasks_complete)
+        self.processing_thread.processing_error.connect(self._on_processing_error)
+        self.processing_thread.finished.connect(self._on_thread_finished)
+        
+        # 启动线程
+        self.processing_thread.start()
