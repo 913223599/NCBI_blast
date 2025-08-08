@@ -43,7 +43,27 @@ class ResultViewerWidget(QGroupBox):
     
     def _connect_signals(self):
         """连接信号"""
-        self.result_tree.itemSelectionChanged.connect(self._on_item_selected)
+        self.result_tree.itemClicked.connect(self._on_item_clicked)
+        # self.result_tree.itemSelectionChanged.connect(self._on_item_selected)  # 移除选择变化信号连接
+    
+    def _on_item_clicked(self, item, column):
+        """处理项目点击事件"""
+        # 如果点击的是父节点（文件节点）
+        if item.parent() is None:
+            file_name = item.text(0)
+            self.signals.item_selected.emit(file_name)
+            
+            # 切换展开/折叠状态
+            is_expanded = not item.isExpanded()
+            item.setExpanded(is_expanded)
+            
+            # 如果是展开状态且还没有加载详细信息，则加载详细信息
+            if is_expanded and item.childCount() > 0:
+                child = item.child(0)
+                # 检查是否已加载详细信息（通过检查子节点的列数）
+                if child.columnCount() == 3 and child.text(0) == '':
+                    # 加载并显示详细信息
+                    self._load_detail_info(item, file_name)
     
     def _show_context_menu(self, position):
         """显示上下文菜单"""
@@ -101,28 +121,6 @@ class ResultViewerWidget(QGroupBox):
                 QMessageBox.information(self, "导出成功", f"查询信息已导出到:\n{save_path}")
             except Exception as e:
                 QMessageBox.critical(self, "导出失败", f"导出过程中发生错误:\n{str(e)}")
-    
-    def _on_item_selected(self):
-        """处理项目选择事件"""
-        selected_items = self.result_tree.selectedItems()
-        if selected_items:
-            item = selected_items[0]
-            # 如果选择的是父节点（文件节点）
-            if item.parent() is None:
-                file_name = item.text(0)
-                self.signals.item_selected.emit(file_name)
-                
-                # 单击时展开/折叠
-                is_expanded = not item.isExpanded()
-                item.setExpanded(is_expanded)
-                
-                # 如果是展开状态且还没有加载详细信息，则加载详细信息
-                if is_expanded and item.childCount() > 0:
-                    child = item.child(0)
-                    # 检查是否已加载详细信息（通过检查子节点的列数）
-                    if child.columnCount() == 3 and child.text(0) == '':
-                        # 加载并显示详细信息
-                        self._load_detail_info(item, file_name)
     
     def _load_detail_info(self, parent_item, file_name):
         """加载并显示详细信息"""

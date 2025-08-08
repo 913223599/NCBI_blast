@@ -128,8 +128,6 @@ class ParameterSettingsWidget(QGroupBox):
         
         # 右栏
         right_layout = QFormLayout()
-        # 远程BLAST参数（继续）
-        right_layout.addRow(QLabel("远程BLAST参数 (续):"))
         
         # 比对数量设置 (ALIGNMENTS)
         alignments_layout = QHBoxLayout()
