@@ -131,6 +131,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
             return
         
+        # 获取高级参数设置
+        advanced_settings = self.parameter_settings.get_advanced_settings()
+        
         # 更新界面状态
         self.is_processing = True
         self.control_panel.enable_start_button(False)
@@ -140,8 +143,11 @@ class MainWindow(QMainWindow):
         # 清空之前的结果
         self.results = []
         
-        # 创建并启动处理线程
-        self.batch_processor = BatchProcessor(max_workers=max_workers)
+        # 创建并启动处理线程，传递高级参数
+        self.batch_processor = BatchProcessor(
+            max_workers=max_workers,
+            advanced_settings=advanced_settings
+        )
         self.processing_thread = ProcessingThread(self.batch_processor, self.sequence_files)
         
         # 连接线程信号

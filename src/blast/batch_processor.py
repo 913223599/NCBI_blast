@@ -19,14 +19,16 @@ class BatchProcessor:
     负责多线程批量处理序列文件
     """
     
-    def __init__(self, max_workers=3):
+    def __init__(self, max_workers=3, advanced_settings=None):
         """
         初始化批量处理器
         
         Args:
             max_workers (int): 最大工作线程数
+            advanced_settings (dict): 高级设置参数
         """
         self.max_workers = max_workers
+        self.advanced_settings = advanced_settings or {}
         self.file_handler = FileHandler()
         self.blast_executor = BlastExecutor()
         self.result_parser = BlastResultParser()
@@ -67,8 +69,36 @@ class BatchProcessor:
             # 读取序列
             sequence = self.file_handler.read_sequence_file(str(sequence_file))
             
-            # 执行BLAST搜索
-            result_handle = self.blast_executor.execute_blast_search(sequence)
+            # 准备BLAST参数
+            blast_params = {}
+            
+            # 添加启用的参数
+            if 'hitlist_size' in self.advanced_settings:
+                blast_params['hitlist_size'] = self.advanced_settings['hitlist_size']
+                
+            if 'word_size' in self.advanced_settings:
+                blast_params['word_size'] = self.advanced_settings['word_size']
+                
+            if 'evalue' in self.advanced_settings:
+                blast_params['evalue'] = self.advanced_settings['evalue']
+                
+            if 'matrix_name' in self.advanced_settings:
+                blast_params['matrix_name'] = self.advanced_settings['matrix_name']
+                
+            if 'filter' in self.advanced_settings:
+                blast_params['filter'] = self.advanced_settings['filter']
+                
+            if 'alignments' in self.advanced_settings:
+                blast_params['alignments'] = self.advanced_settings['alignments']
+                
+            if 'descriptions' in self.advanced_settings:
+                blast_params['descriptions'] = self.advanced_settings['descriptions']
+            
+            # 执行BLAST搜索，传递参数
+            result_handle = self.blast_executor.execute_blast_search(
+                sequence, 
+                **blast_params
+            )
             
             # 保存结果到文件（使用序列文件名命名）
             self.file_handler.save_result_file(result_handle, str(result_file))

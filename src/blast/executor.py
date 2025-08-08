@@ -32,7 +32,7 @@ class BlastExecutor:
         self.opener = build_opener(self.https_handler)
         install_opener(self.opener)
     
-    def execute_blast_search(self, sequence, program="blastn", database="nt"):
+    def execute_blast_search(self, sequence, program="blastn", database="nt", **kwargs):
         """
         执行BLAST搜索
         
@@ -40,6 +40,7 @@ class BlastExecutor:
             sequence (str): 要搜索的序列
             program (str): BLAST程序类型，默认为"blastn"
             database (str): 数据库，默认为"nt"
+            **kwargs: 其他BLAST参数
             
         Returns:
             result_handle: BLAST搜索结果句柄
@@ -48,8 +49,38 @@ class BlastExecutor:
         print("这可能需要一些时间...")
         
         try:
-            # 执行BLAST搜索
-            result_handle = NCBIWWW.qblast(program, database, sequence)
+            # 准备参数字典
+            blast_params = {
+                'program': program,
+                'database': database,
+                'sequence': sequence,
+                'megablast': True
+            }
+            
+            # 添加可选参数
+            if 'hitlist_size' in kwargs:
+                blast_params['hitlist_size'] = kwargs['hitlist_size']
+                
+            if 'word_size' in kwargs:
+                blast_params['word_size'] = kwargs['word_size']
+                
+            if 'evalue' in kwargs:
+                blast_params['expect'] = kwargs['evalue']
+                
+            if 'matrix_name' in kwargs:
+                blast_params['matrix_name'] = kwargs['matrix_name']
+                
+            if 'filter' in kwargs:
+                blast_params['filter'] = kwargs['filter']
+                
+            if 'alignments' in kwargs:
+                blast_params['alignments'] = kwargs['alignments']
+                
+            if 'descriptions' in kwargs:
+                blast_params['descriptions'] = kwargs['descriptions']
+            
+            # 执行BLAST搜索，传递参数
+            result_handle = NCBIWWW.qblast(**blast_params)
             print("BLAST搜索完成!")
             return result_handle
         except Exception as e:

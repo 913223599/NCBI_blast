@@ -97,19 +97,7 @@ else:
 3. 动态调整并发数
 
 **代码示例**：
-```python
-from src.blast.smart_scheduler import SmartScheduler
 
-# 创建智能调度器
-scheduler = SmartScheduler(max_concurrent=5)
-
-# 添加任务
-for seq_file in sequence_files:
-    scheduler.add_task(seq_file)
-
-# 执行调度
-results = scheduler.execute()
-```
 
 **注意事项**：
 - 需要根据网络状况和服务器响应调整参数
@@ -160,19 +148,6 @@ result = perform_blast_search(sequence, database, program, **params)
 3. 动态调整参数
 
 **代码示例**：
-```python
-from src.blast.ultimate_blast import UltimateBlastProcessor
-
-# 创建终极处理器
-processor = UltimateBlastProcessor(
-    local_db_path="/path/to/local/db",  # 本地数据库路径
-    cache_dir="./cache",                # 缓存目录
-    max_concurrent=5                    # 最大并发数
-)
-
-# 处理序列文件
-results = processor.process_sequences(["seq1.fasta", "seq2.fasta"])
-```
 
 **注意事项**：
 - 需要同时满足本地BLAST和缓存的环境要求

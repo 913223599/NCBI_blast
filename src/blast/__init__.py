@@ -8,8 +8,6 @@ from .optimized_config import get_optimized_config, print_config_recommendations
 from .optimized_remote_blast import OptimizedRemoteBlastExecutor, OptimizedBatchProcessor
 from .parser import BlastResultParser
 from .result_cache import BlastResultCache, CachedBlastProcessor
-from .smart_scheduler import SmartQueryScheduler, SequenceAnalyzer
-from .ultimate_blast import UltimateBlastProcessor
 
 __all__ = [
     'BlastExecutor', 
@@ -23,8 +21,5 @@ __all__ = [
     'get_optimized_config',
     'print_config_recommendations',
     'BlastResultCache',
-    'CachedBlastProcessor',
-    'SmartQueryScheduler',
-    'SequenceAnalyzer',
-    'UltimateBlastProcessor'
+    'CachedBlastProcessor'
 ]
