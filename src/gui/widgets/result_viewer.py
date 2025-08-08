@@ -4,10 +4,11 @@
 """
 
 from pathlib import Path
-from PyQt6.QtCore import Qt  # 添加此行导入 Qt 模块
-from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QTextEdit)
-from PyQt6.QtCore import pyqtSignal, QObject
+
 from Bio.Blast import NCBIXML
+from PyQt6.QtCore import Qt  # 添加此行导入 Qt 模块
+from PyQt6.QtCore import pyqtSignal, QObject
+from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTreeWidget, QTreeWidgetItem)
 
 
 class ResultViewerSignals(QObject):

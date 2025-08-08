@@ -4,9 +4,9 @@
 """
 
 from pathlib import Path
-from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTextEdit)
-from PyQt6.QtCore import Qt  # 添加此行导入 Qt 模块
+
 from Bio.Blast import NCBIXML
+from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTextEdit)
 
 
 class DetailViewerWidget(QGroupBox):

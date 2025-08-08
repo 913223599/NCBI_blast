@@ -7,7 +7,6 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox)
 
 # 添加项目根目录到Python路径

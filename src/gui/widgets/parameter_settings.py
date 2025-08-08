@@ -5,7 +5,6 @@
 
 from PyQt6.QtWidgets import (QGroupBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, 
                              QCheckBox, QLineEdit, QPushButton, QWidget, QFormLayout, QComboBox, QGridLayout)
-from PyQt6.QtCore import Qt
 
 
 class ParameterSettingsWidget(QGroupBox):

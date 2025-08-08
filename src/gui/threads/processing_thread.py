@@ -4,7 +4,6 @@
 """
 
 from PyQt6.QtCore import QThread, pyqtSignal
-from src.blast.batch_processor import BatchProcessor
 
 
 class ProcessingThread(QThread):

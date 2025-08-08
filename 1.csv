@@ -1,0 +1,27 @@
+﻿Parameter,Definition,Type,Allowed values,Default value,Applicable for
+CMD *,Operation to perform,String,Put,None,All programs
+QUERY *,Search query,String,"Accession, GI, or FASTA",None,All programs
+DATABASE *,BLAST database,String,"Database file name (e.g.: , core_ntswissprot)",None,All programs
+PROGRAM *,BLAST program,String,"One of , , , , . To enable megablast, use .blastnblastpblastxtblastntblastxPROGRAM=blastn&amp;MEGABLAST=on",blastn,None
+FILTER,Low complexity filtering,String,"F to disable. or to enable. Prepend “m” for mask at lookup (e.g., TLmL)","blastn: blastp,tblastn,blastx:, tblastx: mLFL",All programs
+EXPECT,Expect value,Double,"Number greater than zero (e.g.: , 101e-3)",10,All programs
+NUCL_REWARDNUCL_PENALTY,Reward for matching bases Penalty for mismatched bases,Positive integerNegative integer,"Combination of reward,penalty parameters.","blastn: 2,-3","blastn, megablast"
+,,,"1,-2, , , , , 1,-32,-31,-44,-51,-1","megablast: 1,-2",
+WORD_SIZE,Size of word for initial matches,Integer,"blastn: , , 71115",blastn: 11,All programs
+,,,"megablast: , , , , , , 16202428324864",megablast: 28,
+,,,"blastp: , , 356","blastp, tblastx: 3",
+,,,"tblastn, blastx: , , , 2356","tblastn,blastx:5",
+,,,"tblastx: , 23",,
+GAPCOSTS,Gap existence and extension costs,String,Pair of positive integers separated by a space.,blastn: 5 2,"blastn, blastp , blastx, tblastn"
+,,,"blastn: , , , , , , , 4 42 40 43 36 25 24 22 2","blastp,blastx,tblastn: 11 2",
+,,,"blastp,blastx,tblastn: , , , , , , , , , , 11 210 29 28 27 26 213 112 111 110 19 1",,
+MATRIX,Scoring matrix name,String,"BLOSUM45, , , , , , or .BLOSUM50BLOSUM62BLOSUM80BLOSUM90PAM250PAM30PAM70",BLOSUM62,"blastp , blastx, tblastn, tblastx"
+COMPOSITION_BASED_STATISTICS,Composition based statistics algorithm to use,Integer,"0, , , or . See command line option in the BLAST+ user manual.123comp_based_stats",2,"blastp , blastx, tblastn, tblastx"
+HITLIST_SIZE,Number of databases sequences to keep,Integer,Integer greater than zero.,100,All programs
+SHORT_QUERY_ADJUST,Automatically adjust parameters for input sequences shorter than 30 bases/residues,String,true or false,FALSE,"blastn, blastp"
+FORMAT_TYPE,Report type,String,"HTML, , , , , , , .TextXML2XML2_SJSONSAJSON2JSON2_SSAM",HTML,All programs
+DESCRIPTIONS,Number of descriptions to print,Integer,Integer greater than zero.,100,"All programs, HTML, Text formats"
+ALIGNMENTS,Number of alignments to print,Integer,Integer greater than zero.,100,"All programs, HTML, Text formats"
+NCBI_GI,Show NCBI GIs in report,String,true or false,FALSE,"blastn, tblastn, tblastx"
+NO_DATABASE_OVERRIDE Experimental: this parameter is subject to removal without notice,Do not automatically switch nt to core_nt,String,true or false,FALSE,"blastn, tblastn, tblastx"
+,

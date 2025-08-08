@@ -3,8 +3,8 @@
 负责文件选择相关的GUI组件
 """
 
-from PyQt6.QtWidgets import (QGroupBox, QHBoxLayout, QPushButton, QLabel)
 from PyQt6.QtCore import pyqtSignal, QObject
+from PyQt6.QtWidgets import (QGroupBox, QHBoxLayout, QPushButton, QLabel)
 
 
 class FileSelectorSignals(QObject):
