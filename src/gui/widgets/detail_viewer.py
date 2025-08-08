@@ -5,6 +5,8 @@
 
 from pathlib import Path
 from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTextEdit)
+from PyQt6.QtCore import Qt  # 添加此行导入 Qt 模块
+from Bio.Blast import NCBIXML
 
 
 class DetailViewerWidget(QGroupBox):
@@ -25,7 +27,7 @@ class DetailViewerWidget(QGroupBox):
         
         self.setLayout(layout)
     
-    def show_details(self, file_name, results):
+    def show_details(self, file_name, results, selected_alignment=None):
         """显示文件详细信息"""
         # 清空详细信息
         self.detail_text.clear()
@@ -46,9 +48,64 @@ class DetailViewerWidget(QGroupBox):
                 
                 if "result_file" in result:
                     details += f"结果文件: {result['result_file']}\n"
+                    
+                    # 读取并解析结果文件以获取详细信息
+                    result_file = result["result_file"]
+                    try:
+                        with open(result_file, 'r') as f:
+                            handle = NCBIXML.read(f)
+                            details += self._get_detailed_info(handle, selected_alignment)
+                    except Exception as e:
+                        details += f"加载结果失败: {str(e)}"
                 
                 self.detail_text.setPlainText(details)
                 break
         else:
             # 如果没有找到结果，显示基本信息
             self.detail_text.setPlainText(f"文件: {file_name}\n状态: 待处理\n")
+
+    def _get_detailed_info(self, blast_record, selected_alignment=None):
+        """获取详细的BLAST结果信息"""
+        detailed_info = "\n详细信息:\n"
+        
+        if blast_record.alignments:
+            if selected_alignment is None:
+                detailed_info += f"找到 {len(blast_record.alignments)} 个匹配:\n"
+                for i, alignment in enumerate(blast_record.alignments):
+                    title = alignment.title[:100] + "..." if len(alignment.title) > 100 else alignment.title
+                    detailed_info += f"\n匹配 {i+1}: {title}\n"
+                    
+                    # 翻译物种名字（示例：实际应用中需要使用翻译API）
+                    translated_title = self._translate_species_name(title)
+                    detailed_info += f"翻译: {translated_title}\n"
+                    
+                    for hsp in alignment.hsps:
+                        identity_pct = (hsp.identities / hsp.align_length * 100) if hsp.align_length > 0 else 0
+                        detailed_info += f"  - 长度: {alignment.length}\n"
+                        detailed_info += f"  - E值: {hsp.expect:.2e}\n"
+                        detailed_info += f"  - 相似度: {identity_pct:.2f}%\n"
+                        detailed_info += f"  - 比对序列:\n{hsp.query}\n{hsp.match}\n{hsp.sbjct}\n"
+            else:
+                title = selected_alignment.title[:100] + "..." if len(selected_alignment.title) > 100 else selected_alignment.title
+                detailed_info += f"匹配: {title}\n"
+                
+                # 翻译物种名字（示例：实际应用中需要使用翻译API）
+                translated_title = self._translate_species_name(title)
+                detailed_info += f"翻译: {translated_title}\n"
+                
+                for hsp in selected_alignment.hsps:
+                    identity_pct = (hsp.identities / hsp.align_length * 100) if hsp.align_length > 0 else 0
+                    detailed_info += f"  - 长度: {selected_alignment.length}\n"
+                    detailed_info += f"  - E값: {hsp.expect:.2e}\n"
+                    detailed_info += f"  - 相似度: {identity_pct:.2f}%\n"
+                    detailed_info += f"  - 比对序列:\n{hsp.query}\n{hsp.match}\n{hsp.sbjct}\n"
+        else:
+            detailed_info += "没有找到匹配结果\n"
+        
+        return detailed_info
+
+    def _translate_species_name(self, title):
+        """翻译物种名字（示例实现）"""
+        # 实际应用中应使用翻译API或字典进行翻译
+        # 这里仅作示例返回原字符串
+        return title

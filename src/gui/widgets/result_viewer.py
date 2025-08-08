@@ -4,8 +4,10 @@
 """
 
 from pathlib import Path
+from PyQt6.QtCore import Qt  # 添加此行导入 Qt 模块
 from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QTextEdit)
 from PyQt6.QtCore import pyqtSignal, QObject
+from Bio.Blast import NCBIXML
 
 
 class ResultViewerSignals(QObject):
@@ -22,6 +24,7 @@ class ResultViewerWidget(QGroupBox):
         self.signals = ResultViewerSignals()
         self._setup_ui()
         self._connect_signals()
+        self.results_data = {}  # 存储结果数据
     
     def _setup_ui(self):
         """设置界面"""
@@ -50,7 +53,63 @@ class ResultViewerWidget(QGroupBox):
     
     def _on_item_double_clicked(self, item, column):
         """处理项目双击事件"""
+        # 如果是父节点，展开/折叠
+        if item.parent() is None:
+            file_name = item.text(0)
+            # 切换展开状态
+            is_expanded = not item.isExpanded()
+            item.setExpanded(is_expanded)
+            
+            # 如果是展开状态且还没有加载详细信息，则加载详细信息
+            if is_expanded and item.childCount() > 0:
+                child = item.child(0)
+                # 检查是否已加载详细信息（通过检查子节点的列数）
+                if child.columnCount() == 3 and child.text(0) == '':
+                    # 加载并显示详细信息
+                    self._load_detail_info(item, file_name)
         self.signals.item_double_clicked.emit(item, column)
+    
+    def _load_detail_info(self, parent_item, file_name):
+        """加载并显示详细信息"""
+        # 查找对应的结果数据
+        result_data = None
+        for data in self.results_data.values():
+            if Path(data.get("file", "")).name == file_name:
+                result_data = data
+                break
+        
+        if result_data and result_data.get("status") == "success":
+            # 读取结果文件
+            result_file = result_data.get("result_file")
+            try:
+                with open(result_file, 'r') as f:
+                    handle = NCBIXML.read(f)
+                    self._display_blast_results(parent_item, handle)
+            except Exception as e:
+                # 清空子节点并显示错误信息
+                if parent_item.childCount() > 0:
+                    child = parent_item.child(0)
+                    child.setText(0, f"加载结果失败: {str(e)}")
+        elif result_data and result_data.get("status") == "error":
+            # 显示错误信息
+            if parent_item.childCount() > 0:
+                child = parent_item.child(0)
+                child.setText(0, f"处理失败: {result_data.get('error', '未知错误')}")
+    
+    def _display_blast_results(self, parent_item, blast_record):
+        """显示BLAST结果"""
+        if parent_item.childCount() > 0:
+            # 清空现有子节点
+            for i in range(parent_item.childCount()):
+                parent_item.removeChild(parent_item.child(0))
+        
+        if blast_record.alignments:
+            for alignment in blast_record.alignments:
+                title = alignment.title[:100] + "..." if len(alignment.title) > 100 else alignment.title
+                item = QTreeWidgetItem(parent_item, [title, '', ''])
+                item.setData(0, Qt.ItemDataRole.UserRole, alignment)
+        else:
+            QTreeWidgetItem(parent_item, ["没有找到匹配结果", '', ''])
     
     def update_result_tree(self, sequence_files):
         """更新结果树显示"""
@@ -74,6 +133,9 @@ class ResultViewerWidget(QGroupBox):
         file_name = Path(file_path).name
         status = "成功" if result.get("status") == "success" else "失败"
         elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
+        
+        # 保存结果数据
+        self.results_data[file_name] = result
         
         # 查找对应的树节点并更新
         root = self.result_tree.invisibleRootItem()
