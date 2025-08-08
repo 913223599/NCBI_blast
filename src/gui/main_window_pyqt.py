@@ -97,6 +97,15 @@ class MainWindow(QMainWindow):
         # 结果查看器信号
         self.result_viewer.signals.item_selected.connect(self._on_item_selected)
         self.result_viewer.signals.item_double_clicked.connect(self._on_item_double_clicked)
+        
+        # 处理线程信号
+        if self.processing_thread:
+            self.processing_thread.task_started.connect(self._on_task_start)
+            self.processing_thread.progress_updated.connect(self.control_panel.update_progress)  # 确保这里正确连接
+            self.processing_thread.result_received.connect(self._on_result_received)
+            self.processing_thread.all_tasks_completed.connect(self._on_all_tasks_complete)
+            self.processing_thread.processing_error.connect(self._on_processing_error)
+            self.processing_thread.finished.connect(self._on_thread_finished)
     
     def _on_files_selected(self, files):
         """处理文件选择事件"""

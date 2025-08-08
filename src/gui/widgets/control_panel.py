@@ -39,8 +39,12 @@ class ControlPanelWidget(QGroupBox):
     
     def update_progress(self, value, maximum=100):
         """更新进度条"""
-        self.progress_bar.setMaximum(maximum)
-        self.progress_bar.setValue(value)
+        if maximum > 0:
+            progress = int((value / maximum) * 100)
+            self.progress_bar.setMaximum(maximum)
+            self.progress_bar.setValue(progress)
+        else:
+            self.progress_bar.setValue(0)  # 如果maximum为0，重置进度条
     
     def enable_start_button(self, enabled=True):
         """启用/禁用开始按钮"""

@@ -137,7 +137,14 @@ class BatchProcessor:
             
             # 收集结果
             results = []
+            completed = 0
+            total = len(sequence_files)
+            
             for future in as_completed(future_to_file):
+                # 更新进度
+                if self.on_progress_update:
+                    self.on_progress_update(completed, total)
+                
                 file = future_to_file[future]
                 try:
                     result = future.result()
@@ -160,6 +167,13 @@ class BatchProcessor:
                     results.append(error_result)
                     if self.on_result_received:
                         self.on_result_received(error_result)
+                
+                # 更新完成计数
+                completed += 1
+                
+                # 更新进度
+                if self.on_progress_update:
+                    self.on_progress_update(completed, total)
         
         # 调用所有任务完成回调
         if self.on_all_tasks_complete:
