@@ -1,0 +1,189 @@
+"""
+批量处理模块
+负责批量处理序列文件的BLAST查询
+"""
+
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+from src.utils.file_handler import FileHandler
+from .executor import BlastExecutor
+from .parser import BlastResultParser
+
+
+class BatchProcessor:
+    """
+    批量处理器类
+    负责多线程批量处理序列文件
+    """
+    
+    def __init__(self, max_workers=3):
+        """
+        初始化批量处理器
+        
+        Args:
+            max_workers (int): 最大工作线程数
+        """
+        self.max_workers = max_workers
+        self.file_handler = FileHandler()
+        self.blast_executor = BlastExecutor()
+        self.result_parser = BlastResultParser()
+        self.on_task_start = None  # 任务开始回调
+        self.on_progress_update = None  # 进度更新回调
+        self.on_result_received = None  # 结果接收回调
+        self.on_all_tasks_complete = None  # 所有任务完成回调
+        self._cancel_flag = False  # 取消标志
+    
+    def cancel_processing(self):
+        """
+        取消处理过程
+        """
+        self._cancel_flag = True
+    
+    def process_single_sequence(self, sequence_file):
+        """
+        处理单个序列文件
+        
+        Args:
+            sequence_file (str): 序列文件路径
+            
+        Returns:
+            dict: 处理结果信息
+        """
+        thread_id = threading.current_thread().ident
+        start_time = time.time()
+        
+        try:
+            # 获取文件名（不含扩展名）用于结果文件命名
+            file_name = Path(sequence_file).stem
+            result_file = Path("results") / f"{file_name}_blast_result.xml"
+            
+            # 调用任务开始回调
+            if self.on_task_start:
+                self.on_task_start(sequence_file)
+            
+            # 读取序列
+            sequence = self.file_handler.read_sequence_file(str(sequence_file))
+            
+            # 执行BLAST搜索
+            result_handle = self.blast_executor.execute_blast_search(sequence)
+            
+            # 保存结果到文件（使用序列文件名命名）
+            self.file_handler.save_result_file(result_handle, str(result_file))
+            result_handle.close()
+            
+            # 重新打开结果文件进行解析
+            result_handle = open(result_file)
+            blast_record = self.result_parser.parse_result(result_handle)
+            
+            # 显示结果摘要
+            print(f"\n文件 {file_name} 的搜索结果:")
+            self.result_parser.display_result_summary(blast_record, top_hits=3)
+            
+            result_handle.close()
+            
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            
+            result = {
+                "file": sequence_file,
+                "status": "success",
+                "result_file": result_file,
+                "thread_id": thread_id,
+                "elapsed_time": elapsed_time
+            }
+            
+            return result
+        except Exception as e:
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            
+            print(f"处理文件 {sequence_file} 时出错: {e}")
+            result = {
+                "file": sequence_file,
+                "status": "error",
+                "error": str(e),
+                "thread_id": thread_id,
+                "elapsed_time": elapsed_time
+            }
+            
+            return result
+    
+    def process_sequences(self, sequence_files):
+        """
+        批量处理序列文件
+        
+        Args:
+            sequence_files (list): 序列文件路径列表
+            
+        Returns:
+            list: 处理结果列表
+        """
+        print(f"开始批量处理 {len(sequence_files)} 个序列文件...")
+        print(f"使用 {self.max_workers} 个线程进行处理")
+        
+        # 创建结果目录（如果不存在）
+        Path("results").mkdir(exist_ok=True)
+        
+        # 使用线程池处理序列文件
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            # 提交所有任务
+            future_to_file = {
+                executor.submit(self.process_single_sequence, seq_file): seq_file
+                for seq_file in sequence_files
+            }
+            
+            # 收集结果
+            results = []
+            for future in as_completed(future_to_file):
+                file = future_to_file[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    if result["status"] == "success":
+                        print(f"✓ 完成处理: {Path(file).name}")
+                    else:
+                        print(f"✗ 处理失败: {Path(file).name} - {result['error']}")
+                    
+                    # 发送结果（确保只发送一次）
+                    if self.on_result_received:
+                        self.on_result_received(result)
+                except Exception as e:
+                    print(f"✗ 处理 {file} 时发生异常: {e}")
+                    error_result = {
+                        "file": file,
+                        "status": "error",
+                        "error": str(e)
+                    }
+                    results.append(error_result)
+                    if self.on_result_received:
+                        self.on_result_received(error_result)
+        
+        # 调用所有任务完成回调
+        if self.on_all_tasks_complete:
+            self.on_all_tasks_complete(results)
+            
+        return results
+    
+    def print_summary(self, results):
+        """
+        打印处理结果总结
+        
+        Args:
+            results (list): 处理结果列表
+        """
+        successful = sum(1 for r in results if r["status"] == "success")
+        failed = len(results) - successful
+        
+        print(f"\n批量处理完成!")
+        print(f"总共处理: {len(results)} 个文件")
+        print(f"成功处理: {successful} 个文件")
+        print(f"处理失败: {failed} 个文件")
+        
+        if failed > 0:
+            print("\n失败的文件:")
+            for result in results:
+                if result["status"] == "error":
+                    print(f"  - {Path(result['file']).name}: {result['error']}")
