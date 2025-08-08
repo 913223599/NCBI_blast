@@ -24,8 +24,9 @@ class BatchProcessor:
         初始化批量处理器
         
         Args:
-            max_workers (int): 最大工作线程数
-            advanced_settings (dict): 高级设置参数
+            max_workers (int): 最大工作线程数，默认为3
+            advanced_settings (dict): 高级设置参数，包含BLAST搜索的高级参数设置
+                                      默认为None，表示使用BLAST的默认参数
         """
         self.max_workers = max_workers
         self.advanced_settings = advanced_settings or {}
@@ -52,7 +53,13 @@ class BatchProcessor:
             sequence_file (str): 序列文件路径
             
         Returns:
-            dict: 处理结果信息
+            dict: 处理结果信息，包含以下键值:
+                  - file: 序列文件路径
+                  - status: 处理状态 ("success" 或 "error")
+                  - result_file: 结果文件路径 (仅在成功时存在)
+                  - error: 错误信息 (仅在失败时存在)
+                  - thread_id: 处理线程ID
+                  - elapsed_time: 处理耗时(秒)
         """
         thread_id = threading.current_thread().ident
         start_time = time.time()

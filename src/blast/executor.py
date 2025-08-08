@@ -40,10 +40,20 @@ class BlastExecutor:
             sequence (str): 要搜索的序列
             program (str): BLAST程序类型，默认为"blastn"
             database (str): 数据库，默认为"nt"
-            **kwargs: 其他BLAST参数
+            **kwargs: 其他BLAST参数，支持的参数包括:
+                     - hitlist_size: 返回结果数量
+                     - word_size: 词大小
+                     - evalue: 期望值阈值
+                     - matrix_name: 打分矩阵
+                     - filter: 过滤器设置
+                     - alignments: 比对数量
+                     - descriptions: 描述数量
             
         Returns:
-            result_handle: BLAST搜索结果句柄
+            result_handle: BLAST搜索结果句柄，可用于读取搜索结果
+            
+        Raises:
+            Exception: 如果BLAST搜索执行过程中出现错误
         """
         print("正在执行BLAST搜索...")
         print("这可能需要一些时间...")

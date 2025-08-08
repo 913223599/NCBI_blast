@@ -23,10 +23,11 @@ class ParameterSettingsWidget(QGroupBox):
         basic_layout = QHBoxLayout()
         basic_layout.addWidget(QLabel("线程数:"))
         
+        # 创建线程数设置控件
         self.thread_count_spinbox = QSpinBox()
-        self.thread_count_spinbox.setRange(1, 10)
-        self.thread_count_spinbox.setValue(3)
-        self.thread_count_spinbox.setFixedWidth(60)
+        self.thread_count_spinbox.setRange(1, 10)  # 设置线程数范围为1-10
+        self.thread_count_spinbox.setValue(3)      # 默认线程数设为3
+        self.thread_count_spinbox.setFixedWidth(60)  # 设置控件宽度
         basic_layout.addWidget(self.thread_count_spinbox)
         
         # 添加展开/收起高级设置按钮
@@ -50,62 +51,62 @@ class ParameterSettingsWidget(QGroupBox):
         # 远程BLAST参数
         left_layout.addRow(QLabel("远程BLAST参数:"))
         
-        # 结果数量
+        # 结果数量设置 (HITLIST_SIZE)
         hitlist_size_layout = QHBoxLayout()
         self.hitlist_size_enabled = QCheckBox()
-        self.hitlist_size_enabled.setChecked(False)
+        self.hitlist_size_enabled.setChecked(True)
         self.hitlist_size_spinbox = QSpinBox()
-        self.hitlist_size_spinbox.setRange(1, 1000)
-        self.hitlist_size_spinbox.setValue(20)
-        self.hitlist_size_spinbox.setEnabled(False)
+        self.hitlist_size_spinbox.setRange(1, 1000)  # 设置结果数量范围为1-1000
+        self.hitlist_size_spinbox.setValue(20)       # 默认结果数量设为20
+        self.hitlist_size_spinbox.setEnabled(True)  # 默认启用
         self.hitlist_size_enabled.toggled.connect(self.hitlist_size_spinbox.setEnabled)
         hitlist_size_layout.addWidget(self.hitlist_size_enabled)
         hitlist_size_layout.addWidget(self.hitlist_size_spinbox)
         left_layout.addRow("结果数量 (HITLIST_SIZE):", hitlist_size_layout)
         
-        # 词大小
+        # 词大小设置 (WORD_SIZE)
         word_size_layout = QHBoxLayout()
         self.word_size_enabled = QCheckBox()
         self.word_size_enabled.setChecked(False)
         self.word_size_spinbox = QSpinBox()
-        self.word_size_spinbox.setRange(1, 100)
-        self.word_size_spinbox.setValue(28)
-        self.word_size_spinbox.setEnabled(False)
+        self.word_size_spinbox.setRange(1, 100)     # 设置词大小范围为1-100
+        self.word_size_spinbox.setValue(28)         # 默认词大小设为28
+        self.word_size_spinbox.setEnabled(False)    # 默认禁用，需要勾选复选框启用
         self.word_size_enabled.toggled.connect(self.word_size_spinbox.setEnabled)
         word_size_layout.addWidget(self.word_size_enabled)
         word_size_layout.addWidget(self.word_size_spinbox)
         left_layout.addRow("词大小 (WORD_SIZE):", word_size_layout)
         
-        # 期望值
+        # 期望值设置 (EXPECT)
         evalue_layout = QHBoxLayout()
         self.evalue_enabled = QCheckBox()
         self.evalue_enabled.setChecked(False)
-        self.evalue_input = QLineEdit("10.0")
-        self.evalue_input.setEnabled(False)
+        self.evalue_input = QLineEdit("10.0")      # 默认期望值设为10.0
+        self.evalue_input.setEnabled(False)        # 默认禁用，需要勾选复选框启用
         self.evalue_enabled.toggled.connect(self.evalue_input.setEnabled)
         evalue_layout.addWidget(self.evalue_enabled)
         evalue_layout.addWidget(self.evalue_input)
         left_layout.addRow("期望值 (EXPECT):", evalue_layout)
         
-        # 打分矩阵
+        # 打分矩阵设置 (MATRIX_NAME)
         matrix_layout = QHBoxLayout()
         self.matrix_name_enabled = QCheckBox()
         self.matrix_name_enabled.setChecked(False)
         self.matrix_name_combo = QComboBox()
-        self.matrix_name_combo.addItems(["BLOSUM62", "BLOSUM45", "BLOSUM80", "PAM30", "PAM70"])
-        self.matrix_name_combo.setCurrentText("BLOSUM62")
-        self.matrix_name_combo.setEnabled(False)
+        self.matrix_name_combo.addItems(["BLOSUM62", "BLOSUM45", "BLOSUM80", "PAM30", "PAM70"])  # 可选的打分矩阵
+        self.matrix_name_combo.setCurrentText("BLOSUM62")  # 默认打分矩阵设为BLOSUM62
+        self.matrix_name_combo.setEnabled(False)           # 默认禁用，需要勾选复选框启用
         self.matrix_name_enabled.toggled.connect(self.matrix_name_combo.setEnabled)
         matrix_layout.addWidget(self.matrix_name_enabled)
         matrix_layout.addWidget(self.matrix_name_combo)
         left_layout.addRow("打分矩阵 (MATRIX_NAME):", matrix_layout)
         
-        # 过滤器
+        # 过滤器设置 (FILTER)
         filter_layout = QHBoxLayout()
         self.filter_enabled = QCheckBox()
         self.filter_enabled.setChecked(False)
-        self.filter_input = QLineEdit("none")
-        self.filter_input.setEnabled(False)
+        self.filter_input = QLineEdit("none")      # 默认过滤器设为"none"(不过滤)
+        self.filter_input.setEnabled(False)        # 默认禁用，需要勾选复选框启用
         self.filter_enabled.toggled.connect(self.filter_input.setEnabled)
         filter_layout.addWidget(self.filter_enabled)
         filter_layout.addWidget(self.filter_input)
@@ -117,9 +118,9 @@ class ParameterSettingsWidget(QGroupBox):
         self.local_num_threads_enabled = QCheckBox()
         self.local_num_threads_enabled.setChecked(False)
         self.local_num_threads_spinbox = QSpinBox()
-        self.local_num_threads_spinbox.setRange(1, 16)
-        self.local_num_threads_spinbox.setValue(4)
-        self.local_num_threads_spinbox.setEnabled(False)
+        self.local_num_threads_spinbox.setRange(1, 16)   # 设置本地线程数范围为1-16
+        self.local_num_threads_spinbox.setValue(4)       # 默认本地线程数设为4
+        self.local_num_threads_spinbox.setEnabled(False) # 默认禁用，需要勾选复选框启用
         self.local_num_threads_enabled.toggled.connect(self.local_num_threads_spinbox.setEnabled)
         local_threads_layout.addWidget(self.local_num_threads_enabled)
         local_threads_layout.addWidget(self.local_num_threads_spinbox)
@@ -130,27 +131,27 @@ class ParameterSettingsWidget(QGroupBox):
         # 远程BLAST参数（继续）
         right_layout.addRow(QLabel("远程BLAST参数 (续):"))
         
-        # 比对数量
+        # 比对数量设置 (ALIGNMENTS)
         alignments_layout = QHBoxLayout()
         self.alignments_enabled = QCheckBox()
         self.alignments_enabled.setChecked(False)
         self.alignments_spinbox = QSpinBox()
-        self.alignments_spinbox.setRange(0, 5000)
-        self.alignments_spinbox.setValue(500)
-        self.alignments_spinbox.setEnabled(False)
+        self.alignments_spinbox.setRange(0, 5000)    # 设置比对数量范围为0-5000
+        self.alignments_spinbox.setValue(500)        # 默认比对数量设为500
+        self.alignments_spinbox.setEnabled(False)    # 默认禁用，需要勾选复选框启用
         self.alignments_enabled.toggled.connect(self.alignments_spinbox.setEnabled)
         alignments_layout.addWidget(self.alignments_enabled)
         alignments_layout.addWidget(self.alignments_spinbox)
         right_layout.addRow("比对数量 (ALIGNMENTS):", alignments_layout)
         
-        # 描述数量
+        # 描述数量设置 (DESCRIPTIONS)
         descriptions_layout = QHBoxLayout()
         self.descriptions_enabled = QCheckBox()
         self.descriptions_enabled.setChecked(False)
         self.descriptions_spinbox = QSpinBox()
-        self.descriptions_spinbox.setRange(0, 5000)
-        self.descriptions_spinbox.setValue(500)
-        self.descriptions_spinbox.setEnabled(False)
+        self.descriptions_spinbox.setRange(0, 5000)   # 设置描述数量范围为0-5000
+        self.descriptions_spinbox.setValue(500)       # 默认描述数量设为500
+        self.descriptions_spinbox.setEnabled(False)   # 默认禁用，需要勾选复选框启用
         self.descriptions_enabled.toggled.connect(self.descriptions_spinbox.setEnabled)
         descriptions_layout.addWidget(self.descriptions_enabled)
         descriptions_layout.addWidget(self.descriptions_spinbox)
@@ -160,11 +161,11 @@ class ParameterSettingsWidget(QGroupBox):
         max_hsps_layout = QHBoxLayout()
         self.max_hsps_enabled = QCheckBox()
         self.max_hsps_enabled.setChecked(False)
-        self.max_hsps_enabled.setEnabled(False)  # 禁用整个控件
+        self.max_hsps_enabled.setEnabled(False)  # 禁用整个控件，因为qblast不支持该参数
         self.max_hsps_spinbox = QSpinBox()
-        self.max_hsps_spinbox.setRange(1, 100)
-        self.max_hsps_spinbox.setValue(1)
-        self.max_hsps_spinbox.setEnabled(False)
+        self.max_hsps_spinbox.setRange(1, 100)   # 设置max_hsps范围为1-100
+        self.max_hsps_spinbox.setValue(1)        # 默认max_hsps设为1
+        self.max_hsps_spinbox.setEnabled(False)  # 默认禁用
         max_hsps_layout.addWidget(self.max_hsps_enabled)
         max_hsps_layout.addWidget(self.max_hsps_spinbox)
         right_layout.addRow("最大HSP数 (MAX_HSPS):", max_hsps_layout)
@@ -172,15 +173,15 @@ class ParameterSettingsWidget(QGroupBox):
         # 混合模式参数
         right_layout.addRow(QLabel("混合模式参数:"))
         self.prefer_local_checkbox = QCheckBox("优先使用本地BLAST")
-        self.prefer_local_checkbox.setChecked(True)
+        self.prefer_local_checkbox.setChecked(True)      # 默认优先使用本地BLAST
         right_layout.addRow("", self.prefer_local_checkbox)
         
         self.fallback_to_remote_checkbox = QCheckBox("本地不可用时回退到远程")
-        self.fallback_to_remote_checkbox.setChecked(True)
+        self.fallback_to_remote_checkbox.setChecked(True) # 默认启用回退到远程
         right_layout.addRow("", self.fallback_to_remote_checkbox)
         
         self.use_cache_checkbox = QCheckBox("使用缓存")
-        self.use_cache_checkbox.setChecked(True)
+        self.use_cache_checkbox.setChecked(True)          # 默认启用缓存
         right_layout.addRow("", self.use_cache_checkbox)
         
         # 将左右两栏添加到网格布局中
@@ -205,7 +206,13 @@ class ParameterSettingsWidget(QGroupBox):
         self.thread_count_spinbox.setValue(count)
     
     def get_advanced_settings(self):
-        """获取高级设置参数"""
+        """
+        获取高级设置参数
+        
+        Returns:
+            dict: 包含所有启用的高级参数设置的字典
+                  只有用户勾选启用的参数才会包含在返回字典中
+        """
         settings = {}
         
         # 只添加启用的参数
@@ -243,7 +250,13 @@ class ParameterSettingsWidget(QGroupBox):
         return settings
     
     def set_advanced_settings(self, settings):
-        """设置高级参数"""
+        """
+        设置高级参数
+        
+        Args:
+            settings (dict): 包含参数设置的字典
+                            会根据字典中的键值对设置对应的参数控件值和启用状态
+        """
         # 设置参数值和启用状态
         if 'hitlist_size' in settings:
             self.hitlist_size_enabled.setChecked(True)
