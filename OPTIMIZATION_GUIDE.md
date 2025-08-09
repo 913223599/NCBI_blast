@@ -98,7 +98,6 @@ else:
 
 **代码示例**：
 
-
 **注意事项**：
 - 需要根据网络状况和服务器响应调整参数
 - 可以结合其他优化方案使用
@@ -173,6 +172,23 @@ result = perform_blast_search(sequence, database, program, **params)
 | 结果缓存（命中率50%） | 15秒 | 2x |
 | 本地BLAST | 3秒 | 10x |
 | 综合优化 | 1.5秒 | 20x |
+
+## 依赖库更新说明
+
+为了支持AI翻译功能，项目新增了以下依赖库：
+- `openai>=1.0.0`：用于调用通义千问大模型进行专业生物学术语翻译
+- `httpx>=0.23.0,<0.28.0`：openai库的网络请求依赖
+
+请使用以下命令安装最新依赖：
+```bash
+pip install -e .
+```
+
+或者单独安装：
+```bash
+pip install openai>=1.0.0
+pip install "httpx>=0.23.0,<0.28.0"
+```
 
 ## 总结
 

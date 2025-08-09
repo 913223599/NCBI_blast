@@ -5,17 +5,24 @@
 
 from pathlib import Path
 import shutil
+import os
+import threading
+import time
 
 from Bio.Blast import NCBIXML
-from PyQt6.QtCore import Qt  # 添加此行导入 Qt 模块
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtCore import pyqtSignal, QObject
 from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QMenu, QMessageBox, QFileDialog)
+
+# 导入生物学翻译模块
+from src.utils.biology_translator import get_biology_translator
 
 
 class ResultViewerSignals(QObject):
     """结果查看器信号类"""
     item_selected = pyqtSignal(str)  # 信号：项目已选择
     retry_blast = pyqtSignal(str)    # 信号：重试BLAST搜索
+    translation_complete = pyqtSignal(object, str, str)  # 翻译完成信号：item, 原文, 译文
 
 
 class ResultViewerWidget(QGroupBox):
@@ -28,6 +35,16 @@ class ResultViewerWidget(QGroupBox):
         self._connect_signals()
         self.results_data = {}  # 存储结果数据
         self.current_file_item = None  # 当前右键点击的文件项
+        self.translating_items = {}  # 正在翻译的项目
+        # 初始化翻译器，启用AI翻译功能，并从配置文件获取API密钥
+        try:
+            from src.utils.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            api_key = config_manager.get_api_key('dashscope')
+        except Exception:
+            api_key = None
+        
+        self.translator = get_biology_translator(use_ai=True, ai_api_key=api_key)
     
     def _setup_ui(self):
         """设置界面"""
@@ -44,6 +61,7 @@ class ResultViewerWidget(QGroupBox):
     def _connect_signals(self):
         """连接信号"""
         self.result_tree.itemClicked.connect(self._on_item_clicked)
+        self.signals.translation_complete.connect(self._on_translation_complete)
         # self.result_tree.itemSelectionChanged.connect(self._on_item_selected)  # 移除选择变化信号连接
     
     def _on_item_clicked(self, item, column):
@@ -158,11 +176,55 @@ class ResultViewerWidget(QGroupBox):
         
         if blast_record.alignments:
             for alignment in blast_record.alignments:
-                title = alignment.title.split(" ", 1)[1] if " " in alignment.title else alignment.title  # 移除"gi|...|"部分
-                item = QTreeWidgetItem(parent_item, [title, '', ''])
+                # 获取原始标题（移除"gi|...|"部分）
+                original_title = alignment.title.split(" ", 1)[1] if " " in alignment.title else alignment.title
+                
+                # 创建树节点
+                item = QTreeWidgetItem(parent_item, ["", '', ''])
                 item.setData(0, Qt.ItemDataRole.UserRole, alignment)
+                
+                # 启动翻译过程（在后台线程中）
+                self._start_translation(item, original_title)
         else:
             QTreeWidgetItem(parent_item, ["没有找到匹配结果", '', ''])
+    
+    def _start_translation(self, item, original_title):
+        """启动翻译过程"""
+        # 显示正在翻译的提示
+        item.setText(0, f"正在翻译，请稍后... ({original_title})")
+        
+        # 记录正在翻译的项目
+        self.translating_items[id(item)] = original_title
+        
+        # 在后台线程中执行翻译
+        def translate_task():
+            try:
+                translated_title = self.translator.translate_text(original_title)
+                # 发送翻译完成信号
+                self.signals.translation_complete.emit(item, original_title, translated_title)
+            except Exception as e:
+                print(f"翻译失败: {e}")
+                # 发送翻译失败信号
+                self.signals.translation_complete.emit(item, original_title, original_title)
+        
+        # 启动翻译线程
+        thread = threading.Thread(target=translate_task, daemon=True)
+        thread.start()
+    
+    def _on_translation_complete(self, item, original_title, translated_title):
+        """处理翻译完成事件"""
+        # 检查项目是否仍在翻译列表中
+        if id(item) in self.translating_items:
+            del self.translating_items[id(item)]
+        
+        # 更新显示
+        if translated_title and translated_title != original_title:
+            display_title = f"{translated_title} ({original_title})"
+        else:
+            # 翻译失败或与原文相同则只显示原文
+            display_title = original_title
+        
+        item.setText(0, display_title)
     
     def update_result_tree(self, sequence_files):
         """更新结果树显示"""

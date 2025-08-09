@@ -7,6 +7,8 @@ setup(
     install_requires=[
         "biopython>=1.78",
         "PyQt6>=6.0.0",
+        "openai>=1.0.0,<2.0.0",
+        "httpx>=0.23.0,<0.28.0"
     ],
     entry_points={
         'console_scripts': [

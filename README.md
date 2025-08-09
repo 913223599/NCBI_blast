@@ -78,6 +78,8 @@ ncbi_blast/
 ```bash
 pip install biopython
 pip install PyQt6
+pip install openai
+pip install "httpx>=0.23.0,<0.28.0"
 ```
 
 或者使用项目配置文件:
@@ -130,7 +132,7 @@ ncbi_blast [--gui]
 
 ## 性能优化
 
-查看 [OPTIMIZATION_GUIDE.md](file:///D:/PycharmProjects/NCBI%20blast/OPTIMIZATION_GUIDE.md) 了解性能优化方案：
+查看 [OPTIMIZATION_GUIDE.md](file:///D:/NCBI%20blast/OPTIMIZATION_GUIDE.md) 了解性能优化方案：
 
 1. **本地BLAST**：安装本地数据库，查询速度提升10-100倍
 2. **结果缓存**：避免重复查询，重复查询速度提升50-200倍
@@ -145,7 +147,7 @@ ncbi_blast [--gui]
 
 ## 结果文件
 
-每个序列文件的BLAST结果都会保存在 [results/](file:///D:/PycharmProjects/NCBI%20blast/results/) 目录中，文件名格式为：
+每个序列文件的BLAST结果都会保存在 [results/](file:///D:/NCBI%20blast/results/) 目录中，文件名格式为：
 ```
 [原始文件名]_blast_result.xml
 ```
@@ -163,3 +165,35 @@ ncbi_blast [--gui]
 1. 修改相应模块文件
 2. 保持向后兼容性
 3. 更新文档说明
+
+## 配置API密钥
+
+有两种方式配置API密钥:
+
+### 方法1: 使用配置文件（推荐）
+在项目根目录下创建`config.json`文件，内容如下:
+```json
+{
+  "api_keys": {
+    "dashscope": "your_dashscope_api_key_here"
+  }
+}
+```
+
+### 方法2: 使用环境变量
+```bash
+# Windows命令行
+set DASHSCOPE_API_KEY=your_api_key_here
+
+# Windows PowerShell
+$env:DASHSCOPE_API_KEY="your_api_key_here"
+
+# Linux/Mac
+export DASHSCOPE_API_KEY=your_api_key_here
+```
+
+### 方法3: 在代码中直接传递
+```python
+translator = get_qwen_translator('your_api_key_here')
+```
+
