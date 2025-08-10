@@ -113,12 +113,6 @@ class BatchProcessor:
             
             # 重新打开结果文件进行解析
             result_handle = open(result_file)
-            blast_record = self.result_parser.parse_result(result_handle)
-            
-            # 显示结果摘要
-            print(f"\n文件 {file_name} 的搜索结果:")
-            self.result_parser.display_result_summary(blast_record, top_hits=3)
-            
             result_handle.close()
             
             end_time = time.time()

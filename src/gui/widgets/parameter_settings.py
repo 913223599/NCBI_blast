@@ -169,6 +169,12 @@ class ParameterSettingsWidget(QGroupBox):
         self.use_cache_checkbox.setChecked(True)          # 默认启用缓存
         right_layout.addRow("", self.use_cache_checkbox)
         
+        # 添加AI翻译功能开关
+        right_layout.addRow(QLabel("翻译功能设置:"))
+        self.ai_translation_checkbox = QCheckBox("使用AI翻译")
+        self.ai_translation_checkbox.setChecked(True)     # 默认启用AI翻译
+        right_layout.addRow("", self.ai_translation_checkbox)
+        
         # 将左右两栏添加到网格布局中
         advanced_layout.addLayout(left_layout, 0, 0)
         advanced_layout.addLayout(right_layout, 0, 1)
@@ -232,6 +238,9 @@ class ParameterSettingsWidget(QGroupBox):
         settings['fallback_to_remote'] = self.fallback_to_remote_checkbox.isChecked()
         settings['use_cache'] = self.use_cache_checkbox.isChecked()
         
+        # AI翻译功能开关
+        settings['use_ai_translation'] = self.ai_translation_checkbox.isChecked()
+        
         return settings
     
     def set_advanced_settings(self, settings):
@@ -287,3 +296,7 @@ class ParameterSettingsWidget(QGroupBox):
             
         if 'use_cache' in settings:
             self.use_cache_checkbox.setChecked(settings['use_cache'])
+            
+        # AI翻译功能开关设置
+        if 'use_ai_translation' in settings:
+            self.ai_translation_checkbox.setChecked(settings['use_ai_translation'])
