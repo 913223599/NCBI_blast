@@ -55,8 +55,10 @@ class BlastExecutor:
         Raises:
             Exception: 如果BLAST搜索执行过程中出现错误
         """
-        print("正在执行BLAST搜索...")
-        print("这可能需要一些时间...")
+        # 只有在处理多个文件时才打印这些信息
+        # 这些信息在批处理器中已经打印过了
+        # print("正在执行BLAST搜索...")
+        # print("这可能需要一些时间...")
         
         try:
             # 准备参数字典
@@ -91,7 +93,7 @@ class BlastExecutor:
             
             # 执行BLAST搜索，传递参数
             result_handle = NCBIWWW.qblast(**blast_params)
-            print("BLAST搜索完成!")
+            # print("BLAST搜索完成!")
             return result_handle
         except Exception as e:
             print(f"执行BLAST搜索时出错: {e}")

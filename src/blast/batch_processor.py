@@ -152,8 +152,10 @@ class BatchProcessor:
         Returns:
             list: 处理结果列表
         """
-        print(f"开始批量处理 {len(sequence_files)} 个序列文件...")
-        print(f"使用 {self.max_workers} 个线程进行处理")
+        # 只有当有多个文件时才打印批量处理信息
+        if len(sequence_files) > 1:
+            print(f"开始批量处理 {len(sequence_files)} 个序列文件...")
+            print(f"使用 {self.max_workers} 个线程进行处理")
         
         # 创建结果目录（如果不存在）
         Path("results").mkdir(exist_ok=True)

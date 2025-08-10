@@ -89,7 +89,9 @@ class ResultViewerWidget(QGroupBox):
             if is_expanded and item.childCount() > 0:
                 child = item.child(0)
                 # 检查是否已加载详细信息（通过检查子节点的列数）
-                if child.columnCount() == 3 and child.text(0) == '':
+                # 同时检查子节点的文本是否为空或正在翻译的提示
+                if (child.columnCount() == 3 and 
+                    (child.text(0) == '' or child.text(0).startswith('正在翻译'))):
                     # 加载并显示详细信息
                     self._load_detail_info(item, file_name)
     

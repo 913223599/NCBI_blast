@@ -114,6 +114,7 @@ class TranslationDataManager:
         """
         添加新的翻译条目
         优化：避免存储过长的摘要信息，只存储关键术语
+        改进：确保菌种名称能被正确存储
         
         Args:
             english (str): 英文术语
@@ -122,22 +123,31 @@ class TranslationDataManager:
             subcategory (str): 子类别
         """
         # 检查是否为摘要信息（包含多个">"字符或长度过长）
-        if english.count('>') > 1 or len(english) > 200:
+        if (english.count('>') > 1 or len(english) > 200 or 
+            '16S ribosomal RNA gene, partial sequence' in english):
             print(f"跳过摘要信息存储: {english[:50]}...")
+            return
+            
+        # 使用更灵活的模式匹配来识别菌株、分离株和克隆信息
+        # 这些信息应该直接组合显示而不是翻译
+        if any(english.lower().startswith(prefix) for prefix in ['strain ', 'isolate ', 'clone ', 'sp. ', 'spp. ']) or \
+           any(' ' + prefix in english.lower() for prefix in ['strain', 'isolate', 'clone']):
+            print(f"跳过菌株/分离株/克隆信息存储: {english}")
             return
             
         # 只有当翻译内容不为空且与原文字不同时才添加
         if english and chinese and english.strip() and chinese.strip() and english != chinese:
             # 额外检查：确保中文翻译不是英文原文的简单变体
             if english.strip().lower() != chinese.strip().lower():
-                # 更新快速查找字典
-                self.translation_data[english] = chinese
-                
-                # 检查是否已存在该条目
+                # 检查是否已存在该条目且翻译相同
                 existing_index = None
                 for i, record in enumerate(self.translation_records):
                     if record['english'] == english:
                         existing_index = i
+                        # 如果已经存在相同的翻译且类别相同，则不需要重复添加
+                        if record['chinese'] == chinese and record['category'] == category:
+                            print(f"发现重复条目，跳过添加: {english} -> {chinese}")
+                            return
                         break
                 
                 # 创建新记录
@@ -151,8 +161,13 @@ class TranslationDataManager:
                 # 更新或添加记录
                 if existing_index is not None:
                     self.translation_records[existing_index] = new_record
+                    print(f"更新翻译条目: {english} -> {chinese}")
                 else:
                     self.translation_records.append(new_record)
+                    print(f"添加新翻译条目: {english} -> {chinese}")
+                
+                # 更新快速查找字典
+                self.translation_data[english] = chinese
                 
                 # 更新分类存储
                 if category not in self.translation_by_category:
@@ -265,6 +280,44 @@ class TranslationDataManager:
         
         return results
 
+    def add_structured_translation(self, english: str, chinese: str, 
+                                 term_type: str, term_subtype: str = ""):
+        """
+        添加结构化的翻译条目，根据术语类型自动分类
+        
+        Args:
+            english (str): 英文术语
+            chinese (str): 中文翻译
+            term_type (str): 术语类型（如菌种、菌株、基因、序列等）
+            term_subtype (str): 术语子类型
+        """
+        # 定义术语类型到分类的映射
+        type_to_category = {
+            'species': '菌种',
+            'strain': '菌株',
+            'isolate': '分离株',
+            'gene': '基因',
+            'sequence': '序列',
+            'genome': '基因组',
+            'plasmid': '质粒',
+            'protein': '蛋白质',
+            'enzyme': '酶',
+            'clone': '克隆',
+        }
+        
+        # 获取分类
+        category = type_to_category.get(term_type, term_type)
+        
+        # 对于菌种名称，我们需要特殊处理以确保正确存储
+        if term_type == 'species':
+            # 检查是否已经有该菌种的翻译
+            existing_translation = self.get_translation(english)
+            if existing_translation and existing_translation == chinese:
+                # 如果已经存在相同的翻译，则不需要重复添加
+                return
+        
+        # 添加翻译条目
+        self.add_translation(english, chinese, category, term_subtype)
 
 def get_translation_data_manager(data_file: str = "translation_data.csv") -> TranslationDataManager:
     """
