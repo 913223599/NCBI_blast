@@ -39,7 +39,7 @@ class ResultViewerWidget(QGroupBox):
         # 初始化翻译器，始终启用本地翻译，AI翻译功能根据设置决定
         self.use_ai_translation = True  # 默认启用AI翻译
         self.translator = get_biology_translator(use_ai=self.use_ai_translation)
-    
+
     def _setup_ui(self):
         """设置界面"""
         layout = QVBoxLayout()
@@ -58,16 +58,17 @@ class ResultViewerWidget(QGroupBox):
         self.signals.translation_complete.connect(self._on_translation_complete)
         # self.result_tree.itemSelectionChanged.connect(self._on_item_selected)  # 移除选择变化信号连接
     
-    def set_translation_settings(self, use_ai_translation, api_key=None):
+    def set_translation_settings(self, translation_settings: dict, api_key: str = None):
         """
-        设置翻译参数
+        设置翻译设置
         
         Args:
-            use_ai_translation (bool): 是否使用AI翻译
-            api_key (str): API密钥
+            translation_settings (dict): 翻译设置
+            api_key (str): AI翻译API密钥
         """
-        self.use_ai_translation = use_ai_translation
+        use_ai_translation = translation_settings.get('use_ai', False)
         try:
+            # 尝试初始化AI翻译器
             self.translator = get_biology_translator(use_ai=use_ai_translation, ai_api_key=api_key)
         except Exception as e:
             print(f"初始化翻译器失败: {e}")

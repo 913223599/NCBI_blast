@@ -80,7 +80,9 @@ class QwenTranslator:
         1. 保持专业术语的准确性
         2. 保持原文的语义和结构
         3. 对于生物学专业词汇，请使用标准的中文学术术语
-        4. 如果遇到物种学名（如 Homo sapiens），请保留原文格式
+        4. 如果遇到物种学名，请尽可能准确的翻译成中文
+        5. 如遇到无法翻译的物种学名或词组，请使用最接近的翻译
+        6. 只回答实际翻译部分，不要回答任何无关内容
         
         文本：
         {text}
@@ -112,6 +114,15 @@ class QwenTranslator:
                     "translation_options": translation_options
                 }
             )
+            
+            # 输出API返回的完整内容用于调试
+            print("=" * 50)
+            print("通义千问API返回内容:")
+            print(f"Model: {completion.model}")
+            print(f"Choices count: {len(completion.choices)}")
+            print(f"Usage: {completion.usage}")
+            print(f"Response content: {completion.choices[0].message.content}")
+            print("=" * 50)
             
             return completion.choices[0].message.content.strip()
                 

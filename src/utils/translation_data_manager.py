@@ -5,7 +5,10 @@
 
 import csv
 import os
+import re
 from typing import Dict, Optional, List
+import sys
+from pathlib import Path
 
 import pandas as pd
 
@@ -24,6 +27,12 @@ class TranslationDataManager:
         Args:
             data_file (str): CSV数据文件路径
         """
+        # 确保使用项目根目录下的翻译数据文件
+        if not os.path.isabs(data_file):
+            # 获取项目根目录
+            project_root = Path(__file__).parent.parent.parent
+            data_file = os.path.join(project_root, data_file)
+        
         self.data_file = data_file
         # 存储完整的翻译数据记录，包括分类信息
         self.translation_records: List[Dict[str, str]] = []
@@ -129,11 +138,19 @@ class TranslationDataManager:
             print(f"跳过摘要信息存储: {english[:50]}...")
             return
             
-        # 使用更灵活的模式匹配来识别菌株、分离株和克隆信息
-        # 这些信息应该直接组合显示而不是翻译
-        if any(english.lower().startswith(prefix) for prefix in ['strain ', 'isolate ', 'clone ', 'sp. ', 'spp. ']) or \
-           any(' ' + prefix in english.lower() for prefix in ['strain', 'isolate', 'clone']):
-            print(f"跳过菌株/分离株/克隆信息存储: {english}")
+        # 使用更精确的模式匹配来识别菌株、分离株和克隆信息
+        # 这些信息如果只是简单的前缀匹配则跳过，但如果是完整术语则不跳过
+        simple_prefixes = ['strain ', 'isolate ', 'clone ', 'sp. ', 'spp. ']
+        if any(english.lower().startswith(prefix) for prefix in simple_prefixes):
+            # 检查是否是简单词（只有一个词）或者包含菌株编号等信息
+            words = english.split()
+            if len(words) == 2 and (words[1].isalnum() or re.match(r'^[A-Za-z0-9\-._]+$', words[1])):
+                print(f"跳过菌株/分离株/克隆信息存储: {english}")
+                return
+        
+        # 对于菌株信息，如果包含"strain"但不是以"strain"开头，也应该跳过
+        if ' strain ' in english.lower() and not english.lower().startswith('strain '):
+            print(f"跳过包含菌株信息的条目存储: {english}")
             return
             
         # 只有当翻译内容不为空且与原文字不同时才添加

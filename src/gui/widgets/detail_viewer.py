@@ -101,7 +101,7 @@ class DetailViewerWidget(QGroupBox):
                 for hsp in selected_alignment.hsps:
                     identity_pct = (hsp.identities / hsp.align_length * 100) if hsp.align_length > 0 else 0
                     detailed_info += f"  - 长度: {selected_alignment.length}\n"
-                    detailed_info += f"  - E값: {hsp.expect:.2e}\n"
+                    detailed_info += f"  - E值: {hsp.expect:.2e}\n"
                     detailed_info += f"  - 相似度: {identity_pct:.2f}%\n"
                     detailed_info += f"  - 比对序列:\n{hsp.query}\n{hsp.match}\n{hsp.sbjct}\n"
         else:

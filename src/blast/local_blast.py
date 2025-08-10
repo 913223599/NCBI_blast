@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 from Bio.Blast import NCBIXML
-from Bio.Blast.Applications import NcbiblastnCommandline
 
 
 class LocalBlastExecutor:
@@ -16,39 +15,28 @@ class LocalBlastExecutor:
     使用本地数据库进行BLAST搜索
     """
     
-    def __init__(self, database_path="nt", blast_bin_path=None):
+    def __init__(self, database_path="database/nt"):
         """
         初始化本地BLAST执行器
         
         Args:
             database_path (str): 数据库路径
-            blast_bin_path (str): BLAST二进制文件路径（可选）
         """
         self.database_path = database_path
-        self.blast_bin_path = blast_bin_path
-        
-        # 检查BLAST是否已安装
-        if not self.is_blast_installed():
-            raise RuntimeError(
-                "未找到BLAST+工具。请先安装NCBI BLAST+:\n"
-                "1. 访问 https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/ \n"
-                "2. 下载并安装适合您操作系统的版本\n"
-                "3. 将BLAST bin目录添加到系统PATH环境变量"
-            )
+        self.blast_bin = "blastn"  # BLAST可执行文件名
     
-    def is_blast_installed(self):
+    def check_blast_installation(self):
         """
         检查BLAST是否已安装
         
         Returns:
-            bool: 是否已安装BLAST
+            bool: 是否已安装
         """
         try:
-            # 尝试运行blastn命令
-            subprocess.run(
-                ["blastn", "-version"], 
-                stdout=subprocess.DEVNULL, 
-                stderr=subprocess.DEVNULL,
+            result = subprocess.run(
+                [self.blast_bin, "-version"], 
+                capture_output=True, 
+                text=True, 
                 check=True
             )
             return True
@@ -83,30 +71,35 @@ class LocalBlastExecutor:
             str: 输出文件路径
         """
         try:
-            # 构建BLAST命令行
-            blastn_cline = NcbiblastnCommandline(
-                query=sequence_file,
-                db=self.database_path,
-                out=output_file,
-                outfmt=5,  # XML格式输出
-                max_target_seqs=max_hits,
-                evalue=10.0
-            )
+            # 构建BLAST命令行参数
+            blast_cmd = [
+                self.blast_bin,
+                "-query", sequence_file,
+                "-db", self.database_path,
+                "-out", output_file,
+                "-outfmt", "5",  # XML格式输出
+                "-max_target_seqs", str(max_hits),
+                "-evalue", "10.0"
+            ]
             
             print(f"正在执行本地BLAST搜索: {Path(sequence_file).name}")
-            print(f"命令: {blastn_cline}")
+            print(f"命令: {' '.join(blast_cmd)}")
             
             # 执行BLAST搜索
-            stdout, stderr = blastn_cline()
+            result = subprocess.run(
+                blast_cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
             
-            if stderr:
-                print(f"警告: {stderr}")
-            
-            print(f"本地BLAST搜索完成，结果保存到: {output_file}")
             return output_file
             
-        except Exception as e:
-            raise RuntimeError(f"本地BLAST搜索失败: {e}")
+        except subprocess.CalledProcessError as e:
+            error_msg = f"本地BLAST执行失败: {e}\nstderr: {e.stderr}"
+            raise Exception(error_msg)
+        except FileNotFoundError:
+            raise Exception(f"未找到BLAST可执行文件: {self.blast_bin}")
     
     def parse_result(self, result_file):
         """
