@@ -134,6 +134,30 @@ class MainWindow(QMainWindow):
         # 获取高级参数设置
         advanced_settings = self.parameter_settings.get_advanced_settings()
         
+        # 设置生物学翻译器参数
+        translation_settings = {
+            'use_ai_translation': advanced_settings.get('use_ai_translation', True),
+            'translator_type': advanced_settings.get('translator_type', 'default')  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
+        }
+        
+        # 获取API密钥（如果需要）
+        api_key = None
+        if translation_settings['use_ai_translation']:
+            try:
+                from src.utils.config_manager import get_config_manager
+                config_manager = get_config_manager()
+                api_key = config_manager.get_api_key('dashscope')
+                
+                # 如果配置中没有API密钥，回退到默认类型翻译
+                if not api_key:
+                    translation_settings['translator_type'] = 'default'
+            except Exception as e:
+                print(f"获取API密钥失败: {e}")
+                translation_settings['translator_type'] = 'default'
+        
+        # 设置结果查看器的翻译配置
+        self.result_viewer.set_translation_settings(translation_settings, api_key)
+        
         # 更新界面状态
         self.is_processing = True
         self.control_panel.enable_start_button(False)
@@ -278,3 +302,11 @@ class MainWindow(QMainWindow):
         
         # 启动线程
         self.processing_thread.start()
+
+    def closeEvent(self, event):
+        """处理窗口关闭事件"""
+        if self.is_processing:
+            QMessageBox.warning(self, "警告", "正在处理中，请等待完成")
+            event.ignore()
+        else:
+            event.accept()

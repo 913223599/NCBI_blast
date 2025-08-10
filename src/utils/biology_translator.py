@@ -17,14 +17,6 @@ except ImportError:
     QWEN_AVAILABLE = False
     QwenTranslator = object  # 占位符
 
-# 导入模拟翻译器（用于测试）
-try:
-    from .mock_qwen_translator import get_mock_qwen_translator, MockQwenTranslator
-    MOCK_AVAILABLE = True
-except ImportError:
-    MOCK_AVAILABLE = False
-    MockQwenTranslator = object  # 占位符
-
 # 导入翻译数据管理器
 try:
     from .translation_data_manager import get_translation_data_manager, TranslationDataManager
@@ -42,7 +34,7 @@ class BiologyTranslator:
     """
     
     def __init__(self, data_file: Optional[str] = None, use_ai: bool = False, 
-                 ai_api_key: Optional[str] = None, use_mock: bool = False):
+                 ai_api_key: Optional[str] = None):
         """
         初始化翻译器
         
@@ -50,7 +42,6 @@ class BiologyTranslator:
             data_file (str, optional): 包含翻译数据的CSV文件路径
             use_ai (bool): 是否使用AI翻译器
             ai_api_key (str, optional): AI翻译器API密钥
-            use_mock (bool): 是否使用模拟AI翻译器（用于测试）
         """
         # 初始化翻译数据管理器
         self.translation_data_manager = None
@@ -60,19 +51,11 @@ class BiologyTranslator:
         
         # AI翻译器相关属性
         self.use_ai = use_ai
-        self.use_mock = use_mock
         self.ai_translator = None
         self.ai_api_key = ai_api_key
         
         # 初始化AI翻译器（如果启用）
-        if self.use_mock and MOCK_AVAILABLE:
-            try:
-                self.ai_translator = get_mock_qwen_translator(self.ai_api_key)
-            except Exception as e:
-                print(f"警告: 无法初始化模拟AI翻译器: {e}")
-                self.ai_translator = None
-                self.use_mock = False
-        elif self.use_ai and QWEN_AVAILABLE:
+        if self.use_ai and QWEN_AVAILABLE:
             try:
                 self.ai_translator = get_qwen_translator(self.ai_api_key)
             except Exception as e:
@@ -92,37 +75,31 @@ class BiologyTranslator:
             text (str): 英文文本
             
         Returns:
-            str: 翻译后的文本
+            str: 翻译后的文本，带有翻译类型标识（[AI]表示AI翻译，[本地]表示本地翻译）
         """
         if not text:
             return text
             
-        # 如果启用了模拟AI翻译且模拟翻译器可用，则使用模拟AI翻译
-        if self.use_mock and self.ai_translator:
-            try:
-                result = self.ai_translator.translate_text(text)
-                # 回收翻译数据
-                if self.translation_data_manager:
-                    self._collect_translations(text, result)
-                return result
-            except Exception as e:
-                print(f"模拟AI翻译失败: {e}")
-        
         # 如果启用了AI翻译且AI翻译器可用，则优先使用AI翻译
-        elif self.use_ai and self.ai_translator:
+        if self.use_ai and self.ai_translator:
             # 首先尝试从本地数据中翻译
             if self.translation_data_manager:
                 local_result = self._translate_with_local_data(text)
                 if local_result != text:  # 如果本地翻译成功
-                    return local_result
+                    print(f"[翻译调试] 使用本地翻译: {text} -> {local_result}")
+                    # 返回本地翻译结果，并添加标识
+                    return f"[本地]{local_result}"
             
             # 如果本地翻译失败或未启用，使用AI翻译
+            print(f"[翻译调试] 使用AI翻译: {text}")
             try:
                 result = self.ai_translator.translate_text(text)
+                print(f"[翻译调试] AI翻译结果: {result}")
                 # 回收翻译数据
                 if self.translation_data_manager:
                     self._collect_translations(text, result)
-                return result
+                # 返回AI翻译结果，并添加标识
+                return f"[AI]{result}"
             except Exception as e:
                 print(f"AI翻译失败: {e}")
                 # 新增逻辑：AI翻译失败时，将原文存储到本地词典中
@@ -133,9 +110,12 @@ class BiologyTranslator:
         if self.translation_data_manager:
             local_result = self._translate_with_local_data(text)
             if local_result != text:  # 如果本地翻译成功
-                return local_result
+                print(f"[翻译调试] 使用本地翻译: {text} -> {local_result}")
+                # 返回本地翻译结果，并添加标识
+                return f"[本地]{local_result}"
         
         # 所有方法都失败，返回原文
+        print(f"[翻译调试] 未翻译，返回原文: {text}")
         return text
     
     def _translate_with_local_data(self, text: str) -> str:
@@ -296,7 +276,7 @@ class BiologyTranslator:
 
 
 def get_biology_translator(data_file: Optional[str] = None, use_ai: bool = False, 
-                          ai_api_key: Optional[str] = None, use_mock: bool = False) -> BiologyTranslator:
+                           ai_api_key: Optional[str] = None) -> BiologyTranslator:
     """
     获取生物学翻译器实例
     
@@ -304,12 +284,11 @@ def get_biology_translator(data_file: Optional[str] = None, use_ai: bool = False
         data_file (str, optional): 包含翻译数据的CSV文件路径
         use_ai (bool): 是否使用AI翻译器
         ai_api_key (str, optional): AI翻译器API密钥
-        use_mock (bool): 是否使用模拟AI翻译器（用于测试）
         
     Returns:
-        BiologyTranslator: 翻译器实例
+        BiologyTranslator: 生物学翻译器实例
     """
-    return BiologyTranslator(data_file, use_ai, ai_api_key, use_mock)
+    return BiologyTranslator(data_file, use_ai, ai_api_key)
 
 
 def get_biology_translator_from_api(api_key: Optional[str] = None) -> BiologyTranslator:

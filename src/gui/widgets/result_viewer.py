@@ -36,15 +36,9 @@ class ResultViewerWidget(QGroupBox):
         self.results_data = {}  # 存储结果数据
         self.current_file_item = None  # 当前右键点击的文件项
         self.translating_items = {}  # 正在翻译的项目
-        # 初始化翻译器，启用AI翻译功能，并从配置文件获取API密钥
-        try:
-            from src.utils.config_manager import get_config_manager
-            config_manager = get_config_manager()
-            api_key = config_manager.get_api_key('dashscope')
-        except Exception:
-            api_key = None
-        
-        self.translator = get_biology_translator(use_ai=True, ai_api_key=api_key)
+        # 初始化翻译器，始终启用本地翻译，AI翻译功能根据设置决定
+        self.use_ai_translation = True  # 默认启用AI翻译
+        self.translator = get_biology_translator(use_ai=self.use_ai_translation)
     
     def _setup_ui(self):
         """设置界面"""
@@ -63,6 +57,22 @@ class ResultViewerWidget(QGroupBox):
         self.result_tree.itemClicked.connect(self._on_item_clicked)
         self.signals.translation_complete.connect(self._on_translation_complete)
         # self.result_tree.itemSelectionChanged.connect(self._on_item_selected)  # 移除选择变化信号连接
+    
+    def set_translation_settings(self, use_ai_translation, api_key=None):
+        """
+        设置翻译参数
+        
+        Args:
+            use_ai_translation (bool): 是否使用AI翻译
+            api_key (str): API密钥
+        """
+        self.use_ai_translation = use_ai_translation
+        try:
+            self.translator = get_biology_translator(use_ai=use_ai_translation, ai_api_key=api_key)
+        except Exception as e:
+            print(f"初始化翻译器失败: {e}")
+            # 如果AI翻译器初始化失败，降级到仅使用本地翻译
+            self.translator = get_biology_translator(use_ai=False)
     
     def _on_item_clicked(self, item, column):
         """处理项目点击事件"""
@@ -176,8 +186,38 @@ class ResultViewerWidget(QGroupBox):
         
         if blast_record.alignments:
             for alignment in blast_record.alignments:
-                # 获取原始标题（移除"gi|...|"部分）
-                original_title = alignment.title.split(" ", 1)[1] if " " in alignment.title else alignment.title
+                # 获取原始标题（正确处理包含多个序列标识符的情况）
+                original_title = alignment.title
+                
+                # 处理包含多个序列标识符的情况，只提取第一个序列的描述部分
+                if ">" in original_title and original_title.count(">") > 1:
+                    # 这是一个包含多个序列标识符的标题
+                    # 第一个">"后到第二个">"前的内容是第一个序列标识符
+                    first_greater_index = original_title.find(">")
+                    second_greater_index = original_title.find(">", first_greater_index + 1)
+                    
+                    if second_greater_index == -1:
+                        # 如果没有找到第二个">"，则处理到字符串末尾
+                        first_entry = original_title[first_greater_index + 1:].strip()
+                    else:
+                        # 提取第一个完整序列标识符
+                        first_entry = original_title[first_greater_index + 1:second_greater_index].strip()
+                    
+                    # 从第一个序列标识符中提取描述部分（移除gi|...|等标识符）
+                    if " " in first_entry:
+                        original_title = first_entry.split(" ", 1)[1]
+                    else:
+                        original_title = first_entry
+                else:
+                    # 处理单个序列标识符的情况（原有逻辑）
+                    # 移除开头可能存在的">"符号
+                    if original_title.startswith(">"):
+                        original_title = original_title[1:]
+                    
+                    # 移除gi|...|部分，保留描述信息
+                    if " " in original_title:
+                        original_title = original_title.split(" ", 1)[1]
+                    # 如果没有空格，说明没有gi|...|部分，保留整个标题
                 
                 # 创建树节点
                 item = QTreeWidgetItem(parent_item, ["", '', ''])
@@ -199,12 +239,19 @@ class ResultViewerWidget(QGroupBox):
         # 在后台线程中执行翻译
         def translate_task():
             try:
-                translated_title = self.translator.translate_text(original_title)
+                # 始终使用翻译器（包含本地翻译功能）
+                # 如果启用了AI翻译，则会先尝试AI翻译，失败后回退到本地翻译
+                # 如果未启用AI翻译，则直接使用本地翻译
+                if self.translator:
+                    translated_title = self.translator.translate_text(original_title)
+                else:
+                    # 如果没有翻译器（理论上不应该发生），直接返回原文
+                    translated_title = original_title
                 # 发送翻译完成信号
                 self.signals.translation_complete.emit(item, original_title, translated_title)
             except Exception as e:
                 print(f"翻译失败: {e}")
-                # 发送翻译失败信号
+                # 发送翻译失败信号，显示原文
                 self.signals.translation_complete.emit(item, original_title, original_title)
         
         # 启动翻译线程
@@ -217,12 +264,32 @@ class ResultViewerWidget(QGroupBox):
         if id(item) in self.translating_items:
             del self.translating_items[id(item)]
         
-        # 更新显示
+        # 根据翻译类型设置显示文本和颜色
         if translated_title and translated_title != original_title:
-            display_title = f"{translated_title} ({original_title})"
+            # 检查翻译类型
+            if translated_title.startswith("[AI]"):
+                # AI翻译内容显示为蓝色
+                display_title = f"{translated_title[4:]} ({original_title})"
+                item.setForeground(0, Qt.GlobalColor.blue)
+            elif translated_title.startswith("[本地]"):
+                # 本地翻译内容显示为默认颜色
+                display_title = f"{translated_title[4:]} ({original_title})"
+                item.setForeground(0, Qt.GlobalColor.black)
+            else:
+                # 其他情况显示为默认颜色
+                display_title = f"{translated_title} ({original_title})"
+                item.setForeground(0, Qt.GlobalColor.black)
+            
+            print(f"[结果查看器] 翻译完成: {original_title} -> {translated_title}")
         else:
-            # 翻译失败或与原文相同则只显示原文
+            # 翻译失败或与原文相同则只显示原文，使用红色显示
             display_title = original_title
+            item.setForeground(0, Qt.GlobalColor.red)
+            
+            if translated_title == original_title:
+                print(f"[结果查看器] 翻译结果与原文相同: {original_title}")
+            else:
+                print(f"[结果查看器] 翻译失败，显示原文: {original_title}")
         
         item.setText(0, display_title)
     
