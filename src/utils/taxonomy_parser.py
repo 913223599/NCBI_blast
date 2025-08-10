@@ -4,7 +4,7 @@ NCBI Taxonomy数据库解析器
 """
 
 import os
-from typing import Dict, List, Optional, Iterator, Tuple
+from typing import Dict, List, Iterator, Tuple
 
 
 class TaxonomyParser:

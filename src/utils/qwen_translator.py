@@ -4,8 +4,9 @@
 """
 
 import os
+from typing import Optional, List
+
 from openai import OpenAI
-from typing import Optional, List, Dict, Any, Union, Iterable
 from openai.types.chat import ChatCompletionMessageParam
 
 

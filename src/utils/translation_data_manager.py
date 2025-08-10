@@ -5,7 +5,8 @@
 
 import csv
 import os
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List
+
 import pandas as pd
 
 

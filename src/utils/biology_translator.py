@@ -4,10 +4,8 @@
 使用更高效的数据结构支持大量数据的存储和检索
 """
 
-import json
 import re
-import os
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Optional
 
 # 导入通义千问翻译器
 try:
