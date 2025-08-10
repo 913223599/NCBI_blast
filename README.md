@@ -8,35 +8,51 @@
 ncbi_blast/
 ├── setup.py                 # 项目安装配置
 ├── README.md                # 项目说明文档
+├── config.json              # 配置文件
 ├── OPTIMIZATION_GUIDE.md    # 性能优化指南
+├── translation_data.csv     # 翻译数据文件
 ├── sequences/               # 序列文件目录
 │   └── *.seq                # 待分析的序列文件
+├── database/                # 数据库目录
+│   ├── taxdmp/              # NCBI Taxonomy 旧版数据库
+│   └── new_taxdump/         # NCBI Taxonomy 新版数据库
 ├── src/                     # 源代码目录
 │   ├── __init__.py          # Python 包初始化文件
 │   ├── __main__.py          # 使包可直接运行
 │   ├── main.py              # 程序入口
-│   ├── gui_main.py          # GUI程序入口
+│   ├── gui_main_pyqt.py     # GUI程序入口
 │   ├── blast/               # BLAST 功能模块
 │   │   ├── __init__.py      # Python 包初始化文件
 │   │   ├── executor.py      # BLAST 执行器
 │   │   ├── parser.py        # BLAST 结果解析器
 │   │   ├── batch_processor.py  # 批量处理模块
 │   │   ├── local_blast.py   # 本地BLAST处理模块
-│   │   ├── optimized_remote_blast.py  # 优化的远程BLAST模块
-│   │   ├── hybrid_blast.py  # 混合BLAST处理模块
 │   │   ├── optimized_config.py  # 优化配置模块
 │   │   ├── result_cache.py  # 结果缓存模块
-│   │   ├── smart_scheduler.py  # 智能调度模块
-│   │   └── ultimate_blast.py  # 终极BLAST处理器
 │   ├── utils/               # 工具模块
-│   │   ├── __init__.py      # Python 包初始化文件
-│   │   └── file_handler.py  # 文件处理工具
-│   └── gui/                 # 图形界面模块
-│       ├── __init__.py      # Python 包初始化文件
-│       ├── main_window.py   # 主窗口界面
-│       └── application.py   # GUI应用程序
-└── results/                 # 结果保存目录
-    └── *_blast_result.xml   # BLAST 结果文件（以序列文件名命名）
+│   │   ├── __init__.py             # Python 包初始化文件
+│   │   ├── file_handler.py         # 文件处理工具
+│   │   ├── taxonomy_parser.py      # Taxonomy数据解析器
+│   │   ├── biology_translator.py   # 生物学文本翻译器
+│   │   ├── qwen_translator.py      # Qwen AI翻译器
+│   │   ├── translation_data_manager.py  # 翻译数据管理器
+│   │   ├── config_manager.py       # 配置管理器
+│   └── gui/                        # 图形界面模块
+│       ├── __init__.py             # Python 包初始化文件
+│       ├── main_window_pyqt.py     # 主窗口界面
+│       ├── application_pyqt.py     # GUI应用程序
+│       ├── threads/                # 工作线程模块
+│       │   └── processing_thread.py  # BLAST处理线程
+│       └── widgets/                # GUI组件模块
+│           ├── __init__.py         # Python 包初始化文件
+│           ├── file_selector.py    # 文件选择组件
+│           ├── control_panel.py    # 控制面板组件
+│           ├── parameter_settings.py  # 参数设置组件
+│           ├── result_viewer.py    # 结果展示组件
+│           ├── detail_viewer.py    # 详情查看组件
+│           └── summary_panel.py    # 摘要面板组件
+└── results/                        # 结果保存目录
+    └── *_blast_result.xml          # BLAST 结果文件（以序列文件名命名）
 ```
 
 ## 模块说明
@@ -46,19 +62,27 @@ ncbi_blast/
 - **parser.py**: 负责解析 BLAST 搜索结果
 - **batch_processor.py**: 负责批量处理多个序列文件
 - **local_blast.py**: 本地BLAST处理模块
-- **optimized_remote_blast.py**: 优化的远程BLAST模块
-- **hybrid_blast.py**: 混合BLAST处理模块
 - **optimized_config.py**: 优化配置模块
 - **result_cache.py**: 结果缓存模块
-- **smart_scheduler.py**: 智能调度模块
-- **ultimate_blast.py**: 终极BLAST处理器
 
 ### 工具模块
 - **file_handler.py**: 负责文件读取和保存操作
+- **taxonomy_parser.py**: 解析NCBI Taxonomy数据库文件，提供分类学信息查询功能
+- **biology_translator.py**: 生物学专业术语中英翻译工具
+- **qwen_translator.py**: 基于Qwen大模型的AI翻译工具
+- **translation_data_manager.py**: 管理本地翻译数据的存储和检索
+- **config_manager.py**: 配置文件管理工具
 
 ### GUI模块
-- **main_window.py**: 主窗口界面实现
-- **application.py**: GUI应用程序管理
+- **main_window_pyqt.py**: 主窗口界面实现
+- **application_pyqt.py**: GUI应用程序管理
+- **threads/processing_thread.py**: BLAST处理工作线程
+- **widgets/file_selector.py**: 文件选择组件
+- **widgets/control_panel.py**: 控制面板组件（开始/停止按钮等）
+- **widgets/parameter_settings.py**: 参数设置组件
+- **widgets/result_viewer.py**: 结果展示组件
+- **widgets/detail_viewer.py**: 详情查看组件
+- **widgets/summary_panel.py**: 摘要面板组件
 
 ## 功能特点
 
@@ -72,6 +96,10 @@ ncbi_blast/
 8. **处理取消功能**: 支持取消正在进行的处理任务
 9. **性能优化**: 提供多种性能优化方案
 10. **模块化设计**: 功能分解为独立模块，便于维护和扩展
+11. **专业术语翻译**: 提供生物学专业术语中英翻译功能
+12. **AI辅助翻译**: 支持使用Qwen大模型进行AI翻译
+13. **本地翻译缓存**: 支持本地翻译数据的存储和检索
+14. **Taxonomy信息查询**: 支持查询NCBI Taxonomy数据库获取分类学信息
 
 ## 安装依赖
 
@@ -80,6 +108,7 @@ pip install biopython
 pip install PyQt6
 pip install openai
 pip install "httpx>=0.23.0,<0.28.0"
+pip install pandas
 ```
 
 或者使用项目配置文件:
