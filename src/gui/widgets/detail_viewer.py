@@ -9,7 +9,7 @@ from Bio.Blast import NCBIXML
 from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTextEdit)
 
 # 导入生物学翻译模块
-from src.utils.biology_translator import get_biology_translator
+from src.utils.translation.biology_translator import get_biology_translator
 
 
 class DetailViewerWidget(QGroupBox):
@@ -81,7 +81,14 @@ class DetailViewerWidget(QGroupBox):
                     detailed_info += f"\n匹配 {i+1}: {title}\n"
                     
                     # 翻译物种名字
-                    translated_title = self._translate_species_name(title)
+                    # 使用新的物种翻译模块
+                    try:
+                        from utils.species_translator import get_species_translator
+                        species_translator = get_species_translator(self.translator.translation_data_manager)
+                        translated_title = species_translator.translate_species_name(title)
+                    except ImportError:
+                        # 如果无法导入新模块，则使用原来的实现
+                        translated_title = self._translate_species_name(title)
                     detailed_info += f"翻译: {translated_title}\n"
                     
                     for hsp in alignment.hsps:
@@ -95,7 +102,14 @@ class DetailViewerWidget(QGroupBox):
                 detailed_info += f"匹配: {title}\n"
                 
                 # 翻译物种名字
-                translated_title = self._translate_species_name(title)
+                # 使用新的物种翻译模块
+                try:
+                    from utils.species_translator import get_species_translator
+                    species_translator = get_species_translator(self.translator.translation_data_manager)
+                    translated_title = species_translator.translate_species_name(title)
+                except ImportError:
+                    # 如果无法导入新模块，则使用原来的实现
+                    translated_title = self._translate_species_name(title)
                 detailed_info += f"翻译: {translated_title}\n"
                 
                 for hsp in selected_alignment.hsps:

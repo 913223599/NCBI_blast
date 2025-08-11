@@ -30,7 +30,7 @@ class TranslationDataManager:
         # 确保使用项目根目录下的翻译数据文件
         if not os.path.isabs(data_file):
             # 获取项目根目录
-            project_root = Path(__file__).parent.parent.parent
+            project_root = Path(__file__).parent.parent.parent.parent
             data_file = os.path.join(project_root, data_file)
         
         self.data_file = data_file
@@ -257,6 +257,15 @@ class TranslationDataManager:
         
         # 保存数据
         self._save_data()
+    
+    def get_all_terms(self):
+        """
+        获取所有翻译条目
+        
+        Returns:
+            dict: 包含所有翻译条目的字典
+        """
+        return self.translation_data.copy()
     
     def get_statistics(self):
         """

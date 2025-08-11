@@ -33,9 +33,15 @@ ncbi_blast/
 │   │   ├── __init__.py             # Python 包初始化文件
 │   │   ├── file_handler.py         # 文件处理工具
 │   │   ├── taxonomy_parser.py      # Taxonomy数据解析器
-│   │   ├── biology_translator.py   # 生物学文本翻译器
-│   │   ├── qwen_translator.py      # Qwen AI翻译器
-│   │   ├── translation_data_manager.py  # 翻译数据管理器
+│   │   ├── translation/            # 翻译功能模块
+│   │   │   ├── __init__.py                # Python  包初始化文件
+│   │   │   ├── biology_translator.py      # 生物学文本翻译器
+│   │   │   ├── special_pattern_translator.py  # 特殊模式翻译器
+│   │   │   ├── species_translator.py      # 物种名称翻译器
+│   │   │   ├── qwen_translator.py         # Qwen AI翻译器
+│   │   │   ├── translation_data_manager.py  # 翻译数据管理器
+│   │   │   ├── translation_quality_checker.py  # 翻译质量检查器
+│   │   │   └── term_extractor.py          # 术语提取器
 │   │   ├── config_manager.py       # 配置管理器
 │   └── gui/                        # 图形界面模块
 │       ├── __init__.py             # Python 包初始化文件
@@ -68,10 +74,16 @@ ncbi_blast/
 ### 工具模块
 - **file_handler.py**: 负责文件读取和保存操作
 - **taxonomy_parser.py**: 解析NCBI Taxonomy数据库文件，提供分类学信息查询功能
+- **config_manager.py**: 配置文件管理工具
+
+#### 翻译功能模块
 - **biology_translator.py**: 生物学专业术语中英翻译工具
+- **special_pattern_translator.py**: 特殊模式翻译器（处理菌株、分离株等特殊命名模式）
+- **species_translator.py**: 物种名称翻译器
 - **qwen_translator.py**: 基于Qwen大模型的AI翻译工具
 - **translation_data_manager.py**: 管理本地翻译数据的存储和检索
-- **config_manager.py**: 配置文件管理工具
+- **translation_quality_checker.py**: 翻译质量检查工具
+- **term_extractor.py**: 术语提取工具
 
 ### GUI模块
 - **main_window_pyqt.py**: 主窗口界面实现

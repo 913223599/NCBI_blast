@@ -15,7 +15,7 @@ from PyQt6.QtCore import pyqtSignal, QObject
 from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QMenu, QMessageBox, QFileDialog)
 
 # 导入生物学翻译模块
-from src.utils.biology_translator import get_biology_translator
+from src.utils.translation.biology_translator import get_biology_translator
 
 
 class ResultViewerSignals(QObject):

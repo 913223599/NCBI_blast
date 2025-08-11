@@ -30,7 +30,7 @@ class QwenTranslator:
         # 如果仍然没有api_key，则尝试从配置文件获取
         if not self.api_key:
             try:
-                from .config_manager import get_config_manager
+                from ...utils.config_manager import get_config_manager
                 config_manager = get_config_manager()
                 self.api_key = config_manager.get_api_key('dashscope')
             except Exception:

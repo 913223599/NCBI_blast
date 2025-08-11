@@ -10,28 +10,7 @@
             </Attribute>
           </value>
         </entry>
-        <entry key="\src\translation_data.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
-        <entry key="\src\utils\test_biology_translator.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
-        <entry key="\src\utils\test_data_collection.csv">
-          <value>
-            <Attribute>
-              <option name="separator" value="," />
-            </Attribute>
-          </value>
-        </entry>
-        <entry key="\src\utils\test_translation_data.csv">
+        <entry key="\predefined_terms.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
