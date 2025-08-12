@@ -72,21 +72,26 @@ class QwenTranslator:
         if not text:
             return text
             
-        # 构造翻译提示词，专门针对生物学领域
+        # 构造翻译提示词，专门针对生物学领域，特别是菌种名称翻译
         prompt = f"""
-        你是一位专业的生物学家和翻译专家，请将以下生物学相关的英文文本翻译成中文：
-        
-        要求：
-        1. 保持原文的语义和结构，保持专业术语的准确性
-        2. 请使用标准的中文学术术语
-        3. 只进行翻译，不要输出任何无关内容
-        4. 如遇到结尾类似"sp."或"spp."识别为属名，类似"Staphylococcus sp."识别为"葡萄球菌属"
-        
-        文本：
-        {text}
-        
-        翻译结果：
-        """.strip()
+你是一位专业的生物学家和翻译专家，请将以下生物学相关的英文文本翻译成中文：
+
+翻译要求：
+1. 保持原文的语义和结构，保持专业术语的准确性
+2. 请使用标准的中文学术术语
+3. 只进行文本翻译，除了翻译内容外不要输出任何无关内容
+4. 对于微生物学名，严格按照以下规则处理：
+   - 完整的学名（如 "Streptococcus iniae"）必须翻译为标准中文名（如"海豚链球菌"）
+   - 属名+sp.或spp.（如 "Streptococcus sp."）翻译为"链球菌属"
+   - 不要将学名直接音译，而要使用标准的中文学名
+5. 如果你不确定某个学名的标准中文翻译，请使用最接近的翻译并保持学名格式
+6. 再次强调，只进行文本翻译，除了翻译内容外不要输出任何无关内容
+
+文本：
+{text}
+
+结果：
+""".strip()
         
         # 设置翻译选项
         translation_options = {
@@ -106,7 +111,7 @@ class QwenTranslator:
         try:
             # 调用通义千问模型进行翻译
             completion = self.client.chat.completions.create(
-                model="qwen-mt-turbo",  # 使用专门的翻译模型
+                model="deepseek-r1",  # 使用专门的翻译模型
                 messages=messages,
                 extra_body={
                     "translation_options": translation_options

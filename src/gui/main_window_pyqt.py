@@ -366,6 +366,12 @@ class MainWindow(QMainWindow):
         # 获取高级参数设置
         advanced_settings = self.parameter_settings.get_advanced_settings()
         
+        # 设置生物学翻译器参数
+        translation_settings = {
+            'use_ai': advanced_settings.get('use_ai_translation', True),
+            'translator_type': advanced_settings.get('translator_type', 'default')  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
+        }
+        
         # 获取API密钥（如果需要）
         api_key = None
         try:
@@ -375,6 +381,9 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"获取API密钥失败: {e}")
         
+        # 设置结果查看器的翻译配置
+        self.result_viewer.set_translation_settings(translation_settings, api_key)
+        
         # 更新界面状态
         self.is_processing = True
         self.control_panel.enable_start_button(False)
@@ -382,9 +391,6 @@ class MainWindow(QMainWindow):
         self.control_panel.update_progress(0)
         self.control_panel.set_status(f"正在重试: {file_name}")
         self.statusBar().showMessage(f"正在重试: {file_name}")
-        
-        # 设置结果查看器的翻译配置
-        self.result_viewer.set_translation_settings(translation_settings, api_key)
         
         # 创建并启动处理线程，传递高级参数
         self.batch_processor = BatchProcessor(
