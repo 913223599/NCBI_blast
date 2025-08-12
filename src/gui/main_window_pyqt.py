@@ -7,8 +7,9 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox, 
-                             QPushButton, QHBoxLayout, QMenuBar, QMenu, QStatusBar)
+from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
+                             QPushButton, QHBoxLayout, QMenuBar, QMenu, QStatusBar, QSplitter)
 from PyQt6.QtGui import QAction
 
 # 添加项目根目录到Python路径
@@ -54,12 +55,6 @@ class MainWindow(QMainWindow):
         self.help_dialog = None  # 帮助文档对话框实例
         self.api_key_dialog = None  # API密钥设置对话框实例
         
-        # 创建菜单栏
-        self._create_menubar()
-        
-        # 创建状态栏
-        self._create_statusbar()
-        
         # 创建界面组件
         self._create_widgets()
         
@@ -68,74 +63,6 @@ class MainWindow(QMainWindow):
         
         # 连接信号
         self._connect_signals()
-    
-    def _create_menubar(self):
-        """创建菜单栏"""
-        menubar = self.menuBar()
-        
-        # 创建"工具"菜单
-        tools_menu = menubar.addMenu('工具')
-        
-        # 添加翻译调试器动作
-        translation_debug_action = QAction('翻译调试器', self)
-        translation_debug_action.triggered.connect(self._open_translation_debugger)
-        tools_menu.addAction(translation_debug_action)
-        
-        # 添加API密钥设置动作
-        api_key_action = QAction('API密钥设置', self)
-        api_key_action.triggered.connect(self._open_api_key_dialog)
-        tools_menu.addAction(api_key_action)
-        
-        # 添加分隔线
-        tools_menu.addSeparator()
-        
-        # 添加退出动作
-        exit_action = QAction('退出', self)
-        exit_action.triggered.connect(self.close)
-        tools_menu.addAction(exit_action)
-        
-        # 创建"帮助"菜单
-        help_menu = menubar.addMenu('帮助')
-        
-        # 添加帮助动作
-        help_action = QAction('帮助', self)
-        help_action.triggered.connect(self._show_help)
-        help_menu.addAction(help_action)
-        
-        # 添加关于动作
-        about_action = QAction('关于', self)
-        about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
-    
-    def _create_statusbar(self):
-        """创建状态栏"""
-        self.statusbar = QStatusBar()
-        self.setStatusBar(self.statusbar)
-        self.statusbar.showMessage("就绪")
-    
-    def _show_help(self):
-        """显示帮助文档"""
-        if not self.help_dialog:
-            self.help_dialog = HelpDialog(self)
-        self.help_dialog.show()
-        self.help_dialog.raise_()
-        self.help_dialog.activateWindow()
-    
-    def _show_about(self):
-        """显示关于对话框"""
-        QMessageBox.about(self, "关于", 
-                         "NCBI BLAST 查询工具\n\n"
-                         "一个用于执行 NCBI BLAST 搜索的工具，支持本地和远程搜索，"
-                         "提供批量处理和结果缓存功能，提升查询效率。\n\n"
-                         "版本: 1.0.0")
-    
-    def _open_api_key_dialog(self):
-        """打开API密钥设置对话框"""
-        if not self.api_key_dialog:
-            self.api_key_dialog = ApiKeyDialog(self)
-        self.api_key_dialog.show()
-        self.api_key_dialog.raise_()
-        self.api_key_dialog.activateWindow()
     
     def _create_widgets(self):
         """创建界面组件"""
@@ -150,30 +77,96 @@ class MainWindow(QMainWindow):
         """
         初始化用户界面
         """
+        # 创建菜单栏
+        self._create_menu_bar()
+        
         # 创建中央部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
         # 创建主布局
-        main_layout = QVBoxLayout()
-        central_widget.setLayout(main_layout)
+        main_layout = QVBoxLayout(central_widget)
         
-        # 将各个区域添加到主布局
-        main_layout.addWidget(self.file_selector)
-        main_layout.addWidget(self.parameter_settings)
-        main_layout.addWidget(self.control_panel)
-        main_layout.addWidget(self.result_viewer)
-        main_layout.addWidget(self.detail_viewer)
-        main_layout.addWidget(self.summary_panel)
+        # 创建水平分割器
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # 左侧面板（文件选择和结果查看）
+        left_panel = QWidget()
+        left_layout = QVBoxLayout()
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_panel.setLayout(left_layout)
+        left_layout.addWidget(self.file_selector)
+        left_layout.addWidget(self.parameter_settings)
+        left_layout.addWidget(self.control_panel)
+        left_layout.addWidget(self.result_viewer)
+        
+        # 右侧面板（详细信息查看和统计）
+        self.right_panel = QWidget()
+        right_layout = QVBoxLayout()
+        self.right_panel.setLayout(right_layout)
+        right_layout.addWidget(self.detail_viewer)
+        right_layout.addWidget(self.summary_panel)
+        
+        # 默认隐藏右侧面板
+        self.right_panel.hide()
+        self.control_panel.toggle_detail_button.setText("显示详细信息")
+        
+        # 添加面板到分割器
+        splitter.addWidget(left_panel)
+        splitter.addWidget(self.right_panel)
+        splitter.setSizes([400, 600])  # 设置初始大小
+        
+        # 将分割器添加到主布局
+        main_layout.addWidget(splitter)
+        
+        # 创建状态栏
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("就绪")
+    
+    def _create_menu_bar(self):
+        """创建菜单栏"""
+        menu_bar = QMenuBar(self)
+        self.setMenuBar(menu_bar)
+        
+        # 文件菜单
+        file_menu = QMenu("文件", self)
+        menu_bar.addMenu(file_menu)
+        
+        # 设置菜单
+        settings_menu = QMenu("设置", self)
+        menu_bar.addMenu(settings_menu)
+        
+        # 帮助菜单
+        help_menu = QMenu("帮助", self)
+        menu_bar.addMenu(help_menu)
+        
+        # 添加菜单项
+        open_translation_debugger_action = QAction("翻译调试器", self)
+        open_translation_debugger_action.triggered.connect(self._open_translation_debugger)
+        settings_menu.addAction(open_translation_debugger_action)
+        
+        open_settings_dialog_action = QAction("设置", self)
+        open_settings_dialog_action.triggered.connect(self._open_settings_dialog)
+        settings_menu.addAction(open_settings_dialog_action)
+        
+        open_help_dialog_action = QAction("帮助", self)
+        open_help_dialog_action.triggered.connect(self._open_help_dialog)
+        help_menu.addAction(open_help_dialog_action)
+        
+        open_api_key_dialog_action = QAction("API密钥", self)
+        open_api_key_dialog_action.triggered.connect(self._open_api_key_dialog)
+        help_menu.addAction(open_api_key_dialog_action)
     
     def _connect_signals(self):
         """连接信号"""
         # 文件选择器信号
-        self.file_selector.signals.files_selected.connect(self._on_files_selected)
+        self.file_selector.files_selected.connect(self._on_files_selected)
         
         # 控制面板信号
         self.control_panel.start_button.clicked.connect(self._start_processing)
         self.control_panel.stop_button.clicked.connect(self._stop_processing)
+        self.control_panel.toggle_detail_button.clicked.connect(self._toggle_detail_panel)  # 连接切换按钮信号
         
         # 结果查看器信号
         self.result_viewer.signals.item_selected.connect(self._on_item_selected)
@@ -190,6 +183,15 @@ class MainWindow(QMainWindow):
             self.processing_thread.processing_error.connect(self._on_processing_error)
             self.processing_thread.finished.connect(self._on_thread_finished)
     
+    def _toggle_detail_panel(self):
+        """切换详细信息面板显示/隐藏"""
+        if self.right_panel.isVisible():
+            self.right_panel.hide()
+            self.control_panel.toggle_detail_button.setText("显示详细信息")
+        else:
+            self.right_panel.show()
+            self.control_panel.toggle_detail_button.setText("隐藏详细信息")
+    
     def _on_files_selected(self, files):
         """处理文件选择事件"""
         self.sequence_files = files
@@ -204,6 +206,13 @@ class MainWindow(QMainWindow):
         if self.is_processing:
             QMessageBox.warning(self, "警告", "正在处理中，请等待完成")
             return
+        
+        # 如果是通过文件选择器触发的开始处理，则清空之前的错误状态
+        for file in self.sequence_files:
+            self.result_viewer.update_file_status({
+                "file": file,
+                "status": "pending"
+            })
         
         try:
             max_workers = self.parameter_settings.get_thread_count()
@@ -239,13 +248,14 @@ class MainWindow(QMainWindow):
         
         # 设置结果查看器的翻译配置
         self.result_viewer.set_translation_settings(translation_settings, api_key)
+        # 设置详细信息查看器的API密钥
+        self.detail_viewer.set_api_key(api_key)
         
         # 更新界面状态
         self.is_processing = True
         self.control_panel.enable_start_button(False)
         self.control_panel.enable_stop_button(True)
         self.control_panel.update_progress(0)
-        self.statusbar.showMessage("开始处理...")
         
         # 清空之前的结果
         self.results = []
@@ -268,6 +278,7 @@ class MainWindow(QMainWindow):
         # 启动线程
         self.processing_thread.start()
     
+    @pyqtSlot()
     def _stop_processing(self):
         """停止处理"""
         if self.is_processing and self.batch_processor:
@@ -275,13 +286,13 @@ class MainWindow(QMainWindow):
             self.batch_processor.cancel_processing()
             self.control_panel.set_status("正在取消处理...")
             self.control_panel.enable_stop_button(False)
-            self.statusbar.showMessage("正在取消处理...")
+            self.statusBar().showMessage("正在取消处理...")
     
     def _on_task_start(self, sequence_file):
         """处理任务开始事件"""
         file_name = Path(sequence_file).name
         self.control_panel.set_status(f"正在处理: {file_name}")
-        self.statusbar.showMessage(f"正在处理: {file_name}")
+        self.statusBar().showMessage(f"正在处理: {file_name}")
     
     def _on_progress_update(self, completed, total):
         """处理进度更新事件"""
@@ -305,7 +316,7 @@ class MainWindow(QMainWindow):
     def _on_all_tasks_complete(self, total_tasks):
         """处理所有任务完成事件"""
         self.control_panel.set_status("处理完成")
-        self.statusbar.showMessage("处理完成")
+        self.statusBar().showMessage("处理完成")
         self.summary_panel.update_summary(self.results)
     
     def _on_processing_error(self, error_message):
@@ -318,7 +329,7 @@ class MainWindow(QMainWindow):
         # 显示错误消息
         QMessageBox.critical(self, "处理出错", f"处理过程中发生错误:\n{error_message}")
         self.control_panel.set_status("处理出错")
-        self.statusbar.showMessage("处理出错")
+        self.statusBar().showMessage("处理出错")
     
     def _on_thread_finished(self):
         """处理线程结束事件"""
@@ -330,14 +341,15 @@ class MainWindow(QMainWindow):
         
         # 显示完成消息
         successful = sum(1 for r in self.results if r["status"] == "success")
-        QMessageBox.information(self, "处理完成", f"处理完成!\n成功: {successful}个文件\n失败: {len(self.results) - successful}个文件")
-        self.control_panel.set_status("处理完成")
-        self.statusbar.showMessage("处理完成")
+        self.control_panel.set_status(f"处理完成: 成功 {successful} 个文件")
+        self.statusBar().showMessage(f"处理完成: 成功 {successful} 个文件")
     
+    @pyqtSlot(str)
     def _on_item_selected(self, file_name):
         """处理项目选择事件"""
         self.detail_viewer.show_details(file_name, self.results)
 
+    @pyqtSlot(str)
     def _retry_blast(self, file_name):
         """重试BLAST搜索"""
         if self.is_processing:
@@ -367,13 +379,25 @@ class MainWindow(QMainWindow):
         # 获取高级参数设置
         advanced_settings = self.parameter_settings.get_advanced_settings()
         
+        # 获取API密钥（如果需要）
+        api_key = None
+        try:
+            from src.utils.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            api_key = config_manager.get_api_key('dashscope')
+        except Exception as e:
+            print(f"获取API密钥失败: {e}")
+        
+        # 设置详细信息查看器的API密钥
+        self.detail_viewer.set_api_key(api_key)
+        
         # 更新界面状态
         self.is_processing = True
         self.control_panel.enable_start_button(False)
         self.control_panel.enable_stop_button(True)
         self.control_panel.update_progress(0)
         self.control_panel.set_status(f"正在重试: {file_name}")
-        self.statusbar.showMessage(f"正在重试: {file_name}")
+        self.statusBar().showMessage(f"正在重试: {file_name}")
         
         # 创建并启动处理线程，传递高级参数
         self.batch_processor = BatchProcessor(
@@ -402,11 +426,46 @@ class MainWindow(QMainWindow):
         self.translation_debugger.show()
         self.translation_debugger.raise_()
         self.translation_debugger.activateWindow()
-
+        
+    def _open_settings_dialog(self):
+        """打开设置对话框"""
+        # TODO: 实现设置对话框
+        pass
+    
+    def _open_help_dialog(self):
+        """打开帮助文档对话框"""
+        if not self.help_dialog:
+            self.help_dialog = HelpDialog()
+        self.help_dialog.show()
+        self.help_dialog.raise_()
+        self.help_dialog.activateWindow()
+    
+    def _open_api_key_dialog(self):
+        """打开API密钥设置对话框"""
+        if not self.api_key_dialog:
+            self.api_key_dialog = ApiKeyDialog()
+        self.api_key_dialog.show()
+        self.api_key_dialog.raise_()
+        self.api_key_dialog.activateWindow()
+    
     def closeEvent(self, event):
         """处理窗口关闭事件"""
+        # 如果有正在运行的工作线程，询问用户是否确定关闭
         if self.is_processing:
-            QMessageBox.warning(self, "警告", "正在处理中，请等待完成")
-            event.ignore()
+            reply = QMessageBox.question(
+                self,
+                "确认退出",
+                "有处理任务正在运行，确定要退出吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+                
+            if reply == QMessageBox.StandardButton.Yes:
+                # 终止工作线程
+                if self.processing_thread:
+                    self.processing_thread.terminate()
+                    self.processing_thread.wait()
+                event.accept()
+            else:
+                event.ignore()
         else:
             event.accept()

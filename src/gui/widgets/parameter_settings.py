@@ -3,51 +3,53 @@
 负责参数设置相关的GUI组件
 """
 
-from PyQt6.QtWidgets import (QGroupBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, 
-                             QCheckBox, QLineEdit, QPushButton, QWidget, QFormLayout, QComboBox, QGridLayout)
+from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QFormLayout, QCheckBox, 
+                             QSpinBox, QComboBox, QLineEdit, QHBoxLayout, QLabel, QWidget, QPushButton)
+from PyQt6.QtCore import pyqtSignal
 
 
 class ParameterSettingsWidget(QGroupBox):
     """参数设置组件类"""
     
+    # 定义信号
+    settings_changed = pyqtSignal(dict)  # 参数设置改变信号
+    
     def __init__(self):
         super().__init__("参数设置")
-        self.advanced_settings_visible = False
         self._setup_ui()
+        self._connect_signals()
     
     def _setup_ui(self):
         """设置界面"""
+        # 创建主布局
         main_layout = QVBoxLayout()
         
-        # 基本设置
-        basic_layout = QHBoxLayout()
-        basic_layout.addWidget(QLabel("线程数:"))
-        
-        # 创建线程数设置控件
+        # 创建线程数设置
+        thread_layout = QHBoxLayout()
+        self.thread_count_label = QLabel("线程数 (1-10):")
         self.thread_count_spinbox = QSpinBox()
-        self.thread_count_spinbox.setRange(1, 10)  # 设置线程数范围为1-10
-        self.thread_count_spinbox.setValue(3)      # 默认线程数设为3
-        self.thread_count_spinbox.setFixedWidth(60)  # 设置控件宽度
-        basic_layout.addWidget(self.thread_count_spinbox)
+        self.thread_count_spinbox.setRange(1, 10)
+        self.thread_count_spinbox.setValue(3)  # 默认线程数设为3
+        thread_layout.addWidget(self.thread_count_label)
+        thread_layout.addWidget(self.thread_count_spinbox)
+        thread_layout.addStretch()
+        main_layout.addLayout(thread_layout)
         
-        # 添加展开/收起高级设置按钮
-        self.toggle_advanced_button = QPushButton("显示高级设置")
-        self.toggle_advanced_button.setCheckable(True)
-        self.toggle_advanced_button.clicked.connect(self._toggle_advanced_settings)
-        basic_layout.addWidget(self.toggle_advanced_button)
+        # 创建高级参数开关
+        self.advanced_toggle_button = QPushButton("显示高级参数")
+        self.advanced_toggle_button.setCheckable(True)
+        self.advanced_toggle_button.setChecked(False)
+        self.advanced_toggle_button.toggled.connect(self._toggle_advanced_settings)
+        main_layout.addWidget(self.advanced_toggle_button)
         
-        basic_layout.addStretch()
-        main_layout.addLayout(basic_layout)
-        
-        # 高级设置区域（默认隐藏）
-        self.advanced_settings_widget = QWidget()
-        self.advanced_settings_widget.setVisible(False)
-        
-        # 使用网格布局实现双栏显示
-        advanced_layout = QGridLayout(self.advanced_settings_widget)
+        # 创建高级参数设置区域
+        self.advanced_settings_widget = QGroupBox("高级参数设置")
+        self.advanced_settings_widget.setVisible(False)  # 默认隐藏
+        advanced_layout = QHBoxLayout(self.advanced_settings_widget)  # 使用水平布局而不是表单布局
         
         # 左栏
-        left_layout = QFormLayout()
+        left_widget = QWidget()
+        left_layout = QFormLayout(left_widget)
         # 远程BLAST参数
         left_layout.addRow(QLabel("远程BLAST参数:"))
         
@@ -127,7 +129,8 @@ class ParameterSettingsWidget(QGroupBox):
         left_layout.addRow("本地线程数:", local_threads_layout)
         
         # 右栏
-        right_layout = QFormLayout()
+        right_widget = QWidget()
+        right_layout = QFormLayout(right_widget)
         
         # 比对数量设置 (ALIGNMENTS)
         alignments_layout = QHBoxLayout()
@@ -175,18 +178,52 @@ class ParameterSettingsWidget(QGroupBox):
         self.ai_translation_checkbox.setChecked(True)     # 默认启用AI翻译
         right_layout.addRow("", self.ai_translation_checkbox)
         
-        # 将左右两栏添加到网格布局中
-        advanced_layout.addLayout(left_layout, 0, 0)
-        advanced_layout.addLayout(right_layout, 0, 1)
+        # 将左右两栏添加到水平布局中
+        advanced_layout.addWidget(left_widget)
+        advanced_layout.addWidget(right_widget)
         
         main_layout.addWidget(self.advanced_settings_widget)
         self.setLayout(main_layout)
     
-    def _toggle_advanced_settings(self):
-        """切换高级设置显示状态"""
-        self.advanced_settings_visible = not self.advanced_settings_visible
-        self.advanced_settings_widget.setVisible(self.advanced_settings_visible)
-        self.toggle_advanced_button.setText("隐藏高级设置" if self.advanced_settings_visible else "显示高级设置")
+    def _toggle_advanced_settings(self, checked):
+        """切换高级参数设置显示状态"""
+        self.advanced_settings_widget.setVisible(checked)
+        if checked:
+            self.advanced_toggle_button.setText("隐藏高级参数")
+        else:
+            self.advanced_toggle_button.setText("显示高级参数")
+    
+    def _connect_signals(self):
+        """连接信号"""
+        # 连接所有可能改变设置的控件信号到设置改变槽函数
+        self.thread_count_spinbox.valueChanged.connect(self._on_settings_changed)
+        self.hitlist_size_enabled.toggled.connect(self._on_settings_changed)
+        self.hitlist_size_spinbox.valueChanged.connect(self._on_settings_changed)
+        self.word_size_enabled.toggled.connect(self._on_settings_changed)
+        self.word_size_spinbox.valueChanged.connect(self._on_settings_changed)
+        self.evalue_enabled.toggled.connect(self._on_settings_changed)
+        self.evalue_input.textChanged.connect(self._on_settings_changed)
+        self.matrix_name_enabled.toggled.connect(self._on_settings_changed)
+        self.matrix_name_combo.currentTextChanged.connect(self._on_settings_changed)
+        self.filter_enabled.toggled.connect(self._on_settings_changed)
+        self.filter_input.textChanged.connect(self._on_settings_changed)
+        self.alignments_enabled.toggled.connect(self._on_settings_changed)
+        self.alignments_spinbox.valueChanged.connect(self._on_settings_changed)
+        self.descriptions_enabled.toggled.connect(self._on_settings_changed)
+        self.descriptions_spinbox.valueChanged.connect(self._on_settings_changed)
+        self.local_num_threads_enabled.toggled.connect(self._on_settings_changed)
+        self.local_num_threads_spinbox.valueChanged.connect(self._on_settings_changed)
+        self.prefer_local_checkbox.toggled.connect(self._on_settings_changed)
+        self.fallback_to_remote_checkbox.toggled.connect(self._on_settings_changed)
+        self.use_cache_checkbox.toggled.connect(self._on_settings_changed)
+        self.ai_translation_checkbox.toggled.connect(self._on_settings_changed)
+        self.advanced_toggle_button.toggled.connect(self._on_settings_changed)
+    
+    def _on_settings_changed(self):
+        """处理设置改变事件"""
+        settings = self.get_advanced_settings()
+        settings['thread_count'] = self.get_thread_count()
+        self.settings_changed.emit(settings)
     
     def get_thread_count(self):
         """获取线程数设置"""
@@ -197,50 +234,26 @@ class ParameterSettingsWidget(QGroupBox):
         self.thread_count_spinbox.setValue(count)
     
     def get_advanced_settings(self):
-        """
-        获取高级设置参数
-        
-        Returns:
-            dict: 包含所有启用的高级参数设置的字典
-                  只有用户勾选启用的参数才会包含在返回字典中
-        """
-        settings = {}
-        
-        # 只添加启用的参数
-        if self.hitlist_size_enabled.isChecked():
-            settings['hitlist_size'] = self.hitlist_size_spinbox.value()
-        
-        if self.word_size_enabled.isChecked():
-            settings['word_size'] = self.word_size_spinbox.value()
+        """获取高级参数设置"""
+        settings = {
+            # 基本BLAST参数
+            'hitlist_size': self.hitlist_size_spinbox.value() if self.hitlist_size_enabled.isChecked() else None,
+            'word_size': self.word_size_spinbox.value() if self.word_size_enabled.isChecked() else None,
+            'evalue': float(self.evalue_input.text()) if self.evalue_enabled.isChecked() and self.evalue_input.text() else None,
+            'matrix_name': self.matrix_name_combo.currentText() if self.matrix_name_enabled.isChecked() else None,
+            'filter': self.filter_input.text() if self.filter_enabled.isChecked() and self.filter_input.text() else None,
+            'alignments': self.alignments_spinbox.value() if self.alignments_enabled.isChecked() else None,
+            'descriptions': self.descriptions_spinbox.value() if self.descriptions_enabled.isChecked() else None,
+            'local_num_threads': self.local_num_threads_spinbox.value() if self.local_num_threads_enabled.isChecked() else None,
             
-        if self.evalue_enabled.isChecked():
-            settings['evalue'] = float(self.evalue_input.text())
+            # 混合模式参数
+            'prefer_local': self.prefer_local_checkbox.isChecked(),
+            'fallback_to_remote': self.fallback_to_remote_checkbox.isChecked(),
+            'use_cache': self.use_cache_checkbox.isChecked(),
             
-        if self.matrix_name_enabled.isChecked():
-            settings['matrix_name'] = self.matrix_name_combo.currentText()
-            
-        if self.filter_enabled.isChecked():
-            settings['filter'] = self.filter_input.text()
-            
-        if self.alignments_enabled.isChecked():
-            settings['alignments'] = self.alignments_spinbox.value()
-            
-        if self.descriptions_enabled.isChecked():
-            settings['descriptions'] = self.descriptions_spinbox.value()
-            
-        # 'max_hsps' 参数被移除，因为qblast不支持该参数
-        
-        if self.local_num_threads_enabled.isChecked():
-            settings['local_num_threads'] = self.local_num_threads_spinbox.value()
-            
-        # 混合模式参数始终包含
-        settings['prefer_local'] = self.prefer_local_checkbox.isChecked()
-        settings['fallback_to_remote'] = self.fallback_to_remote_checkbox.isChecked()
-        settings['use_cache'] = self.use_cache_checkbox.isChecked()
-        
-        # AI翻译功能开关
-        settings['use_ai_translation'] = self.ai_translation_checkbox.isChecked()
-        
+            # AI翻译功能开关
+            'use_ai_translation': self.ai_translation_checkbox.isChecked()
+        }
         return settings
     
     def set_advanced_settings(self, settings):

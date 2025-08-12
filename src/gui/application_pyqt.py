@@ -1,17 +1,10 @@
 """
-PyQt应用程序模块
-负责启动和管理GUI应用程序
+PyQt6应用程序主类
 """
 
-import os
 import sys
-
-# 添加src目录到Python路径
-src_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
-
 from PyQt6.QtWidgets import QApplication
+
 from src.gui.main_window_pyqt import MainWindow
 
 
@@ -39,8 +32,7 @@ class Application:
         # 显示主窗口
         self.main_window.show()
         
-        # 启动GUI主循环
-        sys.exit(self.app.exec())
+        return self.app.exec()
 
 
 def main():
@@ -48,8 +40,8 @@ def main():
     PyQt应用程序入口
     """
     app = Application()
-    app.run()
+    return app.run()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

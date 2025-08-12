@@ -24,6 +24,9 @@ class ControlPanelWidget(QGroupBox):
         self.stop_button.setEnabled(False)
         layout.addWidget(self.stop_button)
         
+        self.toggle_detail_button = QPushButton("隐藏详细信息")
+        layout.addWidget(self.toggle_detail_button)
+        
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)

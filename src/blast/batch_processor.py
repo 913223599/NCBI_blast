@@ -11,6 +11,7 @@ from pathlib import Path
 from src.utils.file_handler import FileHandler
 from .executor import BlastExecutor
 from .parser import BlastResultParser
+from .result_converter import BlastResultConverter
 
 
 class BatchProcessor:
@@ -33,6 +34,7 @@ class BatchProcessor:
         self.file_handler = FileHandler()
         self.blast_executor = BlastExecutor()
         self.result_parser = BlastResultParser()
+        self.result_converter = BlastResultConverter()
         self.on_task_start = None  # 任务开始回调
         self.on_progress_update = None  # 进度更新回调
         self.on_result_received = None  # 结果接收回调
@@ -68,6 +70,8 @@ class BatchProcessor:
             # 获取文件名（不含扩展名）用于结果文件命名
             file_name = Path(sequence_file).stem
             result_file = Path("results") / f"{file_name}_blast_result.xml"
+            csv_file = Path("results") / f"{file_name}_blast_result.csv"
+            desc_file = Path("results") / f"{file_name}_blast_result.desc"
             
             # 调用任务开始回调
             if self.on_task_start:
@@ -111,6 +115,9 @@ class BatchProcessor:
             self.file_handler.save_result_file(result_handle, str(result_file))
             result_handle.close()
             
+            # 将XML结果转换为CSV格式并生成描述文件
+            self.result_converter.convert_xml_to_csv(str(result_file), str(csv_file), str(desc_file))
+            
             # 重新打开结果文件进行解析
             result_handle = open(result_file)
             result_handle.close()
@@ -122,6 +129,8 @@ class BatchProcessor:
                 "file": sequence_file,
                 "status": "success",
                 "result_file": result_file,
+                "csv_file": csv_file,
+                "desc_file": desc_file,
                 "thread_id": thread_id,
                 "elapsed_time": elapsed_time
             }

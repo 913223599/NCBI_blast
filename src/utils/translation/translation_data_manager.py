@@ -1,359 +1,282 @@
 """
-翻译数据管理模块
-用于管理本地翻译数据的存储和更新，支持CSV格式存储
+翻译数据管理器模块
+负责管理翻译数据的加载、存储和检索
 """
 
 import csv
 import os
-import re
-from typing import Dict, Optional, List
-import sys
+from typing import Dict, Optional, Tuple, List
 from pathlib import Path
-
-import pandas as pd
 
 
 class TranslationDataManager:
     """
     翻译数据管理器
-    负责管理本地翻译数据的存储、检索和更新
-    支持术语分类存储以优化查询性能
+    负责管理翻译数据的加载、存储和检索
     """
     
-    def __init__(self, data_file: str = "translation_data.csv"):
+    def __init__(self, csv_file: str = "translation_data.csv"):
         """
         初始化翻译数据管理器
         
         Args:
-            data_file (str): CSV数据文件路径
+            csv_file (str): 包含翻译数据的CSV文件路径
         """
-        # 确保使用项目根目录下的翻译数据文件
-        if not os.path.isabs(data_file):
-            # 获取项目根目录
-            project_root = Path(__file__).parent.parent.parent.parent
-            data_file = os.path.join(project_root, data_file)
+        # 确保使用项目根目录下的translation_data.csv文件
+        if not os.path.isabs(csv_file):
+            # 获取项目根目录下的translation_data.csv文件路径
+            current_dir = Path(__file__).parent
+            project_root = current_dir.parent.parent
+            csv_file = str(project_root / csv_file)
         
-        self.data_file = data_file
-        # 存储完整的翻译数据记录，包括分类信息
-        self.translation_records: List[Dict[str, str]] = []
-        # 快速查找字典
-        self.translation_data: Dict[str, str] = {}
-        # 按类别存储翻译数据，提高查询效率
-        self.translation_by_category: Dict[str, Dict[str, str]] = {}
-        self._load_data()
+        self.csv_file = csv_file
+        self.translations: Dict[str, str] = {}
+        # 按分类存储的翻译数据，提高查询效率
+        self.translations_by_category: Dict[str, Dict[str, str]] = {
+            'species': {},    # 物种
+            'genus': {},      # 属名
+            'strain': {},     # 菌株
+            'gene': {},       # 基因类型
+            'sequence': {},   # 序列类型
+            'other': {}       # 其他
+        }
+        # 保存每个术语的分类信息
+        self.term_categories: Dict[str, str] = {}
+        self._load_translations()
+        self._load_predefined_terms()  # 添加预定义术语加载
     
-    def _load_data(self):
-        """
-        从CSV文件加载翻译数据
-        """
-        if not os.path.exists(self.data_file):
-            # 如果文件不存在，创建一个带有表头的空文件
-            with open(self.data_file, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(['english', 'chinese', 'category', 'subcategory'])
-            return
-        
+    def _load_translations(self):
+        """加载翻译数据"""
         try:
-            # 使用pandas读取CSV文件
-            df = pd.read_csv(self.data_file, encoding='utf-8')
-            
-            # 将数据转换为字典格式
-            self.translation_data = dict(zip(df['english'], df['chinese']))
-            
-            # 存储完整的记录
-            self.translation_records = df.to_dict('records')
-            
-            # 按类别组织数据
-            self.translation_by_category = {}
-            for record in self.translation_records:
-                category = record.get('category', 'unknown')
-                if category not in self.translation_by_category:
-                    self.translation_by_category[category] = {}
-                self.translation_by_category[category][record['english']] = record['chinese']
-                
+            # 检查文件是否存在且不为空
+            if os.path.exists(self.csv_file) and os.path.getsize(self.csv_file) > 0:
+                with open(self.csv_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    # 检查是否是旧格式（包含已弃用的表头）
+                    if any(header in reader.fieldnames for header in ['序号', '物种英文名', '属名英文名', '菌株英文名']):
+                        # 旧格式文件，需要重新创建
+                        self.translations = {}
+                        self.term_categories = {}
+                        # 初始化分类字典
+                        for category in self.translations_by_category:
+                            self.translations_by_category[category] = {}
+                        # 创建带有正确标题行的空文件
+                        self._create_empty_csv()
+                    else:
+                        # 新格式文件，正常加载
+                        for row in reader:
+                            # 确保行中有英文和中文字段
+                            if 'english' in row and 'chinese' in row:
+                                english = row['english'].strip()
+                                chinese = row['chinese'].strip()
+                                # 获取分类信息，如果没有则默认为'other'
+                                category = row.get('category', 'other').strip()
+                                if not category:
+                                    category = 'other'
+                                
+                                if english and chinese:
+                                    self.translations[english] = chinese
+                                    self.term_categories[english] = category
+                                    # 按分类存储
+                                    if category in self.translations_by_category:
+                                        self.translations_by_category[category][english] = chinese
+                                    else:
+                                        self.translations_by_category['other'][english] = chinese
+                                        self.term_categories[english] = 'other'
+            else:
+                # 如果文件不存在或为空，初始化空的翻译字典
+                self.translations = {}
+                self.term_categories = {}
+                # 初始化分类字典
+                for category in self.translations_by_category:
+                    self.translations_by_category[category] = {}
+                # 创建带有标题行的空文件
+                self._create_empty_csv()
         except Exception as e:
             print(f"警告: 加载翻译数据文件时出错: {e}")
-            self.translation_data = {}
-            self.translation_records = []
+            self.translations = {}
+            self.term_categories = {}
+            # 初始化分类字典
+            for category in self.translations_by_category:
+                self.translations_by_category[category] = {}
     
-    def _save_data(self):
-        """
-        将翻译数据保存到CSV文件
-        """
+    def _create_empty_csv(self):
+        """创建空的CSV文件并写入标题行"""
         try:
-            # 创建DataFrame
-            df = pd.DataFrame(self.translation_records)
-            # 确保必要的列存在
-            for col in ['english', 'chinese', 'category', 'subcategory']:
-                if col not in df.columns:
-                    df[col] = ""
-            # 保存到CSV文件
-            df.to_csv(self.data_file, index=False, encoding='utf-8')
-            print(f"数据已保存至 {self.data_file}")  # 添加提示信息
+            with open(self.csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['english', 'chinese', 'category'])  # 添加分类列
         except Exception as e:
-            print(f"警告: 保存翻译数据时出错: {e}")
-
-    def get_translation(self, english: str) -> Optional[str]:
+            print(f"警告: 创建空CSV文件时出错: {e}")
+    
+    def get_translation(self, english_text: str, category: str = None) -> Optional[str]:
         """
-        获取指定英文术语的中文翻译
+        获取英文文本的中文翻译
         
         Args:
-            english (str): 英文术语
+            english_text (str): 英文文本
+            category (str, optional): 分类，如果提供则只在该分类中查找
             
         Returns:
-            str or None: 中文翻译，如果找不到则返回None
+            str: 中文翻译，如果未找到则返回None
         """
-        return self.translation_data.get(english)
-    
-    def get_translation_with_context(self, english: str, category: str = None) -> Optional[str]:
-        """
-        根据类别获取指定英文术语的中文翻译
+        english_text = english_text.strip()
         
-        Args:
-            english (str): 英文术语
-            category (str): 术语类别
-            
-        Returns:
-            str or None: 中文翻译，如果找不到则返回None
-        """
-        if category and category in self.translation_by_category:
-            return self.translation_by_category[category].get(english)
-        return self.translation_data.get(english)
+        # 如果提供了分类，则只在该分类中查找
+        if category and category in self.translations_by_category:
+            return self.translations_by_category[category].get(english_text)
+        
+        # 否则在所有翻译中查找
+        return self.translations.get(english_text)
     
-    def add_translation(self, english: str, chinese: str, category: str = "unknown", subcategory: str = ""):
+    def add_translation(self, english_text: str, chinese_text: str, category: str = 'other'):
         """
         添加新的翻译条目
-        优化：避免存储过长的摘要信息，只存储关键术语
-        改进：确保菌种名称能被正确存储
         
         Args:
-            english (str): 英文术语
-            chinese (str): 中文翻译
-            category (str): 术语类别（如菌种、基因等）
-            subcategory (str): 子类别
+            english_text (str): 英文文本
+            chinese_text (str): 中文翻译
+            category (str): 分类 (species, genus, strain, gene, sequence, other)
         """
-        # 检查是否为摘要信息（包含多个">"字符或长度过长）
-        if (english.count('>') > 1 or len(english) > 200 or 
-            '16S ribosomal RNA gene, partial sequence' in english):
-            print(f"跳过摘要信息存储: {english[:50]}...")
-            return
-            
-        # 使用更精确的模式匹配来识别菌株、分离株和克隆信息
-        # 这些信息如果只是简单的前缀匹配则跳过，但如果是完整术语则不跳过
-        simple_prefixes = ['strain ', 'isolate ', 'clone ', 'sp. ', 'spp. ']
-        if any(english.lower().startswith(prefix) for prefix in simple_prefixes):
-            # 检查是否是简单词（只有一个词）或者包含菌株编号等信息
-            words = english.split()
-            if len(words) == 2 and (words[1].isalnum() or re.match(r'^[A-Za-z0-9\-._]+$', words[1])):
-                print(f"跳过菌株/分离株/克隆信息存储: {english}")
-                return
+        english_text = english_text.strip()
+        chinese_text = chinese_text.strip()
+        category = category.strip() if category else 'other'
         
-        # 对于菌株信息，如果包含"strain"但不是以"strain"开头，也应该跳过
-        if ' strain ' in english.lower() and not english.lower().startswith('strain '):
-            print(f"跳过包含菌株信息的条目存储: {english}")
-            return
-            
-        # 只有当翻译内容不为空且与原文字不同时才添加
-        if english and chinese and english.strip() and chinese.strip() and english != chinese:
-            # 额外检查：确保中文翻译不是英文原文的简单变体
-            if english.strip().lower() != chinese.strip().lower():
-                # 检查是否已存在该条目且翻译相同
-                existing_index = None
-                for i, record in enumerate(self.translation_records):
-                    if record['english'] == english:
-                        existing_index = i
-                        # 如果已经存在相同的翻译且类别相同，则不需要重复添加
-                        if record['chinese'] == chinese and record['category'] == category:
-                            print(f"发现重复条目，跳过添加: {english} -> {chinese}")
-                            return
-                        break
-                
-                # 创建新记录
-                new_record = {
-                    'english': english,
-                    'chinese': chinese,
-                    'category': category,
-                    'subcategory': subcategory
-                }
-                
-                # 更新或添加记录
-                if existing_index is not None:
-                    self.translation_records[existing_index] = new_record
-                    print(f"更新翻译条目: {english} -> {chinese}")
-                else:
-                    self.translation_records.append(new_record)
-                    print(f"添加新翻译条目: {english} -> {chinese}")
-                
-                # 更新快速查找字典
-                self.translation_data[english] = chinese
-                
-                # 更新分类存储
-                if category not in self.translation_by_category:
-                    self.translation_by_category[category] = {}
-                self.translation_by_category[category][english] = chinese
-                
-                # 确保数据被保存
-                self._save_data()
-
-    def update_translation(self, english: str, chinese: str, category: str = None, subcategory: str = None):
-        """
-        更新现有翻译条目
+        # 验证分类
+        if category not in self.translations_by_category:
+            category = 'other'
         
-        Args:
-            english (str): 英文术语
-            chinese (str): 新的中文翻译
-            category (str, optional): 新的术语类别
-            subcategory (str, optional): 新的子类别
-        """
-        # 查找现有记录
-        existing_index = None
-        existing_record = None
-        for i, record in enumerate(self.translation_records):
-            if record['english'] == english:
-                existing_index = i
-                existing_record = record
-                break
-        
-        if existing_record:
-            # 更新翻译
-            self.translation_data[english] = chinese
-            
-            # 更新记录
-            updated_record = existing_record.copy()
-            updated_record['chinese'] = chinese
-            if category is not None:
-                updated_record['category'] = category
-            if subcategory is not None:
-                updated_record['subcategory'] = subcategory
-                
-            self.translation_records[existing_index] = updated_record
-            
-            # 更新分类存储
-            record_category = updated_record['category']
-            if record_category not in self.translation_by_category:
-                self.translation_by_category[record_category] = {}
-            self.translation_by_category[record_category][english] = chinese
-            
-            self._save_data()
+        if english_text and chinese_text:
+            # 更新内存中的字典
+            self.translations[english_text] = chinese_text
+            self.term_categories[english_text] = category
+            self.translations_by_category[category][english_text] = chinese_text
+            # 保存到文件
+            self._save_translations()
     
-    def remove_translation(self, english: str):
+    def update_translation(self, english_text: str, chinese_text: str, category: str = 'other'):
         """
-        删除翻译条目
+        更新翻译条目
         
         Args:
-            english (str): 英文术语
+            english_text (str): 英文文本
+            chinese_text (str): 中文翻译
+            category (str): 分类
         """
-        # 从快速查找字典中删除
-        if english in self.translation_data:
-            del self.translation_data[english]
-        
-        # 从记录列表中删除
-        self.translation_records = [record for record in self.translation_records if record['english'] != english]
-        
-        # 从分类存储中删除
-        for category_dict in self.translation_by_category.values():
-            if english in category_dict:
-                del category_dict[english]
-        
-        # 保存数据
-        self._save_data()
+        self.add_translation(english_text, chinese_text, category)
     
-    def get_all_terms(self):
+    def contains(self, english_text: str, category: str = None) -> bool:
+        """
+        检查是否包含指定的英文文本翻译
+        
+        Args:
+            english_text (str): 英文文本
+            category (str, optional): 分类，如果提供则只在该分类中查找
+            
+        Returns:
+            bool: 如果包含返回True，否则返回False
+        """
+        return self.get_translation(english_text, category) is not None
+    
+    def get_all_terms(self) -> Dict[str, str]:
         """
         获取所有翻译条目
         
         Returns:
-            dict: 包含所有翻译条目的字典
+            Dict[str, str]: 所有翻译条目
         """
-        return self.translation_data.copy()
+        return self.translations.copy()
     
-    def get_statistics(self):
+    def get_terms_by_category(self, category: str) -> Dict[str, str]:
         """
-        获取翻译数据统计信息
-        
-        Returns:
-            dict: 包含各类翻译条目数量的字典
-        """
-        # 按类别统计
-        category_stats = {}
-        for record in self.translation_records:
-            category = record.get('category', 'unknown')
-            category_stats[category] = category_stats.get(category, 0) + 1
-        
-        # 添加总计
-        category_stats['total_entries'] = len(self.translation_records)
-        
-        return category_stats
-    
-    def search_translations(self, query: str) -> List[Dict[str, str]]:
-        """
-        搜索翻译条目
+        根据分类获取翻译条目
         
         Args:
-            query (str): 搜索查询
+            category (str): 分类
             
         Returns:
-            list: 匹配的翻译条目列表
+            Dict[str, str]: 指定分类的翻译条目
         """
-        results = []
-        query_lower = query.lower()
-        
-        for record in self.translation_records:
-            if (query_lower in record['english'].lower() or 
-                query_lower in record['chinese'].lower() or
-                query_lower in record.get('category', '').lower() or
-                query_lower in record.get('subcategory', '').lower()):
-                results.append(record)
-        
-        return results
+        if category in self.translations_by_category:
+            return self.translations_by_category[category].copy()
+        return {}
+    
+    def _save_translations(self):
+        """保存翻译数据到CSV文件"""
+        try:
+            # 确保目录存在
+            Path(self.csv_file).parent.mkdir(parents=True, exist_ok=True)
+            
+            # 写入所有翻译条目
+            with open(self.csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['english', 'chinese', 'category'])  # 写入标题行，包含分类列
+                # 先写入预定义术语，确保它们不会被覆盖
+                predefined_terms_written = set()
+                predefined_terms_file = Path(__file__).parent.parent.parent.parent / "predefined_terms.csv"
+                if predefined_terms_file.exists():
+                    with open(predefined_terms_file, 'r', encoding='utf-8') as pf:
+                        preader = csv.DictReader(pf)
+                        for row in preader:
+                            if 'english' in row and 'chinese' in row:
+                                english = row['english'].strip()
+                                chinese = row['chinese'].strip()
+                                category = row.get('category', 'other').strip()
+                                if not category:
+                                    category = 'other'
+                                
+                                if english and chinese:
+                                    writer.writerow([english, chinese, category])
+                                    predefined_terms_written.add(english)
+                
+                # 再写入用户添加的术语，避免重复写入预定义术语
+                for english, chinese in self.translations.items():
+                    if english not in predefined_terms_written:
+                        # 获取该条目的分类
+                        category = self.term_categories.get(english, 'other')
+                        writer.writerow([english, chinese, category])
+        except Exception as e:
+            print(f"警告: 保存翻译数据时出错: {e}")
+    
+    def _load_predefined_terms(self):
+        """加载预定义术语文件中的翻译数据"""
+        try:
+            predefined_terms_file = Path(__file__).parent.parent.parent.parent / "predefined_terms.csv"
+            if predefined_terms_file.exists():
+                with open(predefined_terms_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        # 确保行中有英文和中文字段
+                        if 'english' in row and 'chinese' in row:
+                            english = row['english'].strip()
+                            chinese = row['chinese'].strip()
+                            category = row.get('category', 'other').strip()
+                            if not category:
+                                category = 'other'
+                            
+                            if english and chinese:
+                                # 只有当翻译不存在时才添加预定义术语
+                                if english not in self.translations:
+                                    self.translations[english] = chinese
+                                    self.term_categories[english] = category
+                                    # 按分类存储
+                                    if category in self.translations_by_category:
+                                        self.translations_by_category[category][english] = chinese
+                                    else:
+                                        self.translations_by_category['other'][english] = chinese
+                                        self.term_categories[english] = 'other'
+        except Exception as e:
+            print(f"警告: 加载预定义术语文件时出错: {e}")
 
-    def add_structured_translation(self, english: str, chinese: str, 
-                                 term_type: str, term_subtype: str = ""):
-        """
-        添加结构化的翻译条目，根据术语类型自动分类
-        
-        Args:
-            english (str): 英文术语
-            chinese (str): 中文翻译
-            term_type (str): 术语类型（如菌种、菌株、基因、序列等）
-            term_subtype (str): 术语子类型
-        """
-        # 定义术语类型到分类的映射
-        type_to_category = {
-            'species': '菌种',
-            'strain': '菌株',
-            'isolate': '分离株',
-            'gene': '基因',
-            'sequence': '序列',
-            'genome': '基因组',
-            'plasmid': '质粒',
-            'protein': '蛋白质',
-            'enzyme': '酶',
-            'clone': '克隆',
-        }
-        
-        # 获取分类
-        category = type_to_category.get(term_type, term_type)
-        
-        # 对于菌种名称，我们需要特殊处理以确保正确存储
-        if term_type == 'species':
-            # 检查是否已经有该菌种的翻译
-            existing_translation = self.get_translation(english)
-            if existing_translation and existing_translation == chinese:
-                # 如果已经存在相同的翻译，则不需要重复添加
-                return
-        
-        # 添加翻译条目
-        self.add_translation(english, chinese, category, term_subtype)
 
-def get_translation_data_manager(data_file: str = "translation_data.csv") -> TranslationDataManager:
+def get_translation_data_manager(csv_file: str = "translation_data.csv") -> TranslationDataManager:
     """
     获取翻译数据管理器实例
     
     Args:
-        data_file (str): CSV数据文件路径
+        csv_file (str): 包含翻译数据的CSV文件路径
         
     Returns:
-        TranslationDataManager: 数据管理器实例
+        TranslationDataManager: 翻译数据管理器实例
     """
-    return TranslationDataManager(data_file)
+    return TranslationDataManager(csv_file)

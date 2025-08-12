@@ -1,64 +1,101 @@
 """
-文件选择组件模块
-负责文件选择相关的GUI组件
+文件选择组件模块（PyQt6版本）
 """
 
+from pathlib import Path
+from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QHBoxLayout, QPushButton, 
+                             QListWidget, QFileDialog, QMessageBox)
 from PyQt6.QtCore import pyqtSignal, QObject
-from PyQt6.QtWidgets import (QGroupBox, QHBoxLayout, QPushButton, QLabel)
-
-
-class FileSelectorSignals(QObject):
-    """文件选择器信号类"""
-    files_selected = pyqtSignal(list)  # 信号：文件已选择
 
 
 class FileSelectorWidget(QGroupBox):
     """文件选择组件类"""
     
+    files_selected = pyqtSignal(list)
+    
     def __init__(self):
-        super().__init__("文件选择")
-        self.signals = FileSelectorSignals()
-        self.selected_files = []
+        super().__init__("序列文件选择")
         self._setup_ui()
         self._connect_signals()
+        self.selected_files = []
     
     def _setup_ui(self):
         """设置界面"""
-        layout = QHBoxLayout()
+        layout = QVBoxLayout()
         
-        self.select_button = QPushButton("选择序列文件")
-        layout.addWidget(self.select_button)
+        # 创建文件列表
+        self.file_list = QListWidget()
+        layout.addWidget(self.file_list)
         
-        self.file_count_label = QLabel("未选择文件")
-        layout.addWidget(self.file_count_label)
-        layout.addStretch()
+        # 创建按钮布局
+        button_layout = QHBoxLayout()
         
+        self.add_button = QPushButton("添加文件")
+        button_layout.addWidget(self.add_button)
+        
+        self.remove_button = QPushButton("移除选中")
+        button_layout.addWidget(self.remove_button)
+        
+        self.clear_button = QPushButton("清空列表")
+        button_layout.addWidget(self.clear_button)
+        
+        layout.addLayout(button_layout)
         self.setLayout(layout)
     
     def _connect_signals(self):
         """连接信号"""
-        self.select_button.clicked.connect(self._on_select_files)
+        self.add_button.clicked.connect(self._add_files)
+        self.remove_button.clicked.connect(self._remove_selected)
+        self.clear_button.clicked.connect(self._clear_files)
+        self.file_list.itemSelectionChanged.connect(self._on_selection_changed)
     
-    def _on_select_files(self):
-        """处理文件选择事件"""
-        from PyQt6.QtWidgets import QFileDialog
-        file_paths, _ = QFileDialog.getOpenFileNames(
+    def _add_files(self):
+        """添加文件"""
+        files, _ = QFileDialog.getOpenFileNames(
             self,
             "选择序列文件",
             "",
-            "Sequence files (*.seq);;FASTA files (*.fasta *.fa);;All files (*.*)"
+            "Sequence Files (*.fasta *.fa *.fna *.seq *.fasta.gz);;All Files (*)"
         )
         
-        if file_paths:
-            self.selected_files = list(file_paths)
-            self.file_count_label.setText(f"已选择 {len(self.selected_files)} 个文件")
-            self.signals.files_selected.emit(self.selected_files)
+        if files:
+            # 添加新文件到列表
+            for file_path in files:
+                if file_path not in self.selected_files:
+                    self.selected_files.append(file_path)
+                    self.file_list.addItem(Path(file_path).name)
+            
+            # 发出文件选择信号
+            self.files_selected.emit(self.selected_files)
+    
+    def _remove_selected(self):
+        """移除选中的文件"""
+        selected_items = self.file_list.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "提示", "请先选择要移除的文件")
+            return
+        
+        # 从列表中移除选中的文件
+        for item in selected_items:
+            row = self.file_list.row(item)
+            self.file_list.takeItem(row)
+            if 0 <= row < len(self.selected_files):
+                del self.selected_files[row]
+        
+        # 发出文件选择信号
+        self.files_selected.emit(self.selected_files)
+    
+    def _clear_files(self):
+        """清空文件列表"""
+        self.file_list.clear()
+        self.selected_files.clear()
+        self.files_selected.emit(self.selected_files)
+    
+    def _on_selection_changed(self):
+        """处理选择变化事件"""
+        # 可以在这里添加选择变化的处理逻辑
+        pass
     
     def get_selected_files(self):
-        """获取已选择的文件列表"""
-        return self.selected_files
-    
-    def clear_selection(self):
-        """清空文件选择"""
-        self.selected_files = []
-        self.file_count_label.setText("未选择文件")
+        """获取选中的文件列表"""
+        return self.selected_files[:]
