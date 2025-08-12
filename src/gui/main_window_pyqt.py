@@ -223,7 +223,8 @@ class MainWindow(QMainWindow):
         # 设置生物学翻译器参数
         translation_settings = {
             'use_ai': advanced_settings.get('use_ai_translation', True),
-            'translator_type': advanced_settings.get('translator_type', 'default')  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
+            'translator_type': advanced_settings.get('translator_type', 'default'),  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
+            'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')  # 添加AI模型参数
         }
         
         # 获取API密钥（如果需要）
@@ -369,7 +370,8 @@ class MainWindow(QMainWindow):
         # 设置生物学翻译器参数
         translation_settings = {
             'use_ai': advanced_settings.get('use_ai_translation', True),
-            'translator_type': advanced_settings.get('translator_type', 'default')  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
+            'translator_type': advanced_settings.get('translator_type', 'default'),  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
+            'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')  # 添加AI模型参数
         }
         
         # 获取API密钥（如果需要）

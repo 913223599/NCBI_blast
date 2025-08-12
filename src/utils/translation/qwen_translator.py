@@ -16,16 +16,31 @@ class QwenTranslator:
     使用通义千问大模型进行专业的生物学文本翻译
     """
     
-    def __init__(self, api_key: Optional[str] = None):
+    # 支持的模型列表
+    SUPPORTED_MODELS = {
+        'qwen-plus': '通义千问-Plus',
+        'qwen-mt-plus': '通义千问-MT-Plus',
+        'qwen-mt-turbo': '通义千问-MT-Turbo',
+        'qwen-turbo': '通义千问-Turbo',
+        'deepseek-r1': 'DeepSeek'
+    }
+    
+    def __init__(self, api_key: Optional[str] = None, model: str = 'deepseek-r1'):
         """
         初始化翻译器
         
         Args:
             api_key (str, optional): 通义百炼API密钥
                                      如果未提供，则从环境变量DASHSCOPE_API_KEY获取
+            model (str): 使用的模型名称，默认为'deepseek-r1'
         """
         # 如果没有直接提供api_key，则尝试从环境变量获取
         self.api_key = api_key or os.environ.get('DASHSCOPE_API_KEY')
+        
+        # 验证模型是否支持
+        if model not in self.SUPPORTED_MODELS:
+            raise ValueError(f"不支持的模型: {model}。支持的模型: {', '.join(self.SUPPORTED_MODELS.keys())}")
+        self.model = model
         
         # 如果仍然没有api_key，则尝试从配置文件获取
         if not self.api_key:
@@ -111,7 +126,7 @@ class QwenTranslator:
         try:
             # 调用通义千问模型进行翻译
             completion = self.client.chat.completions.create(
-                model="deepseek-r1",  # 使用专门的翻译模型
+                model=self.model,  # 使用配置的模型
                 messages=messages,
                 extra_body={
                     "translation_options": translation_options
@@ -174,17 +189,18 @@ class QwenTranslator:
         return results
 
 
-def get_qwen_translator(api_key: Optional[str] = None) -> QwenTranslator:
+def get_qwen_translator(api_key: Optional[str] = None, model: str = 'deepseek-r1') -> QwenTranslator:
     """
     获取通义千问翻译器实例
     
     Args:
         api_key (str, optional): 通义百炼API密钥
+        model (str): 使用的模型名称，默认为'deepseek-r1'
         
     Returns:
         QwenTranslator: 翻译器实例
     """
-    return QwenTranslator(api_key)
+    return QwenTranslator(api_key, model)
 
 
 # 示例和测试
@@ -192,7 +208,12 @@ if __name__ == "__main__":
     # 测试代码
     try:
         # 注意：需要先设置DASHSCOPE_API_KEY环境变量
-        translator = get_qwen_translator()
+        # 可以通过model参数指定使用的模型
+        translator = get_qwen_translator(model='deepseek-r1')  # 默认使用DeepSeek
+        # translator = get_qwen_translator(model='qwen-plus')    # 使用通义千问-Plus
+        # translator = get_qwen_translator(model='qwen-mt-plus') # 使用通义千问-MT-Plus
+        # translator = get_qwen_translator(model='qwen-mt-turbo')# 使用通义千问-MT-Turbo
+        # translator = get_qwen_translator(model='qwen-turbo')   # 使用通义千问-Turbo
         
         # 测试翻译
         test_cases = [
@@ -204,6 +225,8 @@ if __name__ == "__main__":
         
         print("通义千问生物学翻译测试:")
         print("=" * 50)
+        print(f"使用模型: {translator.model} ({QwenTranslator.SUPPORTED_MODELS[translator.model]})")
+        print("-" * 50)
         
         for test_case in test_cases:
             try:

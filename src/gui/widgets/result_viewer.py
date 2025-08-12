@@ -227,7 +227,17 @@ class ResultViewerWidget(QGroupBox):
                 from pathlib import Path
                 project_root = Path(__file__).parent.parent.parent.parent
                 csv_file = str(project_root / "translation_data.csv")
-                self.biology_translator = get_biology_translator(data_file=csv_file, use_ai=True, ai_api_key=api_key)
+                
+                # 获取AI模型参数
+                ai_model = self.translation_settings.get('ai_model', 'deepseek-r1')
+                
+                # 初始化生物学翻译器，传递AI模型参数
+                self.biology_translator = get_biology_translator(
+                    data_file=csv_file, 
+                    use_ai=True, 
+                    ai_api_key=api_key,
+                    ai_model=ai_model  # 传递AI模型参数
+                )
             except Exception as e:
                 print(f"初始化生物学翻译器失败: {e}")
                 self.biology_translator = None

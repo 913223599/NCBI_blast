@@ -33,8 +33,9 @@ class BiologyTranslator:
     使用高效的数据结构支持大量数据的存储和检索
     """
     
-    def __init__(self, data_file: Optional[str] = None, use_ai: bool = True, 
-                 ai_api_key: Optional[str] = None):
+    def __init__(self, data_file: Optional[str] = None, use_ai: bool = False, 
+                 ai_api_key: Optional[str] = None,
+                 ai_model: Optional[str] = None):
         """
         初始化翻译器
         
@@ -53,6 +54,7 @@ class BiologyTranslator:
         self.use_ai = use_ai
         self.ai_translator = None
         self.ai_api_key = ai_api_key
+        self.ai_model = ai_model or 'deepseek-r1'  # 默认使用deepseek-r1模型
         
         # 添加缓存来存储已翻译的内容，避免重复翻译
         self._translation_cache = {}
@@ -60,7 +62,8 @@ class BiologyTranslator:
         # 初始化AI翻译器（如果启用）
         if self.use_ai and QWEN_AVAILABLE:
             try:
-                self.ai_translator = get_qwen_translator(self.ai_api_key)
+                # 传递AI模型参数给翻译器
+                self.ai_translator = get_qwen_translator(self.ai_api_key, self.ai_model)
                 # 添加健康检查
                 if self.ai_translator and hasattr(self.ai_translator, 'health_check'):
                     if not self.ai_translator.health_check():
@@ -305,8 +308,9 @@ class BiologyTranslator:
         term_extractor = TermExtractor(self.translation_data_manager)
         term_extractor.extract_and_store_key_terms(original, translated)
 
-def get_biology_translator(data_file: Optional[str] = None, use_ai: bool = True, 
-                           ai_api_key: Optional[str] = None) -> BiologyTranslator:
+def get_biology_translator(data_file: Optional[str] = None, use_ai: bool = False, 
+                           ai_api_key: Optional[str] = None,
+                           ai_model: Optional[str] = None) -> BiologyTranslator:
     """
     获取生物学翻译器实例
     
@@ -318,4 +322,4 @@ def get_biology_translator(data_file: Optional[str] = None, use_ai: bool = True,
     Returns:
         BiologyTranslator: 生物学翻译器实例
     """
-    return BiologyTranslator(data_file, use_ai, ai_api_key)
+    return BiologyTranslator(data_file, use_ai, ai_api_key, ai_model)

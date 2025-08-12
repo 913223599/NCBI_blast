@@ -35,6 +35,27 @@ class ParameterSettingsWidget(QGroupBox):
         thread_layout.addStretch()
         main_layout.addLayout(thread_layout)
         
+        # 添加AI翻译功能开关和模型选择到常规设置
+        ai_layout = QHBoxLayout()
+        self.ai_translation_checkbox = QCheckBox("启用AI翻译")
+        self.ai_translation_checkbox.setChecked(True)  # 默认启用AI翻译
+        ai_layout.addWidget(self.ai_translation_checkbox)
+        
+        # AI翻译模型选择
+        self.ai_model_combo = QComboBox()
+        self.ai_model_combo.addItem("DeepSeek (deepseek-r1)", "deepseek-r1")
+        self.ai_model_combo.addItem("通义千问-Plus (qwen-plus)", "qwen-plus")
+        self.ai_model_combo.addItem("通义千问-MT-Plus (qwen-mt-plus)", "qwen-mt-plus")
+        self.ai_model_combo.addItem("通义千问-MT-Turbo (qwen-mt-turbo)", "qwen-mt-turbo")
+        self.ai_model_combo.addItem("通义千问-Turbo (qwen-turbo)", "qwen-turbo")
+        self.ai_model_combo.setCurrentIndex(0)  # 默认选择DeepSeek
+        # 当启用AI翻译时，启用模型选择
+        self.ai_translation_checkbox.toggled.connect(self.ai_model_combo.setEnabled)
+        ai_layout.addWidget(QLabel("AI模型:"))
+        ai_layout.addWidget(self.ai_model_combo)
+        ai_layout.addStretch()
+        main_layout.addLayout(ai_layout)
+        
         # 创建高级参数开关
         self.advanced_toggle_button = QPushButton("显示高级参数")
         self.advanced_toggle_button.setCheckable(True)
@@ -172,12 +193,6 @@ class ParameterSettingsWidget(QGroupBox):
         self.use_cache_checkbox.setChecked(True)          # 默认启用缓存
         right_layout.addRow("", self.use_cache_checkbox)
         
-        # 添加AI翻译功能开关
-        right_layout.addRow(QLabel("翻译功能设置:"))
-        self.ai_translation_checkbox = QCheckBox("使用AI翻译")
-        self.ai_translation_checkbox.setChecked(True)     # 默认启用AI翻译
-        right_layout.addRow("", self.ai_translation_checkbox)
-        
         # 将左右两栏添加到水平布局中
         advanced_layout.addWidget(left_widget)
         advanced_layout.addWidget(right_widget)
@@ -217,6 +232,7 @@ class ParameterSettingsWidget(QGroupBox):
         self.fallback_to_remote_checkbox.toggled.connect(self._on_settings_changed)
         self.use_cache_checkbox.toggled.connect(self._on_settings_changed)
         self.ai_translation_checkbox.toggled.connect(self._on_settings_changed)
+        self.ai_model_combo.currentTextChanged.connect(self._on_settings_changed)
         self.advanced_toggle_button.toggled.connect(self._on_settings_changed)
     
     def _on_settings_changed(self):
@@ -252,7 +268,9 @@ class ParameterSettingsWidget(QGroupBox):
             'use_cache': self.use_cache_checkbox.isChecked(),
             
             # AI翻译功能开关
-            'use_ai_translation': self.ai_translation_checkbox.isChecked()
+            'use_ai_translation': self.ai_translation_checkbox.isChecked(),
+            # AI翻译模型选择
+            'ai_translation_model': self.ai_model_combo.currentData() if self.ai_translation_checkbox.isChecked() else None
         }
         return settings
     
@@ -294,9 +312,7 @@ class ParameterSettingsWidget(QGroupBox):
         if 'descriptions' in settings:
             self.descriptions_enabled.setChecked(True)
             self.descriptions_spinbox.setValue(settings['descriptions'])
-            
-        # max_hsps 参数被移除，因为qblast不支持该参数
-        
+
         if 'local_num_threads' in settings:
             self.local_num_threads_enabled.setChecked(True)
             self.local_num_threads_spinbox.setValue(settings['local_num_threads'])
@@ -309,7 +325,3 @@ class ParameterSettingsWidget(QGroupBox):
             
         if 'use_cache' in settings:
             self.use_cache_checkbox.setChecked(settings['use_cache'])
-            
-        # AI翻译功能开关设置
-        if 'use_ai_translation' in settings:
-            self.ai_translation_checkbox.setChecked(settings['use_ai_translation'])
