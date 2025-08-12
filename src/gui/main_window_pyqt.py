@@ -22,7 +22,6 @@ from src.gui.widgets.file_selector import FileSelectorWidget
 from src.gui.widgets.parameter_settings import ParameterSettingsWidget
 from src.gui.widgets.control_panel import ControlPanelWidget
 from src.gui.widgets.result_viewer import ResultViewerWidget
-from src.gui.widgets.detail_viewer import DetailViewerWidget
 from src.gui.widgets.summary_panel import SummaryPanelWidget
 from src.gui.widgets.translation_debugger import TranslationDebuggerDialog
 from src.gui.widgets.help_dialog import HelpDialog
@@ -70,7 +69,6 @@ class MainWindow(QMainWindow):
         self.parameter_settings = ParameterSettingsWidget()
         self.control_panel = ControlPanelWidget()
         self.result_viewer = ResultViewerWidget()
-        self.detail_viewer = DetailViewerWidget()
         self.summary_panel = SummaryPanelWidget()
     
     def _setup_ui(self):
@@ -100,21 +98,20 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.control_panel)
         left_layout.addWidget(self.result_viewer)
         
-        # 右侧面板（详细信息查看和统计）
+        # 右侧面板（统计）
         self.right_panel = QWidget()
         right_layout = QVBoxLayout()
         self.right_panel.setLayout(right_layout)
-        right_layout.addWidget(self.detail_viewer)
         right_layout.addWidget(self.summary_panel)
-        
+
         # 默认隐藏右侧面板
         self.right_panel.hide()
-        self.control_panel.toggle_detail_button.setText("显示详细信息")
+        self.control_panel.toggle_detail_button.setText("显示统计信息")
         
         # 添加面板到分割器
         splitter.addWidget(left_panel)
         splitter.addWidget(self.right_panel)
-        splitter.setSizes([400, 600])  # 设置初始大小
+        splitter.setSizes([400, 200])  # 调整初始大小，因为不需要显示详细信息
         
         # 将分割器添加到主布局
         main_layout.addWidget(splitter)
@@ -171,8 +168,6 @@ class MainWindow(QMainWindow):
         # 结果查看器信号
         self.result_viewer.signals.item_selected.connect(self._on_item_selected)
         self.result_viewer.signals.retry_blast.connect(self._retry_blast)  # 连接重试BLAST信号
-        # 移除对已移除的item_double_clicked信号的连接
-        # self.result_viewer.signals.item_double_clicked.connect(self._on_item_double_clicked)
         
         # 处理线程信号
         if self.processing_thread:
@@ -184,13 +179,13 @@ class MainWindow(QMainWindow):
             self.processing_thread.finished.connect(self._on_thread_finished)
     
     def _toggle_detail_panel(self):
-        """切换详细信息面板显示/隐藏"""
+        """切换统计信息面板显示/隐藏"""
         if self.right_panel.isVisible():
             self.right_panel.hide()
-            self.control_panel.toggle_detail_button.setText("显示详细信息")
+            self.control_panel.toggle_detail_button.setText("显示统计信息")
         else:
             self.right_panel.show()
-            self.control_panel.toggle_detail_button.setText("隐藏详细信息")
+            self.control_panel.toggle_detail_button.setText("隐藏统计信息")
     
     def _on_files_selected(self, files):
         """处理文件选择事件"""
@@ -233,23 +228,15 @@ class MainWindow(QMainWindow):
         
         # 获取API密钥（如果需要）
         api_key = None
-        if translation_settings['use_ai']:
-            try:
-                from src.utils.config_manager import get_config_manager
-                config_manager = get_config_manager()
-                api_key = config_manager.get_api_key('dashscope')
-                
-                # 如果配置中没有API密钥，回退到默认类型翻译
-                if not api_key:
-                    translation_settings['translator_type'] = 'default'
-            except Exception as e:
-                print(f"获取API密钥失败: {e}")
-                translation_settings['translator_type'] = 'default'
+        try:
+            from src.utils.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            api_key = config_manager.get_api_key('dashscope')
+        except Exception as e:
+            print(f"获取API密钥失败: {e}")
         
         # 设置结果查看器的翻译配置
         self.result_viewer.set_translation_settings(translation_settings, api_key)
-        # 设置详细信息查看器的API密钥
-        self.detail_viewer.set_api_key(api_key)
         
         # 更新界面状态
         self.is_processing = True
@@ -346,8 +333,8 @@ class MainWindow(QMainWindow):
     
     @pyqtSlot(str)
     def _on_item_selected(self, file_name):
-        """处理项目选择事件"""
-        self.detail_viewer.show_details(file_name, self.results)
+        """处理项目选择事件（现在不执行任何操作，因为detail_viewer已被移除）"""
+        pass
 
     @pyqtSlot(str)
     def _retry_blast(self, file_name):
@@ -388,9 +375,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"获取API密钥失败: {e}")
         
-        # 设置详细信息查看器的API密钥
-        self.detail_viewer.set_api_key(api_key)
-        
         # 更新界面状态
         self.is_processing = True
         self.control_panel.enable_start_button(False)
@@ -398,6 +382,9 @@ class MainWindow(QMainWindow):
         self.control_panel.update_progress(0)
         self.control_panel.set_status(f"正在重试: {file_name}")
         self.statusBar().showMessage(f"正在重试: {file_name}")
+        
+        # 设置结果查看器的翻译配置
+        self.result_viewer.set_translation_settings(translation_settings, api_key)
         
         # 创建并启动处理线程，传递高级参数
         self.batch_processor = BatchProcessor(

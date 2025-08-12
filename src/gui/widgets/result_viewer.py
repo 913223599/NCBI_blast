@@ -290,16 +290,14 @@ class ResultViewerWidget(QGroupBox):
                         similarity = row.get('相似度', '')
                         e_value = row.get('E值', '')
                         
-                        # 使用生物学翻译器翻译物种和属名
+                        # 统一使用生物学翻译器进行翻译
                         if species and self.biology_translator:
                             try:
                                 translated_species = self.biology_translator.translate_text(species)
-                                if translated_species and translated_species != species:
-                                    # 提取翻译结果，去除标识符如[AI]或[本地]
-                                    if translated_species.startswith('[AI]'):
-                                        species = translated_species[4:]  # 去掉前缀[AI]
-                                    elif translated_species.startswith('[本地]'):
-                                        species = translated_species[4:]  # 去掉前缀[本地]
+                                # 处理翻译结果，去除标识符如[AI]或[本地]
+                                if translated_species:
+                                    if translated_species.startswith(('[AI]', '[本地]')):
+                                        species = translated_species[4:].strip()
                                     else:
                                         species = translated_species
                             except Exception as e:
@@ -308,28 +306,23 @@ class ResultViewerWidget(QGroupBox):
                         if genus and self.biology_translator:
                             try:
                                 translated_genus = self.biology_translator.translate_text(genus)
+                                # 处理翻译结果，去除标识符如[AI]或[本地]
                                 if translated_genus and translated_genus != genus:
-                                    # 提取翻译结果，去除标识符如[AI]或[本地]
-                                    if translated_genus.startswith('[AI]'):
-                                        genus = translated_genus[4:]  # 去掉前缀[AI]
-                                    elif translated_genus.startswith('[本地]'):
-                                        genus = translated_genus[4:]  # 去掉前缀[本地]
+                                    if translated_genus.startswith(('[AI]', '[本地]')):
+                                        genus = translated_genus[4:].strip()
                                     else:
                                         genus = translated_genus
                             except Exception as e:
                                 print(f"翻译属名时出错: {e}")
                         
-                        
-                        # 使用AI增强的生物学翻译器翻译基因类型和序列类型
+                        # 基因类型和序列类型的翻译逻辑保持不变
                         if gene_type and self.biology_translator:
                             try:
                                 translated_gene = self.biology_translator.translate_text(gene_type)
+                                # 处理翻译结果，去除标识符如[AI]或[本地]
                                 if translated_gene and translated_gene != gene_type:
-                                    # 提取翻译结果，去除标识符如[AI]或[本地]
-                                    if translated_gene.startswith('[AI]'):
-                                        gene_type = translated_gene[4:]  # 去掉前缀[AI]
-                                    elif translated_gene.startswith('[本地]'):
-                                        gene_type = translated_gene[4:]  # 去掉前缀[本地]
+                                    if translated_gene.startswith(('[AI]', '[本地]')):
+                                        gene_type = translated_gene[4:].strip()
                                     else:
                                         gene_type = translated_gene
                             except Exception as e:
@@ -338,12 +331,10 @@ class ResultViewerWidget(QGroupBox):
                         if sequence_type and self.biology_translator:
                             try:
                                 translated_sequence = self.biology_translator.translate_text(sequence_type)
+                                # 处理翻译结果，去除标识符如[AI]或[本地]
                                 if translated_sequence and translated_sequence != sequence_type:
-                                    # 提取翻译结果，去除标识符如[AI]或[本地]
-                                    if translated_sequence.startswith('[AI]'):
-                                        sequence_type = translated_sequence[4:]  # 去掉前缀[AI]
-                                    elif translated_sequence.startswith('[本地]'):
-                                        sequence_type = translated_sequence[4:]  # 去掉前缀[本地]
+                                    if translated_sequence.startswith(('[AI]', '[本地]')):
+                                        sequence_type = translated_sequence[4:].strip()
                                     else:
                                         sequence_type = translated_sequence
                             except Exception as e:
