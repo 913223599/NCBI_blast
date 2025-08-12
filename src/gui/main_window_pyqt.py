@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
-                             QPushButton, QHBoxLayout, QMenuBar, QMenu, QStatusBar, QSplitter)
+                             QPushButton, QHBoxLayout, QMenuBar, QMenu, QStatusBar, QSplitter, QDialog)
 from PyQt6.QtGui import QAction
 
 # 添加项目根目录到Python路径
@@ -424,8 +424,23 @@ class MainWindow(QMainWindow):
         
     def _open_settings_dialog(self):
         """打开设置对话框"""
-        # TODO: 实现设置对话框
-        pass
+        # 创建并显示高级设置对话框
+        from src.gui.widgets.parameter_settings import AdvancedSettingsDialog
+        dialog = AdvancedSettingsDialog(self)
+        
+        # 获取当前高级设置
+        current_settings = self.parameter_settings.get_advanced_settings()
+        # 移除AI相关设置，只保留纯高级设置
+        advanced_only_settings = {
+            k: v for k, v in current_settings.items() 
+            if k not in ['use_ai_translation', 'ai_translation_model']
+        }
+        dialog.set_settings(advanced_only_settings)
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 保存高级参数设置
+            advanced_settings = dialog.get_settings()
+            self.parameter_settings.set_advanced_settings(advanced_settings)
     
     def _open_help_dialog(self):
         """打开帮助文档对话框"""
