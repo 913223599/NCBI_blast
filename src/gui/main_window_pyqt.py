@@ -6,6 +6,7 @@ PyQt主窗口模块
 import os
 import sys
 from pathlib import Path
+import shutil
 
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
@@ -30,6 +31,28 @@ from src.gui.threads.processing_thread import ProcessingThread
 from src.blast.batch_processor import BatchProcessor
 
 
+def clear_results_folder():
+    """
+    清空results文件夹中的所有文件
+    """
+    try:
+        results_path = Path(project_root) / "results"
+        if results_path.exists() and results_path.is_dir():
+            # 删除文件夹中的所有文件和子文件夹
+            for item in results_path.iterdir():
+                if item.is_file():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            print(f"已清空results文件夹: {results_path}")
+        else:
+            # 如果results文件夹不存在，则创建它
+            results_path.mkdir(parents=True, exist_ok=True)
+            print(f"已创建results文件夹: {results_path}")
+    except Exception as e:
+        print(f"清空results文件夹时出错: {e}")
+
+
 class MainWindow(QMainWindow):
     """
     PyQt主窗口类
@@ -43,6 +66,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("NCBI BLAST 查询工具")
         self.setGeometry(100, 100, 1000, 700)
+        
+        # 在程序启动时清空results文件夹
+        clear_results_folder()
         
         # 初始化变量
         self.sequence_files = []
