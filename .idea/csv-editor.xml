@@ -24,6 +24,27 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="\results\2.1492R.SP506300620002_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\results\4.1492R.SP506300620004_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\results\6.1492R.SP506300620006_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="\src\results\2.1492R.SP506300620002_blast_result.csv">
           <value>
             <Attribute>
