@@ -65,12 +65,13 @@ class TermExtractor:
             elif any(bac in original.lower() for bac in ['bacillus', 'staphylococcus', 'escherichia']):
                 category = 'species'
                 
+        # 不再存储到本地数据库，而是直接使用术语数据库
         # 添加到翻译数据库
         try:
             self.translation_data_manager.add_translation(original, clean_translated, category)
-            print(f"[翻译调试] 已将'{original}'的翻译结果存储到本地数据库，分类为'{category}'")
+            print(f"[翻译调试] 已将'{original}'的翻译结果存储到术语数据库，分类为'{category}'")
         except Exception as e:
-            print(f"[翻译调试] 存储翻译结果到本地数据库失败: {e}")
+            print(f"[翻译调试] 存储翻译结果到术语数据库失败: {e}")
 
     def extract_blast_result_terms(self, csv_file_path: str):
         """
@@ -102,14 +103,14 @@ class TermExtractor:
                     # 提取基因类型
                     gene_type = row.get('基因类型', '').strip()
                     if gene_type:
-                        translated_gene = self._translate_term_from_db(gene_type, '基因')
-                        new_terms[(gene_type, '基因')] = translated_gene
+                        translated_gene = self._translate_term_from_db(gene_type, 'gene')
+                        new_terms[(gene_type, 'gene')] = translated_gene
                     
                     # 提取序列类型
                     sequence_type = row.get('序列类型', '').strip()
                     if sequence_type:
-                        translated_sequence = self._translate_term_from_db(sequence_type, '序列')
-                        new_terms[(sequence_type, '序列')] = translated_sequence
+                        translated_sequence = self._translate_term_from_db(sequence_type, 'sequence')
+                        new_terms[(sequence_type, 'sequence')] = translated_sequence
                     
                     # 提取菌株信息（可能包含术语和编码）
                     strain = row.get('菌株', '').strip()
@@ -117,8 +118,8 @@ class TermExtractor:
                         # 分离术语部分和编码部分
                         strain_term, strain_code = self._parse_strain_info(strain)
                         if strain_term:
-                            translated_strain = self._translate_term_from_db(strain_term, '菌株')
-                            new_terms[(strain_term, '菌株')] = translated_strain
+                            translated_strain = self._translate_term_from_db(strain_term, 'strain')
+                            new_terms[(strain_term, 'strain')] = translated_strain
         except Exception as e:
             print(f"读取CSV文件时出错: {e}")
             return
@@ -134,7 +135,7 @@ class TermExtractor:
             if term_key not in existing_terms:
                 all_terms.append((term_key[0], chinese, term_key[1]))
         
-        # 将所有术语写入预定义术语文件
+        # 将所有术语写入预定义术语文件，分类使用英文
         try:
             with open(predefined_terms_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -191,7 +192,7 @@ class TermExtractor:
         Returns:
             str: 中文翻译
         """
-        return self._translate_term_from_db(gene_term, '基因')
+        return self._translate_term_from_db(gene_term, 'gene')
 
     def _translate_sequence_term(self, sequence_term: str) -> str:
         """
@@ -203,7 +204,7 @@ class TermExtractor:
         Returns:
             str: 中文翻译
         """
-        return self._translate_term_from_db(sequence_term, '序列')
+        return self._translate_term_from_db(sequence_term, 'sequence')
 
     def _translate_strain_term(self, strain_term: str) -> str:
         """
@@ -215,7 +216,7 @@ class TermExtractor:
         Returns:
             str: 中文翻译
         """
-        return self._translate_term_from_db(strain_term, '菌株')
+        return self._translate_term_from_db(strain_term, 'strain')
 
     def _parse_strain_info(self, strain_info: str) -> Tuple[str, str]:
         """
