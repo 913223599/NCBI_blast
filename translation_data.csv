@@ -70,7 +70,7 @@ Freshwater bacterium,淡水细菌,other
 Freshwater,淡水,genus
 Plesiomonas shigelloides,类志贺邻单胞菌,other
 Pantoea brenneri,布伦纳泛菌,other
-Plesiomonas,结果：邻单胞菌属,genus
+Plesiomonas,邻单胞菌属,genus
 Pantoea,泛菌属,genus
 Plesiomonas sp,邻单胞菌属,other
 Pantoea sp,泛菌属,other
@@ -87,3 +87,21 @@ Klebsiella,克雷伯氏菌属,genus
 Brucella,布鲁氏菌属,genus
 Klebsiella sp,克雷伯菌属,other
 Aeromonas hydrophila,嗜水气单胞菌,other
+Acidovorax sp,食酸菌属,other
+Acidovorax,食酸菌属,genus
+Acidovorax temperans,温和食酸菌,other
+Diaphorobacter sp,脱硫杆菌属,other
+Diaphorobacter,脱硫杆菌属,genus
+Acinetobacter bouvetii,布氏不动杆菌,other
+Acinetobacter oryzae,水稻不动杆菌,other
+Pseudomonas taiwanensis,台湾假单胞菌,other
+Pseudomonas plecoglossicida,杀香鱼假单胞菌,other
+Buk,伯克霍尔德氏菌属,other
+Pseudomonas fulva,黄褐假单胞菌,other
+Pseudomonas alloputida,异恶臭假单胞菌,other
+Pseudomonas parafulva,类黄假单胞菌,other
+Pseudomonas hunanensis,湖南假单胞菌,other
+Exiguobacterium acetylicum,乙酰微小杆菌,other
+Exiguobacterium,微小杆菌属,genus
+Marine bacterium,海洋细菌,other
+Marine,海洋的,genus

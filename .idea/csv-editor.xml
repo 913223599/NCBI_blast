@@ -38,6 +38,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="\results\5.1492R.SP506300620005_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="\results\6.1492R.SP506300620006_blast_result.csv">
           <value>
             <Attribute>
@@ -81,6 +88,13 @@
           </value>
         </entry>
         <entry key="\translation_data.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="diff.csv">
           <value>
             <Attribute>
               <option name="separator" value="," />
