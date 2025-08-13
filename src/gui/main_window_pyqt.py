@@ -31,24 +31,41 @@ from src.gui.threads.processing_thread import ProcessingThread
 from src.blast.batch_processor import BatchProcessor
 
 
-def clear_results_folder():
+def clear_results_folders():
     """
     清空results文件夹中的所有文件
+    根据项目规范，同时清理项目根目录和src目录下的results文件夹
     """
     try:
-        results_path = Path(project_root) / "results"
-        if results_path.exists() and results_path.is_dir():
+        # 清理项目根目录下的results文件夹
+        root_results_path = Path(project_root) / "results"
+        if root_results_path.exists() and root_results_path.is_dir():
             # 删除文件夹中的所有文件和子文件夹
-            for item in results_path.iterdir():
+            for item in root_results_path.iterdir():
                 if item.is_file():
                     item.unlink()
                 elif item.is_dir():
                     shutil.rmtree(item)
-            print(f"已清空results文件夹: {results_path}")
+            print(f"已清空项目根目录results文件夹: {root_results_path}")
         else:
             # 如果results文件夹不存在，则创建它
-            results_path.mkdir(parents=True, exist_ok=True)
-            print(f"已创建results文件夹: {results_path}")
+            root_results_path.mkdir(parents=True, exist_ok=True)
+            print(f"已创建项目根目录results文件夹: {root_results_path}")
+            
+        # 清理src目录下的results文件夹
+        src_results_path = Path(project_root) / "src" / "results"
+        if src_results_path.exists() and src_results_path.is_dir():
+            # 删除文件夹中的所有文件和子文件夹
+            for item in src_results_path.iterdir():
+                if item.is_file():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            print(f"已清空src目录results文件夹: {src_results_path}")
+        else:
+            # 如果results文件夹不存在，则创建它
+            src_results_path.mkdir(parents=True, exist_ok=True)
+            print(f"已创建src目录results文件夹: {src_results_path}")
     except Exception as e:
         print(f"清空results文件夹时出错: {e}")
 
@@ -68,7 +85,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1000, 700)
         
         # 在程序启动时清空results文件夹
-        clear_results_folder()
+        clear_results_folders()
         
         # 初始化变量
         self.sequence_files = []
