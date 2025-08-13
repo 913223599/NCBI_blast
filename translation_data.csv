@@ -27,7 +27,6 @@ Aeromonas veronii,维罗纳气单胞菌,species
 Aeromonas,气单胞菌属,genus
 Aeromonas sp,气单胞菌属,genus
 Uncultured,未培养的,species
-Aeromonas hydrophila,嗜水气单胞菌,species
 Bacillus paralicheniformis,类地衣芽孢杆菌,species
 Rothia marina,海沉积物罗思菌,other
 Aeromonas rivipollensis,河污气单胞菌,other
@@ -48,13 +47,13 @@ Aeromonas sobria,温和气单胞菌,species
 Pseudomonas guariconensis,瓜里科假单胞菌,species
 Pseudomonas,假单胞菌属,genus
 Acinetobacter lwoffii,鲁氏不动杆菌,species
-Stenotrophomonas sp,寡养单胞菌属,genus
+Stenotrophomonas sp,窄食单胞菌属,genus
 Pseudomonas monteilii,蒙氏假单胞菌,species
 Pseudomonas sp,假单胞菌属,genus
 Pseudomonas putida,恶臭假单胞菌,species
-Stenotrophomonas,寡养单胞菌属,genus
+Stenotrophomonas,窄食单胞菌属,genus
 Stenotrophomonas maltophilia,嗜麦芽窄食单胞菌,species
-Stenotrophomonas beteli,槟榔寡养单胞菌,species
+Stenotrophomonas beteli,槟榔窄食单胞菌,species
 Stutzerimonas stutzeri,施氏施图策菌,species
 Bacillus sonorensis,索诺拉芽孢杆菌,species
 Vogesella urethralis,尿道沃格菌,species
@@ -64,8 +63,27 @@ Beta,β-变形菌纲,genus
 Vogesella sp,沃格斯氏菌属,genus
 Vibrio cholerae,霍乱弧菌,species
 Vibrio,弧菌属,genus
-Aeromonas allosaccharophila,异糖气单胞菌,other
+Aeromonas allosaccharophila,异嗜糖气单胞菌,other
 Vogesella perlucida,透明福格斯氏菌,other
 Vogesella oryzae,水稻沃格氏菌,other
 Freshwater bacterium,淡水细菌,other
 Freshwater,淡水,genus
+Plesiomonas shigelloides,类志贺邻单胞菌,other
+Pantoea brenneri,布伦纳泛菌,other
+Plesiomonas,结果：邻单胞菌属,genus
+Pantoea,泛菌属,genus
+Plesiomonas sp,邻单胞菌属,other
+Pantoea sp,泛菌属,other
+Pseudomonas peli,泥假单胞菌,other
+Pantoea deleyi,德莱氏泛菌,other
+Proteobacterium,变形菌,genus
+Pantoea agglomerans,成团泛菌,other
+Staphylococcus equorum,马胃葡萄球菌,species
+Streptococcus iniae,海豚链球菌,other
+Klebsiella pneumoniae,肺炎克雷伯菌,other
+Brucella intermedia,中间布鲁氏菌,other
+Streptococcus,链球菌属,genus
+Klebsiella,克雷伯氏菌属,genus
+Brucella,布鲁氏菌属,genus
+Klebsiella sp,克雷伯菌属,other
+Aeromonas hydrophila,嗜水气单胞菌,other
