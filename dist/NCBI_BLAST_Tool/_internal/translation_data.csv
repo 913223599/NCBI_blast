@@ -1,0 +1,122 @@
+english,chinese,category
+strain,菌株,strain
+16S ribosomal RNA gene,16S核糖体RNA基因,gene
+clone,克隆,strain
+complete sequence,完整序列,sequence
+partial sequence,部分序列,sequence
+partial 16S rRNA gene,部分16S rRNA基因,sequence
+16S ribosomal RNA,16S核糖体RNA,gene
+isolate,分离株,strain
+16S rRNA gene,16S rRNA基因,gene
+complete genome,完整基因组,sequence
+gene for 16S rRNA,16S rRNA基因,gene
+Staphylococcus epidermidis,表皮葡萄球菌,species
+Staphylococcus,葡萄球菌,genus
+Staphylococcus sp,葡萄球菌属,genus
+Bacterium,细菌,genus
+Edwardsiella ictaluri,鲇鱼爱德华氏菌,species
+Edwardsiella,爱德华氏菌属,genus
+Bacillus mobilis,运动芽孢杆菌,species
+Bacillus,芽孢杆菌属,genus
+Bacillus sp,芽孢杆菌属,species
+Bacillus cereus,蜡样芽孢杆菌,species
+Bacillus albus,白色芽孢杆菌,species
+Bacillus thuringiensis,苏云金芽孢杆菌,species
+Bacillus tropicus,热带芽孢杆菌,species
+Aeromonas veronii,维罗纳气单胞菌,species
+Aeromonas,气单胞菌属,genus
+Aeromonas sp,气单胞菌属,genus
+Uncultured,未培养的,species
+Bacillus paralicheniformis,类地衣芽孢杆菌,species
+Rothia marina,海沉积物罗思菌,other
+Aeromonas rivipollensis,河污气单胞菌,other
+Bacillus licheniformis,地衣芽孢杆菌,species
+Rothia,罗氏菌属,genus
+Rothia endophytica,植物内生罗氏菌,other
+Bacillota bacterium,杆菌门细菌,other
+Uncultured bacterium,未培养细菌,other
+Bacillota,厚壁菌门,genus
+Bacillus haynesii,海氏芽孢杆菌,species
+Rothia sp,罗氏菌属,other
+Kocuria sp,考克氏菌属,other
+Kocuria,考克氏菌属,genus
+Acinetobacter johnsonii,约氏不动杆菌,species
+Acinetobacter,不动杆菌属,genus
+Acinetobacter sp,不动杆菌属,genus
+Aeromonas sobria,温和气单胞菌,species
+Pseudomonas guariconensis,瓜里科假单胞菌,species
+Pseudomonas,假单胞菌属,genus
+Acinetobacter lwoffii,鲁氏不动杆菌,species
+Stenotrophomonas sp,窄食单胞菌属,genus
+Pseudomonas monteilii,蒙氏假单胞菌,species
+Pseudomonas sp,假单胞菌属,genus
+Pseudomonas putida,恶臭假单胞菌,species
+Stenotrophomonas,窄食单胞菌属,genus
+Stenotrophomonas maltophilia,嗜麦芽窄食单胞菌,species
+Stenotrophomonas beteli,槟榔窄食单胞菌,species
+Stutzerimonas stutzeri,施氏施图策菌,species
+Bacillus sonorensis,索诺拉芽孢杆菌,species
+Vogesella urethralis,尿道沃格菌,species
+Vogesella,沃格氏菌属,genus
+Beta proteobacterium,β-变形菌纲,other
+Beta,β-变形菌纲,genus
+Vogesella sp,沃格斯氏菌属,genus
+Vibrio cholerae,霍乱弧菌,species
+Vibrio,弧菌属,genus
+Aeromonas allosaccharophila,异嗜糖气单胞菌,other
+Vogesella perlucida,透明福格斯氏菌,other
+Vogesella oryzae,水稻沃格氏菌,other
+Freshwater bacterium,淡水细菌,other
+Freshwater,淡水,genus
+Plesiomonas shigelloides,类志贺邻单胞菌,other
+Pantoea brenneri,布伦纳泛菌,other
+Plesiomonas,邻单胞菌属,genus
+Pantoea,泛菌属,genus
+Plesiomonas sp,邻单胞菌属,other
+Pantoea sp,泛菌属,other
+Pseudomonas peli,泥假单胞菌,other
+Pantoea deleyi,德莱氏泛菌,other
+Proteobacterium,变形菌,genus
+Pantoea agglomerans,成团泛菌,other
+Staphylococcus equorum,马胃葡萄球菌,species
+Streptococcus iniae,海豚链球菌,other
+Klebsiella pneumoniae,肺炎克雷伯菌,other
+Brucella intermedia,中间布鲁氏菌,other
+Streptococcus,链球菌属,genus
+Klebsiella,克雷伯氏菌属,genus
+Brucella,布鲁氏菌属,genus
+Klebsiella sp,克雷伯菌属,other
+Aeromonas hydrophila,嗜水气单胞菌,other
+Acidovorax sp,食酸菌属,other
+Acidovorax,食酸菌属,genus
+Acidovorax temperans,温和食酸菌,other
+Diaphorobacter sp,脱硫杆菌属,other
+Diaphorobacter,脱硫杆菌属,genus
+Acinetobacter bouvetii,布氏不动杆菌,other
+Acinetobacter oryzae,水稻不动杆菌,other
+Pseudomonas taiwanensis,台湾假单胞菌,other
+Pseudomonas plecoglossicida,杀香鱼假单胞菌,other
+Buk,伯克霍尔德氏菌属,other
+Pseudomonas fulva,黄褐假单胞菌,other
+Pseudomonas alloputida,异恶臭假单胞菌,other
+Pseudomonas parafulva,类黄假单胞菌,other
+Pseudomonas hunanensis,湖南假单胞菌,other
+Exiguobacterium acetylicum,乙酰微小杆菌,other
+Exiguobacterium,微小杆菌属,genus
+Marine bacterium,海洋细菌,other
+Marine,海洋的,genus
+Alcaligenes faecalis,粪产碱杆菌,gene
+Alcaligenes,产碱杆菌属,genus
+Lysinibacillus sphaericus,球形赖氨酸芽孢杆菌,species
+Lysinibacillus,溶杆菌属,genus
+Bacillus altitudinis,高地芽孢杆菌,species
+Ensifer sp,剑菌属,other
+Ensifer,剑菌属,genus
+Enterococcus faecium,屎肠球菌,other
+Enterococcus,肠球菌属,genus
+Williamsia sp,威廉姆斯氏菌属,other
+Williamsia,威廉姆斯菌属,genus
+Lp,植物乳杆菌,other
+Gaf,毗邻颗粒链球菌,genus
+Streptomyces sp,链霉菌属,other
+Streptomyces,链霉菌属,genus
