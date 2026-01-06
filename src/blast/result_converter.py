@@ -66,7 +66,7 @@ class BlastResultConverter:
                     if other_accession_match:
                         accession = other_accession_match.group(1)
                 
-                # 提取基因类型
+                # 提取基因类型（适用于核苷酸序列）
                 gene_patterns = [
                     r'((?:16S|23S|18S)\s+ribosomal\s+RNA(?:\s+gene)?)',
                     r'(16S\s+rRNA\s+gene)',
@@ -80,10 +80,68 @@ class BlastResultConverter:
                         gene_type = gene_match.group(1)
                         break
                 
+                # 提取蛋白质相关术语（适用于蛋白质序列）
+                protein_patterns = [
+                    r'(hypothetical protein)',
+                    r'(conserved protein)',
+                    r'(protein\s+\w+)',
+                    r'(\w+\s+protein)',
+                    r'(uncharacterized protein)',
+                    r'(putative protein)',
+                    r'(PREDICTED:\s+\w+\s+protein)',
+                    r'(COA\s+protein)',
+                    r'(coat\s+protein)',
+                    r'(membrane\s+protein)',
+                    r'(transcription\s+factor)',
+                    r'(kinase)',
+                    r'(receptor)',
+                    r'(synthase)',
+                    r'(transferase)',
+                    r'(hydrolase)',
+                    r'(oxidase)',
+                    r'(reductase)',
+                    r'(ligase)',
+                    r'(synthetase)',
+                    r'(transporter)',
+                    r'(channel)',
+                    r'(permease)',
+                    r'(binding protein)',
+                    r'(regulatory protein)',
+                    r'(structural protein)',
+                    r'(enzyme)',
+                    r'(antigen)',
+                    r'(antibiotic resistance protein)',
+                    r'(toxin)',
+                    r'(virulence factor)',
+                    r'(pathogenicity island protein)',
+                    r'(transposase)',
+                    r'(integrase)',
+                    r'(replication protein)',
+                    r'(regulatory RNA)',
+                    r'(small RNA)',
+                    r'(non-coding RNA)',
+                    r'(tRNA)',
+                    r'(rRNA)',
+                    r'(mRNA)',
+                    r'(antisense RNA)'
+                ]
+                
+                for pattern in protein_patterns:
+                    protein_match = re.search(pattern, title, re.IGNORECASE)
+                    if protein_match and not gene_type:  # 只在没有基因类型时设置蛋白质类型
+                        gene_type = protein_match.group(1)
+                        break
+                
                 # 提取序列类型
                 sequence_patterns = [
-                    r'(partial|complete)\s+(?:sequence|genome)',
-                    r'(partial\s+16S\s+rRNA\s+gene)'
+                    r'(partial|complete)\s+(?:sequence|genome|protein|gene)',
+                    r'(partial\s+16S\s+rRNA\s+gene)',
+                    r'(complete\s+ cds)',
+                    r'(partial\s+ cds)',
+                    r'(genomic\s+ DNA)',
+                    r'(mRNA\s+ sequence)',
+                    r'(coding\s+ sequence)',
+                    r'(CDS:\s+[^,]+)'
                 ]
                 
                 for pattern in sequence_patterns:
@@ -92,11 +150,18 @@ class BlastResultConverter:
                         sequence_type = seq_match.group(0)
                         break
                 
-                # 提取菌株信息
+                # 提取菌株/品系信息
                 strain_patterns = [
                     r'(strain\s+[A-Za-z0-9\-._]+)',
                     r'(isolate\s+[A-Za-z0-9\-._]+)',
-                    r'(clone\s+[A-Za-z0-9\-._]+)'
+                    r'(clone\s+[A-Za-z0-9\-._]+)',
+                    r'(serotype\s+[A-Za-z0-9\-._]+)',
+                    r'(subtype\s+[A-Za-z0-9\-._]+)',
+                    r'(biotype\s+[A-Za-z0-9\-._]+)',
+                    r'(variant\s+[A-Za-z0-9\-._]+)',
+                    r'(subsp\.\s+[A-Za-z0-9\-._]+)',
+                    r'(pv\.\s+[A-Za-z0-9\-._]+)',
+                    r'(type\s+[A-Za-z0-9\-._]+)'
                 ]
                 
                 for pattern in strain_patterns:
@@ -107,18 +172,31 @@ class BlastResultConverter:
                 
                 # 提取物种和属名
                 # 先尝试从标题中提取完整的物种名
-                species_match = re.search(r'([A-Z][a-z]+(?:\s+[a-z]+)?)\s+(?:16S|23S|18S)', title)
-                if not species_match:
-                    species_match = re.search(r'([A-Z][a-z]+(?:\s+[a-z]+)?)\s+(?:strain|isolate|clone)', title)
-                if not species_match:
-                    species_match = re.search(r'([A-Z][a-z]+(?:\s+[a-z]+)?)\b', title)
+                # 改进的物种提取模式，适用于蛋白质和核苷酸序列
+                species_patterns = [
+                    r'([A-Z][a-z]+(?:\s+[a-z]+)?)\s+(?:16S|23S|18S|rRNA|strain|isolate|clone)',  # 传统模式
+                    r'([A-Z][a-z]+\s+[a-z]+)\s+(?:strain|isolate|clone|gene|protein)',  # 物种名 + 特定词
+                    r'([A-Z][a-z]+\s+[a-z]+)\s+(?:complete|partial|gene|protein)',  # 物种名 + 完整/部分
+                    r'([A-Z][a-z]+\s+[a-z]+)',  # 通用物种名模式
+                    r'(Uncultured\s+\w+)',  # 未培养生物
+                    r'(Environmental\s+sample)',  # 环境样本
+                    r'(Synthetic\s+construct)',  # 合成构建体
+                    r'(Artificial\s+sequence)',  # 人工序列
+                    r'(Vector\s+p[A-Z0-9]+)',  # 载体
+                    r'([A-Z][a-z]+\s+phage)',  # 噬菌体
+                    r'(Bacteriophage\s+[A-Za-z0-9]+)',  # 噬菌体全名
+                    r'(Phage\s+[A-Za-z0-9]+)',  # 噬菌体简称
+                ]
                 
-                if species_match:
-                    species = species_match.group(1)
-                    # 提取属名（第一个单词）
-                    genus_match = re.search(r'^([A-Z][a-z]+)', species)
-                    if genus_match:
-                        genus = genus_match.group(1)
+                for pattern in species_patterns:
+                    species_match = re.search(pattern, title, re.IGNORECASE)
+                    if species_match:
+                        species = species_match.group(1)
+                        # 提取属名（第一个单词）
+                        genus_match = re.search(r'^([A-Z][a-z]+)', species)
+                        if genus_match:
+                            genus = genus_match.group(1)
+                        break
                 
                 # 处理每个HSP（高得分片段对）
                 for hsp in alignment.hsps:
@@ -249,7 +327,6 @@ class BlastResultConverter:
             print(f"提取术语时出错: {e}")
             import traceback
             traceback.print_exc()
-
 
 
 def get_blast_result_converter() -> BlastResultConverter:

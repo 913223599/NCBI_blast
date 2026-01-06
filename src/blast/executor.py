@@ -65,9 +65,12 @@ class BlastExecutor:
             blast_params = {
                 'program': program,
                 'database': database,
-                'sequence': sequence,
-                'megablast': True
+                'sequence': sequence
             }
+            
+            # 对于蛋白质搜索，不使用megablast参数
+            if program not in ['blastp', 'blastx', 'rpsblast', 'rpstblastn']:
+                blast_params['megablast'] = True
             
             # 添加可选参数
             if 'hitlist_size' in kwargs:

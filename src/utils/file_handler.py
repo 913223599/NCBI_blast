@@ -5,6 +5,8 @@
 
 import os
 from pathlib import Path
+from Bio import SeqIO
+from io import StringIO
 
 
 class FileHandler:
@@ -21,7 +23,7 @@ class FileHandler:
     
     def read_sequence_file(self, file_path):
         """
-        读取序列文件
+        读取序列文件（兼容旧方法，返回第一个序列）
         
         Args:
             file_path (str): 序列文件路径
@@ -29,17 +31,68 @@ class FileHandler:
         Returns:
             str: 序列内容
         """
+        sequences = self.read_fasta_file(file_path)
+        if sequences:
+            return sequences[0]['sequence']  # 返回第一个序列
+        return ""
+    
+    def read_fasta_file(self, file_path):
+        """
+        读取FASTA文件，返回所有序列信息
+        
+        Args:
+            file_path (str): FASTA文件路径
+            
+        Returns:
+            list: 包含序列信息的字典列表，每个字典包含'id', 'description', 'sequence'键
+        """
+        sequences = []
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                # 读取文件内容并去除空白字符
-                sequence = f.read().strip()
-                # 如果是FASTA格式，跳过第一行（描述行）
-                if sequence.startswith('>'):
-                    lines = sequence.split('\n')
-                    sequence = ''.join(lines[1:]).strip()
-            return sequence
+            # 使用BioPython解析FASTA文件
+            with open(file_path, 'r', encoding='utf-8') as handle:
+                for record in SeqIO.parse(handle, "fasta"):
+                    seq_info = {
+                        'id': str(record.id),
+                        'description': str(record.description),
+                        'sequence': str(record.seq),
+                        'length': len(record.seq)
+                    }
+                    sequences.append(seq_info)
         except Exception as e:
-            raise RuntimeError(f"读取序列文件失败 {file_path}: {e}")
+            # 如果BioPython解析失败，回退到原始方法
+            print(f"使用BioPython解析FASTA文件失败: {e}")
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    if content.startswith('>'):
+                        # 解析FASTA格式
+                        entries = content.split('>')
+                        for entry in entries:
+                            if entry.strip():
+                                lines = entry.strip().split('\n', 1)
+                                if len(lines) > 1:
+                                    header = lines[0].strip()
+                                    sequence = ''.join(lines[1:]).replace('\n', '').replace(' ', '').strip()
+                                    seq_info = {
+                                        'id': header.split()[0] if header else "unknown",
+                                        'description': header,
+                                        'sequence': sequence,
+                                        'length': len(sequence)
+                                    }
+                                    sequences.append(seq_info)
+                    else:
+                        # 非FASTA格式，作为单个序列处理
+                        seq_info = {
+                            'id': Path(file_path).stem,
+                            'description': f"Sequence from {Path(file_path).name}",
+                            'sequence': content.replace('\n', '').replace(' ', '').strip(),
+                            'length': len(content.replace('\n', '').replace(' ', '').strip())
+                        }
+                        sequences.append(seq_info)
+            except Exception as fallback_e:
+                raise RuntimeError(f"读取序列文件失败 {file_path}: {fallback_e}")
+        
+        return sequences
     
     def save_result_file(self, result_handle, output_file):
         """

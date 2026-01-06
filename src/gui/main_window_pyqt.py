@@ -28,7 +28,7 @@ from src.gui.widgets.translation_debugger import TranslationDebuggerDialog
 from src.gui.widgets.help_dialog import HelpDialog
 from src.gui.widgets.api_key_dialog import ApiKeyDialog
 from src.gui.threads.processing_thread import ProcessingThread
-from src.blast.batch_processor import BatchProcessor
+from src.blast.batch_processor import BatchProcessor, MultiSequenceBatchProcessor
 
 
 def clear_results_folders():
@@ -260,7 +260,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
             return
         
-        # 获取高级参数设置
+        # 设置高级参数设置
         advanced_settings = self.parameter_settings.get_advanced_settings()
         
         # 设置生物学翻译器参数
@@ -291,12 +291,45 @@ class MainWindow(QMainWindow):
         # 清空之前的结果
         self.results = []
         
-        # 创建并启动处理线程，传递高级参数
-        self.batch_processor = BatchProcessor(
-            max_workers=max_workers,
-            advanced_settings=advanced_settings
-        )
-        self.processing_thread = ProcessingThread(self.batch_processor, self.sequence_files)
+        try:
+            max_workers = self.parameter_settings.get_thread_count()
+            if max_workers < 1 or max_workers > 50:
+                raise ValueError("线程数必须在1-50之间")
+        except ValueError as e:
+            QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
+            return
+        
+        # 检查是否有文件包含多条序列
+        has_multi_sequence_files = False
+        for file_path in self.sequence_files:
+            try:
+                from src.utils.file_handler import FileHandler
+                file_handler = FileHandler()
+                sequences = file_handler.read_fasta_file(file_path)
+                if len(sequences) > 1:
+                    has_multi_sequence_files = True
+                    break
+            except Exception as e:
+                print(f"检查文件 {file_path} 时出错: {e}")
+        
+        # 根据文件类型选择处理器
+        if has_multi_sequence_files:
+            # 使用多序列处理器
+            self.batch_processor = MultiSequenceBatchProcessor(
+                max_workers=max_workers,
+                advanced_settings=advanced_settings
+            )
+            # 对于多序列处理，我们处理每个文件中的多条序列
+            # 但需要修改线程以支持多序列处理
+            from src.gui.threads.processing_thread import MultiSequenceProcessingThread
+            self.processing_thread = MultiSequenceProcessingThread(self.batch_processor, self.sequence_files)
+        else:
+            # 使用普通处理器
+            self.batch_processor = BatchProcessor(
+                max_workers=max_workers,
+                advanced_settings=advanced_settings
+            )
+            self.processing_thread = ProcessingThread(self.batch_processor, self.sequence_files)
         
         # 连接线程信号
         self.processing_thread.task_started.connect(self._on_task_start)
@@ -438,13 +471,34 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"正在重试: {file_name}")
         
         # 创建并启动处理线程，传递高级参数
-        self.batch_processor = BatchProcessor(
-            max_workers=max_workers,
-            advanced_settings=advanced_settings
-        )
-        
-        # 只处理需要重试的单个文件
-        self.processing_thread = ProcessingThread(self.batch_processor, [file_path])
+        # 检查文件是否包含多条序列
+        try:
+            from src.utils.file_handler import FileHandler
+            file_handler = FileHandler()
+            sequences = file_handler.read_fasta_file(file_path)
+            if len(sequences) > 1:
+                # 使用多序列处理器
+                self.batch_processor = MultiSequenceBatchProcessor(
+                    max_workers=max_workers,
+                    advanced_settings=advanced_settings
+                )
+                from src.gui.threads.processing_thread import MultiSequenceProcessingThread
+                self.processing_thread = MultiSequenceProcessingThread(self.batch_processor, [file_path])
+            else:
+                # 使用普通处理器
+                self.batch_processor = BatchProcessor(
+                    max_workers=max_workers,
+                    advanced_settings=advanced_settings
+                )
+                self.processing_thread = ProcessingThread(self.batch_processor, [file_path])
+        except Exception as e:
+            print(f"检查文件 {file_path} 时出错: {e}")
+            # 如果检查失败，使用普通处理器
+            self.batch_processor = BatchProcessor(
+                max_workers=max_workers,
+                advanced_settings=advanced_settings
+            )
+            self.processing_thread = ProcessingThread(self.batch_processor, [file_path])
         
         # 连接线程信号
         self.processing_thread.task_started.connect(self._on_task_start)

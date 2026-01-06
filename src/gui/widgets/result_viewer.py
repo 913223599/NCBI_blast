@@ -580,22 +580,50 @@ class ResultViewerWidget(QGroupBox):
     
     def update_file_status(self, result):
         """更新文件状态"""
-        file_path = result.get("file", "")
-        file_name = Path(file_path).name
-        status = "成功" if result.get("status") == "success" else "失败"
-        elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
-        
-        # 保存结果数据
-        self.results_data[file_name] = result
-        
-        # 查找对应的树节点并更新
-        root = self.result_tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            item = root.child(i)
-            if item.text(0) == file_name:
-                # 只有当状态不是"待处理"时才更新状态显示
-                if result.get("status") != "pending":
+        # 检查是否是多序列处理结果
+        if 'sequence_id' in result:
+            # 这是一个多序列处理结果
+            file_path = result.get("file", "")
+            file_name = Path(file_path).name
+            sequence_id = result.get("sequence_id", "")
+            sequence_description = result.get("sequence_description", "")
+            
+            # 构建组合键
+            combined_key = f"{file_name}#{sequence_id}"
+            
+            status = "成功" if result.get("status") == "success" else "失败"
+            elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
+            
+            # 保存结果数据
+            self.results_data[combined_key] = result
+            
+            # 查找对应的树节点并更新
+            root = self.result_tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                item = root.child(i)
+                if item.text(0) == file_name:
                     # 更新父节点的值
                     item.setText(1, status)
                     item.setText(2, elapsed_time)
-                break
+                    break
+        else:
+            # 这是一个单序列处理结果
+            file_path = result.get("file", "")
+            file_name = Path(file_path).name
+            status = "成功" if result.get("status") == "success" else "失败"
+            elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
+            
+            # 保存结果数据
+            self.results_data[file_name] = result
+            
+            # 查找对应的树节点并更新
+            root = self.result_tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                item = root.child(i)
+                if item.text(0) == file_name:
+                    # 只有当状态不是"待处理"时才更新状态显示
+                    if result.get("status") != "pending":
+                        # 更新父节点的值
+                        item.setText(1, status)
+                        item.setText(2, elapsed_time)
+                    break

@@ -136,6 +136,35 @@ class AdvancedSettingsDialog(QDialog):
         descriptions_layout.addWidget(self.descriptions_spinbox)
         right_layout.addRow("描述数量 (DESCRIPTIONS):", descriptions_layout)
         
+        # 数据库设置
+        right_layout.addRow(QLabel("数据库设置:"))
+        
+        # 核苷酸数据库
+        self.nucleotide_db_layout = QHBoxLayout()
+        self.nucleotide_db_enabled = QCheckBox()
+        self.nucleotide_db_enabled.setChecked(False)
+        self.nucleotide_db_combo = QComboBox()
+        self.nucleotide_db_combo.addItems(["nt", "refseq_rna", "refseq_genomic", "nr", "swissprot"])
+        self.nucleotide_db_combo.setCurrentText("nt")  # 默认核苷酸数据库
+        self.nucleotide_db_combo.setEnabled(False)     # 默认禁用
+        self.nucleotide_db_enabled.toggled.connect(self.nucleotide_db_combo.setEnabled)
+        self.nucleotide_db_layout.addWidget(self.nucleotide_db_enabled)
+        self.nucleotide_db_layout.addWidget(self.nucleotide_db_combo)
+        right_layout.addRow("核苷酸数据库:", self.nucleotide_db_layout)
+        
+        # 蛋白质数据库
+        self.protein_db_layout = QHBoxLayout()
+        self.protein_db_enabled = QCheckBox()
+        self.protein_db_enabled.setChecked(False)
+        self.protein_db_combo = QComboBox()
+        self.protein_db_combo.addItems(["nr", "refseq_protein", "swissprot", "pdb", "env_nr"])
+        self.protein_db_combo.setCurrentText("nr")    # 默认蛋白质数据库
+        self.protein_db_combo.setEnabled(False)        # 默认禁用
+        self.protein_db_enabled.toggled.connect(self.protein_db_combo.setEnabled)
+        self.protein_db_layout.addWidget(self.protein_db_enabled)
+        self.protein_db_layout.addWidget(self.protein_db_combo)
+        right_layout.addRow("蛋白质数据库:", self.protein_db_layout)
+        
         # 混合模式参数
         right_layout.addRow(QLabel("混合模式参数:"))
         self.prefer_local_checkbox = QCheckBox("优先使用本地BLAST")
@@ -183,6 +212,10 @@ class AdvancedSettingsDialog(QDialog):
             'alignments': self.alignments_spinbox.value() if self.alignments_enabled.isChecked() else None,
             'descriptions': self.descriptions_spinbox.value() if self.descriptions_enabled.isChecked() else None,
             'local_num_threads': self.local_num_threads_spinbox.value() if self.local_num_threads_enabled.isChecked() else None,
+            
+            # 数据库设置
+            'nucleotide_database': self.nucleotide_db_combo.currentText() if self.nucleotide_db_enabled.isChecked() else 'nt',
+            'protein_database': self.protein_db_combo.currentText() if self.protein_db_enabled.isChecked() else 'nr',
             
             # 混合模式参数
             'prefer_local': self.prefer_local_checkbox.isChecked(),
@@ -249,6 +282,22 @@ class AdvancedSettingsDialog(QDialog):
         else:
             self.local_num_threads_enabled.setChecked(False)
             
+        if 'nucleotide_database' in settings and settings['nucleotide_database'] is not None:
+            self.nucleotide_db_enabled.setChecked(True)
+            index = self.nucleotide_db_combo.findText(settings['nucleotide_database'])
+            if index >= 0:
+                self.nucleotide_db_combo.setCurrentIndex(index)
+        else:
+            self.nucleotide_db_enabled.setChecked(False)
+            
+        if 'protein_database' in settings and settings['protein_database'] is not None:
+            self.protein_db_enabled.setChecked(True)
+            index = self.protein_db_combo.findText(settings['protein_database'])
+            if index >= 0:
+                self.protein_db_combo.setCurrentIndex(index)
+        else:
+            self.protein_db_enabled.setChecked(False)
+            
         if 'prefer_local' in settings:
             self.prefer_local_checkbox.setChecked(settings['prefer_local'])
             
@@ -277,6 +326,8 @@ class ParameterSettingsWidget(QGroupBox):
             'alignments': None,
             'descriptions': None,
             'local_num_threads': None,
+            'nucleotide_database': 'nt',
+            'protein_database': 'nr',
             'prefer_local': True,
             'fallback_to_remote': True,
             'use_cache': True
@@ -296,7 +347,7 @@ class ParameterSettingsWidget(QGroupBox):
         thread_layout = QHBoxLayout()  # 改为水平布局
         self.thread_count_label = QLabel("线程数:")
         self.thread_count_spinbox = QSpinBox()
-        self.thread_count_spinbox.setRange(1, 10)
+        self.thread_count_spinbox.setRange(1, 50)
         self.thread_count_spinbox.setValue(3)  # 默认线程数设为3
         self.thread_count_spinbox.setFixedWidth(60)  # 设置固定宽度
         thread_layout.addWidget(self.thread_count_label)
@@ -390,6 +441,10 @@ class ParameterSettingsWidget(QGroupBox):
             'descriptions': 500,     # 默认描述数量
             'local_num_threads': 4,  # 默认本地线程数
             
+            # 数据库设置
+            'nucleotide_database': 'nt',  # 默认核苷酸数据库
+            'protein_database': 'nr',     # 默认蛋白质数据库
+            
             # 混合模式参数默认值
             'prefer_local': True,    # 默认优先使用本地BLAST
             'fallback_to_remote': True, # 默认启用回退到远程
@@ -425,8 +480,8 @@ class ParameterSettingsWidget(QGroupBox):
         advanced_settings = {}
         for key, value in settings.items():
             if key in ['hitlist_size', 'word_size', 'evalue', 'matrix_name', 'filter', 
-                      'alignments', 'descriptions', 'local_num_threads', 'prefer_local', 
-                      'fallback_to_remote', 'use_cache']:
+                      'alignments', 'descriptions', 'local_num_threads', 'nucleotide_database',
+                      'protein_database', 'prefer_local', 'fallback_to_remote', 'use_cache']:
                 advanced_settings[key] = value
             elif key == 'use_ai_translation':
                 self.ai_translation_checkbox.setChecked(value)
