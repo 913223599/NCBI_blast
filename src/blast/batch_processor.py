@@ -12,6 +12,7 @@ from src.utils.file_handler import FileHandler
 from .executor import BlastExecutor
 from .parser import BlastResultParser
 from .result_converter import BlastResultConverter
+from .result_cache import BlastResultCache
 
 
 class BatchProcessor:
@@ -20,7 +21,7 @@ class BatchProcessor:
     负责多线程批量处理序列文件
     """
     
-    def __init__(self, max_workers=3, advanced_settings=None):
+    def __init__(self, max_workers=3, advanced_settings=None):  # 减少默认线程数
         """
         初始化批量处理器
         
@@ -35,6 +36,7 @@ class BatchProcessor:
         self.blast_executor = BlastExecutor()
         self.result_parser = BlastResultParser()
         self.result_converter = BlastResultConverter()
+        self.cache = BlastResultCache(cache_dir="cache", expiry_time=86400)  # 24小时缓存
         self.on_task_start = None  # 任务开始回调
         self.on_progress_update = None  # 进度更新回调
         self.on_result_received = None  # 结果接收回调
@@ -80,30 +82,51 @@ class BatchProcessor:
             # 读取序列
             sequence = self.file_handler.read_sequence_file(str(sequence_file))
             
-            # 准备BLAST参数
+            # 检查缓存
+            use_cache = self.advanced_settings.get('use_cache', True)
+            if use_cache:
+                cached_result = self.cache.get_cached_result(sequence)
+                if cached_result:
+                    print(f"✓ 使用缓存结果: {Path(sequence_file).name}")
+                    cached_result['from_cache'] = True
+                    return cached_result
+            
+            # 准备BLAST参数，设置更快的默认值
             blast_params = {}
             
-            # 添加启用的参数
-            if 'hitlist_size' in self.advanced_settings:
+            # 添加启用的参数，设置更快的默认值
+            if 'hitlist_size' in self.advanced_settings and self.advanced_settings['hitlist_size'] is not None:
                 blast_params['hitlist_size'] = self.advanced_settings['hitlist_size']
+            else:
+                # 使用较小的默认值以提高速度
+                blast_params['hitlist_size'] = 10
                 
-            if 'word_size' in self.advanced_settings:
+            if 'word_size' in self.advanced_settings and self.advanced_settings['word_size'] is not None:
                 blast_params['word_size'] = self.advanced_settings['word_size']
                 
-            if 'evalue' in self.advanced_settings:
+            if 'evalue' in self.advanced_settings and self.advanced_settings['evalue'] is not None:
                 blast_params['evalue'] = self.advanced_settings['evalue']
+            else:
+                # 使用更严格的默认值以提高速度
+                blast_params['evalue'] = 0.1
                 
-            if 'matrix_name' in self.advanced_settings:
+            if 'matrix_name' in self.advanced_settings and self.advanced_settings['matrix_name'] is not None:
                 blast_params['matrix_name'] = self.advanced_settings['matrix_name']
                 
-            if 'filter' in self.advanced_settings:
+            if 'filter' in self.advanced_settings and self.advanced_settings['filter'] is not None:
                 blast_params['filter'] = self.advanced_settings['filter']
                 
-            if 'alignments' in self.advanced_settings:
+            if 'alignments' in self.advanced_settings and self.advanced_settings['alignments'] is not None:
                 blast_params['alignments'] = self.advanced_settings['alignments']
+            else:
+                # 使用较小的默认值以提高速度
+                blast_params['alignments'] = 100
                 
-            if 'descriptions' in self.advanced_settings:
+            if 'descriptions' in self.advanced_settings and self.advanced_settings['descriptions'] is not None:
                 blast_params['descriptions'] = self.advanced_settings['descriptions']
+            else:
+                # 使用较小的默认值以提高速度
+                blast_params['descriptions'] = 100
             
             # 根据序列类型选择合适的BLAST程序和数据库
             sequence_type = self._detect_sequence_type(sequence)
@@ -115,11 +138,15 @@ class BatchProcessor:
                 program = 'blastn'
                 database = self.advanced_settings.get('nucleotide_database', 'nt')
             
+            # 在发送请求前添加延迟，以避免过多并发请求，遵循NCBI限制
+            time.sleep(2)  # 增加到2秒延迟以更好地遵守NCBI限制
+            
             # 执行BLAST搜索，传递参数
             result_handle = self.blast_executor.execute_with_retry(
                 sequence,
                 program=program,
                 database=database,
+                timeout_minutes=6,
                 **blast_params
             )
             
@@ -133,6 +160,19 @@ class BatchProcessor:
             # 重新打开结果文件进行解析
             result_handle = open(result_file)
             result_handle.close()
+            
+            # 保存到缓存
+            if use_cache:
+                cache_result = {
+                    "file": sequence_file,
+                    "status": "success",
+                    "result_file": result_file,
+                    "csv_file": csv_file,
+                    "desc_file": desc_file,
+                    "thread_id": thread_id,
+                    "elapsed_time": 0  # 缓存结果不需要计算处理时间
+                }
+                self.cache.save_result(sequence, cache_result)
             
             end_time = time.time()
             elapsed_time = end_time - start_time
@@ -249,7 +289,7 @@ class BatchProcessor:
         # 只有当有多个文件时才打印批量处理信息
         if len(sequence_files) > 1:
             print(f"开始批量处理 {len(sequence_files)} 个序列文件...")
-            print(f"使用 {self.max_workers} 个线程进行处理")
+            print(f"使用 {self.max_workers} 个线程进行处理（减少并发以避免NCBI限制）")
         
         # 创建结果目录（如果不存在）
         Path("results").mkdir(exist_ok=True)
@@ -336,12 +376,12 @@ class MultiSequenceBatchProcessor:
     负责处理包含多个序列的单个文件
     """
     
-    def __init__(self, max_workers=3, advanced_settings=None):
+    def __init__(self, max_workers=2, advanced_settings=None):  # 减少默认线程数
         """
         初始化多序列批量处理器
         
         Args:
-            max_workers (int): 最大工作线程数，默认为3
+            max_workers (int): 最大工作线程数，默认为2（减少并发以避免NCBI限制）
             advanced_settings (dict): 高级设置参数
         """
         self.max_workers = max_workers
@@ -350,6 +390,7 @@ class MultiSequenceBatchProcessor:
         self.blast_executor = BlastExecutor()
         self.result_parser = BlastResultParser()
         self.result_converter = BlastResultConverter()
+        self.cache = BlastResultCache(cache_dir="cache", expiry_time=86400)  # 24小时缓存
         self.on_task_start = None  # 任务开始回调
         self.on_progress_update = None  # 进度更新回调
         self.on_result_received = None  # 结果接收回调
@@ -388,33 +429,55 @@ class MultiSequenceBatchProcessor:
             if self.on_task_start:
                 self.on_task_start(f"{original_file_path} - {sequence_info['id']}")
             
-            # 准备BLAST参数
+            sequence = sequence_info['sequence']
+            
+            # 检查缓存
+            use_cache = self.advanced_settings.get('use_cache', True)
+            if use_cache:
+                cached_result = self.cache.get_cached_result(sequence)
+                if cached_result:
+                    print(f"✓ 使用缓存结果: {sequence_info['id']}")
+                    cached_result['from_cache'] = True
+                    return cached_result
+            
+            # 准备BLAST参数，设置更快的默认值
             blast_params = {}
             
-            # 添加启用的参数
-            if 'hitlist_size' in self.advanced_settings:
+            # 添加启用的参数，设置更快的默认值
+            if 'hitlist_size' in self.advanced_settings and self.advanced_settings['hitlist_size'] is not None:
                 blast_params['hitlist_size'] = self.advanced_settings['hitlist_size']
+            else:
+                # 使用较小的默认值以提高速度
+                blast_params['hitlist_size'] = 10
                 
-            if 'word_size' in self.advanced_settings:
+            if 'word_size' in self.advanced_settings and self.advanced_settings['word_size'] is not None:
                 blast_params['word_size'] = self.advanced_settings['word_size']
                 
-            if 'evalue' in self.advanced_settings:
+            if 'evalue' in self.advanced_settings and self.advanced_settings['evalue'] is not None:
                 blast_params['evalue'] = self.advanced_settings['evalue']
+            else:
+                # 使用更严格的默认值以提高速度
+                blast_params['evalue'] = 0.1
                 
-            if 'matrix_name' in self.advanced_settings:
+            if 'matrix_name' in self.advanced_settings and self.advanced_settings['matrix_name'] is not None:
                 blast_params['matrix_name'] = self.advanced_settings['matrix_name']
                 
-            if 'filter' in self.advanced_settings:
+            if 'filter' in self.advanced_settings and self.advanced_settings['filter'] is not None:
                 blast_params['filter'] = self.advanced_settings['filter']
                 
-            if 'alignments' in self.advanced_settings:
+            if 'alignments' in self.advanced_settings and self.advanced_settings['alignments'] is not None:
                 blast_params['alignments'] = self.advanced_settings['alignments']
+            else:
+                # 使用较小的默认值以提高速度
+                blast_params['alignments'] = 100
                 
-            if 'descriptions' in self.advanced_settings:
+            if 'descriptions' in self.advanced_settings and self.advanced_settings['descriptions'] is not None:
                 blast_params['descriptions'] = self.advanced_settings['descriptions']
+            else:
+                # 使用较小的默认值以提高速度
+                blast_params['descriptions'] = 100
             
             # 根据序列类型选择合适的BLAST程序和数据库
-            sequence = sequence_info['sequence']
             sequence_type = self._detect_sequence_type(sequence)
             
             if sequence_type == 'protein':
@@ -423,6 +486,9 @@ class MultiSequenceBatchProcessor:
             else:
                 program = 'blastn'
                 database = self.advanced_settings.get('nucleotide_database', 'nt')
+            
+            # 在发送请求前添加短暂延迟，以避免过多并发请求
+            time.sleep(1)  # 添加1秒延迟以避免过多并发
             
             # 执行BLAST搜索，传递参数
             result_handle = self.blast_executor.execute_with_retry(
@@ -438,6 +504,21 @@ class MultiSequenceBatchProcessor:
             
             # 将XML结果转换为CSV格式并生成描述文件
             self.result_converter.convert_xml_to_csv(str(result_file), str(csv_file), str(desc_file))
+            
+            # 保存到缓存
+            if use_cache:
+                cache_result = {
+                    "file": original_file_path,
+                    "sequence_id": sequence_info['id'],
+                    "sequence_description": sequence_info['description'],
+                    "status": "success",
+                    "result_file": result_file,
+                    "csv_file": csv_file,
+                    "desc_file": desc_file,
+                    "thread_id": thread_id,
+                    "elapsed_time": 0  # 缓存结果不需要计算处理时间
+                }
+                self.cache.save_result(sequence, cache_result)
             
             end_time = time.time()
             elapsed_time = end_time - start_time
@@ -556,6 +637,7 @@ class MultiSequenceBatchProcessor:
             list: 处理结果列表
         """
         print(f"开始处理文件 {Path(sequence_file).name} 中的多条序列...")
+        print(f"使用 {self.max_workers} 个线程进行处理（减少并发以避免NCBI限制）")
         
         # 读取文件中的所有序列
         sequences = self.file_handler.read_fasta_file(sequence_file)
@@ -608,7 +690,7 @@ class MultiSequenceBatchProcessor:
                     }
                     results.append(error_result)
                     if self.on_result_received:
-                        self.on_result_received(error_result)
+                        self.result_received(error_result)
                 
                 # 更新完成计数
                 completed += 1

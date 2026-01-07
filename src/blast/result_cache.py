@@ -111,10 +111,52 @@ class BlastResultCache:
             cache_data = result.copy()
             cache_data['cached_at'] = datetime.now().isoformat()
             
-            with open(cache_file, 'w') as f:
-                json.dump(cache_data, f, indent=2)
+            # 转换Path对象为字符串以避免序列化错误
+            serializable_data = {}
+            for key, value in cache_data.items():
+                if isinstance(value, Path):
+                    serializable_data[key] = str(value)
+                else:
+                    # 检查嵌套字典或列表中的Path对象
+                    serializable_data[key] = self._convert_paths_to_strings(value)
+            
+            # 先将数据写入临时文件，然后重命名，以避免写入过程中出现问题
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, dir=self.cache_dir, suffix='.tmp') as tmp_file:
+                json.dump(serializable_data, tmp_file, indent=2, ensure_ascii=False)
+                temp_path = tmp_file.name
+            
+            # 原子性地替换原文件
+            import shutil
+            shutil.move(temp_path, cache_file)
+            
         except Exception as e:
             print(f"保存缓存失败: {e}")
+            # 如果临时文件存在，删除它
+            import os
+            if 'temp_path' in locals() and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def _convert_paths_to_strings(self, obj):
+        """
+        递归地将对象中的Path对象转换为字符串
+        
+        Args:
+            obj: 要转换的对象
+            
+        Returns:
+            转换后的对象
+        """
+        if isinstance(obj, Path):
+            return str(obj)
+        elif isinstance(obj, dict):
+            return {key: self._convert_paths_to_strings(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_paths_to_strings(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self._convert_paths_to_strings(item) for item in obj)
+        else:
+            return obj
     
     def clear_expired_cache(self):
         """

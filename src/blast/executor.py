@@ -6,7 +6,6 @@ BLAST执行器模块
 import ssl
 import time
 from urllib.request import HTTPSHandler, build_opener, install_opener
-
 from Bio.Blast import NCBIWWW
 
 
@@ -102,7 +101,7 @@ class BlastExecutor:
             print(f"执行BLAST搜索时出错: {e}")
             raise e
     
-    def execute_with_retry(self, sequence, program="blastn", database="nt", max_retries=3, **kwargs):
+    def execute_with_retry(self, sequence, program="blastn", database="nt", max_retries=3, timeout_minutes=6, **kwargs):
         """
         带重试机制的BLAST搜索执行
         
@@ -111,6 +110,7 @@ class BlastExecutor:
             program (str): BLAST程序类型，默认为"blastn"
             database (str): 数据库，默认为"nt"
             max_retries (int): 最大重试次数，默认为3
+            timeout_minutes (int): 请求超时时间（分钟），默认为6分钟
             **kwargs: 其他BLAST参数，支持的参数包括:
                      - hitlist_size: 返回结果数量
                      - word_size: 词大小
@@ -123,15 +123,87 @@ class BlastExecutor:
         Returns:
             result_handle: BLAST搜索结果句柄
         """
+        import threading
+        
+        def run_with_timeout(func, args, timeout):
+            """在指定时间内运行函数，超时则抛出异常"""
+            result = [None]
+            exception = [None]
+            
+            def target():
+                try:
+                    result[0] = func(*args)
+                except Exception as e:
+                    exception[0] = e
+            
+            thread = threading.Thread(target=target)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout)
+            
+            if thread.is_alive():
+                # 注意：threading._stop() 在新版本Python中不可用，这里我们仅记录超时
+                print(f"警告：BLAST请求超过{timeout_minutes}分钟超时，将重新提交")
+                raise TimeoutError(f"BLAST请求超过{timeout_minutes}分钟超时")
+            
+            if exception[0]:
+                raise exception[0]
+            
+            return result[0]
+        
         retries = 0
+        # 使用更长的等待时间以避免服务器过载
+        base_wait_time = 5  # 增加基础等待时间
+        
         while retries < max_retries:
             try:
-                return self.execute_blast_search(sequence, program, database, **kwargs)
+                # 使用超时包装器执行BLAST搜索
+                result = run_with_timeout(
+                    self.execute_blast_search,
+                    (sequence, program, database) + tuple(),
+                    timeout_minutes * 60  # 转换为秒
+                )
+                return result
             except Exception as e:
-                retries += 1
-                if retries >= max_retries:
-                    raise e
-                else:
-                    wait_time = 5 * (2 ** (retries - 1))  # 指数退避
-                    print(f"搜索失败，{wait_time}秒后进行第{retries}次重试...")
+                # 检查错误类型，如果是NCBI服务器拒绝请求，需要特别处理
+                error_msg = str(e).lower()
+                if "cannot accept request" in error_msg or "error code: -1" in error_msg:
+                    # 根据历史经验，错误码-1表示服务器过载，需要大幅增加等待时间
+                    wait_time = 20  # 20秒等待时间
+                    print(f"NCBI服务器拒绝请求，{wait_time}秒后重试... (错误: {e})")
                     time.sleep(wait_time)
+                    retries += 1
+                    continue
+                elif "taking longer than" in error_msg:
+                    # 长时间请求警告，根据用户需求，超过一定时间应视为超时并重新提交
+                    print(f"检测到长时间运行的BLAST请求，视为超时，将重新提交... (警告: {e})")
+                    retries += 1
+                    if retries >= max_retries:
+                        raise e
+                    else:
+                        # 使用指数退避策略，但确保等待时间足够长
+                        wait_time = base_wait_time * (2 ** (retries - 1))  # 指数退避
+                        print(f"超时重试，{wait_time:.1f}秒后进行第{retries}次重试... (错误: {e})")
+                        time.sleep(wait_time)
+                    continue
+                elif isinstance(e, TimeoutError):
+                    # 超时错误，按用户需求重新提交
+                    print(f"BLAST请求超时({timeout_minutes}分钟)，将重新提交... (错误: {e})")
+                    retries += 1
+                    if retries >= max_retries:
+                        raise e
+                    else:
+                        # 使用指数退避策略，但确保等待时间足够长
+                        wait_time = base_wait_time * (2 ** (retries - 1))  # 指数退避
+                        print(f"超时重试，{wait_time:.1f}秒后进行第{retries}次重试... (错误: {e})")
+                        time.sleep(wait_time)
+                    continue
+                else:
+                    retries += 1
+                    if retries >= max_retries:
+                        raise e
+                    else:
+                        # 使用指数退避策略，但确保等待时间足够长
+                        wait_time = base_wait_time * (2 ** (retries - 1))  # 指数退避
+                        print(f"搜索失败，{wait_time:.1f}秒后进行第{retries}次重试... (错误: {e})")
+                        time.sleep(wait_time)

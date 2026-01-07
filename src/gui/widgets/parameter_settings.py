@@ -37,7 +37,7 @@ class AdvancedSettingsDialog(QDialog):
         self.hitlist_size_enabled.setChecked(True)
         self.hitlist_size_spinbox = QSpinBox()
         self.hitlist_size_spinbox.setRange(1, 1000)  # 设置结果数量范围为1-1000
-        self.hitlist_size_spinbox.setValue(20)       # 默认结果数量设为20
+        self.hitlist_size_spinbox.setValue(10)       # 默认结果数量设为10，提高查询速度
         self.hitlist_size_spinbox.setEnabled(True)  # 默认启用
         self.hitlist_size_enabled.toggled.connect(self.hitlist_size_spinbox.setEnabled)
         hitlist_size_layout.addWidget(self.hitlist_size_enabled)
@@ -61,7 +61,7 @@ class AdvancedSettingsDialog(QDialog):
         evalue_layout = QHBoxLayout()
         self.evalue_enabled = QCheckBox()
         self.evalue_enabled.setChecked(False)
-        self.evalue_input = QLineEdit("10.0")      # 默认期望值设为10.0
+        self.evalue_input = QLineEdit("0.1")      # 默认期望值设为0.1，提高查询速度
         self.evalue_input.setEnabled(False)        # 默认禁用，需要勾选复选框启用
         self.evalue_enabled.toggled.connect(self.evalue_input.setEnabled)
         evalue_layout.addWidget(self.evalue_enabled)
@@ -348,7 +348,7 @@ class ParameterSettingsWidget(QGroupBox):
         self.thread_count_label = QLabel("线程数:")
         self.thread_count_spinbox = QSpinBox()
         self.thread_count_spinbox.setRange(1, 50)
-        self.thread_count_spinbox.setValue(3)  # 默认线程数设为3
+        self.thread_count_spinbox.setValue(2)  # 默认线程数设为2，避免NCBI限制
         self.thread_count_spinbox.setFixedWidth(60)  # 设置固定宽度
         thread_layout.addWidget(self.thread_count_label)
         thread_layout.addWidget(self.thread_count_spinbox)
@@ -432,13 +432,13 @@ class ParameterSettingsWidget(QGroupBox):
         # 默认值设置
         default_settings = {
             # 高级BLAST参数默认值
-            'hitlist_size': 20,      # 默认结果数量
+            'hitlist_size': 10,      # 默认结果数量，提高查询速度
             'word_size': None,       # 默认不设置词大小
-            'evalue': 10.0,          # 默认期望值
+            'evalue': 0.1,           # 默认期望值，提高查询速度
             'matrix_name': 'BLOSUM62', # 默认打分矩阵
             'filter': 'none',        # 默认过滤器设置
-            'alignments': 500,       # 默认比对数量
-            'descriptions': 500,     # 默认描述数量
+            'alignments': 100,       # 默认比对数量，提高查询速度
+            'descriptions': 100,     # 默认描述数量，提高查询速度
             'local_num_threads': 4,  # 默认本地线程数
             
             # 数据库设置
