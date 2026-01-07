@@ -5,8 +5,26 @@ BLAST执行器模块
 
 import ssl
 import time
+import threading
 from urllib.request import HTTPSHandler, build_opener, install_opener
 from Bio.Blast import NCBIWWW
+
+# 全局请求计数器和锁，用于控制请求频率
+request_counter = 0
+request_lock = threading.Lock()
+
+
+def delay_before_request():
+    """
+    在请求前添加延迟以控制请求频率
+    NCBI限制每秒最多3个请求，所以我们控制请求间隔
+    使用0.4秒的延迟，允许每秒2.5个请求，低于NCBI的3个/秒限制
+    """
+    global request_counter
+    with request_lock:
+        request_counter += 1
+        # 计算需要等待的时间，以保持每秒不超过3个请求的频率
+        time.sleep(0.4)
 
 
 class BlastExecutor:
@@ -60,6 +78,9 @@ class BlastExecutor:
         # print("这可能需要一些时间...")
         
         try:
+            # 在发送请求前添加延迟，以控制请求频率并遵循NCBI限制
+            delay_before_request()  # 使用伪队列机制控制请求频率
+            
             # 准备参数字典
             blast_params = {
                 'program': program,
@@ -123,8 +144,7 @@ class BlastExecutor:
         Returns:
             result_handle: BLAST搜索结果句柄
         """
-        import threading
-        
+
         def run_with_timeout(func, args, timeout):
             """在指定时间内运行函数，超时则抛出异常"""
             result = [None]

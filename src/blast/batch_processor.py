@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from src.utils.file_handler import FileHandler
-from .executor import BlastExecutor
+from .executor import BlastExecutor, delay_before_request
 from .parser import BlastResultParser
 from .result_converter import BlastResultConverter
 from .result_cache import BlastResultCache
@@ -85,7 +85,8 @@ class BatchProcessor:
             # 检查缓存
             use_cache = self.advanced_settings.get('use_cache', True)
             if use_cache:
-                cached_result = self.cache.get_cached_result(sequence)
+                sequence_id = Path(sequence_file).stem  # 使用文件名作为序列ID
+                cached_result = self.cache.get_cached_result(sequence, sequence_id)
                 if cached_result:
                     print(f"✓ 使用缓存结果: {Path(sequence_file).name}")
                     cached_result['from_cache'] = True
@@ -138,8 +139,8 @@ class BatchProcessor:
                 program = 'blastn'
                 database = self.advanced_settings.get('nucleotide_database', 'nt')
             
-            # 在发送请求前添加延迟，以避免过多并发请求，遵循NCBI限制
-            time.sleep(2)  # 增加到2秒延迟以更好地遵守NCBI限制
+            # 在发送请求前添加延迟，以控制请求频率并遵循NCBI限制
+            delay_before_request()  # 使用伪队列机制控制请求频率
             
             # 执行BLAST搜索，传递参数
             result_handle = self.blast_executor.execute_with_retry(
@@ -163,6 +164,7 @@ class BatchProcessor:
             
             # 保存到缓存
             if use_cache:
+                sequence_id = Path(sequence_file).stem  # 使用文件名作为序列ID
                 cache_result = {
                     "file": sequence_file,
                     "status": "success",
@@ -172,7 +174,7 @@ class BatchProcessor:
                     "thread_id": thread_id,
                     "elapsed_time": 0  # 缓存结果不需要计算处理时间
                 }
-                self.cache.save_result(sequence, cache_result)
+                self.cache.save_result(sequence, cache_result, sequence_id)
             
             end_time = time.time()
             elapsed_time = end_time - start_time
@@ -487,8 +489,8 @@ class MultiSequenceBatchProcessor:
                 program = 'blastn'
                 database = self.advanced_settings.get('nucleotide_database', 'nt')
             
-            # 在发送请求前添加短暂延迟，以避免过多并发请求
-            time.sleep(1)  # 添加1秒延迟以避免过多并发
+            # 在发送请求前添加延迟，以控制请求频率并遵循NCBI限制
+            delay_before_request()  # 使用伪队列机制控制请求频率
             
             # 执行BLAST搜索，传递参数
             result_handle = self.blast_executor.execute_with_retry(

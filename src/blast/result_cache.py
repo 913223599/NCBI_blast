@@ -27,18 +27,26 @@ class BlastResultCache:
         self.cache_dir.mkdir(exist_ok=True)
         self.expiry_time = expiry_time
     
-    def _get_cache_key(self, sequence):
+    def _get_cache_key(self, sequence, sequence_id=None):
         """
         生成序列的缓存键
         
         Args:
             sequence (str): 序列内容
+            sequence_id (str, optional): 序列ID，用于避免内容相同但ID不同的情况
             
         Returns:
             str: 缓存键
         """
-        # 使用序列内容的哈希值作为缓存键
-        return hashlib.md5(sequence.encode()).hexdigest()
+        # 使用序列内容的哈希值作为主要缓存键
+        content_hash = hashlib.md5(sequence.encode()).hexdigest()
+        
+        # 如果提供了序列ID，将其与内容哈希结合以避免潜在冲突
+        if sequence_id:
+            combined_str = f"{content_hash}_{sequence_id}"
+            return hashlib.md5(combined_str.encode()).hexdigest()
+        else:
+            return content_hash
     
     def _get_cache_file(self, cache_key):
         """
@@ -70,17 +78,18 @@ class BlastResultCache:
         now = datetime.now()
         return (now - mod_time).total_seconds() > self.expiry_time
     
-    def get_cached_result(self, sequence):
+    def get_cached_result(self, sequence, sequence_id=None):
         """
         获取缓存的结果
         
         Args:
             sequence (str): 序列内容
+            sequence_id (str, optional): 序列ID
             
         Returns:
             dict or None: 缓存的结果，如果不存在或过期则返回None
         """
-        cache_key = self._get_cache_key(sequence)
+        cache_key = self._get_cache_key(sequence, sequence_id)
         cache_file = self._get_cache_file(cache_key)
         
         # 检查缓存是否存在且未过期
@@ -95,15 +104,16 @@ class BlastResultCache:
             print(f"读取缓存失败: {e}")
             return None
     
-    def save_result(self, sequence, result):
+    def save_result(self, sequence, result, sequence_id=None):
         """
         保存结果到缓存
         
         Args:
             sequence (str): 序列内容
             result (dict): 查询结果
+            sequence_id (str, optional): 序列ID
         """
-        cache_key = self._get_cache_key(sequence)
+        cache_key = self._get_cache_key(sequence, sequence_id)
         cache_file = self._get_cache_file(cache_key)
         
         try:
@@ -247,7 +257,8 @@ class CachedBlastProcessor:
             }
         
         # 检查缓存
-        cached_result = self.cache.get_cached_result(sequence)
+        sequence_id = Path(sequence_file).stem  # 使用文件名作为序列ID
+        cached_result = self.cache.get_cached_result(sequence, sequence_id)
         if cached_result:
             print(f"✓ 使用缓存结果: {Path(sequence_file).name}")
             cached_result['from_cache'] = True
@@ -259,7 +270,8 @@ class CachedBlastProcessor:
         
         # 保存到缓存
         if result['status'] == 'success':
-            self.cache.save_result(sequence, result)
+            sequence_id = Path(sequence_file).stem  # 使用文件名作为序列ID
+            self.cache.save_result(sequence, result, sequence_id)
             result['from_cache'] = False
         
         return result

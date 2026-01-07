@@ -24,6 +24,27 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="\src\results\hit_sequences_phage_10133761_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\src\results\hit_sequences_phage_1029515_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\src\results\hit_sequences_phage_388832_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="\translation_data.csv">
           <value>
             <Attribute>
