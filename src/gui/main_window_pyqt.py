@@ -240,8 +240,8 @@ class MainWindow(QMainWindow):
         
         try:
             max_workers = self.parameter_settings.get_thread_count()
-            if max_workers < 1 or max_workers > 10:
-                raise ValueError("线程数必须在1-10之间")
+            if max_workers < 1 or max_workers > 50:
+                raise ValueError("线程数必须在1-50之间")
         except ValueError as e:
             QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
             return
@@ -420,8 +420,8 @@ class MainWindow(QMainWindow):
         
         try:
             max_workers = self.parameter_settings.get_thread_count()
-            if max_workers < 1 or max_workers > 10:
-                raise ValueError("线程数必须在1-10之间")
+            if max_workers < 1 or max_workers > 50:
+                raise ValueError("线程数必须在1-50之间")
         except ValueError as e:
             QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
             return
