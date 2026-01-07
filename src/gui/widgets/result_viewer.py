@@ -404,6 +404,34 @@ class ResultViewerWidget(QGroupBox):
         file_item.setText(1, status)
         file_item.setText(2, elapsed_time)
 
+        # 为单序列文件也创建序列节点，确保三层结构完整
+        # 解析文件获取序列ID
+        sequences_in_file = self._parse_sequences_from_file(file_path)
+        if sequences_in_file:  # 如果解析到序列ID
+            sequence_id = sequences_in_file[0]  # 取第一个序列ID
+            
+            # 更新该序列的状态
+            if sequence_id not in self.file_data[file_name]['sequences']:
+                self.file_data[file_name]['sequences'][sequence_id] = {
+                    'status': status,
+                    'elapsed_time': elapsed_time,
+                    'result': result
+                }
+            else:
+                # 更新已存在的序列信息
+                self.file_data[file_name]['sequences'][sequence_id]['status'] = status
+                self.file_data[file_name]['sequences'][sequence_id]['elapsed_time'] = elapsed_time
+                self.file_data[file_name]['sequences'][sequence_id]['result'] = result
+            
+            # 创建序列节点
+            sequence_item = self._ensure_sequence_item_exists(file_item, file_name, sequence_id)
+            sequence_item.setText(1, status)
+            sequence_item.setText(2, elapsed_time)
+            
+            # 显示前3个比对结果
+            if result.get("csv_file"):
+                self._display_top_results(sequence_item, result.get("csv_file"))
+
         # 强制更新UI显示
         self.result_tree.update()
         print(f"文件 {file_name} 状态已更新为: {status}, 当前项目数量: {self.result_tree.topLevelItemCount()}")
@@ -566,10 +594,12 @@ class ResultViewerWidget(QGroupBox):
         item.treeWidget().update()
 
     def _parse_sequences_from_file(self, file_path):
-        """从FASTA文件中解析序列ID列表"""
+        """从文件中解析序列ID列表，支持FASTA和纯序列文件"""
         sequences = []
         try:
             file_path = Path(file_path)
+            
+            # 如果是FASTA格式文件
             if file_path.suffix.lower() in ['.fasta', '.fas', '.fa']:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     for line in f:
@@ -579,6 +609,12 @@ class ResultViewerWidget(QGroupBox):
                             # 取第一部分作为序列ID（通常是空格前的部分）
                             seq_id = header.split()[0] if header.split() else f"sequence_{len(sequences)+1}"
                             sequences.append(seq_id)
+            else:
+                # 对于非FASTA格式文件（如.seq），将其视为单个序列文件
+                # 从文件名生成一个序列ID
+                seq_id = file_path.stem  # 使用文件名作为序列ID
+                sequences.append(seq_id)
+                
         except Exception as e:
             print(f"解析序列文件失败: {e}")
             # 如果解析失败，返回一个默认序列ID

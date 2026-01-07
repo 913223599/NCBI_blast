@@ -1,16 +1,16 @@
 english,chinese,category
 hypothetical protein,hypothetical protein,gene
 hydrolase,hydrolase,gene
-strain,菌株,strain
-16S ribosomal RNA gene,16S核糖体RNA基因,gene
-clone,克隆,strain
+16S ribosomal RNA gene,16S ribosomal RNA gene,gene
+partial sequence,partial sequence,sequence
+strain,strain,strain
+complete genome,complete genome,sequence
+16S ribosomal RNA,16S ribosomal RNA,gene
+clone,clone,strain
 complete sequence,完整序列,sequence
-partial sequence,部分序列,sequence
 partial 16S rRNA gene,部分16S rRNA基因,sequence
-16S ribosomal RNA,16S核糖体RNA,gene
 isolate,分离株,strain
 16S rRNA gene,16S rRNA基因,gene
-complete genome,完整基因组,sequence
 gene for 16S rRNA,16S rRNA基因,gene
 Staphylococcus epidermidis,表皮葡萄球菌,species
 Staphylococcus,葡萄球菌,genus
@@ -127,3 +127,10 @@ Clostridium,梭菌,genus
 Clostridium perfringens,梭状芽孢杆菌,other
 alanine amidase,丙氨酸酰胺酶,other
 MAG TPA,MAG TPA,other
+ribosomal RNA,核糖体RNA,gene
+Lactobacillus plantarum,植物乳杆菌,species
+Lactobacillus,乳杆菌属,genus
+Citrobacter freundii,弗氏柠檬酸杆菌,other
+Citrobacter,柠檬酸杆菌属,genus
+Weissella confusa,混淆魏斯氏菌,other
+Weissella,魏斯氏菌属,genus
