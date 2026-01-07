@@ -159,6 +159,7 @@ class ResultViewerWidget(QGroupBox):
         # 为每个文件维护独立的翻译线程和工作对象
         self.translation_threads = {}  # 存储每个文件的翻译线程
         self.translation_workers = {}  # 存储每个文件的翻译工作对象
+        self.all_sequence_files = []  # 存储所有序列文件列表
     
     def _setup_ui(self):
         """设置界面"""
@@ -240,6 +241,133 @@ class ResultViewerWidget(QGroupBox):
         else:
             self.biology_translator = None
 
+    def update_sequence_files(self, sequence_files):
+        """更新序列文件列表"""
+        self.all_sequence_files = sequence_files
+        # 更新结果树显示所有文件
+        self.update_result_tree(sequence_files)
+    
+    def update_result_tree(self, sequence_files):
+        """更新结果树显示"""
+        # 清空现有内容
+        self.result_tree.clear()
+        
+        # 添加文件列表
+        for seq_file in sequence_files:
+            file_name = Path(seq_file).name
+            
+            # 添加父节点（文件）
+            item = QTreeWidgetItem(self.result_tree, [file_name, '待处理', ''])
+            item.setExpanded(False)
+            
+            # 添加子节点（详细信息占位符）
+            QTreeWidgetItem(item, ['', '', ''])
+    
+    def update_file_status(self, result):
+        """更新文件状态"""
+        # 检查是否是多序列处理结果
+        if 'sequence_id' in result:
+            # 这是一个多序列处理结果
+            file_path = result.get("file", "")
+            file_name = Path(file_path).name
+            sequence_id = result.get("sequence_id", "")
+            sequence_description = result.get("sequence_description", "")
+            
+            # 构建组合键
+            combined_key = f"{file_name}#{sequence_id}"
+            
+            status = "成功" if result.get("status") == "success" else "失败"
+            elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
+            
+            # 保存结果数据
+            self.results_data[combined_key] = result
+            
+            # 查找或创建文件节点
+            root = self.result_tree.invisibleRootItem()
+            file_item = None
+            for i in range(root.childCount()):
+                item = root.child(i)
+                if item.text(0) == file_name:
+                    file_item = item
+                    break
+            
+            if file_item is None:
+                # 如果文件节点不存在，创建它
+                file_item = QTreeWidgetItem(self.result_tree, [file_name, '处理中', ''])
+                file_item.setExpanded(False)
+            
+            # 更新文件节点状态
+            file_item.setText(1, status)
+            file_item.setText(2, elapsed_time)
+            
+            # 查找或创建序列节点
+            sequence_item = None
+            for i in range(file_item.childCount()):
+                child = file_item.child(i)
+                if child.text(0) == sequence_id:
+                    sequence_item = child
+                    break
+            
+            if sequence_item is None:
+                # 创建序列节点
+                sequence_item = QTreeWidgetItem(file_item, [sequence_id, status, elapsed_time])
+                sequence_item.setExpanded(False)
+            
+            # 如果是成功状态，添加前3个比对结果
+            if result.get("status") == "success" and result.get("csv_file"):
+                csv_file = result.get("csv_file")
+                if Path(csv_file).exists():
+                    # 清空现有的结果子节点
+                    while sequence_item.childCount() > 0:
+                        sequence_item.removeChild(sequence_item.child(0))
+                    
+                    # 读取CSV文件并获取前3个结果
+                    try:
+                        with open(csv_file, 'r', encoding='utf-8') as f:
+                            reader = csv.DictReader(f)
+                            rows = list(reader)
+                            # 只取前3个结果
+                            top_results = rows[:3] if len(rows) > 3 else rows
+                            
+                            for i, row in enumerate(top_results):
+                                species = row.get('物种', 'N/A')
+                                similarity = row.get('相似度', 'N/A')
+                                e_value = row.get('E값', 'N/A')
+                                
+                                result_text = f"{i+1}. {species} (相似度: {similarity}, E값: {e_value})"
+                                result_item = QTreeWidgetItem(sequence_item, [result_text, '', ''])
+                                
+                                # 为结果节点设置不同的背景色以区分层次
+                                for col in range(3):
+                                    result_item.setBackground(col, QColor(245, 245, 245))
+                    except Exception as e:
+                        result_item = QTreeWidgetItem(sequence_item, [f"读取结果失败: {str(e)}", '', ''])
+        else:
+            # 这是一个单序列处理结果
+            file_path = result.get("file", "")
+            file_name = Path(file_path).name
+            status = "成功" if result.get("status") == "success" else "失败"
+            elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
+            
+            # 保存结果数据
+            self.results_data[file_name] = result
+            
+            # 查找对应的树节点并更新
+            root = self.result_tree.invisibleRootItem()
+            for i in range(root.childCount()):
+                item = root.child(i)
+                if item.text(0) == file_name:
+                    # 更新父节点的值
+                    item.setText(1, status)
+                    item.setText(2, elapsed_time)
+                    break
+            else:
+                # 如果文件节点不存在，创建它（处理过程中动态添加）
+                item = QTreeWidgetItem(self.result_tree, [file_name, status, elapsed_time])
+                item.setExpanded(False)
+                # 添加子节点（详细信息占位符）
+                QTreeWidgetItem(item, ['', '', ''])
+    
     def _display_csv_results_async(self, parent_item, csv_file):
         """异步显示CSV结果"""
         # 显示正在翻译的提示
@@ -561,120 +689,3 @@ class ResultViewerWidget(QGroupBox):
         # 清理线程引用
         if file_key:
             self._cleanup_thread_reference(file_key)
-    
-    def update_result_tree(self, sequence_files):
-        """更新结果树显示"""
-        # 清空现有内容
-        self.result_tree.clear()
-        
-        # 添加文件列表
-        for seq_file in sequence_files:
-            file_name = Path(seq_file).name
-            
-            # 添加父节点（文件）
-            item = QTreeWidgetItem(self.result_tree, [file_name, '待处理', ''])
-            item.setExpanded(False)
-            
-            # 添加子节点（详细信息占位符）
-            QTreeWidgetItem(item, ['', '', ''])
-    
-    def update_file_status(self, result):
-        """更新文件状态"""
-        # 检查是否是多序列处理结果
-        if 'sequence_id' in result:
-            # 这是一个多序列处理结果
-            file_path = result.get("file", "")
-            file_name = Path(file_path).name
-            sequence_id = result.get("sequence_id", "")
-            sequence_description = result.get("sequence_description", "")
-            
-            # 构建组合键
-            combined_key = f"{file_name}#{sequence_id}"
-            
-            status = "成功" if result.get("status") == "success" else "失败"
-            elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
-            
-            # 保存结果数据
-            self.results_data[combined_key] = result
-            
-            # 查找或创建文件节点
-            root = self.result_tree.invisibleRootItem()
-            file_item = None
-            for i in range(root.childCount()):
-                item = root.child(i)
-                if item.text(0) == file_name:
-                    file_item = item
-                    break
-            
-            if file_item is None:
-                # 如果文件节点不存在，创建它
-                file_item = QTreeWidgetItem(self.result_tree, [file_name, '处理中', ''])
-                file_item.setExpanded(False)
-            
-            # 更新文件节点状态
-            file_item.setText(1, status)
-            file_item.setText(2, elapsed_time)
-            
-            # 查找或创建序列节点
-            sequence_item = None
-            for i in range(file_item.childCount()):
-                child = file_item.child(i)
-                if child.text(0) == sequence_id:
-                    sequence_item = child
-                    break
-            
-            if sequence_item is None:
-                # 创建序列节点
-                sequence_item = QTreeWidgetItem(file_item, [sequence_id, status, elapsed_time])
-                sequence_item.setExpanded(False)
-            
-            # 如果是成功状态，添加前3个比对结果
-            if result.get("status") == "success" and result.get("csv_file"):
-                csv_file = result.get("csv_file")
-                if Path(csv_file).exists():
-                    # 清空现有的结果子节点
-                    while sequence_item.childCount() > 0:
-                        sequence_item.removeChild(sequence_item.child(0))
-                    
-                    # 读取CSV文件并获取前3个结果
-                    try:
-                        with open(csv_file, 'r', encoding='utf-8') as f:
-                            reader = csv.DictReader(f)
-                            rows = list(reader)
-                            # 只取前3个结果
-                            top_results = rows[:3] if len(rows) > 3 else rows
-                            
-                            for i, row in enumerate(top_results):
-                                species = row.get('物种', 'N/A')
-                                similarity = row.get('相似度', 'N/A')
-                                e_value = row.get('E값', 'N/A')
-                                
-                                result_text = f"{i+1}. {species} (相似度: {similarity}, E값: {e_value})"
-                                result_item = QTreeWidgetItem(sequence_item, [result_text, '', ''])
-                                
-                                # 为结果节点设置不同的背景色以区分层次
-                                for col in range(3):
-                                    result_item.setBackground(col, QColor(245, 245, 245))
-                    except Exception as e:
-                        result_item = QTreeWidgetItem(sequence_item, [f"读取结果失败: {str(e)}", '', ''])
-        else:
-            # 这是一个单序列处理结果
-            file_path = result.get("file", "")
-            file_name = Path(file_path).name
-            status = "成功" if result.get("status") == "success" else "失败"
-            elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
-            
-            # 保存结果数据
-            self.results_data[file_name] = result
-            
-            # 查找对应的树节点并更新
-            root = self.result_tree.invisibleRootItem()
-            for i in range(root.childCount()):
-                item = root.child(i)
-                if item.text(0) == file_name:
-                    # 只有当状态不是"待处理"时才更新状态显示
-                    if result.get("status") != "pending":
-                        # 更新父节点的值
-                        item.setText(1, status)
-                        item.setText(2, elapsed_time)
-                    break
