@@ -597,15 +597,66 @@ class ResultViewerWidget(QGroupBox):
             # 保存结果数据
             self.results_data[combined_key] = result
             
-            # 查找对应的树节点并更新
+            # 查找或创建文件节点
             root = self.result_tree.invisibleRootItem()
+            file_item = None
             for i in range(root.childCount()):
                 item = root.child(i)
                 if item.text(0) == file_name:
-                    # 更新父节点的值
-                    item.setText(1, status)
-                    item.setText(2, elapsed_time)
+                    file_item = item
                     break
+            
+            if file_item is None:
+                # 如果文件节点不存在，创建它
+                file_item = QTreeWidgetItem(self.result_tree, [file_name, '处理中', ''])
+                file_item.setExpanded(False)
+            
+            # 更新文件节点状态
+            file_item.setText(1, status)
+            file_item.setText(2, elapsed_time)
+            
+            # 查找或创建序列节点
+            sequence_item = None
+            for i in range(file_item.childCount()):
+                child = file_item.child(i)
+                if child.text(0) == sequence_id:
+                    sequence_item = child
+                    break
+            
+            if sequence_item is None:
+                # 创建序列节点
+                sequence_item = QTreeWidgetItem(file_item, [sequence_id, status, elapsed_time])
+                sequence_item.setExpanded(False)
+            
+            # 如果是成功状态，添加前3个比对结果
+            if result.get("status") == "success" and result.get("csv_file"):
+                csv_file = result.get("csv_file")
+                if Path(csv_file).exists():
+                    # 清空现有的结果子节点
+                    while sequence_item.childCount() > 0:
+                        sequence_item.removeChild(sequence_item.child(0))
+                    
+                    # 读取CSV文件并获取前3个结果
+                    try:
+                        with open(csv_file, 'r', encoding='utf-8') as f:
+                            reader = csv.DictReader(f)
+                            rows = list(reader)
+                            # 只取前3个结果
+                            top_results = rows[:3] if len(rows) > 3 else rows
+                            
+                            for i, row in enumerate(top_results):
+                                species = row.get('物种', 'N/A')
+                                similarity = row.get('相似度', 'N/A')
+                                e_value = row.get('E값', 'N/A')
+                                
+                                result_text = f"{i+1}. {species} (相似度: {similarity}, E값: {e_value})"
+                                result_item = QTreeWidgetItem(sequence_item, [result_text, '', ''])
+                                
+                                # 为结果节点设置不同的背景色以区分层次
+                                for col in range(3):
+                                    result_item.setBackground(col, QColor(245, 245, 245))
+                    except Exception as e:
+                        result_item = QTreeWidgetItem(sequence_item, [f"读取结果失败: {str(e)}", '', ''])
         else:
             # 这是一个单序列处理结果
             file_path = result.get("file", "")

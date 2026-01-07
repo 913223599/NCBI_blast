@@ -219,17 +219,31 @@ class CachedBlastProcessor:
     带缓存的BLAST处理器
     """
     
-    def __init__(self, cache_enabled=True, cache_expiry=86400):
+    def __init__(self, timestamp_folder=None, cache_enabled=True, cache_expiry=86400):
         """
         初始化带缓存的BLAST处理器
         
         Args:
+            timestamp_folder (Path): 时间戳文件夹路径
             cache_enabled (bool): 是否启用缓存
             cache_expiry (int): 缓存过期时间（秒）
         """
+        self.timestamp_folder = timestamp_folder or self._create_timestamp_folder()
         self.cache_enabled = cache_enabled
         self.cache = BlastResultCache(expiry_time=cache_expiry) if cache_enabled else None
     
+    def _create_timestamp_folder(self):
+        """
+        创建基于时间戳的结果保存文件夹
+        
+        Returns:
+            Path: 时间戳文件夹路径
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder_path = Path("results") / timestamp
+        folder_path.mkdir(parents=True, exist_ok=True)
+        return folder_path
+
     def process_sequence_with_cache(self, sequence_file, blast_executor):
         """
         处理带缓存的序列
@@ -297,7 +311,7 @@ class CachedBlastProcessor:
             
             # 保存结果
             file_name = Path(sequence_file).stem
-            result_file = Path("results") / f"{file_name}_cached_blast_result.xml"
+            result_file = self.timestamp_folder / f"{file_name}_cached_blast_result.xml"
             
             with open(result_file, "w") as out_handle:
                 out_handle.write(result_handle.read())

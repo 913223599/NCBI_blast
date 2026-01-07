@@ -7,6 +7,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from datetime import datetime
 
 from src.utils.file_handler import FileHandler
 from .executor import BlastExecutor, delay_before_request
@@ -42,6 +43,19 @@ class BatchProcessor:
         self.on_result_received = None  # 结果接收回调
         self.on_all_tasks_complete = None  # 所有任务完成回调
         self._cancel_flag = False  # 取消标志
+        self.timestamp_folder = self._create_timestamp_folder()
+
+    def _create_timestamp_folder(self):
+        """
+        创建基于时间戳的结果保存文件夹
+        
+        Returns:
+            Path: 时间戳文件夹路径
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder_path = Path("results") / timestamp
+        folder_path.mkdir(parents=True, exist_ok=True)
+        return folder_path
     
     def cancel_processing(self):
         """
@@ -71,9 +85,9 @@ class BatchProcessor:
         try:
             # 获取文件名（不含扩展名）用于结果文件命名
             file_name = Path(sequence_file).stem
-            result_file = Path("results") / f"{file_name}_blast_result.xml"
-            csv_file = Path("results") / f"{file_name}_blast_result.csv"
-            desc_file = Path("results") / f"{file_name}_blast_result.desc"
+            result_file = self.timestamp_folder / f"{file_name}_blast_result.xml"
+            csv_file = self.timestamp_folder / f"{file_name}_blast_result.csv"
+            desc_file = self.timestamp_folder / f"{file_name}_blast_result.desc"
             
             # 调用任务开始回调
             if self.on_task_start:
@@ -172,7 +186,8 @@ class BatchProcessor:
                     "csv_file": csv_file,
                     "desc_file": desc_file,
                     "thread_id": thread_id,
-                    "elapsed_time": 0  # 缓存结果不需要计算处理时间
+                    "elapsed_time": 0,  # 缓存结果不需要计算处理时间
+                    "timestamp_folder": str(self.timestamp_folder)  # 记录时间戳文件夹
                 }
                 self.cache.save_result(sequence, cache_result, sequence_id)
             
@@ -293,8 +308,7 @@ class BatchProcessor:
             print(f"开始批量处理 {len(sequence_files)} 个序列文件...")
             print(f"使用 {self.max_workers} 个线程进行处理（减少并发以避免NCBI限制）")
         
-        # 创建结果目录（如果不存在）
-        Path("results").mkdir(exist_ok=True)
+        # 时间戳文件夹已在初始化时创建
         
         # 使用线程池处理序列文件
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -398,6 +412,19 @@ class MultiSequenceBatchProcessor:
         self.on_result_received = None  # 结果接收回调
         self.on_all_tasks_complete = None  # 所有任务完成回调
         self._cancel_flag = False  # 取消标志
+        self.timestamp_folder = self._create_timestamp_folder()
+
+    def _create_timestamp_folder(self):
+        """
+        创建基于时间戳的结果保存文件夹
+        
+        Returns:
+            Path: 时间戳文件夹路径
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        folder_path = Path("results") / timestamp
+        folder_path.mkdir(parents=True, exist_ok=True)
+        return folder_path
     
     def cancel_processing(self):
         """
@@ -423,9 +450,9 @@ class MultiSequenceBatchProcessor:
             # 获取原始文件名（不含扩展名）和序列ID用于结果文件命名
             base_name = Path(original_file_path).stem
             sequence_id = sequence_info['id'].replace('|', '_').replace(' ', '_')  # 确保文件名安全
-            result_file = Path("results") / f"{base_name}_{sequence_id}_blast_result.xml"
-            csv_file = Path("results") / f"{base_name}_{sequence_id}_blast_result.csv"
-            desc_file = Path("results") / f"{base_name}_{sequence_id}_blast_result.desc"
+            result_file = self.timestamp_folder / f"{base_name}_{sequence_id}_blast_result.xml"
+            csv_file = self.timestamp_folder / f"{base_name}_{sequence_id}_blast_result.csv"
+            desc_file = self.timestamp_folder / f"{base_name}_{sequence_id}_blast_result.desc"
             
             # 调用任务开始回调
             if self.on_task_start:
@@ -518,7 +545,8 @@ class MultiSequenceBatchProcessor:
                     "csv_file": csv_file,
                     "desc_file": desc_file,
                     "thread_id": thread_id,
-                    "elapsed_time": 0  # 缓存结果不需要计算处理时间
+                    "elapsed_time": 0,  # 缓存结果不需要计算处理时间
+                    "timestamp_folder": str(self.timestamp_folder)  # 记录时间戳文件夹
                 }
                 self.cache.save_result(sequence, cache_result)
             
@@ -648,8 +676,7 @@ class MultiSequenceBatchProcessor:
         if not sequences:
             return []
         
-        # 创建结果目录（如果不存在）
-        Path("results").mkdir(exist_ok=True)
+        # 时间戳文件夹已在初始化时创建
         
         # 使用线程池处理序列
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -692,7 +719,7 @@ class MultiSequenceBatchProcessor:
                     }
                     results.append(error_result)
                     if self.on_result_received:
-                        self.result_received(error_result)
+                        self.on_result_received(error_result)
                 
                 # 更新完成计数
                 completed += 1

@@ -17,6 +17,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="\src\results\hit_sequences_phage_10115553_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="\src\results\hit_sequences_phage_10133736_blast_result.csv">
           <value>
             <Attribute>
