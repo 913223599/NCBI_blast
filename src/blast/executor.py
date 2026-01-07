@@ -82,8 +82,9 @@ class BlastExecutor:
             raise ValueError("序列不能为空")
         
         # 检查序列是否包含有效字符（核苷酸或氨基酸）
-        valid_nucleotide_chars = set('ATCGNUatcg nu')
-        valid_protein_chars = set('ACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvwy')
+        # X是常见字符，代表未知氨基酸或核苷酸
+        valid_nucleotide_chars = set('ATCGNUatcg nuXx')
+        valid_protein_chars = set('ACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvwXYxy')
         valid_chars = valid_nucleotide_chars | valid_protein_chars
         
         # 过滤掉空白字符后检查序列是否包含有效字符
