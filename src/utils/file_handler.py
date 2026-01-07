@@ -34,7 +34,16 @@ class FileHandler:
         sequences = self.read_fasta_file(file_path)
         if sequences:
             return sequences[0]['sequence']  # 返回第一个序列
-        return ""
+        
+        # 如果FASTA解析失败，尝试作为纯文本序列文件读取
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                # 移除可能的换行符、空格等
+                sequence = content.replace('\n', '').replace(' ', '').replace('\r', '').strip()
+                return sequence
+        except Exception:
+            return ""
     
     def read_fasta_file(self, file_path):
         """
@@ -48,16 +57,22 @@ class FileHandler:
         """
         sequences = []
         try:
-            # 使用BioPython解析FASTA文件
+            # 使用BioPython解析FASTA文件，使用'fasta-pearson'格式避免弃用警告
             with open(file_path, 'r', encoding='utf-8') as handle:
-                for record in SeqIO.parse(handle, "fasta"):
-                    seq_info = {
-                        'id': str(record.id),
-                        'description': str(record.description),
-                        'sequence': str(record.seq),
-                        'length': len(record.seq)
-                    }
-                    sequences.append(seq_info)
+                content = handle.read()
+                if content.startswith('>'):  # 确认是FASTA格式
+                    handle.seek(0)  # 重置文件指针
+                    for record in SeqIO.parse(handle, "fasta-pearson"):
+                        seq_info = {
+                            'id': str(record.id),
+                            'description': str(record.description),
+                            'sequence': str(record.seq),
+                            'length': len(record.seq)
+                        }
+                        sequences.append(seq_info)
+                else:
+                    # 如果不是FASTA格式，直接使用回退方法
+                    raise ValueError("不是FASTA格式文件")
         except Exception as e:
             # 如果BioPython解析失败，回退到原始方法
             print(f"使用BioPython解析FASTA文件失败: {e}")

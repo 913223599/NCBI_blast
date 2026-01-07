@@ -77,6 +77,29 @@ class BlastExecutor:
         # print("正在执行BLAST搜索...")
         # print("这可能需要一些时间...")
         
+        # 验证序列是否有效
+        if not sequence or len(sequence.strip()) == 0:
+            raise ValueError("序列不能为空")
+        
+        # 检查序列是否包含有效字符（核苷酸或氨基酸）
+        valid_nucleotide_chars = set('ATCGNUatcg nu')
+        valid_protein_chars = set('ACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvwy')
+        valid_chars = valid_nucleotide_chars | valid_protein_chars
+        
+        # 过滤掉空白字符后检查序列是否包含有效字符
+        seq_chars = set(c for c in sequence if c.isalpha())
+        if not seq_chars.issubset(valid_chars):
+            invalid_chars = seq_chars - valid_chars
+            print(f"警告: 序列包含无效字符: {invalid_chars}")
+            # 移除无效字符
+            sequence = ''.join(c for c in sequence if c in valid_chars or c.isspace())
+        
+        # 清理序列，移除空白字符
+        sequence = sequence.replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '').strip()
+        
+        if len(sequence) < 5:  # NCBI BLAST要求最短序列长度
+            raise ValueError(f"序列长度太短: {len(sequence)} 个字符，最少需要5个字符")
+        
         try:
             # 在发送请求前添加延迟，以控制请求频率并遵循NCBI限制
             delay_before_request()  # 使用伪队列机制控制请求频率

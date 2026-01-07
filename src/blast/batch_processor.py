@@ -27,7 +27,7 @@ class BatchProcessor:
         初始化批量处理器
         
         Args:
-            max_workers (int): 最大工作线程数，默认为3
+            max_workers (int): 最大工作线程数，默认为1（减少并发以避免NCBI限制和崩溃）
             advanced_settings (dict): 高级设置参数，包含BLAST搜索的高级参数设置
                                       默认为None，表示使用BLAST的默认参数
         """
@@ -95,6 +95,10 @@ class BatchProcessor:
             
             # 读取序列
             sequence = self.file_handler.read_sequence_file(str(sequence_file))
+            
+            # 验证序列是否有效
+            if not sequence or len(sequence.strip()) == 0:
+                raise ValueError(f"无法从文件中读取有效序列: {sequence_file}")
             
             # 检查缓存
             use_cache = self.advanced_settings.get('use_cache', True)
@@ -392,7 +396,7 @@ class MultiSequenceBatchProcessor:
     负责处理包含多个序列的单个文件
     """
     
-    def __init__(self, max_workers=2, advanced_settings=None):  # 减少默认线程数
+    def __init__(self, max_workers=3, advanced_settings=None):  # 减少默认线程数
         """
         初始化多序列批量处理器
         
@@ -459,6 +463,10 @@ class MultiSequenceBatchProcessor:
                 self.on_task_start(f"{original_file_path} - {sequence_info['id']}")
             
             sequence = sequence_info['sequence']
+            
+            # 验证序列是否有效
+            if not sequence or len(sequence.strip()) == 0:
+                raise ValueError(f"序列信息中包含空序列: {sequence_info['id']}")
             
             # 检查缓存
             use_cache = self.advanced_settings.get('use_cache', True)
