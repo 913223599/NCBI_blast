@@ -218,11 +218,30 @@ class MainWindow(QMainWindow):
     
     def _on_files_selected(self, files):
         """处理文件选择事件"""
+        print(f"选择了 {len(files)} 个文件: {[Path(f).name for f in files]}")
+        
+        # 更新序列文件列表
         self.sequence_files = files
-        self.result_viewer.update_result_tree(files)
+        
+        # 更新结果树显示所有选中的文件
+        self.result_viewer.update_sequence_files(files)  # 使用新的方法来显示所有文件
+        
+        # 更新状态栏
+        self.status_bar.showMessage(f"已选择 {len(files)} 个序列文件", 3000)
+        
+        # 强制刷新UI
+        self.result_viewer.update()  # 更新结果查看器
+        self.update()  # 更新主窗口
     
     def _start_processing(self):
         """开始处理文件"""
+        # 从文件选择器组件直接获取文件列表，确保是最新的状态
+        current_files = self.file_selector.get_selected_files()
+        print(f"开始处理时检测到的文件数量: {len(current_files)}, 文件列表: {[Path(f).name for f in current_files]}")
+        
+        # 更新实例变量以确保一致性
+        self.sequence_files = current_files
+        
         if not self.sequence_files:
             QMessageBox.warning(self, "警告", "请先选择序列文件")
             return
@@ -235,8 +254,16 @@ class MainWindow(QMainWindow):
         for file in self.sequence_files:
             self.result_viewer.update_file_status({
                 "file": file,
-                "status": "pending"
+                "status": "processing",  # 更改为processing状态
+                "elapsed_time": 0
             })
+        
+        # 强制刷新UI
+        self.result_viewer.update()
+        try:
+            QApplication.processEvents()  # 强制处理UI事件
+        except:
+            pass  # 如果QApplication不可用，忽略这个调用
         
         try:
             max_workers = self.parameter_settings.get_thread_count()
@@ -297,7 +324,7 @@ class MainWindow(QMainWindow):
                     break
             except Exception as e:
                 print(f"检查文件 {file_path} 时出错: {e}")
-        
+    
         # 根据文件类型选择处理器
         if has_multi_sequence_files:
             # 使用多序列处理器

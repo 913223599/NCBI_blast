@@ -21,7 +21,7 @@ try:
         sys.path.insert(0, project_root)
 
     print("Importing main function...")
-    from src.gui.application_pyqt import main
+    from gui.application_pyqt import main  # 修复导入路径
     
     print("Calling main function...")
     if __name__ == "__main__":

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 结果展示组件模块
 """
@@ -55,7 +56,7 @@ class TranslationWorker(QObject):
                         gene_type = row.get('基因类型', '')
                         sequence_type = row.get('序列类型', '')
                         similarity = row.get('相似度', '')
-                        e_value = row.get('E값', '')
+                        e_value = row.get('E值', '')
                         
                         # 使用生物学翻译器翻译物种和属名
                         if species and self.biology_translator:
@@ -139,11 +140,7 @@ class ResultViewerSignals(QObject):
 
 
 class ResultViewerWidget(QGroupBox):
-    """结果展示组件类"""
-    
-    # 定义信号
-    item_selected = pyqtSignal(str)
-    retry_blast = pyqtSignal(str)
+    """结果展示组件类 - 完全重构的树形结构逻辑"""
     
     def __init__(self):
         super().__init__("结果查看")
@@ -160,6 +157,12 @@ class ResultViewerWidget(QGroupBox):
         self.translation_threads = {}  # 存储每个文件的翻译线程
         self.translation_workers = {}  # 存储每个文件的翻译工作对象
         self.all_sequence_files = []  # 存储所有序列文件列表
+        
+        # 完全重构的数据结构
+        self.file_data = {}  # 存储每个文件的完整信息
+        self.file_items = {}  # 存储文件名到QTreeWidgetItem的映射
+        self.sequence_items = {}  # 存储文件名+序列ID到序列QTreeWidgetItem的映射
+        self.result_items = {}  # 存储文件名+序列ID+结果ID到结果QTreeWidgetItem的映射
     
     def _setup_ui(self):
         """设置界面"""
@@ -167,7 +170,7 @@ class ResultViewerWidget(QGroupBox):
         
         # 创建结果树
         self.result_tree = QTreeWidget()
-        self.result_tree.setHeaderLabels(["文件名/结果", "状态", "耗时"])
+        self.result_tree.setHeaderLabels(["文件名/序列/结果", "状态", "耗时"])
         self.result_tree.setAlternatingRowColors(True)
         self.result_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)  # 启用自定义上下文菜单
         self.result_tree.customContextMenuRequested.connect(self._show_context_menu)   # 连接上下文菜单信号
@@ -201,7 +204,6 @@ class ResultViewerWidget(QGroupBox):
         """连接信号"""
         # 只连接itemPressed信号，避免重复触发
         self.result_tree.itemPressed.connect(self._on_item_clicked)
-        # self.result_tree.itemSelectionChanged.connect(self._on_item_selected)  # 移除选择变化信号连接
     
     def set_translation_settings(self, translation_settings: dict, api_key: str = None):
         """
@@ -242,134 +244,350 @@ class ResultViewerWidget(QGroupBox):
             self.biology_translator = None
 
     def update_sequence_files(self, sequence_files):
-        """更新序列文件列表"""
+        """更新序列文件列表 - 重构版本"""
         self.all_sequence_files = sequence_files
-        # 更新结果树显示所有文件
-        self.update_result_tree(sequence_files)
-    
-    def update_result_tree(self, sequence_files):
-        """更新结果树显示"""
-        # 清空现有内容
-        self.result_tree.clear()
+        print(f"更新序列文件列表，文件数量: {len(sequence_files)}")
         
-        # 添加文件列表
+        # 重构：重新构建整个结果树
+        self._rebuild_result_tree(sequence_files)
+        
+        # 强制更新UI显示
+        self.result_tree.update()
+        try:
+            QApplication.processEvents()  # 强制处理UI事件
+        except:
+            pass  # 如果QApplication不可用，忽略这个调用
+    
+    def _rebuild_result_tree(self, sequence_files):
+        """完全重建结果树 - 重构核心逻辑"""
+        # 清空现有内容和内部数据结构
+        self.result_tree.clear()
+        self.file_items.clear()
+        self.sequence_items.clear()
+        self.result_items.clear()
+        self.file_data.clear()
+
+        # 为每个文件创建初始数据结构
         for seq_file in sequence_files:
             file_name = Path(seq_file).name
             
-            # 添加父节点（文件）
-            item = QTreeWidgetItem(self.result_tree, [file_name, '待处理', ''])
-            item.setExpanded(False)
+            # 创建文件节点
+            file_item = QTreeWidgetItem(self.result_tree, [file_name, '待处理', ''])
+            file_item.setExpanded(False)
             
-            # 添加子节点（详细信息占位符）
-            QTreeWidgetItem(item, ['', '', ''])
-    
+            # 初始化该文件的完整数据结构
+            self.file_data[file_name] = {
+                'file_path': seq_file,
+                'sequences': {},  # 存储每个序列的信息
+                'status': '待处理',
+                'elapsed_time': '',
+                'expanded': False
+            }
+            
+            # 保存文件项的引用
+            self.file_items[file_name] = file_item
+
     def update_file_status(self, result):
-        """更新文件状态"""
+        """更新文件状态 - 重构版本"""
         # 检查是否是多序列处理结果
         if 'sequence_id' in result:
             # 这是一个多序列处理结果
-            file_path = result.get("file", "")
-            file_name = Path(file_path).name
-            sequence_id = result.get("sequence_id", "")
-            sequence_description = result.get("sequence_description", "")
-            
-            # 构建组合键
-            combined_key = f"{file_name}#{sequence_id}"
-            
-            status = "成功" if result.get("status") == "success" else "失败"
-            elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
-            
-            # 保存结果数据
-            self.results_data[combined_key] = result
-            
-            # 查找或创建文件节点
-            root = self.result_tree.invisibleRootItem()
-            file_item = None
-            for i in range(root.childCount()):
-                item = root.child(i)
-                if item.text(0) == file_name:
-                    file_item = item
-                    break
-            
-            if file_item is None:
-                # 如果文件节点不存在，创建它
-                file_item = QTreeWidgetItem(self.result_tree, [file_name, '处理中', ''])
-                file_item.setExpanded(False)
-            
-            # 更新文件节点状态
-            file_item.setText(1, status)
-            file_item.setText(2, elapsed_time)
-            
-            # 查找或创建序列节点
-            sequence_item = None
-            for i in range(file_item.childCount()):
-                child = file_item.child(i)
-                if child.text(0) == sequence_id:
-                    sequence_item = child
-                    break
-            
-            if sequence_item is None:
-                # 创建序列节点
-                sequence_item = QTreeWidgetItem(file_item, [sequence_id, status, elapsed_time])
-                sequence_item.setExpanded(False)
-            
-            # 如果是成功状态，添加前3个比对结果
-            if result.get("status") == "success" and result.get("csv_file"):
-                csv_file = result.get("csv_file")
-                if Path(csv_file).exists():
-                    # 清空现有的结果子节点
-                    while sequence_item.childCount() > 0:
-                        sequence_item.removeChild(sequence_item.child(0))
-                    
-                    # 读取CSV文件并获取前3个结果
-                    try:
-                        with open(csv_file, 'r', encoding='utf-8') as f:
-                            reader = csv.DictReader(f)
-                            rows = list(reader)
-                            # 只取前3个结果
-                            top_results = rows[:3] if len(rows) > 3 else rows
-                            
-                            for i, row in enumerate(top_results):
-                                species = row.get('物种', 'N/A')
-                                similarity = row.get('相似度', 'N/A')
-                                e_value = row.get('E값', 'N/A')
-                                
-                                result_text = f"{i+1}. {species} (相似度: {similarity}, E값: {e_value})"
-                                result_item = QTreeWidgetItem(sequence_item, [result_text, '', ''])
-                                
-                                # 为结果节点设置不同的背景色以区分层次
-                                for col in range(3):
-                                    result_item.setBackground(col, QColor(245, 245, 245))
-                    except Exception as e:
-                        result_item = QTreeWidgetItem(sequence_item, [f"读取结果失败: {str(e)}", '', ''])
+            self._update_multi_sequence_result(result)
         else:
             # 这是一个单序列处理结果
-            file_path = result.get("file", "")
-            file_name = Path(file_path).name
-            status = "成功" if result.get("status") == "success" else "失败"
+            self._update_single_sequence_result(result)
+
+    def _update_multi_sequence_result(self, result):
+        """更新多序列处理结果 - 重构版本"""
+        file_path = result.get("file", "")
+        file_name = Path(file_path).name
+        sequence_id = result.get("sequence_id", "")
+
+        status = "成功" if result.get("status") == "success" else "失败"
+        elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
+
+        # 确保文件数据结构存在
+        if file_name not in self.file_data:
+            self.file_data[file_name] = {
+                'file_path': file_path,
+                'sequences': {},
+                'status': '待处理',
+                'elapsed_time': '',
+                'expanded': False
+            }
+        
+        # 更新序列信息
+        self.file_data[file_name]['sequences'][sequence_id] = {
+            'status': status,
+            'elapsed_time': elapsed_time,
+            'result': result
+        }
+        
+        # 计算文件总体状态
+        all_seqs = self.file_data[file_name]['sequences']
+        success_count = sum(1 for seq in all_seqs.values() if seq['status'] == '成功')
+        total_count = len(all_seqs)
+        
+        if success_count == total_count:
+            overall_status = '成功'
+        elif success_count == 0:
+            overall_status = '失败'
+        else:
+            overall_status = f'部分完成({success_count}/{total_count})'
+        
+        self.file_data[file_name]['status'] = overall_status
+
+        # 保存结果数据
+        combined_key = f"{file_name}#{sequence_id}"
+        self.results_data[combined_key] = result
+
+        # 获取或创建文件节点
+        file_item = self._ensure_file_item_exists(file_name, file_path)
+
+        # 更新文件节点状态
+        file_item.setText(1, self.file_data[file_name]['status'])
+        file_item.setText(2, self.file_data[file_name].get('elapsed_time', ''))
+
+        # 获取或创建序列节点
+        sequence_item = self._ensure_sequence_item_exists(file_item, file_name, sequence_id)
+
+        # 更新序列节点状态
+        sequence_item.setText(1, status)
+        sequence_item.setText(2, elapsed_time)
+
+        # 显示前3个比对结果
+        if result.get("csv_file"):
+            self._display_top_results(sequence_item, result.get("csv_file"))
+
+        # 强制更新UI显示
+        self.result_tree.update()
+        print(f"多序列结果 - 文件 {file_name}, 序列 {sequence_id} 状态已更新为: {status}")
+
+    def _update_single_sequence_result(self, result):
+        """更新单序列处理结果 - 重构版本"""
+        file_path = result.get("file", "")
+        file_name = Path(file_path).name
+        result_status = result.get("status", "")
+
+        # 根据不同的状态设置显示文本
+        if result_status == "processing":
+            status = "处理中"
+            elapsed_time = ""  # 处理中时不显示时间
+        elif result_status == "success":
+            status = "成功"
             elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
+        elif result_status == "error":
+            status = "失败"
+            elapsed_time = f"{result.get('elapsed_time', 0):.2f}秒" if "elapsed_time" in result else "N/A"
+        else:
+            status = "失败"  # 默认为失败状态
+            elapsed_time = "N/A"
+
+        # 保存结果数据
+        self.results_data[file_name] = result
+
+        # 更新文件数据结构
+        if file_name not in self.file_data:
+            self.file_data[file_name] = {
+                'file_path': file_path,
+                'sequences': {},
+                'status': '待处理',
+                'elapsed_time': '',
+                'expanded': False
+            }
+        
+        self.file_data[file_name]['status'] = status
+        self.file_data[file_name]['elapsed_time'] = elapsed_time
+
+        # 获取或创建文件节点并更新
+        file_item = self._ensure_file_item_exists(file_name, file_path)
+        file_item.setText(1, status)
+        file_item.setText(2, elapsed_time)
+
+        # 强制更新UI显示
+        self.result_tree.update()
+        print(f"文件 {file_name} 状态已更新为: {status}, 当前项目数量: {self.result_tree.topLevelItemCount()}")
+
+    def _ensure_file_item_exists(self, file_name, file_path):
+        """确保文件节点存在 - 重构版本"""
+        if file_name in self.file_items:
+            return self.file_items[file_name]
+        
+        # 如果文件节点不存在，创建它
+        file_item = QTreeWidgetItem(self.result_tree, [file_name, '待处理', ''])
+        file_item.setExpanded(False)
+        
+        # 初始化该文件的完整数据结构（如果不存在）
+        if file_name not in self.file_data:
+            self.file_data[file_name] = {
+                'file_path': file_path,
+                'sequences': {},
+                'status': '待处理',
+                'elapsed_time': '',
+                'expanded': False
+            }
+        
+        # 保存文件项的引用
+        self.file_items[file_name] = file_item
+        return file_item
+
+    def _ensure_sequence_item_exists(self, file_item, file_name, sequence_id):
+        """确保序列节点存在 - 重构版本"""
+        key = f"{file_name}#{sequence_id}"
+        if key in self.sequence_items:
+            return self.sequence_items[key]
+        
+        # 搜索子节点中是否已存在该序列
+        for i in range(file_item.childCount()):
+            child = file_item.child(i)
+            if child.text(0) == sequence_id:
+                self.sequence_items[key] = child
+                return child
+        
+        # 如果序列节点不存在，创建它
+        sequence_item = QTreeWidgetItem(file_item, [sequence_id, '待处理', ''])
+        sequence_item.setExpanded(False)
+        
+        # 保存序列项的引用
+        self.sequence_items[key] = sequence_item
+        return sequence_item
+
+    def _display_top_results(self, parent_item, csv_file):
+        """显示前3个比对结果 - 重构版本"""
+        # 清空现有的结果子节点
+        self._clear_result_children(parent_item)
+
+        if not Path(csv_file).exists():
+            return
+
+        # 读取CSV文件并获取前3个结果
+        try:
+            with open(csv_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                # 只取前3个结果
+                top_results = rows[:3] if len(rows) > 3 else rows
+
+                for i, row in enumerate(top_results):
+                    species = row.get('物种', 'N/A')
+                    similarity = row.get('相似度', 'N/A')
+                    e_value = row.get('E值', 'N/A')
+
+                    result_text = f"{i+1}. {species} (相似度: {similarity}, E值: {e_value})"
+                    result_item = QTreeWidgetItem(parent_item, [result_text, '', ''])
+
+                    # 为结果节点设置不同的背景色以区分层次
+                    for col in range(3):
+                        result_item.setBackground(col, QColor(245, 245, 245))
+        except Exception as e:
+            result_item = QTreeWidgetItem(parent_item, [f"读取结果失败: {str(e)}", '', ''])
+
+    def _clear_result_children(self, parent_item):
+        """清除结果子节点 - 重构版本"""
+        # 从后往前删除，避免索引变化问题
+        for i in range(parent_item.childCount() - 1, -1, -1):
+            child = parent_item.child(i)
+            # 检查是否为结果节点（以数字开头）
+            if self._is_result_node(child):
+                parent_item.takeChild(i)
+
+    def _is_result_node(self, item):
+        """判断是否为结果节点 - 重构版本"""
+        text = item.text(0)
+        return text.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.', '0.')) or \
+               text.startswith('读取结果失败:')
+
+    def _on_item_clicked(self, item, column):
+        """处理项目点击事件 - 重构版本"""
+        # 获取父节点判断层级
+        parent = item.parent()
+        
+        if parent is None:
+            # 点击的是顶级文件节点
+            file_name = item.text(0)
+            self.signals.item_selected.emit(file_name)
+
+            # 切换展开/折叠状态
+            is_expanded = not item.isExpanded()
+            item.setExpanded(is_expanded)
             
-            # 保存结果数据
-            self.results_data[file_name] = result
+            # 更新文件数据中的展开状态
+            if file_name in self.file_data:
+                self.file_data[file_name]['expanded'] = is_expanded
+
+            # 如果是展开状态，确保所有序列节点都已创建（即使还没有处理结果）
+            if is_expanded:
+                # 直接使用file_data中存储的文件路径
+                if file_name in self.file_data:
+                    target_file_path = self.file_data[file_name]['file_path']
+                    
+                    # 检查文件中包含哪些序列（如果是FASTA文件）
+                    sequences_in_file = self._parse_sequences_from_file(target_file_path)
+                    
+                    # 确保所有序列节点都已创建
+                    for sequence_id in sequences_in_file:
+                        # 检查是否已经在file_data中存在此序列信息
+                        if sequence_id not in self.file_data[file_name]['sequences']:
+                            # 为尚未处理的序列初始化状态
+                            self.file_data[file_name]['sequences'][sequence_id] = {
+                                'status': '待处理',
+                                'elapsed_time': '',
+                                'result': None
+                            }
+                        
+                        # 确保序列节点存在
+                        self._ensure_sequence_item_exists(item, file_name, sequence_id)
+                
+        else:
+            # 点击的是序列节点
+            sequence_id = item.text(0)
+            file_item = parent
+            file_name = file_item.text(0)
             
-            # 查找对应的树节点并更新
-            root = self.result_tree.invisibleRootItem()
-            for i in range(root.childCount()):
-                item = root.child(i)
-                if item.text(0) == file_name:
-                    # 更新父节点的值
-                    item.setText(1, status)
-                    item.setText(2, elapsed_time)
-                    break
-            else:
-                # 如果文件节点不存在，创建它（处理过程中动态添加）
-                item = QTreeWidgetItem(self.result_tree, [file_name, status, elapsed_time])
-                item.setExpanded(False)
-                # 添加子节点（详细信息占位符）
-                QTreeWidgetItem(item, ['', '', ''])
-    
+            # 切换展开/折叠状态
+            is_expanded = not item.isExpanded()
+            item.setExpanded(is_expanded)
+            
+            # 加载序列的详细结果信息
+            if is_expanded and file_name in self.file_data:
+                file_info = self.file_data[file_name]
+                if sequence_id in file_info['sequences']:
+                    seq_info = file_info['sequences'][sequence_id]
+                    result = seq_info['result']
+                    
+                    # 获取CSV文件路径
+                    if result and result.get('csv_file'):
+                        csv_file = result.get('csv_file')
+                        if csv_file and Path(csv_file).exists():
+                            # 异步加载和翻译CSV结果
+                            self._display_csv_results_async(item, csv_file)
+
+        # 强制更新UI显示
+        item.treeWidget().update()
+
+    def _parse_sequences_from_file(self, file_path):
+        """从FASTA文件中解析序列ID列表"""
+        sequences = []
+        try:
+            file_path = Path(file_path)
+            if file_path.suffix.lower() in ['.fasta', '.fas', '.fa']:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.startswith('>'):
+                            # 提取序列ID（标题行去掉>符号）
+                            header = line[1:].strip()
+                            # 取第一部分作为序列ID（通常是空格前的部分）
+                            seq_id = header.split()[0] if header.split() else f"sequence_{len(sequences)+1}"
+                            sequences.append(seq_id)
+        except Exception as e:
+            print(f"解析序列文件失败: {e}")
+            # 如果解析失败，返回一个默认序列ID
+            sequences = [f"sequence_{i+1}" for i in range(1)]  # 至少有一个
+        
+        return sequences
+
     def _display_csv_results_async(self, parent_item, csv_file):
-        """异步显示CSV结果"""
+        """异步显示CSV结果 - 重构版本"""
         # 显示正在翻译的提示
         if parent_item.childCount() > 0:
             child = parent_item.child(0)
@@ -418,81 +636,11 @@ class ResultViewerWidget(QGroupBox):
         # 启动线程
         translation_thread.start()
 
-    def _on_item_clicked(self, item, column):
-        """处理项目点击事件"""
-        # 如果点击的是父节点（文件节点）
-        if item.parent() is None:
-            file_name = item.text(0)
-            self.item_selected.emit(file_name)
-            
-            # 切换展开/折叠状态
-            is_expanded = not item.isExpanded()
-            item.setExpanded(is_expanded)
-            
-            # 如果是展开状态且还没有加载详细信息，则加载详细信息
-            if is_expanded and item.childCount() > 0:
-                try:
-                    child = item.child(0)
-                    # 检查是否已加载详细信息（通过检查子节点的列数）
-                    # 同时检查子节点的文本是否为空或正在翻译的提示
-                    if (child.columnCount() == 3 and 
-                        (child.text(0) == '' or child.text(0).startswith('正在加载') or child.text(0).startswith('正在翻译'))):
-                        # 显示正在加载的提示
-                        child.setText(0, "正在加载详细信息...")
-                        # 处理事件队列，确保UI更新
-                        QApplication.processEvents()
-                        # 加载并显示详细信息
-                        self._load_detail_info(item, file_name)
-                except Exception as e:
-                    # 出现异常时，显示错误信息而不是闪退
-                    if item.childCount() > 0:
-                        child = item.child(0)
-                        child.setText(0, f"加载结果失败: {str(e)}")
-
-    def _load_detail_info(self, parent_item, file_name):
-        """加载并显示详细信息"""
-        # 显示正在加载的提示
-        if parent_item.childCount() > 0:
-            child = parent_item.child(0)
-            child.setText(0, "正在加载详细信息...")
-            # 处理事件队列，确保UI更新
-            try:
-                QApplication.processEvents()
-            except:
-                pass  # 如果QApplication不可用，忽略这个调用
-        
-        # 查找对应的结果数据
-        result_data = None
-        for data in self.results_data.values():
-            if Path(data.get("file", "")).name == file_name:
-                result_data = data
-                break
-        
-        if result_data:
-            if result_data.get("status") == "success":
-                # 读取CSV结果文件
-                csv_file = result_data.get("csv_file") or result_data.get("result_file").replace(".xml", ".csv")
-                try:
-                    self._display_csv_results_async(parent_item, csv_file)
-                except Exception as e:
-                    # 清空子节点并显示错误信息
-                    if parent_item.childCount() > 0:
-                        child = parent_item.child(0)
-                        child.setText(0, f"加载结果失败: {str(e)}")
-                    # 触发翻译完成的错误处理
-                    self._on_translation_error(parent_item, str(e))
-            elif result_data.get("status") == "error":
-                # 显示错误信息
-                if parent_item.childCount() > 0:
-                    child = parent_item.child(0)
-                    child.setText(0, f"处理失败: {result_data.get('error', '未知错误')}")
-
     def _on_translation_finished(self, parent_item, translated_rows, file_key):
-        """处理翻译完成"""
+        """处理翻译完成 - 重构版本"""
         # 清空现有子节点
-        if parent_item.childCount() > 0:
-            for i in range(parent_item.childCount()):
-                parent_item.removeChild(parent_item.child(0))
+        for i in range(parent_item.childCount() - 1, -1, -1):
+            parent_item.takeChild(0)
         
         # 显示翻译结果
         if translated_rows:
@@ -527,7 +675,7 @@ class ResultViewerWidget(QGroupBox):
                 if similarity:
                     detail_parts.append(f"相似度: {similarity}")
                 if e_value:
-                    detail_parts.append(f"E값: {e_value}")
+                    detail_parts.append(f"E值: {e_value}")
                 
                 if detail_parts:
                     detail_text = ", ".join(detail_parts)
@@ -540,7 +688,42 @@ class ResultViewerWidget(QGroupBox):
             QApplication.processEvents()
         except:
             pass  # 如果QApplication不可用，忽略这个调用
-
+        
+        # 强制更新UI显示
+        parent_item.treeWidget().update()
+    
+    def _on_translation_progress(self, parent_item, message):
+        """处理翻译进度更新 - 重构版本"""
+        if parent_item.childCount() > 0:
+            child = parent_item.child(0)
+            child.setText(0, message)
+            try:
+                QApplication.processEvents()
+            except:
+                pass  # 如果QApplication不可用，忽略这个调用
+        
+        # 强制更新UI显示
+        parent_item.treeWidget().update()
+    
+    def _cleanup_thread_reference(self, file_key):
+        """清理线程引用 - 重构版本"""
+        if file_key in self.translation_threads:
+            del self.translation_threads[file_key]
+        if file_key in self.translation_workers:
+            del self.translation_workers[file_key]
+    
+    def _on_translation_error(self, parent_item, error, file_key=None):
+        """处理翻译错误 - 重构版本"""
+        if parent_item.childCount() > 0:
+            child = parent_item.child(0)
+            child.setText(0, f"翻译失败: {error}")
+        # 清理线程引用
+        if file_key:
+            self._cleanup_thread_reference(file_key)
+        
+        # 强制更新UI显示
+        parent_item.treeWidget().update()
+    
     def closeEvent(self, event):
         """处理窗口关闭事件"""
         # 停止所有正在运行的翻译线程
@@ -603,6 +786,11 @@ class ResultViewerWidget(QGroupBox):
             self.results_data.clear()
             # 清空结果树
             self.result_tree.clear()
+            # 清空内部数据结构
+            self.file_data.clear()
+            self.file_items.clear()
+            self.sequence_items.clear()
+            self.result_items.clear()
             # 发送清空信号（如果需要）
     
     def _show_context_menu(self, position):
@@ -663,29 +851,3 @@ class ResultViewerWidget(QGroupBox):
                 QMessageBox.information(self, "导出成功", f"查询信息已导出到:\n{save_path}")
             except Exception as e:
                 QMessageBox.critical(self, "导出失败", f"导出过程中发生错误:\n{str(e)}")
-    
-    def _on_translation_progress(self, parent_item, message):
-        """处理翻译进度更新"""
-        if parent_item.childCount() > 0:
-            child = parent_item.child(0)
-            child.setText(0, message)
-            try:
-                QApplication.processEvents()
-            except:
-                pass  # 如果QApplication不可用，忽略这个调用
-    
-    def _cleanup_thread_reference(self, file_key):
-        """清理线程引用"""
-        if file_key in self.translation_threads:
-            del self.translation_threads[file_key]
-        if file_key in self.translation_workers:
-            del self.translation_workers[file_key]
-    
-    def _on_translation_error(self, parent_item, error, file_key=None):
-        """处理翻译错误"""
-        if parent_item.childCount() > 0:
-            child = parent_item.child(0)
-            child.setText(0, f"翻译失败: {error}")
-        # 清理线程引用
-        if file_key:
-            self._cleanup_thread_reference(file_key)
