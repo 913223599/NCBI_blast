@@ -41,8 +41,11 @@ class TranslationWorker(QObject):
                 reader = csv.DictReader(f)
                 rows = list(reader)
                 
-                if rows:
-                    for i, row in enumerate(rows):
+                # 只处理前5个结果，与显示逻辑保持一致
+                top_rows = rows[:5] if len(rows) > 5 else rows
+                
+                if top_rows:
+                    for i, row in enumerate(top_rows):
                         if not self._is_running:
                             break
                             
@@ -163,7 +166,13 @@ class ResultViewerWidget(QGroupBox):
         self.file_items = {}  # 存储文件名到QTreeWidgetItem的映射
         self.sequence_items = {}  # 存储文件名+序列ID到序列QTreeWidgetItem的映射
         self.result_items = {}  # 存储文件名+序列ID+结果ID到结果QTreeWidgetItem的映射
-    
+        
+        # 存储翻译状态
+        self.translation_states = {}  # 存储每个节点的翻译状态
+        # 存储原始文本和翻译文本
+        self.original_texts = {}  # 存储原始文本
+        self.translated_texts = {}  # 存储翻译文本
+
     def _setup_ui(self):
         """设置界面"""
         layout = QVBoxLayout()
@@ -274,6 +283,10 @@ class ResultViewerWidget(QGroupBox):
             # 创建文件节点
             file_item = QTreeWidgetItem(self.result_tree, [file_name, '待处理', ''])
             file_item.setExpanded(False)
+            
+            # 为文件项设置初始翻译状态
+            file_item_key = self._get_item_key(file_item)
+            self.translation_states[file_item_key] = False
             
             # 初始化该文件的完整数据结构
             self.file_data[file_name] = {
@@ -493,8 +506,8 @@ class ResultViewerWidget(QGroupBox):
             with open(csv_file, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 rows = list(reader)
-                # 只取前3个结果
-                top_results = rows[:3] if len(rows) > 3 else rows
+                # 只取前5个结果
+                top_results = rows[:5] if len(rows) > 5 else rows
 
                 for i, row in enumerate(top_results):
                     species = row.get('物种', 'N/A')
@@ -827,31 +840,140 @@ class ResultViewerWidget(QGroupBox):
             self.file_items.clear()
             self.sequence_items.clear()
             self.result_items.clear()
+            # 清空翻译相关数据
+            self.translation_states.clear()
+            self.original_texts.clear()
+            self.translated_texts.clear()
             # 发送清空信号（如果需要）
     
     def _show_context_menu(self, position):
         """显示上下文菜单"""
         # 获取右键点击的项
         item = self.result_tree.itemAt(position)
-        if item and item.parent() is None:  # 确保是文件节点（父节点）
-            self.current_file_item = item
-            file_name = item.text(0)
-            
+        if item:
             # 创建上下文菜单
             context_menu = QMenu(self)
             
-            # 添加重试菜单项
-            retry_action = QAction("重试比对", self)
-            retry_action.triggered.connect(lambda: self._retry_blast(file_name))
-            context_menu.addAction(retry_action)
+            # 根据节点类型添加不同的菜单项
+            parent = item.parent()
             
-            # 添加导出菜单项
-            export_action = QAction("导出查询信息", self)
-            export_action.triggered.connect(lambda: self._export_query_info(file_name))
-            context_menu.addAction(export_action)
+            if parent is None:  # 文件节点
+                self.current_file_item = item
+                file_name = item.text(0)
+                
+                # 添加重试菜单项
+                retry_action = QAction("重试比对", self)
+                retry_action.triggered.connect(lambda: self._retry_blast(file_name))
+                context_menu.addAction(retry_action)
+                
+                # 添加导出菜单项
+                export_action = QAction("导出查询信息", self)
+                export_action.triggered.connect(lambda: self._export_query_info(file_name))
+                context_menu.addAction(export_action)
+                
+                # 添加翻译菜单项
+                translate_action = QAction("翻译此文件结果", self)
+                translate_action.triggered.connect(lambda: self._translate_item_text(item))
+                context_menu.addAction(translate_action)
+            
+            elif parent.parent() is None:  # 序列节点
+                # 添加翻译菜单项
+                translate_action = QAction("翻译此序列结果", self)
+                translate_action.triggered.connect(lambda: self._translate_item_text(item))
+                context_menu.addAction(translate_action)
+            
+            else:  # 结果节点
+                # 检查该项目是否已经被翻译
+                item_key = self._get_item_key(item)
+                is_translated = self.translation_states.get(item_key, False)
+                
+                if is_translated:
+                    # 如果已翻译，提供显示原文选项
+                    show_original_action = QAction("显示原文", self)
+                    show_original_action.triggered.connect(lambda: self._show_original_text(item))
+                    context_menu.addAction(show_original_action)
+                else:
+                    # 如果未翻译，提供翻译选项
+                    translate_action = QAction("翻译此结果", self)
+                    translate_action.triggered.connect(lambda: self._translate_item_text(item))
+                    context_menu.addAction(translate_action)
             
             # 显示菜单
             context_menu.exec(self.result_tree.mapToGlobal(position))
+    
+    def _get_item_key(self, item):
+        """获取项目唯一键"""
+        # 构建唯一键：[文件名]#[序列ID]#[结果文本]
+        parent = item.parent()
+        if parent is None:  # 文件节点
+            return f"file#{item.text(0)}"
+        elif parent.parent() is None:  # 序列节点
+            file_item = parent
+            file_name = file_item.text(0)
+            sequence_id = item.text(0)
+            return f"sequence#{file_name}#{sequence_id}"
+        else:  # 结果节点
+            sequence_item = parent
+            file_item = sequence_item.parent()
+            file_name = file_item.text(0)
+            sequence_id = sequence_item.text(0)
+            result_text = item.text(0)
+            return f"result#{file_name}#{sequence_id}#{result_text}"
+    
+    def _translate_item_text(self, item):
+        """翻译项目文本"""
+        if not self.biology_translator:
+            QMessageBox.warning(self, "翻译失败", "翻译器未初始化，请检查AI设置")
+            return
+        
+        original_text = item.text(0)
+        item_key = self._get_item_key(item)
+        
+        # 检查是否已经翻译过
+        if self.translation_states.get(item_key, False):
+            # 如果已经翻译过，直接切换到原文
+            self._show_original_text(item)
+            return
+        
+        try:
+            # 保存原始文本
+            self.original_texts[item_key] = original_text
+            
+            # 使用生物学翻译器翻译
+            translated_text = self.biology_translator.translate_text(original_text)
+            
+            # 如果翻译结果包含标识符，去掉标识符
+            if translated_text.startswith(('[AI]', '[本地]')):
+                translated_text = translated_text[4:].strip()
+            
+            # 保存翻译文本
+            self.translated_texts[item_key] = translated_text
+            
+            # 更新显示文本
+            item.setText(0, translated_text)
+            
+            # 记录翻译状态
+            self.translation_states[item_key] = True
+            
+            print(f"翻译成功: {original_text} -> {translated_text}")
+        except Exception as e:
+            QMessageBox.critical(self, "翻译失败", f"翻译过程中发生错误:\n{str(e)}")
+    
+    def _show_original_text(self, item):
+        """显示原始文本"""
+        item_key = self._get_item_key(item)
+        
+        # 检查是否保存了原始文本
+        if item_key in self.original_texts:
+            original_text = self.original_texts[item_key]
+            item.setText(0, original_text)
+            
+            # 更新翻译状态
+            self.translation_states[item_key] = False
+            
+            print(f"已切换到原文: {original_text}")
+        else:
+            QMessageBox.information(self, "提示", "未找到原始文本，无法切换")
     
     def _retry_blast(self, file_name):
         """重试BLAST搜索"""

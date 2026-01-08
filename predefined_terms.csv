@@ -1,9 +1,12 @@
 english,chinese,category
-hypothetical protein,hypothetical protein,gene
-hydrolase,hydrolase,gene
-16S ribosomal RNA gene,16S ribosomal RNA gene,gene
-partial sequence,partial sequence,sequence
-strain,strain,strain
-complete genome,complete genome,sequence
-16S ribosomal RNA,16S ribosomal RNA,gene
-clone,clone,strain
+hydrolase,水解酶,gene
+hypothetical protein,假定蛋白,gene
+16S ribosomal RNA gene,16S核糖体RNA基因,gene
+partial sequence,部分序列,sequence
+strain,菌株,strain
+clone,克隆,strain
+16S rRNA gene,16S rRNA基因,gene
+partial 16S rRNA gene,部分16S rRNA基因,sequence
+complete genome,完整基因组,sequence
+complete sequence,完整序列,sequence
+16S ribosomal RNA,16S核糖体RNA,gene

@@ -118,10 +118,12 @@ class BiologyTranslator:
                     
                     # 回收翻译数据
                     if self.translation_data_manager:
-                        self._collect_translations(text, result)
+                        # 确保存储翻译数据
+                        self.translation_data_manager.add_translation(text, result, "unknown")
+                        print(f"[翻译调试] 已将'{text}'的AI翻译结果存储到本地数据库")
                     
-                    # 更新缓存
-                    self._translation_cache[text] = result
+                    # 更新缓存 - 存储带标识的结果
+                    self._translation_cache[text] = f"[AI]{result}"
                     
                     # 返回AI翻译结果，并添加标识
                     translated = f"[AI]{result}"

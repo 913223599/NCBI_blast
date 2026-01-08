@@ -279,9 +279,9 @@ class MainWindow(QMainWindow):
         # 设置高级参数设置
         advanced_settings = self.parameter_settings.get_advanced_settings()
         
-        # 设置生物学翻译器参数
+        # 设置生物学翻译器参数，现在由右键菜单控制，但初始化时启用AI翻译器
         translation_settings = {
-            'use_ai': advanced_settings.get('use_ai_translation', True),
+            'use_ai': True,  # 默认启用AI翻译器，供右键菜单使用
             'translator_type': advanced_settings.get('translator_type', 'default'),  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
             'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')  # 添加AI模型参数
         }
@@ -459,9 +459,9 @@ class MainWindow(QMainWindow):
         # 获取高级参数设置
         advanced_settings = self.parameter_settings.get_advanced_settings()
         
-        # 设置生物学翻译器参数
+        # 设置生物学翻译器参数，现在由右键菜单控制，但初始化时启用AI翻译器
         translation_settings = {
-            'use_ai': advanced_settings.get('use_ai_translation', True),
+            'use_ai': True,  # 默认启用AI翻译器，供右键菜单使用
             'translator_type': advanced_settings.get('translator_type', 'default'),  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
             'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')  # 添加AI模型参数
         }

@@ -10,6 +10,20 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="\src\results\20260108_154359\ZR-1.1492R.SP508270590001_ZR-1.1492R.SP508270590001_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
+        <entry key="\src\results\20260108_171330\hit_sequences_phage_13168448_blast_result.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="\translation_data.csv">
           <value>
             <Attribute>

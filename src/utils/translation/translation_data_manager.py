@@ -211,8 +211,8 @@ class TranslationDataManager:
             with open(self.csv_file, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow(['english', 'chinese', 'category'])  # 写入标题行，包含分类列
-                # 先写入预定义术语，确保它们不会被覆盖
-                predefined_terms_written = set()
+                # 先收集预定义术语
+                predefined_terms_map = {}
                 predefined_terms_file = Path(__file__).parent.parent.parent.parent / "predefined_terms.csv"
                 if predefined_terms_file.exists():
                     with open(predefined_terms_file, 'r', encoding='utf-8') as pf:
@@ -226,14 +226,17 @@ class TranslationDataManager:
                                     category = 'other'
                                 
                                 if english and chinese:
-                                    writer.writerow([english, chinese, category])
-                                    predefined_terms_written.add(english)
+                                    predefined_terms_map[english] = (chinese, category)
                 
-                # 再写入用户添加的术语，避免重复写入预定义术语
+                # 先写入用户添加的术语（优先级更高）
                 for english, chinese in self.translations.items():
-                    if english not in predefined_terms_written:
-                        # 获取该条目的分类
-                        category = self.term_categories.get(english, 'other')
+                    # 获取该条目的分类
+                    category = self.term_categories.get(english, 'other')
+                    writer.writerow([english, chinese, category])
+                
+                # 再写入预定义术语（但只写入那些用户没有自定义翻译的）
+                for english, (chinese, category) in predefined_terms_map.items():
+                    if english not in self.translations:  # 只有当用户没有提供翻译时才写入预定义术语
                         writer.writerow([english, chinese, category])
         except Exception as e:
             print(f"警告: 保存翻译数据时出错: {e}")

@@ -354,26 +354,7 @@ class ParameterSettingsWidget(QGroupBox):
         thread_layout.addWidget(self.thread_count_spinbox)
         regular_settings_layout.addLayout(thread_layout)
         
-        # 添加AI翻译功能开关和模型选择到常规设置
-        ai_layout = QHBoxLayout()  # 改为水平布局
-        self.ai_translation_checkbox = QCheckBox("启用AI翻译")
-        self.ai_translation_checkbox.setChecked(True)  # 默认启用AI翻译
-        ai_layout.addWidget(self.ai_translation_checkbox)
-        
-        # AI翻译模型选择
-        self.ai_model_combo = QComboBox()
-        self.ai_model_combo.addItem("DeepSeek", "deepseek-r1")
-        self.ai_model_combo.addItem("Qwen-Plus", "qwen-plus")
-        self.ai_model_combo.addItem("Qwen-MT-Plus", "qwen-mt-plus")
-        self.ai_model_combo.addItem("Qwen-MT-Turbo", "qwen-mt-turbo")
-        self.ai_model_combo.addItem("Qwen-Turbo", "qwen-turbo")
-        self.ai_model_combo.setCurrentIndex(0)  # 默认选择DeepSeek
-        self.ai_model_combo.setFixedWidth(120)  # 设置固定宽度
-        # 当启用AI翻译时，启用模型选择
-        self.ai_translation_checkbox.toggled.connect(self.ai_model_combo.setEnabled)
-        ai_layout.addWidget(QLabel("模型:"))
-        ai_layout.addWidget(self.ai_model_combo)
-        regular_settings_layout.addLayout(ai_layout)
+        # AI翻译功能已移除，现在使用右键菜单实现按需翻译
         
         # 将常规设置布局添加到主布局
         main_layout.addLayout(regular_settings_layout)
@@ -397,8 +378,6 @@ class ParameterSettingsWidget(QGroupBox):
         """连接信号"""
         # 连接所有可能改变设置的控件信号到设置改变槽函数
         self.thread_count_spinbox.valueChanged.connect(self._on_settings_changed)
-        self.ai_translation_checkbox.toggled.connect(self._on_settings_changed)
-        self.ai_model_combo.currentTextChanged.connect(self._on_settings_changed)
         self.advanced_settings_button.clicked.connect(self._show_advanced_settings)
     
     def _show_advanced_settings(self):
@@ -463,9 +442,7 @@ class ParameterSettingsWidget(QGroupBox):
             settings = default_settings.copy()
             settings.update(self.advanced_settings)
         
-        # 强制设置AI翻译相关参数，确保使用当前界面状态
-        settings['use_ai_translation'] = self.ai_translation_checkbox.isChecked()
-        settings['ai_translation_model'] = self.ai_model_combo.currentData() if self.ai_translation_checkbox.isChecked() else None
+
         
         return settings
     
@@ -483,13 +460,7 @@ class ParameterSettingsWidget(QGroupBox):
                       'alignments', 'descriptions', 'local_num_threads', 'nucleotide_database',
                       'protein_database', 'prefer_local', 'fallback_to_remote', 'use_cache']:
                 advanced_settings[key] = value
-            elif key == 'use_ai_translation':
-                self.ai_translation_checkbox.setChecked(value)
-            elif key == 'ai_translation_model':
-                if value:
-                    index = self.ai_model_combo.findData(value)
-                    if index >= 0:
-                        self.ai_model_combo.setCurrentIndex(index)
+
         
         # 保存高级参数设置
         self.advanced_settings = advanced_settings
