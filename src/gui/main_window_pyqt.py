@@ -155,8 +155,38 @@ class MainWindow(QMainWindow):
             QSplitter::handle {
                 background-color: #e4e7ed;
             }
-
             
+            /* 树形控件样式 - 包括悬停和选择效果 */
+            QTreeWidget {
+                border: 1px solid #dcdfe6;
+                background-color: #ffffff;
+                alternate-background-color: #f9f9f9;
+                show-decoration-controls: 1;
+            }
+            
+            QTreeWidget::item {
+                border: 1px solid transparent;
+                padding: 4px;
+            }
+            
+            QTreeWidget::item:hover {
+                background-color: #e3f2fd; /* 淡蓝色悬停效果 */
+                border: 1px solid #bbdefb;
+                border-radius: 4px;
+            }
+            
+            QTreeWidget::item:selected {
+                background-color: #d0e7ff;
+                color: #2c3e50;
+            }
+            
+            QTreeWidget::item:selected:active {
+                background-color: #bbdcff;
+            }
+            
+            QTreeWidget::item:selected:!active {
+                background-color: #d0e7ff;
+            }
         """)
     def _create_widgets(self):
         """创建界面组件 (保持原有逻辑)"""
