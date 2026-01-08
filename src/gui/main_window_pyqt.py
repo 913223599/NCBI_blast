@@ -9,10 +9,9 @@ from pathlib import Path
 import shutil
 
 from PyQt6.QtCore import Qt, pyqtSlot
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QMessageBox,
-                             QPushButton, QHBoxLayout, QMenuBar, QMenu, QStatusBar, QSplitter, QDialog)
 from PyQt6.QtGui import QAction
-
+from PyQt6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QSplitter,
+                             QStatusBar, QMessageBox, QDialog, QApplication)
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
@@ -158,6 +157,10 @@ class MainWindow(QMainWindow):
         # 文件菜单
         file_menu = QMenu("文件", self)
         menu_bar.addMenu(file_menu)
+        
+        # 分析菜单
+        analysis_menu = QMenu("分析", self)
+        menu_bar.addMenu(analysis_menu)
         
         # 设置菜单
         settings_menu = QMenu("设置", self)
