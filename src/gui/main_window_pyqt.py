@@ -11,7 +11,7 @@ import shutil
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QSplitter,
-                             QStatusBar, QMessageBox, QDialog, QApplication)
+                             QStatusBar, QMessageBox, QDialog, QApplication, QHBoxLayout, QFrame)
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
@@ -22,7 +22,6 @@ from src.gui.widgets.file_selector import FileSelectorWidget
 from src.gui.widgets.parameter_settings import ParameterSettingsWidget
 from src.gui.widgets.control_panel import ControlPanelWidget
 from src.gui.widgets.result_viewer import ResultViewerWidget
-from src.gui.widgets.summary_panel import SummaryPanelWidget
 from src.gui.widgets.translation_debugger import TranslationDebuggerDialog
 from src.gui.widgets.help_dialog import HelpDialog
 from src.gui.widgets.api_key_dialog import ApiKeyDialog
@@ -57,97 +56,192 @@ def ensure_results_folders():
 
 class MainWindow(QMainWindow):
     """
-    PyQt主窗口类
-    负责创建和管理GUI界面
+    重构后的现代化 UI 主窗口
+    采用 侧边栏(输入) + 主视图(输出) 的布局结构
     """
     
     def __init__(self):
-        """
-        初始化主窗口
-        """
         super().__init__()
-        self.setWindowTitle("NCBI BLAST 查询工具")
-        self.setGeometry(100, 100, 1000, 700)
+        self.setWindowTitle("NCBI BLAST Pro | 生物序列分析工作站") # 稍微高大上一点的标题
+        self.resize(1200, 800) #稍微加大初始尺寸以适应侧边栏
         
-        # 确保结果文件夹存在
         ensure_results_folders()
         
-        # 初始化变量
+        # 初始化变量 (保持不变)
         self.sequence_files = []
         self.results = []
         self.is_processing = False
         self.processing_thread = None
         self.batch_processor = None
-        self.translation_debugger = None  # 翻译调试器实例
-        self.help_dialog = None  # 帮助文档对话框实例
-        self.api_key_dialog = None  # API密钥设置对话框实例
+        self.translation_debugger = None
+        self.help_dialog = None
+        self.api_key_dialog = None
         
-        # 创建界面组件
+        # 1. 应用现代化皮肤
+        self._apply_modern_theme()
+        
+        # 2. 创建组件 (保持不变，但稍后会被放入不同容器)
         self._create_widgets()
         
-        # 创建界面
-        self._setup_ui()
+        # 3. 布局界面 (核心修改点)
+        self._setup_modern_ui()
         
-        # 连接信号
+        # 4. 连接信号 (保持不变)
         self._connect_signals()
-    
+
+    def _apply_modern_theme(self):
+        """应用全局 QSS 样式表 - 按钮背景图版"""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f0f2f5;
+            }
+            QWidget {
+                font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+                font-size: 14px;
+                color: #2c3e50;
+            }
+
+            /* 卡片容器通用样式 */
+            QFrame#Sidebar, QFrame#ContentArea {
+                background-color: transparent;
+                border: none;
+            }
+            QFrame#Card {
+                background-color: #ffffff;
+                border-radius: 10px;
+                border: 1px solid #e0e0e0;
+            }
+
+            /* 分组框优化 */
+            QGroupBox {
+                border: 1px solid #dcdfe6;
+                border-radius: 6px;
+                margin-top: 12px;
+                padding-top: 10px;
+                font-weight: bold;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 5px;
+                color: #409eff;
+            }
+
+            /* 按钮美化 */
+            QPushButton {
+                background-color: #ffffff;
+                border: 1px solid #dcdfe6;
+                border-radius: 4px;
+                padding: 6px 15px;
+                color: #606266;
+            }
+            QPushButton:hover {
+                color: #409eff;
+                border-color: #c6e2ff;
+                background-color: #ecf5ff;
+            }
+            QPushButton:pressed {
+                background-color: #dbeeff;
+            }
+
+            /* 状态栏 */
+            QStatusBar {
+                background-color: #ffffff;
+                color: #909399;
+                border-top: 1px solid #e4e7ed;
+            }
+
+            QSplitter::handle {
+                background-color: #e4e7ed;
+            }
+
+            
+        """)
     def _create_widgets(self):
-        """创建界面组件"""
+        """创建界面组件 (保持原有逻辑)"""
         self.file_selector = FileSelectorWidget()
         self.parameter_settings = ParameterSettingsWidget()
         self.control_panel = ControlPanelWidget()
         self.result_viewer = ResultViewerWidget()
-        self.summary_panel = SummaryPanelWidget()
-    
-    def _setup_ui(self):
+        
+        # 针对特定组件的样式微调 (可选)
+        # 这里可以给特定组件设置 objectName 以便在 QSS 中单独控制
+        self.file_selector.setObjectName("FileSelector")
+
+    def _setup_modern_ui(self):
         """
-        初始化用户界面
+        核心重构：构建 侧边栏 + 主内容区 的布局
         """
-        # 创建菜单栏
         self._create_menu_bar()
         
-        # 创建中央部件
+        # 主容器
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget) # 改为水平布局
+        main_layout.setContentsMargins(15, 15, 15, 15)
+        main_layout.setSpacing(15)
         
-        # 创建主布局
-        main_layout = QVBoxLayout(central_widget)
+        # --- 左侧：侧边栏 (Sidebar) ---
+        sidebar_frame = QFrame()
+        sidebar_frame.setObjectName("Sidebar")
+        sidebar_frame.setFixedWidth(380) # 固定宽度，显得整洁
+        sidebar_layout = QVBoxLayout(sidebar_frame)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(15)
         
-        # 创建水平分割器
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # 1. 文件选择卡片
+        file_card = self._wrap_in_card(self.file_selector)
+        # 2. 参数设置卡片
+        param_card = self._wrap_in_card(self.parameter_settings)
         
-        # 左侧面板（文件选择和结果查看）
-        left_panel = QWidget()
-        left_layout = QVBoxLayout()
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_panel.setLayout(left_layout)
-        left_layout.addWidget(self.file_selector)
-        left_layout.addWidget(self.parameter_settings)
-        left_layout.addWidget(self.control_panel)
-        left_layout.addWidget(self.result_viewer)
+        sidebar_layout.addWidget(file_card, 1) # 权重1，稍微占点空间
+        sidebar_layout.addWidget(param_card, 2) # 权重2，参数通常比较长
         
-        # 右侧面板（统计）
-        self.right_panel = QWidget()
-        right_layout = QVBoxLayout()
-        self.right_panel.setLayout(right_layout)
-        right_layout.addWidget(self.summary_panel)
-
-        # 默认隐藏右侧面板
-        self.right_panel.hide()
-        self.control_panel.toggle_detail_button.setText("显示统计信息")
+        # --- 右侧：主工作区 (Content Area) ---
+        content_frame = QFrame()
+        content_frame.setObjectName("ContentArea")
+        content_layout = QVBoxLayout(content_frame)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(15)
         
-        # 添加面板到分割器
-        splitter.addWidget(left_panel)
-        splitter.addWidget(self.right_panel)
-        splitter.setSizes([400, 200])  # 调整初始大小，因为不需要显示详细信息
+        # 1. 顶部控制栏卡片 (进度条、开始按钮)
+        control_card = self._wrap_in_card(self.control_panel)
+        control_card.setFixedHeight(100) # 限制高度，使其像个工具栏
         
-        # 将分割器添加到主布局
-        main_layout.addWidget(splitter)
+        # 2. 核心结果区 (仅结果查看器)
+        result_container = self._wrap_in_card(self.result_viewer)
         
-        # 创建状态栏
+        content_layout.addWidget(control_card)
+        content_layout.addWidget(result_container)
+        
+        # 将左右两部分加入主布局
+        main_layout.addWidget(sidebar_frame)
+        main_layout.addWidget(content_frame)
+        
+        # 状态栏
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("就绪")
+        self.status_bar.showMessage("系统就绪")
+
+    def _wrap_in_card(self, widget):
+        """辅助函数：将任何组件包裹在一个白色圆角卡片中"""
+        card = QFrame()
+        card.setObjectName("Card")
+        
+        # 添加阴影效果 (可选，稍微增加质感)
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt6.QtGui import QColor
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setColor(QColor(0, 0, 0, 20)) # 淡淡的黑色阴影
+        shadow.setOffset(0, 2)
+        card.setGraphicsEffect(shadow)
+        
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 10, 10, 10) # 卡片内边距
+        layout.addWidget(widget)
+        return card
     
     def _create_menu_bar(self):
         """创建菜单栏"""
@@ -195,7 +289,6 @@ class MainWindow(QMainWindow):
         # 控制面板信号
         self.control_panel.start_button.clicked.connect(self._start_processing)
         self.control_panel.stop_button.clicked.connect(self._stop_processing)
-        self.control_panel.toggle_detail_button.clicked.connect(self._toggle_detail_panel)  # 连接切换按钮信号
         
         # 结果查看器信号
         self.result_viewer.signals.item_selected.connect(self._on_item_selected)
@@ -210,14 +303,7 @@ class MainWindow(QMainWindow):
             self.processing_thread.processing_error.connect(self._on_processing_error)
             self.processing_thread.finished.connect(self._on_thread_finished)
     
-    def _toggle_detail_panel(self):
-        """切换统计信息面板显示/隐藏"""
-        if self.right_panel.isVisible():
-            self.right_panel.hide()
-            self.control_panel.toggle_detail_button.setText("显示统计信息")
-        else:
-            self.right_panel.show()
-            self.control_panel.toggle_detail_button.setText("隐藏统计信息")
+
     
     def _on_files_selected(self, files):
         """处理文件选择事件"""
@@ -390,14 +476,13 @@ class MainWindow(QMainWindow):
         # 更新树形视图中的状态
         self.result_viewer.update_file_status(result)
         
-        # 更新统计信息
-        self.summary_panel.update_summary(self.results)
+
     
     def _on_all_tasks_complete(self, total_tasks):
         """处理所有任务完成事件"""
         self.control_panel.set_status("处理完成")
         self.statusBar().showMessage("处理完成")
-        self.summary_panel.update_summary(self.results)
+
     
     def _on_processing_error(self, error_message):
         """处理错误事件"""
