@@ -5,6 +5,7 @@
       <excludeFolder url="file://$MODULE_DIR$/src/cache" />
       <excludeFolder url="file://$MODULE_DIR$/src/results" />
       <excludeFolder url="file://$MODULE_DIR$/dist" />
+      <excludeFolder url="file://$MODULE_DIR$/build" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

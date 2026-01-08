@@ -67,7 +67,7 @@ class ProjectAnalyzer:
         try:
             content = file_path.read_text(encoding='utf-8', errors='ignore')
             return '__main__' in content or 'if __name__ == "__main__"' in content
-        except:
+        except (IOError, OSError):
             return False
     
     def _is_data_file(self, filename: str) -> bool:

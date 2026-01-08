@@ -3,11 +3,31 @@
 负责批量处理序列文件的BLAST查询
 """
 
+import logging
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
+
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+# 常量定义
+NUCLEOTIDE_CHARS = set('ATCGNU')
+PROTEIN_CHARS = set('KERYWHDNQSTVRLEAICGPMF')
+MIN_SEQUENCE_LENGTH = 5
+DEFAULT_HITLIST_SIZE = 10
+DEFAULT_EVALUE = 0.1
+DEFAULT_ALIGNMENTS = 100
+DEFAULT_DESCRIPTIONS = 100
+NUCLEOTIDE_THRESHOLD = 0.7  # 70%以上是核苷酸字符
+PROTEIN_THRESHOLD = 0.7  # 70%以上是蛋白质字符
+MIN_PROTEIN_SEQ_LENGTH = 10  # 最小蛋白质序列长度
 
 from src.utils.file_handler import FileHandler
 from .executor import BlastExecutor, delay_before_request
@@ -238,9 +258,9 @@ class BatchProcessor:
         sequence_upper = sequence.upper()
         
         # 核苷酸字符集合
-        nucleotide_chars = set('ATCGNU')
+        nucleotide_chars = NUCLEOTIDE_CHARS
         # 蛋白质特有字符集合
-        protein_chars = set('KERYWHDNQSTVRLEAICGPMF')
+        protein_chars = PROTEIN_CHARS
         
         # 过滤掉非字母字符
         seq_chars = set(c for c in sequence_upper if c.isalpha())
@@ -251,51 +271,67 @@ class BatchProcessor:
         
         # 如果序列中同时包含核苷酸和蛋白质字符，根据比例判断
         if nucleotide_count > 0 and protein_count > 0:
-            # 检查序列中是否包含核苷酸模式（连续的A,T,G,C字符）
-            import re
-            nucleotide_pattern = r'[ATCGU]{3,}'  # 至少3个连续的核苷酸字符
-            protein_pattern = r'[KERYWHDNQSTVRLEAICGPMF]{3,}'  # 至少3个连续的蛋白质字符
-            
-            has_nucleotide_pattern = bool(re.search(nucleotide_pattern, sequence_upper))
-            has_protein_pattern = bool(re.search(protein_pattern, sequence_upper))
-            
-            if has_nucleotide_pattern and not has_protein_pattern:
-                return 'nucleotide'
-            elif has_protein_pattern and not has_nucleotide_pattern:
-                return 'protein'
-            elif has_protein_pattern and has_nucleotide_pattern:
-                # 如果都有，根据序列长度和字符比例判断
-                total_len = len(sequence_upper)
-                protein_chars_in_seq = sum(1 for c in sequence_upper if c in protein_chars)
-                nucleotide_chars_in_seq = sum(1 for c in sequence_upper if c in nucleotide_chars)
-                
-                protein_ratio = protein_chars_in_seq / total_len if total_len > 0 else 0
-                nucleotide_ratio = nucleotide_chars_in_seq / total_len if total_len > 0 else 0
-                
-                if protein_ratio > nucleotide_ratio:
-                    return 'protein'
-                else:
-                    return 'nucleotide'
+            return self._detect_sequence_type_both_present(sequence_upper, nucleotide_chars, protein_chars)
         
         # 如果只包含一种类型的字符
         elif nucleotide_count > 0 and protein_count == 0:
             # 检查是否主要是核苷酸字符
             nucleotide_seq_chars = [c for c in sequence_upper if c in nucleotide_chars]
-            if len(nucleotide_seq_chars) / len(sequence_upper) > 0.7:  # 70%以上是核苷酸字符
+            if len(nucleotide_seq_chars) / len(sequence_upper) > NUCLEOTIDE_THRESHOLD:  # 70%以上是核苷酸字符
                 return 'nucleotide'
         
         elif protein_count > 0 and nucleotide_count == 0:
             # 检查是否主要是蛋白质字符
             protein_seq_chars = [c for c in sequence_upper if c in protein_chars]
-            if len(protein_seq_chars) / len(sequence_upper) > 0.7:  # 70%以上是蛋白质字符
+            if len(protein_seq_chars) / len(sequence_upper) > PROTEIN_THRESHOLD:  # 70%以上是蛋白质字符
                 return 'protein'
         
         # 默认情况下，如果序列较长且包含蛋白质字符，认为是蛋白质序列
-        if len(sequence_upper) > 10 and protein_count > 0:
+        if len(sequence_upper) > MIN_PROTEIN_SEQ_LENGTH and protein_count > 0:
             return 'protein'
         
         # 否则默认为核苷酸序列
         return 'nucleotide'
+    
+    def _detect_sequence_type_both_present(self, sequence_upper, nucleotide_chars, protein_chars):
+        """
+        当序列同时包含核苷酸和蛋白质字符时判断类型
+        
+        Args:
+            sequence_upper (str): 大写的序列字符串
+            nucleotide_chars (set): 核苷酸字符集合
+            protein_chars (set): 蛋白质字符集合
+            
+        Returns:
+            str: 'nucleotide' 或 'protein'
+        """
+        # 检查序列中是否包含核苷酸模式（连续的A,T,G,C字符）
+        nucleotide_pattern = r'[ATCGU]{3,}'  # 至少3个连续的核苷酸字符
+        protein_pattern = r'[KERYWHDNQSTVRLEAICGPMF]{3,}'  # 至少3个连续的蛋白质字符
+        
+        has_nucleotide_pattern = bool(re.search(nucleotide_pattern, sequence_upper))
+        has_protein_pattern = bool(re.search(protein_pattern, sequence_upper))
+        
+        if has_nucleotide_pattern and not has_protein_pattern:
+            return 'nucleotide'
+        elif has_protein_pattern and not has_nucleotide_pattern:
+            return 'protein'
+        elif has_protein_pattern and has_nucleotide_pattern:
+            # 如果都有，根据序列长度和字符比例判断
+            total_len = len(sequence_upper)
+            protein_chars_in_seq = sum(1 for c in sequence_upper if c in protein_chars)
+            nucleotide_chars_in_seq = sum(1 for c in sequence_upper if c in nucleotide_chars)
+            
+            protein_ratio = protein_chars_in_seq / total_len if total_len > 0 else 0
+            nucleotide_ratio = nucleotide_chars_in_seq / total_len if total_len > 0 else 0
+            
+            if protein_ratio > nucleotide_ratio:
+                return 'protein'
+            else:
+                return 'nucleotide'
+        else:
+            # 默认返回核苷酸
+            return 'nucleotide'
     
     def process_sequences(self, sequence_files):
         """
@@ -605,9 +641,9 @@ class MultiSequenceBatchProcessor:
         sequence_upper = sequence.upper()
         
         # 核苷酸字符集合
-        nucleotide_chars = set('ATCGNU')
+        nucleotide_chars = NUCLEOTIDE_CHARS
         # 蛋白质特有字符集合
-        protein_chars = set('KERYWHDNQSTVRLEAICGPMF')
+        protein_chars = PROTEIN_CHARS
         
         # 过滤掉非字母字符
         seq_chars = set(c for c in sequence_upper if c.isalpha())
@@ -618,51 +654,67 @@ class MultiSequenceBatchProcessor:
         
         # 如果序列中同时包含核苷酸和蛋白质字符，根据比例判断
         if nucleotide_count > 0 and protein_count > 0:
-            # 检查序列中是否包含核苷酸模式（连续的A,T,G,C字符）
-            import re
-            nucleotide_pattern = r'[ATCGU]{3,}'  # 至少3个连续的核苷酸字符
-            protein_pattern = r'[KERYWHDNQSTVRLEAICGPMF]{3,}'  # 至少3个连续的蛋白质字符
-            
-            has_nucleotide_pattern = bool(re.search(nucleotide_pattern, sequence_upper))
-            has_protein_pattern = bool(re.search(protein_pattern, sequence_upper))
-            
-            if has_nucleotide_pattern and not has_protein_pattern:
-                return 'nucleotide'
-            elif has_protein_pattern and not has_nucleotide_pattern:
-                return 'protein'
-            elif has_protein_pattern and has_nucleotide_pattern:
-                # 如果都有，根据序列长度和字符比例判断
-                total_len = len(sequence_upper)
-                protein_chars_in_seq = sum(1 for c in sequence_upper if c in protein_chars)
-                nucleotide_chars_in_seq = sum(1 for c in sequence_upper if c in nucleotide_chars)
-                
-                protein_ratio = protein_chars_in_seq / total_len if total_len > 0 else 0
-                nucleotide_ratio = nucleotide_chars_in_seq / total_len if total_len > 0 else 0
-                
-                if protein_ratio > nucleotide_ratio:
-                    return 'protein'
-                else:
-                    return 'nucleotide'
+            return self._detect_sequence_type_both_present(sequence_upper, nucleotide_chars, protein_chars)
         
         # 如果只包含一种类型的字符
         elif nucleotide_count > 0 and protein_count == 0:
             # 检查是否主要是核苷酸字符
             nucleotide_seq_chars = [c for c in sequence_upper if c in nucleotide_chars]
-            if len(nucleotide_seq_chars) / len(sequence_upper) > 0.7:  # 70%以上是核苷酸字符
+            if len(nucleotide_seq_chars) / len(sequence_upper) > NUCLEOTIDE_THRESHOLD:  # 70%以上是核苷酸字符
                 return 'nucleotide'
         
         elif protein_count > 0 and nucleotide_count == 0:
             # 检查是否主要是蛋白质字符
             protein_seq_chars = [c for c in sequence_upper if c in protein_chars]
-            if len(protein_seq_chars) / len(sequence_upper) > 0.7:  # 70%以上是蛋白质字符
+            if len(protein_seq_chars) / len(sequence_upper) > PROTEIN_THRESHOLD:  # 70%以上是蛋白质字符
                 return 'protein'
         
         # 默认情况下，如果序列较长且包含蛋白质字符，认为是蛋白质序列
-        if len(sequence_upper) > 10 and protein_count > 0:
+        if len(sequence_upper) > MIN_PROTEIN_SEQ_LENGTH and protein_count > 0:
             return 'protein'
         
         # 否则默认为核苷酸序列
         return 'nucleotide'
+    
+    def _detect_sequence_type_both_present(self, sequence_upper, nucleotide_chars, protein_chars):
+        """
+        当序列同时包含核苷酸和蛋白质字符时判断类型
+        
+        Args:
+            sequence_upper (str): 大写的序列字符串
+            nucleotide_chars (set): 核苷酸字符集合
+            protein_chars (set): 蛋白质字符集合
+            
+        Returns:
+            str: 'nucleotide' 或 'protein'
+        """
+        # 检查序列中是否包含核苷酸模式（连续的A,T,G,C字符）
+        nucleotide_pattern = r'[ATCGU]{3,}'  # 至少3个连续的核苷酸字符
+        protein_pattern = r'[KERYWHDNQSTVRLEAICGPMF]{3,}'  # 至少3个连续的蛋白质字符
+        
+        has_nucleotide_pattern = bool(re.search(nucleotide_pattern, sequence_upper))
+        has_protein_pattern = bool(re.search(protein_pattern, sequence_upper))
+        
+        if has_nucleotide_pattern and not has_protein_pattern:
+            return 'nucleotide'
+        elif has_protein_pattern and not has_nucleotide_pattern:
+            return 'protein'
+        elif has_protein_pattern and has_nucleotide_pattern:
+            # 如果都有，根据序列长度和字符比例判断
+            total_len = len(sequence_upper)
+            protein_chars_in_seq = sum(1 for c in sequence_upper if c in protein_chars)
+            nucleotide_chars_in_seq = sum(1 for c in sequence_upper if c in nucleotide_chars)
+            
+            protein_ratio = protein_chars_in_seq / total_len if total_len > 0 else 0
+            nucleotide_ratio = nucleotide_chars_in_seq / total_len if total_len > 0 else 0
+            
+            if protein_ratio > nucleotide_ratio:
+                return 'protein'
+            else:
+                return 'nucleotide'
+        else:
+            # 默认返回核苷酸
+            return 'nucleotide'
     
     def process_sequences_from_file(self, sequence_file):
         """
@@ -674,12 +726,12 @@ class MultiSequenceBatchProcessor:
         Returns:
             list: 处理结果列表
         """
-        print(f"开始处理文件 {Path(sequence_file).name} 中的多条序列...")
-        print(f"使用 {self.max_workers} 个线程进行处理（减少并发以避免NCBI限制）")
+        logger.info(f"开始处理文件 {Path(sequence_file).name} 中的多条序列...")
+        logger.info(f"使用 {self.max_workers} 个线程进行处理（减少并发以避免NCBI限制）")
         
         # 读取文件中的所有序列
         sequences = self.file_handler.read_fasta_file(sequence_file)
-        print(f"在文件中找到 {len(sequences)} 个序列")
+        logger.info(f"在文件中找到 {len(sequences)} 个序列")
         
         if not sequences:
             return []
@@ -709,15 +761,15 @@ class MultiSequenceBatchProcessor:
                     result = future.result()
                     results.append(result)
                     if result["status"] == "success":
-                        print(f"✓ 完成处理: {seq_info['id']}")
+                        logger.info(f"✓ 完成处理: {seq_info['id']}")
                     else:
-                        print(f"✗ 处理失败: {seq_info['id']} - {result['error']}")
+                        logger.error(f"✗ 处理失败: {seq_info['id']} - {result['error']}")
                     
                     # 发送结果
                     if self.on_result_received:
                         self.on_result_received(result)
                 except Exception as e:
-                    print(f"✗ 处理序列 {seq_info['id']} 时发生异常: {e}")
+                    logger.error(f"✗ 处理序列 {seq_info['id']} 时发生异常: {e}")
                     error_result = {
                         "file": sequence_file,
                         "sequence_id": seq_info['id'],

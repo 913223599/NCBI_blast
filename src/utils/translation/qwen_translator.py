@@ -48,7 +48,7 @@ class QwenTranslator:
                 from ...utils.config_manager import get_config_manager
                 config_manager = get_config_manager()
                 self.api_key = config_manager.get_api_key('dashscope')
-            except Exception:
+            except (ImportError, AttributeError):
                 # 如果配置管理器不可用，则api_key保持为空
                 pass
         

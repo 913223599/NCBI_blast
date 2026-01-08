@@ -381,7 +381,7 @@ class MainWindow(QMainWindow):
         self.result_viewer.update()
         try:
             QApplication.processEvents()  # 强制处理UI事件
-        except:
+        except AttributeError:
             pass  # 如果QApplication不可用，忽略这个调用
         
         try:
@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
             from src.utils.config_manager import get_config_manager
             config_manager = get_config_manager()
             api_key = config_manager.get_api_key('dashscope')
-        except Exception as e:
+        except (ImportError, AttributeError) as e:
             print(f"获取API密钥失败: {e}")
         
         # 设置结果查看器的翻译配置
@@ -441,7 +441,7 @@ class MainWindow(QMainWindow):
                 if len(sequences) > 1:
                     has_multi_sequence_files = True
                     break
-            except Exception as e:
+            except (FileNotFoundError, IOError, ValueError) as e:
                 print(f"检查文件 {file_path} 时出错: {e}")
     
         # 根据文件类型选择处理器

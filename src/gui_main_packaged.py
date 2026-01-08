@@ -59,34 +59,30 @@ try:
 
     print("Importing main function...")
     
-    # 直接尝试导入application_pyqt模块
-    try:
+    def try_import_main():
         # 尝试直接从src.gui导入
-        from src.gui.application_pyqt import main
-        print("Successfully imported from src.gui.application_pyqt")
-    except ImportError as e:
-        print(f"Import error from src.gui: {e}")
-        # 如果上面失败，尝试直接导入
         try:
-            import src.gui.application_pyqt
-            main = src.gui.application_pyqt.main
-            print("Successfully imported main function via module reference")
-        except ImportError as e2:
-            print(f"Second import error: {e2}")
-            # 如果还是失败，尝试从当前目录导入
+            from src.gui.application_pyqt import main
+            print("Successfully imported from src.gui.application_pyqt")
+            return main
+        except ImportError as e1:
+            print(f"Import error from src.gui: {e1}")
+            # 如果上面失败，尝试从当前目录导入
             try:
                 # 添加当前目录到路径
                 current_dir = os.path.dirname(os.path.abspath(__file__))
                 if current_dir not in sys.path:
                     sys.path.insert(0, current_dir)
                 
-                import gui.application_pyqt
-                main = gui.application_pyqt.main
-                print("Successfully imported from gui.application_pyqt")
-            except ImportError as e3:
-                print(f"Final import error: {e3}")
+                from application_pyqt import main
+                print("Successfully imported from application_pyqt")
+                return main
+            except ImportError as e2:
+                print(f"Final import error: {e2}")
                 traceback.print_exc()
                 raise
+
+    main = try_import_main()
 
     print("Calling main function...")
     if __name__ == "__main__":

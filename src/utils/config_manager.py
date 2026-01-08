@@ -5,6 +5,7 @@
 
 import json
 import threading
+import logging
 from pathlib import Path
 
 
@@ -86,7 +87,7 @@ class ConfigManager:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     self.config_data = json.load(f)
             except Exception as e:
-                print(f"警告: 加载配置文件时出错: {e}，将使用默认配置")
+                logging.warning(f"加载配置文件时出错: {e}，将使用默认配置")
                 self.config_data = {}
                 modified = True
         else:
@@ -127,7 +128,7 @@ class ConfigManager:
                     json.dump(self.config_data, f, indent=2, ensure_ascii=False)
                 # print(f"配置已保存至: {self.config_file}") # 调试用
         except Exception as e:
-            print(f"错误: 保存配置文件时出错: {e}")
+            logging.error(f"保存配置文件时出错: {e}")
 
     def get_api_key(self, service: str) -> str:
         return self.config_data.get("api_keys", {}).get(service, "")

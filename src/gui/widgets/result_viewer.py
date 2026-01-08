@@ -513,7 +513,7 @@ class ResultViewerWidget(QGroupBox):
                             sequences.append(seq_id)
             else:
                 sequences.append(path.stem)
-        except:
+        except (IOError, OSError, UnicodeDecodeError):
             sequences = ["sequence_1"]  # Fallback
         return sequences
 

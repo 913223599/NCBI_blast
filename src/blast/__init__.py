@@ -10,9 +10,9 @@ __all__ = [
     'BlastResultParser', 
     'BatchProcessor',
     'MultiSequenceBatchProcessor',
+    'BlastExecutor',
     'LocalBlastExecutor',
     'LocalBatchProcessor',
-    'HybridBlastProcessor',
     'BlastResultCache',
     'CachedBlastProcessor'
 ]
