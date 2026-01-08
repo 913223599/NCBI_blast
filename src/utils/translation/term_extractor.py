@@ -1,6 +1,7 @@
 """
 术语提取和存储模块
 用于从生物学术语中提取关键术语并存储到翻译数据库中
+I/O 优化版 - 使用内存缓存提高性能
 """
 
 import re
@@ -12,7 +13,7 @@ from pathlib import Path
 
 class TermExtractor:
     """
-    术语提取器
+    术语提取器 - I/O 优化版
     专门用于从生物学术语中提取关键术语并存储到翻译数据库中
     """
 
@@ -24,6 +25,36 @@ class TermExtractor:
             translation_data_manager: 翻译数据管理器实例
         """
         self.translation_data_manager = translation_data_manager
+        
+        # [优化点 1] 初始化时加载预定义术语到内存缓存
+        self._predefined_terms_cache = {}
+        self._load_predefined_terms_to_cache()
+
+    def _load_predefined_terms_to_cache(self):
+        """[新增方法] 将预定义术语加载到内存缓存"""
+        try:
+            # 确定预定义术语文件路径 (保持原逻辑)
+            predefined_terms_file = Path(__file__).parent.parent.parent.parent / "predefined_terms.csv"
+            
+            if predefined_terms_file.exists():
+                with open(predefined_terms_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        term = row['english'].strip()
+                        category = row['category'].strip()
+                        chinese = row['chinese'].strip()
+                        
+                        # 构建多级索引缓存: cache[term] = {'chinese': xxx, 'category': xxx}
+                        # 同时也支持 (term, category) 的快速查找
+                        if term not in self._predefined_terms_cache:
+                            self._predefined_terms_cache[term] = []
+                        
+                        self._predefined_terms_cache[term].append({
+                            'chinese': chinese,
+                            'category': category
+                        })
+        except Exception as e:
+            print(f"警告: 预加载术语库失败: {e}")
 
     def extract_and_store_key_terms(self, original: str, translated: str):
         """
@@ -148,38 +179,28 @@ class TermExtractor:
 
     def _translate_term_from_db(self, term: str, category: str = None) -> str:
         """
-        从预定义术语数据库中获取术语翻译
-        
-        Args:
-            term (str): 英文术语
-            category (str): 术语类别（可选）
-            
-        Returns:
-            str: 中文翻译
+        从内存缓存中获取术语翻译 (替代原有的文件读取方法)
         """
-        # 确定预定义术语文件路径
-        predefined_terms_file = Path(__file__).parent.parent.parent.parent / "predefined_terms.csv"
-        
-        # 如果文件不存在，返回原术语
-        if not predefined_terms_file.exists():
+        if not term:
             return term
             
-        try:
-            # 读取预定义术语文件
-            with open(predefined_terms_file, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    # 精确匹配术语
-                    if row['english'].strip() == term.strip():
-                        return row['chinese'].strip()
-                    
-                    # 如果指定了类别，也检查类别是否匹配
-                    if category and row['category'].strip() == category.strip() and row['english'].strip() == term.strip():
-                        return row['chinese'].strip()
-        except Exception as e:
-            print(f"读取预定义术语文件时出错: {e}")
+        term_key = term.strip()
+        
+        # 1. 检查缓存中是否有该术语
+        if term_key in self._predefined_terms_cache:
+            candidates = self._predefined_terms_cache[term_key]
             
-        # 如果没有找到匹配的翻译，返回原术语
+            # 2. 如果指定了分类，优先精确匹配
+            if category:
+                for item in candidates:
+                    if item['category'] == category.strip():
+                        return item['chinese']
+            
+            # 3. 如果没指定分类，或者分类未匹配到，返回第一个匹配项
+            if candidates:
+                return candidates[0]['chinese']
+                
+        # 如果缓存未命中，返回原术语
         return term
 
     def _translate_gene_term(self, gene_term: str) -> str:

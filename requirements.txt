@@ -1,5 +1,5 @@
 # 自动生成的依赖文件
 PyQt6>=6.4.0
-biopython>=1.80
-openai>=0.27.0
 pandas>=1.5.0
+openai>=0.27.0
+biopython>=1.80
