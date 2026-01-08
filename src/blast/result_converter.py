@@ -3,11 +3,10 @@ BLAST结果转换模块
 负责将BLAST的XML格式结果转换为CSV格式
 """
 
-import xml.etree.ElementTree as ET
 import csv
 import re
 from pathlib import Path
-from typing import List, Dict
+
 from Bio.Blast import NCBIXML
 
 from src.utils.translation import get_blast_result_translator

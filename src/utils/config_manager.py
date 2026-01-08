@@ -6,7 +6,6 @@
 import json
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional
 
 
 class ConfigManager:

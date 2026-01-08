@@ -2,12 +2,12 @@
 帮助对话框模块（PyQt6版本）
 """
 
-import sys
 import os
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-                             QTextEdit, QLabel)
-from PyQt6.QtCore import Qt
+import sys
+
 from PyQt6.QtGui import QTextOption
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
+                             QTextEdit)
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))

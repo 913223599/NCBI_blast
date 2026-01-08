@@ -3,11 +3,7 @@
 用于翻译生物学领域的专业术语，支持本地数据和AI翻译
 """
 
-import csv
-import re
-from typing import Optional, Dict, List
-import logging
-
+from typing import Optional
 
 # 导入通义千问翻译器
 try:

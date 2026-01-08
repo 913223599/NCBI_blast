@@ -6,13 +6,12 @@ PyQt主窗口模块
 import os
 import sys
 from pathlib import Path
-import shutil
 
-from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QSplitter,
-                             QStatusBar, QMessageBox, QDialog, QApplication, QHBoxLayout, QFrame)
-from src.utils.config_manager import get_config_manager
+from PyQt6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QStatusBar, QMessageBox, QDialog,
+                             QApplication, QHBoxLayout, QFrame)
+
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:

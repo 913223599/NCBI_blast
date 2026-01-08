@@ -3,14 +3,14 @@
 负责参数设置相关的GUI组件
 """
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QCheckBox, QSpinBox, QComboBox, QLineEdit,
-    QLabel, QPushButton, QDialog, QTabWidget,
-    QFrame, QScrollArea
-)
 from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox, QComboBox, QLineEdit,
+    QLabel, QPushButton, QDialog, QTabWidget
+)
+
 from src.utils.config_manager import get_config_manager  # [关键修复] 导入配置管理器
+
 
 # =============================================================================
 #  高级参数设置对话框 (现代化 Tab 布局)

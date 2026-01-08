@@ -4,9 +4,10 @@ BLAST执行器模块
 """
 
 import ssl
-import time
 import threading
+import time
 from urllib.request import HTTPSHandler, build_opener, install_opener
+
 from Bio.Blast import NCBIWWW
 
 # 全局请求计数器和锁，用于控制请求频率

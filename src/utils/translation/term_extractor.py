@@ -4,11 +4,9 @@
 I/O 优化版 - 使用内存缓存提高性能
 """
 
-import re
 import csv
-import os
-from typing import List, Tuple, Optional
 from pathlib import Path
+from typing import Tuple
 
 
 class TermExtractor:

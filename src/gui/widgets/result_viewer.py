@@ -7,11 +7,11 @@ import csv
 import shutil
 import traceback
 from pathlib import Path
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QTreeWidget,
+
+from PyQt6.QtCore import pyqtSignal, QObject, Qt, QThread
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import (QVBoxLayout, QPushButton, QTreeWidget,
                              QTreeWidgetItem, QFileDialog, QMessageBox, QHeaderView, QMenu, QHBoxLayout, QGroupBox)
-from PyQt6.QtCore import pyqtSignal, QObject, Qt, QThread, pyqtSlot
-from PyQt6.QtGui import QColor, QAction
-from PyQt6.QtWidgets import QApplication
 
 from src.utils.translation import get_blast_result_translator
 

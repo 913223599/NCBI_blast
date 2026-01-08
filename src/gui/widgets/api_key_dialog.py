@@ -3,12 +3,11 @@ API密钥设置对话框模块
 负责提供API密钥的设置和管理界面
 """
 
-import sys
 import os
-import json
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
+import sys
+
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QLineEdit, QMessageBox)
-from PyQt6.QtCore import Qt
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))

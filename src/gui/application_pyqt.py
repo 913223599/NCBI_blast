@@ -3,6 +3,7 @@ PyQt6应用程序主类
 """
 
 import sys
+
 from PyQt6.QtWidgets import QApplication
 
 from src.gui.main_window_pyqt import MainWindow

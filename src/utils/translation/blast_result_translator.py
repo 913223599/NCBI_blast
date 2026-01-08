@@ -5,8 +5,9 @@ BLAST结果翻译模块
 
 import csv
 import os
-from typing import Dict
 from pathlib import Path
+from typing import Dict
+
 import pandas as pd
 
 

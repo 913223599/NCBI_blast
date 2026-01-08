@@ -5,8 +5,8 @@
 
 import os
 from pathlib import Path
+
 from Bio import SeqIO
-from io import StringIO
 
 
 class FileHandler:

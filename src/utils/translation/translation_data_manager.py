@@ -5,8 +5,8 @@
 
 import csv
 import os
-from typing import Dict, Optional, Tuple, List
 from pathlib import Path
+from typing import Dict, Optional
 
 
 class TranslationDataManager:

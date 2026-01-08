@@ -6,15 +6,12 @@ NCBI BLAST GUI 完整自动化打包脚本 - 修复版本
 支持后续项目迭代时的一键打包
 """
 
-import os
-import sys
 import ast
+import os
 import subprocess
-import json
-import tempfile
+import sys
 from pathlib import Path
 from typing import List, Dict, Set, Tuple
-import re
 
 
 class ProjectAnalyzer:
@@ -466,21 +463,29 @@ def run_pyinstaller(spec_file: str):
         print("正在验证spec文件语法...")
         result_syntax = subprocess.run([
             sys.executable, "-m", "py_compile", spec_file
-        ], check=True, capture_output=True, text=True)
+        ], check=True, capture_output=True, text=True, encoding='utf-8')
         print("spec文件语法验证通过")
         
+        # 使用二进制模式捕获输出，然后手动解码以避免字符编码问题
         result = subprocess.run([
             sys.executable, "-m", "PyInstaller", spec_file, "--clean"
-        ], check=True, capture_output=True, text=True)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        
+        # 解码输出时处理可能的编码问题
+        stdout_str = result.stdout.decode('utf-8', errors='replace')
+        stderr_str = result.stderr.decode('utf-8', errors='replace')
+        
         print("打包完成")
-        print("详细输出:", result.stdout[-500:] if len(result.stdout) > 500 else result.stdout)  # 只显示最后500个字符
+        print("详细输出:", stdout_str[-500:] if len(stdout_str) > 500 else stdout_str)  # 只显示最后500个字符
         return True
     except subprocess.CalledProcessError as e:
         print(f"打包失败: {e}")
-        if hasattr(e, 'stderr') and e.stderr:
-            print(f"错误输出: {e.stderr}")
-        else:
-            print("错误输出: 未知错误")
+        # 处理可能的输出解码
+        try:
+            stderr_str = e.stderr.decode('utf-8', errors='replace') if isinstance(e.stderr, bytes) else str(e.stderr)
+        except AttributeError:
+            stderr_str = str(e.stderr) if e.stderr else "未知错误"
+        print(f"错误输出: {stderr_str}")
         return False
     except FileNotFoundError:
         print("错误: 未找到PyInstaller，请先安装PyInstaller: pip install pyinstaller")

@@ -6,8 +6,8 @@ PyQt GUI主程序入口 - 用于打包版本
 负责初始化和启动PyQt GUI应用程序
 """
 
-import sys
 import os
+import sys
 import traceback
 
 # 修复在--windowed模式下丢失stdin/stdout的问题

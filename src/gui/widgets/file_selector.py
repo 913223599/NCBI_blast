@@ -3,9 +3,10 @@
 """
 
 from pathlib import Path
-from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QHBoxLayout, QPushButton, 
+
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import (QGroupBox, QVBoxLayout, QHBoxLayout, QPushButton,
                              QListWidget, QFileDialog, QMessageBox)
-from PyQt6.QtCore import pyqtSignal, QObject
 
 
 class FileSelectorWidget(QGroupBox):

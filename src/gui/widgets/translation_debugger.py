@@ -3,11 +3,11 @@
 负责提供一个独立的界面用于调试AI翻译功能
 """
 
-import sys
 import os
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QTextEdit, QLabel, QMessageBox, QGroupBox, QFormLayout)
-from PyQt6.QtCore import pyqtSignal
+import sys
+
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+                             QTextEdit, QLabel, QMessageBox, QGroupBox)
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))

@@ -6,14 +6,14 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 from src.utils.file_handler import FileHandler
 from .executor import BlastExecutor, delay_before_request
 from .parser import BlastResultParser
-from .result_converter import BlastResultConverter
 from .result_cache import BlastResultCache
+from .result_converter import BlastResultConverter
 
 
 class BatchProcessor:
