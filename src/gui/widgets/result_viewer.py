@@ -426,7 +426,7 @@ class ResultViewerWidget(QGroupBox):
         return item
 
     def _display_top_results(self, parent_item, csv_file):
-        """显示前 5 个比对结果"""
+        """显示前 5 个比对结果 - [优化版]"""
         self._clear_result_children(parent_item)
 
         if not Path(csv_file).exists():
@@ -435,10 +435,13 @@ class ResultViewerWidget(QGroupBox):
         try:
             with open(csv_file, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
-                rows = list(reader)
-                top_results = rows[:5] if len(rows) > 5 else rows
 
-                for i, row in enumerate(top_results):
+                # [优化点] 使用 enumerate + break，避免读取整个文件到内存
+                # 原代码: rows = list(reader) -> top_results = rows[:5] (内存杀手)
+                for i, row in enumerate(reader):
+                    if i >= 5:  # 只读前5行
+                        break
+
                     species = row.get('物种', 'N/A')
                     similarity = row.get('相似度', 'N/A')
                     e_value = row.get('E值', 'N/A')
@@ -450,7 +453,7 @@ class ResultViewerWidget(QGroupBox):
                     # 设置淡灰色背景，增加层次感
                     for c in range(3):
                         result_item.setBackground(c, QColor("#FAFAFA"))
-                        result_item.setForeground(c, QColor("#606266"))  # 字体稍微变灰
+                        result_item.setForeground(c, QColor("#606266"))
 
         except Exception as e:
             QTreeWidgetItem(parent_item, [f"读取失败: {str(e)}", '', ''])
@@ -645,11 +648,7 @@ class ResultViewerWidget(QGroupBox):
             menu.addAction("翻译此序列结果", lambda: self._translate_item_node(item))
 
         else:  # Result Leaf
-            key = self._get_item_key(item)
-            if self.translation_states.get(key):
-                menu.addAction("显示原文", lambda: self._toggle_translation(item, key, False))
-            else:
-                menu.addAction("翻译此条目", lambda: self._translate_single_text(item, key))
+            pass  # 不显示任何右键菜单项
 
         menu.exec(self.result_tree.mapToGlobal(pos))
 

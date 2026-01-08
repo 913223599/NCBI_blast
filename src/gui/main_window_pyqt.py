@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QSplitter,
                              QStatusBar, QMessageBox, QDialog, QApplication, QHBoxLayout, QFrame)
+from src.utils.config_manager import get_config_manager
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if project_root not in sys.path:
@@ -397,7 +398,7 @@ class MainWindow(QMainWindow):
         
         # 设置生物学翻译器参数，现在由右键菜单控制，但初始化时启用AI翻译器
         translation_settings = {
-            'use_ai': True,  # 默认启用AI翻译器，供右键菜单使用
+            'use_ai': advanced_settings.get('use_ai_translation', True),  # 使用高级设置中的AI翻译开关
             'translator_type': advanced_settings.get('translator_type', 'default'),  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
             'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')  # 添加AI模型参数
         }
@@ -576,7 +577,7 @@ class MainWindow(QMainWindow):
         
         # 设置生物学翻译器参数，现在由右键菜单控制，但初始化时启用AI翻译器
         translation_settings = {
-            'use_ai': True,  # 默认启用AI翻译器，供右键菜单使用
+            'use_ai': advanced_settings.get('use_ai_translation', True),  # 使用高级设置中的AI翻译开关
             'translator_type': advanced_settings.get('translator_type', 'default'),  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
             'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')  # 添加AI模型参数
         }
@@ -649,26 +650,35 @@ class MainWindow(QMainWindow):
         self.translation_debugger.show()
         self.translation_debugger.raise_()
         self.translation_debugger.activateWindow()
-        
+
     def _open_settings_dialog(self):
-        """打开设置对话框"""
-        # 创建并显示高级设置对话框
+        """打开设置对话框 - 修复版"""
         from src.gui.widgets.parameter_settings import AdvancedSettingsDialog
+        from src.utils.config_manager import get_config_manager
+
         dialog = AdvancedSettingsDialog(self)
-        
-        # 获取当前高级设置
+
+        # 1. 获取当前所有高级设置
+        # [关键修复] 不要过滤掉 AI 设置，否则弹窗无法显示当前状态
         current_settings = self.parameter_settings.get_advanced_settings()
-        # 移除AI相关设置，只保留纯高级设置
-        advanced_only_settings = {
-            k: v for k, v in current_settings.items() 
-            if k not in ['use_ai_translation', 'ai_translation_model']
-        }
-        dialog.set_settings(advanced_only_settings)
-        
+        dialog.set_settings(current_settings)
+
+        # 2. [关键修复] 只调用一次 exec()
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            # 保存高级参数设置
-            advanced_settings = dialog.get_settings()
-            self.parameter_settings.set_advanced_settings(advanced_settings)
+            # 3. 获取用户修改后的新设置
+            new_settings = dialog.get_settings()
+
+            # 4. 更新内存中的参数组件 (确保侧边栏等组件拿到最新值)
+            self.parameter_settings.set_advanced_settings(new_settings)
+
+            # 5. 保存到配置文件 config.json
+            config_manager = get_config_manager()
+            config_manager.set_advanced_settings(new_settings)
+
+            # 6. 更新状态栏提示
+            if hasattr(self, 'status_bar'):
+                self.status_bar.showMessage("高级参数已保存", 3000)
+            print(f"配置已更新并保存: {new_settings}")
     
     def _open_help_dialog(self):
         """打开帮助文档对话框"""

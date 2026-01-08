@@ -1,5 +1,22 @@
 {
   "api_keys": {
     "dashscope": "sk-a0ecff19a71649deaa6009ae66687bdb"
+  },
+  "advanced_settings": {
+    "hitlist_size": 20,
+    "use_ai_translation": true,
+    "ai_translation_model": "qwen-turbo",
+    "word_size": null,
+    "evalue": null,
+    "matrix_name": null,
+    "filter": null,
+    "alignments": null,
+    "descriptions": null,
+    "local_num_threads": null,
+    "nucleotide_database": "nt",
+    "protein_database": "nr",
+    "prefer_local": true,
+    "fallback_to_remote": true,
+    "use_cache": true
   }
 }
