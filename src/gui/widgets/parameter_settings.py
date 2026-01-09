@@ -125,7 +125,7 @@ class AdvancedSettingsDialog(QDialog):
         # --- AI 参数 ---
         self.use_ai_checkbox = QCheckBox("启用 AI 辅助翻译与解释")
         self.ai_model_combo = QComboBox()
-        self.ai_model_combo.addItems(["deepseek-r1", "qwen-plus", "qwen-turbo", "qwen-max"])
+        self.ai_model_combo.addItems(["deepseek-r1", "qwen-plus", "qwen-mt-plus", "qwen-mt-turbo", "qwen-turbo"])
 
         # --- 系统参数 ---
         self.local_num_threads_enabled = QCheckBox()
