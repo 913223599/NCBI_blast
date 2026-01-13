@@ -11,785 +11,421 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-
-# 常量定义
-NUCLEOTIDE_CHARS = set('ATCGNU')
-PROTEIN_CHARS = set('KERYWHDNQSTVRLEAICGPMF')
-MIN_SEQUENCE_LENGTH = 5
-DEFAULT_HITLIST_SIZE = 10
-DEFAULT_EVALUE = 0.1
-DEFAULT_ALIGNMENTS = 100
-DEFAULT_DESCRIPTIONS = 100
-NUCLEOTIDE_THRESHOLD = 0.7  # 70%以上是核苷酸字符
-PROTEIN_THRESHOLD = 0.7  # 70%以上是蛋白质字符
-MIN_PROTEIN_SEQ_LENGTH = 10  # 最小蛋白质序列长度
-
+# 引入原有依赖
 from src.utils.file_handler import FileHandler
 from .executor import BlastExecutor, delay_before_request
 from .parser import BlastResultParser
 from .result_cache import BlastResultCache
 from .result_converter import BlastResultConverter
 
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-class BatchProcessor:
+# 常量定义
+NUCLEOTIDE_CHARS = set('ATCGNU')
+PROTEIN_CHARS = set('KERYWHDNQSTVRLEAICGPMF')
+MIN_SEQUENCE_LENGTH = 5
+NUCLEOTIDE_THRESHOLD = 0.7
+PROTEIN_THRESHOLD = 0.7
+MIN_PROTEIN_SEQ_LENGTH = 10
+
+# 预编译正则以提升性能
+RE_NUCLEOTIDE_PATTERN = re.compile(r'[ATCGU]{3,}')
+RE_PROTEIN_PATTERN = re.compile(r'[KERYWHDNQSTVRLEAICGPMF]{3,}')
+
+class BaseProcessor:
     """
-    批量处理器类
-    负责多线程批量处理序列文件
+    基础处理器类
+    包含两个处理器共用的核心逻辑：参数配置、类型检测、文件管理、核心BLAST流程
     """
-    
-    def __init__(self, max_workers=3, advanced_settings=None):  # 减少默认线程数
-        """
-        初始化批量处理器
-        
-        Args:
-            max_workers (int): 最大工作线程数，默认为1（减少并发以避免NCBI限制和崩溃）
-            advanced_settings (dict): 高级设置参数，包含BLAST搜索的高级参数设置
-                                      默认为None，表示使用BLAST的默认参数
-        """
+    def __init__(self, max_workers=3, advanced_settings=None):
         self.max_workers = max_workers
         self.advanced_settings = advanced_settings or {}
         self.file_handler = FileHandler()
         self.blast_executor = BlastExecutor()
         self.result_parser = BlastResultParser()
         self.result_converter = BlastResultConverter()
-        self.cache = BlastResultCache(cache_dir="cache", expiry_time=86400)  # 24小时缓存
-        self.on_task_start = None  # 任务开始回调
-        self.on_progress_update = None  # 进度更新回调
-        self.on_result_received = None  # 结果接收回调
-        self.on_all_tasks_complete = None  # 所有任务完成回调
-        self._cancel_flag = False  # 取消标志
+        # 统一缓存配置
+        self.cache = BlastResultCache(
+            cache_dir="cache",
+            expiry_time=self.advanced_settings.get('cache_expiry', 86400)
+        )
+
+        # 回调函数
+        self.on_task_start = None
+        self.on_progress_update = None
+        self.on_result_received = None
+        self.on_all_tasks_complete = None
+
+        self._cancel_flag = False
         self.timestamp_folder = self._create_timestamp_folder()
 
+        # 默认 BLAST 参数
+        self.default_blast_params = {
+            'hitlist_size': 10,
+            'evalue': 0.1,
+            'alignments': 100,
+            'descriptions': 100,
+            # 其他默认值可在此扩展
+        }
+
     def _create_timestamp_folder(self):
-        """
-        创建基于时间戳的结果保存文件夹
-        
-        Returns:
-            Path: 时间戳文件夹路径
-        """
+        """创建基于时间戳的结果保存文件夹"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         folder_path = Path("results") / timestamp
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path
-    
+
     def cancel_processing(self):
-        """
-        取消处理过程
-        """
+        """取消处理过程"""
         self._cancel_flag = True
-    
-    def process_single_sequence(self, sequence_file):
+
+    def _prepare_blast_params(self):
+        """合并默认参数与高级设置"""
+        params = self.default_blast_params.copy()
+
+        # 允许的参数白名单
+        allowed_keys = ['hitlist_size', 'word_size', 'evalue', 'matrix_name',
+                        'filter', 'alignments', 'descriptions']
+
+        # 仅当 settings 中有值且不为 None 时覆盖
+        for key in allowed_keys:
+            if key in self.advanced_settings and self.advanced_settings[key] is not None:
+                params[key] = self.advanced_settings[key]
+
+        return params
+
+    def _detect_sequence_type(self, sequence):
+        """检测序列类型（核苷酸或蛋白质）"""
+        sequence_upper = sequence.upper()
+
+        # 过滤掉非字母字符
+        seq_chars = [c for c in sequence_upper if c.isalpha()]
+        if not seq_chars:
+            return 'nucleotide' # 默认回退
+
+        total_len = len(sequence_upper)
+        nucleotide_count = sum(1 for c in seq_chars if c in NUCLEOTIDE_CHARS)
+        protein_count = sum(1 for c in seq_chars if c in PROTEIN_CHARS)
+
+        # 逻辑分支优化
+        if nucleotide_count > 0 and protein_count > 0:
+            return self._detect_sequence_type_both_present(sequence_upper, nucleotide_count, protein_count, total_len)
+
+        if nucleotide_count > 0 and (nucleotide_count / total_len > NUCLEOTIDE_THRESHOLD):
+            return 'nucleotide'
+
+        if protein_count > 0 and (protein_count / total_len > PROTEIN_THRESHOLD):
+            return 'protein'
+
+        if total_len > MIN_PROTEIN_SEQ_LENGTH and protein_count > 0:
+            return 'protein'
+
+        return 'nucleotide'
+
+    def _detect_sequence_type_both_present(self, sequence_upper, n_count, p_count, total_len):
+        """混合字符情况下的详细判断"""
+        has_n_pattern = bool(RE_NUCLEOTIDE_PATTERN.search(sequence_upper))
+        has_p_pattern = bool(RE_PROTEIN_PATTERN.search(sequence_upper))
+
+        if has_n_pattern and not has_p_pattern:
+            return 'nucleotide'
+        elif has_p_pattern and not has_n_pattern:
+            return 'protein'
+
+        # 比例判断
+        p_ratio = p_count / total_len if total_len > 0 else 0
+        n_ratio = n_count / total_len if total_len > 0 else 0
+
+        return 'protein' if p_ratio > n_ratio else 'nucleotide'
+
+    def _execute_blast_workflow(self, sequence, seq_id, original_file_name, source_file_path):
         """
-        处理单个序列文件
-        
-        Args:
-            sequence_file (str): 序列文件路径
-            
-        Returns:
-            dict: 处理结果信息，包含以下键值:
-                  - file: 序列文件路径
-                  - status: 处理状态 ("success" 或 "error")
-                  - result_file: 结果文件路径 (仅在成功时存在)
-                  - error: 错误信息 (仅在失败时存在)
-                  - thread_id: 处理线程ID
-                  - elapsed_time: 处理耗时(秒)
+        核心工作流：执行单个序列的BLAST、文件保存、转换和缓存
+        此方法被两个子类通用调用
         """
         thread_id = threading.current_thread().ident
         start_time = time.time()
-        
+
+        # 结果文件路径构建
+        base_filename = f"{original_file_name}_blast_result" if original_file_name == seq_id else f"{original_file_name}_{seq_id}_blast_result"
+        result_file = self.timestamp_folder / f"{base_filename}.xml"
+        csv_file = self.timestamp_folder / f"{base_filename}.csv"
+        desc_file = self.timestamp_folder / f"{base_filename}.desc"
+
+        # 构造基础返回对象
+        result_info = {
+            "file": source_file_path,
+            "status": "pending",
+            "thread_id": thread_id,
+            "result_file": result_file,
+            "csv_file": csv_file,
+            "desc_file": desc_file
+        }
+
+        # 如果是 MultiSequenceProcessor 调用，可能需要额外的字段
+        if original_file_name != seq_id:
+             result_info["sequence_id"] = seq_id
+
         try:
-            # 获取文件名（不含扩展名）用于结果文件命名
-            file_name = Path(sequence_file).stem
-            result_file = self.timestamp_folder / f"{file_name}_blast_result.xml"
-            csv_file = self.timestamp_folder / f"{file_name}_blast_result.csv"
-            desc_file = self.timestamp_folder / f"{file_name}_blast_result.desc"
-            
-            # 调用任务开始回调
-            if self.on_task_start:
-                self.on_task_start(sequence_file)
-            
-            # 读取序列
-            sequence = self.file_handler.read_sequence_file(str(sequence_file))
-            
-            # 验证序列是否有效
-            if not sequence or len(sequence.strip()) == 0:
-                raise ValueError(f"无法从文件中读取有效序列: {sequence_file}")
-            
-            # 检查缓存
+            # 1. 验证序列
+            if not sequence or not sequence.strip():
+                raise ValueError(f"无效的空序列: {seq_id}")
+
+            # 2. 检查缓存
             use_cache = self.advanced_settings.get('use_cache', True)
             if use_cache:
-                sequence_id = Path(sequence_file).stem  # 使用文件名作为序列ID
-                cached_result = self.cache.get_cached_result(sequence, sequence_id)
+                # 缓存键策略：如果是多序列文件，组合文件名和ID；如果是单文件，使用ID(即文件名)
+                cache_key_id = seq_id if original_file_name == seq_id else f"{original_file_name}_{seq_id}"
+                cached_result = self.cache.get_cached_result(sequence, cache_key_id)
                 if cached_result:
-                    print(f"✓ 使用缓存结果: {Path(sequence_file).name}")
+                    logger.info(f"✓ 使用缓存结果: {cache_key_id}")
                     cached_result['from_cache'] = True
                     return cached_result
-            
-            # 准备BLAST参数，设置更快的默认值
-            blast_params = {}
-            
-            # 添加启用的参数，设置更快的默认值
-            if 'hitlist_size' in self.advanced_settings and self.advanced_settings['hitlist_size'] is not None:
-                blast_params['hitlist_size'] = self.advanced_settings['hitlist_size']
-            else:
-                # 使用较小的默认值以提高速度
-                blast_params['hitlist_size'] = 10
-                
-            if 'word_size' in self.advanced_settings and self.advanced_settings['word_size'] is not None:
-                blast_params['word_size'] = self.advanced_settings['word_size']
-                
-            if 'evalue' in self.advanced_settings and self.advanced_settings['evalue'] is not None:
-                blast_params['evalue'] = self.advanced_settings['evalue']
-            else:
-                # 使用更严格的默认值以提高速度
-                blast_params['evalue'] = 0.1
-                
-            if 'matrix_name' in self.advanced_settings and self.advanced_settings['matrix_name'] is not None:
-                blast_params['matrix_name'] = self.advanced_settings['matrix_name']
-                
-            if 'filter' in self.advanced_settings and self.advanced_settings['filter'] is not None:
-                blast_params['filter'] = self.advanced_settings['filter']
-                
-            if 'alignments' in self.advanced_settings and self.advanced_settings['alignments'] is not None:
-                blast_params['alignments'] = self.advanced_settings['alignments']
-            else:
-                # 使用较小的默认值以提高速度
-                blast_params['alignments'] = 100
-                
-            if 'descriptions' in self.advanced_settings and self.advanced_settings['descriptions'] is not None:
-                blast_params['descriptions'] = self.advanced_settings['descriptions']
-            else:
-                # 使用较小的默认值以提高速度
-                blast_params['descriptions'] = 100
-            
-            # 根据序列类型选择合适的BLAST程序和数据库
+
+            # 3. 准备参数
+            blast_params = self._prepare_blast_params()
+
+            # 4. 确定程序和数据库
             sequence_type = self._detect_sequence_type(sequence)
-            
             if sequence_type == 'protein':
                 program = 'blastp'
                 database = self.advanced_settings.get('protein_database', 'nr')
             else:
                 program = 'blastn'
                 database = self.advanced_settings.get('nucleotide_database', 'nt')
-            
-            # 在发送请求前添加延迟，以控制请求频率并遵循NCBI限制
-            delay_before_request()  # 使用伪队列机制控制请求频率
-            
-            # 执行BLAST搜索，传递参数
+
+            # 5. 请求控制与执行
+            if self._cancel_flag:
+                raise InterruptedError("任务被用户取消")
+
+            delay_before_request()
+
             result_handle = self.blast_executor.execute_with_retry(
                 sequence,
                 program=program,
                 database=database,
-                timeout_minutes=6,
+                timeout_minutes=6, # 统一超时设置
                 **blast_params
             )
-            
-            # 保存结果到文件（使用序列文件名命名）
+
+            # 6. 保存原始XML
             self.file_handler.save_result_file(result_handle, str(result_file))
-            result_handle.close()
-            
-            # 将XML结果转换为CSV格式并生成描述文件
+            result_handle.close() # 确保关闭句柄
+
+            # 7. 格式转换
             self.result_converter.convert_xml_to_csv(str(result_file), str(csv_file), str(desc_file))
-            
-            # 重新打开结果文件进行解析
-            result_handle = open(result_file)
-            result_handle.close()
-            
-            # 保存到缓存
-            if use_cache:
-                sequence_id = Path(sequence_file).stem  # 使用文件名作为序列ID
-                cache_result = {
-                    "file": sequence_file,
-                    "status": "success",
-                    "result_file": result_file,
-                    "csv_file": csv_file,
-                    "desc_file": desc_file,
-                    "thread_id": thread_id,
-                    "elapsed_time": 0,  # 缓存结果不需要计算处理时间
-                    "timestamp_folder": str(self.timestamp_folder)  # 记录时间戳文件夹
-                }
-                self.cache.save_result(sequence, cache_result, sequence_id)
-            
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            
-            result = {
-                "file": sequence_file,
+
+            # 8. 更新结果状态
+            elapsed_time = time.time() - start_time
+            result_info.update({
                 "status": "success",
-                "result_file": result_file,
-                "csv_file": csv_file,
-                "desc_file": desc_file,
-                "thread_id": thread_id,
-                "elapsed_time": elapsed_time
-            }
-            
-            return result
+                "elapsed_time": elapsed_time,
+                "timestamp_folder": str(self.timestamp_folder)
+            })
+
+            # 9. 写入缓存
+            if use_cache:
+                # 缓存记录不需要包含运行时长，设为0或不存
+                cache_entry = result_info.copy()
+                cache_entry["elapsed_time"] = 0
+                self.cache.save_result(sequence, cache_entry, cache_key_id)
+
+            return result_info
+
         except Exception as e:
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            
-            print(f"处理文件 {sequence_file} 时出错: {e}")
-            result = {
-                "file": sequence_file,
+            elapsed_time = time.time() - start_time
+            logger.error(f"处理 {seq_id} 时出错: {e}")
+            # 记录详细堆栈
+            logger.debug(e, exc_info=True)
+
+            result_info.update({
                 "status": "error",
                 "error": str(e),
-                "thread_id": thread_id,
                 "elapsed_time": elapsed_time
+            })
+            return result_info
+
+
+class BatchProcessor(BaseProcessor):
+    """
+    针对单文件单序列的批量处理器
+    """
+
+    def process_single_sequence(self, sequence_file):
+        """处理单个序列文件"""
+        # 回调
+        if self.on_task_start:
+            self.on_task_start(sequence_file)
+
+        file_path = Path(sequence_file)
+        file_name = file_path.stem
+
+        try:
+            # 读取
+            sequence = self.file_handler.read_sequence_file(str(sequence_file))
+            # 执行核心逻辑
+            # 对于单文件模式，seq_id 和 original_file_name 通常是一样的
+            return self._execute_blast_workflow(sequence, file_name, file_name, str(file_path))
+
+        except Exception as e:
+            # 捕获读取阶段的错误
+            logger.error(f"读取文件失败: {sequence_file} - {e}")
+            return {
+                "file": str(sequence_file),
+                "status": "error",
+                "error": str(e),
+                "thread_id": threading.current_thread().ident,
+                "elapsed_time": 0
             }
-            
-            return result
-    
-    def _detect_sequence_type(self, sequence):
-        """
-        检测序列类型（核苷酸或蛋白质）
-        
-        Args:
-            sequence (str): 序列字符串
-            
-        Returns:
-            str: 'nucleotide' 或 'protein'
-        """
-        # 检查序列中是否包含蛋白质特有氨基酸（如K, E, P, etc.）
-        sequence_upper = sequence.upper()
-        
-        # 核苷酸字符集合
-        nucleotide_chars = NUCLEOTIDE_CHARS
-        # 蛋白质特有字符集合
-        protein_chars = PROTEIN_CHARS
-        
-        # 过滤掉非字母字符
-        seq_chars = set(c for c in sequence_upper if c.isalpha())
-        
-        # 计算核苷酸字符和蛋白质字符的数量
-        nucleotide_count = sum(1 for c in seq_chars if c in nucleotide_chars)
-        protein_count = sum(1 for c in seq_chars if c in protein_chars)
-        
-        # 如果序列中同时包含核苷酸和蛋白质字符，根据比例判断
-        if nucleotide_count > 0 and protein_count > 0:
-            return self._detect_sequence_type_both_present(sequence_upper, nucleotide_chars, protein_chars)
-        
-        # 如果只包含一种类型的字符
-        elif nucleotide_count > 0 and protein_count == 0:
-            # 检查是否主要是核苷酸字符
-            nucleotide_seq_chars = [c for c in sequence_upper if c in nucleotide_chars]
-            if len(nucleotide_seq_chars) / len(sequence_upper) > NUCLEOTIDE_THRESHOLD:  # 70%以上是核苷酸字符
-                return 'nucleotide'
-        
-        elif protein_count > 0 and nucleotide_count == 0:
-            # 检查是否主要是蛋白质字符
-            protein_seq_chars = [c for c in sequence_upper if c in protein_chars]
-            if len(protein_seq_chars) / len(sequence_upper) > PROTEIN_THRESHOLD:  # 70%以上是蛋白质字符
-                return 'protein'
-        
-        # 默认情况下，如果序列较长且包含蛋白质字符，认为是蛋白质序列
-        if len(sequence_upper) > MIN_PROTEIN_SEQ_LENGTH and protein_count > 0:
-            return 'protein'
-        
-        # 否则默认为核苷酸序列
-        return 'nucleotide'
-    
-    def _detect_sequence_type_both_present(self, sequence_upper, nucleotide_chars, protein_chars):
-        """
-        当序列同时包含核苷酸和蛋白质字符时判断类型
-        
-        Args:
-            sequence_upper (str): 大写的序列字符串
-            nucleotide_chars (set): 核苷酸字符集合
-            protein_chars (set): 蛋白质字符集合
-            
-        Returns:
-            str: 'nucleotide' 或 'protein'
-        """
-        # 检查序列中是否包含核苷酸模式（连续的A,T,G,C字符）
-        nucleotide_pattern = r'[ATCGU]{3,}'  # 至少3个连续的核苷酸字符
-        protein_pattern = r'[KERYWHDNQSTVRLEAICGPMF]{3,}'  # 至少3个连续的蛋白质字符
-        
-        has_nucleotide_pattern = bool(re.search(nucleotide_pattern, sequence_upper))
-        has_protein_pattern = bool(re.search(protein_pattern, sequence_upper))
-        
-        if has_nucleotide_pattern and not has_protein_pattern:
-            return 'nucleotide'
-        elif has_protein_pattern and not has_nucleotide_pattern:
-            return 'protein'
-        elif has_protein_pattern and has_nucleotide_pattern:
-            # 如果都有，根据序列长度和字符比例判断
-            total_len = len(sequence_upper)
-            protein_chars_in_seq = sum(1 for c in sequence_upper if c in protein_chars)
-            nucleotide_chars_in_seq = sum(1 for c in sequence_upper if c in nucleotide_chars)
-            
-            protein_ratio = protein_chars_in_seq / total_len if total_len > 0 else 0
-            nucleotide_ratio = nucleotide_chars_in_seq / total_len if total_len > 0 else 0
-            
-            if protein_ratio > nucleotide_ratio:
-                return 'protein'
-            else:
-                return 'nucleotide'
-        else:
-            # 默认返回核苷酸
-            return 'nucleotide'
-    
+
     def process_sequences(self, sequence_files):
-        """
-        批量处理序列文件
-        
-        Args:
-            sequence_files (list): 序列文件路径列表
-            
-        Returns:
-            list: 处理结果列表
-        """
-        # 只有当有多个文件时才打印批量处理信息
+        """批量处理入口"""
         if len(sequence_files) > 1:
-            print(f"开始批量处理 {len(sequence_files)} 个序列文件...")
-            print(f"使用 {self.max_workers} 个线程进行处理（减少并发以避免NCBI限制）")
-        
-        # 时间戳文件夹已在初始化时创建
-        
-        # 使用线程池处理序列文件
+            logger.info(f"开始批量处理 {len(sequence_files)} 个序列文件，线程数: {self.max_workers}")
+
+        return self._run_thread_pool(sequence_files, self.process_single_sequence)
+
+    def _run_thread_pool(self, items, process_func):
+        """通用的线程池执行逻辑"""
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 提交所有任务
-            future_to_file = {
-                executor.submit(self.process_single_sequence, seq_file): seq_file
-                for seq_file in sequence_files
-            }
-            
-            # 收集结果
+            future_to_item = {executor.submit(process_func, item): item for item in items}
             results = []
             completed = 0
-            total = len(sequence_files)
-            
-            for future in as_completed(future_to_file):
-                # 更新进度
-                if self.on_progress_update:
-                    self.on_progress_update(completed, total)
-                
-                file = future_to_file[future]
+            total = len(items)
+
+            for future in as_completed(future_to_item):
+                if self._cancel_flag:
+                    break
+
+                item = future_to_item[future]
                 try:
                     result = future.result()
                     results.append(result)
+
+                    # 日志与回调
                     if result["status"] == "success":
-                        print(f"✓ 完成处理: {Path(file).name}")
+                        name = Path(result["file"]).name
+                        logger.info(f"✓ 完成处理: {name}")
                     else:
-                        print(f"✗ 处理失败: {Path(file).name} - {result['error']}")
-                    
-                    # 发送结果（确保只发送一次）
+                        name = Path(item).name if isinstance(item, (str, Path)) else "Item"
+                        logger.error(f"✗ 处理失败: {name} - {result.get('error', 'Unknown')}")
+
                     if self.on_result_received:
                         self.on_result_received(result)
+
                 except Exception as e:
-                    print(f"✗ 处理 {file} 时发生异常: {e}")
-                    error_result = {
-                        "file": file,
-                        "status": "error",
-                        "error": str(e)
-                    }
-                    results.append(error_result)
-                    if self.on_result_received:
-                        self.on_result_received(error_result)
-                
-                # 更新完成计数
+                    logger.error(f"任务执行异常: {e}")
+
                 completed += 1
-                
-                # 更新进度
                 if self.on_progress_update:
                     self.on_progress_update(completed, total)
-        
-        # 调用所有任务完成回调
+
         if self.on_all_tasks_complete:
             self.on_all_tasks_complete(results)
-            
+
         return results
-    
+
     def print_summary(self, results):
-        """
-        打印处理结果总结
-        
-        Args:
-            results (list): 处理结果列表
-        """
+        """打印简单的文本总结"""
         successful = sum(1 for r in results if r["status"] == "success")
         failed = len(results) - successful
-        
-        print(f"\n批量处理完成!")
-        print(f"总共处理: {len(results)} 个文件")
-        print(f"成功处理: {successful} 个文件")
-        print(f"处理失败: {failed} 个文件")
-        
+
+        print(f"\nBatch processing complete!")
+        print(f"Total: {len(results)}, Success: {successful}, Failed: {failed}")
+
         if failed > 0:
-            print("\n失败的文件:")
+            print("\nFailures:")
             for result in results:
                 if result["status"] == "error":
                     print(f"  - {Path(result['file']).name}: {result['error']}")
 
 
-class MultiSequenceBatchProcessor:
+class MultiSequenceBatchProcessor(BaseProcessor):
     """
-    多序列批量处理器类
-    负责处理包含多个序列的单个文件
+    针对单文件多序列 (FASTA) 的批量处理器
     """
-    
-    def __init__(self, max_workers=3, advanced_settings=None):  # 减少默认线程数
-        """
-        初始化多序列批量处理器
-        
-        Args:
-            max_workers (int): 最大工作线程数，默认为2（减少并发以避免NCBI限制）
-            advanced_settings (dict): 高级设置参数
-        """
-        self.max_workers = max_workers
-        self.advanced_settings = advanced_settings or {}
-        self.file_handler = FileHandler()
-        self.blast_executor = BlastExecutor()
-        self.result_parser = BlastResultParser()
-        self.result_converter = BlastResultConverter()
-        self.cache = BlastResultCache(cache_dir="cache", expiry_time=86400)  # 24小时缓存
-        self.on_task_start = None  # 任务开始回调
-        self.on_progress_update = None  # 进度更新回调
-        self.on_result_received = None  # 结果接收回调
-        self.on_all_tasks_complete = None  # 所有任务完成回调
-        self._cancel_flag = False  # 取消标志
-        self.timestamp_folder = self._create_timestamp_folder()
 
-    def _create_timestamp_folder(self):
-        """
-        创建基于时间戳的结果保存文件夹
-        
-        Returns:
-            Path: 时间戳文件夹路径
-        """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder_path = Path("results") / timestamp
-        folder_path.mkdir(parents=True, exist_ok=True)
-        return folder_path
-    
-    def cancel_processing(self):
-        """
-        取消处理过程
-        """
-        self._cancel_flag = True
-    
     def process_single_sequence(self, sequence_info, original_file_path):
-        """
-        处理单个序列信息
-        
-        Args:
-            sequence_info (dict): 序列信息字典，包含'id', 'description', 'sequence'等
-            original_file_path (str): 原始文件路径
-            
-        Returns:
-            dict: 处理结果
-        """
-        thread_id = threading.current_thread().ident
-        start_time = time.time()
-        
-        try:
-            # 获取原始文件名（不含扩展名）和序列ID用于结果文件命名
-            base_name = Path(original_file_path).stem
-            sequence_id = sequence_info['id'].replace('|', '_').replace(' ', '_')  # 确保文件名安全
-            result_file = self.timestamp_folder / f"{base_name}_{sequence_id}_blast_result.xml"
-            csv_file = self.timestamp_folder / f"{base_name}_{sequence_id}_blast_result.csv"
-            desc_file = self.timestamp_folder / f"{base_name}_{sequence_id}_blast_result.desc"
-            
-            # 调用任务开始回调
-            if self.on_task_start:
-                self.on_task_start(f"{original_file_path} - {sequence_info['id']}")
-            
-            sequence = sequence_info['sequence']
-            
-            # 验证序列是否有效
-            if not sequence or len(sequence.strip()) == 0:
-                raise ValueError(f"序列信息中包含空序列: {sequence_info['id']}")
-            
-            # 检查缓存
-            use_cache = self.advanced_settings.get('use_cache', True)
-            if use_cache:
-                cached_result = self.cache.get_cached_result(sequence)
-                if cached_result:
-                    print(f"✓ 使用缓存结果: {sequence_info['id']}")
-                    cached_result['from_cache'] = True
-                    return cached_result
-            
-            # 准备BLAST参数，设置更快的默认值
-            blast_params = {}
-            
-            # 添加启用的参数，设置更快的默认值
-            if 'hitlist_size' in self.advanced_settings and self.advanced_settings['hitlist_size'] is not None:
-                blast_params['hitlist_size'] = self.advanced_settings['hitlist_size']
-            else:
-                # 使用较小的默认值以提高速度
-                blast_params['hitlist_size'] = 10
-                
-            if 'word_size' in self.advanced_settings and self.advanced_settings['word_size'] is not None:
-                blast_params['word_size'] = self.advanced_settings['word_size']
-                
-            if 'evalue' in self.advanced_settings and self.advanced_settings['evalue'] is not None:
-                blast_params['evalue'] = self.advanced_settings['evalue']
-            else:
-                # 使用更严格的默认值以提高速度
-                blast_params['evalue'] = 0.1
-                
-            if 'matrix_name' in self.advanced_settings and self.advanced_settings['matrix_name'] is not None:
-                blast_params['matrix_name'] = self.advanced_settings['matrix_name']
-                
-            if 'filter' in self.advanced_settings and self.advanced_settings['filter'] is not None:
-                blast_params['filter'] = self.advanced_settings['filter']
-                
-            if 'alignments' in self.advanced_settings and self.advanced_settings['alignments'] is not None:
-                blast_params['alignments'] = self.advanced_settings['alignments']
-            else:
-                # 使用较小的默认值以提高速度
-                blast_params['alignments'] = 100
-                
-            if 'descriptions' in self.advanced_settings and self.advanced_settings['descriptions'] is not None:
-                blast_params['descriptions'] = self.advanced_settings['descriptions']
-            else:
-                # 使用较小的默认值以提高速度
-                blast_params['descriptions'] = 100
-            
-            # 根据序列类型选择合适的BLAST程序和数据库
-            sequence_type = self._detect_sequence_type(sequence)
-            
-            if sequence_type == 'protein':
-                program = 'blastp'
-                database = self.advanced_settings.get('protein_database', 'nr')
-            else:
-                program = 'blastn'
-                database = self.advanced_settings.get('nucleotide_database', 'nt')
-            
-            # 在发送请求前添加延迟，以控制请求频率并遵循NCBI限制
-            delay_before_request()  # 使用伪队列机制控制请求频率
-            
-            # 执行BLAST搜索，传递参数
-            result_handle = self.blast_executor.execute_with_retry(
-                sequence,
-                program=program,
-                database=database,
-                **blast_params
-            )
-            
-            # 保存结果到文件
-            self.file_handler.save_result_file(result_handle, str(result_file))
-            result_handle.close()
-            
-            # 将XML结果转换为CSV格式并生成描述文件
-            self.result_converter.convert_xml_to_csv(str(result_file), str(csv_file), str(desc_file))
-            
-            # 保存到缓存
-            if use_cache:
-                cache_result = {
-                    "file": original_file_path,
-                    "sequence_id": sequence_info['id'],
-                    "sequence_description": sequence_info['description'],
-                    "status": "success",
-                    "result_file": result_file,
-                    "csv_file": csv_file,
-                    "desc_file": desc_file,
-                    "thread_id": thread_id,
-                    "elapsed_time": 0,  # 缓存结果不需要计算处理时间
-                    "timestamp_folder": str(self.timestamp_folder)  # 记录时间戳文件夹
-                }
-                self.cache.save_result(sequence, cache_result)
-            
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            
-            result = {
-                "file": original_file_path,
-                "sequence_id": sequence_info['id'],
-                "sequence_description": sequence_info['description'],
-                "status": "success",
-                "result_file": result_file,
-                "csv_file": csv_file,
-                "desc_file": desc_file,
-                "thread_id": thread_id,
-                "elapsed_time": elapsed_time
-            }
-            
-            return result
-        except Exception as e:
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            
-            print(f"处理序列 {sequence_info['id']} 时出错: {e}")
-            result = {
-                "file": original_file_path,
-                "sequence_id": sequence_info['id'],
-                "sequence_description": sequence_info['description'],
-                "status": "error",
-                "error": str(e),
-                "thread_id": thread_id,
-                "elapsed_time": elapsed_time
-            }
-            
-            return result
-    
-    def _detect_sequence_type(self, sequence):
-        """
-        检测序列类型（核苷酸或蛋白质）
-        
-        Args:
-            sequence (str): 序列字符串
-            
-        Returns:
-            str: 'nucleotide' 或 'protein'
-        """
-        # 检查序列中是否包含蛋白质特有氨基酸（如K, E, P, etc.）
-        sequence_upper = sequence.upper()
-        
-        # 核苷酸字符集合
-        nucleotide_chars = NUCLEOTIDE_CHARS
-        # 蛋白质特有字符集合
-        protein_chars = PROTEIN_CHARS
-        
-        # 过滤掉非字母字符
-        seq_chars = set(c for c in sequence_upper if c.isalpha())
-        
-        # 计算核苷酸字符和蛋白质字符的数量
-        nucleotide_count = sum(1 for c in seq_chars if c in nucleotide_chars)
-        protein_count = sum(1 for c in seq_chars if c in protein_chars)
-        
-        # 如果序列中同时包含核苷酸和蛋白质字符，根据比例判断
-        if nucleotide_count > 0 and protein_count > 0:
-            return self._detect_sequence_type_both_present(sequence_upper, nucleotide_chars, protein_chars)
-        
-        # 如果只包含一种类型的字符
-        elif nucleotide_count > 0 and protein_count == 0:
-            # 检查是否主要是核苷酸字符
-            nucleotide_seq_chars = [c for c in sequence_upper if c in nucleotide_chars]
-            if len(nucleotide_seq_chars) / len(sequence_upper) > NUCLEOTIDE_THRESHOLD:  # 70%以上是核苷酸字符
-                return 'nucleotide'
-        
-        elif protein_count > 0 and nucleotide_count == 0:
-            # 检查是否主要是蛋白质字符
-            protein_seq_chars = [c for c in sequence_upper if c in protein_chars]
-            if len(protein_seq_chars) / len(sequence_upper) > PROTEIN_THRESHOLD:  # 70%以上是蛋白质字符
-                return 'protein'
-        
-        # 默认情况下，如果序列较长且包含蛋白质字符，认为是蛋白质序列
-        if len(sequence_upper) > MIN_PROTEIN_SEQ_LENGTH and protein_count > 0:
-            return 'protein'
-        
-        # 否则默认为核苷酸序列
-        return 'nucleotide'
-    
-    def _detect_sequence_type_both_present(self, sequence_upper, nucleotide_chars, protein_chars):
-        """
-        当序列同时包含核苷酸和蛋白质字符时判断类型
-        
-        Args:
-            sequence_upper (str): 大写的序列字符串
-            nucleotide_chars (set): 核苷酸字符集合
-            protein_chars (set): 蛋白质字符集合
-            
-        Returns:
-            str: 'nucleotide' 或 'protein'
-        """
-        # 检查序列中是否包含核苷酸模式（连续的A,T,G,C字符）
-        nucleotide_pattern = r'[ATCGU]{3,}'  # 至少3个连续的核苷酸字符
-        protein_pattern = r'[KERYWHDNQSTVRLEAICGPMF]{3,}'  # 至少3个连续的蛋白质字符
-        
-        has_nucleotide_pattern = bool(re.search(nucleotide_pattern, sequence_upper))
-        has_protein_pattern = bool(re.search(protein_pattern, sequence_upper))
-        
-        if has_nucleotide_pattern and not has_protein_pattern:
-            return 'nucleotide'
-        elif has_protein_pattern and not has_nucleotide_pattern:
-            return 'protein'
-        elif has_protein_pattern and has_nucleotide_pattern:
-            # 如果都有，根据序列长度和字符比例判断
-            total_len = len(sequence_upper)
-            protein_chars_in_seq = sum(1 for c in sequence_upper if c in protein_chars)
-            nucleotide_chars_in_seq = sum(1 for c in sequence_upper if c in nucleotide_chars)
-            
-            protein_ratio = protein_chars_in_seq / total_len if total_len > 0 else 0
-            nucleotide_ratio = nucleotide_chars_in_seq / total_len if total_len > 0 else 0
-            
-            if protein_ratio > nucleotide_ratio:
-                return 'protein'
-            else:
-                return 'nucleotide'
-        else:
-            # 默认返回核苷酸
-            return 'nucleotide'
-    
+        """适配器方法：将 dict 输入转为核心工作流调用"""
+        seq_id = sequence_info['id'].replace('|', '_').replace(' ', '_')
+        description = sequence_info.get('description', '')
+
+        if self.on_task_start:
+            self.on_task_start(f"{original_file_path} - {seq_id}")
+
+        result = self._execute_blast_workflow(
+            sequence=sequence_info['sequence'],
+            seq_id=seq_id,
+            original_file_name=Path(original_file_path).stem,
+            source_file_path=str(original_file_path)
+        )
+
+        # 补充多序列特有的字段
+        result['sequence_description'] = description
+        return result
+
     def process_sequences_from_file(self, sequence_file):
-        """
-        处理来自单个文件的多个序列
-        
-        Args:
-            sequence_file (str): 序列文件路径
-            
-        Returns:
-            list: 处理结果列表
-        """
-        logger.info(f"开始处理文件 {Path(sequence_file).name} 中的多条序列...")
-        logger.info(f"使用 {self.max_workers} 个线程进行处理（减少并发以避免NCBI限制）")
-        
-        # 读取文件中的所有序列
-        sequences = self.file_handler.read_fasta_file(sequence_file)
-        logger.info(f"在文件中找到 {len(sequences)} 个序列")
-        
-        if not sequences:
+        """处理文件中的所有序列"""
+        logger.info(f"开始读取文件: {Path(sequence_file).name}")
+
+        try:
+            sequences = self.file_handler.read_fasta_file(sequence_file)
+            logger.info(f"找到 {len(sequences)} 条序列")
+
+            if not sequences:
+                return []
+
+            # 使用 lambda 绑定 file path 参数，使其适配通用的线程池逻辑
+            task_func = lambda seq_info: self.process_single_sequence(seq_info, sequence_file)
+
+            # 复用 BatchProcessor 中的线程池逻辑 (这里通过复制逻辑实现，或可提取mixin)
+            # 为了保持干净，这里重写一个针对性的线程池调用，但逻辑是一样的
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                future_to_seq = {executor.submit(task_func, seq): seq for seq in sequences}
+                results = []
+                completed = 0
+                total = len(sequences)
+
+                for future in as_completed(future_to_seq):
+                    if self._cancel_flag:
+                        break
+
+                    seq_info = future_to_seq[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+
+                        if result["status"] == "success":
+                            logger.info(f"✓ 完成处理: {seq_info['id']}")
+                        else:
+                            logger.error(f"✗ 处理失败: {seq_info['id']} - {result['error']}")
+
+                        if self.on_result_received:
+                            self.on_result_received(result)
+
+                    except Exception as e:
+                        # 兜底异常处理
+                        err_res = {
+                            "file": sequence_file,
+                            "sequence_id": seq_info['id'],
+                            "status": "error",
+                            "error": str(e)
+                        }
+                        results.append(err_res)
+                        if self.on_result_received:
+                            self.on_result_received(err_res)
+
+                    completed += 1
+                    if self.on_progress_update:
+                        self.on_progress_update(completed, total)
+
+            if self.on_all_tasks_complete:
+                self.on_all_tasks_complete(results)
+
+            return results
+
+        except Exception as e:
+            logger.error(f"处理文件级错误: {e}")
             return []
-        
-        # 时间戳文件夹已在初始化时创建
-        
-        # 使用线程池处理序列
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 提交所有任务
-            future_to_seq = {
-                executor.submit(self.process_single_sequence, seq_info, sequence_file): seq_info
-                for seq_info in sequences
-            }
-            
-            # 收集结果
-            results = []
-            completed = 0
-            total = len(sequences)
-            
-            for future in as_completed(future_to_seq):
-                # 更新进度
-                if self.on_progress_update:
-                    self.on_progress_update(completed, total)
-                
-                seq_info = future_to_seq[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                    if result["status"] == "success":
-                        logger.info(f"✓ 完成处理: {seq_info['id']}")
-                    else:
-                        logger.error(f"✗ 处理失败: {seq_info['id']} - {result['error']}")
-                    
-                    # 发送结果
-                    if self.on_result_received:
-                        self.on_result_received(result)
-                except Exception as e:
-                    logger.error(f"✗ 处理序列 {seq_info['id']} 时发生异常: {e}")
-                    error_result = {
-                        "file": sequence_file,
-                        "sequence_id": seq_info['id'],
-                        "sequence_description": seq_info['description'],
-                        "status": "error",
-                        "error": str(e)
-                    }
-                    results.append(error_result)
-                    if self.on_result_received:
-                        self.on_result_received(error_result)
-                
-                # 更新完成计数
-                completed += 1
-                
-                # 更新进度
-                if self.on_progress_update:
-                    self.on_progress_update(completed, total)
-        
-        # 调用所有任务完成回调
-        if self.on_all_tasks_complete:
-            self.on_all_tasks_complete(results)
-            
-        return results

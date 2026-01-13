@@ -197,6 +197,11 @@ class BlastResultConverter:
                             genus = genus_match.group(1)
                         break
                 
+                # 提取宿主信息（方括号中的内容）
+                host_pattern = r'\[([^\]]+)\]'
+                host_match = re.search(host_pattern, title)
+                host_info = host_match.group(1) if host_match else ""
+                
                 # 处理每个HSP（高得分片段对）
                 for hsp in alignment.hsps:
                     # 计算相似度
@@ -212,6 +217,7 @@ class BlastResultConverter:
                         '菌株': strain,
                         '基因类型': gene_type,
                         '序列类型': sequence_type,
+                        '宿主信息': host_info,
                         '高得分片段对(HSPs)': 1,  # 每行代表一个HSP
                         'E值': f"{hsp.expect:.2e}",
                         '比对长度': hsp.align_length,
@@ -228,7 +234,7 @@ class BlastResultConverter:
             if csv_data:
                 fieldnames = [
                     '标题', '长度', '访问号', '物种', '属名', '菌株', '基因类型', '序列类型',
-                    '高得分片段对(HSPs)', 'E值', '比对长度', '相同碱基数', '相似度', '缺口数',
+                    '宿主信息', '高得分片段对(HSPs)', 'E值', '比对长度', '相同碱基数', '相似度', '缺口数',
                     '查询起始-结束', '命中起始-结束'
                 ]
                 

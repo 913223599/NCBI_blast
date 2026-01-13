@@ -567,6 +567,7 @@ class ResultViewerWidget(QGroupBox):
             parts = [row['species']]
             if row['genus'] and row['genus'] != row['species']: parts.append(row['genus'])
             if row['strain']: parts.append(row['strain'])
+            if row['host_info']: parts.append(f"[宿主: {row['host_info']}]")
 
             main_text = f"{i + 1}. {' '.join(filter(None, parts))}"
             item = QTreeWidgetItem(parent_item, [main_text, '', ''])
