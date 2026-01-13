@@ -161,7 +161,6 @@ class MainWindow(QMainWindow):
                 border: 1px solid #dcdfe6;
                 background-color: #ffffff;
                 alternate-background-color: #f9f9f9;
-                show-decoration-controls: 1;
             }
             
             QTreeWidget::item {
@@ -352,13 +351,52 @@ class MainWindow(QMainWindow):
         self.result_viewer.update()  # 更新结果查看器
         self.update()  # 更新主窗口
     
+    def _create_processor_and_thread(self, file_paths):
+        """
+        工厂方法：根据文件内容创建合适的处理器和线程
+        统一了 _start_processing 和 _retry_blast 的逻辑
+        """
+        # 获取配置
+        try:
+            max_workers = self.parameter_settings.get_thread_count()
+            if not (1 <= max_workers <= 50):
+                raise ValueError("线程数必须在1-50之间")
+        except ValueError as e:
+            QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
+            return None, None
+
+        advanced_settings = self.parameter_settings.get_advanced_settings()
+
+        # 检查是否需要多序列处理
+        has_multi_sequence = False
+        try:
+            from src.utils.file_handler import FileHandler
+            file_handler = FileHandler()
+            for f in file_paths:
+                seqs = file_handler.read_fasta_file(f)
+                if len(seqs) > 1:
+                    has_multi_sequence = True
+                    break
+        except Exception as e:
+            print(f"文件检查警告: {e}")
+            # 出错时默认使用普通处理或根据需求降级
+
+        # 动态导入以避免循环依赖
+        from src.blast.batch_processor import BatchProcessor, MultiSequenceBatchProcessor
+        from src.gui.threads.processing_thread import ProcessingThread, MultiSequenceProcessingThread
+
+        if has_multi_sequence:
+            processor = MultiSequenceBatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings)
+            thread = MultiSequenceProcessingThread(processor, file_paths)
+        else:
+            processor = BatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings)
+            thread = ProcessingThread(processor, file_paths)
+            
+        return processor, thread
+
     def _start_processing(self):
-        """开始处理文件"""
-        # 从文件选择器组件直接获取文件列表，确保是最新的状态
+        """优化后的开始处理"""
         current_files = self.file_selector.get_selected_files()
-        print(f"开始处理时检测到的文件数量: {len(current_files)}, 文件列表: {[Path(f).name for f in current_files]}")
-        
-        # 更新实例变量以确保一致性
         self.sequence_files = current_files
         
         if not self.sequence_files:
@@ -368,110 +406,31 @@ class MainWindow(QMainWindow):
         if self.is_processing:
             QMessageBox.warning(self, "警告", "正在处理中，请等待完成")
             return
-        
-        # 如果是通过文件选择器触发的开始处理，则清空之前的错误状态
+
+        # 更新UI状态
         for file in self.sequence_files:
             self.result_viewer.update_file_status({
-                "file": file,
-                "status": "processing",  # 更改为processing状态
-                "elapsed_time": 0
+                "file": file, "status": "processing", "elapsed_time": 0
             })
         
-        # 强制刷新UI
-        self.result_viewer.update()
-        try:
-            QApplication.processEvents()  # 强制处理UI事件
-        except AttributeError:
-            pass  # 如果QApplication不可用，忽略这个调用
+        # 配置翻译设置 (保持原有逻辑)
+        self._setup_translation_settings()
+
+        # 创建处理器和线程
+        self.batch_processor, self.processing_thread = self._create_processor_and_thread(self.sequence_files)
         
-        try:
-            max_workers = self.parameter_settings.get_thread_count()
-            if max_workers < 1 or max_workers > 50:
-                raise ValueError("线程数必须在1-50之间")
-        except ValueError as e:
-            QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
-            return
-        
-        # 设置高级参数设置
-        advanced_settings = self.parameter_settings.get_advanced_settings()
-        
-        # 设置生物学翻译器参数，现在由右键菜单控制，但初始化时启用AI翻译器
-        translation_settings = {
-            'use_ai': advanced_settings.get('use_ai_translation', True),  # 使用高级设置中的AI翻译开关
-            'translator_type': advanced_settings.get('translator_type', 'default'),  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
-            'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')  # 添加AI模型参数
-        }
-        
-        # 获取API密钥（如果需要）
-        api_key = None
-        try:
-            from src.utils.config_manager import get_config_manager
-            config_manager = get_config_manager()
-            api_key = config_manager.get_api_key('dashscope')
-        except (ImportError, AttributeError) as e:
-            print(f"获取API密钥失败: {e}")
-        
-        # 设置结果查看器的翻译配置
-        self.result_viewer.set_translation_settings(translation_settings, api_key)
-        
-        # 更新界面状态
+        if not self.batch_processor:
+            return # 创建失败（如配置错误）
+
+        # 设置UI控制状态
         self.is_processing = True
         self.control_panel.enable_start_button(False)
         self.control_panel.enable_stop_button(True)
         self.control_panel.update_progress(0)
-        
-        # 清空之前的结果
         self.results = []
-        
-        try:
-            max_workers = self.parameter_settings.get_thread_count()
-            if max_workers < 1 or max_workers > 50:
-                raise ValueError("线程数必须在1-50之间")
-        except ValueError as e:
-            QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
-            return
-        
-        # 检查是否有文件包含多条序列
-        has_multi_sequence_files = False
-        for file_path in self.sequence_files:
-            try:
-                from src.utils.file_handler import FileHandler
-                file_handler = FileHandler()
-                sequences = file_handler.read_fasta_file(file_path)
-                if len(sequences) > 1:
-                    has_multi_sequence_files = True
-                    break
-            except (FileNotFoundError, IOError, ValueError) as e:
-                print(f"检查文件 {file_path} 时出错: {e}")
-    
-        # 根据文件类型选择处理器
-        if has_multi_sequence_files:
-            # 使用多序列处理器
-            self.batch_processor = MultiSequenceBatchProcessor(
-                max_workers=max_workers,
-                advanced_settings=advanced_settings
-            )
-            # 对于多序列处理，我们处理每个文件中的多条序列
-            # 但需要修改线程以支持多序列处理
-            from src.gui.threads.processing_thread import MultiSequenceProcessingThread
-            self.processing_thread = MultiSequenceProcessingThread(self.batch_processor, self.sequence_files)
-        else:
-            # 使用普通处理器
-            self.batch_processor = BatchProcessor(
-                max_workers=max_workers,
-                advanced_settings=advanced_settings
-            )
-            self.processing_thread = ProcessingThread(self.batch_processor, self.sequence_files)
-        
-        # 连接线程信号
-        self.processing_thread.task_started.connect(self._on_task_start)
-        self.processing_thread.progress_updated.connect(self._on_progress_update)
-        self.processing_thread.result_received.connect(self._on_result_received)
-        self.processing_thread.all_tasks_completed.connect(self._on_all_tasks_complete)
-        self.processing_thread.processing_error.connect(self._on_processing_error)
-        self.processing_thread.finished.connect(self._on_thread_finished)
-        
-        # 启动线程
+
+        # 连接并启动
+        self._connect_thread_signals()
         self.processing_thread.start()
     
     @pyqtSlot()
@@ -545,101 +504,59 @@ class MainWindow(QMainWindow):
         pass
 
     @pyqtSlot(str)
-    def _retry_blast(self, file_name):
-        """重试BLAST搜索"""
-        if self.is_processing:
-            QMessageBox.warning(self, "警告", "正在处理中，请等待完成")
-            return
-        
-        # 查找对应的文件路径
-        file_path = None
-        for result in self.results:
-            result_file_name = Path(result.get("file", "")).name
-            if result_file_name == file_name:
-                file_path = result.get("file")
-                break
-        
-        if not file_path:
-            QMessageBox.warning(self, "重试失败", f"未找到文件 {file_name} 的路径信息")
-            return
-        
-        try:
-            max_workers = self.parameter_settings.get_thread_count()
-            if max_workers < 1 or max_workers > 50:
-                raise ValueError("线程数必须在1-50之间")
-        except ValueError as e:
-            QMessageBox.critical(self, "错误", f"线程数设置错误: {e}")
-            return
-        
-        # 获取高级参数设置
+    def _setup_translation_settings(self):
+        """辅助方法：配置翻译设置"""
         advanced_settings = self.parameter_settings.get_advanced_settings()
-        
-        # 设置生物学翻译器参数，现在由右键菜单控制，但初始化时启用AI翻译器
         translation_settings = {
-            'use_ai': advanced_settings.get('use_ai_translation', True),  # 使用高级设置中的AI翻译开关
-            'translator_type': advanced_settings.get('translator_type', 'default'),  # 可以是 'default', 'ai_basic', 'ai_advanced' 等
-            'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')  # 添加AI模型参数
+            'use_ai': advanced_settings.get('use_ai_translation', True),
+            'translator_type': advanced_settings.get('translator_type', 'default'),
+            'ai_model': advanced_settings.get('ai_translation_model', 'deepseek-r1')
         }
         
-        # 获取API密钥（如果需要）
         api_key = None
         try:
             from src.utils.config_manager import get_config_manager
-            config_manager = get_config_manager()
-            api_key = config_manager.get_api_key('dashscope')
-        except Exception as e:
-            print(f"获取API密钥失败: {e}")
-        
-        # 设置结果查看器的翻译配置
+            api_key = get_config_manager().get_api_key('dashscope')
+        except Exception:
+            pass
+            
         self.result_viewer.set_translation_settings(translation_settings, api_key)
+
+    def _connect_thread_signals(self):
+        """辅助方法：连接线程信号"""
+        if self.processing_thread:
+            self.processing_thread.task_started.connect(self._on_task_start)
+            self.processing_thread.progress_updated.connect(self._on_progress_update)
+            self.processing_thread.result_received.connect(self._on_result_received)
+            self.processing_thread.all_tasks_completed.connect(self._on_all_tasks_complete)
+            self.processing_thread.processing_error.connect(self._on_processing_error)
+            self.processing_thread.finished.connect(self._on_thread_finished)
+
+    def _retry_blast(self, file_name):
+        """优化后的重试逻辑"""
+        if self.is_processing:
+            return
+            
+        # 查找文件路径
+        file_path = next((res.get("file") for res in self.results if Path(res.get("file", "")).name == file_name), None)
+        if not file_path:
+             QMessageBox.warning(self, "错误", "找不到原文件路径")
+             return
+
+        self._setup_translation_settings()
         
-        # 更新界面状态
+        # 复用工厂方法
+        self.batch_processor, self.processing_thread = self._create_processor_and_thread([file_path])
+        
+        if not self.batch_processor:
+            return
+
         self.is_processing = True
         self.control_panel.enable_start_button(False)
         self.control_panel.enable_stop_button(True)
-        self.control_panel.update_progress(0)
         self.control_panel.set_status(f"正在重试: {file_name}")
-        self.statusBar().showMessage(f"正在重试: {file_name}")
         
-        # 创建并启动处理线程，传递高级参数
-        # 检查文件是否包含多条序列
-        try:
-            from src.utils.file_handler import FileHandler
-            file_handler = FileHandler()
-            sequences = file_handler.read_fasta_file(file_path)
-            if len(sequences) > 1:
-                # 使用多序列处理器
-                self.batch_processor = MultiSequenceBatchProcessor(
-                    max_workers=max_workers,
-                    advanced_settings=advanced_settings
-                )
-                from src.gui.threads.processing_thread import MultiSequenceProcessingThread
-                self.processing_thread = MultiSequenceProcessingThread(self.batch_processor, [file_path])
-            else:
-                # 使用普通处理器
-                self.batch_processor = BatchProcessor(
-                    max_workers=max_workers,
-                    advanced_settings=advanced_settings
-                )
-                self.processing_thread = ProcessingThread(self.batch_processor, [file_path])
-        except Exception as e:
-            print(f"检查文件 {file_path} 时出错: {e}")
-            # 如果检查失败，使用普通处理器
-            self.batch_processor = BatchProcessor(
-                max_workers=max_workers,
-                advanced_settings=advanced_settings
-            )
-            self.processing_thread = ProcessingThread(self.batch_processor, [file_path])
-        
-        # 连接线程信号
-        self.processing_thread.task_started.connect(self._on_task_start)
-        self.processing_thread.progress_updated.connect(self._on_progress_update)
-        self.processing_thread.result_received.connect(self._on_result_received)
-        self.processing_thread.all_tasks_completed.connect(self._on_all_tasks_complete)
-        self.processing_thread.processing_error.connect(self._on_processing_error)
-        self.processing_thread.finished.connect(self._on_thread_finished)
-        
-        # 启动线程
+        self._connect_thread_signals()
         self.processing_thread.start()
 
     def _open_translation_debugger(self):

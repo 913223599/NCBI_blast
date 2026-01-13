@@ -5,6 +5,7 @@
 
 import csv
 import os
+import threading
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -40,6 +41,9 @@ class TranslationDataManager:
         self.translations_by_category: Dict[str, Dict[str, str]] = {
             key: {} for key in ['species', 'genus', 'strain', 'gene', 'sequence', 'other']
         }
+        
+        # 添加线程锁以确保线程安全
+        self._lock = threading.Lock()
 
         # 统一加载数据
         self._load_all_data()
@@ -143,10 +147,11 @@ class TranslationDataManager:
         """获取英文文本的中文翻译"""
         english_text = english_text.strip()
 
-        if category and category in self.translations_by_category:
-            return self.translations_by_category[category].get(english_text)
+        with self._lock:  # 确保线程安全
+            if category and category in self.translations_by_category:
+                return self.translations_by_category[category].get(english_text)
 
-        return self.translations.get(english_text)
+            return self.translations.get(english_text)
 
     def add_translation(self, english_text: str, chinese_text: str, category: str = 'other'):
         """添加新的翻译条目"""
@@ -155,8 +160,9 @@ class TranslationDataManager:
         category = category.strip() if category else 'other'
 
         if english_text and chinese_text:
-            self._upsert_memory(english_text, chinese_text, category)
-            self._save_translations()
+            with self._lock:  # 确保线程安全
+                self._upsert_memory(english_text, chinese_text, category)
+                self._save_translations()
 
     def update_translation(self, english_text: str, chinese_text: str, category: str = 'other'):
         """更新翻译条目"""
@@ -164,16 +170,19 @@ class TranslationDataManager:
 
     def contains(self, english_text: str, category: str = None) -> bool:
         """检查是否包含指定的英文文本翻译"""
-        return self.get_translation(english_text, category) is not None
+        with self._lock:  # 确保线程安全
+            return self.get_translation(english_text, category) is not None
 
     def get_all_terms(self) -> Dict[str, str]:
         """获取所有翻译条目"""
-        return self.translations.copy()
+        with self._lock:  # 确保线程安全
+            return self.translations.copy()
 
     def get_terms_by_category(self, category: str) -> Dict[str, str]:
         """根据分类获取翻译条目"""
-        if category in self.translations_by_category:
-            return self.translations_by_category[category].copy()
+        with self._lock:  # 确保线程安全
+            if category in self.translations_by_category:
+                return self.translations_by_category[category].copy()
         return {}
 
 

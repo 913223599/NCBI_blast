@@ -5,7 +5,7 @@
   "advanced_settings": {
     "hitlist_size": 20,
     "use_ai_translation": true,
-    "ai_translation_model": "qwen-turbo",
+    "ai_translation_model": "qwen-mt-plus",
     "word_size": null,
     "evalue": null,
     "matrix_name": null,

@@ -8,265 +8,150 @@ import threading
 import time
 import logging
 from urllib.request import HTTPSHandler, build_opener, install_opener
-
 from Bio.Blast import NCBIWWW
-
 
 # 常量定义
 MIN_SEQUENCE_LENGTH = 5
-DEFAULT_WAIT_TIME = 5  # 基础等待时间
-MAX_WAIT_TIME = 20  # 最大等待时间
-TIMEOUT_MINUTES = 6  # 超时分钟数
-MAX_RETRIES = 3  # 最大重试次数
+DEFAULT_WAIT_TIME = 5
+MAX_WAIT_TIME = 20
+MAX_RETRIES = 3
 
-
-# 全局请求计数器和锁，用于控制请求频率
+# 全局请求控制
 request_counter = 0
 request_lock = threading.Lock()
 
-
 def delay_before_request():
-    """
-    在请求前添加延迟以控制请求频率
-    NCBI限制每秒最多3个请求，所以我们控制请求间隔
-    使用0.4秒的延迟，允许每秒2.5个请求，低于NCBI的3个/秒限制
-    """
-    global request_counter
+    """控制请求频率，遵循NCBI规则"""
     with request_lock:
+        global request_counter
         request_counter += 1
-        # 计算需要等待的时间，以保持每秒不超过3个请求的频率
-        time.sleep(0.4)
-
+        time.sleep(0.4) # 约2.5次/秒
 
 class BlastExecutor:
-    """
-    BLAST执行器类
-    负责执行BLAST搜索请求
-    """
-    
     def __init__(self):
-        """
-        初始化BLAST执行器
-        """
-        # 创建一个不验证SSL证书的上下文
+        # 统一SSL上下文设置
+        self._setup_ssl()
+
+    def _setup_ssl(self):
+        """配置非验证的SSL上下文（用于应对特定网络环境）"""
         self.ssl_context = ssl.create_default_context()
         self.ssl_context.check_hostname = False
         self.ssl_context.verify_mode = ssl.CERT_NONE
-        
-        # 创建一个使用自定义SSL上下文的HTTPS处理器
-        self.https_handler = HTTPSHandler(context=self.ssl_context)
-        
-        # 创建并安装使用自定义SSL上下文的opener
-        self.opener = build_opener(self.https_handler)
-        install_opener(self.opener)
-    
-    def execute_blast_search(self, sequence, program="blastn", database="nt", **kwargs):
-        """
-        执行BLAST搜索
-        
-        Args:
-            sequence (str): 要搜索的序列
-            program (str): BLAST程序类型，默认为"blastn"
-            database (str): 数据库，默认为"nt"
-            **kwargs: 其他BLAST参数，支持的参数包括:
-                     - hitlist_size: 返回结果数量
-                     - word_size: 词大小
-                     - evalue: 期望值阈值
-                     - matrix_name: 打分矩阵
-                     - filter: 过滤器设置
-                     - alignments: 比对数量
-                     - descriptions: 描述数量
-            
-        Returns:
-            result_handle: BLAST搜索结果句柄，可用于读取搜索结果
-            
-        Raises:
-            Exception: 如果BLAST搜索执行过程中出现错误
-        """
-        # 只有在处理多个文件时才打印这些信息
-        # 这些信息在批处理器中已经打印过了
-        # print("正在执行BLAST搜索...")
-        # print("这可能需要一些时间...")
-        
-        # 验证序列是否有效
-        if not sequence or len(sequence.strip()) == 0:
-            raise ValueError("序列不能为空")
-        
-        # 检查序列是否包含有效字符（核苷酸或氨基酸）
-        # X是常见字符，代表未知氨基酸或核苷酸
-        valid_nucleotide_chars = set('ATCGNUatcg nuXx')
-        valid_protein_chars = set('ACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvwXYxy')
-        valid_chars = valid_nucleotide_chars | valid_protein_chars
-        
-        # 过滤掉空白字符后检查序列是否包含有效字符
-        seq_chars = set(c for c in sequence if c.isalpha())
-        if not seq_chars.issubset(valid_chars):
-            invalid_chars = seq_chars - valid_chars
-            print(f"警告: 序列包含无效字符: {invalid_chars}")
-            # 移除无效字符
-            sequence = ''.join(c for c in sequence if c in valid_chars or c.isspace())
-        
-        # 清理序列，移除空白字符
-        sequence = sequence.replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '').strip()
-        
-        if len(sequence) < MIN_SEQUENCE_LENGTH:  # NCBI BLAST要求最短序列长度
-            logging.error(f"序列长度太短: {len(sequence)} 个字符，最少需要{MIN_SEQUENCE_LENGTH}个字符")
-            raise ValueError(f"序列长度太短: {len(sequence)} 个字符，最少需要{MIN_SEQUENCE_LENGTH}个字符")
-        
-        try:
-            # 在发送请求前添加延迟，以控制请求频率并遵循NCBI限制
-            delay_before_request()  # 使用伪队列机制控制请求频率
-            
-            # 准备参数字典
-            blast_params = {
-                'program': program,
-                'database': database,
-                'sequence': sequence
-            }
-            
-            # 对于蛋白质搜索，不使用megablast参数
-            if program not in ['blastp', 'blastx', 'rpsblast', 'rpstblastn']:
-                blast_params['megablast'] = 'on'  # 使用'on'而不是True
-            
-            # 添加可选参数
-            if 'hitlist_size' in kwargs:
-                blast_params['hitlist_size'] = kwargs['hitlist_size']
-                
-            if 'word_size' in kwargs:
-                blast_params['word_size'] = kwargs['word_size']
-                
-            if 'evalue' in kwargs:
-                blast_params['expect'] = kwargs['evalue']
-                
-            if 'matrix_name' in kwargs:
-                blast_params['matrix_name'] = kwargs['matrix_name']
-                
-            if 'filter' in kwargs:
-                blast_params['filter'] = kwargs['filter']
-                
-            if 'alignments' in kwargs:
-                blast_params['alignments'] = kwargs['alignments']
-                
-            if 'descriptions' in kwargs:
-                blast_params['descriptions'] = kwargs['descriptions']
-            
-            # 执行BLAST搜索，传递参数
-            result_handle = NCBIWWW.qblast(**blast_params)
-            # print("BLAST搜索完成!")
-            return result_handle
-        except Exception as e:
-            print(f"执行BLAST搜索时出错: {e}")
-            raise e
-    
-    def execute_with_retry(self, sequence, program="blastn", database="nt", max_retries=MAX_RETRIES, timeout_minutes=TIMEOUT_MINUTES, **kwargs):
-        """
-        带重试机制的BLAST搜索执行
-        
-        Args:
-            sequence (str): 要搜索的序列
-            program (str): BLAST程序类型，默认为"blastn"
-            database (str): 数据库，默认为"nt"
-            max_retries (int): 最大重试次数，默认为3
-            timeout_minutes (int): 请求超时时间（分钟），默认为6分钟
-            **kwargs: 其他BLAST参数，支持的参数包括:
-                     - hitlist_size: 返回结果数量
-                     - word_size: 词大小
-                     - evalue: 期望值阈值
-                     - matrix_name: 打分矩阵
-                     - filter: 过滤器设置
-                     - alignments: 比对数量
-                     - descriptions: 描述数量
-            
-        Returns:
-            result_handle: BLAST搜索结果句柄
-        """
+        https_handler = HTTPSHandler(context=self.ssl_context)
+        opener = build_opener(https_handler)
+        install_opener(opener)
 
-        def run_with_timeout(func, args, timeout):
-            """在指定时间内运行函数，超时则抛出异常"""
-            result = [None]
-            exception = [None]  # 明确定义为包含可能异常的列表
-            
-            def target():
-                try:
-                    # 解包参数，其中args[3]是kwargs参数
-                    if len(args) > 3:
-                        result[0] = func(args[0], args[1], args[2], **args[3])
-                    else:
-                        result[0] = func(*args[:3])  # 如果没有kwargs参数，则只传递前三个参数
-                except Exception as e:
-                    exception[0] = e  # 捕获异常并存储到外部变量
-            
-            thread = threading.Thread(target=target)
-            thread.daemon = True
-            thread.start()
-            thread.join(timeout)
-            
-            if thread.is_alive():
-                # 注意：threading._stop() 在新版本Python中不可用，这里我们仅记录超时
-                print(f"警告：BLAST请求超过{timeout_minutes}分钟超时，将重新提交")
-                raise TimeoutError(f"BLAST请求超过{timeout_minutes}分钟超时")
-            
-            if exception[0] is not None:  # 检查是否捕获了异常
-                raise exception[0]
-            
-            return result[0]
-        
-        retries = 0
-        # 使用更长的等待时间以避免服务器过载
-        base_wait_time = DEFAULT_WAIT_TIME  # 增加基础等待时间
-        
-        while retries < max_retries:
+    def _validate_sequence(self, sequence):
+        """验证并清理序列"""
+        if not sequence:
+            raise ValueError("序列为空")
+
+        # 清理空白
+        clean_seq = "".join(sequence.split())
+
+        if len(clean_seq) < MIN_SEQUENCE_LENGTH:
+            raise ValueError(f"序列过短: {len(clean_seq)} < {MIN_SEQUENCE_LENGTH}")
+
+        # 简单字符检查（可选优化：正则）
+        valid_chars = set('ATCGNUatcgnuXxACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvw')
+        if not set(clean_seq).issubset(valid_chars):
+             logging.warning("序列包含非标准字符")
+             clean_seq = "".join(c for c in clean_seq if c in valid_chars)
+
+        return clean_seq
+
+    def execute_blast_search(self, sequence, program="blastn", database="nt", **kwargs):
+        """执行单词BLAST搜索"""
+        sequence = self._validate_sequence(sequence)
+
+        delay_before_request()
+
+        blast_params = {
+            'program': program,
+            'database': database,
+            'sequence': sequence
+        }
+
+        # 参数映射优化
+        if program not in ['blastp', 'blastx', 'rpsblast', 'rpstblastn']:
+            blast_params['megablast'] = 'on'
+
+        # 批量映射可选参数
+        param_map = {
+            'hitlist_size': 'hitlist_size',
+            'word_size': 'word_size',
+            'evalue': 'expect',
+            'matrix_name': 'matrix_name',
+            'filter': 'filter',
+            'alignments': 'alignments',
+            'descriptions': 'descriptions'
+        }
+
+        for key, ncbi_key in param_map.items():
+            if key in kwargs:
+                blast_params[ncbi_key] = kwargs[key]
+
+        try:
+            return NCBIWWW.qblast(**blast_params)
+        except Exception as e:
+            # 简单封装异常以便上层处理
+            raise RuntimeError(f"NCBI BLAST请求失败: {e}") from e
+
+    def execute_with_retry(self, sequence, program="blastn", database="nt",
+                          max_retries=MAX_RETRIES, timeout_minutes=6, **kwargs):
+        """带重试和超时机制的执行"""
+
+        def run_thread(result_container, exception_container):
             try:
-                # 使用超时包装器执行BLAST搜索
-                result = run_with_timeout(
-                    self.execute_blast_search,
-                    (sequence, program, database, kwargs),  # 将kwargs传递给execute_blast_search
-                    timeout_minutes * 60  # 转换为秒
-                )
-                return result
+                result_container[0] = self.execute_blast_search(sequence, program, database, **kwargs)
             except Exception as e:
-                # 检查错误类型，如果是NCBI服务器拒绝请求，需要特别处理
-                error_msg = str(e).lower()
-                if "cannot accept request" in error_msg or "error code: -1" in error_msg:
-                    # 根据历史经验，错误码-1表示服务器过载，需要大幅增加等待时间
-                    wait_time = MAX_WAIT_TIME  # 20秒等待时间
-                    print(f"NCBI服务器拒绝请求，{wait_time}秒后重试... (错误: {e})")
-                    time.sleep(wait_time)
-                    retries += 1
-                    continue
-                elif "taking longer than" in error_msg:
-                    # 长时间请求警告，根据用户需求，超过一定时间应视为超时并重新提交
-                    print(f"检测到长时间运行的BLAST请求，视为超时，将重新提交... (警告: {e})")
-                    retries += 1
-                    if retries >= max_retries:
-                        raise e
-                    else:
-                        # 使用指数退避策略，但确保等待时间足够长
-                        wait_time = base_wait_time * (2 ** (retries - 1))  # 指数退避
-                        logging.info(f"超时重试，{wait_time:.1f}秒后进行第{retries}次重试... (错误: {e})")
-                        time.sleep(wait_time)
-                    continue
-                elif isinstance(e, TimeoutError):
-                    # 超时错误，按用户需求重新提交
-                    print(f"BLAST请求超时({timeout_minutes}分钟)，将重新提交... (错误: {e})")
-                    retries += 1
-                    if retries >= max_retries:
-                        raise e
-                    else:
-                        # 使用指数退避策略，但确保等待时间足够长
-                        wait_time = base_wait_time * (2 ** (retries - 1))  # 指数退避
-                        logging.info(f"超时重试，{wait_time:.1f}秒后进行第{retries}次重试... (错误: {e})")
-                        time.sleep(wait_time)
-                    continue
-                else:
-                    retries += 1
-                    if retries >= max_retries:
-                        raise e
-                    else:
-                        # 使用指数退避策略，但确保等待时间足够长
-                        wait_time = base_wait_time * (2 ** (retries - 1))  # 指数退避
-                        logging.info(f"搜索失败，{wait_time:.1f}秒后进行第{retries}次重试... (错误: {e})")
-                        time.sleep(wait_time)
-        
-        # 如果循环结束仍未成功，说明达到了最大重试次数，抛出异常
-        raise Exception(f"达到最大重试次数 {max_retries}，BLAST搜索失败")
+                exception_container[0] = e
+
+        retries = 0
+        current_wait = DEFAULT_WAIT_TIME
+
+        while retries < max_retries:
+            result_container = [None]
+            exception_container = [None]
+
+            # 使用线程实现超时控制
+            worker = threading.Thread(target=run_thread, args=(result_container, exception_container))
+            worker.daemon = True
+            worker.start()
+            worker.join(timeout_minutes * 60)
+
+            # 情况1: 成功
+            if not worker.is_alive() and exception_container[0] is None and result_container[0] is not None:
+                return result_container[0]
+
+            # 准备重试逻辑
+            retries += 1
+            error_reason = "未知错误"
+            should_wait = True
+
+            # 情况2: 超时
+            if worker.is_alive():
+                error_reason = f"请求超时 (> {timeout_minutes}m)"
+                # 注意: Python线程无法强制终止，只能丢弃引用
+
+            # 情况3: 抛出异常
+            elif exception_container[0]:
+                e = exception_container[0]
+                error_reason = str(e)
+                # 检查是否是严重错误（如认证失败等），可能不需要重试
+                # 这里假设网络错误都需要重试
+
+            # 达到最大重试次数
+            if retries >= max_retries:
+                raise TimeoutError(f"BLAST失败 (重试 {retries} 次): {error_reason}")
+
+            # 计算等待时间 (指数退避)
+            wait_time = current_wait * (2 ** (retries - 1))
+            # 如果是服务器拒绝 (-1)，使用更长的固定等待
+            if "error code: -1" in str(error_reason).lower():
+                wait_time = MAX_WAIT_TIME
+
+            logging.info(f"尝试 {retries}/{max_retries} 失败: {error_reason}. {wait_time:.1f}s 后重试...")
+            time.sleep(wait_time)
+
+        raise Exception("未知流程错误")

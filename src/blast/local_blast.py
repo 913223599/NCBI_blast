@@ -4,258 +4,161 @@
 """
 
 import subprocess
+import shutil
+import os
 from pathlib import Path
-
 from Bio.Blast import NCBIXML
-
 
 class LocalBlastExecutor:
     """
     本地BLAST执行器
     使用本地数据库进行BLAST搜索
     """
-    
+
     def __init__(self, database_path="database/nt"):
-        """
-        初始化本地BLAST执行器
-        
-        Args:
-            database_path (str): 数据库路径
-        """
         self.database_path = database_path
-        self.blast_bin = "blastn"  # BLAST可执行文件名
-    
+        # 根据操作系统自动查找可执行文件，Windows下可能需要.exe后缀
+        self.blast_bin = "blastn"
+
     def check_blast_installation(self):
         """
         检查BLAST是否已安装
-        
-        Returns:
-            bool: 是否已安装
+        使用 shutil.which 提供更健壮的跨平台检查
         """
-        try:
-            result = subprocess.run(
-                [self.blast_bin, "-version"], 
-                capture_output=True, 
-                text=True, 
-                check=True
-            )
-            return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return False
-    
+        return shutil.which(self.blast_bin) is not None
+
     def download_database(self, db_name="nt", output_dir="database"):
-        """
-        下载BLAST数据库（需要手动执行）
-        
-        Args:
-            db_name (str): 数据库名称
-            output_dir (str): 输出目录
-        """
+        """下载BLAST数据库提示"""
         print(f"请手动下载数据库 {db_name} 到 {output_dir} 目录:")
         print("方法一：使用NCBI提供的工具")
         print(f"  update_blastdb.pl --decompress {db_name}")
         print("方法二：从NCBI网站下载")
         print(f"  https://ftp.ncbi.nih.gov/blast/db/")
-        print(f"  下载 {db_name}.*.tar.gz 文件并解压到 {output_dir} 目录")
-    
+
     def execute_local_blast(self, sequence_file, output_file, max_hits=50):
-        """
-        执行本地BLAST搜索
-        
-        Args:
-            sequence_file (str): 序列文件路径
-            output_file (str): 输出文件路径
-            max_hits (int): 最大匹配数
-            
-        Returns:
-            str: 输出文件路径
-        """
+        """执行本地BLAST搜索"""
+        if not self.check_blast_installation():
+            raise FileNotFoundError(f"未找到BLAST可执行文件: {self.blast_bin}，请确保已安装并添加到PATH环境变量。")
+
+        if not Path(sequence_file).exists():
+             raise FileNotFoundError(f"序列文件不存在: {sequence_file}")
+
+        # 构建BLAST命令行参数
+        blast_cmd = [
+            self.blast_bin,
+            "-query", str(sequence_file),
+            "-db", str(self.database_path),
+            "-out", str(output_file),
+            "-outfmt", "5",  # XML格式输出
+            "-max_target_seqs", str(max_hits),
+            "-evalue", "10.0"
+        ]
+
         try:
-            # 构建BLAST命令行参数
-            blast_cmd = [
-                self.blast_bin,
-                "-query", sequence_file,
-                "-db", self.database_path,
-                "-out", output_file,
-                "-outfmt", "5",  # XML格式输出
-                "-max_target_seqs", str(max_hits),
-                "-evalue", "10.0"
-            ]
-            
             print(f"正在执行本地BLAST搜索: {Path(sequence_file).name}")
-            print(f"命令: {' '.join(blast_cmd)}")
-            
-            # 执行BLAST搜索
-            result = subprocess.run(
+            # 使用 capture_output=True 捕获输出，text=True 确保返回字符串
+            subprocess.run(
                 blast_cmd,
                 capture_output=True,
                 text=True,
                 check=True
             )
-            
             return output_file
-            
+
         except subprocess.CalledProcessError as e:
-            error_msg = f"本地BLAST执行失败: {e}\nstderr: {e.stderr}"
-            raise Exception(error_msg)
-        except FileNotFoundError:
-            raise Exception(f"未找到BLAST可执行文件: {self.blast_bin}")
-    
+            error_msg = f"本地BLAST执行失败 (Exit code {e.returncode}):\n{e.stderr}"
+            raise RuntimeError(error_msg)
+
     def parse_result(self, result_file):
         """
         解析BLAST结果
-        
-        Args:
-            result_file (str): 结果文件路径
-            
-        Returns:
-            blast_record: 解析后的BLAST记录
+        修复了使用 next() 可能导致的 StopIteration 错误
         """
         try:
-            with open(result_file) as result_handle:
-                blast_records = NCBIXML.parse(result_handle)
-                blast_record = next(blast_records)
-                return blast_record
+            with open(result_file, 'r') as result_handle:
+                # NCBIXML.parse 返回的是迭代器，转换为列表以安全访问
+                blast_records = list(NCBIXML.parse(result_handle))
+
+                if not blast_records:
+                    print(f"警告: {result_file} 中未发现BLAST记录")
+                    return None
+
+                # 目前逻辑只处理单条序列的搜索结果
+                return blast_records[0]
         except Exception as e:
             raise RuntimeError(f"解析BLAST结果失败: {e}")
-    
+
     def display_result_summary(self, blast_record, top_hits=5):
-        """
-        显示结果摘要
-        
-        Args:
-            blast_record: BLAST记录
-            top_hits (int): 显示前几个匹配结果
-        """
+        """显示结果摘要"""
+        if not blast_record:
+            print("没有可显示的BLAST记录。")
+            return
+
         print(f"\n找到 {len(blast_record.alignments)} 个比对结果")
-        print("\n前{}个最佳比对:".format(top_hits))
+        print(f"\n前{top_hits}个最佳比对:")
         print("=" * 80)
-        
+
         for i, alignment in enumerate(blast_record.alignments[:top_hits]):
             print(f"匹配 {i+1}:")
             print(f"标题: {alignment.title}")
             print(f"长度: {alignment.length}")
-            
-            for hsp in alignment.hsps[:1]:  # 只显示最好的HSP
+
+            if alignment.hsps:
+                hsp = alignment.hsps[0] # 只显示最好的HSP
                 print(f"E值: {hsp.expect}")
                 print(f"得分: {hsp.score}")
                 print(f"比对长度: {hsp.align_length}")
-                print(f"相似度: {hsp.identities / hsp.align_length * 100:.2f}%")
+                if hsp.align_length > 0:
+                    print(f"相似度: {hsp.identities / hsp.align_length * 100:.2f}%")
                 print(f"缺口: {hsp.gaps}")
-            
+
             print("=" * 80)
 
-
+# LocalBatchProcessor 类保持原逻辑，只需确保调用新的 execute_local_blast 即可
 class LocalBatchProcessor:
-    """
-    本地批量处理器
-    使用本地BLAST进行批量序列处理
-    """
-    
     def __init__(self, database_path="nt"):
-        """
-        初始化本地批量处理器
-        
-        Args:
-            database_path (str): 数据库路径
-        """
         self.database_path = database_path
         self.blast_executor = LocalBlastExecutor(database_path=database_path)
-    
+
     def process_single_sequence(self, sequence_file):
-        """
-        处理单个序列文件
-        
-        Args:
-            sequence_file (str): 序列文件路径
-            
-        Returns:
-            dict: 处理结果信息
-        """
         try:
-            # 获取文件名（不含扩展名）用于结果文件命名
-            file_name = Path(sequence_file).stem
-            result_file = Path("results") / f"{file_name}_local_blast_result.xml"
-            
-            # 执行本地BLAST搜索
-            self.blast_executor.execute_local_blast(sequence_file, str(result_file))
-            
-            # 解析结果
+            file_path = Path(sequence_file)
+            file_name = file_path.stem
+
+            # 确保结果目录存在
+            results_dir = Path("results")
+            results_dir.mkdir(exist_ok=True)
+            result_file = results_dir / f"{file_name}_local_blast_result.xml"
+
+            self.blast_executor.execute_local_blast(str(file_path), str(result_file))
             blast_record = self.blast_executor.parse_result(str(result_file))
-            
-            # 显示结果摘要
+
             print(f"\n文件 {file_name} 的搜索结果:")
             self.blast_executor.display_result_summary(blast_record, top_hits=3)
-            
+
             return {
-                "file": sequence_file,
+                "file": str(sequence_file),
                 "status": "success",
-                "result_file": result_file
+                "result_file": str(result_file)
             }
         except Exception as e:
             print(f"处理文件 {sequence_file} 时出错: {e}")
             return {
-                "file": sequence_file,
+                "file": str(sequence_file),
                 "status": "error",
                 "error": str(e)
             }
-    
-    def process_sequences(self, sequence_files):
-        """
-        批量处理序列文件
-        
-        Args:
-            sequence_files (list): 序列文件路径列表
-            
-        Returns:
-            list: 处理结果列表
-        """
-        print(f"开始本地批量处理 {len(sequence_files)} 个序列文件...")
-        
-        # 创建结果目录（如果不存在）
-        Path("results").mkdir(exist_ok=True)
-        
-        # 处理序列文件
-        results = []
-        for seq_file in sequence_files:
-            result = self.process_single_sequence(seq_file)
-            results.append(result)
-            if result["status"] == "success":
-                print(f"✓ 完成处理: {Path(seq_file).name}")
-            else:
-                print(f"✗ 处理失败: {Path(seq_file).name} - {result['error']}")
-        
-        return results
 
+    def process_sequences(self, sequence_files):
+        print(f"开始本地批量处理 {len(sequence_files)} 个序列文件...")
+        return [self.process_single_sequence(f) for f in sequence_files]
 
 def main():
-    """
-    本地BLAST工具使用示例
-    """
-    print("本地BLAST工具")
-    print("=" * 30)
-    
-    # 检查是否安装了BLAST
-    try:
-        executor = LocalBlastExecutor()
-        print("✓ BLAST+ 已正确安装")
-    except RuntimeError as e:
-        print(f"✗ {e}")
-        return
-    
-    print("\n使用说明:")
-    print("1. 首先下载NCBI BLAST数据库:")
-    print("   - 访问 https://ftp.ncbi.nih.gov/blast/db/")
-    print("   - 下载 nt.*.tar.gz 文件并解压")
-    print("2. 设置数据库路径")
-    print("3. 运行本地BLAST搜索")
-    
-    print("\n本地BLAST优势:")
-    print("- 查询速度快（秒级响应）")
-    print("- 不依赖网络连接")
-    print("- 可以处理大量序列")
-    print("- 支持批量处理")
-
+    executor = LocalBlastExecutor()
+    if executor.check_blast_installation():
+         print("✓ BLAST+ 已正确安装")
+    else:
+         print("✗ 未检测到 BLAST+")
 
 if __name__ == "__main__":
     main()

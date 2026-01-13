@@ -1,14 +1,3 @@
 english,chinese,category
-hydrolase,水解酶,gene
 hypothetical protein,假定蛋白,gene
-16S ribosomal RNA gene,16S核糖体RNA基因,gene
-partial sequence,部分序列,sequence
-strain,菌株,strain
-clone,克隆,strain
-16S rRNA gene,16S rRNA基因,gene
-partial 16S rRNA gene,部分16S rRNA基因,sequence
-complete genome,完整基因组,sequence
-complete sequence,完整序列,sequence
-16S ribosomal RNA,16S核糖体RNA,gene
-isolate,isolate,strain
-gene for 16S rRNA,gene for 16S rRNA,gene
+hydrolase,水解酶,gene

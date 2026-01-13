@@ -75,11 +75,12 @@ class TranslationWorker(QObject):
                             'strain': row.get('菌株', ''),
                             'gene_type': row.get('基因类型', ''),
                             'sequence_type': row.get('序列类型', ''),
+                            'host_info': row.get('宿主信息', ''),  # 添加宿主信息字段
                         }
 
                         # 批量翻译需要翻译的字段
                         if self.biology_translator:
-                            for key in ['species', 'genus', 'gene_type', 'sequence_type']:
+                            for key in ['species', 'genus', 'gene_type', 'sequence_type', 'host_info']:
                                 original_text = fields[key]
                                 if original_text:
                                     try:
@@ -91,7 +92,6 @@ class TranslationWorker(QObject):
                         # 构建结果
                         translated_row = {
                             **fields,  # 解包翻译后的字段
-                            'strain': fields['strain'],  # strain 通常不需要翻译，保持原样
                             'similarity': row.get('相似度', ''),
                             'e_value': row.get('E值', ''),
                             'original_row': row
@@ -564,19 +564,25 @@ class ResultViewerWidget(QGroupBox):
 
         for i, row in enumerate(translated_rows):
             # 构建主要信息
-            parts = [row['species']]
-            if row['genus'] and row['genus'] != row['species']: parts.append(row['genus'])
-            if row['strain']: parts.append(row['strain'])
-            if row['host_info']: parts.append(f"[宿主: {row['host_info']}]")
+            parts = [row.get('species', '')]
+            genus = row.get('genus', '')
+            if genus and genus != row.get('species', ''): parts.append(genus)
+            strain = row.get('strain', '')
+            if strain: parts.append(strain)
+            host_info = row.get('host_info', '')
+            if host_info: parts.append(f"[宿主: {host_info}]")
 
             main_text = f"{i + 1}. {' '.join(filter(None, parts))}"
             item = QTreeWidgetItem(parent_item, [main_text, '', ''])
 
             # 构建次要信息
             sub_parts = []
-            if row['similarity']: sub_parts.append(f"相似度: {row['similarity']}")
-            if row['e_value']: sub_parts.append(f"E值: {row['e_value']}")
-            if row['gene_type']: sub_parts.append(f"基因: {row['gene_type']}")
+            similarity = row.get('similarity', '')
+            if similarity: sub_parts.append(f"相似度: {similarity}")
+            e_value = row.get('e_value', '')
+            if e_value: sub_parts.append(f"E值: {e_value}")
+            gene_type = row.get('gene_type', '')
+            if gene_type: sub_parts.append(f"基因: {gene_type}")
 
             if sub_parts:
                 sub_item = QTreeWidgetItem(item, [", ".join(sub_parts), '', ''])

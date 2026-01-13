@@ -326,6 +326,7 @@ class BlastResultConverter:
         """
         try:
             from src.utils.translation.term_extractor import TermExtractor
+            # 不传递translation_data_manager，避免多线程冲突
             term_extractor = TermExtractor()
             term_extractor.extract_blast_result_terms(csv_file_path)
         except Exception as e:
