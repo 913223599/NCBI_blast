@@ -308,6 +308,10 @@ class ParameterSettingsWidget(QWidget):
             model_index = self.ai_model_combo.findText(ai_model)
         self.ai_model_combo.setCurrentIndex(model_index)
 
+        # [新增] 设置线程数
+        thread_count = self.advanced_settings.get('thread_count', 3)
+        self.thread_count_spinbox.setValue(int(thread_count))
+
     def _setup_ui(self):
         """设置简洁的垂直布局"""
         layout = QVBoxLayout(self)
@@ -330,7 +334,7 @@ class ParameterSettingsWidget(QWidget):
 
         self.thread_count_spinbox = QSpinBox()
         self.thread_count_spinbox.setRange(1, 50)
-        self.thread_count_spinbox.setValue(2)
+        # self.thread_count_spinbox.setValue(2) # [已移除] 移除硬编码默认值
         self.thread_count_spinbox.setFixedWidth(90)
 
         thread_layout.addWidget(lbl_thread)
@@ -433,7 +437,11 @@ class ParameterSettingsWidget(QWidget):
     def _on_settings_changed(self):
         # 获取当前设置
         settings = self.get_advanced_settings()
-        settings['thread_count'] = self.get_thread_count()
+        
+        # 更新线程数
+        thread_count = self.get_thread_count()
+        settings['thread_count'] = thread_count
+        self.advanced_settings['thread_count'] = thread_count
         
         # 更新AI翻译设置
         use_ai = self.use_ai_checkbox.isChecked()
@@ -447,9 +455,9 @@ class ParameterSettingsWidget(QWidget):
         self.advanced_settings['ai_translation_model'] = ai_model
         try:
             self.config_manager.set_advanced_settings(self.advanced_settings)
-            print(f"AI翻译设置已更新 - 启用: {use_ai}, 模型: {ai_model}")
+            print(f"配置已更新 - 线程: {thread_count}, AI启用: {use_ai}, 模型: {ai_model}")
         except Exception as e:
-            print(f"错误：无法保存AI翻译配置: {e}")
+            print(f"错误：无法保存配置: {e}")
         
         # 发出信号
         self.settings_changed.emit(settings)
@@ -469,7 +477,7 @@ class ParameterSettingsWidget(QWidget):
             'hitlist_size', 'word_size', 'evalue', 'matrix_name', 'filter',
             'alignments', 'descriptions', 'local_num_threads', 'nucleotide_database',
             'protein_database', 'prefer_local', 'fallback_to_remote', 'use_cache',
-            'use_ai_translation', 'ai_translation_model'
+            'use_ai_translation', 'ai_translation_model', 'thread_count'
         ]
 
         # 更新内存

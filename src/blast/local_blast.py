@@ -126,7 +126,9 @@ class LocalBatchProcessor:
             file_name = file_path.stem
 
             # 确保结果目录存在
-            results_dir = Path("results")
+            # 获取项目根目录 (src/blast/local_blast.py -> src/blast -> src -> root)
+            project_root = Path(__file__).resolve().parent.parent.parent
+            results_dir = project_root / "results"
             results_dir.mkdir(exist_ok=True)
             result_file = results_dir / f"{file_name}_local_blast_result.xml"
 

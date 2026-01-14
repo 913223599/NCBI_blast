@@ -86,7 +86,40 @@ try:
 
     print("Calling main function...")
     if __name__ == "__main__":
-        sys.exit(main())
+        try:
+            # 在调用main之前，先检查是否有GUI显示问题
+            import ctypes
+            import platform
+            
+            # 在Windows上尝试修复DPI缩放问题
+            if platform.system() == "Windows":
+                try:
+                    # 启用高DPI缩放感知
+                    ctypes.windll.shcore.SetProcessDpiAwareness(1)
+                except Exception as dpi_error:
+                    print(f"Could not set DPI awareness: {dpi_error}")
+            
+            # 尝试实例化Application类而不立即运行，以检查初始化错误
+            print("Attempting to create Application instance...")
+            from src.gui.application_pyqt import Application
+            app_instance = Application()
+            print("Application instance created successfully")
+            
+            # 现在运行应用
+            result = app_instance.run()
+            print(f"Main function returned: {result}")
+            sys.exit(result)
+        except Exception as e:
+            print(f"Error occurred in main function: {e}")
+            import traceback
+            traceback.print_exc()
+            print("主界面无法启动，可能的原因：")
+            print("1. 缺少必要的GUI库（如PyQt6）")
+            print("2. 显示驱动或图形界面环境问题")
+            print("3. 权限问题导致无法创建窗口")
+            print("4. 其他GUI初始化错误")
+            input("Press Enter to exit...")  # 添加暂停，以便查看错误信息
+            sys.exit(1)
 
 except Exception as e:
     print(f"Failed to start GUI application: {e}")

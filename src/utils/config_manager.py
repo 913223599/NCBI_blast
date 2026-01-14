@@ -17,7 +17,7 @@ class ConfigManager:
     """
 
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()  # 使用可重入锁防止死锁
     _initialized = False
 
     # 定义默认配置常量
@@ -40,7 +40,8 @@ class ConfigManager:
         "fallback_to_remote": True,
         "use_cache": True,
         "use_ai_translation": True,
-        "ai_translation_model": "deepseek-r1"
+        "ai_translation_model": "deepseek-r1",
+        "thread_count": 3  # 默认处理线程数
     }
 
     def __new__(cls, *args, **kwargs):

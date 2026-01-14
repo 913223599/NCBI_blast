@@ -39,6 +39,7 @@
     "protein_database": "nr",
     "prefer_local": true,
     "fallback_to_remote": true,
-    "use_cache": true
+    "use_cache": true,
+    "thread_count": 3
   }
 }

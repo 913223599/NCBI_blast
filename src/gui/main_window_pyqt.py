@@ -32,7 +32,7 @@ from src.blast.batch_processor import BatchProcessor, MultiSequenceBatchProcesso
 def ensure_results_folders():
     """
     确保results文件夹存在
-    根据项目规范，确保项目根目录和src目录下的results文件夹存在
+    只在项目根目录下创建results文件夹
     """
     try:
         # 确保项目根目录下的results文件夹存在
@@ -43,13 +43,6 @@ def ensure_results_folders():
         else:
             print(f"项目根目录results文件夹已存在: {root_results_path}")
             
-        # 确保src目录下的results文件夹存在
-        src_results_path = Path(project_root) / "src" / "results"
-        if not src_results_path.exists():
-            src_results_path.mkdir(parents=True, exist_ok=True)
-            print(f"已创建src目录results文件夹: {src_results_path}")
-        else:
-            print(f"src目录results文件夹已存在: {src_results_path}")
     except Exception as e:
         print(f"确保results文件夹存在时出错: {e}")
 

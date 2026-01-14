@@ -13,13 +13,18 @@ class HashChecker:
     用于计算文件哈希值并检查缓存结果
     """
     
-    def __init__(self, cache_dir="results"):
+    def __init__(self, cache_dir=None):
         """
         初始化哈希校验器
         
         Args:
-            cache_dir (str): 缓存目录路径
+            cache_dir (str or Path): 缓存目录路径
         """
+        if cache_dir is None:
+             # 默认为项目根目录下的results文件夹
+             project_root = Path(__file__).resolve().parent.parent.parent
+             cache_dir = project_root / "results"
+             
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
     
@@ -162,12 +167,12 @@ class HashChecker:
             return False
 
 
-def get_hash_checker(cache_dir="results") -> HashChecker:
+def get_hash_checker(cache_dir=None) -> HashChecker:
     """
     获取哈希校验器实例
     
     Args:
-        cache_dir (str): 缓存目录路径
+        cache_dir (str or Path): 缓存目录路径
         
     Returns:
         HashChecker: 哈希校验器实例

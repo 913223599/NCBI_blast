@@ -240,7 +240,9 @@ class CachedBlastProcessor:
             Path: 时间戳文件夹路径
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder_path = Path("results") / timestamp
+        # 获取项目根目录 (src/blast/result_cache.py -> src/blast -> src -> root)
+        project_root = Path(__file__).resolve().parent.parent.parent
+        folder_path = project_root / "results" / timestamp
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path
 

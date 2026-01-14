@@ -73,7 +73,9 @@ class BaseProcessor:
     def _create_timestamp_folder(self):
         """创建基于时间戳的结果保存文件夹"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        folder_path = Path("results") / timestamp
+        # 获取项目根目录 (src/blast/batch_processor.py -> src/blast -> src -> root)
+        project_root = Path(__file__).resolve().parent.parent.parent
+        folder_path = project_root / "results" / timestamp
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path
 
