@@ -16,14 +16,7 @@ class QwenTranslator:
     使用通义千问大模型进行专业的生物学文本翻译
     """
     
-    # 支持的模型列表
-    SUPPORTED_MODELS = {
-        'qwen-plus': '通义千问-Plus',
-        'qwen-mt-plus': '通义千问-MT-Plus',
-        'qwen-mt-turbo': '通义千问-MT-Turbo',
-        'qwen-turbo': '通义千问-Turbo',
-        'deepseek-r1': 'DeepSeek'
-    }
+    # 支持的模型列表 - 现在从配置文件获取，不再硬编码
     
     def __init__(self, api_key: Optional[str] = None, model: str = 'deepseek-r1'):
         """
@@ -38,8 +31,8 @@ class QwenTranslator:
         self.api_key = api_key or os.environ.get('DASHSCOPE_API_KEY')
         
         # 验证模型是否支持
-        if model not in self.SUPPORTED_MODELS:
-            raise ValueError(f"不支持的模型: {model}。支持的模型: {', '.join(self.SUPPORTED_MODELS.keys())}")
+        if model not in self.get_supported_models():
+            raise ValueError(f"不支持的模型: {model}。支持的模型: {', '.join(self.get_supported_models().keys())}")
         self.model = model
         
         # 如果仍然没有api_key，则尝试从配置文件获取
@@ -64,6 +57,30 @@ class QwenTranslator:
             api_key=self.api_key,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
+    
+    def get_supported_models(self, return_keys_only=False) -> dict or list:
+        """获取支持的AI模型列表"""
+        # 从配置文件获取支持的模型
+        try:
+            from ...utils.config_manager import get_config_manager
+            config_manager = get_config_manager()
+            if return_keys_only:
+                return config_manager.get_supported_model_keys()
+            else:
+                return config_manager.get_supported_models()
+        except Exception as e:
+            # 如果配置管理器不可用，返回默认值
+            default_models = {
+                'qwen-plus': '通义千问-Plus',
+                'qwen-mt-plus': '通义千问-MT-Plus',
+                'qwen-mt-turbo': '通义千问-MT-Turbo',
+                'qwen-turbo': '通义千问-Turbo',
+                'deepseek-r1': 'DeepSeek'
+            }
+            if return_keys_only:
+                return list(default_models.keys())
+            else:
+                return default_models
     
     def translate_text(self, text: str, source_lang: str = 'en', target_lang: str = 'zh') -> str:
         """
@@ -223,7 +240,10 @@ if __name__ == "__main__":
         
         print("通义千问生物学翻译测试:")
         print("=" * 50)
-        print(f"使用模型: {translator.model} ({QwenTranslator.SUPPORTED_MODELS[translator.model]})")
+        # 获取模型名称（如果有的话）
+        supported_models = translator.get_supported_models()
+        model_name = supported_models.get(translator.model, translator.model)
+        print(f"使用模型: {translator.model} ({model_name})")
         print("-" * 50)
         
         for test_case in test_cases:

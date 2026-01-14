@@ -54,7 +54,6 @@ class AdvancedSettingsDialog(QDialog):
 
         self.tabs.addTab(self._create_search_tab(), "搜索参数")
         self.tabs.addTab(self._create_database_tab(), "数据库与输出")
-        self.tabs.addTab(self._create_ai_tab(), "AI 翻译设置")
         self.tabs.addTab(self._create_system_tab(), "系统与混合模式")
 
         content_wrapper = QWidget()
@@ -123,9 +122,7 @@ class AdvancedSettingsDialog(QDialog):
         self.protein_db_combo.addItems(["nr", "refseq_protein", "swissprot", "pdb", "env_nr"])
 
         # --- AI 参数 ---
-        self.use_ai_checkbox = QCheckBox("启用 AI 辅助翻译与解释")
-        self.ai_model_combo = QComboBox()
-        self.ai_model_combo.addItems(["deepseek-r1", "qwen-plus", "qwen-mt-plus", "qwen-mt-turbo", "qwen-turbo"])
+        # 已移除，现在在主界面直接配置
 
         # --- 系统参数 ---
         self.local_num_threads_enabled = QCheckBox()
@@ -198,41 +195,7 @@ class AdvancedSettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
-    def _create_ai_tab(self):
-        """AI 设置选项卡"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(15)
 
-        layout.addWidget(QLabel("<b>AI 智能翻译配置</b>"))
-
-        # 启用开关
-        ai_group = QWidget()
-        ai_layout = QHBoxLayout(ai_group)
-        ai_layout.setContentsMargins(0, 0, 0, 0)
-        ai_layout.addWidget(self.use_ai_checkbox)
-        ai_layout.addStretch()
-        layout.addWidget(ai_group)
-
-        # 模型选择
-        model_group = QWidget()
-        model_layout = QHBoxLayout(model_group)
-        model_layout.setContentsMargins(0, 0, 0, 0)
-        model_layout.addWidget(QLabel("AI 模型选择:"))
-        self.ai_model_combo.setMinimumWidth(250)
-        model_layout.addWidget(self.ai_model_combo)
-        model_layout.addStretch()
-        layout.addWidget(model_group)
-
-        # 说明文字
-        info_label = QLabel(
-            "提示：请确保在 API 密钥设置中配置了对应的 Key (如 DashScope)。\nDeepSeek-R1 适合复杂推理，Qwen-Plus 适合通用翻译。")
-        info_label.setStyleSheet("color: #666; font-size: 12px; margin-top: 10px;")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-
-        layout.addStretch()
-        return tab
 
     def _create_system_tab(self):
         tab = QWidget()
@@ -264,9 +227,9 @@ class AdvancedSettingsDialog(QDialog):
             'fallback_to_remote': self.fallback_to_remote_checkbox.isChecked(),
             'use_cache': self.use_cache_checkbox.isChecked(),
 
-            # AI 参数
-            'use_ai_translation': self.use_ai_checkbox.isChecked(),
-            'ai_translation_model': self.ai_model_combo.currentText()
+            # AI 参数 - 从主界面获取
+            'use_ai_translation': self.use_ai_checkbox.isChecked() if hasattr(self, 'use_ai_checkbox') else False,
+            'ai_translation_model': self.ai_model_combo.currentText() if hasattr(self, 'ai_model_combo') else "qwen-mt-plus"
         }
         return settings
 
@@ -302,11 +265,7 @@ class AdvancedSettingsDialog(QDialog):
         if 'use_cache' in settings: self.use_cache_checkbox.setChecked(settings['use_cache'])
 
         # 设置 AI 参数
-        if 'use_ai_translation' in settings:
-            self.use_ai_checkbox.setChecked(settings['use_ai_translation'])
-        if 'ai_translation_model' in settings:
-            idx = self.ai_model_combo.findText(settings['ai_translation_model'])
-            if idx >= 0: self.ai_model_combo.setCurrentIndex(idx)
+        # AI翻译设置已移至主界面，此处不再处理
 
 # =============================================================================
 #  参数设置组件 Widget (侧边栏嵌入版)
@@ -330,6 +289,24 @@ class ParameterSettingsWidget(QWidget):
 
         self._setup_ui()
         self._connect_signals()
+        
+        # [新增] 根据配置初始化控件状态
+        self._load_settings_from_config()
+
+    def _load_settings_from_config(self):
+        """从配置加载设置到界面"""
+        # 设置AI翻译复选框状态
+        use_ai = self.advanced_settings.get('use_ai_translation', True)
+        self.use_ai_checkbox.setChecked(use_ai)
+        
+        # 设置AI模型下拉框
+        ai_model = self.advanced_settings.get('ai_translation_model', 'qwen-mt-plus')
+        # 如果模型不在下拉框中，添加它
+        model_index = self.ai_model_combo.findText(ai_model)
+        if model_index == -1:
+            self.ai_model_combo.addItem(ai_model)
+            model_index = self.ai_model_combo.findText(ai_model)
+        self.ai_model_combo.setCurrentIndex(model_index)
 
     def _setup_ui(self):
         """设置简洁的垂直布局"""
@@ -361,7 +338,45 @@ class ParameterSettingsWidget(QWidget):
         thread_layout.addWidget(self.thread_count_spinbox)
         layout.addWidget(thread_container)
 
-        # 2. 高级设置按钮
+        # 2. AI翻译开关
+        ai_container = QWidget()
+        ai_layout = QHBoxLayout(ai_container)
+        ai_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.use_ai_checkbox = QCheckBox("启用 AI 辅助翻译与解释")
+        ai_layout.addWidget(self.use_ai_checkbox)
+        ai_layout.addStretch()
+        layout.addWidget(ai_container)
+
+        # 3. AI模型选择下拉框
+        ai_model_container = QWidget()
+        ai_model_layout = QHBoxLayout(ai_model_container)
+        ai_model_layout.setContentsMargins(0, 0, 0, 0)
+
+        lbl_ai_model = QLabel("AI翻译模型:")
+        lbl_ai_model.setToolTip("选择用于辅助翻译的AI模型")
+        lbl_ai_model.setStyleSheet("color: #606266; font-size: 13px;")
+
+        self.ai_model_combo = QComboBox()
+        # 从配置文件获取支持的模型列表
+        from src.utils.config_manager import get_config_manager
+        config_manager = get_config_manager()
+        supported_model_keys = config_manager.get_supported_model_keys()
+        if not supported_model_keys:
+            # 如果配置文件中没有定义，使用默认值
+            from src.utils.translation.qwen_translator import QwenTranslator
+            supported_model_keys = QwenTranslator().get_supported_models(return_keys_only=True)
+        
+        self.ai_model_combo.addItems(supported_model_keys)
+        # 设置默认值为配置文件中的模型
+        self.ai_model_combo.setFixedWidth(180)
+
+        ai_model_layout.addWidget(lbl_ai_model)
+        ai_model_layout.addStretch()
+        ai_model_layout.addWidget(self.ai_model_combo)
+        layout.addWidget(ai_model_container)
+
+        # 4. 高级设置按钮
         self.advanced_settings_button = QPushButton("配置高级参数 / 数据库")
         self.advanced_settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.advanced_settings_button.setStyleSheet("""
@@ -386,6 +401,8 @@ class ParameterSettingsWidget(QWidget):
 
     def _connect_signals(self):
         self.thread_count_spinbox.valueChanged.connect(self._on_settings_changed)
+        self.use_ai_checkbox.stateChanged.connect(self._on_settings_changed)
+        self.ai_model_combo.currentTextChanged.connect(self._on_settings_changed)
         self.advanced_settings_button.clicked.connect(self._show_advanced_settings)
 
     def _show_advanced_settings(self):
@@ -414,8 +431,27 @@ class ParameterSettingsWidget(QWidget):
             self._on_settings_changed()
 
     def _on_settings_changed(self):
+        # 获取当前设置
         settings = self.get_advanced_settings()
         settings['thread_count'] = self.get_thread_count()
+        
+        # 更新AI翻译设置
+        use_ai = self.use_ai_checkbox.isChecked()
+        settings['use_ai_translation'] = use_ai
+        # 直接使用下拉框中的模型名，现在只显示模型键名
+        ai_model = self.ai_model_combo.currentText()
+        settings['ai_translation_model'] = ai_model
+        
+        # 立即更新配置文件中的AI翻译设置
+        self.advanced_settings['use_ai_translation'] = use_ai
+        self.advanced_settings['ai_translation_model'] = ai_model
+        try:
+            self.config_manager.set_advanced_settings(self.advanced_settings)
+            print(f"AI翻译设置已更新 - 启用: {use_ai}, 模型: {ai_model}")
+        except Exception as e:
+            print(f"错误：无法保存AI翻译配置: {e}")
+        
+        # 发出信号
         self.settings_changed.emit(settings)
 
     def get_thread_count(self):

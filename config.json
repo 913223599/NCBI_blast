@@ -2,10 +2,32 @@
   "api_keys": {
     "dashscope": "sk-a0ecff19a71649deaa6009ae66687bdb"
   },
+  "supported_models": [
+    {
+      "key": "qwen-plus",
+      "name": "通义千问-Plus"
+    },
+    {
+      "key": "qwen-mt-plus",
+      "name": "通义千问-MT-Plus"
+    },
+    {
+      "key": "qwen-mt-turbo",
+      "name": "通义千问-MT-Turbo"
+    },
+    {
+      "key": "qwen-turbo",
+      "name": "通义千问-Turbo"
+    },
+    {
+      "key": "deepseek-r1",
+      "name": "DeepSeek"
+    }
+  ],
   "advanced_settings": {
     "hitlist_size": 20,
-    "use_ai_translation": true,
-    "ai_translation_model": "qwen-mt-plus",
+    "use_ai_translation": false,
+    "ai_translation_model": "qwen-plus",
     "word_size": null,
     "evalue": null,
     "matrix_name": null,

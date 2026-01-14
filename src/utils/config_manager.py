@@ -167,6 +167,33 @@ class ConfigManager:
     def get_config_file_path(self) -> str:
         return str(self.config_file)
 
+    def get_supported_models(self) -> dict:
+        """获取支持的AI模型列表，返回 {key: name} 格式的字典"""
+        # 从配置文件中获取支持的模型
+        supported_models = self.config_data.get("supported_models", [])
+        
+        # 转换为字典格式 {key: name}
+        models_dict = {}
+        for model in supported_models:
+            if isinstance(model, dict) and "key" in model and "name" in model:
+                models_dict[model["key"]] = model["name"]
+        
+        # 如果配置文件中没有定义，返回默认值
+        if not models_dict:
+            return {
+                'qwen-plus': '通义千问-Plus',
+                'qwen-mt-plus': '通义千问-MT-Plus',
+                'qwen-mt-turbo': '通义千问-MT-Turbo',
+                'qwen-turbo': '通义千问-Turbo',
+                'deepseek-r1': 'DeepSeek'
+            }
+        
+        return models_dict
+    
+    def get_supported_model_keys(self) -> list:
+        """获取支持的AI模型键列表，用于界面显示"""
+        return list(self.get_supported_models().keys())
+
 
 def get_config_manager(config_file: str = None) -> ConfigManager:
     """获取配置管理器单例"""
