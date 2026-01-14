@@ -147,6 +147,8 @@ class BaseProcessor:
         """
         thread_id = threading.current_thread().ident
         start_time = time.time()
+        
+        logger.info(f"开始处理序列: {seq_id}, 文件: {Path(source_file_path).name}")
 
         # 结果文件路径构建
         base_filename = f"{original_file_name}_blast_result" if original_file_name == seq_id else f"{original_file_name}_{seq_id}_blast_result"
@@ -183,18 +185,24 @@ class BaseProcessor:
                     logger.info(f"✓ 使用缓存结果: {cache_key_id}")
                     cached_result['from_cache'] = True
                     return cached_result
+                else:
+                    logger.info(f"○ 缓存未命中，开始实际查询: {cache_key_id}")
 
             # 3. 准备参数
             blast_params = self._prepare_blast_params()
 
             # 4. 确定程序和数据库
             sequence_type = self._detect_sequence_type(sequence)
+            logger.debug(f"检测到序列类型: {sequence_type} (序列ID: {seq_id})")
+            
             if sequence_type == 'protein':
                 program = 'blastp'
                 database = self.advanced_settings.get('protein_database', 'nr')
             else:
                 program = 'blastn'
                 database = self.advanced_settings.get('nucleotide_database', 'nt')
+
+            logger.debug(f"使用程序: {program}, 数据库: {database} (序列ID: {seq_id})")
 
             # 5. 请求控制与执行
             if self._cancel_flag:
@@ -224,6 +232,8 @@ class BaseProcessor:
                 "elapsed_time": elapsed_time,
                 "timestamp_folder": str(self.timestamp_folder)
             })
+
+            logger.info(f"✓ 序列处理完成: {seq_id}, 耗时: {elapsed_time:.2f}秒")
 
             # 9. 写入缓存
             if use_cache:
@@ -289,6 +299,8 @@ class BatchProcessor(BaseProcessor):
 
     def _run_thread_pool(self, items, process_func):
         """通用的线程池执行逻辑"""
+        logger.info(f"开始处理 {len(items)} 个项目，使用 {self.max_workers} 个工作线程")
+        
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_item = {executor.submit(process_func, item): item for item in items}
             results = []
@@ -297,6 +309,7 @@ class BatchProcessor(BaseProcessor):
 
             for future in as_completed(future_to_item):
                 if self._cancel_flag:
+                    logger.info(f"处理被取消，已完成 {completed}/{total} 个项目")
                     break
 
                 item = future_to_item[future]
@@ -319,9 +332,15 @@ class BatchProcessor(BaseProcessor):
                     logger.error(f"任务执行异常: {e}")
 
                 completed += 1
+                # 输出进度日志，每处理10%或至少每处理10个项目时输出一次
+                if completed % max(1, total // 10) == 0 or completed == total or completed == 1:
+                    logger.info(f"进度: {completed}/{total} ({completed/total*100:.1f}%)")
+                    
                 if self.on_progress_update:
                     self.on_progress_update(completed, total)
-
+        
+        logger.info(f"线程池处理完成，总共处理 {len(results)} 个项目，成功 {sum(1 for r in results if r['status'] == 'success')} 个")
+        
         if self.on_all_tasks_complete:
             self.on_all_tasks_complete(results)
 
@@ -375,11 +394,14 @@ class MultiSequenceBatchProcessor(BaseProcessor):
             logger.info(f"找到 {len(sequences)} 条序列")
 
             if not sequences:
+                logger.info(f"文件 {Path(sequence_file).name} 中没有序列，跳过处理")
                 return []
 
             # 使用 lambda 绑定 file path 参数，使其适配通用的线程池逻辑
             task_func = lambda seq_info: self.process_single_sequence(seq_info, sequence_file)
 
+            logger.info(f"开始处理 {len(sequences)} 条序列，使用 {self.max_workers} 个工作线程")
+            
             # 复用 BatchProcessor 中的线程池逻辑 (这里通过复制逻辑实现，或可提取mixin)
             # 为了保持干净，这里重写一个针对性的线程池调用，但逻辑是一样的
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
@@ -390,6 +412,7 @@ class MultiSequenceBatchProcessor(BaseProcessor):
 
                 for future in as_completed(future_to_seq):
                     if self._cancel_flag:
+                        logger.info(f"处理被取消，已完成 {completed}/{total} 个序列")
                         break
 
                     seq_info = future_to_seq[future]
@@ -406,6 +429,7 @@ class MultiSequenceBatchProcessor(BaseProcessor):
                             self.on_result_received(result)
 
                     except Exception as e:
+                        logger.error(f"处理序列 {seq_info['id']} 时发生异常: {e}")
                         # 兜底异常处理
                         err_res = {
                             "file": sequence_file,
@@ -418,9 +442,15 @@ class MultiSequenceBatchProcessor(BaseProcessor):
                             self.on_result_received(err_res)
 
                     completed += 1
+                    # 输出进度日志，每处理10%或至少每处理10个序列时输出一次
+                    if completed % max(1, total // 10) == 0 or completed == total or completed == 1:
+                        logger.info(f"进度: {completed}/{total} ({completed/total*100:.1f}%)")
+                    
                     if self.on_progress_update:
                         self.on_progress_update(completed, total)
 
+            logger.info(f"文件 {Path(sequence_file).name} 处理完成，总共处理 {len(results)} 个结果，成功 {sum(1 for r in results if r['status'] == 'success')} 个")
+            
             if self.on_all_tasks_complete:
                 self.on_all_tasks_complete(results)
 
