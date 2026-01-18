@@ -1,0 +1,34 @@
+{
+  "species": [
+    "Clostridium",
+    "sp.",
+    "Clostridium\\s+sp.",
+    "phage",
+    "Clostridium\\s+phage",
+    "Siphoviridae",
+    "Siphoviridae\\s+sp.",
+    "HMD-PC1",
+    "CpP_VarHS",
+    "Candidatus",
+    "Onthovivens",
+    "Mediterraneibacter",
+    "gnavus",
+    "Mediterraneibacter\\s+gnavus",
+    "Herelleviridae",
+    "Herelleviridae\\s+sp\\.",
+    "flintii",
+    "Mediterraneibacter\\s+flintii",
+    "cagae",
+    "Clostridium\\s+cagae",
+    "butyricum",
+    "Clostridium\\s+butyricum"
+  ],
+  "genus": [],
+  "gene": [],
+  "sequence": [],
+  "strain": [],
+  "other": [
+    "Ruminococcus",
+    "unclassified"
+  ]
+}
