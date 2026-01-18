@@ -195,6 +195,16 @@ class ConfigManager:
         """获取支持的AI模型键列表，用于界面显示"""
         return list(self.get_supported_models().keys())
 
+    def get_config_value(self, key, default=None):
+        """获取通用配置项"""
+        return self.config_data.get(key, default)
+
+    def set_config_value(self, key, value):
+        """设置通用配置项"""
+        if self.config_data.get(key) != value:
+            self.config_data[key] = value
+            self._save_config()
+
 
 def get_config_manager(config_file: str = None) -> ConfigManager:
     """获取配置管理器单例"""

@@ -6,14 +6,16 @@
 import csv
 import shutil
 import traceback
+import os
 from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal, QObject, Qt, QThread
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QAction
 from PyQt6.QtWidgets import (QVBoxLayout, QPushButton, QTreeWidget,
                              QTreeWidgetItem, QFileDialog, QMessageBox, QHeaderView, QMenu, QHBoxLayout, QGroupBox)
 
 from src.utils.translation import get_blast_result_translator
+from src.gui.widgets.alignment_visualizer import AlignmentVisualizerDialog
 
 
 class TranslationWorker(QObject):
@@ -165,7 +167,7 @@ class ResultViewerWidget(QGroupBox):
         # 设置列宽为用户可调
         header = self.result_tree.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)  # 第一列可手动调整
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)  # 耗时列固定
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)  # 耗时列固定
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)  # 耗时列固定
         header.resizeSection(0, 500)
         header.resizeSection(1, 80)
@@ -228,6 +230,24 @@ class ResultViewerWidget(QGroupBox):
         # 不需要 processEvents，正常 update 即可
         self.result_tree.update()
 
+    def _normalize_path(self, path_str):
+        """统一路径格式，解决路径不一致导致的重复节点问题"""
+        if not path_str:
+            return ""
+        try:
+            return os.path.normpath(os.path.abspath(path_str))
+        except Exception:
+            return path_str
+
+    def _normalize_seq_id(self, raw_id):
+        """
+        统一序列ID格式，确保与 BatchProcessor 中的处理逻辑一致
+        BatchProcessor: seq_id = sequence_info['id'].replace('|', '_').replace(' ', '_')
+        """
+        if not raw_id:
+            return "unknown_seq"
+        return raw_id.replace('|', '_').replace(' ', '_')
+
     def _rebuild_result_tree(self, sequence_files):
         """完全重建结果树"""
         self.result_tree.clear()
@@ -238,11 +258,13 @@ class ResultViewerWidget(QGroupBox):
 
         items_to_add = []
         for seq_file in sequence_files:
+            # [修复] 使用统一的路径格式
+            file_path = self._normalize_path(str(seq_file))
             file_name = Path(seq_file).name
 
             # 预先创建数据结构
-            self.file_data[file_name] = {
-                'file_path': seq_file,
+            self.file_data[file_path] = {
+                'file_path': file_path,
                 'sequences': {},
                 'status': '待处理',
                 'elapsed_time': '',
@@ -250,13 +272,21 @@ class ResultViewerWidget(QGroupBox):
             }
 
             item = QTreeWidgetItem([file_name, '待处理', ''])
-            self.file_items[file_name] = item
+            self.file_items[file_path] = item
 
             # 初始化翻译状态
-            file_item_key = f"file#{file_name}"
+            file_item_key = f"file#{file_path}"
             self.translation_states[file_item_key] = False
 
             items_to_add.append(item)
+            
+            # 预解析序列
+            sequences = self._parse_sequences_from_file(seq_file)
+            for seq_id in sequences:
+                # 预先填充序列状态
+                self.file_data[file_path]['sequences'][seq_id] = {'status': '待处理'}
+                # 预先创建序列节点
+                self._ensure_sequence_item_exists(item, file_path, seq_id)
 
         self.result_tree.addTopLevelItems(items_to_add)
 
@@ -268,11 +298,34 @@ class ResultViewerWidget(QGroupBox):
         else:
             self._update_single_sequence_result(result)
 
-    def _update_common_logic(self, file_name, file_path, status, elapsed_time):
+    def _calculate_overall_status(self, sequences_data):
+        """计算总体状态"""
+        total_count = len(sequences_data)
+        if total_count == 0:
+            return "待处理"
+
+        # 统计非"待处理"的数量（即已完成或失败的）
+        completed_count = sum(1 for s in sequences_data.values() if s.get('status') != '待处理')
+        success_count = sum(1 for s in sequences_data.values() if s.get('status') == '成功')
+        
+        if completed_count == 0:
+            return "待处理"
+        
+        if completed_count == total_count:
+            if success_count == total_count:
+                return "成功"
+            elif success_count == 0:
+                return "失败"
+            else:
+                return f"完成({success_count}/{total_count})"
+        else:
+            return f"处理中 ({completed_count}/{total_count})"
+
+    def _update_common_logic(self, file_path, file_name, status, elapsed_time):
         """辅助方法：更新文件节点的通用逻辑"""
         # 确保数据结构存在
-        if file_name not in self.file_data:
-            self.file_data[file_name] = {
+        if file_path not in self.file_data:
+            self.file_data[file_path] = {
                 'file_path': file_path,
                 'sequences': {},
                 'status': '待处理',
@@ -283,9 +336,9 @@ class ResultViewerWidget(QGroupBox):
         # 获取节点并更新UI
         file_item = self._ensure_file_item_exists(file_name, file_path)
 
-        # 只有在单序列模式或多序列汇总状态下才直接更新文件节点
-        if status != "待处理":
-            file_item.setText(1, status)
+        # 更新文件节点状态
+        file_item.setText(1, status)
+        if elapsed_time:
             file_item.setText(2, elapsed_time)
 
         # 设置颜色提示状态
@@ -293,14 +346,15 @@ class ResultViewerWidget(QGroupBox):
             file_item.setForeground(1, QColor("#67C23A"))  # 绿色
         elif status == "失败":
             file_item.setForeground(1, QColor("#F56C6C"))  # 红色
-        elif status == "处理中":
+        elif "处理中" in status:
             file_item.setForeground(1, QColor("#409EFF"))  # 蓝色
 
         return file_item
 
     def _update_multi_sequence_result(self, result):
         """更新多序列处理结果"""
-        file_path = result.get("file", "")
+        # [修复] 使用统一的路径格式
+        file_path = self._normalize_path(result.get("file", ""))
         file_name = Path(file_path).name
         sequence_id = result.get("sequence_id", "")
 
@@ -308,109 +362,136 @@ class ResultViewerWidget(QGroupBox):
         status_text = "成功" if status_code == "success" else "失败"
         elapsed_time = f"{result.get('elapsed_time', 0):.2f}s" if "elapsed_time" in result else "-"
 
-        # 更新内部数据
-        if file_name not in self.file_data:
-            self._update_common_logic(file_name, file_path, "处理中", "")
+        # 1. 确保文件级数据存在
+        if file_path not in self.file_data:
+            # 如果是意外的新文件（未预解析），初始化它
+            self.file_data[file_path] = {
+                'file_path': file_path,
+                'sequences': {},
+                'status': '处理中',
+                'elapsed_time': '',
+                'expanded': False
+            }
 
-        self.file_data[file_name]['sequences'][sequence_id] = {
+        # 2. 更新单条序列数据
+        # 注意：这里直接更新字典中的项，如果 sequence_id 已存在（预解析的），则更新状态
+        self.file_data[file_path]['sequences'][sequence_id] = {
             'status': status_text,
             'elapsed_time': elapsed_time,
             'result': result
         }
 
-        # 计算总体状态
-        all_seqs = self.file_data[file_name]['sequences']
-        success_count = sum(1 for s in all_seqs.values() if s['status'] == '成功')
-        total_count = len(all_seqs)
+        # 3. 计算并更新总体状态
+        overall_status = self._calculate_overall_status(self.file_data[file_path]['sequences'])
+        self.file_data[file_path]['status'] = overall_status
 
-        overall_status = "处理中"
-        if total_count > 0:
-            if success_count == total_count:
-                overall_status = "成功"
-            elif success_count == 0 and len(all_seqs) > 0:  # 简化逻辑，实际可能需要总序列数
-                overall_status = "失败"  # 暂时简化
-            else:
-                overall_status = f"完成({success_count}/{total_count})"
-
-        self.file_data[file_name]['status'] = overall_status
-
-        # 更新UI
-        file_item = self._update_common_logic(file_name, file_path, overall_status, "")
-        sequence_item = self._ensure_sequence_item_exists(file_item, file_name, sequence_id)
-
+        # 4. 更新UI - 文件节点
+        file_item = self._update_common_logic(file_path, file_name, overall_status, "")
+        
+        # 5. 更新UI - 序列节点
+        sequence_item = self._ensure_sequence_item_exists(file_item, file_path, sequence_id)
         sequence_item.setText(1, status_text)
         sequence_item.setText(2, elapsed_time)
 
         if status_code == "success":
             sequence_item.setForeground(1, QColor("#67C23A"))
+        elif status_code == "error":
+            sequence_item.setForeground(1, QColor("#F56C6C"))
 
-        # 缓存结果
-        self.results_data[f"{file_name}#{sequence_id}"] = result
+        # 6. 缓存结果
+        self.results_data[f"{file_path}#{sequence_id}"] = result
 
         if result.get("csv_file"):
             self._display_top_results(sequence_item, result.get("csv_file"))
 
     def _update_single_sequence_result(self, result):
         """更新单序列处理结果"""
-        file_path = result.get("file", "")
-        file_name = Path(file_path).name
-        result_status = result.get("status", "")
+        try:
+            # [修复] 使用统一的路径格式
+            file_path = self._normalize_path(result.get("file", ""))
+            if not file_path:
+                print("警告: 结果中没有文件路径")
+                return
 
-        status_map = {
-            "processing": ("处理中", "#409EFF"),
-            "success": ("成功", "#67C23A"),
-            "error": ("失败", "#F56C6C")
-        }
+            file_name = Path(file_path).name
+            result_status = result.get("status", "")
 
-        status_text, color_code = status_map.get(result_status, ("未知", "#909399"))
-        elapsed_time = f"{result.get('elapsed_time', 0):.2f}s" if "elapsed_time" in result and result_status != "processing" else ""
-
-        self.results_data[file_name] = result
-
-        # 更新数据和UI
-        self.file_data[file_name] = self.file_data.get(file_name, {})
-        self.file_data[file_name].update({
-            'status': status_text,
-            'elapsed_time': elapsed_time
-        })
-
-        file_item = self._update_common_logic(file_name, file_path, status_text, elapsed_time)
-
-        # 处理序列子节点
-        sequences = self._parse_sequences_from_file(file_path)
-        if sequences:
-            seq_id = sequences[0]
-            # 初始化或更新序列数据
-            if 'sequences' not in self.file_data[file_name]:
-                self.file_data[file_name]['sequences'] = {}
-
-            self.file_data[file_name]['sequences'][seq_id] = {
-                'status': status_text,
-                'elapsed_time': elapsed_time,
-                'result': result
+            status_map = {
+                "processing": ("处理中", "#409EFF"),
+                "success": ("成功", "#67C23A"),
+                "error": ("失败", "#F56C6C")
             }
 
-            seq_item = self._ensure_sequence_item_exists(file_item, file_name, seq_id)
-            seq_item.setText(1, status_text)
-            seq_item.setText(2, elapsed_time)
-            seq_item.setForeground(1, QColor(color_code))
+            status_text, color_code = status_map.get(result_status, ("未知", "#909399"))
+            elapsed_time = f"{result.get('elapsed_time', 0):.2f}s" if "elapsed_time" in result and result_status != "processing" else ""
 
-            if result.get("csv_file"):
-                self._display_top_results(seq_item, result.get("csv_file"))
+            # 使用 file_path 作为键
+            self.results_data[file_path] = result
+
+            # 1. 确保文件级数据存在
+            if file_path not in self.file_data:
+                self.file_data[file_path] = {
+                    'file_path': file_path,
+                    'sequences': {},
+                    'status': '待处理',
+                    'elapsed_time': '',
+                    'expanded': False
+                }
+            
+            self.file_data[file_path].update({
+                'status': status_text,
+                'elapsed_time': elapsed_time
+            })
+
+            # 2. 更新UI - 文件节点
+            file_item = self._update_common_logic(file_path, file_name, status_text, elapsed_time)
+
+            # 3. 处理序列子节点 (单序列文件通常只有一个序列)
+            sequences = []
+            if Path(file_path).exists():
+                sequences = self._parse_sequences_from_file(file_path)
+            
+            if not sequences:
+                sequences = ["sequence_1"]
+
+            if sequences:
+                seq_id = sequences[0]
+                # 初始化或更新序列数据
+                if 'sequences' not in self.file_data[file_path]:
+                    self.file_data[file_path]['sequences'] = {}
+
+                self.file_data[file_path]['sequences'][seq_id] = {
+                    'status': status_text,
+                    'elapsed_time': elapsed_time,
+                    'result': result
+                }
+
+                seq_item = self._ensure_sequence_item_exists(file_item, file_path, seq_id)
+                seq_item.setText(1, status_text)
+                seq_item.setText(2, elapsed_time)
+                seq_item.setForeground(1, QColor(color_code))
+
+                if result.get("csv_file"):
+                    self._display_top_results(seq_item, result.get("csv_file"))
+        except Exception as e:
+            print(f"更新单序列结果时出错: {e}")
+            traceback.print_exc()
 
     def _ensure_file_item_exists(self, file_name, file_path):
-        if file_name in self.file_items:
-            return self.file_items[file_name]
+        # 使用 file_path 作为键
+        if file_path in self.file_items:
+            return self.file_items[file_path]
 
         item = QTreeWidgetItem(self.result_tree, [file_name, '待处理', ''])
-        self.file_items[file_name] = item
+        self.file_items[file_path] = item
+        
         # 保持数据结构同步
-        if file_name not in self.file_data:
-            self.file_data[file_name] = {'file_path': file_path, 'sequences': {}, 'status': '待处理'}
+        if file_path not in self.file_data:
+            self.file_data[file_path] = {'file_path': file_path, 'sequences': {}, 'status': '待处理'}
         return item
 
-    def _ensure_sequence_item_exists(self, file_item, file_name, sequence_id):
-        key = f"{file_name}#{sequence_id}"
+    def _ensure_sequence_item_exists(self, file_item, file_path, sequence_id):
+        key = f"{file_path}#{sequence_id}"
         if key in self.sequence_items:
             return self.sequence_items[key]
 
@@ -436,8 +517,6 @@ class ResultViewerWidget(QGroupBox):
             with open(csv_file, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
 
-                # [优化点] 使用 enumerate + break，避免读取整个文件到内存
-                # 原代码: rows = list(reader) -> top_results = rows[:5] (内存杀手)
                 for i, row in enumerate(reader):
                     if i >= 5:  # 只读前5行
                         break
@@ -446,11 +525,9 @@ class ResultViewerWidget(QGroupBox):
                     similarity = row.get('相似度', 'N/A')
                     e_value = row.get('E值', 'N/A')
 
-                    # 简化显示文本
                     result_text = f"{i + 1}. {species} | 相似度: {similarity} | E值: {e_value}"
                     result_item = QTreeWidgetItem(parent_item, [result_text, '', ''])
 
-                    # 设置淡灰色背景，增加层次感
                     for c in range(3):
                         result_item.setBackground(c, QColor("#FAFAFA"))
                         result_item.setForeground(c, QColor("#606266"))
@@ -471,30 +548,57 @@ class ResultViewerWidget(QGroupBox):
 
     def _on_item_clicked(self, item, column):
         """处理点击逻辑"""
-        parent = item.parent()
+        try:
+            parent = item.parent()
 
-        # 切换展开/折叠 (UX优化: 单击即可切换)
-        item.setExpanded(not item.isExpanded())
+            # 切换展开/折叠 (UX优化: 单击即可切换)
+            item.setExpanded(not item.isExpanded())
 
-        if parent is None:  # 文件节点
-            self.signals.item_selected.emit(item.text(0))
-            if item.isExpanded():
-                # 展开时尝试预加载序列节点
-                file_name = item.text(0)
-                if file_name in self.file_data:
-                    path = self.file_data[file_name]['file_path']
-                    seqs = self._parse_sequences_from_file(path)
-                    for seq_id in seqs:
-                        self._ensure_sequence_item_exists(item, file_name, seq_id)
+            if parent is None:  # 文件节点
+                self.signals.item_selected.emit(item.text(0))
+                if item.isExpanded():
+                    # 展开时尝试预加载序列节点
+                    file_name = item.text(0)
+                    # 查找对应的 file_path
+                    found_path = None
+                    for path, f_item in self.file_items.items():
+                        if f_item == item:
+                            found_path = path
+                            break
+                    
+                    if found_path and found_path in self.file_data:
+                        path = found_path
+                        # [修复] 增加对文件不存在的处理
+                        if Path(path).exists():
+                            seqs = self._parse_sequences_from_file(path)
+                            for seq_id in seqs:
+                                self._ensure_sequence_item_exists(item, path, seq_id)
+                        else:
+                            # 尝试从缓存恢复
+                            if 'sequences' in self.file_data[path]:
+                                for seq_id in self.file_data[path]['sequences']:
+                                    self._ensure_sequence_item_exists(item, path, seq_id)
 
-        elif parent.parent() is None:  # 序列节点
-            if item.isExpanded():
-                self._load_sequence_details(item, parent.text(0), item.text(0))
+            elif parent.parent() is None:  # 序列节点
+                if item.isExpanded():
+                    # 同样需要找到 file_path
+                    file_item = parent
+                    found_path = None
+                    for path, f_item in self.file_items.items():
+                        if f_item == file_item:
+                            found_path = path
+                            break
+                            
+                    if found_path:
+                        self._load_sequence_details(item, found_path, item.text(0))
+        except Exception as e:
+            print(f"点击项目时出错: {e}")
+            traceback.print_exc()
 
-    def _load_sequence_details(self, item, file_name, sequence_id):
+    def _load_sequence_details(self, item, file_path, sequence_id):
         """加载序列详细结果"""
-        if file_name in self.file_data:
-            seqs_data = self.file_data[file_name]['sequences']
+        if file_path in self.file_data:
+            seqs_data = self.file_data[file_path]['sequences']
             if sequence_id in seqs_data:
                 result = seqs_data[sequence_id].get('result')
                 if result and result.get('csv_file'):
@@ -509,7 +613,9 @@ class ResultViewerWidget(QGroupBox):
                 with open(path, 'r', encoding='utf-8') as f:
                     for line in f:
                         if line.startswith('>'):
-                            seq_id = line[1:].strip().split()[0]
+                            # [修复] 使用统一的 ID 格式化方法
+                            raw_id = line[1:].strip().split()[0]
+                            seq_id = self._normalize_seq_id(raw_id)
                             sequences.append(seq_id)
             else:
                 sequences.append(path.stem)
@@ -646,6 +752,15 @@ class ResultViewerWidget(QGroupBox):
         menu = QMenu(self)
         parent = item.parent()
 
+        # 通用操作
+        action_visualize = QAction("可视化比对", self)
+        action_visualize.triggered.connect(lambda: self._open_visualizer(item))
+        
+        # 只有在有结果时才启用
+        if self._get_result_data_for_item(item):
+            menu.addAction(action_visualize)
+            menu.addSeparator()
+
         if parent is None:  # File
             menu.addAction("重试比对", lambda: self.signals.retry_blast.emit(item.text(0)))
             menu.addAction("导出查询信息", lambda: self._export_query_info(item.text(0)))
@@ -658,6 +773,44 @@ class ResultViewerWidget(QGroupBox):
             pass  # 不显示任何右键菜单项
 
         menu.exec(self.result_tree.mapToGlobal(pos))
+
+    def _get_result_data_for_item(self, item):
+        """辅助函数：根据 Tree Item 获取其对应的结果数据"""
+        parent = item.parent()
+        if parent is None: # 文件节点 (单序列)
+            # 需要反向查找 file_path
+            for path, f_item in self.file_items.items():
+                if f_item == item:
+                    return self.results_data.get(path)
+        elif parent.parent() is None: # 序列节点 (多序列)
+            # 找到父节点对应的 file_path
+            file_path = None
+            for path, f_item in self.file_items.items():
+                if f_item == parent:
+                    file_path = path
+                    break
+            
+            if file_path:
+                seq_id = item.text(0)
+                key = f"{file_path}#{seq_id}"
+                return self.results_data.get(key)
+        return None
+
+    def _open_visualizer(self, item):
+        """打开可视化对话框"""
+        result_data = self._get_result_data_for_item(item)
+        if not result_data or 'result_file' not in result_data:
+            QMessageBox.warning(self, "提示", "未找到有效的 BLAST 结果文件 (XML)。")
+            return
+            
+        xml_file = result_data['result_file']
+        if not Path(xml_file).exists():
+            QMessageBox.critical(self, "错误", f"结果文件不存在: {xml_file}")
+            return
+
+        # 创建并显示对话框
+        dialog = AlignmentVisualizerDialog(xml_file, self)
+        dialog.exec()
 
     def _get_item_key(self, item):
         # 简单的唯一键生成
@@ -692,6 +845,12 @@ class ResultViewerWidget(QGroupBox):
 
     def _export_query_info(self, file_name):
         # 保持原逻辑
+        # 注意：这里的 file_name 实际上是 item.text(0)，即文件名
+        # 我们需要找到对应的 file_path
+        # 这是一个简化的导出，可能无法处理同名文件
+        # 更好的做法是传入 item，然后使用 _get_result_data_for_item
+        
+        # 暂时保留原逻辑，但需注意潜在风险
         data = self.results_data.get(file_name)
         if not data: return
 

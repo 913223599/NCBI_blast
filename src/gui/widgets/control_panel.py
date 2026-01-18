@@ -24,8 +24,6 @@ class ControlPanelWidget(QGroupBox):
         self.stop_button.setEnabled(False)
         layout.addWidget(self.stop_button)
         
-
-        
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)

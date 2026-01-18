@@ -13,6 +13,7 @@ from pathlib import Path
 
 # 引入原有依赖
 from src.utils.file_handler import FileHandler
+from src.utils.history_manager import HistoryManager  # 引入历史记录管理器
 from .executor import BlastExecutor, delay_before_request
 from .parser import BlastResultParser
 from .result_cache import BlastResultCache
@@ -39,13 +40,17 @@ class BaseProcessor:
     基础处理器类
     包含两个处理器共用的核心逻辑：参数配置、类型检测、文件管理、核心BLAST流程
     """
-    def __init__(self, max_workers=3, advanced_settings=None):
+    def __init__(self, max_workers=3, advanced_settings=None, task_name=None):
         self.max_workers = max_workers
         self.advanced_settings = advanced_settings or {}
+        self.task_name = task_name or f"Task_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
         self.file_handler = FileHandler()
         self.blast_executor = BlastExecutor()
         self.result_parser = BlastResultParser()
         self.result_converter = BlastResultConverter()
+        self.history_manager = HistoryManager() # 初始化历史记录管理器
+        
         # 统一缓存配置
         self.cache = BlastResultCache(
             cache_dir="cache",
@@ -59,7 +64,7 @@ class BaseProcessor:
         self.on_all_tasks_complete = None
 
         self._cancel_flag = False
-        self.timestamp_folder = self._create_timestamp_folder()
+        self.task_folder = self._create_task_folder()
 
         # 默认 BLAST 参数
         self.default_blast_params = {
@@ -70,12 +75,25 @@ class BaseProcessor:
             # 其他默认值可在此扩展
         }
 
-    def _create_timestamp_folder(self):
-        """创建基于时间戳的结果保存文件夹"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    def _create_task_folder(self):
+        """创建基于任务名的结果保存文件夹"""
         # 获取项目根目录 (src/blast/batch_processor.py -> src/blast -> src -> root)
         project_root = Path(__file__).resolve().parent.parent.parent
-        folder_path = project_root / "results" / timestamp
+        
+        # 清理任务名中的非法字符
+        safe_task_name = "".join([c for c in self.task_name if c.isalnum() or c in (' ', '_', '-')]).strip()
+        if not safe_task_name:
+            safe_task_name = f"Task_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            
+        folder_path = project_root / "results" / safe_task_name
+        
+        # 如果文件夹已存在，添加后缀避免覆盖
+        counter = 1
+        original_path = folder_path
+        while folder_path.exists():
+            folder_path = original_path.parent / f"{original_path.name}_{counter}"
+            counter += 1
+            
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path
 
@@ -154,9 +172,9 @@ class BaseProcessor:
 
         # 结果文件路径构建
         base_filename = f"{original_file_name}_blast_result" if original_file_name == seq_id else f"{original_file_name}_{seq_id}_blast_result"
-        result_file = self.timestamp_folder / f"{base_filename}.xml"
-        csv_file = self.timestamp_folder / f"{base_filename}.csv"
-        desc_file = self.timestamp_folder / f"{base_filename}.desc"
+        result_file = self.task_folder / f"{base_filename}.xml"
+        csv_file = self.task_folder / f"{base_filename}.csv"
+        desc_file = self.task_folder / f"{base_filename}.desc"
 
         # 构造基础返回对象
         result_info = {
@@ -216,7 +234,7 @@ class BaseProcessor:
                 sequence,
                 program=program,
                 database=database,
-                timeout_minutes=6, # 统一超时设置
+                timeout_minutes=4, # [修改] 超时时间改为4分钟
                 **blast_params
             )
 
@@ -232,7 +250,7 @@ class BaseProcessor:
             result_info.update({
                 "status": "success",
                 "elapsed_time": elapsed_time,
-                "timestamp_folder": str(self.timestamp_folder)
+                "timestamp_folder": str(self.task_folder)
             })
 
             logger.info(f"✓ 序列处理完成: {seq_id}, 耗时: {elapsed_time:.2f}秒")
@@ -243,6 +261,19 @@ class BaseProcessor:
                 cache_entry = result_info.copy()
                 cache_entry["elapsed_time"] = 0
                 self.cache.save_result(sequence, cache_entry, cache_key_id)
+            
+            # 10. 保存历史记录 (旧接口，保留兼容性)
+            try:
+                self.history_manager.add_record(
+                    query_file=source_file_path,
+                    database=database,
+                    program=program,
+                    parameters=blast_params,
+                    result_file=str(result_file),
+                    status="success"
+                )
+            except Exception as e:
+                logger.error(f"保存历史记录失败: {e}")
 
             return result_info
 
@@ -258,6 +289,23 @@ class BaseProcessor:
                 "elapsed_time": elapsed_time
             })
             return result_info
+            
+    def _save_task_history(self, results):
+        """保存任务级历史记录"""
+        try:
+            # 统计成功数量
+            success_count = sum(1 for r in results if r.get("status") == "success")
+            status = "completed" if success_count == len(results) else "partial" if success_count > 0 else "failed"
+            
+            self.history_manager.add_task(
+                task_name=self.task_folder.name, # 使用实际创建的文件夹名作为任务名
+                parameters=self._prepare_blast_params(),
+                result_dir=str(self.task_folder),
+                file_count=len(results),
+                status=status
+            )
+        except Exception as e:
+            logger.error(f"保存任务历史失败: {e}")
 
 
 class BatchProcessor(BaseProcessor):
@@ -297,7 +345,12 @@ class BatchProcessor(BaseProcessor):
         if len(sequence_files) > 1:
             logger.info(f"开始批量处理 {len(sequence_files)} 个序列文件，线程数: {self.max_workers}")
 
-        return self._run_thread_pool(sequence_files, self.process_single_sequence)
+        results = self._run_thread_pool(sequence_files, self.process_single_sequence)
+        
+        # 保存任务历史
+        self._save_task_history(results)
+        
+        return results
 
     def _run_thread_pool(self, items, process_func):
         """通用的线程池执行逻辑"""
@@ -452,6 +505,9 @@ class MultiSequenceBatchProcessor(BaseProcessor):
                         self.on_progress_update(completed, total)
 
             logger.info(f"文件 {Path(sequence_file).name} 处理完成，总共处理 {len(results)} 个结果，成功 {sum(1 for r in results if r['status'] == 'success')} 个")
+            
+            # 保存任务历史
+            self._save_task_history(results)
             
             if self.on_all_tasks_complete:
                 self.on_all_tasks_complete(results)

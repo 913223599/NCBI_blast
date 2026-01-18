@@ -40,6 +40,8 @@
     "prefer_local": true,
     "fallback_to_remote": true,
     "use_cache": true,
-    "thread_count": 3
-  }
+    "thread_count": 20
+  },
+  "setup_completed": true,
+  "blast_bin_path": "C:\\Program Files\\NCBI\\blast-2.16.0+\\bin"
 }

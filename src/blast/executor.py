@@ -19,13 +19,15 @@ MAX_RETRIES = 3
 # 全局请求控制
 request_counter = 0
 request_lock = threading.Lock()
+# [新增] 限制并发请求数为 3，遵循 NCBI 最佳实践
+concurrent_limit = threading.Semaphore(3)
 
 def delay_before_request():
     """控制请求频率，遵循NCBI规则"""
     with request_lock:
         global request_counter
         request_counter += 1
-        time.sleep(0.4) # 约2.5次/秒
+        time.sleep(0.5) # 稍微增加间隔
 
 class BlastExecutor:
     def __init__(self):
@@ -64,38 +66,40 @@ class BlastExecutor:
         """执行单词BLAST搜索"""
         sequence = self._validate_sequence(sequence)
 
-        delay_before_request()
+        # [新增] 使用信号量限制并发
+        with concurrent_limit:
+            delay_before_request()
 
-        blast_params = {
-            'program': program,
-            'database': database,
-            'sequence': sequence
-        }
+            blast_params = {
+                'program': program,
+                'database': database,
+                'sequence': sequence
+            }
 
-        # 参数映射优化
-        if program not in ['blastp', 'blastx', 'rpsblast', 'rpstblastn']:
-            blast_params['megablast'] = 'on'
+            # 参数映射优化
+            if program not in ['blastp', 'blastx', 'rpsblast', 'rpstblastn']:
+                blast_params['megablast'] = 'on'
 
-        # 批量映射可选参数
-        param_map = {
-            'hitlist_size': 'hitlist_size',
-            'word_size': 'word_size',
-            'evalue': 'expect',
-            'matrix_name': 'matrix_name',
-            'filter': 'filter',
-            'alignments': 'alignments',
-            'descriptions': 'descriptions'
-        }
+            # 批量映射可选参数
+            param_map = {
+                'hitlist_size': 'hitlist_size',
+                'word_size': 'word_size',
+                'evalue': 'expect',
+                'matrix_name': 'matrix_name',
+                'filter': 'filter',
+                'alignments': 'alignments',
+                'descriptions': 'descriptions'
+            }
 
-        for key, ncbi_key in param_map.items():
-            if key in kwargs:
-                blast_params[ncbi_key] = kwargs[key]
+            for key, ncbi_key in param_map.items():
+                if key in kwargs:
+                    blast_params[ncbi_key] = kwargs[key]
 
-        try:
-            return NCBIWWW.qblast(**blast_params)
-        except Exception as e:
-            # 简单封装异常以便上层处理
-            raise RuntimeError(f"NCBI BLAST请求失败: {e}") from e
+            try:
+                return NCBIWWW.qblast(**blast_params)
+            except Exception as e:
+                # 简单封装异常以便上层处理
+                raise RuntimeError(f"NCBI BLAST请求失败: {e}") from e
 
     def execute_with_retry(self, sequence, program="blastn", database="nt",
                           max_retries=MAX_RETRIES, timeout_minutes=6, **kwargs):
@@ -149,6 +153,9 @@ class BlastExecutor:
             wait_time = current_wait * (2 ** (retries - 1))
             # 如果是服务器拒绝 (-1)，使用更长的固定等待
             if "error code: -1" in str(error_reason).lower():
+                wait_time = MAX_WAIT_TIME
+            # 如果是 error code: 1 (Cannot accept request)，也增加等待
+            if "error code: 1" in str(error_reason).lower():
                 wait_time = MAX_WAIT_TIME
 
             logging.info(f"尝试 {retries}/{max_retries} 失败: {error_reason}. {wait_time:.1f}s 后重试...")

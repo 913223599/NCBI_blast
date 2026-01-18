@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSlot
+from PyQt6.QtCore import pyqtSlot, QTimer
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QWidget, QVBoxLayout, QStatusBar, QMessageBox, QDialog,
                              QApplication, QHBoxLayout, QFrame)
@@ -25,6 +25,9 @@ from src.gui.widgets.result_viewer import ResultViewerWidget
 from src.gui.widgets.translation_debugger import TranslationDebuggerDialog
 from src.gui.widgets.help_dialog import HelpDialog
 from src.gui.widgets.api_key_dialog import ApiKeyDialog
+from src.gui.widgets.history_dialog import HistoryDialog  # 导入历史记录对话框
+from src.gui.widgets.database_manager_dialog import DatabaseManagerDialog # 导入数据库管理对话框
+from src.gui.widgets.task_name_dialog import TaskNameDialog # 导入任务命名对话框
 from src.gui.threads.processing_thread import ProcessingThread
 from src.blast.batch_processor import BatchProcessor, MultiSequenceBatchProcessor
 
@@ -69,6 +72,8 @@ class MainWindow(QMainWindow):
         self.translation_debugger = None
         self.help_dialog = None
         self.api_key_dialog = None
+        self.history_dialog = None # 初始化历史记录对话框变量
+        self.db_manager_dialog = None # 初始化数据库管理对话框变量
         
         # 1. 应用现代化皮肤
         self._apply_modern_theme()
@@ -229,7 +234,7 @@ class MainWindow(QMainWindow):
         
         # 1. 顶部控制栏卡片 (进度条、开始按钮)
         control_card = self._wrap_in_card(self.control_panel)
-        control_card.setFixedHeight(100) # 限制高度，使其像个工具栏
+        control_card.setFixedHeight(100) # 恢复高度
         
         # 2. 核心结果区 (仅结果查看器)
         result_container = self._wrap_in_card(self.result_viewer)
@@ -287,6 +292,14 @@ class MainWindow(QMainWindow):
         menu_bar.addMenu(help_menu)
         
         # 添加菜单项
+        open_history_action = QAction("任务历史记录", self)
+        open_history_action.triggered.connect(self._open_history_dialog)
+        file_menu.addAction(open_history_action)
+
+        open_db_manager_action = QAction("本地数据库管理", self)
+        open_db_manager_action.triggered.connect(self._open_db_manager_dialog)
+        settings_menu.addAction(open_db_manager_action)
+
         open_translation_debugger_action = QAction("翻译调试器", self)
         open_translation_debugger_action.triggered.connect(self._open_translation_debugger)
         settings_menu.addAction(open_translation_debugger_action)
@@ -344,7 +357,7 @@ class MainWindow(QMainWindow):
         self.result_viewer.update()  # 更新结果查看器
         self.update()  # 更新主窗口
     
-    def _create_processor_and_thread(self, file_paths):
+    def _create_processor_and_thread(self, file_paths, task_name=None):
         """
         工厂方法：根据文件内容创建合适的处理器和线程
         统一了 _start_processing 和 _retry_blast 的逻辑
@@ -379,10 +392,10 @@ class MainWindow(QMainWindow):
         from src.gui.threads.processing_thread import ProcessingThread, MultiSequenceProcessingThread
 
         if has_multi_sequence:
-            processor = MultiSequenceBatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings)
+            processor = MultiSequenceBatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings, task_name=task_name)
             thread = MultiSequenceProcessingThread(processor, file_paths)
         else:
-            processor = BatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings)
+            processor = BatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings, task_name=task_name)
             thread = ProcessingThread(processor, file_paths)
             
         return processor, thread
@@ -400,6 +413,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "正在处理中，请等待完成")
             return
 
+        # 弹出任务命名对话框
+        task_dialog = TaskNameDialog(self)
+        if task_dialog.exec() != QDialog.DialogCode.Accepted:
+            return # 用户取消
+            
+        task_name = task_dialog.get_task_name()
+
         # 更新UI状态
         for file in self.sequence_files:
             self.result_viewer.update_file_status({
@@ -410,7 +430,7 @@ class MainWindow(QMainWindow):
         self._setup_translation_settings()
 
         # 创建处理器和线程
-        self.batch_processor, self.processing_thread = self._create_processor_and_thread(self.sequence_files)
+        self.batch_processor, self.processing_thread = self._create_processor_and_thread(self.sequence_files, task_name)
         
         if not self.batch_processor:
             return # 创建失败（如配置错误）
@@ -604,7 +624,85 @@ class MainWindow(QMainWindow):
         self.api_key_dialog.show()
         self.api_key_dialog.raise_()
         self.api_key_dialog.activateWindow()
-    
+
+    def _open_history_dialog(self):
+        """打开历史记录对话框"""
+        if not self.history_dialog:
+            self.history_dialog = HistoryDialog(self)
+            self.history_dialog.load_history_signal.connect(self._load_task_history)
+        
+        # 每次打开都刷新数据
+        self.history_dialog._load_data()
+        self.history_dialog.show()
+        self.history_dialog.raise_()
+        self.history_dialog.activateWindow()
+
+    def _open_db_manager_dialog(self):
+        """打开数据库管理对话框"""
+        if not self.db_manager_dialog:
+            self.db_manager_dialog = DatabaseManagerDialog(self)
+        
+        self.db_manager_dialog.show()
+        self.db_manager_dialog.raise_()
+        self.db_manager_dialog.activateWindow()
+
+    def _load_task_history(self, result_dir):
+        """加载任务历史记录"""
+        print(f"加载任务历史: {result_dir}")
+        QTimer.singleShot(100, lambda: self._do_load_task_history(result_dir))
+
+    def _do_load_task_history(self, result_dir):
+        """实际执行加载任务历史的操作"""
+        try:
+            result_path = Path(result_dir)
+            if not result_path.exists():
+                raise FileNotFoundError(f"任务目录不存在: {result_dir}")
+
+            # 扫描目录下的所有 XML 文件
+            xml_files = list(result_path.glob("*_blast_result.xml"))
+            if not xml_files:
+                QMessageBox.warning(self, "提示", "该任务目录下没有找到结果文件")
+                return
+
+            # 清空当前结果
+            self.results = []
+            # 这里我们不直接清空 ResultViewer，而是让它追加显示，或者提供一个选项清空
+            # 为了简单起见，我们假设用户希望看到新加载的任务
+            # self.result_viewer.clear() # 如果 ResultViewer 有 clear 方法的话
+
+            count = 0
+            for xml_file in xml_files:
+                csv_file = xml_file.with_suffix('.csv')
+                desc_file = xml_file.with_suffix('.desc')
+                
+                # 尝试从文件名恢复原始文件名
+                # 假设格式为 {original_name}_{seq_id}_blast_result.xml
+                # 或者 {original_name}_blast_result.xml
+                # 这是一个简化的假设，实际情况可能更复杂
+                file_stem = xml_file.stem.replace('_blast_result', '')
+                
+                # 构造结果对象
+                result_info = {
+                    "file": str(xml_file), # 使用结果文件作为唯一标识
+                    "status": "success",
+                    "result_file": str(xml_file),
+                    "csv_file": str(csv_file),
+                    "desc_file": str(desc_file),
+                    "elapsed_time": 0,
+                    "from_history": True,
+                    "display_name": file_stem
+                }
+                
+                self.results.append(result_info)
+                self.result_viewer.update_file_status(result_info)
+                count += 1
+            
+            self.status_bar.showMessage(f"已加载任务 '{result_path.name}'，共 {count} 个结果", 3000)
+            
+        except Exception as e:
+            print(f"加载任务历史失败: {e}")
+            QMessageBox.critical(self, "错误", f"加载任务历史失败: {e}")
+
     def closeEvent(self, event):
         """处理窗口关闭事件"""
         # 如果有正在运行的工作线程，询问用户是否确定关闭
