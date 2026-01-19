@@ -133,6 +133,12 @@ class AdvancedSettingsDialog(QDialog):
         self.fallback_to_remote_checkbox = QCheckBox("本地不可用时回退到远程")
         self.use_cache_checkbox = QCheckBox("启用结果缓存")
 
+        # [新增] 请求超时设置
+        self.request_timeout_enabled = QCheckBox()
+        self.request_timeout_spinbox = QSpinBox()
+        self.request_timeout_spinbox.setRange(1, 9) # 最大值上限设置为9分钟
+        self.request_timeout_spinbox.setValue(6) # 默认6分钟
+
         self._setup_toggles()
 
     def _setup_toggles(self):
@@ -147,7 +153,8 @@ class AdvancedSettingsDialog(QDialog):
             (self.descriptions_enabled, self.descriptions_spinbox),
             (self.nucleotide_db_enabled, self.nucleotide_db_combo),
             (self.protein_db_enabled, self.protein_db_combo),
-            (self.local_num_threads_enabled, self.local_num_threads_spinbox)
+            (self.local_num_threads_enabled, self.local_num_threads_spinbox),
+            (self.request_timeout_enabled, self.request_timeout_spinbox) # [新增]
         ]
         for chk, widget in pairs:
             widget.setEnabled(chk.isChecked())
@@ -207,6 +214,9 @@ class AdvancedSettingsDialog(QDialog):
         layout.addWidget(self.prefer_local_checkbox)
         layout.addWidget(self.fallback_to_remote_checkbox)
         layout.addWidget(self.use_cache_checkbox)
+        layout.addSpacing(10)
+        layout.addWidget(QLabel("<b>网络请求</b>"))
+        layout.addWidget(self._create_param_row("请求超时 (分钟)", self.request_timeout_enabled, self.request_timeout_spinbox, "BLAST请求的最大等待时间"))
         layout.addStretch()
         return tab
 
@@ -226,6 +236,7 @@ class AdvancedSettingsDialog(QDialog):
             'prefer_local': self.prefer_local_checkbox.isChecked(),
             'fallback_to_remote': self.fallback_to_remote_checkbox.isChecked(),
             'use_cache': self.use_cache_checkbox.isChecked(),
+            'request_timeout': self.request_timeout_spinbox.value() if self.request_timeout_enabled.isChecked() else 4, # [新增]
 
             # AI 参数 - 从主界面获取
             'use_ai_translation': self.use_ai_checkbox.isChecked() if hasattr(self, 'use_ai_checkbox') else False,
@@ -259,6 +270,14 @@ class AdvancedSettingsDialog(QDialog):
         _set_val(self.local_num_threads_enabled, self.local_num_threads_spinbox, 'local_num_threads')
         _set_val(self.nucleotide_db_enabled, self.nucleotide_db_combo, 'nucleotide_database')
         _set_val(self.protein_db_enabled, self.protein_db_combo, 'protein_database')
+        
+        # [新增] 设置请求超时
+        if 'request_timeout' in settings and settings['request_timeout'] is not None:
+            self.request_timeout_enabled.setChecked(True)
+            self.request_timeout_spinbox.setValue(int(settings['request_timeout']))
+        else:
+            self.request_timeout_enabled.setChecked(True) # 默认启用
+            self.request_timeout_spinbox.setValue(4)
 
         if 'prefer_local' in settings: self.prefer_local_checkbox.setChecked(settings['prefer_local'])
         if 'fallback_to_remote' in settings: self.fallback_to_remote_checkbox.setChecked(settings['fallback_to_remote'])
@@ -477,7 +496,7 @@ class ParameterSettingsWidget(QWidget):
             'hitlist_size', 'word_size', 'evalue', 'matrix_name', 'filter',
             'alignments', 'descriptions', 'local_num_threads', 'nucleotide_database',
             'protein_database', 'prefer_local', 'fallback_to_remote', 'use_cache',
-            'use_ai_translation', 'ai_translation_model', 'thread_count'
+            'use_ai_translation', 'ai_translation_model', 'thread_count', 'request_timeout'
         ]
 
         # 更新内存

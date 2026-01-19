@@ -53,3 +53,7 @@ class ControlPanelWidget(QGroupBox):
     def enable_stop_button(self, enabled=True):
         """启用/禁用停止按钮"""
         self.stop_button.setEnabled(enabled)
+        
+    def set_stop_button_text(self, text):
+        """设置停止按钮文本"""
+        self.stop_button.setText(text)

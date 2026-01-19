@@ -4,6 +4,7 @@ PyQt6应用程序主类
 
 import sys
 import os
+import psutil
 from PyQt6.QtWidgets import QApplication, QWizard
 
 from src.gui.main_window_pyqt import MainWindow
@@ -62,7 +63,35 @@ class Application:
         print(f"Main window geometry: {self.main_window.geometry()}")
         print(f"Main window visible: {self.main_window.isVisible()}")
         
-        return self.app.exec()
+        exit_code = self.app.exec()
+        
+        # 退出前清理所有子进程
+        self._cleanup_processes()
+        
+        return exit_code
+
+    def _cleanup_processes(self):
+        """清理当前进程及其子进程"""
+        try:
+            current_process = psutil.Process(os.getpid())
+            children = current_process.children(recursive=True)
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            
+            # 等待子进程结束
+            _, alive = psutil.wait_procs(children, timeout=3)
+            for p in alive:
+                try:
+                    p.kill() # 强制杀死
+                except psutil.NoSuchProcess:
+                    pass
+                    
+            print("所有子进程已清理")
+        except Exception as e:
+            print(f"清理进程时出错: {e}")
 
 
 def main():

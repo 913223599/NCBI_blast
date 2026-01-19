@@ -20,30 +20,6 @@ class ConfigManager:
     _lock = threading.RLock()  # 使用可重入锁防止死锁
     _initialized = False
 
-    # 定义默认配置常量
-    DEFAULT_API_KEYS = {
-        "dashscope": ""
-    }
-
-    DEFAULT_ADVANCED_SETTINGS = {
-        "hitlist_size": 20,
-        "word_size": None,
-        "evalue": None,
-        "matrix_name": None,
-        "filter": None,
-        "alignments": None,
-        "descriptions": None,
-        "local_num_threads": None,
-        "nucleotide_database": "nt",
-        "protein_database": "nr",
-        "prefer_local": True,
-        "fallback_to_remote": True,
-        "use_cache": True,
-        "use_ai_translation": True,
-        "ai_translation_model": "deepseek-r1",
-        "thread_count": 3  # 默认处理线程数
-    }
-
     def __new__(cls, *args, **kwargs):
         """实现单例模式的核心方法"""
         if not cls._instance:
@@ -80,45 +56,16 @@ class ConfigManager:
 
     def _load_config(self):
         """从配置文件加载配置数据"""
-        modified = False
-
-        # 1. 加载现有文件
         if self.config_file.exists():
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     self.config_data = json.load(f)
             except Exception as e:
-                logging.warning(f"加载配置文件时出错: {e}，将使用默认配置")
+                logging.error(f"加载配置文件时出错: {e}")
                 self.config_data = {}
-                modified = True
         else:
+            logging.warning(f"配置文件不存在: {self.config_file}")
             self.config_data = {}
-            modified = True
-
-        # 2. 验证并修复 'api_keys'
-        if "api_keys" not in self.config_data:
-            self.config_data["api_keys"] = self.DEFAULT_API_KEYS.copy()
-            modified = True
-        else:
-            for key, default_val in self.DEFAULT_API_KEYS.items():
-                if key not in self.config_data["api_keys"]:
-                    self.config_data["api_keys"][key] = default_val
-                    modified = True
-
-        # 3. 验证并修复 'advanced_settings'
-        if "advanced_settings" not in self.config_data:
-            self.config_data["advanced_settings"] = self.DEFAULT_ADVANCED_SETTINGS.copy()
-            modified = True
-        else:
-            current_settings = self.config_data["advanced_settings"]
-            for key, default_val in self.DEFAULT_ADVANCED_SETTINGS.items():
-                if key not in current_settings:
-                    current_settings[key] = default_val
-                    modified = True
-
-        # 4. 仅在必要时保存
-        if modified:
-            self._save_config()
 
     def _save_config(self):
         """保存配置数据到文件 (线程安全)"""
@@ -127,7 +74,6 @@ class ConfigManager:
                 self.config_file.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.config_file, 'w', encoding='utf-8') as f:
                     json.dump(self.config_data, f, indent=2, ensure_ascii=False)
-                # print(f"配置已保存至: {self.config_file}") # 调试用
         except Exception as e:
             logging.error(f"保存配置文件时出错: {e}")
 
@@ -178,16 +124,6 @@ class ConfigManager:
         for model in supported_models:
             if isinstance(model, dict) and "key" in model and "name" in model:
                 models_dict[model["key"]] = model["name"]
-        
-        # 如果配置文件中没有定义，返回默认值
-        if not models_dict:
-            return {
-                'qwen-plus': '通义千问-Plus',
-                'qwen-mt-plus': '通义千问-MT-Plus',
-                'qwen-mt-turbo': '通义千问-MT-Turbo',
-                'qwen-turbo': '通义千问-Turbo',
-                'deepseek-r1': 'DeepSeek'
-            }
         
         return models_dict
     

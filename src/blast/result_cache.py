@@ -23,8 +23,14 @@ class BlastResultCache:
             cache_dir (str): 缓存目录
             expiry_time (int): 缓存过期时间（秒）
         """
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+        # 如果是相对路径，确保它相对于项目根目录
+        if not Path(cache_dir).is_absolute():
+            project_root = Path(__file__).resolve().parents[2]
+            self.cache_dir = project_root / cache_dir
+        else:
+            self.cache_dir = Path(cache_dir)
+            
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.expiry_time = expiry_time
     
     def _get_cache_key(self, sequence, sequence_id=None):
@@ -97,7 +103,7 @@ class BlastResultCache:
             return None
         
         try:
-            with open(cache_file, 'r') as f:
+            with open(cache_file, 'r', encoding='utf-8') as f:
                 cached_data = json.load(f)
             return cached_data
         except Exception as e:
@@ -132,7 +138,7 @@ class BlastResultCache:
             
             # 先将数据写入临时文件，然后重命名，以避免写入过程中出现问题
             import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, dir=self.cache_dir, suffix='.tmp') as tmp_file:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, dir=self.cache_dir, suffix='.tmp', encoding='utf-8') as tmp_file:
                 json.dump(serializable_data, tmp_file, indent=2, ensure_ascii=False)
                 temp_path = tmp_file.name
             
@@ -212,127 +218,6 @@ class BlastResultCache:
             'expired': expired_files,
             'valid': total_files - expired_files
         }
-
-
-class CachedBlastProcessor:
-    """
-    带缓存的BLAST处理器
-    """
-    
-    def __init__(self, timestamp_folder=None, cache_enabled=True, cache_expiry=86400):
-        """
-        初始化带缓存的BLAST处理器
-        
-        Args:
-            timestamp_folder (Path): 时间戳文件夹路径
-            cache_enabled (bool): 是否启用缓存
-            cache_expiry (int): 缓存过期时间（秒）
-        """
-        self.timestamp_folder = timestamp_folder or self._create_timestamp_folder()
-        self.cache_enabled = cache_enabled
-        self.cache = BlastResultCache(expiry_time=cache_expiry) if cache_enabled else None
-    
-    def _create_timestamp_folder(self):
-        """
-        创建基于时间戳的结果保存文件夹
-        
-        Returns:
-            Path: 时间戳文件夹路径
-        """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # 获取项目根目录 (src/blast/result_cache.py -> src/blast -> src -> root)
-        project_root = Path(__file__).resolve().parent.parent.parent
-        folder_path = project_root / "results" / timestamp
-        folder_path.mkdir(parents=True, exist_ok=True)
-        return folder_path
-
-    def process_sequence_with_cache(self, sequence_file, blast_executor):
-        """
-        处理带缓存的序列
-        
-        Args:
-            sequence_file (str): 序列文件路径
-            blast_executor: BLAST执行器
-            
-        Returns:
-            dict: 处理结果
-        """
-        if not self.cache_enabled or not self.cache:
-            # 不使用缓存，直接处理
-            return self._process_without_cache(sequence_file, blast_executor)
-        
-        # 读取序列
-        try:
-            with open(sequence_file, 'r') as f:
-                sequence = f.read().strip()
-        except Exception as e:
-            return {
-                "file": sequence_file,
-                "status": "error",
-                "error": f"读取序列文件失败: {e}"
-            }
-        
-        # 检查缓存
-        sequence_id = Path(sequence_file).stem  # 使用文件名作为序列ID
-        cached_result = self.cache.get_cached_result(sequence, sequence_id)
-        if cached_result:
-            print(f"✓ 使用缓存结果: {Path(sequence_file).name}")
-            cached_result['from_cache'] = True
-            return cached_result
-        
-        # 缓存未命中，执行实际查询
-        print(f"○ 执行实际查询: {Path(sequence_file).name}")
-        result = self._process_without_cache(sequence_file, blast_executor)
-        
-        # 保存到缓存
-        if result['status'] == 'success':
-            sequence_id = Path(sequence_file).stem  # 使用文件名作为序列ID
-            self.cache.save_result(sequence, result, sequence_id)
-            result['from_cache'] = False
-        
-        return result
-    
-    def _process_without_cache(self, sequence_file, blast_executor):
-        """
-        不使用缓存处理序列
-        
-        Args:
-            sequence_file (str): 序列文件路径
-            blast_executor: BLAST执行器
-            
-        Returns:
-            dict: 处理结果
-        """
-        try:
-            # 读取序列
-            with open(sequence_file, 'r') as f:
-                sequence = f.read().strip()
-            
-            # 执行BLAST搜索
-            result_handle = blast_executor.execute_blast_search(sequence)
-            
-            # 保存结果
-            file_name = Path(sequence_file).stem
-            result_file = self.timestamp_folder / f"{file_name}_cached_blast_result.xml"
-            
-            with open(result_file, "w") as out_handle:
-                out_handle.write(result_handle.read())
-            
-            result_handle.close()
-            
-            return {
-                "file": sequence_file,
-                "status": "success",
-                "result_file": str(result_file),
-                "timestamp": datetime.now().isoformat()
-            }
-        except Exception as e:
-            return {
-                "file": sequence_file,
-                "status": "error",
-                "error": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
 
 
 def main():

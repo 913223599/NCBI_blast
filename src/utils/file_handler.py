@@ -57,56 +57,66 @@ class FileHandler:
         """
         sequences = []
         try:
-            # 使用BioPython解析FASTA文件，使用'fasta-pearson'格式避免弃用警告
+            # 尝试直接使用BioPython解析
+            # BioPython通常能很好地处理FASTA格式
             with open(file_path, 'r', encoding='utf-8') as handle:
-                content = handle.read()
-                if content.startswith('>'):  # 确认是FASTA格式
-                    handle.seek(0)  # 重置文件指针
-                    for record in SeqIO.parse(handle, "fasta-pearson"):
-                        seq_info = {
-                            'id': str(record.id),
-                            'description': str(record.description),
-                            'sequence': str(record.seq),
-                            'length': len(record.seq)
-                        }
-                        sequences.append(seq_info)
-                else:
-                    # 如果不是FASTA格式，直接使用回退方法
-                    raise ValueError("不是FASTA格式文件")
+                # 使用 'fasta' 而不是 'fasta-pearson'，后者是旧格式
+                for record in SeqIO.parse(handle, "fasta"):
+                    seq_info = {
+                        'id': str(record.id),
+                        'description': str(record.description),
+                        'sequence': str(record.seq),
+                        'length': len(record.seq)
+                    }
+                    sequences.append(seq_info)
         except Exception as e:
-            # 如果BioPython解析失败，回退到原始方法
-            print(f"使用BioPython解析FASTA文件失败: {e}")
+            print(f"BioPython解析失败: {e}")
+        
+        # 如果BioPython没解析出东西，尝试手动解析（容错模式）
+        if not sequences:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if content.startswith('>'):
-                        # 解析FASTA格式
+                    content = f.read()
+                    # 查找第一个 '>'
+                    start_idx = content.find('>')
+                    if start_idx != -1:
+                        content = content[start_idx:] # 跳过前面的垃圾内容
                         entries = content.split('>')
                         for entry in entries:
                             if entry.strip():
                                 lines = entry.strip().split('\n', 1)
-                                if len(lines) > 1:
+                                if len(lines) > 0:
                                     header = lines[0].strip()
-                                    sequence = ''.join(lines[1:]).replace('\n', '').replace(' ', '').strip()
-                                    seq_info = {
-                                        'id': header.split()[0] if header else "unknown",
-                                        'description': header,
-                                        'sequence': sequence,
-                                        'length': len(sequence)
-                                    }
-                                    sequences.append(seq_info)
-                    else:
-                        # 非FASTA格式，作为单个序列处理
-                        seq_info = {
+                                    sequence = ''.join(lines[1:]).replace('\n', '').replace(' ', '').strip() if len(lines) > 1 else ""
+                                    if sequence: # 只添加有序列的
+                                        seq_info = {
+                                            'id': header.split()[0] if header else "unknown",
+                                            'description': header,
+                                            'sequence': sequence,
+                                            'length': len(sequence)
+                                        }
+                                        sequences.append(seq_info)
+            except Exception as e2:
+                print(f"手动解析失败: {e2}")
+
+        # 如果还是没有，尝试作为单序列处理 (兜底)
+        if not sequences:
+             try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read().strip()
+                    # 只有当内容不为空且不包含 '>' 时才作为纯序列处理
+                    # 如果包含 '>' 但前面解析失败，说明格式有问题，不应作为纯序列
+                    if content and '>' not in content:
+                         seq_info = {
                             'id': Path(file_path).stem,
                             'description': f"Sequence from {Path(file_path).name}",
-                            'sequence': content.replace('\n', '').replace(' ', '').strip(),
-                            'length': len(content.replace('\n', '').replace(' ', '').strip())
+                            'sequence': content.replace('\n', '').replace(' ', ''),
+                            'length': len(content)
                         }
-                        sequences.append(seq_info)
-            except Exception as fallback_e:
-                raise RuntimeError(f"读取序列文件失败 {file_path}: {fallback_e}")
-        
+                         sequences.append(seq_info)
+             except:
+                 pass
+
         return sequences
     
     def save_result_file(self, result_handle, output_file):

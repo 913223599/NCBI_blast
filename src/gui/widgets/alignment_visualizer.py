@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 
 from Bio.Blast import NCBIXML
 import os
+import re
 
 class VisualizationWorker(QThread):
     """后台解析和绘图数据准备线程"""
@@ -149,6 +150,62 @@ class AlignmentVisualizerDialog(QDialog):
         self.status_label.setText("加载失败")
         QMessageBox.critical(self, "错误", f"无法加载可视化数据:\n{msg}")
 
+    def _simplify_title(self, title):
+        """
+        简化标题，提取种属名或关键信息
+        适配 Protein 和 DNA 序列格式
+        """
+        # 1. 尝试提取 Accession ID
+        # 格式如: gi|12345|ref|NM_001234.1| Description...
+        parts = title.split('|')
+        accession_id = ""
+        if len(parts) >= 4:
+            accession_id = parts[3]
+        elif len(parts) >= 2:
+            accession_id = parts[1]
+        else:
+            accession_id = title.split()[0] if title else "Unknown"
+
+        # 2. 尝试提取种属名 [Species Name] (常见于 Protein)
+        species_match = re.search(r'\[(.*?)\]', title)
+        if species_match:
+            species_name = species_match.group(1)
+            display_name = f"{species_name} ({accession_id})"
+        else:
+            # 3. 如果没有种属名（常见于 DNA），处理描述文本
+            desc_part = title
+            
+            # 移除类似 "gi|123|ref|NM_001|" 的前缀
+            # 循环移除直到开头不是竖线分隔的 ID 格式
+            while True:
+                match = re.match(r'^[\w\.]+\|', desc_part)
+                if match:
+                    desc_part = desc_part[match.end():]
+                else:
+                    break
+            
+            desc_part = desc_part.strip().lstrip('| ,-')
+            
+            # 如果 Accession ID 还在描述中，移除它
+            if accession_id in desc_part:
+                desc_part = desc_part.replace(accession_id, "").strip()
+                desc_part = desc_part.lstrip('| ,-')
+
+            # 截取策略：保留前 5-6 个单词
+            words = desc_part.split()
+            if len(words) > 6:
+                short_desc = " ".join(words[:6])
+            else:
+                short_desc = desc_part
+                
+            display_name = f"{short_desc} ({accession_id})"
+
+        # 4. 最终长度限制
+        if len(display_name) > 50:
+            display_name = display_name[:47] + "..."
+            
+        return display_name
+
     def _update_plot(self):
         if not hasattr(self, 'data'):
             return
@@ -164,19 +221,26 @@ class AlignmentVisualizerDialog(QDialog):
         max_display = 100 # 增加显示上限，配合滚动条
         
         # 使用 sorted 生成新列表，不修改原数据
-        if sort_mode == "按 E-value":
-            # E-value 越小越好
-            display_hits = sorted(hits, key=lambda x: min([h['evalue'] for h in x['hsps']] + [1.0]))
-        elif sort_mode == "按 Score":
-            # Score 越大越好
-            display_hits = sorted(hits, key=lambda x: max([h['score'] for h in x['hsps']] + [0]), reverse=True)
-        elif sort_mode == "按起始位置":
-            # 起始位置越小越靠前
-            display_hits = sorted(hits, key=lambda x: min([h['query_start'] for h in x['hsps']] + [999999]))
-        else:
+        try:
+            if sort_mode == "按 E-value":
+                # E-value 越小越好
+                display_hits = sorted(hits, key=lambda x: min([float(h['evalue']) for h in x['hsps']] + [1.0]))
+            elif sort_mode == "按 Score":
+                # Score 越大越好
+                display_hits = sorted(hits, key=lambda x: max([float(h['score']) for h in x['hsps']] + [0]), reverse=True)
+            elif sort_mode == "按起始位置":
+                # 起始位置越小越靠前
+                display_hits = sorted(hits, key=lambda x: min([int(h['query_start']) for h in x['hsps']] + [999999]))
+            else:
+                display_hits = list(hits)
+        except Exception as e:
+            print(f"排序出错: {e}")
             display_hits = list(hits)
 
         display_hits = display_hits[:max_display]
+        
+        # 更新状态栏以反馈排序状态
+        self.status_label.setText(f"当前排序: {sort_mode} (显示前 {len(display_hits)} 条)")
 
         # 动态调整 Canvas 高度
         # 基础高度 100 + 每个 Hit 30 像素
@@ -206,9 +270,8 @@ class AlignmentVisualizerDialog(QDialog):
             # 倒序排列，排名第一的在最上面 (紧挨着 Query)
             y = len(display_hits) - i - 1 
             
-            # 简化标题
-            title = hit['title']
-            if len(title) > 50: title = title[:47] + "..."
+            # 使用新的简化标题逻辑
+            title = self._simplify_title(hit['title'])
             
             yticks.append(y + bar_height/2)
             yticklabels.append(f"{i+1}. {title}")

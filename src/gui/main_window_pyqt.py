@@ -5,6 +5,7 @@ PyQt主窗口模块
 
 import os
 import sys
+import json
 from pathlib import Path
 
 from PyQt6.QtCore import pyqtSlot, QTimer
@@ -28,7 +29,7 @@ from src.gui.widgets.api_key_dialog import ApiKeyDialog
 from src.gui.widgets.history_dialog import HistoryDialog  # 导入历史记录对话框
 from src.gui.widgets.database_manager_dialog import DatabaseManagerDialog # 导入数据库管理对话框
 from src.gui.widgets.task_name_dialog import TaskNameDialog # 导入任务命名对话框
-from src.gui.threads.processing_thread import ProcessingThread
+from src.gui.threads.processing_thread import ProcessingThread, MultiSequenceProcessingThread
 from src.blast.batch_processor import BatchProcessor, MultiSequenceBatchProcessor
 
 
@@ -67,6 +68,7 @@ class MainWindow(QMainWindow):
         self.sequence_files = []
         self.results = []
         self.is_processing = False
+        self.is_cancelling = False # [新增] 标记是否正在取消中
         self.processing_thread = None
         self.batch_processor = None
         self.translation_debugger = None
@@ -437,9 +439,15 @@ class MainWindow(QMainWindow):
 
         # 设置UI控制状态
         self.is_processing = True
+        self.is_cancelling = False # 重置取消状态
         self.control_panel.enable_start_button(False)
         self.control_panel.enable_stop_button(True)
+        self.control_panel.set_stop_button_text("停止处理") # 恢复按钮文本
         self.control_panel.update_progress(0)
+        
+        # [新增] 设置文件选择器为处理状态
+        self.file_selector.set_processing_state(True)
+        
         self.results = []
 
         # 连接并启动
@@ -448,13 +456,51 @@ class MainWindow(QMainWindow):
     
     @pyqtSlot()
     def _stop_processing(self):
-        """停止处理"""
-        if self.is_processing and self.batch_processor:
-            # 设置取消标志
-            self.batch_processor.cancel_processing()
-            self.control_panel.set_status("正在取消处理...")
-            self.control_panel.enable_stop_button(False)
-            self.statusBar().showMessage("正在取消处理...")
+        """停止处理 - 两阶段逻辑"""
+        if not self.is_processing:
+            return
+
+        # 第一阶段：请求取消
+        if not self.is_cancelling:
+            if self.batch_processor:
+                # 设置取消标志
+                self.batch_processor.cancel_processing()
+                
+            self.is_cancelling = True
+            self.control_panel.set_status("正在取消处理... (再次点击强制终止)")
+            self.statusBar().showMessage("正在取消处理... (再次点击强制终止)")
+            self.control_panel.set_stop_button_text("强制终止")
+            
+        # 第二阶段：强制终止
+        else:
+            reply = QMessageBox.question(
+                self,
+                "强制终止",
+                "确定要强制终止所有任务吗？\n这可能会导致当前正在进行的网络请求中断。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.control_panel.set_status("正在强制终止...")
+                if self.processing_thread and self.processing_thread.isRunning():
+                    # [关键修复] 断开信号，防止 terminate 后触发信号导致崩溃
+                    try:
+                        self.processing_thread.task_started.disconnect()
+                        self.processing_thread.progress_updated.disconnect()
+                        self.processing_thread.result_received.disconnect()
+                        self.processing_thread.all_tasks_completed.disconnect()
+                        self.processing_thread.processing_error.disconnect()
+                        self.processing_thread.finished.disconnect()
+                    except Exception as e:
+                        print(f"断开信号时出错: {e}")
+
+                    self.processing_thread.terminate()
+                    self.processing_thread.wait()
+                
+                # 手动触发结束清理
+                self._on_thread_finished()
+                self.control_panel.set_status("已强制终止")
+                self.statusBar().showMessage("已强制终止")
     
     def _on_task_start(self, sequence_file):
         """处理任务开始事件"""
@@ -490,8 +536,13 @@ class MainWindow(QMainWindow):
         """处理错误事件"""
         # 更新界面状态
         self.is_processing = False
+        self.is_cancelling = False
         self.control_panel.enable_start_button(True)
         self.control_panel.enable_stop_button(False)
+        self.control_panel.set_stop_button_text("停止处理")
+        
+        # [新增] 恢复文件选择器状态
+        self.file_selector.set_processing_state(False)
         
         # 显示错误消息
         QMessageBox.critical(self, "处理出错", f"处理过程中发生错误:\n{error_message}")
@@ -502,14 +553,25 @@ class MainWindow(QMainWindow):
         """处理线程结束事件"""
         # 更新界面状态
         self.is_processing = False
+        self.is_cancelling = False
         self.control_panel.enable_start_button(True)
         self.control_panel.enable_stop_button(False)
-        self.control_panel.update_progress(100, 100)
+        self.control_panel.set_stop_button_text("停止处理")
         
-        # 显示完成消息
-        successful = sum(1 for r in self.results if r["status"] == "success")
-        self.control_panel.set_status(f"处理完成: 成功 {successful} 个文件")
-        self.statusBar().showMessage(f"处理完成: 成功 {successful} 个文件")
+        # [新增] 恢复文件选择器状态
+        self.file_selector.set_processing_state(False)
+        
+        # 如果是取消状态，显示取消消息
+        if self.batch_processor and self.batch_processor._cancel_flag:
+            self.control_panel.set_status("处理已取消")
+            self.statusBar().showMessage("处理已取消")
+            self.control_panel.update_progress(0, 0) # 重置进度条
+        else:
+            self.control_panel.update_progress(100, 100)
+            # 显示完成消息
+            successful = sum(1 for r in self.results if r["status"] == "success")
+            self.control_panel.set_status(f"处理完成: 成功 {successful} 个文件")
+            self.statusBar().showMessage(f"处理完成: 成功 {successful} 个文件")
     
     @pyqtSlot(str)
     def _on_item_selected(self, file_name):
@@ -565,9 +627,14 @@ class MainWindow(QMainWindow):
             return
 
         self.is_processing = True
+        self.is_cancelling = False
         self.control_panel.enable_start_button(False)
         self.control_panel.enable_stop_button(True)
+        self.control_panel.set_stop_button_text("停止处理")
         self.control_panel.set_status(f"正在重试: {file_name}")
+        
+        # [新增] 设置文件选择器为处理状态
+        self.file_selector.set_processing_state(True)
         
         self._connect_thread_signals()
         self.processing_thread.start()
@@ -658,17 +725,68 @@ class MainWindow(QMainWindow):
             if not result_path.exists():
                 raise FileNotFoundError(f"任务目录不存在: {result_dir}")
 
+            # [新增] 检查结果区是否已有数据
+            if self.results:
+                reply = QMessageBox.question(
+                    self,
+                    "加载历史任务",
+                    "结果区已有数据，是否清空当前结果？\n\n点击'Yes'清空并加载，点击'No'附加到当前结果。",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+                )
+                
+                if reply == QMessageBox.StandardButton.Cancel:
+                    return
+                elif reply == QMessageBox.StandardButton.Yes:
+                    self.results = []
+                    self.result_viewer._clear_results_internal() # 需要在 ResultViewer 中添加此方法或直接调用 clear
+
+            # [新增] 尝试读取 task_info.json
+            task_info_file = result_path / "task_info.json"
+            if task_info_file.exists():
+                try:
+                    with open(task_info_file, 'r', encoding='utf-8') as f:
+                        task_info = json.load(f)
+                        
+                    results_list = task_info.get("results", [])
+                    if not results_list:
+                        QMessageBox.warning(self, "提示", "任务记录中没有结果数据")
+                        return
+
+                    count = 0
+                    for res in results_list:
+                        # 补充必要字段
+                        res["from_history"] = True
+                        
+                        # 确保 sequence_id 存在
+                        if "sequence_id" not in res:
+                             res["sequence_id"] = "Unknown"
+
+                        # 修正 result_file 等路径为绝对路径（如果它们是相对路径）
+                        for key in ["result_file", "csv_file", "desc_file"]:
+                            path_str = res.get(key, "")
+                            if path_str:
+                                path = Path(path_str)
+                                if not path.exists():
+                                    # 尝试在当前任务目录下寻找
+                                    local_path = result_path / path.name
+                                    if local_path.exists():
+                                        res[key] = str(local_path)
+                        
+                        self.results.append(res)
+                        self.result_viewer.update_file_status(res)
+                        count += 1
+                        
+                    self.status_bar.showMessage(f"已加载任务 '{result_path.name}'，共 {count} 个结果", 3000)
+                    return # 成功加载，直接返回
+
+                except Exception as e:
+                    print(f"读取 task_info.json 失败: {e}，尝试扫描 XML 文件")
+
             # 扫描目录下的所有 XML 文件
             xml_files = list(result_path.glob("*_blast_result.xml"))
             if not xml_files:
                 QMessageBox.warning(self, "提示", "该任务目录下没有找到结果文件")
                 return
-
-            # 清空当前结果
-            self.results = []
-            # 这里我们不直接清空 ResultViewer，而是让它追加显示，或者提供一个选项清空
-            # 为了简单起见，我们假设用户希望看到新加载的任务
-            # self.result_viewer.clear() # 如果 ResultViewer 有 clear 方法的话
 
             count = 0
             for xml_file in xml_files:
@@ -693,6 +811,33 @@ class MainWindow(QMainWindow):
                     "display_name": file_stem
                 }
                 
+                # [修复] 尝试解析 sequence_id
+                # 我们尝试方案 1，读取 XML 获取 query name
+                try:
+                    import xml.etree.ElementTree as ET
+                    tree = ET.parse(xml_file)
+                    root = tree.getroot()
+                    # BLAST XML format: BlastOutput -> BlastOutput_query-def
+                    query_def = root.find(".//BlastOutput_query-def")
+                    if query_def is not None:
+                        seq_id = query_def.text.split()[0] # 通常取第一个词作为 ID
+                        result_info["sequence_id"] = seq_id
+                        
+                        # 尝试推断原始文件名
+                        if seq_id in file_stem:
+                            # 移除 seq_id 得到原始文件名
+                            original_name = file_stem.replace(f"_{seq_id}", "").replace(seq_id, "")
+                            if not original_name: original_name = "Unknown_Source"
+                            # result_info["file"] = original_name # 之前被注释掉了
+                        else:
+                            # result_info["file"] = file_stem
+                            pass
+                            
+                        # 修正：为了简单展示，我们可以把 file 设为 "历史任务加载" 或者基于目录名
+                        result_info["file"] = result_path.name 
+                except Exception:
+                    pass
+
                 self.results.append(result_info)
                 self.result_viewer.update_file_status(result_info)
                 count += 1
@@ -717,6 +862,17 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.Yes:
                 # 终止工作线程
                 if self.processing_thread:
+                    # [关键修复] 断开信号，防止 terminate 后触发信号导致崩溃
+                    try:
+                        self.processing_thread.task_started.disconnect()
+                        self.processing_thread.progress_updated.disconnect()
+                        self.processing_thread.result_received.disconnect()
+                        self.processing_thread.all_tasks_completed.disconnect()
+                        self.processing_thread.processing_error.disconnect()
+                        self.processing_thread.finished.disconnect()
+                    except Exception as e:
+                        print(f"断开信号时出错: {e}")
+
                     self.processing_thread.terminate()
                     self.processing_thread.wait()
                 event.accept()

@@ -4,7 +4,9 @@ from .batch_processor import BatchProcessor, MultiSequenceBatchProcessor
 from .executor import BlastExecutor
 from .local_blast import LocalBlastExecutor, LocalBatchProcessor
 from .parser import BlastResultParser
-from .result_cache import BlastResultCache, CachedBlastProcessor
+from .result_cache import BlastResultCache
+from .database_manager import DatabaseManager
+from .result_converter import BlastResultConverter
 
 __all__ = [
     'BlastResultParser', 
@@ -14,5 +16,6 @@ __all__ = [
     'LocalBlastExecutor',
     'LocalBatchProcessor',
     'BlastResultCache',
-    'CachedBlastProcessor'
+    'DatabaseManager',
+    'BlastResultConverter'
 ]

@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import time
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -65,6 +66,9 @@ class BaseProcessor:
 
         self._cancel_flag = False
         self.task_folder = self._create_task_folder()
+        
+        # [新增] 初始化任务记录，确保任务一开始就被记录
+        self._init_task_record()
 
         # 默认 BLAST 参数
         self.default_blast_params = {
@@ -96,10 +100,26 @@ class BaseProcessor:
             
         folder_path.mkdir(parents=True, exist_ok=True)
         return folder_path
+        
+    def _init_task_record(self):
+        """初始化任务记录到数据库"""
+        try:
+            self.history_manager.add_task(
+                task_name=self.task_folder.name,
+                parameters=self.advanced_settings, # 此时可能还没合并默认参数，但足够了
+                result_dir=str(self.task_folder),
+                file_count=0, # 初始为0，后续更新
+                status="running" # 初始状态为运行中
+            )
+        except Exception as e:
+            logger.error(f"初始化任务记录失败: {e}")
 
     def cancel_processing(self):
         """取消处理过程"""
         self._cancel_flag = True
+        # 尝试取消正在进行的线程池任务
+        # 注意：Python 的 ThreadPoolExecutor 无法强制终止正在运行的线程
+        # 但我们可以设置标志位，让任务在下一个检查点退出
 
     def _prepare_blast_params(self):
         """合并默认参数与高级设置"""
@@ -165,13 +185,31 @@ class BaseProcessor:
         核心工作流：执行单个序列的BLAST、文件保存、转换和缓存
         此方法被两个子类通用调用
         """
+        # 0. 早期取消检查
+        if self._cancel_flag:
+            logger.info(f"任务已取消，跳过序列: {seq_id}")
+            return {
+                "file": source_file_path,
+                "status": "cancelled",
+                "error": "Task cancelled by user",
+                "thread_id": threading.current_thread().ident,
+                "sequence_id": seq_id # 确保返回 sequence_id
+            }
+
         thread_id = threading.current_thread().ident
         start_time = time.time()
         
         logger.info(f"开始处理序列: {seq_id}, 文件: {Path(source_file_path).name}")
 
         # 结果文件路径构建
-        base_filename = f"{original_file_name}_blast_result" if original_file_name == seq_id else f"{original_file_name}_{seq_id}_blast_result"
+        # [修改] 统一文件名格式，确保包含 seq_id，方便后续解析
+        # 格式：{original_file_name}_{seq_id}_blast_result
+        # 如果是单序列文件，seq_id 通常等于 original_file_name，此时避免重复
+        if original_file_name == seq_id:
+            base_filename = f"{original_file_name}_blast_result"
+        else:
+            base_filename = f"{original_file_name}_{seq_id}_blast_result"
+            
         result_file = self.task_folder / f"{base_filename}.xml"
         csv_file = self.task_folder / f"{base_filename}.csv"
         desc_file = self.task_folder / f"{base_filename}.desc"
@@ -183,12 +221,9 @@ class BaseProcessor:
             "thread_id": thread_id,
             "result_file": result_file,
             "csv_file": csv_file,
-            "desc_file": desc_file
+            "desc_file": desc_file,
+            "sequence_id": seq_id # 始终包含 sequence_id
         }
-
-        # 如果是 MultiSequenceProcessor 调用，可能需要额外的字段
-        if original_file_name != seq_id:
-             result_info["sequence_id"] = seq_id
 
         try:
             # 1. 验证序列
@@ -204,6 +239,9 @@ class BaseProcessor:
                 if cached_result:
                     logger.info(f"✓ 使用缓存结果: {cache_key_id}")
                     cached_result['from_cache'] = True
+                    # 确保缓存结果中包含 sequence_id
+                    if 'sequence_id' not in cached_result:
+                        cached_result['sequence_id'] = seq_id
                     return cached_result
                 else:
                     logger.info(f"○ 缓存未命中，开始实际查询: {cache_key_id}")
@@ -230,11 +268,18 @@ class BaseProcessor:
 
             delay_before_request()
 
+            # 从配置获取超时时间，默认4分钟
+            timeout_minutes = self.advanced_settings.get('request_timeout', 6)
+
+            # 再次检查取消标志，在发起网络请求前
+            if self._cancel_flag:
+                raise InterruptedError("任务被用户取消")
+
             result_handle = self.blast_executor.execute_with_retry(
                 sequence,
                 program=program,
                 database=database,
-                timeout_minutes=4, # [修改] 超时时间改为4分钟
+                timeout_minutes=timeout_minutes,
                 **blast_params
             )
 
@@ -277,6 +322,15 @@ class BaseProcessor:
 
             return result_info
 
+        except InterruptedError as e:
+            logger.info(f"任务取消: {seq_id}")
+            result_info.update({
+                "status": "cancelled",
+                "error": str(e),
+                "elapsed_time": time.time() - start_time
+            })
+            return result_info
+
         except Exception as e:
             elapsed_time = time.time() - start_time
             logger.error(f"处理 {seq_id} 时出错: {e}")
@@ -295,17 +349,139 @@ class BaseProcessor:
         try:
             # 统计成功数量
             success_count = sum(1 for r in results if r.get("status") == "success")
-            status = "completed" if success_count == len(results) else "partial" if success_count > 0 else "failed"
+            failed_count = sum(1 for r in results if r.get("status") == "error")
             
-            self.history_manager.add_task(
+            # [修改] 状态判断逻辑，包含 cancelled
+            if success_count == len(results):
+                status = "completed"
+            elif success_count > 0:
+                status = "partial"
+            elif any(r.get("status") == "cancelled" for r in results):
+                status = "cancelled"
+            else:
+                status = "failed"
+            
+            # 更新任务记录（状态和文件数）
+            self.history_manager.add_or_update_task(
                 task_name=self.task_folder.name, # 使用实际创建的文件夹名作为任务名
                 parameters=self._prepare_blast_params(),
                 result_dir=str(self.task_folder),
-                file_count=len(results),
+                total=len(results),
+                completed=success_count,
+                failed=failed_count,
                 status=status
             )
+            
+            # [新增] 保存详细的任务结果映射信息到 json 文件
+            # 这对于恢复历史记录时的文件名和序列ID至关重要
+            task_info = {
+                "task_name": self.task_name,
+                "timestamp": datetime.now().isoformat(),
+                "results": []
+            }
+            
+            for res in results:
+                # 只保存必要信息，且将 Path 对象转为字符串
+                info = {
+                    "file": str(res.get("file", "")), # 原始文件路径
+                    "sequence_id": res.get("sequence_id", ""),
+                    "result_file": str(res.get("result_file", "")),
+                    "csv_file": str(res.get("csv_file", "")),
+                    "desc_file": str(res.get("desc_file", "")),
+                    "status": res.get("status", "unknown"),
+                    "elapsed_time": res.get("elapsed_time", 0)
+                }
+                task_info["results"].append(info)
+                
+            info_file = self.task_folder / "task_info.json"
+            with open(info_file, 'w', encoding='utf-8') as f:
+                json.dump(task_info, f, indent=2, ensure_ascii=False)
+
         except Exception as e:
             logger.error(f"保存任务历史失败: {e}")
+
+    def _run_thread_pool(self, items, process_func, item_name_func=None):
+        """通用的线程池执行逻辑"""
+        logger.info(f"开始处理 {len(items)} 个项目，使用 {self.max_workers} 个工作线程")
+        
+        if item_name_func is None:
+            item_name_func = lambda x: Path(x).name if isinstance(x, (str, Path)) else str(x)
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_item = {executor.submit(process_func, item): item for item in items}
+            results = []
+            completed = 0
+            total = len(items)
+
+            for future in as_completed(future_to_item):
+                if self._cancel_flag:
+                    logger.info(f"处理被取消，已完成 {completed}/{total} 个项目")
+                    # 取消所有未开始的任务
+                    for f in future_to_item:
+                        f.cancel()
+                    # 不 break，继续收集已完成或取消的结果
+                    # break
+
+                item = future_to_item[future]
+                item_name = item_name_func(item)
+                
+                try:
+                    result = future.result()
+                    results.append(result)
+
+                    # 日志与回调
+                    if result["status"] == "success":
+                        # 尝试获取更友好的名称
+                        log_name = result.get("sequence_id", item_name) if "sequence_id" in result else item_name
+                        logger.info(f"✓ 完成处理: {log_name}")
+                    elif result["status"] == "cancelled":
+                        logger.info(f"⚠ 任务取消: {item_name}")
+                    else:
+                        logger.error(f"✗ 处理失败: {item_name} - {result.get('error', 'Unknown')}")
+
+                    if self.on_result_received:
+                        self.on_result_received(result)
+                        
+                    # [新增] 实时更新任务进度到数据库
+                    # 为了避免频繁写入，可以每完成一定数量更新一次
+                    if len(results) % 5 == 0 or len(results) == total:
+                        success_count = sum(1 for r in results if r.get("status") == "success")
+                        failed_count = sum(1 for r in results if r.get("status") == "error")
+                        self.history_manager.add_or_update_task(
+                            task_name=self.task_folder.name,
+                            completed=success_count,
+                            failed=failed_count
+                        )
+
+                except Exception as e:
+                    logger.error(f"任务执行异常: {e}")
+                    # 兜底异常处理
+                    err_res = {
+                        "status": "error",
+                        "error": str(e),
+                        "file": str(item) if isinstance(item, (str, Path)) else "unknown"
+                    }
+                    if isinstance(item, dict) and 'id' in item:
+                         err_res['sequence_id'] = item['id']
+                    
+                    results.append(err_res)
+                    if self.on_result_received:
+                        self.on_result_received(err_res)
+
+                completed += 1
+                # 输出进度日志，每处理10%或至少每处理10个项目时输出一次
+                if completed % max(1, total // 10) == 0 or completed == total or completed == 1:
+                    logger.info(f"进度: {completed}/{total} ({completed/total*100:.1f}%)")
+                    
+                if self.on_progress_update:
+                    self.on_progress_update(completed, total)
+        
+        logger.info(f"线程池处理完成，总共处理 {len(results)} 个项目，成功 {sum(1 for r in results if r.get('status') == 'success')} 个")
+        
+        if self.on_all_tasks_complete:
+            self.on_all_tasks_complete(results)
+
+        return results
 
 
 class BatchProcessor(BaseProcessor):
@@ -315,6 +491,16 @@ class BatchProcessor(BaseProcessor):
 
     def process_single_sequence(self, sequence_file):
         """处理单个序列文件"""
+        # 检查取消标志
+        if self._cancel_flag:
+            return {
+                "file": str(sequence_file),
+                "status": "cancelled",
+                "error": "Task cancelled by user",
+                "thread_id": threading.current_thread().ident,
+                "sequence_id": Path(sequence_file).stem # 确保返回 sequence_id
+            }
+
         # 回调
         if self.on_task_start:
             self.on_task_start(sequence_file)
@@ -337,68 +523,27 @@ class BatchProcessor(BaseProcessor):
                 "status": "error",
                 "error": str(e),
                 "thread_id": threading.current_thread().ident,
-                "elapsed_time": 0
+                "elapsed_time": 0,
+                "sequence_id": file_name # 确保返回 sequence_id
             }
 
     def process_sequences(self, sequence_files):
         """批量处理入口"""
         if len(sequence_files) > 1:
             logger.info(f"开始批量处理 {len(sequence_files)} 个序列文件，线程数: {self.max_workers}")
+            
+        # [新增] 更新任务总数
+        self.history_manager.add_or_update_task(
+            task_name=self.task_folder.name,
+            total=len(sequence_files),
+            status="running"
+        )
 
         results = self._run_thread_pool(sequence_files, self.process_single_sequence)
         
         # 保存任务历史
         self._save_task_history(results)
         
-        return results
-
-    def _run_thread_pool(self, items, process_func):
-        """通用的线程池执行逻辑"""
-        logger.info(f"开始处理 {len(items)} 个项目，使用 {self.max_workers} 个工作线程")
-        
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            future_to_item = {executor.submit(process_func, item): item for item in items}
-            results = []
-            completed = 0
-            total = len(items)
-
-            for future in as_completed(future_to_item):
-                if self._cancel_flag:
-                    logger.info(f"处理被取消，已完成 {completed}/{total} 个项目")
-                    break
-
-                item = future_to_item[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-
-                    # 日志与回调
-                    if result["status"] == "success":
-                        name = Path(result["file"]).name
-                        logger.info(f"✓ 完成处理: {name}")
-                    else:
-                        name = Path(item).name if isinstance(item, (str, Path)) else "Item"
-                        logger.error(f"✗ 处理失败: {name} - {result.get('error', 'Unknown')}")
-
-                    if self.on_result_received:
-                        self.on_result_received(result)
-
-                except Exception as e:
-                    logger.error(f"任务执行异常: {e}")
-
-                completed += 1
-                # 输出进度日志，每处理10%或至少每处理10个项目时输出一次
-                if completed % max(1, total // 10) == 0 or completed == total or completed == 1:
-                    logger.info(f"进度: {completed}/{total} ({completed/total*100:.1f}%)")
-                    
-                if self.on_progress_update:
-                    self.on_progress_update(completed, total)
-        
-        logger.info(f"线程池处理完成，总共处理 {len(results)} 个项目，成功 {sum(1 for r in results if r['status'] == 'success')} 个")
-        
-        if self.on_all_tasks_complete:
-            self.on_all_tasks_complete(results)
-
         return results
 
     def print_summary(self, results):
@@ -423,6 +568,15 @@ class MultiSequenceBatchProcessor(BaseProcessor):
 
     def process_single_sequence(self, sequence_info, original_file_path):
         """适配器方法：将 dict 输入转为核心工作流调用"""
+        # 检查取消标志
+        if self._cancel_flag:
+            return {
+                "file": str(original_file_path),
+                "sequence_id": sequence_info['id'],
+                "status": "cancelled",
+                "error": "Task cancelled by user"
+            }
+
         seq_id = sequence_info['id'].replace('|', '_').replace(' ', '_')
         description = sequence_info.get('description', '')
 
@@ -451,60 +605,26 @@ class MultiSequenceBatchProcessor(BaseProcessor):
             if not sequences:
                 logger.info(f"文件 {Path(sequence_file).name} 中没有序列，跳过处理")
                 return []
+                
+            # [新增] 更新任务总数
+            self.history_manager.add_or_update_task(
+                task_name=self.task_folder.name,
+                total=len(sequences),
+                status="running"
+            )
 
             # 使用 lambda 绑定 file path 参数，使其适配通用的线程池逻辑
             task_func = lambda seq_info: self.process_single_sequence(seq_info, sequence_file)
+            
+            # 自定义名称函数，用于日志
+            name_func = lambda seq_info: seq_info['id']
 
             logger.info(f"开始处理 {len(sequences)} 条序列，使用 {self.max_workers} 个工作线程")
             
-            # 复用 BatchProcessor 中的线程池逻辑 (这里通过复制逻辑实现，或可提取mixin)
-            # 为了保持干净，这里重写一个针对性的线程池调用，但逻辑是一样的
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                future_to_seq = {executor.submit(task_func, seq): seq for seq in sequences}
-                results = []
-                completed = 0
-                total = len(sequences)
+            # 复用 BaseProcessor 中的线程池逻辑
+            results = self._run_thread_pool(sequences, task_func, item_name_func=name_func)
 
-                for future in as_completed(future_to_seq):
-                    if self._cancel_flag:
-                        logger.info(f"处理被取消，已完成 {completed}/{total} 个序列")
-                        break
-
-                    seq_info = future_to_seq[future]
-                    try:
-                        result = future.result()
-                        results.append(result)
-
-                        if result["status"] == "success":
-                            logger.info(f"✓ 完成处理: {seq_info['id']}")
-                        else:
-                            logger.error(f"✗ 处理失败: {seq_info['id']} - {result['error']}")
-
-                        if self.on_result_received:
-                            self.on_result_received(result)
-
-                    except Exception as e:
-                        logger.error(f"处理序列 {seq_info['id']} 时发生异常: {e}")
-                        # 兜底异常处理
-                        err_res = {
-                            "file": sequence_file,
-                            "sequence_id": seq_info['id'],
-                            "status": "error",
-                            "error": str(e)
-                        }
-                        results.append(err_res)
-                        if self.on_result_received:
-                            self.on_result_received(err_res)
-
-                    completed += 1
-                    # 输出进度日志，每处理10%或至少每处理10个序列时输出一次
-                    if completed % max(1, total // 10) == 0 or completed == total or completed == 1:
-                        logger.info(f"进度: {completed}/{total} ({completed/total*100:.1f}%)")
-                    
-                    if self.on_progress_update:
-                        self.on_progress_update(completed, total)
-
-            logger.info(f"文件 {Path(sequence_file).name} 处理完成，总共处理 {len(results)} 个结果，成功 {sum(1 for r in results if r['status'] == 'success')} 个")
+            logger.info(f"文件 {Path(sequence_file).name} 处理完成，总共处理 {len(results)} 个结果，成功 {sum(1 for r in results if r.get('status') == 'success')} 个")
             
             # 保存任务历史
             self._save_task_history(results)
