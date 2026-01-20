@@ -157,33 +157,33 @@ class MainWindow(QMainWindow):
             }
             
             /* 树形控件样式 - 包括悬停和选择效果 */
-            QTreeWidget {
+            QTreeView {
                 border: 1px solid #dcdfe6;
                 background-color: #ffffff;
                 alternate-background-color: #f9f9f9;
             }
             
-            QTreeWidget::item {
+            QTreeView::item {
                 border: 1px solid transparent;
                 padding: 4px;
             }
             
-            QTreeWidget::item:hover {
+            QTreeView::item:hover {
                 background-color: #e3f2fd; /* 淡蓝色悬停效果 */
                 border: 1px solid #bbdefb;
                 border-radius: 4px;
             }
             
-            QTreeWidget::item:selected {
+            QTreeView::item:selected {
                 background-color: #d0e7ff;
                 color: #2c3e50;
             }
             
-            QTreeWidget::item:selected:active {
+            QTreeView::item:selected:active {
                 background-color: #bbdcff;
             }
             
-            QTreeWidget::item:selected:!active {
+            QTreeView::item:selected:!active {
                 background-color: #d0e7ff;
             }
         """)
@@ -376,29 +376,17 @@ class MainWindow(QMainWindow):
         advanced_settings = self.parameter_settings.get_advanced_settings()
 
         # 检查是否需要多序列处理
-        has_multi_sequence = False
-        try:
-            from src.utils.file_handler import FileHandler
-            file_handler = FileHandler()
-            for f in file_paths:
-                seqs = file_handler.read_fasta_file(f)
-                if len(seqs) > 1:
-                    has_multi_sequence = True
-                    break
-        except Exception as e:
-            print(f"文件检查警告: {e}")
-            # 出错时默认使用普通处理或根据需求降级
-
+        # [修改] 统一使用 MultiSequenceBatchProcessor 处理所有情况
+        # 这样可以更好地管理线程池，避免单文件单序列和单文件多序列混合时的调度问题
+        
         # 动态导入以避免循环依赖
-        from src.blast.batch_processor import BatchProcessor, MultiSequenceBatchProcessor
-        from src.gui.threads.processing_thread import ProcessingThread, MultiSequenceProcessingThread
+        from src.blast.batch_processor import MultiSequenceBatchProcessor
+        from src.gui.threads.processing_thread import MultiSequenceProcessingThread
 
-        if has_multi_sequence:
-            processor = MultiSequenceBatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings, task_name=task_name)
-            thread = MultiSequenceProcessingThread(processor, file_paths)
-        else:
-            processor = BatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings, task_name=task_name)
-            thread = ProcessingThread(processor, file_paths)
+        # 无论单序列还是多序列，都使用 MultiSequenceBatchProcessor
+        # 它现在具备处理多个文件的能力
+        processor = MultiSequenceBatchProcessor(max_workers=max_workers, advanced_settings=advanced_settings, task_name=task_name)
+        thread = MultiSequenceProcessingThread(processor, file_paths)
             
         return processor, thread
 
@@ -430,6 +418,9 @@ class MainWindow(QMainWindow):
         
         # 配置翻译设置 (保持原有逻辑)
         self._setup_translation_settings()
+
+        # [关键修复] 断开旧线程信号，防止旧任务结果干扰新任务
+        self._disconnect_current_thread()
 
         # 创建处理器和线程
         self.batch_processor, self.processing_thread = self._create_processor_and_thread(self.sequence_files, task_name)
@@ -484,15 +475,7 @@ class MainWindow(QMainWindow):
                 self.control_panel.set_status("正在强制终止...")
                 if self.processing_thread and self.processing_thread.isRunning():
                     # [关键修复] 断开信号，防止 terminate 后触发信号导致崩溃
-                    try:
-                        self.processing_thread.task_started.disconnect()
-                        self.processing_thread.progress_updated.disconnect()
-                        self.processing_thread.result_received.disconnect()
-                        self.processing_thread.all_tasks_completed.disconnect()
-                        self.processing_thread.processing_error.disconnect()
-                        self.processing_thread.finished.disconnect()
-                    except Exception as e:
-                        print(f"断开信号时出错: {e}")
+                    self._disconnect_current_thread()
 
                     self.processing_thread.terminate()
                     self.processing_thread.wait()
@@ -597,6 +580,19 @@ class MainWindow(QMainWindow):
             
         self.result_viewer.set_translation_settings(translation_settings, api_key)
 
+    def _disconnect_current_thread(self):
+        """断开当前线程的所有信号连接"""
+        if self.processing_thread:
+            try:
+                self.processing_thread.task_started.disconnect()
+                self.processing_thread.progress_updated.disconnect()
+                self.processing_thread.result_received.disconnect()
+                self.processing_thread.all_tasks_completed.disconnect()
+                self.processing_thread.processing_error.disconnect()
+                self.processing_thread.finished.disconnect()
+            except Exception:
+                pass
+
     def _connect_thread_signals(self):
         """辅助方法：连接线程信号"""
         if self.processing_thread:
@@ -620,6 +616,9 @@ class MainWindow(QMainWindow):
 
         self._setup_translation_settings()
         
+        # [关键修复] 断开旧线程信号
+        self._disconnect_current_thread()
+
         # 复用工厂方法
         self.batch_processor, self.processing_thread = self._create_processor_and_thread([file_path])
         
@@ -863,15 +862,7 @@ class MainWindow(QMainWindow):
                 # 终止工作线程
                 if self.processing_thread:
                     # [关键修复] 断开信号，防止 terminate 后触发信号导致崩溃
-                    try:
-                        self.processing_thread.task_started.disconnect()
-                        self.processing_thread.progress_updated.disconnect()
-                        self.processing_thread.result_received.disconnect()
-                        self.processing_thread.all_tasks_completed.disconnect()
-                        self.processing_thread.processing_error.disconnect()
-                        self.processing_thread.finished.disconnect()
-                    except Exception as e:
-                        print(f"断开信号时出错: {e}")
+                    self._disconnect_current_thread()
 
                     self.processing_thread.terminate()
                     self.processing_thread.wait()

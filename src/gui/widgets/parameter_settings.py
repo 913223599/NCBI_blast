@@ -102,6 +102,11 @@ class AdvancedSettingsDialog(QDialog):
 
         self.filter_enabled = QCheckBox()
         self.filter_input = QLineEdit("none")
+        
+        # [新增] BLAST 程序选择
+        self.program_enabled = QCheckBox()
+        self.program_combo = QComboBox()
+        self.program_combo.addItems(["blastn", "blastp", "blastx", "tblastn", "tblastx"])
 
         # --- 输出参数 ---
         self.alignments_enabled = QCheckBox()
@@ -149,6 +154,7 @@ class AdvancedSettingsDialog(QDialog):
             (self.evalue_enabled, self.evalue_input),
             (self.matrix_name_enabled, self.matrix_name_combo),
             (self.filter_enabled, self.filter_input),
+            (self.program_enabled, self.program_combo), # [新增]
             (self.alignments_enabled, self.alignments_spinbox),
             (self.descriptions_enabled, self.descriptions_spinbox),
             (self.nucleotide_db_enabled, self.nucleotide_db_combo),
@@ -181,6 +187,7 @@ class AdvancedSettingsDialog(QDialog):
     def _create_search_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.addWidget(self._create_param_row("BLAST 程序 (Program)", self.program_enabled, self.program_combo, "强制指定 BLAST 程序 (如 blastn, blastp)"))
         layout.addWidget(self._create_param_row("结果数量 (Hitlist Size)", self.hitlist_size_enabled, self.hitlist_size_spinbox))
         layout.addWidget(self._create_param_row("期望值 (E-Value)", self.evalue_enabled, self.evalue_input))
         layout.addWidget(self._create_param_row("词大小 (Word Size)", self.word_size_enabled, self.word_size_spinbox))
@@ -223,6 +230,7 @@ class AdvancedSettingsDialog(QDialog):
     def get_settings(self):
         """获取所有设置 (包含 AI 设置)"""
         settings = {
+            'program': self.program_combo.currentText() if self.program_enabled.isChecked() else None, # [新增]
             'hitlist_size': self.hitlist_size_spinbox.value() if self.hitlist_size_enabled.isChecked() else None,
             'word_size': self.word_size_spinbox.value() if self.word_size_enabled.isChecked() else None,
             'evalue': float(self.evalue_input.text()) if self.evalue_enabled.isChecked() and self.evalue_input.text() else None,
@@ -260,6 +268,7 @@ class AdvancedSettingsDialog(QDialog):
             else:
                 chk.setChecked(False)
 
+        _set_val(self.program_enabled, self.program_combo, 'program') # [新增]
         _set_val(self.hitlist_size_enabled, self.hitlist_size_spinbox, 'hitlist_size')
         _set_val(self.word_size_enabled, self.word_size_spinbox, 'word_size')
         _set_val(self.evalue_enabled, self.evalue_input, 'evalue')
@@ -493,6 +502,7 @@ class ParameterSettingsWidget(QWidget):
     def set_advanced_settings(self, settings):
         """外部调用更新设置 (如主窗口)"""
         valid_keys = [
+            'program', # [新增]
             'hitlist_size', 'word_size', 'evalue', 'matrix_name', 'filter',
             'alignments', 'descriptions', 'local_num_threads', 'nucleotide_database',
             'protein_database', 'prefer_local', 'fallback_to_remote', 'use_cache',

@@ -250,15 +250,26 @@ class BaseProcessor:
             blast_params = self._prepare_blast_params()
 
             # 4. 确定程序和数据库
-            sequence_type = self._detect_sequence_type(sequence)
-            logger.debug(f"检测到序列类型: {sequence_type} (序列ID: {seq_id})")
-            
-            if sequence_type == 'protein':
-                program = 'blastp'
-                database = self.advanced_settings.get('protein_database', 'nr')
+            # [新增] 优先使用用户指定的程序
+            user_program = self.advanced_settings.get('program')
+            if user_program and user_program != 'auto':
+                program = user_program
+                # 根据程序类型自动选择默认数据库（如果用户未指定）
+                if program in ['blastn', 'tblastx']:
+                    database = self.advanced_settings.get('nucleotide_database', 'nt')
+                else:
+                    database = self.advanced_settings.get('protein_database', 'nr')
             else:
-                program = 'blastn'
-                database = self.advanced_settings.get('nucleotide_database', 'nt')
+                # 自动检测
+                sequence_type = self._detect_sequence_type(sequence)
+                logger.debug(f"检测到序列类型: {sequence_type} (序列ID: {seq_id})")
+                
+                if sequence_type == 'protein':
+                    program = 'blastp'
+                    database = self.advanced_settings.get('protein_database', 'nr')
+                else:
+                    program = 'blastn'
+                    database = self.advanced_settings.get('nucleotide_database', 'nt')
 
             logger.debug(f"使用程序: {program}, 数据库: {database} (序列ID: {seq_id})")
 
@@ -476,6 +487,27 @@ class BaseProcessor:
                 if self.on_progress_update:
                     self.on_progress_update(completed, total)
         
+        # [新增] 确保所有未完成的任务都被标记为取消或失败
+        if self._cancel_flag:
+            for future in future_to_item:
+                if not future.done():
+                    future.cancel()
+                    item = future_to_item[future]
+                    # 构造取消结果
+                    cancel_res = {
+                        "status": "cancelled",
+                        "error": "Task cancelled by user",
+                        "file": str(item) if isinstance(item, (str, Path)) else "unknown"
+                    }
+                    if isinstance(item, dict) and 'id' in item:
+                         cancel_res['sequence_id'] = item['id']
+                    
+                    # 避免重复添加
+                    if not any(r.get('sequence_id') == cancel_res.get('sequence_id') and r.get('file') == cancel_res.get('file') for r in results):
+                        results.append(cancel_res)
+                        if self.on_result_received:
+                            self.on_result_received(cancel_res)
+
         logger.info(f"线程池处理完成，总共处理 {len(results)} 个项目，成功 {sum(1 for r in results if r.get('status') == 'success')} 个")
         
         if self.on_all_tasks_complete:
@@ -509,11 +541,28 @@ class BatchProcessor(BaseProcessor):
         file_name = file_path.stem
 
         try:
-            # 读取
-            sequence = self.file_handler.read_sequence_file(str(sequence_file))
+            # [修改] 尝试解析 FASTA 获取真实 ID，解决结果树重复节点问题
+            seq_id = file_name
+            sequence = ""
+            
+            # 尝试读取第一个序列
+            found = False
+            # 使用 read_fasta_file_iter，它已经包含了对非FASTA的兼容尝试
+            for seq_info in self.file_handler.read_fasta_file_iter(str(sequence_file)):
+                sequence = seq_info['sequence']
+                if seq_info['id']:
+                    seq_id = seq_info['id'].replace('|', '_').replace(' ', '_')
+                found = True
+                break
+            
+            if not found:
+                 # 最后的兜底
+                 sequence = self.file_handler.read_sequence_file(str(sequence_file))
+                 seq_id = file_name
+
             # 执行核心逻辑
             # 对于单文件模式，seq_id 和 original_file_name 通常是一样的
-            return self._execute_blast_workflow(sequence, file_name, file_name, str(file_path))
+            return self._execute_blast_workflow(sequence, seq_id, file_name, str(file_path))
 
         except Exception as e:
             # 捕获读取阶段的错误
@@ -599,7 +648,21 @@ class MultiSequenceBatchProcessor(BaseProcessor):
         logger.info(f"开始读取文件: {Path(sequence_file).name}")
 
         try:
-            sequences = self.file_handler.read_fasta_file(sequence_file)
+            # [优化] 使用迭代器读取，避免一次性加载
+            sequences_iter = self.file_handler.read_fasta_file_iter(sequence_file)
+            
+            # 为了获取总数，我们可能需要先扫描一遍，或者在处理过程中动态更新
+            # 但为了进度条，我们通常需要总数。
+            # 权衡：对于超大文件，扫描一遍也耗时。
+            # 方案：先快速扫描一遍获取数量（只读头），或者直接开始处理，进度条显示已处理数量而不是百分比
+            # 这里为了保持现有逻辑兼容性，我们还是先转为列表，但 FileHandler 已经优化了读取方式
+            # 如果文件真的巨大，这里 list() 仍然会消耗内存。
+            # 真正的流式处理需要改造 ThreadPoolExecutor 的用法。
+            
+            # 暂时保持 list()，因为 FileHandler.read_fasta_file_iter 已经优化了底层读取
+            # 如果内存仍然是瓶颈，需要进一步改造 MultiSequenceBatchProcessor
+            sequences = list(sequences_iter)
+
             logger.info(f"找到 {len(sequences)} 条序列")
 
             if not sequences:
@@ -637,3 +700,54 @@ class MultiSequenceBatchProcessor(BaseProcessor):
         except Exception as e:
             logger.error(f"处理文件级错误: {e}")
             return []
+
+    def process_multiple_files(self, sequence_files):
+        """同时处理多个文件中的所有序列"""
+        all_tasks = []
+        
+        # 1. 收集所有任务
+        for file_path in sequence_files:
+            try:
+                # 检查取消
+                if self._cancel_flag: break
+                
+                logger.info(f"正在读取文件: {Path(file_path).name}")
+                count = 0
+                for seq_info in self.file_handler.read_fasta_file_iter(str(file_path)):
+                    # 注入源文件路径
+                    seq_info['source_file'] = str(file_path)
+                    all_tasks.append(seq_info)
+                    count += 1
+                
+                if count == 0:
+                     logger.info(f"文件 {Path(file_path).name} 中没有序列")
+                     
+            except Exception as e:
+                logger.error(f"读取文件 {file_path} 失败: {e}")
+                # 可以在这里生成一个错误结果，或者忽略
+        
+        if not all_tasks:
+            return []
+
+        logger.info(f"总共收集到 {len(all_tasks)} 个序列任务，开始并行处理")
+        
+        # 更新任务总数
+        self.history_manager.add_or_update_task(
+            task_name=self.task_folder.name,
+            total=len(all_tasks),
+            status="running"
+        )
+
+        # 2. 执行线程池
+        task_func = lambda seq_info: self.process_single_sequence(seq_info, seq_info['source_file'])
+        name_func = lambda seq_info: f"{Path(seq_info['source_file']).name} - {seq_info['id']}"
+        
+        results = self._run_thread_pool(all_tasks, task_func, item_name_func=name_func)
+        
+        # 3. 保存历史
+        self._save_task_history(results)
+        
+        if self.on_all_tasks_complete:
+            self.on_all_tasks_complete(results)
+            
+        return results

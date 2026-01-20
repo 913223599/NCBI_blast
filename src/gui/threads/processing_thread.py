@@ -3,8 +3,12 @@
 负责在后台线程中处理序列文件
 """
 
+import logging
+import traceback
 from PyQt6.QtCore import QThread, pyqtSignal
 
+# 配置日志
+logger = logging.getLogger(__name__)
 
 class BaseProcessingThread(QThread):
     """
@@ -49,7 +53,10 @@ class BaseProcessingThread(QThread):
 
     def _on_all_tasks_complete(self, total_tasks):
         """所有任务完成回调"""
-        if isinstance(total_tasks, int):
+        # 这里的 total_tasks 可能是结果列表，也可能是数字
+        if isinstance(total_tasks, list):
+            self.all_tasks_completed.emit(len(total_tasks))
+        elif isinstance(total_tasks, int):
             self.all_tasks_completed.emit(total_tasks)
 
 
@@ -59,10 +66,15 @@ class ProcessingThread(BaseProcessingThread):
     """
     def run(self):
         try:
+            logger.info(f"ProcessingThread started with {len(self.sequence_files)} files")
             # 开始处理序列文件
             results = self.processor.process_sequences(self.sequence_files)
-            self.all_tasks_completed.emit(len(results))
+            # 信号已在回调中发出，这里不需要再次发出 all_tasks_completed，除非回调未触发
+            # 但为了保险起见，如果回调未被正确调用，这里可以补发
+            # self.all_tasks_completed.emit(len(results)) 
         except Exception as e:
+            logger.error(f"ProcessingThread error: {e}")
+            logger.debug(traceback.format_exc())
             self.processing_error.emit(str(e))
         finally:
             self.finished.emit()
@@ -74,14 +86,22 @@ class MultiSequenceProcessingThread(BaseProcessingThread):
     """
     def run(self):
         try:
-            # 对每个包含多条序列的文件进行处理
-            all_results = []
-            for sequence_file in self.sequence_files:
-                results = self.processor.process_sequences_from_file(sequence_file)
-                all_results.extend(results)
+            logger.info(f"MultiSequenceProcessingThread started with {len(self.sequence_files)} files")
             
-            self.all_tasks_completed.emit(len(all_results))
+            # [修改] 使用 process_multiple_files 统一处理所有文件
+            # 这允许线程池在所有文件的所有序列之间共享，实现更好的负载均衡
+            if hasattr(self.processor, 'process_multiple_files'):
+                self.processor.process_multiple_files(self.sequence_files)
+            else:
+                # 降级处理：逐个文件处理（旧逻辑）
+                for sequence_file in self.sequence_files:
+                    if self.isInterruptionRequested():
+                        break
+                    self.processor.process_sequences_from_file(sequence_file)
+
         except Exception as e:
+            logger.error(f"MultiSequenceProcessingThread error: {e}")
+            logger.debug(traceback.format_exc())
             self.processing_error.emit(str(e))
         finally:
             self.finished.emit()

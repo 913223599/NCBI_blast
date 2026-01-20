@@ -24,9 +24,9 @@ class HelpDialog(QDialog):
         
     def _setup_ui(self):
         """设置界面"""
-        self.setWindowTitle("帮助")
+        self.setWindowTitle("帮助与使用指南")
         self.setModal(True)
-        self.resize(600, 400)
+        self.resize(800, 600)
         
         layout = QVBoxLayout()
         
@@ -51,50 +51,68 @@ class HelpDialog(QDialog):
     def _get_help_content(self):
         """获取帮助内容"""
         return """
-        <h2>NCBI BLAST工具使用帮助</h2>
+        <style>
+            h2 { color: #2c3e50; }
+            h3 { color: #3498db; margin-top: 20px; }
+            li { margin-bottom: 5px; }
+            .note { background-color: #f9f9f9; border-left: 5px solid #f1c40f; padding: 10px; margin: 10px 0; }
+            .tip { background-color: #e8f8f5; border-left: 5px solid #2ecc71; padding: 10px; margin: 10px 0; }
+        </style>
         
-        <h3>功能简介</h3>
-        <p>本工具提供了一个图形界面，用于执行NCBI BLAST搜索并查看结果。主要功能包括：</p>
+        <h2>NCBI BLAST Pro 使用指南</h2>
+        
+        <div class="tip">
+        <b>快速入门：</b> 拖拽 FASTA 文件到左侧列表 -> 点击"开始处理" -> 等待结果显示。
+        </div>
+
+        <h3>1. 文件导入</h3>
         <ul>
-            <li>选择FASTA格式的序列文件</li>
-            <li>配置BLAST参数</li>
-            <li>执行BLAST搜索</li>
-            <li>查看和导出结果</li>
-            <li>结果翻译（中英文对照）</li>
+            <li><b>支持格式</b>：FASTA (.fasta, .fa, .fna), 纯文本序列 (.seq, .txt)</li>
+            <li><b>批量处理</b>：支持一次性导入多个文件，或包含多条序列的单个 FASTA 文件。</li>
+            <li><b>操作方式</b>：点击"添加文件"按钮，或直接将文件拖入左侧列表区域。</li>
         </ul>
-        
-        <h3>使用步骤</h3>
-        <ol>
-            <li><b>选择序列文件</b>：点击"添加文件"按钮选择一个或多个FASTA格式的序列文件</li>
-            <li><b>配置参数</b>：通过"文件"->"设置"菜单配置BLAST参数，如数据库、程序类型等</li>
-            <li><b>开始BLAST</b>：点击"开始BLAST"按钮执行搜索</li>
-            <li><b>查看结果</b>：在结果区域查看搜索结果，点击文件名可查看详细信息</li>
-            <li><b>导出结果</b>：右键点击结果文件可选择导出查询信息</li>
-        </ol>
-        
-        <h3>结果说明</h3>
-        <p>搜索结果包含以下信息：</p>
+
+        <h3>2. 参数配置</h3>
         <ul>
-            <li><b>物种信息</b>：匹配序列的物种名称</li>
-            <li><b>基因信息</b>：匹配的基因类型和序列类型</li>
-            <li><b>相似度</b>：查询序列与匹配序列的相似度</li>
-            <li><b>E值</b>：期望值，表示随机匹配的概率</li>
+            <li><b>基础设置</b>：在左侧面板可快速调整线程数和 AI 翻译开关。</li>
+            <li><b>高级设置</b>：点击"配置高级参数"可设置：
+                <ul>
+                    <li><b>BLAST 程序</b>：手动指定 blastn, blastp, blastx 等，或留空自动检测。</li>
+                    <li><b>数据库</b>：选择 nt (核酸), nr (蛋白) 等标准数据库。</li>
+                    <li><b>搜索参数</b>：E-value, Word Size, Hitlist Size 等。</li>
+                    <li><b>本地/远程</b>：配置本地 BLAST+ 路径及优先策略。</li>
+                </ul>
+            </li>
         </ul>
-        
-        <h3>翻译功能</h3>
-        <p>工具支持中英文对照显示：</p>
+
+        <h3>3. 结果查看与分析</h3>
         <ul>
-            <li><b>本地翻译</b>：使用内置词典进行翻译</li>
-            <li><b>AI翻译</b>：使用通义千问API进行翻译（需要配置API密钥）</li>
+            <li><b>实时状态</b>：处理过程中，文件状态会实时更新（处理中/成功/失败）。</li>
+            <li><b>详细结果</b>：点击文件节点展开，查看每条序列的最佳匹配结果（物种、相似度、E值）。</li>
+            <li><b>可视化</b>：右键点击结果，选择"可视化比对"查看图形化比对视图。</li>
+            <li><b>AI 翻译</b>：启用 AI 翻译后，结果中的物种名、基因功能等将自动翻译为中文，并提供简要解释。</li>
         </ul>
-        
-        <h3>注意事项</h3>
+
+        <h3>4. 历史记录与缓存</h3>
         <ul>
-            <li>确保网络连接正常，以便访问NCBI BLAST服务</li>
-            <li>较大的序列文件可能需要较长时间处理</li>
-            <li>建议定期更新本地翻译数据库以获得更好的翻译效果</li>
+            <li><b>任务历史</b>：通过"文件" -> "任务历史记录"查看过往任务，支持重新加载结果。</li>
+            <li><b>智能缓存</b>：系统会自动缓存相同序列的查询结果（默认 24 小时），避免重复消耗时间和流量。</li>
         </ul>
+
+        <h3>5. 常见问题</h3>
+        <div class="note">
+        <b>Q: 处理速度慢？</b><br>
+        A: 远程 BLAST 受网络和 NCBI 服务器负载影响。建议：
+        1. 减少并发线程数（默认 3）；
+        2. 启用本地 BLAST+（需自行安装并下载数据库）；
+        3. 检查网络连接。
+        </div>
         
+        <div class="note">
+        <b>Q: 内存占用高？</b><br>
+        A: 处理超大 FASTA 文件时，系统会自动优化读取方式。但建议将超大文件（>500MB）分割后处理。
+        </div>
+
         <h3>技术支持</h3>
-        <p>如有问题，请联系技术支持。</p>
+        <p>如遇程序错误或有功能建议，请联系开发团队。</p>
         """
