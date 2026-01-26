@@ -18,19 +18,25 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+# 添加 Elastic BLAST 源码路径
+elastic_blast_src = os.path.join(project_root, "tools", "elastic-blast-master", "src")
+if elastic_blast_src not in sys.path:
+    sys.path.insert(0, elastic_blast_src)
+
 # 导入自定义组件
 from src.gui.widgets.file_selector import FileSelectorWidget
 from src.gui.widgets.parameter_settings import ParameterSettingsWidget
 from src.gui.widgets.control_panel import ControlPanelWidget
 from src.gui.widgets.result_viewer import ResultViewerWidget
 from src.gui.widgets.translation_debugger import TranslationDebuggerDialog
-from src.gui.widgets.help_dialog import HelpDialog
+from src.gui.widgets.help_viewer import HelpViewerDialog
 from src.gui.widgets.api_key_dialog import ApiKeyDialog
 from src.gui.widgets.history_dialog import HistoryDialog  # 导入历史记录对话框
 from src.gui.widgets.database_manager_dialog import DatabaseManagerDialog # 导入数据库管理对话框
 from src.gui.widgets.task_name_dialog import TaskNameDialog # 导入任务命名对话框
 from src.gui.threads.processing_thread import ProcessingThread, MultiSequenceProcessingThread
 from src.blast.batch_processor import BatchProcessor, MultiSequenceBatchProcessor
+from src.gui.widgets.cloud_manager_dialog import CloudManagerDialog # 导入云资源管理器对话框
 
 
 def ensure_results_folders():
@@ -72,10 +78,11 @@ class MainWindow(QMainWindow):
         self.processing_thread = None
         self.batch_processor = None
         self.translation_debugger = None
-        self.help_dialog = None
+        self.help_viewer_dialog = None
         self.api_key_dialog = None
         self.history_dialog = None # 初始化历史记录对话框变量
         self.db_manager_dialog = None # 初始化数据库管理对话框变量
+        self.cloud_manager_dialog = None # 初始化云资源管理器对话框变量
         
         # 1. 应用现代化皮肤
         self._apply_modern_theme()
@@ -306,9 +313,15 @@ class MainWindow(QMainWindow):
         open_translation_debugger_action.triggered.connect(self._open_translation_debugger)
         settings_menu.addAction(open_translation_debugger_action)
         
-        open_settings_dialog_action = QAction("设置", self)
-        open_settings_dialog_action.triggered.connect(self._open_settings_dialog)
-        settings_menu.addAction(open_settings_dialog_action)
+        # 移除重复的“设置”菜单项
+        # open_settings_dialog_action = QAction("设置", self)
+        # open_settings_dialog_action.triggered.connect(self._open_settings_dialog)
+        # settings_menu.addAction(open_settings_dialog_action)
+
+        # 云资源管理器菜单项
+        open_cloud_manager_action = QAction("云资源管理器", self)
+        open_cloud_manager_action.triggered.connect(self._open_cloud_manager)
+        settings_menu.addAction(open_cloud_manager_action)
         
         open_help_dialog_action = QAction("帮助", self)
         open_help_dialog_action.triggered.connect(self._open_help_dialog)
@@ -374,6 +387,21 @@ class MainWindow(QMainWindow):
             return None, None
 
         advanced_settings = self.parameter_settings.get_advanced_settings()
+
+        # [新增] 检查是否启用 Elastic BLAST
+        if advanced_settings.get('elb_enabled'):
+            try:
+                from src.blast.elastic_blast_processor import ElasticBlastProcessor
+                processor = ElasticBlastProcessor(max_workers=1, advanced_settings=advanced_settings, task_name=task_name)
+                # 使用 ProcessingThread，因为它调用 process_sequences
+                thread = ProcessingThread(processor, file_paths)
+                return processor, thread
+            except ImportError as e:
+                QMessageBox.critical(self, "错误", f"无法加载 Elastic BLAST 模块: {e}")
+                return None, None
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"初始化 Elastic BLAST 失败: {e}")
+                return None, None
 
         # 检查是否需要多序列处理
         # [修改] 统一使用 MultiSequenceBatchProcessor 处理所有情况
@@ -677,11 +705,11 @@ class MainWindow(QMainWindow):
     
     def _open_help_dialog(self):
         """打开帮助文档对话框"""
-        if not self.help_dialog:
-            self.help_dialog = HelpDialog()
-        self.help_dialog.show()
-        self.help_dialog.raise_()
-        self.help_dialog.activateWindow()
+        if not self.help_viewer_dialog:
+            self.help_viewer_dialog = HelpViewerDialog(self, initial_topic=None)
+        self.help_viewer_dialog.show()
+        self.help_viewer_dialog.raise_()
+        self.help_viewer_dialog.activateWindow()
     
     def _open_api_key_dialog(self):
         """打开API密钥设置对话框"""
@@ -711,6 +739,21 @@ class MainWindow(QMainWindow):
         self.db_manager_dialog.show()
         self.db_manager_dialog.raise_()
         self.db_manager_dialog.activateWindow()
+
+    def _open_cloud_manager(self):
+        """打开云资源管理器对话框"""
+        # 传递当前的 Elastic BLAST 设置作为默认值
+        current_elb_settings = self.parameter_settings.get_advanced_settings()
+        if not self.cloud_manager_dialog:
+            self.cloud_manager_dialog = CloudManagerDialog(self, default_settings=current_elb_settings)
+        else:
+            # 每次打开都更新默认设置
+            self.cloud_manager_dialog.default_settings = current_elb_settings
+            self.cloud_manager_dialog._load_defaults() # 重新加载默认值
+
+        self.cloud_manager_dialog.show()
+        self.cloud_manager_dialog.raise_()
+        self.cloud_manager_dialog.activateWindow()
 
     def _load_task_history(self, result_dir):
         """加载任务历史记录"""

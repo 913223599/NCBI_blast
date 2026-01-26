@@ -26,7 +26,7 @@
   ],
   "advanced_settings": {
     "hitlist_size": 20,
-    "use_ai_translation": false,
+    "use_ai_translation": true,
     "ai_translation_model": "qwen-plus",
     "word_size": null,
     "evalue": null,
@@ -40,7 +40,7 @@
     "prefer_local": true,
     "fallback_to_remote": true,
     "use_cache": true,
-    "thread_count": 10,
+    "thread_count": 1,
     "request_timeout": 9
   },
   "setup_completed": true,

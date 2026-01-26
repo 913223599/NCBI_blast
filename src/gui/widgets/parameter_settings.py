@@ -6,7 +6,7 @@
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox, QComboBox, QLineEdit,
-    QLabel, QPushButton, QDialog, QTabWidget
+    QLabel, QPushButton, QDialog, QTabWidget, QGroupBox
 )
 
 from src.utils.config_manager import get_config_manager  # [关键修复] 导入配置管理器
@@ -23,7 +23,7 @@ class AdvancedSettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("高级参数配置")
         self.setModal(True)
-        self.resize(700, 500)
+        self.resize(750, 550) # 稍微加大尺寸以容纳更多选项
 
         self._apply_styles()
         self._setup_ui()
@@ -39,6 +39,8 @@ class AdvancedSettingsDialog(QDialog):
             QLabel { font-size: 13px; color: #333; }
             QLineEdit, QComboBox { border: 1px solid #dcdfe6; border-radius: 4px; padding: 5px; background-color: #fff; }
             QLineEdit:disabled, QComboBox:disabled { background-color: #f5f7fa; color: #c0c4cc; }
+            QGroupBox { border: 1px solid #dcdfe6; border-radius: 6px; margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; color: #409eff; font-weight: bold; }
         """)
 
     def _setup_ui(self):
@@ -55,6 +57,7 @@ class AdvancedSettingsDialog(QDialog):
         self.tabs.addTab(self._create_search_tab(), "搜索参数")
         self.tabs.addTab(self._create_database_tab(), "数据库与输出")
         self.tabs.addTab(self._create_system_tab(), "系统与混合模式")
+        self.tabs.addTab(self._create_elastic_blast_tab(), "Elastic BLAST (云端)") # [新增]
 
         content_wrapper = QWidget()
         content_layout = QVBoxLayout(content_wrapper)
@@ -144,6 +147,28 @@ class AdvancedSettingsDialog(QDialog):
         self.request_timeout_spinbox.setRange(1, 9) # 最大值上限设置为9分钟
         self.request_timeout_spinbox.setValue(6) # 默认6分钟
 
+        # --- Elastic BLAST 参数 [新增] ---
+        self.elb_enabled_checkbox = QCheckBox("启用 Elastic BLAST (云端运行)")
+        
+        self.elb_cloud_provider_combo = QComboBox()
+        self.elb_cloud_provider_combo.addItems(["AWS", "GCP"])
+        
+        self.elb_region_input = QLineEdit()
+        self.elb_region_input.setPlaceholderText("例如: us-east-1")
+        
+        self.elb_bucket_input = QLineEdit()
+        self.elb_bucket_input.setPlaceholderText("例如: s3://my-bucket/results")
+        
+        self.elb_machine_type_input = QLineEdit()
+        self.elb_machine_type_input.setPlaceholderText("留空使用默认值")
+        
+        self.elb_num_nodes_spinbox = QSpinBox()
+        self.elb_num_nodes_spinbox.setRange(1, 1000)
+        self.elb_num_nodes_spinbox.setValue(1)
+        
+        self.elb_use_spot_checkbox = QCheckBox("使用 Spot/Preemptible 实例 (更便宜)")
+        self.elb_use_spot_checkbox.setChecked(True)
+
         self._setup_toggles()
 
     def _setup_toggles(self):
@@ -165,6 +190,14 @@ class AdvancedSettingsDialog(QDialog):
         for chk, widget in pairs:
             widget.setEnabled(chk.isChecked())
             chk.toggled.connect(widget.setEnabled)
+            
+        # Elastic BLAST 联动
+        self.elb_enabled_checkbox.toggled.connect(self._on_elb_toggled)
+
+    def _on_elb_toggled(self, checked):
+        """Elastic BLAST 启用状态切换"""
+        # 这里可以控制相关控件的启用/禁用，或者在 Tab 切换时处理
+        pass
 
     def _create_param_row(self, label, checkbox, widget, tooltip=""):
         # 辅助函数
@@ -172,15 +205,20 @@ class AdvancedSettingsDialog(QDialog):
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 5, 0, 5)
 
-        left_layout = QHBoxLayout()
-        left_layout.addWidget(checkbox)
-        lbl = QLabel(label)
-        if tooltip: lbl.setToolTip(tooltip)
-        left_layout.addWidget(lbl)
-        left_layout.addStretch()
+        if checkbox:
+            left_layout = QHBoxLayout()
+            left_layout.addWidget(checkbox)
+            lbl = QLabel(label)
+            if tooltip: lbl.setToolTip(tooltip)
+            left_layout.addWidget(lbl)
+            left_layout.addStretch()
+            layout.addLayout(left_layout, 1)
+        else:
+            lbl = QLabel(label)
+            if tooltip: lbl.setToolTip(tooltip)
+            layout.addWidget(lbl, 1)
 
         widget.setMinimumWidth(200)
-        layout.addLayout(left_layout, 1)
         layout.addWidget(widget, 1)
         return row
 
@@ -209,8 +247,6 @@ class AdvancedSettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
-
-
     def _create_system_tab(self):
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -227,8 +263,45 @@ class AdvancedSettingsDialog(QDialog):
         layout.addStretch()
         return tab
 
+    def _create_elastic_blast_tab(self):
+        """创建 Elastic BLAST 设置页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # 启用开关
+        layout.addWidget(self.elb_enabled_checkbox)
+        
+        # 基础配置组
+        basic_group = QGroupBox("基础配置")
+        basic_layout = QVBoxLayout(basic_group)
+        
+        basic_layout.addWidget(self._create_param_row("云服务提供商", None, self.elb_cloud_provider_combo, "选择 AWS 或 GCP"))
+        basic_layout.addWidget(self._create_param_row("区域 (Region)", None, self.elb_region_input, "云服务区域，如 us-east-1"))
+        basic_layout.addWidget(self._create_param_row("结果存储桶 (Bucket)", None, self.elb_bucket_input, "用于存储结果的 S3 或 GCS 路径"))
+        
+        layout.addWidget(basic_group)
+        
+        # 资源配置组
+        resource_group = QGroupBox("计算资源")
+        resource_layout = QVBoxLayout(resource_group)
+        
+        resource_layout.addWidget(self._create_param_row("机器类型 (Machine Type)", None, self.elb_machine_type_input, "指定实例类型，留空则自动选择"))
+        resource_layout.addWidget(self._create_param_row("节点数量 (Num Nodes)", None, self.elb_num_nodes_spinbox, "并行计算节点数量"))
+        resource_layout.addWidget(self.elb_use_spot_checkbox)
+        
+        layout.addWidget(resource_group)
+        
+        # 说明文本
+        info_label = QLabel("注意: 使用 Elastic BLAST 需要配置相应的云服务凭证 (AWS CLI 或 gcloud)。\n请确保本地环境已正确配置凭证。")
+        info_label.setStyleSheet("color: #909399; font-size: 12px; margin-top: 10px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        return tab
+
     def get_settings(self):
-        """获取所有设置 (包含 AI 设置)"""
+        """获取所有设置 (包含 AI 设置和 Elastic BLAST 设置)"""
         settings = {
             'program': self.program_combo.currentText() if self.program_enabled.isChecked() else None, # [新增]
             'hitlist_size': self.hitlist_size_spinbox.value() if self.hitlist_size_enabled.isChecked() else None,
@@ -248,16 +321,25 @@ class AdvancedSettingsDialog(QDialog):
 
             # AI 参数 - 从主界面获取
             'use_ai_translation': self.use_ai_checkbox.isChecked() if hasattr(self, 'use_ai_checkbox') else False,
-            'ai_translation_model': self.ai_model_combo.currentText() if hasattr(self, 'ai_model_combo') else "qwen-mt-plus"
+            'ai_translation_model': self.ai_model_combo.currentText() if hasattr(self, 'ai_model_combo') else "qwen-mt-plus",
+            
+            # Elastic BLAST 参数
+            'elb_enabled': self.elb_enabled_checkbox.isChecked(),
+            'elb_cloud_provider': self.elb_cloud_provider_combo.currentText(),
+            'elb_region': self.elb_region_input.text(),
+            'elb_results_bucket': self.elb_bucket_input.text(),
+            'elb_machine_type': self.elb_machine_type_input.text(),
+            'elb_num_nodes': self.elb_num_nodes_spinbox.value(),
+            'elb_use_spot': self.elb_use_spot_checkbox.isChecked()
         }
         return settings
 
     def set_settings(self, settings):
-        """设置界面值 (包含 AI 设置)"""
+        """设置界面值 (包含 AI 设置和 Elastic BLAST 设置)"""
 
         def _set_val(chk, widget, key):
             if key in settings and settings[key] is not None:
-                chk.setChecked(True)
+                if chk: chk.setChecked(True)
                 if isinstance(widget, QSpinBox):
                     widget.setValue(int(settings[key]))
                 elif isinstance(widget, QLineEdit):
@@ -266,7 +348,7 @@ class AdvancedSettingsDialog(QDialog):
                     idx = widget.findText(str(settings[key]))
                     if idx >= 0: widget.setCurrentIndex(idx)
             else:
-                chk.setChecked(False)
+                if chk: chk.setChecked(False)
 
         _set_val(self.program_enabled, self.program_combo, 'program') # [新增]
         _set_val(self.hitlist_size_enabled, self.hitlist_size_spinbox, 'hitlist_size')
@@ -291,6 +373,15 @@ class AdvancedSettingsDialog(QDialog):
         if 'prefer_local' in settings: self.prefer_local_checkbox.setChecked(settings['prefer_local'])
         if 'fallback_to_remote' in settings: self.fallback_to_remote_checkbox.setChecked(settings['fallback_to_remote'])
         if 'use_cache' in settings: self.use_cache_checkbox.setChecked(settings['use_cache'])
+        
+        # Elastic BLAST 参数
+        if 'elb_enabled' in settings: self.elb_enabled_checkbox.setChecked(settings['elb_enabled'])
+        _set_val(None, self.elb_cloud_provider_combo, 'elb_cloud_provider')
+        _set_val(None, self.elb_region_input, 'elb_region')
+        _set_val(None, self.elb_bucket_input, 'elb_results_bucket')
+        _set_val(None, self.elb_machine_type_input, 'elb_machine_type')
+        _set_val(None, self.elb_num_nodes_spinbox, 'elb_num_nodes')
+        if 'elb_use_spot' in settings: self.elb_use_spot_checkbox.setChecked(settings['elb_use_spot'])
 
         # 设置 AI 参数
         # AI翻译设置已移至主界面，此处不再处理
@@ -506,7 +597,10 @@ class ParameterSettingsWidget(QWidget):
             'hitlist_size', 'word_size', 'evalue', 'matrix_name', 'filter',
             'alignments', 'descriptions', 'local_num_threads', 'nucleotide_database',
             'protein_database', 'prefer_local', 'fallback_to_remote', 'use_cache',
-            'use_ai_translation', 'ai_translation_model', 'thread_count', 'request_timeout'
+            'use_ai_translation', 'ai_translation_model', 'thread_count', 'request_timeout',
+            # Elastic BLAST keys
+            'elb_enabled', 'elb_cloud_provider', 'elb_region', 'elb_results_bucket',
+            'elb_machine_type', 'elb_num_nodes', 'elb_use_spot'
         ]
 
         # 更新内存
