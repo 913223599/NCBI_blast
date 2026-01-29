@@ -1,0 +1,36 @@
+Tool: tsv2insert.exe
+========================================
+
+Convert a tsv-table into SQL insert statements
+
+USAGE:   tsv2insert.exe <tsv_table> [-sql_table ""] [-file_name_col ""] [-add_go] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv2insert.exe -help
+VERSION: tsv2insert.exe -version
+
+POSITIONAL PARAMETERS
+<tsv_table>
+    .tsv-table
+
+NAMED PARAMETERS
+-sql_table ""
+    SQL table name (default = <tsv_table>
+-file_name_col ""
+    Column to store the file name
+-add_go
+    Add 'go' at the end of the SQL statements
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

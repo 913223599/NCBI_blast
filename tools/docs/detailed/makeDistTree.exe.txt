@@ -1,0 +1,24 @@
+Tool: makeDistTree.exe
+========================================
+
+## 项目中的使用说明 (Source Code Context)
+在本项目 (`src/tree/tree_executor.py`) 中，`makeDistTree` 用于从距离矩阵 (.dm) 构建系统发育树。
+
+**典型调用方式**:
+```python
+makeDistTree.exe -data <DATA_BASE_PATH> -variance lin -output_tree <OUTPUT_NWK>
+```
+
+**常见问题与技巧**:
+- **-data 参数**: 必须传入不带 `.dm` 后缀的基础路径。如果文件是 `file.dm`，则 `-data file`。
+- **-variance lin**: 使用线性方差模型 (Linear Variance) 构建树。
+- 输入必须是先前由 `fasta2dissim` 生成的矩阵文件。
+
+----------------------------------------
+## 官方帮助信息 (Official Help)
+
+Optimize or modify a least-squares distance tree
+
+USAGE:   makeDistTree.exe [-input_tree ""] [-data ""] [-dissim_attr ""] [-weight_attr ""] [-dissim_power 1] [-dissim_coeff 1] [-variance none] [-variance_power NaN] [-variance_dissim] [-reinsert_variance_dist] [-variance_min 0] [-good ""] [-delete ""] [-check_delete] [-keep ""] [-check_keep] [-optimize] [-subgraph_iter_max 0] [-skip_len] [-reinsert] [-skip_topology] [-new_only] [-fix_discernible] [-fix_transient] [-delete_criterion_outliers ""] [-criterion_outlier_num_max 0] [-delete_deformation_outliers ""] [-deformation_outlier_num_max 0] [-hybridness_min 1.1] [-delete_hybrids ""] [-hybrid_parent_pairs ""] [-dissim_boundary nan] [-reroot] [-root_topological] [-reroot_at ""] [-arc_prob_min 0] [-dissim_request ""] [-noqual] [-output_tree ""] [-output_tree_tmp ""] [-output_feature_tree ""] [-feature_tree_time] [-output_dissim_coeff ""] [-leaf_errors ""] [-arc_existence ""] [-output_dissim ""] [-output_dist_etc] [-output_data ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-threads 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    makeDistTree.exe -help
+VERSION: makeDistTree.exe -version

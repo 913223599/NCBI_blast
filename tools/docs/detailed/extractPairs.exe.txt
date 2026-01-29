@@ -1,0 +1,32 @@
+Tool: extractPairs.exe
+========================================
+
+A1<delim>A2<delim>A3...\tB1<delim>B2<delim>B3... -> A1\tB1\nA1\tB2\nA1\tB3\nA2\tB1\nA2\tB2\nA2\tB3\nA3\tB1\nA3\tB2\nA3\tB3...
+
+USAGE:   extractPairs.exe <in> [-delim " "] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    extractPairs.exe -help
+VERSION: extractPairs.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input file
+
+NAMED PARAMETERS
+-delim " "
+    Delimiter
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

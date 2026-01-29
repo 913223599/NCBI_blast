@@ -1,0 +1,42 @@
+Tool: dna_cut.exe
+========================================
+
+Cut a segment out of a DNA sequence, make it to be in a positive strand
+
+USAGE:   dna_cut.exe <in> <start> <stop> [-flank 0] [-excise] [-strand 1] [-name ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    dna_cut.exe -help
+VERSION: dna_cut.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    DNA FASTA file with one sequence
+<start>
+    Start position of a segment, 1-based
+<stop>
+    Stop position of a segment, can be equal start
+
+NAMED PARAMETERS
+-flank 0
+    length of flanking sequence
+-excise
+    Excise the segment, otherwise leave the segment
+-strand 1
+    Strand (0 or - / 1 or +)
+-name ""
+    Name of the resulting sequence
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

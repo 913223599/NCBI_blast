@@ -1,0 +1,36 @@
+Tool: tblastn2marker_euk.exe
+========================================
+
+Find best protein matches and print proteins
+
+USAGE:   tblastn2marker_euk.exe <tblastn> [-delimiter ""] [-threshold 4] [-matrix BLOSUM62] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tblastn2marker_euk.exe -help
+VERSION: tblastn2marker_euk.exe -version
+
+POSITIONAL PARAMETERS
+<tblastn>
+    tblastn output in format: qseqid sseqid qstart qend qlen sstart send slen qseq sseq. Ordered by qseqid, sseqid. If -delimeter then qseqid = <gene><delimiter><variant>, where <gene> has no <delimiter>.
+
+NAMED PARAMETERS
+-delimiter ""
+    Delimiter character separating gene names from variant names in <tblastn>
+-threshold 4
+    Min. protein score to length ratio to be reported
+-matrix BLOSUM62
+    Protein matrix
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

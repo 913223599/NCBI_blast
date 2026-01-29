@@ -1,0 +1,36 @@
+Tool: dm2feature.exe
+========================================
+
+Create files in makeFeatureTree format forma Data Master file
+
+USAGE:   dm2feature.exe <data> <attrs> <feature_dir> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-threads 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    dm2feature.exe -help
+VERSION: dm2feature.exe -version
+
+POSITIONAL PARAMETERS
+<data>
+    .dm-file
+<attrs>
+    List of Boolean or nominal attributes in <data>
+<feature_dir>
+    Directory where the files will be created
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-threads 1
+    Max. number of threads
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

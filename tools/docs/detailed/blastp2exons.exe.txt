@@ -1,0 +1,32 @@
+Tool: blastp2exons.exe
+========================================
+
+Find exons
+
+USAGE:   blastp2exons.exe <blastp> [-stat ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    blastp2exons.exe -help
+VERSION: blastp2exons.exe -version
+
+POSITIONAL PARAMETERS
+<blastp>
+    blastp output in format: qseqid sseqid qstart qend qlen qseq sseq
+
+NAMED PARAMETERS
+-stat ""
+    Output statistcis file
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

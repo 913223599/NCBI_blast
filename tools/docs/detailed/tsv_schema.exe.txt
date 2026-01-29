@@ -1,0 +1,32 @@
+Tool: tsv_schema.exe
+========================================
+
+Print the schema of a tsv-table: # name length type(decimals)
+
+USAGE:   tsv_schema.exe <table> [-sql] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_schema.exe -help
+VERSION: tsv_schema.exe -version
+
+POSITIONAL PARAMETERS
+<table>
+    tsv-table
+
+NAMED PARAMETERS
+-sql
+    SQL DDL format
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

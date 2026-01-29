@@ -1,0 +1,32 @@
+Tool: hmmsearch2besthits.exe
+========================================
+
+Select a best protein hit for each HMM. Print: <protein> <HMM> <score> <ali_from> <ali_to>
+
+USAGE:   hmmsearch2besthits.exe <tblout> [-domtblout ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    hmmsearch2besthits.exe -help
+VERSION: hmmsearch2besthits.exe -version
+
+POSITIONAL PARAMETERS
+<tblout>
+    hmmsearch --tblout result
+
+NAMED PARAMETERS
+-domtblout ""
+    hmmsearch --domtblout result
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,36 @@
+Tool: hash_request2dissim.exe
+========================================
+
+Compute hash dissimilarities for pairs of hash files
+
+USAGE:   hash_request2dissim.exe <pairs> <out> [-intersection_min 50] [-ratio_min 0.5] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    hash_request2dissim.exe -help
+VERSION: hash_request2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<pairs>
+    File with pairs of files
+<out>
+    Output file with lines: <obj1> <obj2> <dissimlarity>; <obj1> < <obj2>
+
+NAMED PARAMETERS
+-intersection_min 50
+    Min. number of common hashes to compute distance
+-ratio_min 0.5
+    Min. ratio of hash sizes (0..1)
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

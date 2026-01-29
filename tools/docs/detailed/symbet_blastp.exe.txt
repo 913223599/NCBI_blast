@@ -1,0 +1,36 @@
+Tool: symbet_blastp.exe
+========================================
+
+Print dissimilarity by BLASTP symmetric best hits
+
+USAGE:   symbet_blastp.exe <blastp1> <blastp2> <n1> <n2> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    symbet_blastp.exe -help
+VERSION: symbet_blastp.exe -version
+
+POSITIONAL PARAMETERS
+<blastp1>
+    File 1 with BLASTP hits: qseqid sseqid positive nident
+<blastp2>
+    File 2 with BLASTP hits: qseqid sseqid positive nident
+<n1>
+    Number of proteins in genome 1
+<n2>
+    Number of proteins in genome 2
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,48 @@
+Tool: fasterq-dump.exe
+========================================
+
+## 项目中的使用说明 (Source Code Context)
+在本项目 (`src/sra/sra_executor.py`) 中，`fasterq-dump` 是首选的 SRA 转 FASTQ 工具，因为它支持多线程且速度更快。
+
+**典型调用方式**:
+```python
+fasterq-dump.exe <SRA_PATH> --outdir <OUTPUT_DIR> --split-files --threads <CPU_COUNT> --progress
+```
+
+**关键参数**:
+- `--split-files`: 自动将 Paired-end 数据拆分为 `_1.fastq` 和 `_2.fastq`。
+- `--threads`: 自动根据 CPU 核心数设置线程数 (通常限制在 8 以内)。
+- `--progress`: 代码中有专门逻辑解析其特殊的 "join :|" 进度条格式。
+
+----------------------------------------
+## 官方帮助信息 (Official Help)
+
+Usage:
+  fasterq-dump.exe <path> [options]
+  fasterq-dump.exe <accession> [options]
+
+Options:
+  -F|--format                      format (special, fastq, default=fastq) 
+  -o|--outfile                     output-file 
+  -O|--outdir                      output-dir 
+  -b|--bufsize                     size of file-buffer dflt=1MB 
+  -c|--curcache                    size of cursor-cache dflt=10MB 
+  -m|--mem                         memory limit for sorting dflt=100MB 
+  -t|--temp                        where to put temp. files dflt=curr dir 
+  -e|--threads                     how many thread dflt=6 
+  -p|--progress                    show progress 
+  -x|--details                     print details 
+  -s|--split-spot                  split spots into reads 
+  -S|--split-files                 write reads into different files 
+  -3|--split-3                     writes single reads in special file 
+  --concatenate-reads              writes whole spots into one file 
+  -Z|--stdout                      print output to stdout 
+  -f|--force                       force to overwrite existing file(s) 
+  --skip-technical                 skip technical reads 
+  --include-technical              include technical reads 
+  -M|--min-read-len                filter by sequence-len 
+  --table                          which seq-table to use in case of pacbio 
+  -B|--bases                       filter by bases 
+  -A|--append                      append to output-file 
+  --fasta                          produce FASTA output 
+  -h|--help                        Output brief explanation for the program. 

@@ -1,0 +1,50 @@
+Tool: fasta2dissim.exe
+========================================
+
+## 项目中的使用说明 (Source Code Context)
+在本项目 (`src/tree/tree_executor.py`) 中，`fasta2dissim` 用于将 FASTA 序列文件（核苷酸或蛋白质）转换为距离矩阵 (.dm)，这是构建距离树的第一步。
+
+**典型调用方式**:
+```python
+fasta2dissim.exe <INPUT_FASTA> -dataset <OUTPUT_BASE> [-aa]
+```
+
+**参数细节**:
+- `<INPUT_FASTA>`: 输入的 FASTA 文件。
+- `-dataset <OUTPUT_BASE>`: 输出文件名的基础部分。工具会自动添加后缀生成 `.dm` 文件。
+- `-aa`: 如果输入是蛋白质序列 (Amino Acid)，必须加上此标记。代码通过检测序列内容（是否包含非 ATCGN 字符）来自动决定是否添加此参数。
+
+----------------------------------------
+## 自动生成的帮助信息
+
+Convert a multiple alignment to a distance matrix (dissimilarity)
+
+USAGE:   fasta2dissim.exe <fasta> [-dataset ""] [-aa] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    fasta2dissim.exe -help
+VERSION: fasta2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<fasta>
+    Input alignment
+
+NAMED PARAMETERS
+-dataset ""
+    Output dataset object
+-aa
+    Seq-s are amino acids
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

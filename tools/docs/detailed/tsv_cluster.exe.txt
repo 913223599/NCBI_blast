@@ -1,0 +1,38 @@
+Tool: tsv_cluster.exe
+========================================
+
+Cluster a text column of a tsv-table base on k-mers. Add numeric column <col>_cluster
+
+USAGE:   tsv_cluster.exe <in> <col> <out> [-k 20] [-dissim 1.0] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_cluster.exe -help
+VERSION: tsv_cluster.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    tsv-table
+<col>
+    Text column
+<out>
+    Output tsv-file
+
+NAMED PARAMETERS
+-k 20
+    K-mer size
+-dissim 1.0
+    Max. dissimlarity for single-linkage clustering
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,58 @@
+Tool: fasta2hash.exe
+========================================
+
+Print hash codes for CDSs or proteins
+
+USAGE:   fasta2hash.exe <in> <out> [-gene_finder ""] [-cds] [-segment] [-translate] [-reduce] [-ambig 0] [-kmer 0] [-prot_len_min 0] [-hashes_max 0] [-target_hashes ""] [-named] [-out_prot ""] [-target_seq ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    fasta2hash.exe -help
+VERSION: fasta2hash.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Multi-FASTA file
+<out>
+    Output file of sorted unique hashes. Sorting is numeric.
+
+NAMED PARAMETERS
+-gene_finder ""
+    Gene finder used to find CDSs: prodigal, GeneMark
+-cds
+    Are input sequences CDSs? If not then proteins
+-segment
+    Sequences are not full-length
+-translate
+    Translate CDSs to proteins
+-reduce
+    Reduce 20 amino acids to 13 characters
+-ambig 0
+    Max. number of ambiguous characters in sequences
+-kmer 0
+    Cut the sequences into k-mers of this size. 0 - do not cut
+-prot_len_min 0
+    Min. protein length of input sequences
+-hashes_max 0
+    Max. number of hashes to print. 0 - print all
+-target_hashes ""
+    List of target hashes
+-named
+    Save hashes with sequence names
+-out_prot ""
+    File to save proteins with hashes
+-target_seq ""
+    File to save the sequence names of the hashes in -target_hashes
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

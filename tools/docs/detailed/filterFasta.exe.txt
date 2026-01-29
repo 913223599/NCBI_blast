@@ -1,0 +1,50 @@
+Tool: filterFasta.exe
+========================================
+
+Print FASTA sequences with filtering
+
+USAGE:   filterFasta.exe <in> [-aa] [-whole] [-target ""] [-remove] [-replace] [-cut] [-len_min 1] [-complexity_min 0] [-title] [-force] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    filterFasta.exe -help
+VERSION: filterFasta.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input FASTA file
+
+NAMED PARAMETERS
+-aa
+    FASTA file contains protein sequences, otherwise DNA sequences
+-whole
+    Sequence identifiers are whole strings which should not be split by '|'
+-target ""
+    File with line format: <sequence id> [<new sequence id> [<from> <to>]]
+-remove
+    Sequences in <target> are removed from the input file, otherwise only the sequences in <target> are saved
+-replace
+    <target> file contains a replacement
+-cut
+    Cut out the segment indicated by <from> <to> in replacement in <target>
+-len_min 1
+    Min. sequence length
+-complexity_min 0
+    Min. sequence complexity
+-title
+    Preserve sequence titles
+-force
+    Do not stop on errors in input data
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

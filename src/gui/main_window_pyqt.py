@@ -32,6 +32,7 @@ from src.gui.widgets.translation_debugger import TranslationDebuggerDialog
 from src.gui.widgets.help_viewer import HelpViewerDialog
 from src.gui.widgets.api_key_dialog import ApiKeyDialog
 from src.gui.widgets.history_dialog import HistoryDialog  # 导入历史记录对话框
+from src.gui.widgets.tree_dialog import TreeDialog  # 导入历史记录对话框
 from src.gui.widgets.database_manager_dialog import DatabaseManagerDialog # 导入数据库管理对话框
 from src.gui.widgets.task_name_dialog import TaskNameDialog # 导入任务命名对话框
 from src.gui.threads.processing_thread import ProcessingThread, MultiSequenceProcessingThread
@@ -291,6 +292,17 @@ class MainWindow(QMainWindow):
         # 分析菜单
         analysis_menu = QMenu("分析", self)
         menu_bar.addMenu(analysis_menu)
+        # SRA 数据获取
+        sra_action = QAction("SRA 数据获取...", self)
+        sra_action.setStatusTip("从 NCBI SRA 下载并处理数据")
+        sra_action.triggered.connect(self.show_sra_dialog)
+        analysis_menu.addAction(sra_action)
+
+        # 进化树构建
+        tree_action = QAction("进化树构建...", self)
+        tree_action.setStatusTip("构建进化树")
+        tree_action.triggered.connect(self.show_tree_dialog)
+        analysis_menu.addAction(tree_action)
         
         # 设置菜单
         settings_menu = QMenu("设置", self)
@@ -754,6 +766,19 @@ class MainWindow(QMainWindow):
         self.cloud_manager_dialog.show()
         self.cloud_manager_dialog.raise_()
         self.cloud_manager_dialog.activateWindow()
+
+    def show_sra_dialog(self):
+        """打开 SRA 工具对话框"""
+        from src.gui.widgets.sra_dialog import SraDialog
+        dialog = SraDialog(self)
+        dialog.show()
+        dialog.exec() # 使用模态对话框，简单起见
+
+    def show_tree_dialog(self):
+        """显示 Tree 工具对话框"""
+        from src.gui.widgets.tree_dialog import TreeDialog
+        dialog = TreeDialog(self)
+        dialog.exec()
 
     def _load_task_history(self, result_dir):
         """加载任务历史记录"""

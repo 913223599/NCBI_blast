@@ -1,0 +1,91 @@
+NCBI SRA Tools 工具包说明文档
+
+目录位置: tools/ncbi_dist/bin/sra-tools
+
+## 1. 概述
+SRA Tools (Sequence Read Archive Tools) 是由 NCBI 开发的一套工具集，用于访问、下载、转储和操作 SRA (Sequence Read Archive) 数据库中的测序数据。该工具包允许用户将 SRA 格式的数据转换为 FASTQ、SAM 等常见格式，并提供数据下载和配置功能。
+
+## 2. 工具详细说明
+
+### 数据下载与配置
+- **prefetch.exe**: SRA 数据下载工具。支持依赖项预取和断点续传。
+- **vdb-config.exe**: 交互式或命令行配置工具，用于设置缓存、代理和云凭证。
+- **cache-mgr.exe**: 本地缓存管理工具，用于维护下载的数据。
+- **srapath.exe**: 查找 SRA 数据的完整路径（本地或远程），常用于调试定位。
+
+### 数据转换 (Dumpers)
+- **fastq-dump.exe**: 将 SRA 数据转换为 FASTQ 格式。功能最全面，支持多种过滤和拆分选项。
+- **fasterq-dump.exe**: `fastq-dump` 的高性能多线程版本，专为大文件设计。
+- **sam-dump.exe**: 将 SRA 数据转换并输出为 SAM 格式。
+- **sff-dump.exe**: 提取 454 SFF 格式数据。
+- **illumina-dump.exe**: 提取 Illumina 原始格式数据 (qseq/fasta/qual)。
+- **abi-dump.exe**: 提取 ABI 平台数据。
+- **ngs-pileup.exe**: 基于 NGS SDK 的 pileup 生成工具。
+- **sra-pileup.exe**: SRA 专用的 pileup 统计工具，参考序列覆盖度分析。
+
+### 分析与统计
+- **sra-stat.exe**: 快速统计 SRA 文件的 reads 数、碱基分布等信息。
+- **sra-info.exe**: 显示 SRA 存档的元数据结构和依赖关系。
+- **align-info.exe**: 显示比对对象的信息。
+- **sra-search.exe**: 在 SRA 数据中搜索特定的序列片段。
+- **check-corrupt.exe**: 检查 SRA 文件是否损坏。
+- **vdb-validate.exe**: 验证 VDB/SRA 数据的完整性 (CRC 校验等)。
+- **ref-variation.exe**: 参考序列变异分析工具。
+- **var-expand.exe**: 变异数据扩展工具。
+
+### 调试与底层工具
+- **vdb-dump.exe**: 导出 VDB 表格的底层列数据，用于深层调试。
+- **vdb-decrypt.exe**: 解密 VDB 数据。
+- **vdb-encrypt.exe**: 加密 VDB 数据。
+- **kdbmeta.exe**: 访问和修改 KDB (Kernel Database) 元数据。
+- **rcexplain.exe**: 解释 SRA Tools 返回的错误代码 (Return Codes)。
+- **test-sra.exe**: 系统测试工具。
+- **sratools.exe**: 统一入口分发程序 (Dispatcher)，可作为单一入口调用其他子命令。
+
+### 驱动程序 (Drivers)
+以下程序通常由主程序自动调用，不建议直接手动运行：
+- `fasterq-dump-driver.exe`
+- `sam-dump-driver.exe`
+- `sra-pileup-driver.exe`
+- `vdb-dump-driver.exe`
+
+## 3. 完整文件清单
+(包含所有 38 个文件)
+- `abi-dump.exe`
+- `align-info.exe`
+- `cache-mgr.exe`
+- `check-corrupt.exe`
+- `fasterq-dump-driver.exe`
+- `fasterq-dump.exe`
+- `fastq-dump.exe`
+- `illumina-dump.exe`
+- `kdbmeta.exe`
+- `libatomic-1.dll`
+- `libgcc_s_seh-1.dll`
+- `libgfortran-5.dll`
+- `libgomp-1.dll`
+- `libquadmath-0.dll`
+- `libstdc++-6.dll`
+- `libwinpthread-1.dll`
+- `ngs-pileup.exe`
+- `prefetch.exe`
+- `rcexplain.exe`
+- `ref-variation.exe`
+- `sam-dump-driver.exe`
+- `sam-dump.exe`
+- `sff-dump.exe`
+- `sra-info.exe`
+- `sra-pileup-driver.exe`
+- `sra-pileup.exe`
+- `sra-search.exe`
+- `sra-stat.exe`
+- `srapath.exe`
+- `sratools.exe`
+- `test-sra.exe`
+- `var-expand.exe`
+- `vdb-config.exe`
+- `vdb-decrypt.exe`
+- `vdb-dump-driver.exe`
+- `vdb-dump.exe`
+- `vdb-encrypt.exe`
+- `vdb-validate.exe`

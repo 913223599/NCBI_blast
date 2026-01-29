@@ -1,0 +1,39 @@
+Tool: xml_find.exe
+========================================
+
+Find an XML context matching query and print values as a .tsv-file
+
+USAGE:   xml_find.exe <target> <query> <row_tag> [-variable_tag q] [-width 0] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    xml_find.exe -help
+VERSION: xml_find.exe -version
+
+POSITIONAL PARAMETERS
+<target>
+    Target XML file
+<query>
+    Query XML file
+<row_tag>
+    Tag name in query indicating rows in .tsv-file
+
+NAMED PARAMETERS
+-variable_tag q
+    Tag name in query indicating .tsv-columns.
+Text of query unifying with "<" variable_tag ">" column_name "</" variable_tag ">" goes to the column named column_name in the output .tsv-file
+-width 0
+    Max. column width; 0 - umlimited
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

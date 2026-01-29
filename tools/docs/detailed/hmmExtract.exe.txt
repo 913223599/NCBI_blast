@@ -1,0 +1,36 @@
+Tool: hmmExtract.exe
+========================================
+
+Extract HMMs from an HMM library
+
+USAGE:   hmmExtract.exe <in> <target> <out> [-acc] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    hmmExtract.exe -help
+VERSION: hmmExtract.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input HMM library
+<target>
+    List of HMMs to be extracted
+<out>
+    Output HMM library
+
+NAMED PARAMETERS
+-acc
+    Target identifier field is "ACC", otherwise "NAME"
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

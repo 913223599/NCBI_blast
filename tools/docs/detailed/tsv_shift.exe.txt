@@ -1,0 +1,30 @@
+Tool: tsv_shift.exe
+========================================
+
+<row_i> <nl> <row_i+1> <row_i+2> <nl> ... -> <row_i> <tab> <row_i+1> <nl> <row_i+1> <tab> <row_i+2> <nl> ...
+
+USAGE:   tsv_shift.exe <table> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_shift.exe -help
+VERSION: tsv_shift.exe -version
+
+POSITIONAL PARAMETERS
+<table>
+    tsv-table
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

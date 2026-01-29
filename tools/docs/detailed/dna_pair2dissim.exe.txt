@@ -1,0 +1,56 @@
+Tool: dna_pair2dissim.exe
+========================================
+
+Align and compute dissimilarity for pairs of DNA sequences
+
+USAGE:   dna_pair2dissim.exe <pairs> <dnaDir> <align_len_min> <out> [-large] [-global] [-relative] [-diff] [-band 0] [-coeff 1.0] [-power 1.0] [-name_new ""] [-file_new ""] [-print] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    dna_pair2dissim.exe -help
+VERSION: dna_pair2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<pairs>
+    File with pairs of DNA file names
+<dnaDir>
+    Directory with DNA sequences
+<align_len_min>
+    Min. sequence length
+<out>
+    Output file with lines: <DNA1> <DNA2> <dissimilarity>. <DNA1> < <DNA2>. Lines match the file <pairs>
+
+NAMED PARAMETERS
+-large
+    DNA sequences are in subdirectoirs of <dnaDir> which are hash-codes modulo 1000 of the DNA file names
+-global
+    Global alignment, otherwise semiglobal
+-relative
+    Dissimilarity relative to sequence length
+-diff
+    Dissimilarity is the number of different nucleotides
+-band 0
+    Alignment band; 0 - no band
+-coeff 1.0
+    Coefficient to multiply the dissimilarity by
+-power 1.0
+    Power to raise the dissimilarity in
+-name_new ""
+    Name of a sequence which is not in <dnaDir>
+-file_new ""
+    File with the sequence <name_new>
+-print
+    Print alignment
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,36 @@
+Tool: asm_gap.exe
+========================================
+
+Compute the distribution of gaps in a DNA multi-FASTA file; print: # contigs, Total length, L50, N50; save contigs split by gaps
+
+USAGE:   asm_gap.exe <in> <gap_min> [-gap_distr ""] [-out ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    asm_gap.exe -help
+VERSION: asm_gap.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input DNA multi-FASTA file
+<gap_min>
+    Minimum gap length
+
+NAMED PARAMETERS
+-gap_distr ""
+    Output file with gap distribution
+-out ""
+    Output multi-FASTA file split into separate contigs using gaps as separators
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

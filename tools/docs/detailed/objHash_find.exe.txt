@@ -1,0 +1,38 @@
+Tool: objHash_find.exe
+========================================
+
+Print closest objects
+
+USAGE:   objHash_find.exe <obj_hash> <target> <common_min> <out_size> [-superset ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    objHash_find.exe -help
+VERSION: objHash_find.exe -version
+
+POSITIONAL PARAMETERS
+<obj_hash>
+    File with lines: <object> <hash>
+<target>
+    File with unique hashes
+<common_min>
+    Min. number of common hashes
+<out_size>
+    Number of output objects
+
+NAMED PARAMETERS
+-superset ""
+    Superset of <object>'s
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

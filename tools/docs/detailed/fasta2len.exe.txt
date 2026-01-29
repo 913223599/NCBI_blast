@@ -1,0 +1,38 @@
+Tool: fasta2len.exe
+========================================
+
+Print lengths of DNA or protein sequences
+
+USAGE:   fasta2len.exe <in> [-aa] [-min_len 0] [-out ""] [-header ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    fasta2len.exe -help
+VERSION: fasta2len.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    FASTA file
+
+NAMED PARAMETERS
+-aa
+    Protein sequence, otherwise DNA
+-min_len 0
+    Min. length for output sequences in the file <out>
+-out ""
+    Output FASTA file with sequences longer than <min_len>
+-header ""
+    Add comma-separated .tsv-header to the output file
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

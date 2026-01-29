@@ -1,0 +1,34 @@
+Tool: main_ortholog.exe
+========================================
+
+Find main common ortholog for a set of protein FASTA files
+
+USAGE:   main_ortholog.exe <dir> <out> [-blosum62] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    main_ortholog.exe -help
+VERSION: main_ortholog.exe -version
+
+POSITIONAL PARAMETERS
+<dir>
+    Directory with protein FASTA files
+<out>
+    Output FASTA fule with main orthologous proteins
+
+NAMED PARAMETERS
+-blosum62
+    Use BLOSUM62, otherwise PAM30
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

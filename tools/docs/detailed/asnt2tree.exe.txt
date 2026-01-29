@@ -1,0 +1,32 @@
+Tool: asnt2tree.exe
+========================================
+
+Convert a tree in textual ASN.1 format to internal format
+
+USAGE:   asnt2tree.exe <input_tree> [-feature ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    asnt2tree.exe -help
+VERSION: asnt2tree.exe -version
+
+POSITIONAL PARAMETERS
+<input_tree>
+    Tree in textual ASN.1 format (BioTreeContainer)
+
+NAMED PARAMETERS
+-feature ""
+    Output file with features
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

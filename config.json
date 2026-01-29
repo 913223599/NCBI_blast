@@ -44,5 +44,11 @@
     "request_timeout": 9
   },
   "setup_completed": true,
-  "blast_bin_path": "C:\\Program Files\\NCBI\\blast-2.16.0+\\bin"
+  "blast_bin_path": "C:\\Program Files\\NCBI\\blast-2.16.0+\\bin",
+  "tool_paths": {
+    "sra_tools": "tools/ncbi_dist/bin/sra-tools",
+    "tree_tools_bin": "tools/ncbi_dist/bin/tree-tools"
+  },
+  "sra_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\sra-tools",
+  "tree_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\tree-tools"
 }

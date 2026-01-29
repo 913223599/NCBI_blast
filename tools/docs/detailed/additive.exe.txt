@@ -1,0 +1,32 @@
+Tool: additive.exe
+========================================
+
+Check additivity of a dissimilarity
+
+USAGE:   additive.exe <file> <attrName> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    additive.exe -help
+VERSION: additive.exe -version
+
+POSITIONAL PARAMETERS
+<file>
+    .dm-file without the extension
+<attrName>
+    Attribute name of a distance in the <file>
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

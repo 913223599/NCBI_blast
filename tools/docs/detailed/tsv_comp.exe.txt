@@ -1,0 +1,40 @@
+Tool: tsv_comp.exe
+========================================
+
+Compare two .tsv-files. Print statistics for <tsv1> vs. <tsv2>
+
+USAGE:   tsv_comp.exe <tsv1> <tsv2> <diff> [-keys ""] [-diff_min 0] [-dupl] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_comp.exe -help
+VERSION: tsv_comp.exe -version
+
+POSITIONAL PARAMETERS
+<tsv1>
+    .tsv-file 1
+<tsv2>
+    .tsv-file 2
+<diff>
+    Output tsv-file with different column values: REPLACE|DELETE|ADD <column name> <value in tsv1> <value in tsv2> <abs. difference (for numeric column)> <key>
+
+NAMED PARAMETERS
+-keys ""
+    Key columns, comma-separated. If no key columns then comparison by row numbers
+-diff_min 0
+    Min. abs. difference of numeric columns to report
+-dupl
+    For the rows with duplicate keys use only the first row
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

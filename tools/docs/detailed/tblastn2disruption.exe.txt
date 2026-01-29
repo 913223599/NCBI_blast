@@ -1,0 +1,39 @@
+Tool: tblastn2disruption.exe
+========================================
+
+Find gene disruptions using tblastn output.
+Output: qseqid sseqid <Disruption::genesymbol_raw()>
+
+USAGE:   tblastn2disruption.exe <tblastn> [-stop_codon] [-bacteria] [-ident_min 0.8] [-coverage_min 0.5] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tblastn2disruption.exe -help
+VERSION: tblastn2disruption.exe -version
+
+POSITIONAL PARAMETERS
+<tblastn>
+    tblastn output in the format: qseqid sseqid qstart qend sstart send qseq sseq. Ordered by qseqid, sseqid
+
+NAMED PARAMETERS
+-stop_codon
+    Query proteins end with stop codons
+-bacteria
+    Bacterial genome
+-ident_min 0.8
+    Min. identity of the reference protein
+-coverage_min 0.5
+    Min. coverage of the reference protein
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

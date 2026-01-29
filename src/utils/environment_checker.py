@@ -34,19 +34,18 @@ class EnvironmentChecker:
             return True
     
     def check_pyqt(self) -> bool:
-        """检查PyQt库是否可用"""
+        """检查PyQt库及WebEngine组件是否可用"""
         try:
             from PyQt6.QtWidgets import QApplication
-            self.checks.append("PyQt6可用")
+            from PyQt6.QtWebEngineWidgets import QWebEngineView
+            self.checks.append("PyQt6 (含 WebEngine) 可用")
             return True
-        except ImportError:
-            try:
-                from PyQt5.QtWidgets import QApplication
-                self.checks.append("PyQt5可用")
-                return True
-            except ImportError:
-                self.errors.append("PyQt库不可用。请确保已安装PyQt5或PyQt6")
-                return False
+        except ImportError as e:
+            if "WebEngine" in str(e):
+                 self.errors.append("缺少 PyQt6-WebEngine 组件。请运行: pip install PyQt6-WebEngine")
+            else:
+                 self.errors.append(f"PyQt6 库不可用: {e}")
+            return False
     
     def check_blast_executables(self) -> bool:
         """检查BLAST可执行文件是否存在"""
@@ -81,6 +80,8 @@ class EnvironmentChecker:
             'requests',
             'numpy',
             'pandas',
+            'ete3',
+            'toytree'
         ]
         
         missing_modules = []

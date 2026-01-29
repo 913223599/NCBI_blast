@@ -1,0 +1,34 @@
+Tool: loci_request2dissim.exe
+========================================
+
+Compute loci dissimilarities for requested pairs
+
+USAGE:   loci_request2dissim.exe <pairs> <loci_dir> <out> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    loci_request2dissim.exe -help
+VERSION: loci_request2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<pairs>
+    File with pairs of objects
+<loci_dir>
+    Directory with a file of loci for each object. File line format: G<locus number> <allele number>
+<out>
+    Output file
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

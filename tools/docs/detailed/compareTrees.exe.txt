@@ -1,0 +1,36 @@
+Tool: compareTrees.exe
+========================================
+
+Compare two trees by Robinson-Foulds method, print matching and mismatching interior nodes for Tree 1
+
+USAGE:   compareTrees.exe <input_tree1> <input_tree2> [-type dist] [-arc_info] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    compareTrees.exe -help
+VERSION: compareTrees.exe -version
+
+POSITIONAL PARAMETERS
+<input_tree1>
+    Tree 1
+<input_tree2>
+    Tree 2
+
+NAMED PARAMETERS
+-type dist
+    Tree type: dist|feature
+-arc_info
+    Print arc information: length, depth, # leaves
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

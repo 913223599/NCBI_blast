@@ -1,0 +1,41 @@
+Tool: index_find.exe
+========================================
+
+Find approximately closest objects ordered by proximity using an index.
+An object is a file with a list of attributes.
+Average time: O(A S (A (log A + log S) + log N)), where N is the number of objects, and A is the average number of attributes in an object, S = attr_size_max.
+
+
+USAGE:   index_find.exe <dir> <index> <attr_size_max> <target> [-large] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    index_find.exe -help
+VERSION: index_find.exe -version
+
+POSITIONAL PARAMETERS
+<dir>
+    Directory with objects
+<index>
+    Directory with an attribute index for <dir>
+<attr_size_max>
+    Attribute file size limit; objects having only attrbutes whose index files exceed <attr_size_max> are indiscernible
+<target>
+    Target object
+
+NAMED PARAMETERS
+-large
+    Directory <dir> is large: it is subdivided into subdirectories "0" .. "999" which are the hashes of file names
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

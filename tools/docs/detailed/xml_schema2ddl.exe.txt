@@ -1,0 +1,36 @@
+Tool: xml_schema2ddl.exe
+========================================
+
+Generate SQL "create table" commands from an XML schema
+
+USAGE:   xml_schema2ddl.exe <schema> [-data] [-index] [-sql_schema ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    xml_schema2ddl.exe -help
+VERSION: xml_schema2ddl.exe -version
+
+POSITIONAL PARAMETERS
+<schema>
+    XML schema file
+
+NAMED PARAMETERS
+-data
+    'create table' etc. DDL
+-index
+    'create index' etc. DDL
+-sql_schema ""
+    SQL schema prefix
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

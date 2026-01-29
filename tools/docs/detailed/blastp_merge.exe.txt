@@ -1,0 +1,36 @@
+Tool: blastp_merge.exe
+========================================
+
+For multiple BLASTP HSPs with the same queries and subjects: trim bad ends and merge the HSPs
+Print: qseqid sseqid ident_frac p_target_coverage p_ref_coverage
+
+USAGE:   blastp_merge.exe <blastp> <ident_max> <coverage_min> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    blastp_merge.exe -help
+VERSION: blastp_merge.exe -version
+
+POSITIONAL PARAMETERS
+<blastp>
+    blastp output in the format: qseqid sseqid length nident qstart qend qlen sstart send slen sseq qseq
+Sorted by qseqid, sseqid
+<ident_max>
+    Max. identity of bad ends of an HSP
+<coverage_min>
+    Min. coverage of a trimmed HSP
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

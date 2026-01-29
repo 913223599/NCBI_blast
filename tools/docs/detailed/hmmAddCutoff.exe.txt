@@ -1,0 +1,36 @@
+Tool: hmmAddCutoff.exe
+========================================
+
+Add cutoffs to an HMM library
+
+USAGE:   hmmAddCutoff.exe <in> <cutoffFile> <type> <out> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    hmmAddCutoff.exe -help
+VERSION: hmmAddCutoff.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input HMM library
+<cutoffFile>
+    File with lines: <hmmName> <cuttoff> ...
+<type>
+    Cutoff type: TC|GA|NC
+<out>
+    Output HMM library
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

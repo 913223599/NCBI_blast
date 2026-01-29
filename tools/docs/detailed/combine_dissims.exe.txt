@@ -1,0 +1,39 @@
+Tool: combine_dissims.exe
+========================================
+
+Combine different dissimilarities for the same pairs of objects
+
+USAGE:   combine_dissims.exe <dissims> <scales> [-barrier ""] [-print_raw] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    combine_dissims.exe -help
+VERSION: combine_dissims.exe -version
+
+POSITIONAL PARAMETERS
+<dissims>
+    File with lines: <obj1> <obj2> <dissimilarity 1> <dissimilarity 2> ...
+<scales>
+    File with equalizing scales and max. values for each dissimilarity, ordered by <unit> * <raw_max>.
+Line format: <unit> <raw_max>
+unit = 1 / <species_barrier for dissimilarity>
+<raw_max> can be inf
+
+NAMED PARAMETERS
+-barrier ""
+    Scale sequential number, 1-based, 0 - no barrier. If i > barrier then maximize (dissim[i-1], dissim_max[barrier-1])
+-print_raw
+    Print raw dissimilarities
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

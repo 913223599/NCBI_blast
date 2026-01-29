@@ -1,0 +1,30 @@
+Tool: tsv2html.exe
+========================================
+
+Convert a tsv-file into an object-attribute-value table
+
+USAGE:   tsv2html.exe <tsv> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv2html.exe -help
+VERSION: tsv2html.exe -version
+
+POSITIONAL PARAMETERS
+<tsv>
+    tsv-table
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

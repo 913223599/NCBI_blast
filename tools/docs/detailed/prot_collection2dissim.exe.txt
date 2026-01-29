@@ -1,0 +1,40 @@
+Tool: prot_collection2dissim.exe
+========================================
+
+Compute dissimilarity between collections of proteins
+
+USAGE:   prot_collection2dissim.exe <prot_info> <in> <out> [-blosum62] [-separate] [-raw_power 1.0] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    prot_collection2dissim.exe -help
+VERSION: prot_collection2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<prot_info>
+    Format: <Outlier SEs> <ignoreZero (0/1)> <newline> {<attrname> <coeff> <var> <newline>}*, where <attrname>'s are the protein identifiers in <in>
+<in>
+    File with pairs of protein FASTA file names. Protein sequences may contain stop codons
+<out>
+    Output for each pair in <in>: if -separate then a list of dissimilarities for each identifier in <prot_info>, else one dissimilarity
+
+NAMED PARAMETERS
+-blosum62
+    Use BLOSUM62, otherwise PAM30
+-separate
+    Print scores for each target protein separately
+-raw_power 1.0
+    Raise raw (not averaged) dissimilarities to this power
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

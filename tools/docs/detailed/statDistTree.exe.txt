@@ -1,0 +1,48 @@
+Tool: statDistTree.exe
+========================================
+
+Compute different statistics of a distance tree without using dissimilarities
+
+USAGE:   statDistTree.exe <input_tree> [-dist_request ""] [-noise 0] [-sqrt] [-closest_num 1] [-dist2 ""] [-arc_length ""] [-dist_pairs ""] [-height ""] [-closest_out ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    statDistTree.exe -help
+VERSION: statDistTree.exe -version
+
+POSITIONAL PARAMETERS
+<input_tree>
+    Distance tree file
+
+NAMED PARAMETERS
+-dist_request ""
+    File with requests to compute tree distances, tab-delimited line format: <obj1> <obj2>, to be printed in the file <dist_pairs>
+-noise 0
+    "dissim" += Normal(0,noise) for -dist2
+-sqrt
+    Apply square root to the attribute "dissim" for -dist2
+-closest_num 1
+    Number of closest leaves to print for -closest_out
+-dist2 ""
+    A .dm-file with a two-way dissimilarity attribute "dissim" which equals the tree distances plus noise
+-arc_length ""
+    Output file with arc length statistics: <node name> <arc length> <depth length> <log(<parent arc length>/<arc length>)
+-dist_pairs ""
+    Output file with all or <dist_request> tree distances, tab-delimited line format: <obj1> <obj2> <dist>
+-height ""
+    Output file with interior node average heights
+-closest_out ""
+    Output file with closest leaves: <leaf> <neighbor1> <dist1> <neighbor2> <dist2> <neighbor3> <dist3> ...
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

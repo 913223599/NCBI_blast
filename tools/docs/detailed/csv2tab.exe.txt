@@ -1,0 +1,32 @@
+Tool: csv2tab.exe
+========================================
+
+Convert a .csv-file to a tab-delimited file
+
+USAGE:   csv2tab.exe <in> [-tsv] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    csv2tab.exe -help
+VERSION: csv2tab.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Text file
+
+NAMED PARAMETERS
+-tsv
+    First line is a header
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,38 @@
+Tool: symbet.exe
+========================================
+
+Print dissimilarity by k-mer symmetric best hits: >= 0 or nan
+
+USAGE:   symbet.exe <fasta1> <fasta2> [-k 5] [-min_prot_len 0] [-ploidy 1] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    symbet.exe -help
+VERSION: symbet.exe -version
+
+POSITIONAL PARAMETERS
+<fasta1>
+    Protein FASTA file 1
+<fasta2>
+    Protein FASTA file 2
+
+NAMED PARAMETERS
+-k 5
+    k-mer size, >= 3
+-min_prot_len 0
+    Min. protein length
+-ploidy 1
+    Number of chromosome copies
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,36 @@
+Tool: fasta_prefix.exe
+========================================
+
+Replace sequence identifiers with <prefix><number>
+
+USAGE:   fasta_prefix.exe <in> <match> <prefix> [-aa] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    fasta_prefix.exe -help
+VERSION: fasta_prefix.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input FASTA file
+<match>
+    Output pairs: <old id>	<new id>
+<prefix>
+    Prefix of new identifiers
+
+NAMED PARAMETERS
+-aa
+    FASTA is a protein file
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

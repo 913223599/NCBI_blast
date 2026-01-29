@@ -1,0 +1,39 @@
+Tool: connectPairs.exe
+========================================
+
+Create disjoint sets of items
+
+USAGE:   connectPairs.exe <in> <out> [-subset ""] [-pairs] [-center] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    connectPairs.exe -help
+VERSION: connectPairs.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    List of pairs of connected items: <item1> <item2>
+where <item1>, <item2> are strings with no spaces
+<out>
+    If -pairs then output file with pairs <item> <tab> <item_min>, otherwise output directory with the sets of connected items, where each set is a file named by its lexicographycally smallest item with the added extension ".component"
+
+NAMED PARAMETERS
+-subset ""
+    List of items. Item pairs are restricted to this list
+-pairs
+    <out> is a list of pairs: <item> <item_min>, where <item_min> is the lexicographycally smallest item of the cluster
+-center
+    <item_min> is the item with the maximum number of connected items
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,42 @@
+Tool: tsv_group.exe
+========================================
+
+Group columns of a tsv-table, sort
+
+USAGE:   tsv_group.exe <table> [-by ""] [-count ""] [-sum ""] [-min ""] [-max ""] [-aggr ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_group.exe -help
+VERSION: tsv_group.exe -version
+
+POSITIONAL PARAMETERS
+<table>
+    tsv-table
+
+NAMED PARAMETERS
+-by ""
+    Comma-separated list of columns to sort and group by
+-count ""
+    name of the added "count" column
+-sum ""
+    Comma-separated list of columns to sum
+-min ""
+    Comma-separated list of columns to find minimum
+-max ""
+    Comma-separated list of columns to find maximum
+-aggr ""
+    Comma-separated list of columns to aggregate: make unique and sort
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

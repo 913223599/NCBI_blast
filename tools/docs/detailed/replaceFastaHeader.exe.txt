@@ -1,0 +1,34 @@
+Tool: replaceFastaHeader.exe
+========================================
+
+Print FASTA file with replaced headers
+
+USAGE:   replaceFastaHeader.exe <in> <headers> [-aa] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    replaceFastaHeader.exe -help
+VERSION: replaceFastaHeader.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    FASTA file
+<headers>
+    Lines: <identifier> <new header>
+
+NAMED PARAMETERS
+-aa
+    Protein sequence, otherwise DNA
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,33 @@
+Tool: kmerIndex_add.exe
+========================================
+
+Add DNA sequences to a DNA k-mer index.
+Time: O(n), where n is the number of sequences, assuming constant average length of sequences and sequence identifiers
+
+USAGE:   kmerIndex_add.exe <kmer_index> <Multi_FASTA> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    kmerIndex_add.exe -help
+VERSION: kmerIndex_add.exe -version
+
+POSITIONAL PARAMETERS
+<kmer_index>
+    K-mer index file name
+<Multi_FASTA>
+    Multi-FASTA file with DNA sequences
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

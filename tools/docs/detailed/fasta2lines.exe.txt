@@ -1,0 +1,32 @@
+Tool: fasta2lines.exe
+========================================
+
+Print each FASTA sequence in one line
+
+USAGE:   fasta2lines.exe <in> [-aa] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    fasta2lines.exe -help
+VERSION: fasta2lines.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input FASTA file
+
+NAMED PARAMETERS
+-aa
+    FASTA file contains protein sequences, otherwise DNA sequences
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,32 @@
+Tool: align2html.exe
+========================================
+
+Print aligned sequences as HTML
+
+USAGE:   align2html.exe <in> [-aa] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    align2html.exe -help
+VERSION: align2html.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input DNA multi-FASTA file, alignment
+
+NAMED PARAMETERS
+-aa
+    Sequence is a protein, otherwise DNA
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

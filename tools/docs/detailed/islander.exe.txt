@@ -1,0 +1,34 @@
+Tool: islander.exe
+========================================
+
+Find annotation islands, print summary statistics
+
+USAGE:   islander.exe <annot> <gap_max> [-non_island_coor ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    islander.exe -help
+VERSION: islander.exe -version
+
+POSITIONAL PARAMETERS
+<annot>
+    Annotation tsv-file with columns: plasmid	contig_len	start	stop (1-based), sorted by plasmid (accession), start, stop desc; column names are arbitrary; start and stop are optional
+<gap_max>
+    Max. gap to merge annotations into an island
+
+NAMED PARAMETERS
+-non_island_coor ""
+    Coordinates of non-islands
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

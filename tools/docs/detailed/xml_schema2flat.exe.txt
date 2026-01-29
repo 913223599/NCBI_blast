@@ -1,0 +1,38 @@
+Tool: xml_schema2flat.exe
+========================================
+
+Generate tab-delimited files for SQL bulk insert from XML files and their XML schema
+
+USAGE:   xml_schema2flat.exe <xml> <xml_num> <schema> <out_dir> [-no_xml_header] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    xml_schema2flat.exe -help
+VERSION: xml_schema2flat.exe -version
+
+POSITIONAL PARAMETERS
+<xml>
+    XML file
+<xml_num>
+    XML file number
+<schema>
+    XML schema file
+<out_dir>
+    Directory for output tab-delimited files
+
+NAMED PARAMETERS
+-no_xml_header
+    XML file has no header
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

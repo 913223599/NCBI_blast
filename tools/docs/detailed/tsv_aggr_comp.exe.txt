@@ -1,0 +1,38 @@
+Tool: tsv_aggr_comp.exe
+========================================
+
+Compare two aggregated columns (values are comma-separated) of a tsv-table
+
+USAGE:   tsv_aggr_comp.exe <tsv> <col1> <col2> <diff1> <diff2> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_aggr_comp.exe -help
+VERSION: tsv_aggr_comp.exe -version
+
+POSITIONAL PARAMETERS
+<tsv>
+    tsv-file name
+<col1>
+    First aggregated column
+<col2>
+    Second aggregated column
+<diff1>
+    New column containing col1 \ col2
+<diff2>
+    New column containing col2 \ col1
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

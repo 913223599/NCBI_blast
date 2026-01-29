@@ -1,0 +1,42 @@
+Tool: feature_request2dissim.exe
+========================================
+
+Print dissimilarities (Hamming distance, SNP dissimilarity, Jaccard index) computed from features for requested pairs of objects
+
+USAGE:   feature_request2dissim.exe <req> <dir> [-optional_weight NaN] [-mutation_rate ""] [-dna_weight NaN] [-virus] [-large] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    feature_request2dissim.exe -help
+VERSION: feature_request2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<req>
+    File with pairs of objects
+<dir>
+    Directory with <object> files containing feature-optional(0/1) pairs
+
+NAMED PARAMETERS
+-optional_weight NaN
+    For Hamming distance: Weight of optional-nonoptional match (0..1)
+-mutation_rate ""
+    For SNP dissimilarity: file where each line has format: <feature_name> <rate of mutation 0->1> <rate of mutation 1->0>
+-dna_weight NaN
+    Weight of DNA mutations (>=0). Protein mutations are weighted as 1. Features are DNA or protein mutations, where DNA is not named and proteins are named
+-virus
+    Features are DNA and protein mutations, protein mutations are ignored
+-large
+    Object files are in subdirectories of <dir> named "0" .. "999" which are the hashes of the object names
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

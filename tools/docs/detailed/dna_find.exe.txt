@@ -1,0 +1,32 @@
+Tool: dna_find.exe
+========================================
+
+Print 1-based coordinates and strand of a DNA needle in a DNA hay
+
+USAGE:   dna_find.exe <hay> <needle> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    dna_find.exe -help
+VERSION: dna_find.exe -version
+
+POSITIONAL PARAMETERS
+<hay>
+    Multi-FASTA DNA file
+<needle>
+    FASTA file with a target DNA sequence to be found
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

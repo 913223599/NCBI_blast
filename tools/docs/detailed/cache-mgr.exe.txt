@@ -1,0 +1,35 @@
+Tool: cache-mgr.exe
+========================================
+
+Usage:
+  cache-mgr.exe [path_to_cache] options
+
+Options:
+  -r|--report                      report objects in cache 
+  -o|--rep-report                  report status of repositories 
+  -t|--details                     show detailed report 
+  -z|--test-zero                   test for zero blocks (for report function) 
+  -u|--unlock                      remove lock-files 
+  -c|--clear                       clear cache 
+  -m|--max-remove                  remove until reached that many bytes 
+  -i|--remove-dirs                 remove directories, not only files 
+  -e|--enable                      enable repository [user/site/rem] 
+  -d|--disable                     disable repository [user/site/rem] 
+  -p|--user-repo-name              restrict to this user-repository 
+
+  -h|--help                        Output brief explanation for the program. 
+  -V|--version                     Display the version of the program then 
+                                   quit. 
+  -L|--log-level <level>           Logging level as number or enum string. One 
+                                   of (fatal|sys|int|err|warn|info|debug) or 
+                                   (0-6) Current/default is warn. 
+  -v|--verbose                     Increase the verbosity of the program 
+                                   status messages. Use multiple times for more 
+                                   verbosity. Negates quiet. 
+  -q|--quiet                       Turn off all status messages for the 
+                                   program. Negated by verbose. 
+  --option-file <file>             Read more options and parameters from the 
+                                   file. 
+  -+|--debug <Module[-Flag]>       Turn on debug output for module. All flags 
+                                   if not specified. 
+/d/PycharmProjects/NCBI blast/tools/ncbi_dist/bin/sra-tools/cache-mgr.exe : 3.3.0

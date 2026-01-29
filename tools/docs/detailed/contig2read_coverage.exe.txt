@@ -1,0 +1,32 @@
+Tool: contig2read_coverage.exe
+========================================
+
+Print a tsv-table with columns: Contig	Length	Coverage_avg	Noise
+
+USAGE:   contig2read_coverage.exe <in> <noise> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    contig2read_coverage.exe -help
+VERSION: contig2read_coverage.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Tab-delimited file where each line corresponds to one nucleotide and has format: <contig>	<coverage>
+<noise>
+    noise threshold (0..1)
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

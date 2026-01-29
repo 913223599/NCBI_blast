@@ -1,0 +1,40 @@
+Tool: disruption2genesymbol.exe
+========================================
+
+Convert Disruption::genesymbol_raw() to standard gene symbols according to https://hgvs-nomenclature.org/stable/recommendations/protein/frameshift/.
+A stop codon is 'Ter'.
+Print: <tab row> where <genesymbol> is inserted before <Disruption::genesymbol_raw()>
+
+USAGE:   disruption2genesymbol.exe <nucl> <prot> <tab> [-gencode 11] [-prot_id_pos 0] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    disruption2genesymbol.exe -help
+VERSION: disruption2genesymbol.exe -version
+
+POSITIONAL PARAMETERS
+<nucl>
+    Input nucleotide FASTA file
+<prot>
+    Input protein FASTA file
+<tab>
+    Table with lines: <contig identifier in <nucl>>  <protein identifier in <prot>>  <Disruption::genesymbol_raw()>
+
+NAMED PARAMETERS
+-gencode 11
+    NCBI genetic code for translated BLAST
+-prot_id_pos 0
+    Position of protein id in qseqid delimited by |, 1-based. 0 - use qseqid as a whole
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

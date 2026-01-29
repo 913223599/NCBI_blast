@@ -1,0 +1,34 @@
+Tool: interSeq.exe
+========================================
+
+Print identical (intersection) sequences in 2 FASTA files: <seqid of in1> <seqid of in2>
+
+USAGE:   interSeq.exe <in1> <in2> [-aa] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    interSeq.exe -help
+VERSION: interSeq.exe -version
+
+POSITIONAL PARAMETERS
+<in1>
+    Input FASTA file 1
+<in2>
+    Input FASTA file 2
+
+NAMED PARAMETERS
+-aa
+    Sequences are proteins, otherwise DNA
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

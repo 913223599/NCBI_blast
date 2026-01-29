@@ -1,0 +1,37 @@
+Tool: setMinus.exe
+========================================
+
+Print the set-theoretic minus: <list1> \ <list2>
+Time: O(L1 + L2 ) where L1=|list1|, L2=|list2|
+
+USAGE:   setMinus.exe <list1> <list2> [-number] [-subset] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    setMinus.exe -help
+VERSION: setMinus.exe -version
+
+POSITIONAL PARAMETERS
+<list1>
+    File with ordered set of items
+<list2>
+    File with ordered set of items to be removed from list1
+
+NAMED PARAMETERS
+-number
+    Items are numbers
+-subset
+    Break if <list1> is not a subset of <list2>
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

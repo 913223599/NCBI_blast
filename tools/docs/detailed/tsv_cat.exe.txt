@@ -1,0 +1,36 @@
+Tool: tsv_cat.exe
+========================================
+
+Concatenate tsv-tables
+
+USAGE:   tsv_cat.exe <list> <file_name> [-syn ""] [-skip_bad] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_cat.exe -help
+VERSION: tsv_cat.exe -version
+
+POSITIONAL PARAMETERS
+<list>
+    List of tsv-tables
+<file_name>
+    Name of the added column which will contain the file names in <list>; may be empty
+
+NAMED PARAMETERS
+-syn ""
+    Column synonyms file with the format: {<main synonym> <eol> {<synonym> <eol>}* {<eol>|<eof>}}*
+-skip_bad
+    Skip bad tsv-files
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

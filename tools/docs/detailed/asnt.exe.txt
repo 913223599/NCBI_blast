@@ -1,0 +1,37 @@
+Tool: asnt.exe
+========================================
+
+Parse an ASN.1 text file.
+<ASN.1> ::= <name> "::=" <node>
+<node> ::= <name>* [<value>]
+<value> ::= <name | "<text>" | <number> | '<hex_text>'H | { <nodes> }
+<nodes> ::= <node> | <nodes>, <node>
+
+
+USAGE:   asnt.exe <in> <names> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    asnt.exe -help
+VERSION: asnt.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Text ASN.1 file
+<names>
+    Search node names
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

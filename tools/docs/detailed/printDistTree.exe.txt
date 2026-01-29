@@ -1,0 +1,46 @@
+Tool: printDistTree.exe
+========================================
+
+Print a tree made by makeDistTree
+
+USAGE:   printDistTree.exe <input_tree> [-name_match ""] [-name_extend ""] [-clade_name ""] [-root_name ""] [-decimals 6] [-order] [-format newick] [-ext_name] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    printDistTree.exe -help
+VERSION: printDistTree.exe -version
+
+POSITIONAL PARAMETERS
+<input_tree>
+    Tree file
+
+NAMED PARAMETERS
+-name_match ""
+    File with lines: <name_old> <tab> <name_new>, to replace leaf names
+-name_extend ""
+    File with lines: <name[_new]> <tab> <name_extension>, to extend leaf names
+-clade_name ""
+    File with lines: {<name>|<name1>:<name2>} <tab> <clade name>
+-root_name ""
+    Root name
+-decimals 6
+    Number of decimals in arc lengths
+-order
+    Order subtrees by the number of leaves descending
+-format newick
+    newick | dm (Data Master format, makeDistTree output) | ASNT (textual ASN.1)
+-ext_name
+    Extended leaf names for newick
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

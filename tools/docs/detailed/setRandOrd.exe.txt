@@ -1,0 +1,30 @@
+Tool: setRandOrd.exe
+========================================
+
+Print a random reordering of <items>
+
+USAGE:   setRandOrd.exe <items> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    setRandOrd.exe -help
+VERSION: setRandOrd.exe -version
+
+POSITIONAL PARAMETERS
+<items>
+    File with items
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,38 @@
+Tool: blast2ani.exe
+========================================
+
+Compute ANI-based Jukes-Cantor dissimilarity.
+Console input: BLASTN HSP: 'qseqid sseqid qstart qend sstart send nident length qseq sseq' (capital letters)
+Print: <jc_whole> [<jc_ave> <jc_sd/jc_ave>] <jc_cluster_ave>
+
+USAGE:   blast2ani.exe <piece_len> [-cut] [-print_matches] [-pieces_file ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    blast2ani.exe -help
+VERSION: blast2ani.exe -version
+
+POSITIONAL PARAMETERS
+<piece_len>
+    Minimum piece length
+
+NAMED PARAMETERS
+-cut
+    cut into pieces of <piece_len>: if true then 'qseq sseq' should be absent, only 3rd codon positions in reduced alphabet (M/not M) are used
+-print_matches
+    print matching nt pairs (if <cut>)
+-pieces_file ""
+    Save data of HSP pieces into a file
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,32 @@
+Tool: effectiveSize.exe
+========================================
+
+Print effective number of different classes
+
+USAGE:   effectiveSize.exe <in> [-num 1000] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    effectiveSize.exe -help
+VERSION: effectiveSize.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Text file
+
+NAMED PARAMETERS
+-num 1000
+    Approximate number of different classes
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

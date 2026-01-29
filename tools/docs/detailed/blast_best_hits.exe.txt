@@ -1,0 +1,40 @@
+Tool: blast_best_hits.exe
+========================================
+
+Find BLAST HSPs with largest coverage
+Print tsv-file with columns: qseqid	sseqid	pident	qstart	qend	qstrand	sstart	send	sstrand	slen	pscoverage	stitle
+
+USAGE:   blast_best_hits.exe <blast> <pident_min> <coverage_min> <pcoverage_min> [-name] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    blast_best_hits.exe -help
+VERSION: blast_best_hits.exe -version
+
+POSITIONAL PARAMETERS
+<blast>
+    BLAST output in the format: qseqid sseqid length nident qstart qend sstart send slen stitle
+Grouped by name, qseqid
+<pident_min>
+    Min. identity percent of HSPs
+<coverage_min>
+    Min. coverage of HSP reference to report
+<pcoverage_min>
+    Min. coverage percent of HSP reference to report
+
+NAMED PARAMETERS
+-name
+    First column of <blast> is the query name
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

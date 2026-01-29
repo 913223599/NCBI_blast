@@ -1,0 +1,48 @@
+Tool: GeneMark2CDS.exe
+========================================
+
+Save CDSs predicted by GeneMark; FASTA description contains: trunc5:(0/1) trunc3:(0/1) 
+
+USAGE:   GeneMark2CDS.exe <fasta> <annot> [-gtf] [-cds ""] [-prot ""] [-prot_len_min 20] [-prot_len_max 50000] [-gencode 0] [-complete] [-ambig 1] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    GeneMark2CDS.exe -help
+VERSION: GeneMark2CDS.exe -version
+
+POSITIONAL PARAMETERS
+<fasta>
+    FASTA DNA file
+<annot>
+    GeneMark file with annotations
+
+NAMED PARAMETERS
+-gtf
+    <annot> is a GeneMark .gtf-file, otherwise a GeneMark .lst-file
+-cds ""
+    Output FASTA DNA file of CDSs
+-prot ""
+    Output FASTA DNA file of proteins
+-prot_len_min 20
+    Min. protein length
+-prot_len_max 50000
+    Min. protein length
+-gencode 0
+    NCBI genetic code
+-complete
+    Save only non-truncated
+-ambig 1
+    Min. number of ambiguities to discard
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

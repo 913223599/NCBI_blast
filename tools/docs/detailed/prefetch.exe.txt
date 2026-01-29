@@ -1,0 +1,70 @@
+Tool: prefetch.exe
+========================================
+
+## 项目中的使用说明 (Source Code Context)
+在本项目 (`src/sra/sra_executor.py`) 中，`prefetch` 用于下载 SRA 数据。
+
+**典型调用方式**:
+```python
+prefetch.exe <SRR_ID> --output-directory <TARGET_DIR> --progress
+```
+
+**错误处理**:
+- 程序会检查并在下载失败时删除残留的 `.lock` 文件。
+- 捕获退出代码 `0xC0000135` (3221225781)，提示缺少 MinGW 依赖库 (libwinpthread-1.dll 等)。
+- 进度条处理：脚本会解析输出中的百分比信息进行限流显示。
+
+----------------------------------------
+## 官方帮助信息 (Official Help)
+
+Usage:
+  prefetch.exe [options] <SRA accession> [...]
+  Download SRA files and their dependencies
+
+  prefetch.exe [options] --perm <JWT cart file> <SRA accession> [...]
+  Download SRA files and their dependencies from JWT cart
+
+  prefetch.exe [options] --cart <kart file>
+  Download cart file
+
+  prefetch.exe [options] <URL> --output-file <FILE>
+  Download URL to FILE
+
+  prefetch.exe [options] <URL> [...] --output-directory <DIRECTORY>
+  Download URL or URL-s to DIRECTORY
+
+  prefetch.exe [options] <SRA file> [...]
+  Check SRA file for missed dependencies and download them
+
+
+Options:
+  -T|--type <value>                Specify file type to download. Default: sra 
+  -t|--transport <http|fasp|both>  Transport: one of: fasp; http; both 
+                                   [default]. (fasp only; http only; first try 
+                                   fasp (ascp), use http if cannot download 
+                                   using fasp). 
+  --location <value>               Location of data. 
+
+  -N|--min-size <size>             Minimum file size to download in KB 
+                                   (inclusive). 
+  -X|--max-size <size>             Maximum file size to download in KB 
+                                   (exclusive). Default: 20G 
+  -f|--force <yes|no|all|ALL>      Force object download: one of: no, yes, 
+                                   all, ALL. no [default]: skip download if the 
+                                   object if found and complete; yes: download 
+                                   it even if it is found and is complete; all: 
+                                   ignore lock files (stale locks or it is 
+                                   being downloaded by another process use 
+                                   at your own risk!); ALL: ignore lock files, 
+                                   restart download from beginning. 
+  -r|--resume <yes|no>             Resume partial downloads: one of: no, yes 
+                                   [default]. 
+  -C|--verify <yes|no>             Verify after download: one of: no, yes 
+                                   [default]. 
+  -p|--progress                    Show progress. 
+  -H|--heartbeat <value>           Time period in minutes to display download 
+                                   progress. (0: no progress), default: 1 
+  -O|--output-directory <DIRECTORY>  Save files to DIRECTORY/ 
+  -h|--help                        Output brief explanation for the program. 
+  -V|--version                     Display the version of the program then 
+                                   quit. 

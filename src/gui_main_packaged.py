@@ -9,28 +9,72 @@ PyQt GUI主程序入口 - 用于打包版本
 import os
 import sys
 import traceback
+import logging
+import faulthandler
+from datetime import datetime
 
-# 修复在--windowed模式下丢失stdin/stdout的问题
-if not hasattr(sys, 'stdout'):
-    sys.stdout = open(os.devnull, 'w')
-if not hasattr(sys, 'stderr'):
-    sys.stderr = open(os.devnull, 'w')
-if not hasattr(sys, 'stdin'):
-    sys.stdin = open(os.devnull, 'r')
+# 确保 log 目录存在
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'logs')
+if getattr(sys, 'frozen', False):
+    # 如果是打包环境，logs 在可执行文件同级
+    log_dir = os.path.join(os.path.dirname(sys.executable), 'logs')
 
+os.makedirs(log_dir, exist_ok=True)
+
+# 1. 启用 Fault Handler 以捕获硬崩溃 (如 0xC0000409)
+try:
+    crash_log_path = os.path.join(log_dir, 'crash_dump.log')
+    crash_log = open(crash_log_path, 'wb', buffering=0) 
+    faulthandler.enable(file=crash_log, all_threads=True)
+except Exception as e:
+    print(f"Failed to enable faulthandler: {e}")
+
+# 2. 配置日志记录到文件
+log_filename = os.path.join(log_dir, f"application_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+logging.basicConfig(
+    filename=log_filename,
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    encoding='utf-8'
+)
+
+# 3. 双向重定向 stdout/stderr: 既输出到控制台(如有)，也写入日志文件
+class DualLogger:
+    def __init__(self, original_stream, logger_func):
+        self.original_stream = original_stream
+        self.logger_func = logger_func
+
+    def write(self, message):
+        if message.strip():
+            self.logger_func(message.strip())
+        # 尝试写入原始流 (如果有)
+        try:
+            if self.original_stream and not self.original_stream.closed:
+                self.original_stream.write(message)
+                self.original_stream.flush()
+        except Exception:
+            pass
+
+    def flush(self):
+        try:
+            if self.original_stream and not self.original_stream.closed:
+                self.original_stream.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        try:
+            return self.original_stream.isatty()
+        except Exception:
+            return False
+            
+sys.stdout = DualLogger(sys.stdout, logging.info)
+sys.stderr = DualLogger(sys.stderr, logging.error)
+
+print(f"Logging initialized to {log_filename}")
 print("Starting GUI application...")  # 添加调试输出
 
 try:
-    # 首先进行环境检查
-    print("Checking environment...")
-    from src.utils.environment_checker import check_environment
-    
-    if not check_environment():
-        print("Environment check failed. Exiting...")
-        sys.exit(1)
-    
-    print("Environment check passed. Starting application...")
-
     # 动态添加必要的路径
     if getattr(sys, 'frozen', False):
         # 如果是PyInstaller打包的可执行文件
@@ -56,6 +100,16 @@ try:
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if project_root not in sys.path:
             sys.path.insert(0, project_root)
+
+    # 首先进行环境检查
+    print("Checking environment...")
+    from src.utils.environment_checker import check_environment
+    
+    if not check_environment():
+        print("Environment check failed. Exiting...")
+        sys.exit(1)
+    
+    print("Environment check passed. Starting application...")
 
     print("Importing main function...")
     

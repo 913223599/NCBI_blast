@@ -1,0 +1,34 @@
+Tool: fixed2tsv.exe
+========================================
+
+Convert a fixed-field text file to a tsv-table
+
+USAGE:   fixed2tsv.exe <in> <field_start> [-skip_comment] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    fixed2tsv.exe -help
+VERSION: fixed2tsv.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Fixed-field text file
+<field_start>
+    1-based start positions of fieldas
+
+NAMED PARAMETERS
+-skip_comment
+    Skip comment starting with '#'
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

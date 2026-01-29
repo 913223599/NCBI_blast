@@ -1,0 +1,30 @@
+Tool: dna_consensus.exe
+========================================
+
+Print a DNA alignment consensus
+
+USAGE:   dna_consensus.exe <Multi_FASTA> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    dna_consensus.exe -help
+VERSION: dna_consensus.exe -version
+
+POSITIONAL PARAMETERS
+<Multi_FASTA>
+    Multi-FASTA DNA file with aligned sequences
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

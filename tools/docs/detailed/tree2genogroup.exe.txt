@@ -1,0 +1,38 @@
+Tool: tree2genogroup.exe
+========================================
+
+Find genogroups in a distance tree by single linkage clustering
+
+USAGE:   tree2genogroup.exe <input_tree> <genogroup_dist> [-genogroup_table ""] [-genogroups ""] [-genogroup_under_genogroup ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tree2genogroup.exe -help
+VERSION: tree2genogroup.exe -version
+
+POSITIONAL PARAMETERS
+<input_tree>
+    Tree file
+<genogroup_dist>
+    Max. distance between objects of the same genogroup
+
+NAMED PARAMETERS
+-genogroup_table ""
+    File with lines: <object> <genogroup leader>
+-genogroups ""
+    File with the names of the interior nodes which are genogroup roots
+-genogroup_under_genogroup ""
+    File with lines: <node1 LCA name> <node2 LCA name>, where nodes belong to different genogroups, but node1 is a child of node2
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

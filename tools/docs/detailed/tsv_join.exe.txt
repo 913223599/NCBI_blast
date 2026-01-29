@@ -1,0 +1,40 @@
+Tool: tsv_join.exe
+========================================
+
+Join 2 tsv-tables by identical columns, print the result
+
+USAGE:   tsv_join.exe <table1> <table2> [-syn ""] [-left] [-remove] [-common ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_join.exe -help
+VERSION: tsv_join.exe -version
+
+POSITIONAL PARAMETERS
+<table1>
+    tsv-table
+<table2>
+    tsv-table
+
+NAMED PARAMETERS
+-syn ""
+    Column synonyms file with the format: {<main synonym> <eol> {<synonym> <eol>}* {<eol>|<eof>}}*
+-left
+    SQL left join
+-remove
+    Remove the rows from <table1> which are in <table2>
+-common ""
+    Output file to print common columns
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

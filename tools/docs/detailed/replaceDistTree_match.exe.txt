@@ -1,0 +1,34 @@
+Tool: replaceDistTree_match.exe
+========================================
+
+Replace a subtree in a "whole" distance tree by matching the subtrees of a "part" tree with the subtrees of the "whole" tree
+
+USAGE:   replaceDistTree_match.exe <whole> <part> <out> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    replaceDistTree_match.exe -help
+VERSION: replaceDistTree_match.exe -version
+
+POSITIONAL PARAMETERS
+<whole>
+    Rooted tree where there is a subtree to be replaced by <part>
+<part>
+    Rooted tree to replace a subtree in <whole>
+<out>
+    Output tree
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

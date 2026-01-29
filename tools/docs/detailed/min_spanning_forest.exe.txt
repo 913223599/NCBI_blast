@@ -1,0 +1,34 @@
+Tool: min_spanning_forest.exe
+========================================
+
+Print minimum spanning forest per connected component
+
+USAGE:   min_spanning_forest.exe <in> [-max] [-rename ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    min_spanning_forest.exe -help
+VERSION: min_spanning_forest.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    File with lines: <item1> <item2> <weight>. Sorted by <weight> ascending, or descending if -max
+
+NAMED PARAMETERS
+-max
+    <weight> must be maximized in the forest, otherwise minimized
+-rename ""
+    File with pairs: <item> <tab> <new name>
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

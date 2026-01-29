@@ -1,0 +1,40 @@
+Tool: prot_clust.exe
+========================================
+
+Print: <protein 1> <protein 2> <Jaccard index of protein sequence hashes>. Time: 3.5 hours/5.5 M sequences
+
+USAGE:   prot_clust.exe <in> <jaccard_min> <out> [-jaccard_k 4] [-index_k 20] [-freq_max 0.001] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    prot_clust.exe -help
+VERSION: prot_clust.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Protein FASTA file
+<jaccard_min>
+    Min. <Jaccard index>. 0.5 matches 85% identity, 0.4 - 50% identity
+<out>
+    Matches: <id1> <id2> <Jaccard index>
+
+NAMED PARAMETERS
+-jaccard_k 4
+    K-mer length for Jaccard index
+-index_k 20
+    K-mer length for indexing, larger than <jaccard_k>
+-freq_max 0.001
+    Max. relative frequency of an index k-mer. Set to 1 for remote matches
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

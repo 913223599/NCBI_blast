@@ -21,6 +21,11 @@ class Application:
         """
         初始化应用程序
         """
+        # 为 WebEngine 注入稳定性参数，防止某些显卡驱动导致的 0xC0000409 崩溃
+        sys.argv.append("--disable-gpu")
+        sys.argv.append("--no-sandbox")
+        sys.argv.append("--disable-software-rasterizer")
+        
         print("Creating QApplication...")
         self.app = QApplication(sys.argv)
         self.app.setApplicationName("NCBI BLAST 查询工具")

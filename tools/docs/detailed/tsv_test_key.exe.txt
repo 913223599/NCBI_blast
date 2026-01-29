@@ -1,0 +1,32 @@
+Tool: tsv_test_key.exe
+========================================
+
+Test a key of a tsv-file, print column numbers (1-based)
+
+USAGE:   tsv_test_key.exe <tsv> <keys> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_test_key.exe -help
+VERSION: tsv_test_key.exe -version
+
+POSITIONAL PARAMETERS
+<tsv>
+    tsv-table
+<keys>
+    Object columns in <tsv>, comma-delimited
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

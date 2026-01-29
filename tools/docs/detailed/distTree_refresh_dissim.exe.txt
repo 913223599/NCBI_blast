@@ -1,0 +1,36 @@
+Tool: distTree_refresh_dissim.exe
+========================================
+
+Create files with representative dissimilarities
+
+USAGE:   distTree_refresh_dissim.exe <dir> <dissim_request> <output_dissim> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-threads 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    distTree_refresh_dissim.exe -help
+VERSION: distTree_refresh_dissim.exe -version
+
+POSITIONAL PARAMETERS
+<dir>
+    Directory with data for an incremental tree ending with '/'
+<dissim_request>
+    Output file with requests to compute needed dissimilarities, tab-delimited line format: <obj1> <obj2>
+<output_dissim>
+    Output file with dissimilarities used in the tree, tab-delimited line format: <obj1> <obj2> <dissimilarity>
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-threads 1
+    Max. number of threads
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,40 @@
+Tool: replaceDistTree_reroot.exe
+========================================
+
+Replace a subtree in a "whole" distance tree with a rerooted "part" tree
+
+USAGE:   replaceDistTree_reroot.exe <whole> <part> <out> [-variance none] [-variance_power NaN] [-variance_min 0] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    replaceDistTree_reroot.exe -help
+VERSION: replaceDistTree_reroot.exe -version
+
+POSITIONAL PARAMETERS
+<whole>
+    Rooted tree where there is a subtree to be replaced by <part>
+<part>
+    Tree to replace a subtree in <whole>
+<out>
+    Output tree
+
+NAMED PARAMETERS
+-variance none
+    Dissimilarity variance function for <part>: lin | sqr | pow | exp | linExp | none
+-variance_power NaN
+    Power for -variance pow for <part>; >= 0
+-variance_min 0
+    Min. dissimilarity variance for <part>
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,34 @@
+Tool: conv_comb.exe
+========================================
+
+Convex combinination of two dissimilarities
+
+USAGE:   conv_comb.exe <in1> <in2> <coeff> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    conv_comb.exe -help
+VERSION: conv_comb.exe -version
+
+POSITIONAL PARAMETERS
+<in1>
+    File with lines: <obj1> <obj2> <dissimilarity>
+<in2>
+    File with lines: <obj1> <obj2> <dissimilarity>. Object pairs must match <in1>
+<coeff>
+    Coefficient for dissimilarity in <in1>, 0..1
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

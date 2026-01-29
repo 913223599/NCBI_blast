@@ -1,0 +1,33 @@
+Tool: kmerIndex_make.exe
+========================================
+
+Make a DNA k-mer index.
+Index size = O(n), where n is the number of sequences.
+
+USAGE:   kmerIndex_make.exe <kmer_index> <kmer_size> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    kmerIndex_make.exe -help
+VERSION: kmerIndex_make.exe -version
+
+POSITIONAL PARAMETERS
+<kmer_index>
+    K-mer index file name
+<kmer_size>
+    K-mer size (1..14)
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

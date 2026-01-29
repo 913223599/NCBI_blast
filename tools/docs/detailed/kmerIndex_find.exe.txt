@@ -1,0 +1,39 @@
+Tool: kmerIndex_find.exe
+========================================
+
+Find close sequences using a DNA k-mer index.
+Time: O(log n), where n is the number of DNA sequences in the index
+
+USAGE:   kmerIndex_find.exe <kmer_index> <FASTA> <top> [-common_kmers] [-self] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    kmerIndex_find.exe -help
+VERSION: kmerIndex_find.exe -version
+
+POSITIONAL PARAMETERS
+<kmer_index>
+    DNA k-mer index file name
+<FASTA>
+    Input DNA sequence
+<top>
+    Number of closest sequence identifiers to print
+
+NAMED PARAMETERS
+-common_kmers
+    Print number of common k-mers
+-self
+    Do not remove the input DNA identifier
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

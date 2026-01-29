@@ -1,0 +1,6 @@
+Tool: check-corrupt.exe
+========================================
+
+2026-01-29T10:08:52 check-corrupt.3.3.0 err: libs/kapp/args.c:1347:ArgsParseInt: param unknown while parsing argument list within application support module - Unknown argument '-e'
+2026-01-29T10:08:52 check-corrupt.3.3.0 err: libs/kapp/args.c:1347:ArgsParseInt: param unknown while parsing argument list within application support module - Unknown argument '-l'
+2026-01-29T10:08:52 check-corrupt.3.3.0 err: libs/kapp/args.c:1347:ArgsParseInt: param unknown while parsing argument list within application support module - Unknown argument '-p'

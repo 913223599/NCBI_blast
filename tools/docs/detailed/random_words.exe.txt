@@ -1,0 +1,40 @@
+Tool: random_words.exe
+========================================
+
+Generate distinct ASCII-printable random words
+
+USAGE:   random_words.exe <num> <len_max> [-exclude ""] [-exclude_first ""] [-exclude_last ""] [-exclude_double ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    random_words.exe -help
+VERSION: random_words.exe -version
+
+POSITIONAL PARAMETERS
+<num>
+    Number of random words
+<len_max>
+    Max. word length
+
+NAMED PARAMETERS
+-exclude ""
+    Characters to exclude
+-exclude_first ""
+    Characters in the beginning of a word to exclude
+-exclude_last ""
+    Characters at the end of a word to exclude
+-exclude_double ""
+    Double characters to exclude
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

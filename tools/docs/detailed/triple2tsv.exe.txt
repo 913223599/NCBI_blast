@@ -1,0 +1,40 @@
+Tool: triple2tsv.exe
+========================================
+
+Convert a tsv-file of object-attribute-value triples into a tsv-file with attributes as columns
+
+USAGE:   triple2tsv.exe <table> <obj> <attr> <val> [-no_header] [-aggr] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    triple2tsv.exe -help
+VERSION: triple2tsv.exe -version
+
+POSITIONAL PARAMETERS
+<table>
+    tsv-table where <<obj>,<attr>> is a key
+<obj>
+    Object column in <table>
+<attr>
+    Attribute column in <table>
+<val>
+    Value column in <table>
+
+NAMED PARAMETERS
+-no_header
+    .tsv-file has no header
+-aggr
+    Aggregate multipel values
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

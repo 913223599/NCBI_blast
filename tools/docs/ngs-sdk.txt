@@ -1,0 +1,22 @@
+NCBI NGS SDK 说明文档
+
+目录位置: tools/ncbi_dist/lib/ngs-sdk
+
+## 1. 概述
+NCBI NGS (Next Generation Sequencing) SDK 是一个高级别的抽象 API，旨在为访问下一代测序数据提供统一的编程接口。与底层的 VDB 库不同，NGS SDK 更加面向对象，提供了类似于 Java 或 C++ 类的接口（ReadCollection, Read, Alignment 等），屏蔽了底层的格式差异。
+
+## 2. 库文件说明
+- **libngs-sdk.a**: NGS SDK 的静态库文件。
+
+## 3. 功能特性
+NGS SDK 允许开发者编写不依赖于特定底层文件格式（如 SRA, VDB, BAM 等）的代码。如果系统安装了相应的驱动（如 ncbi-vdb），NGS SDK 就可以透明地访问这些格式的数据。
+
+主要功能类包括：
+- **ReadCollection**: 代表一组 reads 的集合（如一个 SRA run）。
+- **Read**: 单条测序读段。
+- **Fragment**: 测序片段。
+- **Alignment**: 参考序列比对信息。
+- **Reference**: 参考序列。
+
+## 4. 开发用途
+用于开发需要处理 NGS 数据的生物信息学软件。相比于直接使用 VDB API，NGS SDK API 更简单、更稳定且易于维护。

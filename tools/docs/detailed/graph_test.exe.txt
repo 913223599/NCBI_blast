@@ -1,0 +1,74 @@
+Tool: graph_test.exe
+========================================
+
+London  
+  In:
+  Out:
+    Paris: 100
+    Berlin: 200
+    Madrid: 50
+
+Paris  
+  In:
+    London: 100
+    Berlin: 30
+    Berlin: 35
+  Out:
+
+Berlin  
+  In:
+    London: 200
+    Berlin: 0
+  Out:
+    Paris: 30
+    Paris: 35
+    Berlin: 0
+    Madrid: 200
+
+Madrid  
+  In:
+    London: 50
+    Berlin: 200
+  Out:
+
+
+London  
+  In:
+  Out:
+    Berlin: 200
+    Madrid: 50
+
+Paris  
+  In:
+  Out:
+
+Berlin  
+  In:
+    London: 200
+  Out:
+    Madrid: 200
+
+Madrid  
+  In:
+    London: 50
+    Berlin: 200
+  Out:
+
+
+London  
+  In:
+  Out:
+    Berlin: 200
+    Madrid: 50
+
+Berlin  
+  In:
+    London: 200
+  Out:
+    Madrid: 200
+
+Madrid  
+  In:
+    London: 50
+    Berlin: 200
+  Out:

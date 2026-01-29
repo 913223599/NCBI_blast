@@ -1,0 +1,30 @@
+Tool: prots_pair2stat.exe
+========================================
+
+Compute amino acid substitution statistic
+
+USAGE:   prots_pair2stat.exe <pairs_dist> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    prots_pair2stat.exe -help
+VERSION: prots_pair2stat.exe -version
+
+POSITIONAL PARAMETERS
+<pairs_dist>
+    File with lines: <Alignment file1> <Alignment file2> <evolution distance>
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

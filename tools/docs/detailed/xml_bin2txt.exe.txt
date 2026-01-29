@@ -1,0 +1,32 @@
+Tool: xml_bin2txt.exe
+========================================
+
+Convert binary XML to text XML
+
+USAGE:   xml_bin2txt.exe <from> <to> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    xml_bin2txt.exe -help
+VERSION: xml_bin2txt.exe -version
+
+POSITIONAL PARAMETERS
+<from>
+    Input binary XML file
+<to>
+    Output text XML file
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

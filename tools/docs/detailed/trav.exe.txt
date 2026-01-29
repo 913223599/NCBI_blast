@@ -1,0 +1,52 @@
+Tool: trav.exe
+========================================
+
+Apply <command> to all <items>
+
+USAGE:   trav.exe <items> <command> [-large] [-errors ""] [-step 100] [-start 1] [-zero] [-print] [-tsv] [-number] [-good_exit_codes 0] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-threads 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    trav.exe -help
+VERSION: trav.exe -version
+
+POSITIONAL PARAMETERS
+<items>
+    Items container: file with items (end-of-line separated), a directory (in this case items are files in this directory in raw order), or a natural number
+<command>
+    Text with special symbols: "%d" = <items>, "%f" - item, "%n" - item number (see -zero), "%<n>" - subitem #n (1 <= n <= 9), "%{<n>}" - subitem #n (n >= 10), "%h" - small item hash (0..999), "%H" - large item hash (0..99999), "%q" - single quote, "%Q" - double quote, "%D" - $, "%g" - `, "%b" - backslash, "%p" - %
+
+NAMED PARAMETERS
+-large
+    Directory <items> is large: it is subdivided into subdirectories "0" .. "999" which are the hashes of file names
+-errors ""
+    Ignore errors in running items and save error items into this file
+-step 100
+    # Items processed to output the progress for
+-start 1
+    # Item to start with
+-zero
+    Item numbers are 0-based, otherwise 1-based
+-print
+    Print command, not execute
+-tsv
+    <items> is a tsv-file
+-number
+    <items> is a number (not a file or directory)
+-good_exit_codes 0
+    Comma-delimited list of allowed exit codes
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-threads 1
+    Max. number of threads
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

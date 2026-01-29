@@ -1,0 +1,38 @@
+Tool: dna2prots.exe
+========================================
+
+Print all longest proteins between start and stop codons
+
+USAGE:   dna2prots.exe <in> <gencode> <len_min> [-complexity_min 0] [-no_x] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    dna2prots.exe -help
+VERSION: dna2prots.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input DNA multi-FASTA file
+<gencode>
+    NCBI genetic code
+<len_min>
+    Min. protein length in aa
+
+NAMED PARAMETERS
+-complexity_min 0
+    Min. protein sequence complexity
+-no_x
+    Suppress sequences with ambiguous aa
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

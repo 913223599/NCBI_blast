@@ -1,0 +1,46 @@
+Tool: dna_coverage.exe
+========================================
+
+Print the coverage of a query DNA by subject DNAs or proteins, sorted by qseqid, as a .tsv-table
+
+USAGE:   dna_coverage.exe <in> [-prot] [-mode all] [-query ""] [-subject ""] [-pident_min 0] [-align_min 0] [-force] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    dna_coverage.exe -help
+VERSION: dna_coverage.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    BLASTN output in format: qseqid sseqid length nident qstart qend qlen sstart send slen stitle, sorted by qseqid and nident descending.
+If '' then print only the table header
+
+NAMED PARAMETERS
+-prot
+    Subject is proteins
+-mode all
+    combine: combine the coverages of subject DNAs
+all: report all covered segments
+-query ""
+    Query DNA name
+-subject ""
+    Subject DNA name, used if mode = combine
+-pident_min 0
+    Min. percent of identity of HSP
+-align_min 0
+    Min. alignment length of HSP
+-force
+    Force one-line report if there is no match
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,32 @@
+Tool: hmmSplit.exe
+========================================
+
+Split an HMM library into HMM files named as the NAME field
+
+USAGE:   hmmSplit.exe <in> <out_dir> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    hmmSplit.exe -help
+VERSION: hmmSplit.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input HMM library
+<out_dir>
+    Output directory
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,44 @@
+Tool: testDistTree.exe
+========================================
+
+Test the optimiality of a tree by reinsert
+
+USAGE:   testDistTree.exe <data> [-input_tree ""] [-dissim_attr ""] [-dissim_power 1] [-dissim_coeff 1] [-variance none] [-variance_power NaN] [-variance_min 0] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    testDistTree.exe -help
+VERSION: testDistTree.exe -version
+
+POSITIONAL PARAMETERS
+<data>
+    .dm-file without ".dm" to read object comments
+
+NAMED PARAMETERS
+-input_tree ""
+    Tree file
+-dissim_attr ""
+    Dissimilarity attribute name in the <data> file
+-dissim_power 1
+    Power to raise dissimilarity in
+-dissim_coeff 1
+    Coefficient to multiply dissimilarity by (after dissim_power is applied)
+-variance none
+    Dissimilarity variance function: lin | sqr | pow | exp | linExp | none
+-variance_power NaN
+    Power for -variance pow; >= 0
+-variance_min 0
+    Min. dissimilarity variance
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

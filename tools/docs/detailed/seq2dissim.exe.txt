@@ -1,0 +1,57 @@
+Tool: seq2dissim.exe
+========================================
+
+Align and compute dissimilarity for a pair of sequences.
+Print: ref_match: <target start>-<target stop> (human coordinates)
+
+USAGE:   seq2dissim.exe <target> <reference> [-prot_name ""] [-global] [-match_score 5] [-mismatch_score 4] [-gap_open 10] [-gap_extent 5] [-match_len_min 60] [-noambig -1] [-mutation ""] [-ambig_start] [-blosum62] [-alignment] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    seq2dissim.exe -help
+VERSION: seq2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<target>
+    FASTA file 1 with a sequence (target)
+<reference>
+    FASTA file 1 with a sequence (reference)
+
+NAMED PARAMETERS
+-prot_name ""
+    Protein name. Empty string means that sequences are DNA
+-global
+    Global alignment, otherwise semiglobal
+-match_score 5
+    DNA match integer score, > 0
+-mismatch_score 4
+    DNA mismatch integer penalty, > 0
+-gap_open 10
+    DNA gap open integer penalty, >= 0
+-gap_extent 5
+    DNA gap extent integer penalty, > 0
+-match_len_min 60
+    Min. match length. Valid for semiglobal alignment
+-noambig -1
+    Min. window around a mutation with no ambiguity. -1: allow ambiguities
+-mutation ""
+    File for mutations
+-ambig_start
+    Replace deletions at the start of <target> by the ambiguity character
+-blosum62
+    Use substitution matrix BLASUM62, otherwise PAM30. Valid for protein sequences
+-alignment
+    Print alignment
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

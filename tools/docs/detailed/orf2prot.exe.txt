@@ -1,0 +1,34 @@
+Tool: orf2prot.exe
+========================================
+
+Convert ORFs into proteins
+
+USAGE:   orf2prot.exe <Multi_FASTA> [-no_stop] [-error ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    orf2prot.exe -help
+VERSION: orf2prot.exe -version
+
+POSITIONAL PARAMETERS
+<Multi_FASTA>
+    Multi-FASTA file with ORFs
+
+NAMED PARAMETERS
+-no_stop
+    It is allowed to miss the stop codon
+-error ""
+    File with errors
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

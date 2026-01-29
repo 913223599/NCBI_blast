@@ -1,0 +1,32 @@
+Tool: blastn2mlst.exe
+========================================
+
+Print 7-locus MLST number given the BLASTN result against an MLST scheme. 0 - unknown, 999999 - novel
+
+USAGE:   blastn2mlst.exe <alleles> <mlst_dir> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    blastn2mlst.exe -help
+VERSION: blastn2mlst.exe -version
+
+POSITIONAL PARAMETERS
+<alleles>
+    List of MLST alleles (first tab-separated field in each line)
+<mlst_dir>
+    MLST directory with all.fa (all <locus>.fasta-files) and profiles.list
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

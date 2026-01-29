@@ -1,0 +1,54 @@
+Tool: splitFasta.exe
+========================================
+
+Split a multi-fasta file into a set of fasta files each containing one sequence
+
+USAGE:   splitFasta.exe <in> <out_dir> [-aa] [-sparse] [-len_min 0] [-whole] [-pseudo] [-mono_nuc_max 0] [-large] [-group_count 0] [-group_size 0] [-extension ""] [-suffix ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    splitFasta.exe -help
+VERSION: splitFasta.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Input multi-FASTA file
+<out_dir>
+    Output directory
+
+NAMED PARAMETERS
+-aa
+    Multi-FASTA file contains protein sequences, otherwise DNA sequences
+-sparse
+    Sparse sequence
+-len_min 0
+    Minimum sequence length
+-whole
+    Sequence identifiers are whole strings which should not be split by '|'
+-pseudo
+    Pseudo-proteins are allowed
+-mono_nuc_max 0
+    Mask mononucleotide repeats longer than <mono_nuc_max>. 0 = infinity
+-large
+    Create files in subdirectories "0" .. "999" which are the hashes of file names
+-group_count 0
+    Group by <group_count> number of sequences. Group names are sequential numbers. 0 - no grouping.
+-group_size 0
+    Make groups of sequences with total sequence size <= <group_size> with possible splitting sequences. Group names are sequential numbers. 0 - no grouping.
+-extension ""
+    Add file extension (not compatible with -group_count or -group_size)
+-suffix ""
+    Suffix to add to each sequence separated by dash
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

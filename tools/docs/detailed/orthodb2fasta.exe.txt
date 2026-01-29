@@ -1,0 +1,32 @@
+Tool: orthodb2fasta.exe
+========================================
+
+Extract FASTA file for given taxids from a gzipped OrthoDB file
+
+USAGE:   orthodb2fasta.exe <orthodb> <taxids> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    orthodb2fasta.exe -help
+VERSION: orthodb2fasta.exe -version
+
+POSITIONAL PARAMETERS
+<orthodb>
+    OrthoDB gzipped FASTA file
+<taxids>
+    List of taxids
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

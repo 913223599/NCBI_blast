@@ -1,0 +1,201 @@
+NCBI Tree Tools 工具包说明文档
+
+目录位置: tools/ncbi_dist/bin/tree-tools
+
+## 1. 概述
+Tree Tools 是一组用于系统发育分析、序列处理、格式转换和数据挖掘的工具集合。该工具包包含了大量专注于特定任务的小型实用程序，覆盖了从序列清洗、比对、统计到构建系统发育树的全流程。
+
+## 2. 功能分类说明
+
+### A. 序列处理 (DNA/Protein)
+- **转换**: `dna2prots` (DNA转氨基酸), `orf2prot`, `hmm2prot`
+- **统计**: `dna2stat`, `dna_complexity`, `dna_gc_skew`, `prot_complexity`
+- **编辑**: `dna_cut`, `dna_trim` (修剪), `dna_rev` (反向互补)
+- **比较与比对**: `dna_diff`, `dna_align_service`, `prot_find`, `blast_best_hits`
+
+### B. FASTA 文件操作
+- **格式处理**: `fasta2GC`, `fasta2len` (长度统计), `fasta2hash`
+- **分割与过滤**: `splitFasta`, `filterFasta`
+- **元数据**: `replaceFastaHeader`, `fastaAddGi`
+
+### C. 系统发育树 (Construction & Analysis)
+- **建树**: `makeDistTree` (构建距离树), `makeFeatureTree`, `distTree_new`
+- **树操作**: `compareTrees`, `printDistTree`, `statDistTree`, `newick2tree`
+- **高级分析**: `tree2genogroup`, `tree2indiscern`, `randomDistTree`
+
+### D. 表格与数据转换 (TSV/XML)
+- **TSV 工具**: `tsv_join`, `tsv_sort`, `tsv_cluster`, `tsv2html`
+- **XML 工具**: `xml_find`, `xml2schema`, `xml_print`
+
+### E. 其他实用程序
+- **哈希工具**: `str2hash`, `file2hash`, `hash2dissim`
+- **Blast 后处理**: `blast2ani`, `blast2cons`, `tblastn2orfs`
+- **测试**: `hello`, `gzip_test`
+
+## 3. 库依赖
+依赖 MinGW 运行时库: `libstdc++-6.dll`, `libgcc_s_seh-1.dll`, `libgomp-1.dll` 等。
+
+## 4. 完整文件清单 (Full Inventory)
+以下列出目录下所有 161 个文件，确保无遗漏：
+
+GeneMark2CDS.exe
+additive.exe
+align2html.exe
+ascii.exe
+asm_gap.exe
+asnt.exe
+asnt2tree.exe
+blast2ani.exe
+blast2cons.exe
+blast_best_hits.exe
+blastmat.exe
+blastn2mlst.exe
+blastp2exons.exe
+blastp_merge.exe
+colors_test.exe
+combine_dissims.exe
+compareTrees.exe
+connectPairs.exe
+contig2read_coverage.exe
+conv_comb.exe
+csv2tab.exe
+disruption2genesymbol.exe
+distTree_new.exe
+distTree_refresh_dissim.exe
+dm2feature.exe
+dna2prots.exe
+dna2stat.exe
+dna_align_service.exe
+dna_complexity.exe
+dna_consensus.exe
+dna_coverage.exe
+dna_cut.exe
+dna_diff.exe
+dna_find.exe
+dna_gc_skew.exe
+dna_pair2dissim.exe
+dna_rev.exe
+dna_trim.exe
+effectiveSize.exe
+extractPairs.exe
+fasta2GC.exe
+fasta2dissim.exe
+fasta2feature.exe
+fasta2hash.exe
+fasta2len.exe
+fasta2lines.exe
+fastaAddGi.exe
+fastaDna2pairs.exe
+fasta_prefix.exe
+feature2dissim.exe
+feature2gain_loss.exe
+feature_request2dissim.exe
+file2hash.exe
+filterFasta.exe
+fixed2tsv.exe
+genbank_grep.exe
+graph_test.exe
+gzip_test.exe
+hash2dissim.exe
+hash_request2dissim.exe
+hello.exe
+hmm2prot.exe
+hmmAddCutoff.exe
+hmmExtract.exe
+hmmNAME2ACC.exe
+hmmSplit.exe
+hmm_tc1.exe
+hmmsearch2besthits.exe
+index_find.exe
+interSeq.exe
+islander.exe
+key_test.exe
+kmerIndex_add.exe
+kmerIndex_find.exe
+kmerIndex_make.exe
+kmerIndex_stat.exe
+libatomic-1.dll
+libgcc_s_seh-1.dll
+libgfortran-5.dll
+libgomp-1.dll
+libquadmath-0.dll
+libstdc++-6.dll
+libwinpthread-1.dll
+list2pairs.exe
+loci_request2dissim.exe
+main_ortholog.exe
+makeDistTree.exe
+makeFeatureTree.exe
+mergePairs.exe
+min_spanning_forest.exe
+mlst2dissim.exe
+mlst2hash.exe
+multilist2subset.exe
+mutation2feature.exe
+mutation_dna2prot.exe
+mutation_tab.exe
+newick2tree.exe
+objHash_find.exe
+orf2prot.exe
+orthodb2fasta.exe
+pairs2tsv.exe
+printDistTree.exe
+prot2triplets.exe
+prot_check.exe
+prot_clust.exe
+prot_collection2dissim.exe
+prot_complexity.exe
+prot_consensus.exe
+prot_find.exe
+prot_grep_short.exe
+prots2hmm_signature.exe
+prots_pair2stat.exe
+randomDistTree.exe
+random_words.exe
+replaceDistTree_match.exe
+replaceDistTree_reroot.exe
+replaceFastaHeader.exe
+replace_dict.exe
+seq2dissim.exe
+seq_print.exe
+setMinus.exe
+setRandOrd.exe
+splitFasta.exe
+splitList.exe
+statDistTree.exe
+str2hash.exe
+symbet.exe
+symbet_blastp.exe
+tblastn2disruption.exe
+tblastn2marker_euk.exe
+tblastn2orfs.exe
+testDistTree.exe
+trav.exe
+tree2genogroup.exe
+tree2indiscern.exe
+triple2tsv.exe
+tsv2html.exe
+tsv2insert.exe
+tsv2triple.exe
+tsv_aggr_comp.exe
+tsv_cat.exe
+tsv_cluster.exe
+tsv_comp.exe
+tsv_group.exe
+tsv_join.exe
+tsv_null.exe
+tsv_rename.exe
+tsv_schema.exe
+tsv_shift.exe
+tsv_split.exe
+tsv_test_key.exe
+uniqProtRef.exe
+uniqSeq.exe
+xml2schema.exe
+xml_bin2txt.exe
+xml_find.exe
+xml_merge_schemas.exe
+xml_print.exe
+xml_schema2ddl.exe
+xml_schema2flat.exe
+xml_txt2bin.exe

@@ -1,0 +1,36 @@
+Tool: mlst2dissim.exe
+========================================
+
+Convert wgMLST data to a dissimilarity and print a .dm-file
+
+USAGE:   mlst2dissim.exe <biosamples> <pairs> [-ani] [-filtering] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    mlst2dissim.exe -help
+VERSION: mlst2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<biosamples>
+    File with a list of BioSamples
+<pairs>
+    File with tab-delimited lines: <obj1> <obj2> <X1> <X2> <X3> <X4> <Result> <number of loci in common with same allele> <number of loci in common with different allele> ...
+
+NAMED PARAMETERS
+-ani
+    Compute density-filtered ANI-based Jukes-Cantor distance, otherwise MLST DNA Jaccard evolution distance
+-filtering
+    Use density filtering?
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,32 @@
+Tool: pairs2tsv.exe
+========================================
+
+Convert a directory with attribute-value files to a tsv-table
+
+USAGE:   pairs2tsv.exe <dir> [-file_col ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    pairs2tsv.exe -help
+VERSION: pairs2tsv.exe -version
+
+POSITIONAL PARAMETERS
+<dir>
+    directory with attribute-value files; separators are ':', '=' or tab
+
+NAMED PARAMETERS
+-file_col ""
+    Column name for the file name
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,19 @@
+Tool: colors_test.exe
+========================================
+
+Color 30 dark
+Color 30 bright
+Color 31 dark
+Color 31 bright
+Color 32 dark
+Color 32 bright
+Color 33 dark
+Color 33 bright
+Color 34 dark
+Color 34 bright
+Color 35 dark
+Color 35 bright
+Color 36 dark
+Color 36 bright
+Color 37 dark
+Color 37 bright

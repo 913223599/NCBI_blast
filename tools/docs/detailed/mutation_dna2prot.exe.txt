@@ -1,0 +1,40 @@
+Tool: mutation_dna2prot.exe
+========================================
+
+Print protein mutations given DNA mutations and CDS annotations
+
+USAGE:   mutation_dna2prot.exe <mut> <ref> <annot> [-gencode 1] [-dna_mut] [-annot_overlap] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    mutation_dna2prot.exe -help
+VERSION: mutation_dna2prot.exe -version
+
+POSITIONAL PARAMETERS
+<mut>
+    Input list of DNA mutations
+<ref>
+    Reference DNA sequence file
+<annot>
+    File with CDS annotations in <ref>, line format: <CDS name> <start> <stop>; 1-based, <stop> is the last nucleotide position
+
+NAMED PARAMETERS
+-gencode 1
+    NCBI genetic code
+-dna_mut
+    print DNA mutation
+-annot_overlap
+    Print DNA mutation and overlapping protein annotations only
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

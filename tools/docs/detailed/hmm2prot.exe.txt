@@ -1,0 +1,32 @@
+Tool: hmm2prot.exe
+========================================
+
+Find new seeds for a set of HMMs
+
+USAGE:   hmm2prot.exe <hmmsearch> <dir> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    hmm2prot.exe -help
+VERSION: hmm2prot.exe -version
+
+POSITIONAL PARAMETERS
+<hmmsearch>
+    Output of hmmsearch
+<dir>
+    Directory for output files with ordered seed ids
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

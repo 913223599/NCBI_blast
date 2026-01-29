@@ -1,0 +1,34 @@
+Tool: tsv_split.exe
+========================================
+
+Create tables which are a split of a source table by key columns
+
+USAGE:   tsv_split.exe <table> <by> <dir> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    tsv_split.exe -help
+VERSION: tsv_split.exe -version
+
+POSITIONAL PARAMETERS
+<table>
+    tsv-table
+<by>
+    Column name to split by
+<dir>
+    Output directory
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

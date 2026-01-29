@@ -1,0 +1,32 @@
+Tool: randomDistTree.exe
+========================================
+
+Print a random distance tree
+
+USAGE:   randomDistTree.exe <branch_prob> <leaf_num_max> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    randomDistTree.exe -help
+VERSION: randomDistTree.exe -version
+
+POSITIONAL PARAMETERS
+<branch_prob>
+    Probability to expand a branch
+<leaf_num_max>
+    Max. number of leaves
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

@@ -1,0 +1,30 @@
+Tool: fasta2GC.exe
+========================================
+
+Print .dm-file with GC% of DNA sequences
+
+USAGE:   fasta2GC.exe <Multi_FASTA> [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    fasta2GC.exe -help
+VERSION: fasta2GC.exe -version
+
+POSITIONAL PARAMETERS
+<Multi_FASTA>
+    Multi-FASTA file with DNA sequences
+
+NAMED PARAMETERS
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

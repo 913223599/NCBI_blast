@@ -1,0 +1,66 @@
+NCBI VDB Library (Virtual Database) 说明文档
+
+目录位置: tools/ncbi_dist/lib/ncbi-vdb
+
+## 1. 概述
+NCBI VDB (Virtual Database) 是 SRA 工具包的核心底层存储引擎。它提供了一种高度压缩、列式的数据库格式，专门用于存储大规模的生物序列数据（如 NGS 数据）。
+
+## 2. 核心功能模块
+- **SRA 数据库支持**: `libsradb.a`, `libsrareader.a`, `libwsradb.a` (写入支持)
+- **VDB 核心**: `libncbi-vdb.a`, `libvdb.a`
+- **文件系统抽象 (VFS)**: `libvfs.a` - 支持本地及云端 (AWS/GCP) 文件访问。
+- **键值存储 (KDB)**: `libkdb.a` - 底层存储实现。
+- **压缩算法**: `libzstd.a`, `libbz2.a`, `libz.a`
+- **加密与安全**: `libmbedtls.a`, `libmbedcrypto.a`
+
+## 3. 完整文件清单
+(包含所有 48 个库文件)
+
+libalign-access.a
+libalign-reader.a
+libalign-writer.a
+libaxf.a
+libbz2.a
+libcloud.a
+libjudy.a
+libkdb.a
+libkdbtext.a
+libkfc.a
+libkfg.a
+libkfs-nommap.a
+libkfs.a
+libklib.a
+libkns.a
+libkproc.a
+libkq.a
+libkrypto.a
+libkryptotest.a
+libktst.a
+libmbedcrypto.a
+libmbedtls.a
+libmbedx509.a
+libncbi-bam.a
+libncbi-vdb.a
+libncbi-vdb.dll.a
+libncbi-wvdb.a
+libncbi-wvdb.dll.a
+libsam-extract.a
+libschema.a
+libsradb.a
+libsrareader.a
+libsraxf.a
+libvdb-blast.a
+libvdb.a
+libvdbapp.a
+libvfs.a
+libvxf.a
+libwaxf.a
+libwgsxf.a
+libwsradb.a
+libwsraxf.a
+libwvdb.a
+libwvxf.a
+libwwgsxf.a
+libz.a
+libzstd.a
+objects.a

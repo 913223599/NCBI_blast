@@ -1,0 +1,57 @@
+Tool: distTree_new.exe
+========================================
+
+Find location of new objects in a distance tree. -variance_dissim is used.
+Update: <incremental distance tree directory>/search/
+
+USAGE:   distTree_new.exe <data> [-init] [-dissim_power 1] [-dissim_coeff 1] [-variance none] [-variance_power NaN] [-variance_dissim] [-variance_min 0] [-name ""] [-dissim ""] [-request ""] [-leaf ""] [-closest ""] [-closest_num 1] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    distTree_new.exe -help
+VERSION: distTree_new.exe -version
+
+POSITIONAL PARAMETERS
+<data>
+    Directory with data ending with '/'
+
+NAMED PARAMETERS
+-init
+    Initialize search
+-dissim_power 1
+    Power to raise dissimilarity in
+-dissim_coeff 1
+    Coefficient to multiply dissimilarity by (after dissim_power is applied)
+-variance none
+    Dissimilarity variance function: lin | sqr | pow | exp | linExp | none
+-variance_power NaN
+    Power for -variance pow; >= 0
+-variance_dissim
+    Variance is computed off dissimilarities
+-variance_min 0
+    Min. dissimilarity variance
+-name ""
+    Name of the object
+-dissim ""
+    File of the format: <obj1> <obj2> <dissimilarity>
+-request ""
+    Output file of the format: <obj1> <obj2>
+-leaf ""
+    Output file of the format: <obj_new> <obj1>-<obj2> <leaf_len> <arc_len>
+-closest ""
+    Output file with objects with closest distances
+-closest_num 1
+    Number of closest objects to print in <closest>
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

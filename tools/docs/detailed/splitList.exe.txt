@@ -1,0 +1,43 @@
+Tool: splitList.exe
+========================================
+
+Partition <in> into parts of size <size> lines sequentially.
+Parts are named <out_dir>/<prefix><i>
+
+USAGE:   splitList.exe <in> <size> <out_dir> [-start 1] [-zero] [-prefix ""] [-extension ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    splitList.exe -help
+VERSION: splitList.exe -version
+
+POSITIONAL PARAMETERS
+<in>
+    Text file
+<size>
+    # lines in one part
+<out_dir>
+    Output directory
+
+NAMED PARAMETERS
+-start 1
+    Start number of a part
+-zero
+    Parts strat with 0, otherwise 1
+-prefix ""
+    File name prefix
+-extension ""
+    File name extension
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

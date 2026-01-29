@@ -1,0 +1,36 @@
+Tool: replace_dict.exe
+========================================
+
+Replace words in a text using a dictionary
+
+USAGE:   replace_dict.exe <file> <dictionary> [-reverse] [-prefix ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    replace_dict.exe -help
+VERSION: replace_dict.exe -version
+
+POSITIONAL PARAMETERS
+<file>
+    Text file
+<dictionary>
+    Pairs of words: <word1> <word2>
+
+NAMED PARAMETERS
+-reverse
+    Replace <word2> by <word1>, otherwise <word1> by <word2>
+-prefix ""
+    Replace only in line starting with the prefix
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE
