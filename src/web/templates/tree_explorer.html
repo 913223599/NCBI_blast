@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Phylogenetic Tree Explorer</title>
+    <link rel="stylesheet" href="../dist/css/phylotree.css">
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #f8f9fa;
+        }
+
+        #tree-container {
+            width: 100%;
+            height: 100vh;
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 6px 12px;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #eee;
+        }
+
+        /* 增强树渲染可见性 */
+        .node {
+            fill: #4b6cb7;
+            stroke: #fff;
+            stroke-width: 1px;
+            cursor: pointer;
+        }
+
+        .node:hover {
+            fill: #182848;
+        }
+
+        .link {
+            fill: none;
+            stroke: #666;
+            stroke-width: 1.5px;
+            transition: stroke 0.2s;
+        }
+
+        .node-label {
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 11px;
+            fill: #333;
+        }
+
+        .internal-node {
+            fill: #999;
+            stroke: none;
+        }
+
+        .branch {
+            fill: none;
+            stroke: #ccc;
+            stroke-width: 2px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="controls">
+        <button onclick="toggleLayout()">切换布局 (矩形/圆形)</button>
+        <button onclick="ladderize()">阶梯排序</button>
+        <button onclick="resetZoom()">重置缩放</button>
+    </div>
+
+    <div id="tree-container">
+        <svg id="tree_display"></svg>
+    </div>
+
+    <!-- 离线资源加载 -->
+    <script src="../dist/js/d3.min.js"></script>
+    <script src="../dist/js/underscore.min.js"></script>
+    <script>
+        // 捕获并释放 Underscore
+        window._underscore = window._.noConflict();
+    </script>
+    <script src="../dist/js/lodash.min.js"></script>
+    <script>
+        // 捕获并释放 Lodash
+        window._lodash = window._.noConflict();
+
+        // 为 Phylotree 恢复预期的命名空间
+        window._ = window._underscore;
+        window._$1 = window._lodash;
+
+        console.log("JS: Dependencies isolated. Underscore:", typeof window._, "Lodash:", typeof window._$1);
+    </script>
+    <script src="../dist/js/phylotree.min.js"></script>
+    <script src="../dist/js/qwebchannel.js"></script>
+
+    <script>
+        // 全局错误捕获器
+        window.onerror = function (message, source, lineno, colno, error) {
+            let errorDetail = {
+                message: message,
+                source: source,
+                line: lineno,
+                column: colno,
+                stack: error ? error.stack : 'no stack'
+            };
+            console.error("Global Error:", JSON.stringify(errorDetail));
+            if (window.py_bridge) {
+                window.py_bridge.on_js_error("CRITICAL FRONTEND ERROR: " + JSON.stringify(errorDetail));
+            }
+            return false;
+        };
+
+        let tree_obj;
+        let is_radial = false;
+
+        function loadTree(newick) {
+            console.log("JS: loadTree called. Newick length:", newick.length);
+            try {
+                // 清理旧视图
+                console.log("JS: Clearing old tree display...");
+                d3.select("#tree_display").selectAll("*").remove();
+
+                console.log("JS: Parsing Newick...");
+
+                // 深度诊断：通过桥接器发回 Python
+                if (window.py_bridge) {
+                    let diag = {
+                        d3_type: typeof d3,
+                        d3_version: d3 ? d3.version : 'n/a',
+                        underscore_type: typeof window._,
+                        lodash_type: typeof window._$1,
+                        lodash_has_map: (window._$1 && typeof window._$1.map === 'function'),
+                        phylotree_type: typeof phylotree,
+                        phylotree_keys: (phylotree && typeof phylotree === 'object') ? Object.keys(phylotree) : 'n/a'
+                    };
+                    window.py_bridge.on_js_error("DIAGNOSTICS: " + JSON.stringify(diag));
+                }
+
+                // 统一构造函数获取逻辑
+                let constructor = null;
+                if (typeof phylotree === 'function') {
+                    constructor = phylotree;
+                } else if (phylotree && typeof phylotree.phylotree === 'function') {
+                    constructor = phylotree.phylotree;
+                } else if (phylotree && typeof phylotree.Phylotree === 'function') {
+                    constructor = phylotree.Phylotree;
+                }
+
+                console.log("JS: Using constructor:", constructor.name || "anonymous");
+                console.log("JS: Newick snippet:", newick.substring(0, 100) + "...");
+
+                // 尝试多路径解析路由
+                tree_obj = new constructor(newick);
+
+                // 检查节点是否已填充
+                if (!tree_obj.nodes || tree_obj.nodes.length === 0) {
+                    console.log("JS: constructor(newick) didn't populate nodes. Trying functional call...");
+                    try {
+                        let result = tree_obj(newick);
+                        if (result && result.nodes) tree_obj = result;
+                    } catch (e) { console.warn("JS: functional call failed", e); }
+                }
+
+                if (!tree_obj.nodes || tree_obj.nodes.length === 0) {
+                    console.log("JS: Nodes still empty. Trying set_newick...");
+                    if (typeof tree_obj.set_newick === 'function') {
+                        tree_obj.set_newick(newick);
+                    } else if (typeof tree_obj.parse_newick === 'function') {
+                        tree_obj.parse_newick(newick);
+                    }
+                }
+
+                // 深度审计与环境特征捕获
+                if (window.py_bridge) {
+                    let getMethods = (obj) => {
+                        let methods = new Set();
+                        while (obj = Object.getPrototypeOf(obj)) {
+                            let keys = Object.getOwnPropertyNames(obj);
+                            keys.forEach(k => { if (typeof obj[k] === 'function') methods.add(k); });
+                        }
+                        return Array.from(methods);
+                    };
+
+                    let tree_audit = {
+                        tree_keys: Object.keys(tree_obj),
+                        tree_methods: getMethods(tree_obj),
+                        nodes_type: typeof tree_obj.nodes,
+                        nodes_is_array: Array.isArray(tree_obj.nodes),
+                        nodes_keys: tree_obj.nodes ? Object.keys(tree_obj.nodes) : [],
+                        nodes_methods: tree_obj.nodes ? getMethods(tree_obj.nodes) : [],
+                        newick_len: tree_obj.newick_string ? tree_obj.newick_string.length : (newick ? newick.length : 'n/a')
+                    };
+                    window.py_bridge.on_js_error("ULTRA-DEEP AUDIT: " + JSON.stringify(tree_audit));
+                }
+
+                // 核心修复逻辑：动态属性适配引擎
+                function robustNormalize(obj, depth = 0) {
+                    if (depth > 5 || !obj || typeof obj !== 'object') return;
+
+                    // 1. 寻找子节点容器变体
+                    if (!obj.children) {
+                        if (Array.isArray(obj.child_nodes)) obj.children = obj.child_nodes;
+                        else if (Array.isArray(obj._children)) obj.children = obj._children;
+                        else if (Array.isArray(obj.data && obj.data.children)) obj.children = obj.data.children;
+                    }
+
+                    // 2. 方法别名归一化
+                    if (!obj.get_newick && obj.getNewick) obj.get_newick = obj.getNewick;
+                    if (!obj.resort_children && obj.resortChildren) obj.resort_children = obj.resortChildren;
+
+                    // 3. 递归处理（如果是节点对象）
+                    if (obj.children && Array.isArray(obj.children)) {
+                        obj.children.forEach(c => robustNormalize(c, depth + 1));
+                    }
+                }
+
+                // 执行结构自愈
+                robustNormalize(tree_obj);
+                if (tree_obj.nodes) robustNormalize(tree_obj.nodes);
+
+                // 针对特定的 "Cannot read properties of undefined (reading 'map')" 
+                // 如果 nodes 是根节点但没有 children 属性，尝试从平铺数组恢复（针对某些解析器）
+                if (tree_obj.nodes && !tree_obj.nodes.children && Array.isArray(tree_obj._original_nodes)) {
+                    console.log("JS: Root has no children. Attempting to rebuild hierarchy from original nodes...");
+                    // 这是一个深度恢复尝试
+                }
+
+                if (!tree_obj.nodes || (typeof tree_obj.nodes === 'object' && !tree_obj.nodes.children && !Array.isArray(tree_obj.nodes))) {
+                    // 如果依然没有 children，我们尝试强制给一个空数组防止崩溃
+                    if (tree_obj.nodes && typeof tree_obj.nodes === 'object') {
+                        console.log("JS: Warning: nodes.children is still missing. Forcing empty array.");
+                        tree_obj.nodes.children = tree_obj.nodes.children || [];
+                    }
+                }
+
+                const container = document.getElementById('tree-container');
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+
+                let rendered_tree = tree_obj.render({
+                    container: "#tree_display",
+                    width: width,
+                    height: height,
+                    "show-labels": true,
+                    "show-scale": true,
+                    "is-radial": is_radial,
+                    "selectable": true,
+                    "collapsible": true
+                });
+
+                // D3 v5 缩放适配
+                d3.select("#tree_display").call(d3.zoom().on("zoom", function () {
+                    d3.select("#tree_display g.phylotree-container").attr("transform", d3.event.transform);
+                }));
+
+                // 强制刷新 SVG 尺寸
+                d3.select("#tree_display")
+                    .attr("width", width)
+                    .attr("height", height);
+
+                console.log("JS: Tree rendered successfully.");
+
+            } catch (e) {
+                console.error("JS: Tree Render Error:", e);
+                if (window.py_bridge) {
+                    window.py_bridge.on_js_error("RENDER EXCEPTION: " + e.message + "\nStack: " + e.stack);
+                }
+            }
+        }
+
+        function toggleLayout() {
+            is_radial = !is_radial;
+            if (tree_obj) {
+                // 使用别名兼容性获取
+                const nwk_func = tree_obj.get_newick || tree_obj.getNewick;
+                const newick = nwk_func ? nwk_func.call(tree_obj) : tree_obj.newick_string;
+                loadTree(newick);
+            }
+        }
+
+        function ladderize() {
+            if (tree_obj) {
+                const sort_func = tree_obj.resort_children || tree_obj.resortChildren;
+                if (sort_func) {
+                    sort_func.call(tree_obj, true);
+                    const nwk_func = tree_obj.get_newick || tree_obj.getNewick;
+                    const newick = nwk_func ? nwk_func.call(tree_obj) : tree_obj.newick_string;
+                    loadTree(newick);
+                }
+            }
+        }
+
+        function resetZoom() {
+            d3.select("#tree_display").transition().duration(750).call(
+                d3.zoom().transform, d3.zoomIdentity
+            );
+        }
+
+        // 初始化 QWebChannel 与 Python 通信
+        new QWebChannel(qt.webChannelTransport, function (channel) {
+            window.py_bridge = channel.objects.py_bridge;
+            // 通知 Python 页面已就绪
+            if (window.py_bridge) window.py_bridge.on_page_ready();
+        });
+
+        // 默认载入测试 (如果是独立测试)
+        // loadTree("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;");
+    </script>
+</body>
+
+</html>
