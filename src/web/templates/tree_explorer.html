@@ -72,15 +72,26 @@
             fill: #333;
         }
 
-        .internal-node {
-            fill: #999;
-            stroke: none;
+        /* Native D3 Styling */
+        .d3-link {
+            fill: none;
+            stroke: #555;
+            stroke-width: 1.5px;
         }
 
-        .branch {
-            fill: none;
-            stroke: #ccc;
-            stroke-width: 2px;
+        .d3-node circle {
+            fill: #999;
+            stroke: white;
+            stroke-width: 1.5px;
+        }
+
+        .d3-node text {
+            font: 10px sans-serif;
+            fill: #333;
+        }
+
+        .d3-node--internal circle {
+            fill: #555;
         }
     </style>
 </head>
@@ -95,6 +106,7 @@
     <div id="tree-container">
         <svg id="tree_display"></svg>
     </div>
+
 
     <!-- 离线资源加载 -->
     <script src="../dist/js/d3.min.js"></script>
@@ -137,6 +149,60 @@
         let tree_obj;
         let is_radial = false;
 
+        // Native D3 Render Function
+        function renderNativeD3(rootData, containerId, width, height) {
+            console.log("JS: Starting Native D3 Fallback Render...");
+            const svg = d3.select(containerId);
+            svg.html(""); // Clear
+
+            const g = svg.append("g");
+
+            // Create hierarchy
+            const root = d3.hierarchy(rootData);
+
+            // Layout (Cluster or Tree)
+            const layout = d3.tree().size([height - 40, width - 160]);
+            layout(root);
+
+            // Render Links
+            g.selectAll(".d3-link")
+                .data(root.descendants().slice(1))
+                .enter().append("path")
+                .attr("class", "d3-link")
+                .attr("d", d => {
+                    return "M" + d.y + "," + d.x
+                        + "C" + (d.parent.y + 100) + "," + d.x
+                        + " " + (d.parent.y + 100) + "," + d.parent.x
+                        + " " + d.parent.y + "," + d.parent.x;
+                });
+
+            // Render Nodes
+            const node = g.selectAll(".d3-node")
+                .data(root.descendants())
+                .enter().append("g")
+                .attr("class", d => "d3-node" + (d.children ? " d3-node--internal" : " d3-node--leaf"))
+                .attr("transform", d => "translate(" + d.y + "," + d.x + ")");
+
+            node.append("circle")
+                .attr("r", 4);
+
+            node.append("text")
+                .attr("dy", 3)
+                .attr("x", d => d.children ? -8 : 8)
+                .style("text-anchor", d => d.children ? "end" : "start")
+                .text(d => d.data.name || d.data.data.name || ""); // Handle phylotree data structure
+
+            // Zoom
+            svg.call(d3.zoom().on("zoom", () => {
+                g.attr("transform", d3.event.transform);
+            }));
+            // Center the tree
+            const initialTransform = d3.zoomIdentity.translate(40, 20);
+            svg.call(d3.zoom().transform, initialTransform);
+
+            console.log("JS: Native D3 Render Complete.");
+        }
+
         function loadTree(newick) {
             console.log("JS: loadTree called. Newick length:", newick.length);
             try {
@@ -144,151 +210,119 @@
                 console.log("JS: Clearing old tree display...");
                 d3.select("#tree_display").selectAll("*").remove();
 
-                console.log("JS: Parsing Newick...");
+                console.log("JS: Parsing Newick (robust)...");
 
-                // 深度诊断：通过桥接器发回 Python
-                if (window.py_bridge) {
-                    let diag = {
-                        d3_type: typeof d3,
-                        d3_version: d3 ? d3.version : 'n/a',
-                        underscore_type: typeof window._,
-                        lodash_type: typeof window._$1,
-                        lodash_has_map: (window._$1 && typeof window._$1.map === 'function'),
-                        phylotree_type: typeof phylotree,
-                        phylotree_keys: (phylotree && typeof phylotree === 'object') ? Object.keys(phylotree) : 'n/a'
-                    };
-                    window.py_bridge.on_js_error("DIAGNOSTICS: " + JSON.stringify(diag));
-                }
-
-                // 统一构造函数获取逻辑
+                // 1. 尝试动态构造
                 let constructor = null;
-                if (typeof phylotree === 'function') {
-                    constructor = phylotree;
-                } else if (phylotree && typeof phylotree.phylotree === 'function') {
-                    constructor = phylotree.phylotree;
-                } else if (phylotree && typeof phylotree.Phylotree === 'function') {
-                    constructor = phylotree.Phylotree;
-                }
+                if (typeof phylotree === 'function') constructor = phylotree;
+                else if (phylotree && typeof phylotree.phylotree === 'function') constructor = phylotree.phylotree;
+                else if (phylotree && typeof phylotree.Phylotree === 'function') constructor = phylotree.Phylotree;
 
-                console.log("JS: Using constructor:", constructor.name || "anonymous");
-                console.log("JS: Newick snippet:", newick.substring(0, 100) + "...");
+                console.log("JS: Using constructor:", constructor ? (constructor.name || "anonymous") : "None!");
 
-                // 尝试多路径解析路由
                 tree_obj = new constructor(newick);
 
-                // 检查节点是否已填充
-                if (!tree_obj.nodes || tree_obj.nodes.length === 0) {
-                    console.log("JS: constructor(newick) didn't populate nodes. Trying functional call...");
-                    try {
-                        let result = tree_obj(newick);
-                        if (result && result.nodes) tree_obj = result;
-                    } catch (e) { console.warn("JS: functional call failed", e); }
+                // 2. 数据自愈 (Data Healing)
+                function heal(n) {
+                    if (!n) return;
+                    if (!n.children && n.data && n.data.children) n.children = n.data.children;
+                    if (n.children) n.children.forEach(heal);
                 }
+                heal(tree_obj);
+                if (tree_obj.nodes) heal(tree_obj.nodes);
 
-                if (!tree_obj.nodes || tree_obj.nodes.length === 0) {
-                    console.log("JS: Nodes still empty. Trying set_newick...");
-                    if (typeof tree_obj.set_newick === 'function') {
-                        tree_obj.set_newick(newick);
-                    } else if (typeof tree_obj.parse_newick === 'function') {
-                        tree_obj.parse_newick(newick);
-                    }
-                }
-
-                // 深度审计与环境特征捕获
-                if (window.py_bridge) {
-                    let getMethods = (obj) => {
-                        let methods = new Set();
-                        while (obj = Object.getPrototypeOf(obj)) {
-                            let keys = Object.getOwnPropertyNames(obj);
-                            keys.forEach(k => { if (typeof obj[k] === 'function') methods.add(k); });
-                        }
-                        return Array.from(methods);
-                    };
-
-                    let tree_audit = {
-                        tree_keys: Object.keys(tree_obj),
-                        tree_methods: getMethods(tree_obj),
-                        nodes_type: typeof tree_obj.nodes,
-                        nodes_is_array: Array.isArray(tree_obj.nodes),
-                        nodes_keys: tree_obj.nodes ? Object.keys(tree_obj.nodes) : [],
-                        nodes_methods: tree_obj.nodes ? getMethods(tree_obj.nodes) : [],
-                        newick_len: tree_obj.newick_string ? tree_obj.newick_string.length : (newick ? newick.length : 'n/a')
-                    };
-                    window.py_bridge.on_js_error("ULTRA-DEEP AUDIT: " + JSON.stringify(tree_audit));
-                }
-
-                // 核心修复逻辑：动态属性适配引擎
-                function robustNormalize(obj, depth = 0) {
-                    if (depth > 5 || !obj || typeof obj !== 'object') return;
-
-                    // 1. 寻找子节点容器变体
-                    if (!obj.children) {
-                        if (Array.isArray(obj.child_nodes)) obj.children = obj.child_nodes;
-                        else if (Array.isArray(obj._children)) obj.children = obj._children;
-                        else if (Array.isArray(obj.data && obj.data.children)) obj.children = obj.data.children;
-                    }
-
-                    // 2. 方法别名归一化
-                    if (!obj.get_newick && obj.getNewick) obj.get_newick = obj.getNewick;
-                    if (!obj.resort_children && obj.resortChildren) obj.resort_children = obj.resortChildren;
-
-                    // 3. 递归处理（如果是节点对象）
-                    if (obj.children && Array.isArray(obj.children)) {
-                        obj.children.forEach(c => robustNormalize(c, depth + 1));
-                    }
-                }
-
-                // 执行结构自愈
-                robustNormalize(tree_obj);
-                if (tree_obj.nodes) robustNormalize(tree_obj.nodes);
-
-                // 针对特定的 "Cannot read properties of undefined (reading 'map')" 
-                // 如果 nodes 是根节点但没有 children 属性，尝试从平铺数组恢复（针对某些解析器）
-                if (tree_obj.nodes && !tree_obj.nodes.children && Array.isArray(tree_obj._original_nodes)) {
-                    console.log("JS: Root has no children. Attempting to rebuild hierarchy from original nodes...");
-                    // 这是一个深度恢复尝试
-                }
-
-                if (!tree_obj.nodes || (typeof tree_obj.nodes === 'object' && !tree_obj.nodes.children && !Array.isArray(tree_obj.nodes))) {
-                    // 如果依然没有 children，我们尝试强制给一个空数组防止崩溃
-                    if (tree_obj.nodes && typeof tree_obj.nodes === 'object') {
-                        console.log("JS: Warning: nodes.children is still missing. Forcing empty array.");
-                        tree_obj.nodes.children = tree_obj.nodes.children || [];
-                    }
-                }
-
+                // 3. 渲染策略 (Render Strategy)
                 const container = document.getElementById('tree-container');
-                const width = container.clientWidth;
-                const height = container.clientHeight;
+                const width = container.clientWidth || 800;
+                const height = container.clientHeight || 600;
 
-                let rendered_tree = tree_obj.render({
-                    container: "#tree_display",
-                    width: width,
-                    height: height,
-                    "show-labels": true,
-                    "show-scale": true,
-                    "is-radial": is_radial,
-                    "selectable": true,
-                    "collapsible": true
-                });
+                console.log(`JS: Container Size: ${width}x${height}`);
 
-                // D3 v5 缩放适配
-                d3.select("#tree_display").call(d3.zoom().on("zoom", function () {
-                    d3.select("#tree_display g.phylotree-container").attr("transform", d3.event.transform);
-                }));
+                // 强制重置 SVG 状态
+                let svg = d3.select("#tree_display");
+                if (svg.empty()) {
+                    console.warn("JS: #tree_display lost! Recreating...");
+                    svg = d3.select("#tree-container").append("svg").attr("id", "tree_display");
+                }
+                svg.html("").attr("width", width).attr("height", height);
 
-                // 强制刷新 SVG 尺寸
-                d3.select("#tree_display")
-                    .attr("width", width)
-                    .attr("height", height);
+                // Strategy A: Standard Phylotree Render
+                console.log("JS: Attempting Render Strategy A (Standard)...");
+                try {
+                    // 基本配置
+                    let opts = {
+                        container: "#tree_display",
+                        width: width,
+                        height: height,
+                        "show-labels": true,
+                        "is-radial": is_radial
+                    };
+                    tree_obj.render(opts);
+                } catch (e) { console.error("JS: Strategy A Error:", e); }
 
-                console.log("JS: Tree rendered successfully.");
+                let contentLen = svg.html().length;
+                console.log("JS: Strategy A Output Length:", contentLen);
+
+                // Strategy B: Manual Update
+                if (contentLen < 50) {
+                    console.log("JS: Strategy A failed (empty). Attempting Strategy B (Manual Layout/Update)...");
+                    try {
+                        tree_obj.selection = "#tree_display";
+                        if (typeof tree_obj.layout === 'function') tree_obj.layout();
+                        if (typeof tree_obj.update === 'function') tree_obj.update();
+                    } catch (e) { console.error("JS: Strategy B Error:", e); }
+                    contentLen = svg.html().length;
+                    console.log("JS: Strategy B Output Length:", contentLen);
+                }
+
+                // Strategy C: Native D3 Fallback (The Saver)
+                if (contentLen < 50) {
+                    console.warn("JS: Phylotree rendering failed completely. Activating Native D3 Fallback...");
+                    try {
+                        // Determine root data
+                        let rootData = tree_obj.nodes;
+                        if (!rootData || (Array.isArray(rootData) && rootData.length === 0)) {
+                            // If nodes is empty list, maybe try parsing newick manually?
+                            // Assuming tree_obj.nodes IS the root object as per diagnostics
+                            console.warn("JS: Root data suspect. Using tree_obj.nodes directly.");
+                        }
+
+                        // If rootData is an array (some parsers do this), find the root (no parent)
+                        if (Array.isArray(rootData)) {
+                            rootData = rootData.find(n => !n.parent);
+                        }
+
+                        if (rootData) {
+                            renderNativeD3(rootData, "#tree_display", width, height);
+                        } else {
+                            throw new Error("No valid root node found for Native D3");
+                        }
+
+                    } catch (e) {
+                        console.error("JS: Native D3 Fallback Failed:", e);
+                        // RED BOX OF DOOM
+                        svg.append("rect")
+                            .attr("width", width).attr("height", height)
+                            .attr("fill", "#ffebee")
+                            .attr("stroke", "red");
+                        svg.append("text")
+                            .attr("x", 50).attr("y", 50)
+                            .attr("font-size", "20px")
+                            .attr("fill", "red")
+                            .text("CRITICAL: All Renderers Failed. See Logs.");
+                    }
+                } else {
+                    console.log("JS: Render Success (Phylotree). Applying Zoom...");
+                    svg.call(d3.zoom().on("zoom", function () {
+                        let g = svg.select(".phylotree-container");
+                        if (g.empty()) g = svg.select("g");
+                        if (!g.empty()) g.attr("transform", d3.event.transform);
+                    }));
+                }
 
             } catch (e) {
-                console.error("JS: Tree Render Error:", e);
-                if (window.py_bridge) {
-                    window.py_bridge.on_js_error("RENDER EXCEPTION: " + e.message + "\nStack: " + e.stack);
-                }
+                console.error("JS: Top-Level Render Exception:", e);
+                if (window.py_bridge) window.py_bridge.on_js_error("EXCEPTION: " + e.toString());
             }
         }
 
@@ -320,15 +354,44 @@
             );
         }
 
+        function overrideConsole() {
+            if (!window.py_bridge) return;
+            // 劫持 console.log
+            const originalLog = console.log;
+            console.log = function (...args) {
+                originalLog.apply(console, args);
+                if (window.py_bridge && window.py_bridge.on_js_log) {
+                    const msg = args.map(arg => {
+                        if (typeof arg === 'object') return JSON.stringify(arg);
+                        return String(arg);
+                    }).join(' ');
+                    window.py_bridge.on_js_log(msg);
+                }
+            };
+
+            // 劫持 console.error
+            const originalError = console.error;
+            console.error = function (...args) {
+                originalError.apply(console, args);
+                if (window.py_bridge) { // Assume error handler always exists
+                    const msg = args.map(arg => {
+                        if (typeof arg === 'object') return JSON.stringify(arg);
+                        return String(arg);
+                    }).join(' ');
+                    window.py_bridge.on_js_error(msg);
+                }
+            };
+            console.log("JS: Console hijacked for Python logging.");
+        }
+
         // 初始化 QWebChannel 与 Python 通信
         new QWebChannel(qt.webChannelTransport, function (channel) {
             window.py_bridge = channel.objects.py_bridge;
+            overrideConsole();
             // 通知 Python 页面已就绪
             if (window.py_bridge) window.py_bridge.on_page_ready();
         });
 
-        // 默认载入测试 (如果是独立测试)
-        // loadTree("(A:0.1,B:0.2,(C:0.3,D:0.4)E:0.5)F;");
     </script>
 </body>
 
