@@ -5,6 +5,7 @@
 
 import os
 import warnings
+import logging
 from pathlib import Path
 from typing import Generator, Dict, Any, List, Union
 
@@ -12,6 +13,8 @@ from Bio import SeqIO, BiopythonDeprecationWarning
 
 # 忽略 Biopython 关于 FASTA 注释的弃用警告
 warnings.simplefilter('ignore', BiopythonDeprecationWarning)
+
+logger = logging.getLogger(__name__)
 
 class FileHandler:
     """
@@ -39,7 +42,8 @@ class FileHandler:
         try:
             for seq_info in self.read_fasta_file_iter(file_path):
                 return seq_info['sequence']
-        except Exception:
+        except Exception as e:
+            logger.debug(f"尝试作为 FASTA 读取失败: {e}")
             pass
         
         # 如果FASTA解析失败，尝试作为纯文本序列文件读取
@@ -57,7 +61,8 @@ class FileHandler:
                 # 移除可能的换行符、空格等
                 sequence = content.replace('\n', '').replace(' ', '').replace('\r', '').strip()
                 return sequence
-        except Exception:
+        except Exception as e:
+            logger.error(f"无法读取序列文件 {file_path}: {e}")
             return ""
     
     def read_fasta_file(self, file_path: str) -> List[Dict[str, Any]]:
@@ -100,8 +105,9 @@ class FileHandler:
                         }
                 if found_any: return
             except Exception as e:
-                # logger.error(f"ABI 解析失败: {e}")
-                pass
+                logger.error(f"ABI 解析失败: {e}")
+                # ABI 失败则不继续尝试文本解析
+                raise
 
         try:
             # 尝试使用 BioPython 解析 FASTA
@@ -114,7 +120,9 @@ class FileHandler:
                         'sequence': str(record.seq),
                         'length': len(record.seq)
                     }
-        except Exception:
+        except Exception as e:
+            # 如果不是 FASTA 格式错误，则记录
+            logger.debug(f"BioPython FASTA 解析失败 (可能非标准格式): {e}")
             pass
         
         # 如果BioPython成功解析出序列，直接返回
@@ -161,7 +169,7 @@ class FileHandler:
                             'length': len(full_seq)
                         }
         except Exception as e2:
-            print(f"手动解析失败: {e2}")
+            logger.warning(f"手动 FASTA 解析失败: {e2}")
 
         if found_any:
             return
@@ -183,7 +191,8 @@ class FileHandler:
                             'sequence': content.replace('\n', '').replace(' ', ''),
                             'length': len(content)
                         }
-        except:
+        except Exception as e:
+            logger.error(f"最终兜底读取失败: {e}")
             pass
     
     def save_result_file(self, result_handle, output_file: str):

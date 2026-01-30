@@ -9,6 +9,11 @@
       <excludeFolder url="file://$MODULE_DIR$/build" />
       <excludeFolder url="file://$MODULE_DIR$/database" />
       <excludeFolder url="file://$MODULE_DIR$/results" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv/Include" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv/Lib" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv/Scripts" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv/ete3" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv/share" />
       <excludeFolder url="file://$MODULE_DIR$/test" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13" jdkType="Python SDK" />

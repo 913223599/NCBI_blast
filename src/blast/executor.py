@@ -96,8 +96,25 @@ class BlastExecutor:
                 'descriptions': 'descriptions'
             }
 
+            # 特殊处理 Gap Costs (合并 open 和 extend)
+            if 'gap_open' in kwargs and 'gap_extend' in kwargs:
+                # NCBI QBLAST API 期望格式: "open extend" (例如 "11 1")
+                # 注意: 具体数值必须符合矩阵要求 (例如 BLOSUM62 默认 11 1)
+                blast_params['gapcosts'] = f"{kwargs['gap_open']} {kwargs['gap_extend']}"
+
+            # 特殊处理 Filter (转换布尔值为 NCBI 字符串)
+            if 'filter' in kwargs:
+                f_val = kwargs['filter']
+                if isinstance(f_val, bool):
+                     # True -> 'L' (Low complexity), False -> 'F' (None)
+                     blast_params['filter'] = 'L' if f_val else 'F'
+                else:
+                     blast_params['filter'] = str(f_val)
+
             for key, ncbi_key in param_map.items():
                 if key in kwargs:
+                    # Filter 上面已经处理了，这里跳过以防覆盖
+                    if key == 'filter': continue
                     blast_params[ncbi_key] = kwargs[key]
 
             try:

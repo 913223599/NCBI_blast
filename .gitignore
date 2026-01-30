@@ -1697,3 +1697,4 @@ database/
 /dist/NCBI_BLAST_GUI/_internal/VCRUNTIME140_1.dll
 /dist/NCBI_BLAST_GUI/NCBI_BLAST_GUI.exe
 /dist/NCBI_BLAST_GUI.exe
+/test/
