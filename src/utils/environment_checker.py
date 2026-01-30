@@ -79,10 +79,9 @@ class EnvironmentChecker:
             'Bio',  # Biopython
             'requests',
             'numpy',
-            'pandas',
-            'ete3',
-            'toytree'
+            'pandas'
         ]
+
         
         missing_modules = []
         for module in required_modules:

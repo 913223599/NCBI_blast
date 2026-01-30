@@ -75,18 +75,37 @@ class FileHandler:
 
     def read_fasta_file_iter(self, file_path: str) -> Generator[Dict[str, Any], None, None]:
         """
-        [优化] 迭代读取FASTA文件，避免一次性加载整个文件到内存
+        [优化] 迭代读取序列文件，支持 FASTA 和 ABI (.ab1) 格式。
         
         Args:
-            file_path (str): FASTA文件路径
+            file_path (str): 文件路径
             
         Yields:
             dict: 包含序列信息的字典
         """
         found_any = False
+        ext = Path(file_path).suffix.lower()
+        
+        # 针对 ABI 二进制格式的处理
+        if ext in ['.ab1', '.abi']:
+            try:
+                with open(file_path, 'rb') as handle:
+                    for record in SeqIO.parse(handle, "abi"):
+                        found_any = True
+                        yield {
+                            'id': str(record.id),
+                            'description': str(record.description),
+                            'sequence': str(record.seq),
+                            'length': len(record.seq)
+                        }
+                if found_any: return
+            except Exception as e:
+                # logger.error(f"ABI 解析失败: {e}")
+                pass
+
         try:
-            # 尝试直接使用BioPython解析 (SeqIO.parse 本身就是生成器)
-            with open(file_path, 'r', encoding='utf-8') as handle:
+            # 尝试使用 BioPython 解析 FASTA
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as handle:
                 for record in SeqIO.parse(handle, "fasta"):
                     found_any = True
                     yield {
@@ -95,8 +114,7 @@ class FileHandler:
                         'sequence': str(record.seq),
                         'length': len(record.seq)
                     }
-        except Exception as e:
-            # print(f"BioPython解析失败: {e}") # 降低日志级别
+        except Exception:
             pass
         
         # 如果BioPython成功解析出序列，直接返回

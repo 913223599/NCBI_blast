@@ -30,12 +30,10 @@ class BiologyTranslator:
             ai_model (str): AI模型名称
         """
         # 确保数据文件路径存在
-        if data_file is None:
-            # 默认使用项目根目录下的translation_data.csv
-            project_root = Path(__file__).resolve().parents[3]
-            data_file = str(project_root / "translation_data.csv")
+        # 默认使用项目根目录下的translation_data.csv，由get_translation_data_manager内部处理
         
-        self.translation_data_manager = TranslationDataManager(data_file)
+        from .translation_data_manager import get_translation_data_manager
+        self.translation_data_manager = get_translation_data_manager()
         self.use_ai = use_ai
         self.ai_model = ai_model
         
@@ -58,7 +56,7 @@ class BiologyTranslator:
         self._translation_cache = {}
         self._lock = threading.Lock()  # 线程安全锁
 
-    def translate_text(self, text: str) -> str:
+    def translate_text(self, text: str, category: str = 'other') -> str:
         """
         翻译整段文本 - 逻辑优化版
         优先顺序: 缓存 -> 规范化后本地数据库 -> 本地数据库 -> AI -> 原文
@@ -79,7 +77,8 @@ class BiologyTranslator:
         
         # 2. 如果文本被规范化了，先尝试从数据库中查找规范化后的版本
         if normalized_text != text and self.translation_data_manager:
-            local_result = self.translation_data_manager.get_translation(normalized_text)
+            # 传递 category 以优化查询
+            local_result = self.translation_data_manager.get_translation(normalized_text, category=category)
             if local_result and local_result != normalized_text:
                 result = f"[本地]{local_result}"
                 with self._lock:
@@ -88,7 +87,7 @@ class BiologyTranslator:
         
         # 3. 尝试本地数据库匹配原始文本
         if self.translation_data_manager:
-            local_result = self.translation_data_manager.get_translation(text)
+            local_result = self.translation_data_manager.get_translation(text, category=category)
             if local_result and local_result != text:
                 result = f"[本地]{local_result}"
                 with self._lock:
@@ -109,6 +108,9 @@ class BiologyTranslator:
                             print(f"术语提取和存储过程中出错: {e}")
                             import traceback
                             traceback.print_exc()
+                        
+                        # 保存时也记录分类
+                        self.translation_data_manager.add_translation(text, ai_result, category=category, source="ai")
                     
                     result = f"[AI]{ai_result}"
                     with self._lock:
@@ -137,6 +139,18 @@ class BiologyTranslator:
         for text in texts:
             results[text] = self.translate_text(text)
         return results
+
+    def search_translations(self, query: str, limit: int = 50) -> list:
+        """透传搜索请求"""
+        if self.translation_data_manager:
+            return self.translation_data_manager.search_translations(query, limit)
+        return []
+
+    def update_translation(self, english: str, chinese: str) -> bool:
+        """透传更新请求"""
+        if self.translation_data_manager:
+            return self.translation_data_manager.update_translation_entry(english, chinese)
+        return False
 
     def add_translation(self, original: str, translation: str, source: str = "manual"):
         """

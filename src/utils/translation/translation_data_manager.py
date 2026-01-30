@@ -1,191 +1,414 @@
-"""
-翻译数据管理器模块
-负责管理翻译数据的加载、存储和检索 - 优化版
-"""
-
+import sqlite3
 import csv
 import os
 import threading
+import logging
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 
 class TranslationDataManager:
     """
     翻译数据管理器
-    负责管理翻译数据的加载、存储和检索
+    负责管理翻译数据的加载、存储和检索 - SQLite 后端
     """
 
-    def __init__(self, csv_file: str = "translation_data.csv"):
+    def __init__(self):
         """
         初始化翻译数据管理器
-
-        Args:
-            csv_file (str): 包含翻译数据的CSV文件路径
         """
-        # 优化路径获取逻辑：使用更稳健的pathlib操作
-        # 假设当前文件位于 src/utils/translation/
-        # parents[2] -> src/, parents[3] -> 项目根目录
-        self.project_root = Path(__file__).resolve().parents[3]
-
-        if not os.path.isabs(csv_file):
-            self.csv_file = str(self.project_root / csv_file)
-        else:
-            self.csv_file = csv_file
-
-        # 初始化数据结构
-        self.translations: Dict[str, str] = {}
-        self.term_categories: Dict[str, str] = {}
-
-        # 初始化分类字典，确保常用键存在
-        self.translations_by_category: Dict[str, Dict[str, str]] = {
-            key: {} for key in ['species', 'genus', 'strain', 'gene', 'sequence', 'other']
-        }
+        # 强制使用固定文件名，防止外部传入非法路径（如 CSV 路径）导致锁冲突
+        db_file = "translations.db"
+        backup_file = "translations_backup.db"
         
-        # 添加线程锁以确保线程安全
+        # 使用项目根目录为基准
+        self.project_root = Path(__file__).resolve().parents[3]
+        self.db_path = self.project_root / db_file
+        self.backup_path = self.project_root / backup_file
+        
+        logging.info(f"翻译数据库初始化: A={self.db_path.name}, B={self.backup_path.name}")
+        
         self._lock = threading.Lock()
+        self._cache: Dict[str, dict] = {}
+        
+        # 1. 启动时的冷热备份恢复检查
+        self._startup_recovery()
+        
+        # 2. 初始化数据库 (确保表结构)
+        self._init_db()
+        
+        # 3. 首次启动时自动迁移旧数据
+        self._check_and_migrate()
 
-        # 统一加载数据
-        self._load_all_data()
+    def _check_integrity(self, path: Path) -> bool:
+        """检查 SQLite 文件的完整性"""
+        if not path.exists():
+            return False
+        try:
+            conn = sqlite3.connect(path)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA integrity_check;")
+            result = cursor.fetchone()[0]
+            conn.close()
+            return result == "ok"
+        except Exception:
+            return False
 
-    def _upsert_memory(self, english: str, chinese: str, category: str):
+    def _sync_files(self, src: Path, dst: Path):
+        """物理同步数据库文件"""
+        try:
+            import shutil
+            if src.exists():
+                shutil.copy2(src, dst)
+                logging.info(f"数据库同步成功: {src.name} -> {dst.name}")
+        except Exception as e:
+            logging.error(f"同步数据库失败: {e}")
+
+    def _startup_recovery(self):
         """
-        [内部方法] 统一更新内存中的数据结构
-        确保三个字典状态始终保持同步
+        [冷热备份策略] 启动阶段的健康诊断与同步
+        根据 A (热库) 和 B (冷库) 的健康状况决定同步方向
         """
-        # 1. 更新主字典
-        self.translations[english] = chinese
-
-        # 2. 规范化分类
-        if category not in self.translations_by_category:
-            category = 'other'
-
-        # 3. 更新分类字典
-        self.translations_by_category[category][english] = chinese
-
-        # 4. 更新反向索引
-        self.term_categories[english] = category
-
-    def _parse_row(self, row: dict):
-        """[内部方法] 解析单行数据并更新内存"""
-        if 'english' in row and 'chinese' in row:
-            english = row['english'].strip()
-            chinese = row['chinese'].strip()
-            category = row.get('category', 'other').strip() or 'other'
-
-            if english and chinese:
-                self._upsert_memory(english, chinese, category)
-
-    def _load_all_data(self):
-        """加载所有数据（用户数据 + 预定义数据）"""
-        # 1. 加载用户自定义数据
-        if os.path.exists(self.csv_file) and os.path.getsize(self.csv_file) > 0:
+        # 1. 检查物理存在但不健康的文件，主动清理
+        if self.db_path.exists() and not self._check_integrity(self.db_path):
+            logging.warning(f"检测到热库 A ({self.db_path.name}) 损坏，正在清理...")
             try:
-                with open(self.csv_file, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    # 检查是否为旧格式
-                    fieldnames = reader.fieldnames or []
-                    if any(h in fieldnames for h in ['序号', '物种英文名']):
-                        self._create_empty_csv()
-                    else:
+                os.remove(self.db_path)
+            except Exception as e:
+                logging.error(f"无法删除损坏的热库文件: {e}")
+
+        if self.backup_path.exists() and not self._check_integrity(self.backup_path):
+            logging.warning(f"检测到冷库 B ({self.backup_path.name}) 损坏，正在清理...")
+            try:
+                os.remove(self.backup_path)
+            except Exception as e:
+                logging.error(f"无法删除损坏的冷库文件: {e}")
+
+        # 2. 重新评估健康状态
+        a_healthy = self._check_integrity(self.db_path)
+        b_healthy = self._check_integrity(self.backup_path)
+
+        logging.info(f"启动自愈诊断: 库A稳定={a_healthy}, 库B稳定={b_healthy}")
+
+        # 情况1: 热库丢失/损坏已删，冷库完好 -> 从冷库恢复 A
+        if not a_healthy and b_healthy:
+            logging.warning("正在从稳定备份库 B 恢复数据到 A...")
+            self._sync_files(self.backup_path, self.db_path)
+        
+        # 情况2: 热库完好，冷库丢失/损坏已删 -> 将 A 同步到 B 建立备份
+        elif a_healthy and not b_healthy:
+            logging.info("正在将当前热库 A 同步到冷库 B...")
+            self._sync_files(self.db_path, self.backup_path)
+            
+        # 情况3: 两者均完好，但可能 B 更“全” (异常退出兜底)
+        elif a_healthy and b_healthy:
+            a_count = self._get_count_direct(self.db_path)
+            b_count = self._get_count_direct(self.backup_path)
+            if b_count > a_count:
+                logging.warning(f"检测到冷库 B 条目 ({b_count}) 多于 A ({a_count})，执行恢复")
+                self._sync_files(self.backup_path, self.db_path)
+        
+        # 情况4: 两者均不存在 -> 由后续 _init_db 创建并 _check_and_migrate 迁移
+
+    def _get_count_direct(self, path: Path) -> int:
+        """直接从指定路径获取行数，不使用实例连接"""
+        try:
+            conn = sqlite3.connect(path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM translations')
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count
+        except Exception:
+            return 0
+
+    def prepare_shutdown(self):
+        """
+        [冷热备份策略] 应用退出前的同步钩子
+        将最新的热库 A 同步到备份库 B
+        """
+        logging.info("执行应用关闭同步逻辑 (A -> B)...")
+        self._sync_files(self.db_path, self.backup_path)
+
+    def _init_db(self):
+        """初始化 SQLite 数据库表结构"""
+        with self._lock:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                # english 为规范化后的原文，作为主键
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS translations (
+                        english TEXT PRIMARY KEY,
+                        chinese TEXT NOT NULL,
+                        category TEXT,
+                        source TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                # 创建索引优化分类查询
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON translations(category)')
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logging.error(f"初始化翻译数据库失败: {e}")
+
+    def _check_and_migrate(self):
+        """检查并从旧的 CSV 文件迁移数据"""
+        # 检查是否已迁移过（通过查询数据库行数或标记）
+        if self._get_count() > 0:
+            return
+
+        logging.info("检测到新数据库，开始从 CSV 迁移旧数据...")
+        
+        # 定义要加载的 CSV 文件
+        csv_files = [
+            self.project_root / "translation_data.csv",
+            self.project_root / "predefined_terms.csv"
+        ]
+        
+        migrated_count = 0
+        for csv_file in csv_files:
+            if csv_file.exists():
+                try:
+                    with open(csv_file, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
                         for row in reader:
-                            self._parse_row(row)
-            except Exception as e:
-                print(f"警告: 加载用户翻译数据时出错: {e}")
-                self._create_empty_csv()
-        else:
-            self._create_empty_csv()
+                            english = row.get('english', '').strip()
+                            chinese = row.get('chinese', '').strip()
+                            category = row.get('category', 'other').strip() or 'other'
+                            
+                            if english and chinese:
+                                # 内部 upsert, 不覆盖已存在项（保持优先级：数据文件顺序）
+                                if self._insert_if_not_exists(english, chinese, category, "migration"):
+                                    migrated_count += 1
+                except Exception as e:
+                    logging.error(f"迁移文件 {csv_file.name} 时出错: {e}")
+        
+        if migrated_count > 0:
+            logging.info(f"数据迁移完成，共导入 {migrated_count} 条记录")
 
-        # 2. 加载预定义数据 (作为补充，不覆盖用户数据)
-        predefined_file = self.project_root / "predefined_terms.csv"
-        if predefined_file.exists():
-            try:
-                with open(predefined_file, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        english = row.get('english', '').strip()
-                        # 仅当该术语尚未存在时才添加 (用户数据优先级 > 预定义数据)
-                        if english and english not in self.translations:
-                            self._parse_row(row)
-            except Exception as e:
-                print(f"警告: 加载预定义术语时出错: {e}")
-
-    def _save_translations(self):
-        """
-        保存翻译数据到CSV文件
-        优化：直接转储内存数据，不再重复读取预定义文件
-        """
+    def _insert_if_not_exists(self, english: str, chinese: str, category: str, source: str) -> bool:
+        """[内部方法] 插入数据（如果不存在）"""
         try:
-            # 确保目录存在
-            Path(self.csv_file).parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT OR IGNORE INTO translations (english, chinese, category, source)
+                VALUES (?, ?, ?, ?)
+            ''', (english, chinese, category, source))
+            changed = conn.total_changes > 0
+            conn.commit()
+            conn.close()
+            return changed
+        except Exception:
+            return False
 
-            with open(self.csv_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['english', 'chinese', 'category'])
-
-                # 写入所有内存中的数据
-                for english, chinese in self.translations.items():
-                    category = self.term_categories.get(english, 'other')
-                    writer.writerow([english, chinese, category])
-
-        except Exception as e:
-            print(f"警告: 保存翻译数据时出错: {e}")
-
-    def _create_empty_csv(self):
-        """创建空的CSV文件并写入标题行"""
+    def _get_count(self) -> int:
+        """获取总行数"""
         try:
-            Path(self.csv_file).parent.mkdir(parents=True, exist_ok=True)
-            with open(self.csv_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['english', 'chinese', 'category'])
-        except Exception as e:
-            print(f"警告: 创建空CSV文件时出错: {e}")
-
-    # ================= 公共接口保持不变 =================
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM translations')
+            count = cursor.fetchone()[0]
+            conn.close()
+            return count
+        except Exception:
+            return 0
 
     def get_translation(self, english_text: str, category: str = None) -> Optional[str]:
-        """获取英文文本的中文翻译"""
+        """
+        获取中文翻译
+        优先从内存缓存读取，缓存穿透则读库并回填
+        """
         english_text = english_text.strip()
+        if not english_text:
+            return None
 
-        with self._lock:  # 确保线程安全
-            if category and category in self.translations_by_category:
-                return self.translations_by_category[category].get(english_text)
+        # 1. 尝试内存缓存
+        if english_text in self._cache:
+            data = self._cache[english_text]
+            if not category or data['category'] == category:
+                return data['chinese']
 
-            return self.translations.get(english_text)
+        # 2. 查询数据库
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            if category:
+                cursor.execute('SELECT chinese, category FROM translations WHERE english = ? AND category = ?', (english_text, category))
+            else:
+                cursor.execute('SELECT chinese, category FROM translations WHERE english = ?', (english_text,))
+            
+            row = cursor.fetchone()
+            conn.close()
 
-    def add_translation(self, english_text: str, chinese_text: str, category: str = 'other'):
-        """添加新的翻译条目"""
-        english_text = english_text.strip()
-        chinese_text = chinese_text.strip()
-        category = category.strip() if category else 'other'
+            if row:
+                chinese, db_cat = row
+                # 回填缓存
+                self._cache[english_text] = {'chinese': chinese, 'category': db_cat}
+                return chinese
+        except Exception as e:
+            logging.error(f"查询翻译失败 ({english_text}): {e}")
+        
+        return None
 
-        if english_text and chinese_text:
-            with self._lock:  # 确保线程安全
-                self._upsert_memory(english_text, chinese_text, category)
-                self._save_translations()
+    def add_translation(self, english: str, chinese: str, category: str = 'other', source: str = 'manual'):
+        """添加或更新翻译条目"""
+        english = english.strip()
+        chinese = chinese.strip()
+        if not english or not chinese:
+            return
 
-    def update_translation(self, english_text: str, chinese_text: str, category: str = 'other'):
-        """更新翻译条目"""
-        self.add_translation(english_text, chinese_text, category)
+        with self._lock:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO translations (english, chinese, category, source)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(english) DO UPDATE SET
+                        chinese = excluded.chinese,
+                        category = excluded.category,
+                        source = excluded.source,
+                        created_at = CURRENT_TIMESTAMP
+                ''', (english, chinese, category, source))
+                conn.commit()
+                conn.close()
+                # 同步更新内存缓存
+                self._cache[english] = {'chinese': chinese, 'category': category}
+            except Exception as e:
+                logging.error(f"保存翻译到 SQL 失败: {e}")
+
+    def update_translation(self, english: str, chinese: str, category: str = 'other'):
+        """更新翻译条目（别名）"""
+        self.add_translation(english, chinese, category)
 
     def contains(self, english_text: str, category: str = None) -> bool:
-        """检查是否包含指定的英文文本翻译"""
-        with self._lock:  # 确保线程安全
-            return self.get_translation(english_text, category) is not None
+        """检查是否存在"""
+        return self.get_translation(english_text, category) is not None
 
     def get_all_terms(self) -> Dict[str, str]:
-        """获取所有翻译条目"""
-        with self._lock:  # 确保线程安全
-            return self.translations.copy()
+        """获取所有翻译条目（用于兼容旧界面）"""
+        results = {}
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT english, chinese FROM translations')
+            for eng, chi in cursor.fetchall():
+                results[eng] = chi
+            conn.close()
+        except Exception as e:
+            logging.error(f"拉取全量翻译失败: {e}")
+        return results
 
     def get_terms_by_category(self, category: str) -> Dict[str, str]:
-        """根据分类获取翻译条目"""
-        with self._lock:  # 确保线程安全
-            if category in self.translations_by_category:
-                return self.translations_by_category[category].copy()
-        return {}
+        """按分类拉取"""
+        results = {}
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT english, chinese FROM translations WHERE category = ?', (category,))
+            for eng, chi in cursor.fetchall():
+                results[eng] = chi
+            conn.close()
+        except Exception as e:
+            logging.error(f"按类拉取翻译失败: {e}")
+        return results
+
+    def search_translations(self, query: str, limit: int = 50) -> List[Dict[str, str]]:
+        """
+        搜索翻译条目 (模糊匹配)
+        返回: [{'english':..., 'chinese':..., 'category':..., 'source':...}, ...]
+        """
+        results = []
+        if not query:
+            return results
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            wildcard = f"%{query}%"
+            # 搜索英文或中文
+            cursor.execute('''
+                SELECT english, chinese, category, source 
+                FROM translations 
+                WHERE english LIKE ? OR chinese LIKE ? 
+                LIMIT ?
+            ''', (wildcard, wildcard, limit))
+            
+            for row in cursor.fetchall():
+                results.append({
+                    'english': row[0],
+                    'chinese': row[1],
+                    'category': row[2],
+                    'source': row[3]
+                })
+            conn.close()
+        except Exception as e:
+            logging.error(f"搜索翻译失败: {e}")
+        return results
+
+    def update_translation_entry(self, english: str, new_chinese: str) -> bool:
+        """
+        更新特定条目的中文翻译
+        此操作会同步更新数据库和内存缓存
+        """
+        english = english.strip()
+        new_chinese = new_chinese.strip()
+        
+        if not english or not new_chinese:
+            logging.warning("更新翻译失败: 英文或中文为空")
+            return False
+
+        with self._lock:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # 检查是否存在
+                cursor.execute('SELECT category, source FROM translations WHERE english = ?', (english,))
+                row = cursor.fetchone()
+                
+                if not row:
+                    logging.warning(f"更新翻译失败: 条目不存在 {english}")
+                    conn.close()
+                    return False
+                
+                current_category, current_source = row
+                
+                # 执行更新
+                cursor.execute('''
+                    UPDATE translations 
+                    SET chinese = ?, source = ?, created_at = CURRENT_TIMESTAMP
+                    WHERE english = ?
+                ''', (new_chinese, 'manual_correction', english))
+                
+                if cursor.rowcount > 0:
+                    conn.commit()
+                    conn.close()
+                    
+                    # 更新缓存
+                    self._cache[english] = {'chinese': new_chinese, 'category': current_category}
+                    logging.info(f"翻译条目更新成功: {english} -> {new_chinese}")
+                    return True
+                else:
+                    conn.close()
+                    return False
+                    
+            except Exception as e:
+                logging.error(f"更新翻译数据库失败: {e}")
+                return False
 
 
-def get_translation_data_manager(csv_file: str = "translation_data.csv") -> TranslationDataManager:
-    """获取翻译数据管理器实例"""
-    return TranslationDataManager(csv_file)
+# 全局单例管理器实例
+_global_data_manager = None
+_manager_lock = threading.Lock()
+
+def get_translation_data_manager() -> TranslationDataManager:
+    """获取翻译数据管理器实例（单例模式）"""
+    global _global_data_manager
+    with _manager_lock:
+        if _global_data_manager is None:
+            _global_data_manager = TranslationDataManager()
+        return _global_data_manager

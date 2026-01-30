@@ -33,18 +33,26 @@ except ImportError as e:
     CSP = None
     ElasticBlastFactory = None
 
-from src.blast.batch_processor import BaseProcessor
-from src.blast.result_converter import BlastResultConverter
+
+from .result_converter import BlastResultConverter
 
 logger = logging.getLogger(__name__)
 
-class ElasticBlastProcessor(BaseProcessor):
+class ElasticBlastProcessor:
     """
     Elastic BLAST 处理器
     将任务提交到云端 (AWS/GCP) 执行
     """
     def __init__(self, max_workers=1, advanced_settings=None, task_name=None):
-        super().__init__(max_workers, advanced_settings, task_name)
+        self.max_workers = max_workers
+        self.advanced_settings = advanced_settings or {}
+        self.task_name = task_name or f"elb_{int(time.time())}"
+        self.task_folder = Path("results") / self.task_name
+        self.task_folder.mkdir(parents=True, exist_ok=True)
+        self._cancel_flag = False
+        self.on_task_start = None
+        self.on_progress_update = None
+        self.on_all_tasks_complete = None
         self.elb_instance = None
         self.result_converter = BlastResultConverter()
         
@@ -78,12 +86,8 @@ class ElasticBlastProcessor(BaseProcessor):
             logger.error(f"Failed to create Elastic BLAST config: {e}")
             return [{"status": "error", "error": f"Configuration error: {e}"}]
 
-        # 更新任务历史状态
-        self.history_manager.add_or_update_task(
-            task_name=self.task_folder.name,
-            total=1, # 视为一个大任务
-            status="running"
-        )
+        # 更新任务历史状态 (Legacy)
+        pass
 
         # 3. 提交任务
         try:
@@ -210,8 +214,8 @@ class ElasticBlastProcessor(BaseProcessor):
                     "sequence_id": "Cloud_Batch_Result"
                 }
                 
-                # 保存任务历史
-                self._save_task_history([result_info])
+                # 保存任务历史 (Legacy)
+                pass
                 
                 if self.on_all_tasks_complete:
                     self.on_all_tasks_complete([result_info])

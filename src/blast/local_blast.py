@@ -9,6 +9,12 @@ import os
 from pathlib import Path
 from Bio.Blast import NCBIXML
 
+import threading
+
+# 全局并发控制：限制同时运行的 blastn 进程数，防止 CPU 过载
+# 默认为 4，可根据 CPU 核心数调整
+_local_blast_semaphore = threading.Semaphore(4)
+
 class LocalBlastExecutor:
     """
     本地BLAST执行器
@@ -55,14 +61,23 @@ class LocalBlastExecutor:
         ]
 
         try:
-            print(f"正在执行本地BLAST搜索: {Path(sequence_file).name}")
-            # 使用 capture_output=True 捕获输出，text=True 确保返回字符串
-            subprocess.run(
-                blast_cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
+            print(f"正在执行本地BLAST搜索: {Path(sequence_file).name} (等待信号量...)")
+            
+            # 获取信号量，限制并发数
+            with _local_blast_semaphore:
+                print(f"已获取信号量，开始执行: {Path(sequence_file).name}")
+                # 使用 capture_output=True 捕获输出，text=True 确保返回字符串
+                subprocess.run(
+                    blast_cmd,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+            
+            # 兼容性处理：检查输出文件是否生成，如果未生成但也没报错，可能是权限等问题
+            if not Path(output_file).exists():
+                raise RuntimeError(f"BLAST执行看似成功但未生成输出文件: {output_file}")
+                
             return output_file
 
         except subprocess.CalledProcessError as e:

@@ -70,6 +70,14 @@ class Application:
         
         exit_code = self.app.exec()
         
+        # 退出前同步翻译数据库（冷热备份策略）
+        try:
+            from src.utils.translation.translation_data_manager import get_translation_data_manager
+            manager = get_translation_data_manager()
+            manager.prepare_shutdown()
+        except Exception as e:
+            print(f"退出同步翻译数据库时出错: {e}")
+
         # 退出前清理所有子进程
         self._cleanup_processes()
         

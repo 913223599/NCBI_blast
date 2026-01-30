@@ -50,5 +50,6 @@
     "tree_tools_bin": "tools/ncbi_dist/bin/tree-tools"
   },
   "sra_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\sra-tools",
-  "tree_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\tree-tools"
+  "tree_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\tree-tools",
+  "language": "en_US"
 }

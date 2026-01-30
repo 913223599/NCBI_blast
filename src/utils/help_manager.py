@@ -49,6 +49,37 @@ class HelpManager:
             topics.append(file.stem)
         return sorted(topics)
 
+    def get_help_structure(self):
+        """
+        获取帮助文档的分类结构
+        Returns:
+            list: [{"category": str, "topics": [{"id": str, "title": str}, ...]}, ...]
+        """
+        return [
+            {
+                "category": "入门指南",
+                "topics": [
+                    {"id": "quick_start", "title": "快速入门"},
+                ]
+            },
+            {
+                "category": "核心功能",
+                "topics": [
+                    {"id": "local_blast", "title": "本地 BLAST"},
+                    {"id": "elastic_blast", "title": "Elastic BLAST 云服务"},
+                    {"id": "database_manager", "title": "数据库管理"},
+                    {"id": "history", "title": "任务历史"},
+                ]
+            },
+            {
+                "category": "高级设置",
+                "topics": [
+                    {"id": "settings", "title": "参数设置"},
+                    {"id": "translation_debugger", "title": "翻译调试器"},
+                ]
+            }
+        ]
+
     def get_help_content(self, topic_id):
         """
         获取指定主题的帮助内容

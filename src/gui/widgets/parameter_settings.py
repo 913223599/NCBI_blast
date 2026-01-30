@@ -1,15 +1,538 @@
-"""
-参数设置组件模块 - 现代化 UI 重构版
-负责参数设置相关的GUI组件
-"""
 
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox, QComboBox, QLineEdit,
-    QLabel, QPushButton, QDialog, QTabWidget, QGroupBox
+    QLabel, QPushButton, QDialog, QTabWidget, QGroupBox, QMessageBox
 )
 
-from src.utils.config_manager import get_config_manager  # [关键修复] 导入配置管理器
+from src.utils.config_manager import get_config_manager
+from src.utils.ui_translation_manager import get_ui_translator
+
+# =============================================================================
+#  高级参数设置对话框 (现代化 Tab 布局)
+# =============================================================================
+
+class AdvancedSettingsDialog(QDialog):
+    """高级参数设置对话框 - 现代化 Tab 风格"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.tr_mgr = get_ui_translator()
+        
+        self.setWindowTitle(self.tr("advanced_btn")) # Reusing button text or own title
+        self.setModal(True)
+        self.resize(750, 550)
+
+        self._apply_styles()
+        self._setup_ui()
+        
+    def tr(self, key):
+        return self.tr_mgr.tr(key)
+
+    def _apply_styles(self):
+        # Fixed Stylesheet for ComboBox popup issue
+        self.setStyleSheet("""
+            QDialog { background-color: #ffffff; }
+            QTabWidget::pane { border: 1px solid #e0e0e0; border-radius: 6px; background: #fff; margin-top: -1px; }
+            QTabWidget::tab-bar { left: 10px; }
+            QTabBar::tab { background: #f5f6f7; border: 1px solid #e0e0e0; border-bottom-color: #e0e0e0; 
+                          border-top-left-radius: 4px; border-top-right-radius: 4px; padding: 8px 20px; margin-right: 4px; color: #606266; }
+            QTabBar::tab:selected { background: #fff; border-bottom-color: #fff; color: #409eff; font-weight: bold; }
+            QLabel { font-size: 13px; color: #333; }
+            
+            QLineEdit, QComboBox { 
+                border: 1px solid #dcdfe6; 
+                border-radius: 4px; 
+                padding: 5px; 
+                background-color: #fff; 
+                min-height: 20px;
+            }
+            
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 20px;
+                border-left-width: 0px;
+                border-top-right-radius: 3px;
+                border-bottom-right-radius: 3px;
+            }
+            
+            /* Fix for expanding background */
+            QComboBox QAbstractItemView {
+                border: 1px solid #dcdfe6;
+                selection-background-color: #409eff;
+                background-color: #fff;
+                outline: none;
+            }
+
+            QLineEdit:disabled, QComboBox:disabled { background-color: #f5f7fa; color: #c0c4cc; }
+            QGroupBox { border: 1px solid #dcdfe6; border-radius: 6px; margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; color: #409eff; font-weight: bold; }
+        """)
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 20, 15, 20)
+        layout.setSpacing(15)
+
+        # Title (Language switch removed, moved to Global Settings)
+        self.title_label = QLabel(self.tr("parameter_settings_title"))
+        self.title_label.setStyleSheet("font-weight: bold; color: #409eff; font-size: 15px;")
+        layout.addWidget(self.title_label)
+
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+
+        self._init_controls()
+
+        self.tabs.addTab(self._create_search_tab(), self.tr("tab_search"))
+        self.tabs.addTab(self._create_database_tab(), self.tr("tab_db"))
+        self.tabs.addTab(self._create_system_tab(), self.tr("tab_system"))
+        self.tabs.addTab(self._create_elastic_blast_tab(), self.tr("tab_elastic"))
+
+        content_wrapper = QWidget()
+        content_layout = QVBoxLayout(content_wrapper)
+        content_layout.setContentsMargins(20, 20, 20, 20)
+        content_layout.addWidget(self.tabs)
+        layout.addWidget(content_wrapper)
+
+        # Buttons
+        button_container = QWidget()
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(20, 15, 20, 15)
+        button_layout.addStretch()
+
+        self.cancel_button = QPushButton(self.tr("btn_cancel"))
+        self.ok_button = QPushButton(self.tr("btn_ok"))
+        self.ok_button.setStyleSheet("background-color: #409eff; color: white; padding: 6px 20px; border-radius: 4px;")
+
+        self.cancel_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ok_button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.ok_button)
+        layout.addWidget(button_container)
+
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+    def _init_controls(self):
+        # ... (Controls initialization - mostly unchanged, just text)
+        # --- Search ---
+        self.hitlist_size_enabled = QCheckBox()
+        self.hitlist_size_spinbox = QSpinBox()
+        self.hitlist_size_spinbox.setRange(1, 1000)
+
+        self.word_size_enabled = QCheckBox()
+        self.word_size_spinbox = QSpinBox()
+        self.word_size_spinbox.setRange(1, 100)
+
+        self.evalue_enabled = QCheckBox()
+        self.evalue_input = QLineEdit("0.1")
+
+        self.matrix_name_enabled = QCheckBox()
+        self.matrix_name_combo = QComboBox()
+        self.matrix_name_combo.addItems(["BLOSUM62", "BLOSUM45", "BLOSUM80", "PAM30", "PAM70"])
+
+        self.filter_enabled = QCheckBox()
+        self.filter_input = QLineEdit("none")
+        
+        self.program_enabled = QCheckBox()
+        self.program_combo = QComboBox()
+        self.program_combo.addItems(["blastn", "blastp", "blastx", "tblastn", "tblastx"])
+
+        # --- Output ---
+        self.alignments_enabled = QCheckBox()
+        self.alignments_spinbox = QSpinBox()
+        self.alignments_spinbox.setRange(0, 5000)
+
+        self.descriptions_enabled = QCheckBox()
+        self.descriptions_spinbox = QSpinBox()
+        self.descriptions_spinbox.setRange(0, 5000)
+
+        # --- DB ---
+        self.nucleotide_db_enabled = QCheckBox()
+        self.nucleotide_db_combo = QComboBox()
+        self.nucleotide_db_combo.addItems(["nt", "refseq_rna", "refseq_genomic", "nr", "swissprot"])
+
+        self.protein_db_enabled = QCheckBox()
+        self.protein_db_combo = QComboBox()
+        self.protein_db_combo.addItems(["nr", "refseq_protein", "swissprot", "pdb", "env_nr"])
+
+        # --- System ---
+        self.local_num_threads_enabled = QCheckBox()
+        self.local_num_threads_spinbox = QSpinBox()
+        self.local_num_threads_spinbox.setRange(1, 32)
+        
+        # Translations apply to labels here
+        self.prefer_local_checkbox = QCheckBox(self.tr("chk_prefer_local"))
+        self.fallback_to_remote_checkbox = QCheckBox(self.tr("chk_fallback"))
+        self.use_cache_checkbox = QCheckBox(self.tr("chk_cache"))
+
+        self.request_timeout_enabled = QCheckBox()
+        self.request_timeout_spinbox = QSpinBox()
+        self.request_timeout_spinbox.setRange(1, 60)
+        self.request_timeout_spinbox.setValue(6)
+
+        # --- Elastic ---
+        self.elb_enabled_checkbox = QCheckBox(self.tr("chk_elb_enable"))
+        
+        self.elb_cloud_provider_combo = QComboBox()
+        self.elb_cloud_provider_combo.addItems(["AWS", "GCP"])
+        
+        self.elb_region_input = QLineEdit()
+        self.elb_region_input.setPlaceholderText("us-east-1")
+        
+        self.elb_bucket_input = QLineEdit()
+        self.elb_bucket_input.setPlaceholderText("s3://bucket/path")
+        
+        self.elb_machine_type_input = QLineEdit()
+        
+        self.elb_num_nodes_spinbox = QSpinBox()
+        self.elb_num_nodes_spinbox.setRange(1, 1000)
+        self.elb_num_nodes_spinbox.setValue(1)
+        
+        self.elb_use_spot_checkbox = QCheckBox(self.tr("chk_spot"))
+        self.elb_use_spot_checkbox.setChecked(True)
+
+        self._setup_toggles()
+
+    def _setup_toggles(self):
+        pairs = [
+            (self.hitlist_size_enabled, self.hitlist_size_spinbox),
+            (self.word_size_enabled, self.word_size_spinbox),
+            (self.evalue_enabled, self.evalue_input),
+            (self.matrix_name_enabled, self.matrix_name_combo),
+            (self.filter_enabled, self.filter_input),
+            (self.program_enabled, self.program_combo),
+            (self.alignments_enabled, self.alignments_spinbox),
+            (self.descriptions_enabled, self.descriptions_spinbox),
+            (self.nucleotide_db_enabled, self.nucleotide_db_combo),
+            (self.protein_db_enabled, self.protein_db_combo),
+            (self.local_num_threads_enabled, self.local_num_threads_spinbox),
+            (self.request_timeout_enabled, self.request_timeout_spinbox)
+        ]
+        for chk, widget in pairs:
+            widget.setEnabled(chk.isChecked())
+            chk.toggled.connect(widget.setEnabled)
+
+    def _create_param_row(self, label_key, checkbox, widget, tooltip=""):
+        row = QWidget()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 5, 0, 5)
+        
+        text = self.tr(label_key)
+
+        if checkbox:
+            left_layout = QHBoxLayout()
+            left_layout.addWidget(checkbox)
+            lbl = QLabel(text)
+            if tooltip: lbl.setToolTip(tooltip)
+            left_layout.addWidget(lbl)
+            left_layout.addStretch()
+            layout.addLayout(left_layout, 1)
+        else:
+            lbl = QLabel(text)
+            if tooltip: lbl.setToolTip(tooltip)
+            layout.addWidget(lbl, 1)
+
+        widget.setMinimumWidth(200)
+        layout.addWidget(widget, 1)
+        return row
+    
+    # --- Tab Creations (Using _create_param_row) ---
+    def _create_search_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(self._create_param_row("param_program", self.program_enabled, self.program_combo))
+        layout.addWidget(self._create_param_row("param_hitlist", self.hitlist_size_enabled, self.hitlist_size_spinbox))
+        layout.addWidget(self._create_param_row("param_evalue", self.evalue_enabled, self.evalue_input))
+        layout.addWidget(self._create_param_row("param_wordsize", self.word_size_enabled, self.word_size_spinbox))
+        layout.addWidget(self._create_param_row("param_matrix", self.matrix_name_enabled, self.matrix_name_combo))
+        layout.addWidget(self._create_param_row("param_filter", self.filter_enabled, self.filter_input))
+        layout.addStretch()
+        return tab
+
+    def _create_database_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(QLabel(f"<b>{self.tr('header_db')}</b>"))
+        layout.addWidget(self._create_param_row("param_nuc_db", self.nucleotide_db_enabled, self.nucleotide_db_combo))
+        layout.addWidget(self._create_param_row("param_prot_db", self.protein_db_enabled, self.protein_db_combo))
+        layout.addSpacing(10)
+        layout.addWidget(QLabel(f"<b>{self.tr('header_output')}</b>"))
+        layout.addWidget(self._create_param_row("param_alignments", self.alignments_enabled, self.alignments_spinbox))
+        layout.addWidget(self._create_param_row("param_descriptions", self.descriptions_enabled, self.descriptions_spinbox))
+        layout.addStretch()
+        return tab
+
+    def _create_system_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(QLabel(f"<b>{self.tr('header_local_perf')}</b>"))
+        layout.addWidget(self._create_param_row("param_local_threads", self.local_num_threads_enabled, self.local_num_threads_spinbox))
+        layout.addSpacing(10)
+        layout.addWidget(QLabel(f"<b>{self.tr('header_strategy')}</b>"))
+        layout.addWidget(self.prefer_local_checkbox)
+        layout.addWidget(self.fallback_to_remote_checkbox)
+        layout.addWidget(self.use_cache_checkbox)
+        layout.addSpacing(10)
+        layout.addWidget(QLabel(f"<b>{self.tr('header_network')}</b>"))
+        layout.addWidget(self._create_param_row("param_timeout", self.request_timeout_enabled, self.request_timeout_spinbox))
+        layout.addStretch()
+        return tab
+
+    def _create_elastic_blast_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.addWidget(self.elb_enabled_checkbox)
+        
+        basic_group = QGroupBox(self.tr("grp_basic"))
+        basic_layout = QVBoxLayout(basic_group)
+        basic_layout.addWidget(self._create_param_row("param_provider", None, self.elb_cloud_provider_combo))
+        basic_layout.addWidget(self._create_param_row("param_region", None, self.elb_region_input))
+        basic_layout.addWidget(self._create_param_row("param_bucket", None, self.elb_bucket_input))
+        layout.addWidget(basic_group)
+        
+        resource_group = QGroupBox(self.tr("grp_resource"))
+        resource_layout = QVBoxLayout(resource_group)
+        resource_layout.addWidget(self._create_param_row("param_machine", None, self.elb_machine_type_input))
+        resource_layout.addWidget(self._create_param_row("param_nodes", None, self.elb_num_nodes_spinbox))
+        resource_layout.addWidget(self.elb_use_spot_checkbox)
+        layout.addWidget(resource_group)
+        
+        info_label = QLabel(self.tr("elb_note"))
+        info_label.setStyleSheet("color: #909399; font-size: 12px; margin-top: 10px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        layout.addStretch()
+        return tab
+
+    # ... get_settings/set_settings identical to before mostly ...
+    def get_settings(self):
+        # (Same implementation code logic, just verifying it was preserved in replace if I pasted it,
+        # but since I am overwriting I must include it)
+        settings = {
+            'program': self.program_combo.currentText() if self.program_enabled.isChecked() else None,
+            'hitlist_size': self.hitlist_size_spinbox.value() if self.hitlist_size_enabled.isChecked() else None,
+            'word_size': self.word_size_spinbox.value() if self.word_size_enabled.isChecked() else None,
+            'evalue': float(self.evalue_input.text()) if self.evalue_enabled.isChecked() and self.evalue_input.text() else None,
+            'matrix_name': self.matrix_name_combo.currentText() if self.matrix_name_enabled.isChecked() else None,
+            'filter': self.filter_input.text() if self.filter_enabled.isChecked() and self.filter_input.text() else None,
+            'alignments': self.alignments_spinbox.value() if self.alignments_enabled.isChecked() else None,
+            'descriptions': self.descriptions_spinbox.value() if self.descriptions_enabled.isChecked() else None,
+            'local_num_threads': self.local_num_threads_spinbox.value() if self.local_num_threads_enabled.isChecked() else None,
+            'nucleotide_database': self.nucleotide_db_combo.currentText() if self.nucleotide_db_enabled.isChecked() else 'nt',
+            'protein_database': self.protein_db_combo.currentText() if self.protein_db_enabled.isChecked() else 'nr',
+            'prefer_local': self.prefer_local_checkbox.isChecked(),
+            'fallback_to_remote': self.fallback_to_remote_checkbox.isChecked(),
+            'use_cache': self.use_cache_checkbox.isChecked(),
+            'request_timeout': self.request_timeout_spinbox.value() if self.request_timeout_enabled.isChecked() else 4,
+            'elb_enabled': self.elb_enabled_checkbox.isChecked(),
+            'elb_cloud_provider': self.elb_cloud_provider_combo.currentText(),
+            'elb_region': self.elb_region_input.text(),
+            'elb_results_bucket': self.elb_bucket_input.text(),
+            'elb_machine_type': self.elb_machine_type_input.text(),
+            'elb_num_nodes': self.elb_num_nodes_spinbox.value(),
+            'elb_use_spot': self.elb_use_spot_checkbox.isChecked()
+        }
+        return settings
+
+    def set_settings(self, settings):
+        def _set_val(chk, widget, key):
+            if key in settings and settings[key] is not None:
+                if chk: chk.setChecked(True)
+                if isinstance(widget, QSpinBox): widget.setValue(int(settings[key]))
+                elif isinstance(widget, QLineEdit): widget.setText(str(settings[key]))
+                elif isinstance(widget, QComboBox):
+                    idx = widget.findText(str(settings[key]))
+                    if idx >= 0: widget.setCurrentIndex(idx)
+            else:
+                if chk: chk.setChecked(False)
+
+        _set_val(self.program_enabled, self.program_combo, 'program')
+        _set_val(self.hitlist_size_enabled, self.hitlist_size_spinbox, 'hitlist_size')
+        _set_val(self.word_size_enabled, self.word_size_spinbox, 'word_size')
+        _set_val(self.evalue_enabled, self.evalue_input, 'evalue')
+        _set_val(self.matrix_name_enabled, self.matrix_name_combo, 'matrix_name')
+        _set_val(self.filter_enabled, self.filter_input, 'filter')
+        _set_val(self.alignments_enabled, self.alignments_spinbox, 'alignments')
+        _set_val(self.descriptions_enabled, self.descriptions_spinbox, 'descriptions')
+        _set_val(self.local_num_threads_enabled, self.local_num_threads_spinbox, 'local_num_threads')
+        _set_val(self.nucleotide_db_enabled, self.nucleotide_db_combo, 'nucleotide_database')
+        _set_val(self.protein_db_enabled, self.protein_db_combo, 'protein_database')
+        
+        if 'request_timeout' in settings:
+            self.request_timeout_enabled.setChecked(True)
+            self.request_timeout_spinbox.setValue(int(settings['request_timeout']))
+
+        if 'prefer_local' in settings: self.prefer_local_checkbox.setChecked(settings['prefer_local'])
+        if 'fallback_to_remote' in settings: self.fallback_to_remote_checkbox.setChecked(settings['fallback_to_remote'])
+        if 'use_cache' in settings: self.use_cache_checkbox.setChecked(settings['use_cache'])
+        
+        if 'elb_enabled' in settings: self.elb_enabled_checkbox.setChecked(settings['elb_enabled'])
+        _set_val(None, self.elb_cloud_provider_combo, 'elb_cloud_provider')
+        _set_val(None, self.elb_region_input, 'elb_region')
+        _set_val(None, self.elb_bucket_input, 'elb_results_bucket')
+        _set_val(None, self.elb_machine_type_input, 'elb_machine_type')
+        _set_val(None, self.elb_num_nodes_spinbox, 'elb_num_nodes')
+        if 'elb_use_spot' in settings: self.elb_use_spot_checkbox.setChecked(settings['elb_use_spot'])
+
+
+# =============================================================================
+#  参数设置组件 Widget (侧边栏嵌入版)
+# =============================================================================
+
+class ParameterSettingsWidget(QWidget):
+    settings_changed = pyqtSignal(dict)
+
+    def __init__(self):
+        super().__init__()
+        self.config_manager = get_config_manager()
+        self.tr_mgr = get_ui_translator()
+        self.advanced_settings = self.config_manager.get_advanced_settings()
+        
+        self._setup_ui()
+        self._connect_signals()
+        self._load_settings_from_config()
+
+    def tr(self, key):
+        return self.tr_mgr.tr(key)
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 20, 15, 20)
+        layout.setSpacing(15)
+
+        # Title + Language Switch
+        title_box = QHBoxLayout()
+        self.title_label = QLabel(self.tr("parameter_settings_title"))
+        self.title_label.setStyleSheet("font-weight: bold; color: #409eff; font-size: 15px;")
+        
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems(["中文", "English"])
+        self.lang_combo.setFixedWidth(80)
+        # Set current selection based on config
+        idx = 0 if self.tr_mgr.get_language() == "zh_CN" else 1
+        self.lang_combo.setCurrentIndex(idx)
+        self.lang_combo.currentIndexChanged.connect(self._on_lang_changed)
+        
+        title_box.addWidget(self.title_label)
+        title_box.addStretch()
+        title_box.addWidget(self.lang_combo)
+        layout.addLayout(title_box)
+
+        # 1. Threads
+        thread_container = QWidget()
+        thread_layout = QHBoxLayout(thread_container)
+        thread_layout.setContentsMargins(0, 0, 0, 0)
+        self.lbl_thread = QLabel(self.tr("thread_count_label"))
+        self.lbl_thread.setStyleSheet("color: #606266; font-size: 13px;")
+        self.thread_count_spinbox = QSpinBox()
+        self.thread_count_spinbox.setRange(1, 128)
+        self.thread_count_spinbox.setFixedWidth(90)
+        thread_layout.addWidget(self.lbl_thread)
+        thread_layout.addStretch()
+        thread_layout.addWidget(self.thread_count_spinbox)
+        layout.addWidget(thread_container)
+
+        # 2. AI
+        ai_container = QWidget()
+        ai_layout = QHBoxLayout(ai_container)
+        ai_layout.setContentsMargins(0, 0, 0, 0)
+        self.use_ai_checkbox = QCheckBox(self.tr("use_ai_label"))
+        ai_layout.addWidget(self.use_ai_checkbox)
+        ai_layout.addStretch()
+        layout.addWidget(ai_container)
+
+        # 3. AI Model
+        ai_model_container = QWidget()
+        ai_model_layout = QHBoxLayout(ai_model_container)
+        ai_model_layout.setContentsMargins(0, 0, 0, 0)
+        self.lbl_ai_model = QLabel(self.tr("ai_model_label"))
+        self.lbl_ai_model.setStyleSheet("color: #606266; font-size: 13px;")
+        self.ai_model_combo = QComboBox()
+        self.ai_model_combo.setFixedWidth(180)
+        ai_model_layout.addWidget(self.lbl_ai_model)
+        ai_model_layout.addStretch()
+        ai_model_layout.addWidget(self.ai_model_combo)
+        layout.addWidget(ai_model_container)
+
+        # 4. Advanced Button
+        self.advanced_settings_button = QPushButton(self.tr("advanced_btn"))
+        self.advanced_settings_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.advanced_settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: 1px dashed #b0b3b8;
+                border-radius: 4px;
+                color: #606266;
+                padding: 10px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                border-color: #409eff;
+                color: #409eff;
+                background-color: #f0f9eb;
+            }
+        """)
+        layout.addWidget(self.advanced_settings_button)
+        layout.addStretch()
+        
+        # Populate models (helper)
+        self._populate_models()
+
+    def _populate_models(self):
+        supported_model_keys = self.config_manager.get_supported_model_keys()
+        if not supported_model_keys:
+             # Fallback
+             supported_model_keys = ["deepseek-r1", "qwen-mt-plus", "gpt-4"]
+        self.ai_model_combo.addItems(supported_model_keys)
+
+    def _load_settings_from_config(self):
+         use_ai = self.advanced_settings.get('use_ai_translation', True)
+         self.use_ai_checkbox.setChecked(use_ai)
+         
+         ai_model = self.advanced_settings.get('ai_translation_model', 'qwen-mt-plus')
+         idx = self.ai_model_combo.findText(ai_model)
+         if idx != -1: self.ai_model_combo.setCurrentIndex(idx)
+         
+         thread_count = self.advanced_settings.get('thread_count', 3)
+         self.thread_count_spinbox.setValue(int(thread_count))
+
+    def _connect_signals(self):
+        self.thread_count_spinbox.valueChanged.connect(self._on_settings_changed)
+        self.use_ai_checkbox.stateChanged.connect(self._on_settings_changed)
+        self.ai_model_combo.currentTextChanged.connect(self._on_settings_changed)
+        self.advanced_settings_button.clicked.connect(self._show_advanced_settings)
+
+
+    def _show_advanced_settings(self):
+        dialog = AdvancedSettingsDialog(self)
+        dialog.set_settings(self.advanced_settings)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_settings = dialog.get_settings()
+            self.advanced_settings = new_settings
+            try:
+                self.config_manager.set_advanced_settings(self.advanced_settings)
+            except: pass
+            self._on_settings_changed()
+
+    def _on_settings_changed(self):
+        settings = self.get_advanced_settings()
+        settings['thread_count'] = self.thread_count_spinbox.value()
+        settings['use_ai_translation'] = self.use_ai_checkbox.isChecked()
+        settings['ai_translation_model'] = self.ai_model_combo.currentText()
+        
+        # Update memory and config
+        self.advanced_settings.update(settings)
+        self.config_manager.set_advanced_settings(self.advanced_settings)
+        
+        self.settings_changed.emit(settings)
+        
+    def get_advanced_settings(self):
+        return self.advanced_settings.copy()
+
 
 
 # =============================================================================

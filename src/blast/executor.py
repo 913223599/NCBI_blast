@@ -7,6 +7,7 @@ import ssl
 import threading
 import time
 import logging
+import urllib.error
 from urllib.request import HTTPSHandler, build_opener, install_opener
 from Bio.Blast import NCBIWWW
 
@@ -19,8 +20,14 @@ MAX_RETRIES = 3
 # 全局请求控制
 request_counter = 0
 request_lock = threading.Lock()
-# [新增] 限制并发请求数为 3，遵循 NCBI 最佳实践
+# 限制并发请求数为 3，遵循 NCBI 最佳实践 (可通过 set_concurrency_limit 修改)
 concurrent_limit = threading.Semaphore(3)
+
+def set_concurrency_limit(limit: int):
+    """设置全局并发请求限制"""
+    global concurrent_limit
+    logging.info(f"Setting NCBI BLAST concurrency limit to {limit}")
+    concurrent_limit = threading.Semaphore(limit)
 
 def delay_before_request():
     """控制请求频率，遵循NCBI规则"""
@@ -48,25 +55,23 @@ class BlastExecutor:
         if not sequence:
             raise ValueError("序列为空")
 
-        # 清理空白
-        clean_seq = "".join(sequence.split())
-
-        if len(clean_seq) < MIN_SEQUENCE_LENGTH:
-            raise ValueError(f"序列过短: {len(clean_seq)} < {MIN_SEQUENCE_LENGTH}")
-
-        # 简单字符检查（可选优化：正则）
-        valid_chars = set('ATCGNUatcgnuXxACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvw')
-        if not set(clean_seq).issubset(valid_chars):
-             logging.warning("序列包含非标准字符")
-             clean_seq = "".join(c for c in clean_seq if c in valid_chars)
-
-        return clean_seq
+        # 字符检查：支持 FASTA 格式（包含 > 头部、数字、下划线、空格等）
+        # 允许的基本字符：核酸/蛋白字母 + FASTA 头部常用字符
+        valid_chars = set('ATCGNUatcgnuXxACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvw>_-.| 0123456789\n\r')
+        
+        # 不要使用 join(split())，因为那会破坏多序列的换行结构
+        # 我们只做基础验证，或者在清理时保留必要结构
+        if not set(sequence).issubset(valid_chars):
+             logging.warning("序列包含非标准字符，已自动清理")
+             sequence = "".join(c for c in sequence if c in valid_chars)
+             
+        return sequence
 
     def execute_blast_search(self, sequence, program="blastn", database="nt", **kwargs):
         """执行单词BLAST搜索"""
         sequence = self._validate_sequence(sequence)
 
-        # [新增] 使用信号量限制并发
+        # 使用信号量限制并发
         with concurrent_limit:
             delay_before_request()
 
@@ -98,8 +103,8 @@ class BlastExecutor:
             try:
                 return NCBIWWW.qblast(**blast_params)
             except Exception as e:
-                # 简单封装异常以便上层处理
-                raise RuntimeError(f"NCBI BLAST请求失败: {e}") from e
+                # 抛出原始异常以便上层区分处理
+                raise e
 
     def execute_with_retry(self, sequence, program="blastn", database="nt",
                           max_retries=MAX_RETRIES, timeout_minutes=6, **kwargs):
@@ -141,9 +146,25 @@ class BlastExecutor:
             # 情况3: 抛出异常
             elif exception_container[0]:
                 e = exception_container[0]
-                error_reason = str(e)
-                # 检查是否是严重错误（如认证失败等），可能不需要重试
-                # 这里假设网络错误都需要重试
+                
+                # 3.1 HTTP 错误处理
+                if isinstance(e, urllib.error.HTTPError):
+                    if e.code == 429: # Too Many Requests
+                        error_reason = "NCBI服务器繁忙 (HTTP 429)"
+                        current_wait = MAX_WAIT_TIME * 2 # 惩罚性等待
+                    elif 400 <= e.code < 500: # 客户端错误 (400, 403, 404等)
+                        # 这些错误重试通常无效，直接抛出
+                        raise RuntimeError(f"NCBI请求被拒绝 (HTTP {e.code}): {e.reason}")
+                    else: # 5xx 服务器错误
+                        error_reason = f"NCBI服务器错误 (HTTP {e.code})"
+                
+                # 3.2 网络连接错误
+                elif isinstance(e, urllib.error.URLError):
+                    error_reason = f"网络连接失败: {e.reason}"
+                    
+                # 3.3 其他错误
+                else:
+                    error_reason = str(e)
 
             # 达到最大重试次数
             if retries >= max_retries:
@@ -151,12 +172,15 @@ class BlastExecutor:
 
             # 计算等待时间 (指数退避)
             wait_time = current_wait * (2 ** (retries - 1))
-            # 如果是服务器拒绝 (-1)，使用更长的固定等待
+            
+            # 特殊错误代码处理 (保留旧逻辑兼容)
             if "error code: -1" in str(error_reason).lower():
                 wait_time = MAX_WAIT_TIME
-            # 如果是 error code: 1 (Cannot accept request)，也增加等待
             if "error code: 1" in str(error_reason).lower():
                 wait_time = MAX_WAIT_TIME
+
+            # 限制最大等待时间
+            wait_time = min(wait_time, 60)
 
             logging.info(f"尝试 {retries}/{max_retries} 失败: {error_reason}. {wait_time:.1f}s 后重试...")
             time.sleep(wait_time)
