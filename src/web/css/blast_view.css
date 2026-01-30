@@ -38,7 +38,7 @@ html {
     grid-template-areas:
         "editor params history"
         "matrix matrix history";
-    grid-template-columns: 1fr 360px 300px;
+    grid-template-columns: 1fr minmax(320px, 30%) minmax(240px, 280px);
     grid-template-rows: 1fr 380px;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
@@ -48,7 +48,7 @@ html {
     grid-template-areas:
         "editor params"
         "matrix matrix";
-    grid-template-columns: 1fr 360px;
+    grid-template-columns: 1fr minmax(320px, 30%);
 }
 
 /* Panel Styling */
@@ -430,6 +430,12 @@ html {
     flex: 1;
 }
 
+#editor-panel .panel-body,
+#params-panel .panel-body {
+    overflow-y: auto;
+    /* Enable vertical scroll if content squeezed */
+}
+
 /* Editor Specifics */
 .editor-zone {
     padding: 16px;
@@ -472,6 +478,10 @@ textarea {
     background: #fff;
     color: #1e293b;
     user-select: text;
+    overflow: auto;
+    /* Add scrollbar */
+    min-height: 150px;
+    /* Prevent being squeezed to zero */
 }
 
 textarea:focus {
@@ -843,4 +853,136 @@ tr:hover {
 /* Utility */
 .hidden {
     display: none !important;
+}
+
+/* Responsive Adjustments */
+
+/* Tablet / Notebook (< 1200px) */
+@media (max-width: 1200px) {
+    .workbench.history-collapsed {
+        grid-template-areas:
+            "editor params"
+            "matrix matrix";
+        grid-template-columns: 1fr minmax(320px, 45%);
+        grid-template-rows: 1fr 380px;
+        gap: 8px;
+    }
+
+    /* Overlay History Mode on Tablet */
+    .workbench:not(.history-collapsed) #history-panel {
+        position: absolute;
+        right: 0;
+        top: 0;
+        height: 100%;
+        width: 280px;
+        z-index: 50;
+        box-shadow: -5px 0 20px rgba(0, 0, 0, 0.15);
+        display: flex !important;
+    }
+
+    /* Ensure tag is hidden when expanded */
+    .workbench:not(.history-collapsed) .history-tag {
+        display: none !important;
+    }
+
+    /* Default state for tag when collapsed */
+    .workbench.history-collapsed .history-tag {
+        display: flex !important;
+    }
+}
+
+/* Mobile / Small Tablet (< 768px) */
+@media (max-width: 768px) {
+    body {
+        overflow: auto;
+        /* Allow body scroll */
+    }
+
+    .workbench,
+    .workbench.history-collapsed {
+        display: flex;
+        flex-direction: column;
+        height: auto;
+        overflow: visible;
+        padding: 8px;
+        gap: 8px;
+    }
+
+    .panel {
+        height: auto !important;
+        min-height: auto;
+        overflow: visible;
+    }
+
+    .panel-body {
+        overflow: visible;
+    }
+
+    .scroll-v {
+        overflow: visible;
+        max-height: none;
+    }
+
+    /* Adjust specific panels */
+    #editor-panel {
+        height: 500px !important;
+        /* Fixed height for editor on mobile */
+    }
+
+    #editor-panel .panel-body {
+        overflow: hidden;
+        /* Internal scroll for file list/textarea */
+    }
+
+    #editor-panel .scroll-v {
+        overflow-y: auto;
+    }
+
+    #params-panel {
+        order: 2;
+    }
+
+    #matrix-panel {
+        order: 3;
+        height: 400px !important;
+    }
+
+    /* Adjust headers */
+    .panel-header {
+        height: 44px;
+        padding: 0 12px;
+    }
+
+    .panel-title {
+        font-size: 0.9rem;
+    }
+
+    /* Reset History Panel for Mobile (No Overlay) */
+    .workbench:not(.history-collapsed) #history-panel {
+        position: relative !important;
+        width: 100% !important;
+        height: 400px !important;
+        box-shadow: none !important;
+        order: 4;
+        display: flex !important;
+        z-index: 1;
+    }
+
+    /* Compact Header Actions for Mobile */
+    .header-actions {
+        gap: 6px !important;
+    }
+
+    .header-actions .btn {
+        padding: 4px 8px;
+        font-size: 0.75rem;
+        white-space: nowrap;
+        /* Prevent wrap */
+    }
+
+    .header-actions .btn svg {
+        margin-right: 4px !important;
+        width: 14px;
+        height: 14px;
+    }
 }
