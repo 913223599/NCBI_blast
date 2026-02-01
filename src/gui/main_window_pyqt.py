@@ -15,7 +15,6 @@ from src.gui.widgets.web_container import WebContainer
 from src.gui.widgets.help_viewer import HelpViewerDialog
 from src.gui.widgets.api_key_dialog import ApiKeyDialog
 from src.gui.widgets.database_manager_dialog import DatabaseManagerDialog
-from src.gui.widgets.cloud_manager_dialog import CloudManagerDialog
 
 # Project Root
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -57,7 +56,6 @@ class MainWindow(QMainWindow):
         
         # State (Dialogs)
         self.db_manager_dialog = None
-        self.cloud_manager_dialog = None
         self.help_viewer_dialog = None
         self.api_key_dialog = None
         
@@ -91,12 +89,6 @@ class MainWindow(QMainWindow):
             self.db_manager_dialog = DatabaseManagerDialog(self)
         self.db_manager_dialog.show()
 
-    def _open_cloud_manager(self):
-        # Note: Previous settings logic was tied to BlastWidget. 
-        # For now, we open with default settings.
-        if not self.cloud_manager_dialog:
-            self.cloud_manager_dialog = CloudManagerDialog(self)
-        self.cloud_manager_dialog.show()
 
     def _open_help_dialog(self):
         if not self.help_viewer_dialog:

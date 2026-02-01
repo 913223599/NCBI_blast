@@ -18,8 +18,6 @@ class BlastViewController {
             taskList: document.getElementById('task-list'),
             resultBody: document.getElementById('result-body'),
             emptyState: document.getElementById('empty-state'),
-            progressBar: document.getElementById('progress-bar'),
-            resultProgress: document.getElementById('result-progress'),
             queryInput: document.getElementById('query-input'),
             progSelect: document.getElementById('prog-select'),
             dbSelect: document.getElementById('db-select'),
@@ -679,7 +677,6 @@ class BlastViewController {
                 this.currentTaskId = res.task_id;
                 this.dom.resultBody.innerHTML = '';
                 this.dom.emptyState.classList.add('hidden');
-                this.dom.resultProgress.classList.remove('hidden');
                 this.refreshTasks();
             } else {
                 alert((this.translations['msg_start_failed'] || "启动失败: ") + res.error);
