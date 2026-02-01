@@ -1,0 +1,324 @@
+/* =========================================
+   Bio-Station WebOS Design System (v1.2)
+   Source of Truth for Tokens & Components
+   ========================================= */
+
+:root {
+    /* 1. Palette (Semantic) */
+    --primary-color: #3b82f6;
+    /* Blue 500 */
+    --primary-hover: #2563eb;
+    /* Blue 600 */
+    --accent-color: #10b981;
+    /* Emerald 500 */
+    --danger-color: #ef4444;
+    /* Red 500 */
+    --warning-color: #f59e0b;
+    /* Amber 500 */
+
+    /* 2. Backgrounds */
+    --bg-body: #f1f5f9;
+    /* Slate 100 */
+    --bg-surface: #ffffff;
+    /* White */
+    --bg-sidebar: #0f172a;
+    /* Slate 900 */
+    --bg-panel: #ffffff;
+    /* Legacy alias */
+
+    /* 3. Typography Colors */
+    --text-main: #1e293b;
+    /* Slate 800 */
+    --text-primary: var(--text-main);
+    /* Alias */
+    --text-secondary: #64748b;
+    /* Slate 500 */
+    --text-muted: #94a3b8;
+    /* Slate 400 */
+    --text-on-dark: #f8fafc;
+    /* Slate 50 */
+
+    /* 4. Borders & Shadows */
+    --bg-card: var(--bg-surface);
+    /* Alias */
+    --border-color: #e2e8f0;
+    /* Slate 200 */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+    --border-radius: 10px;
+
+    /* 5. Sizing */
+    --sidebar-width: 260px;
+    --header-height: 52px;
+}
+
+/* Base Typography */
+body {
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    color: var(--text-main);
+    background: var(--bg-body);
+    line-height: 1.5;
+}
+
+/* =========================================
+   2. Component Catalogue
+   ========================================= */
+
+/* --- Buttons --- */
+.btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border: 1px solid transparent;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.2s;
+    user-select: none;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-hover);
+    transform: translateY(-1px);
+}
+
+.btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+}
+
+.btn-ghost:hover {
+    background: var(--bg-surface);
+    color: var(--text-main);
+    border-color: var(--text-secondary);
+}
+
+.btn-danger-block {
+    background: transparent;
+    color: var(--danger-color);
+    border: 1px solid var(--danger-color);
+}
+
+.btn-danger-block:hover {
+    background: #fef2f2;
+}
+
+.btn-icon {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    /* Align box model */
+    background: transparent;
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-icon:hover {
+    background: #f1f5f9;
+    color: var(--primary-color);
+}
+
+/* --- Forms --- */
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+}
+
+/* Universal Input Style */
+.settings-input {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: border-color 0.2s;
+    outline: none;
+}
+
+.settings-input:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Select Specific Fix */
+select.settings-input {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 12px center !important;
+    background-size: 16px;
+    padding-right: 40px;
+    height: 42px;
+    /* Fixed Height */
+    transition: none;
+    /* No layout jitter */
+    cursor: pointer;
+}
+
+/* --- Feedback --- */
+.badge {
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: white;
+}
+
+.status-running {
+    background: var(--primary-color);
+}
+
+.status-completed {
+    background: var(--accent-color);
+}
+
+.status-error {
+    background: var(--danger-color);
+}
+
+.status-paused {
+    background: var(--warning-color);
+}
+
+/* Alerts */
+.alert {
+    padding: 12px;
+    border-radius: 8px;
+    border-left: 4px solid;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+}
+
+.alert-info {
+    background: #eff6ff;
+    border-color: var(--primary-color);
+    color: #1e40af;
+}
+
+.alert-warning {
+    background: #fffbeb;
+    border-color: var(--warning-color);
+    color: #92400e;
+}
+
+/* Empty States */
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+}
+
+/* --- Data Display --- */
+.card,
+.glass-card {
+    background: var(--bg-surface);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+}
+
+.glass-card {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(12px);
+}
+
+.table-container {
+    width: 100%;
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+th {
+    text-align: left;
+    padding: 12px;
+    background: var(--bg-body);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* --- Bio Specifics --- */
+.sequence-box {
+    font-family: 'Fira Code', 'Courier New', monospace;
+    font-size: 12px;
+    word-break: break-all;
+    background: #f8fafc;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    color: #334155;
+    line-height: 1.6;
+}
+
+/* --- Layout Utilities --- */
+.scroll-v {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.row-center {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.row-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+/* --- Icons --- */
+.icon-svg {
+    width: 1em;
+    height: 1em;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: middle;
+}

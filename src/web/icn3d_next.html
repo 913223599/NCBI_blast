@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>iCn3D NextGen Prototype</title>
+    <link rel="stylesheet" href="icn3d/dist/lib/jquery-ui-1.13.2.min.css">
+    <link rel="stylesheet" href="icn3d/dist/icn3d_3.47.1.css">
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --sidebar-bg: rgba(30, 41, 59, 0.7);
+            --primary-blue: #3b82f6;
+            --accent-glow: rgba(59, 130, 246, 0.3);
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+            --border-light: rgba(255, 255, 255, 0.1);
+        }
+
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-dark);
+            font-family: 'Inter', -apple-system, system-ui, sans-serif;
+            color: var(--text-main);
+        }
+
+        #app-wrapper {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Sidebar Design */
+        #pro-sidebar {
+            width: 240px;
+            height: 100%;
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            z-index: 1000;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-header h2 {
+            margin: 0;
+            font-size: 14px;
+            letter-spacing: 1px;
+            color: var(--primary-blue);
+            text-transform: uppercase;
+        }
+
+        .sidebar-content {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+        }
+
+        .control-group {
+            margin-bottom: 24px;
+        }
+
+        .group-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-dim);
+            margin-bottom: 10px;
+            display: block;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .pro-btn {
+            background: rgba(51, 65, 85, 0.5);
+            border: 1px solid var(--border-light);
+            color: var(--text-main);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            text-align: left;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .pro-btn:hover {
+            background: rgba(71, 85, 105, 0.8);
+            border-color: var(--primary-blue);
+            transform: translateX(2px);
+        }
+
+        .pro-btn.active {
+            background: var(--primary-blue);
+            border-color: var(--primary-blue);
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+
+        .pro-btn svg {
+            width: 14px;
+            height: 14px;
+            opacity: 0.8;
+        }
+
+        /* Viewer Area */
+        #viewer-container {
+            position: absolute;
+            top: 0;
+            left: 240px;
+            right: 0;
+            bottom: 0;
+            background: #000;
+            overflow: hidden;
+        }
+
+        #icn3d-target {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            inset: 0;
+        }
+
+        /* Float Overlays */
+        #stat-card {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 10px 15px;
+            border-radius: 10px;
+            border: 1px solid var(--primary-blue);
+            font-size: 12px;
+            display: none;
+            z-index: 1500;
+            animation: slideUp 0.4s ease;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+
+        #loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-dark);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(59, 130, 246, 0.2);
+            border-top-color: var(--primary-blue);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        /* AGGRESSIVE UI PURGE - TARGETING DIALOGS & OVERLAYS */
+        /* Note: We allow all divs inside icn3d-target to ensure renderer containers work */
+        #icn3d-target>div:not([class*="icn3d-"]) {
+            display: none !important;
+        }
+
+        /* Target jQuery UI and any dynamic floaters at body level */
+        body>.ui-dialog,
+        body>.ui-widget-overlay,
+        .ui-dialog,
+        .ui-widget-overlay,
+        .icn3d-overlay,
+        [id*="log"]:not(#icn3d-target *),
+        [id*="command"]:not(#icn3d-target *),
+        [id*="input"]:not(#icn3d-target *),
+        input,
+        textarea {
+            display: none !important;
+            height: 0 !important;
+            width: 0 !important;
+            opacity: 0 !important;
+            position: fixed !important;
+            top: -9999px !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div style="font-size: 12px; color: var(--text-dim);">下一代 3D 渲染引擎启动中...</div>
+    </div>
+
+    <div id="app-wrapper">
+        <!-- Next-Gen Sidebar -->
+        <aside id="pro-sidebar">
+            <div class="sidebar-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    style="width:20px; color:var(--primary-blue)">
+                    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+                </svg>
+                <h2>NextGen 3D</h2>
+            </div>
+
+            <div class="sidebar-content">
+                <div class="control-group">
+                    <span class="group-label">表现形态 Styling</span>
+                    <div class="btn-stack" id="style-btns">
+                        <button class="pro-btn active" data-cmd="style ribbon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M4 12V4L12 2l8 2v8l-8 10-8-10z" />
+                            </svg>
+                            Ribbon (默认)
+                        </button>
+                        <button class="pro-btn" data-cmd="style stick">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M8 12h8" />
+                            </svg>
+                            Stick (棍状)
+                        </button>
+                        <button class="pro-btn" data-cmd="style sphere">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                            Sphere (球状)
+                        </button>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <span class="group-label">颜色模式 Coloring</span>
+                    <div class="btn-stack" id="color-btns">
+                        <button class="pro-btn" data-cmd="color spectrum">虹彩 (Spectrum)</button>
+                        <button class="pro-btn" data-cmd="color cpk">元素权重 (CPK)</button>
+                        <button class="pro-btn" data-cmd="color chain">链 ID (Chain)</button>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <span class="group-label">视口控制 Viewport</span>
+                    <div class="btn-stack">
+                        <button class="pro-btn" data-cmd="center; draw">自动对焦 (Center)</button>
+                        <button class="pro-btn" data-cmd="set background black; draw">暗黑模式</button>
+                        <button class="pro-btn" data-cmd="set background white; draw">打印预览 (白)</button>
+                    </div>
+                </div>
+            </div>
+
+            <div
+                style="padding: 15px; border-top: 1px solid var(--border-light); font-size: 10px; color: var(--text-dim);">
+                Prototype v0.1.0-Next
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main id="viewer-container">
+            <div id="icn3d-target"></div>
+
+            <div id="stat-card">
+                <div id="pdb-id" style="font-weight:700; margin-bottom:4px;">LOCAL STRUCTURE</div>
+                <div id="atom-count" style="color:var(--text-dim)">Atoms: 0</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Core Dependencies -->
+    <script src="icn3d/dist/lib/jquery-3.5.0.min.js"></script>
+    <script src="icn3d/dist/lib/jquery-ui-1.13.2.min.js"></script>
+    <script src="icn3d/dist/icn3d_3.47.1.min.js"></script>
+
+    <script type="text/javascript">
+        let icn3dui = null;
+
+        function logToParent(msg, type = 'info') {
+            window.parent.postMessage({ type: 'icn3d-log', msg: `[NextGen] ${msg}`, logType: type }, '*');
+        }
+
+        let engineReady = false;
+
+        async function initNextGen() {
+            const cfg = {
+                divid: 'icn3d-target',
+                width: '100%', height: '100%',
+                resize: true, rotate: true,
+                showui: false, showmenu: false, showanno: false,
+                showlog: false, showcommand: false,
+                command: ''
+            };
+
+            logToParent("Initializing Next-Gen baseline...");
+            icn3dui = new icn3d.iCn3DUI(cfg);
+            window.icn3dui = icn3dui;
+
+            await icn3dui.show3DStructure();
+            engineReady = true;
+            $('#loading-overlay').fadeOut(500);
+            logToParent("Engine Ready.", 'success');
+        }
+
+        window.loadLocalPDB = async function (data) {
+            logToParent("Protocol: Data Injection Pending...");
+
+            // Wait for engine to be truly ready (Max 10s)
+            let waitCount = 0;
+            while (!engineReady && waitCount < 20) {
+                await new Promise(r => setTimeout(r, 500));
+                waitCount++;
+                if (waitCount % 4 === 0) logToParent("Waiting for engine ready... " + waitCount);
+            }
+
+            if (!icn3dui) await initNextGen();
+
+            logToParent("Protocol: Data Injection Start...");
+            try {
+                if (icn3dui.icn3d && icn3dui.icn3d.loadPDBCls) {
+                    await icn3dui.icn3d.loadPDBCls.loadPDB(data, "local_pdb");
+
+                    // Unified activation sequence - SAFE DISPATCH WITH DELAY
+                    logToParent("Data loaded. Syncing renderer...");
+
+                    setTimeout(() => {
+                        const cmd = "select all; style ribbon; color spectrum; center; draw";
+                        const target = window.icn3dui || icn3dui;
+
+                        if (target && typeof target.handleCommands === 'function') {
+                            logToParent("Dispatching render commands...");
+                            target.handleCommands(cmd);
+                        } else {
+                            logToParent("Engine API not exposed. Forcing low-level draw...", 'warn');
+                            if (target && target.icn3d && target.icn3d.drawCls) {
+                                target.icn3d.drawCls.draw();
+                            }
+                        }
+
+                        const count = Object.keys(icn3dui.icn3d.atoms || {}).length;
+                        $('#atom-count').text(`Atoms: ${count}`);
+                        $('#stat-card').fadeIn();
+
+                        // AGGRESSIVE: Programmatically close any leftover jQuery UI dialogs
+                        try {
+                            if (window.$ && $.ui && $(".ui-dialog-content").length > 0) {
+                                $(".ui-dialog-content").dialog("close");
+                                logToParent("Residual dialogs closed via script.");
+                            }
+                        } catch (e) { }
+
+                        logToParent(`Injection completed. ${count} atoms parsed.`, 'success');
+                    }, 800);
+                }
+            } catch (e) {
+                logToParent("Injection Error: " + e.message, 'error');
+            }
+        };
+
+        // Command delegate with UI feedback
+        $(document).on('click', '.pro-btn[data-cmd]', function () {
+            const cmd = $(this).data('cmd');
+            const group = $(this).parent();
+
+            if (icn3dui && icn3dui.handleCommands) {
+                icn3dui.handleCommands(cmd + "; draw");
+
+                // Toggle active class within same group
+                group.find('.pro-btn').removeClass('active');
+                $(this).addClass('active');
+
+                logToParent(`Command Dispatched: ${cmd}`);
+            }
+        });
+
+        $(document).ready(() => {
+            initNextGen();
+        });
+    </script>
+</body>
+
+</html>
