@@ -748,7 +748,8 @@ tr:hover {
     box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.1);
 }
 
-.status-error {
+.status-error,
+.status-failed {
     background: var(--danger);
 }
 
@@ -1087,6 +1088,7 @@ tr:hover {
     color: var(--primary);
     font-weight: 500;
 }
+
 /* Smart Help Tooltip */
 .help-tooltip {
     position: fixed;
@@ -1141,8 +1143,15 @@ tr:hover {
 }
 
 @keyframes dialogAppear {
-    from { opacity: 0; transform: scale(0.9) translateY(10px); }
-    to { opacity: 1; transform: scale(1) translateY(0); }
+    from {
+        opacity: 0;
+        transform: scale(0.9) translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
 }
 
 .dialog-header {
@@ -1169,4 +1178,3 @@ tr:hover {
     width: 100%;
     padding: 10px;
 }
-

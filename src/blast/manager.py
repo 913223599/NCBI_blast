@@ -71,6 +71,8 @@ class BlastStore:
 
     def save_result(self, task_id: str, seq_id: str, data: Dict[str, Any]):
         with sqlite3.connect(self.db_path) as conn:
+            # Use REPLACE logic to avoid duplicates during Resumption
+            conn.execute("DELETE FROM results WHERE task_id = ? AND sequence_id = ?", (task_id, seq_id))
             conn.execute("INSERT INTO results (task_id, sequence_id, data) VALUES (?, ?, ?)",
                         (task_id, seq_id, json.dumps(data)))
 
@@ -121,11 +123,10 @@ class BlastTask:
         """
         # 1. 终态检查
         if self.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
-             # 允许重试逻辑：如果当前是 Failed 但由于某种原因要重置为 Pending/Running (虽然这通常意味着新建任务)
-             # 但一般情况下，终态不可变，除非是特定的 Force Reset
-             logger.warning(f"Task {self.task_id} ignoring transition {self.status} -> {new_status} (Terminal State)")
-             # 简单起见，目前不允许从终态跳出，防止逻辑混乱
-             return
+             # [FIX] 允许从 FAILED 或 CANCELLED 重置为 PENDING (为了断点续传/重试)
+             if new_status != TaskStatus.PENDING:
+                 logger.warning(f"Task {self.task_id} ignoring transition {self.status} -> {new_status} (Terminal State)")
+                 return
 
         # 2. 状态更新
         logger.info(f"Task {self.task_id} transition: {self.status.value} -> {new_status.value}")
@@ -197,7 +198,7 @@ class TaskScheduler:
                 # 只有 Pending 状态任务才执行 (防止已在队列中被取消)
                 if task.status != TaskStatus.PENDING:
                     logger.info(f"Skipping task {task.task_id} with status {task.status}")
-                    self.queue.task_done()
+                    # [FIX] Removed redundant task_done() here
                     continue
 
                 with self._lock:
@@ -212,6 +213,8 @@ class TaskScheduler:
                 with self._lock:
                     if task.task_id in self.active_tasks:
                         self.active_tasks.remove(task.task_id)
+                # [FIX] task_done must be called EXACTLY once per get()
+                # Previous code called it both in main try and in 'if task.status != PENDING'
                 self.queue.task_done()
 
     def shutdown(self):
@@ -244,6 +247,7 @@ class BlastManager:
         
         self.store = BlastStore(db_path=str(self.results_dir / "blast_meta.db"))
         self.logger = logging.getLogger("BlastManager")
+        self.result_listeners = [] # [callback(task_id, result_data)]
         
         # Initialize Scheduler (default 2 concurrent tasks)
         # Pass self._run_task as the execution logic
@@ -276,9 +280,9 @@ class BlastManager:
 
             # 2. 处理异常中断 (Handle Interrupted)
             elif t.status == TaskStatus.RUNNING:
-                self.logger.warning(f"Found interrupted task: {t.task_id}. Marking as FAILED.")
-                # 直接修改状态，不使用 transition_to (避免触发额外逻辑)，并保存到DB
-                t.status = TaskStatus.FAILED
+                self.logger.warning(f"Found interrupted task: {t.task_id}. Marking as CANCELLED for resumption.")
+                # 将中断任务标记为 CANCELLED，以便用户通过“继续分析”恢复
+                t.status = TaskStatus.CANCELLED
                 t.error = "任务异常中断 (应用重启)"
                 t.end_time = datetime.now()
                 self.store.save_task(t)
@@ -339,6 +343,12 @@ class BlastManager:
                 # Ensure data is JSON serializable
                 task.results.append(data)
                 self.store.save_result(task.task_id, data.get('sequence_id','?'), data)
+                # Notify active listeners (for real-time UI streaming)
+                for callback in self.result_listeners:
+                    try:
+                        callback(task.task_id, data)
+                    except Exception as e:
+                        self.logger.error(f"Result listener callback error: {e}")
 
             engine.progress_callback = on_progress
             engine.result_callback = on_result
@@ -415,46 +425,119 @@ class BlastManager:
             return self.store.get_results(task_id)
 
     def clear_history(self):
-        """Clear all tasks from memory and storage."""
+        """Clear all tasks and results safely. Returns list of failed paths."""
+        failed_tasks = []
         with self._lock:
-            # Cancel all running tasks if any
-            for task in self.tasks.values():
-                if task.status == "running" and task.engine:
-                    task.engine.cancel()
+            # 1. Gather all tasks that need deletion
+            # We work on a copy of keys to safely modify dict if needed
+            all_task_ids = list(self.tasks.keys())
             
-            # Delete physical result directories
-            if self.results_dir.exists():
-                for item in self.results_dir.iterdir():
-                    if item.is_dir() and item.name.startswith("blast_"):
-                        try:
-                            shutil.rmtree(item, ignore_errors=True)
-                        except Exception as e:
-                            self.logger.warning(f"Failed to delete result directory {item}: {e}")
-
-            self.tasks.clear()
-            self.store.clear_all()
-            self.logger.info("All history cleared successfully.")
+            # 2. Try to delete each one with protection
+            for task_id in all_task_ids:
+                success, failed_path = self.delete_task(task_id)
+                if not success:
+                    failed_tasks.append(failed_path)
+            
+            self.logger.info(f"Batch clear finished. {len(failed_tasks)} tasks failed to clear physically.")
+            return failed_tasks
 
     def delete_task(self, task_id: str):
-        """Delete a specific task."""
+        """Delete a specific task with protection. Returns (success, failed_path)"""
         with self._lock:
+            # Check if task exists (even if only in store)
+            task_dir = self.results_dir / task_id
+            
             if task_id in self.tasks:
                 task = self.tasks[task_id]
                 if task.status == "running" and task.engine:
                     task.engine.cancel()
-                del self.tasks[task_id]
+                    time.sleep(0.3) # Wait for process release
             
-            # Delete physical result directory
-            task_dir = self.results_dir / task_id
+            # ATOMIC PROTECTION: Try to rename the directory first to detect lock
             if task_dir.exists():
+                temp_dir = task_dir.with_name(f"{task_id}_deleting_{int(time.time())}")
                 try:
-                    shutil.rmtree(task_dir, ignore_errors=True)
-                    self.logger.info(f"Physical directory {task_dir} deleted.")
+                    # Rename is usually atomic on the same filesystem. 
+                    # If any file inside is open, rename might fail or subsequent rmtree will fail.
+                    # On Windows, renaming a directory fails if any file inside is open.
+                    task_dir.rename(temp_dir)
+                    
+                    # If rename succeeded, we are likely safe to delete
+                    shutil.rmtree(temp_dir)
+                    self.logger.info(f"Physical directory for {task_id} cleared successfully.")
                 except Exception as e:
-                    self.logger.warning(f"Failed to delete directory for task {task_id}: {e}")
+                    self.logger.warning(f"Deletion PROTECTED for {task_id}: Directory is locked/in use. {e}")
+                    # ABORT database deletion to keep UI consistent with disk
+                    return (False, str(task_dir))
 
+            # Only reach here if directory was successfully deleted OR didn't exist
+            if task_id in self.tasks:
+                del self.tasks[task_id]
             self.store.delete_task(task_id)
-            self.logger.info(f"Task {task_id} data removed from store.")
+            self.logger.info(f"Task {task_id} removed from tracking and store.")
+            return (True, None)
+
+    def resume_task(self, task_id: str):
+        """Resume a failed/cancelled task from its last physical checkpoint."""
+        with self._lock:
+            if task_id not in self.tasks:
+                # Try to load if it exists in store but not in memory
+                tasks_data = self.store.load_all_tasks()
+                target = next((t for t in tasks_data if t['task_id'] == task_id), None)
+                if not target:
+                    self.logger.error(f"Cannot resume task {task_id}: Not found in store.")
+                    return False
+                
+                # Restore to memory 
+                task = BlastTask(task_id, json.loads(target['params']))
+                task.status = TaskStatus(target['status']) if target['status'] in [s.value for s in TaskStatus] else target['status']
+                task.progress = target['progress']
+                self.tasks[task_id] = task
+            
+            task = self.tasks[task_id]
+            
+            # Check if already running or queued
+            if task.status in [TaskStatus.RUNNING, TaskStatus.PENDING]:
+                self.logger.warning(f"Task {task_id} is already in active queue (Status: {task.status})")
+                return True
+            
+            # LOCK PARAMETERS: Reload from physical params.json to ensure 100% consistency
+            task_dir = self.results_dir / task_id
+            params_file = task_dir / "params.json"
+            if params_file.exists():
+                try:
+                    with open(params_file, 'r', encoding='utf-8') as f:
+                        archived_params = json.load(f)
+                        # Ensure we don't accidentally bring in audit fields like 'archived_at' as core params
+                        task.params = archived_params
+                        self.logger.info(f"Task {task_id} resumed with locked parameters from disk.")
+                except Exception as e:
+                    self.logger.error(f"Failed to load params.json for resumption: {e}")
+
+            # Prepare for restart
+            task.error = None
+            task.end_time = None
+            # We clear memory results so the Engine can refill them (skipped items + new items)
+            # This ensures the progress calculation and UI lists are reconstructed correctly.
+            task.results = [] 
+            
+            # Update status and submit
+            task.transition_to(TaskStatus.PENDING)
+            self.store.save_task(task)
+            self.scheduler.submit(task)
+            self.logger.info(f"Task {task_id} resumed and resubmitted to scheduler.")
+            return True
+
+    def open_directory(self, path: str):
+        """Open a directory in system file explorer."""
+        try:
+            p = Path(path).resolve()
+            if p.exists() and p.is_dir():
+                os.startfile(p)
+                return True
+        except Exception as e:
+            self.logger.error(f"Failed to open directory {path}: {e}")
+        return False
 
 
 # Global Accessor

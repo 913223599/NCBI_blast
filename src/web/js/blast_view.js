@@ -56,6 +56,14 @@ class BlastViewController {
         };
 
         this.inputMode = 'file'; // 'file' | 'text'
+        this.translations = {};
+    }
+
+    /**
+     * Translation Helper
+     */
+    t(key) {
+        return this.translations[key] || key;
     }
 
     async init() {
@@ -107,6 +115,26 @@ class BlastViewController {
                 if (window.parent && window.parent.py_bridge) {
                     this.localBridge = window.parent.py_bridge;
                     console.log("Found parent py_bridge immediately.");
+                    this.localBridge.blast_event.connect((type, data) => {
+                        console.log(`Bridge Event: ${type}`, data);
+                        if (type === 'status_update') {
+                            const status = JSON.parse(data);
+                            this.refreshTasks();
+                        } else if (type === 'deletion_failed') {
+                            const payload = JSON.parse(data);
+                            this.showDeletionFailureDialog(payload.task_id, payload.path);
+                        } else if (type === 'batch_deletion_failed') {
+                            const payload = JSON.parse(data);
+                            this.showBatchDeletionFailureDialog(payload.failed_list);
+                        } else if (type === 'single_result_update') {
+                            const payload = JSON.parse(data);
+                            if (payload.task_id === this.currentTaskId) {
+                                this.appendResultRow(payload.result);
+                            }
+                            // Also trigger refresh for task list counts
+                            this.refreshTasks();
+                        }
+                    });
                     this.onBridgeReady();
                     resolve(this.localBridge);
                     return;
@@ -349,7 +377,7 @@ class BlastViewController {
 
     deleteTask(event, taskId) {
         if (event) event.stopPropagation();
-        if (!confirm(`确定要删除记录 ${taskId} 吗?`)) return;
+        if (!confirm(this.t('confirm_delete_task')?.replace('${id}', taskId) || `确定要删除记录 ${taskId} 吗?`)) return;
         if (this.localBridge) {
             this.localBridge.delete_single_task(taskId);
             if (this.currentTaskId === taskId) {
@@ -359,6 +387,44 @@ class BlastViewController {
             }
             this.refreshTasks();
         }
+    }
+
+    showDeletionFailureDialog(taskId, path) {
+        BioDialog.show({
+            title: this.t('title_deletion_failed') || "删除物理目录失败",
+            message: this.t('msg_deletion_failed_desc')?.replace('${path}', path) ||
+                `由于文件正在被其他程序占用，无法自动删除该任务的结果文件夹。该条记录已保留在列表中。`,
+            choices: [
+                { id: 'open', text: this.t('btn_open_folder') || "打开所在目录", type: 'btn-primary' },
+                { id: 'close', text: this.t('btn_close') || "关闭提示", type: 'btn-secondary' }
+            ],
+            onSelect: (choiceId) => {
+                if (choiceId === 'open' && this.localBridge) {
+                    this.localBridge.open_results_dir(path);
+                }
+            }
+        });
+    }
+
+    showBatchDeletionFailureDialog(failedList) {
+        const count = failedList.length;
+        BioDialog.show({
+            title: this.t('title_batch_deletion_failed') || "部分目录清理受阻",
+            message: (this.t('msg_batch_deletion_failed_desc') ||
+                `在尝试清空历史时，有 ${count} 个项目的文件夹因被占用而未能删除。相关记录已在列表中保留。`)
+                .replace('${count}', count),
+            choices: [
+                { id: 'open', text: this.t('btn_open_results') || "打开结果根目录", type: 'btn-primary' },
+                { id: 'close', text: this.t('btn_close') || "关闭提示", type: 'btn-secondary' }
+            ],
+            onSelect: (choiceId) => {
+                if (choiceId === 'open' && this.localBridge && failedList.length > 0) {
+                    // Open the parent results dir
+                    const parentDir = failedList[0].split(/[/\\]/).slice(0, -1).join('/');
+                    this.localBridge.open_results_dir(parentDir);
+                }
+            }
+        });
     }
 
     renderTaskList(tasks) {
@@ -393,8 +459,17 @@ class BlastViewController {
                         <svg class="icon-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
                     </button>
                 `;
-            } else if (['cancelled', 'error', 'completed'].includes(task.status)) {
+            } else if (['cancelled', 'error', 'failed', 'completed'].includes(task.status)) {
+                let resumeBtn = '';
+                if (['cancelled', 'error', 'failed'].includes(task.status)) {
+                    resumeBtn = `
+                        <button class="btn-task-action" title="${this.t('btn_resume')}" onclick="window.blastView.resumeTask(event, '${task.task_id}')">
+                            <svg class="icon-svg" viewBox="0 0 24 24"><path d="M5 3l14 9-14 9V3z"/></svg>
+                        </button>
+                    `;
+                }
                 actionBtns = `
+                    ${resumeBtn}
                     <button class="btn-task-action" title="重试" onclick="window.blastView.retryTask(event, '${task.task_id}')">
                          <svg class="icon-svg" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
                     </button>
@@ -430,7 +505,14 @@ class BlastViewController {
     }
 
     getStatusLabel(status) {
-        const labels = { 'running': '运行中', 'paused': '已暂停', 'cancelled': '已取消', 'completed': '已完成', 'error': '错误' };
+        const labels = {
+            'running': '运行中',
+            'paused': '已暂停',
+            'cancelled': '已取消',
+            'completed': '已完成',
+            'error': '错误',
+            'failed': '失败'
+        };
         return labels[status] || status;
     }
 
@@ -455,6 +537,13 @@ class BlastViewController {
         if (this.localBridge) {
             this.localBridge.resume_blast_job(taskId);
             setTimeout(() => this.refreshTasks(), 200);
+        }
+    }
+
+    resumeTask(event, taskId) {
+        if (event) event.stopPropagation();
+        if (this.localBridge) {
+            this.localBridge.resume_task(taskId);
         }
     }
 
@@ -601,7 +690,28 @@ class BlastViewController {
     }
 
     /**
-     * Result Rendering
+     * Incremental Result Rendering
+     */
+    appendResultRow(res) {
+        // If it was empty state, clear it
+        if (this.dom.resultBody.querySelector('td[colspan]')) {
+            this.dom.resultBody.innerHTML = '';
+            this.dom.emptyState.classList.add('hidden');
+        }
+
+        // Check if row already exists (prevent duplicates during resumption sync)
+        if (this.dom.resultBody.querySelector(`tr[data-seq-id="${res.sequence_id}"]`)) {
+            return;
+        }
+
+        const row = document.createElement('tr');
+        row.setAttribute('data-seq-id', res.sequence_id);
+        this._fillRowContent(row, res);
+        this.dom.resultBody.appendChild(row);
+    }
+
+    /**
+     * Result Rendering (Full)
      */
     renderResults(results) {
         this.dom.resultBody.innerHTML = '';
@@ -613,42 +723,47 @@ class BlastViewController {
 
         results.forEach(res => {
             const row = document.createElement('tr');
-            const bestHit = res.data?.[0] || {};
-            const metaParts = [];
-            if (bestHit.genus && bestHit.genus !== 'N/A') metaParts.push(bestHit.genus);
-            if (bestHit.strain) metaParts.push(bestHit.strain);
-            if (bestHit.gene_type) metaParts.push(`<span style="color:var(--primary); opacity:0.8">${bestHit.gene_type}</span>`);
-            const metaLine = metaParts.length > 0 ? `<div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">${metaParts.join(' • ')}</div>` : '';
-            const bgInfo = [];
-            if (bestHit.host) bgInfo.push(`宿主: ${bestHit.host}`);
-            if (bestHit.seq_type) bgInfo.push(bestHit.seq_type);
-            const similarityVal = parseFloat(bestHit.similarity) || 0;
-            const badgeColor = similarityVal > 99 ? 'background: #ecfdf5; color: #065f46; border: 1px solid #ccfbf1;' : 'background: #f8fafc; color: #475569; border: 1px solid #e2e8f0;';
-
-            row.innerHTML = `
-                <td style="font-weight: 500; font-size: 0.8rem; color: var(--text-muted);">${res.sequence_id}</td>
-                <td>
-                    <div class="species-name" style="font-weight: 700; color: var(--text-main); font-size: 0.85rem;" data-english="${bestHit.species}">${bestHit.species || '未知物种'}</div>
-                    <div class="translated-name" style="font-size: 0.75rem; color: var(--primary); font-weight: 500; margin-top: 2px; display: none;"></div>
-                    ${metaLine}
-                </td>
-                <td style="font-size: 0.82rem; color: #64748b;">${bgInfo.join(' | ') || '--'}</td>
-                <td><span class="badge" style="${badgeColor}">${bestHit.similarity || '0%'}</span></td>
-                <td style="font-family: 'Fira Code', monospace; font-size: 0.85rem; color: var(--text-main);">${bestHit.evalue || '--'}</td>
-                <td style="font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--primary); font-weight: 500;">${bestHit.acc || '--'}</td>
-                <td>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <button class="btn-icon translate-row-btn" title="AI 翻译物种名" onclick="window.blastView.translateRow(this, '${bestHit.species}')" style="opacity: 0.6;">
-                            <svg class="icon-svg" viewBox="0 0 24 24" style="width: 15px; height: 15px;"><path d="M5 8l6 6"></path><path d="M4 14l6-6 2-3"></path><path d="M2 5h12"></path><path d="M22 22l-5-10-5 10"></path><path d="M14 18h6"></path></svg>
-                        </button>
-                        <button class="btn-icon" title="查看比对详情" onclick="window.blastView.viewDetail('${res.csv_file}', '${res.xml_file}', '${res.sequence_id}')">
-                            <svg class="icon-svg" viewBox="0 0 24 24" style="width: 18px; height: 18px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                        </button>
-                    </div>
-                </td>
-            `;
+            row.setAttribute('data-seq-id', res.sequence_id);
+            this._fillRowContent(row, res);
             this.dom.resultBody.appendChild(row);
         });
+    }
+
+    _fillRowContent(row, res) {
+        const bestHit = res.data?.[0] || {};
+        const metaParts = [];
+        if (bestHit.genus && bestHit.genus !== 'N/A') metaParts.push(bestHit.genus);
+        if (bestHit.strain) metaParts.push(bestHit.strain);
+        if (bestHit.gene_type) metaParts.push(`<span style="color:var(--primary); opacity:0.8">${bestHit.gene_type}</span>`);
+        const metaLine = metaParts.length > 0 ? `<div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">${metaParts.join(' • ')}</div>` : '';
+        const bgInfo = [];
+        if (bestHit.host) bgInfo.push(`宿主: ${bestHit.host}`);
+        if (bestHit.seq_type) bgInfo.push(bestHit.seq_type);
+        const similarityVal = parseFloat(bestHit.similarity) || 0;
+        const badgeColor = similarityVal > 99 ? 'background: #ecfdf5; color: #065f46; border: 1px solid #ccfbf1;' : 'background: #f8fafc; color: #475569; border: 1px solid #e2e8f0;';
+
+        row.innerHTML = `
+            <td style="font-weight: 500; font-size: 0.8rem; color: var(--text-muted);">${res.sequence_id}</td>
+            <td>
+                <div class="species-name" style="font-weight: 700; color: var(--text-main); font-size: 0.85rem;" data-english="${bestHit.species}">${bestHit.species || '未知物种'}</div>
+                <div class="translated-name" style="font-size: 0.75rem; color: var(--primary); font-weight: 500; margin-top: 2px; display: none;"></div>
+                ${metaLine}
+            </td>
+            <td style="font-size: 0.82rem; color: #64748b;">${bgInfo.join(' | ') || '--'}</td>
+            <td><span class="badge" style="${badgeColor}">${bestHit.similarity || '0%'}</span></td>
+            <td style="font-family: 'Fira Code', monospace; font-size: 0.85rem; color: var(--text-main);">${bestHit.evalue || '--'}</td>
+            <td style="font-family: 'Fira Code', monospace; font-size: 0.8rem; color: var(--primary); font-weight: 500;">${bestHit.acc || '--'}</td>
+            <td>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn-icon translate-row-btn" title="AI 翻译物种名" onclick="window.blastView.translateRow(this, '${bestHit.species}')" style="opacity: 0.6;">
+                        <svg class="icon-svg" viewBox="0 0 24 24" style="width: 15px; height: 15px;"><path d="M5 8l6 6"></path><path d="M4 14l6-6 2-3"></path><path d="M2 5h12"></path><path d="M22 22l-5-10-5 10"></path><path d="M14 18h6"></path></svg>
+                    </button>
+                    <button class="btn-icon" title="查看比对详情" onclick="window.blastView.viewDetail('${res.csv_file}', '${res.xml_file}', '${res.sequence_id}')">
+                        <svg class="icon-svg" viewBox="0 0 24 24" style="width: 18px; height: 18px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    </button>
+                </div>
+            </td>
+        `;
     }
 
     /**

@@ -84,8 +84,8 @@
     "placeholder_model_name": "模型显示名称",
     "placeholder_api_key": "输入从阿里云获取的 API 密钥",
     "set_api_key_tip": "密钥将安全存储在本地配置文件中",
-    "param_gap_open": "空隙开启 (Opening)",
-    "param_gap_extend": "空隙延伸 (Extension)",
+    "param_gap_open": "空隙开启",
+    "param_gap_extend": "空隙延伸",
     "msg_config_saved": "配置及模型已成功保存！",
     "msg_save_failed": "保存失败，请重试。",
     "msg_save_failed_key_ok": "模型保存失败，但 API Key 已更新",
@@ -138,5 +138,15 @@
     "title_retry_task": "任务重试确认",
     "msg_retry_choice": "请选择该任务的重试参数配置：",
     "btn_retry_history": "使用任务历史记录的存档参数",
-    "btn_retry_current": "使用当前页面实时配置的参数"
+    "btn_retry_current": "使用当前页面实时配置的参数",
+    "confirm_delete_task": "确定要删除记录 ${id} 吗?",
+    "title_deletion_failed": "物理目录删除失败",
+    "msg_deletion_failed_desc": "由于文件正在被其他程序占用，无法自动删除该任务的结果文件夹。您可以手动清理以下目录：\n${path}",
+    "btn_open_folder": "打开所在目录",
+    "btn_close": "关闭提示",
+    "msg_no_params": "无法读取任务参数",
+    "title_batch_deletion_failed": "部分目录清理受阻",
+    "msg_batch_deletion_failed_desc": "在尝试清空历史时，有 ${count} 个项目的文件夹因被占用而未能删除。相关记录已在列表中保留，请检查并手动清理。",
+    "btn_open_results": "打开结果根目录",
+    "btn_resume": "继续分析"
 }

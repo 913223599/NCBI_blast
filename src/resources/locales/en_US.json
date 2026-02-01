@@ -138,5 +138,15 @@
     "title_retry_task": "Task Retry Confirmation",
     "msg_retry_choice": "Select parameter configuration for this retry:",
     "btn_retry_history": "Use Historic Parameters from task record",
-    "btn_retry_current": "Use Current Page Configuration"
+    "btn_retry_current": "Use Current Page Configuration",
+    "confirm_delete_task": "Are you sure you want to delete task ${id}?",
+    "title_deletion_failed": "Physical Deletion Failed",
+    "msg_deletion_failed_desc": "Unable to automatically delete result directory because some files are in use by another program. Please clean up manually:\n${path}",
+    "btn_open_folder": "Open Directory",
+    "btn_close": "Close",
+    "msg_no_params": "Could not read task parameters",
+    "title_batch_deletion_failed": "Batch Cleanup Restricted",
+    "msg_batch_deletion_failed_desc": "While clearing history, ${count} folder(s) could not be deleted because they are in use. The corresponding records have been kept in the list. Please check and clean up manually.",
+    "btn_open_results": "Open Results Root",
+    "btn_resume": "Resume"
 }

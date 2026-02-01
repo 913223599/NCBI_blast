@@ -130,7 +130,7 @@ class BlastExecutor:
                 raise e
 
     def execute_with_retry(self, sequence, program="blastn", database="nt",
-                          max_retries=MAX_RETRIES, timeout_minutes=6, **kwargs):
+                          max_retries=MAX_RETRIES, timeout_minutes=6, cancel_event=None, **kwargs):
         """带重试和超时机制的执行"""
 
         def run_thread(result_container, exception_container):
@@ -150,7 +150,17 @@ class BlastExecutor:
             worker = threading.Thread(target=run_thread, args=(result_container, exception_container))
             worker.daemon = True
             worker.start()
-            worker.join(timeout_minutes * 60)
+            
+            # 增量式 join 检查，以便响应 cancel_event
+            total_timeout = timeout_minutes * 60
+            elapsed = 0
+            check_interval = 0.5
+            while elapsed < total_timeout and worker.is_alive():
+                if cancel_event and cancel_event.is_set():
+                    logging.info("Excutor cancellation detected during active IO. Thread abandoned.")
+                    return None
+                worker.join(check_interval)
+                elapsed += check_interval
 
             # 情况1: 成功
             if not worker.is_alive() and exception_container[0] is None and result_container[0] is not None:
@@ -206,6 +216,13 @@ class BlastExecutor:
             wait_time = min(wait_time, 60)
 
             logging.info(f"尝试 {retries}/{max_retries} 失败: {error_reason}. {wait_time:.1f}s 后重试...")
-            time.sleep(wait_time)
+            
+            # 使用增量 sleep 以响应 cancel_event
+            slept = 0
+            while slept < wait_time:
+                if cancel_event and cancel_event.is_set():
+                    return None
+                time.sleep(0.5)
+                slept += 0.5
 
         raise Exception("未知流程错误")

@@ -36,6 +36,22 @@ class WebBridge(QObject):
         except ImportError:
             pass
 
+        # Connect to BlastManager real-time result stream
+        self.blast_manager.result_listeners.append(self._broadcast_result)
+
+    def _broadcast_result(self, task_id, data):
+        """Internal callback to push single result to JS"""
+        # Ensure we have the parsed data for the matrix row 
+        # (similar to what get_task_results does)
+        if 'csv_file' in data and os.path.exists(data['csv_file']):
+            parsed = self._parse_blast_csv(data['csv_file'], limit=1)
+            data['data'] = parsed
+        
+        self.blast_event.emit("single_result_update", json.dumps({
+            "task_id": task_id,
+            "result": data
+        }))
+
     def notify_arrearage(self):
         """Notify JS about AI account arrearage"""
         self.logger.warning("AI Translation Arrearage detected, notifying UI")
@@ -365,15 +381,45 @@ class WebBridge(QObject):
 
     @pyqtSlot()
     def clear_all_history(self):
-        """Clear all tasks via manager"""
-        self.logger.info("JS requested clear history")
-        self.blast_manager.clear_history()
+        """Clear all tasks and notify if some folders were locked"""
+        self.logger.info("JS requested clear all history")
+        failed_paths = self.blast_manager.clear_history()
+        
+        if failed_paths:
+            self.logger.warning(f"Batch clear partially failed. {len(failed_paths)} folders locked.")
+            self.blast_event.emit("batch_deletion_failed", json.dumps({
+                "failed_list": failed_paths
+            }))
+        
+        # We still emit status_update to refresh the list for items that WERE deleted
+        self.blast_event.emit("status_update", json.dumps({"status": "cleared"}))
 
     @pyqtSlot(str)
     def delete_single_task(self, task_id):
-        """Delete specific task"""
+        """Delete specific task and notify on failure"""
         self.logger.info(f"JS requested delete task: {task_id}")
-        self.blast_manager.delete_task(task_id)
+        success, failed_path = self.blast_manager.delete_task(task_id)
+        if not success:
+            self.logger.warning(f"Deletion failed for {task_id}, path blocked: {failed_path}")
+            # Notify JS via blast_event signal
+            self.blast_event.emit("deletion_failed", json.dumps({
+                "task_id": task_id,
+                "path": failed_path
+            }))
+
+    @pyqtSlot(str)
+    def resume_task(self, task_id):
+        """Resume a failed/cancelled task"""
+        self.logger.info(f"JS requested resume task: {task_id}")
+        if self.blast_manager.resume_task(task_id):
+            # Notify JS to refresh UI immediately
+            self.blast_event.emit("status_update", json.dumps({"status": "resumed", "task_id": task_id}))
+
+    @pyqtSlot(str)
+    def open_results_dir(self, path):
+        """Open results directory in explorer"""
+        self.logger.info(f"JS requested open folder: {path}")
+        self.blast_manager.open_directory(path)
 
     def _parse_blast_csv(self, csv_path, limit=None):
         """Parse BLAST CSV output to list of dicts for Web UI"""

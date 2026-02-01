@@ -103,7 +103,8 @@ class BlastEngine:
 
         logger.info(f"Engine [{self.task_id}] starting with {total} sequences, {max_workers} workers.")
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             futures = []
             for seq in sequences:
                 if self._cancel_flag.is_set():
@@ -112,10 +113,13 @@ class BlastEngine:
             
             for future in as_completed(futures):
                 if self._cancel_flag.is_set():
-                    logger.info(f"Engine [{self.task_id}] cancellation detected. Shutting down pool.")
-                    # In Python 3.9+, shutdown has wait=False/Cancel_futures
-                    # For compatibility, we'll rely on the workers checking the flag
-                    break
+                    logger.info(f"Engine [{self.task_id}] cancellation detected. Sending immediate shutdown to pool.")
+                    # Cancel all pending futures in the queue
+                    for f in futures:
+                        f.cancel()
+                    # Do NOT wait for active threads - let them background-zombie until they hit next flag
+                    executor.shutdown(wait=False)
+                    return # Exit run() immediately
                 
                 try:
                     result = future.result()
@@ -133,6 +137,25 @@ class BlastEngine:
                 except Exception as e:
                     logger.error(f"Engine sequence processing error: {e}")
                     completed += 1 # Still count as attempted
+        finally:
+            # Ensure pool is cleaned up even if no cancellation happened
+            executor.shutdown(wait=False)
+
+    def _verify_result_integrity(self, csv_path: Path) -> bool:
+        """Verify if the CSV result file is structurally sound and complete."""
+        if not csv_path.exists() or csv_path.stat().st_size == 0:
+            return False
+        
+        try:
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                header = f.readline()
+                # Basic check: First line should contain 'Sequence ID'
+                if not header or 'Sequence ID' not in header:
+                    return False
+                # For more strictness, we could check if there's at least a newline or more content
+                return True
+        except Exception:
+            return False
 
     def _process_single(self, seq_data: Dict[str, str]) -> Dict[str, Any]:
         """Process a single sequence: Query -> Parse -> Convert -> Cache."""
@@ -177,8 +200,26 @@ class BlastEngine:
             xml_path = self.results_dir / f"{safe_id}.xml"
             csv_path = self.results_dir / f"{safe_id}.csv"
 
+            # RESUMPTION: Check if valid result already exists
+            if self._verify_result_integrity(csv_path):
+                logger.info(f"Sequence {seq_id} | Result valid and found on disk. Skipping analysis.")
+                return {
+                    "task_id": self.task_id,
+                    "sequence_id": seq_id,
+                    "status": "success",
+                    "elapsed_time": 0.0,
+                    "xml_file": str(xml_path),
+                    "csv_file": str(csv_path),
+                    "program": prog,
+                    "database": db,
+                    "cached": True
+                }
+
             # Call Executor
-            # Filter params based on program type
+            # CHECK AGAIN BEFORE IO
+            if self._cancel_flag.is_set():
+                return {"status": "cancelled", "seq_id": seq_id}
+
             exec_params = {k: v for k, v in self.settings.items() if k in ['evalue', 'word_size', 'hitlist_size', 'matrix_name', 'filter', 'gap_open', 'gap_extend']}
             
             # CRITICAL FIX: Remove protein-specific params for nucleotide searches
@@ -190,14 +231,19 @@ class BlastEngine:
                     del exec_params['gap_open']
                 if 'gap_extend' in exec_params:
                     del exec_params['gap_extend']
-
+            
             handle = self.executor.execute_with_retry(
                 query,
                 program=prog,
                 database=db,
                 timeout_minutes=self.settings.get('request_timeout', 6),
+                cancel_event=self._cancel_flag, # Pass event down for IO interrupt
                 **exec_params
             )
+            
+            if self._cancel_flag.is_set():
+                if handle: handle.close()
+                return {"status": "cancelled", "seq_id": seq_id}
             
             # Save and Convert
             self.file_handler.save_result_file(handle, str(xml_path))
