@@ -16,7 +16,8 @@ class QwenTranslator:
     使用通义千问大模型进行专业的生物学文本翻译
     """
     
-    # 支持的模型列表 - 现在从配置文件获取，不再硬编码
+    _has_arrearage = False # 类级别变量，追踪欠费状态
+    _on_arrearage_callback = None # 欠费时的回调函数
     
     def __init__(self, api_key: Optional[str] = None, model: str = 'deepseek-r1'):
         """
@@ -30,9 +31,7 @@ class QwenTranslator:
         # 如果没有直接提供api_key，则尝试从环境变量获取
         self.api_key = api_key or os.environ.get('DASHSCOPE_API_KEY')
         
-        # 验证模型是否支持
-        if model not in self.get_supported_models():
-            raise ValueError(f"不支持的模型: {model}。支持的模型: {', '.join(self.get_supported_models().keys())}")
+        # 模型名称不再进行硬性白名单验证，以允许测试新增模型
         self.model = model
         
         # 如果仍然没有api_key，则尝试从配置文件获取
@@ -82,6 +81,28 @@ class QwenTranslator:
             else:
                 return default_models
     
+    def validate_model(self) -> tuple[bool, str]:
+        """
+        验证模型是否可用 (轻量级测试)
+        Returns: (success, message)
+        """
+        try:
+            messages: List[ChatCompletionMessageParam] = [{"role": "user", "content": "hello"}]
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=20 # 允许返回翻译结果
+            )
+            response_content = completion.choices[0].message.content.strip()
+            return True, f"验证成功！模型响应: '{response_content}'"
+        except Exception as e:
+            err_msg = str(e)
+            if 'Arrearage' in err_msg or 'overdue-payment' in err_msg:
+                return False, "账户欠费或访问受限"
+            if 'Model' in err_msg or 'model_not_found' in err_msg or '400' in err_msg:
+                return False, f"无效的模型标识符: {self.model}"
+            return False, f"连接测试失败: {err_msg}"
+
     def translate_text(self, text: str, source_lang: str = 'en', target_lang: str = 'zh') -> str:
         """
         翻译文本
@@ -137,6 +158,10 @@ class QwenTranslator:
             }
         ]
         
+        if QwenTranslator._has_arrearage:
+            # 如果已知欠费，直接返回原文，不再浪费网络请求
+            return text
+
         # 调用通义千问模型进行翻译
         try:
             # 调用通义千问模型进行翻译
@@ -149,18 +174,32 @@ class QwenTranslator:
             )
             
             # 输出API返回的完整内容用于调试
-            print("=" * 50)
-            print("通义千问API返回内容:")
-            print(f"Model: {completion.model}")
-            print(f"Choices count: {len(completion.choices)}")
-            print(f"Usage: {completion.usage}")
-            print(f"Response content: {completion.choices[0].message.content}")
-            print("=" * 50)
+            # print("=" * 50)
+            # print("通义千问API返回内容:")
+            # print(f"Model: {completion.model}")
+            # print(f"Choices count: {len(completion.choices)}")
+            # print(f"Response content: {completion.choices[0].message.content}")
+            # print("=" * 50)
             
             return completion.choices[0].message.content.strip()
                 
         except Exception as e:
-            raise Exception(f"调用通义千问API时出错: {str(e)}")
+            err_msg = str(e)
+            # 精确匹配欠费相关错误
+            if 'Arrearage' in err_msg or 'overdue-payment' in err_msg:
+                if not QwenTranslator._has_arrearage:
+                    QwenTranslator._has_arrearage = True
+                    print(f"[严重错误] AI 翻译账户欠费，已进入静默模式。")
+                    if QwenTranslator._on_arrearage_callback:
+                        QwenTranslator._on_arrearage_callback()
+                return text
+            
+            # 模型错误处理
+            if 'Model' in err_msg or 'model_not_found' in err_msg or '400' in err_msg:
+                print(f"[警告] AI 模型调用失败 ({self.model}): {err_msg}")
+                return text
+
+            raise Exception(f"调用通义千问API时出错: {err_msg}")
     
     def translate_biology_term(self, term: str) -> str:
         """

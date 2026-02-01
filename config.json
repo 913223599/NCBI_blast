@@ -12,16 +12,12 @@
       "name": "通义千问-MT-Plus"
     },
     {
-      "key": "qwen-mt-turbo",
-      "name": "通义千问-MT-Turbo"
-    },
-    {
       "key": "qwen-turbo",
       "name": "通义千问-Turbo"
     },
     {
-      "key": "deepseek-r1",
-      "name": "DeepSeek"
+      "key": "deepseek-v3.2",
+      "name": "deepseek-v3.2"
     }
   ],
   "advanced_settings": {
@@ -41,7 +37,8 @@
     "fallback_to_remote": true,
     "use_cache": true,
     "thread_count": 1,
-    "request_timeout": 9
+    "request_timeout": 9,
+    "ai_model": "deepseek-v3.2"
   },
   "setup_completed": true,
   "blast_bin_path": "C:\\Program Files\\NCBI\\blast-2.16.0+\\bin",
@@ -51,5 +48,5 @@
   },
   "sra_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\sra-tools",
   "tree_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\tree-tools",
-  "language": "en_US"
+  "language": "zh_CN"
 }

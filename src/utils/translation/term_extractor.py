@@ -29,26 +29,13 @@ class TermExtractor:
         # 加载分类规则
         self.classification_rules = self._load_classification_rules()
         
-        # 初始化学习数据结构
-        self.learning_patterns = {
-            'species': [],
-            'genus': [],
-            'gene': [],
-            'sequence': [],
-            'strain': [],
-            'other': []
-        }
-        
         # 添加线程锁
         import threading
         self._lock = threading.Lock()
         
-        # [优化点 1] 初始化时加载预定义术语到内存缓存
+        # [优化点] 初始化时加载预定义术语到内存缓存
         self._predefined_terms_cache = {}
         self._load_predefined_terms_to_cache()
-        
-        # 加载学习到的模式
-        self._load_learned_patterns()
 
     def _load_classification_rules(self):
         """加载分类规则"""
@@ -75,19 +62,20 @@ class TermExtractor:
     def _load_predefined_terms_to_cache(self):
         """[新增方法] 将预定义术语加载到内存缓存"""
         try:
-            # 确定预定义术语文件路径 (保持原逻辑)
-            predefined_terms_file = Path(__file__).parent.parent.parent.parent / "predefined_terms.csv"
+            # 使用更健壮的路径获取方案
+            root_dir = Path(__file__).parent.parent.parent.parent
+            predefined_terms_file = root_dir / "predefined_terms.csv"
             
             if predefined_terms_file.exists():
                 with open(predefined_terms_file, 'r', encoding='utf-8') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        term = row['english'].strip()
-                        category = row['category'].strip()
-                        chinese = row['chinese'].strip()
+                        term = row.get('english', '').strip()
+                        category = row.get('category', '').strip()
+                        chinese = row.get('chinese', '').strip()
                         
-                        # 构建多级索引缓存: cache[term] = {'chinese': xxx, 'category': xxx}
-                        # 同时也支持 (term, category) 的快速查找
+                        if not term: continue
+                        
                         if term not in self._predefined_terms_cache:
                             self._predefined_terms_cache[term] = []
                         
@@ -98,282 +86,69 @@ class TermExtractor:
         except Exception as e:
             print(f"警告: 预加载术语库失败: {e}")
 
-    def _load_learned_patterns(self):
-        """加载已学习的模式"""
-        try:
-            learned_patterns_file = Path(__file__).parent / "learned_patterns.json"
-            if learned_patterns_file.exists():
-                with open(learned_patterns_file, 'r', encoding='utf-8') as f:
-                    loaded_patterns = json.load(f)
-                    for category, patterns in loaded_patterns.items():
-                        if category in self.learning_patterns:
-                            self.learning_patterns[category] = patterns
-        except Exception as e:
-            print(f"警告: 加载学习模式失败: {e}")
-
-    def _save_learned_patterns(self):
-        """保存学习到的模式"""
-        try:
-            learned_patterns_file = Path(__file__).parent / "learned_patterns.json"
-            with open(learned_patterns_file, 'w', encoding='utf-8') as f:
-                json.dump(self.learning_patterns, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"警告: 保存学习模式失败: {e}")
-
-    def learn_from_examples(self, examples: List[Tuple[str, str]]) -> None:
-        """
-        从示例中学习分类模式
-        
-        Args:
-            examples: 术语和类别对的列表，例如 [("Staphylococcus aureus", "species"), ("hydrolase", "gene")]
-        """
-        with self._lock:  # 确保线程安全
-            for term, expected_category in examples:
-                # 提取特征模式
-                self._extract_features_from_term(term, expected_category)
-            
-            # 保存学习到的模式
-            self._save_learned_patterns()
-            
-            # 更新分类规则
-            self._update_classification_rules_with_learned_patterns()
-
-    def _extract_features_from_term(self, term: str, category: str) -> None:
-        """
-        从术语中提取特征模式并学习
-        
-        Args:
-            term: 术语
-            category: 类别
-        """
-        term_lower = term.lower()
-        words = term.split()
-        
-        # 为每个类别积累术语样本，用于后续分析
-        if hasattr(self, '_category_samples'):
-            if category not in self._category_samples:
-                self._category_samples[category] = []
-            if term not in self._category_samples[category]:
-                self._category_samples[category].append(term)
-        else:
-            self._category_samples = {category: [term]}
-        
-        # 提取词汇模式
-        for word in words:
-            if len(word) > 2 and word.lower() not in self.classification_rules.get("common_genera", []):
-                # 如果这个词经常出现在某个类别中，将其加入该类别的模式
-                if word not in self.learning_patterns[category]:
-                    self.learning_patterns[category].append(word)
-        
-        # 提取正则表达式模式
-        if category == 'species':
-            # 对于物种名，学习双名法模式
-            if len(words) >= 2:
-                genus = words[0]
-                species = words[1]
-                if (genus[0].isupper() and 
-                    all(c.islower() or c in ['.', '-', '_'] for c in genus[1:]) and 
-                    all(c.islower() or c in ['.', '-', '_', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] for c in species)):
-                    # 学习属名+种名模式，但仅在确认这是有效模式时
-                    pattern = rf"{re.escape(genus)}\s+{re.escape(species)}"
-                    if pattern not in self.learning_patterns[category]:
-                        self.learning_patterns[category].append(pattern)
-        
-        elif category == 'genus':
-            # 学习属名模式
-            if len(words) == 1 and words[0][0].isupper():
-                # 单个词，首字母大写，可能是属名
-                word = words[0]
-                if word not in self.learning_patterns[category]:
-                    self.learning_patterns[category].append(word)
-
-    def _update_classification_rules_with_learned_patterns(self):
-        """使用学习到的模式更新分类规则"""
-        # 将学习到的模式合并到现有规则中，但不覆盖原有规则
-        for category, patterns in self.learning_patterns.items():
-            if category in ['gene', 'sequence', 'strain']:
-                # 为基因、序列、菌株类别添加学习到的模式
-                for pattern in patterns:
-                    if pattern not in self.classification_rules.get(f"{category}_patterns", []):
-                        self.classification_rules[f"{category}_patterns"].append(pattern)
-            elif category == 'genus':
-                # 为属名类别添加学习到的模式
-                for pattern in patterns:
-                    if pattern not in self.classification_rules.get("common_genera", []):
-                        self.classification_rules["common_genera"].append(pattern)
-            elif category == 'species':
-                # 为物种类别添加学习到的模式
-                for pattern in patterns:
-                    if pattern not in self.classification_rules.get("common_genera", []) and \
-                       pattern not in [term.lower() for term in self.classification_rules.get("special_terms", [])]:
-                        # 只添加不在现有规则中的新模式
-                        if pattern not in self.classification_rules.get("species", []):
-                            if 'species' not in self.classification_rules:
-                                self.classification_rules['species'] = []
-                            self.classification_rules['species'].append(pattern)
+    # Removed: _load_learned_patterns, _save_learned_patterns, learn_from_examples, 
+    # _extract_features_from_term, _update_classification_rules_with_learned_patterns
+    # for simplicity and reliability as requested by user.
 
     def normalize_term(self, term: str) -> str:
         """
-        规范化术语，移除编号部分，如phiCP39-O, DOBBIE2, XP41-N3等
+        规范化术语，移除编号部分，如phiCP39-O, DOBBIE2, XP41-N3, strain WS02等
         但保留有效的生物学名称，如属+种的双名法命名
-        
-        Args:
-            term: 原始术语
-            
-        Returns:
-            str: 规范化后的术语
         """
         if not term:
             return term
             
-        # 预先检查是否为已知的有效术语，避免不必要的处理
-        # 检查是否为有效的双名法命名（属+种）或包含有效生物学术语的情况
-        words = term.split()
-        
-        # 首先处理方括号等特殊字符
-        # 如果术语以左方括号开头但没有闭合，可能是提取不完整，尝试清理
-        if term.startswith('[') and not term.endswith(']'):
-            # 移除开头的左方括号
-            cleaned_term = term[1:]
-            if cleaned_term:
-                # 递归处理清理后的术语
-                return self.normalize_term(cleaned_term)
-        
-        # 如果术语以左方括号开头并以右方括号结尾，移除方括号
+        # 1. 首先处理方括号等特殊字符
+        term = term.strip()
         if term.startswith('[') and term.endswith(']'):
-            cleaned_term = term[1:-1].strip()
-            if cleaned_term:
-                # 递归处理清理后的术语
-                return self.normalize_term(cleaned_term)
-        
-        if len(words) >= 2:
-            # 优先检查特殊生物学术语模式（如 phage, sp. 等）
-            first_word = words[0].strip()
-            second_word = words[1].strip()
+            term = term[1:-1].strip()
+        elif term.startswith('['):
+            term = term[1:].strip()
             
-            # 检查是否为 "属名 phage 编号" 或 "属名 sp. 编号" 模式
-            if (second_word.lower() == 'phage' or second_word.lower() == 'sp.') and len(words) > 2:
-                # 检查是否有编号需要移除
-                remaining_part = ' '.join(words[2:])
-                patterns = [
-                    r'\s+v?B_[A-Za-z0-9_]+$',  # 匹配 vB_CpeP_PMQ04 样式的编号
-                    r'\s+\w*[A-Z]+\d+[A-Z]*-*\d*[A-Z]*$',  # 匹配 phiCP39-O, XP41-N3 等
-                    r'\s+\w*[A-Z]*\d+-*\d*-*\d*[A-Z]*\d*$',  # 匹配 C2-6-12, DOBBIE2 等
-                    r'\s+[a-z]*[A-Z]*[A-Z0-9]+$',  # 匹配 ctNU74 等
-                ]
-                
-                for pattern in patterns:
-                    if re.search(pattern, term, re.IGNORECASE):
-                        # 移除匹配的编号部分，保留属名和生物学术语
-                        cleaned_term = re.sub(pattern, '', term, flags=re.IGNORECASE)
-                        # 确保只保留属名和生物学术语
-                        if second_word.lower() == 'phage':
-                            return f"{first_word} phage"
-                        elif second_word.lower() == 'sp.':
-                            return f"{first_word} sp."
-            
-            # 检查是否符合双名法格式：属名（首字母大写）+ 种名（全小写或包含数字）
-            # 但要排除生物学术语如 'phage', 'sp.' 等
-            is_valid_genus = first_word[0].isupper() and all(c.islower() or c in ['.', '-', '_'] for c in first_word[1:])
-            is_valid_species = all(c.islower() or c in ['.', '-', '_', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '[', ']'] for c in second_word)
-            
-            # 排除生物学术语作为种名
-            is_bio_term = second_word.lower() in ['phage', 'sp.', 'subsp.', 'var.', 'str.', 'strain', 'isolate', 'clone']
-            
-            # 检查是否是有效的生物学术语（但不是编号）
-            if is_valid_genus and is_valid_species and not is_bio_term:
-                # 检查第二部分是否更像是编号而不是种名
-                # 如果第二部分全是数字或看起来像编号，则可能是需要移除的部分
-                looks_like_number = re.match(r'^\d+$', second_word) or \
-                                   re.search(r'(?:\d+[A-Z]+\d*|[A-Z]+\d+|_|\-[A-Z]*\d)', second_word, re.IGNORECASE)
-                
-                # 如果第二部分看起来像编号，移除它
-                if looks_like_number and len(words) > 2:
-                    # 检查后续部分是否包含真正的编号模式
-                    potential_number_part = ' '.join(words[1:])
-                    patterns = [
-                        r'\s+v?B_[A-Za-z0-9_]+$',  # 匹配 vB_CpeP_PMQ04 样式的编号
-                        r'\s+\w*[A-Z]+\d+[A-Z]*-*\d*[A-Z]*$',  # 匹配 phiCP39-O, XP41-N3 等
-                        r'\s+\w*[A-Z]*\d+-*\d*-*\d*[A-Z]*\d*$',  # 匹配 C2-6-12, DOBBIE2 等
-                        r'\s+[a-z]*[A-Z]*[A-Z0-9]+$',  # 匹配 ctNU74 等
-                    ]
-                    
-                    for pattern in patterns:
-                        if re.search(pattern, term, re.IGNORECASE):
-                            # 移除匹配的编号部分
-                            cleaned_term = re.sub(pattern, '', term, flags=re.IGNORECASE)
-                            return cleaned_term.strip()
-                
-                # 如果第二部分是有效种名，但后面还有编号，则移除编号部分
-                elif len(words) > 2:
-                    # 检查第三个及以后的词是否是编号
-                    remaining_part = ' '.join(words[2:])
-                    patterns = [
-                        r'\s+v?B_[A-Za-z0-9_]+$',  # 匹配 vB_CpeP_PMQ04 样式的编号
-                        r'\s+\w*[A-Z]+\d+[A-Z]*-*\d*[A-Z]*$',  # 匹配 phiCP39-O, XP41-N3 等
-                        r'\s+\w*[A-Z]*\d+-*\d*-*\d*[A-Z]*\d*$',  # 匹配 C2-6-12, DOBBIE2 等
-                        r'\s+[a-z]*[A-Z]*[A-Z0-9]+$',  # 匹配 ctNU74 等
-                    ]
-                    
-                    for pattern in patterns:
-                        if re.search(pattern, term, re.IGNORECASE):
-                            # 移除匹配的编号部分，保留属名和种名
-                            cleaned_term = re.sub(pattern, '', term, flags=re.IGNORECASE)
-                            return cleaned_term.strip()
-                
-                # 如果只是简单的双名法，不做改变
-                return term
-        
-        # 对于非双名法术语，应用编号移除规则
-        # 定义编号模式的正则表达式
-        patterns = [
-            r'\s+v?B_[A-Za-z0-9_]+$',  # 匹配 vB_CpeP_PMQ04 样式的编号
-            r'\s+\w*[A-Z]+\d+[A-Z]*-*\d*[A-Z]*$',  # 匹配 phiCP39-O, XP41-N3 等
-            r'\s+\w*[A-Z]*\d+-*\d*-*\d*[A-Z]*\d*$',  # 匹配 C2-6-12, DOBBIE2 等
-            r'\s+[a-z]*[A-Z]*[A-Z0-9]+$',  # 匹配 ctNU74 等
+        # 2. 定义需要彻底裁剪的噪音关键字（及其后续所有内容）
+        # 这些词通常标志着非规范化部分的开始
+        strip_keywords = [
+            'strain', 'isolate', 'clone', 'serotype', 'subtype', 
+            'str.', 'str', 'isolate:', 'type:', 'sample', 'accession'
         ]
         
-        # 依次尝试每个模式
-        normalized_term = term
-        for pattern in patterns:
-            # 移除匹配的编号部分
-            new_term = re.sub(pattern, '', normalized_term, flags=re.IGNORECASE)
-            if new_term != normalized_term:
-                normalized_term = new_term
-                break  # 找到匹配项后停止
+        # 3. 定义需要保留但需要裁剪后续编号的关键字
+        keep_keywords = ['phage', 'sp.', 'subsp.', 'var.', 'ssp.']
+
+        # 4. 执行基于关键字的裁剪
+        words = term.split()
+        normalized_words = []
         
-        # 如果上面的模式没有匹配，尝试更通用的方法
-        if normalized_term == term:
-            # 对于 "属名 phage 编号" 这样的模式，我们需要保留属名和phage，只移除编号
-            # 如 "Clostridium phage phiCP39-O" -> "Clostridium phage"
-            # 或 "Clostridium phage HMD-PC1" -> "Clostridium phage"
-            phage_pattern = r'(\w+\s+phage)\s+[\w\d_-]+$'
-            match = re.search(phage_pattern, term, re.IGNORECASE)
-            if match:
-                normalized_term = match.group(1)
-                return normalized_term.strip()
-        
-        # 如果还是没有变化，尝试移除结尾的字母数字组合（增强版）
-        if normalized_term == term:
-            # 移除结尾的编号部分，但保留有意义的词汇
-            # 这次使用更广泛的模式来匹配各种编号格式
-            suffix_patterns = [
-                r'\s+[A-Z]+-?[A-Z]*\d+[A-Z]*$',  # 匹配 HMD-PC1, XP41-N3 等
-                r'\s+\w*[A-Z]*\d+[A-Z]*-*\d*[A-Z]*$',  # 更通用的数字字母组合
-                r'\s+v?B_[A-Za-z0-9_]+$',  # 匹配 vB_CpeP_PMQ04 样式
-                r'\s+[\w\d_-]+$',  # 最后兜底：任何以字母数字下划线结尾的部分
-            ]
+        for i, word in enumerate(words):
+            lower_word = word.lower().rstrip(',;:').strip('.')
             
-            for pattern in suffix_patterns:
-                new_term = re.sub(pattern, '', normalized_term, flags=re.IGNORECASE)
+            # 如果遇到彻底裁剪关键字，直接停止并返回之前的部分
+            if lower_word in strip_keywords:
+                break
+                
+            # 如果遇到保留关键字
+            if lower_word in [k.strip('.') for k in keep_keywords] or word.lower() in keep_keywords:
+                normalized_words.append(word)
+                break # 保留关键字通常是名称的最后有效部分（如 xxx phage）
+
+            normalized_words.append(word)
+            
+        # 重新组合
+        normalized_term = ' '.join(normalized_words).strip().rstrip(',;: ')
+        
+        if normalized_term == term:
+            # 强化正则：必须包含数字或特定的 ID 格式，避免误删普通单词
+            patterns = [
+                (r'\s+v?B_[A-Za-z0-9_]+$', re.IGNORECASE),  # 匹配 vB_xxxx
+                (r'\s+[A-Z\d_\-]{2,}$', 0),                 # 匹配全大写/数字的 ID (至少2位)
+                (r'\s+[A-Za-z]*\d+[A-Za-z0-9]*$', 0),       # 匹配包含数字的 ID
+                (r'\s+[A-Z]+[A-Za-z]*\d+$', 0),             # 匹配以大写开头且包含数字的 ID
+            ]
+            for pattern, flags in patterns:
+                new_term = re.sub(pattern, '', normalized_term, flags=flags)
                 if new_term != normalized_term:
                     normalized_term = new_term
                     break
-        
-        # 如果还是没有变化，尝试移除结尾的字母数字组合
-        if normalized_term == term:
-            # 移除结尾的编号部分，但保留有意义的词汇
-            normalized_term = re.sub(r'\s+[\w\d_-]+$', '', term)
         
         return normalized_term.strip()
 
@@ -487,7 +262,8 @@ class TermExtractor:
             # 英文没有被规范化，使用原始中文翻译
             normalized_translation = processed_translation
         
-        print(f"[术语规范化] 将 '{processed_original}' 规范化为 '{normalized_original}'")
+        if normalized_original != processed_original:
+            print(f"[术语规范化] 将 '{processed_original}' 规范化为 '{normalized_original}'")
         
         # 将规范化后的术语添加到翻译数据管理器中
         # 先尝试确定术语的分类
@@ -500,9 +276,6 @@ class TermExtractor:
             if not existing_translation:
                 self.translation_data_manager.add_translation(normalized_original, normalized_translation, category)
                 print(f"[翻译调试] 已将'{normalized_original}'的翻译结果存储到术语数据库，分类为'{category}'")
-                
-                # 学习这个术语的分类（用于后续改进）
-                self.learn_from_examples([(normalized_original, category)])
             else:
                 # 如果已存在，但内容不同，则更新
                 if existing_translation != normalized_translation:
@@ -606,76 +379,57 @@ class TermExtractor:
 
     def extract_blast_result_terms(self, csv_file_path: str):
         """
-        从BLAST结果CSV文件中提取术语并保存到预定义术语文件中
-        
-        Args:
-            csv_file_path (str): BLAST结果CSV文件路径
+        从 BLAST 结果 CSV 中增量提取术语 (I/O 优化版)
         """
-        # 确定预定义术语文件路径
-        predefined_terms_file = Path(__file__).parent.parent.parent.parent / "predefined_terms.csv"
-        
-        # 读取现有的预定义术语
-        existing_terms = set()
-        existing_terms_dict = {}  # 用于快速查找
-        if predefined_terms_file.exists():
-            with open(predefined_terms_file, 'r', encoding='utf-8') as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    term_key = (row['english'], row['category'])
-                    existing_terms.add(term_key)
-                    existing_terms_dict[term_key] = row['chinese']
-        
-        # 从CSV文件中提取术语
-        new_terms = {}
         try:
+            root_dir = Path(__file__).parent.parent.parent.parent
+            predefined_terms_file = root_dir / "predefined_terms.csv"
+            
+            # 使用内存缓存后的快速去重检查
+            existing_keys = set()
+            for term, entries in self._predefined_terms_cache.items():
+                for entry in entries:
+                    existing_keys.add((term, entry['category']))
+            
+            new_rows = []
             with open(csv_file_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    # 提取基因类型
-                    gene_type = row.get('基因类型', '').strip()
-                    if gene_type:
-                        translated_gene = self._translate_term_from_db(gene_type, 'gene')
-                        new_terms[(gene_type, 'gene')] = translated_gene
+                    # 批量检查感兴趣的列
+                    for col, category in [('基因类型', 'gene'), ('序列类型', 'sequence'), ('菌株', 'strain')]:
+                        val = row.get(col, '').strip()
+                        if not val: continue
+                        
+                        # 如果是菌株，可能需要特殊处理（移除编码）
+                        term_to_save = val
+                        if category == 'strain':
+                            term_to_save, _ = self._parse_strain_info(val)
+                        
+                        if (term_to_save, category) not in existing_keys:
+                            # 确定翻译 (如果缓存中没有，可能是新抓取的)
+                            translated = self._translate_term_from_db(term_to_save, category)
+                            new_rows.append([term_to_save, translated, category])
+                            existing_keys.add((term_to_save, category))
+            
+            # 仅在有新条目时追加，避免全量重写
+            if new_rows:
+                file_exists = predefined_terms_file.exists()
+                with open(predefined_terms_file, 'a', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    if not file_exists:
+                        writer.writerow(['english', 'chinese', 'category'])
+                    writer.writerows(new_rows)
                     
-                    # 提取序列类型
-                    sequence_type = row.get('序列类型', '').strip()
-                    if sequence_type:
-                        translated_sequence = self._translate_term_from_db(sequence_type, 'sequence')
-                        new_terms[(sequence_type, 'sequence')] = translated_sequence
-                    
-                    # 提取菌株信息（可能包含术语和编码）
-                    strain = row.get('菌株', '').strip()
-                    if strain:
-                        # 分离术语部分和编码部分
-                        strain_term, strain_code = self._parse_strain_info(strain)
-                        if strain_term:
-                            translated_strain = self._translate_term_from_db(strain_term, 'strain')
-                            new_terms[(strain_term, 'strain')] = translated_strain
+                # 同步更新内存缓存，防止同一批次内重复
+                for term, trans, cat in new_rows:
+                    if term not in self._predefined_terms_cache:
+                        self._predefined_terms_cache[term] = []
+                    self._predefined_terms_cache[term].append({'chinese': trans, 'category': cat})
+                
+                print(f"[I/O 优化] 已向预定义术语表追加 {len(new_rows)} 条新记录")
+                
         except Exception as e:
-            print(f"读取CSV文件时出错: {e}")
-            return
-        
-        # 合并现有术语和新术语
-        all_terms = []
-        # 先添加现有术语
-        for term_key, chinese in existing_terms_dict.items():
-            all_terms.append((term_key[0], chinese, term_key[1]))
-        
-        # 再添加新术语（避免重复）
-        for term_key, chinese in new_terms.items():
-            if term_key not in existing_terms:
-                all_terms.append((term_key[0], chinese, term_key[1]))
-        
-        # 将所有术语写入预定义术语文件，分类使用英文
-        try:
-            with open(predefined_terms_file, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['english', 'chinese', 'category'])
-                for term in all_terms:
-                    writer.writerow(term)
-            print(f"成功更新预定义术语文件: {predefined_terms_file}")
-        except Exception as e:
-            print(f"写入预定义术语文件时出错: {e}")
+            print(f"提取 BLAST 结果术语时出错: {e}")
 
     def _determine_category(self, original: str) -> str:
         """
@@ -690,11 +444,8 @@ class TermExtractor:
         original_lower = original.lower().strip()
         words = original.split()
         
-        # 检查学习到的模式（优先级最高）
-        for category, learned_patterns in self.learning_patterns.items():
-            for pattern in learned_patterns:
-                if isinstance(pattern, str) and pattern.lower() in original_lower:
-                    return category
+        # Determination based on static rules and predefined patterns
+        # Removed dynamic learning patterns lookup for reliability.
         
         # 检查基因/蛋白质模式
         for pattern in self.classification_rules["gene_patterns"]:

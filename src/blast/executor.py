@@ -118,6 +118,12 @@ class BlastExecutor:
                     blast_params[ncbi_key] = kwargs[key]
 
             try:
+                # Log request (truncate sequence)
+                log_params = blast_params.copy()
+                if 'sequence' in log_params and len(log_params['sequence']) > 50:
+                    log_params['sequence'] = log_params['sequence'][:20] + f"...({len(log_params['sequence'])-40}bp)..." + log_params['sequence'][-20:]
+                logging.info(f"Executing NCBI BLAST Request: {log_params}")
+                
                 return NCBIWWW.qblast(**blast_params)
             except Exception as e:
                 # 抛出原始异常以便上层区分处理

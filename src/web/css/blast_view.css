@@ -986,3 +986,104 @@ tr:hover {
         height: 14px;
     }
 }
+
+/* --- Universal Input Style --- */
+.settings-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-family: inherit;
+    transition: border-color 0.2s;
+    outline: none;
+}
+
+.settings-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* --- Custom Select Component Styles --- */
+.custom-select-container {
+    position: relative;
+    width: 100%;
+}
+
+.select-trigger {
+    width: 100%;
+    padding: 8px 12px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s;
+    height: 40px;
+}
+
+.select-trigger:hover {
+    border-color: var(--primary);
+}
+
+.custom-select-container.active .select-trigger {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.select-trigger i.arrow {
+    width: 10px;
+    height: 10px;
+    border-right: 2px solid var(--text-muted);
+    border-bottom: 2px solid var(--text-muted);
+    transform: rotate(45deg);
+    margin-top: -3px;
+    transition: transform 0.2s;
+}
+
+.custom-select-container.active .arrow {
+    transform: rotate(-135deg);
+    margin-top: 3px;
+}
+
+.select-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    z-index: 2000;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 4px;
+}
+
+.select-menu.hidden {
+    display: none;
+}
+
+.select-option {
+    padding: 8px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-main);
+    transition: background 0.15s;
+}
+
+.select-option:hover {
+    background: #f8fafc;
+}
+
+.select-option.selected {
+    background: #eff6ff;
+    color: var(--primary);
+    font-weight: 500;
+}

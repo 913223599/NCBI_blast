@@ -51,6 +51,7 @@ class ConfigManager:
                 self.config_file = Path(config_file)
 
             self.config_data = {}
+            logging.info(f"ConfigManager initializing. Path: {self.config_file.absolute()}")
             self._load_config()
             self._initialized = True
 
@@ -71,9 +72,11 @@ class ConfigManager:
         """保存配置数据到文件 (线程安全)"""
         try:
             with self._lock: # 写入时加锁
+                abs_path = self.config_file.absolute()
                 self.config_file.parent.mkdir(parents=True, exist_ok=True)
                 with open(self.config_file, 'w', encoding='utf-8') as f:
                     json.dump(self.config_data, f, indent=2, ensure_ascii=False)
+                logging.info(f"Config successfully saved to: {abs_path}")
         except Exception as e:
             logging.error(f"保存配置文件时出错: {e}")
 
@@ -108,16 +111,34 @@ class ConfigManager:
                 has_changes = True
 
         if has_changes:
+            logging.info(f"Advanced settings updated: {settings}")
             self.config_data["advanced_settings"] = current_settings
             self._save_config()
+        else:
+            logging.debug("No changes detected in advanced settings, skipping save.")
 
     def get_config_file_path(self) -> str:
         return str(self.config_file)
 
     def get_supported_models(self) -> dict:
         """获取支持的AI模型列表，返回 {key: name} 格式的字典"""
+        # 默认模型列表
+        default_models = [
+            {'key': 'qwen-plus', 'name': '通义千问-Plus'},
+            {'key': 'qwen-mt-plus', 'name': '通义千问-MT-Plus'},
+            {'key': 'qwen-mt-turbo', 'name': '通义千问-MT-Turbo'},
+            {'key': 'qwen-turbo', 'name': '通义千问-Turbo'},
+            {'key': 'deepseek-r1', 'name': 'DeepSeek'}
+        ]
+        
         # 从配置文件中获取支持的模型
         supported_models = self.config_data.get("supported_models", [])
+        
+        # 如果配置为空，初始化为默认模型
+        if not supported_models:
+            logging.info("Supported models not found in config, using defaults.")
+            supported_models = default_models
+            self.config_data["supported_models"] = supported_models
         
         # 转换为字典格式 {key: name}
         models_dict = {}
@@ -125,7 +146,45 @@ class ConfigManager:
             if isinstance(model, dict) and "key" in model and "name" in model:
                 models_dict[model["key"]] = model["name"]
         
+        logging.debug(f"Retrieved {len(models_dict)} supported models.")
         return models_dict
+
+    def add_supported_model(self, key: str, name: str):
+        """添加一个新的支持模型"""
+        logging.info(f"Adding supported model: {key} ({name})")
+        
+        # 确保 supported_models 存在
+        if "supported_models" not in self.config_data or not self.config_data["supported_models"]:
+            self.get_supported_models() # 这会初始化默认列表
+            
+        supported_models = self.config_data["supported_models"]
+        
+        # 检查是否已存在
+        found = False
+        for model in supported_models:
+            if model.get("key") == key:
+                model["name"] = name  # 更新名称
+                found = True
+                break
+                
+        if not found:
+            supported_models.append({"key": key, "name": name})
+            
+        self.config_data["supported_models"] = supported_models
+        self._save_config()
+        logging.info(f"Model {key} saved. Total models: {len(supported_models)}")
+
+    def remove_supported_model(self, key: str):
+        """移除一个支持的模型"""
+        if "supported_models" not in self.config_data:
+            return
+            
+        supported_models = self.config_data["supported_models"]
+        new_list = [m for m in supported_models if m.get("key") != key]
+        
+        if len(new_list) != len(supported_models):
+            self.config_data["supported_models"] = new_list
+            self._save_config()
     
     def get_supported_model_keys(self) -> list:
         """获取支持的AI模型键列表，用于界面显示"""

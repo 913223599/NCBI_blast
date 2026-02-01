@@ -6,6 +6,7 @@
     <title>BLAST Analysis Workbench</title>
     <link rel="stylesheet" href="css/blast_view.css">
     <script src="dist/js/qwebchannel.js"></script>
+    <script src="js/ui_components.js"></script>
     <!-- Main Controller -->
     <script src="js/blast_view.js"></script>
 </head>
@@ -22,7 +23,7 @@
                 </path>
                 <path d="M6 9H1V4"></path>
             </svg>
-            <span>分析历史</span>
+            <span data-i18n="blast_history">分析历史</span>
         </div>
         <!-- Input Panel -->
         <div id="editor-panel" class="panel">
@@ -32,7 +33,7 @@
                         <polyline points="4 17 10 11 4 5"></polyline>
                         <line x1="12" y1="19" x2="20" y2="19"></line>
                     </svg>
-                    序列输入
+                    <span data-i18n="blast_input_seq">序列输入</span>
                 </div>
             </div>
             <div class="panel-body">
@@ -46,7 +47,7 @@
                                 <line x1="12" y1="18" x2="12" y2="12"></line>
                                 <line x1="9" y1="15" x2="15" y2="15"></line>
                             </svg>
-                            批量文件 (File)
+                            <span data-i18n="blast_tab_file">批量文件 (File)</span>
                         </div>
                         <div id="tab-text" class="mode-tab"
                             onclick="if(window.blastView) window.blastView.switchInputMode('text')">
@@ -54,7 +55,7 @@
                                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                             </svg>
-                            文本粘贴 (Text)
+                            <span data-i18n="blast_tab_text">文本粘贴 (Text)</span>
                         </div>
                     </div>
 
@@ -68,13 +69,14 @@
                                 <polyline points="17 8 12 3 7 8"></polyline>
                                 <line x1="12" y1="3" x2="12" y2="15"></line>
                             </svg>
-                            <span style="margin-left: 8px; font-weight: 500;">点击添加或拖拽文件到此处</span>
+                            <span style="margin-left: 8px; font-weight: 500;"
+                                data-i18n="blast_drop_zone">点击添加或拖拽文件到此处</span>
                         </div>
 
                         <div class="file-list-container">
                             <div class="file-list-header">
                                 <div style="display:flex;align-items:center;gap:6px;">
-                                    <span>待比对文件列表</span>
+                                    <span data-i18n="blast_file_list">待比对文件列表</span>
                                     <span id="file-count-badge" class="badge"
                                         style="background:var(--bg-page); color:var(--text-muted)">0</span>
                                 </div>
@@ -90,7 +92,7 @@
                                 </button>
                             </div>
                             <div id="file-list-scroll" class="file-scroll-area">
-                                <div class="file-list-empty">
+                                <div class="file-list-empty" data-i18n="blast_empty_list">
                                     拖拽文件至上方区域<br>或者点击添加
                                 </div>
                             </div>
@@ -115,50 +117,53 @@
                             d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33 1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82 1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
                         </path>
                     </svg>
-                    参数配置
+                    <span data-i18n="parameter_settings_title">参数配置</span>
                 </div>
                 <button id="run-btn" class="btn btn-primary" style="padding: 6px 12px; font-size: 0.8rem;"
                     onclick="if(window.blastView) window.blastView.launchBlast()">
                     <svg class="icon-svg" viewBox="0 0 24 24" style="width: 14px; height: 14px; margin-right: 4px;">
                         <polygon points="5 3 19 12 5 21 5 3"></polygon>
                     </svg>
-                    开始分析
+                    <span data-i18n="blast_btn_run">开始分析</span>
                 </button>
             </div>
             <div class="panel-body scroll-v">
                 <div class="control-panel">
                     <div class="form-group">
-                        <label>分析程序 (Program)</label>
-                        <select id="prog-select" onchange="if(window.blastView) window.blastView.updateDBOptions()">
-                            <option value="auto">自动识别 (Auto)</option>
-                            <option value="blastn">blastn (核酸 -> 核酸)</option>
-                            <option value="blastp">blastp (蛋白 -> 蛋白)</option>
-                            <option value="blastx">blastx (核酸翻译 -> 蛋白)</option>
-                            <option value="tblastn">tblastn (蛋白 -> 核酸翻译)</option>
+                        <label data-i18n="param_program">分析程序 (Program)</label>
+                        <select id="prog-select" class="settings-input"
+                            onchange="if(window.blastView) window.blastView.updateDBOptions()">
+                            <option value="auto" data-i18n="opt_auto">自动识别 (Auto)</option>
+                            <option value="blastn" data-i18n="opt_blastn">blastn (核酸 -> 核酸)</option>
+                            <option value="blastp" data-i18n="opt_blastp">blastp (蛋白 -> 蛋白)</option>
+                            <option value="blastx" data-i18n="opt_blastx">blastx (核酸翻译 -> 蛋白)</option>
+                            <option value="tblastn" data-i18n="opt_tblastn">tblastn (蛋白 -> 核酸翻译)</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>目标数据库 (Database)</label>
-                        <select id="db-select" onchange="if(window.blastView) window.blastView.saveParams()">
+                        <label data-i18n="param_database">目标数据库 (Database)</label>
+                        <select id="db-select" class="settings-input"
+                            onchange="if(window.blastView) window.blastView.saveParams()">
                             <option value="nt">nt - Nucleotide collection</option>
                         </select>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>E-Value 阈值</label>
-                            <input type="number" id="evalue-input" value="0.05" step="0.01"
+                            <label data-i18n="param_evalue">E-Value 阈值</label>
+                            <input type="number" id="evalue-input" class="settings-input" value="0.05" step="0.01"
                                 onchange="if(window.blastView) window.blastView.saveParams()">
                         </div>
                         <div class="form-group">
-                            <label>最大匹配数</label>
-                            <input type="number" id="hits-input" value="50"
+                            <label data-i18n="param_hitlist">最大匹配数</label>
+                            <input type="number" id="hits-input" class="settings-input" value="50"
                                 onchange="if(window.blastView) window.blastView.saveParams()">
                         </div>
                     </div>
                     <div class="form-group">
-                        <label>计分矩阵 (Matrix)</label>
-                        <select id="matrix-select" onchange="if(window.blastView) window.blastView.saveParams()">
-                            <option value="BLOSUM62">BLOSUM62 (推荐)</option>
+                        <label data-i18n="param_matrix">计分矩阵 (Matrix)</label>
+                        <select id="matrix-select" class="settings-input"
+                            onchange="if(window.blastView) window.blastView.saveParams()">
+                            <option value="BLOSUM62" data-i18n="mat_recommended">BLOSUM62 (推荐)</option>
                             <option value="BLOSUM45">BLOSUM45</option>
                             <option value="BLOSUM80">BLOSUM80</option>
                             <option value="PAM30">PAM30</option>
@@ -167,20 +172,20 @@
                     </div>
                     <div class="form-row">
                         <div class="form-group">
-                            <label>空隙开启 (Opening)</label>
-                            <input type="number" id="gap-open" value="11"
+                            <label data-i18n="param_gap_open">空隙开启 (Opening)</label>
+                            <input type="number" id="gap-open" class="settings-input" value="11"
                                 onchange="if(window.blastView) window.blastView.saveParams()">
                         </div>
                         <div class="form-group">
-                            <label>空隙延伸 (Extension)</label>
-                            <input type="number" id="gap-extend" value="1"
+                            <label data-i18n="param_gap_extend">空隙延伸 (Extension)</label>
+                            <input type="number" id="gap-extend" class="settings-input" value="1"
                                 onchange="if(window.blastView) window.blastView.saveParams()">
                         </div>
                     </div>
                     <div class="form-group" style="display: flex; align-items: center; gap: 8px; padding-top: 5px;">
                         <input type="checkbox" id="filter-check" checked style="width: auto; height: auto;"
                             onchange="if(window.blastView) window.blastView.saveParams()">
-                        <label style="margin-bottom: 0;">过滤低复杂度区域 (Filter)</label>
+                        <label style="margin-bottom: 0;" data-i18n="param_filter">过滤低复杂度区域 (Filter)</label>
                     </div>
                 </div>
             </div>
@@ -197,7 +202,7 @@
                         </path>
                         <path d="M6 9H1V4"></path>
                     </svg>
-                    分析历史
+                    <span data-i18n="blast_history">分析历史</span>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
                     <button class="btn-danger-block" title="清除历史"
@@ -238,7 +243,7 @@
                         <line x1="3" y1="12" x2="3.01" y2="12"></line>
                         <line x1="3" y1="18" x2="3.01" y2="18"></line>
                     </svg>
-                    <span id="matrix-title">结果矩阵</span>
+                    <span id="matrix-title" data-i18n="blast_results">结果矩阵</span>
                 </div>
                 <div class="header-actions" style="display: flex; align-items: center; gap: 15px;">
                     <div id="result-progress" style="width: 180px;" class="hidden">
@@ -249,7 +254,7 @@
                         </div>
                     </div>
                     <button class="btn btn-ghost" onclick="if(window.blastView) window.blastView.translateAllResults()"
-                        title="翻译结果中的所有物种名">
+                        data-i18n-title="tip_translate_all" title="翻译结果中的所有物种名">
                         <svg class="icon-svg" viewBox="0 0 24 24" style="margin-right: 6px; color: #f59e0b;">
                             <path d="M5 8l6 6"></path>
                             <path d="M4 14l6-6 2-3"></path>
@@ -258,7 +263,7 @@
                             <path d="M22 22l-5-10-5 10"></path>
                             <path d="M14 18h6"></path>
                         </svg>
-                        一键 AI 翻译
+                        <span data-i18n="btn_translate_all">一键 AI 翻译</span>
                     </button>
                     <button class="btn btn-ghost" onclick="if(window.blastView) window.blastView.exportResults()">
                         <svg class="icon-svg" viewBox="0 0 24 24" style="margin-right: 6px;">
@@ -266,7 +271,7 @@
                             <polyline points="7 10 12 15 17 10"></polyline>
                             <line x1="12" y1="15" x2="12" y2="3"></line>
                         </svg>
-                        导出报表
+                        <span data-i18n="btn_export">导出报表</span>
                     </button>
                 </div>
             </div>
@@ -275,13 +280,13 @@
                     <table id="result-table">
                         <thead>
                             <tr>
-                                <th style="width: 15%;">查询序列</th>
-                                <th style="width: 20%;">最匹配项 (鉴定详情)</th>
-                                <th style="width: 22%;">生物学背景</th>
-                                <th style="width: 9%;">相似度</th>
-                                <th style="width: 12%;">E值</th>
-                                <th style="width: 14%;">登录号</th>
-                                <th style="width: 8%;">操作</th>
+                                <th style="width: 15%;" data-i18n="col_query">查询序列</th>
+                                <th style="width: 20%;" data-i18n="col_hit">最匹配项 (鉴定详情)</th>
+                                <th style="width: 22%;" data-i18n="col_desc">生物学背景</th>
+                                <th style="width: 9%;" data-i18n="col_identity">相似度</th>
+                                <th style="width: 12%;" data-i18n="col_evalue">E值</th>
+                                <th style="width: 14%;" data-i18n="col_accession">登录号</th>
+                                <th style="width: 8%;" data-i18n="col_action">操作</th>
                             </tr>
                         </thead>
                         <tbody id="result-body"></tbody>
@@ -338,6 +343,8 @@
                 </div>
 
                 <div class="dict-search-box" style="margin-bottom: 20px; position: relative;">
+
+
                     <input type="text" id="dict-search-input" placeholder="输入英文物种名进行搜索..."
                         style="width: 100%; padding: 10px 12px 10px 36px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem;">
                     <svg class="icon-svg" viewBox="0 0 24 24"

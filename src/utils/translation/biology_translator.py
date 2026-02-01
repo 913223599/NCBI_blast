@@ -212,6 +212,20 @@ def get_global_biology_translator(data_file: str = None, use_ai: bool = True, ai
     
     with _global_lock:
         if _global_translator is None:
+            # Auto-fetch API key from config if not provided
+            if ai_api_key is None:
+                try:
+                    from src.utils.config_manager import get_config_manager
+                    config = get_config_manager()
+                    ai_api_key = config.get_api_key("dashscope")
+                    
+                    # Also try to sync model from settings if available
+                    advanced = config.get_advanced_settings()
+                    if "ai_model" in advanced:
+                        ai_model = advanced["ai_model"]
+                except Exception as e:
+                    print(f"Warning: Failed to auto-fetch API key from config: {e}")
+
             _global_translator = BiologyTranslator(
                 data_file=data_file, 
                 use_ai=use_ai, 

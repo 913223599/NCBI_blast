@@ -155,19 +155,25 @@ class BlastXmlParser:
             r'(Bacteriophage\s+[A-Za-z0-9]+)', r'(Phage\s+[A-Za-z0-9]+)',
         ]
         for p in species_patterns:
-            m = re.search(p, title, re.IGNORECASE)
+            # 移除 re.IGNORECASE 以确保属名首字母大写，避免误匹配 gene for 等描述词
+            m = re.search(p, title)
             if m:
                 metadata['species'] = m.group(1)
-                # 提取属名
-                genus_m = re.search(r'^([A-Z][a-z]+)', metadata['species'])
-                if genus_m:
-                    metadata['genus'] = genus_m.group(1)
                 break
 
-        # 7. 提取宿主
+        # 7. 提取备选物种名 (方括号中的信息通常是 NCBI 格式下的物种名)
         host_m = re.search(r'\[([^\]]+)\]', title)
         if host_m:
             metadata['host_info'] = host_m.group(1)
+            # 如果主物种名提取失败，使用方括号内的内容作为物种名
+            if not metadata['species']:
+                metadata['species'] = metadata['host_info']
+
+        # 8. 补全属名 (基于最终确定的物种名)
+        if metadata['species']:
+            genus_m = re.search(r'^([A-Z][a-z]+)', metadata['species'])
+            if genus_m:
+                metadata['genus'] = genus_m.group(1)
 
         return metadata
 
