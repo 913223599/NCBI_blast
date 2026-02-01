@@ -42,10 +42,24 @@ class BlastEngine:
         self.result_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def _init_results_dir(self) -> Path:
-        """Create a dedicated directory for task results."""
+        """Create a dedicated directory for task results and archive parameters."""
         root = Path(__file__).resolve().parent.parent.parent
         dir_path = root / "results" / self.task_id
         dir_path.mkdir(parents=True, exist_ok=True)
+        
+        # Archive parameters (Scrubbing large query sequences for performance/audit)
+        try:
+            params_file = dir_path / "params.json"
+            # Deep copy or filter to avoid mutating original settings if needed
+            scrubbed_params = {k: v for k, v in self.settings.items() if k != 'query'}
+            scrubbed_params['archived_at'] = datetime.now().isoformat()
+            
+            with open(params_file, 'w', encoding='utf-8') as f:
+                json.dump(scrubbed_params, f, indent=4, ensure_ascii=False)
+            logger.info(f"Engine [{self.task_id}] parameters archived to {params_file}")
+        except Exception as e:
+            logger.error(f"Failed to archive parameters for task {self.task_id}: {e}")
+            
         return dir_path
 
     def cancel(self):

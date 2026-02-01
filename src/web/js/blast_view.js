@@ -29,6 +29,7 @@ class BlastViewController {
             gapOpen: document.getElementById('gap-open'),
             gapExtend: document.getElementById('gap-extend'),
             filterCheck: document.getElementById('filter-check'),
+            threadsInput: document.getElementById('threads-input'),
             runBtn: document.getElementById('run-btn'),
             dropZone: document.getElementById('file-drop-area'),
             fileSummary: document.getElementById('selected-files-summary'),
@@ -66,6 +67,11 @@ class BlastViewController {
         // Initialize Custom Dropdowns
         if (window.CustomSelect) {
             window.CustomSelect.initAll();
+        }
+
+        // Initialize Help Tooltips
+        if (window.HelpTooltipManager) {
+            window.HelpTooltipManager.init();
         }
 
         // Initial data load
@@ -184,6 +190,11 @@ class BlastViewController {
                 el.title = translation;
             }
         });
+
+        // Sync Help Tooltips
+        if (window.HelpTooltipManager && window.__helpTooltipManager) {
+            window.__helpTooltipManager.updateTranslations(this.translations);
+        }
     }
 
     /**
@@ -249,7 +260,8 @@ class BlastViewController {
             matrix: this.dom.matrixSelect.value,
             gapOpen: this.dom.gapOpen.value,
             gapExtend: this.dom.gapExtend.value,
-            filter: this.dom.filterCheck.checked
+            filter: this.dom.filterCheck.checked,
+            threads: this.dom.threadsInput ? this.dom.threadsInput.value : '4'
         };
         localStorage.setItem('blast_params', JSON.stringify(params));
     }
@@ -269,6 +281,7 @@ class BlastViewController {
             if (params.gapOpen) this.dom.gapOpen.value = params.gapOpen;
             if (params.gapExtend) this.dom.gapExtend.value = params.gapExtend;
             if (params.filter !== undefined) this.dom.filterCheck.checked = params.filter;
+            if (params.threads && this.dom.threadsInput) this.dom.threadsInput.value = params.threads;
         } catch (e) {
             console.error("Failed to restore params:", e);
         }
@@ -450,24 +463,35 @@ class BlastViewController {
 
         const task = this.taskListData.find(t => t.task_id === taskId);
         if (!task || !task.params) {
-            alert("无法读取任务参数");
+            alert(this.t('msg_no_params') || "无法读取任务参数");
             return;
         }
 
-        let params = {};
+        let historicParams = {};
         try {
-            params = JSON.parse(task.params);
+            historicParams = JSON.parse(task.params);
         } catch (e) {
             console.error("Params parse error", e);
-            alert("任务参数格式错误");
-            return;
         }
 
-        if (confirm("是否恢复此任务的参数并重新运行?")) {
-            this.restoreTaskParams(params);
-            // Give a short delay for UI update before launch
-            setTimeout(() => this.launchBlast(), 100);
-        }
+        BioDialog.show({
+            title: this.t('title_retry_task'),
+            message: this.t('msg_retry_choice'),
+            choices: [
+                { id: 'history', text: this.t('btn_retry_history'), type: 'btn-primary' },
+                { id: 'current', text: this.t('btn_retry_current'), type: 'btn-secondary' },
+                { id: 'cancel', text: this.t('btn_cancel'), type: 'btn-ghost' }
+            ],
+            onSelect: (choiceId) => {
+                if (choiceId === 'history') {
+                    this.restoreTaskParams(historicParams);
+                    setTimeout(() => this.launchBlast(), 100);
+                } else if (choiceId === 'current') {
+                    // Directly use current page settings
+                    this.launchBlast();
+                }
+            }
+        });
     }
 
     restoreTaskParams(params) {
@@ -548,7 +572,7 @@ class BlastViewController {
             gap_open: parseInt(this.dom.gapOpen.value),
             gap_extend: parseInt(this.dom.gapExtend.value),
             filter: this.dom.filterCheck.checked,
-            max_workers: 4
+            max_workers: parseInt(this.dom.threadsInput ? this.dom.threadsInput.value : '4')
         };
 
         this.dom.runBtn.disabled = true;

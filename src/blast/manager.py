@@ -3,6 +3,7 @@ import threading
 import json
 import sqlite3
 import os
+import shutil
 import queue
 import time
 from enum import Enum, auto
@@ -236,7 +237,12 @@ class BlastManager:
 
     def _init_manager(self):
         self.tasks: Dict[str, BlastTask] = {}
-        self.store = BlastStore()
+        # Absolute project root detection
+        self.root_dir = Path(__file__).resolve().parent.parent.parent
+        self.results_dir = self.root_dir / "results"
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.store = BlastStore(db_path=str(self.results_dir / "blast_meta.db"))
         self.logger = logging.getLogger("BlastManager")
         
         # Initialize Scheduler (default 2 concurrent tasks)
@@ -416,6 +422,15 @@ class BlastManager:
                 if task.status == "running" and task.engine:
                     task.engine.cancel()
             
+            # Delete physical result directories
+            if self.results_dir.exists():
+                for item in self.results_dir.iterdir():
+                    if item.is_dir() and item.name.startswith("blast_"):
+                        try:
+                            shutil.rmtree(item, ignore_errors=True)
+                        except Exception as e:
+                            self.logger.warning(f"Failed to delete result directory {item}: {e}")
+
             self.tasks.clear()
             self.store.clear_all()
             self.logger.info("All history cleared successfully.")
@@ -429,8 +444,17 @@ class BlastManager:
                     task.engine.cancel()
                 del self.tasks[task_id]
             
+            # Delete physical result directory
+            task_dir = self.results_dir / task_id
+            if task_dir.exists():
+                try:
+                    shutil.rmtree(task_dir, ignore_errors=True)
+                    self.logger.info(f"Physical directory {task_dir} deleted.")
+                except Exception as e:
+                    self.logger.warning(f"Failed to delete directory for task {task_id}: {e}")
+
             self.store.delete_task(task_id)
-            self.logger.info(f"Task {task_id} deleted successfully.")
+            self.logger.info(f"Task {task_id} data removed from store.")
 
 
 # Global Accessor
