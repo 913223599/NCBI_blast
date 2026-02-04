@@ -618,6 +618,8 @@ table {
     border-collapse: collapse;
     font-size: 0.85rem;
     user-select: text;
+    table-layout: fixed;
+    /* 允许精确控制列宽 */
 }
 
 th {
@@ -635,6 +637,11 @@ th {
 td {
     padding: 10px 12px;
     border-bottom: 1px solid #f1f5f9;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 0;
+    /* 关键：配合 table-layout: fixed 生效 */
 }
 
 tr:hover {

@@ -12,6 +12,8 @@ from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal
 
 # BLAST Logic
 from src.blast.manager import get_blast_manager
+from src.gui.workers.tree_worker_thread import TreeWorker
+from PyQt6.QtWidgets import QFileDialog
 
 class WebBridge(QObject):
     """Bridge for JS to python communication"""
@@ -96,8 +98,43 @@ class WebBridge(QObject):
     @pyqtSlot(str)
     def request_file_load(self, file_type):
         """Handle file load request from JS"""
-        self.logger.info(f"JS requested file load for type: {file_type}")
-        self.container.open_file_dialog(file_type)
+        self.logger.info(f"BRIDGE: JS requested file load for type: {file_type}")
+        try:
+            self.container.open_file_dialog(file_type)
+        except Exception as e:
+            self.logger.error(f"BRIDGE ERROR in open_file_dialog: {e}")
+
+    @pyqtSlot(str, str, result=bool)
+    def save_file(self, content, filename_hint="export.txt"):
+        """Save text content to valid local file via Dialog"""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        try:
+            # Determine filter based on extension
+            file_filter = "All Files (*.*)"
+            if filename_hint.endswith("svg"):
+                file_filter = "SVG Files (*.svg);;All Files (*.*)"
+            elif filename_hint.endswith("png"):
+                file_filter = "PNG Files (*.png);;All Files (*.*)"
+            elif filename_hint.endswith("nwk"):
+                file_filter = "Newick Files (*.nwk *.tree);;All Files (*.*)"
+                
+            path, _ = QFileDialog.getSaveFileName(self.container, "Save File", filename_hint, file_filter)
+            
+            if path:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                self.logger.info(f"File saved successfully to: {path}")
+                return True
+            return False # Cancelled
+        except Exception as e:
+            self.logger.error(f"Save File Error: {e}")
+            return False
+
+    @pyqtSlot()
+    def request_tree_analysis(self):
+        """Handle request to run tree analysis from iTOL page"""
+        self.logger.info("JS requested tree analysis")
+        self.container.run_tree_analysis()
 
     @pyqtSlot(str, result=str)
     def run_blast_job(self, params_json):
@@ -434,7 +471,7 @@ class WebBridge(QObject):
                     data.append({
                         'title': row.get('标题', 'Unknown'),
                         'len': row.get('长度', '0'),
-                        'acc': row.get('登录号', 'N/A'),
+                        'acc': row.get('访问号', 'N/A'),
                         'species': row.get('物种', 'N/A'),
                         'genus': row.get('属名', ''),
                         'strain': row.get('菌株', ''),
@@ -606,3 +643,120 @@ class WebContainer(QWidget):
             except Exception as e:
                 self.logger.error(f"Failed to read file {file_path}: {e}")
                 QMessageBox.warning(self, "读取错误", f"无法读取文件 {Path(file_path).name}:\n{str(e)}")
+
+    def run_tree_analysis(self):
+        """
+        Open file dialog (supports multi-select), merge if needed, run TreeWorker.
+        """
+        # 1. Allow multi-select and .seq/.txt files
+        paths, _ = QFileDialog.getOpenFileNames(self, "Select Sequences for Tree", "", "Sequence Files (*.fasta *.fa *.fna *.seq *.txt);;All Files (*.*)")
+        
+        if not paths:
+            return
+
+        final_path = paths[0]
+        
+        # 2. If multiple files OR single non-fasta file, we merge/convert
+        if len(paths) > 1 or (len(paths) == 1 and not paths[0].lower().endswith(('.fasta', '.fa', '.fna'))):
+            try:
+                # Create a named temp file that persists so worker can read it
+                # We put it in result dir or temp dir
+                import tempfile
+                
+                # Use a specific prefix to identify merged files
+                with tempfile.NamedTemporaryFile(mode='w', suffix='_merged.fasta', delete=False, encoding='utf-8') as tmp:
+                    final_path = tmp.name
+                    self.logger.info(f"Merging {len(paths)} files into temporary FASTA: {final_path}")
+                    
+                    for p in paths:
+                        p_obj = Path(p)
+                        with open(p, 'r', encoding='utf-8', errors='ignore') as src:
+                            content = src.read().strip()
+                            if not content: continue
+                            
+                            # Heuristic: If content starts with >, assume it's already FASTA fragment
+                            # Otherwise, assume raw sequence
+                            header = p_obj.stem
+                            
+                            if content.startswith('>'):
+                                # Write as is, ensure newline
+                                tmp.write(f"{content}\n")
+                            else:
+                                # Raw sequence, wrap it
+                                # Remove all whitespace/newlines from sequence
+                                clean_seq = "".join(content.split())
+                                tmp.write(f">{header}\n{clean_seq}\n")
+                                
+            except Exception as e:
+                QMessageBox.critical(self, "Merge Error", f"Failed to merge sequence files:\n{str(e)}")
+                return
+            
+        self.logger.info(f"Starting tree analysis for {final_path}")
+        # Notify JS that we started with VISIBLE loading state
+        self.web_view.page().runJavaScript("if(window.showLoading) window.showLoading('正在构建进化树...');")
+        self.web_view.page().runJavaScript("console.log('[Py] Starting tree analysis...');")
+        
+        # Create worker
+        # Store worker in self to prevent garbage collection
+        self.tree_worker = TreeWorker(final_path)
+        self.tree_worker.finished.connect(self.on_tree_finished)
+        self.tree_worker.error.connect(self.on_tree_error)
+        self.tree_worker.progress.connect(self.on_tree_progress)
+        self.tree_worker.start()
+
+    def on_tree_progress(self, data):
+        """Handle progress updates from TreeWorker"""
+        try:
+            percent = data.get("progress", 0)
+            msg = data.get("message", "")
+            # Call JS update
+            # We use a try-catch block in JS to be safe
+            js_code = f"if(window.updateLoading) window.updateLoading({percent}, '{msg}');"
+            self.web_view.page().runJavaScript(js_code)
+        except Exception as e:
+            self.logger.error(f"Error updating progress: {e}")
+        
+    def on_tree_finished(self, result):
+        # Hide loading first
+        self.web_view.page().runJavaScript("if(window.hideLoading) window.hideLoading();")
+        
+        self.logger.info("Tree analysis finished")
+        if "tree_file" in result:
+            tree_path = result["tree_file"]
+            try:
+                with open(tree_path, 'r') as f:
+                    newick_content = f.read().strip()
+                
+                # Escape JSON
+                safe_newick = json.dumps(newick_content)
+                
+                # CRITICAL FIX: Target the iframe, not the main window
+                js_code = f"""
+                (function() {{
+                    var iframe = document.querySelector("#tree-view iframe");
+                    // If we are INSIDE the iframe (which matches tree_explorer structure), window.loadTree exists directly
+                    if (window.loadTree) {{
+                        console.log("[Py->JS] Loading tree directly in current view...");
+                        window.loadTree({safe_newick});
+                    }} 
+                    else if (iframe && iframe.contentWindow && iframe.contentWindow.loadTree) {{
+                        console.log("[Py->JS] Injecting tree data into child iframe...");
+                        iframe.contentWindow.loadTree({safe_newick});
+                    }} else {{
+                        console.error("[Py->JS] Failed to find target window for loadTree.");
+                    }}
+                }})();
+                """
+                self.web_view.page().runJavaScript(js_code)
+                self.logger.info(f"Injected tree data ({len(newick_content)} bytes)")
+            except Exception as e:
+                self.logger.error(f"Failed to read tree file: {e}")
+                self.web_view.page().runJavaScript(f"console.error('Failed to read tree file: {str(e)}'); alert('读取树文件失败: {str(e)}');")
+        else:
+             self.logger.warning("No tree file in result")
+             self.web_view.page().runJavaScript("console.warn('No tree file generated.'); alert('建树失败：未生成结果文件');")
+
+    def on_tree_error(self, err_msg):
+        self.web_view.page().runJavaScript("if(window.hideLoading) window.hideLoading();")
+        self.logger.error(f"Tree analysis error: {err_msg}")
+        self.web_view.page().runJavaScript(f"console.error('Tree analysis failed: {err_msg}'); alert('建树过程出错: {err_msg}');")

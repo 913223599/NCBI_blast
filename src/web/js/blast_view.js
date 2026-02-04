@@ -76,8 +76,9 @@ class BlastViewController {
         }
 
         // Initialize Help Tooltips
-        if (window.HelpTooltipManager) {
-            window.HelpTooltipManager.init();
+        // Initialize Help Tooltips
+        if (window.TooltipFix) {
+            window.TooltipFix.init();
         }
 
         // Initial data load
@@ -218,8 +219,9 @@ class BlastViewController {
         });
 
         // Sync Help Tooltips
-        if (window.HelpTooltipManager && window.__helpTooltipManager) {
-            window.__helpTooltipManager.updateTranslations(this.translations);
+        // Sync Help Tooltips
+        if (window.TooltipFix) {
+            window.TooltipFix.updateTranslations(this.translations);
         }
     }
 
@@ -742,9 +744,10 @@ class BlastViewController {
         row.innerHTML = `
             <td style="font-weight: 500; font-size: 0.8rem; color: var(--text-muted);">${res.sequence_id}</td>
             <td>
-                <div class="species-name" style="font-weight: 700; color: var(--text-main); font-size: 0.85rem;" data-english="${bestHit.species}">${bestHit.species || '未知物种'}</div>
-                <div class="translated-name" style="font-size: 0.75rem; color: var(--primary); font-weight: 500; margin-top: 2px; display: none;"></div>
-                ${metaLine}
+                <div class="species-name" style="font-weight: 700; color: var(--text-main); font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${bestHit.species}" data-english="${bestHit.species}">${bestHit.species || '未知物种'}</div>
+                <div class="translated-name" style="font-size: 0.75rem; color: var(--primary); font-weight: 500; display: none;"></div>
+                <div style="font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${[bestHit.genus, bestHit.strain].filter(x => x && x !== 'N/A').join(' • ') || '--'}">${[bestHit.genus, bestHit.strain].filter(x => x && x !== 'N/A').join(' • ') || '--'}</div>
+                <div style="font-size: 0.72rem; color: var(--primary); opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${bestHit.gene_type || '--'}">${bestHit.gene_type || '--'}</div>
             </td>
             <td style="font-size: 0.82rem; color: #64748b;">${bgInfo.join(' | ') || '--'}</td>
             <td><span class="badge" style="${badgeColor}">${bestHit.similarity || '0%'}</span></td>

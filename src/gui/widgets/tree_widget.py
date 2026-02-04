@@ -13,15 +13,32 @@ from src.workbench.models.tool_config import ToolConfig
 
 class TreeWorker(QThread):
     finished = pyqtSignal(dict)
+    progress = pyqtSignal(dict)
+    error = pyqtSignal(str)
     
-    def __init__(self, fasta_path):
+    def __init__(self, fasta_path, mode="standard"):
         super().__init__()
         self.fasta_path = Path(fasta_path)
+        self.mode = mode
         self.pipeline = AnalysisPipeline()
         
     def run(self):
-        result = self.pipeline.run_standard_tree_workflow(self.fasta_path, ToolConfig.RESULTS_DIR)
-        self.finished.emit(result)
+        try:
+            workflow = None
+            if self.mode == "fast":
+                workflow = self.pipeline.run_fast_tree_workflow(self.fasta_path, ToolConfig.RESULTS_DIR)
+            else:
+                workflow = self.pipeline.run_standard_tree_workflow(self.fasta_path, ToolConfig.RESULTS_DIR)
+            
+            final_result = {}
+            for step_data in workflow:
+                self.progress.emit(step_data)
+                if "result" in step_data:
+                    final_result = step_data["result"]
+            
+            self.finished.emit(final_result)
+        except Exception as e:
+            self.error.emit(str(e))
 
 class WebBridge(QObject):
     """Bridge for JS to python communication"""
@@ -32,6 +49,11 @@ class WebBridge(QObject):
     @pyqtSlot(str)
     def on_js_error(self, message):
         self.log_callback(f"[JS Error] {message}")
+    
+    @pyqtSlot(str)
+    def on_js_log(self, message):
+        # 过滤掉一些 verbose 的日志 if needed
+        self.log_callback(f"[JS] {message}")
 
     @pyqtSlot()
     def on_page_ready(self):
@@ -41,8 +63,8 @@ class TreeWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
-        self.setup_ui()
         self.current_newick = None
+        self.setup_ui()
         self.setup_bridge()
 
         
@@ -60,11 +82,18 @@ class TreeWidget(QWidget):
              self.logger.info(msg)
 
     def setup_ui(self):
+        from PyQt6.QtWidgets import QComboBox, QProgressBar, QGroupBox, QFrame
 
         layout = QVBoxLayout(self)
         
         # Header
-        layout.addWidget(QLabel("<h2>Phylogenetic Tree Studio</h2>"))
+        header = QFrame()
+        header.setStyleSheet("background: white; border-bottom: 1px solid #ddd;")
+        header_layout = QHBoxLayout(header)
+        title = QLabel("<h2>Phylogenetic Tree Studio</h2>")
+        title.setStyleSheet("border: none;")
+        header_layout.addWidget(title)
+        layout.addWidget(header)
         
         # Splitter for Log vs Viz
         splitter = QSplitter()
@@ -73,16 +102,47 @@ class TreeWidget(QWidget):
         control_widget = QWidget()
         control_layout = QVBoxLayout(control_widget)
         
-        self.btn_load = QPushButton("Select FASTA & Build Tree")
-        self.btn_load.clicked.connect(self.run_tree)
-        control_layout.addWidget(self.btn_load)
+        # Config Group
+        cfg_group = QGroupBox("Analysis Settings")
+        cfg_layout = QVBoxLayout(cfg_group)
         
-        self.btn_reload_viz = QPushButton("Reload Visualization")
+        self.method_select = QComboBox()
+        self.method_select.addItem("Standard (Alignment-based)", "standard")
+        self.method_select.addItem("Fast (MinHash-based)", "fast")
+        cfg_layout.addWidget(QLabel("Workflow Method:"))
+        cfg_layout.addWidget(self.method_select)
+        
+        self.btn_load = QPushButton("Select FASTA & Build Tree")
+        self.btn_load.setStyleSheet("background-color: #007bff; color: white; padding: 6px; font-weight: bold;")
+        self.btn_load.clicked.connect(self.run_tree)
+        cfg_layout.addWidget(self.btn_load)
+        
+        control_layout.addWidget(cfg_group)
+        
+        # Progress
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.hide()
+        control_layout.addWidget(self.progress_bar)
+        
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: #666; font-style: italic;")
+        control_layout.addWidget(self.status_label)
+        
+        # Actions
+        action_layout = QHBoxLayout()
+        self.btn_reload_viz = QPushButton("Reload Viz")
         self.btn_reload_viz.clicked.connect(self.reload_visualization)
         self.btn_reload_viz.setEnabled(False)
-        control_layout.addWidget(self.btn_reload_viz)
+        action_layout.addWidget(self.btn_reload_viz)
         
+        control_layout.addLayout(action_layout)
+        
+        # Log
+        control_layout.addWidget(QLabel("Activity Log:"))
         self.log_view = QTextEdit()
+        self.log_view.setStyleSheet("font-family: Consolas; font-size: 9pt;")
         control_layout.addWidget(self.log_view)
         
         splitter.addWidget(control_widget)
@@ -90,9 +150,9 @@ class TreeWidget(QWidget):
         # Right: Web View
         self.web_view = QWebEngineView()
         # Initialize with blank or loading
-        self.web_view.setHtml("<h3>Tree Visualization Area</h3>")
+        self.web_view.setHtml("<div style='text-align:center; padding:50px; color:#aaa;'><h1>Tree Visualization Area</h1><p>Load sequences to begin</p></div>")
         splitter.addWidget(self.web_view)
-        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(1, 4) # Give more space to Web View
         
         layout.addWidget(splitter)
         
@@ -104,22 +164,49 @@ class TreeWidget(QWidget):
         if not path:
             return
             
-        self.log_view.append(f"Building tree for {path}...")
-        self.btn_load.setEnabled(False)
-        self.btn_reload_viz.setEnabled(False)
+        mode = self.method_select.currentData()
+        self.log_view.append(f"Starting {mode} workflow for {path}...")
         
-        self.worker = TreeWorker(path)
+        self.btn_load.setEnabled(False)
+        self.method_select.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
+        
+        self.worker = TreeWorker(path, mode)
+        self.worker.progress.connect(self.on_progress)
         self.worker.finished.connect(self.on_finished)
+        self.worker.error.connect(self.on_error)
         self.worker.start()
         
+    def on_progress(self, data):
+        pct = data.get("progress", 0)
+        msg = data.get("message", "")
+        self.progress_bar.setValue(pct)
+        self.status_label.setText(msg)
+        if msg:
+            self.log_view.append(f"[{data.get('step')}] {msg}")
+            
+    def on_error(self, err_msg):
+        self.log_view.append(f"ERROR: {err_msg}")
+        self.status_label.setText("Error occurred")
+        self.reset_ui_state()
+
     def on_finished(self, result):
-        self.btn_load.setEnabled(True)
-        self.log_view.append(f"Result: {result}")
+        self.reset_ui_state()
+        self.log_view.append(f"Workflow completed. Result keys: {list(result.keys())}")
         
         if "tree_file" in result:
              self.current_tree_path = result["tree_file"]
              self.visualize_tree(self.current_tree_path)
              self.btn_reload_viz.setEnabled(True)
+             self.status_label.setText("Tree built successfully.")
+        else:
+             self.log_view.append("Warning: No tree file generated.")
+
+    def reset_ui_state(self):
+        self.btn_load.setEnabled(True)
+        self.method_select.setEnabled(True)
+        self.progress_bar.hide()
 
     def visualize_tree(self, tree_path):
         """

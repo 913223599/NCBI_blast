@@ -154,149 +154,8 @@ class CustomSelect {
 // Global expose
 window.CustomSelect = CustomSelect;
 
-/**
- * Global Help Tooltip Manager
- * Handles smart hover tooltips with defensive logic and collision detection.
- */
-class HelpTooltipManager {
-    constructor() {
-        this.tooltip = null;
-        this.timer = null;
-        this.activeElement = null;
-        this.translations = {};
-        this.delay = 600;
+// HelpTooltipManager removed in favor of TooltipFix.js
 
-        this._init();
-    }
-
-    _init() {
-        this._createTooltipElement();
-        this._bindEvents();
-    }
-
-    _createTooltipElement() {
-        if (document.getElementById('global-help-tooltip')) {
-            this.tooltip = document.getElementById('global-help-tooltip');
-            return;
-        }
-        this.tooltip = document.createElement('div');
-        this.tooltip.id = 'global-help-tooltip';
-        this.tooltip.className = 'help-tooltip';
-        this.tooltip.setAttribute('role', 'tooltip');
-        document.body.appendChild(this.tooltip);
-    }
-
-    _bindEvents() {
-        // Use event delegation for performance
-        document.addEventListener('mouseover', (e) => this._handleMouseOver(e));
-        document.addEventListener('mouseout', (e) => this._handleMouseOut(e));
-
-        // Defensive: Hide on significant user actions
-        const hideImmediately = () => this.hide();
-        window.addEventListener('scroll', hideImmediately, true);
-        window.addEventListener('resize', hideImmediately);
-        document.addEventListener('mousedown', hideImmediately);
-        document.addEventListener('contextmenu', hideImmediately);
-    }
-
-    _handleMouseOver(e) {
-        const target = e.target.closest('[data-i18n-help]');
-        if (!target) return;
-
-        // If mouse moved between siblings with help, clear old timer
-        if (this.activeElement !== target) {
-            this.hide();
-            this.activeElement = target;
-        }
-
-        const helpKey = target.getAttribute('data-i18n-help');
-        const content = this.translations[helpKey];
-
-        if (!content) return;
-
-        this.timer = setTimeout(() => {
-            this.show(target, content);
-        }, this.delay);
-    }
-
-    _handleMouseOut(e) {
-        const target = e.target.closest('[data-i18n-help]');
-        if (!target) return;
-
-        this.hide();
-    }
-
-    show(target, text) {
-        this.tooltip.innerText = text;
-        this.tooltip.classList.add('visible');
-
-        // Accessibility
-        const id = `help-${Math.random().toString(36).substr(2, 9)}`;
-        this.tooltip.id = id;
-        target.setAttribute('aria-describedby', id);
-
-        this._positionTooltip(target);
-    }
-
-    hide() {
-        if (this.timer) {
-            clearTimeout(this.timer);
-            this.timer = null;
-        }
-        if (this.tooltip) {
-            this.tooltip.classList.remove('visible');
-        }
-        if (this.activeElement) {
-            this.activeElement.removeAttribute('aria-describedby');
-            this.activeElement = null;
-        }
-    }
-
-    _positionTooltip(target) {
-        const targetRect = target.getBoundingClientRect();
-        const tooltipRect = this.tooltip.getBoundingClientRect();
-        const offset = 10;
-
-        let top = targetRect.top - tooltipRect.height - offset;
-        let left = targetRect.left + (targetRect.width / 2) - (tooltipRect.width / 2);
-
-        // Collision Detection: Top boundary
-        if (top < 10) {
-            // Flip to bottom
-            top = targetRect.bottom + offset;
-        }
-
-        // Collision Detection: Left/Right boundary
-        const viewportWidth = window.innerWidth;
-        if (left < 10) left = 10;
-        if (left + tooltipRect.width > viewportWidth - 10) {
-            left = viewportWidth - tooltipRect.width - 10;
-        }
-
-        this.tooltip.style.top = `${top}px`;
-        this.tooltip.style.left = `${left}px`;
-    }
-
-    /**
-     * Update translations used by the manager
-     */
-    updateTranslations(translations) {
-        this.translations = translations || {};
-    }
-
-    /**
-     * Global Init
-     */
-    static init(translations) {
-        if (!window.__helpTooltipManager) {
-            window.__helpTooltipManager = new HelpTooltipManager();
-        }
-        if (translations) {
-            window.__helpTooltipManager.updateTranslations(translations);
-        }
-        return window.__helpTooltipManager;
-    }
-}
 
 /**
  * Global Dialog System
@@ -337,5 +196,6 @@ class BioDialog {
 
 // Global expose
 window.CustomSelect = CustomSelect;
-window.HelpTooltipManager = HelpTooltipManager;
+// window.HelpTooltipManager = HelpTooltipManager; // Removed
+
 window.BioDialog = BioDialog;

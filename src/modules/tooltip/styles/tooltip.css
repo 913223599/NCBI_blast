@@ -1,0 +1,202 @@
+/**
+ * Tooltip 模块样式
+ * 独立的CSS样式定义
+ */
+
+/* 基础tooltip样式 */
+.tooltip-module {
+    position: fixed;
+    z-index: 10000;
+    max-width: 280px;
+    padding: 8px 12px;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #cbd5e1;
+    font-size: 12px;
+    line-height: 1.6;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    pointer-events: none;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: none;
+    word-wrap: break-word;
+    word-break: break-word;
+}
+
+/* 可见状态 */
+.tooltip-module.tooltip-visible {
+    opacity: 1;
+    transform: scale(1);
+}
+
+/* 动画状态 */
+.tooltip-module.tooltip-animate {
+    transition: all 0.2s ease-out;
+}
+
+/* 主题变体 */
+.tooltip-module.tooltip-light {
+    background: rgba(255, 255, 255, 0.95);
+    color: #334155;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.tooltip-module.tooltip-dark {
+    background: rgba(15, 23, 42, 0.95);
+    color: #cbd5e1;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* 内容容器 */
+.tooltip-content {
+    position: relative;
+    z-index: 2;
+}
+
+/* 箭头样式 */
+.tooltip-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 8px solid transparent;
+    z-index: 1;
+}
+
+/* 不同位置的箭头 */
+.tooltip-module.tooltip-placement-top .tooltip-arrow {
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-top-color: rgba(15, 23, 42, 0.95);
+}
+
+.tooltip-module.tooltip-placement-bottom .tooltip-arrow {
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-bottom-color: rgba(15, 23, 42, 0.95);
+}
+
+.tooltip-module.tooltip-placement-left .tooltip-arrow {
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left-color: rgba(15, 23, 42, 0.95);
+}
+
+.tooltip-module.tooltip-placement-right .tooltip-arrow {
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right-color: rgba(15, 23, 42, 0.95);
+}
+
+/* 浅色主题箭头 */
+.tooltip-module.tooltip-light.tooltip-placement-top .tooltip-arrow {
+    border-top-color: rgba(255, 255, 255, 0.95);
+}
+
+.tooltip-module.tooltip-light.tooltip-placement-bottom .tooltip-arrow {
+    border-bottom-color: rgba(255, 255, 255, 0.95);
+}
+
+.tooltip-module.tooltip-light.tooltip-placement-left .tooltip-arrow {
+    border-left-color: rgba(255, 255, 255, 0.95);
+}
+
+.tooltip-module.tooltip-light.tooltip-placement-right .tooltip-arrow {
+    border-right-color: rgba(255, 255, 255, 0.95);
+}
+
+/* 富文本内容样式 */
+.tooltip-content strong {
+    font-weight: 600;
+    color: #f8fafc;
+}
+
+.tooltip-content em {
+    font-style: italic;
+}
+
+.tooltip-content code {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-family: 'Fira Code', monospace;
+    font-size: 11px;
+}
+
+.tooltip-content a {
+    color: #60a5fa;
+    text-decoration: none;
+}
+
+.tooltip-content a:hover {
+    text-decoration: underline;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .tooltip-module {
+        max-width: 240px;
+        font-size: 11px;
+        padding: 6px 10px;
+    }
+    
+    .tooltip-arrow {
+        border-width: 6px;
+    }
+}
+
+/* 高对比度模式支持 */
+@media (prefers-contrast: high) {
+    .tooltip-module {
+        border-width: 2px;
+        font-weight: 500;
+    }
+    
+    .tooltip-module.tooltip-light {
+        border-color: #000;
+    }
+    
+    .tooltip-module.tooltip-dark {
+        border-color: #fff;
+    }
+}
+
+/* 减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+    .tooltip-module {
+        transition: none !important;
+    }
+    
+    .tooltip-module.tooltip-animate {
+        transition: none !important;
+    }
+}
+
+/* 打印样式 */
+@media print {
+    .tooltip-module {
+        display: none !important;
+    }
+}
+
+/* 调试辅助类 */
+.tooltip-debug {
+    outline: 2px dashed #f59e0b !important;
+}
+
+.tooltip-enabled {
+    cursor: help;
+    position: relative;
+}
+
+/* 焦点样式 */
+.tooltip-enabled:focus {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+}

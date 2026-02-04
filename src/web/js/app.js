@@ -68,17 +68,15 @@ class WebOS {
             window.CustomSelect.initAll();
         }
 
-        // Listen for messages from IFrame (PostMessage API)
+        // Listen for messages from IFrame (PostMessage API) - Universal communication channel
         window.addEventListener('message', (event) => {
             const data = event.data;
             if (data && data.type === 'request_file_load') {
-                console.log("Received file load request via postMessage:", data.fileType);
+                console.log("[Bio-WebOS] Received file load request via postMessage:", data.fileType);
+                if (window.py_bridge && window.py_bridge.on_js_log) {
+                    window.py_bridge.on_js_log(`[WebOS Msg] IFrame requested ${data.fileType} file load`);
+                }
                 this.requestFile(data.fileType);
-            }
-            // Future expansion: handle other bridge calls via message
-            else if (data && data.type === 'run_blast_job') {
-                // Forward to bridge? For now just log
-                console.log("Received run_blast_job request (Not implemented via msg yet)");
             }
         });
     }

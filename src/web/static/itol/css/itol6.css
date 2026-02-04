@@ -1,0 +1,473 @@
+#itolHome,
+#mainNav,
+#mainFooter {
+    -webkit-filter: grayscale(100%);
+    -moz-filter: grayscale(100%);
+    -ms-filter: grayscale(100%);
+    filter: grayscale(100%);
+}
+
+body {
+    padding-top: 2rem;
+}
+
+@media (max-width: 1000px) {
+    .navTxt2 {
+        display: none;
+    }
+
+}
+
+@media (max-width: 760px) {
+    .navTxt2 {
+        display: inline;
+    }
+
+    .footHd {
+        display: none;
+    }
+}
+
+#mainNav {
+    background-image: linear-gradient(to bottom, #c9c4c0 0, #b2aaa4 100%);
+    background-repeat: repeat-x;
+    z-index: 2300;
+}
+
+#mainNav .navbar-brand {
+    margin-top: -5px;
+}
+
+#mainNav .nav-link {
+    color: rgba(0, 0, 0, 0.9);
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+#mainNav .nav-link .bi,
+#mainNav .dropdown-item .bi {
+    height: 1em;
+    width: 1em;
+    margin-right: 0.2em;
+    margin-top: -0.15em;
+    color: rgba(0, 0, 0, 0.5);
+}
+
+#mainNav .nav-link i,
+#mainNav .dropdown-item i {
+    margin-right: 0.2em;
+}
+
+#mainNav .nav-link img {
+    margin-top: -0.2em;
+    margin-right: 0.2em;
+    height: 22px;
+    width: 22px;
+}
+
+#mainNav .active>.nav-link {
+    background-color: #b2aaa4;
+    font-weight: 600;
+}
+
+.dropdown-item:hover,
+.dropdown-item:focus {
+    color: #16181b;
+    text-decoration: none;
+    background: #f5f6f7 linear-gradient(180deg, #f5f6f7, #f8f9fa) repeat-x;
+}
+
+#mainNav :not(.active)>.nav-link:hover {
+    background-color: #8b7f76;
+    color: white;
+    text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+
+#mainFooter {
+    border-top: 1px solid #ddd;
+    background: rgba(225, 225, 225, 0.8);
+    min-height: 25px;
+    height: 25px;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    line-height: 20px;
+    z-index: 1001;
+
+}
+
+#homeChangesNote {
+    text-align: right;
+    margin-bottom: 40px;
+    color: #666;
+    font-size: 0.9em;
+}
+
+.carousel-caption {
+    z-index: 10;
+    background: rgba(255, 255, 255, 0.8);
+    color: black;
+    border-radius: 10px;
+    text-shadow: 0 2px 2px rgba(100, 100, 100, 0.4);
+}
+
+.carousel-caption p {
+    font-size: 1.1rem;
+}
+
+.carousel-indicators li {
+    background-color: #666;
+}
+
+body.fileover .filedrop-modal {
+    display: block;
+}
+
+.filedrop-modal {
+    border: none;
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    background-image: radial-gradient(circle, rgba(130, 130, 130, 0.6), rgba(220, 220, 220, 0.3));
+    background-repeat: no-repeat;
+}
+
+.filedrop-modal div {
+    top: 50%;
+    left: 50%;
+    transform: translate3d(-50%, -50%, 0);
+    position: absolute;
+    border: 2px solid #888;
+    padding: 40px;
+    border-radius: 10px;
+    font-size: 20px;
+    text-align: center;
+    box-shadow: 0 0 50px rgb(50, 50, 50);
+    background: rgba(180, 180, 180, 0.8);
+}
+
+.filedrop-modal button {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+}
+
+.loading-modal {
+    border: none;
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    background: url('/img/l.gif') 50% 50% no-repeat;
+
+}
+
+body.loading .loading-modal {
+    display: block;
+}
+
+.card-header {
+    font-weight: bold;
+}
+
+/*tabs*/
+
+.tab-pane {
+    border: solid 1px #ddd;
+    border-top: 0;
+}
+
+.nav-tabs {
+    background: #f5f6f7 linear-gradient(180deg, #dddddd, #efefef) repeat-x;
+    padding-left: 5px;
+}
+
+#subscriptionInfo .nav-tabs {
+    border-top-left-radius: .25rem;
+    border-top-right-radius: .25rem;
+}
+
+.nav-tabs li a {
+    margin: 5px 1px 0 1px;
+
+}
+
+.nav-tabs .nav-link {
+    background: #eee;
+    border: 1px solid #aaa;
+    border-bottom: none;
+}
+
+.nav-tabs .nav-link:hover {
+    border: 1px solid #aaa;
+    border-bottom: none;
+    color: black;
+}
+
+/* panels */
+.jsPanel-titlebar .jsPanel-title {
+    font-variant: normal;
+    font-weight: bold;
+    margin: 0 5px 0 10px;
+    font-size: 0.9rem;
+}
+
+.sp-palette-row {
+    min-width: 177px;
+}
+
+/* ES5 */
+
+.e-grid .e-pager {
+    padding: 0.3rem;
+}
+
+.e-grid .e-pager .e-numericitem {
+    line-height: 0.7rem;
+}
+
+.e-grid .e-pager,
+.e-grid .e-pager .e-pagercontainer,
+.e-grid .e-pager .e-pagercontainer * {
+    background: #efefef linear-gradient(180deg, #ffffff, #efefef) repeat-x;
+    color: black;
+}
+
+.e-grid .e-pager .e-currentitem,
+.e-pager .e-currentitem:hover {
+    background: var(--primary);
+    color: white;
+}
+
+.e-control,
+.e-css,
+.e-control-wrapper {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif !important;
+    font-size: 1rem;
+    font-weight: normal;
+}
+
+#ws_tabbar {
+    padding-left: 10px;
+}
+
+#ws_tabbar li {
+    user-select: none !important;
+}
+
+#ws_menu {
+    background: #f5f6f7 linear-gradient(180deg, #dddddd, #efefef) repeat-x;
+}
+
+#ws_menu .nav-tabs {
+    border-bottom: none;
+}
+
+#ws_menu_btn {
+    border-radius: 0;
+    border: 1px solid rgba(255, 255, 255, 0);
+}
+
+.projectList {
+    margin: 0;
+    padding: 0;
+}
+
+.project {
+    margin: 3px 0;
+    border-radius: 2px;
+    border: 1px solid #808080;
+    padding: 0px;
+    list-style: none;
+}
+
+.project_title {
+    margin: 0;
+    padding: 0 5px;
+    font-size: 1.2rem;
+    font-weight: bold;
+    background: #f5f6f7 linear-gradient(180deg, #dddddd, #efefef) repeat-x;
+}
+
+.project_title .e-inplaceeditor .e-editable-value-wrapper {
+    padding: 0 10px 0 5px;
+}
+
+.project_title .e-inplaceeditor .e-editable-value-wrapper .e-editable-value {
+    font-size: 1.2rem;
+    font-weight: bold;
+    color: black;
+}
+
+.project_title .dropdown-toggle {
+    padding: 0 0.25rem;
+}
+
+.project_title .dropdown-toggle::after {
+    display: none;
+}
+
+.p_title_js {
+    cursor: move;
+}
+
+.project_content {
+    padding: 0 2px;
+}
+
+.accDialogTbl {
+    width: 100%;
+}
+
+.accDialogTbl td {
+    width: 99%;
+}
+
+.accDialogTbl th {
+    text-align: right;
+    padding-right: 5px;
+    font-weight: normal;
+}
+
+.project_description,
+.ws_description {
+    margin: 0 !important;
+    width: 100%;
+}
+
+.treeFeatCell img {
+    height: 16px;
+    margin-right: 1px;
+}
+
+.tGridSettings th {
+    padding-right: 5px;
+    text-align: right;
+    font-weight: normal;
+}
+
+.tGridSettings td {
+    padding: 3px 5px;
+}
+
+.tGridSettings button {
+    line-height: 1;
+}
+
+.treeOptionBut {
+    line-height: 1;
+    background-color: rgba(255, 255, 255, 0);
+    border-color: rgba(255, 255, 255, 0);
+    color: #444;
+}
+
+button.treeOptionBut:hover {
+    background-color: rgba(255, 255, 255, 0);
+    border-color: rgba(255, 255, 255, 0);
+    color: royalblue;
+}
+
+.acViewPop {
+    width: 100%;
+}
+
+.acViewPop th {
+    text-align: right;
+    padding: 3px 10px;
+    background: #eee;
+}
+
+.acViewPop td {
+    text-align: right;
+    padding: 0 10px;
+    border-bottom: 1px solid #eee;
+}
+
+#treeMenu .e-menu-item {
+    white-space: nowrap;
+}
+
+#tUploadPanel .e-upload {
+    border: none !important;
+}
+
+#tUploadPanel .e-file-select-wrap {
+    padding: 0;
+}
+
+#tUploadPanel th {
+    text-align: center;
+}
+
+#tUploadArea {
+    vertical-align: middle;
+    text-align: center;
+    color: #666;
+}
+
+#tUploadPanel .e-upload-files {
+    display: none;
+}
+
+.e-tooltip-wrap.e-popup {
+    background-color: rgba(255, 255, 255, 0.9);
+    border: 1px solid #ddd;
+}
+
+.e-tooltip-wrap .e-tip-content {
+    color: black;
+}
+
+.e-tooltip-wrap .e-arrow-tip-inner.e-tip-right,
+.e-tooltip-wrap .e-arrow-tip-inner.e-tip-left,
+.e-tooltip-wrap .e-arrow-tip-inner.e-tip-bottom,
+.e-tooltip-wrap .e-arrow-tip-inner.e-tip-top {
+    color: rgba(200, 200, 200, 0.9);
+}
+
+.e-tooltip-wrap .e-arrow-tip-outer.e-tip-bottom {
+    border-top: 8px solid rgba(200, 200, 200, 0.9);
+}
+
+.prDragGhost {
+    border: 4px dashed royalblue;
+}
+
+.e-contextmenu-wrapper ul .e-menu-item.menuTbl {
+    background-color: transparent;
+    cursor: default;
+    line-height: normal;
+    height: auto;
+}
+
+.wsMenuTbl {
+    margin: 0 -20px;
+}
+
+.wsMenuTbl td {
+    padding: 5px 20px;
+}
+
+.wsMenuTbl td:hover {
+    background: #efefef;
+}
+
+.wsMenuTbl a:hover {
+    text-decoration: none;
+}
+
+.wsMenuTbl a {
+    display: block;
+    color: #212529;
+    font-weight: normal;
+}
+
+.frm2 {
+    display: none;
+}

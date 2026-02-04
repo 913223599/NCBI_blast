@@ -284,13 +284,13 @@
                     <table id="result-table">
                         <thead>
                             <tr>
-                                <th style="width: 15%;" data-i18n="col_query">查询序列</th>
-                                <th style="width: 20%;" data-i18n="col_hit">最匹配项 (鉴定详情)</th>
-                                <th style="width: 22%;" data-i18n="col_desc">生物学背景</th>
-                                <th style="width: 9%;" data-i18n="col_identity">相似度</th>
-                                <th style="width: 12%;" data-i18n="col_evalue">E值</th>
-                                <th style="width: 14%;" data-i18n="col_accession">登录号</th>
-                                <th style="width: 8%;" data-i18n="col_action">操作</th>
+                                <th style="width: 150px;" data-i18n="col_query">查询序列</th>
+                                <th style="width: 200px;" data-i18n="col_hit">最匹配项 (鉴定详情)</th>
+                                <th style="width: 130px;" data-i18n="col_desc">生物学背景</th>
+                                <th style="width: 110px;" data-i18n="col_identity">相似度</th>
+                                <th style="width: 100px;" data-i18n="col_evalue">E值</th>
+                                <th style="width: 120px;" data-i18n="col_accession">登录号</th>
+                                <th style="width: 70px;" data-i18n="col_action">操作</th>
                             </tr>
                         </thead>
                         <tbody id="result-body"></tbody>
@@ -407,6 +407,99 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Column Resize Script (MUST be outside all overlays) -->
+    <style>
+        #result-table th.resizable {
+            position: relative;
+        }
+
+        #result-table th .resize-handle {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 8px;
+            cursor: col-resize;
+            background: transparent;
+            transition: background 0.15s;
+            z-index: 10;
+        }
+
+        #result-table th .resize-handle:hover,
+        #result-table th .resize-handle.active {
+            background: var(--primary, #3b82f6);
+        }
+    </style>
+    <script>
+        (function () {
+            function initColumnResize() {
+                const table = document.getElementById('result-table');
+                if (!table) {
+                    console.warn('[ColumnResize] Table not found, retrying...');
+                    setTimeout(initColumnResize, 500);
+                    return;
+                }
+
+                const headerCells = table.querySelectorAll('thead th');
+                if (headerCells.length === 0) {
+                    console.warn('[ColumnResize] No header cells found');
+                    return;
+                }
+
+                // Make first two columns (Query Sequence, Best Hit) resizable
+                const resizableCols = [0, 1];
+                console.log('[ColumnResize] Initializing resize for columns:', resizableCols);
+
+                resizableCols.forEach(idx => {
+                    const th = headerCells[idx];
+                    if (!th || th.querySelector('.resize-handle')) return; // Skip if already initialized
+
+                    th.classList.add('resizable');
+
+                    const handle = document.createElement('div');
+                    handle.className = 'resize-handle';
+                    th.appendChild(handle);
+
+                    let startX, startWidth;
+
+                    handle.addEventListener('mousedown', function (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        startX = e.pageX;
+                        startWidth = th.offsetWidth;
+                        handle.classList.add('active');
+                        document.body.style.cursor = 'col-resize';
+                        document.body.style.userSelect = 'none';
+
+                        function onMouseMove(e) {
+                            const delta = e.pageX - startX;
+                            const newWidth = startWidth + delta;
+                            if (newWidth > 30) { // 仅防止完全消失
+                                th.style.width = newWidth + 'px';
+                            }
+                        }
+
+                        function onMouseUp() {
+                            handle.classList.remove('active');
+                            document.body.style.cursor = '';
+                            document.body.style.userSelect = '';
+                            document.removeEventListener('mousemove', onMouseMove);
+                            document.removeEventListener('mouseup', onMouseUp);
+                        }
+
+                        document.addEventListener('mousemove', onMouseMove);
+                        document.addEventListener('mouseup', onMouseUp);
+                    });
+                });
+                console.log('[ColumnResize] Initialization complete');
+            }
+
+            // Initialize after a short delay to ensure table is rendered
+            setTimeout(initColumnResize, 300);
+        })();
+    </script>
 </body>
 
 </html>
