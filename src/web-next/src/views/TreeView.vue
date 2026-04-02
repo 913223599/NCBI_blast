@@ -1,47 +1,38 @@
 <script setup lang="ts">
+/**
+ * TreeView - 进化树分析视图 (Station 2.0)
+ * 采用 3 板块架构：顶栏菜单 / 动态侧栏工具 / 全屏渲染区
+ */
 import { ref, onMounted, reactive, computed } from 'vue'
 import { useTree } from '../composables/useTree'
 import { useAppStore } from '../stores/app'
 import { getBridge } from '../bridge/pyqt-bridge'
-import BaseButton from '../components/ui/BaseButton.vue'
-import BaseSelect from '../components/ui/BaseSelect.vue'
 
 const appStore = useAppStore()
-const { settings, loadNewick, exportSVG, hasTree, isLoading, nodeCount, renderer } = useTree()
-const fileInput = ref<HTMLInputElement | null>(null)
+const { settings, loadNewick, exportSVG, hasTree, isLoading, renderer } = useTree()
 
-// 2.0 Reactive States
-const sequenceInput = ref('')
-const selectedFiles = ref<File[]>([])
+/* -------- 核心状态 -------- */
+const isSidebarOpen = ref(true)
+const activeSideTool = ref<'input' | 'analysis' | 'display'>('input')
+const workspaceFiles = ref<string[]>([])
+const selectedFiles = ref<any[]>([]) 
 const menuVisible = ref(false)
 const menuPos = ref({ x: 0, y: 0 })
 const selectedNode = ref<any>(null)
-const isSidebarOpen = ref(true)
+const fileInput = ref<HTMLInputElement | null>(null)
 
-const activeDrawers = reactive({
-    input: true,
-    analysis: true,
-    display: true
+const treeWorkflows = reactive({
+    msa: 'none',
+    engine: 'nj',
+    model: 'jc',
+    bootstrap: 100
 })
 
-// Options from the Remake Report
+/* -------- 选项数据 -------- */
 const layoutModeOptions = [
     { label: '矩形 (Rectangular)', value: 'rect' },
     { label: '圆形 (Circular)', value: 'circular' }
 ]
-
-const branchStyleOptions = [
-    { value: 'square', label: '直角 (Square)' },
-    { value: 'slanted', label: '斜线 (Slanted)' },
-    { value: 'curved', label: '曲线 (Curved)' }
-]
-
-const treeWorkflows = reactive({
-    msa: 'none', // none, mafft, muscle
-    engine: 'nj', // nj, ml, fast
-    model: 'jc',
-    bootstrap: 100
-})
 
 const msaOptions = [
     { value: 'none', label: '无需比对 (已对齐)' },
@@ -66,9 +57,27 @@ const modelOptions = computed(() => {
     return [{ value: 'identity', label: 'Standard Identity' }]
 })
 
-// Logic Methods
-function toggleDrawer(key: keyof typeof activeDrawers) {
-    activeDrawers[key] = !activeDrawers[key]
+/* -------- 交互逻辑 -------- */
+function refreshWorkspace() {
+    const bridge = getBridge()
+    if (bridge && typeof bridge.list_tree_sequences === 'function') {
+        bridge.list_tree_sequences((res: string) => {
+            try {
+                workspaceFiles.value = JSON.parse(res) || []
+            } catch (e) {
+                console.error("Failed to parse workspace files", e)
+            }
+        })
+    }
+}
+
+function toggleSideTool(tool: 'input' | 'analysis' | 'display') {
+  if (activeSideTool.value === tool && isSidebarOpen.value) {
+    isSidebarOpen.value = false
+  } else {
+    activeSideTool.value = tool
+    isSidebarOpen.value = true
+  }
 }
 
 function handleFileUpload(e: Event) {
@@ -80,11 +89,11 @@ function handleFileUpload(e: Event) {
 }
 
 function importSequences() {
-    if (sequenceInput.value.length > 0 || selectedFiles.value.length > 0) {
+    if (selectedFiles.value.length > 0 || workspaceFiles.value.length > 0) {
         appStore.showNotification('序列已载入内核，准备执行 MSA 预处理...', 'success')
-        setTimeout(() => { activeDrawers.input = false; activeDrawers.analysis = true }, 800)
+        activeSideTool.value = 'analysis'
     } else {
-        appStore.showNotification('请先输入序列或选择文件', 'error')
+        appStore.showNotification('请先添加序列文件', 'error')
     }
 }
 
@@ -103,141 +112,209 @@ function requestAnalysis() {
     }
 }
 
+function handleReroot() {
+    if (selectedNode.value && getBridge()) {
+        getBridge().request_tree_reroot(selectedNode.value.name)
+        menuVisible.value = false
+    }
+}
+
+function openNCBI() {
+    if (selectedNode.value?.name) {
+        window.open(`https://www.ncbi.nlm.nih.gov/taxonomy/?term=${encodeURIComponent(selectedNode.value.name)}`, '_blank')
+    }
+    menuVisible.value = false
+}
+
+function closeMenu() {
+    menuVisible.value = false
+}
+
 onMounted(() => {
+    refreshWorkspace()
+    
     // @ts-ignore
     window.treeView = {
         loadNewick: (content: string) => { 
             loadNewick(content)
             isLoading.value = false
         },
-        setLoading: (val: boolean) => { isLoading.value = val }
+        setLoading: (val: boolean) => { isLoading.value = val },
+        handleExternalFiles: (paths: string[]) => {
+            if (!paths || paths.length === 0) return
+            appStore.showNotification(`正在处理 ${paths.length} 个导入文件...`, 'info')
+            
+            const firstPath = paths[0]
+            if (paths.length === 1 && firstPath && (firstPath.endsWith('.nwk') || firstPath.endsWith('.newick'))) {
+                const bridge = getBridge()
+                if (bridge && typeof bridge.read_result_file === 'function') {
+                    bridge.read_result_file(firstPath).then((content: string) => {
+                        if (content) loadNewick(content)
+                    })
+                }
+            } else {
+                appStore.showNotification('序列已添加，请点击“载入并预处理”', 'info')
+                refreshWorkspace()
+            }
+        }
     }
+
     if (renderer) {
-        renderer.onNodeClick = (node, e) => {
+        renderer.onNodeClick = (node: any, e: MouseEvent) => {
             selectedNode.value = node
             menuPos.value = { x: e.clientX, y: e.clientY }
             menuVisible.value = true
         }
     }
 })
-
-function closeMenu() { menuVisible.value = false }
-function handleReroot() {
-    if (selectedNode.value && getBridge()) {
-        getBridge().request_tree_reroot(selectedNode.value.name)
-        closeMenu()
-    }
-}
-function openNCBI() {
-    if (selectedNode.value?.name) {
-        window.open(`https://www.ncbi.nlm.nih.gov/taxonomy/?term=${encodeURIComponent(selectedNode.value.name)}`, '_blank')
-    }
-    closeMenu()
-}
-function clearWorkspace() {
-    selectedFiles.value = []
-    sequenceInput.value = ''
-}
 </script>
 
 <template>
-  <div class="tree-view-container">
-    <header class="tree-header">
-      <div class="left">
-        <BaseButton variant="ghost" size="sm" @click="isSidebarOpen = !isSidebarOpen">☰</BaseButton>
-        <h2 class="title">NCBI Tree Station 2.0</h2>
-        <span v-if="hasTree" class="meta-badge">{{ nodeCount }} Nodes</span>
+  <div v-if="activeSideTool" class="tree-workspace-container">
+    <!-- 顶部工具菜单栏 (板块1) -->
+    <header class="tree-toolbar-top">
+      <div class="tool-items">
+        <div class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }" @click="toggleSideTool('input')">
+          <span class="icon">📥</span>
+          <span class="label">数据采集</span>
+        </div>
+        <div class="tool-divider"></div>
+        <div class="tool-btn" :class="{ active: activeSideTool === 'analysis' && isSidebarOpen }" @click="toggleSideTool('analysis')">
+          <span class="icon">🧬</span>
+          <span class="label">分析分析</span>
+        </div>
+        <div class="tool-divider"></div>
+        <div class="tool-btn" :class="{ active: activeSideTool === 'display' && isSidebarOpen }" @click="toggleSideTool('display')">
+          <span class="icon">💡</span>
+          <span class="label">视图控制</span>
+        </div>
       </div>
-      <div class="right">
-        <BaseButton variant="primary" size="md" icon="🚀" @click="requestAnalysis" :disabled="isLoading">启动分析</BaseButton>
-        <BaseButton variant="secondary" size="md" icon="💾" @click="exportSVG" :disabled="!hasTree">导出图表</BaseButton>
+      <div class="toolbar-actions">
+        <button class="btn-primary-run" @click="requestAnalysis" :disabled="isLoading">
+          <span class="icon">🚀</span> 启动分析管线
+        </button>
+        <button class="btn-export" @click="exportSVG" :disabled="!hasTree">
+          <span class="icon">💾</span> 导出
+        </button>
       </div>
     </header>
 
-    <div class="tree-body">
-      <aside v-show="isSidebarOpen" class="tree-sidebar">
-        
-        <!-- Input Drawer -->
-        <div class="drawer" :class="{ open: activeDrawers.input }">
-          <div class="drawer-header" @click="toggleDrawer('input')">
-            <span class="drawer-icon">📥</span>
-            <span class="drawer-title">序列采集 (Input)</span>
-            <span class="drawer-arrow">{{ activeDrawers.input ? '▼' : '▶' }}</span>
-          </div>
-          <div class="drawer-body" v-if="activeDrawers.input">
-            <div class="upload-zone" @click="fileInput?.click()">
-                <div class="icon">📁</div>
-                <div class="txt">{{ selectedFiles.length > 0 ? `已选 ${selectedFiles.length} 个文件` : '上传 FASTA/ALN 文件' }}</div>
-                <input type="file" ref="fileInput" hidden multiple @change="handleFileUpload" />
+    <div class="tree-main-area">
+      <!-- 左侧工具展开栏 (板块2) -->
+      <aside class="tree-sidebar" :class="{ collapsed: !isSidebarOpen }">
+        <div class="sidebar-content scroll-v">
+          
+          <!-- 采集面板 -->
+          <div v-if="activeSideTool === 'input'" class="panel-section">
+            <h3 class="section-title">▶ 数据采集</h3>
+            <div class="upload-zone-neo" @click="fileInput?.click()">
+              <span class="dz-icon">📁</span>
+              <span class="dz-text">{{ (selectedFiles?.length || 0) > 0 ? `已选 ${selectedFiles.length} 个文件` : '上传 FASTA/SEQ' }}</span>
+              <input type="file" ref="fileInput" hidden multiple @change="handleFileUpload" />
             </div>
-            <div class="input-divider">或粘贴文本</div>
-            <textarea v-model="sequenceInput" class="fasta-textarea" placeholder=">Seq1\nATCG..."></textarea>
-            <div class="actions mt-4">
-                <button class="btn-mini-primary w-full" @click="importSequences">载入到分析队列</button>
-                <button class="btn-text" @click="clearWorkspace">清空</button>
+            
+            <div class="input-divider">待分析清单 (Workspace)</div>
+            
+            <!-- 文件清单列表 -->
+            <div class="workspace-list-neo scroll-v">
+              <div v-if="(!workspaceFiles || workspaceFiles.length === 0) && (!selectedFiles || selectedFiles.length === 0)" class="empty-list-hint">
+                 暂无导入文件
+              </div>
+              <div v-for="file in workspaceFiles" :key="'ws-'+file" class="workspace-item">
+                 <span class="file-icon">📄</span>
+                 <span class="file-name" :title="file">{{ file }}</span>
+                 <span class="file-badge">Staged</span>
+              </div>
+              <div v-for="(file, idx) in selectedFiles" :key="'sel-'+(file?.name || idx)" class="workspace-item new-item">
+                 <span class="file-icon">🆕</span>
+                 <span class="file-name">{{ file?.name || 'Unknown' }}</span>
+              </div>
+            </div>
+
+            <div class="actions-footer">
+               <button class="btn-block-primary" @click="importSequences">载入并预处理</button>
+               <button class="btn-text-link" @click="refreshWorkspace">刷新工作区</button>
             </div>
           </div>
+
+          <!-- 分析参数 -->
+          <div v-if="activeSideTool === 'analysis'" class="panel-section">
+            <h3 class="section-title">🧬 分析管线配置</h3>
+            <div class="form-group">
+              <label>多序列比对 (MSA)</label>
+              <select v-model="treeWorkflows.msa" class="neo-select">
+                <option v-for="o in msaOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>分析引擎 (Engine)</label>
+              <select v-model="treeWorkflows.engine" class="neo-select">
+                <option v-for="o in engineOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>进化模型 (Model)</label>
+              <select v-model="treeWorkflows.model" class="neo-select">
+                <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Bootstrap 随机采样: {{ treeWorkflows.bootstrap }}</label>
+              <input type="range" v-model.number="treeWorkflows.bootstrap" min="0" max="1000" step="100" class="neo-range" />
+            </div>
+          </div>
+
+          <!-- 视图控制 -->
+          <div v-if="activeSideTool === 'display'" class="panel-section">
+            <h3 class="section-title">💡 视图控制</h3>
+            <div class="form-group">
+              <label>拓扑形态</label>
+              <select v-model="settings.mode" class="neo-select">
+                <option v-for="o in layoutModeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+              </select>
+            </div>
+            <div class="neo-checkbox-group">
+               <label><input type="checkbox" v-model="settings.showLabels" /> 显示样本标签</label>
+               <label><input type="checkbox" v-model="settings.useBranchLengths" /> 使用原始进化长度</label>
+            </div>
+            <div class="form-group">
+               <label>字体缩放: {{ settings.fontSize }}px</label>
+               <input type="range" v-model.number="settings.fontSize" min="8" max="24" class="neo-range" />
+            </div>
+          </div>
+
         </div>
 
-        <!-- Pipeline Drawer -->
-        <div class="drawer" :class="{ open: activeDrawers.analysis }">
-          <div class="drawer-header" @click="toggleDrawer('analysis')">
-            <span class="drawer-icon">🧬</span>
-            <span class="drawer-title">发育分析管线 (Pipeline)</span>
-            <span class="drawer-arrow">{{ activeDrawers.analysis ? '▼' : '▶' }}</span>
-          </div>
-          <div class="drawer-body" v-if="activeDrawers.analysis">
-            <BaseSelect label="多序列比对 (MSA)" :options="msaOptions" v-model="treeWorkflows.msa" />
-            <BaseSelect label="分析引擎 (Engine)" :options="engineOptions" v-model="treeWorkflows.engine" />
-            <BaseSelect label="进化模型 (Model)" :options="modelOptions" v-model="treeWorkflows.model" />
-            <div class="control-group">
-                <label>Bootstrap: {{ treeWorkflows.bootstrap }}</label>
-                <input type="range" v-model.number="treeWorkflows.bootstrap" min="0" max="1000" step="100" />
-            </div>
-          </div>
-        </div>
-
-        <!-- Display Drawer -->
-        <div class="drawer" :class="{ open: activeDrawers.display }">
-          <div class="drawer-header" @click="toggleDrawer('display')">
-            <span class="drawer-icon">💡</span>
-            <span class="drawer-title">显示控制 (Display)</span>
-            <span class="drawer-arrow">{{ activeDrawers.display ? '▼' : '▶' }}</span>
-          </div>
-          <div class="drawer-body" v-if="activeDrawers.display">
-            <BaseSelect label="拓扑形态" :options="layoutModeOptions" v-model="settings.mode" />
-            <BaseSelect label="分支样式" :options="branchStyleOptions" v-model="settings.branchStyle" />
-            <div class="checkbox-group">
-                <label><input type="checkbox" v-model="settings.showLabels" /> 显示标签</label>
-                <label><input type="checkbox" v-model="settings.useBranchLengths" /> 原始长度</label>
-            </div>
-            <div class="control-group">
-                <label>缩放级别: {{ settings.fontSize }}px</label>
-                <input type="range" v-model.number="settings.fontSize" min="8" max="24" />
-            </div>
-          </div>
+        <!-- 显隐控制 Handle -->
+        <div class="sidebar-collapse-toggle" @click="isSidebarOpen = !isSidebarOpen">
+          {{ isSidebarOpen ? '◀' : '▶' }}
         </div>
       </aside>
 
-      <main class="tree-main">
+      <!-- 结果显示栏 (板块3) -->
+      <main class="tree-results">
         <div ref="containerRef" class="canvas-container"></div>
+        
         <div v-if="!hasTree && !isLoading" class="empty-state">
-            <div class="empty-content">
-              <span class="icon">🧬</span>
-              <h3>NCBI Tree Station 2.0</h3>
-              <p>请上传序列文件或粘贴 FASTA，启动专业的系统发育分析管线。</p>
-            </div>
+           <div class="empty-content">
+             <span class="icon">🧬</span>
+             <h3>NCBI Tree Station 2.0</h3>
+             <p>请上传序列文件或拖入数据，启动专业的系统发育分析管线。</p>
+           </div>
         </div>
-        <div v-if="isLoading" class="loading-state">
-           <div class="spinner"></div>
-           <p>核心管线运行中: 执行 MSA 与拓扑推断...</p>
+
+        <div v-if="isLoading" class="loading-overlay">
+           <div class="loader"></div>
+           <p>核心管线运行中: 执行拓扑推断与渲染...</p>
         </div>
-        <div v-if="menuVisible" class="node-menu" :style="{ left: menuPos.x + 'px', top: menuPos.y + 'px' }" v-click-outside="closeMenu">
-          <div class="menu-header">{{ selectedNode?.name }}</div>
-          <div class="menu-item" @click="handleReroot">🎯 重定根 (Reroot)</div>
-          <div class="menu-item" @click="openNCBI">🌐 在 NCBI 查看</div>
-          <div class="menu-divider"></div>
-          <div class="menu-item danger" @click="closeMenu">取消</div>
+
+        <!-- 右分屏右键菜单 -->
+        <div v-if="menuVisible" class="node-context-menu" :style="{ left: menuPos.x + 'px', top: menuPos.y + 'px' }" v-click-outside="closeMenu">
+          <div class="menu-title">{{ selectedNode?.name }}</div>
+          <div class="menu-action" @click="handleReroot">🎯 重定根 (Reroot)</div>
+          <div class="menu-action" @click="openNCBI">🌐 在 NCBI 查看</div>
+          <div class="menu-sep"></div>
+          <div class="menu-action danger" @click="closeMenu">关闭菜单</div>
         </div>
       </main>
     </div>
@@ -245,107 +322,145 @@ function clearWorkspace() {
 </template>
 
 <style scoped>
-.tree-view-container { display: flex; flex-direction: column; height: 100%; background: #f8fafc; }
-.tree-header {
-  height: 50px; background: white; border-bottom: 1px solid var(--border-color);
-  display: flex; align-items: center; justify-content: space-between; padding: 0 16px;
-}
-.left, .right { display: flex; align-items: center; gap: 12px; }
-.title { font-size: 1rem; font-weight: 600; color: var(--text-primary); margin: 0; }
-.meta-badge { background: #e0f2fe; color: #0284c7; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 500; }
-
-.tree-body { flex: 1; display: flex; overflow: hidden; }
-.tree-sidebar { width: 290px; background: white; border-right: 1px solid var(--border-color); overflow-y: auto; display: flex; flex-direction: column; }
-
-.drawer { border-bottom: 1px solid var(--border-light); overflow: hidden; }
-.drawer-header {
-  padding: 12px 16px; cursor: pointer; display: flex; align-items: center; gap: 10px;
-  transition: background 0.2s; user-select: none;
-}
-.drawer-header:hover { background: #f8fafc; }
-.drawer-title { flex: 1; font-weight: 600; font-size: 0.85rem; color: var(--text-primary); }
-.drawer-body { padding: 16px; background: #fafafa; border-top: 1px solid #f1f5f9; }
-
-.upload-zone {
-  border: 2px dashed #e2e8f0; border-radius: 10px; padding: 24px; text-align: center;
-  cursor: pointer; transition: all 0.2s; background: white;
-}
-.upload-zone:hover { border-color: var(--accent-blue); background: #f8fafc; }
-.upload-zone .icon { font-size: 2rem; margin-bottom: 8px; }
-.upload-zone .txt { font-size: 0.8rem; color: #64748b; }
-
-.input-divider { text-align: center; margin: 16px 0; font-size: 0.7rem; color: #94a3b8; position: relative; }
-.input-divider::before, .input-divider::after { content: ''; position: absolute; top: 50%; width: 25%; height: 1px; background: #e2e8f0; }
-.input-divider::before { left: 0; } .input-divider::after { right: 0; }
-
-.fasta-textarea {
-  width: 100%; height: 120px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 8px;
-  font-family: 'Fira Code', monospace; font-size: 0.75rem; resize: vertical; background: #fff;
+.tree-workspace-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: white;
+  overflow: hidden;
 }
 
-.tree-main { flex: 1; position: relative; background: white; overflow: hidden; }
+/* 顶部菜单栏 */
+.tree-toolbar-top {
+  height: 60px;
+  background: white;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 100;
+}
+.tool-items { display: flex; align-items: center; gap: 8px; }
+.tool-btn {
+  display: flex; align-items: center; gap: 10px; padding: 8px 16px;
+  cursor: pointer; border-radius: 10px; color: #64748b; font-weight: 600; font-size: 0.82rem;
+}
+.tool-btn:hover { background: #f8fafc; color: #1e293b; }
+.tool-btn.active { color: #2563eb; background: #eff6ff; }
+.tool-divider { width: 1px; height: 24px; background: #e2e8f0; margin: 0 10px; }
+
+.btn-primary-run {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: white; padding: 10px 24px; border-radius: 10px;
+  font-weight: 700; font-size: 0.85rem; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  display: flex; align-items: center; gap: 10px;
+}
+.btn-export {
+  background: #f8fafc; border: 1px solid #e2e8f0; color: #475569;
+  padding: 8px 18px; border-radius: 10px; font-weight: 800; font-size: 0.78rem;
+}
+
+/* 下方板块容器 */
+.tree-main-area { flex: 1; display: flex; overflow: hidden; background: #f8fafc; }
+
+/* 侧边栏 */
+.tree-sidebar {
+  width: 360px; background: white; transition: none;
+  display: flex; flex-direction: column; position: relative; z-index: 5;
+  border-right: 1px solid #e2e8f0; overflow: visible;
+}
+.tree-sidebar.collapsed { width: 0; border-right: none; }
+.sidebar-content { padding: 24px; flex: 1; overflow-y: auto; white-space: nowrap; }
+.collapsed .sidebar-content { display: none; }
+
+.sidebar-collapse-toggle {
+  position: absolute; left: 100%; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 60px; background: white; border: 1px solid #e2e8f0;
+  border-left: none; border-radius: 0 10px 10px 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 10; font-size: 0.61rem; color: #94a3b8;
+  box-shadow: 2px 0 6px rgba(0,0,0,0.06);
+}
+
+.section-title { font-size: 1rem; font-weight: 800; color: #0f172a; margin-bottom: 20px; }
+
+/* UI 组件 */
+.upload-zone-neo {
+  border: 2px dashed #cbd5e1; border-radius: 12px; padding: 24px; text-align: center;
+  cursor: pointer; transition: all 0.2s; background: #f8fafc;
+}
+.upload-zone-neo:hover { border-color: #2563eb; background: #f0f7ff; }
+.dz-icon { font-size: 1.8rem; display: block; margin-bottom: 8px; }
+.dz-text { font-size: 0.82rem; font-weight: 700; color: #475569; }
+
+/* 工作区列表样式 */
+.workspace-list-neo {
+  height: 320px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;
+  padding: 8px; margin-top: 10px;
+}
+.empty-list-hint {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  color: #94a3b8; font-size: 0.8rem; font-style: italic;
+}
+.workspace-item {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  background: white; border: 1px solid #f1f5f9; border-radius: 8px; margin-bottom: 6px;
+  font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;
+}
+.workspace-item.new-item { border-left: 3px solid #3b82f6; }
+.file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #334155; }
+.file-badge { font-size: 0.65rem; background: #f1f5f9; color: #64748b; padding: 2px 6px; border-radius: 4px; }
+
+.neo-select {
+  width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;
+  background: #f8fafc; font-size: 0.85rem; outline: none;
+}
+.form-group { margin-bottom: 20px; }
+.form-group label { display: block; font-size: 0.72rem; font-weight: 800; color: #64748b; margin-bottom: 8px; }
+
+.neo-checkbox-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+.neo-checkbox-group label { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 500; cursor: pointer; }
+
+/* 结果区 */
+.tree-results { flex: 1; background: white; position: relative; overflow: hidden; }
 .canvas-container { width: 100%; height: 100%; }
 
-.empty-state, .loading-state {
+.empty-state {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.9); z-index: 10; text-align: center;
+  text-align: center; background: white; z-index: 5;
 }
-.empty-content .icon { font-size: 3rem; display: block; margin-bottom: 1rem; }
-.spinner {
-  width: 32px; height: 32px; border: 3px solid var(--primary-color); border-right-color: transparent;
-  border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
+.empty-content .icon { font-size: 4rem; opacity: 0.1; }
 
-.node-menu {
-  position: fixed; z-index: 1000; background: white; border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15); min-width: 180px; padding: 4px; border: 1px solid var(--border-color);
+.loading-overlay {
+  position: absolute; inset: 0; background: rgba(255,255,255,0.8);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;
 }
-.menu-header { font-size: 0.75rem; color: #94a3b8; padding: 8px 12px; border-bottom: 1px solid #f1f5f9; font-weight: 500; }
-.menu-item { padding: 10px 12px; font-size: 0.9rem; color: var(--text-primary); cursor: pointer; border-radius: 6px; }
-.menu-item:hover { background: #f1f5f9; }
-.menu-item.danger { color: #ef4444; }
-.menu-divider { height: 1px; background: #f1f5f9; margin: 4px 0; }
-.w-full { width: 100%; }
-.mt-4 { margin-top: 16px; }
+.loader {
+  width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #2563eb;
+  border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-/* Dashboard Buttons */
-.btn-mini-primary {
-  background: var(--accent-blue);
-  color: white;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.2s;
+/* Context Menu */
+.node-context-menu {
+  position: fixed; z-index: 1000; background: white; padding: 6px; border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15); border: 1px solid #e2e8f0; min-width: 160px;
 }
-.btn-mini-primary:hover { opacity: 0.9; }
-.btn-mini-primary:disabled { background: #cbd5e1; cursor: not-allowed; }
+.menu-title { font-size: 0.7rem; font-weight: 800; padding: 6px 12px; border-bottom: 1px solid #f1f5f9; color: #94a3b8; }
+.menu-action { padding: 10px 12px; font-size: 0.85rem; border-radius: 6px; cursor: pointer; }
+.menu-action:hover { background: #f1f5f9; }
+.menu-action.danger { color: #ef4444; }
+.menu-sep { height: 1px; background: #f1f5f9; margin: 4px 0; }
 
-.btn-text {
-  background: transparent;
-  border: none;
-  color: #64748b;
-  font-size: 0.75rem;
-  cursor: pointer;
-  padding: 8px;
-  text-decoration: underline;
+.actions-footer { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+.btn-block-primary {
+  width: 100%; background: #2563eb; color: white; padding: 12px; border-radius: 10px;
+  font-weight: 700; font-size: 0.85rem; border: none; cursor: pointer;
 }
-.btn-text:hover { color: var(--accent-blue); }
+.btn-text-link { background: none; border: none; color: #64748b; font-size: 0.75rem; text-decoration: underline; cursor: pointer; }
 
-.header-actions {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-}
-.mt-4 { margin-top: 16px; }
-.btn-mini-primary { background: var(--accent-blue); color: white; border: none; padding: 6px 12px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
-.btn-text { background: transparent; border: none; color: var(--accent-blue); font-size: 0.75rem; cursor: pointer; padding: 8px; }
-.checkbox-group { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
-.checkbox-group label { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer; }
-.control-group { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
-.control-group label { font-size: 0.8rem; color: var(--text-secondary); }
+.scroll-v { overflow-y: auto; scrollbar-width: thin; }
+.scroll-v::-webkit-scrollbar { width: 6px; }
+.scroll-v::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 </style>

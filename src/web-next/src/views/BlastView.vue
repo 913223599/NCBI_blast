@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
  * BlastView - BLAST 分析视图
- * 从旧版 index.html #blast-view 迁移
- * 四面板布局：序列输入 / 参数配置 / 分析历史 / 结果矩阵
+ * 精简、现代、专业的工作区布局
  */
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useBlastStore } from '../stores/blast'
 import { getBridge } from '../bridge/pyqt-bridge'
 import { useAppStore } from '../stores/app'
@@ -12,7 +11,16 @@ import { useAppStore } from '../stores/app'
 const blast = useBlastStore()
 const appStore = useAppStore()
 
-/* -------- BLAST 操作 -------- */
+/* -------- 核心状态 -------- */
+const isTranslating = ref(false)
+const activeSideTool = ref<'input' | 'params' | 'history'>('input')
+const isSidebarOpen = ref(true)
+const openDropdown = ref<string | null>(null)
+const editingTaskId = ref<string | null>(null)
+const editName = ref('')
+const renameInputRef = ref<HTMLInputElement | null>(null)
+
+/* -------- BLAST 交互逻辑 -------- */
 function selectFiles(): void {
   try {
     getBridge().request_file_load('fasta')
@@ -33,12 +41,9 @@ function startPolling(taskId: string) {
           if (!statusObj || !statusObj.status) return
 
           blast.updateTaskStatus(taskId, statusObj.status, statusObj.progress)
-          // 如果任务到达终态则停止轮询
           if (['done', 'completed', 'error', 'failed', 'cancelled'].includes(statusObj.status)) {
             window.clearInterval(pollingTimers[taskId])
             delete pollingTimers[taskId]
-
-            // 若成功，拉取最终结果
             if (statusObj.status === 'done' || statusObj.status === 'completed') {
               fetchTaskResults(taskId)
             }
@@ -52,66 +57,6 @@ function startPolling(taskId: string) {
   }, 1000)
 }
 
-function clearAllHistory() {
-  if (confirm('确定要清空所有分析历史及产生的文件吗？此操作不可恢复。')) {
-    try {
-      getBridge().clear_all_history()
-      blast.clearHistory()
-      appStore.showNotification('已清空全部记录', 'success')
-    } catch { }
-  }
-}
-
-function deleteSingleTask(taskId: string, event: Event) {
-  event.stopPropagation()
-  try {
-    getBridge().delete_single_task(taskId)
-    blast.removeTask(taskId)
-  } catch { }
-}
-const editingTaskId = ref<string | null>(null)
-const editName = ref('')
-const renameInputRef = ref<HTMLInputElement | null>(null)
-
-function startRename(task: any, event: Event) {
-  event.stopPropagation()
-  editingTaskId.value = task.taskId
-  editName.value = task.fileName
-  // 异步聚焦
-  setTimeout(() => {
-    renameInputRef.value?.focus()
-    renameInputRef.value?.select()
-  }, 50)
-}
-
-function cancelRename() {
-  editingTaskId.value = null
-  editName.value = ''
-}
-function commitRename(task: any) {
-  if (editingTaskId.value === task.taskId) {
-    const trimmedName = editName.value.trim()
-    if (trimmedName && trimmedName !== task.fileName) {
-      task.fileName = trimmedName
-      try {
-        getBridge().rename_task(task.taskId, trimmedName)
-      } catch { }
-    }
-    editingTaskId.value = null
-  }
-}
-
-function getFormattedTimestamp(date: string | Date = new Date()) {
-  const d = new Date(date)
-  const yr = d.getFullYear()
-  const mo = String(d.getMonth() + 1).padStart(2, '0')
-  const dy = String(d.getDate()).padStart(2, '0')
-  const hr = String(d.getHours()).padStart(2, '0')
-  const mi = String(d.getMinutes()).padStart(2, '0')
-  const se = String(d.getSeconds()).padStart(2, '0')
-  return `${yr}-${mo}-${dy} ${hr}:${mi}:${se}`
-}
-
 function fetchTaskResults(taskId: string) {
   try {
     getBridge().get_task_results(taskId, (resStr) => {
@@ -122,42 +67,32 @@ function fetchTaskResults(taskId: string) {
         const hits: any[] = []
         for (const res of resultsArray) {
           const queryId = res.sequence_id || '未知序列'
-          // Extract the top hit from parsed data
           if (res.data && Array.isArray(res.data) && res.data.length > 0) {
             const bestHit = res.data[0]
             hits.push({
               queryTitle: queryId,
-              // 共识投票后的物种名（加粗显示）
               speciesName: bestHit.species || 'Unknown',
-              // 种属 · 菌株
               genusStrain: [bestHit.genus, bestHit.strain].filter(Boolean).join(' · ') || '',
-              // 来源（如 16S rRNA）
               geneSource: bestHit.gene_source || bestHit.gene_type || '',
-              // 生物学背景
               seqType: bestHit.seq_type || '',
               host: bestHit.host || '',
               alignLen: bestHit.align_len || '',
-              // 核心指标
               identity: parseFloat(bestHit.similarity) || 0,
               evalue: String(bestHit.evalue || 'N/A'),
               accession: bestHit.acc || 'N/A',
-              // 原始标题用于翻译
               hitTitle: bestHit.title || '',
               translatedName: null
             })
           }
         }
-        // 按查询序列标题进行“常识”（自然）排序
         hits.sort((a, b) => a.queryTitle.localeCompare(b.queryTitle, undefined, { numeric: true, sensitivity: 'base' }))
-
-        const titleSuffix = hits.length > 0 ? ` (已加载 ${hits.length} 项)` : ' (无匹配结果)'
-        blast.setResults(hits, '分析结果' + titleSuffix)
+        blast.setResults(hits, '分析结果 (' + hits.length + ' 项)')
       } catch (e) {
         console.error('[Blast] 解析结果失败:', e)
       }
     })
   } catch (error) {
-    console.warn('[Blast] 获取任务结果调用失败:', error)
+    console.warn('[Blast] 获取任务结果失败:', error)
   }
 }
 
@@ -167,10 +102,7 @@ function launchBlast(): void {
     return
   }
   try {
-    // 统一使用时间戳命名
     const generatedTaskName = getFormattedTimestamp()
-
-    // 构造请求参数，映射前端 UI 变量名到后端 Engine/Executor 期望的参数名
     const payload = JSON.stringify({
       task_name: generatedTaskName,
       mode: blast.inputMode,
@@ -186,7 +118,6 @@ function launchBlast(): void {
       filter: blast.params.filterLowComplexity
     })
 
-    // 调用桥接
     getBridge().run_blast_job(payload, (resStr) => {
       try {
         const res = JSON.parse(resStr)
@@ -198,19 +129,17 @@ function launchBlast(): void {
             progress: 0,
             startTime: new Date().toISOString()
           })
-
-          // 提交后立即清空待处理列表及输入框，准备下一次输入
           blast.clearFiles()
           blast.queryText = ''
-
-          appStore.showNotification('BLAST 任务已提交并开始执行', 'success')
-          blast.historyVisible = true
+          appStore.showNotification('任务已提交', 'success')
+          activeSideTool.value = 'history'
+          isSidebarOpen.value = true
           startPolling(res.task_id)
         } else {
-          appStore.showNotification('任务启动失败: ' + (res.error || '未知错误'), 'error')
+          appStore.showNotification('启动失败: ' + (res.error || '未知错误'), 'error')
         }
       } catch (e) {
-        appStore.showNotification('解析后端返回失败', 'error')
+        appStore.showNotification('解析返回失败', 'error')
       }
     })
   } catch (error) {
@@ -218,39 +147,19 @@ function launchBlast(): void {
   }
 }
 
-function stopTask(taskId: string): void {
-  try { getBridge().stop_blast_job(taskId) } catch { /* mock */ }
-}
-
-function pauseTask(taskId: string): void {
-  try { getBridge().pause_blast_job(taskId) } catch { /* mock */ }
-}
-
 function exportResults(): void {
-  try { getBridge().save_file(JSON.stringify(blast.results), 'blast_results.csv') } catch { /* mock */ }
+  try { getBridge().save_file(JSON.stringify(blast.results), 'blast_results.csv') } catch { }
 }
-
-const isTranslating = ref(false)
 
 async function translateAll(): Promise<void> {
-  if (blast.results.length === 0) {
-    appStore.showNotification('暂无结果可翻译', 'warning')
-    return
-  }
-  if (isTranslating.value) {
-    appStore.showNotification('翻译正在进行中...', 'info')
-    return
-  }
-
+  if (blast.results.length === 0) return
+  if (isTranslating.value) return
   isTranslating.value = true
   appStore.showNotification(`开始翻译 ${blast.results.length} 条结果...`, 'info')
-
   const bridge = getBridge()
   let translated = 0
-
-  // Non-blocking fire-and-forget loop
   blast.results.forEach((hit) => {
-    if (hit.speciesName && !hit.translatedName?.startsWith('[')) {
+    if (hit.speciesName && !hit.translatedName) {
       bridge.translate_text(hit.speciesName, 'species', (result: string) => {
         if (result && result !== hit.speciesName) {
           hit.translatedName = result
@@ -259,134 +168,61 @@ async function translateAll(): Promise<void> {
       })
     }
   })
-
   isTranslating.value = false
-  appStore.showNotification(`翻译完成，共翻译 ${translated} 条`, 'success')
-}
-
-function openNcbi(accession: string): void {
-  const url = `https://www.ncbi.nlm.nih.gov/nuccore/${accession}`
-  try {
-    window.open(url, '_blank')
-  } catch {
-    // Fallback: try bridge log
-    try { getBridge().log_message(`Open NCBI: ${url}`) } catch { }
-  }
 }
 
 function selectTask(taskId: string): void {
   blast.setActiveTask(taskId)
   fetchTaskResults(taskId)
 }
-function handleGlobalClick(event: MouseEvent) {
-  // 关闭重命名
-  if (editingTaskId.value) {
-    const target = event.target as HTMLElement
-    if (!target.classList.contains('rename-input')) {
-      const task = blast.tasks.find(t => t.taskId === editingTaskId.value)
-      if (task) commitRename(task)
-      else editingTaskId.value = null
-    }
-  }
-  // 关闭所有下拉框
-  if (openDropdown.value) {
-    openDropdown.value = null
+
+function toggleSideTool(tool: 'input' | 'params' | 'history') {
+  if (activeSideTool.value === tool && isSidebarOpen.value) {
+    isSidebarOpen.value = false
+  } else {
+    activeSideTool.value = tool
+    isSidebarOpen.value = true
   }
 }
 
-/* -------- 生命周期 -------- */
-onMounted(() => {
-  document.addEventListener('click', handleGlobalClick)
-  // 注册 BLAST 特有的回调 (供 Python 端 executor.py 等分发进度)
-  if (typeof window !== 'undefined') {
-    (window as any).blastCallback = {
-      onFileAdded: (path: string) => blast.addFile(path),
-      onTaskCreated: (taskId: string) => {
-        const timeLabel = getFormattedTimestamp()
-        blast.addTask({ taskId, fileName: timeLabel, status: 'queued', progress: 0, startTime: new Date().toISOString() })
-      },
-      onTaskProgress: (taskId: string, progress: number) => blast.updateTaskStatus(taskId, 'running', progress),
-      onTaskDone: (taskId: string) => {
-        blast.updateTaskStatus(taskId, 'done', 100)
-        fetchTaskResults(taskId)
-      },
-      onTaskError: (taskId: string) => blast.updateTaskStatus(taskId, 'error'),
-      onResults: (hits: string) => {
-        try { blast.setResults(JSON.parse(hits)) } catch { /* parse error */ }
-      }
-    }
-  }
-
-  // 组件挂载时，从后端加载历史记录以恢复状态
-  setTimeout(() => {
-    try {
-      getBridge().get_all_tasks((resStr) => {
-        try {
-          const pastTasks = JSON.parse(resStr)
-          if (Array.isArray(pastTasks) && pastTasks.length > 0) {
-            // 清理并重新注入
-            blast.tasks = []
-            pastTasks.forEach(t => {
-              const timeLabel = getFormattedTimestamp(t.start_time || new Date())
-              blast.tasks.push({
-                taskId: t.task_id,
-                fileName: timeLabel,
-                status: t.status,
-                progress: t.progress || 0,
-                startTime: t.start_time
-              })
-              // 恢复未完成任务的轮询
-              if (t.status === 'running' || t.status === 'pending') {
-                startPolling(t.task_id)
-              }
-            })
-          }
-        } catch (e) {
-          console.warn('[Blast] Failed to parse historical tasks', e)
-        }
-      })
-    } catch (e) {
-      // Bridge probably not ready
-    }
-  }, 500) // 给予 Bridge 握手时间
-})
-
-onUnmounted(() => { document.removeEventListener('click', handleGlobalClick) })
-
-/** 数据库选项 */
-const DB_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
-  nucleotide: [
-    { value: 'nt', label: 'nt - Nucleotide collection' },
-    { value: 'refseq_rna', label: 'refseq_rna - RefSeq RNA' },
-    { value: 'refseq_genomic', label: 'refseq_genomic - RefSeq Genomic' }
-  ],
-  protein: [
-    { value: 'nr', label: 'nr - Non-redundant protein' },
-    { value: 'swissprot', label: 'swissprot - Swiss-Prot' },
-    { value: 'refseq_protein', label: 'refseq_protein - RefSeq Protein' }
-  ]
+/* -------- 辅助工具 -------- */
+function getFormattedTimestamp(date: string | Date = new Date()) {
+  const d = new Date(date)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
-/** 矩阵选项 */
-const MATRIX_OPTIONS = [
-  { value: 'BLOSUM62', label: 'BLOSUM62 (推荐)' },
-  { value: 'BLOSUM45', label: 'BLOSUM45' },
-  { value: 'BLOSUM80', label: 'BLOSUM80' },
-  { value: 'PAM30', label: 'PAM30' },
-  { value: 'PAM70', label: 'PAM70' }
-]
+function startRename(task: any, event: Event) {
+  event.stopPropagation()
+  editingTaskId.value = task.taskId
+  editName.value = task.fileName
+  setTimeout(() => { renameInputRef.value?.focus(); renameInputRef.value?.select(); }, 50)
+}
 
-/** 程序选项 */
-const PROGRAM_OPTIONS = [
-  { value: 'auto', label: '自动识别 (Auto)' },
-  { value: 'blastn', label: 'blastn (核酸 → 核酸)' },
-  { value: 'blastp', label: 'blastp (蛋白 → 蛋白)' },
-  { value: 'blastx', label: 'blastx (核酸翻译 → 蛋白)' },
-  { value: 'tblastn', label: 'tblastn (蛋白 → 核酸翻译)' }
-]
+function commitRename(task: any) {
+  if (editingTaskId.value === task.taskId) {
+    const trimmed = editName.value.trim()
+    if (trimmed && trimmed !== task.fileName) {
+      task.fileName = trimmed
+      try { getBridge().rename_task(task.taskId, trimmed) } catch { }
+    }
+    editingTaskId.value = null
+  }
+}
 
-/* -------- 自定义下拉框逻辑 -------- */
-const openDropdown = ref<string | null>(null)
+function clearAllHistory() {
+  if (confirm('确定要清空所有分析历史吗？')) {
+    try { getBridge().clear_all_history(); blast.clearHistory(); } catch { }
+  }
+}
+
+function deleteSingleTask(taskId: string, event: Event) {
+  event.stopPropagation()
+  try { getBridge().delete_single_task(taskId); blast.removeTask(taskId); } catch { }
+}
+
+function openNcbi(accession: string): void {
+  window.open(`https://www.ncbi.nlm.nih.gov/nuccore/${accession}`, '_blank')
+}
 
 function toggleDropdown(id: string, event: Event) {
   event.stopPropagation()
@@ -400,903 +236,442 @@ function selectOption(id: string, value: any) {
   openDropdown.value = null
 }
 
-function getProgramLabel() {
-  return PROGRAM_OPTIONS.find(o => o.value === blast.params.program)?.label || '请选择'
+function getProgramLabel() { return PROGRAM_OPTIONS.find(o => o.value === blast.params.program)?.label || '核酸/蛋白' }
+function getDatabaseLabel() { 
+  const all = [...DB_OPTIONS.nucleotide, ...DB_OPTIONS.protein]
+  return all.find(o => o.value === blast.params.database)?.label || '选择库'
+}
+function getMatrixLabel() { return MATRIX_OPTIONS.find(o => o.value === blast.params.matrix)?.label || '选择矩阵' }
+function statusLabel(s: string) { 
+  const m: any = { queued: '排队', running: '运行', done: '完成', error: '失败' }
+  return m[s] || s
 }
 
-function getDatabaseLabel() {
-  const nuc = DB_OPTIONS.nucleotide || []
-  const pro = DB_OPTIONS.protein || []
-  const allOpts = [...nuc, ...pro]
-  return allOpts.find(o => o.value === blast.params.database)?.label || '请选择'
+/* -------- 数据常量 -------- */
+const DB_OPTIONS = {
+  nucleotide: [
+    { value: 'nt', label: 'nt - 全球核酸库' },
+    { value: 'refseq_rna', label: 'refseq_rna - 参考 RNA' },
+    { value: 'refseq_genomic', label: 'refseq_genomic - 参考基因组' }
+  ],
+  protein: [
+    { value: 'nr', label: 'nr - 非冗余蛋白库' },
+    { value: 'swissprot', label: 'swissprot - Swiss-Prot' }
+  ]
 }
+const MATRIX_OPTIONS = [{ value: 'BLOSUM62', label: 'BLOSUM62' }, { value: 'PAM30', label: 'PAM30' }]
+const PROGRAM_OPTIONS = [
+  { value: 'auto', label: '自动识别' },
+  { value: 'blastn', label: 'blastn (核酸)' },
+  { value: 'blastp', label: 'blastp (蛋白)' }
+]
 
-function getMatrixLabel() {
-  return MATRIX_OPTIONS.find(o => o.value === blast.params.matrix)?.label || '请选择'
-}
-
-/** 状态徽章样式 */
-function statusLabel(status: string): string {
-  const map: Record<string, string> = {
-    queued: '排队中', running: '运行中', done: '已完成', error: '失败', paused: '已暂停'
-  }
-  return map[status] ?? status
-}
+onMounted(() => {
+  document.addEventListener('click', () => { openDropdown.value = null; })
+  setTimeout(() => {
+    try {
+      getBridge().get_all_tasks((resStr) => {
+        try {
+          const tasks = JSON.parse(resStr)
+          if (Array.isArray(tasks)) {
+            blast.tasks = tasks.map(t => ({
+              taskId: t.task_id, fileName: t.task_name || getFormattedTimestamp(t.start_time),
+              status: t.status, progress: t.progress || 0, startTime: t.start_time
+            }))
+            blast.tasks.forEach(t => { if (t.status === 'running') startPolling(t.taskId) })
+          }
+        } catch { }
+      })
+    } catch { }
+  }, 500)
+})
 </script>
 
 <template>
-  <div class="blast-view">
-    <!-- 左栏：输入 + 参数 -->
-    <div class="left-col">
-      <!-- 序列输入面板 -->
-      <div class="panel input-panel">
-        <div class="panel-header">
-          <span class="panel-title">▶ 序列输入</span>
+  <div class="blast-workspace-container">
+    <!-- 顶部工具栏 -->
+    <div class="blast-toolbar-top">
+      <div class="tool-items">
+        <div class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }" @click="toggleSideTool('input')">
+          <span class="icon">📁</span>
+          <span class="label">序列输入</span>
         </div>
-        <div class="panel-body">
-          <!-- 模式切换 -->
-          <div class="mode-tabs">
-            <div class="mode-tab" :class="{ active: blast.inputMode === 'file' }"
-              @click="blast.switchInputMode('file')">📁 批量文件</div>
-            <div class="mode-tab" :class="{ active: blast.inputMode === 'text' }"
-              @click="blast.switchInputMode('text')">✏️ 文本粘贴</div>
-          </div>
-          <!-- File 模式 -->
-          <div v-if="blast.inputMode === 'file'">
-            <div class="drop-zone" @click="selectFiles" @dragover.prevent>
-              <span>📤 点击添加或拖拽文件到此处</span>
-            </div>
-            <div class="file-list-header">
-              <span>待比对文件列表 <span class="badge">{{ blast.fileCount }}</span></span>
-              <button class="btn-icon" @click="blast.clearFiles" title="清空列表">🗑</button>
-            </div>
-            <div class="file-list">
-              <div v-for="(filePath, idx) in blast.files" :key="idx" class="file-item">
-                <span class="file-name">{{ filePath.split(/[/\\]/).pop() }}</span>
-                <button class="btn-icon" @click="blast.removeFile(filePath)">✕</button>
-              </div>
-              <div v-if="blast.files.length === 0" class="empty-hint">
-                拖拽文件至上方区域<br />或者点击添加
-              </div>
-            </div>
-          </div>
-          <!-- Text 模式 -->
-          <div v-else>
-            <textarea v-model="blast.queryText" class="query-textarea" placeholder=">Sequence_Title&#10;ATCG..." />
-          </div>
+        <div class="tool-divider"></div>
+        <div class="tool-btn" :class="{ active: activeSideTool === 'params' && isSidebarOpen }" @click="toggleSideTool('params')">
+          <span class="icon">⚙️</span>
+          <span class="label">分析参数</span>
+        </div>
+        <div class="tool-divider"></div>
+        <div class="tool-btn" :class="{ active: activeSideTool === 'history' && isSidebarOpen }" @click="toggleSideTool('history')">
+          <span class="icon">🕐</span>
+          <span class="label">分析历史</span>
         </div>
       </div>
-
-      <!-- 参数配置面板 -->
-      <div class="panel params-panel">
-        <div class="panel-header">
-          <span class="panel-title">⚙️ 参数配置</span>
-          <button class="btn-run" @click="launchBlast">▶ 开始分析</button>
-        </div>
-        <div class="panel-body scroll-v">
-          <div class="form-group">
-            <label>分析程序 (Program)</label>
-            <div class="custom-select">
-              <div class="select-box form-input" @click="toggleDropdown('program', $event)">
-                {{ getProgramLabel() }}
-                <span class="select-arrow">▼</span>
-              </div>
-              <div class="select-dropdown" v-if="openDropdown === 'program'">
-                <div class="select-option" v-for="opt in PROGRAM_OPTIONS" :key="opt.value"
-                  :class="{ active: blast.params.program === opt.value }" @click.stop="selectOption('program', opt.value)">
-                  {{ opt.label }}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>目标数据库 (Database)</label>
-            <div class="custom-select">
-              <div class="select-box form-input" @click="toggleDropdown('database', $event)">
-                {{ getDatabaseLabel() }}
-                <span class="select-arrow">▼</span>
-              </div>
-              <div class="select-dropdown" v-if="openDropdown === 'database'">
-                <div class="select-group">核酸数据库</div>
-                <div class="select-option" v-for="opt in DB_OPTIONS.nucleotide" :key="opt.value"
-                  :class="{ active: blast.params.database === opt.value }" @click.stop="selectOption('database', opt.value)">
-                  {{ opt.label }}
-                </div>
-                <div class="select-group">蛋白数据库</div>
-                <div class="select-option" v-for="opt in DB_OPTIONS.protein" :key="opt.value"
-                  :class="{ active: blast.params.database === opt.value }" @click.stop="selectOption('database', opt.value)">
-                  {{ opt.label }}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label>E-Value 阈值</label>
-              <input v-model.number="blast.params.evalue" type="number" step="0.01" class="form-input" />
-            </div>
-            <div class="form-group">
-              <label>最大匹配数</label>
-              <input v-model.number="blast.params.maxHits" type="number" class="form-input" />
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label>计分矩阵 (Matrix)</label>
-            <div class="custom-select">
-              <div class="select-box form-input" @click="toggleDropdown('matrix', $event)">
-                {{ getMatrixLabel() }}
-                <span class="select-arrow">▼</span>
-              </div>
-              <div class="select-dropdown" v-if="openDropdown === 'matrix'">
-                <div class="select-option" v-for="opt in MATRIX_OPTIONS" :key="opt.value"
-                  :class="{ active: blast.params.matrix === opt.value }" @click.stop="selectOption('matrix', opt.value)">
-                  {{ opt.label }}
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>空隙开启 (Opening)</label>
-              <input v-model.number="blast.params.gapOpen" type="number" class="form-input" />
-            </div>
-            <div class="form-group">
-              <label>空隙延伸 (Extension)</label>
-              <input v-model.number="blast.params.gapExtend" type="number" class="form-input" />
-            </div>
-          </div>
-          <div class="form-group">
-            <label>并行处理线程数</label>
-            <input v-model.number="blast.params.threads" type="number" min="1" max="64" class="form-input" />
-            <div class="tip">设置本地 CPU 核心调用数量，建议不要超过物理核心数</div>
-          </div>
-          <div class="checkbox-row">
-            <input v-model="blast.params.filterLowComplexity" type="checkbox" id="filter-check" />
-            <label for="filter-check">过滤低复杂度区域 (Filter)</label>
-          </div>
-        </div>
+      <div class="toolbar-actions">
+        <button class="btn-primary-run" @click="launchBlast" :disabled="!blast.hasInput">
+          <span class="icon">▶</span> 执行比对分析
+        </button>
       </div>
     </div>
 
-    <!-- 右栏：历史 + 结果 -->
-    <div class="right-col">
-      <!-- 历史面板 -->
-      <div v-show="blast.historyVisible" class="panel history-panel">
-        <div class="panel-header">
-          <span class="panel-title">🕐 分析历史</span>
-          <div class="header-actions">
-            <button class="btn-icon" @click="clearAllHistory" title="清空全部历史">🗑</button>
-            <button class="btn-icon" @click="blast.toggleHistory" title="收起">
-              ✖
-            </button>
-          </div>
-        </div>
-        <div class="panel-body scroll-v">
-          <div v-for="task in blast.tasks" :key="task.taskId" class="task-item"
-            :class="{ active: blast.activeTaskId === task.taskId }" @click="selectTask(task.taskId)">
-            <div class="task-name" @dblclick="startRename(task, $event)" title="双击重命名">
-              <span v-if="editingTaskId !== task.taskId">{{ task.fileName }}</span>
-              <input v-else v-model="editName" class="rename-input" ref="renameInputRef" @blur="commitRename(task)"
-                @keyup.enter="commitRename(task)" @keyup.esc="cancelRename" @click.stop />
+    <div class="blast-main-area">
+      <!-- 动态侧边栏 -->
+      <div class="blast-sidebar" :class="{ collapsed: !isSidebarOpen }">
+        <div class="sidebar-content scroll-v">
+          <!-- 输入面板 -->
+          <div v-show="activeSideTool === 'input'" class="panel-section">
+            <h3 class="section-title">▶ 序列输入</h3>
+            <div class="mode-tabs-neo">
+              <button class="mode-tab" :class="{ active: blast.inputMode === 'file' }" @click="blast.switchInputMode('file')">批量文件</button>
+              <button class="mode-tab" :class="{ active: blast.inputMode === 'text' }" @click="blast.switchInputMode('text')">粘贴文本</button>
             </div>
-            <div class="task-meta">
-              <span class="task-status" :class="task.status">{{ statusLabel(task.status) }}</span>
-              <div v-if="task.status === 'running'" class="progress-bar">
-                <div class="progress-fill" :style="{ width: task.progress + '%' }" />
+            
+            <div v-if="blast.inputMode === 'file'" class="file-area">
+              <div class="drop-zone-neo" @click="selectFiles">
+                <span class="dz-icon">📤</span>
+                <span class="dz-text">点击或拖拽 FASTA</span>
+              </div>
+              <div class="file-list-neo">
+                 <div v-for="f in blast.files" :key="f" class="file-item-neo">
+                   <span class="name">{{ f.split(/[/\\]/).pop() }}</span>
+                   <button class="del" @click="blast.removeFile(f)">✕</button>
+                 </div>
               </div>
             </div>
-            <div class="task-actions">
-              <button v-if="task.status === 'running'" class="btn-icon sm" @click.stop="pauseTask(task.taskId)"
-                title="暂停">⏸</button>
-              <button v-if="task.status === 'running'" class="btn-icon sm" @click.stop="stopTask(task.taskId)"
-                title="停止">⏹</button>
-              <button class="btn-icon sm" @click="deleteSingleTask(task.taskId, $event)" title="删除此记录">🗑</button>
+            <textarea v-else v-model="blast.queryText" class="neo-textarea" placeholder=">Sequence_Title..." />
+          </div>
+
+          <!-- 参数面板 -->
+          <div v-show="activeSideTool === 'params'" class="panel-section">
+            <h3 class="section-title">⚙️ 任务参数</h3>
+            <div class="form-group">
+              <label>分析程序</label>
+              <div class="select-box-neo" @click.stop="toggleDropdown('program', $event)">
+                {{ getProgramLabel() }} <span class="arrow">▼</span>
+                <div v-if="openDropdown === 'program'" class="dropdown-list">
+                  <div v-for="o in PROGRAM_OPTIONS" :key="o.value" class="opt" @click="selectOption('program', o.value)">{{ o.label }}</div>
+                </div>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>任务数据库</label>
+              <div class="select-box-neo" @click.stop="toggleDropdown('db', $event)">
+                 {{ getDatabaseLabel() }} <span class="arrow">▼</span>
+                 <div v-if="openDropdown === 'db'" class="dropdown-list">
+                    <div class="group">核酸</div>
+                    <div v-for="o in DB_OPTIONS.nucleotide" :key="o.value" class="opt" @click="selectOption('database', o.value)">{{ o.label }}</div>
+                    <div class="group">蛋白</div>
+                    <div v-for="o in DB_OPTIONS.protein" :key="o.value" class="opt" @click="selectOption('database', o.value)">{{ o.label }}</div>
+                 </div>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                 <label>E-Value</label>
+                 <input type="number" v-model="blast.params.evalue" class="neo-input" />
+              </div>
+              <div class="form-group">
+                 <label>最大匹配</label>
+                 <input type="number" v-model="blast.params.maxHits" class="neo-input" />
+              </div>
+            </div>
+            <h3 class="section-title sub">🧬 模型选项</h3>
+            <div class="form-group">
+               <label>计分矩阵</label>
+               <div class="select-box-neo" @click.stop="toggleDropdown('matrix', $event)">
+                  {{ getMatrixLabel() }} <span class="arrow">▼</span>
+                  <div v-if="openDropdown === 'matrix'" class="dropdown-list">
+                    <div v-for="o in MATRIX_OPTIONS" :key="o.value" class="opt" @click="selectOption('matrix', o.value)">{{ o.label }}</div>
+                  </div>
+               </div>
             </div>
           </div>
-          <div v-if="blast.tasks.length === 0" class="empty-hint">暂无历史任务</div>
+
+          <!-- 历史面板 -->
+          <div v-show="activeSideTool === 'history'" class="panel-section">
+            <h3 class="section-title">🕐 分析历史</h3>
+            <div class="history-list">
+               <div v-for="t in blast.tasks" :key="t.taskId" class="task-card" :class="{ active: blast.activeTaskId === t.taskId }" @click="selectTask(t.taskId)">
+                  <div class="title" @dblclick="startRename(t, $event)">
+                    <span v-if="editingTaskId !== t.taskId">{{ t.fileName }}</span>
+                    <input v-else v-model="editName" class="rename-inp" ref="renameInputRef" @blur="commitRename(t)" @keyup.enter="commitRename(t)" />
+                  </div>
+                  <div class="meta">
+                    <span class="status" :class="t.status">{{ statusLabel(t.status) }}</span>
+                    <span class="time">{{ getFormattedTimestamp(t.startTime).split(' ')[1] }}</span>
+                  </div>
+                  <div class="card-actions">
+                     <button @click.stop="deleteSingleTask(t.taskId, $event)">🗑</button>
+                  </div>
+               </div>
+            </div>
+            <div v-if="blast.tasks.length > 0" class="history-footer">
+               <button class="text-btn-warn" @click="clearAllHistory">清空全部历史记录</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 侧边栏收起 handle -->
+        <div class="sidebar-collapse-toggle" @click="isSidebarOpen = !isSidebarOpen">
+           {{ isSidebarOpen ? '◀' : '▶' }}
         </div>
       </div>
 
-      <!-- 结果面板 -->
-      <div class="panel result-panel">
-        <div class="panel-header">
-          <span class="panel-title">📊 {{ blast.resultTitle }}</span>
-          <div class="header-actions">
-            <button class="btn-ghost" @click="translateAll" :disabled="isTranslating">
-              {{ isTranslating ? '⏳ 翻译中...' : '🌐 一键 AI 翻译' }}
-            </button>
-            <button class="btn-ghost" @click="exportResults">💾 导出报表</button>
-          </div>
+      <!-- 结果主区域 -->
+      <div class="blast-results">
+        <div class="results-header">
+           <div class="title">📊 {{ blast.resultTitle }}</div>
+           <div class="actions">
+              <button class="btn-ai" @click="translateAll" :disabled="isTranslating">🌐 AI 翻译</button>
+              <button class="btn-export" @click="exportResults">💾 导出</button>
+           </div>
         </div>
-        <div class="panel-body">
-          <div class="table-container">
-            <table v-if="blast.results.length > 0">
-              <thead>
-                <tr>
-                  <th>查询序列</th>
-                  <th>最匹配项 (鉴定详情)</th>
-                  <th>生物学背景</th>
-                  <th>相似度</th>
-                  <th>E值</th>
-                  <th>登录号</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(hit, idx) in blast.results" :key="idx">
-                  <td class="query-col">{{ hit.queryTitle }}</td>
-                  <td class="hit-detail-col">
-                    <div class="hit-species">{{ hit.translatedName || hit.speciesName }}</div>
-                    <div v-if="hit.genusStrain" class="hit-strain">{{ hit.genusStrain }}</div>
-                    <div v-if="hit.geneSource" class="hit-source">{{ hit.geneSource }}</div>
-                  </td>
-                  <td class="bio-col">
-                    <div v-if="hit.seqType" class="bio-tag">{{ hit.seqType }}</div>
-                    <div v-if="hit.host" class="bio-host">宿主: {{ hit.host }}</div>
-                    <div v-if="hit.alignLen" class="bio-len">比对长度: {{ hit.alignLen }}bp</div>
-                  </td>
-                  <td>
-                    <div class="identity-bar">
-                      <div class="identity-fill" :class="{ 'low-identity': hit.identity < 97 }"
-                        :style="{ width: hit.identity + '%' }">
-                        <span class="identity-text">{{ hit.identity.toFixed(1) }}%</span>
-                      </div>
+        <div class="table-wrapper scroll-v">
+           <table v-if="blast.results.length > 0">
+             <thead>
+               <tr>
+                 <th>查询序列</th>
+                 <th>鉴定详情 (物种/菌株/基因)</th>
+                 <th>生物学背景</th>
+                 <th>相似度 (Identity)</th>
+                 <th>E值</th>
+                 <th>NCBI</th>
+               </tr>
+             </thead>
+             <tbody>
+               <tr v-for="h in blast.results" :key="h.accession">
+                 <td class="mono">{{ h.queryTitle }}</td>
+                 <td>
+                   <div class="sp">{{ h.translatedName || h.speciesName }}</div>
+                   <div class="st">{{ h.genusStrain }}</div>
+                   <div class="gs">{{ h.geneSource }}</div>
+                 </td>
+                 <td class="bio">
+                    <div class="tag">{{ h.seqType }}</div>
+                    <div class="host">宿主: {{ h.host }}</div>
+                 </td>
+                 <td>
+                    <div class="id-val" :class="h.identity >= 97 ? 'high-id' : 'low-id'">
+                      {{ h.identity.toFixed(1) }}%
                     </div>
-                  </td>
-                  <td class="mono">{{ hit.evalue }}</td>
-                  <td>
-                    <a class="accession-link" :href="'https://www.ncbi.nlm.nih.gov/nuccore/' + hit.accession"
-                      target="_blank" @click.prevent="openNcbi(hit.accession)">{{ hit.accession }}</a>
-                  </td>
-                  <td>
-                    <button class="btn-icon sm" @click="openNcbi(hit.accession)" title="在 NCBI 查看">🔗</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            <div v-else class="empty-state">
-              <div class="empty-icon">🧬</div>
-              <p>选择历史任务或提交新序列开始分析</p>
-            </div>
-          </div>
+                 </td>
+                 <td class="mono">{{ h.evalue }}</td>
+                 <td><button class="link-btn" @click="openNcbi(h.accession)">🔗</button></td>
+               </tr>
+             </tbody>
+           </table>
+           <div v-else class="empty-hint">
+             <div class="icon">🧬</div>
+             <p>数据已准备就绪，请选择历史或发起新比对</p>
+           </div>
         </div>
       </div>
-    </div>
-
-    <div v-if="!blast.historyVisible" class="history-tag" @click="blast.toggleHistory">
-      🕐 分析历史
     </div>
   </div>
 </template>
 
 <style scoped>
-.blast-view {
+/* 主布局结构 */
+.blast-workspace-container {
   display: flex;
+  flex-direction: column;
   height: 100%;
-  gap: 0;
-  background: #f1f5f9;
-  position: relative;
+  background: white;
   overflow: hidden;
-  /* Ensure split styling */
 }
 
-/* ... */
-.history-tag {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+/* 顶部工具菜单栏 (板块1) */
+.blast-toolbar-top {
+  height: 60px;
   background: white;
-  border: 1px solid var(--border-color);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  padding: 10px 12px;
-  font-size: 0.78rem;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  writing-mode: vertical-rl;
-  transition: all 0.2s;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
   z-index: 100;
-  /* Increased z-index */
 }
 
-.history-tag:hover {
-  background: #f8fafc;
-  transform: translateY(-50%) translateX(-2px);
-}
-
-.left-col {
-  width: 380px;
-  min-width: 380px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  background: var(--border-color);
-}
-
-.right-col {
-  flex: 1;
-  height: 100%;
-  display: flex;
-  gap: 1px;
-  background: var(--border-color);
-}
-
-/* 面板通用 */
-.panel {
-  flex: 1;
-  min-height: 0; /* 允许 flex 子项在受限高度下滚动 */
-  background: white;
-  display: flex;
-  flex-direction: column;
-}
-
-.panel-header {
-  padding: 12px 16px;
+.tool-items { display: flex; align-items: center; gap: 8px; }
+.tool-btn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid var(--border-light);
-  background: #fafbfc;
-}
-
-.panel-title {
-  font-weight: 600;
-  font-size: 0.85rem;
-  color: var(--text-primary);
-}
-
-.panel-body {
-  flex: 1;
-  padding: 14px;
-  overflow: hidden;
-}
-
-.scroll-v {
-  overflow-y: auto;
-}
-
-/* 输入面板 */
-.input-panel {
-  flex: 1;
-}
-
-.params-panel {
-  flex: 1;
-}
-
-.mode-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-}
-
-.mode-tab {
-  flex: 1;
-  padding: 8px;
-  text-align: center;
-  font-size: 0.8rem;
-  border-radius: 6px;
+  gap: 10px;
+  padding: 8px 16px;
   cursor: pointer;
-  background: var(--bg-page);
-  color: var(--text-secondary);
-  transition: all 0.2s;
-}
-
-.mode-tab.active {
-  background: var(--accent-blue);
-  color: white;
-}
-
-.drop-zone {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  border: 2px dashed var(--border-color);
-  border-radius: 8px;
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  transition: all 0.2s;
-  margin-bottom: 12px;
-}
-
-.drop-zone:hover {
-  border-color: var(--accent-blue);
-  background: rgba(59, 130, 246, 0.03);
-}
-
-.file-list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  margin-bottom: 6px;
-}
-
-.badge {
-  background: var(--bg-page);
-  padding: 1px 6px;
   border-radius: 10px;
-  font-size: 0.7rem;
-}
-
-.file-list {
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.file-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 10px;
-  font-size: 0.8rem;
-  border-bottom: 1px solid var(--border-light);
-}
-
-.file-name {
-  color: var(--text-primary);
-  font-family: monospace;
-  font-size: 0.78rem;
-}
-
-.query-textarea {
-  width: 100%;
-  min-height: 200px;
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  font-family: 'Consolas', monospace;
-  font-size: 0.82rem;
-  resize: vertical;
-}
-
-/* 表单 */
-.form-group {
-  margin-bottom: 12px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 0.78rem;
+  color: #64748b;
+  transition: all 0.2s;
   font-weight: 600;
-  margin-bottom: 4px;
-  color: var(--text-primary);
-}
-
-.form-input {
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
   font-size: 0.82rem;
-  background: #fafbfc;
 }
+.tool-btn:hover { background: #f8fafc; color: #1e293b; }
+.tool-btn.active { color: #2563eb; background: #eff6ff; }
+.tool-btn .icon { font-size: 1.2rem; }
 
-.form-input:focus {
-  outline: none;
-  border-color: var(--accent-blue);
-}
+.tool-divider { width: 1px; height: 24px; background: #e2e8f0; margin: 0 10px; }
 
-.form-row {
+.btn-primary-run {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: white;
+  padding: 10px 24px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
   display: flex;
+  align-items: center;
   gap: 10px;
 }
+.btn-primary-run:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3); }
 
-.form-row .form-group {
+/* 下方两栏容器 */
+.blast-main-area {
   flex: 1;
-}
-
-.tip {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 3px;
-}
-
-.checkbox-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 4px;
+  overflow: hidden;
+  background: #f8fafc;
 }
 
-.checkbox-row input {
-  width: auto;
-  height: auto;
-}
-
-.checkbox-row label {
-  margin: 0;
-  font-size: 0.82rem;
-}
-
-/* 自定义下拉菜单核心逻辑 (参照 SettingsView) */
-.custom-select {
-  position: relative;
-  width: 100%;
-  user-select: none;
-}
-
-.select-box {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  cursor: pointer;
-}
-
-.select-arrow {
-  font-size: 0.6rem;
-  opacity: 0.5;
-  transition: transform 0.2s;
-}
-
-.select-dropdown {
-  position: absolute;
-  top: 105%;
-  left: 0;
-  right: 0;
+/* 侧边栏 (工具栏) - 板块2 */
+.blast-sidebar {
+  width: 360px;
   background: white;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  z-index: 1000;
-  max-height: 250px;
-  overflow-y: auto;
-}
-
-.select-group {
-  padding: 8px 14px 4px;
-  font-size: 0.7rem;
-  color: var(--text-muted);
-  font-weight: 600;
-  text-transform: uppercase;
-  background: #f8fafc;
-}
-
-.select-option {
-  padding: 10px 14px;
-  font-size: 0.82rem;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.select-option:hover {
-  background: #f1f5f9;
-}
-
-.select-option.active {
-  color: var(--accent-blue);
-  font-weight: 600;
-  background: rgba(59, 130, 246, 0.05);
-}
-
-.btn-run {
-  padding: 6px 14px;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: white;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
-  transition: all 0.2s;
-}
-
-.btn-run:hover {
-  transform: translateY(-1px);
-}
-
-/* 历史面板 */
-.history-panel {
-  width: 240px;
-  min-width: 240px;
-  flex: none; /* 固定宽度，不参与弹性伸缩 */
-}
-
-.task-item {
-  padding: 10px;
-  border-bottom: 1px solid var(--border-light);
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.task-item:hover {
-  background: #f8fafc;
-}
-
-.task-item.active {
-  background: rgba(59, 130, 246, 0.05);
-  border-left: 3px solid var(--accent-blue);
-}
-
-.task-name {
-  font-size: 0.82rem;
-  font-weight: 500;
-  margin-bottom: 4px;
-}
-
-.task-meta {
+  transition: none; /* 取消动画 */
   display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.task-status {
-  font-size: 0.72rem;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.task-status.queued {
-  background: #f1f5f9;
-  color: #64748b;
-}
-
-.task-status.running {
-  background: #dbeafe;
-  color: #2563eb;
-}
-
-.task-status.done {
-  background: #d1fae5;
-  color: #059669;
-}
-
-.task-status.error {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.task-status.paused {
-  background: #fef3c7;
-  color: #d97706;
-}
-
-.progress-bar {
-  flex: 1;
-  height: 4px;
-  background: #e2e8f0;
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: var(--accent-blue);
-  transition: width 0.3s;
-}
-
-.task-actions {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-}
-
-.rename-input {
-  width: 100%;
-  font-size: 0.82rem;
-  font-weight: 500;
-  padding: 2px 4px;
-  border: 1px solid var(--accent-blue);
-  border-radius: 4px;
-  outline: none;
-}
-
-/* 结果面板 */
-.result-panel {
-  flex: 1;
-}
-
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.btn-ghost {
-  padding: 4px 10px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  border-radius: 4px;
-  transition: all 0.15s;
-}
-
-.btn-ghost:hover {
-  background: #f1f5f9;
-  color: var(--text-primary);
-}
-
-.table-container {
-  overflow: auto;
-  height: 100%;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.82rem;
-}
-
-thead th {
-  position: sticky;
-  top: 0;
-  background: #f8fafc;
-  padding: 10px 12px;
-  text-align: left;
-  font-weight: 600;
-  color: var(--text-secondary);
-  border-bottom: 2px solid var(--border-color);
-  white-space: nowrap;
-}
-
-tbody td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-light);
-}
-
-.mono {
-  font-family: monospace;
-  font-size: 0.78rem;
-}
-
-.identity-bar {
-  width: 40px;
-  height: 16px;
-  background: #f1f5f9;
-  border-radius: 8px;
-  overflow: hidden;
+  flex-direction: column;
   position: relative;
-  border: 1px solid #e2e8f0;
+  z-index: 5;
+  border-right: 1px solid #e2e8f0;
+  overflow: visible; /* 确保 handle 可见 */
+}
+.blast-sidebar.collapsed { width: 0; border-right: none; }
+
+.sidebar-content {
+  padding: 24px;
+  flex: 1;
+  overflow-y: auto;
+  white-space: nowrap; /* 防止收缩时文字折行 */
+}
+.collapsed .sidebar-content { display: none; }
+
+/* 结果栏 - 板块3 */
+.blast-results {
+  flex: 1;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.identity-fill {
-  height: 100%;
-  background: #22c55e;
+/* 收起 Handle - 修复被遮挡问题 */
+.sidebar-collapse-toggle {
+  position: absolute;
+  left: 100%; /* 始终在内容区右侧边缘 */
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 60px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-left: none; /* 贴合侧边栏 */
+  border-radius: 0 10px 10px 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: width 0.3s ease;
-}
-
-.identity-fill.low-identity {
-  background: #94a3b8;
-}
-
-.identity-text {
-  color: white;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
-  white-space: nowrap;
-}
-
-.accession-link {
-  color: var(--accent-blue);
   cursor: pointer;
-  text-decoration: none;
-}
-
-.accession-link:hover {
-  text-decoration: underline;
-}
-
-/* 鉴定详情列 3 行布局 */
-.query-col {
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: monospace;
-  font-size: 0.78rem;
-}
-
-.hit-detail-col {
-  min-width: 180px;
-}
-
-.hit-species {
-  font-weight: 700;
-  font-size: 0.88rem;
-  color: var(--text-primary);
-  line-height: 1.4;
-}
-
-.hit-strain {
-  font-size: 0.74rem;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.hit-source {
-  font-size: 0.72rem;
-  color: var(--accent-blue);
-  margin-top: 2px;
-}
-
-/* 生物学背景列 */
-.bio-col {
-  min-width: 100px;
-}
-
-.bio-tag {
-  font-size: 0.74rem;
-  color: var(--text-secondary);
-}
-
-.bio-host {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.bio-len {
-  font-size: 0.72rem;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.btn-icon {
-  background: none;
-  color: var(--text-muted);
-  padding: 4px;
-  border-radius: 4px;
-  font-size: 0.85rem;
-}
-
-.btn-icon:hover {
-  background: #f1f5f9;
-}
-
-.btn-icon.sm {
-  font-size: 0.75rem;
-}
-
-.empty-state {
-  text-align: center;
-  padding: 100px 20px;
-  color: var(--text-muted);
-}
-
-.empty-icon {
-  font-size: 3rem;
-  opacity: 0.3;
-  margin-bottom: 12px;
-}
-
-.empty-hint {
-  text-align: center;
-  padding: 20px;
-  color: var(--text-muted);
-  font-size: 0.82rem;
-}
-
-/* 浮动历史标签 */
-.history-tag {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  background: white;
-  border: 1px solid var(--border-color);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  padding: 10px 12px;
-  font-size: 0.78rem;
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  writing-mode: vertical-rl;
-  transition: all 0.2s;
   z-index: 10;
+  font-size: 0.61rem;
+  color: #94a3b8;
+  box-shadow: 2px 0 6px rgba(0,0,0,0.06);
 }
+.sidebar-collapse-toggle:hover { color: #2563eb; background: #f8fafc; }
 
-.history-tag:hover {
-  background: #f1f5f9;
+.section-title { font-size: 1rem; font-weight: 800; color: #0f172a; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;}
+.section-title.sub { margin-top: 32px; border-top: 1px dashed #e2e8f0; padding-top: 20px; }
+
+.mode-tabs-neo { display: flex; background: #f1f5f9; padding: 4px; border-radius: 8px; margin-bottom: 20px; }
+.mode-tab { flex: 1; padding: 8px; font-size: 0.78rem; font-weight: 700; border-radius: 6px; color: #64748b; cursor: pointer; }
+.mode-tab.active { background: white; color: #2563eb; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+.drop-zone-neo { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
+.drop-zone-neo:hover { border-color: #2563eb; background: #f0f7ff; }
+.dz-icon { font-size: 1.8rem; display: block; margin-bottom: 8px; }
+.dz-text { font-size: 0.82rem; font-weight: 700; color: #475569; }
+
+.file-item-neo { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: #f8fafc; border-radius: 8px; margin-top: 8px; font-size: 0.78rem; color: #1e293b; border: 1px solid #f1f5f9; }
+.file-item-neo .del { color: #94a3b8; cursor: pointer; font-size: 0.8rem; }
+.file-item-neo .del:hover { color: #ef4444; }
+
+.neo-textarea { width: 100%; height: 320px; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; resize: none; background: #f8fafc; line-height: 1.6; }
+
+.form-group { margin-bottom: 20px; }
+.form-group label { font-size: 0.75rem; font-weight: 800; color: #64748b; margin-bottom: 8px; display: block; text-transform: uppercase; letter-spacing: 0.02em; }
+.select-box-neo { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; font-size: 0.82rem; cursor: pointer; position: relative; display: flex; justify-content: space-between; align-items: center; }
+.dropdown-list { position: absolute; top: 110%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.12); z-index: 100; max-height: 250px; overflow-y: auto; padding: 6px; }
+.dropdown-list .opt { padding: 10px 12px; font-size: 0.82rem; border-radius: 6px; }
+.dropdown-list .opt:hover { background: #f1f5f9; color: #2563eb; }
+.dropdown-list .group { padding: 8px 12px; font-size: 0.68rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; }
+
+.neo-input { width: 100%; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 0.82rem; color: #0f172a; }
+.form-row { display: flex; gap: 16px; }
+
+.panel-section { animation: fadeIn 0.3s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+/* 历史列表 */
+.history-list { margin-top: 10px; }
+.task-card { border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; margin-bottom: 10px; cursor: pointer; position: relative; transition: all 0.2s; background: #fff; }
+.task-card:hover { border-color: #cbd5e1; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+.task-card.active { border-color: #2563eb; background: #eff6ff; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1); }
+.task-card .title { font-size: 0.82rem; font-weight: 800; margin-bottom: 6px; color: #1e293b; }
+.task-card .meta { display: flex; justify-content: space-between; font-size: 0.68rem; color: #94a3b8; font-weight: 500; }
+.status.done { color: #16a34a; }
+.status.running { color: #2563eb; }
+.task-card .card-actions { position: absolute; top: 12px; right: 12px; opacity: 0; transition: opacity 0.2s; }
+.task-card:hover .card-actions { opacity: 1; }
+
+.history-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #f1f5f9; text-align: center; }
+.text-btn-warn { border: none; background: none; color: #ef4444; font-size: 0.78rem; font-weight: 700; cursor: pointer; padding: 8px 16px; border-radius: 6px; }
+.text-btn-warn:hover { background: #fef2f2; }
+
+/* 结果表格 */
+.results-header { padding: 18px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #fff; }
+.results-header .title { font-size: 1.1rem; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 8px; }
+.actions { display: flex; gap: 10px; }
+.btn-ai { background: white; border: 1.5px solid #2563eb; color: #2563eb; padding: 8px 18px; border-radius: 10px; font-size: 0.78rem; font-weight: 800; cursor: pointer; transition: all 0.2s; }
+.btn-ai:hover:not(:disabled) { background: #2563eb; color: white; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2); }
+.btn-export { background: #f8fafc; border: 1px solid #e2e8f0; color: #475569; padding: 8px 18px; border-radius: 10px; font-size: 0.78rem; font-weight: 800; cursor: pointer; transition: all 0.2s; }
+.btn-export:hover { background: #f1f5f9; border-color: #cbd5e1; }
+
+.table-wrapper { flex: 1; overflow: auto; background: white; }
+table { width: 100%; border-collapse: separate; border-spacing: 0; }
+thead th { position: sticky; top: 0; background: #f8fafc; padding: 14px 20px; text-align: left; font-size: 0.72rem; color: #64748b; font-weight: 800; border-bottom: 1px solid #e2e8f0; z-index: 10; text-transform: uppercase; }
+tbody td { padding: 18px 20px; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem; vertical-align: middle; }
+tbody tr:hover { background: #fafbfc; }
+
+.sp { font-weight: 800; font-size: 0.92rem; color: #0f172a; line-height: 1.4; }
+.st { font-size: 0.75rem; color: #64748b; margin-top: 3px; font-weight: 500; }
+.gs { font-size: 0.75rem; color: #2563eb; font-weight: 700; margin-top: 3px; }
+
+.id-val { 
+  font-family: 'JetBrains Mono', monospace; 
+  font-weight: 800; 
+  font-size: 0.88rem; 
 }
+.id-val.high-id { color: #16a34a; } /* 97%及以上：绿色 */
+.id-val.low-id { color: #94a3b8; }  /* 97%以下：灰色 */
+
+.mono { font-family: 'JetBrains Mono', monospace; color: #475569; font-size: 0.78rem; font-weight: 500; }
+.link-btn { background: #f1f5f9; border: none; padding: 6px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
+.link-btn:hover { background: #e2e8f0; transform: scale(1.1); }
+
+.scroll-v { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.scroll-v::-webkit-scrollbar { width: 6px; }
+.scroll-v::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+.scroll-v::-webkit-scrollbar-track { background: transparent; }
+
+.empty-hint { height: 80%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; text-align: center; }
+.empty-hint .icon { font-size: 3.5rem; opacity: 0.15; margin-bottom: 16px; }
+.empty-hint p { font-size: 0.9rem; font-weight: 500; }
 </style>

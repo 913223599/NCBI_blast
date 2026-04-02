@@ -22,19 +22,44 @@ onMounted(async () => {
   const globalApp = {
     handleFileLoaded: (content: string, type: string, path: string) => {
       console.log(`[Bridge->App] File Loaded: ${path} (${type})`)
-      // 弹出轻量通知以确认通信
       appStore.showNotification(`已从本地添加文件: ${path.split(/[/\\]/).pop()}`, 'success')
       
-      if (type === 'fasta' || type === 'sequence' || !type) {
-        blastStore.addFile(path)
-      } else if (type === 'tree') {
-        (window as any).treeView?.loadNewick(content)
+      const currentRoute = window.location.hash // Simple way to check route in SPA
+      if (currentRoute.includes('tree')) {
+         // 如果在进化树页面，且加载的是 tree 类型或通用 fasta
+         if (type === 'tree') {
+            (window as any).treeView?.loadNewick(content)
+         } else {
+            // 提示：Tree 页面目前主要通过 side panel 处理序列，
+            // 但如果用户直接拖入 fasta，我们可以尝试后续支持
+            appStore.showNotification('检测到序列文件，请在左侧面板点击“载入”', 'info')
+         }
+      } else {
+         // 默认逻辑：放入 BLAST
+         if (type === 'fasta' || type === 'sequence' || !type) {
+           blastStore.addFile(path)
+         }
       }
     },
     handleFilesDropped: (paths: string[]) => {
       console.log('[Bridge->App] Files Dropped:', paths)
-      appStore.showNotification(`检测到 ${paths.length} 个文件拖入`, 'info')
-      paths.forEach(p => blastStore.addFile(p))
+      const currentRoute = window.location.hash
+      
+      if (currentRoute.includes('tree')) {
+        // [修复] 如果在进化树页面，不应该进入 BLAST 列表
+        appStore.showNotification(`检测到 ${paths.length} 个文件拖入进化树工作区`, 'success')
+        // 这里可以调用 treeView 组件的方法来处理这些路径
+        if ((window as any).treeView?.handleExternalFiles) {
+          (window as any).treeView.handleExternalFiles(paths)
+        } else {
+          // Fallback: 提示用户在左侧操作
+          console.warn('TreeView has no handleExternalFiles handler yet.')
+        }
+      } else {
+        // BLAST 页面逻辑
+        appStore.showNotification(`检测到 ${paths.length} 个文件拖入比对列表`, 'info')
+        paths.forEach(p => blastStore.addFile(p))
+      }
     },
     showNotification: (msg: string, type: string = 'info') => {
       appStore.showNotification(msg, type as any)
