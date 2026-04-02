@@ -88,7 +88,6 @@ function cancelRename() {
   editingTaskId.value = null
   editName.value = ''
 }
-
 function commitRename(task: any) {
   if (editingTaskId.value === task.taskId) {
     const trimmedName = editName.value.trim()
@@ -100,6 +99,17 @@ function commitRename(task: any) {
     }
     editingTaskId.value = null
   }
+}
+
+function getFormattedTimestamp(date: string | Date = new Date()) {
+  const d = new Date(date)
+  const yr = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const dy = String(d.getDate()).padStart(2, '0')
+  const hr = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  const se = String(d.getSeconds()).padStart(2, '0')
+  return `${yr}-${mo}-${dy} ${hr}:${mi}:${se}`
 }
 
 function fetchTaskResults(taskId: string) {
@@ -254,21 +264,6 @@ async function translateAll(): Promise<void> {
         })
       } catch { }
     }
-
-    // 2. 翻译生物学背景 (序列类型部分)
-    if (hit.seqType && !hit.seqType.includes('本地') && !hit.seqType.includes('AI')) {
-      try {
-        await new Promise<void>((resolve) => {
-          bridge.translate_text(hit.seqType, 'other', (result: string) => {
-            if (result && result !== hit.seqType) {
-              hit.seqType = result
-            }
-            resolve()
-          })
-          setTimeout(resolve, 3000)
-        })
-      } catch { }
-    }
   }
 
   isTranslating.value = false
@@ -290,6 +285,7 @@ function selectTask(taskId: string): void {
   fetchTaskResults(taskId)
 }
 function handleGlobalClick(event: MouseEvent) {
+  // 关闭重命名
   if (editingTaskId.value) {
     const target = event.target as HTMLElement
     if (!target.classList.contains('rename-input')) {
@@ -297,6 +293,10 @@ function handleGlobalClick(event: MouseEvent) {
       if (task) commitRename(task)
       else editingTaskId.value = null
     }
+  }
+  // 关闭所有下拉框
+  if (openDropdown.value) {
+    openDropdown.value = null
   }
 }
 
@@ -307,8 +307,9 @@ onMounted(() => {
   if (typeof window !== 'undefined') {
     (window as any).blastCallback = {
       onFileAdded: (path: string) => blast.addFile(path),
-      onTaskCreated: (taskId: string, fileName: string) => {
-        blast.addTask({ taskId, fileName, status: 'queued', progress: 0, startTime: new Date().toISOString() })
+      onTaskCreated: (taskId: string) => {
+        const timeLabel = getFormattedTimestamp()
+        blast.addTask({ taskId, fileName: timeLabel, status: 'queued', progress: 0, startTime: new Date().toISOString() })
       },
       onTaskProgress: (taskId: string, progress: number) => blast.updateTaskStatus(taskId, 'running', progress),
       onTaskDone: (taskId: string) => {
@@ -333,11 +334,10 @@ onMounted(() => {
             blast.tasks = []
             pastTasks.forEach(t => {
               const params = typeof t.params === 'string' ? JSON.parse(t.params) : (t.params || {})
-              const fileName = params.task_name || (params.files && params.files.length > 0 ? (params.files[0]?.split(/[/\\]/).pop() || 'Historical Task') : 'Historical Task')
-
+              const timeLabel = getFormattedTimestamp(t.start_time || new Date())
               blast.tasks.push({
                 taskId: t.task_id,
-                fileName: fileName,
+                fileName: timeLabel,
                 status: t.status,
                 progress: t.progress || 0,
                 startTime: t.start_time
@@ -391,6 +391,36 @@ const PROGRAM_OPTIONS = [
   { value: 'blastx', label: 'blastx (核酸翻译 → 蛋白)' },
   { value: 'tblastn', label: 'tblastn (蛋白 → 核酸翻译)' }
 ]
+
+/* -------- 自定义下拉框逻辑 -------- */
+const openDropdown = ref<string | null>(null)
+
+function toggleDropdown(id: string, event: Event) {
+  event.stopPropagation()
+  openDropdown.value = openDropdown.value === id ? null : id
+}
+
+function selectOption(id: string, value: any) {
+  if (id === 'program') blast.params.program = value
+  else if (id === 'database') blast.params.database = value
+  else if (id === 'matrix') blast.params.matrix = value
+  openDropdown.value = null
+}
+
+function getProgramLabel() {
+  return PROGRAM_OPTIONS.find(o => o.value === blast.params.program)?.label || '请选择'
+}
+
+function getDatabaseLabel() {
+  const nuc = DB_OPTIONS.nucleotide || []
+  const pro = DB_OPTIONS.protein || []
+  const allOpts = [...nuc, ...pro]
+  return allOpts.find(o => o.value === blast.params.database)?.label || '请选择'
+}
+
+function getMatrixLabel() {
+  return MATRIX_OPTIONS.find(o => o.value === blast.params.matrix)?.label || '请选择'
+}
 
 /** 状态徽章样式 */
 function statusLabel(status: string): string {
@@ -453,22 +483,42 @@ function statusLabel(status: string): string {
         <div class="panel-body scroll-v">
           <div class="form-group">
             <label>分析程序 (Program)</label>
-            <select v-model="blast.params.program" class="form-input">
-              <option v-for="opt in PROGRAM_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-            </select>
+            <div class="custom-select">
+              <div class="select-box form-input" @click="toggleDropdown('program', $event)">
+                {{ getProgramLabel() }}
+                <span class="select-arrow">▼</span>
+              </div>
+              <div class="select-dropdown" v-if="openDropdown === 'program'">
+                <div class="select-option" v-for="opt in PROGRAM_OPTIONS" :key="opt.value"
+                  :class="{ active: blast.params.program === opt.value }" @click.stop="selectOption('program', opt.value)">
+                  {{ opt.label }}
+                </div>
+              </div>
+            </div>
           </div>
+
           <div class="form-group">
             <label>目标数据库 (Database)</label>
-            <select v-model="blast.params.database" class="form-input">
-              <optgroup label="核酸数据库">
-                <option v-for="opt in DB_OPTIONS.nucleotide" :key="opt.value" :value="opt.value">{{ opt.label }}
-                </option>
-              </optgroup>
-              <optgroup label="蛋白数据库">
-                <option v-for="opt in DB_OPTIONS.protein" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-              </optgroup>
-            </select>
+            <div class="custom-select">
+              <div class="select-box form-input" @click="toggleDropdown('database', $event)">
+                {{ getDatabaseLabel() }}
+                <span class="select-arrow">▼</span>
+              </div>
+              <div class="select-dropdown" v-if="openDropdown === 'database'">
+                <div class="select-group">核酸数据库</div>
+                <div class="select-option" v-for="opt in DB_OPTIONS.nucleotide" :key="opt.value"
+                  :class="{ active: blast.params.database === opt.value }" @click.stop="selectOption('database', opt.value)">
+                  {{ opt.label }}
+                </div>
+                <div class="select-group">蛋白数据库</div>
+                <div class="select-option" v-for="opt in DB_OPTIONS.protein" :key="opt.value"
+                  :class="{ active: blast.params.database === opt.value }" @click.stop="selectOption('database', opt.value)">
+                  {{ opt.label }}
+                </div>
+              </div>
+            </div>
           </div>
+
           <div class="form-row">
             <div class="form-group">
               <label>E-Value 阈值</label>
@@ -479,11 +529,21 @@ function statusLabel(status: string): string {
               <input v-model.number="blast.params.maxHits" type="number" class="form-input" />
             </div>
           </div>
+
           <div class="form-group">
             <label>计分矩阵 (Matrix)</label>
-            <select v-model="blast.params.matrix" class="form-input">
-              <option v-for="opt in MATRIX_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-            </select>
+            <div class="custom-select">
+              <div class="select-box form-input" @click="toggleDropdown('matrix', $event)">
+                {{ getMatrixLabel() }}
+                <span class="select-arrow">▼</span>
+              </div>
+              <div class="select-dropdown" v-if="openDropdown === 'matrix'">
+                <div class="select-option" v-for="opt in MATRIX_OPTIONS" :key="opt.value"
+                  :class="{ active: blast.params.matrix === opt.value }" @click.stop="selectOption('matrix', opt.value)">
+                  {{ opt.label }}
+                </div>
+              </div>
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -511,23 +571,23 @@ function statusLabel(status: string): string {
     <!-- 右栏：历史 + 结果 -->
     <div class="right-col">
       <!-- 历史面板 -->
-      <div class="panel history-panel" :class="{ collapsed: !blast.historyVisible }">
+      <div v-show="blast.historyVisible" class="panel history-panel">
         <div class="panel-header">
           <span class="panel-title">🕐 分析历史</span>
           <div class="header-actions">
             <button class="btn-icon" @click="clearAllHistory" title="清空全部历史">🗑</button>
             <button class="btn-icon" @click="blast.toggleHistory" title="收起">
-              {{ blast.historyVisible ? '✖' : '◀' }}
+              ✖
             </button>
           </div>
         </div>
-        <div v-if="blast.historyVisible" class="panel-body scroll-v">
+        <div class="panel-body scroll-v">
           <div v-for="task in blast.tasks" :key="task.taskId" class="task-item"
             :class="{ active: blast.activeTaskId === task.taskId }" @click="selectTask(task.taskId)">
             <div class="task-name" @dblclick="startRename(task, $event)" title="双击重命名">
               <span v-if="editingTaskId !== task.taskId">{{ task.fileName }}</span>
-              <input v-else v-model="editName" class="rename-input" ref="renameInputRef"
-                @blur="commitRename(task)" @keyup.enter="commitRename(task)" @keyup.esc="cancelRename" @click.stop />
+              <input v-else v-model="editName" class="rename-input" ref="renameInputRef" @blur="commitRename(task)"
+                @keyup.enter="commitRename(task)" @keyup.esc="cancelRename" @click.stop />
             </div>
             <div class="task-meta">
               <span class="task-status" :class="task.status">{{ statusLabel(task.status) }}</span>
@@ -587,8 +647,10 @@ function statusLabel(status: string): string {
                   </td>
                   <td>
                     <div class="identity-bar">
-                      <div class="identity-fill" :style="{ width: hit.identity + '%' }" />
-                      <span>{{ hit.identity.toFixed(1) }}%</span>
+                      <div class="identity-fill" :class="{ 'low-identity': hit.identity < 97 }"
+                        :style="{ width: hit.identity + '%' }">
+                        <span class="identity-text">{{ hit.identity.toFixed(1) }}%</span>
+                      </div>
                     </div>
                   </td>
                   <td class="mono">{{ hit.evalue }}</td>
@@ -656,6 +718,7 @@ function statusLabel(status: string): string {
 .left-col {
   width: 380px;
   min-width: 380px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -664,6 +727,7 @@ function statusLabel(status: string): string {
 
 .right-col {
   flex: 1;
+  height: 100%;
   display: flex;
   gap: 1px;
   background: var(--border-color);
@@ -671,6 +735,8 @@ function statusLabel(status: string): string {
 
 /* 面板通用 */
 .panel {
+  flex: 1;
+  min-height: 0; /* 允许 flex 子项在受限高度下滚动 */
   background: white;
   display: flex;
   flex-direction: column;
@@ -858,6 +924,67 @@ function statusLabel(status: string): string {
   font-size: 0.82rem;
 }
 
+/* 自定义下拉菜单核心逻辑 (参照 SettingsView) */
+.custom-select {
+  position: relative;
+  width: 100%;
+  user-select: none;
+}
+
+.select-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.select-arrow {
+  font-size: 0.6rem;
+  opacity: 0.5;
+  transition: transform 0.2s;
+}
+
+.select-dropdown {
+  position: absolute;
+  top: 105%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  max-height: 250px;
+  overflow-y: auto;
+}
+
+.select-group {
+  padding: 8px 14px 4px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  background: #f8fafc;
+}
+
+.select-option {
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.select-option:hover {
+  background: #f1f5f9;
+}
+
+.select-option.active {
+  color: var(--accent-blue);
+  font-weight: 600;
+  background: rgba(59, 130, 246, 0.05);
+}
+
 .btn-run {
   padding: 6px 14px;
   background: linear-gradient(135deg, #3b82f6, #2563eb);
@@ -877,12 +1004,7 @@ function statusLabel(status: string): string {
 .history-panel {
   width: 240px;
   min-width: 240px;
-}
-
-.history-panel.collapsed {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
+  flex: none; /* 固定宽度，不参与弹性伸缩 */
 }
 
 .task-item {
@@ -1032,16 +1154,34 @@ tbody td {
 }
 
 .identity-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  width: 40px;
+  height: 16px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid #e2e8f0;
 }
 
 .identity-fill {
-  height: 6px;
-  background: var(--accent-green);
-  border-radius: 3px;
-  min-width: 20px;
+  height: 100%;
+  background: #22c55e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 0.3s ease;
+}
+
+.identity-fill.low-identity {
+  background: #94a3b8;
+}
+
+.identity-text {
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
 }
 
 .accession-link {
