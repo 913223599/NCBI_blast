@@ -14,7 +14,7 @@ from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 # BLAST Logic
 from src.blast.manager import get_blast_manager
 from src.gui.workers.tree_worker_thread import TreeWorker
-from src.gui.workers.workflow_worker import WorkflowWorker
+# from src.gui.workers.workflow_worker import WorkflowWorker (REMOVED)
 from PyQt6.QtWidgets import QFileDialog
 
 class WebBridge(QObject):
@@ -138,17 +138,6 @@ class WebBridge(QObject):
         self.logger.info(f"JS requested tree analysis (mode: {mode})")
         self.container.run_tree_analysis(mode=mode)
 
-    @pyqtSlot(str, str, str)
-    def run_workflow_node(self, node_id, input_path, params_json):
-        """Invoke a specific modular node in the circuit board"""
-        self.logger.info(f"JS invoked node: {node_id} with input: {input_path}")
-        self.container.run_modular_node(node_id, input_path, params_json)
-
-    @pyqtSlot(str)
-    def run_workflow(self, topology_json):
-        """Handle visual workflow execution request"""
-        self.logger.info("JS requested workflow execution")
-        self.container.run_visual_workflow(topology_json)
 
     @pyqtSlot(str)
     def request_tree_reroot(self, node_id):
@@ -1254,65 +1243,6 @@ class WebContainer(QWidget):
              self.logger.error(f"Reroot failed: {e}")
              self.web_view.page().runJavaScript(f"if(window.hideLoading) window.hideLoading(); alert('重定根失败: {str(e)}');")
 
-    def run_modular_node(self, node_id, input_path, params_json):
-        """Execute a specific stage of the Bio-Circuit in a worker thread"""
-        try:
-            params = json.loads(params_json)
-            self.logger.info(f"Starting modular node {node_id} for {input_path}")
-            
-            # Use current activity loading state
-            node_names = {
-                "fasta": "准备序列数据...",
-                "dist": "正在计算距离矩阵...",
-                "nwk": "正在推断拓扑结构...",
-                "group": "正在进行分型分析..."
-            }
-            msg = node_names.get(node_id, "正在处理...")
-            # ... (Logic moved to WorkflowEngine for full graph, but this single-node run remains for testing/manual triggers)
-            self.web_view.page().runJavaScript(f"if(window.showLoading) window.showLoading('{msg}');")
-            
-            self.tree_worker = TreeWorker(input_path, stage=node_id, params=params)
-            self.tree_worker.finished.connect(self.on_tree_finished)
-            self.tree_worker.error.connect(self.on_tree_error)
-            self.tree_worker.start()
-            
-        except Exception as e:
-            self.logger.error(f"Failed to run modular node: {e}")
-            self.web_view.page().runJavaScript(f"if(window.hideLoading) window.hideLoading(); alert('节点运行失败: {str(e)}');")
-
-    def run_visual_workflow(self, topology_json):
-        """Start the workflow worker"""
-        self.logger.info("Starting visual workflow...")
-        # Notify UI started
-        self.web_view.page().runJavaScript("if(window.handleBridgeEvent) window.handleBridgeEvent('workflow_start', {});")
-        
-        self.workflow_worker = WorkflowWorker(topology_json)
-        self.workflow_worker.progress.connect(self.on_workflow_progress)
-        self.workflow_worker.finished.connect(self.on_workflow_finished)
-        self.workflow_worker.error.connect(self.on_workflow_error)
-        self.workflow_worker.start()
-
-    def on_workflow_progress(self, data):
-        # Notify JS: {node_id, status, message}
-        import json
-        safe_data = json.dumps(data)
-        js_code = f"if(window.handleBridgeEvent) window.handleBridgeEvent('node_status', {safe_data});"
-        self.web_view.page().runJavaScript(js_code)
-
-    def on_workflow_finished(self, context):
-        self.logger.info("Workflow finished")
-        # Maybe send context back?
-        import json
-        safe_ctx = json.dumps(context)
-        js_code = f"if(window.handleBridgeEvent) window.handleBridgeEvent('workflow_complete', {safe_ctx});"
-        self.web_view.page().runJavaScript(js_code)
-
-    def on_workflow_error(self, err_msg):
-        self.logger.error(f"Workflow error: {err_msg}")
-        import json
-        safe_msg = json.dumps(err_msg)
-        js_code = f"if(window.handleBridgeEvent) window.handleBridgeEvent('workflow_error', {{'message': {safe_msg}}});"
-        self.web_view.page().runJavaScript(js_code)
 
 
 

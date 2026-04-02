@@ -50,10 +50,7 @@ onMounted(async () => {
 
   // 3. 注册通用事件处理
   registerGlobalHandler('handleBridgeEvent', (type: any, data: any) => {
-    console.log('[Bridge->App] Event:', type, data)
-    if (type === 'workflow_start') {
-      appStore.showNotification('工作流分析已启动', 'info')
-    } else if (type === 'single_result_update') {
+    if (type === 'single_result_update') {
       try {
         const resultObj = typeof data === 'string' ? JSON.parse(data) : data
         blastStore.appendSingleResult(resultObj)
