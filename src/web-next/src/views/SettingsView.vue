@@ -4,7 +4,7 @@
  * 包含 AI翻译 / 系统参数 / 界面语言 / 词典管理
  * 使用自定义下拉组件解决 PyQt 环境下的布局重绘 Bug
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { getBridge } from '../bridge/pyqt-bridge'
 import { useAppStore } from '../stores/app'
 
@@ -40,6 +40,7 @@ const dropdownOpen = ref(false)
 const selectRef = ref<HTMLElement | null>(null)
 const dictDropdownOpen = ref(false)
 const dictSelectRef = ref<HTMLElement | null>(null)
+let searchTimer: any = null
 
 const dictCategories = [
   { id: 'species', label: '物种名 (Species)' },
@@ -78,11 +79,18 @@ function handleClickOutside(event: MouseEvent) {
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   loadSettings()
-  loadDictionary()
+  // 移除初始加载时的全量词典加载，改为切换到面板时按需加载，解决进入设置页时的卡顿
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+})
+
+/** 监听面板切换，执行延迟加载 */
+watch(activePanel, (newVal) => {
+  if (newVal === 'dictionary' && dictResults.value.length === 0) {
+    loadDictionary()
+  }
 })
 
 /* -------- 业务逻辑 -------- */
@@ -153,10 +161,13 @@ function loadDictionary(): void {
 }
 
 function searchDictionary(): void {
-  if (!dictQuery.value.trim()) { loadDictionary(); return }
-  getBridge().search_dictionary(dictQuery.value.trim(), (resStr: string) => {
-    try { dictResults.value = JSON.parse(resStr) } catch (e) { }
-  })
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    if (!dictQuery.value.trim()) { loadDictionary(); return }
+    getBridge().search_dictionary(dictQuery.value.trim(), (resStr: string) => {
+      try { dictResults.value = JSON.parse(resStr) } catch (e) { }
+    })
+  }, 300) // 300ms 防抖
 }
 
 function saveTerm(): void {

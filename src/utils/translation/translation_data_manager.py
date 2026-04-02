@@ -37,6 +37,11 @@ class TranslationDataManager:
         # 2. 初始化数据库 (确保表结构)
         self._init_db()
         
+        # [OPT] 持久化连接优化：在 Windows 下频繁 connect 会导致显著卡顿。
+        # 使用单个持久连接并配合现有锁进行线程隔离。
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row # 使结果可通过列名访问
+        
         # 3. 首次启动时自动迁移旧数据
         self._check_and_migrate()
 
@@ -207,6 +212,7 @@ class TranslationDataManager:
     def _get_count(self) -> int:
         """获取总行数"""
         try:
+            # 迁移逻辑依然使用独立连接以确保原子性，或复用 _conn (需注意初始化顺序)
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) FROM translations')
@@ -235,27 +241,26 @@ class TranslationDataManager:
 
         # 2. 查询数据库
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            
-            row = None
-            # A. 尝试精确匹配（原文 + 分类）
-            if category:
-                cursor.execute('SELECT chinese, category FROM translations WHERE english = ? AND category = ?', (english_text, category))
-                row = cursor.fetchone()
-            
-            # B. 如果 A 没找到且指定了分类，尝试兜底匹配（仅原文）
-            if not row:
-                cursor.execute('SELECT chinese, category FROM translations WHERE english = ?', (english_text,))
-                row = cursor.fetchone()
-            
-            conn.close()
-
-            if row:
-                chinese, db_cat = row
-                # 回填缓存
-                self._cache[english_text] = {'chinese': chinese, 'category': db_cat}
-                return chinese
+            # 使用持久连接提高响应速度
+            with self._lock:
+                cursor = self._conn.cursor()
+                
+                row = None
+                # A. 尝试精确匹配（原文 + 分类）
+                if category:
+                    cursor.execute('SELECT chinese, category FROM translations WHERE english = ? AND category = ?', (english_text, category))
+                    row = cursor.fetchone()
+                
+                # B. 如果 A 没找到且指定了分类，尝试兜底匹配（仅原文）
+                if not row:
+                    cursor.execute('SELECT chinese, category FROM translations WHERE english = ?', (english_text,))
+                    row = cursor.fetchone()
+                
+                if row:
+                    chinese, db_cat = row['chinese'], row['category']
+                    # 回填缓存
+                    self._cache[english_text] = {'chinese': chinese, 'category': db_cat}
+                    return chinese
         except Exception as e:
             logging.error(f"查询翻译失败 ({english_text}): {e}")
         
@@ -270,8 +275,7 @@ class TranslationDataManager:
 
         with self._lock:
             try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
+                cursor = self._conn.cursor()
                 cursor.execute('''
                     INSERT INTO translations (english, chinese, category, source)
                     VALUES (?, ?, ?, ?)
@@ -281,12 +285,10 @@ class TranslationDataManager:
                         source = excluded.source,
                         created_at = CURRENT_TIMESTAMP
                 ''', (english, chinese, category, source))
-                success = conn.total_changes > 0
-                conn.commit()
-                conn.close()
+                self._conn.commit()
                 # 同步更新内存缓存
                 self._cache[english] = {'chinese': chinese, 'category': category}
-                return success
+                return True
             except Exception as e:
                 logging.error(f"保存翻译到 SQL 失败: {e}")
                 return False
@@ -303,12 +305,11 @@ class TranslationDataManager:
         """获取所有翻译条目（用于兼容旧界面）"""
         results = {}
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT english, chinese FROM translations')
-            for eng, chi in cursor.fetchall():
-                results[eng] = chi
-            conn.close()
+            with self._lock:
+                cursor = self._conn.cursor()
+                cursor.execute('SELECT english, chinese FROM translations')
+                for row in cursor.fetchall():
+                    results[row['english']] = row['chinese']
         except Exception as e:
             logging.error(f"拉取全量翻译失败: {e}")
         return results
@@ -337,25 +338,24 @@ class TranslationDataManager:
             return results
         
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            wildcard = f"%{query}%"
-            # 搜索英文或中文
-            cursor.execute('''
-                SELECT english, chinese, category, source 
-                FROM translations 
-                WHERE english LIKE ? OR chinese LIKE ? 
-                LIMIT ?
-            ''', (wildcard, wildcard, limit))
-            
-            for row in cursor.fetchall():
-                results.append({
-                    'english': row[0],
-                    'chinese': row[1],
-                    'category': row[2],
-                    'source': row[3]
-                })
-            conn.close()
+            with self._lock:
+                cursor = self._conn.cursor()
+                wildcard = f"%{query}%"
+                # 搜索英文或中文
+                cursor.execute('''
+                    SELECT english, chinese, category, source 
+                    FROM translations 
+                    WHERE english LIKE ? OR chinese LIKE ? 
+                    LIMIT ?
+                ''', (wildcard, wildcard, limit))
+                
+                for row in cursor.fetchall():
+                    results.append({
+                        'english': row['english'],
+                        'chinese': row['chinese'],
+                        'category': row['category'],
+                        'source': row['source']
+                    })
         except Exception as e:
             logging.error(f"搜索翻译失败: {e}")
         return results
