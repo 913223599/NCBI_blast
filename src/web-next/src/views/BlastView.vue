@@ -137,6 +137,9 @@ function fetchTaskResults(taskId: string) {
             })
           }
         }
+        // 按查询序列标题进行“常识”（自然）排序
+        hits.sort((a, b) => a.queryTitle.localeCompare(b.queryTitle, undefined, { numeric: true, sensitivity: 'base' }))
+
         const titleSuffix = hits.length > 0 ? ` (已加载 ${hits.length} 项)` : ' (无匹配结果)'
         blast.setResults(hits, '分析结果' + titleSuffix)
       } catch (e) {
