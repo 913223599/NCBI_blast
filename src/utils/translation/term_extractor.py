@@ -48,14 +48,14 @@ class TermExtractor:
             print(f"警告: 加载分类规则失败，使用最小默认规则: {e}")
             # 返回最小化的默认规则，避免重复定义
             return {
-                "gene_patterns": ["gene", "protein"],
-                "sequence_patterns": ["sequence", "genome"],
-                "strain_patterns": ["strain", "isolate"],
+                "gene_patterns": ["gene", "protein", "hydrolase", "oxidase", "reductase", "transferase", "kinase", "enzyme"],
+                "sequence_patterns": ["sequence", "genome", "cds", "fragment"],
+                "strain_patterns": ["strain", "isolate", "clone"],
                 "taxonomic_ranks": ["phylum", "class", "order", "family"],
                 "special_terms": ["sp.", "subsp.", "var."],
-                "common_genera": ["clostridium", "escherichia", "bacillus"],
-                "genus_suffixes": ["us", "a", "um"],
-                "virus_terms": ["virus"],
+                "common_genera": ["staphylococcus", "escherichia", "bacillus", "pseudomonas", "clostridium"],
+                "genus_suffixes": ["us", "a", "um", "er", "ia", "ella"],
+                "virus_terms": ["virus", "viral"],
                 "phage_terms": ["phage"]
             }
 
@@ -467,6 +467,20 @@ class TermExtractor:
             genus = words[0].strip()
             species = words[1].strip()
             
+            # [优化] 拦截明显的生化描述后缀 (仅对长单词)，防止 mis-id 为属名
+            # 如 Hydrolase (9) 拦截, Base (4) 放行
+            if len(genus) > 6 and genus.lower().endswith(('ase', 'zyme', 'in', 'ogen', 'one', 'an', 'ate', 'ide')):
+                return 'other'
+            
+            # [优化] 上下文种加词拦截
+            # 如果第二个词本身就是生化名词后缀，则它一定不是物种名
+            biochem_descriptors = [
+                'precursor', 'receptor', 'complex', 'factor', 'family', 'domain', 
+                'subunit', 'enzyme', 'protein', 'kinase', 'binding', 'inhibitor'
+            ]
+            if species.lower() in biochem_descriptors:
+                return 'gene'
+
             # 检查属名是否符合生物学命名规范（首字母大写，其余小写或特殊字符）
             if (genus[0].isupper() and 
                 all(c.islower() or c in ['.', '-', '_'] for c in genus[1:])):

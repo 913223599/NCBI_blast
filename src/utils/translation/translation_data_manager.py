@@ -228,19 +228,27 @@ class TranslationDataManager:
         # 1. 尝试内存缓存
         if english_text in self._cache:
             data = self._cache[english_text]
+            # 优先返回分类匹配的
             if not category or data['category'] == category:
                 return data['chinese']
+            # 如果不匹配，继续走后面数据库逻辑尝试兜底
 
         # 2. 查询数据库
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            row = None
+            # A. 尝试精确匹配（原文 + 分类）
             if category:
                 cursor.execute('SELECT chinese, category FROM translations WHERE english = ? AND category = ?', (english_text, category))
-            else:
-                cursor.execute('SELECT chinese, category FROM translations WHERE english = ?', (english_text,))
+                row = cursor.fetchone()
             
-            row = cursor.fetchone()
+            # B. 如果 A 没找到且指定了分类，尝试兜底匹配（仅原文）
+            if not row:
+                cursor.execute('SELECT chinese, category FROM translations WHERE english = ?', (english_text,))
+                row = cursor.fetchone()
+            
             conn.close()
 
             if row:
@@ -253,12 +261,12 @@ class TranslationDataManager:
         
         return None
 
-    def add_translation(self, english: str, chinese: str, category: str = 'other', source: str = 'manual'):
+    def add_translation(self, english: str, chinese: str, category: str = 'other', source: str = 'manual') -> bool:
         """添加或更新翻译条目"""
         english = english.strip()
         chinese = chinese.strip()
         if not english or not chinese:
-            return
+            return False
 
         with self._lock:
             try:
@@ -273,14 +281,17 @@ class TranslationDataManager:
                         source = excluded.source,
                         created_at = CURRENT_TIMESTAMP
                 ''', (english, chinese, category, source))
+                success = conn.total_changes > 0
                 conn.commit()
                 conn.close()
                 # 同步更新内存缓存
                 self._cache[english] = {'chinese': chinese, 'category': category}
+                return success
             except Exception as e:
                 logging.error(f"保存翻译到 SQL 失败: {e}")
+                return False
 
-    def update_translation(self, english: str, chinese: str, category: str = 'other'):
+    def update_translation(self, english: str, chinese: str, category: str = 'species'):
         """更新翻译条目（别名）"""
         self.add_translation(english, chinese, category)
 
@@ -349,56 +360,55 @@ class TranslationDataManager:
             logging.error(f"搜索翻译失败: {e}")
         return results
 
-    def update_translation_entry(self, english: str, new_chinese: str) -> bool:
+    def intelligent_repair_categories(self) -> dict:
         """
-        更新特定条目的中文翻译
-        此操作会同步更新数据库和内存缓存
+        智能修复分类：针对标记为 'other' 的条目，利用 TermExtractor 重新判定
         """
-        english = english.strip()
-        new_chinese = new_chinese.strip()
+        results = {"total": 0, "fixed": 0, "remained": 0}
+        from src.utils.translation.term_extractor import TermExtractor
+        extractor = TermExtractor()
         
-        if not english or not new_chinese:
-            logging.warning("更新翻译失败: 英文或中文为空")
-            return False
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # 1. 找出所有分类为 'other' 的记录
+            cursor.execute("SELECT english, chinese FROM translations WHERE category = 'other'")
+            others = cursor.fetchall()
+            results["total"] = len(others)
+            
+            updates = []
+            for english, chinese in others:
+                # 重新判定分类
+                new_cat = extractor._determine_category(english)
+                if new_cat != 'other':
+                    updates.append((new_cat, english))
+            
+            # 2. 批量更新
+            if updates:
+                cursor.executemany("UPDATE translations SET category = ? WHERE english = ?", updates)
+                conn.commit()
+                results["fixed"] = len(updates)
+                
+                # 同步更新内存缓存
+                with self._lock:
+                    for new_cat, english in updates:
+                        if english in self._cache:
+                            self._cache[english]['category'] = new_cat
+            
+            conn.close()
+            results["remained"] = results["total"] - results["fixed"]
+            
+        except Exception as e:
+            logging.error(f"智能修复分类失败: {e}")
+            
+        return results
 
-        with self._lock:
-            try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                
-                # 检查是否存在
-                cursor.execute('SELECT category, source FROM translations WHERE english = ?', (english,))
-                row = cursor.fetchone()
-                
-                if not row:
-                    logging.warning(f"更新翻译失败: 条目不存在 {english}")
-                    conn.close()
-                    return False
-                
-                current_category, current_source = row
-                
-                # 执行更新
-                cursor.execute('''
-                    UPDATE translations 
-                    SET chinese = ?, source = ?, created_at = CURRENT_TIMESTAMP
-                    WHERE english = ?
-                ''', (new_chinese, 'manual_correction', english))
-                
-                if cursor.rowcount > 0:
-                    conn.commit()
-                    conn.close()
-                    
-                    # 更新缓存
-                    self._cache[english] = {'chinese': new_chinese, 'category': current_category}
-                    logging.info(f"翻译条目更新成功: {english} -> {new_chinese}")
-                    return True
-                else:
-                    conn.close()
-                    return False
-                    
-            except Exception as e:
-                logging.error(f"更新翻译数据库失败: {e}")
-                return False
+    def update_translation_entry(self, english: str, new_chinese: str, category: str = 'species') -> bool:
+        """
+        更新特定条目的中文翻译 (支持新增/覆盖)
+        """
+        return self.add_translation(english, new_chinese, category=category, source='manual_correction')
 
 
 # 全局单例管理器实例

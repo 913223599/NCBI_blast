@@ -1,16 +1,13 @@
 english,chinese,category
-hypothetical protein,假定蛋白,gene
-hydrolase,水解酶,gene
+complete genome,complete genome,sequence
+strain,strain,strain
 16S ribosomal RNA gene,16S ribosomal RNA gene,gene
 partial sequence,partial sequence,sequence
-strain,strain,strain
 clone,clone,strain
+16S ribosomal RNA,16S ribosomal RNA,gene
 16S rRNA gene,16S rRNA gene,gene
 partial 16S rRNA gene,partial 16S rRNA gene,sequence
-isolate,isolate,strain
-16S ribosomal RNA,16S ribosomal RNA,gene
-complete sequence,complete sequence,sequence
-complete genome,complete genome,sequence
 gene for 16S rRNA,gene for 16S rRNA,gene
-subsp.,subsp.,strain
 ribosomal RNA gene,ribosomal RNA gene,gene
+isolate,isolate,strain
+complete sequence,complete sequence,sequence

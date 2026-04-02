@@ -57,7 +57,13 @@
     "motif",
     "region",
     "site",
-    "box"
+    "box",
+    "precursor",
+    "cleaved",
+    "mature",
+    "truncated",
+    "mutant",
+    "isoform"
   ],
   "sequence_patterns": [
     "sequence",

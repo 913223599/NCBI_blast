@@ -99,18 +99,20 @@ class BiologyTranslator:
             try:
                 ai_result = self.ai_translator.translate_text(text)
                 if ai_result and ai_result != text:
-                    # 在存储到本地库前进行术语规范化处理
+                    # 恢复并加强自动保存机制：AI 翻译成功后应记录，下次可从本地库秒级返回
                     if self.translation_data_manager:
-                        # 使用术语提取器进行规范化处理
+                        # 1. 使用专用的保存方法，标记来源为 AI
+                        self.translation_data_manager.add_translation(
+                            text, 
+                            ai_result, 
+                            category=category if category else 'species', 
+                            source="ai"
+                        )
+                        # 2. 调用术语提取深度学习分析（如有）
                         try:
                             self.term_extractor.extract_and_store_key_terms(text, ai_result)
-                        except Exception as e:
-                            print(f"术语提取和存储过程中出错: {e}")
-                            import traceback
-                            traceback.print_exc()
-                        
-                        # 保存时也记录分类
-                        self.translation_data_manager.add_translation(text, ai_result, category=category, source="ai")
+                        except:
+                            pass
                     
                     result = f"[AI]{ai_result}"
                     with self._lock:
@@ -125,19 +127,20 @@ class BiologyTranslator:
             self._translation_cache[original_text] = original_text
         return original_text
 
-    def translate_batch(self, texts: list) -> dict:
+    def translate_batch(self, texts: list, category: str = 'species') -> dict:
         """
         批量翻译文本
         
         Args:
             texts (list): 文本列表
+            category (str): 分类，默认为物种名
             
         Returns:
             dict: 翻译结果字典
         """
         results = {}
         for text in texts:
-            results[text] = self.translate_text(text)
+            results[text] = self.translate_text(text, category=category)
         return results
 
     def search_translations(self, query: str, limit: int = 50) -> list:
@@ -146,10 +149,10 @@ class BiologyTranslator:
             return self.translation_data_manager.search_translations(query, limit)
         return []
 
-    def update_translation(self, english: str, chinese: str) -> bool:
+    def update_translation(self, english: str, chinese: str, category: str = 'species') -> bool:
         """透传更新请求"""
         if self.translation_data_manager:
-            return self.translation_data_manager.update_translation_entry(english, chinese)
+            return self.translation_data_manager.update_translation_entry(english, chinese, category=category)
         return False
 
     def add_translation(self, original: str, translation: str, source: str = "manual"):

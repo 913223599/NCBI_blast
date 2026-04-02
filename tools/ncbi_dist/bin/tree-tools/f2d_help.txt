@@ -1,0 +1,49 @@
+Create a dataset with a dissimilarity attribute "dissim" of a collection of DNA or proteins or print: <obj1> <obj2> <dissim> <score> <self-score1> <self-score2>
+
+USAGE:   fasta2dissim.exe <Multi_FASTA> [-aa] [-unknown_strand] [-global] [-match_len_min 60] [-blosum62] [-distance min_edit] [-power 1] [-coeff 1] [-class ""] [-dataset ""] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-threads 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    fasta2dissim.exe -help
+VERSION: fasta2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<Multi_FASTA>
+    Multi-FASTA file with DNA or protein sequences
+
+NAMED PARAMETERS
+-aa
+    Amino-acid (protein) sequences, otherwise DNA
+-unknown_strand
+    DNA strand is unknown
+-global
+    Global alignment, otherwise semiglobal
+-match_len_min 60
+    Min. match length. Valid for semiglobal alignment
+-blosum62
+    Use BLOSUM62, otherwise PAM30
+-distance min_edit
+    Alignment distance: dissim | min_edit | rel_min_edit | diff | mismatch_frac
+-power 1
+    Raise raw dissimilarity to this power
+-coeff 1
+    Multiply raw dissimilarity by this coefficient
+-class ""
+    File with classes of the sequencess (in the same order as Multi_FASTA)
+-dataset ""
+    Output dataset file with dissimilarity matrix without .dm
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-threads 1
+    Max. number of threads
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

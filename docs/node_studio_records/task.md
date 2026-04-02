@@ -1,0 +1,29 @@
+# 任务清单：进化树分析工作流重构 (Bio-Node Studio)
+
+- [x] 故障修复验证 (Verify fix for nan/tree2genogroup)
+- [/] 研发 Bio-Node Studio 节点化工作流控制台 (Visual Scripting Pivot)
+    - [x] 设计 Bio-Node 术语规范与交互逻辑 (UE/Unity Style)
+    - [x] 编写详细实施方案 (implementation_plan.md)
+    - [x] 第一阶段：画布基座与节点外观 (Canvas & Node Base)
+        - [x] 创建 `node_studio.html` 与基础 CSS 变量
+        - [x] 实现基于 SVG 的无限网格背景与缩放/平移逻辑
+        - [x] 设计节点卡片组件 (Header/Pins/Body)
+        - [x] 实现节点的拖拽定位 (Drag-and-Drop)
+        - [x] 实现侧边栏工具库 (Node Library) 拖入功能
+        - [x] 修复缩放焦点偏移异常 (Zoom-to-Cursor Precision Fix)
+        - [x] 实现节点卡片移除功能 (Close Button)
+        - [x] 优化节点层级管理 (Z-Index Focus)
+        - [x] 优化拖拽防选中与矢量锐度渲染 (Precision Rendering & Selection Fix)
+        - [x] 实现节点库 (Node Library) 工具分类 (Categorized Library)
+        - [x] 实现可折叠分类 & 搜索过滤 (Accordion & Search)
+        - [x] 实现 Ctrl+Z 撤销功能 (10 步历史)
+        - [x] 撤销功能模块化 (独立 undo_manager.js，支持 Redo)
+    - [x] 阶段性资产管理：移除“生命电路板”遗留资产
+    - [ ] 第二阶段：连线系统与拓扑逻辑 (Wiring & Logic)
+        - [x] 画布层 Bezier 曲线渲染引擎
+        - [x] 端口 Pin 点坐标计算与动态追踪
+        - [x] 实现端口间拖拽连接逻辑 (Drag-to-Connect)
+        - [x] 连线系统深度解耦 (LinkSystem: Type/Color/Interact) -- New: Cut/Select (Fixed: Highlight Style)
+        - [x] 节点工厂重构 (NodeFactory: NODE_TEMPLATES) -- Refactor for Serialization
+        - [/] 建立节点拓扑图 (Topology Map) 数据结构
+    - [ ] 第三阶段：后端调度与工具集成 (Scheduler & Integration)

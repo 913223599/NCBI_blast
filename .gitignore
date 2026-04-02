@@ -1715,3 +1715,11 @@ database/
 /logs/application_20260203_193301.log
 /logs/application_20260203_202028.log
 /logs/crash_dump.log
+/build/
+/dist/
+/.lingma/rules/PROJECT_RULES.md
+/.vscode/settings.json
+/logs/application_20260206_122903.log
+/logs/application_20260206_123025.log
+/logs/application_20260206_123719.log
+/logs/application_20260206_124443.log

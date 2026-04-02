@@ -66,12 +66,8 @@ class EnvironmentChecker:
     
     def _command_exists(self, cmd: str) -> bool:
         """检查命令是否存在"""
-        try:
-            subprocess.check_output(['where' if platform.system() == 'Windows' else 'which', cmd], 
-                                  stderr=subprocess.STDOUT, shell=True)
-            return True
-        except (subprocess.CalledProcessError, OSError):
-            return False
+        import shutil
+        return shutil.which(cmd) is not None
     
     def check_required_modules(self) -> bool:
         """检查必要的Python模块"""

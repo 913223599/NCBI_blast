@@ -6,7 +6,8 @@ import os
 import sys
 from pathlib import Path
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QStackedWidget, 
-                             QMenuBar, QMenu, QStatusBar, QMessageBox)
+                             QMenuBar, QMenu, QStatusBar, QMessageBox, QApplication)
+from PyQt6.QtCore import QProcess, QUrl
 from PyQt6.QtGui import QAction, QIcon
 
 # Modules
@@ -52,6 +53,8 @@ class MainWindow(QMainWindow):
         refresh_action = QAction(self)
         refresh_action.setShortcut("F5")
         refresh_action.triggered.connect(self.web_container.reload)
+        self.addAction(refresh_action)
+
         self.addAction(refresh_action)
         
         # State (Dialogs)
@@ -106,7 +109,34 @@ class MainWindow(QMainWindow):
         dialog = GlobalSettingsDialog(self)
         dialog.exec()
 
+    def changeEvent(self, event):
+        """拦截窗口状态变更（全屏/窗口化）并通知刷新"""
+        from PyQt6.QtCore import QEvent, QTimer
+        if event.type() == QEvent.Type.WindowStateChange:
+            if hasattr(self, 'web_container'):
+                # 状态切换可能导致 GPU 缓冲区重建，需要强制重绘
+                self.web_container.handle_resize_event()
+                
+                # v4 补丁：执行“物理抖动”策略
+                # 延迟 200ms（等待全屏动画基本结束）后微调窗口尺寸以强制驱动 OS 合成器同步
+                def trigger_jiggle():
+                    if not self.isFullScreen():
+                        curr_size = self.size()
+                        self.resize(curr_size.width(), curr_size.height() + 1)
+                        QTimer.singleShot(50, lambda: self.resize(curr_size))
+                
+                QTimer.singleShot(200, trigger_jiggle)
+        super().changeEvent(event)
+
+    def resizeEvent(self, event):
+        """窗口大小变更时通知 Web 容器强制重绘"""
+        super().resizeEvent(event)
+        if hasattr(self, 'web_container'):
+            self.web_container.handle_resize_event()
+
     def closeEvent(self, event):
         # We can communicate with Web App to check if tasks are running via bridge later
         event.accept()
+
+
 

@@ -477,6 +477,26 @@ class BlastManager:
             self.logger.info(f"Task {task_id} removed from tracking and store.")
             return (True, None)
 
+    def rename_task(self, task_id: str, new_name: str):
+        """Update the display name of a task."""
+        with self._lock:
+            if task_id in self.tasks:
+                self.tasks[task_id].params['task_name'] = new_name
+                self.store.save_task(self.tasks[task_id])
+            else:
+                # Make sure it's updated in DB if not in memory
+                tasks_data = self.store.load_all_tasks()
+                for target in tasks_data:
+                    if target['task_id'] == task_id:
+                        params = json.loads(target['params'])
+                        params['task_name'] = new_name
+                        target_task = BlastTask(task_id, params)
+                        target_task.status = target['status']
+                        target_task.progress = target['progress']
+                        target_task.start_time = datetime.fromisoformat(target['start_time']) if target['start_time'] else None
+                        self.store.save_task(target_task)
+                        break
+
     def resume_task(self, task_id: str):
         """Resume a failed/cancelled task from its last physical checkpoint."""
         with self._lock:

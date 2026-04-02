@@ -1,0 +1,35 @@
+Convert hashes to a dissimilarity named "cons" and print a .dm-file
+
+USAGE:   hash2dissim.exe <objects> <hash_dir> <out> [-intersection_min 50] [-ratio_min 0.5] [-qc] [-verbose 0] [-noprogress] [-profile] [-seed 1] [-json ""] [-log ""] [-sigpipe]
+HELP:    hash2dissim.exe -help
+VERSION: hash2dissim.exe -version
+
+POSITIONAL PARAMETERS
+<objects>
+    File with a list of objects
+<hash_dir>
+    Directory with hashes for each object
+<out>
+    Output .dm-file without .dm
+
+NAMED PARAMETERS
+-intersection_min 50
+    Min. number of common hashes to compute distance
+-ratio_min 0.5
+    Min. ratio of hash sizes (0..1)
+-qc
+    Integrity checks (quality control)
+-verbose 0
+    Level of verbosity
+-noprogress
+    Turn off progress printout
+-profile
+    Use chronometers to profile
+-seed 1
+    Positive integer seed for random number generator
+-json ""
+    Output file in Json format
+-log ""
+    Error log file, appended
+-sigpipe
+    Exit normally on SIGPIPE

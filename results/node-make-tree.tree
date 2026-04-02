@@ -1,0 +1,101 @@
+0x1888bf195d0: len=nan
+  0x1888bf19150: len=1.105099e+02  err_density=1.120e+00  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+    0x1888bf19ed0: len=1.066460e+02  err_density=-4.229e-01  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737
+      0x1888bf19270: len=4.142053e+02  err_density=-7.499e-01  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737
+        0x1888bf19b70: len=3.209889e+02  err_density=3.030e+00  deformation=phage_12218757_:phage_12392667_  deformation_criterion=39.017
+          0x1888bf183d0: len=5.232386e+01  err_density=3.720e+00  deformation=phage_11131646_:phage_12920168_  deformation_criterion=40.6748
+            0x1888bf19c90: len=4.492623e+01  err_density=4.501e+00  deformation=phage_11131646_:phage_12920168_  deformation_criterion=40.6748
+              0x1888bf18a90: len=1.694043e+01  err_density=4.587e+00  deformation=phage_11131646_:phage_12920168_  deformation_criterion=40.6748
+                0x1888bf182b0: len=7.320374e+01  err_density=3.466e+00  deformation=phage_11131646_:phage_12920168_  deformation_criterion=40.6748
+                  phage_11131646_: len=6.431294e+02  err_density=2.866e+00  deformation=phage_11131646_:phage_12920168_  deformation_criterion=40.6748  norm_criterion=1.3702
+                  phage_12421640_: len=5.438706e+02  err_density=1.390e+00  deformation=phage_11298483_:phage_12421640_  deformation_criterion=25.5617  norm_criterion=0.959654
+                phage_12218757_: len=6.677963e+02  err_density=3.587e+00  deformation=phage_12218757_:phage_12392667_  deformation_criterion=39.017  norm_criterion=3.13523
+              phage_12392716_: len=6.150596e+02  err_density=2.866e+00  deformation=phage_11131646_:phage_12392716_  deformation_criterion=25.8427  norm_criterion=2.77408
+            phage_12128796_: len=8.250738e+02  err_density=6.378e-02  deformation=phage_11131646_:phage_12128796_  deformation_criterion=38.2579  norm_criterion=-0.5346
+          phage_12920168_: len=7.860511e+02  err_density=1.551e+00  deformation=phage_11131646_:phage_12920168_  deformation_criterion=40.6748  norm_criterion=1.02768
+        0x1888bf19930: len=2.519037e+02  err_density=-1.771e+00  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737
+          0x1888bf19db0: len=5.903340e+01  err_density=-2.269e+00  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737
+            0x1888bf19a50: len=4.407045e+02  err_density=-1.933e+00  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737
+              0x1888bf18df0: len=9.242856e+01  err_density=-1.534e+00  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737
+                0x1888bf19390: len=6.286113e+01  err_density=-1.291e+00  deformation=phage_12218757_:phage_12392667_  deformation_criterion=39.017
+                  phage_12392667_: len=1.934356e+02  err_density=-1.314e+00  deformation=phage_12218757_:phage_12392667_  deformation_criterion=39.017  norm_criterion=-1.24717
+                  phage_13112795_: len=1.605644e+02  err_density=-9.996e-01  deformation=phage_12218757_:phage_13112795_  deformation_criterion=28.1409  norm_criterion=-0.923365
+                phage_12463887_: len=1.991389e+02  err_density=-1.702e+00  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737  norm_criterion=-1.601
+              phage_12392620_: len=3.385714e+02  err_density=-1.867e+00  deformation=phage_12392620_:phage_9305197_  deformation_criterion=30.8155  norm_criterion=-2.3662
+            phage_12141095_: len=7.875455e+02  err_density=-1.978e+00  deformation=phage_12141095_:phage_12218757_  deformation_criterion=34.6646  norm_criterion=-2.09768
+          phage_13168448_: len=7.309666e+02  err_density=1.332e-02  deformation=phage_13168448_:phage_13750375_  deformation_criterion=23.1871  norm_criterion=0.736531
+      phage_10429037_: len=1.804786e+03  err_density=-1.206e+00  deformation=phage_10429037_:phage_15543458_  deformation_criterion=16.7664  norm_criterion=-0.940723
+    0x1888bf18730: len=5.351707e+02  err_density=8.524e-01  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+      0x1888bf16cd0: len=2.539234e+02  err_density=-1.222e+00  deformation=phage_13750375_:phage_15543458_  deformation_criterion=48.0861
+        0x1888bf15b70: len=7.163322e+02  err_density=3.174e+00  deformation=phage_13750375_:phage_1630508_  deformation_criterion=82.2126
+          0x1888bf15a50: len=1.260642e+03  err_density=5.496e-01  deformation=phage_1029515_:phage_1630508_  deformation_criterion=78.8271
+            0x1888bf15810: len=4.207470e+01  err_density=-1.914e+00  deformation=phage_12241748_:phage_1630508_  deformation_criterion=73.103
+              0x1888bf156f0: len=1.832558e+01  err_density=-1.495e+00  deformation=phage_12241748_:phage_1630508_  deformation_criterion=73.103
+                0x1888bf154b0: len=5.065909e+01  err_density=-1.457e+00  deformation=phage_1630508_:phage_8018235_  deformation_criterion=56.398
+                  0x1888bf15390: len=1.408696e+01  err_density=-1.204e+00  deformation=phage_1630508_:phage_8018235_  deformation_criterion=56.398
+                    phage_7781077_: len=1.097872e+01  err_density=-9.918e-01  deformation=phage_1630508_:phage_7781077_  deformation_criterion=55.4208  norm_criterion=-0.371042
+                    phage_8018235_: len=1.702128e+01  err_density=-1.104e+00  deformation=phage_1630508_:phage_8018235_  deformation_criterion=56.398  norm_criterion=-0.289521
+                  phage_390778_: len=2.991304e+01  err_density=-9.048e-01  deformation=phage_1630508_:phage_390778_  deformation_criterion=55.043  norm_criterion=-0.455481
+                0x1888bf155d0: len=1.734091e+01  err_density=-1.460e+00  deformation=phage_12241748_:phage_1630508_  deformation_criterion=73.103
+                  phage_12241748_: len=4.106667e+01  err_density=-1.377e+00  deformation=phage_12241748_:phage_1630508_  deformation_criterion=73.103  norm_criterion=-0.0203595
+                  phage_985351_: len=4.793333e+01  err_density=-1.122e+00  deformation=phage_1630508_:phage_985351_  deformation_criterion=69.2714  norm_criterion=-0.126931
+              0x1888bf15150: len=9.017442e+01  err_density=-1.362e+00  deformation=phage_1630508_:phage_9565915_  deformation_criterion=62.9655
+                phage_13911074_: len=1.355714e+02  err_density=-1.417e+00  deformation=phage_13911074_:phage_1630508_  deformation_criterion=58.8619  norm_criterion=-0.844341
+                phage_9565915_: len=3.428571e+00  err_density=-1.061e+00  deformation=phage_1630508_:phage_9565915_  deformation_criterion=62.9655  norm_criterion=-0.507776
+            0x1888bf15930: len=3.330030e+01  err_density=-1.927e+00  deformation=phage_1029515_:phage_1630508_  deformation_criterion=78.8271
+              0x1888bf15270: len=8.947321e+01  err_density=-2.107e+00  deformation=phage_1029515_:phage_1630508_  deformation_criterion=78.8271
+                phage_1029515_: len=2.195833e+01  err_density=-1.357e+00  deformation=phage_1029515_:phage_1630508_  deformation_criterion=78.8271  norm_criterion=-0.478987
+                phage_6296379_: len=2.304167e+01  err_density=-1.171e+00  deformation=phage_1630508_:phage_6296379_  deformation_criterion=68.3266  norm_criterion=-0.428779
+              phage_10271438_: len=1.235268e+02  err_density=-1.110e+00  deformation=phage_10271438_:phage_1630508_  deformation_criterion=66.3597  norm_criterion=-0.186378
+          phage_13750375_: len=2.211703e+02  err_density=2.707e+00  deformation=phage_13750375_:phage_1630508_  deformation_criterion=82.2126  norm_criterion=3.78767
+        phage_1630508_: len=1.927199e+03  err_density=1.207e+01  deformation=phage_13750375_:phage_1630508_  deformation_criterion=82.2126  norm_criterion=11.2548
+      phage_8998904_: len=8.323735e+02  err_density=3.485e+00  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935  norm_criterion=3.47279
+  0x1888bf19810: len=1.105099e+02  err_density=1.120e+00  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+    0x1888bf19030: len=5.139796e+01  err_density=-1.440e+00  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+      0x1888bf18f10: len=1.065334e+02  err_density=4.677e-01  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+        0x1888bf19ff0: len=6.148230e+01  err_density=5.017e-01  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+          0x1888bf194b0: len=9.917887e+01  err_density=2.595e+00  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+            0x1888bf18190: len=7.753556e+01  err_density=7.568e-01  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+              0x1888bf16bb0: len=5.911097e+02  err_density=1.843e+00  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+                0x1888bf16a90: len=2.886090e+02  err_density=-1.853e+00  deformation=phage_8998904_:phage_9969585_  deformation_criterion=36.2475
+                  0x1888bf175d0: len=9.388071e+00  err_density=-1.264e+00  deformation=phage_8998904_:phage_9969585_  deformation_criterion=36.2475
+                    0x1888bf17270: len=2.307957e+01  err_density=-1.130e+00  deformation=phage_8998904_:phage_9969585_  deformation_criterion=36.2475
+                      phage_15548467_: len=2.829743e+01  err_density=-1.144e+00  deformation=phage_15548467_:phage_8998904_  deformation_criterion=33.8443  norm_criterion=-1.16178
+                      phage_9969585_: len=2.070257e+01  err_density=-9.326e-01  deformation=phage_8998904_:phage_9969585_  deformation_criterion=36.2475  norm_criterion=-0.950213
+                    phage_10146935_: len=5.692043e+01  err_density=-9.820e-01  deformation=phage_10146935_:phage_8998904_  deformation_criterion=31.3214  norm_criterion=-1.0203
+                  phage_9170729_: len=4.211193e+01  err_density=-1.110e+00  deformation=phage_8998904_:phage_9170729_  deformation_criterion=25.6508  norm_criterion=-1.55946
+                0x1888bf17030: len=4.691410e+02  err_density=2.385e+00  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935
+                  phage_10592026_: len=5.909044e+01  err_density=3.108e-02  deformation=phage_10592026_:phage_8998904_  deformation_criterion=55.4381  norm_criterion=3.95336
+                  phage_15543458_: len=7.890956e+01  err_density=4.072e-02  deformation=phage_15543458_:phage_8998904_  deformation_criterion=61.8935  norm_criterion=4.16096
+              0x1888bf166e0: len=9.466403e+02  err_density=-3.553e+00  deformation=phage_10133761_:phage_8998904_  deformation_criterion=19.1401
+                0x1888bf165c0: len=5.779540e+01  err_density=-1.743e+00  deformation=phage_10133761_:phage_8998904_  deformation_criterion=19.1401
+                  phage_10133761_: len=6.962582e+00  err_density=-8.706e-01  deformation=phage_10133761_:phage_8998904_  deformation_criterion=19.1401  norm_criterion=-1.8651
+                  phage_7291514_: len=9.037418e+00  err_density=-8.702e-01  deformation=phage_7291514_:phage_8998904_  deformation_criterion=18.4526  norm_criterion=-1.84218
+                phage_10109074_: len=5.420460e+01  err_density=-1.311e+00  deformation=phage_10109074_:phage_8998904_  deformation_criterion=15.8162  norm_criterion=-1.8897
+            phage_11298483_: len=5.856519e+02  err_density=4.284e+00  deformation=phage_11298483_:phage_15541525_  deformation_criterion=29.4259  norm_criterion=5.71972
+          0x1888bf16df0: len=1.031913e+03  err_density=-1.549e+00  deformation=phage_10115553_:phage_15548467_  deformation_criterion=14.1346
+            0x1888bf16800: len=1.028125e+01  err_density=-1.008e+00  deformation=phage_10115553_:phage_15548467_  deformation_criterion=14.1346
+              phage_10115553_: len=2.788194e+00  err_density=-9.454e-01  deformation=phage_10115553_:phage_15548467_  deformation_criterion=14.1346  norm_criterion=-1.21057
+              phage_388832_: len=8.211806e+00  err_density=-9.345e-01  deformation=phage_388832_:phage_vB_CPP_WC01  deformation_criterion=12.2831  norm_criterion=-1.59166
+            phage_10133736_: len=8.718750e+00  err_density=-9.663e-01  deformation=phage_10133736_:phage_15548467_  deformation_criterion=13.4198  norm_criterion=-1.30993
+        0x1888bf17390: len=1.057474e+03  err_density=-5.023e+00  deformation=phage_12920168_:phage_9074532_  deformation_criterion=25.2618
+          0x1888bf164a0: len=1.631172e+02  err_density=-3.182e+00  deformation=phage_12920168_:phage_7414921_  deformation_criterion=24.8927
+            phage_15546918_: len=6.851763e+00  err_density=-8.308e-01  deformation=phage_12920168_:phage_15546918_  deformation_criterion=24.457  norm_criterion=-2.8845
+            phage_7414921_: len=7.148237e+00  err_density=-8.338e-01  deformation=phage_12920168_:phage_7414921_  deformation_criterion=24.8927  norm_criterion=-2.99
+          phage_9074532_: len=1.408828e+02  err_density=-2.274e+00  deformation=phage_12920168_:phage_9074532_  deformation_criterion=25.2618  norm_criterion=-3.08812
+      0x1888bf17150: len=9.784888e+02  err_density=9.812e-01  deformation=phage_11298483_:phage_15541525_  deformation_criterion=29.4259
+        0x1888bf176f0: len=2.993804e+01  err_density=1.091e+00  deformation=phage_11298483_:phage_15541525_  deformation_criterion=29.4259
+          0x1888bf174b0: len=3.540938e+01  err_density=4.884e-01  deformation=phage_11298483_:phage_15541525_  deformation_criterion=29.4259
+            phage_15541525_: len=1.574617e+02  err_density=-9.671e-01  deformation=phage_11298483_:phage_15541525_  deformation_criterion=29.4259  norm_criterion=-0.286218
+            phage_vB_CPP_WC01: len=1.135383e+02  err_density=6.634e-01  deformation=phage_10592026_:phage_vB_CPP_WC01  deformation_criterion=25.3551  norm_criterion=0.829494
+          phage_739573_: len=1.625906e+02  err_density=-3.110e-01  deformation=phage_10592026_:phage_739573_  deformation_criterion=28.0226  norm_criterion=0.323619
+        0x1888bf16f10: len=1.350620e+02  err_density=3.285e-02  deformation=phage_11298483_:phage_7693405_  deformation_criterion=27.9101
+          phage_7693405_: len=7.207812e+01  err_density=-6.438e-01  deformation=phage_11298483_:phage_7693405_  deformation_criterion=27.9101  norm_criterion=-1.16131
+          phage_9701888_: len=5.592188e+01  err_density=-5.242e-01  deformation=phage_11298483_:phage_9701888_  deformation_criterion=21.9483  norm_criterion=-0.292495
+    0x1888bf18cd0: len=1.548550e+02  err_density=-2.697e+00  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737
+      0x1888bf196f0: len=5.457347e+02  err_density=-3.459e+00  deformation=phage_13750375_:phage_6074510_  deformation_criterion=19.1655
+        0x1888bf16970: len=1.931737e+02  err_density=-2.962e+00  deformation=phage_13750375_:phage_6074510_  deformation_criterion=19.1655
+          phage_6074510_: len=2.714875e+01  err_density=-1.159e+00  deformation=phage_13750375_:phage_6074510_  deformation_criterion=19.1655  norm_criterion=-1.58181
+          phage_9247675_: len=4.185125e+01  err_density=-1.181e+00  deformation=phage_13750375_:phage_9247675_  deformation_criterion=17.5224  norm_criterion=-1.89437
+        phage_10965508_: len=2.398263e+02  err_density=-1.748e+00  deformation=phage_10965508_:phage_13750375_  deformation_criterion=10.3592  norm_criterion=-1.57791
+      phage_9305197_: len=1.036265e+03  err_density=-9.565e-03  deformation=phage_12463887_:phage_9305197_  deformation_criterion=39.3737  norm_criterion=0.0721917

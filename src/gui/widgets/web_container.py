@@ -9,10 +9,12 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal
+from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 
 # BLAST Logic
 from src.blast.manager import get_blast_manager
 from src.gui.workers.tree_worker_thread import TreeWorker
+from src.gui.workers.workflow_worker import WorkflowWorker
 from PyQt6.QtWidgets import QFileDialog
 
 class WebBridge(QObject):
@@ -42,12 +44,11 @@ class WebBridge(QObject):
         self.blast_manager.result_listeners.append(self._broadcast_result)
 
     def _broadcast_result(self, task_id, data):
-        """Internal callback to push single result to JS"""
-        # Ensure we have the parsed data for the matrix row 
-        # (similar to what get_task_results does)
+        """Internal callback to push single result to JS (with consensus logic)"""
         if 'csv_file' in data and os.path.exists(data['csv_file']):
-            parsed = self._parse_blast_csv(data['csv_file'], limit=1)
-            data['data'] = parsed
+            top_hits = self._parse_blast_csv(data['csv_file'], limit=10)
+            best_hit = self._select_consensus_hit(top_hits)
+            data['data'] = [best_hit] if best_hit else []
         
         self.blast_event.emit("single_result_update", json.dumps({
             "task_id": task_id,
@@ -130,11 +131,30 @@ class WebBridge(QObject):
             self.logger.error(f"Save File Error: {e}")
             return False
 
+    @pyqtSlot(str)
     @pyqtSlot()
-    def request_tree_analysis(self):
-        """Handle request to run tree analysis from iTOL page"""
-        self.logger.info("JS requested tree analysis")
-        self.container.run_tree_analysis()
+    def request_tree_analysis(self, mode="standard"):
+        """Handle request to run tree analysis with specific mode"""
+        self.logger.info(f"JS requested tree analysis (mode: {mode})")
+        self.container.run_tree_analysis(mode=mode)
+
+    @pyqtSlot(str, str, str)
+    def run_workflow_node(self, node_id, input_path, params_json):
+        """Invoke a specific modular node in the circuit board"""
+        self.logger.info(f"JS invoked node: {node_id} with input: {input_path}")
+        self.container.run_modular_node(node_id, input_path, params_json)
+
+    @pyqtSlot(str)
+    def run_workflow(self, topology_json):
+        """Handle visual workflow execution request"""
+        self.logger.info("JS requested workflow execution")
+        self.container.run_visual_workflow(topology_json)
+
+    @pyqtSlot(str)
+    def request_tree_reroot(self, node_id):
+        """Handle reroot request"""
+        self.logger.info(f"JS requested reroot at: {node_id}")
+        self.container.run_tree_reroot(node_id)
 
     @pyqtSlot(str, result=str)
     def run_blast_job(self, params_json):
@@ -195,6 +215,7 @@ class WebBridge(QObject):
         """Return full translation dictionary for current language"""
         from src.utils.ui_translation_manager import get_ui_translator
         tr = get_ui_translator()
+        # tr.load_all_translations() # Reverted
         data = tr.get_all_translations_for_current_lang()
         return json.dumps(data, ensure_ascii=False)
 
@@ -203,6 +224,19 @@ class WebBridge(QObject):
         """Get current UI language code"""
         from src.utils.ui_translation_manager import get_ui_translator
         return get_ui_translator().get_language()
+
+    @pyqtSlot(result=str)
+    def get_tools_metadata(self):
+        """Return the tools_metadata.json content"""
+        try:
+            path = os.path.join(os.path.dirname(__file__), "../../resources/tools_metadata.json")
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            return "{}"
+        except Exception as e:
+            self.logger.error(f"Failed to load tools metadata: {e}")
+            return "{}"
 
     @pyqtSlot(str, result=bool)
     def save_ui_language(self, lang_code):
@@ -217,26 +251,6 @@ class WebBridge(QObject):
             return False
 
     @pyqtSlot(str, str, result=bool)
-    def update_dictionary_entry(self, english, chinese):
-        """Update a translation entry manually."""
-        try:
-            success = self.translator.data_manager.update_entry(english, chinese)
-            return success
-        except Exception as e:
-            logging.error(f"Bridge update_dictionary_entry error: {e}")
-            return False
-
-    @pyqtSlot(str, result=str)
-    def search_dictionary(self, query):
-        """Search dictionary entries."""
-        try:
-            results = self.translator.data_manager.search_entries(query)
-            return json.dumps(results, ensure_ascii=False)
-        except Exception as e:
-            logging.error(f"Bridge search_dictionary error: {e}")
-            return "[]"
-
-    @pyqtSlot(str, str, result=bool)
     def save_api_key(self, service, key):
         """Save API key to config"""
         try:
@@ -247,6 +261,64 @@ class WebBridge(QObject):
         except Exception as e:
             self.logger.error(f"Failed to save API key for {service}: {e}")
             return False
+
+    @pyqtSlot(str, result=bool)
+    def save_selected_model(self, model_key):
+        """Save the selected AI model and force-recreate the global translator"""
+        try:
+            from src.utils.config_manager import get_config_manager
+            config = get_config_manager()
+            config.set_advanced_settings({'ai_model': model_key})
+            self.logger.info(f"Selected AI model saved: {model_key}")
+            
+            # Force the global translator singleton to be recreated with the new model
+            import src.utils.translation.biology_translator as bt
+            bt._global_translator = None
+            self.logger.info("Global translator reset. Next translation will use new model.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to save selected model: {e}")
+            return False
+
+    @pyqtSlot(result=str)
+    def get_selected_model(self):
+        """Get the currently saved AI model selection"""
+        try:
+            from src.utils.config_manager import get_config_manager
+            advanced = get_config_manager().get_advanced_settings()
+            return advanced.get('ai_model', '')
+        except Exception as e:
+            self.logger.error(f"Failed to get selected model: {e}")
+            return ""
+
+    @pyqtSlot(str)
+    def log_message(self, message):
+        """Log message from frontend"""
+        self.logger.info(f"[Frontend] {message}")
+
+    @pyqtSlot(str)
+    def save_topology(self, topology_json):
+        """Save the current canvas topology to a local file for persistence"""
+        try:
+            path = Path(self.blast_manager.results_dir) / "workspace_topology.json"
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(topology_json)
+            self.logger.info(f"Workspace topology saved to: {path}")
+        except Exception as e:
+            self.logger.error(f"Failed to save workspace topology: {e}")
+
+    @pyqtSlot(result=str)
+    def load_topology(self):
+        """Load the last saved workspace topology from local file"""
+        try:
+            path = Path(self.blast_manager.results_dir) / "workspace_topology.json"
+            if path.exists():
+                with open(path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            return ""
+        except Exception as e:
+            self.logger.error(f"Failed to load workspace topology: {e}")
+            return ""
 
     @pyqtSlot(str, str, result=str)
     def translate_text(self, text, category='species'):
@@ -275,20 +347,94 @@ class WebBridge(QObject):
         try:
             translator = get_global_biology_translator()
             results = translator.search_translations(query)
-            return json.dumps(results)
+            return json.dumps(results, ensure_ascii=False)
         except Exception as e:
             self.logger.error(f"Dictionary search error: {e}")
             return "[]"
 
+    @pyqtSlot(str, str, str, result=bool)
+    def save_dictionary_term(self, english, chinese, category):
+        """Save or update a dictionary term"""
+        from src.utils.translation.biology_translator import get_global_biology_translator
+        try:
+            translator = get_global_biology_translator()
+            dm = translator.translation_data_manager
+            if dm:
+                return dm.add_translation(english, chinese, category, source='manual_web')
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to save term: {e}")
+            return False
+
     @pyqtSlot(str, result=bool)
-    def update_dictionary_entry(self, english, chinese):
+    def delete_dictionary_term(self, english):
+        """Delete a term from dictionary"""
+        from src.utils.translation.biology_translator import get_global_biology_translator
+        import sqlite3
+        try:
+            translator = get_global_biology_translator()
+            dm = translator.translation_data_manager
+            if dm and dm.db_path.exists():
+                conn = sqlite3.connect(dm.db_path)
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM translations WHERE english = ?', (english,))
+                success = conn.total_changes > 0
+                conn.commit()
+                conn.close()
+                if english in dm._cache:
+                    del dm._cache[english]
+                return success
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to delete term: {e}")
+            return False
+
+    @pyqtSlot(result=str)
+    def get_all_dictionary_terms(self):
+        """Get all dictionary terms for management"""
+        from src.utils.translation.biology_translator import get_global_biology_translator
+        try:
+            translator = get_global_biology_translator()
+            dm = translator.translation_data_manager
+            if dm:
+                terms = []
+                import sqlite3
+                conn = sqlite3.connect(dm.db_path)
+                cursor = conn.cursor()
+                cursor.execute('SELECT english, chinese, category, source FROM translations ORDER BY created_at DESC')
+                for row in cursor.fetchall():
+                    terms.append({'english': row[0], 'chinese': row[1], 'category': row[2], 'source': row[3]})
+                conn.close()
+                return json.dumps(terms, ensure_ascii=False)
+            return "[]"
+        except Exception as e:
+            self.logger.error(f"Failed to get terms: {e}")
+            return "[]"
+
+    @pyqtSlot(result=str)
+    def repair_dictionary_categories(self):
+        """Repair dictionary categories using intelligent logic"""
+        from src.utils.translation.biology_translator import get_global_biology_translator
+        try:
+            translator = get_global_biology_translator()
+            if translator.translation_data_manager:
+                results = translator.translation_data_manager.intelligent_repair_categories()
+                return json.dumps(results)
+            return json.dumps({"error": "No data manager"})
+        except Exception as e:
+            self.logger.error(f"Failed to repair dictionary: {e}")
+            return json.dumps({"error": str(e)})
+
+    @pyqtSlot(str, str, str, result=bool)
+    @pyqtSlot(str, str, result=bool)
+    def update_dictionary_entry(self, english, chinese, category='species'):
         """Update a dictionary entry"""
         from src.utils.translation.biology_translator import get_global_biology_translator
         try:
             translator = get_global_biology_translator()
-            success = translator.update_translation(english, chinese)
+            success = translator.update_translation(english, chinese, category=category)
             if success:
-                self.logger.info(f"Dictionary updated: {english} -> {chinese}")
+                self.logger.info(f"Dictionary updated: {english} -> {chinese} (cat={category})")
             return success
         except Exception as e:
             self.logger.error(f"Dictionary update error: {e}")
@@ -356,6 +502,19 @@ class WebBridge(QObject):
             self.logger.error(f"Bridge testing model exception: {e}")
             return json.dumps({"success": False, "message": str(e)})
             
+    @pyqtSlot(result=str)
+    def get_ai_models(self):
+        """Get all AI models configured on backend"""
+        try:
+            from src.utils.config_manager import get_config_manager
+            models = get_config_manager().get_supported_models()
+            if isinstance(models, dict):
+                models = [{"key": k, "name": v} for k, v in models.items()]
+            return json.dumps(models)
+        except Exception as e:
+            self.logger.error(f"Failed to get AI models: {e}")
+            return "[]"
+
     @pyqtSlot(str, str, result=bool)
     def add_ai_model(self, model_key, model_name):
         """Add a new AI model to the supported list"""
@@ -382,12 +541,56 @@ class WebBridge(QObject):
 
     @pyqtSlot(str, result=str)
     def get_task_results(self, task_id):
-        """Fetch results for a task"""
+        """Fetch results for a task, using consensus-based best hit selection"""
         results = self.blast_manager.get_task_results(task_id)
         for res in results:
             if 'csv_file' in res and os.path.exists(res['csv_file']):
-                res['data'] = self._parse_blast_csv(res['csv_file'], limit=1) # Matrix only needs top hit
+                # Read top 10 hits for consensus analysis
+                top_hits = self._parse_blast_csv(res['csv_file'], limit=10)
+                best_hit = self._select_consensus_hit(top_hits)
+                res['data'] = [best_hit] if best_hit else []
         return json.dumps(results)
+
+    def _select_consensus_hit(self, hits):
+        """Select the best representative hit using majority voting on species.
+        
+        Instead of blindly trusting the first result (which might be a generic
+        'bacterium'), we analyze the top N hits and pick the species that appears
+        most frequently. This gives a much more reliable identification.
+        """
+        if not hits:
+            return None
+        if len(hits) == 1:
+            return hits[0]
+        
+        from collections import Counter
+        
+        # Count species occurrences, filtering out generic/uninformative names
+        generic_names = {'bacterium', 'uncultured bacterium', 'uncultured organism', 
+                        'unidentified', 'unknown', 'n/a', ''}
+        
+        species_counter = Counter()
+        species_to_hit = {}  # Map species -> best (first seen) hit with that species
+        
+        for hit in hits:
+            species = (hit.get('species') or '').strip()
+            species_lower = species.lower()
+            
+            if species_lower not in generic_names:
+                species_counter[species] += 1
+                if species not in species_to_hit:
+                    species_to_hit[species] = hit
+        
+        if not species_counter:
+            # All hits are generic, just return the first one
+            return hits[0]
+        
+        # Pick the most common species
+        consensus_species, count = species_counter.most_common(1)[0]
+        self.logger.info(
+            f"Consensus hit: '{consensus_species}' appeared {count}/{len(hits)} times"
+        )
+        return species_to_hit[consensus_species]
 
     @pyqtSlot(str, result=str)
     def get_detailed_blast_results(self, csv_file):
@@ -397,17 +600,28 @@ class WebBridge(QObject):
         data = self._parse_blast_csv(csv_file, limit=None) # Get all
         return json.dumps(data)
 
-    @pyqtSlot(str)
-    def open_alignment_visualizer(self, xml_file):
-        """Trigger pop-up matplotlib-based visualizer"""
-        from src.gui.widgets.alignment_visualizer import AlignmentVisualizerDialog
-        if os.path.exists(xml_file):
-            # We use parent.parent because bridge's container is WebContainer, 
-            # and we want the main window as parent usually, but container is fine.
-            dial = AlignmentVisualizerDialog(xml_file, self.container)
-            dial.exec()
-        else:
-            self.logger.error(f"XML file not found for visualizer: {xml_file}")
+    @pyqtSlot(str, result=str)
+    def read_result_file(self, file_path):
+        """Read content of a result file for preview (e.g. tree, fasta)"""
+        # Basic Security: Prevent reading system files. Allow only if in specific paths or has standard extension
+        # For this local app, we trust the logic but prevent obvious abuse
+        if "NCBI blast" not in file_path and "temp" not in file_path.lower(): 
+             # Weak check but consistent with local app context
+             pass
+        
+        try:
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                # Check size
+                if os.path.getsize(file_path) > 5 * 1024 * 1024:
+                    return "file_too_large"
+                
+                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    return f.read()
+            return ""
+        except Exception as e:
+            self.logger.error(f"Failed to read result file {file_path}: {e}")
+            return ""
+
 
 
     @pyqtSlot(result=str)
@@ -443,6 +657,12 @@ class WebBridge(QObject):
                 "task_id": task_id,
                 "path": failed_path
             }))
+            
+    @pyqtSlot(str, str)
+    def rename_task(self, task_id, new_name):
+        """Rename specific task"""
+        self.logger.info(f"JS requested rename task {task_id} -> {new_name}")
+        self.blast_manager.rename_task(task_id, new_name)
 
     @pyqtSlot(str)
     def resume_task(self, task_id):
@@ -463,13 +683,42 @@ class WebBridge(QObject):
         import csv
         data = []
         try:
-            with open(csv_path, 'r', encoding='utf-8') as f:
+            with open(csv_path, 'r', encoding='utf-8-sig') as f:
                 reader = csv.DictReader(f)
                 count = 0
                 for row in reader:
+                    raw_title = row.get('标题', 'Unknown')
+                    
+                    # Clean title: strip concatenated hits after '>'
+                    if '>' in raw_title:
+                        raw_title = raw_title.split('>')[0].strip()
+                    
+                    # Remove gi|xxx|gb|xxx| prefix to get readable description
+                    clean_title = raw_title
+                    import re
+                    gi_match = re.match(r'^gi\|\d+\|[a-z]+\|[A-Za-z0-9_.]+\|\s*', raw_title)
+                    if gi_match:
+                        clean_title = raw_title[gi_match.end():].strip()
+                    
+                    # Extract gene source (e.g. "16S ribosomal RNA gene")
+                    gene_source = ''
+                    source_patterns = [
+                        r'(16S\s+ribosomal\s+RNA\s+gene)',
+                        r'(23S\s+ribosomal\s+RNA\s+gene)',
+                        r'(ITS\s+region)',
+                        r'(chromosome[^,]*)',
+                        r'(complete\s+genome)',
+                        r'(genome\s+assembly)',
+                    ]
+                    for pattern in source_patterns:
+                        source_match = re.search(pattern, clean_title, re.IGNORECASE)
+                        if source_match:
+                            gene_source = source_match.group(1)
+                            break
+                    
                     # Simplify keys for Web
                     data.append({
-                        'title': row.get('标题', 'Unknown'),
+                        'title': clean_title,
                         'len': row.get('长度', '0'),
                         'acc': row.get('访问号', 'N/A'),
                         'species': row.get('物种', 'N/A'),
@@ -478,6 +727,7 @@ class WebBridge(QObject):
                         'gene_type': row.get('基因类型', ''),
                         'seq_type': row.get('序列类型', ''),
                         'host': row.get('宿主信息', ''),
+                        'gene_source': gene_source,
                         'hsp_count': row.get('高得分片段对(HSPs)', '0'),
                         'evalue': row.get('E值', 'N/A'),
                         'align_len': row.get('比对长度', '0'),
@@ -563,9 +813,43 @@ class WebContainer(QWidget):
         # We need to strictly intercept it.
         self.web_view = DnDWebEngineView(self) # Use custom class
         
-        # ... (rest of setup)
+        # Ensure path is persistent in user home or project root
+        storage_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../storage/web"))
+        os.makedirs(storage_path, exist_ok=True)
         
-        # Enable JS features like popups (required for iCn3D menus)
+        # Cleanup potentially corrupted cache subdirs if structure error reported (noisy chrome logs)
+        # Note: Deleting Shared Dictionary if corrupted often fixes Simple Cache Backend errors
+        # We do this BEFORE creating the profile to ensure a clean start if needed.
+        corrupted_dirs = ["Shared Dictionary", "Cache", "Code Cache", "Service Worker"]
+        import shutil
+        for d in corrupted_dirs:
+            d_path = os.path.join(storage_path, d)
+            if os.path.exists(d_path):
+                try:
+                    # In some environments, these files are empty or broken, causing the "wrong file structure" error
+                    # We only attempt forced deletion if we suspect corruption (first boot of session)
+                    if not hasattr(WebContainer, "_cache_cleaned"):
+                        self.logger.info(f"Checking storage health: {d}")
+                        # We don't delete everything every time, only Shared Dictionary which is the most common failure
+                        if d == "Shared Dictionary":
+                            shutil.rmtree(d_path, ignore_errors=True)
+                except Exception as e:
+                    self.logger.warning(f"Could not clean cache dir {d}: {e}")
+        WebContainer._cache_cleaned = True
+        
+        # Enable Persistent Storage via a named Profile
+        profile = QWebEngineProfile("BioStationProfile", self.web_view)
+        profile.setPersistentStoragePath(storage_path)
+        profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
+        
+        # Create a page for this profile
+        page = QWebEnginePage(profile, self.web_view)
+        # v2 补丁：设置默认背景颜色为 Studio 画布色，减少黑屏闪烁时的视觉背离
+        from PyQt6.QtGui import QColor
+        page.setBackgroundColor(QColor("#0f172a"))
+        self.web_view.setPage(page)
+        
+        # Enable JS features like popups
         settings = self.web_view.settings()
         settings.setAttribute(settings.WebAttribute.JavascriptCanOpenWindows, True)
         settings.setAttribute(settings.WebAttribute.JavascriptCanAccessClipboard, True)
@@ -579,26 +863,74 @@ class WebContainer(QWidget):
         # Handle "window.open" - simplified for now: load in main view or just allow it.
         # Custom page class or signal connection might be needed for full multi-window support.
         
-        # Load the local index.html
-        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../web"))
-        index_path = os.path.join(base_path, "index.html")
-        
-        if not os.path.exists(index_path):
-            self.logger.error(f"Web Container index not found at: {index_path}")
-            QMessageBox.critical(self, "Error", f"Web App not found at {index_path}")
-        else:
-            url = QUrl.fromLocalFile(index_path)
-            self.logger.info(f"Loading Web Container from: {url.toString()}")
+        # Load URL - Support WEB_URL for development (HMR for web-next)
+        dev_url = os.environ.get("WEB_URL")
+        if dev_url:
+            url = QUrl(dev_url)
+            self.logger.info(f"Loading Dev Web Container from: {url.toString()}")
             self.web_view.load(url)
+        else:
+            # Fallback to local index.html (legacy)
+            base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../web_legacy"))
+            index_path = os.path.join(base_path, "index.html")
+            
+            if not os.path.exists(index_path):
+                self.logger.error(f"Web Container index not found at: {index_path}")
+                QMessageBox.critical(self, "Error", f"Web App not found at {index_path}")
+            else:
+                url = QUrl.fromLocalFile(index_path)
+                self.logger.info(f"Loading Local Web Container from: {url.toString()}")
+                self.web_view.load(url)
             
         layout.addWidget(self.web_view)
 
     def reload(self):
         self.web_view.reload()
 
+    def handle_resize_event(self):
+        """顶级窗口调整大小或状态变更时触发，采用三重递进式刷新策略"""
+        if hasattr(self, 'web_view'):
+            # 1. 立即刷新一次
+            self.web_view.update()
+            
+            # 2. 引入多重延迟重绘（关键补丁：应对不同硬件在全屏转换时的 Surface 就绪时机）
+            from PyQt6.QtCore import QTimer
+            # 第 1 波：快速尝试 (100ms)
+            QTimer.singleShot(100, self._force_redraw_cycle)
+            # 第 2 波：彻底稳定 (300ms)
+            QTimer.singleShot(300, self._force_redraw_cycle)
+
+    def _force_redraw_cycle(self):
+        """强制重绘周期：执行 JS 并刷新 WebView"""
+        if hasattr(self, 'web_view'):
+            # 执行综合性的 JS 刷新脚本
+            js_code = """
+            (function(){
+                window.dispatchEvent(new Event('resize'));
+                // 强制同步父子框架布局
+                if (window.app && window.app.syncViewLayouts) {
+                    window.app.syncViewLayouts();
+                }
+                // 触发一个极小的 body 偏移以强迫浏览器渲染表面重建
+                document.body.style.opacity = '0.999';
+                setTimeout(() => { document.body.style.opacity = '1'; }, 0);
+            })();
+            """
+            self.web_view.page().runJavaScript(js_code)
+            
+            # v4 补丁：不仅刷新 WebView，还从底层强制进行 Repaint 并在窗口级别更新脏区域
+            self.web_view.update()
+            if self.web_view.focusProxy():
+                self.web_view.focusProxy().repaint()
+            
+            # 手动拉拽顶层窗口刷新
+            if self.window():
+                self.window().update()
+
     def open_file_dialog(self, file_type):
         """Open QFileDialog and inject content back to JS"""
         from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        print(f"[Python] open_file_dialog triggered for {file_type}")
         
         filter_str = "All Files (*.*)"
         if file_type == 'tree':
@@ -644,7 +976,7 @@ class WebContainer(QWidget):
                 self.logger.error(f"Failed to read file {file_path}: {e}")
                 QMessageBox.warning(self, "读取错误", f"无法读取文件 {Path(file_path).name}:\n{str(e)}")
 
-    def run_tree_analysis(self):
+    def run_tree_analysis(self, mode="standard"):
         """
         Open file dialog (supports multi-select), merge if needed, run TreeWorker.
         """
@@ -698,7 +1030,7 @@ class WebContainer(QWidget):
         
         # Create worker
         # Store worker in self to prevent garbage collection
-        self.tree_worker = TreeWorker(final_path)
+        self.tree_worker = TreeWorker(final_path, mode=mode)
         self.tree_worker.finished.connect(self.on_tree_finished)
         self.tree_worker.error.connect(self.on_tree_error)
         self.tree_worker.progress.connect(self.on_tree_progress)
@@ -723,6 +1055,7 @@ class WebContainer(QWidget):
         self.logger.info("Tree analysis finished")
         if "tree_file" in result:
             tree_path = result["tree_file"]
+            self.bridge.current_tree_path = tree_path # Track it for rerooting
             try:
                 with open(tree_path, 'r') as f:
                     newick_content = f.read().strip()
@@ -755,6 +1088,97 @@ class WebContainer(QWidget):
         else:
              self.logger.warning("No tree file in result")
              self.web_view.page().runJavaScript("console.warn('No tree file generated.'); alert('建树失败：未生成结果文件');")
+
+    def run_tree_reroot(self, node_id):
+        """Execute reroot operation and reload tree"""
+        if not hasattr(self.bridge, 'current_tree_path') or not self.bridge.current_tree_path:
+             self.web_view.page().runJavaScript("if(window.app) window.app.showNotification('未找到当前活动的树文件。', 'error');")
+             return
+
+        try:
+             self.web_view.page().runJavaScript("if(window.showLoading) window.showLoading('正在重定根...');")
+             
+             old_path = Path(self.bridge.current_tree_path)
+             new_path = old_path.parent / f"{old_path.stem}_rerooted.nwk"
+             
+             self.bridge.tree_tools = getattr(self.bridge, 'tree_tools', TreeFactory())
+             self.bridge.tree_tools.tree_reroot(old_path, node_id, new_path)
+             
+             # Reload tree in JS
+             with open(new_path, 'r') as f:
+                 content = f.read()
+             
+             self.bridge.current_tree_path = str(new_path)
+             
+             import json
+             safe_newick = json.dumps(content)
+             self.web_view.page().runJavaScript(f"if(window.loadTree) window.loadTree({safe_newick}); if(window.hideLoading) window.hideLoading();")
+             
+        except Exception as e:
+             self.logger.error(f"Reroot failed: {e}")
+             self.web_view.page().runJavaScript(f"if(window.hideLoading) window.hideLoading(); alert('重定根失败: {str(e)}');")
+
+    def run_modular_node(self, node_id, input_path, params_json):
+        """Execute a specific stage of the Bio-Circuit in a worker thread"""
+        try:
+            params = json.loads(params_json)
+            self.logger.info(f"Starting modular node {node_id} for {input_path}")
+            
+            # Use current activity loading state
+            node_names = {
+                "fasta": "准备序列数据...",
+                "dist": "正在计算距离矩阵...",
+                "nwk": "正在推断拓扑结构...",
+                "group": "正在进行分型分析..."
+            }
+            msg = node_names.get(node_id, "正在处理...")
+            # ... (Logic moved to WorkflowEngine for full graph, but this single-node run remains for testing/manual triggers)
+            self.web_view.page().runJavaScript(f"if(window.showLoading) window.showLoading('{msg}');")
+            
+            self.tree_worker = TreeWorker(input_path, stage=node_id, params=params)
+            self.tree_worker.finished.connect(self.on_tree_finished)
+            self.tree_worker.error.connect(self.on_tree_error)
+            self.tree_worker.start()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to run modular node: {e}")
+            self.web_view.page().runJavaScript(f"if(window.hideLoading) window.hideLoading(); alert('节点运行失败: {str(e)}');")
+
+    def run_visual_workflow(self, topology_json):
+        """Start the workflow worker"""
+        self.logger.info("Starting visual workflow...")
+        # Notify UI started
+        self.web_view.page().runJavaScript("if(window.handleBridgeEvent) window.handleBridgeEvent('workflow_start', {});")
+        
+        self.workflow_worker = WorkflowWorker(topology_json)
+        self.workflow_worker.progress.connect(self.on_workflow_progress)
+        self.workflow_worker.finished.connect(self.on_workflow_finished)
+        self.workflow_worker.error.connect(self.on_workflow_error)
+        self.workflow_worker.start()
+
+    def on_workflow_progress(self, data):
+        # Notify JS: {node_id, status, message}
+        import json
+        safe_data = json.dumps(data)
+        js_code = f"if(window.handleBridgeEvent) window.handleBridgeEvent('node_status', {safe_data});"
+        self.web_view.page().runJavaScript(js_code)
+
+    def on_workflow_finished(self, context):
+        self.logger.info("Workflow finished")
+        # Maybe send context back?
+        import json
+        safe_ctx = json.dumps(context)
+        js_code = f"if(window.handleBridgeEvent) window.handleBridgeEvent('workflow_complete', {safe_ctx});"
+        self.web_view.page().runJavaScript(js_code)
+
+    def on_workflow_error(self, err_msg):
+        self.logger.error(f"Workflow error: {err_msg}")
+        import json
+        safe_msg = json.dumps(err_msg)
+        js_code = f"if(window.handleBridgeEvent) window.handleBridgeEvent('workflow_error', {{'message': {safe_msg}}});"
+        self.web_view.page().runJavaScript(js_code)
+
+
 
     def on_tree_error(self, err_msg):
         self.web_view.page().runJavaScript("if(window.hideLoading) window.hideLoading();")

@@ -21,10 +21,17 @@ class Application:
         """
         初始化应用程序
         """
-        # 为 WebEngine 注入稳定性参数，防止某些显卡驱动导致的 0xC0000409 崩溃
-        sys.argv.append("--disable-gpu")
-        sys.argv.append("--no-sandbox")
-        sys.argv.append("--disable-software-rasterizer")
+        # Fix UI Flickering on Windows: Disable hardware GPU acceleration and compositing
+        # Appending to sys.argv often fails to reach Chromium. Must use QTWEBENGINE_CHROMIUM_FLAGS.
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-gpu-compositing --disable-features=Translate"
+        
+        # Force Qt framework to use software OpenGL emulation on Windows to prevent D3D surface flickering
+        if sys.platform == 'win32':
+             os.environ["QT_OPENGL"] = "software"
+        
+        # 允许跨窗口共享 OpenGL 上下文，增强合成稳定性
+        from PyQt6.QtCore import Qt
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
         
         print("Creating QApplication...")
         self.app = QApplication(sys.argv)

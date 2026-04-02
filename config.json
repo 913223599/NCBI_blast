@@ -4,20 +4,12 @@
   },
   "supported_models": [
     {
-      "key": "qwen-plus",
-      "name": "通义千问-Plus"
+      "key": "tongyi-xiaomi-analysis-pro",
+      "name": "小米"
     },
     {
-      "key": "qwen-mt-plus",
-      "name": "通义千问-MT-Plus"
-    },
-    {
-      "key": "qwen-turbo",
-      "name": "通义千问-Turbo"
-    },
-    {
-      "key": "deepseek-v3.2",
-      "name": "deepseek-v3.2"
+      "key": "qwen3-max-2026-01-23",
+      "name": "qwen3-max"
     }
   ],
   "advanced_settings": {
@@ -38,7 +30,7 @@
     "use_cache": true,
     "thread_count": 1,
     "request_timeout": 9,
-    "ai_model": "deepseek-v3.2"
+    "ai_model": "tongyi-xiaomi-analysis-pro"
   },
   "setup_completed": true,
   "blast_bin_path": "C:\\Program Files\\NCBI\\blast-2.16.0+\\bin",
@@ -48,5 +40,7 @@
   },
   "sra_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\sra-tools",
   "tree_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\tree-tools",
-  "language": "zh_CN"
+  "language": "zh_CN",
+  "_test_key_": "_test_value_",
+  "_test_": "test_value"
 }
