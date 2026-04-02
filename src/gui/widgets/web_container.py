@@ -767,29 +767,83 @@ class DnDWebEngineView(QWebEngineView):
             super().dragEnterEvent(event)
 
     def dropEvent(self, event):
+        """Extended drop event to support automatic ZIP extraction/sorting"""
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            paths = []
+            final_paths = []
+            
             for url in urls:
                 if url.isLocalFile():
-                    paths.append(str(url.toLocalFile()))
+                    local_path = str(url.toLocalFile())
+                    if local_path.lower().endswith('.zip'):
+                        # 识别压缩包内序列
+                        extracted = self._extract_sequences_from_zip(local_path)
+                        if extracted:
+                            final_paths.extend(extracted)
+                            print(f"ZIP Extracted via Drop: {len(extracted)} files")
+                    else:
+                        final_paths.append(local_path)
             
-            if paths:
+            if final_paths:
                 event.accept()
-                print(f"Intercepted Drop: {paths}")
-                # Inject into JS
-                # access parent (WebContainer) -> bridge? 
-                # Or run JS directly.
                 import json
-                safe_paths = json.dumps(paths)
+                safe_paths = json.dumps(final_paths)
                 
-                # Check which view is active via JS or assume active app handles it
-                # We call a generic handleFilesDropped on window.app
+                # 注入前端
                 js_code = f"if(window.app && window.app.handleFilesDropped) window.app.handleFilesDropped({safe_paths});"
                 self.page().runJavaScript(js_code)
                 return
         
         super().dropEvent(event)
+
+    def _extract_sequences_from_zip(self, zip_path):
+        """Shared logic for ZIP sorting on drag-and-drop"""
+        import zipfile
+        import tempfile
+        import os
+        from pathlib import Path
+        from PyQt6.QtWidgets import QInputDialog, QLineEdit, QMessageBox
+        
+        extracted_results = []
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                # 优化分拣：仅识别文本类序列文件 (.seq, .fasta 等)，排除冗余的二进制测序原始文件 (.ab1)
+                valid_exts = ['.seq', '.fasta', '.fas', '.fa']
+                seq_files = [n for n in zf.namelist() if any(n.lower().endswith(e) for e in valid_exts)]
+                
+                if not seq_files:
+                    return []
+                
+                # 检查密码
+                test_file = seq_files[0]
+                password = None
+                try:
+                    zf.read(test_file)
+                except Exception as e:
+                    if 'encrypted' in str(e).lower() or 'password' in str(e).lower():
+                        pwd, ok = QInputDialog.getText(self, "拖入加密压缩包", 
+                                                     f"文件 '{Path(zip_path).name}' 已加密。\n请输入解压密码:", 
+                                                     QLineEdit.EchoMode.Password)
+                        if not ok: return []
+                        password = pwd
+                
+                # 提取到临时文件夹
+                temp_root = os.path.join(tempfile.gettempdir(), f"blast_pro_drop_extracted_{os.getpid()}")
+                if not os.path.exists(temp_root):
+                    os.makedirs(temp_root)
+                
+                pwd_bytes = password.encode() if password else None
+                for f_name in seq_files:
+                    try:
+                        out_path = zf.extract(f_name, path=temp_root, pwd=pwd_bytes)
+                        extracted_results.append(out_path)
+                    except:
+                        pass
+                        
+        except Exception as e:
+            print(f"Error extracting ZIP drop: {e}")
+            
+        return extracted_results
 
 
 class WebContainer(QWidget):
@@ -928,8 +982,14 @@ class WebContainer(QWidget):
                 self.window().update()
 
     def open_file_dialog(self, file_type):
-        """Open QFileDialog and inject content back to JS"""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        """Open QFileDialog and handle file injection, now including compressed archive support"""
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox, QInputDialog, QLineEdit
+        from pathlib import Path
+        import os
+        import json
+        import zipfile
+        import tempfile
+        
         print(f"[Python] open_file_dialog triggered for {file_type}")
         
         filter_str = "All Files (*.*)"
@@ -938,43 +998,115 @@ class WebContainer(QWidget):
         elif file_type == 'structure':
             filter_str = "Protein Structure (*.pdb *.ent);;All Files (*.*)"
         elif file_type == 'fasta':
-            filter_str = "Sequence Files (*.fasta *.fas *.fa *.seq *.ab1 *.abi);;All Files (*.*)"
+            # Add compressed archive support explicitly for sequence intake
+            filter_str = "Supported Files (*.fasta *.fas *.fa *.seq *.ab1 *.abi *.zip);;Sequence Files (*.fasta *.fas *.fa *.seq *.ab1 *.abi);;Archives (*.zip);;All Files (*.*)"
             
         file_path, _ = QFileDialog.getOpenFileName(self, f"Open {file_type}", "", filter_str)
         
-        if file_path:
-            try:
-                ext = Path(file_path).suffix.lower()
-                content = ""
-                
-                # 特殊处理：如果是二进制测序文件，通过 FileHandler 提取序列文本
-                if ext in ['.ab1', '.abi']:
-                    from src.utils.file_handler import FileHandler
-                    handler = FileHandler()
-                    for seq_info in handler.read_fasta_file_iter(file_path):
-                        content = seq_info['sequence']
-                        break # 目前仅支持单序列预览/注入
-                else:
-                    # 普通文本文件处理
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read()
-                
-                if not content:
-                    raise ValueError("无法从文件中提取有效序列或内容为空")
+        if not file_path:
+            return
 
-                # Escape content for JS string
-                import json
-                safe_content = json.dumps(content)
-                safe_path = json.dumps(file_path)
-                
-                # Call JS: window.app.handleFileLoaded(content, file_type, path)
-                js_code = f"window.app.handleFileLoaded({safe_content}, '{file_type}', {safe_path});"
-                self.web_view.page().runJavaScript(js_code)
-                self.logger.info(f"Injected {file_type} file content to JS (Size: {len(content)})")
-                
-            except Exception as e:
-                self.logger.error(f"Failed to read file {file_path}: {e}")
-                QMessageBox.warning(self, "读取错误", f"无法读取文件 {Path(file_path).name}:\n{str(e)}")
+        try:
+            ext = Path(file_path).suffix.lower()
+            
+            # --- 分拣处理：压缩包 (.zip) ---
+            if ext == '.zip':
+                try:
+                    with zipfile.ZipFile(file_path) as zf:
+                        # 优化分拣：仅识别文本类序列文件 (.seq, .fasta 等)，排除冗余的二进制测序原始文件 (.ab1)
+                        valid_exts = ['.seq', '.fasta', '.fas', '.fa']
+                        seq_files = [n for n in zf.namelist() if any(n.lower().endswith(e) for e in valid_exts)]
+                        
+                        if not seq_files:
+                            QMessageBox.information(self, "压缩包解析", "该压缩包内未提取到有效的序列文件 (.seq, .fasta等)")
+                            return
+                        
+                        # 检查是否加密
+                        password = None
+                        test_file = seq_files[0]
+                        try:
+                            # 试图直接读取第一个文件
+                            zf.read(test_file)
+                        except RuntimeError as re:
+                            if 'encrypted' in str(re).lower() or 'password' in str(re).lower():
+                                # 需要密码
+                                while True:
+                                    pwd, ok = QInputDialog.getText(self, "识别到加密压缩包", 
+                                                                 f"压缩文件 '{Path(file_path).name}' 已加密。\n请输入密码以继续导入序列:", 
+                                                                 QLineEdit.EchoMode.Password)
+                                    if not ok: return
+                                    try:
+                                        zf.read(test_file, pwd=pwd.encode())
+                                        password = pwd
+                                        break
+                                    except:
+                                        QMessageBox.warning(self, "密码错误", "输入的密码不正确，请重新输入。")
+                        
+                        # 提取到临时文件夹
+                        temp_root = os.path.join(tempfile.gettempdir(), f"ncbi_blast_extracted_{os.getpid()}")
+                        if not os.path.exists(temp_root):
+                            os.makedirs(temp_root)
+                        
+                        pwd_bytes = password.encode() if password else None
+                        injected_count = 0
+                        
+                        for f_name in seq_files:
+                            try:
+                                out_path = zf.extract(f_name, path=temp_root, pwd=pwd_bytes)
+                                
+                                # 处理提取出的文件内容
+                                inner_ext = Path(out_path).suffix.lower()
+                                content = ""
+                                if inner_ext in ['.ab1', '.abi']:
+                                    from src.utils.file_handler import FileHandler
+                                    handler = FileHandler()
+                                    for seq_info in handler.read_fasta_file_iter(out_path):
+                                        content = seq_info['sequence']
+                                        break 
+                                else:
+                                    with open(out_path, 'r', encoding='utf-8', errors='ignore') as f:
+                                        content = f.read()
+                                
+                                if content:
+                                    safe_content = json.dumps(content)
+                                    safe_path = json.dumps(out_path)
+                                    js_code = f"if(window.app) window.app.handleFileLoaded({safe_content}, 'fasta', {safe_path});"
+                                    self.web_view.page().runJavaScript(js_code)
+                                    injected_count += 1
+                            except Exception as ex:
+                                self.logger.error(f"Extraction error for {f_name}: {ex}")
+                                
+                        if injected_count > 0:
+                            QMessageBox.information(self, "导入完成", f"已成功从压缩包中分拣并导入了 {injected_count} 条序列。")
+                        return # ZIP 处理结束
+                except Exception as ze:
+                    raise ValueError(f"压缩包解析失败: {ze}")
+            
+            # --- 常规处理：单文件 ---
+            content = ""
+            if ext in ['.ab1', '.abi']:
+                from src.utils.file_handler import FileHandler
+                handler = FileHandler()
+                for seq_info in handler.read_fasta_file_iter(file_path):
+                    content = seq_info['sequence']
+                    break 
+            else:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+            
+            if not content:
+                raise ValueError("无法从文件中提取有效序列或内容为空")
+
+            safe_content = json.dumps(content)
+            safe_path = json.dumps(file_path)
+            
+            js_code = f"if(window.app) window.app.handleFileLoaded({safe_content}, '{file_type}', {safe_path});"
+            self.web_view.page().runJavaScript(js_code)
+            self.logger.info(f"Injected {file_type} file content to JS (Size: {len(content)})")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to read file {file_path}: {e}")
+            QMessageBox.warning(self, "操作错误", f"无法处理所选文件:\n{str(e)}")
 
     def run_tree_analysis(self, mode="standard"):
         """

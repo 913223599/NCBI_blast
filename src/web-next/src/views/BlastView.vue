@@ -167,23 +167,23 @@ function launchBlast(): void {
     return
   }
   try {
-    // 决定默认任务名称（含时间戳），避免在 Windows 上出现非法字符（/ 和 :）
-    const now = new Date()
-    const timeStr = `${now.getMonth() + 1}-${now.getDate()} ${String(now.getHours()).padStart(2, '0')}.${String(now.getMinutes()).padStart(2, '0')}`
+    // 统一使用时间戳命名
+    const generatedTaskName = getFormattedTimestamp()
 
-    let baseName = '手动输入比对'
-    if (blast.inputMode === 'file' && blast.files.length) {
-      baseName = blast.files[0]?.split(/[/\\]/).pop() ?? '文件比对'
-    }
-    const generatedTaskName = `${baseName} [${timeStr}]`
-
-    // 构造请求参数
+    // 构造请求参数，映射前端 UI 变量名到后端 Engine/Executor 期望的参数名
     const payload = JSON.stringify({
       task_name: generatedTaskName,
       mode: blast.inputMode,
       files: blast.files,
       query: blast.queryText,
-      ...blast.params
+      program: blast.params.program,
+      database: blast.params.database,
+      evalue: blast.params.evalue,
+      hitlist_size: blast.params.maxHits,
+      matrix_name: blast.params.matrix,
+      gap_open: blast.params.gapOpen,
+      gap_extend: blast.params.gapExtend,
+      filter: blast.params.filterLowComplexity
     })
 
     // 调用桥接
