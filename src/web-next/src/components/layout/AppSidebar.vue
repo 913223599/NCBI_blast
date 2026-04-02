@@ -20,7 +20,6 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: 'dashboard', label: '仪表盘', icon: 'dashboard', route: '/', category: '主要' },
-  { id: 'studio', label: '节点工作台', icon: 'studio', route: '/studio', category: '分析工具' },
   { id: 'blast', label: 'BLAST 分析', icon: 'blast', route: '/blast', category: '分析工具' },
   { id: 'tree', label: '进化树', icon: 'tree', route: '/tree', category: '分析工具' },
   { id: 'settings', label: '设置', icon: 'settings', route: '/settings', category: '系统' },
@@ -65,14 +64,6 @@ function isActive(item: NavItem): boolean {
               <rect x="14" y="3" width="7" height="7" />
               <rect x="14" y="14" width="7" height="7" />
               <rect x="3" y="14" width="7" height="7" />
-            </template>
-            <!-- Studio -->
-            <template v-else-if="item.icon === 'studio'">
-              <circle cx="18" cy="5" r="3" />
-              <circle cx="6" cy="12" r="3" />
-              <circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-              <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
             </template>
             <!-- BLAST -->
             <template v-else-if="item.icon === 'blast'">

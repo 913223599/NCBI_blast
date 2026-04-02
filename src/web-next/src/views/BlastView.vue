@@ -199,6 +199,10 @@ function launchBlast(): void {
             startTime: new Date().toISOString()
           })
 
+          // 提交后立即清空待处理列表及输入框，准备下一次输入
+          blast.clearFiles()
+          blast.queryText = ''
+
           appStore.showNotification('BLAST 任务已提交并开始执行', 'success')
           blast.historyVisible = true
           startPolling(res.task_id)
@@ -333,7 +337,6 @@ onMounted(() => {
             // 清理并重新注入
             blast.tasks = []
             pastTasks.forEach(t => {
-              const params = typeof t.params === 'string' ? JSON.parse(t.params) : (t.params || {})
               const timeLabel = getFormattedTimestamp(t.start_time || new Date())
               blast.tasks.push({
                 taskId: t.task_id,

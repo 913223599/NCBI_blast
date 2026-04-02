@@ -827,15 +827,17 @@ class DnDWebEngineView(QWebEngineView):
                         if not ok: return []
                         password = pwd
                 
-                # 提取到临时文件夹
-                temp_root = os.path.join(tempfile.gettempdir(), f"blast_pro_drop_extracted_{os.getpid()}")
-                if not os.path.exists(temp_root):
-                    os.makedirs(temp_root)
+                # [FIX] 使用带时间戳或进程 ID 的唯一子目录，防止多 ZIP 分拣时文件名冲突
+                project_root = Path(__file__).resolve().parent.parent.parent.parent
+                staging_id = f"staged_{datetime.datetime.now().strftime('%H%M%S')}_{os.getpid()}"
+                temp_root = project_root / "results" / "extracted" / staging_id
+                if not temp_root.exists():
+                    temp_root.mkdir(parents=True, exist_ok=True)
                 
                 pwd_bytes = password.encode() if password else None
                 for f_name in seq_files:
                     try:
-                        out_path = zf.extract(f_name, path=temp_root, pwd=pwd_bytes)
+                        out_path = zf.extract(f_name, path=str(temp_root), pwd=pwd_bytes)
                         extracted_results.append(out_path)
                     except:
                         pass
@@ -1042,17 +1044,19 @@ class WebContainer(QWidget):
                                     except:
                                         QMessageBox.warning(self, "密码错误", "输入的密码不正确，请重新输入。")
                         
-                        # 提取到临时文件夹
-                        temp_root = os.path.join(tempfile.gettempdir(), f"ncbi_blast_extracted_{os.getpid()}")
-                        if not os.path.exists(temp_root):
-                            os.makedirs(temp_root)
+                        # [FIX] 使用带时间戳或进程 ID 的唯一子目录，防止多 ZIP 分拣时文件名冲突
+                        project_root = Path(__file__).resolve().parent.parent.parent.parent
+                        staging_id = f"staged_{datetime.datetime.now().strftime('%H%M%S')}_{os.getpid()}"
+                        temp_root = project_root / "results" / "extracted" / staging_id
+                        if not temp_root.exists():
+                            temp_root.mkdir(parents=True, exist_ok=True)
                         
                         pwd_bytes = password.encode() if password else None
                         injected_count = 0
                         
                         for f_name in seq_files:
                             try:
-                                out_path = zf.extract(f_name, path=temp_root, pwd=pwd_bytes)
+                                out_path = zf.extract(f_name, path=str(temp_root), pwd=pwd_bytes)
                                 
                                 # 处理提取出的文件内容
                                 inner_ext = Path(out_path).suffix.lower()

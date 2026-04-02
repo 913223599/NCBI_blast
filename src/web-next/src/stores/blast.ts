@@ -113,6 +113,7 @@ export const useBlastStore = defineStore('blast', () => {
     function addTask(task: BlastTask): void {
         tasks.value.unshift(task)
         activeTaskId.value = task.taskId
+        results.value = [] // 切换到新任务时清空旧结果，为流式更新腾位
     }
 
     function updateTaskStatus(taskId: string, status: BlastTask['status'], progress?: number): void {

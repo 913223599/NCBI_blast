@@ -6,6 +6,7 @@ import os
 import shutil
 import queue
 import time
+import re
 from enum import Enum, auto
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -290,7 +291,11 @@ class BlastManager:
 
     def create_task(self, params: Dict[str, Any], priority: int = 10) -> str:
         """Create and start a new BLAST task."""
-        task_id = params.get("task_name") or f"blast_{datetime.now().strftime('%m%d_%H%M%S')}"
+        raw_name = params.get("task_name") or f"blast_{datetime.now().strftime('%m%d_%H%M%S')}"
+        
+        # [FIX] Sanitize task_id to remove illegal filesystem characters (especially ':' on Windows)
+        # These appear when using timestamps as titles
+        task_id = re.sub(r'[\\/:*?"<>|]', '_', raw_name)
         
         # Ensure unique task ID (Check Enum status)
         if task_id in self.tasks and self.tasks[task_id].status == TaskStatus.RUNNING:
@@ -313,13 +318,42 @@ class BlastManager:
             task.transition_to(TaskStatus.RUNNING)
             self.store.save_task(task)
 
+            # [FIX] 设置任务独立的序列存储目录，将分拣文件归位，便于按任务管理和清理
+            task_dir = self.results_dir / task.task_id
+            seq_storage = task_dir / "sequences"
+            seq_storage.mkdir(parents=True, exist_ok=True)
+
             # Setup Sequences
             from src.utils.file_handler import FileHandler
+            import shutil
             fh = FileHandler()
             sequences = []
             
-            # Extract from files
+            # 处理选中的文件
+            final_file_paths = []
             for f_path in task.params.get("files", []):
+                p = Path(f_path)
+                # 识别是否属于“分拣暂存区”的文件
+                if "extracted" in p.parts:
+                    # 将分拣出的临时文件迁移到当前任务的专属目录
+                    dest_path = seq_storage / p.name
+                    try:
+                        # 如果目标已存在（可能有同名文件），增加后缀防止覆盖
+                        if dest_path.exists():
+                           dest_path = seq_storage / f"{p.stem}_{int(time.time())}{p.suffix}"
+                        shutil.move(str(p), str(dest_path))
+                        final_file_paths.append(str(dest_path))
+                    except Exception as e:
+                        self.logger.warning(f"Failed to migrate extracted file {p.name}: {e}. Using original path.")
+                        final_file_paths.append(f_path)
+                else:
+                    final_file_paths.append(f_path)
+            
+            # 更新 Task Params 中的文件路径，确保持久化后的 params.json 指向归位后的文件
+            task.params["files"] = final_file_paths
+
+            # 提取序列内容
+            for f_path in final_file_paths:
                 for seq in fh.read_fasta_file_iter(f_path):
                     sequences.append(seq)
             

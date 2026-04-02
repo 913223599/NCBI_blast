@@ -13,10 +13,10 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '仪表盘', icon: 'dashboard' }
     },
     {
-        path: '/studio',
-        name: 'studio',
-        component: () => import('../views/StudioView.vue'),
-        meta: { title: '节点工作台', icon: 'studio' }
+        path: '/',
+        name: 'dashboard',
+        component: () => import('../views/DashboardView.vue'),
+        meta: { title: '仪表盘', icon: 'dashboard' }
     },
     {
         path: '/blast',

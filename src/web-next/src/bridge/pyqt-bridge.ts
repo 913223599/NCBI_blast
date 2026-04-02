@@ -42,10 +42,6 @@ export interface PyBridge {
     request_tree_analysis(mode: string): void
     request_tree_reroot(nodeId: string): void
 
-    /* 工作流 */
-    run_workflow(topologyJson: string): void
-    run_workflow_node(nodeId: string, inputPath: string, paramsJson: string): void
-
     /* 配置 */
     get_ui_translations(): void
     get_ui_language(): void
@@ -54,13 +50,8 @@ export interface PyBridge {
     save_api_key(service: string, key: string): void
     save_selected_model(modelKey: string, callback?: (res: boolean) => void): void
     get_selected_model(callback?: (res: string) => void): void
-    get_tools_metadata(callback?: (jsonStr: string) => void): void
 
-    /* 工作台拓扑 */
-    save_topology(topologyJson: string): void
-    load_topology(): void
-
-    /* 翻译与词典 */
+    /* 历史记录 */
     translate_text(text: string, category: string, callback?: (res: string) => void): void
     search_dictionary(query: string, callback?: (res: string) => void): void
     save_dictionary_term(english: string, chinese: string, category: string, callback?: (res: boolean) => void): void
