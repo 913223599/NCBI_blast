@@ -155,8 +155,12 @@ function saveLanguage(): void {
 
 /* -------- 词典管理逻辑 -------- */
 function loadDictionary(): void {
+  // 增加默认限制，避免万级词库一次性加载导致 Vue 渲染假死
   getBridge().get_all_dictionary_terms((termsStr: string) => {
-    try { dictResults.value = JSON.parse(termsStr) } catch (e) { }
+    try { 
+      const terms = JSON.parse(termsStr)
+      dictResults.value = Array.isArray(terms) ? terms.slice(0, 100) : [] 
+    } catch (e) { }
   })
 }
 

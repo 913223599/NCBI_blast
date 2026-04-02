@@ -13,6 +13,70 @@ class TranslationDataManager:
     负责管理翻译数据的加载、存储和检索 - SQLite 后端
     """
 
+    def preload(self):
+        """
+        [启动优化] 在 GUI 启动前执行预加载，并在控制台显示进度
+        """
+        print(f"\n[1/2] 正在同步生物医药翻译词条到 SQLite 数据库...", flush=True)
+        self._init_db()
+        self._check_and_migrate_with_progress()
+        print(f"[2/2] 词库加载完毕。共加载了 {self._get_count()} 条翻译。")
+
+    def _check_and_migrate_with_progress(self):
+        """
+        带进度显示的迁移逻辑
+        """
+        if self._get_count() > 0:
+            return
+
+        csv_files = [
+            self.project_root / "translation_data.csv",
+            self.project_root / "predefined_terms.csv"
+        ]
+        
+        total_files = sum(1 for f in csv_files if f.exists())
+        if total_files == 0: return
+
+        processed_files = 0
+        migrated_count = 0
+        from src.utils.translation.term_extractor import TermExtractor
+        extractor = TermExtractor()
+
+        for csv_file in csv_files:
+            if csv_file.exists():
+                processed_files += 1
+                try:
+                    # 预读总行数以显示进度
+                    with open(csv_file, 'r', encoding='utf-8') as f:
+                        line_count = sum(1 for _ in f) - 1 # exclude header
+                    
+                    with open(csv_file, 'r', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        current_row = 0
+                        for row in reader:
+                            current_row += 1
+                            english = row.get('english', '').strip()
+                            chinese = row.get('chinese', '').strip()
+                            category = row.get('category', 'other').strip() or 'other'
+                            
+                            if english and chinese:
+                                if self._insert_if_not_exists(english, chinese, category, "migration"):
+                                    migrated_count += 1
+                            
+                            # 每 100 行显式一次进度，避免性能损耗
+                            if current_row % 100 == 0:
+                                pct = int((current_row / line_count) * 100)
+                                sys.stdout.write(f"\r -> [{processed_files}/{total_files}] 正在迁移 {csv_file.name}: {pct}%")
+                                sys.stdout.flush()
+                        
+                        sys.stdout.write(f"\r -> [{processed_files}/{total_files}] 正在迁移 {csv_file.name}: 100% [完成]\n")
+                        sys.stdout.flush()
+                except Exception as e:
+                    logging.error(f"迁移文件 {csv_file.name} 时出错: {e}")
+        
+        if migrated_count > 0:
+            logging.info(f"数据迁移完成，共导入 {migrated_count} 条记录")
+
     def __init__(self):
         """
         初始化翻译数据管理器

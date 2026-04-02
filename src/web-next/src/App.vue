@@ -57,6 +57,13 @@ onMounted(async () => {
       } catch (e) {
         console.error('Failed to parse single result stream', e)
       }
+    } else if (type === 'translation_done') {
+      try {
+        const dataObj = typeof data === 'string' ? JSON.parse(data) : data
+        blastStore.updateTranslation(dataObj.original, dataObj.translated)
+      } catch (e) {
+        console.error('Failed to parse translation update', e)
+      }
     }
   })
 
@@ -97,7 +104,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  /* transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1); */
 }
 
 .main-content {

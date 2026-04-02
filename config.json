@@ -30,7 +30,7 @@
     "use_cache": true,
     "thread_count": 1,
     "request_timeout": 9,
-    "ai_model": "tongyi-xiaomi-analysis-pro"
+    "ai_model": "qwen3-max-2026-01-23"
   },
   "setup_completed": true,
   "blast_bin_path": "C:\\Program Files\\NCBI\\blast-2.16.0+\\bin",

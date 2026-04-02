@@ -14,7 +14,6 @@ from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 # BLAST Logic
 from src.blast.manager import get_blast_manager
 from src.gui.workers.tree_worker_thread import TreeWorker
-# from src.gui.workers.workflow_worker import WorkflowWorker (REMOVED)
 from PyQt6.QtWidgets import QFileDialog
 
 class WebBridge(QObject):
@@ -42,11 +41,31 @@ class WebBridge(QObject):
 
         # Connect to BlastManager real-time result stream
         self.blast_manager.result_listeners.append(self._broadcast_result)
+        
+        # Connect bridge signal to actual JS execution
+        self.blast_event.connect(self._on_bridge_event_emitted)
+        
+        # Async Translation Queue
+        import threading
+        self._ai_trans_lock = threading.Lock()
+        self._ai_trans_in_flight = set()  # Track items currently being translated by AI
+
+    def _on_bridge_event_emitted(self, event_type, json_data):
+        """Relay signals from Python to JS global handler in the WebView"""
+        try:
+            # Escape strings for safe JS injection
+            safe_type = json.dumps(event_type)
+            # data is already json_data string
+            js_code = f"if(window.handleBridgeEvent) window.handleBridgeEvent({safe_type}, {json_data});"
+            self.container.web_view.page().runJavaScript(js_code)
+        except Exception as e:
+            self.logger.error(f"Failed to relay bridge event: {e}")
 
     def _broadcast_result(self, task_id, data):
-        """Internal callback to push single result to JS (with consensus logic)"""
+        """Internal callback to push single result to JS (with top-50/98% consensus logic)"""
         if 'csv_file' in data and os.path.exists(data['csv_file']):
-            top_hits = self._parse_blast_csv(data['csv_file'], limit=10)
+            # 根据需求，扩大到前 50 个结果进行 98% 相似度一致性分析
+            top_hits = self._parse_blast_csv(data['csv_file'], limit=50)
             best_hit = self._select_consensus_hit(top_hits)
             data['data'] = [best_hit] if best_hit else []
         
@@ -132,12 +151,44 @@ class WebBridge(QObject):
             return False
 
     @pyqtSlot(str)
-    @pyqtSlot()
-    def request_tree_analysis(self, mode="standard"):
-        """Handle request to run tree analysis with specific mode"""
-        self.logger.info(f"JS requested tree analysis (mode: {mode})")
-        self.container.run_tree_analysis(mode=mode)
+    def save_tree_sequences(self, fasta_content):
+        """保存手动输入的序列到工作空间，支持 Tree Station 2.0"""
+        try:
+            workspace = Path("results/tree_workspace")
+            workspace.mkdir(parents=True, exist_ok=True)
+            file_path = workspace / "user_input.fasta"
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(fasta_content)
+            self.logger.info(f"User sequences saved to {file_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to save sequences: {e}")
+            return False
 
+    @pyqtSlot(str)
+    def request_tree_analysis(self, params_json):
+        """Handle tree analysis request with params"""
+        self.logger.info(f"JS requested tree analysis: {params_json}")
+        try:
+            params = json.loads(params_json)
+            # Pass full params to container/worker
+            self.container.run_tree_analysis(params=params)
+        except Exception as e:
+            self.logger.error(f"Failed to start tree: {e}")
+            self.container.web_view.page().runJavaScript(f"if(window.app) window.app.showNotification('启动分析失败: {str(e)}', 'error');")
+
+    @pyqtSlot(result=str)
+    def list_tree_sequences(self):
+        """List files in the tree workspace"""
+        try:
+            workspace = Path("results/tree_workspace")
+            if not workspace.exists():
+                return "[]"
+            files = [f.name for f in workspace.glob("*.fasta")]
+            return json.dumps(files)
+        except Exception as e:
+            self.logger.error(f"Failed to list sequences: {e}")
+            return "[]"
 
     @pyqtSlot(str)
     def request_tree_reroot(self, node_id):
@@ -311,23 +362,82 @@ class WebBridge(QObject):
 
     @pyqtSlot(str, str, result=str)
     def translate_text(self, text, category='species'):
-        """Translate text using BiologyTranslator"""
+        """
+        Enhanced Translation: Individual item processing with ASYNC AI fallback.
+        Local hits are returned instantly. New terms are queued for background AI.
+        """
         from src.utils.translation.biology_translator import get_global_biology_translator
+        import re
+        import threading
         try:
-            # Normalize input
             text = text.strip()
             if not text: return ""
             
-            self.logger.info(f"Bridge translating: [{text}] (cat={category})")
-            
             translator = get_global_biology_translator()
-            result = translator.translate_text(text, category=category)
             
-            self.logger.info(f"Bridge result: [{text}] -> [{result}]")
-            return result if result else text
+            # Helper to process a single term
+            def process_term(name):
+                # 1. 尝试纯本地查询 (不阻塞)
+                local_res = translator.translate_text(name, category=category, use_ai_override=False)
+                
+                # 如果本地库有结果 (包含 [本地] 标记)
+                if local_res and local_res != name and "[本地]" in local_res:
+                    return local_res
+                
+                # 2. 如果本地未命中，且 AI 已启用，则送入后台队列
+                if translator.use_ai:
+                    with self._ai_trans_lock:
+                        if name not in self._ai_trans_in_flight:
+                            self._ai_trans_in_flight.add(name)
+                            # 启动异步线程逐个处理 AI 请求
+                            threading.Thread(target=self._async_ai_worker, 
+                                           args=(name, category), 
+                                           daemon=True).start()
+                    return f"{name} (AI翻译中...)"
+                
+                return name
+
+            # --- Pattern: Name(XX%) ---
+            pattern = r"([^,(]+)\s*\((?:\d{1,3}%)\)"
+            segments = re.findall(pattern, text)
+            
+            if segments and "(" in text and "%" in text:
+                def translate_match(match):
+                    full_segment = match.group(0)
+                    name_part = match.group(1).strip()
+                    res = process_term(name_part)
+                    return full_segment.replace(name_part, res)
+                
+                result = re.sub(pattern, translate_match, text)
+                return result
+            
+            # --- Case 2: Simple Name ---
+            return process_term(text)
+            
         except Exception as e:
             self.logger.error(f"Translation bridge error: {e}")
             return text
+
+    def _async_ai_worker(self, name, category):
+        """后台 AI 翻译 worker，完成后通过信号通知前端"""
+        from src.utils.translation.biology_translator import get_global_biology_translator
+        try:
+            translator = get_global_biology_translator()
+            # 执行真正的 AI 翻译 (同步阻塞，但在后台线程)
+            ai_res = translator.translate_text(name, category=category, use_ai_override=True)
+            
+            # 翻译完成后告知 JS 刷新对应项
+            if ai_res and ai_res != name:
+                self.blast_event.emit("translation_done", json.dumps({
+                    "original": name,
+                    "translated": ai_res
+                }))
+        except Exception as e:
+            self.logger.error(f"Async AI Translation failed for {name}: {e}")
+        finally:
+            with self._ai_trans_lock:
+                if name in self._ai_trans_in_flight:
+                    self._ai_trans_in_flight.remove(name)
 
     @pyqtSlot(str, result=str)
     def search_dictionary(self, query):
@@ -530,12 +640,12 @@ class WebBridge(QObject):
 
     @pyqtSlot(str, result=str)
     def get_task_results(self, task_id):
-        """Fetch results for a task, using consensus-based best hit selection"""
+        """Fetch results for a task, using consensus-based best hit selection (Top 50 / 98%)"""
         results = self.blast_manager.get_task_results(task_id)
         for res in results:
             if 'csv_file' in res and os.path.exists(res['csv_file']):
-                # Read top 10 hits for consensus analysis
-                top_hits = self._parse_blast_csv(res['csv_file'], limit=10)
+                # Read top 50 hits for consensus analysis
+                top_hits = self._parse_blast_csv(res['csv_file'], limit=50)
                 best_hit = self._select_consensus_hit(top_hits)
                 res['data'] = [best_hit] if best_hit else []
         return json.dumps(results)
@@ -543,14 +653,30 @@ class WebBridge(QObject):
     def _select_consensus_hit(self, hits):
         """Select the best representative hit using majority voting on species.
         
-        Instead of blindly trusting the first result (which might be a generic
-        'bacterium'), we analyze the top N hits and pick the species that appears
-        most frequently. This gives a much more reliable identification.
+        Updated Criteria:
+        - Only consider hits within the provided set (Top 50 by caller).
+        - Filter for Identity >= 98%.
+        - Select species that appears most frequently in this pool.
         """
         if not hits:
             return None
-        if len(hits) == 1:
-            return hits[0]
+            
+        # 1. 过滤相似度在 98% 以上的命中数据
+        high_identity_hits = []
+        for hit in hits:
+            sim_str = str(hit.get('similarity', '0%')).replace('%', '').strip()
+            try:
+                sim_val = float(sim_str)
+                if sim_val >= 98.0:
+                    high_identity_hits.append(hit)
+            except (ValueError, TypeError):
+                continue
+        
+        # 2. 如果有 98% 以上的数据，则对这部分数据进行投票；否则回退到全部数据
+        target_hits = high_identity_hits if high_identity_hits else hits
+        
+        if len(target_hits) == 1:
+            return target_hits[0]
         
         from collections import Counter
         
@@ -561,25 +687,41 @@ class WebBridge(QObject):
         species_counter = Counter()
         species_to_hit = {}  # Map species -> best (first seen) hit with that species
         
-        for hit in hits:
+        for hit in target_hits:
             species = (hit.get('species') or '').strip()
             species_lower = species.lower()
             
-            if species_lower not in generic_names:
+            if species_lower and species_lower not in generic_names:
                 species_counter[species] += 1
                 if species not in species_to_hit:
                     species_to_hit[species] = hit
         
         if not species_counter:
-            # All hits are generic, just return the first one
-            return hits[0]
+            # 所有命中项均为通用名称或过滤后为空，直接返回目标集的第一项
+            return target_hits[0]
+            
+        # 3. 统计各物种出现频率百分比
+        total_valid = sum(species_counter.values())
+        top_entries = species_counter.most_common(5) # 取出现频率最高的前 5 个物种
         
-        # Pick the most common species
-        consensus_species, count = species_counter.most_common(1)[0]
+        # 格式化输出: "物种A(60%), 物种B(30%)"
+        prob_parts = []
+        for name, count in top_entries:
+            pct = (count / total_valid) * 100
+            prob_parts.append(f"{name}({pct:.0f}%)")
+            
+        probability_str = ", ".join(prob_parts)
+        
+        # 4. 选取出现频率最高的物种作为代表
+        consensus_species = top_entries[0][0]
+        best_hit = dict(species_to_hit[consensus_species]) # 获取该物种最好的比对项副本
+        best_hit['species'] = probability_str # 注入概率分布字符串
+        
         self.logger.info(
-            f"Consensus hit: '{consensus_species}' appeared {count}/{len(hits)} times"
+            f"Consensus Probabilities (Top 50/98%): {probability_str} "
+            f"on high_identity_hits={bool(high_identity_hits)}"
         )
-        return species_to_hit[consensus_species]
+        return best_hit
 
     @pyqtSlot(str, result=str)
     def get_detailed_blast_results(self, csv_file):
@@ -1101,12 +1243,27 @@ class WebContainer(QWidget):
             self.logger.error(f"Failed to read file {file_path}: {e}")
             QMessageBox.warning(self, "操作错误", f"无法处理所选文件:\n{str(e)}")
 
-    def run_tree_analysis(self, mode="standard"):
+    def run_tree_analysis(self, params=None):
         """
-        Open file dialog (supports multi-select), merge if needed, run TreeWorker.
+        Run tree analysis with optional parameters and sequence source logic.
         """
-        # 1. Allow multi-select and .seq/.txt files
-        paths, _ = QFileDialog.getOpenFileNames(self, "Select Sequences for Tree", "", "Sequence Files (*.fasta *.fa *.fna *.seq *.txt);;All Files (*.*)")
+        params = params or {"mode": "standard"}
+        mode = params.get("mode", "standard")
+        
+        # 1. Determine Source Paths
+        paths = []
+        
+        # Check if we have files in the workspace (results/tree_workspace)
+        workspace = Path("results/tree_workspace")
+        if workspace.exists():
+            paths = [str(f) for f in workspace.glob("*.fasta")]
+            self.logger.info(f"Auto-detected {len(paths)} sequences in tree workspace.")
+            
+        # If workspace is empty, fallback to File Dialog
+        if not paths:
+            self.logger.info("Workspace empty, showing file dialog...")
+            paths, _ = QFileDialog.getOpenFileNames(self, "Select Sequences for Tree", "", 
+                                                 "Sequence Files (*.fasta *.fa *.fna *.seq *.txt);;All Files (*.*)")
         
         if not paths:
             return
@@ -1116,11 +1273,7 @@ class WebContainer(QWidget):
         # 2. If multiple files OR single non-fasta file, we merge/convert
         if len(paths) > 1 or (len(paths) == 1 and not paths[0].lower().endswith(('.fasta', '.fa', '.fna'))):
             try:
-                # Create a named temp file that persists so worker can read it
-                # We put it in result dir or temp dir
                 import tempfile
-                
-                # Use a specific prefix to identify merged files
                 with tempfile.NamedTemporaryFile(mode='w', suffix='_merged.fasta', delete=False, encoding='utf-8') as tmp:
                     final_path = tmp.name
                     self.logger.info(f"Merging {len(paths)} files into temporary FASTA: {final_path}")
@@ -1131,16 +1284,10 @@ class WebContainer(QWidget):
                             content = src.read().strip()
                             if not content: continue
                             
-                            # Heuristic: If content starts with >, assume it's already FASTA fragment
-                            # Otherwise, assume raw sequence
                             header = p_obj.stem
-                            
                             if content.startswith('>'):
-                                # Write as is, ensure newline
                                 tmp.write(f"{content}\n")
                             else:
-                                # Raw sequence, wrap it
-                                # Remove all whitespace/newlines from sequence
                                 clean_seq = "".join(content.split())
                                 tmp.write(f">{header}\n{clean_seq}\n")
                                 
@@ -1148,14 +1295,11 @@ class WebContainer(QWidget):
                 QMessageBox.critical(self, "Merge Error", f"Failed to merge sequence files:\n{str(e)}")
                 return
             
-        self.logger.info(f"Starting tree analysis for {final_path}")
-        # Notify JS that we started with VISIBLE loading state
+        self.logger.info(f"Starting tree analysis ({mode}) for {final_path}")
         self.web_view.page().runJavaScript("if(window.showLoading) window.showLoading('正在构建进化树...');")
-        self.web_view.page().runJavaScript("console.log('[Py] Starting tree analysis...');")
         
-        # Create worker
-        # Store worker in self to prevent garbage collection
-        self.tree_worker = TreeWorker(final_path, mode=mode)
+        # Create worker with params
+        self.tree_worker = TreeWorker(final_path, params=params)
         self.tree_worker.finished.connect(self.on_tree_finished)
         self.tree_worker.error.connect(self.on_tree_error)
         self.tree_worker.progress.connect(self.on_tree_progress)
@@ -1166,9 +1310,9 @@ class WebContainer(QWidget):
         try:
             percent = data.get("progress", 0)
             msg = data.get("message", "")
+            safe_msg = json.dumps(msg)
             # Call JS update
-            # We use a try-catch block in JS to be safe
-            js_code = f"if(window.updateLoading) window.updateLoading({percent}, '{msg}');"
+            js_code = f"if(window.updateLoading) window.updateLoading({percent}, {safe_msg});"
             self.web_view.page().runJavaScript(js_code)
         except Exception as e:
             self.logger.error(f"Error updating progress: {e}")
@@ -1188,23 +1332,8 @@ class WebContainer(QWidget):
                 # Escape JSON
                 safe_newick = json.dumps(newick_content)
                 
-                # CRITICAL FIX: Target the iframe, not the main window
-                js_code = f"""
-                (function() {{
-                    var iframe = document.querySelector("#tree-view iframe");
-                    // If we are INSIDE the iframe (which matches tree_explorer structure), window.loadTree exists directly
-                    if (window.loadTree) {{
-                        console.log("[Py->JS] Loading tree directly in current view...");
-                        window.loadTree({safe_newick});
-                    }} 
-                    else if (iframe && iframe.contentWindow && iframe.contentWindow.loadTree) {{
-                        console.log("[Py->JS] Injecting tree data into child iframe...");
-                        iframe.contentWindow.loadTree({safe_newick});
-                    }} else {{
-                        console.error("[Py->JS] Failed to find target window for loadTree.");
-                    }}
-                }})();
-                """
+                # 统一使用 Tree Station 2.0 的加载协议调用
+                js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick});"
                 self.web_view.page().runJavaScript(js_code)
                 self.logger.info(f"Injected tree data ({len(newick_content)} bytes)")
             except Exception as e:
@@ -1237,16 +1366,20 @@ class WebContainer(QWidget):
              
              import json
              safe_newick = json.dumps(content)
-             self.web_view.page().runJavaScript(f"if(window.loadTree) window.loadTree({safe_newick}); if(window.hideLoading) window.hideLoading();")
+             # 统一命名协议：使用 window.treeView.loadNewick
+             js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick});"
+             self.web_view.page().runJavaScript(js_code)
              
         except Exception as e:
              self.logger.error(f"Reroot failed: {e}")
-             self.web_view.page().runJavaScript(f"if(window.hideLoading) window.hideLoading(); alert('重定根失败: {str(e)}');")
+             safe_err = json.dumps(str(e))
+             self.web_view.page().runJavaScript(f"if(window.app) window.app.showNotification('重定根失败: ' + {safe_err}, 'error');")
 
 
 
 
     def on_tree_error(self, err_msg):
-        self.web_view.page().runJavaScript("if(window.hideLoading) window.hideLoading();")
         self.logger.error(f"Tree analysis error: {err_msg}")
-        self.web_view.page().runJavaScript(f"console.error('Tree analysis failed: {err_msg}'); alert('建树过程出错: {err_msg}');")
+        safe_err = json.dumps(str(err_msg))
+        js_code = f"if(window.treeView) window.treeView.setLoading(false); if(window.app) window.app.showNotification('建树失败: ' + {safe_err}, 'error');"
+        self.web_view.page().runJavaScript(js_code)

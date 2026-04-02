@@ -15,9 +15,13 @@ export class HybridRenderer {
     isDragging = false
     startX = 0
     startY = 0
+    
+    // Callbacks for interactivity
+    onNodeClick: ((node: TreeNode, event: MouseEvent) => void) | null = null
 
-    // Resize Observer
+    // Resize Observer & Throttling
     resizeObserver: ResizeObserver | null = null
+    resizeTimeout: any = null
 
     constructor() { }
 
@@ -116,25 +120,36 @@ export class HybridRenderer {
     setupResizeObserver() {
         if (typeof ResizeObserver !== 'undefined') {
             this.resizeObserver = new ResizeObserver(() => {
-                if (this.container && this.canvas && this.ctx) {
-                    const rect = this.container.getBoundingClientRect()
-                    const dpr = window.devicePixelRatio || 1
-
-                    // Set display size (css properties)
-                    this.canvas.style.width = `${rect.width}px`
-                    this.canvas.style.height = `${rect.height}px`
-
-                    // Set actual size in memory (scaled to account for extra pixel density)
-                    this.canvas.width = rect.width * dpr
-                    this.canvas.height = rect.height * dpr
-
-                    // Normalize coordinate system to use css pixels
-                    this.ctx.scale(dpr, dpr)
-
-                    // Request redraw via event or callback if needed
-                }
+                // Throttle resize events to prevent lag during sidebar animation
+                if (this.resizeTimeout) return
+                
+                this.resizeTimeout = setTimeout(() => {
+                    this.handleResizeInternal()
+                    this.resizeTimeout = null
+                }, 16) // ~60fps floor
             })
             if (this.container) this.resizeObserver.observe(this.container)
+        }
+    }
+
+    private handleResizeInternal() {
+        if (this.container && this.canvas && this.ctx) {
+            const rect = this.container.getBoundingClientRect()
+            const dpr = window.devicePixelRatio || 1
+
+            // Set display size
+            this.canvas.style.width = `${rect.width}px`
+            this.canvas.style.height = `${rect.height}px`
+
+            // Set actual size
+            this.canvas.width = rect.width * dpr
+            this.canvas.height = rect.height * dpr
+
+            // Normalize
+            this.ctx.scale(dpr, dpr)
+            
+            // If the tree was already rendered, we might need a signal to re-render.
+            // For now, most settings watchers will handle it.
         }
     }
 
@@ -175,7 +190,10 @@ export class HybridRenderer {
         this.drawEdgesRecursive(model.root, settings)
         this.ctx.stroke()
 
-        // 4. Draw Labels (SVG)
+        // 4. Draw Labels (SVG) with Performance Optimization
+        // 4.1 Optimize: Debounce/Throttle text updates if zooming fast
+        const isZoomingFast = Math.abs(this.matrix.a - 1) > 0.001; // Simplified check
+        
         // Clear SVG
         while (this.g.firstChild) {
             this.g.removeChild(this.g.firstChild)
@@ -185,7 +203,16 @@ export class HybridRenderer {
         this.g.setAttribute("transform", `matrix(${this.matrix.a},${this.matrix.b},${this.matrix.c},${this.matrix.d},${this.matrix.e + ox},${this.matrix.f + oy})`)
 
         if (settings.showLabels) {
-            this.drawLabelsRecursive(model.root, settings)
+            // Level-of-Detail (LOD): If there are too many nodes and we are zoomed out, skip label rendering
+            const totalNodes = (model.root as any).descendants ? (model.root as any).descendants().length : 100;
+            const threshold = 1.0 / this.matrix.a; // inverse scale
+            
+            // Only draw if zoom is high enough OR node count is low
+            if (this.matrix.a > 0.5 || totalNodes < 50) {
+                 const fragment = document.createDocumentFragment();
+                 this.drawLabelsRecursive(model.root, settings, fragment);
+                 this.g.appendChild(fragment);
+            }
         }
     }
 
@@ -216,7 +243,7 @@ export class HybridRenderer {
         })
     }
 
-    private drawLabelsRecursive(node: TreeNode, s: LayoutSettings) {
+    private drawLabelsRecursive(node: TreeNode, s: LayoutSettings, parentElement: Element | DocumentFragment) {
         // SVG Text Logic
         if (node.isLeaf) {
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text")
@@ -229,20 +256,22 @@ export class HybridRenderer {
             text.setAttribute("fill", "#000")
             text.setAttribute("font-size", `${s.fontSize}px`)
             text.setAttribute("font-family", "Arial, sans-serif")
+            text.style.cursor = "pointer"
+            text.style.userSelect = "none"
 
-            if (s.mode === 'circular' && node.angle) {
-                // Rotate text to match angle
-                const deg = (node.angle * 180) / Math.PI
-                // Adjust reading direction
-                const finalDeg = (deg > 90 && deg < 270) ? deg + 180 : deg
-                // text.setAttribute("transform", `rotate(${finalDeg}, ${cx}, ${cy})`)
-                // Fix alignment if flipped
+            // Interaction
+            text.onclick = (e) => {
+                e.stopPropagation()
+                if (this.onNodeClick) this.onNodeClick(node, e)
             }
+            
+            text.onmouseenter = () => { text.setAttribute("fill", "#3b82f6"); text.style.fontWeight = "bold" }
+            text.onmouseleave = () => { text.setAttribute("fill", "#000"); text.style.fontWeight = "normal" }
 
-            this.g?.appendChild(text)
+            parentElement.appendChild(text)
         }
         if (node.children) {
-            node.children.forEach(c => this.drawLabelsRecursive(c, s))
+            node.children.forEach(c => this.drawLabelsRecursive(c, s, parentElement))
         }
     }
 

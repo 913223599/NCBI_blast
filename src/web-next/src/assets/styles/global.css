@@ -21,6 +21,12 @@
     --border-color: #e2e8f0;
     --border-light: #f1f5f9;
 
+    /* 语义化别名 */
+    --primary-color: var(--accent-blue);
+    --success-color: var(--accent-green);
+    --warning-color: var(--accent-orange);
+    --error-color: var(--accent-red);
+
     /* 圆角 */
     --radius-sm: 6px;
     --radius-md: 8px;

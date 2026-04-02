@@ -35,6 +35,7 @@ export interface PyBridge {
     get_task_results(taskId: string, callback?: (res: string) => void): void
     get_all_tasks(callback?: (res: string) => void): void
     delete_single_task(taskId: string): void
+    list_tree_sequences(callback: (res: string) => void): void
     clear_all_history(): void
     rename_task(taskId: string, newName: string): void
 

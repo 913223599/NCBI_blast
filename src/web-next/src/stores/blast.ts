@@ -154,6 +154,21 @@ export const useBlastStore = defineStore('blast', () => {
         }
     }
 
+    function updateTranslation(original: string, translated: string): void {
+        results.value.forEach(hit => {
+            if (hit.speciesName.includes(original)) {
+                if (!hit.translatedName) hit.translatedName = hit.speciesName
+                // 替换原文或之前的 (AI翻译中...) 占位符
+                const targetPattern = original + " (AI翻译中...)"
+                if (hit.translatedName.includes(targetPattern)) {
+                    hit.translatedName = hit.translatedName.replace(targetPattern, translated)
+                } else {
+                    hit.translatedName = hit.translatedName.replace(original, translated)
+                }
+            }
+        })
+    }
+
     function appendSingleResult(resultObj: any): void {
         const taskId = resultObj.task_id
         if (activeTaskId.value !== taskId) return // Only update currently viewed task
@@ -196,6 +211,7 @@ export const useBlastStore = defineStore('blast', () => {
         switchInputMode, addFile, removeFile, clearFiles,
         toggleHistory, addTask, updateTaskStatus,
         setResults, clearHistory, setActiveTask, appendSingleResult,
+        updateTranslation,
         removeTask
     }
 })

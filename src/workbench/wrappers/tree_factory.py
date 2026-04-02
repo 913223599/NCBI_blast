@@ -208,11 +208,19 @@ class TreeFactory(BaseWrapper):
     def make_dist_tree(self, input_dm: Path, output_nwk: Path):
         """Build tree from distance matrix using Biopython (Robust)."""
         try:
+            content = input_dm.read_text()
+            # PRIORITY FIX: If it is an NCBI-format matrix (OBJNUM), use native binaries first
+            # as they are guaranteed to be compatible with statDistTree.exe
+            if content.startswith("OBJNUM"):
+                self.logger.info("Detected NCBI-format DM, using native binaries for tree building...")
+                success = self._make_dist_tree_binary(input_dm, output_nwk)
+                if success: return True
+
             from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
             from Bio import Phylo
             
             # Logic for parsing .dm and building NJ tree
-            name_list, matrix = self._parse_dm_file(input_dm)
+            name_list, matrix = self._parse_dm_content(content)
             dm = DistanceMatrix(name_list, matrix)
             
             constructor = DistanceTreeConstructor()
@@ -232,12 +240,12 @@ class TreeFactory(BaseWrapper):
             self.logger.error(f"Tree construction failed: {e}")
             return self._make_dist_tree_binary(input_dm, output_nwk)
 
-    def _parse_dm_file(self, input_dm: Path):
+    def _parse_dm_content(self, content: str):
         """
         Internal helper to parse both pairwise (6-column) and matrix (OBJNUM) formats.
         Returns (name_list, matrix) where matrix is a lower triangular list of lists.
         """
-        lines = input_dm.read_text().splitlines()
+        lines = content.splitlines()
         if not lines:
             return [], []
 
@@ -247,6 +255,10 @@ class TreeFactory(BaseWrapper):
         else:
             # Format: Pairwise (Legacy)
             return self._parse_pairwise_dm(lines)
+
+    def _parse_dm_file(self, input_dm: Path):
+        """Legacy helper for file path parsing."""
+        return self._parse_dm_content(input_dm.read_text())
 
     def _parse_matrix_dm(self, lines: List[str]):
         names = []
@@ -336,8 +348,12 @@ class TreeFactory(BaseWrapper):
         return name_list, matrix
 
     def tree_stats(self, tree_file: Path):
-        """Get tree statistics using statDistTree.exe."""
-        return self._run_command("statDistTree.exe", [str(tree_file)])
+        """Get tree statistics using statDistTree.exe. Silently handle failures."""
+        try:
+            return self._run_command("statDistTree.exe", [str(tree_file)])
+        except Exception as e:
+            self.logger.warning(f"Optional tree_stats failed (format mismatch): {e}")
+            return None
 
     def tree_reroot(self, input_nwk: Path, node_id: str, output_nwk: Path):
         """Reroot tree at specific node."""

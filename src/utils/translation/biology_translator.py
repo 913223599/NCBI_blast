@@ -56,13 +56,21 @@ class BiologyTranslator:
         self._translation_cache = {}
         self._lock = threading.Lock()  # 线程安全锁
 
-    def translate_text(self, text: str, category: str = 'other') -> str:
+    def translate_text(self, text: str, category: str = 'other', use_ai_override: Optional[bool] = None) -> str:
         """
         翻译整段文本 - 逻辑优化版
         优先顺序: 缓存 -> 规范化后本地数据库 -> 本地数据库 -> AI -> 原文
+        
+        Args:
+            text: 原文
+            category: 分类
+            use_ai_override: 强制指定是否使用 AI（默认使用实例化时的配置）
         """
         if not text:
             return text
+        
+        # 使用覆盖配置或默认配置
+        active_use_ai = use_ai_override if use_ai_override is not None else self.use_ai
             
         # 线程安全的缓存访问
         with self._lock:
@@ -80,7 +88,7 @@ class BiologyTranslator:
             # 传递 category 以优化查询
             local_result = self.translation_data_manager.get_translation(normalized_text, category=category)
             if local_result and local_result != normalized_text:
-                result = f"[本地]{local_result}"
+                result = f"{local_result}"
                 with self._lock:
                     self._translation_cache[original_text] = result
                 return result
@@ -89,13 +97,13 @@ class BiologyTranslator:
         if self.translation_data_manager:
             local_result = self.translation_data_manager.get_translation(text, category=category)
             if local_result and local_result != text:
-                result = f"[本地]{local_result}"
+                result = f"{local_result}"
                 with self._lock:
                     self._translation_cache[original_text] = result
                 return result
 
         # 4. 尝试 AI 翻译 (如果启用且可用)
-        if self.use_ai and self.ai_translator:
+        if active_use_ai and self.ai_translator:
             try:
                 ai_result = self.ai_translator.translate_text(text)
                 if ai_result and ai_result != text:
@@ -174,7 +182,7 @@ class BiologyTranslator:
                 traceback.print_exc()
             # 同时更新内存缓存
             with self._lock:
-                self._translation_cache[original] = f"[本地]{translation}"
+                self._translation_cache[original] = f"{translation}"
 
 
 def get_biology_translator(data_file: str = None, use_ai: bool = True, ai_api_key: str = None, ai_model: str = "deepseek-r1") -> BiologyTranslator:

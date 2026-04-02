@@ -248,27 +248,17 @@ async function translateAll(): Promise<void> {
   const bridge = getBridge()
   let translated = 0
 
-  // Process one at a time to avoid API rate limits
-  for (let idx = 0; idx < blast.results.length; idx++) {
-    const hit = blast.results[idx]
-    if (!hit) continue
-
-    // 1. 翻译物种名称 (加粗部分)
+  // Non-blocking fire-and-forget loop
+  blast.results.forEach((hit) => {
     if (hit.speciesName && !hit.translatedName?.startsWith('[')) {
-      try {
-        await new Promise<void>((resolve) => {
-          bridge.translate_text(hit.speciesName, 'species', (result: string) => {
-            if (result && result !== hit.speciesName) {
-              hit.translatedName = result
-              translated++
-            }
-            resolve()
-          })
-          setTimeout(resolve, 5000)
-        })
-      } catch { }
+      bridge.translate_text(hit.speciesName, 'species', (result: string) => {
+        if (result && result !== hit.speciesName) {
+          hit.translatedName = result
+          translated++
+        }
+      })
     }
-  }
+  })
 
   isTranslating.value = false
   appStore.showNotification(`翻译完成，共翻译 ${translated} 条`, 'success')

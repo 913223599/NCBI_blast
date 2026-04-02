@@ -90,6 +90,7 @@ export function useTree() {
         isLoading,
         error,
         hasTree,
-        nodeCount
+        nodeCount,
+        renderer
     }
 }
