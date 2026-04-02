@@ -246,18 +246,31 @@ function editTerm(term: any): void {
         </div>
 
         <div class="glass-card" style="margin-top: 24px;">
-           <label style="display: block; font-weight: 600; font-size: 0.875rem; margin-bottom: 12px;">模型库管理</label>
-           <div class="model-list">
-              <div v-for="m in aiModels" :key="m.key" class="model-item">
-                <span class="model-key">{{ m.key }}</span>
-                <span class="model-name">{{ m.name }}</span>
-                <button class="btn-delete" @click="deleteModel(m.key)">✕</button>
+           <label style="display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 16px; color: var(--text-primary);">📦 本地 AI 模型库</label>
+           
+           <!-- 模型网格列表 -->
+           <div class="model-grid">
+              <div v-for="m in aiModels" :key="m.key" class="model-card">
+                <div class="model-card-info">
+                  <div class="model-card-name">🤖 {{ m.name }}</div>
+                  <div class="model-card-key">{{ m.key }}</div>
+                </div>
+                <button class="btn-delete-card" @click="deleteModel(m.key)" title="移除模型">✕</button>
+              </div>
+              <div v-if="aiModels.length === 0" class="empty-state-sm">
+                尚未配置任何自定义模型
               </div>
             </div>
-            <div class="add-model-row" style="margin-top: 12px; display: flex; gap: 8px;">
-              <input v-model="newModelKey" class="form-input" style="flex: 2" placeholder="模型标识" />
-              <input v-model="newModelName" class="form-input" style="flex: 1" placeholder="显示名称" />
-              <button class="btn-action" @click="addModel">+ 添加</button>
+
+            <!-- 添加新模型表单 -->
+            <div class="add-model-box">
+              <div class="add-inputs">
+                <input v-model="newModelKey" class="form-input" placeholder="模型标识 (如: qwen-max-0522)" />
+                <input v-model="newModelName" class="form-input" placeholder="显示名称 (如: 通义千问-旗舰版)" />
+              </div>
+              <button class="btn-action-plus" @click="addModel">
+                <span class="plus-icon">+</span> 添加模型
+              </button>
             </div>
         </div>
       </div>
@@ -413,7 +426,40 @@ function editTerm(term: any): void {
 .btn-action { background: white; border: 1px solid var(--accent-blue); color: var(--accent-blue); padding: 6px 14px; border-radius: 6px; cursor: pointer; }
 .btn-delete { background: none; color: var(--text-muted); border: none; cursor: pointer; padding: 4px 8px; }
 .btn-delete:hover { color: var(--accent-red); }
-.btn-icon-link { background: none; border: none; cursor: pointer; font-size: 1rem; padding: 4px; }
+/* 模型库管理优化 */
+.model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.model-card { 
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+  transition: all 0.2s;
+}
+.model-card:hover { border-color: var(--accent-blue); background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+.model-card-info { flex: 1; min-width: 0; }
+.model-card-name { font-weight: 600; font-size: 0.9rem; color: var(--text-primary); margin-bottom: 2px; }
+.model-card-key { font-size: 0.72rem; color: var(--text-muted); font-family: monospace; overflow: hidden; text-overflow: ellipsis; }
+.btn-delete-card { background: none; border: none; font-size: 1rem; color: #cbd5e1; cursor: pointer; padding: 4px; line-height: 1; transition: color 0.2s; }
+.btn-delete-card:hover { color: var(--accent-red); }
+
+.add-model-box { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px dashed #e2e8f0; }
+.add-inputs { display: flex; gap: 8px; }
+.add-inputs .form-input { flex: 1; }
+.btn-action-plus { 
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: white; border: 1px solid var(--accent-blue); color: var(--accent-blue);
+  padding: 10px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: all 0.2s;
+}
+.btn-action-plus:hover { background: var(--accent-blue); color: white; }
+.plus-icon { font-size: 1.2rem; line-height: 1; }
+.empty-state-sm { grid-column: 1 / -1; padding: 20px; text-align: center; color: var(--text-muted); font-size: 0.85rem; background: #f8fafc; border-radius: 10px; border: 1px dashed #e2e8f0; }
+
+/* 词典行内操作按钮 */
+.dict-actions { display: flex; gap: 16px; justify-content: flex-end; }
+.btn-icon-link { 
+  background: none; border: none; cursor: pointer; padding: 4px; 
+  font-size: 1.05rem; opacity: 0.4; transition: all 0.2s; 
+  display: flex; align-items: center; justify-content: center;
+}
+.btn-icon-link:hover { opacity: 1; transform: scale(1.2); }
 
 .spacer { flex: 1; }
 .version-tag { font-size: 0.75rem; color: var(--text-muted); padding: 8px 14px; }
