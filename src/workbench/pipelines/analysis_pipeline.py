@@ -81,15 +81,18 @@ class AnalysisPipeline:
                 
         return results
 
-    # --- Phase 3: NWK (Topology Hub) ---
     def stage_nwk_inference(self, input_dm: Path, output_nwk: Path) -> Dict[str, Any]:
         """NWK 元器件逻辑：构树并生成 Newick 拓扑。"""
-        self.tree_tools.make_dist_tree(input_dm, output_nwk)
+        success = self.tree_tools.make_dist_tree(input_dm, output_nwk)
+        if not success:
+            return {"status": "error", "message": "系统发育构树失败: 距离矩阵质量不足或算法崩溃"}
+            
         results = {"status": "success", "tree_file": str(output_nwk)}
         
         try:
             stats = self.tree_tools.tree_stats(output_nwk)
-            results["tree_stats"] = stats.stdout.strip()
+            if stats:
+                results["tree_stats"] = stats.stdout.strip()
         except: pass
         
         return results

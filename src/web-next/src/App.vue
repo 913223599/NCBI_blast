@@ -63,11 +63,32 @@ onMounted(async () => {
     },
     showNotification: (msg: string, type: string = 'info') => {
       appStore.showNotification(msg, type as any)
+    },
+    showLoading: (msg: string) => {
+      // Proxy to active view if it handles loading
+      if ((window as any).treeView?.setLoading) {
+        (window as any).treeView.setLoading(true, msg)
+      }
+    },
+    hideLoading: () => {
+      if ((window as any).treeView?.setLoading) {
+        (window as any).treeView.setLoading(false)
+      }
+    },
+    updateLoading: (percent: number, msg: string) => {
+      if ((window as any).treeView?.setLoading) {
+        (window as any).treeView.setLoading(true, msg, percent)
+      }
     }
   }
 
   if (typeof window !== 'undefined') {
     (window as any).app = globalApp
+    // Also bind directly to window for legacy/simplified calls from Python
+    const win = window as any
+    win.showLoading = globalApp.showLoading
+    win.hideLoading = globalApp.hideLoading
+    win.updateLoading = globalApp.updateLoading
   }
 
   // 2. 初始化 QWebChannel 桥接

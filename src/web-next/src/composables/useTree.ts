@@ -56,6 +56,7 @@ export function useTree() {
                 nodeCount.value = model.getLeafCount() + Object.keys(model.nodesById).length - model.getLeafCount()
 
                 updateLayout()
+                renderer.fitView(model, settings)
             } else {
                 throw new Error("Failed to parse tree.")
             }

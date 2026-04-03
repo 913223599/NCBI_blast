@@ -113,7 +113,7 @@ class WebBridge(QObject):
     @pyqtSlot(str)
     def on_js_log(self, message):
         self.logger.info(f"[JS Log] {message}")
-        
+    
     @pyqtSlot()
     def on_page_ready(self):
         self.logger.info("Web Container Report: Ready")
@@ -1065,6 +1065,19 @@ class DnDWebEngineView(QWebEngineView):
         return extracted_results
 
 
+class WebPage(QWebEnginePage):
+    """Custom page to handle JS console messages"""
+    def javaScriptConsoleMessage(self, level, message, lineNumber, sourceID):
+        logger = logging.getLogger("src.gui.widgets.web_container.js")
+        msg = f"{message} ({sourceID}:{lineNumber})"
+        if level == QWebEnginePage.JavaScriptConsoleMessageLevel.ErrorMessageLevel:
+            logger.error(f"[JS ERROR] {msg}")
+        elif level == QWebEnginePage.JavaScriptConsoleMessageLevel.WarningMessageLevel:
+            logger.warning(f"[JS WARN] {msg}")
+        else:
+            logger.debug(f"[JS LOG] {msg}")
+
+
 class WebContainer(QWidget):
     """
     Main Web Container Widget.
@@ -1118,8 +1131,8 @@ class WebContainer(QWidget):
         # Handle Downloads
         profile.downloadRequested.connect(self.on_download_requested)
         
-        # Create a page for this profile
-        page = QWebEnginePage(profile, self.web_view)
+        # Create a page for this profile (using custom child to capture JS console)
+        page = WebPage(profile, self.web_view)
         # v2 补丁：设置默认背景颜色为 Studio 画布色，减少黑屏闪烁时的视觉背离
         from PyQt6.QtGui import QColor
         page.setBackgroundColor(QColor("#0f172a"))

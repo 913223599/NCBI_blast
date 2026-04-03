@@ -57,6 +57,14 @@ class TreeFactory(BaseWrapper):
         output_dm.write_text(result.stdout, encoding='utf-8')
         return result
 
+    def prot_collection2dissim(self, input_path: Path, output_dm: Path, threads: int = None):
+        """Build dissimilarity matrix from protein collection."""
+        n_threads = self._get_threads(threads)
+        args = [str(input_path), "-threads", str(n_threads)]
+        result = self._run_command("prot_collection2dissim.exe", args)
+        output_dm.write_text(result.stdout, encoding='utf-8')
+        return result
+
     def hash2dissim(self, input_fasta: Path, output_dm: Path, k: int = 8, threads: int = None):
         """Alignment-free dissimilarity using k-mer hashing (Enhanced Sensitivity)."""
         import tempfile; import shutil
@@ -110,7 +118,7 @@ class TreeFactory(BaseWrapper):
         
         # 1. Try Binary first ONLY if format is OBJNUM (Native NCBI Matrix format)
         # NCBI makeDistTree.exe strictly requires OBJNUM format and will crash on pairwise data.
-        if content.startswith("OBJNUM"):
+        if content.strip().startswith("OBJNUM"):
             try:
                 binary_success = self._make_dist_tree_binary(input_dm, output_nwk)
             except Exception as e:
@@ -203,15 +211,27 @@ class TreeFactory(BaseWrapper):
     def _parse_pairwise_dm(self, lines: List[str]):
         names = set(); dists = {}
         for line in lines:
-            p = line.split('\t')
+            line = line.strip()
+            if not line: continue
+            # Handle both tab and space-delimited formats
+            p = re.split(r'\s+', line)
             if len(p) >= 6:
                 n1, n2 = p[0], p[1]
                 names.update([n1, n2])
                 try:
+                    # Column 3 is usually inf type, 4,5,6 are score, len1, len2
+                    # Example NCBI output: seq1 seq2 inf 40 100 100
                     ni, l1, l2 = float(p[3]), float(p[4]), float(p[5])
                     d = 1.0 - (ni / min(l1, l2)) if l1 > 0 and l2 > 0 else 1.0
-                    dists[tuple(sorted((n1, n2)))] = max(0.0, 1.0 if math.isnan(d) else d)
+                    dists[tuple(sorted((n1, n2)))] = max(0.000001, 1.0 if math.isnan(d) else d)
                 except: dists[tuple(sorted((n1, n2)))] = 1.0
+            elif len(p) >= 3:
+                # Simple format: n1 n2 dist
+                try:
+                    n1, n2, d = p[0], p[1], float(p[2])
+                    names.update([n1, n2])
+                    dists[tuple(sorted((n1, n2)))] = max(0.000001, d)
+                except: pass
         n_list = sorted(list(names)); dim = len(n_list); matrix = []
         for i in range(dim):
             matrix.append([0.0 if i == j else dists.get(tuple(sorted((n_list[i], n_list[j]))), 1.0) for j in range(i + 1)])

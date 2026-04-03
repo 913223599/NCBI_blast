@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS: LayoutSettings = {
     showInternalLabels: false,
     showBranchLengths: false,
     labelShiftX: 0,
-    scaleX: 1,
+    scaleX: 400,
     scaleY: 1,
     fontSize: 12,
     branchWidth: 1,

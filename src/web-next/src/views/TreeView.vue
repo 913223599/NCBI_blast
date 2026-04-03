@@ -9,7 +9,7 @@ import { useAppStore } from '../stores/app'
 import { getBridge, initBridge } from '../bridge/pyqt-bridge'
 
 const appStore = useAppStore()
-const { settings, loadNewick, exportSVG, hasTree, isLoading, renderer } = useTree()
+const { settings, loadNewick, exportSVG, hasTree, isLoading, renderer, containerRef } = useTree()
 
 /* -------- 核心状态 -------- */
 const isSidebarOpen = ref(true)
@@ -20,6 +20,9 @@ const menuVisible = ref(false)
 const menuPos = ref({ x: 0, y: 0 })
 const selectedNode = ref<any>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const openDropdown = ref<string | null>(null)
+const loadingMsg = ref('正在处理分析管线...')
+const loadingProgress = ref(0)
 
 const treeWorkflows = reactive({
     msa: 'none',
@@ -104,6 +107,28 @@ function toggleSideTool(tool: 'input' | 'analysis' | 'display') {
     activeSideTool.value = tool
     isSidebarOpen.value = true
   }
+}
+
+/* -------- 自定义下拉栏逻辑 (与 BLAST 同步) -------- */
+function toggleTreeDropdown(name: string, event: MouseEvent) {
+  event.stopPropagation()
+  openDropdown.value = openDropdown.value === name ? null : name
+}
+function selectTreeOption(field: string, value: string) {
+  if (field === 'msa') treeWorkflows.msa = value
+  else if (field === 'engine') treeWorkflows.engine = value
+  else if (field === 'model') treeWorkflows.model = value
+  else if (field === 'mode') settings.mode = value as any
+  openDropdown.value = null
+}
+function getMsaLabel() { return msaOptions.find(o => o.value === treeWorkflows.msa)?.label || treeWorkflows.msa }
+function getEngineLabel() { return engineOptions.find(o => o.value === treeWorkflows.engine)?.label || treeWorkflows.engine }
+function getModelLabel() { return modelOptions.value.find(o => o.value === treeWorkflows.model)?.label || treeWorkflows.model }
+function getLayoutLabel() { return layoutModeOptions.find(o => o.value === settings.mode)?.label || settings.mode }
+
+// 全局点击关闭
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', () => { openDropdown.value = null })
 }
 
 function handleFileUpload(e: Event) {
@@ -201,7 +226,11 @@ onMounted(() => {
             loadNewick(content)
             isLoading.value = false
         },
-        setLoading: (val: boolean) => { isLoading.value = val },
+        setLoading: (val: boolean, msg?: string, percent?: number) => { 
+            isLoading.value = val 
+            if (msg) loadingMsg.value = msg
+            if (percent !== undefined) loadingProgress.value = percent
+        },
         handleExternalFiles: (paths: string[]) => {
             if (!paths || paths.length === 0) return
             
@@ -318,24 +347,33 @@ onMounted(() => {
             <h3 class="section-title">🧬 分析管线配置</h3>
             <div class="form-group">
               <label>多序列比对 (MSA)</label>
-              <select v-model="treeWorkflows.msa" class="neo-select">
-                <option v-for="o in msaOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-              </select>
+              <div class="select-box-neo" @click.stop="toggleTreeDropdown('msa', $event)">
+                {{ getMsaLabel() }} <span class="arrow">▼</span>
+                <div v-if="openDropdown === 'msa'" class="dropdown-list">
+                  <div v-for="o in msaOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.msa === o.value }" @click="selectTreeOption('msa', o.value)">{{ o.label }}</div>
+                </div>
+              </div>
             </div>
             <div class="form-group">
-              <label>分析引擎 (Engine)</label>
-              <select v-model="treeWorkflows.engine" class="neo-select">
-                <option v-for="o in engineOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-              </select>
+              <label>分析引擎 (ENGINE)</label>
+              <div class="select-box-neo" @click.stop="toggleTreeDropdown('engine', $event)">
+                {{ getEngineLabel() }} <span class="arrow">▼</span>
+                <div v-if="openDropdown === 'engine'" class="dropdown-list">
+                  <div v-for="o in engineOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.engine === o.value }" @click="selectTreeOption('engine', o.value)">{{ o.label }}</div>
+                </div>
+              </div>
             </div>
             <div class="form-group">
-              <label>进化模型 (Model)</label>
-              <select v-model="treeWorkflows.model" class="neo-select">
-                <option v-for="o in modelOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-              </select>
+              <label>进化模型 (MODEL)</label>
+              <div class="select-box-neo" @click.stop="toggleTreeDropdown('model', $event)">
+                {{ getModelLabel() }} <span class="arrow">▼</span>
+                <div v-if="openDropdown === 'model'" class="dropdown-list">
+                  <div v-for="o in modelOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.model === o.value }" @click="selectTreeOption('model', o.value)">{{ o.label }}</div>
+                </div>
+              </div>
             </div>
             <div class="form-group">
-              <label>Bootstrap 随机采样: {{ treeWorkflows.bootstrap }}</label>
+              <label>BOOTSTRAP 随机采样: {{ treeWorkflows.bootstrap }}</label>
               <input type="range" v-model.number="treeWorkflows.bootstrap" min="0" max="1000" step="100" class="neo-range" />
             </div>
           </div>
@@ -345,13 +383,16 @@ onMounted(() => {
             <h3 class="section-title">💡 视图控制</h3>
             <div class="form-group">
               <label>拓扑形态</label>
-              <select v-model="settings.mode" class="neo-select">
-                <option v-for="o in layoutModeOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-              </select>
+              <div class="select-box-neo" @click.stop="toggleTreeDropdown('layoutMode', $event)">
+                {{ getLayoutLabel() }} <span class="arrow">▼</span>
+                <div v-if="openDropdown === 'layoutMode'" class="dropdown-list">
+                  <div v-for="o in layoutModeOptions" :key="o.value" class="opt" :class="{ selected: settings.mode === o.value }" @click="selectTreeOption('mode', o.value)">{{ o.label }}</div>
+                </div>
+              </div>
             </div>
             <div class="neo-checkbox-group">
-               <label><input type="checkbox" v-model="settings.showLabels" /> 显示样本标签</label>
-               <label><input type="checkbox" v-model="settings.useBranchLengths" /> 使用原始进化长度</label>
+               <label><input type="checkbox" v-model="settings.showLabels" style="accent-color: #2563eb;" /> 显示样本标签</label>
+               <label><input type="checkbox" v-model="settings.useBranchLengths" style="accent-color: #2563eb;" /> 使用原始进化长度</label>
             </div>
             <div class="form-group">
                <label>字体缩放: {{ settings.fontSize }}px</label>
@@ -381,7 +422,10 @@ onMounted(() => {
 
         <div v-if="isLoading" class="loading-overlay">
            <div class="loader"></div>
-           <p>核心管线运行中: 执行拓扑推断与渲染...</p>
+           <p>{{ loadingMsg }}</p>
+           <div v-if="loadingProgress > 0" class="progress-bar-container">
+             <div class="progress-bar-fill" :style="{ width: loadingProgress + '%' }"></div>
+           </div>
         </div>
 
         <!-- 右分屏右键菜单 -->
@@ -488,12 +532,33 @@ onMounted(() => {
 .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #334155; }
 .file-badge { font-size: 0.65rem; background: #f1f5f9; color: #64748b; padding: 2px 6px; border-radius: 4px; }
 
-.neo-select {
-  width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;
-  background: #f8fafc; font-size: 0.85rem; outline: none;
+/* UI 组件 - BLAST 同款自定义下拉栏 */
+.select-box-neo {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+  padding: 10px 14px; font-size: 0.82rem; cursor: pointer; position: relative;
+  display: flex; justify-content: space-between; align-items: center;
+  transition: border-color 0.2s;
 }
+.select-box-neo:hover { border-color: #cbd5e1; }
+.select-box-neo .arrow { color: #94a3b8; font-size: 0.6rem; margin-left: 8px; }
+
+.dropdown-list {
+  position: absolute; top: 110%; left: 0; right: 0; background: white;
+  border: 1px solid #e2e8f0; border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.12); z-index: 100;
+  max-height: 250px; overflow-y: auto; padding: 6px;
+}
+.dropdown-list .opt {
+  padding: 10px 12px; font-size: 0.82rem; border-radius: 6px; cursor: pointer;
+}
+.dropdown-list .opt:hover { background: #f1f5f9; color: #2563eb; }
+.dropdown-list .opt.selected { color: #2563eb; font-weight: 700; background: #eff6ff; }
+
 .form-group { margin-bottom: 20px; }
-.form-group label { display: block; font-size: 0.72rem; font-weight: 800; color: #64748b; margin-bottom: 8px; }
+.form-group label {
+  font-size: 0.75rem; font-weight: 800; color: #64748b; margin-bottom: 8px;
+  display: block; text-transform: uppercase; letter-spacing: 0.02em;
+}
 
 .neo-checkbox-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
 .neo-checkbox-group label { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 500; cursor: pointer; }
@@ -539,4 +604,12 @@ onMounted(() => {
 .scroll-v { overflow-y: auto; scrollbar-width: thin; }
 .scroll-v::-webkit-scrollbar { width: 6px; }
 .scroll-v::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+.progress-bar-container {
+  width: 240px; height: 6px; background: #e2e8f0; border-radius: 3px;
+  overflow: hidden; margin-top: 15px;
+}
+.progress-bar-fill {
+  height: 100%; background: #2563eb; transition: width 0.3s ease;
+}
 </style>

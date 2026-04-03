@@ -90,9 +90,6 @@ export class HybridRenderer {
             e.preventDefault()
             const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1
 
-            // Zoom around pointer
-            // Simplified logic: adjust scale (a, d) and translate (e, f)
-            // Correct math requires inverse matrix transformation
             const rect = this.svg!.getBoundingClientRect()
             const mouseX = e.clientX - rect.left
             const mouseY = e.clientY - rect.top
@@ -114,19 +111,54 @@ export class HybridRenderer {
         if (this.g) {
             this.g.setAttribute("transform", `matrix(${this.matrix.a},${this.matrix.b},${this.matrix.c},${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
         }
-        // Note: Canvas redraw must be triggered externally or we need to store model/settings
+    }
+
+    fitView(model: TreeModel, settings: LayoutSettings) {
+        if (!this.container || !model.root) return
+        const rect = this.container.getBoundingClientRect()
+        const padding = 60
+        
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+        
+        const isCircular = settings.mode === 'circular'
+        Object.values(model.nodesById).forEach(node => {
+            const nx = isCircular ? (node.cartX || 0) : (node.x || 0)
+            const ny = isCircular ? (node.cartY || 0) : (node.y || 0)
+            minX = Math.min(minX, nx)
+            minY = Math.min(minY, ny)
+            maxX = Math.max(maxX, nx)
+            maxY = Math.max(maxY, ny)
+        })
+        
+        if (minX === Infinity) return
+        
+        const contentWidth = maxX - minX || 100
+        const contentHeight = maxY - minY || 100
+        
+        const scaleX = (rect.width - padding * 2) / contentWidth
+        const scaleY = (rect.height - padding * 2) / contentHeight
+        
+        // Phylogenetic trees usually need more horizontal stretch
+        // If content is very narrow, allow scaleX to be much larger than scaleY
+        const scale = Math.min(scaleX, scaleY)
+        
+        this.matrix.a = scaleX > scaleY * 2 ? scaleX * 0.8 : scale
+        this.matrix.d = scale
+        
+        this.matrix.e = (rect.width / 2) - ((minX + maxX) / 2 * this.matrix.a) 
+        this.matrix.f = (rect.height / 2) - ((minY + maxY) / 2 * this.matrix.d) 
+        
+        this.applyTransform()
     }
 
     setupResizeObserver() {
         if (typeof ResizeObserver !== 'undefined') {
             this.resizeObserver = new ResizeObserver(() => {
-                // Throttle resize events to prevent lag during sidebar animation
                 if (this.resizeTimeout) return
-                
                 this.resizeTimeout = setTimeout(() => {
                     this.handleResizeInternal()
                     this.resizeTimeout = null
-                }, 16) // ~60fps floor
+                }, 16)
             })
             if (this.container) this.resizeObserver.observe(this.container)
         }
@@ -136,83 +168,45 @@ export class HybridRenderer {
         if (this.container && this.canvas && this.ctx) {
             const rect = this.container.getBoundingClientRect()
             const dpr = window.devicePixelRatio || 1
-
-            // Set display size
             this.canvas.style.width = `${rect.width}px`
             this.canvas.style.height = `${rect.height}px`
-
-            // Set actual size
             this.canvas.width = rect.width * dpr
             this.canvas.height = rect.height * dpr
-
-            // Normalize
             this.ctx.scale(dpr, dpr)
-            
-            // If the tree was already rendered, we might need a signal to re-render.
-            // For now, most settings watchers will handle it.
         }
-    }
-
-    resize() {
-        // handled by observer
     }
 
     render(model: TreeModel, settings: LayoutSettings) {
         if (!this.ctx || !this.canvas || !this.g || !model.root) return
 
-        // 1. Clear Canvas
-        // Use resetTransform or setTransform identity
         this.ctx.setTransform(1, 0, 0, 1, 0, 0)
-        // Clear logic adapted for DPI
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
 
-        // 2. Prepare Draw Context
         const dpr = window.devicePixelRatio || 1
-        let ox = settings.centerOffset // use offset
-        let oy = (this.canvas.height / dpr) / 2
-
-        if (settings.mode === 'rect') {
-            ox = 50
-            oy = 50
-        }
-
-        // Apply specific transform for canvas with DPR
+        
         this.ctx.setTransform(
             this.matrix.a * dpr, this.matrix.b * dpr,
             this.matrix.c * dpr, this.matrix.d * dpr,
-            (this.matrix.e + ox) * dpr, (this.matrix.f + oy) * dpr
+            this.matrix.e * dpr, this.matrix.f * dpr
         )
 
-        // 3. Draw Edges (Canvas)
         this.ctx.beginPath()
         this.ctx.strokeStyle = settings.branchColor
-        this.ctx.lineWidth = settings.branchWidth
+        // Scale linewidth inversely to prevent giant strokes when zoomed in
+        this.ctx.lineWidth = settings.branchWidth / Math.sqrt(this.matrix.a)
         this.drawEdgesRecursive(model.root, settings)
         this.ctx.stroke()
 
-        // 4. Draw Labels (SVG) with Performance Optimization
-        // 4.1 Optimize: Debounce/Throttle text updates if zooming fast
-        const isZoomingFast = Math.abs(this.matrix.a - 1) > 0.001; // Simplified check
-        
-        // Clear SVG
         while (this.g.firstChild) {
             this.g.removeChild(this.g.firstChild)
         }
 
-        // Apply transform group
-        this.g.setAttribute("transform", `matrix(${this.matrix.a},${this.matrix.b},${this.matrix.c},${this.matrix.d},${this.matrix.e + ox},${this.matrix.f + oy})`)
+        this.g.setAttribute("transform", `matrix(${this.matrix.a},${this.matrix.b},${this.matrix.c},${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
 
         if (settings.showLabels) {
-            // Level-of-Detail (LOD): If there are too many nodes and we are zoomed out, skip label rendering
-            const totalNodes = (model.root as any).descendants ? (model.root as any).descendants().length : 100;
-            const threshold = 1.0 / this.matrix.a; // inverse scale
-            
-            // Only draw if zoom is high enough OR node count is low
-            if (this.matrix.a > 0.5 || totalNodes < 50) {
-                 const fragment = document.createDocumentFragment();
-                 this.drawLabelsRecursive(model.root, settings, fragment);
-                 this.g.appendChild(fragment);
-            }
+            const fragment = document.createDocumentFragment()
+            this.drawLabelsRecursive(model.root, settings, fragment)
+            this.g.appendChild(fragment)
         }
     }
 
@@ -233,8 +227,8 @@ export class HybridRenderer {
                 ctx.lineTo(chx, chy)
             } else {
                 if (s.branchStyle === 'square') {
-                    ctx.lineTo(cx, chy) // vertical first
-                    ctx.lineTo(chx, chy) // then horizontal to child
+                    ctx.lineTo(cx, chy)
+                    ctx.lineTo(chx, chy)
                 } else {
                     ctx.lineTo(chx, chy)
                 }
@@ -244,7 +238,6 @@ export class HybridRenderer {
     }
 
     private drawLabelsRecursive(node: TreeNode, s: LayoutSettings, parentElement: Element | DocumentFragment) {
-        // SVG Text Logic
         if (node.isLeaf) {
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text")
             const cx = s.mode === 'circular' ? (node.cartX || 0) : (node.x || 0)
@@ -253,20 +246,18 @@ export class HybridRenderer {
             text.setAttribute("x", (cx + 5).toString())
             text.setAttribute("y", (cy + 4).toString())
             text.textContent = node.name || ""
-            text.setAttribute("fill", "#000")
+            text.setAttribute("fill", "#334155")
             text.setAttribute("font-size", `${s.fontSize}px`)
             text.setAttribute("font-family", "Arial, sans-serif")
             text.style.cursor = "pointer"
             text.style.userSelect = "none"
 
-            // Interaction
             text.onclick = (e) => {
-                e.stopPropagation()
                 if (this.onNodeClick) this.onNodeClick(node, e)
             }
             
-            text.onmouseenter = () => { text.setAttribute("fill", "#3b82f6"); text.style.fontWeight = "bold" }
-            text.onmouseleave = () => { text.setAttribute("fill", "#000"); text.style.fontWeight = "normal" }
+            text.onmouseenter = () => { text.setAttribute("fill", "#3b82f6") }
+            text.onmouseleave = () => { text.setAttribute("fill", "#334155") }
 
             parentElement.appendChild(text)
         }
@@ -278,6 +269,5 @@ export class HybridRenderer {
     dispose() {
         if (this.resizeObserver) this.resizeObserver.disconnect()
         if (this.container) this.container.innerHTML = ''
-        // remove window listeners if any
     }
 }
