@@ -1115,6 +1115,9 @@ class WebContainer(QWidget):
         profile.setPersistentStoragePath(storage_path)
         profile.setPersistentCookiesPolicy(QWebEngineProfile.PersistentCookiesPolicy.AllowPersistentCookies)
         
+        # Handle Downloads
+        profile.downloadRequested.connect(self.on_download_requested)
+        
         # Create a page for this profile
         page = QWebEnginePage(profile, self.web_view)
         # v2 补丁：设置默认背景颜色为 Studio 画布色，减少黑屏闪烁时的视觉背离
@@ -1466,6 +1469,17 @@ class WebContainer(QWidget):
 
 
 
+
+    def on_download_requested(self, download):
+        """Handle download requests from the WebEngine"""
+        path, _ = QFileDialog.getSaveFileName(self, "保存下载文件", download.downloadFileName())
+        if path:
+            download.setDownloadDirectory(os.path.dirname(path))
+            download.setDownloadFileName(os.path.basename(path))
+            download.accept()
+            self.logger.info(f"Download accepted: {path}")
+        else:
+            self.logger.info("Download cancelled by user")
 
     def on_tree_error(self, err_msg):
         self.logger.error(f"Tree analysis error: {err_msg}")

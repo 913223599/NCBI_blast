@@ -23,7 +23,7 @@ declare global {
 export interface PyBridge {
     /* 文件操作 */
     request_file_load(fileType: string): void
-    save_file(content: string, filenameHint: string): void
+    save_file(content: string, filenameHint: string, callback?: (success: boolean) => void): void
     open_results_dir(path: string): void
 
     /* BLAST 作业 */
