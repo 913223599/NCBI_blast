@@ -4,6 +4,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { getBridge } from '../bridge/pyqt-bridge'
 
 export const useAppStore = defineStore('app', () => {
     /* -------- 状态 -------- */
@@ -11,6 +12,7 @@ export const useAppStore = defineStore('app', () => {
     const sidebarCollapsed = ref(false)
     const notifications = ref<Array<{ id: number; message: string; type: string }>>([])
     const pageTitle = ref('Dashboard')
+    const translations = ref<Record<string, string>>({})
 
     /* -------- 计算属性 -------- */
     const isZhCN = computed(() => locale.value === 'zh_CN')
@@ -39,10 +41,27 @@ export const useAppStore = defineStore('app', () => {
 
     function setLocale(lang: 'zh_CN' | 'en_US'): void {
         locale.value = lang
+        fetchTranslations() // Reload translations when language changes
     }
 
     function setPageTitle(title: string): void {
         pageTitle.value = title
+    }
+
+    function fetchTranslations(): void {
+        try {
+            getBridge().get_ui_translations((res: string) => {
+                if (res) {
+                    try {
+                        translations.value = JSON.parse(res)
+                    } catch (e) {
+                        console.error("Failed to parse loaded translations", e)
+                    }
+                }
+            })
+        } catch (error) {
+            console.warn("Bridge missing, local translations kept empty.")
+        }
     }
 
     return {
@@ -50,11 +69,13 @@ export const useAppStore = defineStore('app', () => {
         sidebarCollapsed,
         notifications,
         pageTitle,
+        translations,
         isZhCN,
         toggleSidebar,
         initSidebarState,
         showNotification,
         setLocale,
-        setPageTitle
+        setPageTitle,
+        fetchTranslations
     }
 })

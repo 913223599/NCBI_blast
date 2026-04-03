@@ -12,6 +12,14 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 def main():
     """应用程序入口，默认启动 GUI"""
+    # 0. 配置基础日志格式
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    
     # 词库预热：在 GUI 加载前确保词库已迁移并就绪
     # 1. 初始化路径环境
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))

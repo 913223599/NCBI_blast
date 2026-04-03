@@ -21,7 +21,7 @@ export interface BlastParams {
 export interface BlastTask {
     taskId: string
     fileName: string
-    status: 'queued' | 'running' | 'done' | 'error' | 'paused'
+    status: string
     progress: number
     startTime: string
     endTime?: string
@@ -177,28 +177,70 @@ export const useBlastStore = defineStore('blast', () => {
         if (!resData) return
         
         const queryId = resData.sequence_id || '未知序列'
-        if (resData.data && Array.isArray(resData.data) && resData.data.length > 0) {
-            const bestHit = resData.data[0]
-            // Prevent duplicates
-            const exists = results.value.some(h => h.queryTitle === queryId)
-            if (!exists) {
+        const existingIdx = results.value.findIndex(h => h.queryTitle === queryId)
+        
+        if (resData.status === 'pending' || resData.status === 'running') {
+            if (existingIdx === -1) {
                 results.value.push({
                     queryTitle: queryId,
-                    hitTitle: bestHit.title || '',
-                    speciesName: bestHit.species || 'Unknown',
-                    genusStrain: [bestHit.genus, bestHit.strain].filter(Boolean).join(' · ') || '',
-                    geneSource: bestHit.gene_source || bestHit.gene_type || '',
-                    seqType: bestHit.seq_type || '',
-                    host: bestHit.host || '',
-                    alignLen: bestHit.align_len || '',
-                    identity: parseFloat(bestHit.similarity) || 0,
-                    evalue: String(bestHit.evalue || 'N/A'),
-                    accession: bestHit.acc || 'N/A',
+                    hitTitle: '',
+                    speciesName: '等待比对...',
+                    genusStrain: '',
+                    geneSource: '',
+                    seqType: '',
+                    host: '',
+                    alignLen: '',
+                    identity: 0,
+                    evalue: '-',
+                    accession: '-',
                     translatedName: null
                 })
-                resultTitle.value = `分析结果 (已加载 ${results.value.length} 项)`
+                resultTitle.value = `分析结果 (共 ${results.value.length} 项)`
             }
+            return
         }
+        
+        let updatedHit = null
+        if (resData.data && Array.isArray(resData.data) && resData.data.length > 0) {
+            const bestHit = resData.data[0]
+            updatedHit = {
+                queryTitle: queryId,
+                hitTitle: bestHit.title || '',
+                speciesName: bestHit.species || 'Unknown',
+                genusStrain: [bestHit.genus, bestHit.strain].filter(Boolean).join(' · ') || '',
+                geneSource: bestHit.gene_source || bestHit.gene_type || '',
+                seqType: bestHit.seq_type || '',
+                host: bestHit.host || '',
+                alignLen: bestHit.align_len || '',
+                identity: parseFloat(bestHit.similarity) || 0,
+                evalue: String(bestHit.evalue || 'N/A'),
+                accession: bestHit.acc || 'N/A',
+                translatedName: null
+            }
+        } else {
+             // Finished but no hits
+             updatedHit = {
+                queryTitle: queryId,
+                hitTitle: '',
+                speciesName: '未找到匹配项 (No Hits)',
+                genusStrain: '',
+                geneSource: '',
+                seqType: '',
+                host: '',
+                alignLen: '',
+                identity: 0,
+                evalue: '-',
+                accession: '-',
+                translatedName: null
+             }
+        }
+
+        if (existingIdx !== -1) {
+             results.value[existingIdx] = updatedHit
+        } else {
+             results.value.push(updatedHit)
+        }
+        resultTitle.value = `分析结果 (共 ${results.value.length} 项)`
     }
 
     return {

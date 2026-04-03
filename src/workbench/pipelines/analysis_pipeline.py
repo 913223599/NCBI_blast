@@ -120,24 +120,24 @@ class AnalysisPipeline:
         p = params or {}
         msa_method = p.get("msa", "none")
         engine = p.get("engine", "nj")
-        k = p.get("kmerSize", 21)
+        k = p.get("kmerSize", 8)
         threads = p.get("threads", None)
         
-        yield {"step": "fasta", "progress": 10}
+        yield {"step": "fasta", "progress": 10, "message": "启动 FASTA 预处理序列..."}
         self.stage_fasta_process(input_fasta, output_dir)
         
-        yield {"step": "msa", "progress": 25}
+        yield {"step": "msa", "progress": 25, "message": f"执行 {msa_method} 多序列比对..."}
         msa_file = output_dir / f"{input_fasta.stem}_aligned.fasta"
         self.stage_msa_alignment(input_fasta, msa_file, method=msa_method)
         
-        yield {"step": "dist", "progress": 50}
+        yield {"step": "dist", "progress": 50, "message": f"计算距离矩阵 ({method}模式，k={k})..."}
         dm_file = output_dir / f"{input_fasta.stem}.dm"
         # NJ 引擎对应 rapid/standard。ML 引擎在此演示版中也映射到 standard。
         dist_mode = "rapid" if engine == "nj" and method == "rapid" else "standard"
         self.stage_dist_compute(msa_file, dm_file, method=dist_mode, k=k, threads=threads)
         
-        yield {"step": "nwk", "progress": 75}
+        yield {"step": "nwk", "progress": 75, "message": "构建系统发育树拓扑..."}
         nwk_file = output_dir / f"{input_fasta.stem}.nwk"
         self.stage_nwk_inference(dm_file, nwk_file)
         
-        yield {"step": "finish", "progress": 100, "result": {"tree_file": str(nwk_file)}}
+        yield {"step": "finish", "progress": 100, "message": "分析完成，准备加载视图渲染...", "result": {"tree_file": str(nwk_file)}}

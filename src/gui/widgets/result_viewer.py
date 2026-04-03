@@ -7,6 +7,8 @@ import csv
 import shutil
 import traceback
 import os
+import re
+import time
 from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal, QObject, Qt, QThread, QModelIndex
@@ -958,12 +960,30 @@ class ResultViewerWidget(QGroupBox):
 
         count = 0
         try:
-            for fname, data in self.results_data.items():
+            for key, data in self.results_data.items():
                 src = data.get("csv_file") or data.get("result_file")
                 if src and Path(src).exists():
-                    shutil.copy2(src, Path(save_dir) / f"{fname}_results.csv")
+                    # [修复] 提取导出文件名主体，解决路径包含绝对路径或特殊字符导致的问题
+                    key_str = str(key)
+                    if "#" in key_str:
+                         # 处理多序列情况: file_path#seq_id
+                         path_part, seq_id = key_str.rsplit("#", 1)
+                         base_name = f"{Path(path_part).stem}_{seq_id}"
+                    else:
+                         # 处理单序列情况: file_path
+                         base_name = Path(key_str).stem
+                    
+                    # 清理文件名逻辑
+                    safe_name = re.sub(r'[\\/:*?"<>|]', '_', base_name)
+                    dest_path = Path(save_dir) / f"{safe_name}_results.csv"
+                    
+                    # 如果目标已存在，防止重名
+                    if dest_path.exists():
+                         dest_path = dest_path.with_name(f"{dest_path.stem}_{int(time.time())}.csv")
+                         
+                    shutil.copy2(src, dest_path)
                     count += 1
-            QMessageBox.information(self, "成功", f"已导出 {count} 个文件")
+            QMessageBox.information(self, "成功", f"已导出 {count} 个文件到目录: {save_dir}")
         except Exception as e:
             QMessageBox.critical(self, "错误", str(e))
 

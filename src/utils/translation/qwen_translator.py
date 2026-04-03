@@ -159,8 +159,12 @@ class QwenTranslator:
         ]
         
         if QwenTranslator._has_arrearage:
-            # 如果已知欠费，直接返回原文，不再浪费网络请求
+            import logging
+            logging.getLogger(__name__).warning(f"[DEBUG] _has_arrearage is TRUE! Skipping network.")
             return text
+
+        import logging
+        logging.getLogger(__name__).info(f"[DEBUG] Invoking OpenAI completion for: {text}")
 
         # 调用通义千问模型进行翻译
         try:
@@ -168,9 +172,7 @@ class QwenTranslator:
             completion = self.client.chat.completions.create(
                 model=self.model,  # 使用配置的模型
                 messages=messages,
-                extra_body={
-                    "translation_options": translation_options
-                }
+                timeout=15.0 # 设置 15 秒超时，防止无限挂起
             )
             
             # 输出API返回的完整内容用于调试
@@ -181,25 +183,33 @@ class QwenTranslator:
             # print(f"Response content: {completion.choices[0].message.content}")
             # print("=" * 50)
             
-            return completion.choices[0].message.content.strip()
+            import re
+            content = completion.choices[0].message.content.strip()
+            # 过滤掉 DeepSeek-R1 这种模型产生的 <think> 思考过程标签
+            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+            return content
                 
         except Exception as e:
             err_msg = str(e)
+            import logging
+            logger = logging.getLogger(__name__)
+            
             # 精确匹配欠费相关错误
             if 'Arrearage' in err_msg or 'overdue-payment' in err_msg:
                 if not QwenTranslator._has_arrearage:
                     QwenTranslator._has_arrearage = True
-                    print(f"[严重错误] AI 翻译账户欠费，已进入静默模式。")
+                    logger.error(f"[严重错误] AI 翻译账户欠费，已进入静默模式。")
                     if QwenTranslator._on_arrearage_callback:
                         QwenTranslator._on_arrearage_callback()
                 return text
             
             # 模型错误处理
             if 'Model' in err_msg or 'model_not_found' in err_msg or '400' in err_msg:
-                print(f"[警告] AI 模型调用失败 ({self.model}): {err_msg}")
+                logger.warning(f"[警告] AI 模型调用失败 ({self.model}): {err_msg}")
                 return text
 
-            raise Exception(f"调用通义千问API时出错: {err_msg}")
+            logger.error(f"调用API时出错: {err_msg}")
+            raise Exception(f"调用API时出错: {err_msg}")
     
     def translate_biology_term(self, term: str) -> str:
         """

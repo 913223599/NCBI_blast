@@ -369,9 +369,30 @@ class BlastManager:
             engine = BlastEngine(task.task_id, task.params)
             task.engine = engine # Track for cancellation
 
+            # Pre-populate placeholders so UI shows the entire list instantly
+            existing_results = {r.get('sequence_id') for r in self.store.get_results(task.task_id)}
+            for seq in sequences:
+                seq_id = seq.get('id', 'unknown')
+                if seq_id not in existing_results:
+                    pending_data = {
+                        "sequence_id": seq_id,
+                        "status": "pending"
+                    }
+                    # Emit to UI
+                    if self.result_listeners:
+                        for cb in self.result_listeners:
+                            try: cb(task.task_id, pending_data)
+                            except: pass
+                    # Optional: DB persistence for pending items can be skipped if UI generates list live,
+                    # but saving them guarantees history retention.
+                    self.store.save_result(task.task_id, seq_id, pending_data)
+
             def on_progress(comp, total, info):
-                task.progress = int(comp/total * 100)
-                self.store.save_task(task)
+                new_prog = int(comp/total * 100)
+                # Prevent progress bar rollback during breakpoint resuming (cached tasks loading)
+                if new_prog >= getattr(task, 'progress', 0) or comp == total:
+                    task.progress = new_prog
+                    self.store.save_task(task)
 
             def on_result(data):
                 # Ensure data is JSON serializable
@@ -424,14 +445,25 @@ class BlastManager:
                     self.store.save_task(task)
 
     def resume_task(self, task_id: str):
-        """Request resume of a paused task."""
+        """Request resume of a paused task, or restart a cancelled/failed task from breakpoint."""
         with self._lock:
             if task_id in self.tasks:
                 task = self.tasks[task_id]
-                if task.status == TaskStatus.PAUSED and task.engine:
+                
+                # 1. Resume from Paused (Thread still alive)
+                if task.status == TaskStatus.PAUSED and getattr(task, 'engine', None):
                     task.engine.resume()
                     task.transition_to(TaskStatus.RUNNING)
                     self.store.save_task(task)
+                    self.logger.info(f"Resumed paused task: {task_id}")
+                    
+                # 2. Resubmit from Cancelled/Failed (Thread dead, breakpoint continuation)
+                elif task.status in [TaskStatus.CANCELLED, TaskStatus.FAILED, 'error', 'failed', 'cancelled']:
+                    task.transition_to(TaskStatus.PENDING)
+                    task.error = None
+                    self.store.save_task(task)
+                    self.scheduler.submit(task)
+                    self.logger.info(f"Resubmitted stopped task for breakpoint continuation: {task_id}")
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Query status of a specific task."""

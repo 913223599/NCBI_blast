@@ -4,6 +4,7 @@ import json
 import logging
 import tempfile
 import datetime
+import time
 from pathlib import Path
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -45,10 +46,13 @@ class WebBridge(QObject):
         # Connect bridge signal to actual JS execution
         self.blast_event.connect(self._on_bridge_event_emitted)
         
-        # Async Translation Queue
+        # Async Translation Queue & Limited Pool
         import threading
+        from concurrent.futures import ThreadPoolExecutor
         self._ai_trans_lock = threading.Lock()
         self._ai_trans_in_flight = set()  # Track items currently being translated by AI
+        # 使用线程池限制并发量(例如最多4个并发)，防止大规模翻译导致系统负载过高或 API 频率超限
+        self._ai_trans_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="AITranslator")
 
     def _on_bridge_event_emitted(self, event_type, json_data):
         """Relay signals from Python to JS global handler in the WebView"""
@@ -141,9 +145,11 @@ class WebBridge(QObject):
             path, _ = QFileDialog.getSaveFileName(self.container, "Save File", filename_hint, file_filter)
             
             if path:
-                with open(path, 'w', encoding='utf-8') as f:
+                # [修复] 针对 CSV 文件使用 utf-8-sig 编码，提升 Excel 兼容性
+                encoding = 'utf-8-sig' if path.lower().endswith('.csv') else 'utf-8'
+                with open(path, 'w', encoding=encoding) as f:
                     f.write(content)
-                self.logger.info(f"File saved successfully to: {path}")
+                self.logger.info(f"File saved successfully to: {path} (encoding={encoding})")
                 return True
             return False # Cancelled
         except Exception as e:
@@ -184,11 +190,48 @@ class WebBridge(QObject):
             workspace = Path("results/tree_workspace")
             if not workspace.exists():
                 return "[]"
-            files = [f.name for f in workspace.glob("*.fasta")]
+            files = [f.name for f in workspace.glob("*.fasta")] + [f.name for f in workspace.glob("*.seq")]
             return json.dumps(files)
         except Exception as e:
             self.logger.error(f"Failed to list sequences: {e}")
             return "[]"
+
+    @pyqtSlot(str, result=bool)
+    def add_tree_workspace_files(self, paths_json):
+        """Copy local files directly into the tree workspace (used for DnD handling)"""
+        try:
+            import shutil
+            paths = json.loads(paths_json)
+            workspace = Path("results/tree_workspace")
+            workspace.mkdir(parents=True, exist_ok=True)
+            
+            for p in paths:
+                src = Path(p)
+                if src.is_file():
+                    shutil.copy2(src, workspace / src.name)
+                    
+            self.logger.info(f"Successfully staged {len(paths)} external files to tree workspace.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to stage external files: {e}")
+            return False
+
+    @pyqtSlot(result=bool)
+    def clear_tree_workspace(self):
+        """Clear all files in the tree workspace"""
+        try:
+            workspace = Path("results/tree_workspace")
+            if workspace.exists():
+                for f in workspace.glob("*"):
+                    try:
+                        f.unlink()
+                    except Exception as e:
+                        pass
+                self.logger.info("Tree workspace cleared by UI request.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error clearing sequence list: {e}")
+            return False
 
     @pyqtSlot(str)
     def request_tree_reroot(self, node_id):
@@ -255,7 +298,7 @@ class WebBridge(QObject):
         """Return full translation dictionary for current language"""
         from src.utils.ui_translation_manager import get_ui_translator
         tr = get_ui_translator()
-        # tr.load_all_translations() # Reverted
+        tr.load_all_translations() # Reload to get latest JSON changes
         data = tr.get_all_translations_for_current_lang()
         return json.dumps(data, ensure_ascii=False)
 
@@ -380,19 +423,17 @@ class WebBridge(QObject):
                 # 1. 尝试纯本地查询 (不阻塞)
                 local_res = translator.translate_text(name, category=category, use_ai_override=False)
                 
-                # 如果本地库有结果 (包含 [本地] 标记)
-                if local_res and local_res != name and "[本地]" in local_res:
+                # 如果本地库有结果 (翻译内容不等于原文即视为命中本地)
+                if local_res and local_res != name:
                     return local_res
                 
-                # 2. 如果本地未命中，且 AI 已启用，则送入后台队列
+                # 2. 如果本地未命中，且 AI 已启用，则送入后台队列 (使用线程池控制并发量)
                 if translator.use_ai:
                     with self._ai_trans_lock:
                         if name not in self._ai_trans_in_flight:
                             self._ai_trans_in_flight.add(name)
-                            # 启动异步线程逐个处理 AI 请求
-                            threading.Thread(target=self._async_ai_worker, 
-                                           args=(name, category), 
-                                           daemon=True).start()
+                            # 使用线程池提交，防止大规模请求撑爆系统
+                            self._ai_trans_pool.submit(self._async_ai_worker, name, category)
                     return f"{name} (AI翻译中...)"
                 
                 return name
@@ -421,31 +462,49 @@ class WebBridge(QObject):
     def _async_ai_worker(self, name, category):
         """后台 AI 翻译 worker，完成后通过信号通知前端"""
         from src.utils.translation.biology_translator import get_global_biology_translator
+        self.logger.info(f"[AI] 开始异步翻译: {name}")
         try:
             translator = get_global_biology_translator()
             # 执行真正的 AI 翻译 (同步阻塞，但在后台线程)
             ai_res = translator.translate_text(name, category=category, use_ai_override=True)
             
-            # 翻译完成后告知 JS 刷新对应项
+            # 无论成功失败，都应通知 JS 刷新对应项（如果翻译没变化，也要传回原本的名字以清除“翻译中”状态）
+            # 注意：即使 ai_res == name，我们也传回 ai_res，UI 会根据这个值更新并清除占位符
+            self.blast_event.emit("translation_done", json.dumps({
+                "original": name,
+                "translated": ai_res
+            }))
             if ai_res and ai_res != name:
-                self.blast_event.emit("translation_done", json.dumps({
-                    "original": name,
-                    "translated": ai_res
-                }))
+                self.logger.info(f"[AI] 翻译成功: {name} -> {ai_res}")
+            else:
+                self.logger.info(f"[AI] 翻译未产生变化或保持原文: {name}")
+
         except Exception as e:
-            self.logger.error(f"Async AI Translation failed for {name}: {e}")
+            self.logger.error(f"[AI] 异步翻译失败 {name}: {e}")
+            # 发生异常也要通知前端清除状态
+            self.blast_event.emit("translation_done", json.dumps({
+                "original": name,
+                "translated": name
+            }))
         finally:
             with self._ai_trans_lock:
                 if name in self._ai_trans_in_flight:
                     self._ai_trans_in_flight.remove(name)
 
+    @pyqtSlot(str, bool, result=str)
     @pyqtSlot(str, result=str)
-    def search_dictionary(self, query):
+    def search_dictionary(self, query, proofread_mode=False):
         """Search translation dictionary"""
         from src.utils.translation.biology_translator import get_global_biology_translator
         try:
             translator = get_global_biology_translator()
-            results = translator.search_translations(query)
+            if translator.translation_data_manager:
+                results = translator.translation_data_manager.search_translations(query)
+            else:
+                results = []
+            
+            if proofread_mode:
+                results = [r for r in results if r.get('source') == 'ai']
             return json.dumps(results, ensure_ascii=False)
         except Exception as e:
             self.logger.error(f"Dictionary search error: {e}")
@@ -488,9 +547,10 @@ class WebBridge(QObject):
             self.logger.error(f"Failed to delete term: {e}")
             return False
 
+    @pyqtSlot(bool, result=str)
     @pyqtSlot(result=str)
-    def get_all_dictionary_terms(self):
-        """Get all dictionary terms for management"""
+    def get_all_dictionary_terms(self, proofread_mode=False):
+        """Get dictionary terms for management"""
         from src.utils.translation.biology_translator import get_global_biology_translator
         try:
             translator = get_global_biology_translator()
@@ -500,7 +560,11 @@ class WebBridge(QObject):
                 import sqlite3
                 conn = sqlite3.connect(dm.db_path)
                 cursor = conn.cursor()
-                cursor.execute('SELECT english, chinese, category, source FROM translations ORDER BY created_at DESC')
+                if proofread_mode:
+                    # 只获取未校对的词条 (例如来源是 'ai' 的)
+                    cursor.execute("SELECT english, chinese, category, source FROM translations WHERE source = 'ai' ORDER BY created_at DESC")
+                else:
+                    cursor.execute('SELECT english, chinese, category, source FROM translations ORDER BY created_at DESC')
                 for row in cursor.fetchall():
                     terms.append({'english': row[0], 'chinese': row[1], 'category': row[2], 'source': row[3]})
                 conn.close()
@@ -509,6 +573,28 @@ class WebBridge(QObject):
         except Exception as e:
             self.logger.error(f"Failed to get terms: {e}")
             return "[]"
+
+    @pyqtSlot(str, result=bool)
+    def verify_dictionary_term(self, english):
+        """Mark a dictionary term as verified"""
+        import sqlite3
+        from src.utils.translation.biology_translator import get_global_biology_translator
+        try:
+            translator = get_global_biology_translator()
+            dm = translator.translation_data_manager
+            if dm and dm.db_path.exists():
+                conn = sqlite3.connect(dm.db_path)
+                cursor = conn.cursor()
+                # 标记校对过的词条来源为 'verified'
+                cursor.execute("UPDATE translations SET source = 'verified' WHERE english = ?", (english,))
+                success = conn.total_changes > 0
+                conn.commit()
+                conn.close()
+                return success
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to verify term: {e}")
+            return False
 
     @pyqtSlot(result=str)
     def repair_dictionary_categories(self):
@@ -1256,7 +1342,10 @@ class WebContainer(QWidget):
         # Check if we have files in the workspace (results/tree_workspace)
         workspace = Path("results/tree_workspace")
         if workspace.exists():
-            paths = [str(f) for f in workspace.glob("*.fasta")]
+            import itertools
+            paths = []
+            for ext in ("*.fasta", "*.seq", "*.fa", "*.fna"):
+                paths.extend([str(f) for f in workspace.glob(ext)])
             self.logger.info(f"Auto-detected {len(paths)} sequences in tree workspace.")
             
         # If workspace is empty, fallback to File Dialog

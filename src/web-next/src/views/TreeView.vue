@@ -6,7 +6,7 @@
 import { ref, onMounted, reactive, computed } from 'vue'
 import { useTree } from '../composables/useTree'
 import { useAppStore } from '../stores/app'
-import { getBridge } from '../bridge/pyqt-bridge'
+import { getBridge, initBridge } from '../bridge/pyqt-bridge'
 
 const appStore = useAppStore()
 const { settings, loadNewick, exportSVG, hasTree, isLoading, renderer } = useTree()
@@ -58,17 +58,43 @@ const modelOptions = computed(() => {
 })
 
 /* -------- 交互逻辑 -------- */
-function refreshWorkspace() {
-    const bridge = getBridge()
-    if (bridge && typeof bridge.list_tree_sequences === 'function') {
-        bridge.list_tree_sequences((res: string) => {
-            try {
-                workspaceFiles.value = JSON.parse(res) || []
-            } catch (e) {
-                console.error("Failed to parse workspace files", e)
-            }
-        })
+async function refreshWorkspace() {
+    try {
+        const bridge = await initBridge()
+        if (bridge && typeof bridge.list_tree_sequences === 'function') {
+            bridge.list_tree_sequences((res: string) => {
+                try {
+                    workspaceFiles.value = JSON.parse(res) || []
+                } catch (e) {
+                    console.error("Failed to parse workspace files", e)
+                }
+            })
+        }
+    } catch(e) {
+        console.warn("Bridge not ready for list_tree_sequences", e)
     }
+}
+
+async function clearWorkspace() {
+    selectedFiles.value = []
+    workspaceFiles.value = []
+    try {
+        const bridge = await initBridge()
+        // @ts-ignore
+        if (bridge && typeof bridge.clear_tree_workspace === 'function') {
+            // @ts-ignore
+            bridge.clear_tree_workspace((res: boolean) => {
+                if (res) {
+                    appStore.showNotification('工作区已成功清空', 'success')
+                } else {
+                    appStore.showNotification('部分文件被占用，无法完全清空', 'warning')
+                }
+                refreshWorkspace()
+            })
+        } else {
+            appStore.showNotification('清理完成 (仅前端)', 'info')
+        }
+    } catch(e) {}
 }
 
 function toggleSideTool(tool: 'input' | 'analysis' | 'display') {
@@ -88,8 +114,40 @@ function handleFileUpload(e: Event) {
     }
 }
 
-function importSequences() {
-    if (selectedFiles.value.length > 0 || workspaceFiles.value.length > 0) {
+async function importSequences() {
+    if (selectedFiles.value.length > 0) {
+        appStore.showNotification('正在预处理并上传本地序列...', 'info')
+        isLoading.value = true
+        
+        try {
+            let combinedContent = ''
+            for (const file of selectedFiles.value) {
+                const text = await file.text()
+                if (!text.trim().startsWith('>')) {
+                    combinedContent += `>${file.name}\n${text}\n`
+                } else {
+                    combinedContent += `\n${text}\n`
+                }
+            }
+            
+        try {
+            const bridge = await initBridge()
+            if (bridge && typeof bridge.save_tree_sequences === 'function') {
+                bridge.save_tree_sequences(combinedContent)
+            }
+        } catch(err) {}
+            
+            selectedFiles.value = []
+            appStore.showNotification('序列已完全载入内核，准备执行 MSA 预处理...', 'success')
+            activeSideTool.value = 'analysis'
+            refreshWorkspace()
+        } catch(e) {
+            console.error("Import failed", e)
+            appStore.showNotification('读取序列文件失败', 'error')
+        } finally {
+            isLoading.value = false
+        }
+    } else if (workspaceFiles.value.length > 0) {
         appStore.showNotification('序列已载入内核，准备执行 MSA 预处理...', 'success')
         activeSideTool.value = 'analysis'
     } else {
@@ -97,7 +155,7 @@ function importSequences() {
     }
 }
 
-function requestAnalysis() {
+async function requestAnalysis() {
     isLoading.value = true
     appStore.showNotification(`正在启动 [${treeWorkflows.engine}] 发育分析管线...`, 'info')
     try {
@@ -105,17 +163,21 @@ function requestAnalysis() {
             ...treeWorkflows,
             mode: treeWorkflows.engine === 'nj' ? 'rapid' : 'standard'
         }
-        getBridge().request_tree_analysis(JSON.stringify(params))
+        const bridge = await initBridge()
+        bridge.request_tree_analysis(JSON.stringify(params))
     } catch(e) {
         isLoading.value = false
         console.error("Analysis request failed", e)
     }
 }
 
-function handleReroot() {
-    if (selectedNode.value && getBridge()) {
-        getBridge().request_tree_reroot(selectedNode.value.name)
-        menuVisible.value = false
+async function handleReroot() {
+    if (selectedNode.value) {
+        try {
+            const bridge = await initBridge()
+            bridge.request_tree_reroot(selectedNode.value.name)
+            menuVisible.value = false
+        } catch(e) {}
     }
 }
 
@@ -142,21 +204,32 @@ onMounted(() => {
         setLoading: (val: boolean) => { isLoading.value = val },
         handleExternalFiles: (paths: string[]) => {
             if (!paths || paths.length === 0) return
-            appStore.showNotification(`正在处理 ${paths.length} 个导入文件...`, 'info')
             
             const firstPath = paths[0]
-            if (paths.length === 1 && firstPath && (firstPath.endsWith('.nwk') || firstPath.endsWith('.newick'))) {
+            if (paths.length === 1 && firstPath && (firstPath.endsWith('.nwk') || firstPath.endsWith('.newick') || firstPath.endsWith('.tree'))) {
+                appStore.showNotification(`正在加载树文件...`, 'info')
                 const bridge = getBridge()
+                // @ts-ignore
                 if (bridge && typeof bridge.read_result_file === 'function') {
+                    // @ts-ignore
                     bridge.read_result_file(firstPath).then((content: string) => {
                         if (content) loadNewick(content)
                     })
                 }
             } else {
-                appStore.showNotification('序列已添加，请点击“载入并预处理”', 'info')
-                refreshWorkspace()
+                appStore.showNotification(`正在将 ${paths.length} 个文件载入工作区...`, 'info')
+                initBridge().then(bridge => {
+                    // @ts-ignore
+                    if (bridge && typeof bridge.add_tree_workspace_files === 'function') {
+                        // @ts-ignore
+                        bridge.add_tree_workspace_files(JSON.stringify(paths))
+                        setTimeout(() => refreshWorkspace(), 500)
+                    }
+                    appStore.showNotification('序列已添加，请点击“载入并预处理”进入下一步', 'success')
+                })
             }
         }
+
     }
 
     if (renderer) {
@@ -233,7 +306,10 @@ onMounted(() => {
 
             <div class="actions-footer">
                <button class="btn-block-primary" @click="importSequences">载入并预处理</button>
-               <button class="btn-text-link" @click="refreshWorkspace">刷新工作区</button>
+               <div style="display: flex; justify-content: space-between; margin-top: 10px;">
+                   <button class="btn-text-link" @click="refreshWorkspace">刷新工作区</button>
+                   <button class="btn-text-link" style="color: #ff4d4f;" @click="clearWorkspace">清空列表</button>
+               </div>
             </div>
           </div>
 

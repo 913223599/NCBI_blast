@@ -35,6 +35,7 @@ export interface PyBridge {
     get_task_results(taskId: string, callback?: (res: string) => void): void
     get_all_tasks(callback?: (res: string) => void): void
     delete_single_task(taskId: string): void
+    resume_task(taskId: string): void
     list_tree_sequences(callback: (res: string) => void): void
     clear_all_history(): void
     rename_task(taskId: string, newName: string): void
@@ -42,10 +43,11 @@ export interface PyBridge {
     /* 进化树 */
     request_tree_analysis(mode: string): void
     request_tree_reroot(nodeId: string): void
+    clear_tree_workspace(callback?: (res: boolean) => void): void
 
     /* 配置 */
-    get_ui_translations(): void
-    get_ui_language(): void
+    get_ui_translations(callback?: (res: string) => void): void
+    get_ui_language(callback?: (res: string) => void): void
     save_ui_language(langCode: string): void
     get_api_key(service: string, callback?: (res: string) => void): void
     save_api_key(service: string, key: string): void
@@ -54,10 +56,11 @@ export interface PyBridge {
 
     /* 历史记录 */
     translate_text(text: string, category: string, callback?: (res: string) => void): void
-    search_dictionary(query: string, callback?: (res: string) => void): void
+    search_dictionary(query: string, proofread_mode?: boolean | ((res: string) => void), callback?: (res: string) => void): void
     save_dictionary_term(english: string, chinese: string, category: string, callback?: (res: boolean) => void): void
     delete_dictionary_term(english: string, callback?: (res: boolean) => void): void
-    get_all_dictionary_terms(callback?: (res: string) => void): void
+    verify_dictionary_term(english: string, callback?: (res: boolean) => void): void
+    get_all_dictionary_terms(proofread_mode?: boolean | ((res: string) => void), callback?: (res: string) => void): void
 
     /* 帮助 */
     get_help_structure(): void

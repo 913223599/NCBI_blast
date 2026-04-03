@@ -7,9 +7,11 @@ import { onMounted, ref } from 'vue'
 import { useBlastStore } from '../stores/blast'
 import { getBridge } from '../bridge/pyqt-bridge'
 import { useAppStore } from '../stores/app'
+import { useI18n } from '../locales'
 
 const blast = useBlastStore()
 const appStore = useAppStore()
+const { t } = useI18n()
 
 /* -------- 核心状态 -------- */
 const isTranslating = ref(false)
@@ -67,7 +69,22 @@ function fetchTaskResults(taskId: string) {
         const hits: any[] = []
         for (const res of resultsArray) {
           const queryId = res.sequence_id || '未知序列'
-          if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+          if (res.status === 'pending' || res.status === 'running') {
+              hits.push({
+                queryTitle: queryId,
+                speciesName: '等待比对...',
+                genusStrain: '',
+                geneSource: '',
+                seqType: '',
+                host: '',
+                alignLen: '',
+                identity: 0,
+                evalue: '-',
+                accession: '-',
+                hitTitle: '',
+                translatedName: null
+              })
+          } else if (res.data && Array.isArray(res.data) && res.data.length > 0) {
             const bestHit = res.data[0]
             hits.push({
               queryTitle: queryId,
@@ -83,6 +100,22 @@ function fetchTaskResults(taskId: string) {
               hitTitle: bestHit.title || '',
               translatedName: null
             })
+          } else {
+             // Finished but no hits found
+             hits.push({
+                queryTitle: queryId,
+                speciesName: '未找到匹配项 (No Hits)',
+                genusStrain: '',
+                geneSource: '',
+                seqType: '',
+                host: '',
+                alignLen: '',
+                identity: 0,
+                evalue: '-',
+                accession: '-',
+                hitTitle: '',
+                translatedName: null
+             })
           }
         }
         hits.sort((a, b) => a.queryTitle.localeCompare(b.queryTitle, undefined, { numeric: true, sensitivity: 'base' }))
@@ -147,8 +180,99 @@ function launchBlast(): void {
   }
 }
 
-function exportResults(): void {
-  try { getBridge().save_file(JSON.stringify(blast.results), 'blast_results.csv') } catch { }
+async function exportResults(): Promise<void> {
+  if (blast.results.length === 0) {
+    appStore.showNotification('没有结果可导出', 'warning')
+    return
+  }
+
+  // 检查是否存在未翻译的条目
+  const untranslatedCount = blast.results.filter(h => h.speciesName && !h.translatedName).length
+  if (untranslatedCount > 0) {
+    const confirmMsg = `存在 ${untranslatedCount} 条未翻译的物种条目。是否翻译后再导出？\n\n点击“确定”进行批量翻译，点击“取消”将直接导出当前结果（保留空白的翻译列）。`
+    if (window.confirm(confirmMsg)) {
+      await translateAll()
+      // 如果需要可以在翻译完成后自动导出，此处我们等用户手动导出，或者直接调用导出逻辑。
+      // 为防止翻译过程中用户改变主意，这里翻译完后继续下面的导出流程。
+      if (blast.results.filter(h => h.speciesName && !h.translatedName).length > 0) {
+          appStore.showNotification('部分翻译可能未完成，将执行导出。', 'info')
+      }
+    }
+  }
+
+  // 定义表头 - 拆分拉丁文名和翻译名
+  const headers = [
+    '查询序列',
+    '鉴定物种(中文翻译)',
+    '鉴定概率分布(中文翻译)',
+    '原始鉴定物种(拉丁文)',
+    '原始鉴定概率分布(拉丁文)',
+    '分类/菌株信息',
+    '基因/序列库', '相似度 (Identity)', 'E值', '访问号', '详细标题'
+  ]
+  
+  // 转换数据行
+  const rows = blast.results.map(h => {
+    // 翻译相关
+    const fullTrans = h.translatedName || ''
+    let mainTrans = fullTrans
+    let probTrans = '-'
+
+    // 拉丁文相关
+    const fullOriginal = h.speciesName || ''
+    let mainOriginal = fullOriginal
+    let probOriginal = '-'
+
+    // 处理百分比分布(共识算法结果) - 翻译名
+    if (fullTrans.includes('%') && fullTrans.includes('(')) {
+      const matchT = fullTrans.match(/^([^,(]+)\s*\(/)
+      if (matchT && matchT[1]) {
+        mainTrans = matchT[1].trim()
+        probTrans = fullTrans
+      }
+    }
+
+    // 处理百分比分布 - 原始名
+    if (fullOriginal.includes('%') && fullOriginal.includes('(')) {
+      const matchO = fullOriginal.match(/^([^,(]+)\s*\(/)
+      if (matchO && matchO[1]) {
+        mainOriginal = matchO[1].trim()
+        probOriginal = fullOriginal
+      }
+    }
+
+    return [
+      h.queryTitle,
+      mainTrans,
+      probTrans,
+      mainOriginal,
+      probOriginal,
+      h.genusStrain,
+      `${h.geneSource} (${h.seqType})`,
+      `${h.identity.toFixed(1)}%`,
+      h.evalue,
+      h.accession,
+      h.hitTitle
+    ]
+  })
+
+  // 生成 CSV 字符串（考虑 CSV 转义）
+  const csvContent = [
+    headers.join(','),
+    ...rows.map(row => 
+      row.map(cell => {
+        const str = String(cell || '').replace(/"/g, '""')
+        return `"${str}"`
+      }).join(',')
+    )
+  ].join('\n')
+
+  try {
+    getBridge().save_file(csvContent, 'blast_results.csv')
+    appStore.showNotification('导出指令已发送', 'success')
+  } catch (error) {
+    console.error('[Blast] Export error:', error)
+  }
 }
 
 async function translateAll(): Promise<void> {
@@ -156,19 +280,30 @@ async function translateAll(): Promise<void> {
   if (isTranslating.value) return
   isTranslating.value = true
   appStore.showNotification(`开始翻译 ${blast.results.length} 条结果...`, 'info')
+  
   const bridge = getBridge()
   let translated = 0
-  blast.results.forEach((hit) => {
-    if (hit.speciesName && !hit.translatedName) {
+  
+  const translationPromises = blast.results
+    .filter(hit => hit.speciesName && !hit.translatedName)
+    .map(hit => new Promise<void>(resolve => {
       bridge.translate_text(hit.speciesName, 'species', (result: string) => {
         if (result && result !== hit.speciesName) {
           hit.translatedName = result
           translated++
         }
+        resolve()
       })
-    }
-  })
+    }))
+
+  await Promise.all(translationPromises)
+  
   isTranslating.value = false
+  if (translated > 0) {
+    appStore.showNotification(`成功翻译 ${translated} 条新条目`, 'success')
+  } else {
+    appStore.showNotification('未发现需要翻译的新条目', 'info')
+  }
 }
 
 function selectTask(taskId: string): void {
@@ -220,6 +355,25 @@ function deleteSingleTask(taskId: string, event: Event) {
   try { getBridge().delete_single_task(taskId); blast.removeTask(taskId); } catch { }
 }
 
+function pauseTask(taskId: string, event: Event) {
+  event.stopPropagation()
+  try { getBridge().pause_blast_job(taskId); blast.updateTaskStatus(taskId, 'paused'); } catch { }
+}
+
+function resumeTask(taskId: string, event: Event) {
+  event.stopPropagation()
+  try { getBridge().resume_blast_job(taskId); blast.updateTaskStatus(taskId, 'running'); startPolling(taskId); } catch { }
+}
+
+function stopTask(taskId: string, event: Event) {
+  event.stopPropagation()
+  if (confirm('确定要取消此任务的执行吗？')) {
+    try { getBridge().stop_blast_job(taskId); blast.updateTaskStatus(taskId, 'cancelled'); } catch { }
+  }
+}
+
+
+
 function openNcbi(accession: string): void {
   window.open(`https://www.ncbi.nlm.nih.gov/nuccore/${accession}`, '_blank')
 }
@@ -243,7 +397,7 @@ function getDatabaseLabel() {
 }
 function getMatrixLabel() { return MATRIX_OPTIONS.find(o => o.value === blast.params.matrix)?.label || '选择矩阵' }
 function statusLabel(s: string) { 
-  const m: any = { queued: '排队', running: '运行', done: '完成', error: '失败' }
+  const m: any = { queued: t('blast.status.queued'), running: t('blast.status.running'), done: t('blast.status.done'), completed: t('blast.status.completed'), error: t('blast.status.error'), failed: t('blast.status.failed'), cancelled: t('blast.status.cancelled'), paused: t('blast.status.paused') }
   return m[s] || s
 }
 
@@ -294,22 +448,22 @@ onMounted(() => {
       <div class="tool-items">
         <div class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }" @click="toggleSideTool('input')">
           <span class="icon">📁</span>
-          <span class="label">序列输入</span>
+          <span class="label">{{ t('blast.nav.input') }}</span>
         </div>
         <div class="tool-divider"></div>
         <div class="tool-btn" :class="{ active: activeSideTool === 'params' && isSidebarOpen }" @click="toggleSideTool('params')">
           <span class="icon">⚙️</span>
-          <span class="label">分析参数</span>
+          <span class="label">{{ t('blast.nav.params') }}</span>
         </div>
         <div class="tool-divider"></div>
         <div class="tool-btn" :class="{ active: activeSideTool === 'history' && isSidebarOpen }" @click="toggleSideTool('history')">
           <span class="icon">🕐</span>
-          <span class="label">分析历史</span>
+          <span class="label">{{ t('blast.nav.history') }}</span>
         </div>
       </div>
       <div class="toolbar-actions">
         <button class="btn-primary-run" @click="launchBlast" :disabled="!blast.hasInput">
-          <span class="icon">▶</span> 执行比对分析
+          {{ t('blast.btn.run') }}
         </button>
       </div>
     </div>
@@ -320,16 +474,16 @@ onMounted(() => {
         <div class="sidebar-content scroll-v">
           <!-- 输入面板 -->
           <div v-show="activeSideTool === 'input'" class="panel-section">
-            <h3 class="section-title">▶ 序列输入</h3>
+            <h3 class="section-title">{{ t('blast.input.title') }}</h3>
             <div class="mode-tabs-neo">
-              <button class="mode-tab" :class="{ active: blast.inputMode === 'file' }" @click="blast.switchInputMode('file')">批量文件</button>
-              <button class="mode-tab" :class="{ active: blast.inputMode === 'text' }" @click="blast.switchInputMode('text')">粘贴文本</button>
+              <button class="mode-tab" :class="{ active: blast.inputMode === 'file' }" @click="blast.switchInputMode('file')">{{ t('blast.input.file') }}</button>
+              <button class="mode-tab" :class="{ active: blast.inputMode === 'text' }" @click="blast.switchInputMode('text')">{{ t('blast.input.text') }}</button>
             </div>
             
             <div v-if="blast.inputMode === 'file'" class="file-area">
               <div class="drop-zone-neo" @click="selectFiles">
                 <span class="dz-icon">📤</span>
-                <span class="dz-text">点击或拖拽 FASTA</span>
+                <span class="dz-text">{{ t('blast.input.drop') }}</span>
               </div>
               <div class="file-list-neo">
                  <div v-for="f in blast.files" :key="f" class="file-item-neo">
@@ -343,9 +497,9 @@ onMounted(() => {
 
           <!-- 参数面板 -->
           <div v-show="activeSideTool === 'params'" class="panel-section">
-            <h3 class="section-title">⚙️ 任务参数</h3>
+            <h3 class="section-title">{{ t('blast.param.title') }}</h3>
             <div class="form-group">
-              <label>分析程序</label>
+              <label>{{ t('blast.param.prog') }}</label>
               <div class="select-box-neo" @click.stop="toggleDropdown('program', $event)">
                 {{ getProgramLabel() }} <span class="arrow">▼</span>
                 <div v-if="openDropdown === 'program'" class="dropdown-list">
@@ -354,7 +508,7 @@ onMounted(() => {
               </div>
             </div>
             <div class="form-group">
-              <label>任务数据库</label>
+              <label>{{ t('blast.param.db') }}</label>
               <div class="select-box-neo" @click.stop="toggleDropdown('db', $event)">
                  {{ getDatabaseLabel() }} <span class="arrow">▼</span>
                  <div v-if="openDropdown === 'db'" class="dropdown-list">
@@ -367,17 +521,25 @@ onMounted(() => {
             </div>
             <div class="form-row">
               <div class="form-group">
-                 <label>E-Value</label>
+                 <label>{{ t('blast.param.eval') }}</label>
                  <input type="number" v-model="blast.params.evalue" class="neo-input" />
               </div>
               <div class="form-group">
-                 <label>最大匹配</label>
+                 <label>{{ t('blast.param.max') }}</label>
                  <input type="number" v-model="blast.params.maxHits" class="neo-input" />
               </div>
             </div>
-            <h3 class="section-title sub">🧬 模型选项</h3>
             <div class="form-group">
-               <label>计分矩阵</label>
+               <label>{{ t('blast.param.threads') }}</label>
+               <input type="number" v-model="blast.params.threads" class="neo-input" min="1" max="128" />
+            </div>
+            <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+               <input type="checkbox" id="filter-complex" v-model="blast.params.filterLowComplexity" style="accent-color: #2563eb;" />
+               <label for="filter-complex" style="margin-bottom: 0; cursor: pointer;">{{ t('blast.param.filter') }}</label>
+            </div>
+            <h3 class="section-title sub">{{ t('blast.model.title') }}</h3>
+            <div class="form-group">
+               <label>{{ t('blast.model.matrix') }}</label>
                <div class="select-box-neo" @click.stop="toggleDropdown('matrix', $event)">
                   {{ getMatrixLabel() }} <span class="arrow">▼</span>
                   <div v-if="openDropdown === 'matrix'" class="dropdown-list">
@@ -385,11 +547,21 @@ onMounted(() => {
                   </div>
                </div>
             </div>
+            <div class="form-row">
+              <div class="form-group">
+                 <label>Gap Open</label>
+                 <input type="number" v-model="blast.params.gapOpen" class="neo-input" />
+              </div>
+              <div class="form-group">
+                 <label>Gap Extend</label>
+                 <input type="number" v-model="blast.params.gapExtend" class="neo-input" />
+              </div>
+            </div>
           </div>
 
           <!-- 历史面板 -->
           <div v-show="activeSideTool === 'history'" class="panel-section">
-            <h3 class="section-title">🕐 分析历史</h3>
+            <h3 class="section-title">{{ t('blast.hist.title') }}</h3>
             <div class="history-list">
                <div v-for="t in blast.tasks" :key="t.taskId" class="task-card" :class="{ active: blast.activeTaskId === t.taskId }" @click="selectTask(t.taskId)">
                   <div class="title" @dblclick="startRename(t, $event)">
@@ -398,15 +570,24 @@ onMounted(() => {
                   </div>
                   <div class="meta">
                     <span class="status" :class="t.status">{{ statusLabel(t.status) }}</span>
-                    <span class="time">{{ getFormattedTimestamp(t.startTime).split(' ')[1] }}</span>
+                  </div>
+                  <!-- 进度条模块：对所有未完成的任务保持显示进度，以便断点接续时明确当前的进度节点 -->
+                  <div class="progress-bar-container" v-if="['running', 'paused', 'queued', 'error', 'failed', 'cancelled'].includes(t.status)">
+                    <div class="progress-bar-fill" :style="{ width: t.progress + '%' }"></div>
+                    <span class="progress-text">{{ t.progress }}%</span>
                   </div>
                   <div class="card-actions">
-                     <button @click.stop="deleteSingleTask(t.taskId, $event)">🗑</button>
+                     <button v-if="t.status === 'running'" title="暂停" @click.stop="pauseTask(t.taskId, $event)">⏸</button>
+                     <!-- 将原有的 paused 单一继续，扩展为对所有未跑完（中断/暂停/失败/取消）任务展现断点接续功能 -->
+                     <button v-if="['paused', 'error', 'failed', 'cancelled'].includes(t.status)" title="断点接续 / 继续" @click.stop="resumeTask(t.taskId, $event)">▶️</button>
+                     <button v-if="['running', 'paused', 'queued'].includes(t.status)" title="取消" @click.stop="stopTask(t.taskId, $event)">⏹</button>
+                     <!-- 重新运行功能如果后续需要实现全新清空重跑可在这里添加，目前以断点接续为主 -->
+                     <button title="删除" @click.stop="deleteSingleTask(t.taskId, $event)">🗑</button>
                   </div>
                </div>
             </div>
             <div v-if="blast.tasks.length > 0" class="history-footer">
-               <button class="text-btn-warn" @click="clearAllHistory">清空全部历史记录</button>
+               <button class="text-btn-warn" @click="clearAllHistory">{{ t('blast.hist.clear') }}</button>
             </div>
           </div>
         </div>
@@ -422,19 +603,19 @@ onMounted(() => {
         <div class="results-header">
            <div class="title">📊 {{ blast.resultTitle }}</div>
            <div class="actions">
-              <button class="btn-ai" @click="translateAll" :disabled="isTranslating">🌐 AI 翻译</button>
-              <button class="btn-export" @click="exportResults">💾 导出</button>
+              <button class="btn-ai" @click="translateAll" :disabled="isTranslating">{{ t('blast.btn.trans') }}</button>
+              <button class="btn-export" @click="exportResults">{{ t('blast.btn.export') }}</button>
            </div>
         </div>
         <div class="table-wrapper scroll-v">
            <table v-if="blast.results.length > 0">
              <thead>
                <tr>
-                 <th>查询序列</th>
-                 <th>鉴定详情 (物种/菌株/基因)</th>
-                 <th>生物学背景</th>
-                 <th>相似度 (Identity)</th>
-                 <th>E值</th>
+                 <th>{{ t('blast.res.query') }}</th>
+                 <th>{{ t('blast.res.detail') }}</th>
+                 <th>{{ t('blast.res.bg') }}</th>
+                 <th>{{ t('blast.res.id') }}</th>
+                 <th>{{ t('blast.res.eval') }}</th>
                  <th>NCBI</th>
                </tr>
              </thead>
@@ -462,7 +643,7 @@ onMounted(() => {
            </table>
            <div v-else class="empty-hint">
              <div class="icon">🧬</div>
-             <p>数据已准备就绪，请选择历史或发起新比对</p>
+             <p>{{ t('blast.hist.empty') }}</p>
            </div>
         </div>
       </div>
@@ -626,10 +807,53 @@ onMounted(() => {
 .task-card.active { border-color: #2563eb; background: #eff6ff; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1); }
 .task-card .title { font-size: 0.82rem; font-weight: 800; margin-bottom: 6px; color: #1e293b; }
 .task-card .meta { display: flex; justify-content: space-between; font-size: 0.68rem; color: #94a3b8; font-weight: 500; }
-.status.done { color: #16a34a; }
+.status.done, .status.completed { color: #16a34a; }
 .status.running { color: #2563eb; }
-.task-card .card-actions { position: absolute; top: 12px; right: 12px; opacity: 0; transition: opacity 0.2s; }
-.task-card:hover .card-actions { opacity: 1; }
+.task-card .card-actions { position: absolute; top: 12px; right: 12px; opacity: 1; transition: opacity 0.2s; display: flex; gap: 4px; }
+
+.task-card .card-actions button {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+  color: #64748b;
+}
+.task-card .card-actions button:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.progress-bar-container {
+  height: 6px;
+  background-color: #e2e8f0;
+  border-radius: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+  position: relative;
+}
+.progress-bar-fill {
+  height: 100%;
+  background-color: #3b82f6;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.progress-text {
+  position: absolute;
+  right: 0;
+  top: -16px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #3b82f6;
+}
 
 .history-footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #f1f5f9; text-align: center; }
 .text-btn-warn { border: none; background: none; color: #ef4444; font-size: 0.78rem; font-weight: 700; cursor: pointer; padding: 8px 16px; border-radius: 6px; }

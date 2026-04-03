@@ -99,9 +99,21 @@ class BlastEngine:
         """Execute the analysis pipeline for a list of sequences."""
         total = len(sequences)
         completed = 0
+        skipped_cached = 0
         max_workers = self.settings.get('max_workers', 2)
 
-        logger.info(f"Engine [{self.task_id}] starting with {total} sequences, {max_workers} workers.")
+        # 断点续传预扫描：先统计有多少序列已经有有效结果
+        for seq in sequences:
+            seq_id = seq.get('id', 'unknown')
+            safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', seq_id)
+            csv_path = self.results_dir / f"{safe_id}.csv"
+            if self._verify_result_integrity(csv_path):
+                skipped_cached += 1
+
+        if skipped_cached > 0:
+            logger.info(f"Engine [{self.task_id}] ★★ 断点续传模式 ★★ 检测到 {skipped_cached}/{total} 条序列已有有效缓存结果，将跳过这些序列。")
+        else:
+            logger.info(f"Engine [{self.task_id}] 全新任务，共 {total} 条序列待处理, {max_workers} 个工作线程。")
 
         executor = ThreadPoolExecutor(max_workers=max_workers)
         try:
@@ -114,12 +126,10 @@ class BlastEngine:
             for future in as_completed(futures):
                 if self._cancel_flag.is_set():
                     logger.info(f"Engine [{self.task_id}] cancellation detected. Sending immediate shutdown to pool.")
-                    # Cancel all pending futures in the queue
                     for f in futures:
                         f.cancel()
-                    # Do NOT wait for active threads - let them background-zombie until they hit next flag
                     executor.shutdown(wait=False)
-                    return # Exit run() immediately
+                    return
                 
                 try:
                     result = future.result()
@@ -136,23 +146,28 @@ class BlastEngine:
                         
                 except Exception as e:
                     logger.error(f"Engine sequence processing error: {e}")
-                    completed += 1 # Still count as attempted
+                    completed += 1
         finally:
-            # Ensure pool is cleaned up even if no cancellation happened
             executor.shutdown(wait=False)
 
     def _verify_result_integrity(self, csv_path: Path) -> bool:
-        """Verify if the CSV result file is structurally sound and complete."""
+        """Verify if the CSV result file is structurally sound and complete.
+        
+        不依赖特定语言的表头文字（系统实际输出的是中文表头如 '标题,长度,访问号'），
+        只检查文件是否存在、非空、且至少包含 header + 1 行数据。
+        """
         if not csv_path.exists() or csv_path.stat().st_size == 0:
             return False
         
         try:
-            with open(csv_path, 'r', encoding='utf-8') as f:
+            with open(csv_path, 'r', encoding='utf-8-sig') as f:
                 header = f.readline()
-                # Basic check: First line should contain 'Sequence ID'
-                if not header or 'Sequence ID' not in header:
+                if not header or not header.strip():
                     return False
-                # For more strictness, we could check if there's at least a newline or more content
+                # 确保至少有一行数据 (header + data)
+                data_line = f.readline()
+                if not data_line or not data_line.strip():
+                    return False
                 return True
         except Exception:
             return False
@@ -202,7 +217,7 @@ class BlastEngine:
 
             # RESUMPTION: Check if valid result already exists
             if self._verify_result_integrity(csv_path):
-                logger.info(f"Sequence {seq_id} | Result valid and found on disk. Skipping analysis.")
+                logger.info(f"★ 断点跳过: {seq_id} | 磁盘上已存在有效 CSV 结果，无需重新比对。")
                 return {
                     "task_id": self.task_id,
                     "sequence_id": seq_id,

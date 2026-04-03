@@ -8,6 +8,8 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { getBridge } from '../bridge/pyqt-bridge'
 import { useAppStore } from '../stores/app'
 
+import { useVirtualList } from '@vueuse/core'
+
 const appStore = useAppStore()
 
 /* -------- 面板切换 -------- */
@@ -35,7 +37,13 @@ const newTermEn = ref('')
 const newTermZh = ref('')
 const newTermCat = ref('species')
 
-// 下拉菜单控制 (全部采用自定义实现)
+// 虚拟列表配置
+const { list, containerProps, wrapperProps } = useVirtualList(
+  dictResults,
+  { itemHeight: 52 }
+)
+
+// 下拉菜单控制
 const dropdownOpen = ref(false)
 const selectRef = ref<HTMLElement | null>(null)
 const dictDropdownOpen = ref(false)
@@ -79,14 +87,12 @@ function handleClickOutside(event: MouseEvent) {
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
   loadSettings()
-  // 移除初始加载时的全量词典加载，改为切换到面板时按需加载，解决进入设置页时的卡顿
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
 })
 
-/** 监听面板切换，执行延迟加载 */
 watch(activePanel, (newVal) => {
   if (newVal === 'dictionary' && dictResults.value.length === 0) {
     loadDictionary()
@@ -153,14 +159,52 @@ function saveLanguage(): void {
   appStore.showNotification('语言已切换', 'success')
 }
 
+const proofreadMode = ref(false)
+
 /* -------- 词典管理逻辑 -------- */
 function loadDictionary(): void {
-  // 增加默认限制，避免万级词库一次性加载导致 Vue 渲染假死
-  getBridge().get_all_dictionary_terms((termsStr: string) => {
+  // 解除只显示100条的限制，因为有了虚拟滚动，浏览器可以毫无压力处理几万条前端内存数据
+  getBridge().get_all_dictionary_terms(proofreadMode.value, (termsStr: string) => {
     try { 
       const terms = JSON.parse(termsStr)
-      dictResults.value = Array.isArray(terms) ? terms.slice(0, 100) : [] 
+      dictResults.value = Array.isArray(terms) ? terms : [] 
     } catch (e) { }
+  })
+}
+
+function exportDictionaryCSV(): void {
+  getBridge().get_all_dictionary_terms((termsStr: string) => {
+    try {
+      const terms = JSON.parse(termsStr)
+      if (!Array.isArray(terms) || terms.length === 0) {
+        appStore.showNotification('没有可导出的词典数据', 'warning')
+        return
+      }
+      
+      let csvContent = "\uFEFF"
+      csvContent += "英文原词,中文翻译,分类,来源\n"
+      
+      terms.forEach(term => {
+        const en = term.english ? term.english.replace(/"/g, '""') : ''
+        const zh = term.chinese ? term.chinese.replace(/"/g, '""') : ''
+        const cat = term.category || ''
+        const src = term.source || ''
+        csvContent += `"${en}","${zh}","${cat}","${src}"\n`
+      })
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.setAttribute("href", url)
+      link.setAttribute("download", `Bio_Translation_Dict_${new Date().toISOString().slice(0,10)}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      appStore.showNotification('词库导出成功', 'success')
+    } catch (e) {
+      appStore.showNotification('词库导出失败: 数据格式错误', 'error')
+    }
   })
 }
 
@@ -168,10 +212,19 @@ function searchDictionary(): void {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     if (!dictQuery.value.trim()) { loadDictionary(); return }
-    getBridge().search_dictionary(dictQuery.value.trim(), (resStr: string) => {
+    getBridge().search_dictionary(dictQuery.value.trim(), proofreadMode.value, (resStr: string) => {
       try { dictResults.value = JSON.parse(resStr) } catch (e) { }
     })
   }, 300) // 300ms 防抖
+}
+
+function verifyTerm(english: string): void {
+  getBridge().verify_dictionary_term(english, (success: boolean) => {
+    if (success) {
+      appStore.showNotification('词条已校对并标记为 verified', 'success')
+      loadDictionary()
+    }
+  })
 }
 
 function saveTerm(): void {
@@ -354,39 +407,42 @@ function editTerm(term: any): void {
           <div class="search-row" style="margin-bottom: 20px; display: flex; gap: 12px; align-items: center;">
             <input v-model="dictQuery" type="search" class="form-input" 
               style="flex: 1"
-              placeholder="快速搜索本地词库 (英文或中文)..." @input="searchDictionary" />
+              placeholder="快速搜索 (输入 'ai' 可查所有 AI 生成词条)..." @input="searchDictionary" />
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+              <input type="checkbox" v-model="proofreadMode" @change="loadDictionary" />
+              开启纯净校对模式
+            </label>
+            <button class="btn-action" style="padding: 8px 16px;" @click="exportDictionaryCSV">⬇️ 导出完整词库 (CSV)</button>
             <button class="btn-action" style="padding: 8px 16px;" @click="loadDictionary">🔄 刷新数据</button>
           </div>
 
           <div class="dict-table-container">
-            <table class="dict-table">
-              <thead>
-                <tr>
-                  <th>英文原词</th>
-                  <th>翻译结果</th>
-                  <th>分类</th>
-                  <th>来源</th>
-                  <th style="text-align: right;">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(result, idx) in dictResults" :key="idx">
-                  <td class="dict-en-cell">{{ result.english }}</td>
-                  <td class="dict-zh-cell">{{ result.chinese }}</td>
-                  <td><span class="dict-cat-tag">{{ result.category }}</span></td>
-                  <td><span class="source-tag">{{ result.source || 'manual' }}</span></td>
-                  <td style="text-align: right;">
-                    <div class="dict-actions">
-                      <button class="btn-icon-link" @click="editTerm(result)">✏️</button>
-                      <button class="btn-icon-link" @click="deleteTerm(result.english)">🗑️</button>
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="dictResults.length === 0">
-                  <td colspan="5" class="empty-hint">暂无词条，请在上方尝试录入</td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="dict-grid-header">
+              <div class="th">英文原词</div>
+              <div class="th">翻译结果</div>
+              <div class="th">分类</div>
+              <div class="th">来源</div>
+              <div class="th text-right">操作</div>
+            </div>
+            
+            <div v-bind="containerProps" class="dict-virtual-container">
+              <div v-bind="wrapperProps">
+                <div v-for="item in list" :key="item.index" class="dict-grid-row">
+                  <div class="td dict-en-cell">{{ item.data.english }}</div>
+                  <div class="td dict-zh-cell">{{ item.data.chinese }}</div>
+                  <div class="td"><span class="dict-cat-tag">{{ item.data.category }}</span></div>
+                  <div class="td">
+                    <span class="source-tag" :class="item.data.source">{{ item.data.source || 'manual' }}</span>
+                  </div>
+                  <div class="td text-right dict-actions">
+                    <button v-if="proofreadMode && item.data.source !== 'verified'" class="btn-icon-link" @click="verifyTerm(item.data.english)" title="标记为已通过校对">✔️</button>
+                    <button class="btn-icon-link" @click="editTerm(item.data)">✏️</button>
+                    <button class="btn-icon-link" @click="deleteTerm(item.data.english)">🗑️</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="dictResults.length === 0" class="empty-hint">暂无词条，请在上方尝试录入或更改搜索条件</div>
           </div>
         </div>
       </div>
@@ -428,14 +484,46 @@ function editTerm(term: any): void {
 .add-term-grid .form-group:nth-child(3) { flex: 0 0 170px; }
 .add-term-grid .action-group { flex: 0 0 120px; }
 
-.dict-table-container { max-height: 500px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; }
-.dict-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-.dict-table th { position: sticky; top: 0; background: #f8fafc; padding: 12px; text-align: left; border-bottom: 2px solid var(--border-color); z-index: 10; }
-.dict-table td { padding: 12px; border-bottom: 1px solid var(--border-light); }
+.dict-table-container { border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; }
+.dict-grid-header, .dict-grid-row {
+  display: grid;
+  grid-template-columns: 2.5fr 2fr 1fr 1fr 130px;
+  gap: 16px;
+  align-items: center;
+  padding: 0 16px;
+}
+.dict-grid-header {
+  height: 48px;
+  background: var(--bg-secondary, #f8fafc);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.dict-grid-row {
+  height: 52px;
+  border-bottom: 1px solid var(--border-light);
+  transition: background 0.2s;
+}
+.dict-grid-row:hover { background: #f8fafc; }
+.dict-virtual-container {
+  height: calc(100vh - 400px);
+  min-height: 400px;
+  overflow-y: auto;
+}
+.text-right { text-align: right; justify-content: flex-end; }
+.td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.85rem; color: var(--text-primary); }
 .dict-en-cell { font-weight: 600; }
-.dict-zh-cell { color: var(--accent-blue); }
-.dict-cat-tag { background: #f1f5f9; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; }
-.source-tag { font-size: 0.72rem; color: var(--text-muted); }
+.dict-zh-cell { color: var(--accent-blue); font-weight: 600; }
+.dict-cat-tag { background: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-size: 0.72rem; display: inline-block; }
+.source-tag { font-size: 0.72rem; color: var(--text-muted); display: inline-block; padding: 2px 6px; border-radius: 4px; background: rgba(100,116,139,0.1); }
+.source-tag.ai { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+.source-tag.verified { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+.source-tag.manual { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); }
+
+.dict-actions { display: flex; gap: 8px; justify-content: flex-end; overflow: visible; }
+.btn-icon-link { background: none; border: none; font-size: 1.05rem; cursor: pointer; padding: 4px; transition: transform 0.1s; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 4px; }
+.btn-icon-link:hover { transform: scale(1.1); background: rgba(0,0,0,0.05); }
 
 .btn-premium { background: var(--accent-blue); color: white; border: none; padding: 10px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; }
 .btn-action { background: white; border: 1px solid var(--accent-blue); color: var(--accent-blue); padding: 6px 14px; border-radius: 6px; cursor: pointer; }

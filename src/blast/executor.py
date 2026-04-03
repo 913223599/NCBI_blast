@@ -42,13 +42,24 @@ class BlastExecutor:
         self._setup_ssl()
 
     def _setup_ssl(self):
-        """配置非验证的SSL上下文（用于应对特定网络环境）"""
-        self.ssl_context = ssl.create_default_context()
-        self.ssl_context.check_hostname = False
-        self.ssl_context.verify_mode = ssl.CERT_NONE
+        """配置 SSL 上下文以适配 NCBI 服务器的 TLS 要求"""
+        try:
+            # 方案 A: 宽松的非验证上下文 (适用于代理/VPN 环境)
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            self.ssl_context.check_hostname = False
+            self.ssl_context.verify_mode = ssl.CERT_NONE
+            # 强制最低 TLS 1.2，部分旧版本环境下 NCBI 可能拒绝 TLS 1.0/1.1
+            self.ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        except AttributeError:
+            # Python < 3.7 fallback
+            self.ssl_context = ssl.create_default_context()
+            self.ssl_context.check_hostname = False
+            self.ssl_context.verify_mode = ssl.CERT_NONE
+
         https_handler = HTTPSHandler(context=self.ssl_context)
         opener = build_opener(https_handler)
         install_opener(opener)
+        logging.info(f"SSL 上下文已就绪: OpenSSL={ssl.OPENSSL_VERSION}, TLS范围=[{getattr(self.ssl_context, 'minimum_version', '?')}, {getattr(self.ssl_context, 'maximum_version', '?')}]")
 
     def _validate_sequence(self, sequence):
         """验证并清理序列"""

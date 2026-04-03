@@ -405,13 +405,13 @@ class TranslationDataManager:
             with self._lock:
                 cursor = self._conn.cursor()
                 wildcard = f"%{query}%"
-                # 搜索英文或中文
+                # 搜索英文、中文或来源
                 cursor.execute('''
                     SELECT english, chinese, category, source 
                     FROM translations 
-                    WHERE english LIKE ? OR chinese LIKE ? 
+                    WHERE english LIKE ? OR chinese LIKE ? OR source LIKE ?
                     LIMIT ?
-                ''', (wildcard, wildcard, limit))
+                ''', (wildcard, wildcard, wildcard, limit))
                 
                 for row in cursor.fetchall():
                     results.append({

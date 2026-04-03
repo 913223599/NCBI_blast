@@ -94,6 +94,9 @@ onMounted(async () => {
 
   // 4. 通知 Python 页面已就绪
   bridge.on_page_ready()
+  
+  // 5. 初始化加载由后端注入的当前语言包
+  appStore.fetchTranslations()
 })
 </script>
 

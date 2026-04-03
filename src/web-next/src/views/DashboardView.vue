@@ -4,51 +4,46 @@
  * 从旧版 index.html #dashboard-view 迁移
  * 包含欢迎横幅 + 功能导航卡片
  */
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
+import { useI18n } from '../locales'
 
 const router = useRouter()
 const appStore = useAppStore()
+const { t } = useI18n()
 
 interface ActionCard {
   id: string
-  title: string
-  description: string
+  titleKey: string
+  descKey: string
   route: string
   icon: string
   gradient: string
 }
 
-const actionCards: ActionCard[] = [
+const actionCards = computed<ActionCard[]>(() => [
   {
     id: 'blast',
-    title: 'BLAST 比对',
-    description: '使用 NCBI BLAST+ 工具进行局部序列比对搜索',
+    titleKey: 'dash.blast.title',
+    descKey: 'dash.blast.desc',
     route: '/blast',
     icon: '🔍',
     gradient: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)'
   },
   {
-    id: 'studio',
-    title: '节点工作台',
-    description: '可视化工作流编辑器，拖拽构建分析管线',
-    route: '/studio',
-    icon: '⚡',
-    gradient: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)'
-  },
-  {
     id: 'tree',
-    title: '进化树分析',
-    description: '系统发育树构建、可视化与编辑',
+    titleKey: 'dash.tree.title',
+    descKey: 'dash.tree.desc',
     route: '/tree',
     icon: '🌳',
     gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
   }
-]
+])
 
 function navigateTo(card: ActionCard): void {
   router.push(card.route)
-  appStore.setPageTitle(card.title)
+  appStore.setPageTitle(t(card.titleKey))
 }
 </script>
 
@@ -68,7 +63,7 @@ function navigateTo(card: ActionCard): void {
     </div>
 
     <!-- 功能卡片 -->
-    <div class="section-title">🧬 快速开始</div>
+    <div class="section-title">{{ t('dash.quick') }}</div>
     <div class="cards-grid">
       <div
         v-for="card in actionCards"
@@ -80,30 +75,30 @@ function navigateTo(card: ActionCard): void {
           {{ card.icon }}
         </div>
         <div class="card-body">
-          <h3>{{ card.title }}</h3>
-          <p>{{ card.description }}</p>
+          <h3>{{ t(card.titleKey) }}</h3>
+          <p>{{ t(card.descKey) }}</p>
         </div>
         <div class="card-arrow">→</div>
       </div>
     </div>
 
     <!-- 状态信息 -->
-    <div class="section-title">📊 系统信息</div>
+    <div class="section-title">{{ t('dash.sys') }}</div>
     <div class="info-grid">
       <div class="info-card">
-        <div class="info-label">平台版本</div>
+        <div class="info-label">{{ t('dash.sys.v') }}</div>
         <div class="info-value">v2.0-next</div>
       </div>
       <div class="info-card">
-        <div class="info-label">引擎架构</div>
+        <div class="info-label">{{ t('dash.sys.arch') }}</div>
         <div class="info-value">Vue 3 SPA</div>
       </div>
       <div class="info-card">
-        <div class="info-label">渲染模式</div>
+        <div class="info-label">{{ t('dash.sys.render') }}</div>
         <div class="info-value">统一 DOM</div>
       </div>
       <div class="info-card">
-        <div class="info-label">构建工具</div>
+        <div class="info-label">{{ t('dash.sys.tool') }}</div>
         <div class="info-value">Vite 7</div>
       </div>
     </div>
@@ -167,7 +162,7 @@ function navigateTo(card: ActionCard): void {
 /* 功能卡片 */
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--space-md);
   margin-bottom: var(--space-xl);
 }

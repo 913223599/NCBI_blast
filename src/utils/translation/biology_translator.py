@@ -103,36 +103,47 @@ class BiologyTranslator:
                 return result
 
         # 4. 尝试 AI 翻译 (如果启用且可用)
-        if active_use_ai and self.ai_translator:
-            try:
-                ai_result = self.ai_translator.translate_text(text)
-                if ai_result and ai_result != text:
-                    # 恢复并加强自动保存机制：AI 翻译成功后应记录，下次可从本地库秒级返回
-                    if self.translation_data_manager:
-                        # 1. 使用专用的保存方法，标记来源为 AI
-                        self.translation_data_manager.add_translation(
-                            text, 
-                            ai_result, 
-                            category=category if category else 'species', 
-                            source="ai"
-                        )
-                        # 2. 调用术语提取深度学习分析（如有）
-                        try:
-                            self.term_extractor.extract_and_store_key_terms(text, ai_result)
-                        except:
-                            pass
-                    
-                    result = f"[AI]{ai_result}"
-                    with self._lock:
-                        self._translation_cache[original_text] = result
-                    return result
-            except Exception as e:
-                print(f"AI翻译异常: {e}")
-                # AI 失败降级为原文，无需特殊处理，继续向下执行
+        if active_use_ai:
+            if not self.ai_translator:
+                # 如果明确要求了 AI 翻译，但未配置，给予提示
+                if use_ai_override:
+                    import logging
+                    logging.getLogger(__name__).warning("请求了 AI 翻译，但尚未配置有效 API Key。")
+            else:
+                try:
+                    ai_result = self.ai_translator.translate_text(text)
+                    if ai_result and ai_result != text:
+                        # 恢复并加强自动保存机制：AI 翻译成功后应记录，下次可从本地库秒级返回
+                        if self.translation_data_manager:
+                            # 1. 使用专用的保存方法，标记来源为 AI
+                            self.translation_data_manager.add_translation(
+                                text, 
+                                ai_result, 
+                                category=category if category else 'species', 
+                                source="ai"
+                            )
+                            # 2. 调用术语提取深度学习分析（如有）
+                            try:
+                                self.term_extractor.extract_and_store_key_terms(text, ai_result)
+                            except:
+                                pass
+                        
+                        # 移除原先带有的 [AI] 前缀，保证界面的清洁度和词库的标准性
+                        result = ai_result
+                        with self._lock:
+                            self._translation_cache[original_text] = result
+                        return result
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).error(f"[AITranslator] AI翻译异常: {e}")
+                    # AI 失败降级为原文，无需特殊处理，继续向下执行
 
         # 5. 默认返回原文
-        with self._lock:
-            self._translation_cache[original_text] = original_text
+        # 注意：如果是只查询本地 (use_ai_override == False)，不要把英文原文存入缓存，
+        # 否则后续真正的 AI 后台线程调用时，会在第 0 步直接命中这个原文缓存，导致 AI 彻底失效！
+        if active_use_ai:
+            with self._lock:
+                self._translation_cache[original_text] = original_text
         return original_text
 
     def translate_batch(self, texts: list, category: str = 'species') -> dict:
