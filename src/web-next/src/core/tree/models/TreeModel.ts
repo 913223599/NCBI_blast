@@ -160,4 +160,25 @@ export class TreeModel {
     getLeafCount(): number {
         return this.leaves.length
     }
+
+    /**
+     * 将当前内存中的树结构导出为 Newick 字符串
+     */
+    getNewick(): string {
+        if (!this.root) return ""
+        
+        const _serialize = (node: TreeNode): string => {
+            let s = ""
+            if (node.children && node.children.length > 0) {
+                s = "(" + node.children.map(c => _serialize(c)).join(",") + ")"
+            }
+            if (node.name) s += node.name
+            if (node.branch_length !== undefined) {
+                s += ":" + node.branch_length
+            }
+            return s
+        }
+        
+        return _serialize(this.root) + ";"
+    }
 }

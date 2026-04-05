@@ -72,9 +72,12 @@ export function useTree() {
 
     function midpointRooting() {
         if (hasTree.value && model.value) {
-            // Force renderer to rebuild labels by invalidating its model cache
-            // Since we're using a hybrid renderer, this ensures labels follow the new topology
             model.value.rerootMidpoint()
+            
+            // 核心修复：将定根后的新拓扑同步回字符串，触发 UI 插件监听
+            const newNwk = model.value.getNewick()
+            rawNewick.value = newNwk
+
             renderer.lastModel = null 
             updateLayout()
             renderer.fitView(model.value)
