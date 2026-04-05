@@ -147,7 +147,11 @@ export class HybridRenderer {
 
     render(model: TreeModel, settings: LayoutSettings) {
         const isModelChanged = (this.lastModel !== model) || !this.lastModel
-        this.lastModel = model; this.lastSettings = settings
+        const isSettingsChanged = (this.lastSettings?.sortMode !== settings.sortMode) || 
+                                (this.lastSettings?.mode !== settings.mode) ||
+                                (this.lastSettings?.useBranchLengths !== settings.useBranchLengths)
+
+        this.lastModel = model; this.lastSettings = { ...settings }
         if (!this.ctx || !this.canvas || !this.g || !model.root) return
 
         this.ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -162,7 +166,7 @@ export class HybridRenderer {
         this.drawEdgesRecursive(model.root, settings)
         this.ctx.stroke()
 
-        if (isModelChanged) {
+        if (isModelChanged || isSettingsChanged) {
             while (this.g.firstChild) { this.g.removeChild(this.g.firstChild) }
             if (settings.showLabels) {
                 const fragment = document.createDocumentFragment()

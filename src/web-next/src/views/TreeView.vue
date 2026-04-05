@@ -10,7 +10,7 @@ import { getBridge, initBridge } from '../bridge/pyqt-bridge'
 import PhylotreeWidget from '../components/PhylotreeWidget.vue'
 
 const appStore = useAppStore()
-const { settings, loadNewick, midpointRooting, exportSVG, hasTree, isLoading, renderer, containerRef, rawNewick } = useTree()
+const { settings, loadNewick, midpointRooting, resetTopology, isRerooted, applyTreeSorting, exportSVG, hasTree, isLoading, renderer, containerRef, rawNewick } = useTree()
 
 /* -------- 核心状态 -------- */
 const renderEngine = ref<'hybrid'|'phylotree'>('phylotree')
@@ -43,7 +43,16 @@ const treeWorkflows = reactive({
 /* -------- 选项数据 -------- */
 const layoutModeOptions = [
     { label: '矩形 (Rectangular)', value: 'rect' },
-    { label: '圆形 (Circular)', value: 'circular' }
+    { label: '圆形 (Circular)', value: 'circular' },
+    { label: '扇形 (Unrooted)', value: 'unrooted' }
+]
+
+const sortModeOptions = [
+  { label: '原始序列 (Original)', value: 'original' },
+  { label: '右梯形化 (Ladderize Right)', value: 'ladder-right' },
+  { label: '左梯形化 (Ladderize Left)', value: 'ladder-left' },
+  { label: '分类学/ID排序 (Taxonomic)', value: 'taxonomic' },
+  { label: '分枝距离排序 (Distance)', value: 'distance' }
 ]
 
 const msaOptions = [
@@ -220,6 +229,17 @@ async function requestAnalysis() {
         isLoading.value = false
         console.error("Analysis request failed", e)
     }
+}
+
+function handleInternalNodeClick(nodeData: any) {
+    if (!nodeData) return
+    selectedNode.value = nodeData
+    // 如果是外部交互，弹出在鼠标中心
+    const mouseEvent = window.event as MouseEvent
+    if (mouseEvent) {
+        menuPos.value = { x: mouseEvent.clientX, y: mouseEvent.clientY }
+    }
+    menuVisible.value = true
 }
 
 async function handleReroot() {
@@ -427,8 +447,19 @@ onMounted(() => {
                <label>字体缩放: {{ settings.fontSize }}px</label>
                <input type="range" v-model.number="settings.fontSize" min="8" max="24" class="neo-range" />
             </div>
-            <div class="form-group" style="margin-top: 16px;">
-               <button class="btn-block-primary" @click="midpointRooting">中点定根 (Midpoint Root)</button>
+            <div class="form-group">
+                <label>拓扑排序 (Sorting Strategy)</label>
+                <div class="select-box-neo" @click.stop="toggleTreeDropdown('sortMode', $event)">
+                  {{ sortModeOptions.find(o => o.value === settings.sortMode)?.label || 'Original' }} <span class="arrow">▼</span>
+                  <div v-if="openDropdown === 'sortMode'" class="dropdown-list">
+                    <div v-for="o in sortModeOptions" :key="o.value" class="opt" :class="{ selected: settings.sortMode === o.value }" @click.stop="applyTreeSorting(o.value as any); openDropdown = null">{{ o.label }}</div>
+                  </div>
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 10px;">
+                <button v-if="!isRerooted" class="btn-block-primary" @click="midpointRooting">🎯 执行中点定根 (Midpoint Root)</button>
+                <button v-else class="btn-block-primary" style="background: #ef4444; border-color: #ef4444;" @click="resetTopology">🗑️ 还原原始定根 (Reset Root)</button>
             </div>
 
             <div class="divider-line"></div>
@@ -465,6 +496,8 @@ onMounted(() => {
              v-if="renderEngine === 'phylotree' && hasTree" 
              :newick="rawNewick" 
              :mode="settings.mode" 
+             @node-click="handleInternalNodeClick"
+             @render-complete="isLoading = false"
              style="width: 100%; height: 100%;" 
         />
         
@@ -677,6 +710,41 @@ onMounted(() => {
 
 .divider-line {
   height: 1px; background: #e2e8f0; margin: 20px 0;
+}
+
+/* 核心维护：按钮网格与迷你控制按钮 */
+.actions-grid-neo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+  margin-bottom: 20px;
+}
+.btn-action-outline-mini {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  padding: 10px 6px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+}
+.btn-action-outline-mini:hover {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+.btn-action-outline-mini:active {
+  transform: translateY(0);
 }
 
 .btn-text-link { background: none; border: none; color: #64748b; font-size: 0.75rem; text-decoration: underline; cursor: pointer; }

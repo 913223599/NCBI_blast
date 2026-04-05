@@ -162,7 +162,8 @@ onUnmounted(() => {
 :deep(svg) {
   width: 100%;
   height: 100%;
-  font-smoothing: antialiased;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* 分枝高亮交互 */

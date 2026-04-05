@@ -17,6 +17,8 @@ export function useTree() {
     const hasTree = ref(false)
     const nodeCount = ref(0) // Stats
     const rawNewick = ref<string | null>(null)
+    const initialNewick = ref<string | null>(null) 
+    const isRerooted = ref(false) // 核心维护：追踪当前是否处于定根状态
 
     // Initialize
     onMounted(() => {
@@ -46,17 +48,15 @@ export function useTree() {
         isLoading.value = true
         error.value = null
         try {
-            // Simulate slight delay for UI responsiveness if needed
             await nextTick()
-
-            // Create fresh model instance to force renderer full update
             model.value = new TreeModel()
             const root = model.value.parse(newick)
             if (root) {
                 rawNewick.value = newick
+                initialNewick.value = newick 
+                isRerooted.value = false // 重置状态
                 hasTree.value = true
                 nodeCount.value = model.value.getLeafCount()
-
                 updateLayout()
                 renderer.fitView(model.value)
             } else {
@@ -70,22 +70,40 @@ export function useTree() {
         }
     }
 
+    function resetTopology() {
+        if (initialNewick.value) {
+            loadNewick(initialNewick.value)
+            settings.sortMode = 'original' 
+            isRerooted.value = false // 归位
+        }
+    }
+
     function midpointRooting() {
         if (hasTree.value && model.value) {
             model.value.rerootMidpoint()
+            isRerooted.value = true // 记录状态
             
-            // 核心修复：将定根后的新拓扑同步回字符串，触发 UI 插件监听
-            const newNwk = model.value.getNewick()
-            rawNewick.value = newNwk
+            if (settings.sortMode !== 'original') {
+                model.value.applySorting(settings.sortMode)
+            }
 
-            renderer.lastModel = null 
+            rawNewick.value = model.value.getNewick()
+            updateLayout()
+            renderer.fitView(model.value)
+        }
+    }
+
+    function applyTreeSorting(mode: typeof settings.sortMode) {
+        if (hasTree.value && model.value) {
+            settings.sortMode = mode
+            model.value.applySorting(mode)
+            rawNewick.value = model.value.getNewick()
             updateLayout()
             renderer.fitView(model.value)
         }
     }
 
     function exportSVG() {
-        // Helper to export SVG content
         if (!renderer.svg) return
         const serializer = new XMLSerializer()
         const source = serializer.serializeToString(renderer.svg)
@@ -104,6 +122,9 @@ export function useTree() {
         settings,
         loadNewick,
         midpointRooting,
+        resetTopology,
+        isRerooted,
+        applyTreeSorting,
         exportSVG,
         isLoading,
         error,

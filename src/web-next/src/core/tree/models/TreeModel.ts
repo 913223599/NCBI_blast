@@ -9,6 +9,7 @@ export interface TreeNode {
     heightFromRoot: number
     isLeaf: boolean
     leafCount?: number
+    parseIndex?: number
 
     x?: number
     y?: number
@@ -40,8 +41,11 @@ export class TreeModel {
             const node: any = { children: [], parent, branch_length: 0, name: "" }
             if (input[i] === '(') {
                 i++ 
+                let childIndex = 0
                 while (true) {
-                    node.children.push(parseNode(node))
+                    const child = parseNode(node)
+                    child.parseIndex = childIndex++
+                    node.children.push(child)
                     if (input[i] === ',') i++ 
                     else if (input[i] === ')') { i++; break }
                     else break
@@ -83,7 +87,8 @@ export class TreeModel {
 
         while (stack.length > 0) {
             const { node, depth, height, parent } = stack.pop()
-            node.id = node.name ? node.name.replace(/[^\w]/g, '_') : `node_${idCounter++}`
+            // 唯一 ID 保护：定根后 ID 必须重刷，防止渲染器缓存错误
+            node.id = `tree_n_${Math.random().toString(36).substr(2, 4)}_${idCounter++}`
             node.depth = depth
             node.heightFromRoot = height
             node.parent = parent
@@ -97,11 +102,11 @@ export class TreeModel {
                 if (height > this.maxHeight) this.maxHeight = height
             } else {
                 node.isLeaf = false
-                for (let j = node.children.length - 1; j >= 0; j--) {
+                for (const child of node.children) {
                     stack.push({
-                        node: node.children[j],
+                        node: child,
                         depth: depth + 1,
-                        height: height + (node.children[j].branch_length || 0),
+                        height: height + (child.branch_length || 0),
                         parent: node
                     })
                 }
@@ -111,10 +116,114 @@ export class TreeModel {
 
     rerootMidpoint() {
         if (!this.root || this.leaves.length < 2) return
+        
+        // 1. 寻找演化直径
         const tipA = this._findFar(this.leaves[0] as TreeNode).node
-        const { node: tipB } = this._findFar(tipA)
-        this.rerootAtNode(tipB)
+        const { node: tipB, dist: totalDist } = this._findFar(tipA)
+        
+        // 2. 溯源路径
+        const path: TreeNode[] = []
+        let curr: any = tipB
+        while (curr) { path.push(curr); curr = curr.parent }
+        
+        // 3. 寻找中点所在的边 (U, V)
+        if (path.length < 2) return
+        let v: TreeNode = tipB
+        let u: TreeNode = path[1]! // 安全判定
+        let d = 0
+        for (let i = 0; i < path.length - 1; i++) {
+            const node = path[i]
+            if (node && d + node.branch_length >= totalDist / 2) {
+                v = node
+                u = path[i + 1]!
+                break
+            }
+            if (node) d += node.branch_length
+        }
+
+        if (!u) return
+
+        // 4. 执行边劈裂定根 (Edge Splitting)
+        // 我们先将树以 U 为临时根
+        this.rerootAtNode(u)
+        
+        // 创建新的二叉根
+        const newRoot: TreeNode = {
+            id: 'virtual_root_' + Date.now(),
+            children: [],
+            parent: null,
+            branch_length: 0,
+            depth: 0,
+            heightFromRoot: 0,
+            isLeaf: false,
+            parseIndex: 0
+        }
+
+        // 把 U 和 V 分别作为新根的两个孩子
+        const distToV = totalDist / 2 - d
+        const distToU = v.branch_length - distToV
+
+        // 调整 V，使其脱离原有父子关系，挂载到新根
+        if (u.children) u.children = u.children.filter(c => c !== v)
+        
+        v.parent = newRoot
+        v.branch_length = Math.max(0, distToV)
+        
+        u.parent = newRoot
+        u.branch_length = Math.max(0, distToU)
+
+        newRoot.children = [u, v]
+        this.root = newRoot
+
         this._processTree()
+    }
+
+    /**
+     * 系统发育树排序矩阵 (加固版本)
+     */
+    applySorting(type: 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance' | 'original') {
+        if (!this.root) return
+        this.countLeaves(this.root)
+        
+        const _recursiveSort = (node: TreeNode) => {
+            if (node.children && node.children.length > 1) {
+                node.children.sort((a, b) => {
+                    switch (type) {
+                        case 'ladder-right': return (a.leafCount || 1) - (b.leafCount || 1)
+                        case 'ladder-left': return (b.leafCount || 1) - (a.leafCount || 1)
+                        case 'taxonomic': return (a.name || '').localeCompare(b.name || '')
+                        case 'distance': return a.branch_length - b.branch_length
+                        case 'original': return (a.parseIndex || 0) - (b.parseIndex || 0)
+                        default: return 0
+                    }
+                })
+                node.children.forEach(c => _recursiveSort(c))
+            }
+        }
+        _recursiveSort(this.root)
+    }
+
+    /**
+     * 递归计算权重 (公共方法以供 UI 逻辑使用)
+     */
+    countLeaves(node: TreeNode): number {
+        // 核心修复：动态判定叶子，不再信任可能过时的静态标识位
+        const isLeaf = !node.children || node.children.length === 0
+        node.isLeaf = isLeaf 
+        
+        if (isLeaf) {
+            node.leafCount = 1
+            return 1
+        }
+        
+        let count = 0
+        if (node.children) {
+            for (const child of node.children) {
+                count += this.countLeaves(child)
+            }
+        }
+        node.leafCount = count
+        return count
     }
 
     /**

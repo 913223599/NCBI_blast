@@ -23,6 +23,7 @@ export interface LayoutSettings {
     alignLabels: boolean
     showGuideLines: boolean
     centerOffset: number
+    sortMode: 'original' | 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance'
 
     // Computed during layout
     maxLayoutX?: number
@@ -51,7 +52,8 @@ export const DEFAULT_SETTINGS: LayoutSettings = {
     datasetGap: 2,
     alignLabels: false,
     showGuideLines: true,
-    centerOffset: 0
+    centerOffset: 0,
+    sortMode: 'original'
 }
 
 export class LayoutEngine {
