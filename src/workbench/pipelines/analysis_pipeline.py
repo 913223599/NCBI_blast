@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import json
@@ -139,17 +140,14 @@ class AnalysisPipeline:
     def stage_nwk_inference(self, input_dm: Optional[Path], output_nwk: Path, 
                            engine: str = "nj", input_fasta: Optional[Path] = None, 
                            params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """NWK 元器件逻辑：构树生成 Newick 拓扑。支持 NJ 与 ML 分流。"""
-        success = False
-        if engine == "nj" and input_dm:
-            success = self.tree_tools.make_dist_tree(input_dm, output_nwk)
-        elif engine in ["fast", "ml"] and input_fasta:
-            # 直接从对齐后的序列进行 ML 似然推断
-            success = self.tree_tools.exec_fast_tree(input_fasta, output_nwk, params=params)
-        else:
-            # 回退到默认 NJ
-            if input_dm:
-                success = self.tree_tools.make_dist_tree(input_dm, output_nwk)
+        """NWK 元器件逻辑：构树生成 Newick 拓扑。支持多种推断引擎路由。"""
+        # 直接透传至 TreeFactory 的统一路由器，由其决定调用 DistTree, IQ-Tree 还是 MrBayes
+        success = self.tree_tools.make_dist_tree(
+            input_dm=input_dm, 
+            output_nwk=output_nwk, 
+            engine=engine, 
+            input_fasta=input_fasta
+        )
         
         if not success:
             return {"status": "error", "message": f"系统发育构树 ({engine}) 失败: 数据源错误或引擎崩溃"}

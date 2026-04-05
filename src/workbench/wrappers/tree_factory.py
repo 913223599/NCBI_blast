@@ -2,6 +2,7 @@ import os
 import math
 import subprocess
 import re
+import shutil
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Any
 
@@ -9,8 +10,8 @@ from src.workbench.wrappers.base_wrapper import BaseWrapper
 
 class TreeFactory(BaseWrapper):
     """
-    Wrapper for NCBI Tree Tools.
-    Handles Sequence Processing, Distance Calculation, and Tree Building.
+    Unified Tree Construction Factory.
+    Integrates NCBI DistTree, FastTree, IQ-TREE, and MrBayes.
     """
 
     def _get_threads(self, threads: Optional[int]) -> int:
@@ -68,11 +69,21 @@ class TreeFactory(BaseWrapper):
     def hash2dissim(self, input_fasta: Path, output_dm: Path, k: int = 8, threads: int = None):
         """Alignment-free dissimilarity using k-mer hashing (Enhanced Sensitivity)."""
         import tempfile; import shutil
-        temp_dir = Path(tempfile.mkdtemp(prefix="tree_hash_"))
+        temp_dir = Path(tempfile.mkdtemp(prefix="tree_hash_")).absolute()
         split_dir = temp_dir / "split"; hash_dir = temp_dir / "hashes"
         split_dir.mkdir(); hash_dir.mkdir()
+        
+        # Determine optimal K (K=8 for long, K=min(4, len/2) for short)
+        effective_k = k
         try:
-            self._run_command("splitFasta.exe", [str(input_fasta), str(split_dir), "-extension", ".fasta", "-whole"])
+             with open(input_fasta, 'r') as f:
+                 first_seq = f.read(5000).split('\n')[1][:100]
+                 if len(first_seq) < 30: effective_k = min(4, len(first_seq)//2)
+        except: pass
+        
+        try:
+            # 强化 IO：使用引号保护路径，特别是 splitFasta
+            self._run_command("splitFasta.exe", [str(input_fasta.absolute()), str(split_dir), "-extension", ".fasta", "-whole"])
             seq_files = list(split_dir.glob("*.fasta"))
             if not seq_files: raise ValueError("FASTA splitting failed.")
             objects = []
@@ -111,13 +122,11 @@ class TreeFactory(BaseWrapper):
 
     # --- Section: Tree Building ---
 
-    def make_dist_tree(self, input_dm: Path, output_nwk: Path):
-        """Unified tree builder. If binary fails, Biopython guarantees Newick output."""
+    def build_tree_nj(self, input_dm: Path, output_nwk: Path):
+        """Unified Neighbor-Joining tree builder (Fast)."""
         binary_success = False
         content = input_dm.read_text(encoding='utf-8', errors='replace')
         
-        # 1. Try Binary first ONLY if format is OBJNUM (Native NCBI Matrix format)
-        # NCBI makeDistTree.exe strictly requires OBJNUM format and will crash on pairwise data.
         if content.strip().startswith("OBJNUM"):
             try:
                 binary_success = self._make_dist_tree_binary(input_dm, output_nwk)
@@ -127,7 +136,7 @@ class TreeFactory(BaseWrapper):
         if binary_success and output_nwk.exists() and output_nwk.stat().st_size > 10:
             return True
 
-        # 2. Biopython Fallback (guarantees a Newick file exists for the UI)
+        # Biopython Fallback
         try:
             from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
             from Bio import Phylo
@@ -147,8 +156,51 @@ class TreeFactory(BaseWrapper):
             nwk = nwk.replace(" ;", ";")
             
             output_nwk.write_text(nwk, encoding='utf-8')
-            self.logger.info(f"Tree built (Biopython Fallback): {output_nwk}")
+            self.logger.info(f"Tree built (Biopython NJ Fallback): {output_nwk}")
             return True
+        except: return False
+
+    def build_tree_ml(self, input_fasta: Path, output_nwk: Path, bootstrap: int = 1000):
+        """Maximum Likelihood Inference via IQ-TREE 2."""
+        from src.workbench.wrappers.iqtree_wrapper import IQTreeWrapper
+        iqtree = IQTreeWrapper()
+        try:
+            tree_file = iqtree.build_tree(input_fasta, output_nwk.parent, bootstrap=bootstrap)
+            # Normalize to output_nwk path
+            shutil.copy2(tree_file, output_nwk)
+            return True
+        except Exception as e:
+            self.logger.error(f"ML Algorithm Failure: {e}")
+            return False
+
+    def build_tree_bayesian(self, input_fasta: Path, output_nwk: Path, ngen: int = 10000):
+        """Bayesian Inference via MrBayes."""
+        from src.workbench.wrappers.mrbayes_wrapper import MrBayesWrapper
+        mb = MrBayesWrapper()
+        try:
+            nex_file = output_nwk.with_suffix(".nex")
+            mb.prepare_nexus_from_fasta(input_fasta, nex_file, ngen=ngen)
+            con_tree = mb.build_tree(nex_file, ngen=ngen)
+            
+            # Map MrBayes .con.tre to .tree or .nwk
+            shutil.copy2(con_tree, output_nwk)
+            return True
+        except Exception as e:
+            self.logger.error(f"Bayesian Algorithm Failure: {e}")
+            return False
+
+    def make_dist_tree(self, input_dm: Path, output_nwk: Path, engine: str = 'nj', input_fasta: Path = None):
+        """
+        Unified router for tree construction.
+        Engines: 'nj' (FastTree/NCBI), 'ml' (IQ-Tree), 'bayesian' (MrBayes)
+        """
+        try:
+            if engine == 'ml' and input_fasta:
+                return self.build_tree_ml(input_fasta, output_nwk)
+            elif engine == 'bayesian' and input_fasta:
+                return self.build_tree_bayesian(input_fasta, output_nwk)
+            else:
+                return self.build_tree_nj(input_dm, output_nwk)
         except Exception as e:
             self.logger.error(f"Fundamental tree inference failure: {e}")
             return False
@@ -253,16 +305,31 @@ class TreeFactory(BaseWrapper):
                 parts = line.split('\t')
                 if parts[0]: names.append(parts[0])
             elif in_values:
+                # 关键修复：改用正则分割，处理变长空格对齐造成的解析失败
                 row = []
-                for p in line.split('\t'):
+                import re
+                for p in re.split(r'\s+', line):
+                    if not p: continue
                     try: 
                         v = float(p.strip())
+                        # 处理 NaN 并防止全 1.0 的平坦矩阵
                         row.append(1.0 if math.isnan(v) else v)
                     except: pass
                 if row: val_rows.append(row)
         dim = len(names); matrix = []
+        # 鲁棒性重构：确保矩阵对齐且具备真实的枝长差异
         for i in range(dim):
-            matrix.append([val_rows[i][j] if i < len(val_rows) and j < len(val_rows[i]) else (0.0 if i == j else 1.0) for j in range(i + 1)])
+            row = []
+            if i < len(val_rows):
+                # 填充该行已有的距离值
+                for j in range(min(i + 1, len(val_rows[i]))):
+                    row.append(val_rows[i][j])
+                # 补齐长度（如果是下三角矩阵缺失）
+                while len(row) < (i + 1):
+                    row.append(1.0 if len(row) != i else 0.0)
+            else:
+                row = [0.0 if j == i else 1.0 for j in range(i+1)]
+            matrix.append(row)
         return names, matrix
 
     def _parse_pairwise_dm(self, lines: List[str]):

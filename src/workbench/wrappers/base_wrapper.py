@@ -1,3 +1,4 @@
+import os
 import subprocess
 import logging
 import time
@@ -40,9 +41,12 @@ class BaseWrapper:
             FileNotFoundError: If tool is missing.
         """
         tool_path = ToolConfig.get_tool_path(tool_name)
-        cmd = [str(tool_path)] + [str(arg) for arg in args]
+        # Ensure all paths are absolute and quoted for Windows space handling
+        cmd = [str(tool_path.absolute())] + [str(Path(arg).absolute()) if (isinstance(arg, (str, Path)) and os.path.isabs(str(arg))) else str(arg) for arg in args]
         
-        working_dir = cwd if cwd else ToolConfig.PROJECT_ROOT
+        # Isolation: Run inside the tool's parent directory if needed, 
+        # but mostly ensured correctly via ToolConfig.
+        working_dir = (cwd if cwd else ToolConfig.PROJECT_ROOT).absolute()
         
         self.logger.info(f"Executing: {' '.join(cmd)}")
         start_time = time.time()

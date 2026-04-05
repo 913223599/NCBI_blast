@@ -14,15 +14,12 @@ const { settings, loadNewick, midpointRooting, exportSVG, hasTree, isLoading, re
 
 /* -------- 核心状态 -------- */
 const renderEngine = ref<'hybrid'|'phylotree'>('hybrid')
-
-// ▶ 诊断日志：监听引擎切换
-import { watch as vueWatch } from 'vue'
-vueWatch(renderEngine, (newEngine, oldEngine) => {
-  console.log(`%c[ENGINE SWITCH] ${oldEngine} → ${newEngine}`, 'color: #f59e0b; font-weight: bold; font-size: 14px;')
-  console.log('[ENGINE SWITCH] hasTree =', hasTree.value)
-  console.log('[ENGINE SWITCH] rawNewick =', rawNewick.value ? `"${rawNewick.value.substring(0, 80)}..."` : null)
-  console.log('[ENGINE SWITCH] v-if 条件 (renderEngine === phylotree && hasTree) =', newEngine === 'phylotree' && hasTree.value)
+// 进化树渲染引擎切换监听
+import { watch } from 'vue'
+watch(renderEngine, (val) => {
+  console.info(`[Engine] Switched to: ${val}`)
 })
+
 
 const isSidebarOpen = ref(true)
 const activeSideTool = ref<'input' | 'analysis' | 'display'>('input')
@@ -62,14 +59,12 @@ const engineOptions = [
 ]
 
 const modelOptions = computed(() => {
-    if (treeWorkflows.engine === 'ml' || treeWorkflows.engine === 'fast') {
-        return [
-            { value: 'jc', label: 'JC (Jukes-Cantor)' },
-            { value: 'gtr', label: 'GTR (General Time Reversible)' },
-            { value: 'jtt', label: 'JTT (Protein Engine)' }
-        ]
-    }
-    return [{ value: 'identity', label: 'Standard Identity' }]
+    return [
+        { value: 'jc', label: 'JC (Jukes-Cantor)' },
+        { value: 'gtr', label: 'GTR (General Time Reversible)' },
+        { value: 'jtt', label: 'JTT (Protein Engine)' },
+        { value: 'identity', label: 'Standard Identity' }
+    ]
 })
 
 /* -------- 交互逻辑 -------- */
@@ -379,7 +374,7 @@ onMounted(() => {
               <div class="select-box-neo" @click.stop="toggleTreeDropdown('msa', $event)">
                 {{ getMsaLabel() }} <span class="arrow">▼</span>
                 <div v-if="openDropdown === 'msa'" class="dropdown-list">
-                  <div v-for="o in msaOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.msa === o.value }" @click="selectTreeOption('msa', o.value)">{{ o.label }}</div>
+                  <div v-for="o in msaOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.msa === o.value }" @click.stop="selectTreeOption('msa', o.value)">{{ o.label }}</div>
                 </div>
               </div>
             </div>
@@ -388,7 +383,7 @@ onMounted(() => {
               <div class="select-box-neo" @click.stop="toggleTreeDropdown('engine', $event)">
                 {{ getEngineLabel() }} <span class="arrow">▼</span>
                 <div v-if="openDropdown === 'engine'" class="dropdown-list">
-                  <div v-for="o in engineOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.engine === o.value }" @click="selectTreeOption('engine', o.value)">{{ o.label }}</div>
+                  <div v-for="o in engineOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.engine === o.value }" @click.stop="selectTreeOption('engine', o.value)">{{ o.label }}</div>
                 </div>
               </div>
             </div>
@@ -397,7 +392,7 @@ onMounted(() => {
               <div class="select-box-neo" @click.stop="toggleTreeDropdown('model', $event)">
                 {{ getModelLabel() }} <span class="arrow">▼</span>
                 <div v-if="openDropdown === 'model'" class="dropdown-list">
-                  <div v-for="o in modelOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.model === o.value }" @click="selectTreeOption('model', o.value)">{{ o.label }}</div>
+                  <div v-for="o in modelOptions" :key="o.value" class="opt" :class="{ selected: treeWorkflows.model === o.value }" @click.stop="selectTreeOption('model', o.value)">{{ o.label }}</div>
                 </div>
               </div>
             </div>
@@ -419,7 +414,7 @@ onMounted(() => {
               <div class="select-box-neo" @click.stop="toggleTreeDropdown('layoutMode', $event)">
                 {{ getLayoutLabel() }} <span class="arrow">▼</span>
                 <div v-if="openDropdown === 'layoutMode'" class="dropdown-list">
-                  <div v-for="o in layoutModeOptions" :key="o.value" class="opt" :class="{ selected: settings.mode === o.value }" @click="selectTreeOption('mode', o.value)">{{ o.label }}</div>
+                  <div v-for="o in layoutModeOptions" :key="o.value" class="opt" :class="{ selected: settings.mode === o.value }" @click.stop="selectTreeOption('mode', o.value)">{{ o.label }}</div>
                 </div>
               </div>
             </div>
