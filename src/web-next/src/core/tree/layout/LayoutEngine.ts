@@ -76,29 +76,30 @@ export class LayoutEngine {
     }
 
     private _layoutRectangular() {
-        const spacing = this.settings.leafSpacing
         const root = this.model.root
         if (!root) return
 
-        // 1. ORDERED LEAF DFS (The most critical part for non-crossing)
-        // This ensures Y coordinates follow the tree structure
+        // 核心修复：动态调整 Y 轴叶子间距。
+        // 防止条目过多时产生过长的逻辑高度，从而导致 fitView 将水平方向压缩成一条线。
+        const leafCount = this.model.getLeafCount()
+        const targetHeight = 1600 // 目标画布最大逻辑高度
+        const spacing = Math.min(35, Math.max(8, targetHeight / (leafCount || 1)))
+        
+        // 1. ORDERED LEAF DFS
         let leafCounter = 0
         const assignY = (node: TreeNode) => {
             if (node.isLeaf) {
                 node.y = leafCounter * spacing
                 leafCounter++
             } else if (node.children) {
-                // Ensure logic: Always horizontal/vertical orthogonal layout
                 node.children.forEach(child => assignY(child))
-                
-                // Parent Y is the midpoint of its children's extreme Y positions
                 const childYs = node.children.map(c => c.y || 0)
                 node.y = (Math.min(...childYs) + Math.max(...childYs)) / 2
             }
         }
         assignY(root)
 
-        // 2. CALCULATE X (Post-order BFS/DFS)
+        // 2. CALCULATE X
         const resultStack: TreeNode[] = []
         const traverse = (n: TreeNode) => {
             if (n.children?.length) n.children.forEach(traverse)
@@ -106,14 +107,19 @@ export class LayoutEngine {
         }
         traverse(root)
 
+        const maxD = this.settings.useBranchLengths ? Math.max(0.0001, this.model.maxHeight) : Math.max(1, this.model.maxDepth)
+        
+        // 动态计算 X 轴像素步进，确保树的宽度与高度视觉平衡 (约 1.5 倍)
+        const targetWidth = targetHeight * 0.8
+        const dynamicScaleX = targetWidth / maxD
+
         while (resultStack.length > 0) {
             const node = resultStack.pop()!
             const metric = this.settings.useBranchLengths ? (node.heightFromRoot || 0) : node.depth
-            node.x = metric * this.settings.scaleX
+            node.x = metric * dynamicScaleX
         }
 
-        const maxD = this.settings.useBranchLengths ? this.model.maxHeight : this.model.maxDepth
-        this.settings.maxLayoutX = maxD * this.settings.scaleX
+        this.settings.maxLayoutX = maxD * dynamicScaleX
     }
 
     private _layoutCircular() {

@@ -13,7 +13,7 @@ const appStore = useAppStore()
 const { settings, loadNewick, midpointRooting, exportSVG, hasTree, isLoading, renderer, containerRef, rawNewick } = useTree()
 
 /* -------- 核心状态 -------- */
-const renderEngine = ref<'hybrid'|'phylotree'>('hybrid')
+const renderEngine = ref<'hybrid'|'phylotree'>('phylotree')
 // 进化树渲染引擎切换监听
 import { watch } from 'vue'
 watch(renderEngine, (val) => {

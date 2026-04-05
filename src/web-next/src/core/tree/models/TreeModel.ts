@@ -51,9 +51,12 @@ export class TreeModel {
             while (i < input.length && !['(', ')', ',', ':', ';'].includes(input[i] as string)) i++
             if (i > labelStart) node.name = input.substring(labelStart, i).trim()
             if (i < input.length && input[i] === ':') {
-                i++; let lenStart = i
+                i++;
+                let lenStart = i
                 while (i < input.length && !['(', ')', ',', ';'].includes(input[i] as string)) i++
-                node.branch_length = parseFloat(input.substring(lenStart, i).trim()) || 0
+                const rawLen = parseFloat(input.substring(lenStart, i).trim()) || 0
+                // 核心修复：强制分枝长度非负，消除 NJ 算法中由于浮点误差或高度相似序列产生的逆向绘图
+                node.branch_length = Math.max(0, rawLen)
             }
             return node
         }
