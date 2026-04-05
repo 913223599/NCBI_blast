@@ -211,7 +211,8 @@ async function requestAnalysis() {
     try {
         const params = {
             ...treeWorkflows,
-            mode: treeWorkflows.engine === 'nj' ? 'rapid' : 'standard'
+            // 只有在明确不对比对时，才使用快速(k-mer)模式；否则应进入标准比对管线
+            mode: treeWorkflows.msa === 'none' ? 'rapid' : 'standard'
         }
         const bridge = await initBridge()
         bridge.request_tree_analysis(JSON.stringify(params))

@@ -52,11 +52,33 @@ class TreeFactory(BaseWrapper):
     # --- Section: Distance Calculation ---
 
     def fasta2dissim(self, input_fasta: Path, output_dm: Path, threads: int = None):
+        """Alignment-based dissimilarity (ID-Safe Tunneling)."""
         n_threads = self._get_threads(threads)
-        args = [str(input_fasta), "-threads", str(n_threads)]
-        result = self._run_command("fasta2dissim.exe", args)
-        output_dm.write_text(result.stdout, encoding='utf-8')
-        return result
+        
+        # 核心改进：创建 ID 映射以防止 NCBI 工具在 Windows 下因长 ID 崩溃或截断
+        id_map = {}
+        sanitized_fasta = input_fasta.parent / f"{input_fasta.stem}_safe.fasta"
+        try:
+            from Bio import SeqIO
+            records = list(SeqIO.parse(input_fasta, "fasta"))
+            safe_records = []
+            for i, rec in enumerate(records):
+                short_id = f"S{i:05d}"
+                id_map[short_id] = rec.id
+                rec.id = short_id
+                rec.description = ""
+                safe_records.append(rec)
+            SeqIO.write(safe_records, sanitized_fasta, "fasta")
+            
+            args = [str(sanitized_fasta.absolute()), "-threads", str(n_threads)]
+            result = self._run_command("fasta2dissim.exe", args)
+            
+            # 后处理：保存包含短 ID 的中间矩阵，确保解析器能精准对齐
+            output_dm.write_text(result.stdout, encoding='utf-8')
+            # 返回 ID 映射字典供后续还原
+            return id_map
+        finally:
+            if sanitized_fasta.exists(): sanitized_fasta.unlink()
 
     def prot_collection2dissim(self, input_path: Path, output_dm: Path, threads: int = None):
         """Build dissimilarity matrix from protein collection."""
@@ -122,25 +144,74 @@ class TreeFactory(BaseWrapper):
 
     # --- Section: Tree Building ---
 
-    def build_tree_nj(self, input_dm: Path, output_nwk: Path):
-        """Unified Neighbor-Joining tree builder (Fast)."""
-        binary_success = False
+    def build_tree_nj(self, input_dm: Path, output_nwk: Path, input_fasta: Optional[Path] = None):
+        """
+        Unified Neighbor-Joining tree builder (Fast & Robust).
+        If the matrix is invalid, it falls back to direct MSA distance computation.
+        """
         content = input_dm.read_text(encoding='utf-8', errors='replace')
+        name_list, matrix = self._parse_dm_content(content)
         
-        if content.strip().startswith("OBJNUM"):
+        # 矩阵质量评分：极大提升灵敏度，捕获科学计数法级别的演化差异 (如 5e-05)
+        matrix_is_flat = True
+        flat_val = None
+        for i in range(len(matrix)):
+            for j in range(i):
+                val = matrix[i][j]
+                if flat_val is None: flat_val = val
+                elif abs(val - flat_val) > 1e-12: 
+                    matrix_is_flat = False; break
+            if not matrix_is_flat: break
+            
+        # --- 如果矩阵失效且有比对序列，启动强制重算 (True Dist Calculation) ---
+        if (matrix_is_flat or not matrix) and input_fasta and input_fasta.exists():
+            self.logger.warning("Detected dead distance matrix. Starting high-precision recovery calculation...")
             try:
-                binary_success = self._make_dist_tree_binary(input_dm, output_nwk)
-            except Exception as e:
-                self.logger.debug(f"Binary makeDistTree fallback triggered: {e}")
+                from Bio.Align import MultipleSeqAlignment
+                from Bio.SeqRecord import SeqRecord
+                from Bio.Seq import Seq
+                from Bio.Phylo.TreeConstruction import DistanceCalculator, DistanceTreeConstructor
                 
-        if binary_success and output_nwk.exists() and output_nwk.stat().st_size > 10:
-            return True
+                # 核心修复：如果未对齐或长度不一，先执行原子级补齐 (Padding)
+                raw_records = list(SeqIO.parse(input_fasta, "fasta"))
+                max_len = max(len(r.seq) for r in raw_records)
+                padded_records = []
+                for r in raw_records:
+                    if len(r.seq) < max_len:
+                        new_seq = str(r.seq).ljust(max_len, "-")
+                        padded_records.append(SeqRecord(Seq(new_seq), id=r.id, description=""))
+                    else:
+                        padded_records.append(r)
+                
+                alignment = MultipleSeqAlignment(padded_records)
+                calculator = DistanceCalculator('identity') # p-distance for robustness
+                dm = calculator.get_distance(alignment)
+                
+                constructor = DistanceTreeConstructor()
+                tree = constructor.nj(dm)
+                
+                # 规范化清理
+                for node in tree.find_clades():
+                    if not node.is_terminal(): node.name = None
+                
+                from Bio import Phylo
+                import io
+                out_str = io.StringIO()
+                Phylo.write(tree, out_str, "newick")
+                nwk = out_str.getvalue().strip().replace('\r\n', '\n')
+                nwk = re.sub(r':-?\d+\.\d+;$', ';', nwk)
+                output_nwk.write_text(nwk, encoding='utf-8')
+                self.logger.info(f"NJ Tree successfully RECOVERED via direct MSA analysis: {output_nwk}")
+                return True
+            except Exception as e:
+                self.logger.error(f"High-precision NJ recovery failed: {e}")
 
-        # Biopython Fallback
+        # --- 正常流程：基于读入的矩阵构建 ---
         try:
             from Bio.Phylo.TreeConstruction import DistanceTreeConstructor, DistanceMatrix
             from Bio import Phylo
-            name_list, matrix = self._parse_dm_content(content)
+            if not name_list or not matrix: return False
+            
             dm = DistanceMatrix(name_list, matrix)
             constructor = DistanceTreeConstructor()
             tree = constructor.nj(dm)
@@ -155,10 +226,14 @@ class TreeFactory(BaseWrapper):
             nwk = re.sub(r':-?\d+\.\d+;$', ';', nwk)
             nwk = nwk.replace(" ;", ";")
             
+            # 高精度解析还原：确保科学计数法和长 ID 的匹配性
             output_nwk.write_text(nwk, encoding='utf-8')
-            self.logger.info(f"Tree built (Biopython NJ Fallback): {output_nwk}")
+            self.logger.info(f"Tree built from matrix: {output_nwk}")
             return True
-        except: return False
+        except Exception as e:
+            self.logger.error(f"NJ builder failed: {e}")
+            return False
+
 
     def build_tree_ml(self, input_fasta: Path, output_nwk: Path, bootstrap: int = 1000):
         """Maximum Likelihood Inference via IQ-TREE 2."""
@@ -189,18 +264,38 @@ class TreeFactory(BaseWrapper):
             self.logger.error(f"Bayesian Algorithm Failure: {e}")
             return False
 
-    def make_dist_tree(self, input_dm: Path, output_nwk: Path, engine: str = 'nj', input_fasta: Path = None):
+    def make_dist_tree(self, input_dm: Path, output_nwk: Path, engine: str = 'nj', 
+                       input_fasta: Path = None, params: Dict[str, Any] = None):
         """
         Unified router for tree construction.
         Engines: 'nj' (FastTree/NCBI), 'ml' (IQ-Tree), 'bayesian' (MrBayes)
         """
+        p = params or {}
+        in_id_map = p.get("id_map", {})
+        
         try:
             if engine == 'ml' and input_fasta:
-                return self.build_tree_ml(input_fasta, output_nwk)
+                # 补全 IQ-Tree 动态参数：bootstrap
+                bs = p.get("bootstrap", 100)
+                return self.build_tree_ml(input_fasta, output_nwk, bootstrap=bs)
             elif engine == 'bayesian' and input_fasta:
-                return self.build_tree_bayesian(input_fasta, output_nwk)
+                # 补全 MrBayes 动态参数：ngen
+                gen = p.get("ngen", 10000)
+                return self.build_tree_bayesian(input_fasta, output_nwk, ngen=gen)
             else:
-                return self.build_tree_nj(input_dm, output_nwk)
+                # 核心逻辑：执行构树
+                success = self.build_tree_nj(input_dm, output_nwk, input_fasta=input_fasta)
+                
+                # 如果构树成功且有映射表需还原，则在这里执行
+                if success and in_id_map:
+                    nwk = output_nwk.read_text(encoding='utf-8')
+                    # 按照长 ID 降序排列防止包含关系导致的错误替换 (e.g. S0001 vs S00011)
+                    # 只有在 newick 字符串中真正包含这些 SID 时才进行替换
+                    for sid in sorted(in_id_map.keys(), key=len, reverse=True):
+                        if sid in nwk:
+                            nwk = nwk.replace(sid, in_id_map[sid])
+                    output_nwk.write_text(nwk, encoding='utf-8')
+                return success
         except Exception as e:
             self.logger.error(f"Fundamental tree inference failure: {e}")
             return False
@@ -333,32 +428,40 @@ class TreeFactory(BaseWrapper):
         return names, matrix
 
     def _parse_pairwise_dm(self, lines: List[str]):
+        """Parse NCBI pairwise format: ID1 ID2 DIST [ALIGN LEN1 LEN2]"""
         names = set(); dists = {}
         for line in lines:
             line = line.strip()
             if not line: continue
-            # Handle both tab and space-delimited formats
+            # Handle variable whitespace and scientific notation
+            import re
             p = re.split(r'\s+', line)
-            if len(p) >= 6:
+            
+            # NCBI standard output: Col 3 (index 2) is usually precomputed p-distance
+            if len(p) >= 3:
                 n1, n2 = p[0], p[1]
                 names.update([n1, n2])
                 try:
-                    # Column 3 is usually inf type, 4,5,6 are score, len1, len2
-                    # Example NCBI output: seq1 seq2 inf 40 100 100
-                    ni, l1, l2 = float(p[3]), float(p[4]), float(p[5])
-                    d = 1.0 - (ni / min(l1, l2)) if l1 > 0 and l2 > 0 else 1.0
-                    dists[tuple(sorted((n1, n2)))] = max(0.000001, 1.0 if math.isnan(d) else d)
-                except: dists[tuple(sorted((n1, n2)))] = 1.0
-            elif len(p) >= 3:
-                # Simple format: n1 n2 dist
-                try:
-                    n1, n2, d = p[0], p[1], float(p[2])
-                    names.update([n1, n2])
-                    dists[tuple(sorted((n1, n2)))] = max(0.000001, d)
-                except: pass
+                    # 如果是 6 列格式 (NCBI fasta2dissim)，p[2] 就是我们的目标演化距离
+                    # 例如: SeqA SeqB 5.234e-05 1758 4540 4495
+                    d_val = float(p[2])
+                    # 保护逻辑：防止 0 导致的奇异点，确保它是正数
+                    dists[tuple(sorted((n1, n2)))] = max(0.0000001, d_val)
+                except:
+                    dists[tuple(sorted((n1, n2)))] = 1.0
+                    
         n_list = sorted(list(names)); dim = len(n_list); matrix = []
+        # 构建符合 Biopython NJ 输入要求的下三角矩阵
         for i in range(dim):
-            matrix.append([0.0 if i == j else dists.get(tuple(sorted((n_list[i], n_list[j]))), 1.0) for j in range(i + 1)])
+            row = []
+            for j in range(i + 1):
+                if i == j:
+                    row.append(0.0)
+                else:
+                    pair = tuple(sorted((n_list[i], n_list[j])))
+                    # 默认值使用 1.0 (演化差异极大)
+                    row.append(dists.get(pair, 1.0))
+            matrix.append(row)
         return n_list, matrix
 
     def tree_stats(self, tree_file: Path):

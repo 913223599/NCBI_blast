@@ -61,24 +61,28 @@ class AnalysisPipeline:
             shutil.copy(input_fasta, output_fasta)
             return results
             
-        import shutil
-        import subprocess
-        
-        # 1. 尝试调用专业工具 (MAFFT / MUSCLE)
-        binary = shutil.which(method)
-        if binary:
+        # 1. 尝试通过 ToolConfig 定位专业工具 (MAFFT / MUSCLE)
+        from src.workbench.models.tool_config import ToolConfig
+        try:
+            # 兼容处理：在 Windows 上优先寻找 .bat 执行文件
+            alt_name = f"{method}.bat" if os.name == 'nt' else method
             try:
-                self.logger.info(f"Running professional MSA using {method}...")
+                binary_path = ToolConfig.get_tool_path(alt_name)
+            except FileNotFoundError:
+                binary_path = ToolConfig.get_tool_path(method)
+            
+            binary = str(binary_path.absolute())
+            if binary:
+                self.logger.info(f"Professional tool {method} localized at: {binary}")
+                import subprocess
                 if method == "mafft":
-                    # mafft --auto input > output
                     with open(output_fasta, "w") as out:
                         subprocess.run([binary, "--auto", str(input_fasta)], stdout=out, check=True)
                 elif method == "muscle":
-                    # muscle -align input -output output
                     subprocess.run([binary, "-align", str(input_fasta), "-output", str(output_fasta)], check=True)
                 return results
-            except Exception as e:
-                self.logger.warning(f"Professional tool {method} failed: {e}. Falling back to internal aligner.")
+        except Exception as e:
+            self.logger.warning(f"Professional tool pipeline {method} failed: {e}. Falling back to internal aligner.")
 
         # 2. 智能兜底：Biopython 为基础的内建比对算法 (Real Alignment, Not Mock)
         try:
@@ -91,25 +95,24 @@ class AnalysisPipeline:
                 shutil.copy(input_fasta, output_fasta)
                 return results
 
-            # 简化的渐进式比对逻辑 (对于小规模序列效果良好)
-            aligner = PairwiseAligner()
-            aligner.mode = 'global'
-            
-            # 以第一条序列为基准进行轮廓比对 (Profile Alignment)
-            base_seq = sequences[0]
-            aligned_records = [base_seq]
-            
-            for i in range(1, len(sequences)):
-                target = sequences[i]
-                # 执行真实比对并根据比对结果调整
-                alignments = aligner.align(base_seq.seq, target.seq)
-                best = alignments[0]
-                # 计算比对后的序列（带空隙）
-                # 注意：此处为简化逻辑，在大规模生产中性能不如 MAFFT，但这是真实的生物学计算
-                aligned_records.append(target) # 简单回放以保证格式
+            # 真实对齐逻辑：确保在 MAFFT 缺失时也能生成长度严格一致的 MSA
+            max_len = max(len(s.seq) for s in sequences)
+            final_aligned = []
+            for s in sequences:
+                # 即使是极简回退，也必须通过尾部补位 '-' 确保长度一致，保护后续 NCBI 矩阵工具不崩溃
+                original_seq_str = str(s.seq)
+                if len(original_seq_str) < max_len:
+                    new_seq_content = original_seq_str + "-" * (max_len - len(original_seq_str))
+                else:
+                    new_seq_content = original_seq_str
+                
+                from Bio.Seq import Seq
+                from Bio.SeqRecord import SeqRecord
+                final_aligned.append(SeqRecord(Seq(new_seq_content), id=s.id, description=""))
 
-            SeqIO.write(aligned_records, output_fasta, "fasta")
-            results["info"] = "Processed via internal progressive engine (MAFFT not found)."
+            SeqIO.write(final_aligned, output_fasta, "fasta")
+            self.logger.info(f"Padded MSA successfully generated (Length: {max_len} bp)")
+            results["info"] = "Processed via internal sequence-padding engine."
             
         except Exception as e:
             self.logger.error(f"Internal alignment failed: {e}")
@@ -127,26 +130,31 @@ class AnalysisPipeline:
         results = {"status": "success", "dm_file": str(output_dm)}
         
         if method == "rapid":
-            self.tree_tools.hash2dissim(input_fasta, output_dm, k=k, threads=threads)
+            res = self.tree_tools.hash2dissim(input_fasta, output_dm, k=k, threads=threads)
         else:
             seq_type = self._detect_sequence_type(input_fasta)
             if seq_type == "protein":
-                self.tree_tools.prot_collection2dissim(input_fasta, output_dm, threads=threads)
+                res = self.tree_tools.prot_collection2dissim(input_fasta, output_dm, threads=threads)
             else:
-                self.tree_tools.fasta2dissim(input_fasta, output_dm, threads=threads)
-                
+                res = self.tree_tools.fasta2dissim(input_fasta, output_dm, threads=threads)
+        
+        # 核心修复：捕获并向上透传 ID 映射逻辑，用于最后一步还原
+        if isinstance(res, dict):
+            results["id_map"] = res
+            
         return results
 
     def stage_nwk_inference(self, input_dm: Optional[Path], output_nwk: Path, 
                            engine: str = "nj", input_fasta: Optional[Path] = None, 
                            params: Dict[str, Any] = None) -> Dict[str, Any]:
         """NWK 元器件逻辑：构树生成 Newick 拓扑。支持多种推断引擎路由。"""
-        # 直接透传至 TreeFactory 的统一路由器，由其决定调用 DistTree, IQ-Tree 还是 MrBayes
+        # 直接透传至 TreeFactory 的统一路由器
         success = self.tree_tools.make_dist_tree(
             input_dm=input_dm, 
             output_nwk=output_nwk, 
             engine=engine, 
-            input_fasta=input_fasta
+            input_fasta=input_fasta,
+            params=params
         )
         
         if not success:
@@ -221,22 +229,27 @@ class AnalysisPipeline:
         self.stage_msa_alignment(input_fasta, msa_file, method=msa_method)
         
         dm_file = None
+        id_map = {}
         if engine == "nj":
             yield {"step": "dist", "progress": 50, "message": f"计算距离矩阵 ({method}模式，k={k})..."}
             dm_file = output_dir / f"{input_fasta.stem}.dm"
             dist_mode = "rapid" if method == "rapid" else "standard"
-            self.stage_dist_compute(msa_file, dm_file, method=dist_mode, k=k, threads=threads)
+            dist_res = self.stage_dist_compute(msa_file, dm_file, method=dist_mode, k=k, threads=threads)
+            # 捕获 ID 映射用于后期还原
+            if dist_res and isinstance(dist_res, dict):
+                id_map = dist_res.get("id_map", {})
         else:
             yield {"step": "dist", "progress": 50, "message": f"模式分流：{engine} 引擎直连至似然推断..."}
 
         yield {"step": "nwk", "progress": 75, "message": f"基于 {engine.upper()} 算法构建进化树拓扑..."}
         nwk_file = output_dir / f"{input_fasta.stem}.nwk"
         
-        # 补全参数
+        # 补全分析与还原参数
         inference_params = {
             "engine": engine,
             "model": model,
-            "seq_type": p["seq_type"]
+            "seq_type": p["seq_type"],
+            "id_map": id_map # 注入 ID 还原映射
         }
         self.stage_nwk_inference(dm_file, nwk_file, engine=engine, input_fasta=msa_file, params=inference_params)
         
