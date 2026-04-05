@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication, QWizard
 from src.gui.main_window_pyqt import MainWindow
 from src.utils.config_manager import get_config_manager
 from src.gui.widgets.setup_wizard import SetupWizard
+from src.workbench.models.tool_config import ToolConfig
 
 class Application:
     """
@@ -63,11 +64,17 @@ class Application:
             
     def _initialize_main_window(self):
         """初始化并显示主窗口"""
-        # 将配置的 BLAST 路径添加到环境变量
+        # 将配置的 BLAST 路径以及项目自带的 Tree Tools 路径添加到环境变量
         blast_path = self.config_manager.get_config_value('blast_bin_path')
-        if blast_path:
-            os.environ["PATH"] = blast_path + os.pathsep + os.environ.get("PATH", "")
-            print(f"BLAST path added to environment: {blast_path}")
+        tree_tools_path = str(ToolConfig.TREE_BIN_DIR)
+        
+        path_list = []
+        if blast_path: path_list.append(blast_path)
+        if tree_tools_path: path_list.append(tree_tools_path)
+        
+        if path_list:
+            os.environ["PATH"] = os.pathsep.join(path_list) + os.pathsep + os.environ.get("PATH", "")
+            print(f"Tool paths added to environment: {' | '.join(path_list)}")
 
         print("Creating MainWindow...")
         self.main_window = MainWindow()

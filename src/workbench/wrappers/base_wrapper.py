@@ -14,8 +14,9 @@ class BaseWrapper:
     
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
-        # Ensure results dir exists
+        # Ensure results dir and environment are ready for vendor tools
         ToolConfig.ensure_directories()
+        ToolConfig.initialize_env()
         
     def _run_command(self, 
                     tool_name: str, 

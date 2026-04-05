@@ -7,11 +7,23 @@ import { ref, onMounted, reactive, computed } from 'vue'
 import { useTree } from '../composables/useTree'
 import { useAppStore } from '../stores/app'
 import { getBridge, initBridge } from '../bridge/pyqt-bridge'
+import PhylotreeWidget from '../components/PhylotreeWidget.vue'
 
 const appStore = useAppStore()
-const { settings, loadNewick, exportSVG, hasTree, isLoading, renderer, containerRef } = useTree()
+const { settings, loadNewick, midpointRooting, exportSVG, hasTree, isLoading, renderer, containerRef, rawNewick } = useTree()
 
 /* -------- 核心状态 -------- */
+const renderEngine = ref<'hybrid'|'phylotree'>('hybrid')
+
+// ▶ 诊断日志：监听引擎切换
+import { watch as vueWatch } from 'vue'
+vueWatch(renderEngine, (newEngine, oldEngine) => {
+  console.log(`%c[ENGINE SWITCH] ${oldEngine} → ${newEngine}`, 'color: #f59e0b; font-weight: bold; font-size: 14px;')
+  console.log('[ENGINE SWITCH] hasTree =', hasTree.value)
+  console.log('[ENGINE SWITCH] rawNewick =', rawNewick.value ? `"${rawNewick.value.substring(0, 80)}..."` : null)
+  console.log('[ENGINE SWITCH] v-if 条件 (renderEngine === phylotree && hasTree) =', newEngine === 'phylotree' && hasTree.value)
+})
+
 const isSidebarOpen = ref(true)
 const activeSideTool = ref<'input' | 'analysis' | 'display'>('input')
 const workspaceFiles = ref<string[]>([])
@@ -61,6 +73,22 @@ const modelOptions = computed(() => {
 })
 
 /* -------- 交互逻辑 -------- */
+async function loadPrecomputedTree(fileName: string) {
+    try {
+        const bridge = await initBridge()
+        if (bridge && typeof bridge.get_tree_content === 'function') {
+            bridge.get_tree_content(fileName, (nwk: string) => {
+                if (nwk && nwk.startsWith('(')) {
+                    loadNewick(nwk)
+                    appStore.showNotification(`成功加载进化树: ${fileName}`, 'success')
+                } else {
+                    appStore.showNotification('树文件内容无效，请重新生成', 'error')
+                }
+            })
+        }
+    } catch(e) {}
+}
+
 async function refreshWorkspace() {
     try {
         const bridge = await initBridge()
@@ -87,14 +115,16 @@ async function clearWorkspace() {
         if (bridge && typeof bridge.clear_tree_workspace === 'function') {
             // @ts-ignore
             bridge.clear_tree_workspace((res: boolean) => {
+                workspaceFiles.value = [] // 立即同步前端列表
                 if (res) {
-                    appStore.showNotification('工作区已成功清空', 'success')
+                    appStore.showNotification('工作区已清空', 'success')
                 } else {
                     appStore.showNotification('部分文件被占用，无法完全清空', 'warning')
                 }
                 refreshWorkspace()
             })
         } else {
+            workspaceFiles.value = []
             appStore.showNotification('清理完成 (仅前端)', 'info')
         }
     } catch(e) {}
@@ -218,6 +248,7 @@ function closeMenu() {
 }
 
 onMounted(() => {
+    appStore.setPageTitle('进化树分析')
     refreshWorkspace()
     
     // @ts-ignore
@@ -291,14 +322,6 @@ onMounted(() => {
           <span class="label">视图控制</span>
         </div>
       </div>
-      <div class="toolbar-actions">
-        <button class="btn-primary-run" @click="requestAnalysis" :disabled="isLoading">
-          <span class="icon">🚀</span> 启动分析管线
-        </button>
-        <button class="btn-export" @click="exportSVG" :disabled="!hasTree">
-          <span class="icon">💾</span> 导出
-        </button>
-      </div>
     </header>
 
     <div class="tree-main-area">
@@ -322,10 +345,16 @@ onMounted(() => {
               <div v-if="(!workspaceFiles || workspaceFiles.length === 0) && (!selectedFiles || selectedFiles.length === 0)" class="empty-list-hint">
                  暂无导入文件
               </div>
-              <div v-for="file in workspaceFiles" :key="'ws-'+file" class="workspace-item">
-                 <span class="file-icon">📄</span>
+              <div v-for="file in workspaceFiles" :key="'ws-'+file" 
+                   class="workspace-item" 
+                   :class="{ 'selectable-result': file.toLowerCase().endsWith('.nwk') }"
+                   @click="file.toLowerCase().endsWith('.nwk') ? loadPrecomputedTree(file) : null">
+                 <span class="file-icon">{{ file.toLowerCase().endsWith('.nwk') ? '🌲' : '📄' }}</span>
                  <span class="file-name" :title="file">{{ file }}</span>
-                 <span class="file-badge">Staged</span>
+                 <span class="file-badge" :class="{ 'badge-result': file.toLowerCase().endsWith('.nwk') }">
+                   {{ file.toLowerCase().endsWith('.nwk') ? 'Result' : 'Staged' }}
+                 </span>
+                 <button v-if="file.toLowerCase().endsWith('.nwk')" class="btn-mini-load">查看</button>
               </div>
               <div v-for="(file, idx) in selectedFiles" :key="'sel-'+(file?.name || idx)" class="workspace-item new-item">
                  <span class="file-icon">🆕</span>
@@ -376,6 +405,10 @@ onMounted(() => {
               <label>BOOTSTRAP 随机采样: {{ treeWorkflows.bootstrap }}</label>
               <input type="range" v-model.number="treeWorkflows.bootstrap" min="0" max="1000" step="100" class="neo-range" />
             </div>
+            
+            <div class="section-actions" style="margin-top: 30px;">
+                <button class="btn-block-primary" @click="requestAnalysis" :disabled="isLoading">启动分析管线</button>
+            </div>
           </div>
 
           <!-- 视图控制 -->
@@ -398,6 +431,23 @@ onMounted(() => {
                <label>字体缩放: {{ settings.fontSize }}px</label>
                <input type="range" v-model.number="settings.fontSize" min="8" max="24" class="neo-range" />
             </div>
+            <div class="form-group" style="margin-top: 16px;">
+               <button class="btn-block-primary" @click="midpointRooting">中点定根 (Midpoint Root)</button>
+            </div>
+
+            <div class="divider-line"></div>
+            
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label>渲染内核引擎 (Engine Switch)</label>
+              <div class="neo-checkbox-group" style="margin-top: 10px;">
+                <label><input type="radio" value="hybrid" v-model="renderEngine" style="accent-color: #2563eb;" /> Hybrid Canvas (超大树性能级)</label>
+                <label><input type="radio" value="phylotree" v-model="renderEngine" style="accent-color: #2563eb;" /> PhyloTreeJS (枝干高级交互与折叠)</label>
+              </div>
+            </div>
+
+            <div class="section-actions">
+                <button class="btn-block-secondary" @click="exportSVG" :disabled="!hasTree || renderEngine !== 'hybrid'">导出进化树 (Hybrid SVG)</button>
+            </div>
           </div>
 
         </div>
@@ -410,7 +460,17 @@ onMounted(() => {
 
       <!-- 结果显示栏 (板块3) -->
       <main class="tree-results">
-        <div ref="containerRef" class="canvas-container"></div>
+        
+        <!-- Hybrid Canvas Engine -->
+        <div v-show="renderEngine === 'hybrid'" ref="containerRef" class="canvas-container"></div>
+        
+        <!-- PhyloTree D3 Engine -->
+        <PhylotreeWidget 
+             v-if="renderEngine === 'phylotree' && hasTree" 
+             :newick="rawNewick" 
+             :mode="settings.mode" 
+             style="width: 100%; height: 100%;" 
+        />
         
         <div v-if="!hasTree && !isLoading" class="empty-state">
            <div class="empty-content">
@@ -529,8 +589,15 @@ onMounted(() => {
   font-size: 0.8rem; font-family: 'JetBrains Mono', monospace;
 }
 .workspace-item.new-item { border-left: 3px solid #3b82f6; }
+.workspace-item.selectable-result { cursor: pointer; border-left: 3px solid #2563eb; background: #f0f7ff; }
+.workspace-item.selectable-result:hover { background: #e0efff; }
 .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #334155; }
 .file-badge { font-size: 0.65rem; background: #f1f5f9; color: #64748b; padding: 2px 6px; border-radius: 4px; }
+.file-badge.badge-result { background: #2563eb; color: white; }
+.btn-mini-load { 
+    background: #2563eb; color: white; border: none; padding: 2px 8px; 
+    border-radius: 4px; font-size: 0.65rem; cursor: pointer; margin-left: 5px;
+}
 
 /* UI 组件 - BLAST 同款自定义下拉栏 */
 .select-box-neo {
@@ -598,7 +665,24 @@ onMounted(() => {
 .btn-block-primary {
   width: 100%; background: #2563eb; color: white; padding: 12px; border-radius: 10px;
   font-weight: 700; font-size: 0.85rem; border: none; cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
 }
+.btn-block-primary:hover { background: #1d4ed8; }
+.btn-block-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-block-secondary {
+  width: 100%; padding: 12px; border-radius: 10px;
+  font-weight: 600; font-size: 0.85rem; cursor: pointer;
+  background: #f8fafc; border: 1px solid #cbd5e1; color: #334155;
+  transition: all 0.2s;
+}
+.btn-block-secondary:hover { background: #f1f5f9; border-color: #94a3b8; }
+.btn-block-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.divider-line {
+  height: 1px; background: #e2e8f0; margin: 20px 0;
+}
+
 .btn-text-link { background: none; border: none; color: #64748b; font-size: 0.75rem; text-decoration: underline; cursor: pointer; }
 
 .scroll-v { overflow-y: auto; scrollbar-width: thin; }

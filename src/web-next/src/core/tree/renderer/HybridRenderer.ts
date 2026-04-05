@@ -8,20 +8,18 @@ export class HybridRenderer {
     svg: SVGSVGElement | null = null
     g: SVGGElement | null = null
 
-    // Transform Matrix
     matrix = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }
-
-    // Interaction State
     isDragging = false
     startX = 0
     startY = 0
-    
-    // Callbacks for interactivity
-    onNodeClick: ((node: TreeNode, event: MouseEvent) => void) | null = null
+    ticking = false
 
-    // Resize Observer & Throttling
+    onNodeClick: ((node: TreeNode, event: MouseEvent) => void) | null = null
     resizeObserver: ResizeObserver | null = null
     resizeTimeout: any = null
+    
+    lastModel: TreeModel | null = null
+    lastSettings: LayoutSettings | null = null
 
     constructor() { }
 
@@ -31,7 +29,6 @@ export class HybridRenderer {
         this.container.style.position = 'relative'
         this.container.style.overflow = 'hidden'
 
-        // 1. Canvas Layer (Edges)
         this.canvas = document.createElement('canvas')
         this.canvas.style.position = 'absolute'
         this.canvas.style.top = '0'
@@ -40,7 +37,6 @@ export class HybridRenderer {
         this.ctx = this.canvas.getContext('2d')
         this.container.appendChild(this.canvas)
 
-        // 2. SVG Layer (Labels & Interaction)
         this.svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
         this.svg.setAttribute("width", "100%")
         this.svg.setAttribute("height", "100%")
@@ -58,216 +54,226 @@ export class HybridRenderer {
 
     setupInteraction() {
         if (!this.svg) return
-
         this.svg.onmousedown = (e) => {
-            if (e.button === 0) { // Left click
+            if (e.button === 0) { 
                 this.isDragging = true
                 this.startX = e.clientX
                 this.startY = e.clientY
                 this.svg!.style.cursor = "grabbing"
             }
         }
-
         window.addEventListener('mousemove', (e) => {
             if (!this.isDragging) return
-            const dx = e.clientX - this.startX
-            const dy = e.clientY - this.startY
-
-            this.matrix.e += dx
-            this.matrix.f += dy
+            this.matrix.e += e.clientX - this.startX
+            this.matrix.f += e.clientY - this.startY
             this.startX = e.clientX
             this.startY = e.clientY
-
             this.applyTransform()
         })
-
         window.addEventListener('mouseup', () => {
             this.isDragging = false
             if (this.svg) this.svg.style.cursor = "grab"
         })
-
         this.svg.onwheel = (e) => {
             e.preventDefault()
             const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1
-
             const rect = this.svg!.getBoundingClientRect()
             const mouseX = e.clientX - rect.left
             const mouseY = e.clientY - rect.top
-
             const contentX = (mouseX - this.matrix.e) / this.matrix.a
             const contentY = (mouseY - this.matrix.f) / this.matrix.d
-
             this.matrix.a *= scaleFactor
             this.matrix.d *= scaleFactor
-
             this.matrix.e = mouseX - contentX * this.matrix.a
             this.matrix.f = mouseY - contentY * this.matrix.d
-
             this.applyTransform()
         }
     }
 
     applyTransform() {
-        if (this.g) {
-            this.g.setAttribute("transform", `matrix(${this.matrix.a},${this.matrix.b},${this.matrix.c},${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
+        if (!this.ticking) {
+            window.requestAnimationFrame(() => {
+                if (this.g) this.g.setAttribute("transform", `matrix(${this.matrix.a},0,0,${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
+                if (this.lastModel && this.lastSettings) this.render(this.lastModel, this.lastSettings)
+                this.ticking = false
+            })
+            this.ticking = true
         }
     }
 
-    fitView(model: TreeModel, settings: LayoutSettings) {
+    fitView(model: TreeModel) {
         if (!this.container || !model.root) return
         const rect = this.container.getBoundingClientRect()
-        const padding = 60
-        
+        const padding = 100
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-        
-        const isCircular = settings.mode === 'circular'
         Object.values(model.nodesById).forEach(node => {
-            const nx = isCircular ? (node.cartX || 0) : (node.x || 0)
-            const ny = isCircular ? (node.cartY || 0) : (node.y || 0)
-            minX = Math.min(minX, nx)
-            minY = Math.min(minY, ny)
-            maxX = Math.max(maxX, nx)
-            maxY = Math.max(maxY, ny)
+            const nx = node.x || 0, ny = node.y || 0
+            minX = Math.min(minX, nx); minY = Math.min(minY, ny)
+            maxX = Math.max(maxX, nx); maxY = Math.max(maxY, ny)
         })
-        
         if (minX === Infinity) return
-        
-        const contentWidth = maxX - minX || 100
-        const contentHeight = maxY - minY || 100
-        
-        const scaleX = (rect.width - padding * 2) / contentWidth
-        const scaleY = (rect.height - padding * 2) / contentHeight
-        
-        // Phylogenetic trees usually need more horizontal stretch
-        // If content is very narrow, allow scaleX to be much larger than scaleY
-        const scale = Math.min(scaleX, scaleY)
-        
-        this.matrix.a = scaleX > scaleY * 2 ? scaleX * 0.8 : scale
-        this.matrix.d = scale
-        
-        this.matrix.e = (rect.width / 2) - ((minX + maxX) / 2 * this.matrix.a) 
-        this.matrix.f = (rect.height / 2) - ((minY + maxY) / 2 * this.matrix.d) 
-        
+        const sc = Math.min((rect.width - padding * 4) / (maxX - minX || 1), (rect.height - padding * 2) / (maxY - minY || 1))
+        this.matrix.a = this.matrix.d = sc
+        this.matrix.e = (rect.width / 2) - ((minX + maxX) / 2 * sc) - padding
+        this.matrix.f = (rect.height / 2) - ((minY + maxY) / 2 * sc)
         this.applyTransform()
     }
 
     setupResizeObserver() {
-        if (typeof ResizeObserver !== 'undefined') {
+        if (typeof ResizeObserver !== 'undefined' && this.container) {
             this.resizeObserver = new ResizeObserver(() => {
-                if (this.resizeTimeout) return
+                if (this.resizeTimeout) clearTimeout(this.resizeTimeout)
                 this.resizeTimeout = setTimeout(() => {
                     this.handleResizeInternal()
-                    this.resizeTimeout = null
-                }, 16)
+                    if (this.lastModel) {
+                        this.fitView(this.lastModel)
+                    }
+                }, 100)
             })
-            if (this.container) this.resizeObserver.observe(this.container)
+            this.resizeObserver.observe(this.container)
         }
     }
 
     private handleResizeInternal() {
-        if (this.container && this.canvas && this.ctx) {
-            const rect = this.container.getBoundingClientRect()
-            const dpr = window.devicePixelRatio || 1
-            this.canvas.style.width = `${rect.width}px`
-            this.canvas.style.height = `${rect.height}px`
-            this.canvas.width = rect.width * dpr
-            this.canvas.height = rect.height * dpr
-            this.ctx.scale(dpr, dpr)
-        }
+        if (!this.container || !this.canvas || !this.ctx) return
+        const rect = this.container.getBoundingClientRect()
+        const dpr = window.devicePixelRatio || 1
+        this.canvas.style.width = `${rect.width}px`
+        this.canvas.style.height = `${rect.height}px`
+        this.canvas.width = rect.width * dpr
+        this.canvas.height = rect.height * dpr
+        this.ctx.scale(dpr, dpr)
     }
 
     render(model: TreeModel, settings: LayoutSettings) {
+        const isModelChanged = (this.lastModel !== model) || !this.lastModel
+        this.lastModel = model; this.lastSettings = settings
         if (!this.ctx || !this.canvas || !this.g || !model.root) return
 
         this.ctx.setTransform(1, 0, 0, 1, 0, 0)
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-
         const dpr = window.devicePixelRatio || 1
-        
-        this.ctx.setTransform(
-            this.matrix.a * dpr, this.matrix.b * dpr,
-            this.matrix.c * dpr, this.matrix.d * dpr,
-            this.matrix.e * dpr, this.matrix.f * dpr
-        )
+        this.ctx.setTransform(this.matrix.a * dpr, 0, 0, this.matrix.d * dpr, this.matrix.e * dpr, this.matrix.f * dpr)
 
         this.ctx.beginPath()
         this.ctx.strokeStyle = settings.branchColor
-        // Scale linewidth inversely to prevent giant strokes when zoomed in
         this.ctx.lineWidth = settings.branchWidth / Math.sqrt(this.matrix.a)
+        this.ctx.lineCap = 'round'; this.ctx.lineJoin = 'round'
         this.drawEdgesRecursive(model.root, settings)
         this.ctx.stroke()
 
-        while (this.g.firstChild) {
-            this.g.removeChild(this.g.firstChild)
+        if (isModelChanged) {
+            while (this.g.firstChild) { this.g.removeChild(this.g.firstChild) }
+            if (settings.showLabels) {
+                const fragment = document.createDocumentFragment()
+                this.drawLabelsRecursive(model.root, settings, fragment)
+                this.g.appendChild(fragment)
+            }
         }
+        this.g.setAttribute("transform", `matrix(${this.matrix.a},0,0,${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
+        this.renderScaleBar()
+    }
 
-        this.g.setAttribute("transform", `matrix(${this.matrix.a},${this.matrix.b},${this.matrix.c},${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
+    private renderScaleBar() {
+        if (!this.ctx || !this.canvas) return
+        const dpr = window.devicePixelRatio || 1
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        const scale = this.matrix.a
+        const units = Math.pow(10, Math.floor(Math.log10(100 / scale)))
+        const pw = units * scale
+        const x = 60, y = (this.canvas.height / dpr) - 60
 
-        if (settings.showLabels) {
-            const fragment = document.createDocumentFragment()
-            this.drawLabelsRecursive(model.root, settings, fragment)
-            this.g.appendChild(fragment)
-        }
+        // Background pod for premium look
+        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'
+        this.ctx.beginPath()
+        this.ctx.roundRect(x - 10, y - 25, pw + 20, 45, 8)
+        this.ctx.fill()
+
+        this.ctx.strokeStyle = '#1e293b'
+        this.ctx.lineWidth = 1.5
+        this.ctx.beginPath()
+        this.ctx.moveTo(x, y); this.ctx.lineTo(x + pw, y)
+        this.ctx.moveTo(x, y - 4); this.ctx.lineTo(x, y + 4)
+        this.ctx.moveTo(x + pw, y - 4); this.ctx.lineTo(x + pw, y + 4)
+        this.ctx.stroke()
+        this.ctx.fillStyle = '#1e293b'
+        this.ctx.font = 'bold 11px Inter, sans-serif'
+        this.ctx.textAlign = 'center'
+        this.ctx.fillText(`${units.toFixed(units < 0.1 ? 3 : 2)} sub/site`, x + pw / 2, y - 8)
     }
 
     private drawEdgesRecursive(node: TreeNode, s: LayoutSettings) {
-        if (!node.children || node.children.length === 0) return
-        if (!this.ctx) return
-
-        const ctx = this.ctx
-        const cx = s.mode === 'circular' ? (node.cartX || 0) : (node.x || 0)
-        const cy = s.mode === 'circular' ? (node.cartY || 0) : (node.y || 0)
-
-        node.children.forEach(child => {
-            const chx = s.mode === 'circular' ? (child.cartX || 0) : (child.x || 0)
-            const chy = s.mode === 'circular' ? (child.cartY || 0) : (child.y || 0)
-
-            ctx.moveTo(cx, cy)
-            if (s.mode === 'circular') {
-                ctx.lineTo(chx, chy)
-            } else {
-                if (s.branchStyle === 'square') {
-                    ctx.lineTo(cx, chy)
-                    ctx.lineTo(chx, chy)
-                } else {
-                    ctx.lineTo(chx, chy)
-                }
+        if (!node.children || node.children.length === 0 || !this.ctx) return
+        
+        if (s.mode === 'circular' || s.mode === 'unrooted') {
+            const pr = node.radius || 0
+            if (node.children.length > 0) {
+                const angles = node.children.map(c => c.angle || 0)
+                const minA = Math.min(...angles)
+                const maxA = Math.max(...angles)
+                this.ctx.moveTo(pr * Math.cos(minA), pr * Math.sin(minA))
+                this.ctx.arc(0, 0, pr, minA, maxA, false)
             }
-            this.drawEdgesRecursive(child, s)
-        })
+            node.children.forEach(child => {
+                if (this.ctx) {
+                    this.ctx.moveTo(pr * Math.cos(child.angle || 0), pr * Math.sin(child.angle || 0))
+                    this.ctx.lineTo(child.x || 0, child.y || 0)
+                }
+                this.drawEdgesRecursive(child, s)
+            })
+        } else {
+            const cx = node.x || 0
+            const childYs = node.children.map(c => c.y || 0)
+            this.ctx.moveTo(cx, Math.min(...childYs))
+            this.ctx.lineTo(cx, Math.max(...childYs))
+            node.children.forEach(child => {
+                if (this.ctx) {
+                    this.ctx.moveTo(cx, child.y || 0)
+                    this.ctx.lineTo(child.x || 0, child.y || 0)
+                }
+                this.drawEdgesRecursive(child, s)
+            })
+        }
     }
 
     private drawLabelsRecursive(node: TreeNode, s: LayoutSettings, parentElement: Element | DocumentFragment) {
         if (node.isLeaf) {
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text")
-            const cx = s.mode === 'circular' ? (node.cartX || 0) : (node.x || 0)
-            const cy = s.mode === 'circular' ? (node.cartY || 0) : (node.y || 0)
-
-            text.setAttribute("x", (cx + 5).toString())
-            text.setAttribute("y", (cy + 4).toString())
+            if (s.mode === 'circular' || s.mode === 'unrooted') {
+                const angleDeg = (node.angle || 0) * 180 / Math.PI
+                const x = (node.x || 0) + 12 * Math.cos(node.angle || 0)
+                const y = (node.y || 0) + 12 * Math.sin(node.angle || 0)
+                text.setAttribute("x", x.toString())
+                text.setAttribute("y", y.toString())
+                
+                let rot = angleDeg
+                if (angleDeg > 90 && angleDeg < 270) {
+                    rot -= 180
+                    text.setAttribute("text-anchor", "end")
+                    const offset = 24
+                    text.setAttribute("x", (x - offset * Math.cos(node.angle || 0)).toString())
+                    text.setAttribute("y", (y - offset * Math.sin(node.angle || 0)).toString())
+                } else {
+                    text.setAttribute("text-anchor", "start")
+                }
+                text.setAttribute("transform", `rotate(${rot}, ${text.getAttribute('x')}, ${text.getAttribute('y')})`)
+                text.setAttribute("alignment-baseline", "middle")
+            } else {
+                text.setAttribute("x", ((node.x || 0) + 10).toString())
+                text.setAttribute("y", ((node.y || 0) + 4).toString())
+                text.setAttribute("alignment-baseline", "middle")
+            }
             text.textContent = node.name || ""
             text.setAttribute("fill", "#334155")
             text.setAttribute("font-size", `${s.fontSize}px`)
-            text.setAttribute("font-family", "Arial, sans-serif")
-            text.style.cursor = "pointer"
+            text.setAttribute("font-family", "Inter, sans-serif")
             text.style.userSelect = "none"
-
-            text.onclick = (e) => {
-                if (this.onNodeClick) this.onNodeClick(node, e)
-            }
-            
-            text.onmouseenter = () => { text.setAttribute("fill", "#3b82f6") }
-            text.onmouseleave = () => { text.setAttribute("fill", "#334155") }
-
             parentElement.appendChild(text)
         }
-        if (node.children) {
-            node.children.forEach(c => this.drawLabelsRecursive(c, s, parentElement))
-        }
+        if (node.children) node.children.forEach(c => this.drawLabelsRecursive(c, s, parentElement))
     }
 
     dispose() {
         if (this.resizeObserver) this.resizeObserver.disconnect()
-        if (this.container) this.container.innerHTML = ''
     }
 }

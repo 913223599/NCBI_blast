@@ -165,6 +165,63 @@ class TreeFactory(BaseWrapper):
             args.extend(["-variance", "lin", "-variance_dissim"])
         return self._run_command("makeDistTree.exe", args)
 
+    def exec_fast_tree(self, input_fasta: Path, output_nwk: Path, params: Dict[str, Any] = None):
+        """Invoke FastTree for Maximum Likelihood approximation directly from MSA."""
+        args = ["-quiet"]
+        p = params or {}
+        
+        # DNA or Protein logic
+        model = p.get('model', 'jc').lower()
+        if p.get('seq_type') == 'protein':
+            if model == 'wag': args.append("-wag")
+        else:
+            args.append("-nt")
+            if model == 'gtr': args.append("-gtr")
+            
+        args.extend(["-quote", str(input_fasta)])
+        
+        try:
+            result = self._run_command("FastTree.exe", args)
+            if result and result.stdout:
+                output_nwk.write_text(result.stdout.strip(), encoding='utf-8')
+                return True
+        except Exception as e:
+            self.logger.error(f"FastTree analysis failed: {e}")
+        return False
+    def exec_iqtree(self, input_fasta: Path, output_dir: Path, params: Dict[str, Any] = None):
+        """Invoke IQ-TREE for Maximum Likelihood inference."""
+        p = params or {}
+        model = p.get('model', 'AUTO')
+        # IQ-TREE uses -s for alignment, -m for model, -pre for prefix
+        prefix = str(output_dir / input_fasta.stem)
+        args = ["-s", str(input_fasta), "-m", model, "-pre", prefix, "-nt", "AUTO"]
+        
+        try:
+            self._run_command("iqtree.exe", args)
+            # IQ-TREE output tree is usually .iqtree.treefile
+            tree_file = Path(f"{prefix}.treefile")
+            return tree_file
+        except Exception as e:
+            self.logger.error(f"IQ-TREE analysis failed: {e}")
+            return None
+
+    def exec_mrbayes(self, input_nexus: Path, output_dir: Path):
+        """Invoke MrBayes for Bayesian inference (requires NEXUS format)."""
+        # MrBayes typically takes a command file or runs interactively
+        # We'll create a simple command file
+        cmd_file = output_dir / f"{input_nexus.stem}_mb.cmd"
+        cmd_text = f"begin mrbayes;\n  set autoclose=yes nowarn=yes;\n  execute {input_nexus.name};\n  lset nst=6 rates=gamma;\n  mcmc ngen=10000 samplefreq=100 printfreq=100 diagnfreq=1000;\n  sumt;\nend;"
+        cmd_file.write_text(cmd_text, encoding='utf-8')
+        
+        try:
+            # MrBayes takes command file as stdin or via command line Redirect
+            self._run_command("mb.exe", [str(cmd_file)])
+            tree_file = output_dir / f"{input_nexus.name}.con.tre"
+            return tree_file
+        except Exception as e:
+            self.logger.error(f"MrBayes analysis failed: {e}")
+            return None
+
     def exec_print_dist_tree(self, input_tree: Path, output_nwk: Path, format: str = "newick"):
         args = [str(input_tree), "-format", format]
         result = self._run_command("printDistTree.exe", args)

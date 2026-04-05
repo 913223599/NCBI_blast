@@ -6,7 +6,7 @@ import { HybridRenderer } from '../core/tree/renderer/HybridRenderer'
 export function useTree() {
     const containerRef = ref<HTMLElement | null>(null)
     const renderer = new HybridRenderer()
-    const model = new TreeModel()
+    const model = ref<TreeModel>(new TreeModel())
 
     // Reactive Settings
     const settings = reactive<LayoutSettings>({ ...DEFAULT_SETTINGS })
@@ -16,6 +16,7 @@ export function useTree() {
     const error = ref<string | null>(null)
     const hasTree = ref(false)
     const nodeCount = ref(0) // Stats
+    const rawNewick = ref<string | null>(null)
 
     // Initialize
     onMounted(() => {
@@ -36,11 +37,9 @@ export function useTree() {
     }, { deep: true }) // deep watch for settings
 
     function updateLayout() {
-        // Create new Layout Engine instance or reuse? 
-        // LayoutEngine is stateless logic mostly, but holds refs to model/settings
-        const layout = new LayoutEngine(model, settings)
+        const layout = new LayoutEngine(model.value, settings)
         layout.calculateCoordinates()
-        renderer.render(model, settings)
+        renderer.render(model.value, settings)
     }
 
     async function loadNewick(newick: string) {
@@ -50,13 +49,16 @@ export function useTree() {
             // Simulate slight delay for UI responsiveness if needed
             await nextTick()
 
-            const root = model.parse(newick)
+            // Create fresh model instance to force renderer full update
+            model.value = new TreeModel()
+            const root = model.value.parse(newick)
             if (root) {
+                rawNewick.value = newick
                 hasTree.value = true
-                nodeCount.value = model.getLeafCount() + Object.keys(model.nodesById).length - model.getLeafCount()
+                nodeCount.value = model.value.getLeafCount()
 
                 updateLayout()
-                renderer.fitView(model, settings)
+                renderer.fitView(model.value)
             } else {
                 throw new Error("Failed to parse tree.")
             }
@@ -65,6 +67,17 @@ export function useTree() {
             hasTree.value = false
         } finally {
             isLoading.value = false
+        }
+    }
+
+    function midpointRooting() {
+        if (hasTree.value && model.value) {
+            // Force renderer to rebuild labels by invalidating its model cache
+            // Since we're using a hybrid renderer, this ensures labels follow the new topology
+            model.value.rerootMidpoint()
+            renderer.lastModel = null 
+            updateLayout()
+            renderer.fitView(model.value)
         }
     }
 
@@ -87,11 +100,13 @@ export function useTree() {
         containerRef,
         settings,
         loadNewick,
+        midpointRooting,
         exportSVG,
         isLoading,
         error,
         hasTree,
         nodeCount,
-        renderer
+        renderer,
+        rawNewick
     }
 }

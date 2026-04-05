@@ -687,6 +687,69 @@ class WebBridge(QObject):
             self.logger.error(f"Bridge testing model exception: {e}")
             return json.dumps({"success": False, "message": str(e)})
             
+    @pyqtSlot(str, result=bool)
+    def add_tree_workspace_files(self, paths_json):
+        """Add local files to tree workspace by copying them"""
+        try:
+            from pathlib import Path
+            import shutil
+            paths = json.loads(paths_json)
+            workspace = Path("results/tree_workspace")
+            workspace.mkdir(parents=True, exist_ok=True)
+            
+            for p_str in paths:
+                p = Path(p_str)
+                if p.exists():
+                    shutil.copy(p, workspace / p.name)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to add workspace files: {e}")
+            return False
+
+    @pyqtSlot(result=str)
+    def list_tree_sequences(self):
+        """List files in tree workspace with .nwk support"""
+        try:
+            from pathlib import Path
+            workspace = Path("results/tree_workspace")
+            workspace.mkdir(parents=True, exist_ok=True)
+            files = []
+            for ext in ("*.fasta", "*.seq", "*.fa", "*.fna", "*.nwk", "*.txt"):
+                files.extend([f.name for f in workspace.glob(ext)])
+            return json.dumps(sorted(list(set(files))))
+        except Exception as e:
+            self.logger.error(f"Failed to list tree workspace: {e}")
+            return "[]"
+
+    @pyqtSlot(str, result=str)
+    def get_tree_content(self, filename):
+        """Read .nwk tree file content for direct loading"""
+        try:
+            from pathlib import Path
+            path = Path("results/tree_workspace") / filename
+            if path.exists():
+                return path.read_text(encoding='utf-8', errors='ignore')
+            return ""
+        except Exception as e:
+            self.logger.error(f"get_tree_content error: {e}")
+            return ""
+
+    @pyqtSlot(result=bool)
+    def clear_tree_workspace(self):
+        """Delete all files in tree workspace"""
+        try:
+            from pathlib import Path
+            import os
+            workspace = Path("results/tree_workspace")
+            if workspace.exists():
+                for f in workspace.iterdir():
+                    if f.is_file():
+                        os.remove(f)
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to clear workspace: {e}")
+            return False
+
     @pyqtSlot(result=str)
     def get_ai_models(self):
         """Get all AI models configured on backend"""
@@ -698,7 +761,6 @@ class WebBridge(QObject):
             return json.dumps(models)
         except Exception as e:
             self.logger.error(f"Failed to get AI models: {e}")
-            return "[]"
 
     @pyqtSlot(str, str, result=bool)
     def add_ai_model(self, model_key, model_name):
@@ -1075,7 +1137,7 @@ class WebPage(QWebEnginePage):
         elif level == QWebEnginePage.JavaScriptConsoleMessageLevel.WarningMessageLevel:
             logger.warning(f"[JS WARN] {msg}")
         else:
-            logger.debug(f"[JS LOG] {msg}")
+            logger.info(f"[JS LOG] {msg}")
 
 
 class WebContainer(QWidget):

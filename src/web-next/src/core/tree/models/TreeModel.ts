@@ -4,93 +4,67 @@ export interface TreeNode {
     children: TreeNode[]
     parent: TreeNode | null
     branch_length: number
-    original_length?: number // Keep for scientific accuracy
+    original_length?: number 
     depth: number
     heightFromRoot: number
     isLeaf: boolean
     leafCount?: number
 
-    // Layout properties (optional until layout runs)
     x?: number
     y?: number
     cartX?: number
     cartY?: number
     angle?: number
     radius?: number
-    bbox?: { minX: number; minY: number; maxX: number; maxY: number }
-    color?: string
 }
 
-export interface Dataset {
-    name: string
-    type: 'discrete' | 'continuous' | 'bar'
-    data: Record<string, number | string>
-    colorMap?: Record<string, string>
-    gradient?: string[]
-    showLegend: boolean
-}
-
+/**
+ * 进化树核心数据模型 (Station 2.0)
+ */
 export class TreeModel {
     root: TreeNode | null = null
     leaves: TreeNode[] = []
     nodesById: Record<string, TreeNode> = {}
     maxDepth: number = 0
     maxHeight: number = 0
-    datasets: Dataset[] = []
 
     constructor() { }
 
-    parse(newickStr: string): TreeNode | null {
-        if (!newickStr || !newickStr.trim()) {
-            console.error("[TreeModel Error] Empty Newick string.")
-            return null
-        }
+    parse(s: string | undefined): TreeNode | null {
+        if (!s || !s.trim()) return null
+        let input = s.trim()
+        if (input.endsWith(';')) input = input.substring(0, input.length - 1)
 
-        // internal parser
-        const parseNewick = (s: string): any => {
-            const ancestors: any[] = []
-            let tree: any = {}
-            const tokens = s.split(/\s*(;|\(|\)|,|:)\s*/)
-            for (let i = 0; i < tokens.length; i++) {
-                const token = tokens[i]
-                switch (token) {
-                    case '(': // new children
-                        const subtree = {}
-                        tree.children = [subtree]
-                        ancestors.push(tree)
-                        tree = subtree
-                        break
-                    case ',': // another branch
-                        const nextSubtree = {}
-                        ancestors[ancestors.length - 1].children.push(nextSubtree)
-                        tree = nextSubtree
-                        break
-                    case ')': // optional name next
-                        tree = ancestors.pop()
-                        break
-                    case ':': // optional length next
-                        break
-                    default:
-                        const x = tokens[i - 1]
-                        if (x == ')' || x == '(' || x == ',') {
-                            tree.name = token
-                        } else if (x == ':') {
-                            tree.branch_length = parseFloat(token)
-                        }
+        let i = 0
+        const parseNode = (parent: any): any => {
+            const node: any = { children: [], parent, branch_length: 0, name: "" }
+            if (input[i] === '(') {
+                i++ 
+                while (true) {
+                    node.children.push(parseNode(node))
+                    if (input[i] === ',') i++ 
+                    else if (input[i] === ')') { i++; break }
+                    else break
                 }
             }
-            return tree
+            let labelStart = i
+            while (i < input.length && !['(', ')', ',', ':', ';'].includes(input[i] as string)) i++
+            if (i > labelStart) node.name = input.substring(labelStart, i).trim()
+            if (i < input.length && input[i] === ':') {
+                i++; let lenStart = i
+                while (i < input.length && !['(', ')', ',', ';'].includes(input[i] as string)) i++
+                node.branch_length = parseFloat(input.substring(lenStart, i).trim()) || 0
+            }
+            return node
         }
 
         try {
-            // Cast the loose parser result to strict TreeNode structure in _processTree
-            const rawRoot = parseNewick(newickStr)
-            this.root = rawRoot as TreeNode
+            this.root = parseNode(null)
             this._processTree()
             return this.root
-        } catch (e: any) {
-            console.error("Error parsing Newick string: " + e.message)
-            throw e
+        } catch (e) {
+            console.error("Newick Parse Failed:", e)
+            return null
         }
     }
 
@@ -99,58 +73,88 @@ export class TreeModel {
         this.nodesById = {}
         this.maxDepth = 0
         this.maxHeight = 0
-
-        let counter = 0
         if (!this.root) return
 
-        // Explicitly type the stack
-        const stack: { node: any; depth: number; height: number; parent: TreeNode | null }[] = [
-            { node: this.root, depth: 0, height: 0, parent: null }
-        ]
+        let idCounter = 0
+        const stack: any[] = [{ node: this.root, depth: 0, height: 0, parent: null }]
 
         while (stack.length > 0) {
-            const { node, depth, height, parent } = stack.pop()!
-
-            // Assign ID and standard props
-            node.id = node.name ? node.name.replace(/\s+/g, '_') : "node_" + (counter++)
+            const { node, depth, height, parent } = stack.pop()
+            node.id = node.name ? node.name.replace(/[^\w]/g, '_') : `node_${idCounter++}`
             node.depth = depth
             node.heightFromRoot = height
             node.parent = parent
-            node.branch_length = node.branch_length || 0 // Ensure number
-
-            if (depth > this.maxDepth) this.maxDepth = depth
-            if (height > this.maxHeight) this.maxHeight = height
-
-            this.nodesById[node.id] = node as TreeNode
+            this.nodesById[node.id] = node
 
             if (!node.children || node.children.length === 0) {
                 node.isLeaf = true
-                node.children = [] // normalize
-                this.leaves.push(node as TreeNode)
+                node.children = []
+                this.leaves.push(node)
+                if (depth > this.maxDepth) this.maxDepth = depth
+                if (height > this.maxHeight) this.maxHeight = height
             } else {
                 node.isLeaf = false
-                for (let i = node.children.length - 1; i >= 0; i--) {
-                    const child = node.children[i]
-                    const rawDist = child.branch_length ? parseFloat(child.branch_length) : 0.01
-                    // Clamp negative lengths
-                    const dist = Math.max(0, rawDist)
-                    child.branch_length = dist
-                    child.original_length = rawDist
-
+                for (let j = node.children.length - 1; j >= 0; j--) {
                     stack.push({
-                        node: child,
+                        node: node.children[j],
                         depth: depth + 1,
-                        height: height + dist,
-                        parent: node as TreeNode
+                        height: height + (node.children[j].branch_length || 0),
+                        parent: node
                     })
                 }
             }
         }
     }
 
+    rerootMidpoint() {
+        if (!this.root || this.leaves.length < 2) return
+        const tipA = this._findFar(this.leaves[0] as TreeNode).node
+        const { node: tipB } = this._findFar(tipA)
+        this.rerootAtNode(tipB)
+        this._processTree()
+    }
+
+    /**
+     * 辅助寻找最远路径
+     */
+    _findFar(startNode: TreeNode) {
+        let maxDist = -1, farNode = startNode
+        const q: any[] = [{ node: startNode, d: 0 }]
+        const visited = new Set([startNode.id])
+        while (q.length > 0) {
+            const { node, d } = q.shift()
+            if (d > maxDist) { maxDist = d; farNode = node }
+            const neighbors = [...(node.children || []), node.parent].filter(n => n && !visited.has(n.id))
+            neighbors.forEach(n => {
+                visited.add(n!.id)
+                q.push({ node: n, d: d + (n === node.parent ? (node as TreeNode).branch_length : n!.branch_length) })
+            })
+        }
+        return { node: farNode, dist: maxDist }
+    }
+
+    /**
+     * 将树重新定根到特定节点
+     */
+    rerootAtNode(targetNode: TreeNode) {
+        if (!this.root || targetNode === this.root) return
+        const path: TreeNode[] = []
+        let curr: TreeNode | null = targetNode
+        while (curr) { path.push(curr); curr = curr.parent }
+
+        for (let i = path.length - 1; i > 0; i--) {
+            const p = path[i] as TreeNode, c = path[i - 1] as TreeNode
+            p.children = p.children.filter(x => x !== c)
+            c.children.push(p)
+            p.parent = c
+            p.branch_length = c.branch_length
+            c.branch_length = 0
+            c.parent = null
+        }
+        this.root = targetNode
+    }
+
     getLeafCount(): number {
         return this.leaves.length
     }
-
-    // ... other methods (reroot, prune) can be added later
 }
