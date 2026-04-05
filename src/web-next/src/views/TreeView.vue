@@ -181,6 +181,23 @@ async function clearWorkspace() {
     } catch(e) {}
 }
 
+async function reAnalyzeGroup(group: any) {
+    if (!group || !group.items || group.items.length === 0) return
+    
+    // 关键修正：从该组最新的一次分析记录中提取物理归档指纹，确保召回的源数据与该组完全匹配
+    const archiveFile = group.items[0].archiveFile || group.sourceFile
+    
+    appStore.showNotification(`正在从历史档案中召回序列: ${group.name}...`, 'info')
+    try {
+        const bridge = await initBridge()
+        if (bridge && typeof bridge.recall_tree_sequences === 'function') {
+            bridge.recall_tree_sequences(archiveFile)
+        }
+    } catch (e) {
+        console.error("Recall failed", e)
+    }
+}
+
 function toggleSideTool(tool: 'input' | 'analysis' | 'display') {
   if (activeSideTool.value === tool && isSidebarOpen.value) {
     isSidebarOpen.value = false
@@ -205,6 +222,12 @@ function selectTreeOption(field: string, value: string) {
 function getMsaLabel() { return msaOptions.find(o => o.value === treeWorkflows.msa)?.label || treeWorkflows.msa }
 function getEngineLabel() { return engineOptions.find(o => o.value === treeWorkflows.engine)?.label || treeWorkflows.engine }
 function getModelLabel() { return modelOptions.value.find(o => o.value === treeWorkflows.model)?.label || treeWorkflows.model }
+
+// 简写获取（用于历史记录标签）
+function getShortMsa() { return treeWorkflows.msa === 'none' ? 'Rapid' : treeWorkflows.msa.toUpperCase() }
+function getShortEngine() { return engineOptions.find(o => o.value === treeWorkflows.engine)?.value.toUpperCase() || treeWorkflows.engine }
+function getShortModel() { return modelOptions.value.find(o => o.value === treeWorkflows.model)?.value.toUpperCase() || treeWorkflows.model }
+
 function getLayoutLabel() { return layoutModeOptions.find(o => o.value === settings.mode)?.label || settings.mode }
 
 // 全局点击关闭
@@ -217,6 +240,8 @@ function handleFileUpload(e: Event) {
     if (files) {
         selectedFiles.value = Array.from(files)
         appStore.showNotification(`已添加 ${files.length} 个本地序列文件`, 'info')
+        // 关键修复：清除 DOM 值，确保下次选同一个文件也能触发 change 事件
+        ;(e.target as HTMLInputElement).value = ''
     }
 }
 
@@ -320,9 +345,10 @@ onMounted(() => {
     
     // @ts-ignore
     window.treeView = {
-        loadNewick: (content: string) => { 
-            const semanticName = `${getMsaLabel()} | ${getEngineLabel()} | ${getModelLabel()}`
-            loadNewick(content, semanticName)
+        loadNewick: (content: string, alg?: string, source?: string, path?: string) => { 
+            // 语义化标签自动填充：如果后端未传（如重定根），则根据当前 UI 设置生成
+            const finalAlg = alg || `${getShortMsa()} / ${getShortEngine()} (${getShortModel()})`
+            loadNewick(content, finalAlg, source || 'Unknown', path)
             isLoading.value = false
         },
         setLoading: (val: boolean, msg?: string, percent?: number) => { 
@@ -359,6 +385,21 @@ onMounted(() => {
         }
 
     }
+
+    initBridge().then(bridge => {
+        if (bridge && bridge.recall_event) {
+            // @ts-ignore
+            bridge.recall_event.connect((success: boolean, msg: string) => {
+                if (success) {
+                    appStore.showNotification(`序列 [${msg}] 已还原至工作区`, 'success')
+                    activeSideTool.value = 'analysis'
+                    refreshWorkspace()
+                } else {
+                    appStore.showNotification(`召回失败: ${msg}`, 'error')
+                }
+            })
+        }
+    })
 
     if (renderer) {
         renderer.onNodeClick = (node: any, e: MouseEvent) => {
@@ -520,22 +561,25 @@ onMounted(() => {
                 <label class="label-with-icon">
                     <span>🕒 分析历史记录 (History)</span>
                 </label>
-                <div class="history-list" style="margin-top: 10px; max-height: 300px; overflow-y: auto;">
+                <div class="history-list" style="margin-top: 10px; max-height: 400px; overflow-y: auto;">
                     <div v-for="g in appStore.treeHistory" :key="g.id" class="history-group" 
                          style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 10px; overflow: hidden;">
-                        <div style="padding: 10px; background: #f1f5f9; font-weight: 700; font-size: 11px; color: #475569; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0;">
-                            <span style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📂 {{ g.name }}</span>
-                            <span @click.stop="confirmDeleteGroup(g)" style="color: #94a3b8; cursor: pointer; font-size: 14px;">✕</span>
+                        <div class="history-group-header" style="padding: 10px; background: #f1f5f9; font-weight: 700; font-size: 11px; color: #475569; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0;">
+                            <span style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📂 {{ g.name }}</span>
+                            <div style="display: flex; gap: 8px;">
+                                <span @click.stop="reAnalyzeGroup(g)" title="以此组原始数据重算对比" style="color: #2563eb; cursor: pointer; font-size: 14px;">⚡</span>
+                                <span @click.stop="confirmDeleteGroup(g)" title="清理此组" style="color: #94a3b8; cursor: pointer; font-size: 14px;">✕</span>
+                            </div>
                         </div>
                         <div v-for="item in g.items" :key="item.id" 
-                             @click="loadNewick(item.nwk)"
+                             @click="loadNewick(item.nwk, item.algorithm, g.sourceFile, item.filePath, true)"
                              class="history-sub-item"
                              style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s;">
-                            <div>
-                                <span style="font-weight: 600; font-size: 11px; color: #334155;">{{ item.algorithm }}</span>
+                            <div style="flex: 1; overflow: hidden;">
+                                <div style="font-weight: 600; font-size: 10px; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="item.algorithm">{{ item.algorithm }}</div>
                                 <div style="font-size: 9px; color: #94a3b8; margin-top: 2px;">{{ new Date(item.time).toLocaleString() }}</div>
                             </div>
-                            <span @click.stop="confirmDeleteItem(g, item)" style="color: #cbd5e1; font-size: 12px;">✕</span>
+                            <span @click.stop="confirmDeleteItem(g, item)" style="color: #cbd5e1; font-size: 12px; margin-left: 8px;">✕</span>
                         </div>
                     </div>
                     <div v-if="appStore.treeHistory.length === 0" style="text-align: center; color: #94a3b8; font-size: 11px; padding: 20px;">

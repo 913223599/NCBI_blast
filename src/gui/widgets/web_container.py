@@ -24,6 +24,7 @@ class WebBridge(QObject):
     page_ready = pyqtSignal()
     help_requested = pyqtSignal()
     blast_event = pyqtSignal(str, str) # type, json_data
+    recall_event = pyqtSignal(bool, str) # success, message
     
     def __init__(self, container):
         super().__init__()
@@ -160,9 +161,27 @@ class WebBridge(QObject):
     def save_tree_sequences(self, fasta_content):
         """保存手动输入的序列到工作空间，支持 Tree Station 2.0"""
         try:
+            import re
+            import datetime
             workspace = Path("results/tree_workspace")
             workspace.mkdir(parents=True, exist_ok=True)
-            file_path = workspace / "user_input.fasta"
+            
+            # --- 智能命名逻辑：避免 user_input 硬编码 ---
+            # 1. 尝试提取第一个序列的标题作为主干名称
+            first_header = "Station_Input"
+            match = re.search(r'^>\s*(.+)', fasta_content, re.M)
+            if match:
+                header_line = match.group(1).strip()
+                # 清洗文件名：保留字母数字、空格、点、下划线、横杠，其余替换为下划线
+                first_header = "".join(c if c.isalnum() or c in (' ', '.', '_', '-') else '_' for c in header_line).strip()
+                # 进一步压缩：空格转下划线，限长 40 字符
+                first_header = first_header.replace(' ', '_')[:40]
+            
+            # 2. 结合时间戳确保唯一性，支持分批多次导入
+            timestamp = datetime.datetime.now().strftime("%y%m%d_%H%M")
+            file_name = f"{first_header}_{timestamp}.fasta"
+            file_path = workspace / file_name
+            
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(fasta_content)
             self.logger.info(f"User sequences saved to {file_path}")
@@ -170,6 +189,71 @@ class WebBridge(QObject):
         except Exception as e:
             self.logger.error(f"Failed to save sequences: {e}")
             return False
+
+    @pyqtSlot(str)
+    def recall_tree_sequences(self, source_filename):
+        """Recall original sequences from results back to active workspace for re-analysis"""
+        from pathlib import Path
+        import shutil
+        try:
+            results_dir = Path("results/tree_results")
+            workspace_dir = Path("results/tree_workspace")
+            workspace_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 使用列表解析处理多种可能的路径
+            potential_file = results_dir / source_filename
+            if not potential_file.exists():
+                # [深度搜索] 关键修复：结果存储在 Project 子目录下，需使用 rglob 进行递归查找
+                # 优先匹配精准文件名 (包含指纹)
+                matches = list(results_dir.rglob(source_filename))
+                if matches:
+                    potential_file = matches[0]
+                else:
+                    # 无法完全匹配时，尝试前缀匹配
+                    self.logger.info(f"Precise match failed for {source_filename}, trying recursive wildcard matching...")
+                    matches = list(results_dir.rglob(f"{source_filename}*"))
+                    if matches:
+                        potential_file = matches[0]
+                    else:
+                        self.logger.error(f"Recall Failed: No file matches {source_filename} in any subfolders of {results_dir}")
+                        self.recall_event.emit(False, f"Not Found: {source_filename}")
+                        return
+            
+            # --- 智能召回逻辑：还原逻辑文件名，剥离物理指纹前缀 ---
+            # 物理文件名通常为：Tree_20240405_183302_original_name.fasta
+            pure_name = potential_file.name
+            import re
+            # 匹配指纹模式：Tree_YYYYMMDD_HHMMSS_
+            match = re.match(r'^Tree_\d{8}_\d{6}_(.+)$', pure_name)
+            if match:
+                pure_name = match.group(1)
+            
+            target_path = workspace_dir / pure_name
+            shutil.copy2(potential_file, target_path)
+            self.logger.info(f"BRIDGE: [SUCCESS] Recalled {potential_file.name} to workspace as {pure_name}.")
+            self.recall_event.emit(True, pure_name)
+        except Exception as e:
+            self.logger.error(f"Recall Logic Error: {e}")
+            self.recall_event.emit(False, str(e))
+
+    @pyqtSlot(str)
+    def delete_tree_archive(self, rel_path):
+        """Physically delete a single tree archive file or a whole project folder"""
+        from pathlib import Path
+        import shutil
+        try:
+            target = Path("results/tree_results") / rel_path
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                    self.logger.info(f"BRIDGE: [SUCCESS] Physically deleted project folder: {target}")
+                else:
+                    target.unlink()
+                    self.logger.info(f"BRIDGE: [SUCCESS] Physically deleted archive file: {target}")
+            else:
+                self.logger.warning(f"BRIDGE: [WARNING] Delete target not found: {rel_path}")
+        except Exception as e:
+            self.logger.error(f"BRIDGE: [ERROR] Failed to delete archive {rel_path}: {e}")
 
     @pyqtSlot(str)
     def request_tree_analysis(self, params_json):
@@ -1455,11 +1539,15 @@ class WebContainer(QWidget):
         # 2. If multiple files OR single non-fasta file, we merge/convert
         if len(paths) > 1 or (len(paths) == 1 and not paths[0].lower().endswith(('.fasta', '.fa', '.fna'))):
             try:
-                import tempfile
-                with tempfile.NamedTemporaryFile(mode='w', suffix='_merged.fasta', delete=False, encoding='utf-8') as tmp:
-                    final_path = tmp.name
-                    self.logger.info(f"Merging {len(paths)} files into temporary FASTA: {final_path}")
-                    
+                import datetime
+                # --- 语义化合并命名：避免 generic temp 文件名影响历史分组 ---
+                timestamp = datetime.datetime.now().strftime("%m%d_%H%M")
+                merge_name = f"Merged_{len(paths)}_Seqs_{timestamp}.fasta"
+                final_path = workspace / merge_name
+                
+                self.logger.info(f"Merging {len(paths)} files into workspace FASTA: {final_path}")
+                
+                with open(final_path, 'w', encoding='utf-8') as tmp:
                     for p in paths:
                         p_obj = Path(p)
                         with open(p, 'r', encoding='utf-8', errors='ignore') as src:
@@ -1472,7 +1560,6 @@ class WebContainer(QWidget):
                             else:
                                 clean_seq = "".join(content.split())
                                 tmp.write(f">{header}\n{clean_seq}\n")
-                                
             except Exception as e:
                 QMessageBox.critical(self, "Merge Error", f"Failed to merge sequence files:\n{str(e)}")
                 return
@@ -1514,10 +1601,16 @@ class WebContainer(QWidget):
                 # Escape JSON
                 safe_newick = json.dumps(newick_content)
                 
-                # 统一使用 Tree Station 2.0 的加载协议调用
-                js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick});"
+                # 获取元数据：源文件名（用于历史分组）与结果路径（用于物理删除）
+                source_file = os.path.basename(result.get("input_file", "Unknown"))
+                safe_source = json.dumps(source_file)
+                safe_path = json.dumps(tree_path)
+                
+                # 统一使用 Tree Station 2.0 的加载协议调用 (Newick, Algorithm_Label_Placeholder, SourceFile, FilePath)
+                # 算法标签由前端结合当前设置生成，此处传 null 由前端填充
+                js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick}, null, {safe_source}, {safe_path});"
                 self.web_view.page().runJavaScript(js_code)
-                self.logger.info(f"Injected tree data ({len(newick_content)} bytes)")
+                self.logger.info(f"Injected tree data with metadata: {source_file}")
             except Exception as e:
                 self.logger.error(f"Failed to read tree file: {e}")
                 self.web_view.page().runJavaScript(f"console.error('Failed to read tree file: {str(e)}'); alert('读取树文件失败: {str(e)}');")
@@ -1544,12 +1637,14 @@ class WebContainer(QWidget):
              with open(new_path, 'r') as f:
                  content = f.read()
              
-             self.bridge.current_tree_path = str(new_path)
+             # 保持重定根后的项目归属感：使用原文件名作为分组标签
+             source_file = old_path.name.replace('_rerooted.nwk', '').replace('.nwk', '') + '.fasta'
+             safe_source = json.dumps(source_file)
              
              import json
              safe_newick = json.dumps(content)
-             # 统一命名协议：使用 window.treeView.loadNewick
-             js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick});"
+             # 统一命名协议：使用 window.treeView.loadNewick，并透传源文件标识以便继续归档
+             js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick}, 'Rerooted', {safe_source});"
              self.web_view.page().runJavaScript(js_code)
              
         except Exception as e:

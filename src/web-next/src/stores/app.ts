@@ -51,32 +51,70 @@ export const useAppStore = defineStore('app', () => {
         }
     }
 
-    function addTreeHistory(nwk: string, name: string, algorithm: string, sourceFile: string, filePath?: string): void {
-        let group = treeHistory.value.find(g => g.sourceFile === sourceFile)
-        const newItem = { id: Math.random().toString(36).substring(2, 7), algorithm, nwk, filePath, time: Date.now() }
+    function addTreeHistory(nwk: string, algorithm: string, sourceFile: string, filePath?: string): void {
+        // 核心解耦：提取逻辑项目 ID (Project ID)
+        // sourceFile 格式规范： "ProjectName/SessionDir/FileName.fasta" 或 "Legacy_FileName.fasta"
+        const parts = sourceFile.split(/[\\/]/)
+        const logicalId = parts[0].replace(/^Tree_\d+_\d+_/g, "")
+        
+        // 每个 item 携带自己的物理指纹路径，用于精准物理定位与召回
+        const newItem = { 
+            id: Math.random().toString(36).substring(2, 7), 
+            algorithm, 
+            nwk, 
+            filePath, 
+            archiveFile: sourceFile, // 记录后端提供的完整相对档案路径
+            time: Date.now() 
+        }
+
+        let group = treeHistory.value.find(g => g.sourceFile === logicalId)
 
         if (group) {
-            group.items = [newItem, ...group.items.filter(i => i.algorithm !== algorithm).slice(0, 9)]
-            treeHistory.value = [group, ...treeHistory.value.filter(g => g.sourceFile !== sourceFile)]
+            // 项目内合并：允许无限次多版本并存，支持深度对比分析
+            group.items = [newItem, ...group.items].slice(0, 20)
+            // 刷新组在列表中的排序（置顶最近操作的项目）
+            treeHistory.value = [group, ...treeHistory.value.filter(g => g.sourceFile !== logicalId)]
         } else {
+            // 新建逻辑项目组
+            const displayName = logicalId.replace(/\.[^/.]+$/, "") // 去除项目 ID 后的扩展名
             treeHistory.value = [{
                 id: Math.random().toString(36).substring(2, 9),
-                sourceFile, name, items: [newItem]
-            }, ...treeHistory.value.slice(0, 14)]
+                sourceFile: logicalId, 
+                name: displayName,
+                items: [newItem]
+            }, ...treeHistory.value.slice(0, 20)]
         }
         localStorage.setItem('tree_history_records', JSON.stringify(treeHistory.value))
     }
 
     function removeTreeHistory(groupId: string, itemId?: string): void {
-        if (!itemId) {
-            treeHistory.value = treeHistory.value.filter(g => g.id !== groupId)
-        } else {
-            const group = treeHistory.value.find(g => g.id === groupId)
-            if (group) {
+        const group = treeHistory.value.find(g => g.id === groupId)
+        if (!group) return
+
+        try {
+            const bridge = (window as any).pywebview?.api || (window as any).qtBridge || (window as any).chrome?.webview?.hostObjects?.bridge
+            
+            if (!itemId) {
+                // 物理连坐：一键删除整个项目目录
+                if (bridge && typeof bridge.delete_tree_archive === 'function') {
+                    bridge.delete_tree_archive(group.sourceFile)
+                }
+                treeHistory.value = treeHistory.value.filter(g => g.id !== groupId)
+            } else {
+                const item = group.items.find(i => i.id === itemId)
+                // 物理销毁：删除特定版本的实验快照
+                if (item && bridge && typeof bridge.delete_tree_archive === 'function') {
+                    const archPath = (item as any).archiveFile || (item.filePath ? item.filePath.split(/[\\/]/).pop() : '')
+                    if (archPath) bridge.delete_tree_archive(archPath)
+                }
+                
                 group.items = group.items.filter(i => i.id !== itemId)
                 if (group.items.length === 0) treeHistory.value = treeHistory.value.filter(g => g.id !== groupId)
             }
+        } catch (e) {
+            console.warn("Physical cleanup skipped: Bridge not ready", e)
         }
+
         localStorage.setItem('tree_history_records', JSON.stringify(treeHistory.value))
     }
     function toggleSidebar(): void {
