@@ -9,7 +9,9 @@ export interface TreeNode {
     heightFromRoot: number
     isLeaf: boolean
     leafCount?: number
-    parseIndex?: number
+    minTaxon?: string
+    maxDistToLeaf?: number
+    parseIndex: number
 
     x?: number
     y?: number
@@ -28,8 +30,13 @@ export class TreeModel {
     nodesById: Record<string, TreeNode> = {}
     maxDepth: number = 0
     maxHeight: number = 0
+    version: number = 0 // 版本标识，用于触发渲染强制同步
 
     constructor() { }
+
+    incrementVersion() {
+        this.version++
+    }
 
     parse(s: string | undefined): TreeNode | null {
         if (!s || !s.trim()) return null
@@ -76,6 +83,7 @@ export class TreeModel {
     }
 
     _processTree() {
+        this.incrementVersion() // 核心维护：每次拓扑重构必须强制升级版本，通知渲染器刷 Labels
         this.leaves = []
         this.nodesById = {}
         this.maxDepth = 0
@@ -114,11 +122,15 @@ export class TreeModel {
         }
     }
 
+    /**
+     * 第一步：中点定根 (Midpoint Rooting)
+     * 核心逻辑：寻找演化直径 -> 定位几何中点 -> 物理劈裂边
+     */
     rerootMidpoint() {
         if (!this.root || this.leaves.length < 2) return
         
         // 1. 寻找演化直径
-        const tipA = this._findFar(this.leaves[0] as TreeNode).node
+        const tipA = this._findFar(this.leaves[0]!).node
         const { node: tipB, dist: totalDist } = this._findFar(tipA)
         
         // 2. 溯源路径
@@ -129,7 +141,7 @@ export class TreeModel {
         // 3. 寻找中点所在的边 (U, V)
         if (path.length < 2) return
         let v: TreeNode = tipB
-        let u: TreeNode = path[1]! // 安全判定
+        let u: TreeNode = path[1]!
         let d = 0
         for (let i = 0; i < path.length - 1; i++) {
             const node = path[i]
@@ -144,12 +156,12 @@ export class TreeModel {
         if (!u) return
 
         // 4. 执行边劈裂定根 (Edge Splitting)
-        // 我们先将树以 U 为临时根
+        // A. 临时将树以 U 为根
         this.rerootAtNode(u)
         
-        // 创建新的二叉根
+        // B. 插入二叉虚拟根
         const newRoot: TreeNode = {
-            id: 'virtual_root_' + Date.now(),
+            id: `vroot_${Date.now()}`,
             children: [],
             parent: null,
             branch_length: 0,
@@ -159,40 +171,78 @@ export class TreeModel {
             parseIndex: 0
         }
 
-        // 把 U 和 V 分别作为新根的两个孩子
         const distToV = totalDist / 2 - d
         const distToU = v.branch_length - distToV
 
-        // 调整 V，使其脱离原有父子关系，挂载到新根
-        if (u.children) u.children = u.children.filter(c => c !== v)
-        
+        // C. 断开 U-V 原始链接，重新挂向新根
+        u.children = u.children.filter(c => c !== v)
         v.parent = newRoot
         v.branch_length = Math.max(0, distToV)
-        
         u.parent = newRoot
         u.branch_length = Math.max(0, distToU)
 
         newRoot.children = [u, v]
         this.root = newRoot
 
+        // D. 强制执行层级重建
         this._processTree()
     }
 
     /**
-     * 系统发育树排序矩阵 (加固版本)
+     * 第二步：计算排序权重 (Weight Calculation)
+     * 在排序前先预计算各支系的度衡量，避免排序过程中的重复递归
+     */
+    prepareWeights(_mode: 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance') {
+        if (!this.root) return
+        
+        const _recursiveWeight = (node: TreeNode): any => {
+            if (node.isLeaf) {
+                node.leafCount = 1
+                node.minTaxon = node.name || 'zzz' // 用于分类学代理排序
+                node.maxDistToLeaf = 0
+                return
+            }
+
+            let count = 0
+            let minTax = node.name || 'zzz'
+            let maxD = 0
+
+            if (node.children) {
+                for (const child of node.children) {
+                    _recursiveWeight(child)
+                    count += (child.leafCount || 0)
+                    if (child.minTaxon && (child.minTaxon < minTax)) minTax = child.minTaxon
+                    maxD = Math.max(maxD, (child.maxDistToLeaf || 0) + child.branch_length)
+                }
+            }
+            node.leafCount = count
+            node.minTaxon = minTax
+            node.maxDistToLeaf = maxD
+        }
+        _recursiveWeight(this.root)
+    }
+
+    /**
+     * 第三步：执行拓扑排序 (Topological Sorting)
+     * 目的：调整 Children 列表的逻辑顺序
      */
     applySorting(type: 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance' | 'original') {
         if (!this.root) return
-        this.countLeaves(this.root)
         
+        // 1. 如果不是原始序列，先预计算权重
+        if (type !== 'original') {
+            this.prepareWeights(type as any)
+        }
+        
+        // 2. 深度优先遍历并执行排序
         const _recursiveSort = (node: TreeNode) => {
             if (node.children && node.children.length > 1) {
                 node.children.sort((a, b) => {
                     switch (type) {
                         case 'ladder-right': return (a.leafCount || 1) - (b.leafCount || 1)
                         case 'ladder-left': return (b.leafCount || 1) - (a.leafCount || 1)
-                        case 'taxonomic': return (a.name || '').localeCompare(b.name || '')
-                        case 'distance': return a.branch_length - b.branch_length
+                        case 'taxonomic': return (a.minTaxon || '').localeCompare(b.minTaxon || '')
+                        case 'distance': return (a.maxDistToLeaf || 0) - (b.maxDistToLeaf || 0)
                         case 'original': return (a.parseIndex || 0) - (b.parseIndex || 0)
                         default: return 0
                     }
@@ -200,30 +250,19 @@ export class TreeModel {
                 node.children.forEach(c => _recursiveSort(c))
             }
         }
-        _recursiveSort(this.root)
-    }
-
-    /**
-     * 递归计算权重 (公共方法以供 UI 逻辑使用)
-     */
-    countLeaves(node: TreeNode): number {
-        // 核心修复：动态判定叶子，不再信任可能过时的静态标识位
-        const isLeaf = !node.children || node.children.length === 0
-        node.isLeaf = isLeaf 
         
-        if (isLeaf) {
-            node.leafCount = 1
-            return 1
+        // 特殊处理：ladder-left 的逻辑稍微不同
+        if (type === 'ladder-left') {
+             const _sortLeft = (node: TreeNode) => {
+                 if (node.children && node.children.length > 1) {
+                     node.children.sort((a, b) => (b.leafCount || 1) - (a.leafCount || 1))
+                     node.children.forEach(c => _sortLeft(c))
+                 }
+             }
+             _sortLeft(this.root)
+        } else {
+             _recursiveSort(this.root)
         }
-        
-        let count = 0
-        if (node.children) {
-            for (const child of node.children) {
-                count += this.countLeaves(child)
-            }
-        }
-        node.leafCount = count
-        return count
     }
 
     /**
@@ -246,7 +285,7 @@ export class TreeModel {
     }
 
     /**
-     * 将树重新定根到特定节点
+     * 将树重新定根到特定节点 (物理反转)
      */
     rerootAtNode(targetNode: TreeNode) {
         if (!this.root || targetNode === this.root) return

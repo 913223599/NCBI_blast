@@ -234,6 +234,21 @@ class WebBridge(QObject):
             return False
 
     @pyqtSlot(str)
+    def delete_analysis_files(self, paths_json):
+        """物理删除磁盘上的分析结果文件"""
+        try:
+            paths = json.loads(paths_json)
+            for p_str in paths:
+                p = Path(p_str)
+                if p.exists() and p.is_file():
+                    p.unlink()
+                    self.logger.info(f"Physical file deleted: {p_str}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to delete physical files: {e}")
+            return False
+
+    @pyqtSlot(str)
     def request_tree_reroot(self, node_id):
         """Handle reroot request"""
         self.logger.info(f"JS requested reroot at: {node_id}")

@@ -19,11 +19,13 @@ export class HybridRenderer {
     resizeTimeout: any = null
     
     lastModel: TreeModel | null = null
+    lastVersion: number = -1
     lastSettings: LayoutSettings | null = null
 
     constructor() { }
 
     mount(container: HTMLElement) {
+        this.lastVersion = -1 // 关键修复：强制重置版本号以触发布局重绘
         this.container = container
         this.container.innerHTML = ''
         this.container.style.position = 'relative'
@@ -146,12 +148,14 @@ export class HybridRenderer {
     }
 
     render(model: TreeModel, settings: LayoutSettings) {
-        const isModelChanged = (this.lastModel !== model) || !this.lastModel
+        const isModelChanged = (this.lastModel !== model) || (this.lastVersion !== model.version) || !this.lastModel
         const isSettingsChanged = (this.lastSettings?.sortMode !== settings.sortMode) || 
                                 (this.lastSettings?.mode !== settings.mode) ||
                                 (this.lastSettings?.useBranchLengths !== settings.useBranchLengths)
 
-        this.lastModel = model; this.lastSettings = { ...settings }
+        this.lastModel = model; 
+        this.lastVersion = model.version;
+        this.lastSettings = { ...settings }
         if (!this.ctx || !this.canvas || !this.g || !model.root) return
 
         this.ctx.setTransform(1, 0, 0, 1, 0, 0)

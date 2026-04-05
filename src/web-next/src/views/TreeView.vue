@@ -3,22 +3,69 @@
  * TreeView - 进化树分析视图 (Station 2.0)
  * 采用 3 板块架构：顶栏菜单 / 动态侧栏工具 / 全屏渲染区
  */
-import { ref, onMounted, reactive, computed } from 'vue'
+import { ref, onMounted, reactive, computed, watch, nextTick } from 'vue'
 import { useTree } from '../composables/useTree'
 import { useAppStore } from '../stores/app'
 import { getBridge, initBridge } from '../bridge/pyqt-bridge'
 import PhylotreeWidget from '../components/PhylotreeWidget.vue'
 
 const appStore = useAppStore()
-const { settings, loadNewick, midpointRooting, resetTopology, isRerooted, applyTreeSorting, exportSVG, hasTree, isLoading, renderer, containerRef, rawNewick } = useTree()
+const { 
+  settings, loadNewick, midpointRooting, resetTopology, isRerooted, model,
+  applyTreeSorting, updateLayout, exportSVG, hasTree, isLoading, renderer, rawNewick, containerRef 
+} = useTree()
 
 /* -------- 核心状态 -------- */
 const renderEngine = ref<'hybrid'|'phylotree'>('phylotree')
-// 进化树渲染引擎切换监听
-import { watch } from 'vue'
+
+// 进化树渲染引擎切换监听：确保切换后立即重新绑定容器并重绘
 watch(renderEngine, (val) => {
-  console.info(`[Engine] Switched to: ${val}`)
+    nextTick(() => {
+        if (val === 'hybrid' && containerRef.value) {
+            renderer.mount(containerRef.value as HTMLElement)
+        }
+        updateLayout()
+        if (renderer && typeof renderer.fitView === 'function' && model.value) {
+            renderer.fitView(model.value)
+        }
+    })
 })
+
+// 历史记录与删除逻辑
+const showDeleteModal = ref(false)
+const pendingDelete = ref<{ groupId: string; itemId?: string; files: string[] } | null>(null)
+
+function confirmDeleteGroup(group: any) {
+  const files = group.items.map((i: any) => i.filePath).filter(Boolean)
+  pendingDelete.value = { groupId: group.id, files }
+  showDeleteModal.value = true
+}
+
+function confirmDeleteItem(group: any, item: any) {
+  pendingDelete.value = { groupId: group.id, itemId: item.id, files: item.filePath ? [item.filePath] : [] }
+  showDeleteModal.value = true
+}
+
+function executeDelete(physical: boolean) {
+  if (!pendingDelete.value) return
+  const { groupId, itemId, files } = pendingDelete.value
+  
+  if (physical && files.length > 0) {
+    try {
+      const bridge = getBridge()
+      if (bridge && typeof bridge.delete_analysis_files === 'function') {
+        bridge.delete_analysis_files(JSON.stringify(files))
+      }
+    } catch (e) {
+      console.error("Physical delete failed", e)
+    }
+  }
+  
+  appStore.removeTreeHistory(groupId, itemId)
+  showDeleteModal.value = false
+  pendingDelete.value = null
+  appStore.showNotification('记录已移除' + (physical ? '（物理文件已清理）' : ''), 'info')
+}
 
 
 const isSidebarOpen = ref(true)
@@ -231,6 +278,10 @@ async function requestAnalysis() {
     }
 }
 
+onMounted(() => {
+    appStore.initTreeHistory()
+})
+
 function handleInternalNodeClick(nodeData: any) {
     if (!nodeData) return
     selectedNode.value = nodeData
@@ -270,7 +321,8 @@ onMounted(() => {
     // @ts-ignore
     window.treeView = {
         loadNewick: (content: string) => { 
-            loadNewick(content)
+            const semanticName = `${getMsaLabel()} | ${getEngineLabel()} | ${getModelLabel()}`
+            loadNewick(content, semanticName)
             isLoading.value = false
         },
         setLoading: (val: boolean, msg?: string, percent?: number) => { 
@@ -463,6 +515,51 @@ onMounted(() => {
             </div>
 
             <div class="divider-line"></div>
+            
+            <div class="form-group">
+                <label class="label-with-icon">
+                    <span>🕒 分析历史记录 (History)</span>
+                </label>
+                <div class="history-list" style="margin-top: 10px; max-height: 300px; overflow-y: auto;">
+                    <div v-for="g in appStore.treeHistory" :key="g.id" class="history-group" 
+                         style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 10px; overflow: hidden;">
+                        <div style="padding: 10px; background: #f1f5f9; font-weight: 700; font-size: 11px; color: #475569; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0;">
+                            <span style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📂 {{ g.name }}</span>
+                            <span @click.stop="confirmDeleteGroup(g)" style="color: #94a3b8; cursor: pointer; font-size: 14px;">✕</span>
+                        </div>
+                        <div v-for="item in g.items" :key="item.id" 
+                             @click="loadNewick(item.nwk)"
+                             class="history-sub-item"
+                             style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s;">
+                            <div>
+                                <span style="font-weight: 600; font-size: 11px; color: #334155;">{{ item.algorithm }}</span>
+                                <div style="font-size: 9px; color: #94a3b8; margin-top: 2px;">{{ new Date(item.time).toLocaleString() }}</div>
+                            </div>
+                            <span @click.stop="confirmDeleteItem(g, item)" style="color: #cbd5e1; font-size: 12px;">✕</span>
+                        </div>
+                    </div>
+                    <div v-if="appStore.treeHistory.length === 0" style="text-align: center; color: #94a3b8; font-size: 11px; padding: 20px;">
+                        暂无历史记录
+                    </div>
+                </div>
+
+                <!-- 简易确认弹窗 (Confirm Modal) -->
+                <Teleport to="body">
+                    <div v-if="showDeleteModal" class="neo-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+                        <div class="neo-modal" style="background: white; border-radius: 12px; width: 400px; padding: 24px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);">
+                            <h3 style="margin: 0 0 16px 0; font-size: 18px; color: #1e293b;">确认删除？</h3>
+                            <p style="color: #64748b; font-size: 14px; line-height: 1.6;">
+                                你确定要删除此分析记录吗？你可以选择仅移除历史记录，或者同步彻底物理删除磁盘上的原始文件。
+                            </p>
+                            <div style="margin-top: 24px; display: flex; gap: 12px; justify-content: flex-end;">
+                                <button @click="showDeleteModal = false" style="padding: 8px 16px; border-radius: 6px; background: #f1f5f9; border: none; font-size: 14px; cursor: pointer;">取消</button>
+                                <button @click="executeDelete(false)" style="padding: 8px 16px; border-radius: 6px; background: #3b82f6; color: white; border: none; font-size: 14px; cursor: pointer;">仅移除记录</button>
+                                <button @click="executeDelete(true)" style="padding: 8px 16px; border-radius: 6px; background: #ef4444; color: white; border: none; font-size: 14px; cursor: pointer;">物理删除文件</button>
+                            </div>
+                        </div>
+                    </div>
+                </Teleport>
+            </div>
             
             <div class="form-group" style="margin-bottom: 20px;">
               <label>渲染内核引擎 (Engine Switch)</label>

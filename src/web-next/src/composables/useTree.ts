@@ -2,13 +2,13 @@ import { ref, onMounted, onUnmounted, nextTick, reactive, watch } from 'vue'
 import { TreeModel } from '../core/tree/models/TreeModel'
 import { LayoutEngine, DEFAULT_SETTINGS, type LayoutSettings } from '../core/tree/layout/LayoutEngine'
 import { HybridRenderer } from '../core/tree/renderer/HybridRenderer'
+import { useAppStore } from '../stores/app'
 
 export function useTree() {
+    const appStore = useAppStore()
     const containerRef = ref<HTMLElement | null>(null)
     const renderer = new HybridRenderer()
     const model = ref<TreeModel>(new TreeModel())
-
-    // Reactive Settings
     const settings = reactive<LayoutSettings>({ ...DEFAULT_SETTINGS })
 
     // State
@@ -44,19 +44,38 @@ export function useTree() {
         renderer.render(model.value, settings)
     }
 
-    async function loadNewick(newick: string) {
+    async function loadNewick(newick: string, algorithm = 'Calculated', sourceFile = 'Unknown', filePath?: string) {
         isLoading.value = true
         error.value = null
         try {
             await nextTick()
-            model.value = new TreeModel()
-            const root = model.value.parse(newick)
+            const newModel = new TreeModel()
+            const root = newModel.parse(newick)
+            
             if (root) {
-                rawNewick.value = newick
+                // 关键修复：确保模型进入响应式之前，物理上不仅解析好，还排好序
+                if (settings.sortMode !== 'original') {
+                    newModel.prepareWeights(settings.sortMode as any)
+                    newModel.applySorting(settings.sortMode as any)
+                }
+
+                model.value = newModel
+                // 关键修复：必须生成排序后的 Newick 字符串，否则 PhyloTreeJS 会读到原始顺序
+                rawNewick.value = newModel.getNewick()
                 initialNewick.value = newick 
                 isRerooted.value = false // 重置状态
                 hasTree.value = true
-                nodeCount.value = model.value.getLeafCount()
+                nodeCount.value = newModel.getLeafCount()
+                
+                // 核心维护：按照组进行归档
+                if (appStore) {
+                  const existingItem = appStore.treeHistory.flatMap(g => g.items).find(i => i.nwk === newick)
+                  if (!existingItem) {
+                    const treeName = root.name || `Tree_${nodeCount.value}_TIPS`
+                    appStore.addTreeHistory(newick, treeName, algorithm, sourceFile, filePath)
+                  }
+                }
+
                 updateLayout()
                 renderer.fitView(model.value)
             } else {
@@ -70,11 +89,10 @@ export function useTree() {
         }
     }
 
-    function resetTopology() {
+    async function resetTopology() {
         if (initialNewick.value) {
-            loadNewick(initialNewick.value)
-            settings.sortMode = 'original' 
-            isRerooted.value = false // 归位
+            // 这里必须使用 await，确保 loadNewick 内的排序逻辑彻底走完
+            await loadNewick(initialNewick.value)
         }
     }
 
@@ -120,11 +138,13 @@ export function useTree() {
     return {
         containerRef,
         settings,
+        model,
         loadNewick,
         midpointRooting,
         resetTopology,
         isRerooted,
         applyTreeSorting,
+        updateLayout,
         exportSVG,
         isLoading,
         error,
