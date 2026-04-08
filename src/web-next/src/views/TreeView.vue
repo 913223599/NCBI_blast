@@ -12,11 +12,15 @@ import PhylotreeWidget from '../components/PhylotreeWidget.vue'
 const appStore = useAppStore()
 const { 
   settings, loadNewick, midpointRooting, resetTopology, isRerooted, model,
-  applyTreeSorting, updateLayout, exportSVG, hasTree, isLoading, renderer, rawNewick, containerRef 
+  applyTreeSorting, updateLayout, exportSVG, hasTree, renderer, rawNewick, containerRef,
+  currentSource 
 } = useTree()
 
-/* -------- 核心状态 -------- */
 const renderEngine = ref<'hybrid'|'phylotree'>('phylotree')
+const isLoading = ref(false) // UI 层的加载状态
+const currentIdToHash = ref<Record<string, string>>({}) // 核心：ID 到 MD5 指纹的映射映射表
+const treeLeafIds = ref<string[]>([]) // 当前进化树含有的叶子节点 ID 列表
+const treeAnnotations = ref<Record<string, string>>({}) // ID -> 物种名的映射
 
 // 进化树渲染引擎切换监听：确保切换后立即重新绑定容器并重绘
 watch(renderEngine, (val) => {
@@ -30,6 +34,93 @@ watch(renderEngine, (val) => {
         }
     })
 })
+
+// 监听树内容变化，自动拉取语义化注释
+watch(rawNewick, (newNwk) => {
+    if (newNwk) {
+        fetchTreeAnnotations(newNwk)
+    }
+})
+
+async function fetchTreeAnnotations(nwk: string) {
+    if (!nwk) return
+    // 正则提取 Newick 中的叶子节点 ID (支持引号包裹的 ID)
+    const ids = new Set<string>()
+    const matches = nwk.matchAll(/[(),](?:'([^']+)'|([^():,;]+))(?::[0-9eE.-]+)?/g)
+    const foundIds: string[] = []
+    
+    // 收集所有需要查询的标识符
+    for (const m of matches) {
+        const rawPart = m[1] || m[2]
+        if (rawPart) {
+            const id = rawPart.trim()
+            if (id && isNaN(Number(id))) { 
+                ids.add(id)
+                foundIds.push(id)
+            }
+        }
+    }
+    treeLeafIds.value = foundIds
+    if (ids.size === 0) return
+    
+    try {
+        const bridge = await initBridge()
+        if (!bridge) return
+
+        const hashesToQuery: string[] = []
+        ids.forEach(id => {
+            // 鲁棒性查找：优先精确匹配，其次尝试空格/下划线兼容（应对 FastTree 等引擎的自动脱敏）
+            let hash = currentIdToHash.value[id]
+            if (!hash) {
+                // 尝试互换查找
+                const altId = id.includes('_') ? id.replace(/_/g, ' ') : id.replace(/ /g, '_')
+                hash = currentIdToHash.value[altId]
+            }
+            if (hash) hashesToQuery.push(hash)
+        })
+
+        const newAnnotations: Record<string, string> = {}
+
+        // 执行哈希查询
+        if (hashesToQuery.length > 0 && typeof bridge.get_annotations_by_hashes === 'function') {
+            const hashMappingJson = await bridge.get_annotations_by_hashes(JSON.stringify(hashesToQuery))
+            const hashResult = JSON.parse(hashMappingJson) || {}
+            
+            console.log(`[Bridge Sync] DB match: ${Object.keys(hashResult).length} identities for ${hashesToQuery.length} hashes.`);
+            
+            // 还原：将 Hash -> Identity 映射回 ID -> Identity
+            ids.forEach(id => {
+                let h = currentIdToHash.value[id]
+                if (!h) {
+                    const altId = id.includes('_') ? id.replace(/_/g, ' ') : id.replace(/ /g, '_')
+                    h = currentIdToHash.value[altId]
+                }
+                if (h && hashResult[h]) {
+                    newAnnotations[id] = hashResult[h]
+                }
+            })
+            
+            // 核心保护逻辑：由于数据库查回的结果是 0 (可能是因为刚完成任务还没同步磁盘)，
+            // 且我们当前已经有了一些实时结果（treeAnnotations 不空），
+            // 则拒绝用空结果覆盖已有结果，防止 UI 反弹回“未识别”状态。
+            if (Object.keys(newAnnotations).length === 0 && Object.keys(treeAnnotations.value).length > 0) {
+                console.warn("[Annotation Sync] DB return zero, keeping current real-time annotations to prevent UI jump.");
+                return
+            }
+
+            treeAnnotations.value = { ...newAnnotations }
+            
+            // 深度补丁：同步通知 Hybrid 渲染内核更新标签
+            if (renderer && typeof (renderer as any).updateAnnotations === 'function') {
+                (renderer as any).updateAnnotations(treeAnnotations.value);
+            }
+
+            console.log(`[Annotation] Sync success: ${Object.keys(treeAnnotations.value).length} identities active.`);
+        }
+    } catch (e) {
+        console.error("[Annotation] Identity sync failed", e)
+    }
+}
 
 // 历史记录与删除逻辑
 const showDeleteModal = ref(false)
@@ -84,8 +175,52 @@ const treeWorkflows = reactive({
     msa: 'none',
     engine: 'nj',
     model: 'jc',
-    bootstrap: 100
+    bootstrap: 100,
+    threads: 0 // 0 表示自动 (AUTO) 模式
 })
+
+const missingIds = computed(() => {
+    // 找出所有在 annotations 中没有对应翻译结果的叶子 ID
+    return treeLeafIds.value.filter(id => !treeAnnotations.value[id])
+})
+const hasMissingAnnotations = computed(() => {
+    return missingIds.value.length > 0
+})
+
+const showConfirmModal = ref(false)
+async function startAutoIdentification() {
+    if (missingIds.value.length === 0) return
+    showConfirmModal.value = true
+}
+
+async function confirmIdentification() {
+    showConfirmModal.value = false
+    try {
+        const bridge = await initBridge()
+        if (bridge && typeof bridge.request_batch_blast === 'function') {
+            bridge.request_batch_blast(JSON.stringify(missingIds.value), currentSource.value)
+        }
+    } catch(e) {
+        console.error("Failed to trigger auto-identification", e)
+    }
+}
+
+async function handleLoadHistory(item: any, g: any) {
+    if (item.idToHash) {
+        currentIdToHash.value = item.idToHash
+        console.log("[History] Synchronized sequence fingerprints for recall:", Object.keys(item.idToHash).length)
+    } else {
+        currentIdToHash.value = {}
+    }
+    // 强制先清空旧注释，防止前一个任务的注释闪烁或残留
+    treeAnnotations.value = {}
+    await loadNewick(item.nwk, item.algorithm, g.sourceFile, item.filePath, true, item.idToHash)
+    
+    // 关键补丁：显式触发一次注释拉取，应对 Newick 字符串未变（同一历史项重复点选）时 Watcher 不触发的问题
+    if (rawNewick.value) {
+        await fetchTreeAnnotations(rawNewick.value)
+    }
+}
 
 /* -------- 选项数据 -------- */
 const layoutModeOptions = [
@@ -345,10 +480,16 @@ onMounted(() => {
     
     // @ts-ignore
     window.treeView = {
-        loadNewick: (content: string, alg?: string, source?: string, path?: string) => { 
-            // 语义化标签自动填充：如果后端未传（如重定根），则根据当前 UI 设置生成
+        loadNewick: (content: string, alg?: string, source?: string, path?: string, idToHash?: Record<string, string>) => { 
+            // 记录当前任务的指纹清单
+            if (idToHash) {
+                currentIdToHash.value = idToHash
+                console.log("[Bridge] Sequence Fingerprints Manifest Loaded:", Object.keys(idToHash).length)
+            }
+            // 语义化标签自动填充
             const finalAlg = alg || `${getShortMsa()} / ${getShortEngine()} (${getShortModel()})`
-            loadNewick(content, finalAlg, source || 'Unknown', path)
+            // 将 idToHash 传递给 composable，使其能存入历史记录
+            loadNewick(content, finalAlg, source || 'Unknown', path, false, idToHash)
             isLoading.value = false
         },
         setLoading: (val: boolean, msg?: string, percent?: number) => { 
@@ -408,6 +549,47 @@ onMounted(() => {
             menuVisible.value = true
         }
     }
+
+    // --- 实时身份同步补丁：监听 BLAST 流式更新并同步到树节点 ---
+    initBridge().then(bridge => {
+        if (bridge && bridge.blast_event) {
+            // @ts-ignore
+            bridge.blast_event.connect((eventType: string, jsonData: string) => {
+                if (eventType === 'single_result_update') {
+                    try {
+                        const payload = JSON.parse(jsonData)
+                        const res = payload.result
+                        const seqId = res.sequence_id
+                        const bestHit = res.data?.[0]
+                        
+                        if (bestHit && seqId) {
+                            // 提取识别出的身份 (种属信息)
+                            const identity = bestHit.speciesName || bestHit.species || ""
+                            if (identity) {
+                                // 提取核心名：去除百分比和多余的逗号分号
+                                const displayIdentity = identity.split('(')[0].split(';')[0].split(',')[0].trim()
+                                
+                                // 关键：使用对象展开运算符强制 Vue 触发响应式更新 (供 PhylotreeJS 使用)
+                                treeAnnotations.value = {
+                                    ...treeAnnotations.value,
+                                    [seqId]: displayIdentity
+                                }
+                                
+                                // 深度补丁：如果是 Hybrid 引擎，手动通知引擎层刷新
+                                if (renderer && typeof (renderer as any).updateAnnotations === 'function') {
+                                    (renderer as any).updateAnnotations(treeAnnotations.value);
+                                }
+                                
+                                console.log(`[Annotation Sync] Leaf ${seqId} -> ${displayIdentity}`)
+                            }
+                        }
+                    } catch(e) {
+                         console.error("Failed to sync real-time annotation", e)
+                    }
+                }
+            })
+        }
+    })
 })
 </script>
 
@@ -423,7 +605,7 @@ onMounted(() => {
         <div class="tool-divider"></div>
         <div class="tool-btn" :class="{ active: activeSideTool === 'analysis' && isSidebarOpen }" @click="toggleSideTool('analysis')">
           <span class="icon">🧬</span>
-          <span class="label">分析分析</span>
+          <span class="label">分析配置</span>
         </div>
         <div class="tool-divider"></div>
         <div class="tool-btn" :class="{ active: activeSideTool === 'display' && isSidebarOpen }" @click="toggleSideTool('display')">
@@ -482,7 +664,8 @@ onMounted(() => {
 
           <!-- 分析参数 -->
           <div v-if="activeSideTool === 'analysis'" class="panel-section">
-            <h3 class="section-title">🧬 分析管线配置</h3>
+            <h3 class="section-title">🧬 分析配置</h3>
+            
             <div class="form-group">
               <label>多序列比对 (MSA)</label>
               <div class="select-box-neo" @click.stop="toggleTreeDropdown('msa', $event)">
@@ -514,7 +697,12 @@ onMounted(() => {
               <label>BOOTSTRAP 随机采样: {{ treeWorkflows.bootstrap }}</label>
               <input type="range" v-model.number="treeWorkflows.bootstrap" min="0" max="1000" step="100" class="neo-range" />
             </div>
-            
+
+            <div class="form-group">
+              <label>CPU 并行线程数: {{ treeWorkflows.threads === 0 ? '自动 (AUTO)' : treeWorkflows.threads }}</label>
+              <input type="range" v-model.number="treeWorkflows.threads" min="0" max="64" step="1" class="neo-range" />
+            </div>
+
             <div class="section-actions" style="margin-top: 30px;">
                 <button class="btn-block-primary" @click="requestAnalysis" :disabled="isLoading">启动分析管线</button>
             </div>
@@ -523,6 +711,39 @@ onMounted(() => {
           <!-- 视图控制 -->
           <div v-if="activeSideTool === 'display'" class="panel-section">
             <h3 class="section-title">💡 视图控制</h3>
+            
+            <!-- 语义化标注提示灯泡 -->
+            <div v-if="hasTree && hasMissingAnnotations" class="annotation-promo-box">
+                <div class="promo-content">
+                    <span class="icon">💡</span>
+                    <div class="text">
+                        <div class="title">身份识别辅助 (BETA)</div>
+                        <div class="desc">发现 {{ missingIds.length }} 条序列尚未识别，点击一键自动关联比对。</div>
+                    </div>
+                </div>
+                <button class="btn-mini-promo" @click="startAutoIdentification">一键识别</button>
+            </div>
+
+            <!-- Custom Instant Modal (Zero Lag) -->
+            <Teleport to="body">
+                <div v-if="showConfirmModal" class="modal-overlay" @click.self="showConfirmModal = false">
+                    <div class="modal-card">
+                        <div class="modal-header">
+                            <span class="modal-icon">🧬</span>
+                            <div class="modal-title">启动序列身份自动识别</div>
+                        </div>
+                        <div class="modal-body">
+                            检测到树中存在 <span class="highlight">{{ missingIds.length }}</span> 条未知序列。
+                            <p>点击确定将自动从原始数据中提取序列内容并提交至后台进行 BLAST 比对。分析完成后，物种标签将自动实时同步到当前视图。</p>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn-cancel" @click="showConfirmModal = false">放弃</button>
+                            <button class="btn-confirm" @click="confirmIdentification">启动分析</button>
+                        </div>
+                    </div>
+                </div>
+            </Teleport>
+
             <div class="form-group">
               <label>拓扑形态</label>
               <div class="select-box-neo" @click.stop="toggleTreeDropdown('layoutMode', $event)">
@@ -572,7 +793,7 @@ onMounted(() => {
                             </div>
                         </div>
                         <div v-for="item in g.items" :key="item.id" 
-                             @click="loadNewick(item.nwk, item.algorithm, g.sourceFile, item.filePath, true)"
+                             @click="handleLoadHistory(item, g)"
                              class="history-sub-item"
                              style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s;">
                             <div style="flex: 1; overflow: hidden;">
@@ -637,6 +858,8 @@ onMounted(() => {
              v-if="renderEngine === 'phylotree' && hasTree" 
              :newick="rawNewick" 
              :mode="settings.mode" 
+             :label-map="treeAnnotations"
+             :use-branch-lengths="settings.useBranchLengths"
              @node-click="handleInternalNodeClick"
              @render-complete="isLoading = false"
              style="width: 100%; height: 100%;" 
@@ -901,4 +1124,124 @@ onMounted(() => {
 .progress-bar-fill {
   height: 100%; background: #2563eb; transition: width 0.3s ease;
 }
+
+.gpu-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #1e293b;
+    cursor: pointer;
+    background: #f0f9ff;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid #bae6fd;
+}
+
+.gpu-badge {
+    background: #0ea5e9;
+    color: white;
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 800;
+}
+
+.annotation-promo-box {
+    background: linear-gradient(135deg, #f0f7ff 0%, #e0f2fe 100%);
+    border: 1px solid #bae6fd;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.promo-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1; /* 占据剩余空间 */
+    min-width: 0; /* 允许在 flex 容器中缩小 */
+    margin-right: 12px;
+}
+
+.promo-content .icon {
+    font-size: 24px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+    flex-shrink: 0;
+}
+
+.promo-content .text {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* 防止文字溢出 */
+}
+
+.promo-content .title {
+    font-size: 10px;
+    font-weight: 700;
+    color: #0369a1;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.promo-content .desc {
+    font-size: 10px;
+    color: #0c4a6e;
+    line-height: 1.4;
+    white-space: normal; /* 允许自动换行 */
+}
+
+.btn-mini-promo {
+    background: #0ea5e9;
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    flex-shrink: 0; /* 禁止按钮被挤压 */
+}
+
+.btn-mini-promo:hover {
+    background: #0284c7;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+}
+
+/* Custom Modal Styles (Zero Overhead) */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.5); /* 纯色半透，无滤笔开销 */
+    display: flex; align-items: center; justify-content: center; z-index: 9999;
+}
+.modal-card {
+    background: #ffffff; border-radius: 12px; 
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    width: 440px; padding: 24px; 
+}
+.modal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.modal-icon { font-size: 28px; }
+.modal-title { font-size: 1.1rem; font-weight: 800; color: #0f172a; }
+.modal-body { font-size: 0.95rem; color: #475569; line-height: 1.6; margin-bottom: 24px; }
+.modal-body .highlight { color: #2563eb; font-weight: 800; }
+.modal-body p { margin-top: 8px; font-size: 0.85rem; color: #64748b; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 12px; }
+
+.btn-cancel {
+    padding: 10px 20px; border-radius: 8px; border: 1px solid #e2e8f0; font-weight: 600;
+    font-size: 0.9rem; color: #64748b; cursor: pointer; background: white;
+}
+.btn-confirm {
+    padding: 10px 24px; border-radius: 8px; border: none; font-weight: 700;
+    font-size: 0.9rem; color: white; cursor: pointer; background: #2563eb;
+}
+
 </style>

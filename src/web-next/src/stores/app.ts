@@ -17,7 +17,7 @@ export const useAppStore = defineStore('app', () => {
         id: string; 
         sourceFile: string; 
         name: string; 
-        items: Array<{ id: string; algorithm: string; nwk: string; filePath?: string; time: number }> 
+        items: Array<{ id: string; algorithm: string; nwk: string; filePath?: string; idToHash?: Record<string, string>; time: number }> 
     }>>([])
 
     /* -------- 计算属性 -------- */
@@ -51,18 +51,21 @@ export const useAppStore = defineStore('app', () => {
         }
     }
 
-    function addTreeHistory(nwk: string, algorithm: string, sourceFile: string, filePath?: string): void {
+    function addTreeHistory(nwk: string, algorithm: string, sourceFile: string, filePath?: string, idToHash?: Record<string, string>): void {
         // 核心解耦：提取逻辑项目 ID (Project ID)
         // sourceFile 格式规范： "ProjectName/SessionDir/FileName.fasta" 或 "Legacy_FileName.fasta"
         const parts = sourceFile.split(/[\\/]/)
-        const logicalId = parts[0].replace(/^Tree_\d+_\d+_/g, "")
+        // 关键修复：增加安全 fallback 解决 lint 告警
+        const firstPart = parts[0] || "Unknown"
+        const logicalId = firstPart.replace(/^Tree_\d+_\d+_/g, "")
         
-        // 每个 item 携带自己的物理指纹路径，用于精准物理定位与召回
+        // 每个 item 携带自己的物理指纹路径，以及内容哈希字典，用于断开 ID 依赖
         const newItem = { 
             id: Math.random().toString(36).substring(2, 7), 
             algorithm, 
             nwk, 
             filePath, 
+            idToHash,
             archiveFile: sourceFile, // 记录后端提供的完整相对档案路径
             time: Date.now() 
         }

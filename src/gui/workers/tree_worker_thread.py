@@ -17,15 +17,30 @@ class TreeWorker(QThread):
         
     def run(self):
         try:
+            # --- 深度参数对接：从 UI 传入的配置包中提取核心指令 ---
             mode = self.params.get("mode", "standard")
             k_size = self.params.get("kmerSize", 21)
+            use_gpu = self.params.get("useGpu", False)
+            engine = self.params.get("engine", "nj")
+            msa = self.params.get("msa", "none")
+            model = self.params.get("model", "jc")
+            bootstrap = self.params.get("bootstrap", 1000)
+            threads = self.params.get("threads") # Explicitly extract threads if provided
             
             # Run pipeline with dynamic params
             workflow = self.pipeline.run_full_pipeline(
                 self.target_path, 
                 ToolConfig.RESULTS_DIR, 
                 method=mode,
-                params={"k": k_size} if mode == "rapid" else {}
+                params={
+                    "engine": engine,
+                    "msa": msa,
+                    "model": model,
+                    "bootstrap": bootstrap,
+                    "threads": threads,
+                    "k": k_size,
+                    "use_gpu": use_gpu
+                }
             )
             
             final_result = {}
@@ -55,25 +70,33 @@ class TreeWorker(QThread):
                 raw_nwk_path = Path(final_result["tree_file"])
                 if raw_nwk_path.exists():
                     archive_nwk = archive_dir / raw_nwk_path.name
-                    shutil.move(str(raw_nwk_path), str(archive_nwk)) # 移动而非拷贝，完成初步清理
-                    final_result["tree_file"] = str(archive_nwk) # 更新结果路径为归档路径
+                    shutil.move(str(raw_nwk_path), str(archive_nwk)) # 移动而非拷贝
+                    final_result["tree_file"] = str(archive_nwk)
                     final_tree_path = archive_nwk
             
-            # 4. 暴力清理挥发性中间产物 (Cleanup Staging Area)
-            # 扫描 results 根目录下所有与当前项目名相关的临时文件 (.dm, _aligned.fasta 等)
+            # 3.5 核心改进：迁移指纹清单 (Manifest) 到归档会话
+            try:
+                manifest_src = Path("results/sequence_manifest.json")
+                if manifest_src.exists():
+                    archive_manifest = archive_dir / "sequence_manifest.json"
+                    shutil.move(str(manifest_src), str(archive_manifest))
+                    final_result["manifest_file"] = str(archive_manifest)
+            except: pass
+            
+            # 4. 强力自动清理冗余产物 (Cleanup Engine V2)
             try:
                 staging_results = Path("results")
-                # 清理模式：[项目名].dm, [项目名]_aligned.fasta, [项目名].nwk (如果还在)
-                patterns = [f"{project_id}.dm", f"{project_id}_aligned.fasta", f"{project_id}.nwk"]
-                for p in patterns:
-                    target_junk = staging_results / p
-                    if target_junk.exists():
-                        target_junk.unlink()
+                # 模糊匹配模式：扫描 results 根目录下所有以当前项目名为前缀的文件碎片 (不进入目录)
+                # 覆盖：.dm, _aligned.fasta, .nwk, .log, .mldist, .iqtree, .ckp.gz 等
+                for junk in staging_results.glob(f"{project_id}*"):
+                    if junk.is_file(): # 严禁误删目录
+                        junk.unlink()
+                
                 # 针对旧版残留 user_input 的定期自愈清理
                 for junk in staging_results.glob("user_input.*"):
-                    junk.unlink()
+                    if junk.is_file(): junk.unlink()
             except Exception as cleanup_err:
-                print(f"Post-analysis cleanup failed: {cleanup_err}")
+                print(f"Cleanup V2 execution failed: {cleanup_err}")
 
             # 5. 返回复合指纹，供前端精准定位 (Project/Session/Filename)
             final_result["input_file"] = f"{project_id}/{session_id}/{self.target_path.name}"

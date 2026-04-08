@@ -17,8 +17,9 @@ export function useTree() {
     const hasTree = ref(false)
     const nodeCount = ref(0) // Stats
     const rawNewick = ref<string | null>(null)
-    const initialNewick = ref<string | null>(null) 
-    const isRerooted = ref(false) // 核心维护：追踪当前是否处于定根状态
+    const initialNewick = ref<string | null>(null)
+    const isRerooted = ref(false)
+    const currentSource = ref<string>('Unknown') // 追踪当前树对应的原始归档文件路径
 
     // Initialize
     onMounted(() => {
@@ -44,7 +45,7 @@ export function useTree() {
         renderer.render(model.value, settings)
     }
 
-    async function loadNewick(newick: string, algorithm = 'Calculated', sourceFile = 'Unknown', filePath?: string, skipHistory = false) {
+    async function loadNewick(newick: string, algorithm = 'Calculated', sourceFile = 'Unknown', filePath?: string, skipHistory = false, idToHash?: Record<string, string>) {
         isLoading.value = true
         error.value = null
         try {
@@ -63,15 +64,15 @@ export function useTree() {
                 initialNewick.value = newick 
                 isRerooted.value = false 
                 hasTree.value = true
+                currentSource.value = sourceFile // 存入当前源
                 nodeCount.value = newModel.getLeafCount()
                 
-                // 核心维护：仅对明确的新分析（非 Auto/Silent 加载）进行归档，且跳过无意义的 Unknown/Calculated 记录
+                // 核心维护：仅对明确的新分析进行归档，持久化指纹映射
                 if (appStore && !skipHistory && algorithm !== 'Auto-Redraw') {
-                    // 如果既没算法名也没源文件，通常是定根等预览操作，不予入库
                     if (algorithm === 'Calculated' && sourceFile === 'Unknown') {
                         // skip
                     } else {
-                        appStore.addTreeHistory(newick, algorithm, sourceFile, filePath)
+                        appStore.addTreeHistory(newick, algorithm, sourceFile, filePath, idToHash)
                     }
                 }
 
@@ -150,6 +151,7 @@ export function useTree() {
         hasTree,
         nodeCount,
         renderer,
-        rawNewick
+        rawNewick,
+        currentSource
     }
 }

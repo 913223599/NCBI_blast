@@ -357,10 +357,20 @@ class BlastManager:
                 for seq in fh.read_fasta_file_iter(f_path):
                     sequences.append(seq)
             
-            # Extract from query text
+            # Extract from query text (Support Multi-FASTA parse)
             query_text = task.params.get("query", "").strip()
             if query_text:
-                sequences.append({"id": "Manual_Input", "sequence": query_text})
+                if query_text.startswith(">"):
+                    import io
+                    from Bio import SeqIO
+                    try:
+                        for rec in SeqIO.parse(io.StringIO(query_text), "fasta"):
+                            sequences.append({"id": rec.id, "sequence": str(rec.seq)})
+                    except Exception as e:
+                        self.logger.warning(f"Failed to parse query_text as Multi-FASTA: {e}")
+                        sequences.append({"id": "Manual_Input", "sequence": query_text})
+                else:
+                    sequences.append({"id": "Manual_Input", "sequence": query_text})
 
             if not sequences:
                 raise ValueError("没有检测到有效序列")
@@ -494,17 +504,31 @@ class BlastManager:
         """Clear all tasks and results safely. Returns list of failed paths."""
         failed_tasks = []
         with self._lock:
-            # 1. Gather all tasks that need deletion
-            # We work on a copy of keys to safely modify dict if needed
+            # 1. 首先尝试清理已知的数据库任务
             all_task_ids = list(self.tasks.keys())
-            
-            # 2. Try to delete each one with protection
             for task_id in all_task_ids:
                 success, failed_path = self.delete_task(task_id)
                 if not success:
                     failed_tasks.append(failed_path)
             
-            self.logger.info(f"Batch clear finished. {len(failed_tasks)} tasks failed to clear physically.")
+            # 2. 核心补丁：物理层全量清扫 (清理那些不在数据库记录中的孤儿文件夹)
+            try:
+                for entry in self.results_dir.iterdir():
+                    if entry.is_dir() and entry.name != "__pycache__":
+                        # 如果数据库清理后这个文件夹还活着，说明它是孤儿文件夹
+                        try:
+                            import shutil
+                            shutil.rmtree(entry)
+                        except Exception as e:
+                            self.logger.warning(f"Could not remove orphan directory {entry}: {e}")
+                            failed_tasks.append(str(entry))
+            except Exception as e:
+                self.logger.error(f"Physical cleanup scan failed: {e}")
+
+            # 3. 彻底清空数据库
+            self.store.clear_all()
+            
+            self.logger.info(f"Batch clear finished. {len(failed_tasks)} folders still locked/failed.")
             return failed_tasks
 
     def delete_task(self, task_id: str):

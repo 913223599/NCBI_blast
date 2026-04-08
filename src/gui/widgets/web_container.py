@@ -14,6 +14,7 @@ from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 
 # BLAST Logic
 from src.blast.manager import get_blast_manager
+from src.workbench.models.annotation_manager import get_annotation_manager
 from src.gui.workers.tree_worker_thread import TreeWorker
 from PyQt6.QtWidgets import QFileDialog
 
@@ -68,6 +69,7 @@ class WebBridge(QObject):
 
     def _broadcast_result(self, task_id, data):
         """Internal callback to push single result to JS (with top-50/98% consensus logic)"""
+        best_hit = None
         if 'csv_file' in data and os.path.exists(data['csv_file']):
             # 根据需求，扩大到前 50 个结果进行 98% 相似度一致性分析
             top_hits = self._parse_blast_csv(data['csv_file'], limit=50)
@@ -78,6 +80,37 @@ class WebBridge(QObject):
             "task_id": task_id,
             "result": data
         }))
+        
+        # Sync with Annotation Manager if we found a good identity
+        if best_hit:
+            try:
+                # 优先级 1: 使用共识推举引擎提取的精简物种名 (speciesName)
+                # 优先级 2: 使用原始结果中的 species 字段
+                # 优先级 3: 使用标题
+                identity = best_hit.get('speciesName') or best_hit.get('species') or best_hit.get('title')
+                
+                if identity:
+                    # 鲁棒性清洗：提取真正的物种名 (通常为前两个单词)
+                    # 例如 "Citrobacter freundii strain CH-GX-BL..." -> "Citrobacter freundii"
+                    import re
+                    # 匹配双名法：两个单词组成的专有名词
+                    match = re.search(r'^([A-Z][a-z]+(?:\s+[a-z]+))', identity.strip())
+                    if match:
+                        identity = match.group(1)
+                    else:
+                        # 兜底：取第一个分号前的部分并修剪
+                        identity = identity.split(';')[0].split(' strain')[0].split(' genome')[0].strip()
+                    
+                    self.logger.info(f"Consensus Identity Elected: {identity}")
+                    
+                    # 关键修复：同步到 V2 哈希库，确保进化树能召回这个“推举”后的词条
+                    get_annotation_manager().update_annotation(
+                        sequence_hash=data.get('sequence_hash'),
+                        last_known_id=data.get('sequence_id'),
+                        blast_identity=identity
+                    )
+            except Exception as e:
+                self.logger.error(f"Failed to sync consensus annotation: {e}")
 
     def notify_arrearage(self):
         """Notify JS about AI account arrearage"""
@@ -128,6 +161,85 @@ class WebBridge(QObject):
             self.container.open_file_dialog(file_type)
         except Exception as e:
             self.logger.error(f"BRIDGE ERROR in open_file_dialog: {e}")
+
+    @pyqtSlot(str, result=str)
+    def get_annotations_by_hashes(self, hashes_json):
+        """Fetch human-readable names via Content Hash (MD5) lookup with runtime cleaning"""
+        try:
+            import re
+            hashes = json.loads(hashes_json)
+            mapping = get_annotation_manager().get_annotations_by_hashes(hashes)
+            
+            # Runtime Cleaning: Ensure older long records are also simplified
+            clean_mapping = {}
+            for h, identity in mapping.items():
+                if identity:
+                    # 同样的清洗逻辑：只保留前两个单词
+                    match = re.search(r'^([A-Z][a-z]+(?:\s+[a-z]+))', identity.strip())
+                    if match:
+                        clean_mapping[h] = match.group(1)
+                    else:
+                        clean_mapping[h] = identity.split(';')[0].split(' strain')[0].split(' genome')[0].strip()
+                else:
+                    clean_mapping[h] = identity
+            
+            return json.dumps(clean_mapping)
+        except Exception as e:
+            self.logger.error(f"Failed to get annotations (Hash): {e}")
+            return "{}"
+
+    @pyqtSlot(str, str)
+    def request_batch_blast(self, seq_ids_json, source_rel_path):
+        """
+        [One-Click Identity] 
+        从进化树侧直接发起比对任务
+        """
+        try:
+            from Bio import SeqIO
+            seq_ids = set(json.loads(seq_ids_json))
+            
+            # 定位原始文件
+            results_dir = Path("results/tree_results")
+            full_path = results_dir / source_rel_path
+            
+            if not full_path.exists():
+                # 尝试递归搜索 (针对不同层级的归档)
+                matches = list(results_dir.rglob(source_rel_path.split('/')[-1]))
+                if matches: full_path = matches[0]
+                else:
+                    self.logger.error(f"Cannot find source FASTA: {source_rel_path}")
+                    return
+
+            # 提取序列内容
+            queries = []
+            for rec in SeqIO.parse(full_path, "fasta"):
+                if rec.id in seq_ids:
+                    queries.append(f">{rec.id}\n{str(rec.seq)}")
+            
+            if not queries:
+                self.logger.warning("No matching sequences found in source FASTA")
+                return
+
+            # 创建比对任务 (使用时间戳确保 ID 唯一，防止缓存碰撞导致的“秒完成”误判)
+            timestamp = datetime.datetime.now().strftime('%M%S')
+            params = {
+                "query": "\n".join(queries),
+                "program": "auto",
+                "database": "nt",
+                "evalue": 0.05,
+                "hitlist_size": 50,
+                "task_name": f"Identify_{len(queries)}_Seqs_{timestamp}"
+            }
+            task_id = self.blast_manager.create_task(params)
+            self.logger.info(f"Auto-BLAST Task Started: {task_id} for {len(queries)} sequences.")
+            
+            # 通知前端任务已启动
+            self.container.web_view.page().runJavaScript(
+                f"if(window.app) window.app.showNotification('已自动发起 {len(queries)} 条序列的身份识别任务...', 'info');"
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Failed to initiate auto-blast: {e}")
 
     @pyqtSlot(str, str, result=bool)
     def save_file(self, content, filename_hint="export.txt"):
@@ -1606,11 +1718,15 @@ class WebContainer(QWidget):
                 safe_source = json.dumps(source_file)
                 safe_path = json.dumps(tree_path)
                 
-                # 统一使用 Tree Station 2.0 的加载协议调用 (Newick, Algorithm_Label_Placeholder, SourceFile, FilePath)
-                # 算法标签由前端结合当前设置生成，此处传 null 由前端填充
-                js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick}, null, {safe_source}, {safe_path});"
+                # 将序列指纹清单 (Manifest) 也透传给前端，确保历史记录能找回身份识别对照关系
+                id_to_hash = result.get("id_to_hash", {})
+                self.bridge.last_manifest = id_to_hash # 缓存清单，供重定根等子任务召回使用
+                safe_manifest = json.dumps(id_to_hash)
+                
+                # 统一使用 Tree Station 2.0 的加载协议调用 (Newick, Algorithm, SourceFile, FilePath, idToHash)
+                js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick}, null, {safe_source}, {safe_path}, {safe_manifest});"
                 self.web_view.page().runJavaScript(js_code)
-                self.logger.info(f"Injected tree data with metadata: {source_file}")
+                self.logger.info(f"Injected tree data with manifest size: {len(id_to_hash)}")
             except Exception as e:
                 self.logger.error(f"Failed to read tree file: {e}")
                 self.web_view.page().runJavaScript(f"console.error('Failed to read tree file: {str(e)}'); alert('读取树文件失败: {str(e)}');")
@@ -1640,11 +1756,15 @@ class WebContainer(QWidget):
              # 保持重定根后的项目归属感：使用原文件名作为分组标签
              source_file = old_path.name.replace('_rerooted.nwk', '').replace('.nwk', '') + '.fasta'
              safe_source = json.dumps(source_file)
-             
              import json
              safe_newick = json.dumps(content)
+             
+             # 召回缓存的 manifest，确保重定根后身份识别不丢
+             manifest = getattr(self.bridge, 'last_manifest', {})
+             safe_manifest = json.dumps(manifest)
+             
              # 统一命名协议：使用 window.treeView.loadNewick，并透传源文件标识以便继续归档
-             js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick}, 'Rerooted', {safe_source});"
+             js_code = f"if(window.treeView) window.treeView.loadNewick({safe_newick}, 'Rerooted', {safe_source}, null, {safe_manifest});"
              self.web_view.page().runJavaScript(js_code)
              
         except Exception as e:

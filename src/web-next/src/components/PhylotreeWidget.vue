@@ -1,6 +1,6 @@
 <template>
   <div class="phylotree-container" ref="containerRef">
-    <div ref="svgHost"></div>
+    <div id="phylotree-svg-host" ref="svgHost"></div>
   </div>
 </template>
 
@@ -14,6 +14,8 @@ const props = defineProps<{
   newick: string | null
   mode: 'rect' | 'circular' | 'unrooted'
   showLabels?: boolean
+  labelMap?: Record<string, string>
+  useBranchLengths?: boolean
 }>()
 
 const emit = defineEmits(['node-click', 'render-complete'])
@@ -35,37 +37,13 @@ async function renderTree(nwk: string) {
   const measuredWidth = containerRef.value.clientWidth
   const measuredHeight = containerRef.value.clientHeight
 
-  if (measuredWidth === 0 || measuredHeight === 0) {
-    deferRenderUntilSized(nwk)
-    return
-  }
+  if (measuredWidth <= 0 || measuredHeight <= 0) return
 
   executeRender(nwk, measuredWidth, measuredHeight)
 }
 
 /**
- * 处理 v-if 导致的容器尺寸滞后问题
- */
-function deferRenderUntilSized(nwk: string) {
-  if (!containerRef.value) return
-  if (resizeObserver) resizeObserver.disconnect()
-
-  resizeObserver = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      const { width, height } = entry.contentRect
-      if (width > 0 && height > 0) {
-        resizeObserver?.disconnect()
-        resizeObserver = null
-        executeRender(nwk, Math.round(width), Math.round(height))
-        break
-      }
-    }
-  })
-  resizeObserver.observe(containerRef.value)
-}
-
-/**
- * 实际执行 phylotree 渲染逻辑 (维护版本 2.1)
+ * 核心执行：处理 D3 实例化与渲染生命周期
  */
 function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
   if (!svgHost.value || !nwk) return
@@ -76,28 +54,71 @@ function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
   }
 
   try {
-    treeInstance = new (Phylotree as any)(nwk)
-
     let layoutType = "left-to-right"
     if (props.mode === 'circular' || props.mode === 'unrooted') {
       layoutType = "radial"
     }
 
-    // 维护 2: 注入深度交互配置
+    // 核心工具：Newick 语义增强映射 (极致兼容版)
+    let processedNewick = nwk;
+    if (props.labelMap && Object.keys(props.labelMap).length > 0) {
+        const sortedIds = Object.keys(props.labelMap).sort((a, b) => b.length - a.length);
+        
+        sortedIds.forEach(id => {
+            let annotation = props.labelMap![id];
+            if (!annotation) return;
+            
+            // 安全清洗：移出所有可能破坏 Newick 结构的保留字符
+            const safeAnn = annotation.replace(/[()':;,]/g, " ").trim();
+            const cleanId = id.replace(/^['"]|['"]$/g, '');
+            const escapedId = cleanId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            
+            // 匹配 ID 并在替换时强制加单引号
+            const re = new RegExp(`(['"]?)${escapedId}\\1(?=[(:;,])`, 'g');
+            processedNewick = processedNewick.replace(re, `'${safeAnn}'`);
+        });
+    }
+
+    console.log(`[PhyloTree-Debug] Re-instantiating engine. NWK Len: ${processedNewick.length}`);
+    // 注入处理后的 Newick
+    treeInstance = new (Phylotree as any)(processedNewick);
+
+    // 维护 5: 语义化增强 (JS 补丁同步 - 移除不稳定的 branch_length 手动调用)
+    let nodes: any[] = []
+    const rawNodes = (treeInstance as any).nodes;
+    if (rawNodes) {
+        if (Array.isArray(rawNodes)) nodes = rawNodes;
+        else if (typeof (rawNodes as any).descendants === 'function') {
+            nodes = (rawNodes as any).descendants();
+        } else {
+            nodes = [rawNodes];
+        }
+    }
+    
+    if (nodes.length > 0) {
+        nodes.forEach((n: any) => {
+            const d = n.data || n;
+            if (!d) return;
+            const parsedName = (d.name || n.name || "").toString().replace(/^['"]|['"]$/g, '').trim();
+            if (!d._rawName) d._rawName = parsedName;
+        });
+    }
+
+    // 维护 2: 注入渲染配置 (防御性增强)
     const config = {
-      container: svgHost.value,
-      width: maxWidth,
-      height: maxHeight,
+      container: "#phylotree-svg-host",
+      width: maxWidth, height: maxHeight,
       "layout": layoutType,
-      "left-right-spacing": "fit-to-size",
+      "left-right-spacing": props.useBranchLengths ? "fixed-step" : "fit-to-size", 
       "top-bottom-spacing": "fit-to-size",
-      "show-scale": true,
-      "collapsible": true,
-      "selectable": true,
-      "zoom": true,
-      "align-tips": true,
-      "brush": false, // 关闭刷子工具以防手势冲突
-      "hide-internal-nodes": true // 默认隐藏非叶子节点的占位点
+      "show-scale": true, "collapsible": true, "selectable": true, "zoom": true,
+      "align-tips": !props.useBranchLengths, // 如果使用进化长度，则关闭对齐以展现真实距离
+      "brush": false, "hide-internal-nodes": true,
+      "node-label": (n: any) => {
+          if (!n) return "";
+          const d = n.data || n;
+          return d.displayName || d.name || n.name || n.node_data?.name || "";
+      }
     }
 
     const display = treeInstance.render(config)
@@ -105,33 +126,36 @@ function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
     // 维护 3: 捕获全量事件钩子
     if (display && typeof display.show === 'function') {
       const svgElement = display.show()
-      
-      // 深度交互：节点点击桥接
       if (typeof display.on === 'function') {
           display.on('node-clicked', (node: any) => {
-              if (node && node.data) {
-                  console.info(`[PhylotreeJS] User clicked: ${node.data.name}`)
-                  emit('node-click', {
-                      name: node.data.name,
-                      length: node.data.branch_length
-                  })
+              const nd = node ? (node.data || node) : null;
+              if (nd) {
+                  emit('node-click', { name: nd.name, length: nd.branch_length })
               }
           })
       }
-      
       svgHost.value.appendChild(svgElement)
       emit('render-complete', { width: maxWidth, height: maxHeight })
     }
-  } catch (error) {
-    console.error('[PhylotreeJS] Maintenance Error:', error)
+  } catch (err) {
+    console.error("[PhylotreeJS] Maintenance Error:", err)
   }
 }
 
-watch(() => props.newick, (nwk) => {
-  if (nwk) renderTree(nwk)
+// 监听关键属性变化，触发重绘
+watch(() => props.newick, (val) => {
+  if (val) renderTree(val)
 })
 
 watch(() => props.mode, () => {
+  if (props.newick) renderTree(props.newick)
+})
+
+watch(() => props.labelMap, () => {
+  if (props.newick) renderTree(props.newick)
+}, { deep: true })
+
+watch(() => props.useBranchLengths, () => {
   if (props.newick) renderTree(props.newick)
 })
 

@@ -88,8 +88,8 @@ debug_output.txt
 # 临时脚本和工具文件
 # ================================
 finish_tree.py
-test_tree_pipeline.py
-scientific_tree_test.py
+test/test_tree_pipeline.py
+test/scientific_tree_test.py
 copy_component.py
 build_release.py
 *_help.txt

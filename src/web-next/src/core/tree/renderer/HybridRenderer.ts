@@ -244,9 +244,22 @@ export class HybridRenderer {
         }
     }
 
+    private annotations: Record<string, string> = {}
+    
+    updateAnnotations(map: Record<string, string>) {
+        this.annotations = map
+        if (this.lastModel && this.lastSettings) {
+            // 强制触发标签重绘循环
+            this.lastVersion = -1 
+            this.render(this.lastModel, this.lastSettings)
+        }
+    }
+
     private drawLabelsRecursive(node: TreeNode, s: LayoutSettings, parentElement: Element | DocumentFragment) {
         if (node.isLeaf) {
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text")
+            
+            // ... (坐标计算保持不变)
             if (s.mode === 'circular' || s.mode === 'unrooted') {
                 const angleDeg = (node.angle || 0) * 180 / Math.PI
                 const x = (node.x || 0) + 12 * Math.cos(node.angle || 0)
@@ -271,7 +284,14 @@ export class HybridRenderer {
                 text.setAttribute("y", ((node.y || 0) + 4).toString())
                 text.setAttribute("alignment-baseline", "middle")
             }
-            text.textContent = node.name || ""
+
+            // 核心逻辑：如果存在识别出的身份，显示 [身份] 原ID
+            let displayName = node.name || ""
+            if (node.name && this.annotations[node.name]) {
+                displayName = `[${this.annotations[node.name]}] ${node.name}`
+            }
+
+            text.textContent = displayName
             text.setAttribute("fill", "#334155")
             text.setAttribute("font-size", `${s.fontSize}px`)
             text.setAttribute("font-family", "Inter, sans-serif")

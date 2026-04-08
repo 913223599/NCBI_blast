@@ -12,6 +12,7 @@ from src.utils.file_handler import FileHandler
 from .executor import BlastExecutor
 from .parser import BlastResultParser
 from .result_converter import BlastResultConverter
+from src.workbench.models.annotation_manager import get_annotation_manager
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +215,9 @@ class BlastEngine:
             safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', seq_id)
             xml_path = self.results_dir / f"{safe_id}.xml"
             csv_path = self.results_dir / f"{safe_id}.csv"
+            
+            # 1. 核心改进：生成序列内容哈希 (MD5) 作为唯一识别指纹
+            seq_hash = get_annotation_manager().generate_hash(query)
 
             # RESUMPTION: Check if valid result already exists
             if self._verify_result_integrity(csv_path):
@@ -221,6 +225,7 @@ class BlastEngine:
                 return {
                     "task_id": self.task_id,
                     "sequence_id": seq_id,
+                    "sequence_hash": seq_hash,
                     "status": "success",
                     "elapsed_time": 0.0,
                     "xml_file": str(xml_path),
@@ -270,6 +275,7 @@ class BlastEngine:
             result = {
                 "task_id": self.task_id,
                 "sequence_id": seq_id,
+                "sequence_hash": seq_hash,
                 "status": "success",
                 "elapsed_time": elapsed,
                 "xml_file": str(xml_path),

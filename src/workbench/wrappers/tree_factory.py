@@ -15,7 +15,10 @@ class TreeFactory(BaseWrapper):
     """
 
     def _get_threads(self, threads: Optional[int]) -> int:
-        return threads if threads is not None else (os.cpu_count() or 4)
+        # 兼容性修复：0 或 None 均视为自动模式 (AUTO)
+        if threads is None or threads <= 0:
+            return os.cpu_count() or 4
+        return threads
 
     # --- Section: Sequence Preprocessing ---
 
@@ -103,6 +106,7 @@ class TreeFactory(BaseWrapper):
                  if len(first_seq) < 30: effective_k = min(4, len(first_seq)//2)
         except: pass
         
+        id_map = {}
         try:
             # 强化 IO：使用引号保护路径，特别是 splitFasta
             self._run_command("splitFasta.exe", [str(input_fasta.absolute()), str(split_dir), "-extension", ".fasta", "-whole"])
@@ -111,10 +115,13 @@ class TreeFactory(BaseWrapper):
             objects = []
             for sf in seq_files:
                 orig_id = sf.name.removesuffix(".fasta")
+                # 记录 ID 转换映射以便后续在 Newick 中还原
                 seq_id = re.sub(r'[^a-zA-Z0-9.-_]', '_', orig_id).strip(".") or f"seq_{len(objects)}"
                 base_id = seq_id; counter = 1
                 while seq_id in objects:
                     seq_id = f"{base_id}_{counter}"; counter += 1
+                
+                id_map[seq_id] = orig_id
                 sanitized_sf = sf.parent / f"{seq_id}.fasta"
                 sf.rename(sanitized_sf); objects.append(seq_id)
                 self._run_command("fasta2hash.exe", [str(sanitized_sf), str(hash_dir / seq_id), "-kmer", str(k)])
@@ -131,7 +138,7 @@ class TreeFactory(BaseWrapper):
         finally:
             try: shutil.rmtree(temp_dir)
             except: pass
-        return True
+        return id_map
 
     def _sanitize_dm_file(self, dm_path: Path):
         if not dm_path.exists(): return
@@ -144,12 +151,16 @@ class TreeFactory(BaseWrapper):
 
     # --- Section: Tree Building ---
 
-    def build_tree_nj(self, input_dm: Path, output_nwk: Path, input_fasta: Optional[Path] = None):
+    def build_tree_nj(self, input_dm: Optional[Path], output_nwk: Path, input_fasta: Path = None) -> bool:
         """
-        Unified Neighbor-Joining tree builder (Fast & Robust).
+        Neighbor-Joining Tree Construction.
         If the matrix is invalid, it falls back to direct MSA distance computation.
         """
-        content = input_dm.read_text(encoding='utf-8', errors='replace')
+        # --- 核心改进：空对象保护 ---
+        content = ""
+        if input_dm and input_dm.exists():
+            content = input_dm.read_text(encoding='utf-8', errors='replace')
+            
         name_list, matrix = self._parse_dm_content(content)
         
         # 矩阵质量评分：极大提升灵敏度，捕获科学计数法级别的演化差异 (如 5e-05)
@@ -167,6 +178,7 @@ class TreeFactory(BaseWrapper):
         if (matrix_is_flat or not matrix) and input_fasta and input_fasta.exists():
             self.logger.warning("Detected dead distance matrix. Starting high-precision recovery calculation...")
             try:
+                from Bio import SeqIO
                 from Bio.Align import MultipleSeqAlignment
                 from Bio.SeqRecord import SeqRecord
                 from Bio.Seq import Seq
@@ -235,12 +247,12 @@ class TreeFactory(BaseWrapper):
             return False
 
 
-    def build_tree_ml(self, input_fasta: Path, output_nwk: Path, bootstrap: int = 1000):
-        """Maximum Likelihood Inference via IQ-TREE 2."""
+    def build_tree_ml(self, input_fasta: Path, output_nwk: Path, bootstrap: int = 1000, use_gpu: bool = False, threads: int = None):
+        """Maximum Likelihood Inference via IQ-TREE 3 (CPU Optimized)."""
         from src.workbench.wrappers.iqtree_wrapper import IQTreeWrapper
         iqtree = IQTreeWrapper()
         try:
-            tree_file = iqtree.build_tree(input_fasta, output_nwk.parent, bootstrap=bootstrap)
+            tree_file = iqtree.build_tree(input_fasta, output_nwk.parent, bootstrap=bootstrap, use_gpu=use_gpu, threads=threads)
             # Normalize to output_nwk path
             shutil.copy2(tree_file, output_nwk)
             return True
@@ -248,14 +260,14 @@ class TreeFactory(BaseWrapper):
             self.logger.error(f"ML Algorithm Failure: {e}")
             return False
 
-    def build_tree_bayesian(self, input_fasta: Path, output_nwk: Path, ngen: int = 10000):
+    def build_tree_bayesian(self, input_fasta: Path, output_nwk: Path, ngen: int = 10000, use_gpu: bool = False):
         """Bayesian Inference via MrBayes."""
         from src.workbench.wrappers.mrbayes_wrapper import MrBayesWrapper
         mb = MrBayesWrapper()
         try:
             nex_file = output_nwk.with_suffix(".nex")
-            mb.prepare_nexus_from_fasta(input_fasta, nex_file, ngen=ngen)
-            con_tree = mb.build_tree(nex_file, ngen=ngen)
+            mb.prepare_nexus_from_fasta(input_fasta, nex_file, ngen=ngen, use_gpu=use_gpu)
+            con_tree = mb.build_tree(nex_file, ngen=ngen, use_gpu=use_gpu)
             
             # Map MrBayes .con.tre to .tree or .nwk
             shutil.copy2(con_tree, output_nwk)
@@ -274,16 +286,23 @@ class TreeFactory(BaseWrapper):
         in_id_map = p.get("id_map", {})
         
         try:
-            if engine == 'ml' and input_fasta:
-                # 补全 IQ-Tree 动态参数：bootstrap
-                bs = p.get("bootstrap", 100)
-                return self.build_tree_ml(input_fasta, output_nwk, bootstrap=bs)
+            # 兼容性处理：如果前端发送了过时的 ml-gpu，自动回退到 IQ-TREE 3 CPU 模式
+            if engine in ['ml', 'ml-gpu'] and input_fasta:
+                # 统一路由：所有最大似然（ML）请求均使用 IQ-TREE 3 高性能 CPU 模式
+                bs = p.get("bootstrap", 1000)
+                gpu = p.get("use_gpu", False)
+                threads = p.get("threads")
+                return self.build_tree_ml(input_fasta, output_nwk, bootstrap=bs, use_gpu=gpu, threads=threads)
             elif engine == 'bayesian' and input_fasta:
                 # 补全 MrBayes 动态参数：ngen
                 gen = p.get("ngen", 10000)
-                return self.build_tree_bayesian(input_fasta, output_nwk, ngen=gen)
+                gpu = p.get("use_gpu", False)
+                return self.build_tree_bayesian(input_fasta, output_nwk, ngen=gen, use_gpu=gpu)
+            elif engine == 'fast' and input_fasta:
+                # FastTree 直接从 MSA 构树，不需要距离矩阵
+                return self.exec_fast_tree(input_fasta, output_nwk)
             else:
-                # 核心逻辑：执行构树
+                # 核心逻辑：执行构树。如果 input_dm 为空，则 build_tree_nj 会尝试兜底恢复
                 success = self.build_tree_nj(input_dm, output_nwk, input_fasta=input_fasta)
                 
                 # 如果构树成功且有映射表需还原，则在这里执行

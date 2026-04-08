@@ -46,7 +46,9 @@ class BaseWrapper:
         
         # Isolation: Run inside the tool's parent directory if needed, 
         # but mostly ensured correctly via ToolConfig.
-        working_dir = (cwd if cwd else ToolConfig.PROJECT_ROOT).absolute()
+        # Isolation & Environment Guard (Ensures UTF-8 across all threads)
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         
         self.logger.info(f"Executing: {' '.join(cmd)}")
         start_time = time.time()
@@ -55,12 +57,13 @@ class BaseWrapper:
             # Using Popen-like behavior via run
             process = subprocess.run(
                 cmd,
-                cwd=working_dir,
+                cwd=(cwd if cwd else ToolConfig.PROJECT_ROOT).absolute(),
                 capture_output=True,
                 text=True,
-                check=False, # Relax check to allow manual analysis
+                check=False,
                 encoding='utf-8', 
                 errors='replace',
+                env=env,
                 timeout=timeout
             )
             

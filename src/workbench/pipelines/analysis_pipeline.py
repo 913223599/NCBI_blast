@@ -17,37 +17,70 @@ class AnalysisPipeline:
         self.tree_tools = TreeFactory()
         self.logger.info("Bio-Circuit Analysis Pipeline initialized.")
         
-    def _detect_sequence_type(self, fasta_path: Path) -> str:
+    def _detect_sequence_info(self, fasta_path: Path) -> Dict[str, Any]:
         dna_chars = set("ATGCNU- \n\r")
+        count = 0
+        seq_type = "dna"
         try:
-            with open(fasta_path, 'r') as f:
-                content = f.read(4000)
-                sequences = []
+            with open(fasta_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read(10000) # Read enough to detect type and start counting
                 for line in content.splitlines():
-                    if not line.startswith(">"):
-                        sequences.append(line.upper())
+                    if line.startswith(">"):
+                        count += 1
                 
-                seq_str = "".join(sequences)
-                if not seq_str: return "dna"
+                # Check sequence content (skip headers)
+                seq_samples = []
+                f.seek(0)
+                for line in f:
+                    if line.startswith(">"): continue
+                    seq_samples.append(line.upper().strip())
+                    if len(seq_samples) > 20: break
                 
-                for char in seq_str:
+                joined_sample = "".join(seq_samples)
+                for char in joined_sample:
                     if char not in dna_chars:
-                        return "protein"
-            return "dna"
+                        seq_type = "protein"
+                        break
+            
+            # If large file, do a full pass for accurate count
+            if count >= 1:
+                with open(fasta_path, 'r', encoding='utf-8', errors='replace') as f:
+                    count = sum(1 for line in f if line.startswith(">"))
+                    
+            return {"count": count, "type": seq_type}
         except:
-            return "dna"
+            return {"count": 1, "type": "dna"}
 
     # --- Phase 1: FASTA (Inlet) ---
     def stage_fasta_process(self, input_fasta: Path, output_dir: Path) -> Dict[str, Any]:
         """FASTA 元器件逻辑：进行 QC 并准备序列。"""
         results = {"status": "success"}
-        seq_type = self._detect_sequence_type(input_fasta)
-        results["seq_type"] = seq_type
+        seq_info = self._detect_sequence_info(input_fasta)
+        results["seq_type"] = seq_info["type"]
+        results["seq_count"] = seq_info["count"]
         
         try:
             results["qc"] = self.tree_tools.qc_stats(input_fasta)
+            
+            # 核心改进：生成序列指纹清单 (ID -> MD5 Hash)
+            from src.workbench.models.annotation_manager import get_annotation_manager
+            from Bio import SeqIO
+            am = get_annotation_manager()
+            manifest = {}
+            for rec in SeqIO.parse(input_fasta, "fasta"):
+                seq_hash = am.generate_hash(str(rec.seq))
+                manifest[rec.id] = seq_hash
+            
+            # 持久化清单到结果目录，供识别系统调用
+            manifest_path = output_dir / "sequence_manifest.json"
+            with open(manifest_path, 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, indent=4)
+            results["manifest_file"] = str(manifest_path)
+            results["id_to_hash"] = manifest  # 透传给后续步骤
+            
         except Exception as e:
             results["qc_error"] = str(e)
+            self.logger.error(f"Failed to generate sequence manifest: {e}")
             
         return results
         
@@ -60,6 +93,16 @@ class AnalysisPipeline:
             import shutil
             shutil.copy(input_fasta, output_fasta)
             return results
+            
+        if method == "mafft":
+            try:
+                from src.workbench.wrappers.mafft_wrapper import MAFFTWrapper
+                wrapper = MAFFTWrapper()
+                wrapper.align(input_fasta, output_fasta)
+                return results
+            except Exception as e:
+                print(f"WSL MAFFT Fallback failed: {e}")
+                # Fallback handled by the outer logic
             
         # 1. 尝试通过 ToolConfig 定位专业工具 (MAFFT / MUSCLE)
         from src.workbench.models.tool_config import ToolConfig
@@ -76,10 +119,10 @@ class AnalysisPipeline:
                 self.logger.info(f"Professional tool {method} localized at: {binary}")
                 import subprocess
                 if method == "mafft":
-                    with open(output_fasta, "w") as out:
-                        subprocess.run([binary, "--auto", str(input_fasta)], stdout=out, check=True)
+                    with open(output_fasta, "w", encoding='utf-8') as out:
+                        subprocess.run([binary, "--auto", str(input_fasta)], stdout=out, text=True, encoding='utf-8', errors='replace', check=True)
                 elif method == "muscle":
-                    subprocess.run([binary, "-align", str(input_fasta), "-output", str(output_fasta)], check=True)
+                    subprocess.run([binary, "-align", str(input_fasta), "-output", str(output_fasta)], text=True, encoding='utf-8', errors='replace', check=True)
                 return results
         except Exception as e:
             self.logger.warning(f"Professional tool pipeline {method} failed: {e}. Falling back to internal aligner.")
@@ -132,7 +175,8 @@ class AnalysisPipeline:
         if method == "rapid":
             res = self.tree_tools.hash2dissim(input_fasta, output_dm, k=k, threads=threads)
         else:
-            seq_type = self._detect_sequence_type(input_fasta)
+            seq_info = self._detect_sequence_info(input_fasta)
+            seq_type = seq_info["type"]
             if seq_type == "protein":
                 res = self.tree_tools.prot_collection2dissim(input_fasta, output_dm, threads=threads)
             else:
@@ -215,14 +259,17 @@ class AnalysisPipeline:
         """支持全量分流的系统发育分析驱动。"""
         p = params or {}
         msa_method = p.get("msa", "none")
-        engine = p.get("engine", "nj")
+        engine = str(p.get("engine", "nj")).lower().strip()
         model = p.get("model", "jc")
         k = p.get("kmerSize", 8)
         threads = p.get("threads", None)
         
         yield {"step": "fasta", "progress": 10, "message": "启动 FASTA 预处理序列..."}
-        fasta_info = self.stage_fasta_process(input_fasta, output_dir)
-        p["seq_type"] = fasta_info.get("seq_type", "dna")
+        fasta_res = self.stage_fasta_process(input_fasta, output_dir)
+        p["seq_type"] = fasta_res.get("seq_type", "dna")
+        p["seq_count"] = fasta_res.get("seq_count", 0)
+        id_to_hash = fasta_res.get("id_to_hash", {})
+        self.logger.info(f"Pipeline: Auto-detected {p['seq_count']} sequences ({p['seq_type']}) in input.")
         
         yield {"step": "msa", "progress": 25, "message": f"执行 {msa_method} 多序列比对..."}
         msa_file = output_dir / f"{input_fasta.stem}_aligned.fasta"
@@ -249,7 +296,10 @@ class AnalysisPipeline:
             "engine": engine,
             "model": model,
             "seq_type": p["seq_type"],
-            "id_map": id_map # 注入 ID 还原映射
+            "id_map": id_map, # 注入 ID 还原映射
+            "use_gpu": p.get("use_gpu", False), # 注入 GPU 加速模式
+            "bootstrap": p.get("bootstrap", 1000), # 注入采样值
+            "threads": threads # 注入手动线程数
         }
         self.stage_nwk_inference(dm_file, nwk_file, engine=engine, input_fasta=msa_file, params=inference_params)
         
@@ -257,4 +307,8 @@ class AnalysisPipeline:
         final_nwk_file = output_dir / f"{input_fasta.stem}_final.nwk"
         self.stage_post_process_tree(nwk_file, final_nwk_file)
         
-        yield {"step": "finish", "progress": 100, "message": "分析完成，准备加载视图渲染...", "result": {"tree_file": str(final_nwk_file)}}
+        yield {"step": "finish", "progress": 100, "message": "分析完成，准备加载视图渲染...", 
+               "result": {
+                   "tree_file": str(final_nwk_file),
+                   "id_to_hash": id_to_hash
+               }}
