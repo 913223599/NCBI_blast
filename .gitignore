@@ -72,10 +72,13 @@ temp_test_tree/
 vendor/
 tools/mafft/
 tools/ncbi_dist/
+tools/iqtree3_win/
+tools/iqtree_new/
 scripts/
 src/resources/update_locales.py
 src/workbench/bin/
 src/web-next/src/core/tree/vendor_phylotree/
+iqtree*.zip
 
 # ================================
 # 临时结果和调试文件
@@ -94,3 +97,8 @@ copy_component.py
 build_release.py
 *_help.txt
 1
+
+# ================================
+# 测试数据
+# ================================
+test_data/
