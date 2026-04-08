@@ -16,6 +16,8 @@ const props = defineProps<{
   showLabels?: boolean
   labelMap?: Record<string, string>
   useBranchLengths?: boolean
+  labelDisplayMode?: 'replace' | 'append' | 'original'
+  visualGain?: number
 }>()
 
 const emit = defineEmits(['node-click', 'render-complete'])
@@ -39,6 +41,9 @@ async function renderTree(nwk: string) {
 
   if (measuredWidth <= 0 || measuredHeight <= 0) return
 
+  // 再次检查，防止在异步等待期间组件被卸载
+  if (!svgHost.value) return
+
   executeRender(nwk, measuredWidth, measuredHeight)
 }
 
@@ -54,78 +59,71 @@ function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
   }
 
   try {
-    let layoutType = "left-to-right"
-    if (props.mode === 'circular' || props.mode === 'unrooted') {
-      layoutType = "radial"
-    }
-
-    // 核心工具：Newick 语义增强映射 (极致兼容版)
+    const isRadial = props.mode === 'circular' || props.mode === 'unrooted'
+    console.log(`[PhyloTree-Debug] Render Call. Mode: ${props.mode}, Layout: ${isRadial ? 'radial' : 'linear'}, Labels: ${props.labelDisplayMode}`);
+    
+    // 核心工具：分枝长度视觉增益补偿 (不再替换标签内容，保持 ID 原始性以实现动态切换)
     let processedNewick = nwk;
-    if (props.labelMap && Object.keys(props.labelMap).length > 0) {
-        const sortedIds = Object.keys(props.labelMap).sort((a, b) => b.length - a.length);
-        
-        sortedIds.forEach(id => {
-            let annotation = props.labelMap![id];
-            if (!annotation) return;
-            
-            // 安全清洗：移出所有可能破坏 Newick 结构的保留字符
-            const safeAnn = annotation.replace(/[()':;,]/g, " ").trim();
-            const cleanId = id.replace(/^['"]|['"]$/g, '');
-            const escapedId = cleanId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            
-            // 匹配 ID 并在替换时强制加单引号
-            const re = new RegExp(`(['"]?)${escapedId}\\1(?=[(:;,])`, 'g');
-            processedNewick = processedNewick.replace(re, `'${safeAnn}'`);
-        });
-    }
-
-    console.log(`[PhyloTree-Debug] Re-instantiating engine. NWK Len: ${processedNewick.length}`);
-    // 注入处理后的 Newick
-    treeInstance = new (Phylotree as any)(processedNewick);
-
-    // 维护 5: 语义化增强 (JS 补丁同步 - 移除不稳定的 branch_length 手动调用)
-    let nodes: any[] = []
-    const rawNodes = (treeInstance as any).nodes;
-    if (rawNodes) {
-        if (Array.isArray(rawNodes)) nodes = rawNodes;
-        else if (typeof (rawNodes as any).descendants === 'function') {
-            nodes = (rawNodes as any).descendants();
-        } else {
-            nodes = [rawNodes];
+    if (props.useBranchLengths && props.visualGain && props.visualGain > 0) {
+        const lengths = processedNewick.match(/:([0-9eE.+-]+)/g);
+        if (lengths) {
+            let maxLen = 0.0000001;
+            const numericLens = lengths.map(l => parseFloat(l.substring(1))).filter(v => !isNaN(v));
+            if (numericLens.length > 0) maxLen = Math.max(...numericLens);
+            const offset = maxLen * (props.visualGain || 0) * 0.4;
+            processedNewick = processedNewick.replace(/:([0-9eE.+-]+)/g, (match, p1) => {
+                const val = parseFloat(p1);
+                if (isNaN(val)) return match;
+                return `:${(val + offset).toFixed(10)}`;
+            });
         }
     }
-    
-    if (nodes.length > 0) {
-        nodes.forEach((n: any) => {
-            const d = n.data || n;
-            if (!d) return;
-            const parsedName = (d.name || n.name || "").toString().replace(/^['"]|['"]$/g, '').trim();
-            if (!d._rawName) d._rawName = parsedName;
-        });
+
+    // 注入处理后的 Newick (仅调整了长度)
+    treeInstance = new (Phylotree as any)(processedNewick);
+
+    // 维护 2: 显式注入拓扑形态 (解决切换失效问题)
+    if (typeof treeInstance.radial === 'function') {
+        treeInstance.radial(isRadial);
     }
 
-    // 维护 2: 注入渲染配置 (防御性增强)
+    // 维护 3: 注入渲染配置 (针对 v2.x 优化)
+    // 核心修复：直接传入 svgHost.value 作为 container，避免 show() 内部的 DOM 操作异常
     const config = {
-      container: "#phylotree-svg-host",
-      width: maxWidth, height: maxHeight,
-      "layout": layoutType,
-      "left-right-spacing": props.useBranchLengths ? "fixed-step" : "fit-to-size", 
-      "top-bottom-spacing": "fit-to-size",
-      "show-scale": true, "collapsible": true, "selectable": true, "zoom": true,
-      "align-tips": !props.useBranchLengths, // 如果使用进化长度，则关闭对齐以展现真实距离
-      "brush": false, "hide-internal-nodes": true,
+      container: svgHost.value,  // 直接指定容器，不再手动 appendChild
+      width: maxWidth, 
+      height: maxHeight,
+      "layout": isRadial ? "radial" : "left-to-right",
+      "left-right-spacing": props.useBranchLengths ? "fit-to-size" : "fixed-step", 
+      "top-bottom-spacing": "fixed-step",
+      "show-scale": props.useBranchLengths,
+      "align-tips": !props.useBranchLengths,
+      "brush": false, 
+      "hide-internal-nodes": true,
+      "zoom": true,
+      "svg": { // 关键修复：允许 SVG 内容溢出
+        overflow: 'visible'
+      },
       "node-label": (n: any) => {
           if (!n) return "";
           const d = n.data || n;
-          return d.displayName || d.name || n.name || n.node_data?.name || "";
+          // 彻底去除引号并清理空格，确保与 labelMap 键值精确匹配
+          const fullId = (d.name || n.name || "").toString();
+          const cleanId = fullId.replace(/^['"]|['"]$/g, '').trim();
+          
+          const annotation = props.labelMap ? props.labelMap[cleanId] : null;
+
+          // 核心修复：根据 labelDisplayMode 动态渲染
+          if (!annotation || props.labelDisplayMode === 'original') return cleanId;
+          if (props.labelDisplayMode === 'append') return `[${annotation}] ${cleanId}`;
+          return annotation; // 'replace' 模式
       }
     }
 
     const display = treeInstance.render(config)
 
-    // 维护 3: 捕获全量事件钩子
-    if (display && typeof display.show === 'function') {
-      const svgElement = display.show()
+    // 维护 4: 捕获全量事件钩子 (兼容性处理)
+    if (display) {
       if (typeof display.on === 'function') {
           display.on('node-clicked', (node: any) => {
               const nd = node ? (node.data || node) : null;
@@ -134,11 +132,23 @@ function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
               }
           })
       }
-      svgHost.value.appendChild(svgElement)
+      
+      // 如果 render 没有自动挂载，才尝试手动调用 show()
+      if (svgHost.value.children.length === 0 && typeof display.show === 'function') {
+          try {
+              const svgElement = display.show()
+              if (svgElement && svgHost.value && !svgElement.parentNode) {
+                  svgHost.value.appendChild(svgElement)
+              }
+          } catch (e) {
+              console.warn("[PhylotreeJS] Fallback show() failed, but render may have succeeded.", e)
+          }
+      }
+
       emit('render-complete', { width: maxWidth, height: maxHeight })
     }
   } catch (err) {
-    console.error("[PhylotreeJS] Maintenance Error:", err)
+    console.error("[PhylotreeJS] Critical Maintenance Error:", err)
   }
 }
 
@@ -155,12 +165,28 @@ watch(() => props.labelMap, () => {
   if (props.newick) renderTree(props.newick)
 }, { deep: true })
 
+watch(() => props.labelDisplayMode, () => {
+  if (props.newick) renderTree(props.newick)
+})
+
+watch(() => props.visualGain, () => {
+  if (props.newick) renderTree(props.newick)
+})
+
 watch(() => props.useBranchLengths, () => {
   if (props.newick) renderTree(props.newick)
 })
 
 onMounted(() => {
   if (props.newick) renderTree(props.newick)
+  
+  // 维护 5: 启动自动尺寸监听
+  if (containerRef.value) {
+    resizeObserver = new ResizeObserver(() => {
+      if (props.newick) renderTree(props.newick)
+    })
+    resizeObserver.observe(containerRef.value)
+  }
 })
 
 onUnmounted(() => {
@@ -175,19 +201,22 @@ onUnmounted(() => {
 .phylotree-container {
   width: 100%;
   height: 100%;
-  overflow: hidden; /* 核心维护：由 D3 Zoom 处理缩放，容器应隐藏溢出 */
+  overflow: auto; /* 修复：允许滚动查看超出边界的树内容 */
   background: #f8fafc;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  position: relative;
 }
 
 /* 维护 4: 极客风交互样式注入 */
 :deep(svg) {
-  width: 100%;
-  height: 100%;
+  display: block;
+  overflow: visible !important; /* 关键修复：允许 SVG 内容溢出容器 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 确保 SVG 内部的 g 元素可以超出边界 */
+:deep(svg > g) {
+  transform-origin: 0 0;
 }
 
 /* 分枝高亮交互 */
@@ -243,5 +272,33 @@ onUnmounted(() => {
 :deep(.tree-scale-bar) {
   font-size: 11px;
   fill: #64748b;
+}
+/* 维护 7: 修复交互菜单重叠 (解决截图中的文本堆叠问题) */
+:deep(.phylotree-container .dropdown-menu) {
+    background: white !important; 
+    border: 1px solid #e2e8f0 !important; 
+    border-radius: 8px !important;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important; 
+    padding: 8px !important;
+    list-style: none !important; 
+    display: flex !important; 
+    flex-direction: column !important; 
+    gap: 4px !important;
+    min-width: 140px !important;
+    z-index: 1000 !important;
+}
+:deep(.phylotree-container .dropdown-item), :deep(.phylotree-container a) {
+    font-size: 11px !important; 
+    padding: 6px 12px !important; 
+    border-radius: 6px !important;
+    color: #475569 !important; 
+    cursor: pointer !important;
+    text-decoration: none !important;
+    display: block !important;
+    transition: all 0.2s !important;
+}
+:deep(.phylotree-container .dropdown-item:hover), :deep(.phylotree-container a:hover) {
+    background: #eff6ff !important; 
+    color: #2563eb !important;
 }
 </style>

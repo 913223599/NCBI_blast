@@ -44,8 +44,18 @@ export class TreeModel {
         if (input.endsWith(';')) input = input.substring(0, input.length - 1)
 
         let i = 0
-        const parseNode = (parent: any): any => {
-            const node: any = { children: [], parent, branch_length: 0, name: "" }
+        const parseNode = (parent: TreeNode | null): TreeNode => {
+            const node: TreeNode = { 
+                id: '', // 稍后在 _processTree 中分配
+                children: [], 
+                parent, 
+                branch_length: 0, 
+                name: "",
+                depth: 0,
+                heightFromRoot: 0,
+                isLeaf: false,
+                parseIndex: 0
+            }
             if (input[i] === '(') {
                 i++ 
                 let childIndex = 0
@@ -91,10 +101,14 @@ export class TreeModel {
         if (!this.root) return
 
         let idCounter = 0
-        const stack: any[] = [{ node: this.root, depth: 0, height: 0, parent: null }]
+        const stack: { node: TreeNode, depth: number, height: number, parent: TreeNode | null }[] = [
+            { node: this.root, depth: 0, height: 0, parent: null }
+        ]
 
         while (stack.length > 0) {
-            const { node, depth, height, parent } = stack.pop()
+            const item = stack.pop()
+            if (!item) continue
+            const { node, depth, height, parent } = item
             // 唯一 ID 保护：定根后 ID 必须重刷，防止渲染器缓存错误
             node.id = `tree_n_${Math.random().toString(36).substr(2, 4)}_${idCounter++}`
             node.depth = depth
@@ -135,7 +149,7 @@ export class TreeModel {
         
         // 2. 溯源路径
         const path: TreeNode[] = []
-        let curr: any = tipB
+        let curr: TreeNode | null = tipB
         while (curr) { path.push(curr); curr = curr.parent }
         
         // 3. 寻找中点所在的边 (U, V)
@@ -195,12 +209,12 @@ export class TreeModel {
     prepareWeights(_mode: 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance') {
         if (!this.root) return
         
-        const _recursiveWeight = (node: TreeNode): any => {
+        const _recursiveWeight = (node: TreeNode): { count: number, minTaxon: string, maxDist: number } => {
             if (node.isLeaf) {
                 node.leafCount = 1
                 node.minTaxon = node.name || 'zzz' // 用于分类学代理排序
                 node.maxDistToLeaf = 0
-                return
+                return { count: 1, minTaxon: node.minTaxon, maxDist: 0 }
             }
 
             let count = 0
@@ -209,15 +223,16 @@ export class TreeModel {
 
             if (node.children) {
                 for (const child of node.children) {
-                    _recursiveWeight(child)
-                    count += (child.leafCount || 0)
-                    if (child.minTaxon && (child.minTaxon < minTax)) minTax = child.minTaxon
-                    maxD = Math.max(maxD, (child.maxDistToLeaf || 0) + child.branch_length)
+                    const res = _recursiveWeight(child)
+                    count += res.count
+                    if (res.minTaxon < minTax) minTax = res.minTaxon
+                    maxD = Math.max(maxD, res.maxDist + child.branch_length)
                 }
             }
             node.leafCount = count
             node.minTaxon = minTax
             node.maxDistToLeaf = maxD
+            return { count, minTaxon: minTax, maxDist: maxD }
         }
         _recursiveWeight(this.root)
     }
@@ -268,17 +283,17 @@ export class TreeModel {
     /**
      * 辅助寻找最远路径
      */
-    _findFar(startNode: TreeNode) {
+    _findFar(startNode: TreeNode): { node: TreeNode, dist: number } {
         let maxDist = -1, farNode = startNode
-        const q: any[] = [{ node: startNode, d: 0 }]
+        const q: { node: TreeNode, d: number }[] = [{ node: startNode, d: 0 }]
         const visited = new Set([startNode.id])
         while (q.length > 0) {
-            const { node, d } = q.shift()
+            const { node, d } = q.shift()!
             if (d > maxDist) { maxDist = d; farNode = node }
-            const neighbors = [...(node.children || []), node.parent].filter(n => n && !visited.has(n.id))
+            const neighbors = [...(node.children || []), node.parent].filter((n): n is TreeNode => n !== null && !visited.has(n.id))
             neighbors.forEach(n => {
-                visited.add(n!.id)
-                q.push({ node: n, d: d + (n === node.parent ? (node as TreeNode).branch_length : n!.branch_length) })
+                visited.add(n.id)
+                q.push({ node: n, d: d + (n === node.parent ? node.branch_length : n.branch_length) })
             })
         }
         return { node: farNode, dist: maxDist }

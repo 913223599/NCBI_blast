@@ -7,6 +7,13 @@ from typing import List, Optional, Dict, Union, Any
 
 from src.workbench.models.tool_config import ToolConfig
 
+class WrapperError(Exception):
+    """Base exception for wrapper operations."""
+    def __init__(self, message: str, tool_name: str = None, original_error: Exception = None):
+        super().__init__(message)
+        self.tool_name = tool_name
+        self.original_error = original_error
+
 class BaseWrapper:
     """
     Abstract base class for all tool wrappers.
@@ -79,9 +86,27 @@ class BaseWrapper:
                 raise subprocess.CalledProcessError(process.returncode, cmd, output=process.stdout, stderr=process.stderr)
                 
             return process
-        except Exception as e:
+        except subprocess.CalledProcessError as e:
             self.logger.critical(f"Execution error: {str(e)}")
-            raise e
+            raise WrapperError(
+                message=f"Tool '{tool_name}' failed with exit code {e.returncode}",
+                tool_name=tool_name,
+                original_error=e
+            ) from e
+        except FileNotFoundError as e:
+            self.logger.critical(f"Tool not found: {tool_name}")
+            raise WrapperError(
+                message=f"Tool executable not found: {tool_name}",
+                tool_name=tool_name,
+                original_error=e
+            ) from e
+        except Exception as e:
+            self.logger.critical(f"Unexpected execution error: {str(e)}")
+            raise WrapperError(
+                message=f"An unexpected error occurred while running {tool_name}: {str(e)}",
+                tool_name=tool_name,
+                original_error=e
+            ) from e
             
     def validate_file(self, file_path: Union[str, Path]) -> Path:
         """Helper to validate input files exist."""

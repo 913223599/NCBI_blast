@@ -95,6 +95,8 @@
     "dash.blast.desc": "使用 NCBI BLAST+ 工具进行局部序列比对搜索",
     "dash.blast.title": "BLAST 比对",
     "dash.quick": "🧬 快速开始",
+    "dash.strain.desc": "菌毒种库管理、序列检索与元数据分析",
+    "dash.strain.title": "菌毒种库",
     "dash.sys": "📊 系统信息",
     "dash.sys.arch": "引擎架构",
     "dash.sys.render": "渲染模式",

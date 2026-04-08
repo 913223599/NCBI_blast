@@ -16,6 +16,7 @@ from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 from src.blast.manager import get_blast_manager
 from src.workbench.models.annotation_manager import get_annotation_manager
 from src.gui.workers.tree_worker_thread import TreeWorker
+from src.backend.strain_db import get_strain_db_manager
 from PyQt6.QtWidgets import QFileDialog
 
 class WebBridge(QObject):
@@ -152,6 +153,46 @@ class WebBridge(QObject):
     def on_page_ready(self):
         self.logger.info("Web Container Report: Ready")
         self.page_ready.emit()
+
+    # --- Strain Database Slots ---
+    @pyqtSlot(str, result=bool)
+    def db_save_freezer(self, freezer_json):
+        try:
+            data = json.loads(freezer_json)
+            return get_strain_db_manager().save_freezer(data)
+        except Exception as e:
+            self.logger.error(f"DB Error (Save Freezer): {e}")
+            return False
+
+    @pyqtSlot(str, result=bool)
+    def db_delete_freezer(self, freezer_id):
+        return get_strain_db_manager().delete_freezer(freezer_id)
+
+    @pyqtSlot(str, result=bool)
+    def db_save_record(self, record_json):
+        try:
+            data = json.loads(record_json)
+            return get_strain_db_manager().save_record(data)
+        except Exception as e:
+            self.logger.error(f"DB Error (Save Record): {e}")
+            return False
+
+    @pyqtSlot(str, result=bool)
+    def db_delete_record(self, record_id):
+        return get_strain_db_manager().delete_record(record_id)
+
+    @pyqtSlot(result=str)
+    def db_load_all(self):
+        try:
+            data = get_strain_db_manager().load_all_data()
+            return json.dumps(data, ensure_ascii=False)
+        except Exception as e:
+            self.logger.error(f"DB Error (Load All): {e}")
+            return '{"freezers":[], "records":[]}'
+
+    @pyqtSlot(result=bool)
+    def db_clear_all(self):
+        return get_strain_db_manager().clear_all()
     
     @pyqtSlot(str)
     def request_file_load(self, file_type):

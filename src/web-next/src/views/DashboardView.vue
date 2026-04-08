@@ -38,6 +38,14 @@ const actionCards = computed<ActionCard[]>(() => [
     route: '/tree',
     icon: '🌳',
     gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+  },
+  {
+    id: 'strain',
+    titleKey: 'dash.strain.title',
+    descKey: 'dash.strain.desc',
+    route: '/strain',
+    icon: '🦠',
+    gradient: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)'
   }
 ])
 
@@ -162,7 +170,7 @@ function navigateTo(card: ActionCard): void {
 /* 功能卡片 */
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-md);
   margin-bottom: var(--space-xl);
 }

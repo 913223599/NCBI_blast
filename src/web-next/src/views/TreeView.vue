@@ -237,6 +237,12 @@ const sortModeOptions = [
   { label: '分枝距离排序 (Distance)', value: 'distance' }
 ]
 
+const labelDisplayOptions = [
+    { label: '仅覆盖 (仅显示物种)', value: 'replace' },
+    { label: '追加 (物种名 + ID)', value: 'append' },
+    { label: '原始 (仅显示ID)', value: 'original' }
+]
+
 const msaOptions = [
     { value: 'none', label: '无需比对 (已对齐)' },
     { value: 'mafft', label: 'MAFFT (极速启发式)' },
@@ -352,6 +358,7 @@ function selectTreeOption(field: string, value: string) {
   else if (field === 'engine') treeWorkflows.engine = value
   else if (field === 'model') treeWorkflows.model = value
   else if (field === 'mode') settings.mode = value as any
+  else if (field === 'labelMode') settings.labelDisplayMode = value as any
   openDropdown.value = null
 }
 function getMsaLabel() { return msaOptions.find(o => o.value === treeWorkflows.msa)?.label || treeWorkflows.msa }
@@ -364,6 +371,7 @@ function getShortEngine() { return engineOptions.find(o => o.value === treeWorkf
 function getShortModel() { return modelOptions.value.find(o => o.value === treeWorkflows.model)?.value.toUpperCase() || treeWorkflows.model }
 
 function getLayoutLabel() { return layoutModeOptions.find(o => o.value === settings.mode)?.label || settings.mode }
+function getLabelModeLabel() { return labelDisplayOptions.find(o => o.value === settings.labelDisplayMode)?.label || settings.labelDisplayMode }
 
 // 全局点击关闭
 if (typeof document !== 'undefined') {
@@ -762,6 +770,21 @@ onMounted(() => {
                <input type="range" v-model.number="settings.fontSize" min="8" max="24" class="neo-range" />
             </div>
             <div class="form-group">
+                <label>标签展示模式</label>
+                <div class="select-box-neo" @click.stop="toggleTreeDropdown('labelMode', $event)">
+                  {{ getLabelModeLabel() }} <span class="arrow">▼</span>
+                  <div v-if="openDropdown === 'labelMode'" class="dropdown-list">
+                    <div v-for="o in labelDisplayOptions" :key="o.value" class="opt" :class="{ selected: settings.labelDisplayMode === o.value }" @click.stop="selectTreeOption('labelMode', o.value)">{{ o.label }}</div>
+                  </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+               <label>分枝渲染视觉增益: {{ (settings.visualGain * 100).toFixed(0) }}%</label>
+               <input type="range" v-model.number="settings.visualGain" min="0" max="1" step="0.05" class="neo-range" title="微调短分枝的可读性偏移" />
+            </div>
+
+            <div class="form-group">
                 <label>拓扑排序 (Sorting Strategy)</label>
                 <div class="select-box-neo" @click.stop="toggleTreeDropdown('sortMode', $event)">
                   {{ sortModeOptions.find(o => o.value === settings.sortMode)?.label || 'Original' }} <span class="arrow">▼</span>
@@ -860,6 +883,9 @@ onMounted(() => {
              :mode="settings.mode" 
              :label-map="treeAnnotations"
              :use-branch-lengths="settings.useBranchLengths"
+             :label-display-mode="settings.labelDisplayMode"
+             :visual-gain="settings.visualGain"
+             :key="`${settings.mode}-${settings.labelDisplayMode}-${settings.useBranchLengths}-${rawNewick?.length}`"
              @node-click="handleInternalNodeClick"
              @render-complete="isLoading = false"
              style="width: 100%; height: 100%;" 
@@ -1024,7 +1050,7 @@ onMounted(() => {
 .neo-checkbox-group label { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 500; cursor: pointer; }
 
 /* 结果区 */
-.tree-results { flex: 1; background: white; position: relative; overflow: hidden; }
+.tree-results { flex: 1; background: white; position: relative; overflow: auto; }
 .canvas-container { width: 100%; height: 100%; }
 
 .empty-state {

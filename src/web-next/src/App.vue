@@ -13,10 +13,12 @@ import { initBridge, registerGlobalHandler } from './bridge/pyqt-bridge'
 const appStore = useAppStore()
 
 import { useBlastStore } from './stores/blast'
+import { useStrainStore } from './stores/strain'
 
 onMounted(async () => {
   appStore.initSidebarState()
   const blastStore = useBlastStore()
+  const strainStore = useStrainStore()
 
   // 1. 立即定义全局桥接回调，确保 Python 随时可以调用
   const globalApp = {
@@ -118,6 +120,9 @@ onMounted(async () => {
   
   // 5. 初始化加载由后端注入的当前语言包
   appStore.fetchTranslations()
+
+  // 6. 从 SQLite 数据库初始化样本数据
+  strainStore.initFromDatabase()
 })
 </script>
 

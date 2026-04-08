@@ -89,6 +89,8 @@
     "dash.blast.desc": "Local sequence alignment using NCBI BLAST+",
     "dash.blast.title": "BLAST Alignment",
     "dash.quick": "🧬 Quick Start",
+    "dash.strain.desc": "Strain library management, sequence retrieval and metadata analysis",
+    "dash.strain.title": "Strain Library",
     "dash.sys": "📊 System Info",
     "dash.sys.arch": "Engine Arch.",
     "dash.sys.render": "Render Mode",

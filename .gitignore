@@ -64,7 +64,7 @@ Thumbs.db
 # ================================
 test/
 .lingma/rules/
-temp_test_tree/
+test/temp_test_tree/
 
 # ================================
 # 第三方工具和依赖

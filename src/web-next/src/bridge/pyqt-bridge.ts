@@ -71,10 +71,13 @@ export interface PyBridge {
     log_message(message: string): void
     on_js_error(message: string): void
 
-    /* AI 模型 */
-    get_ai_models(callback?: (res: string) => void): void
-    add_ai_model(modelKey: string, modelName: string, callback?: (res: boolean) => void): void
-    delete_ai_model(key: string, callback?: (res: boolean) => void): void
+    /* 数据库存储 (SQLite) */
+    db_save_freezer(freezerJson: string, callback?: (res: boolean) => void): void
+    db_delete_freezer(freezerId: string, callback?: (res: boolean) => void): void
+    db_save_record(recordJson: string, callback?: (res: boolean) => void): void
+    db_delete_record(recordId: string, callback?: (res: boolean) => void): void
+    db_load_all(callback?: (res: string) => void): void
+    db_clear_all(callback?: (res: boolean) => void): void
 
     [key: string]: (...args: any[]) => any
 }

@@ -20,6 +20,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: 'dashboard', label: '仪表盘', icon: 'dashboard', route: '/', category: '主要' },
+  { id: 'strain', label: '菌毒种库', icon: 'strain', route: '/strain', category: '分析工具' },
   { id: 'blast', label: 'BLAST 分析', icon: 'blast', route: '/blast', category: '分析工具' },
   { id: 'tree', label: '进化树', icon: 'tree', route: '/tree', category: '分析工具' },
   { id: 'settings', label: '设置', icon: 'settings', route: '/settings', category: '系统' },
@@ -43,7 +44,21 @@ function isActive(item: NavItem): boolean {
   <nav class="sidebar" :class="{ collapsed: appStore.sidebarCollapsed }">
     <!-- Logo -->
     <div class="brand">
-      <span class="brand-text">NCBI BLAST <span class="brand-sub">Pro</span></span>
+      <div class="logo-container">
+        <svg class="logo-svg" viewBox="0 0 100 100">
+          <defs>
+            <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#60a5fa" />
+              <stop offset="100%" style="stop-color:#34d399" />
+            </linearGradient>
+          </defs>
+          <path d="M50 5 L90 27.5 L90 72.5 L50 95 L10 72.5 L10 27.5 Z" fill="none" stroke="url(#logo-gradient)" stroke-width="8" />
+          <path d="M35 30 C35 30, 65 30, 50 50 C35 70, 65 70, 65 70" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" />
+          <circle cx="35" cy="30" r="4" fill="white" />
+          <circle cx="65" cy="70" r="4" fill="white" />
+        </svg>
+      </div>
+      <span class="brand-text">NCBI <span class="brand-sub">Pro</span></span>
     </div>
 
     <!-- 导航菜单 -->
@@ -64,6 +79,13 @@ function isActive(item: NavItem): boolean {
               <rect x="14" y="3" width="7" height="7" />
               <rect x="14" y="14" width="7" height="7" />
               <rect x="3" y="14" width="7" height="7" />
+            </template>
+            <!-- Strain (Enhanced Microbial Icon) -->
+            <template v-else-if="item.icon === 'strain'">
+              <circle cx="12" cy="12" r="6" />
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+              <path d="M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+              <path d="M9 12a3 3 0 0 1 6 0" />
             </template>
             <!-- BLAST -->
             <template v-else-if="item.icon === 'blast'">
@@ -131,15 +153,32 @@ function isActive(item: NavItem): boolean {
 
 .brand-text {
   color: #f8fafc;
-  font-size: 1.1rem;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  background: linear-gradient(to right, #f8fafc, #94a3b8);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .brand-sub {
   font-size: 0.7em;
-  opacity: 0.6;
-  margin-left: 4px;
+  font-weight: 400;
+  color: #60a5fa;
+  -webkit-text-fill-color: #60a5fa;
+  margin-left: 2px;
+}
+
+.logo-container {
+  width: 32px;
+  height: 32px;
+  margin-right: 12px;
+}
+
+.logo-svg {
+  width: 100%;
+  height: 100%;
 }
 
 .collapsed .brand-text { display: none; }

@@ -24,6 +24,8 @@ export interface LayoutSettings {
     showGuideLines: boolean
     centerOffset: number
     sortMode: 'original' | 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance'
+    labelDisplayMode: 'replace' | 'append' | 'original'
+    visualGain: number // 0 to 1, 调节短分枝的视觉可见度补偿
 
     // Computed during layout
     maxLayoutX?: number
@@ -53,7 +55,19 @@ export const DEFAULT_SETTINGS: LayoutSettings = {
     alignLabels: false,
     showGuideLines: true,
     centerOffset: 0,
-    sortMode: 'original'
+    sortMode: 'original',
+    labelDisplayMode: 'replace',
+    visualGain: 0.1
+}
+
+// 布局常量配置
+const LAYOUT_CONSTANTS = {
+    TARGET_HEIGHT: 1600, // 目标画布最大逻辑高度
+    MIN_SPACING: 8,
+    MAX_SPACING: 35,
+    WIDTH_RATIO: 0.8, // 宽度与高度的视觉平衡比例
+    MIN_METRIC: 0.0001,
+    INNER_RADIUS_OFFSET: 0
 }
 
 export class LayoutEngine {
@@ -82,10 +96,9 @@ export class LayoutEngine {
         if (!root) return
 
         // 核心修复：动态调整 Y 轴叶子间距。
-        // 防止条目过多时产生过长的逻辑高度，从而导致 fitView 将水平方向压缩成一条线。
         const leafCount = this.model.getLeafCount()
-        const targetHeight = 1600 // 目标画布最大逻辑高度
-        const spacing = Math.min(35, Math.max(8, targetHeight / (leafCount || 1)))
+        const spacing = Math.min(LAYOUT_CONSTANTS.MAX_SPACING, 
+            Math.max(LAYOUT_CONSTANTS.MIN_SPACING, LAYOUT_CONSTANTS.TARGET_HEIGHT / (leafCount || 1)))
         
         // 1. ORDERED LEAF DFS
         let leafCounter = 0
@@ -109,10 +122,12 @@ export class LayoutEngine {
         }
         traverse(root)
 
-        const maxD = this.settings.useBranchLengths ? Math.max(0.0001, this.model.maxHeight) : Math.max(1, this.model.maxDepth)
+        const maxD = this.settings.useBranchLengths ? 
+            Math.max(LAYOUT_CONSTANTS.MIN_METRIC, this.model.maxHeight) : 
+            Math.max(1, this.model.maxDepth)
         
-        // 动态计算 X 轴像素步进，确保树的宽度与高度视觉平衡 (约 1.5 倍)
-        const targetWidth = targetHeight * 0.8
+        // 动态计算 X 轴像素步进，确保树的宽度与高度视觉平衡
+        const targetWidth = LAYOUT_CONSTANTS.TARGET_HEIGHT * LAYOUT_CONSTANTS.WIDTH_RATIO
         const dynamicScaleX = targetWidth / maxD
 
         while (resultStack.length > 0) {
@@ -128,7 +143,7 @@ export class LayoutEngine {
         const totalLeaves = this.model.getLeafCount()
         const sweepRadians = (this.settings.arc / 360) * 2 * Math.PI
         const startAngle = (this.settings.rotation / 360) * 2 * Math.PI
-        const INNER_RADIUS = this.settings.centerOffset
+        const INNER_RADIUS = LAYOUT_CONSTANTS.INNER_RADIUS_OFFSET + this.settings.centerOffset
 
         let maxRadius = 0
         const divisor = (this.settings.arc >= 360) ? totalLeaves : (totalLeaves - 1 || 1)

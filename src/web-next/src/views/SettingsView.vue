@@ -104,7 +104,7 @@ async function loadSettings(): Promise<void> {
   try {
     const bridge = getBridge()
     bridge.get_api_key('dashscope', (key: string) => { if (key) apiKey.value = key })
-    bridge.get_ai_models((modelsStr: string) => {
+    bridge.get_ai_models?.((modelsStr: string) => {
       try {
         aiModels.value = JSON.parse(modelsStr)
         if (aiModels.value.length > 0 && !selectedModel.value) {
@@ -123,7 +123,7 @@ function addModel(): void {
     appStore.showNotification('请填写完整模型配置', 'warning')
     return
   }
-  getBridge().add_ai_model(newModelKey.value.trim(), newModelName.value.trim(), (success: boolean) => {
+  getBridge().add_ai_model?.(newModelKey.value.trim(), newModelName.value.trim(), (success: boolean) => {
     if (success) {
       aiModels.value.push({ key: newModelKey.value.trim(), name: newModelName.value.trim() })
       newModelKey.value = ''; newModelName.value = ''
@@ -133,7 +133,7 @@ function addModel(): void {
 }
 
 function deleteModel(key: string): void {
-  getBridge().delete_ai_model(key, (success: boolean) => {
+  getBridge().delete_ai_model?.(key, (success: boolean) => {
     if (success) {
       aiModels.value = aiModels.value.filter(m => m.key !== key)
       appStore.showNotification('已移除模型', 'info')

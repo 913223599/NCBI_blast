@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("NCBI BLAST 专业版 | 工作台")
         self.resize(1400, 900) # Slightly larger for web view
+        self.setMinimumSize(1240, 800) # Lock minimum size to ensure UI integrity
         
         ensure_results_folders()
         self._apply_theme()

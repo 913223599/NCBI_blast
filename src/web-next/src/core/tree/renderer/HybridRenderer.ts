@@ -1,6 +1,14 @@
 import type { TreeModel, TreeNode } from '../models/TreeModel'
 import type { LayoutSettings } from '../layout/LayoutEngine'
+import { ViewportController } from './ViewportController'
+import { ScaleBarRenderer } from './ScaleBarRenderer'
+import { TreeEdgeRenderer } from './TreeEdgeRenderer'
 
+/**
+ * HybridRenderer - 进化树混合渲染器 (协调器)
+ * 职责：容器管理、ResizeObserver、标签渲染、渲染循环调度
+ * 绘图和交互已拆分到独立组件
+ */
 export class HybridRenderer {
     container: HTMLElement | null = null
     canvas: HTMLCanvasElement | null = null
@@ -8,29 +16,30 @@ export class HybridRenderer {
     svg: SVGSVGElement | null = null
     g: SVGGElement | null = null
 
-    matrix = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }
-    isDragging = false
-    startX = 0
-    startY = 0
-    ticking = false
+    // 委托给子组件
+    private viewport: ViewportController | null = null
+    private scaleBar: ScaleBarRenderer | null = null
+    private edgeRenderer: TreeEdgeRenderer | null = null
 
     onNodeClick: ((node: TreeNode, event: MouseEvent) => void) | null = null
     resizeObserver: ResizeObserver | null = null
     resizeTimeout: any = null
-    
+
     lastModel: TreeModel | null = null
     lastVersion: number = -1
     lastSettings: LayoutSettings | null = null
+    private annotations: Record<string, string> = {}
 
     constructor() { }
 
     mount(container: HTMLElement) {
-        this.lastVersion = -1 // 关键修复：强制重置版本号以触发布局重绘
+        this.lastVersion = -1
         this.container = container
         this.container.innerHTML = ''
         this.container.style.position = 'relative'
         this.container.style.overflow = 'hidden'
 
+        // Canvas 层 - 画树枝
         this.canvas = document.createElement('canvas')
         this.canvas.style.position = 'absolute'
         this.canvas.style.top = '0'
@@ -39,6 +48,7 @@ export class HybridRenderer {
         this.ctx = this.canvas.getContext('2d')
         this.container.appendChild(this.canvas)
 
+        // SVG 层 - 画标签
         this.svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
         this.svg.setAttribute("width", "100%")
         this.svg.setAttribute("height", "100%")
@@ -50,75 +60,17 @@ export class HybridRenderer {
         this.svg.appendChild(this.g)
         this.container.appendChild(this.svg)
 
-        this.setupInteraction()
-        this.setupResizeObserver()
-    }
-
-    setupInteraction() {
-        if (!this.svg) return
-        this.svg.onmousedown = (e) => {
-            if (e.button === 0) { 
-                this.isDragging = true
-                this.startX = e.clientX
-                this.startY = e.clientY
-                this.svg!.style.cursor = "grabbing"
-            }
-        }
-        window.addEventListener('mousemove', (e) => {
-            if (!this.isDragging) return
-            this.matrix.e += e.clientX - this.startX
-            this.matrix.f += e.clientY - this.startY
-            this.startX = e.clientX
-            this.startY = e.clientY
-            this.applyTransform()
-        })
-        window.addEventListener('mouseup', () => {
-            this.isDragging = false
-            if (this.svg) this.svg.style.cursor = "grab"
-        })
-        this.svg.onwheel = (e) => {
-            e.preventDefault()
-            const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1
-            const rect = this.svg!.getBoundingClientRect()
-            const mouseX = e.clientX - rect.left
-            const mouseY = e.clientY - rect.top
-            const contentX = (mouseX - this.matrix.e) / this.matrix.a
-            const contentY = (mouseY - this.matrix.f) / this.matrix.d
-            this.matrix.a *= scaleFactor
-            this.matrix.d *= scaleFactor
-            this.matrix.e = mouseX - contentX * this.matrix.a
-            this.matrix.f = mouseY - contentY * this.matrix.d
-            this.applyTransform()
-        }
-    }
-
-    applyTransform() {
-        if (!this.ticking) {
-            window.requestAnimationFrame(() => {
-                if (this.g) this.g.setAttribute("transform", `matrix(${this.matrix.a},0,0,${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
+        // 初始化子组件
+        if (this.ctx && this.svg && this.canvas) {
+            this.edgeRenderer = new TreeEdgeRenderer(this.ctx)
+            this.scaleBar = new ScaleBarRenderer(this.canvas)
+            this.viewport = new ViewportController(this.svg, () => {
+                // 视口变换后重新渲染
                 if (this.lastModel && this.lastSettings) this.render(this.lastModel, this.lastSettings)
-                this.ticking = false
             })
-            this.ticking = true
         }
-    }
 
-    fitView(model: TreeModel) {
-        if (!this.container || !model.root) return
-        const rect = this.container.getBoundingClientRect()
-        const padding = 100
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-        Object.values(model.nodesById).forEach(node => {
-            const nx = node.x || 0, ny = node.y || 0
-            minX = Math.min(minX, nx); minY = Math.min(minY, ny)
-            maxX = Math.max(maxX, nx); maxY = Math.max(maxY, ny)
-        })
-        if (minX === Infinity) return
-        const sc = Math.min((rect.width - padding * 4) / (maxX - minX || 1), (rect.height - padding * 2) / (maxY - minY || 1))
-        this.matrix.a = this.matrix.d = sc
-        this.matrix.e = (rect.width / 2) - ((minX + maxX) / 2 * sc) - padding
-        this.matrix.f = (rect.height / 2) - ((minY + maxY) / 2 * sc)
-        this.applyTransform()
+        this.setupResizeObserver()
     }
 
     setupResizeObserver() {
@@ -147,29 +99,30 @@ export class HybridRenderer {
         this.ctx.scale(dpr, dpr)
     }
 
+    fitView(model: TreeModel) {
+        this.viewport?.fitView(this.container, model)
+    }
+
     render(model: TreeModel, settings: LayoutSettings) {
         const isModelChanged = (this.lastModel !== model) || (this.lastVersion !== model.version) || !this.lastModel
-        const isSettingsChanged = (this.lastSettings?.sortMode !== settings.sortMode) || 
-                                (this.lastSettings?.mode !== settings.mode) ||
-                                (this.lastSettings?.useBranchLengths !== settings.useBranchLengths)
+        const isSettingsChanged = (this.lastSettings?.sortMode !== settings.sortMode) ||
+            (this.lastSettings?.mode !== settings.mode) ||
+            (this.lastSettings?.useBranchLengths !== settings.useBranchLengths)
 
-        this.lastModel = model; 
-        this.lastVersion = model.version;
+        this.lastModel = model
+        this.lastVersion = model.version
         this.lastSettings = { ...settings }
-        if (!this.ctx || !this.canvas || !this.g || !model.root) return
+        if (!this.ctx || !this.canvas || !this.g || !model.root || !this.edgeRenderer || !this.scaleBar || !this.viewport) return
 
+        // 树枝渲染 (Canvas)
         this.ctx.setTransform(1, 0, 0, 1, 0, 0)
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
         const dpr = window.devicePixelRatio || 1
-        this.ctx.setTransform(this.matrix.a * dpr, 0, 0, this.matrix.d * dpr, this.matrix.e * dpr, this.matrix.f * dpr)
+        this.ctx.setTransform(this.viewport.matrix.a * dpr, 0, 0, this.viewport.matrix.d * dpr,
+            this.viewport.matrix.e * dpr, this.viewport.matrix.f * dpr)
+        this.edgeRenderer.drawEdges(model.root, settings)
 
-        this.ctx.beginPath()
-        this.ctx.strokeStyle = settings.branchColor
-        this.ctx.lineWidth = settings.branchWidth / Math.sqrt(this.matrix.a)
-        this.ctx.lineCap = 'round'; this.ctx.lineJoin = 'round'
-        this.drawEdgesRecursive(model.root, settings)
-        this.ctx.stroke()
-
+        // 标签渲染 (SVG)
         if (isModelChanged || isSettingsChanged) {
             while (this.g.firstChild) { this.g.removeChild(this.g.firstChild) }
             if (settings.showLabels) {
@@ -178,79 +131,18 @@ export class HybridRenderer {
                 this.g.appendChild(fragment)
             }
         }
-        this.g.setAttribute("transform", `matrix(${this.matrix.a},0,0,${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
-        this.renderScaleBar()
+        this.g.setAttribute("transform",
+            `matrix(${this.viewport.matrix.a},0,0,${this.viewport.matrix.d},${this.viewport.matrix.e},${this.viewport.matrix.f})`)
+
+        // 比例尺渲染
+        this.scaleBar.render(this.viewport.matrix.a)
     }
 
-    private renderScaleBar() {
-        if (!this.ctx || !this.canvas) return
-        const dpr = window.devicePixelRatio || 1
-        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-        const scale = this.matrix.a
-        const units = Math.pow(10, Math.floor(Math.log10(100 / scale)))
-        const pw = units * scale
-        const x = 60, y = (this.canvas.height / dpr) - 60
-
-        // Background pod for premium look
-        this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'
-        this.ctx.beginPath()
-        this.ctx.roundRect(x - 10, y - 25, pw + 20, 45, 8)
-        this.ctx.fill()
-
-        this.ctx.strokeStyle = '#1e293b'
-        this.ctx.lineWidth = 1.5
-        this.ctx.beginPath()
-        this.ctx.moveTo(x, y); this.ctx.lineTo(x + pw, y)
-        this.ctx.moveTo(x, y - 4); this.ctx.lineTo(x, y + 4)
-        this.ctx.moveTo(x + pw, y - 4); this.ctx.lineTo(x + pw, y + 4)
-        this.ctx.stroke()
-        this.ctx.fillStyle = '#1e293b'
-        this.ctx.font = 'bold 11px Inter, sans-serif'
-        this.ctx.textAlign = 'center'
-        this.ctx.fillText(`${units.toFixed(units < 0.1 ? 3 : 2)} sub/site`, x + pw / 2, y - 8)
-    }
-
-    private drawEdgesRecursive(node: TreeNode, s: LayoutSettings) {
-        if (!node.children || node.children.length === 0 || !this.ctx) return
-        
-        if (s.mode === 'circular' || s.mode === 'unrooted') {
-            const pr = node.radius || 0
-            if (node.children.length > 0) {
-                const angles = node.children.map(c => c.angle || 0)
-                const minA = Math.min(...angles)
-                const maxA = Math.max(...angles)
-                this.ctx.moveTo(pr * Math.cos(minA), pr * Math.sin(minA))
-                this.ctx.arc(0, 0, pr, minA, maxA, false)
-            }
-            node.children.forEach(child => {
-                if (this.ctx) {
-                    this.ctx.moveTo(pr * Math.cos(child.angle || 0), pr * Math.sin(child.angle || 0))
-                    this.ctx.lineTo(child.x || 0, child.y || 0)
-                }
-                this.drawEdgesRecursive(child, s)
-            })
-        } else {
-            const cx = node.x || 0
-            const childYs = node.children.map(c => c.y || 0)
-            this.ctx.moveTo(cx, Math.min(...childYs))
-            this.ctx.lineTo(cx, Math.max(...childYs))
-            node.children.forEach(child => {
-                if (this.ctx) {
-                    this.ctx.moveTo(cx, child.y || 0)
-                    this.ctx.lineTo(child.x || 0, child.y || 0)
-                }
-                this.drawEdgesRecursive(child, s)
-            })
-        }
-    }
-
-    private annotations: Record<string, string> = {}
-    
     updateAnnotations(map: Record<string, string>) {
         this.annotations = map
         if (this.lastModel && this.lastSettings) {
             // 强制触发标签重绘循环
-            this.lastVersion = -1 
+            this.lastVersion = -1
             this.render(this.lastModel, this.lastSettings)
         }
     }
@@ -258,15 +150,14 @@ export class HybridRenderer {
     private drawLabelsRecursive(node: TreeNode, s: LayoutSettings, parentElement: Element | DocumentFragment) {
         if (node.isLeaf) {
             const text = document.createElementNS("http://www.w3.org/2000/svg", "text")
-            
-            // ... (坐标计算保持不变)
+
             if (s.mode === 'circular' || s.mode === 'unrooted') {
                 const angleDeg = (node.angle || 0) * 180 / Math.PI
                 const x = (node.x || 0) + 12 * Math.cos(node.angle || 0)
                 const y = (node.y || 0) + 12 * Math.sin(node.angle || 0)
                 text.setAttribute("x", x.toString())
                 text.setAttribute("y", y.toString())
-                
+
                 let rot = angleDeg
                 if (angleDeg > 90 && angleDeg < 270) {
                     rot -= 180
@@ -285,7 +176,6 @@ export class HybridRenderer {
                 text.setAttribute("alignment-baseline", "middle")
             }
 
-            // 核心逻辑：如果存在识别出的身份，显示 [身份] 原ID
             let displayName = node.name || ""
             if (node.name && this.annotations[node.name]) {
                 displayName = `[${this.annotations[node.name]}] ${node.name}`
@@ -303,5 +193,8 @@ export class HybridRenderer {
 
     dispose() {
         if (this.resizeObserver) this.resizeObserver.disconnect()
+        this.viewport?.dispose()
+        this.edgeRenderer?.dispose()
+        this.scaleBar?.dispose()
     }
 }

@@ -13,12 +13,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '仪表盘', icon: 'dashboard' }
     },
     {
-        path: '/',
-        name: 'dashboard',
-        component: () => import('../views/DashboardView.vue'),
-        meta: { title: '仪表盘', icon: 'dashboard' }
-    },
-    {
         path: '/blast',
         name: 'blast',
         component: () => import('../views/BlastView.vue'),
@@ -29,6 +23,12 @@ const routes: RouteRecordRaw[] = [
         name: 'tree',
         component: () => import('../views/TreeView.vue'),
         meta: { title: '进化树', icon: 'tree' }
+    },
+    {
+        path: '/strain',
+        name: 'strain',
+        component: () => import('../views/StrainView.vue'),
+        meta: { title: '菌毒种库', icon: 'strain' }
     },
     {
         path: '/settings',
