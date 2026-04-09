@@ -1,9 +1,10 @@
 from pathlib import Path
 
 from src.workbench.wrappers.base_wrapper import BaseWrapper
-from src.workbench.wrappers.tree_sequence_processor import SequenceProcessor
-from src.workbench.wrappers.tree_distance_calculator import DistanceCalculator
 from src.workbench.wrappers.tree_builder import TreeBuilder
+from src.workbench.wrappers.tree_distance_calculator import DistanceCalculator
+from src.workbench.wrappers.tree_sequence_processor import SequenceProcessor
+
 
 class TreeFactory(BaseWrapper):
     """

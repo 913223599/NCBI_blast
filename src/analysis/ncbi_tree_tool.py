@@ -5,14 +5,15 @@ Wraps the compiled C++ binaries from the NCBI tree-tool project.
 Handles conversion between Python data structures and .dm (Data Master) format.
 """
 
+import io
+import logging
 import os
+import shutil
 import subprocess
 import tempfile
-import shutil
-import pandas as pd
-import io
 from pathlib import Path
-import logging
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 

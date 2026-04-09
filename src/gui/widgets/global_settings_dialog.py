@@ -1,3 +1,4 @@
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                              QComboBox, QPushButton, QGroupBox, QFormLayout, QMessageBox)
 from src.utils.config_manager import get_config_manager
 from src.utils.ui_translation_manager import get_ui_translator

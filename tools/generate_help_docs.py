@@ -1,7 +1,6 @@
-import subprocess
-import glob
-from pathlib import Path
 import concurrent.futures
+import subprocess
+from pathlib import Path
 
 TOOLS_ROOT = Path(r"d:\PycharmProjects\NCBI blast\tools\ncbi_dist\bin")
 DOCS_ROOT = Path(r"d:\PycharmProjects\NCBI blast\tools\docs\detailed")

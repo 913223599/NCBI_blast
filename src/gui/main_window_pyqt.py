@@ -4,14 +4,16 @@ Hosts Navigation and Modules (BLAST, SRA, Tree)
 """
 import os
 from pathlib import Path
-                             QMenuBar, QMenu, QStatusBar, QMessageBox, QApplication)
 
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import (QMainWindow, QStatusBar)
+
+from src.gui.widgets.api_key_dialog import ApiKeyDialog
+from src.gui.widgets.database_manager_dialog import DatabaseManagerDialog
+from src.gui.widgets.help_viewer import HelpViewerDialog
 # Modules
 # Modules
 from src.gui.widgets.web_container import WebContainer
-from src.gui.widgets.help_viewer import HelpViewerDialog
-from src.gui.widgets.api_key_dialog import ApiKeyDialog
-from src.gui.widgets.database_manager_dialog import DatabaseManagerDialog
 
 # Project Root
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

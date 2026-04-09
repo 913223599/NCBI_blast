@@ -3,12 +3,13 @@
 UI Translation Manager
 Manages UI text translation for English and Chinese support.
 """
-from src.utils.config_manager import get_config_manager
 
 import json
 import logging
 from pathlib import Path
+
 from src.utils.config_manager import get_config_manager
+
 
 class UITranslationManager:
     _instance = None

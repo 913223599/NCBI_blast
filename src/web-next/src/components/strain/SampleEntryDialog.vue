@@ -156,6 +156,43 @@
                   placeholder=">Sequence_Title&#10;ATGCGATCG..."
                   rows="4"
                 ></textarea>
+                
+                <!-- 基因库同步选项 -->
+                <div class="gene-sync-opt" v-if="form.sequence">
+                  <label class="checkbox-container">
+                    <input type="checkbox" v-model="syncToGeneDB" />
+                    <span class="checkmark"></span>
+                    <span class="checkbox-label">同步录入到基因数据库 (Gene DB)</span>
+                  </label>
+                  
+                <div v-if="syncToGeneDB" class="gene-details-panel">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label>测序类型</label>
+                      <div class="custom-select" @click.stop="toggleDropdown('seqType')">
+                        <div class="select-trigger">
+                          {{ getGeneSeqTypeLabel() }}
+                          <span class="arrow">▾</span>
+                        </div>
+                        <div v-if="openDropdown === 'seqType'" class="select-dropdown">
+                          <div
+                            v-for="opt in GENE_SEQ_TYPE_OPTIONS"
+                            :key="opt.value"
+                            class="select-option"
+                            @click.stop="handleDropdownSelect('seqType', opt.value)"
+                          >
+                            {{ opt.label }}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label>测序标题/批次</label>
+                      <input v-model="geneInfo.title" class="text-input" placeholder="默认：[样本编号]-[类型]" />
+                    </div>
+                  </div>
+                </div>
+                </div>
               </div>
             </template>
           </div>
@@ -164,7 +201,7 @@
 
       <!-- 底部按钮 -->
       <div class="dialog-footer">
-        <div class="aliquot-control" v-if="canSubmit">
+        <div class="aliquot-control" v-if="canSubmit && (!selectedPositions || selectedPositions.length <= 1)">
           <label>分装录入管数：</label>
           <div class="number-input">
             <button @click="aliquotCount > 1 && aliquotCount--" class="num-btn">-</button>
@@ -172,6 +209,10 @@
             <button @click="aliquotCount < 100 && aliquotCount++" class="num-btn">+</button>
           </div>
           <span class="aliquot-hint" v-if="aliquotCount > 1">自动往后填充连续空位</span>
+        </div>
+        <!-- 批量说明 -->
+        <div class="batch-hint" v-else-if="selectedPositions && selectedPositions.length > 1">
+          已选中 <strong>{{ selectedPositions.length }}</strong> 个孔位进行批量录入
         </div>
         <div class="footer-actions">
           <button class="btn-cancel" @click="emit('close')">取消</button>
@@ -188,6 +229,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { useSequenceStore } from '../../stores/sequence'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 import type { SampleCategory } from '../../stores/strain'
 
@@ -208,6 +250,7 @@ interface Props {
   drawerId: string
   boxId: string
   position: string
+  selectedPositions?: string[]
 }
 
 const props = defineProps<Props>()
@@ -250,6 +293,15 @@ const form = ref({
 
 const aliquotCount = ref(1)
 
+// 基因库同步状态
+const syncToGeneDB = ref(false)
+const geneInfo = ref({
+  seqType: '16S',
+  title: ''
+})
+
+const sequenceStore = useSequenceStore()
+
 // 编号生成凭证
 const pendingRequest = ref<any>(null)
 
@@ -260,6 +312,14 @@ const SEQUENCE_TYPE_OPTIONS = [
   { value: 'DNA', label: 'DNA (核酸)' },
   { value: 'RNA', label: 'RNA (核酸)' },
   { value: 'Protein', label: 'Protein (蛋白)' }
+]
+
+const GENE_SEQ_TYPE_OPTIONS = [
+  { value: '16S', label: '16S rRNA' },
+  { value: 'ITS', label: 'ITS' },
+  { value: 'WGS', label: '全基因组 (WGS)' },
+  { value: 'Plasmid', label: '质粒全长' },
+  { value: 'TargetGen', label: '目标基因' }
 ]
 
 // 编号大类 ID 与 业务类型 (SampleCategory) 的映射
@@ -314,6 +374,10 @@ function getSequenceTypeLabel(): string {
   return SEQUENCE_TYPE_OPTIONS.find(o => o.value === form.value.sequenceType)?.label || 'DNA'
 }
 
+function getGeneSeqTypeLabel(): string {
+  return GENE_SEQ_TYPE_OPTIONS.find(o => o.value === geneInfo.value.seqType)?.label || '16S rRNA'
+}
+
 function getSampleTypeLabel(): string {
   if (!form.value.sampleType) return '等待识别或选择...'
   return SAMPLE_TYPE_OPTIONS.find(o => o.value === form.value.sampleType)?.label.split(' ')[0] || form.value.sampleType
@@ -328,6 +392,8 @@ function handleDropdownSelect(field: string, value: string) {
     form.value.sequenceType = value as any
   } else if (field === 'sampleType') {
     form.value.sampleType = value as any
+  } else if (field === 'seqType') {
+    geneInfo.value.seqType = value as any
   }
   openDropdown.value = null
 }
@@ -399,23 +465,27 @@ function handleConfirm() {
     return
   }
 
-  // 提取可用空位（从当前 props.position 开始往后找）
-  const startIndex = box.positions.findIndex((p: any) => p.label === props.position)
-  if (startIndex === -1) {
-    appStore.showNotification('起始位置无效', 'error')
-    return
-  }
-
   const targetPositions: string[] = []
-  let currentIndex = startIndex
   
-  while (targetPositions.length < aliquotCount.value && currentIndex < box.positions.length) {
-    const pos = box.positions[currentIndex]
-    if (pos && (!pos.occupied || pos.label === props.position)) {
-      // 容错: 起始位置可能是触发入口（它本身肯定是空的才会点进来录入）
-      targetPositions.push(pos.label)
+  if (props.selectedPositions && props.selectedPositions.length > 1) {
+    // 优先使用拖拽多选的位置
+    targetPositions.push(...props.selectedPositions)
+  } else {
+    // 否则执行原有的连续填充逻辑
+    const startIndex = box.positions.findIndex((p: any) => p.label === props.position)
+    if (startIndex === -1) {
+      appStore.showNotification('起始位置无效', 'error')
+      return
     }
-    currentIndex++
+
+    let currentIndex = startIndex
+    while (targetPositions.length < aliquotCount.value && currentIndex < box.positions.length) {
+      const pos = box.positions[currentIndex]
+      if (pos && (!pos.occupied || pos.label === props.position)) {
+        targetPositions.push(pos.label)
+      }
+      currentIndex++
+    }
   }
 
   // 记录实际入库的数据
@@ -434,6 +504,22 @@ function handleConfirm() {
       position: posLabel
     })
 
+    // 同步到基因库 (仅第一管，避免重复录入序列)
+    if (syncToGeneDB.value && savedCount === 0 && form.value.sequence) {
+      sequenceStore.saveSequence({
+        sampleId: record.id,
+        sampleCode: form.value.sampleCode || form.value.accession || '',
+        seqType: geneInfo.value.seqType,
+        title: geneInfo.value.title || `${record.sampleCode || record.name}-${geneInfo.value.seqType}`,
+        sequence: form.value.sequence,
+        seqLen: form.value.sequence.replace(/[\s\r\n]/g, '').length,
+        metadata: {
+          autoSynced: true,
+          syncedAt: new Date().toISOString()
+        }
+      })
+    }
+
     // 更新位置占用状态
     strain.updatePositionOccupancy(
       props.freezerId,
@@ -448,10 +534,10 @@ function handleConfirm() {
     savedCount++
   })
 
-  if (savedCount < aliquotCount.value) {
-    appStore.showNotification(`盒子空间不足，仅成功录入 ${savedCount} 管（目标 ${aliquotCount.value} 管）`, 'warning')
+  if (savedCount < (props.selectedPositions?.length || aliquotCount.value)) {
+    appStore.showNotification(`部分位置录入失败，仅成功录入 ${savedCount} 管`, 'warning')
   } else if (savedCount > 1) {
-    appStore.showNotification(`成功将 "${form.value.name}" 批量分装录入 ${savedCount} 支备份`, 'success')
+    appStore.showNotification(`成功将 "${form.value.name}" 批量录入到 ${savedCount} 个指定位置`, 'success')
   } else {
     appStore.showNotification(`样本 "${form.value.name}" 已成功录入`, 'success')
   }
@@ -868,6 +954,19 @@ onUnmounted(() => {
   border-radius: 4px;
 }
 
+.batch-hint {
+  font-size: 0.85rem;
+  color: #64748b;
+  background: #f0f9ff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #bae6fd;
+}
+
+.batch-hint strong {
+  color: #0369a1;
+}
+
 .footer-actions {
   display: flex;
   gap: 12px;
@@ -910,6 +1009,89 @@ onUnmounted(() => {
 .btn-confirm:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 基因库同步样式 */
+.gene-sync-opt {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
+}
+
+.gene-details-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 复选框美化 */
+.checkbox-container {
+  display: flex;
+  align-items: center;
+  position: relative;
+  padding-left: 28px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+  user-select: none;
+}
+
+.checkbox-container input {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+  height: 0;
+  width: 0;
+}
+
+.checkmark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 18px;
+  width: 18px;
+  background-color: #fff;
+  border: 2px solid #cbd5e1;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.checkbox-container:hover input ~ .checkmark {
+  border-color: #2563eb;
+}
+
+.checkbox-container input:checked ~ .checkmark {
+  background-color: #2563eb;
+  border-color: #2563eb;
+}
+
+.checkmark:after {
+  content: "";
+  position: absolute;
+  display: none;
+}
+
+.checkbox-container input:checked ~ .checkmark:after {
+  display: block;
+}
+
+.checkbox-container .checkmark:after {
+  left: 5px;
+  top: 1px;
+  width: 5px;
+  height: 10px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 /* 自定义下拉框样式 */

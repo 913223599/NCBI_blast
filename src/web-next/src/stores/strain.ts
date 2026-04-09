@@ -283,7 +283,10 @@ export const useStrainStore = defineStore('strain', () => {
       } as any)
 
       try {
-        getBridge().db_save_code_lookup(JSON.stringify(codeLookupData))
+        const bridge = getBridge()
+        if (bridge && bridge.db_save_code_lookup) {
+          bridge.db_save_code_lookup(JSON.stringify(codeLookupData))
+        }
       } catch (e) {}
 
       autoSaveTimer = null

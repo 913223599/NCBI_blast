@@ -4,13 +4,12 @@
 NCBI BLAST GUI 工业级构建脚本 (Industrial Build Script)
 """
 
+import argparse
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
-
-import argparse
 
 PROJECT_ROOT = Path(__file__).parent.absolute()
 DIST_DIR = PROJECT_ROOT / "dist" / "NCBI_BLAST_GUI"

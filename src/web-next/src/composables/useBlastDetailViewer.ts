@@ -1,7 +1,7 @@
 /**
  * useBlastDetailViewer - BLAST详细结果查看器组合式函数
  */
-import { ref, computed } from 'vue'
+import { ref, computed, shallowRef } from 'vue'
 import { useAppStore } from '../stores/app'
 import { getBridge } from '../bridge/pyqt-bridge'
 
@@ -18,7 +18,8 @@ export function useBlastDetailViewer() {
   
   // 内部状态 - 使用 null 作为初始值，更容易检测
   const isOpenInternal = ref(false)
-  const allHitsData = ref<BlastHitDetail[]>([])
+  // 使用 shallowRef 存储大量静态比对数据，极大提升渲染性能
+  const allHitsData = shallowRef<BlastHitDetail[]>([])
   const currentQueryTitle = ref<string | null>(null)
   // 关键：添加用户交互标志，防止HMR或初始化时的意外弹窗
   const hasUserInteracted = ref(false)
@@ -60,7 +61,7 @@ export function useBlastDetailViewer() {
     allHitsData.value = []
     currentQueryTitle.value = null
     
-    // 使用setTimeout确保Vue完成更新
+    // 使用setTimeout确保Vue完成基本的弹窗背景更新
     setTimeout(() => {
       currentQueryTitle.value = queryTitle.trim()
       isOpenInternal.value = true
@@ -71,7 +72,11 @@ export function useBlastDetailViewer() {
           try {
             const hits = JSON.parse(resStr)
             if (Array.isArray(hits)) {
-              allHitsData.value = hits
+              // 性能核心：等待弹窗动画彻底结束（约400ms）后再注入大量DOM节点
+              // 这样可以避免重绘和动画争抢主线程导致的“卡卡”感
+              setTimeout(() => {
+                allHitsData.value = hits
+              }, 400)
             } else {
               isOpenInternal.value = false
             }

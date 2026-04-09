@@ -5,6 +5,7 @@ ID Manager - 负责序列ID的安全化处理与映射管理
 import re
 from pathlib import Path
 from typing import Dict, Tuple
+
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
 

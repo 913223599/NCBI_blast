@@ -4,8 +4,10 @@ BLAST结果解析器模块
 """
 
 import re
-from Bio.Blast import NCBIXML
 from typing import Iterator, Dict, Any
+
+from Bio.Blast import NCBIXML
+
 
 class BlastXmlParser:
     """

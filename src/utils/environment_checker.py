@@ -3,9 +3,9 @@
 用于在程序启动前检查必要的依赖和环境配置
 """
 
-import sys
 import os
 import platform
+import sys
 from typing import List, Tuple
 
 

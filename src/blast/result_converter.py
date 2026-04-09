@@ -9,6 +9,7 @@ from pathlib import Path
 
 from src.blast.parser import BlastXmlParser
 
+
 class BlastResultConverter:
     """
     BLAST结果转换器

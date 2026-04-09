@@ -3,8 +3,9 @@
 WebBridge Mixin: 核心信号 & 基础功能
 职责：页面就绪、日志转发、帮助系统、Annotation Hash 查询、外部 URL 打开
 """
-import re
 import json
+import re
+
 from PyQt6.QtCore import pyqtSlot
 
 

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from src.workbench.wrappers.base_wrapper import BaseWrapper
 
+
 class IQTreeWrapper(BaseWrapper):
     """
     Wrapper for IQ-TREE 2/3 (Maximum Likelihood Tree Inference).

@@ -1,8 +1,9 @@
-import sqlite3
+import hashlib
 import json
 import logging
-import hashlib
+import sqlite3
 from pathlib import Path
+from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,8 @@ class AnnotationManager:
             # Maintenance: Index for fast lookup by ID (optional fallback)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_known_id ON annotations(last_known_id)")
 
-    def generate_hash(self, sequence: str) -> str:
+    @staticmethod
+    def generate_hash(sequence: str) -> str:
         """Computes a normalized MD5 hash for a biological sequence."""
         # Normalize: remove whitespace, handle case, remove gaps
         clean_seq = "".join(sequence.split()).upper().replace("-", "")
@@ -77,9 +79,9 @@ class AnnotationManager:
             """, (sequence_hash, last_known_id, custom_label, blast_identity, 
                   last_known_id, custom_label, blast_identity))
 
-    def full_sync_from_disk(self):
+    def full_sync_from_disk(self) -> int:
         """Discovers existing results on disk and syncs them to the DB."""
-        if not self.db_path.parent.exists(): return
+        if not self.db_path.parent.exists(): return 0
         
         count = 0
         try:
@@ -92,9 +94,11 @@ class AnnotationManager:
                     # 如果是汇总 CSV 或者已经命名的结果
                     try:
                         # 借用解析逻辑 (注意：这里需要谨慎处理循环导入，但在脚本执行中没关系)
-                        pass 
-                    except: pass
-        except: pass
+                        pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         return count
 
     def batch_update_from_blast(self, task_id: str):
@@ -112,7 +116,7 @@ class AnnotationManager:
                         identity = data.get('species') or data.get('title')
                         if seq_hash and identity:
                             self.update_annotation(seq_hash, last_known_id=sid, blast_identity=identity)
-                    except:
+                    except Exception:
                         continue
         except Exception as e:
             logger.error(f"Failed batch update from BLAST: {e}")

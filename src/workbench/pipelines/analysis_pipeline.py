@@ -1,9 +1,12 @@
-import os
-from pathlib import Path
 import json
 import logging
+import os
+import shutil
+from pathlib import Path
+from typing import Dict, Any, Optional
 
 from src.workbench.wrappers.tree_factory import TreeFactory
+
 
 class AnalysisPipeline:
     """
@@ -47,7 +50,7 @@ class AnalysisPipeline:
                     count = sum(1 for line in f if line.startswith(">"))
                     
             return {"count": count, "type": seq_type}
-        except:
+        except Exception:
             return {"count": 1, "type": "dna"}
 
     # --- Phase 1: FASTA (Inlet) ---
@@ -89,7 +92,6 @@ class AnalysisPipeline:
         results = {"status": "success", "file": str(output_fasta)}
         
         if method == "none":
-            import shutil
             shutil.copy(input_fasta, output_fasta)
             return results
             
@@ -157,7 +159,6 @@ class AnalysisPipeline:
             
         except Exception as e:
             self.logger.error(f"Internal alignment failed: {e}")
-            import shutil
             shutil.copy(input_fasta, output_fasta)
             results["status"] = "warning"
             results["error"] = f"Alignment component failed, using raw sequences: {str(e)}"

@@ -3,12 +3,13 @@ BLAST执行器模块
 负责执行BLAST搜索并与NCBI服务器通信
 """
 
+import logging
 import ssl
 import threading
 import time
-import logging
 import urllib.error
 from urllib.request import HTTPSHandler, build_opener, install_opener
+
 from Bio.Blast import NCBIWWW
 
 # 常量定义

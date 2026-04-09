@@ -24,48 +24,85 @@ export const useSequenceStore = defineStore('sequence', () => {
       addedAt: new Date().toISOString()
     }
     
-    try {
-      const bridge = getBridge()
-      const success = bridge.db_save_sequence(JSON.stringify(newSeq))
-      return success
-    } catch (e) {
-      console.error('Failed to save sequence to DB', e)
-      return false
-    }
+    return new Promise<boolean>((resolve) => {
+      try {
+        const bridge = getBridge()
+        if (bridge && bridge.db_save_sequence) {
+          bridge.db_save_sequence(JSON.stringify(newSeq), (success: boolean) => {
+            resolve(success)
+          })
+        } else {
+          resolve(false)
+        }
+      } catch (e) {
+        console.error('Failed to save sequence to DB', e)
+        resolve(false)
+      }
+    })
   }
 
   async function loadSequencesBySample(sampleId: string) {
-    try {
-      const bridge = getBridge()
-      const jsonStr = bridge.db_load_sequences_by_sample(sampleId)
-      activeSequences.value = JSON.parse(jsonStr)
-      return activeSequences.value
-    } catch (e) {
-      console.error('Failed to load sequences', e)
-      return []
-    }
+    return new Promise<SequenceRecord[]>((resolve) => {
+      try {
+        const bridge = getBridge()
+        if (bridge && bridge.db_load_sequences_by_sample) {
+          bridge.db_load_sequences_by_sample(sampleId, (jsonStr: string) => {
+            try {
+              const data = JSON.parse(jsonStr)
+              activeSequences.value = data
+              resolve(data)
+            } catch (err) {
+              resolve([])
+            }
+          })
+        } else {
+          resolve([])
+        }
+      } catch (e) {
+        console.error('Failed to load sequences', e)
+        resolve([])
+      }
+    })
   }
 
   async function searchSequences(keyword: string) {
-    try {
-      const bridge = getBridge()
-      const jsonStr = bridge.db_search_sequences(keyword)
-      return JSON.parse(jsonStr) as SequenceRecord[]
-    } catch (e) {
-      console.error('Failed to search sequences', e)
-      return []
-    }
+    return new Promise<SequenceRecord[]>((resolve) => {
+      try {
+        const bridge = getBridge()
+        if (bridge && bridge.db_search_sequences) {
+          bridge.db_search_sequences(keyword, (jsonStr: string) => {
+            try {
+              resolve(JSON.parse(jsonStr) as SequenceRecord[])
+            } catch (err) {
+              resolve([])
+            }
+          })
+        } else {
+          resolve([])
+        }
+      } catch (e) {
+        console.error('Failed to search sequences', e)
+        resolve([])
+      }
+    })
   }
 
   async function deleteSequence(id: string) {
-    try {
-      const bridge = getBridge()
-      const success = bridge.db_delete_sequence(id)
-      return success
-    } catch (e) {
-      console.error('Failed to delete sequence', e)
-      return false
-    }
+    return new Promise<boolean>((resolve) => {
+      try {
+        const bridge = getBridge()
+        if (bridge && bridge.db_delete_sequence) {
+          bridge.db_delete_sequence(id, (success: boolean) => {
+            resolve(success)
+          })
+        } else {
+          resolve(false)
+        }
+      } catch (e) {
+        console.error('Failed to delete sequence', e)
+        resolve(false)
+      }
+    })
   }
 
   return {

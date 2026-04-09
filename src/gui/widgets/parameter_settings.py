@@ -2,11 +2,12 @@
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox, QComboBox, QLineEdit,
-    QLabel, QPushButton, QDialog, QTabWidget, QGroupBox, QMessageBox
+    QLabel, QPushButton, QDialog, QTabWidget, QGroupBox
 )
 
 from src.utils.config_manager import get_config_manager
 from src.utils.ui_translation_manager import get_ui_translator
+
 
 # =============================================================================
 #  高级参数设置对话框 (现代化 Tab 布局)

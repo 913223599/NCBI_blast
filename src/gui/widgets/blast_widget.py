@@ -1,22 +1,23 @@
-"""
-BLAST Analysis Module
+"""BLAST Analysis Module
 Migrated from original MainWindow
 """
 from pathlib import Path
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, 
-                             QStatusBar, QMessageBox, QDialog, QSplitter)
-
-# Import original widgets components
-from src.gui.widgets.file_selector import FileSelectorWidget
-from src.gui.widgets.control_panel import ControlPanelWidget
-from src.gui.widgets.result_viewer import ResultViewerWidget
-from src.gui.widgets.task_name_dialog import TaskNameDialog
-
+from PyQt6.QtCore import pyqtSignal, pyqtSlot
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+                             QMessageBox, QDialog)
 
 # Threads and Processors
 from src.gui.threads.processing_thread import ProcessingThread, MultiSequenceProcessingThread
+from src.gui.widgets.control_panel import ControlPanelWidget
+# Import original widgets components
+from src.gui.widgets.file_selector import FileSelectorWidget
+from src.gui.widgets.parameter_settings import ParameterSettingsWidget
+from src.gui.widgets.result_viewer import ResultViewerWidget
+from src.gui.widgets.task_name_dialog import TaskNameDialog
 from src.utils.config_manager import get_config_manager
+from src.blast.local_blast import LocalBatchProcessor as MultiSequenceBatchProcessor
+
 
 class BlastWidget(QWidget):
     """
@@ -166,6 +167,9 @@ class BlastWidget(QWidget):
                 processor = ElasticBlastProcessor(max_workers=1, advanced_settings=advanced_settings, task_name=task_name)
                 thread = ProcessingThread(processor, file_paths)
                 return processor, thread
+            except ImportError:
+                QMessageBox.critical(self, "Error", "Elastic BLAST module not available.")
+                return None, None
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Elastic BLAST Error: {e}")
                 return None, None

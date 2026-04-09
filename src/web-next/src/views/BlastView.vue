@@ -23,24 +23,33 @@ const { t } = useI18n()
 // 注入Composables
 const taskManager = useBlastTaskManager()
 const resultHandler = useBlastResultHandler()
+const { isTranslating, fetchTaskResults, exportResults, translateAll } = resultHandler
 
-// 直接在组件内部管理弹窗状态，避免Composable在HMR时的状态泄漏
+// 使用并解构查看器状态，确保模板能自动解包 Ref
 const detailViewer = useBlastDetailViewer()
+const { 
+  showAllHitsDialog, 
+  allHitsData, 
+  currentQueryTitle,
+  _isLocked,
+  _hasUserInteracted,
+  _isOpenInternal
+} = detailViewer
 
 // 立即强制锁定，防止任何意外弹出
-detailViewer._isLocked.value = true
-detailViewer._hasUserInteracted.value = false
-detailViewer._isOpenInternal.value = false
+_isLocked.value = true
+_hasUserInteracted.value = false
+_isOpenInternal.value = false
 detailViewer.closeDialog()
 
 // 创建本地计算属性，添加更严格的保护
 const shouldShowDetailDialog = computed(() => {
   // 必须同时满足所有条件
-  const hasValidTitle = detailViewer.currentQueryTitle && 
-                        typeof detailViewer.currentQueryTitle === 'string' && 
-                        detailViewer.currentQueryTitle.trim().length > 0
+  const hasValidTitle = currentQueryTitle.value && 
+                        typeof currentQueryTitle.value === 'string' && 
+                        currentQueryTitle.value.trim().length > 0
   
-  return detailViewer.showAllHitsDialog && hasValidTitle
+  return showAllHitsDialog.value && hasValidTitle
 })
 
 /* -------- 核心状态 -------- */
@@ -128,20 +137,16 @@ function launchBlast(): void {
 /**
  * 导出结果（委托给ResultHandler）
  */
-async function exportResults(): Promise<void> {
-  await resultHandler.exportResults()
-}
+// 已通过解构直接使用 handleResult.exportResults
 
 /**
  * 批量翻译（委托给ResultHandler）
  */
-async function translateAll(): Promise<void> {
-  await resultHandler.translateAll()
-}
+// 已通过解构直接使用 handleResult.translateAll
 
 function selectTask(taskId: string): void {
   blast.setActiveTask(taskId)
-  resultHandler.fetchTaskResults(taskId)
+  fetchTaskResults(taskId)
 }
 
 function toggleSideTool(tool: 'input' | 'params' | 'history') {
@@ -197,7 +202,7 @@ function resumeTask(taskId: string, event: Event) {
   event.stopPropagation()
   taskManager.resumeTask(taskId, (tid) => {
     taskManager.startPolling(tid, (completedTaskId) => {
-      resultHandler.fetchTaskResults(completedTaskId)
+      fetchTaskResults(completedTaskId)
     })
   })
 }
@@ -275,9 +280,9 @@ onMounted(() => {
   // 在组件挂载时强制重置，防止Vite热更新导致的状态不一致
   
   // 立即强制重置所有状态
-  detailViewer._isLocked.value = true
-  detailViewer._hasUserInteracted.value = false
-  detailViewer._isOpenInternal.value = false
+  _isLocked.value = true
+  _hasUserInteracted.value = false
+  _isOpenInternal.value = false
   detailViewer.closeDialog()
   
   document.addEventListener('click', () => { openDropdown.value = null; })
@@ -295,7 +300,7 @@ onMounted(() => {
             blast.tasks.forEach(t => { 
               if (t.status === 'running') {
                 taskManager.startPolling(t.taskId, (taskId) => {
-                  resultHandler.fetchTaskResults(taskId)
+                  fetchTaskResults(taskId)
                 })
               }
             })
@@ -471,33 +476,35 @@ onUnmounted(() => {
 
       <!-- 结果主区域 -->
       <div class="blast-results">
-        <div class="results-header">
-           <div class="title">📊 {{ blast.resultTitle }}</div>
-           <div class="actions">
-              <button class="btn-ai" @click="translateAll" :disabled="resultHandler.isTranslating">{{ t('blast.btn.trans') }}</button>
-              <button class="btn-export" @click="exportResults">{{ t('blast.btn.export') }}</button>
-           </div>
-        </div>
+         <div class="results-header">
+            <div class="title">📊 {{ blast.resultTitle }}</div>
+            <div class="actions">
+               <button class="btn-ai" @click="translateAll" :disabled="isTranslating">{{ t('blast.btn.trans') }}</button>
+               <button class="btn-export" @click="exportResults">{{ t('blast.btn.export') }}</button>
+            </div>
+         </div>
         <div class="table-wrapper scroll-v">
            <table v-if="blast.results.length > 0">
              <thead>
-               <tr>
-                 <th>{{ t('blast.res.query') }}</th>
-                 <th>{{ t('blast.res.detail') }}</th>
-                 <th>{{ t('blast.res.bg') }}</th>
-                 <th>{{ t('blast.res.id') }}</th>
-                 <th>{{ t('blast.res.eval') }}</th>
-                 <th>详情</th>
-                 <th>NCBI</th>
-               </tr>
+                <tr>
+                  <th>{{ t('blast.res.query') }}</th>
+                  <th>{{ t('blast.res.detail') }} (含全部结果)</th>
+                  <th>{{ t('blast.res.bg') }}</th>
+                  <th>{{ t('blast.res.id') }}</th>
+                  <th>{{ t('blast.res.eval') }}</th>
+                  <th>NCBI</th>
+                </tr>
              </thead>
              <tbody>
-               <tr v-for="h in blast.results" :key="h.accession">
+               <tr v-for="h in blast.results" :key="h.accession" class="blast-row-neo">
                  <td class="mono">{{ h.queryTitle }}</td>
-                 <td>
+                 <td class="detail-cell-neo">
                    <div class="sp">{{ h.translatedName || h.speciesName }}</div>
                    <div class="st">{{ h.genusStrain }}</div>
                    <div class="gs">{{ h.geneSource }}</div>
+                   <div v-if="h.csvFile" class="view-all-link" @click="viewAllHits(h.csvFile, h.queryTitle)">
+                     查看完整比对列表 ({{ h.csvFile ? '更多' : '0' }}) →
+                   </div>
                  </td>
                  <td class="bio">
                     <div class="tag">{{ h.seqType }}</div>
@@ -509,17 +516,6 @@ onUnmounted(() => {
                     </div>
                  </td>
                  <td class="mono">{{ h.evalue }}</td>
-                 <td>
-                   <button 
-                     v-if="h.csvFile" 
-                     class="detail-btn" 
-                     @click="viewAllHits(h.csvFile, h.queryTitle)"
-                     title="查看所有比对结果"
-                   >
-                     📋 全部
-                   </button>
-                   <span v-else class="no-link">-</span>
-                 </td>
                  <td>
                    <button 
                      v-if="h.accession && h.accession !== '-' && h.accession !== 'N/A'" 
@@ -543,53 +539,55 @@ onUnmounted(() => {
     </div>
 
     <!-- 所有比对结果弹窗 -->
-    <!-- 使用 shouldShowDetailDialog 本地计算属性，添加最严格的保护 -->
-    <div 
-      v-if="shouldShowDetailDialog" 
-      class="dialog-overlay" 
-      @click.self="detailViewer.closeDialog"
-    >
-      <div class="dialog-container">
-        <div class="dialog-header">
-          <h3>📋 {{ detailViewer.currentQueryTitle }} - 全部比对结果 ({{ detailViewer.allHitsData.length }} 条)</h3>
-          <button class="close-btn" @click="detailViewer.closeDialog">✕</button>
-        </div>
-        <div class="dialog-body scroll-v">
-          <table v-if="detailViewer.allHitsData.length > 0" class="detail-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>物种名称</th>
-                <th>相似度</th>
-                <th>E值</th>
-                <th>Accession</th>
-                <th>标题</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(hit, index) in detailViewer.allHitsData" :key="index">
-                <td>{{ index + 1 }}</td>
-                <td>{{ hit.species || '-' }}</td>
-                <td>
-                  <span :class="parseFloat(hit.similarity) >= 98 ? 'high-id' : 'low-id'">
-                    {{ hit.similarity }}
-                  </span>
-                </td>
-                <td class="mono">{{ hit.evalue }}</td>
-                <td class="mono">{{ hit.acc || '-' }}</td>
-                <td class="title-cell">{{ hit.title || '-' }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-else class="empty-hint">
-            <p>加载中...</p>
+    <Transition name="dialog-fade">
+      <div 
+        v-if="shouldShowDetailDialog" 
+        class="dialog-overlay" 
+        @click.self="detailViewer.closeDialog"
+      >
+        <div class="dialog-container">
+          <div class="dialog-header">
+            <h3>📋 {{ currentQueryTitle }} - 全部比对结果 ({{ allHitsData.length }} 条)</h3>
+            <button class="close-btn" @click="detailViewer.closeDialog">✕</button>
+          </div>
+          <div class="dialog-body scroll-v">
+            <table v-if="allHitsData.length > 0" class="detail-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>物种名称</th>
+                  <th>相似度</th>
+                  <th>E值</th>
+                  <th>Accession</th>
+                  <th>标题</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(hit, index) in allHitsData" :key="index" v-memo="[hit.acc, hit.similarity]">
+                  <td>{{ index + 1 }}</td>
+                  <td>{{ hit.species || '-' }}</td>
+                  <td>
+                    <span :class="parseFloat(hit.similarity) >= 98 ? 'high-id' : 'low-id'">
+                      {{ hit.similarity }}
+                    </span>
+                  </td>
+                  <td class="mono">{{ hit.evalue }}</td>
+                  <td class="mono">{{ hit.acc || '-' }}</td>
+                  <td class="title-cell">{{ hit.title || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-else class="loading-skeleton-container">
+              <div v-for="i in 10" :key="i" class="skeleton-row"></div>
+              <p class="loading-text">正在精准解析 {{ allHitsData.length === 0 ? '' : allHitsData.length }} 条比对结果...</p>
+            </div>
+          </div>
+          <div class="dialog-footer">
+            <button class="btn-primary" @click="detailViewer.closeDialog">确认</button>
           </div>
         </div>
-        <div class="dialog-footer">
-          <button class="btn-primary" @click="detailViewer.closeDialog">关闭</button>
-        </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
@@ -839,25 +837,35 @@ tbody tr:hover { background: #fafbfc; }
 .scroll-v::-webkit-scrollbar-track { background: transparent; }
 
 .empty-hint { height: 80%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; text-align: center; }
-.empty-hint .icon { font-size: 3.5rem; opacity: 0.15; margin-bottom: 16px; }
-.empty-hint p { font-size: 0.9rem; font-weight: 500; }
-
-/* 详情按钮 */
-.detail-btn {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: white;
-  border: none;
-  padding: 6px 12px;
-  border-radius: 8px;
+/* 提示链接样式 */
+.view-all-link {
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: #3b82f6;
   cursor: pointer;
-  font-size: 0.78rem;
-  font-weight: 700;
+  display: inline-block;
+  font-weight: 600;
+  padding: 2px 0;
+  border-bottom: 1px solid transparent;
   transition: all 0.2s;
-  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.25);
 }
-.detail-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 10px rgba(245, 158, 11, 0.35);
+
+.view-all-link:hover {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  transform: translateX(4px);
+}
+
+.blast-row-neo {
+  transition: background-color 0.2s;
+}
+
+.blast-row-neo:hover {
+  background-color: #f8fafc !important;
+}
+
+.detail-cell-neo {
+  padding-bottom: 14px !important;
 }
 
 /* 弹窗样式 */
@@ -992,5 +1000,57 @@ tbody tr:hover { background: #fafbfc; }
 .btn-primary:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3);
+}
+
+/* 弹窗过渡动画 */
+.dialog-fade-enter-active,
+.dialog-fade-leave-active {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dialog-fade-enter-active .dialog-container {
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.dialog-fade-enter-from,
+.dialog-fade-leave-to {
+  opacity: 0;
+}
+
+.dialog-fade-enter-from .dialog-container {
+  transform: scale(0.96) translateY(10px);
+  opacity: 0;
+}
+
+.dialog-fade-leave-to .dialog-container {
+  transform: scale(1.01);
+  opacity: 0;
+}
+
+/* 骨架屏样式 */
+.loading-skeleton-container {
+  padding: 24px;
+}
+
+.skeleton-row {
+  height: 20px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s infinite;
+  margin-bottom: 12px;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.loading-text {
+  text-align: center;
+  color: #64748b;
+  font-size: 0.85rem;
+  margin-top: 20px;
+  font-weight: 500;
 }
 </style>

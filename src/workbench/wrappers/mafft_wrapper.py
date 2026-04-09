@@ -1,7 +1,9 @@
 import os
 import subprocess
 from pathlib import Path
+
 from ..models.gpu_manager import GPUManager
+
 
 class MAFFTWrapper:
     """

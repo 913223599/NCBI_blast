@@ -3,8 +3,8 @@
 将错误的相对导入改为正确的相对导入
 """
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 COMPONENT_ROOT = Path(__file__).resolve().parent.parent / "ncbi_blast_component"
 

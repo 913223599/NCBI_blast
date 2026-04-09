@@ -81,6 +81,10 @@ export interface PyBridge {
     db_load_all(callback?: (res: string) => void): void
     db_clear_all(callback?: (res: boolean) => void): void
     db_save_code_lookup(lookupJson: string, callback?: (res: boolean) => void): void
+    db_save_sequence(seqJson: string, callback?: (res: boolean) => void): void
+    db_load_sequences_by_sample(sampleId: string, callback?: (res: string) => void): void
+    db_search_sequences(keyword: string, callback?: (res: string) => void): void
+    db_delete_sequence(seqId: string, callback?: (res: boolean) => void): void
 
     [key: string]: (...args: any[]) => any
 }

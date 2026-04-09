@@ -4,26 +4,25 @@ web_container.py — 主入口
 WebBridge 通过 Mixin 组合了 6 个职责域模块，保持 QWebChannel 注册接口不变。
 WebContainer / DnDWebEngineView / WebPage 保留原位。
 """
-import os
+import datetime
 import json
 import logging
-import datetime
+import os
 from pathlib import Path
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QFileDialog
-from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+from PyQt6.QtCore import QUrl, QObject, pyqtSignal
 from PyQt6.QtWebChannel import QWebChannel
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QFileDialog
 
-from src.blast.manager import get_blast_manager
-from src.gui.workers.tree_worker_thread import TreeWorker
-
+from src.gui.widgets.bridge_blast import BlastBridgeMixin
 # --- Mixin 模块导入 ---
 from src.gui.widgets.bridge_core import CoreBridgeMixin
-from src.gui.widgets.bridge_strain_db import StrainDBMixin
-from src.gui.widgets.bridge_blast import BlastBridgeMixin
-from src.gui.widgets.bridge_tree import TreeBridgeMixin
-from src.gui.widgets.bridge_translation import TranslationBridgeMixin
 from src.gui.widgets.bridge_settings import SettingsBridgeMixin
+from src.gui.widgets.bridge_strain_db import StrainDBMixin
+from src.gui.widgets.bridge_translation import TranslationBridgeMixin
+from src.gui.widgets.bridge_tree import TreeBridgeMixin
 
 
 class WebBridge(
@@ -48,7 +47,9 @@ class WebBridge(
         self.container = container
         self.logger = logging.getLogger(__name__)
 
-        # Initialize BlastManager
+        # Initialize Business Logic Workers
+        from src.blast.manager import get_blast_manager
+        
         self.blast_manager = get_blast_manager()
 
         # Setup Arrearage Callback for QwenTranslator
@@ -461,6 +462,7 @@ class WebContainer(QWidget):
         self.logger.info(f"Starting tree analysis ({mode}) for {final_path}")
         self.web_view.page().runJavaScript("if(window.showLoading) window.showLoading('正在构建进化树...');")
 
+        from src.gui.workers.tree_worker_thread import TreeWorker
         self.tree_worker = TreeWorker(final_path, params=params)
         self.tree_worker.finished.connect(self.on_tree_finished)
         self.tree_worker.error.connect(self.on_tree_error)

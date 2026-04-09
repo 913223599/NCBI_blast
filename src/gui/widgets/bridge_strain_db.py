@@ -4,9 +4,11 @@ WebBridge Mixin: 样本库 & 基因库 CRUD 接口
 职责：所有与 strain.db / sequences.db 交互的 pyqtSlot
 """
 import json
+
 from PyQt6.QtCore import pyqtSlot
-from src.backend.strain_db import get_strain_db_manager
+
 from src.backend.sequence_db import get_sequence_db_manager
+from src.backend.strain_db import get_strain_db_manager
 
 
 class StrainDBMixin:

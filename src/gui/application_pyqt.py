@@ -2,15 +2,17 @@
 PyQt6应用程序主类
 """
 
-import sys
 import os
+import sys
+
 import psutil
 from PyQt6.QtWidgets import QApplication, QWizard
 
 from src.gui.main_window_pyqt import MainWindow
-from src.utils.config_manager import get_config_manager
 from src.gui.widgets.setup_wizard import SetupWizard
+from src.utils.config_manager import get_config_manager
 from src.workbench.models.tool_config import ToolConfig
+
 
 class Application:
     """

@@ -318,18 +318,25 @@
                 </div>
 
                 <!-- 右侧：冻存网格 -->
-                <div class="box-grid-area">
-                  <div class="box-grid" :style="{
-                    gridTemplateColumns: `repeat(${activeBox.cols}, 1fr)`
-                  }">
+                <div class="box-grid-area" @mousedown.self="clearSelection" @mouseleave="handleGlobalMouseUp">
+                  <div 
+                    class="box-grid" 
+                    :style="{
+                      gridTemplateColumns: `repeat(${activeBox.cols}, 1fr)`
+                    }"
+                    @mouseup="handleGlobalMouseUp"
+                  >
                     <div
-                      v-for="pos in activeBox.positions"
+                      v-for="(pos, idx) in activeBox.positions"
                       :key="pos.label"
                       class="position-cell"
-                      :class="{ occupied: activeBox ? isPositionOccupied(selectedShelf?.id || '', selectedCabinet?.id || '', selectedDrawer?.id || '', activeBox.id, pos.label) : false }"
+                      :class="{ 
+                        occupied: activeBox ? isPositionOccupied(selectedShelf?.id || '', selectedCabinet?.id || '', selectedDrawer?.id || '', activeBox.id, pos.label) : false,
+                        selected: selectedIndices.has(Number(idx))
+                      }"
+                      @mousedown="handlePositionMouseDown(Number(idx), pos)"
+                      @mouseenter="handlePositionMouseEnter(Number(idx), pos)"
                       @click="handlePositionLeftClick(pos, activeBox)"
-                      @mouseenter="handlePositionHover(pos, activeBox)"
-                      @mouseleave="handlePositionLeave"
                     >
                       <div class="pos-label">{{ pos.label }}</div>
                       <div v-if="activeBox && isPositionOccupied(selectedShelf?.id || '', selectedCabinet?.id || '', selectedDrawer?.id || '', activeBox.id, pos.label)" class="pos-indicator"></div>
@@ -353,6 +360,7 @@
       :drawer-id="entryPosition.drawerId"
       :box-id="entryPosition.boxId"
       :position="entryPosition.position"
+      :selected-positions="entryPosition.selectedPositions"
       @close="showEntryDialog = false"
       @saved="handleSampleSaved"
     />
@@ -377,7 +385,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, toRaw } from 'vue'
+import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import type { StrainRecord } from '../../stores/strain'
@@ -402,6 +410,7 @@ watch(() => strain.activeFreezerId, () => {
   selectedCabinet.value = null
   selectedDrawer.value = null
   activeBoxId.value = ''
+  selectedIndices.value.clear()
   updateBoxOccupancy()
 })
 
@@ -423,7 +432,13 @@ const entryPosition = ref<{
   drawerId: string
   boxId: string
   position: string
+  selectedPositions?: string[]
 } | null>(null)
+
+// 拖拽多选相关
+const isSelecting = ref(false)
+const selectionStartIdx = ref<number | null>(null)
+const selectedIndices = ref<Set<number>>(new Set())
 
 const totalPositions = computed(() => {
   if (!strain.activeFreezer) return 0
@@ -597,6 +612,7 @@ function selectDrawer(drawer: any) {
   if (drawer.boxes.length > 0) {
     activeBoxId.value = drawer.boxes[0].id
   }
+  selectedIndices.value.clear()
 }
 
 function handlePositionHover(position: any, box: any) {
@@ -615,11 +631,6 @@ function handlePositionHover(position: any, box: any) {
   } else {
     hoveredSample.value = null
   }
-}
-
-function handlePositionLeave() {
-  // 我们不需要立刻清除，或者可以保持显示
-  // 为了清爽，鼠标离开网格时可以清除
 }
 
 // 过滤掉不适合在快速预览显示的元数据字段
@@ -686,6 +697,12 @@ function navigateToLevel(level: 'shelf' | 'cabinet' | 'drawer' | 'box') {
 }
 
 function handlePositionLeftClick(position: any, box: any) {
+  // 如果当前有序选（拖拽结束），则优先触发此处的点击拦截逻辑
+  if (selectedIndices.value.size > 1) {
+    // 已经在 handleGlobalMouseUp 中处理了
+    return
+  }
+
   if (position.occupied) {
     // 显示样本详情
     const sample = getSampleByPosition(
@@ -701,6 +718,9 @@ function handlePositionLeftClick(position: any, box: any) {
       showDetailDialog.value = true
     }
   } else {
+    // 清除可能存在的旧选择
+    selectedIndices.value.clear()
+    
     // 显示录入对话框
     entryPosition.value = {
       freezerId: strain.activeFreezer!.id,
@@ -712,6 +732,89 @@ function handlePositionLeftClick(position: any, box: any) {
     }
     showEntryDialog.value = true
   }
+}
+
+// 鼠标按下：开始框选
+function handlePositionMouseDown(idx: number, pos: any) {
+  if (pos.occupied) return
+  
+  isSelecting.value = true
+  selectionStartIdx.value = idx
+  selectedIndices.value.clear()
+  selectedIndices.value.add(idx)
+}
+
+// 鼠标进入：更新框选范围
+function handlePositionMouseEnter(idx: number, pos: any) {
+  // 预览悬停逻辑保持（如果不在选择中）
+  if (!isSelecting.value) {
+    handlePositionHover(pos, activeBox.value)
+    return
+  }
+
+  if (selectionStartIdx.value === null || !activeBox.value) return
+
+  // 计算矩形范围
+  const startIdx = selectionStartIdx.value
+  const endIdx = idx
+  
+  const cols = activeBox.value.cols
+  const startRow = Math.floor(startIdx / cols)
+  const startCol = startIdx % cols
+  const endRow = Math.floor(endIdx / cols)
+  const endCol = endIdx % cols
+
+  const minRow = Math.min(startRow, endRow)
+  const maxRow = Math.max(startRow, endRow)
+  const minCol = Math.min(startCol, endCol)
+  const maxCol = Math.max(startCol, endCol)
+
+  const newSelection = new Set<number>()
+  for (let r = minRow; r <= maxRow; r++) {
+    for (let c = minCol; c <= maxCol; c++) {
+      const currentIdx = r * cols + c
+      const currentPos = activeBox.value.positions[currentIdx]
+      // 仅允许选择空的格子
+      if (currentPos && !isPositionOccupied(
+        selectedShelf.value.id,
+        selectedCabinet.value.id,
+        selectedDrawer.value.id,
+        activeBox.value.id,
+        currentPos.label
+      )) {
+        newSelection.add(currentIdx)
+      }
+    }
+  }
+  selectedIndices.value = newSelection
+}
+
+// 全局鼠标松开：结束选择并触发对话框
+function handleGlobalMouseUp() {
+  if (!isSelecting.value) return
+  isSelecting.value = false
+  
+  if (selectedIndices.value.size > 1 && activeBox.value) {
+    const positions = Array.from(selectedIndices.value)
+      .sort((a, b) => a - b)
+      .map(idx => activeBox.value!.positions[idx].label)
+
+    entryPosition.value = {
+      freezerId: strain.activeFreezer!.id,
+      shelfId: selectedShelf.value.id,
+      cabinetId: selectedCabinet.value.id,
+      drawerId: selectedDrawer.value.id,
+      boxId: activeBox.value.id,
+      position: positions[0], // 以第一个为起始基准
+      selectedPositions: positions
+    }
+    showEntryDialog.value = true
+  }
+}
+
+// 清除框选
+function clearSelection() {
+  selectedIndices.value.clear()
 }
 
 function getSampleByPosition(
@@ -791,9 +894,6 @@ function updateBoxOccupancy() {
   strain.freezers = [...strain.freezers]
 }
 
-// 组件挂载时更新占用状态
-updateBoxOccupancy()
-
 function editFreezer() {
   showEditDialog.value = true
 }
@@ -811,6 +911,33 @@ function closeDetail() {
   showDetailDialog.value = false
   selectedSample.value = null
 }
+
+// 全局点击拦截：点击网格以外区域清除框选状态
+function handleOutsideClick(e: MouseEvent) {
+  if (selectedIndices.value.size === 0 || isSelecting.value) return
+
+  const target = e.target as HTMLElement
+  
+  // 1. 如果点击的是网格内部，由网格自身的 handlePositionMouseDown 处理，此处跳过
+  const gridArea = document.querySelector('.box-grid-area')
+  if (gridArea?.contains(target)) return
+
+  // 2. 如果点击的是弹窗内部（正在录入），不应清除选区
+  const dialog = document.querySelector('.dialog-overlay')
+  if (dialog?.contains(target)) return
+
+  // 3. 点击其他任何空白区域，清除选区
+  clearSelection()
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', handleOutsideClick)
+  updateBoxOccupancy()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', handleOutsideClick)
+})
 
 function addShelf() {
   appStore.showNotification('添加层功能开发中', 'info')
@@ -1643,6 +1770,17 @@ function addShelf() {
 
 .position-cell.occupied:hover {
   background: linear-gradient(135deg, #fecaca, #fca5a5);
+}
+
+.position-cell.selected {
+  background: #dbeafe !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+  z-index: 5;
+}
+
+.position-cell.selected .pos-label {
+  color: #1d4ed8;
 }
 
 .pos-label {

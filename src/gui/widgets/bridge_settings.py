@@ -3,9 +3,10 @@
 WebBridge Mixin: AI 模型配置 + 系统设置
 职责：API Key 管理、AI 模型增删切换、UI 语言、工作区拓扑持久化
 """
-import os
 import json
+import os
 from pathlib import Path
+
 from PyQt6.QtCore import pyqtSlot
 
 

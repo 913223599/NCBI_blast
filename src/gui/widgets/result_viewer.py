@@ -4,20 +4,20 @@
 """
 
 import csv
-import shutil
-import traceback
 import os
 import re
+import shutil
 import time
+import traceback
 from pathlib import Path
 
 from PyQt6.QtGui import QColor, QAction, QStandardItemModel, QStandardItem, QBrush
 from PyQt6.QtWidgets import (QVBoxLayout, QPushButton, QTreeView,
                              QFileDialog, QMessageBox, QHeaderView, QMenu, QHBoxLayout, QGroupBox, QAbstractItemView)
 
-from src.utils.translation import get_blast_result_translator
 from src.gui.widgets.alignment_visualizer import AlignmentVisualizerDialog
 from src.utils.file_handler import FileHandler
+from src.utils.translation import get_blast_result_translator
 
 
 class TranslationWorker(QObject):

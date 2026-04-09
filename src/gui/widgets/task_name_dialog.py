@@ -3,9 +3,11 @@
 在开始处理前让用户输入任务名称
 """
 
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QLineEdit, QPushButton)
 from datetime import datetime
+
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                             QLineEdit, QPushButton)
+
 
 class TaskNameDialog(QDialog):
     def __init__(self, parent=None):

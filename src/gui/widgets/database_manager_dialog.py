@@ -4,14 +4,16 @@
 """
 
 import os
+
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem, 
+    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QLabel, QFileDialog, QComboBox, QLineEdit, QMessageBox,
-    QGroupBox, QProgressBar, QWidget
+    QGroupBox, QProgressBar
 )
 
 from src.blast.database_manager import DatabaseManager
+
 
 class CreateDbThread(QThread):
     """后台创建数据库线程"""

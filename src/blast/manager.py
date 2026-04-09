@@ -1,15 +1,16 @@
-import logging
-import threading
 import json
-import sqlite3
+from enum import Enum
+import logging
 import os
-import shutil
 import queue
-import time
 import re
+import shutil
+import sqlite3
+import threading
+import time
 from datetime import datetime
-from typing import Dict, List, Any, Optional
 from pathlib import Path
+from typing import Dict, List, Any, Optional
 
 from .engine import BlastEngine
 

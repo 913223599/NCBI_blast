@@ -3,12 +3,12 @@
 使用本地数据库进行BLAST搜索，大幅提高查询速度
 """
 
-import subprocess
 import shutil
-from pathlib import Path
-from Bio.Blast import NCBIXML
-
+import subprocess
 import threading
+from pathlib import Path
+
+from Bio.Blast import NCBIXML
 
 # 全局并发控制：限制同时运行的 blastn 进程数，防止 CPU 过载
 # 默认为 4，可根据 CPU 核心数调整

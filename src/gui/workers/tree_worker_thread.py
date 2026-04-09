@@ -1,8 +1,11 @@
-from PyQt6.QtCore import QThread, pyqtSignal
 from pathlib import Path
-from src.workbench.pipelines.analysis_pipeline import AnalysisPipeline
+
+from PyQt6.QtCore import QThread, pyqtSignal
+
 from src.workbench.models.tool_config import ToolConfig
+from src.workbench.pipelines.analysis_pipeline import AnalysisPipeline
 from src.workbench.wrappers.tree_archive_manager import ArchiveManager
+
 
 class TreeWorker(QThread):
     finished = pyqtSignal(dict)

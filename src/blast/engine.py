@@ -1,18 +1,18 @@
+import json
 import logging
+import re
 import threading
 import time
-import json
-import re
-from pathlib import Path
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
 
 from src.utils.file_handler import FileHandler
+from src.workbench.models.annotation_manager import get_annotation_manager
 from .executor import BlastExecutor
 from .parser import BlastResultParser
 from .result_converter import BlastResultConverter
-from src.workbench.models.annotation_manager import get_annotation_manager
 
 logger = logging.getLogger(__name__)
 

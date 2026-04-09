@@ -2,8 +2,8 @@
 Tree Format Converter - 负责进化树格式转换
 职责：处理Newick、二进制等树格式的相互转换
 """
-from pathlib import Path
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

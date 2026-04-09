@@ -1,8 +1,9 @@
-import sqlite3
 import json
 import logging
-from pathlib import Path
+import sqlite3
 from datetime import datetime
+from pathlib import Path
+
 
 class SequenceDBManager:
     def __init__(self, db_path="database/sequences.db"):

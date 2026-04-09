@@ -5,11 +5,13 @@
 
 import os
 import shutil
-from PyQt6.QtWidgets import (QWizard, QWizardPage, QVBoxLayout, QLabel, 
+
+from PyQt6.QtWidgets import (QWizard, QWizardPage, QVBoxLayout, QLabel,
                              QLineEdit, QPushButton, QHBoxLayout, QFileDialog,
                              QMessageBox)
 
 from src.utils.config_manager import get_config_manager
+
 
 class IntroPage(QWizardPage):
     def __init__(self):

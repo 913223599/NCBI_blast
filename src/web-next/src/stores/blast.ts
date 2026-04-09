@@ -47,6 +47,8 @@ export interface BlastHit {
     evalue: string
     accession: string
     translatedName?: string | null
+    /** 查看详情所用的结果 CSV 路径 */
+    csvFile?: string
 }
 
 export const useBlastStore = defineStore('blast', () => {
@@ -215,7 +217,8 @@ export const useBlastStore = defineStore('blast', () => {
                 identity: parseFloat(bestHit.similarity) || 0,
                 evalue: String(bestHit.evalue || 'N/A'),
                 accession: bestHit.acc || 'N/A',
-                translatedName: null
+                translatedName: null,
+                csvFile: resData.csv_file || ''
             }
         } else {
              // Finished but no hits

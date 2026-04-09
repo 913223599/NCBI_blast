@@ -3,10 +3,11 @@
 负责序列文件的读取和结果文件的保存
 """
 
+import logging
 import os
 import warnings
-import logging
 from pathlib import Path
+from typing import List, Dict, Any, Generator
 
 from Bio import SeqIO, BiopythonDeprecationWarning
 

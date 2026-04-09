@@ -66,6 +66,25 @@ body {
     background: var(--bg-page);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+
+    /* 禁用全局文本选取，防止拖拽时选中文字 */
+    user-select: none;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+}
+
+/* 允许输入的控件和特定声明区域恢复选取 */
+input, 
+textarea, 
+[contenteditable="true"], 
+.selectable,
+pre,
+code {
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
 }
 
 a {

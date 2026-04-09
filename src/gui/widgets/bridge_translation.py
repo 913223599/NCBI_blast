@@ -3,9 +3,10 @@
 WebBridge Mixin: AI 翻译 + 生物词典管理
 职责：翻译桥接、异步 AI 翻译队列、词典 CRUD、校对修复
 """
-import re
 import json
+import re
 import threading
+
 from PyQt6.QtCore import pyqtSlot
 
 

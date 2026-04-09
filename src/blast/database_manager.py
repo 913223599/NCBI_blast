@@ -3,10 +3,11 @@
 负责创建、管理和查询本地BLAST数据库
 """
 
+import glob
 import os
 import shutil
 import subprocess
-import glob
+
 
 class DatabaseManager:
     def __init__(self, db_root="database"):
