@@ -13,7 +13,7 @@ class StrainDBManager:
         self._init_db()
 
     def _init_db(self):
-        """初始化数据库表结构"""
+        """初始化数据库表结构及版本迁移"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -55,7 +55,30 @@ class StrainDBManager:
                     FOREIGN KEY (freezer_id) REFERENCES freezers (id)
                 )
             ''')
-            # 3. 系统配置表 - 存储编码字典等全局设置
+
+            # 3. 动态升级：向 records 表追加缺失的字段 (P1 改动同步)
+            # 通过 pragma table_info 检查列是否存在
+            cursor.execute("PRAGMA table_info(records)")
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            new_columns = [
+                ('sample_code', 'TEXT'),
+                ('code_source', 'TEXT'),
+                ('code_category', 'TEXT'),
+                ('code_genus', 'TEXT'),
+                ('code_species', 'TEXT'),
+                ('code_passage', 'INTEGER'),
+                ('code_serial', 'INTEGER'),
+                ('sequence', 'TEXT'),
+                ('country', 'TEXT')
+            ]
+            
+            for col_name, col_type in new_columns:
+                if col_name not in columns:
+                    self.logger.info(f"Database Migration: Adding column {col_name} to records table")
+                    cursor.execute(f"ALTER TABLE records ADD COLUMN {col_name} {col_type}")
+
+            # 4. 系统配置表 - 存储编码字典等全局设置
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS sys_config (
                     key TEXT PRIMARY KEY,
@@ -111,7 +134,7 @@ class StrainDBManager:
             return False
 
     def save_record(self, record_data):
-        """保存或更新样本记录"""
+        """保存或更新样本记录 (适应 14 位编号系统)"""
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
@@ -120,24 +143,46 @@ class StrainDBManager:
             metadata = json.dumps(record_data.get('metadata', {}))
             now = datetime.now().isoformat()
             
-            fields = [
-                'id', 'name', 'accession', 'species', 'strain', 'sampleType', 
-                'sequenceType', 'source', 'host', 'collectionDate', 
-                'freezerId', 'shelfId', 'cabinetId', 'drawerId', 'boxId', 'position'
+            # 映射前端驼峰到后端下划线字段
+            fields_mapping = [
+                ('id', 'id'),
+                ('name', 'name'),
+                ('accession', 'accession'),
+                ('species', 'species'),
+                ('strain', 'strain'),
+                ('sample_type', 'sampleType'),
+                ('sequence_type', 'sequenceType'),
+                ('source', 'source'),
+                ('host', 'host'),
+                ('collection_date', 'collectionDate'),
+                ('freezer_id', 'freezerId'),
+                ('shelf_id', 'shelfId'),
+                ('cabinet_id', 'cabinetId'),
+                ('drawer_id', 'drawerId'),
+                ('box_id', 'boxId'),
+                ('position', 'position'),
+                ('sample_code', 'sampleCode'),
+                ('code_source', 'codeSource'),
+                ('code_category', 'codeCategory'),
+                ('code_genus', 'codeGenus'),
+                ('code_species', 'codeSpecies'),
+                ('code_passage', 'codePassage'),
+                ('code_serial', 'codeSerial'),
+                ('sequence', 'sequence'),
+                ('country', 'country')
             ]
             
-            values = [record_data.get(f) for f in fields]
+            col_names = [m[0] for m in fields_mapping] + ['metadata', 'added_at']
+            values = [record_data.get(m[1]) for m in fields_mapping]
             values.append(metadata)
             values.append(record_data.get('addedAt') or now)
             
+            cols_str = ", ".join(col_names)
+            placeholders = ", ".join(["?"] * len(col_names))
+            
             cursor.execute(f'''
-                INSERT OR REPLACE INTO records (
-                    id, name, accession, species, strain, sample_type, 
-                    sequence_type, source, host, collection_date, 
-                    freezer_id, shelf_id, cabinet_id, drawer_id, box_id, position,
-                    metadata, added_at
-                )
-                VALUES ({",".join(["?"] * 18)})
+                INSERT OR REPLACE INTO records ({cols_str})
+                VALUES ({placeholders})
             ''', tuple(values))
             
             conn.commit()
@@ -193,7 +238,7 @@ class StrainDBManager:
                     'name': row['name'],
                     'model': row['model'],
                     'location': row['location'],
-                    'shelves': json.loads(row['structure']),
+                    'shelves': json.loads(row['structure'] or '[]'),
                     'createdAt': row['created_at'],
                     'updatedAt': row['updated_at']
                 })
@@ -219,6 +264,15 @@ class StrainDBManager:
                     'drawerId': row['drawer_id'],
                     'boxId': row['box_id'],
                     'position': row['position'],
+                    'sampleCode': row['sample_code'],
+                    'codeSource': row['code_source'],
+                    'codeCategory': row['code_category'],
+                    'codeGenus': row['code_genus'],
+                    'codeSpecies': row['code_species'],
+                    'codePassage': row['code_passage'],
+                    'codeSerial': row['code_serial'],
+                    'sequence': row['sequence'],
+                    'country': row['country'],
                     'metadata': json.loads(row['metadata'] or '{}'),
                     'addedAt': row['added_at']
                 })

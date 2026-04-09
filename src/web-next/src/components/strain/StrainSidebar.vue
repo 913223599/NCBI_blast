@@ -101,14 +101,12 @@
               {{ group.main.sequenceType || '-' }}
             </span>
           </div>
-          <div class="sample-location tooltip-container" v-if="group.count > 1">
+          <div 
+            class="sample-location tooltip-native" 
+            v-if="group.count > 1"
+            :title="`所有存放点:\n${group.positions.join('\n')}`"
+          >
             📍 [多处存放] (悬停查看 {{ group.count }} 处位置)
-            <div class="custom-tooltip">
-              <div class="tt-header">所有存放点</div>
-              <div v-for="(pos, i) in group.positions" :key="i" class="tt-row">
-                {{ pos }}
-              </div>
-            </div>
           </div>
           <div class="sample-location" v-else>
             📍 {{ group.positions[0] }}
@@ -574,29 +572,11 @@ function getTotalBoxes(freezer: any): number {
   border: 1px solid #fbcfe8;
 }
 
-.tooltip-container {
-  position: relative;
+.tooltip-native {
   cursor: help;
   color: #2563eb !important;
-}
-
-.custom-tooltip {
-  display: none;
-  position: absolute;
-  top: 100%;
-  left: 0;
-  background: #1e293b;
-  color: #f8fafc;
-  padding: 8px 12px;
-  border-radius: 6px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-  z-index: 100;
-  min-width: 200px;
-  margin-top: 4px;
-}
-
-.tooltip-container:hover .custom-tooltip {
-  display: block;
+  text-decoration: underline dashed;
+  text-underline-offset: 3px;
 }
 
 .tt-header {

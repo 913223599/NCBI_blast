@@ -122,11 +122,67 @@
             </div>
           </div>
 
-          <!-- 序列数据 -->
+          <!-- 序列数据 (简易预览) -->
           <div v-if="record.sequence" class="info-section">
-            <h4 class="section-label">序列数据</h4>
+            <h4 class="section-label">基础序列 (预览)</h4>
             <div class="sequence-display">
               <pre class="sequence-text">{{ record.sequence }}</pre>
+            </div>
+          </div>
+
+          <!-- 基因数据库关联 (Gene DB) - 核心联动区域 -->
+          <div class="info-section gene-db-section">
+            <div class="section-header-flex">
+              <h4 class="section-label">基因数据库关联 (Gene DB)</h4>
+              <button class="btn-add-gene" @click="showAddGeneForm = true" v-if="!showAddGeneForm">+ 关联新测序数据</button>
+            </div>
+
+            <!-- 新增基因记录表单 -->
+            <div v-if="showAddGeneForm" class="inline-gene-form">
+              <div class="form-grid-mini">
+                <div class="mini-group">
+                  <label>测序类型</label>
+                  <select v-model="newGene.seqType" class="mini-select">
+                    <option value="16S">16S rRNA</option>
+                    <option value="ITS">ITS</option>
+                    <option value="WGS">全基因组 (WGS)</option>
+                    <option value="Plasmid">质粒全长</option>
+                    <option value="TargetGen">目标基因</option>
+                  </select>
+                </div>
+                <div class="mini-group">
+                  <label>测序标题/批次</label>
+                  <input v-model="newGene.title" class="mini-input" placeholder="如：20240409-16S-A1" />
+                </div>
+              </div>
+              <div class="mini-group mt-2">
+                <label>序列内容 (FASTA)</label>
+                <textarea v-model="newGene.sequence" class="mini-textarea" rows="4" placeholder="粘贴序列..."></textarea>
+              </div>
+              <div class="mini-actions">
+                <button class="btn-mini-cancel" @click="showAddGeneForm = false">取消</button>
+                <button class="btn-mini-confirm" @click="handleAddGene" :disabled="!newGene.sequence">确认保存到基因库</button>
+              </div>
+            </div>
+
+            <!-- 已关联列表 -->
+            <div class="gene-list">
+              <div v-if="associatedSequences.length === 0 && !showAddGeneForm" class="gene-empty">
+                暂未关联基因数据库记录
+              </div>
+              <div v-for="seq in associatedSequences" :key="seq.id" class="gene-item">
+                <div class="gene-main">
+                  <div class="gene-badge">{{ seq.seqType }}</div>
+                  <div class="gene-title-row">
+                    <span class="gene-name">{{ seq.title }}</span>
+                    <span class="gene-len">{{ seq.seqLen }} bp</span>
+                  </div>
+                </div>
+                <div class="gene-actions">
+                  <button class="btn-gene-view" @click="copySeq(seq.sequence)">复制</button>
+                  <button class="btn-gene-del" @click="handleDeleteGene(seq.id)">移除</button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -325,6 +381,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { useSequenceStore } from '../../stores/sequence'
 import type { StrainRecord } from '../../stores/strain'
 
 import BaseMetadataForm from './forms/BaseMetadataForm.vue'
@@ -343,10 +400,20 @@ const props = defineProps<Props>()
 const emit = defineEmits(['close', 'deleted'])
 
 const strain = useStrainStore()
+const sequenceStore = useSequenceStore()
 const appStore = useAppStore()
 
 const isEditing = ref(false)
 const openDropdown = ref<string | null>(null)
+
+// 基因数据库状态
+const associatedSequences = ref<any[]>([])
+const showAddGeneForm = ref(false)
+const newGene = reactive({
+  seqType: '16S',
+  title: '',
+  sequence: ''
+})
 
 const editForm = reactive({
   name: '',
@@ -592,8 +659,50 @@ function handleClickOutside() {
   openDropdown.value = null
 }
 
+async function loadAssociatedGenes() {
+  const result = await sequenceStore.loadSequencesBySample(props.record.id)
+  associatedSequences.value = result
+}
+
+async function handleAddGene() {
+  if (!newGene.sequence) return
+
+  const success = await sequenceStore.saveSequence({
+    sampleId: props.record.id,
+    sampleCode: props.record.sampleCode || props.record.accession || '',
+    seqType: newGene.seqType,
+    title: newGene.title || `${newGene.seqType} Sequencing`,
+    sequence: newGene.sequence,
+    seqLen: newGene.sequence.replace(/[\s\r\n]/g, '').length,
+    metadata: {}
+  })
+
+  if (success) {
+    appStore.showNotification('已成功保存至基因数据库并建立关联', 'success')
+    showAddGeneForm.value = false
+    newGene.title = ''
+    newGene.sequence = ''
+    loadAssociatedGenes()
+  }
+}
+
+async function handleDeleteGene(id: string) {
+  if (confirm('确定要从基因数据库中移除此序列吗？')) {
+    const success = await sequenceStore.deleteSequence(id)
+    if (success) {
+      loadAssociatedGenes()
+    }
+  }
+}
+
+function copySeq(text: string) {
+  navigator.clipboard.writeText(text)
+  appStore.showNotification('序列已复制到剪贴板', 'success')
+}
+
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  loadAssociatedGenes()
 })
 
 onUnmounted(() => {
@@ -1096,4 +1205,151 @@ onUnmounted(() => {
   background: #e2e8f0;
   margin: 20px 0;
 }
+/* 基因数据库样式 */
+.gene-db-section {
+  background: #fdf2f8 !important; /* 给基因库一个淡粉色背景增强区分度 */
+  border: 1px dashed #f9a8d4;
+  border-radius: 12px;
+  padding: 16px !important;
+}
+
+.btn-add-gene {
+  padding: 6px 12px;
+  background: #db2777;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inline-gene-form {
+  background: white;
+  border: 1px solid #fbcfe8;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+
+.form-grid-mini {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 12px;
+}
+
+.mini-group label {
+  display: block;
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.mini-select, .mini-input, .mini-textarea {
+  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 0.8rem;
+}
+
+.mini-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.btn-mini-cancel {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.btn-mini-confirm {
+  background: #db2777;
+  color: white;
+  border: none;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.gene-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gene-empty {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  padding: 12px;
+}
+
+.gene-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #fce7f3;
+}
+
+.gene-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.gene-badge {
+  background: #db2777;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.gene-title-row {
+  display: flex;
+  flex-direction: column;
+}
+
+.gene-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.gene-len {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.gene-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-gene-view, .btn-gene-del {
+  background: none;
+  border: none;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.btn-gene-view { color: #2563eb; }
+.btn-gene-del { color: #ef4444; }
+
+.mt-2 { margin-top: 8px; }
 </style>
