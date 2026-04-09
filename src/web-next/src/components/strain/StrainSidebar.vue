@@ -84,22 +84,34 @@
       </div>
 
       <div
-        v-for="record in strain.filteredRecords"
-        :key="record.id"
+        v-for="group in groupedRecords"
+        :key="group.main.id"
         class="sample-card"
-        @click="handleSampleClick(record)"
+        @click="handleSampleClick(group.main)"
       >
         <div class="sample-icon"></div>
         <div class="sample-info">
-          <div class="sample-name">{{ record.name }}</div>
+          <div class="sample-name text-with-badge">
+            {{ group.main.name }}
+            <span v-if="group.count > 1" class="aliquot-badge">x{{ group.count }} 分装</span>
+          </div>
           <div class="sample-meta">
-            <span class="meta-badge accession">{{ record.accession || 'N/A' }}</span>
-            <span class="type-badge" :class="record.sequenceType ? record.sequenceType.toLowerCase() : ''">
-              {{ record.sequenceType || '-' }}
+            <span class="meta-badge accession">{{ group.main.accession || 'N/A' }}</span>
+            <span class="type-badge" :class="group.main.sequenceType ? group.main.sequenceType.toLowerCase() : ''">
+              {{ group.main.sequenceType || '-' }}
             </span>
           </div>
-          <div class="sample-location">
-            📍 {{ getLocationPath(record) }}
+          <div class="sample-location tooltip-container" v-if="group.count > 1">
+            📍 [多处存放] (悬停查看 {{ group.count }} 处位置)
+            <div class="custom-tooltip">
+              <div class="tt-header">所有存放点</div>
+              <div v-for="(pos, i) in group.positions" :key="i" class="tt-row">
+                {{ pos }}
+              </div>
+            </div>
+          </div>
+          <div class="sample-location" v-else>
+            📍 {{ group.positions[0] }}
           </div>
         </div>
       </div>
@@ -115,19 +127,36 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import type { StrainRecord } from '../../stores/strain'
 import { seedMockData } from '../../utils/mockStrainData'
+import { useCodeGenerator } from '../../composables/useCodeGenerator'
 
 const strain = useStrainStore()
 const appStore = useAppStore()
+const codeGen = useCodeGenerator()
 
 const emit = defineEmits(['addFreezer', 'sampleClick'])
 
 const viewMode = ref<'freezers' | 'samples'>('freezers')
 const searchKeyword = ref('')
+
+const groupedRecords = computed(() => {
+  const map = new Map<string, { main: StrainRecord, count: number, positions: string[] }>()
+  for (const record of strain.filteredRecords) {
+     const key = record.sampleCode || record.accession || record.id
+     if (!map.has(key)) {
+       map.set(key, { main: record, count: 1, positions: [getLocationPath(record)] })
+     } else {
+       const group = map.get(key)!
+       group.count++
+       group.positions.push(getLocationPath(record))
+     }
+  }
+  return Array.from(map.values())
+})
 
 let searchTimer: number | null = null
 
@@ -169,8 +198,8 @@ function runMockSeed() {
     appStore.showNotification('请先添加至少一个冰箱', 'warning')
     return
   }
-  seedMockData(strain)
-  appStore.showNotification('测试数据已填充', 'success')
+  seedMockData(strain, codeGen)
+  appStore.showNotification('已成功生成 6 条符合 v6 规范的测试样本', 'success')
 }
 
 function getLocationPath(record: StrainRecord): string {
@@ -527,6 +556,61 @@ function getTotalBoxes(freezer: any): number {
 .sample-info {
   flex: 1;
   min-width: 0;
+}
+
+.text-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aliquot-badge {
+  background: #fdf2f8;
+  color: #db2777;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid #fbcfe8;
+}
+
+.tooltip-container {
+  position: relative;
+  cursor: help;
+  color: #2563eb !important;
+}
+
+.custom-tooltip {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: #1e293b;
+  color: #f8fafc;
+  padding: 8px 12px;
+  border-radius: 6px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  min-width: 200px;
+  margin-top: 4px;
+}
+
+.tooltip-container:hover .custom-tooltip {
+  display: block;
+}
+
+.tt-header {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 4px;
+}
+
+.tt-row {
+  white-space: nowrap;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 .sample-name {

@@ -377,7 +377,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, toRaw } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import type { StrainRecord } from '../../stores/strain'
@@ -405,10 +405,10 @@ watch(() => strain.activeFreezerId, () => {
   updateBoxOccupancy()
 })
 
-// 监听记录变化，更新矩阵占用状态
-watch(() => strain.records, () => {
+// 监听记录数量变化（添加/删除），精确触发而非 deep watcher
+watch(() => strain.records.length, () => {
   updateBoxOccupancy()
-}, { deep: true })
+})
 
 // 对话框状态
 const showEntryDialog = ref(false)
@@ -739,12 +739,15 @@ function handleSampleSaved() {
   updateBoxOccupancy()
 }
 
-// 更新位置占用状态
+// 更新位置占用状态（使用 toRaw 绕过 Vue 代理，避免逐格子触发响应式更新）
 function updateBoxOccupancy() {
   if (!strain.activeFreezer) return
-  
-  // 1. 首先清空当前冰箱所有位置的占用状态，防止删除记录后状态残留
-  for (const shelf of strain.activeFreezer.shelves) {
+
+  // 获取原始对象，批量修改不触发 Vue setter
+  const rawFreezer = toRaw(strain.activeFreezer)
+
+  // 1. 清空所有位置
+  for (const shelf of rawFreezer.shelves) {
     for (const cabinet of shelf.cabinets) {
       for (const drawer of cabinet.drawers) {
         for (const box of drawer.boxes) {
@@ -756,32 +759,36 @@ function updateBoxOccupancy() {
       }
     }
   }
-  
-  // 2. 然后遍历所有样本记录，更新对应位置的占用状态
-  for (const record of strain.records) {
-    if (record.freezerId === strain.activeFreezer.id && 
-        record.shelfId && record.cabinetId && record.drawerId && record.boxId && record.position) {
-      
-      // 快速查找对应的冰箱结构
-      const shelf = strain.activeFreezer.shelves.find(s => s.id === record.shelfId)
-      if (shelf) {
-        const cabinet = shelf.cabinets.find(c => c.id === record.cabinetId)
-        if (cabinet) {
-          const drawer = cabinet.drawers.find(d => d.id === record.drawerId)
-          if (drawer) {
-            const box = drawer.boxes.find(b => b.id === record.boxId)
-            if (box) {
-              const pos = box.positions.find(p => p.label === record.position)
-              if (pos) {
-                pos.occupied = true
-                pos.sampleId = record.id
-              }
-            }
-          }
+
+  // 2. 建立快速查找索引，避免每条记录都五层 find
+  const boxMap = new Map<string, typeof rawFreezer.shelves[0]['cabinets'][0]['drawers'][0]['boxes'][0]>()
+  for (const shelf of rawFreezer.shelves) {
+    for (const cabinet of shelf.cabinets) {
+      for (const drawer of cabinet.drawers) {
+        for (const box of drawer.boxes) {
+          boxMap.set(box.id, box)
         }
       }
     }
   }
+
+  // 3. 遍历记录，一次性标记占用
+  const rawRecords = toRaw(strain.records)
+  const freezerId = rawFreezer.id
+  for (const record of rawRecords) {
+    if (record.freezerId !== freezerId || !record.boxId || !record.position) continue
+    const box = boxMap.get(record.boxId)
+    if (!box) continue
+    const pos = box.positions.find(p => p.label === record.position)
+    if (pos) {
+      pos.occupied = true
+      pos.sampleId = record.id
+    }
+  }
+
+  // 4. 批量修改完成后，强制触发 freezers ref 的依赖更新
+  //    通过浅层重新赋值让 Vue 检测到变化并重渲染
+  strain.freezers = [...strain.freezers]
 }
 
 // 组件挂载时更新占用状态
@@ -1618,7 +1625,6 @@ function addShelf() {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
   position: relative;
   font-size: 0.6rem;
 }
@@ -1626,7 +1632,6 @@ function addShelf() {
 .position-cell:hover {
   border-color: #3b82f6;
   background: #f1f5f9;
-  transform: translateY(-2px);
   z-index: 10;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }

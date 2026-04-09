@@ -77,24 +77,23 @@
             <h4 class="section-label">详细业务元数据</h4>
             <div class="info-grid">
               <div 
-                v-for="(val, key) in record.metadata" 
+                v-for="key in expectedMetadataKeys" 
                 :key="key"
                 class="info-item"
-                :class="{ 'full-width': isFullWidthMetadata(key, val) }"
-                v-show="shouldShowMetadata(key, val)"
+                :class="{ 'full-width': isFullWidthMetadata(key, record.metadata?.[key]) }"
               >
                 <span class="label">{{ getMetadataLabel(key) }}</span>
                 <div class="value">
                   <!-- 数组类型展示为徽章 -->
-                  <div v-if="Array.isArray(val)" class="badge-group">
-                    <span v-for="item in val" :key="item" class="meta-tag">{{ item }}</span>
+                  <div v-if="Array.isArray(record.metadata?.[key]) && record.metadata[key].length > 0" class="badge-group">
+                    <span v-for="item in record.metadata[key]" :key="item" class="meta-tag">{{ item }}</span>
                   </div>
                   <!-- 布尔类型展示为图标 -->
-                  <span v-else-if="typeof val === 'boolean'">
-                    {{ val ? '✅ 是' : '❌ 否' }}
+                  <span v-else-if="typeof record.metadata?.[key] === 'boolean'">
+                    {{ record.metadata[key] ? '✅ 是' : '❌ 否' }}
                   </span>
                   <!-- 普通文本 -->
-                  <span v-else>{{ val || '-' }}</span>
+                  <span v-else>{{ formatMetadataValue(key, record.metadata?.[key]) }}</span>
                 </div>
               </div>
             </div>
@@ -216,12 +215,46 @@
                 </div>
               </div>
             </div>
-
-            <!-- 元数据编辑区提醒 -->
-            <div class="edit-hint-banner">
-              ⚠️ 详细元数据（如抗性、滴度）通过录入时的特定表单定义，此处仅支持修改基础字段。
-            </div>
           </div>
+
+            <!-- 动态元数据编辑区 -->
+            <div class="form-section">
+              <div class="section-header-flex">
+                <h4 class="section-label">详细业务元数据</h4>
+                <span class="type-tag">{{ getSampleTypeLabel(editForm.sampleType) }} 特有字段</span>
+              </div>
+              
+              <div class="metadata-container">
+                <BaseMetadataForm v-model="editForm.metadata" />
+                <div class="divider"></div>
+                <div class="dynamic-metadata-area">
+                  <MicrobeForm 
+                    v-if="['Bacteria', 'Fungi', 'Archaea'].includes(editForm.sampleType)"
+                    v-model="editForm.metadata"
+                  />
+                  <PhageForm 
+                    v-if="editForm.sampleType === 'Phage'"
+                    v-model="editForm.metadata"
+                  />
+                  <GeneticForm 
+                    v-if="['Plasmid', 'GenomicDNA', 'RNA', 'Oligo', 'Library'].includes(editForm.sampleType)"
+                    v-model="editForm.metadata"
+                  />
+                  <VirusForm 
+                    v-if="editForm.sampleType === 'Virus'"
+                    v-model="editForm.metadata"
+                  />
+                  <ProteinForm 
+                    v-if="['Protein', 'Enzyme', 'Antibody', 'Peptide', 'Antigen'].includes(editForm.sampleType)"
+                    v-model="editForm.metadata"
+                  />
+                  <CellForm 
+                    v-if="['CellLine', 'CompetentCell', 'Hybridomas'].includes(editForm.sampleType)"
+                    v-model="editForm.metadata"
+                  />
+                </div>
+              </div>
+            </div>
 
           <div class="form-section">
             <h4 class="section-label">来源信息</h4>
@@ -294,6 +327,14 @@ import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import type { StrainRecord } from '../../stores/strain'
 
+import BaseMetadataForm from './forms/BaseMetadataForm.vue'
+import MicrobeForm from './forms/MicrobeForm.vue'
+import GeneticForm from './forms/GeneticForm.vue'
+import VirusForm from './forms/VirusForm.vue'
+import ProteinForm from './forms/ProteinForm.vue'
+import CellForm from './forms/CellForm.vue'
+import PhageForm from './forms/PhageForm.vue'
+
 interface Props {
   record: StrainRecord
 }
@@ -334,6 +375,7 @@ const SAMPLE_TYPE_OPTIONS = [
 ]
 
 const METADATA_LABELS: Record<string, string> = {
+  storageDate: '入库日期',
   storageMedium: '保存介质',
   passageNumber: '传代次数',
   biosafetyLevel: '安全等级',
@@ -352,6 +394,9 @@ const METADATA_LABELS: Record<string, string> = {
   promoter: '启动子',
   titer: '病毒滴度',
   serotype: '血清型',
+  potency: '效价浓度',
+  envelope: '包膜',
+  inactivationMethod: '灭活方法',
   purity: '纯度',
   concentration: '浓度',
   buffer: '缓冲液',
@@ -367,6 +412,73 @@ const METADATA_LABELS: Record<string, string> = {
   latentPeriod: '潜伏期',
   burstSize: '裂解量',
   morphology: '形态分类'
+}
+
+const TYPE_SPECIFIC_KEYS: Record<string, string[]> = {
+  Bacteria: ['concentration', 'cultureCondition', 'growthTemp', 'resistance', 'genotype'],
+  Fungi: ['concentration', 'cultureCondition', 'growthTemp', 'resistance', 'genotype'],
+  Archaea: ['concentration', 'cultureCondition', 'growthTemp', 'resistance', 'genotype'],
+  Virus: ['potency', 'titer', 'serotype', 'envelope', 'inactivationMethod'],
+  Phage: ['potency', 'hostStrain', 'morphology', 'latentPeriod', 'burstSize', 'lifestyle'],
+  Plasmid: ['concentration', 'hostStrain', 'backbone', 'insertName', 'plasmidSize', 'promoter', 'isExpression', 'marker'],
+  GenomicDNA: ['concentration', 'hostStrain', 'backbone', 'insertName', 'plasmidSize', 'promoter', 'isExpression', 'marker'],
+  RNA: ['concentration', 'hostStrain', 'backbone', 'insertName', 'plasmidSize', 'promoter', 'isExpression', 'marker'],
+  Oligo: ['concentration', 'hostStrain', 'backbone', 'insertName', 'plasmidSize', 'promoter', 'isExpression', 'marker'],
+  Library: ['concentration', 'hostStrain', 'backbone', 'insertName', 'plasmidSize', 'promoter', 'isExpression', 'marker'],
+  Protein: ['concentration', 'purity', 'molecularWeight', 'buffer', 'tags'],
+  Enzyme: ['concentration', 'purity', 'molecularWeight', 'buffer', 'tags'],
+  Antibody: ['concentration', 'purity', 'molecularWeight', 'buffer', 'tags'],
+  Peptide: ['concentration', 'purity', 'molecularWeight', 'buffer', 'tags'],
+  Antigen: ['concentration', 'purity', 'molecularWeight', 'buffer', 'tags'],
+  CellLine: ['concentration', 'cellType', 'medium', 'doublingTime', 'authentication'],
+  CompetentCell: ['concentration', 'cellType', 'medium', 'doublingTime', 'authentication'],
+  Hybridomas: ['concentration', 'cellType', 'medium', 'doublingTime', 'authentication'],
+}
+
+const expectedMetadataKeys = computed(() => {
+  const baseKeys = ['storageDate', 'storageMedium', 'biosafetyLevel', 'passageNumber', 'containerType', 'description']
+  const specificKeys = TYPE_SPECIFIC_KEYS[props.record.sampleType] || []
+  return [...baseKeys, ...specificKeys]
+})
+
+const METADATA_UNITS: Record<string, string | Record<string, string>> = {
+  concentration: { 
+    Bacteria: 'CFU/mL', Fungi: 'CFU/mL', Archaea: 'CFU/mL', 
+    Plasmid: 'ng/μL', GenomicDNA: 'ng/μL', RNA: 'ng/μL', Oligo: 'ng/μL', Library: 'ng/μL',
+    Protein: 'mg/mL', Enzyme: 'mg/mL', Antibody: 'mg/mL', Peptide: 'mg/mL', Antigen: 'mg/mL',
+    CellLine: 'cells/mL', CompetentCell: 'cells/mL', Hybridomas: 'cells/mL' 
+  },
+  growthTemp: '°C',
+  purity: '%',
+  molecularWeight: 'kDa',
+  doublingTime: 'h',
+  plasmidSize: 'bp',
+  potency: { Virus: 'PFU/mL', Phage: 'PFU/mL' },
+  titer: 'TCID50/mL',
+  latentPeriod: 'min',
+  burstSize: 'PFU/cell',
+  passageNumber: '代'
+}
+
+function formatMetadataValue(key: string, val: any): string {
+  if (val === undefined || val === null || val === '') return '-'
+  
+  const unitDef = METADATA_UNITS[key]
+  if (!unitDef) return String(val)
+  
+  let unit = ''
+  if (typeof unitDef === 'string') {
+    unit = unitDef
+  } else {
+    unit = unitDef[props.record.sampleType] || ''
+  }
+  
+  const strVal = String(val).trim()
+  if (unit && !strVal.toLowerCase().includes(unit.toLowerCase())) {
+    return `${strVal} ${unit}`
+  }
+  
+  return strVal
 }
 
 const SEQUENCE_TYPE_OPTIONS = [
@@ -454,18 +566,12 @@ function getMetadataLabel(key: string): string {
   return METADATA_LABELS[key] || key
 }
 
-function shouldShowMetadata(key: string, val: any): boolean {
-  if (key.endsWith('Text')) return false // 隐藏内部转换用的中间字段
-  if (val === undefined || val === null || val === '') return false
-  return true
-}
-
 function isFullWidthMetadata(key: string, val: any): boolean {
   return key === 'description' || key === 'genotype' || (Array.isArray(val) && val.length > 5)
 }
 
 const hasMetadata = computed(() => {
-  return props.record.metadata && Object.keys(props.record.metadata).some(k => shouldShowMetadata(k, props.record.metadata[k]))
+  return expectedMetadataKeys.value.length > 0
 })
 
 function getSampleTypeLabel(type: string): string {
@@ -954,5 +1060,40 @@ onUnmounted(() => {
   color: #2563eb;
   font-weight: 700;
   background: #eff6ff;
+}
+
+/* 动态元数据区域特有样式 */
+.section-header-flex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.section-header-flex .section-label {
+  margin-bottom: 0;
+}
+
+.type-tag {
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-weight: 700;
+  border: 1px solid #e2e8f0;
+}
+
+.metadata-container {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 20px 0;
 }
 </style>

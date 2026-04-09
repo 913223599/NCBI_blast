@@ -2,12 +2,15 @@
   <div class="metadata-form-grid">
     <div class="form-group">
       <label>核酸浓度</label>
-      <input 
-        :value="modelValue.concentration" 
-        @input="updateField('concentration', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：500 ng/ul" 
-      />
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.concentration" 
+          @input="updateField('concentration', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：500" 
+        />
+        <span class="unit">ng/μL</span>
+      </div>
     </div>
     <div class="form-group">
       <label>宿主菌株 (E.coli Host)</label>
@@ -37,13 +40,16 @@
       />
     </div>
     <div class="form-group">
-      <label>质粒大小 (bp)</label>
-      <input 
-        :value="modelValue.plasmidSize" 
-        @input="updateField('plasmidSize', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：5.4kb" 
-      />
+      <label>质粒大小</label>
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.plasmidSize" 
+          @input="updateField('plasmidSize', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：5400" 
+        />
+        <span class="unit">bp</span>
+      </div>
     </div>
     <div class="form-group">
       <label>筛选标记 (Markers)</label>
@@ -173,5 +179,36 @@ onUnmounted(() => document.removeEventListener('click', closeDropdown))
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   font-size: 0.85rem;
+  width: 100%;
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  overflow: hidden;
+}
+
+.input-with-unit .text-input {
+  border: none;
+  border-radius: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.input-with-unit .text-input:focus {
+  outline: none;
+}
+
+.input-with-unit .unit {
+  background: #f8fafc;
+  padding: 8px 12px;
+  border-left: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 </style>

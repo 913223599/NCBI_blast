@@ -26,46 +26,41 @@
               </div>
             </div>
 
+            <!-- 样本编号 -->
+            <div class="form-section">
+              <h4 class="section-label">样本编号</h4>
+              <SampleCodeInput @update="handleCodeUpdate" />
+            </div>
+
             <!-- 核心标识 -->
             <div class="form-section">
               <h4 class="section-label">样本核心信息</h4>
               
               <div class="form-group required">
                 <label>样本名称 <span class="required-mark">*</span></label>
-                <input v-model="form.name" class="text-input" placeholder="例如：E. coli K-12" />
+                <input v-model="form.name" class="text-input" placeholder="例如: E. coli K-12" />
               </div>
 
               <div class="form-row">
                 <div class="form-group">
                   <label>样本类型</label>
-                  <div class="select-box-neo" @click.stop="toggleDropdown('sampleType')">
-                    {{ getSampleTypeLabel() }} <span class="arrow">▼</span>
-                    <div v-if="openDropdown === 'sampleType'" class="dropdown-list">
-                      <div
-                        v-for="option in SAMPLE_TYPE_OPTIONS"
-                        :key="option.value"
-                        class="opt"
-                        :class="{ selected: form.sampleType === option.value }"
-                        @click.stop="selectOption('sampleType', option.value)"
-                      >
-                        {{ option.label }}
-                      </div>
-                    </div>
-                  </div>
+                  <div class="read-only-field">{{ getSampleTypeLabel() }}</div>
                 </div>
                 <div class="form-group">
                   <label>序列类型</label>
-                  <div class="select-box-neo" @click.stop="toggleDropdown('sequenceType')">
-                    {{ getSequenceTypeLabel() }} <span class="arrow">▼</span>
-                    <div v-if="openDropdown === 'sequenceType'" class="dropdown-list">
+                  <div class="custom-select" @click.stop="toggleDropdown('sequenceType')">
+                    <div class="select-trigger">
+                      {{ getSequenceTypeLabel() }}
+                      <span class="arrow">▾</span>
+                    </div>
+                    <div v-if="openDropdown === 'sequenceType'" class="select-dropdown">
                       <div
-                        v-for="option in SEQUENCE_TYPE_OPTIONS"
-                        :key="option.value"
-                        class="opt"
-                        :class="{ selected: form.sequenceType === option.value }"
-                        @click.stop="selectOption('sequenceType', option.value)"
+                        v-for="opt in SEQUENCE_TYPE_OPTIONS"
+                        :key="opt.value"
+                        class="select-option"
+                        @click.stop="handleDropdownSelect('sequenceType', opt.value)"
                       >
-                        {{ option.label }}
+                        {{ opt.label }}
                       </div>
                     </div>
                   </div>
@@ -74,12 +69,12 @@
 
               <div class="form-row">
                 <div class="form-group">
-                  <label>Accession (登录号)</label>
-                  <input v-model="form.accession" class="text-input" placeholder="NC_xxxxxx" />
+                  <label>外部/关联 ID (可选)</label>
+                  <input v-model="form.accession" class="text-input" placeholder="如: ATCC编号, NCBI登录号..." />
                 </div>
                 <div class="form-group">
-                  <label>物种名称</label>
-                  <input v-model="form.species" class="text-input" placeholder="生物学名" />
+                  <label>物种名称 (由编号自动生成)</label>
+                  <div class="read-only-field">{{ form.species || '等待编号生成...' }}</div>
                 </div>
               </div>
             </div>
@@ -102,68 +97,88 @@
 
           <!-- 右侧：动态元数据表单 -->
           <div class="layout-right">
-            <div class="form-section">
-              <div class="section-header-flex">
-                <h4 class="section-label">详细业务元数据</h4>
-                <span class="type-tag">{{ getSampleTypeLabel() }} 特有字段</span>
-              </div>
-              
-              <div class="metadata-container">
-                <!-- 通用基础字段 (所有类型都显示) -->
-                <BaseMetadataForm v-model="form.metadata" />
+            <!-- 空状态提示 -->
+            <div v-if="!form.sampleType" class="empty-state-panel">
+              <div class="empty-icon">👈</div>
+              <h3>暂无业务元数据</h3>
+              <p>请先在左侧选择 <strong>大类 (A)</strong> 或 <strong>样本类型</strong><br>系统将自动为您加载对应的可填字段</p>
+            </div>
+            
+            <template v-else>
+              <div class="form-section">
+                <div class="section-header-flex">
+                  <h4 class="section-label">详细业务元数据</h4>
+                  <span class="type-tag">{{ getSampleTypeLabel() }} 特有字段</span>
+                </div>
                 
-                <div class="divider"></div>
+                <div class="metadata-container">
+                  <!-- 通用基础字段 (所有类型都显示) -->
+                  <BaseMetadataForm v-model="form.metadata" />
+                  
+                  <div class="divider"></div>
 
-                <!-- 针对不同类型的动态表单内容 -->
-                <div class="dynamic-metadata-area">
-                  <MicrobeForm 
-                    v-if="['Bacteria', 'Fungi', 'Archaea'].includes(form.sampleType)"
-                    v-model="form.metadata"
-                  />
-                  <PhageForm 
-                    v-if="form.sampleType === 'Phage'"
-                    v-model="form.metadata"
-                  />
-                  <GeneticForm 
-                    v-if="['Plasmid', 'GenomicDNA', 'RNA', 'Oligo', 'Library'].includes(form.sampleType)"
-                    v-model="form.metadata"
-                  />
-                  <VirusForm 
-                    v-if="form.sampleType === 'Virus'"
-                    v-model="form.metadata"
-                  />
-                  <ProteinForm 
-                    v-if="['Protein', 'Enzyme', 'Antibody', 'Peptide', 'Antigen'].includes(form.sampleType)"
-                    v-model="form.metadata"
-                  />
-                  <CellForm 
-                    v-if="['CellLine', 'CompetentCell', 'Hybridomas'].includes(form.sampleType)"
-                    v-model="form.metadata"
-                  />
+                  <!-- 针对不同类型的动态表单内容 -->
+                  <div class="dynamic-metadata-area">
+                    <MicrobeForm 
+                      v-if="['Bacteria', 'Fungi', 'Archaea'].includes(form.sampleType)"
+                      v-model="form.metadata"
+                    />
+                    <PhageForm 
+                      v-if="form.sampleType === 'Phage'"
+                      v-model="form.metadata"
+                    />
+                    <GeneticForm 
+                      v-if="['Plasmid', 'GenomicDNA', 'RNA', 'Oligo', 'Library'].includes(form.sampleType)"
+                      v-model="form.metadata"
+                    />
+                    <VirusForm 
+                      v-if="form.sampleType === 'Virus'"
+                      v-model="form.metadata"
+                    />
+                    <ProteinForm 
+                      v-if="['Protein', 'Enzyme', 'Antibody', 'Peptide', 'Antigen'].includes(form.sampleType)"
+                      v-model="form.metadata"
+                    />
+                    <CellForm 
+                      v-if="['CellLine', 'CompetentCell', 'Hybridomas'].includes(form.sampleType)"
+                      v-model="form.metadata"
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <!-- 序列文本支持 -->
-            <div class="form-section">
-              <h4 class="section-label">序列数据 (FASTA)</h4>
-              <textarea
-                v-model="form.sequence"
-                class="text-input textarea"
-                placeholder=">Sequence_Title&#10;ATGCGATCG..."
-                rows="4"
-              ></textarea>
-            </div>
+              <!-- 序列文本支持 -->
+              <div class="form-section">
+                <h4 class="section-label">序列数据 (FASTA)</h4>
+                <textarea
+                  v-model="form.sequence"
+                  class="text-input textarea"
+                  placeholder=">Sequence_Title&#10;ATGCGATCG..."
+                  rows="4"
+                ></textarea>
+              </div>
+            </template>
           </div>
         </div>
       </div>
 
       <!-- 底部按钮 -->
       <div class="dialog-footer">
-        <button class="btn-cancel" @click="emit('close')">取消</button>
-        <button class="btn-confirm" @click="handleConfirm" :disabled="!canSubmit">
-          确认录入
-        </button>
+        <div class="aliquot-control" v-if="canSubmit">
+          <label>分装录入管数：</label>
+          <div class="number-input">
+            <button @click="aliquotCount > 1 && aliquotCount--" class="num-btn">-</button>
+            <input v-model.number="aliquotCount" type="number" min="1" max="100" class="num-text" />
+            <button @click="aliquotCount < 100 && aliquotCount++" class="num-btn">+</button>
+          </div>
+          <span class="aliquot-hint" v-if="aliquotCount > 1">自动往后填充连续空位</span>
+        </div>
+        <div class="footer-actions">
+          <button class="btn-cancel" @click="emit('close')">取消</button>
+          <button class="btn-confirm" @click="handleConfirm" :disabled="!canSubmit">
+            确认录入 {{ aliquotCount > 1 ? `(${aliquotCount} 管)` : '' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -173,9 +188,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { useCodeGenerator } from '../../composables/useCodeGenerator'
 import type { SampleCategory } from '../../stores/strain'
 
-// 导入子表单自组件
+// 导入子表单组件
 import BaseMetadataForm from './forms/BaseMetadataForm.vue'
 import MicrobeForm from './forms/MicrobeForm.vue'
 import GeneticForm from './forms/GeneticForm.vue'
@@ -183,6 +199,7 @@ import VirusForm from './forms/VirusForm.vue'
 import ProteinForm from './forms/ProteinForm.vue'
 import CellForm from './forms/CellForm.vue'
 import PhageForm from './forms/PhageForm.vue'
+import SampleCodeInput from './SampleCodeInput.vue'
 
 interface Props {
   freezerId: string
@@ -198,6 +215,7 @@ const emit = defineEmits(['close', 'saved'])
 
 const strain = useStrainStore()
 const appStore = useAppStore()
+const codeGen = useCodeGenerator()
 
 // 表单数据
 const form = ref({
@@ -205,13 +223,21 @@ const form = ref({
   accession: '',
   species: '',
   strain: '',
-  sampleType: 'Bacteria' as SampleCategory,
+  sampleType: '' as SampleCategory | '',
   sequenceType: 'DNA' as 'DNA' | 'RNA' | 'Protein',
   sequence: '',
   source: '',
   host: '',
   country: '',
   collectionDate: '',
+  // 编号系统字段
+  sampleCode: '',
+  codeSource: '',
+  codeCategory: '',
+  codeGenus: '',
+  codeSpecies: '',
+  codePassage: 0,
+  codeSerial: 0,
   metadata: {
     storageDate: new Date().toISOString().split('T')[0],
     storageMedium: '20% Glycerol',
@@ -222,6 +248,11 @@ const form = ref({
   } as Record<string, any>
 })
 
+const aliquotCount = ref(1)
+
+// 编号生成凭证
+const pendingRequest = ref<any>(null)
+
 // 下拉框状态
 const openDropdown = ref<string | null>(null)
 
@@ -230,6 +261,19 @@ const SEQUENCE_TYPE_OPTIONS = [
   { value: 'RNA', label: 'RNA (核酸)' },
   { value: 'Protein', label: 'Protein (蛋白)' }
 ]
+
+// 编号大类 ID 与 业务类型 (SampleCategory) 的映射
+const CATEGORY_CODE_TO_SAMPLE_TYPE: Record<string, SampleCategory> = {
+  '1': 'Bacteria',
+  '2': 'Virus',
+  '3': 'Phage',
+  '4': 'Fungi',
+  '5': 'Plasmid',
+  '6': 'CellLine',
+  '7': 'GenomicDNA',
+  '8': 'Protein',
+  '9': 'Other'
+}
 
 const SAMPLE_TYPE_OPTIONS = [
   { value: 'Bacteria', label: '细菌 (Bacteria)' },
@@ -263,7 +307,7 @@ const positionLabel = computed(() => {
 
 // 表单验证
 const canSubmit = computed(() => {
-  return form.value.name.trim().length > 0
+  return form.value.name.trim().length > 0 && form.value.sampleType !== ''
 })
 
 function getSequenceTypeLabel(): string {
@@ -271,51 +315,148 @@ function getSequenceTypeLabel(): string {
 }
 
 function getSampleTypeLabel(): string {
-  return SAMPLE_TYPE_OPTIONS.find(o => o.value === form.value.sampleType)?.label || '其他'
+  if (!form.value.sampleType) return '等待识别或选择...'
+  return SAMPLE_TYPE_OPTIONS.find(o => o.value === form.value.sampleType)?.label.split(' ')[0] || form.value.sampleType
 }
 
 function toggleDropdown(name: string) {
   openDropdown.value = openDropdown.value === name ? null : name
 }
 
-function selectOption(field: string, value: string) {
+function handleDropdownSelect(field: string, value: string) {
   if (field === 'sequenceType') {
     form.value.sequenceType = value as any
   } else if (field === 'sampleType') {
     form.value.sampleType = value as any
-    // 切换类型时可以考虑重置 metadata 的特定部分，但保留基础部分
   }
   openDropdown.value = null
+}
+
+/** 编号组件回调 */
+function handleCodeUpdate(data: any): void {
+  // 1. 同步预览编号到 accession
+  form.value.accession = data.sampleCode 
+  
+  // 2. 暂存生成凭据
+  pendingRequest.value = data.generationRequest || null
+
+  // 3. 自动根据编号推断样本类型（用于切换右侧表单）
+  if (data.codeCategory) {
+    const inferredType = CATEGORY_CODE_TO_SAMPLE_TYPE[data.codeCategory]
+    if (inferredType) {
+      form.value.sampleType = inferredType
+    }
+  }
+
+  // 4. 解析物种名称（属 + 种）
+  const resolved = codeGen.resolve(data.sampleCode)
+  if (resolved) {
+    // 自动合并属名和种名作为“物种名称”
+    form.value.species = `${resolved.genusName} ${resolved.speciesName}`.trim()
+  }
+
+  // 5. 同步所有解析出的元数据
+  Object.assign(form.value, {
+    sampleCode: data.sampleCode,
+    codeSource: data.codeSource,
+    codeCategory: data.codeCategory,
+    codeGenus: data.codeGenus,
+    codeSpecies: data.codeSpecies,
+    codePassage: data.codePassage,
+    codeSerial: data.codeSerial
+  })
 }
 
 function handleConfirm() {
   if (!canSubmit.value) return
 
-  // 创建样本记录
-  const record = strain.addRecord({
-    ...form.value,
-    freezerId: props.freezerId,
-    shelfId: props.shelfId,
-    cabinetId: props.cabinetId,
-    drawerId: props.drawerId,
-    boxId: props.boxId,
-    position: props.position
+  // 如果有 Pending 的生成请求，在此刻正式 Commit（消耗流水号）
+  if (pendingRequest.value) {
+    try {
+      const finalCode = codeGen.commit(pendingRequest.value)
+      const parsed = codeGen.parse(finalCode)!
+      
+      form.value.sampleCode = finalCode
+      form.value.accession = finalCode
+      form.value.codeSerial = parsed.serial
+      
+      console.log(`[SampleEntryDialog] 编号正式 Commit: ${finalCode}`)
+    } catch (e) {
+      appStore.showNotification('编号提交失败，请重试', 'error')
+      return
+    }
+  }
+
+  // 查找对应的盒
+  const freezer = strain.freezers.find(f => f.id === props.freezerId)
+  const shelf = freezer?.shelves.find(s => s.id === props.shelfId)
+  const cabinet = shelf?.cabinets.find(c => c.id === props.cabinetId)
+  const drawer = cabinet?.drawers.find(d => d.id === props.drawerId)
+  const box = drawer?.boxes.find(b => b.id === props.boxId)
+
+  if (!box) {
+    appStore.showNotification('未找到目标冻存盒信息', 'error')
+    return
+  }
+
+  // 提取可用空位（从当前 props.position 开始往后找）
+  const startIndex = box.positions.findIndex((p: any) => p.label === props.position)
+  if (startIndex === -1) {
+    appStore.showNotification('起始位置无效', 'error')
+    return
+  }
+
+  const targetPositions: string[] = []
+  let currentIndex = startIndex
+  
+  while (targetPositions.length < aliquotCount.value && currentIndex < box.positions.length) {
+    const pos = box.positions[currentIndex]
+    if (pos && (!pos.occupied || pos.label === props.position)) {
+      // 容错: 起始位置可能是触发入口（它本身肯定是空的才会点进来录入）
+      targetPositions.push(pos.label)
+    }
+    currentIndex++
+  }
+
+  // 记录实际入库的数据
+  let savedCount = 0
+
+  targetPositions.forEach((posLabel) => {
+    // 创建样本记录
+    const record = strain.addRecord({
+      ...form.value,
+      sampleType: form.value.sampleType as SampleCategory,
+      freezerId: props.freezerId,
+      shelfId: props.shelfId,
+      cabinetId: props.cabinetId,
+      drawerId: props.drawerId,
+      boxId: props.boxId,
+      position: posLabel
+    })
+
+    // 更新位置占用状态
+    strain.updatePositionOccupancy(
+      props.freezerId,
+      props.shelfId,
+      props.cabinetId,
+      props.drawerId,
+      props.boxId,
+      posLabel,
+      true,
+      record.id
+    )
+    savedCount++
   })
 
-  // 更新位置占用状态
-  strain.updatePositionOccupancy(
-    props.freezerId,
-    props.shelfId,
-    props.cabinetId,
-    props.drawerId,
-    props.boxId,
-    props.position,
-    true,
-    record.id
-  )
+  if (savedCount < aliquotCount.value) {
+    appStore.showNotification(`盒子空间不足，仅成功录入 ${savedCount} 管（目标 ${aliquotCount.value} 管）`, 'warning')
+  } else if (savedCount > 1) {
+    appStore.showNotification(`成功将 "${form.value.name}" 批量分装录入 ${savedCount} 支备份`, 'success')
+  } else {
+    appStore.showNotification(`样本 "${form.value.name}" 已成功录入`, 'success')
+  }
 
-  appStore.showNotification(`样本"${form.value.name}"已成功录入`, 'success')
-  emit('saved', record)
+  emit('saved')
   emit('close')
 }
 
@@ -554,6 +695,77 @@ onUnmounted(() => {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
+.custom-select {
+  position: relative;
+  width: 100%;
+}
+
+.select-trigger {
+  padding: 10px 14px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #1e293b;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s ease;
+  min-height: 40px;
+}
+
+.select-trigger:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.select-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  z-index: 1001; /* 确保高于其他表单项 */
+  overflow: hidden;
+  animation: dropdownIn 0.2s ease-out;
+}
+
+.select-option {
+  padding: 10px 14px;
+  font-size: 0.88rem;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.select-option:hover {
+  background: #f1f5f9;
+  color: #2563eb;
+}
+
+@keyframes dropdownIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.read-only-field {
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 0.88rem;
+  font-weight: 600;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
 .text-input.textarea {
   resize: vertical;
   min-height: 100px;
@@ -576,11 +788,90 @@ onUnmounted(() => {
 /* 底部按钮 */
 .dialog-footer {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
   padding: 16px 24px;
   border-top: 1px solid #e2e8f0;
   background: #f8fafc;
+}
+
+.aliquot-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.aliquot-control label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.number-input {
+  display: flex;
+  align-items: center;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.num-btn {
+  background: #f1f5f9;
+  border: none;
+  width: 28px;
+  height: 28px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.num-btn:hover {
+  background: #e2e8f0;
+}
+
+.num-btn:active {
+  background: #cbd5e1;
+}
+
+.num-text {
+  width: 40px;
+  height: 28px;
+  border: none;
+  border-left: 1px solid #cbd5e1;
+  border-right: 1px solid #cbd5e1;
+  text-align: center;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.num-text:focus {
+  outline: none;
+}
+
+.num-text::-webkit-inner-spin-button, 
+.num-text::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+
+.aliquot-hint {
+  font-size: 0.75rem;
+  color: #3b82f6;
+  background: #eff6ff;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.footer-actions {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
 }
 
 .btn-cancel,
@@ -684,8 +975,45 @@ onUnmounted(() => {
 }
 
 .dropdown-list .opt.selected {
-  color: #2563eb;
-  font-weight: 700;
   background: #eff6ff;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+/* 空状态样式 */
+.empty-state-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 40px;
+  text-align: center;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px dashed #cbd5e1;
+}
+
+.empty-state-panel .empty-icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+  animation: bounceLeft 2s infinite;
+}
+
+@keyframes bounceLeft {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-10px); }
+}
+
+.empty-state-panel h3 {
+  font-size: 1.1rem;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.empty-state-panel p {
+  font-size: 0.85rem;
+  color: #64748b;
+  line-height: 1.6;
 }
 </style>

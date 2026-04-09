@@ -2,21 +2,27 @@
   <div class="metadata-form-grid">
     <div class="form-group">
       <label>效价 (Potency)</label>
-      <input 
-        :value="modelValue.potency" 
-        @input="updateField('potency', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：1x10^12 PFU/ml" 
-      />
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.potency" 
+          @input="updateField('potency', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：1x10^12" 
+        />
+        <span class="unit">PFU/mL</span>
+      </div>
     </div>
     <div class="form-group">
       <label>滴度 (Titer)</label>
-      <input 
-        :value="modelValue.titer" 
-        @input="updateField('titer', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：1x10^9" 
-      />
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.titer" 
+          @input="updateField('titer', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：1x10^9" 
+        />
+        <span class="unit">TCID50/mL</span>
+      </div>
     </div>
     <div class="form-group">
       <label>血清型 (Serotype)</label>
@@ -81,5 +87,36 @@ function updateField(key: string, value: any) {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   font-size: 0.85rem;
+  width: 100%;
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  overflow: hidden;
+}
+
+.input-with-unit .text-input {
+  border: none;
+  border-radius: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.input-with-unit .text-input:focus {
+  outline: none;
+}
+
+.input-with-unit .unit {
+  background: #f8fafc;
+  padding: 8px 12px;
+  border-left: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 </style>

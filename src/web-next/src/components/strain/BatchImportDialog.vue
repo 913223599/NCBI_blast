@@ -1,210 +1,212 @@
 <template>
-  <div class="batch-import-panel">
-    <!-- 头部 -->
-    <div class="import-header">
-      <h3 class="title">📥 批量导入样本</h3>
-      <button class="close-btn" @click="emit('close')">✕</button>
-    </div>
+  <div class="dialog-overlay" @click.self="emit('close')">
+    <div class="batch-import-panel">
+      <!-- 头部 -->
+      <div class="import-header">
+        <h3 class="title">📥 批量导入样本</h3>
+        <button class="close-btn" @click="emit('close')">✕</button>
+      </div>
 
-    <div class="import-body">
-      <!-- 目标位置选择 -->
-      <div class="form-section">
-        <h4 class="section-label">选择目标冰箱</h4>
-        <div class="select-box-neo" @click.stop="toggleDropdown('freezer')">
-          {{ getFreezerLabel() }} <span class="arrow">▼</span>
-          <div v-if="openDropdown === 'freezer'" class="dropdown-list">
-            <div
-              v-for="freezer in strain.freezers"
-              :key="freezer.id"
-              class="opt"
-              :class="{ selected: targetFreezerId === freezer.id }"
-              @click.stop="selectFreezer(freezer.id)"
+      <div class="import-body">
+        <!-- 目标位置选择 -->
+        <div class="form-section">
+          <h4 class="section-label">选择目标冰箱</h4>
+          <div class="select-box-neo" @click.stop="toggleDropdown('freezer')">
+            {{ getFreezerLabel() }} <span class="arrow">▼</span>
+            <div v-if="openDropdown === 'freezer'" class="dropdown-list">
+              <div
+                v-for="freezer in strain.freezers"
+                :key="freezer.id"
+                class="opt"
+                :class="{ selected: targetFreezerId === freezer.id }"
+                @click.stop="selectFreezer(freezer.id)"
+              >
+                {{ freezer.name }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 导入模式 -->
+        <div class="form-section">
+          <h4 class="section-label">导入模式</h4>
+          <div class="mode-selector">
+            <button
+              class="mode-btn"
+              :class="{ active: importMode === 'auto' }"
+              @click="importMode = 'auto'"
             >
-              {{ freezer.name }}
+              <span class="mode-icon">🤖</span>
+              <div class="mode-info">
+                <div class="mode-name">自动分配位置</div>
+                <div class="mode-desc">系统自动查找空余位置</div>
+              </div>
+            </button>
+            <button
+              class="mode-btn"
+              :class="{ active: importMode === 'manual' }"
+              @click="importMode = 'manual'"
+            >
+              <span class="mode-icon">📍</span>
+              <div class="mode-info">
+                <div class="mode-name">指定位置</div>
+                <div class="mode-desc">手动选择具体位置</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- 手动选择位置（仅手动模式） -->
+        <div v-if="importMode === 'manual' && targetFreezerId" class="form-section">
+          <h4 class="section-label">选择目标位置</h4>
+          <div class="location-selector">
+            <div class="form-row">
+              <div class="form-group">
+                <label>层</label>
+                <select v-model="selectedShelfId" class="text-input">
+                  <option value="">选择层</option>
+                  <option v-for="shelf in targetFreezer?.shelves" :key="shelf.id" :value="shelf.id">
+                    {{ shelf.name }}
+                  </option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>柜</label>
+                <select v-model="selectedCabinetId" class="text-input" :disabled="!selectedShelfId">
+                  <option value="">选择柜</option>
+                  <option v-for="cabinet in selectedShelf?.cabinets" :key="cabinet.id" :value="cabinet.id">
+                    {{ cabinet.name }}
+                  </option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>抽屉</label>
+                <select v-model="selectedDrawerId" class="text-input" :disabled="!selectedCabinetId">
+                  <option value="">选择抽屉</option>
+                  <option v-for="drawer in selectedCabinet?.drawers" :key="drawer.id" :value="drawer.id">
+                    {{ drawer.name }}
+                  </option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>冻存盒</label>
+                <select v-model="selectedBoxId" class="text-input" :disabled="!selectedDrawerId">
+                  <option value="">选择冻存盒</option>
+                  <option v-for="box in selectedDrawer?.boxes" :key="box.id" :value="box.id">
+                    {{ box.name }}
+                  </option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 数据输入 -->
+        <div class="form-section">
+          <h4 class="section-label">输入样本数据</h4>
+          <div class="input-mode-tabs">
+            <button
+              class="tab-btn"
+              :class="{ active: dataInputMode === 'paste' }"
+              @click="dataInputMode = 'paste'"
+            >
+              📋 粘贴数据
+            </button>
+            <button
+              class="tab-btn"
+              :class="{ active: dataInputMode === 'file' }"
+              @click="dataInputMode = 'file'"
+            >
+              📁 上传文件
+            </button>
+          </div>
+
+          <!-- 粘贴模式 -->
+          <div v-if="dataInputMode === 'paste'" class="paste-area">
+            <textarea
+              v-model="pasteData"
+              class="data-textarea"
+              placeholder="粘贴CSV或JSON格式数据...&#10;&#10;CSV示例：&#10;name,accession,species,sequence_type&#10;Sample1,NC_000001,Escherichia coli,DNA&#10;&#10;JSON示例：&#10;[{&quot;name&quot;:&quot;Sample1&quot;,&quot;accession&quot;:&quot;NC_000001&quot;,&quot;species&quot;:&quot;Escherichia coli&quot;,&quot;sequenceType&quot;:&quot;DNA&quot;}]"
+              rows="12"
+            ></textarea>
+            <div class="format-hint">
+              支持 CSV 和 JSON 格式。CSV需要包含表头，字段包括：name, accession, species, strain, sequenceType, source, host, country, collectionDate
+            </div>
+          </div>
+
+          <!-- 文件模式 -->
+          <div v-if="dataInputMode === 'file'" class="file-upload-area">
+            <input
+              type="file"
+              ref="fileInput"
+              @change="handleFileUpload"
+              accept=".csv,.json,.tsv"
+              style="display: none"
+            />
+            <div class="upload-dropzone" @click="fileInput?.click()">
+              <div class="upload-icon"></div>
+              <div class="upload-text">点击或拖拽文件到此处</div>
+              <div class="upload-hint">支持 .csv, .json, .tsv 格式</div>
+            </div>
+            <div v-if="selectedFile" class="file-info">
+              <span class="file-name"></span>
+              <button class="remove-file-btn" @click="removeFile">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 预览 -->
+        <div v-if="parsedRecords.length > 0" class="form-section">
+          <h4 class="section-label">预览 ({{ parsedRecords.length }} 条记录)</h4>
+          <div class="preview-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>名称</th>
+                  <th>Accession</th>
+                  <th>物种</th>
+                  <th>类型</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(record, index) in parsedRecords.slice(0, 5)" :key="index">
+                  <td>{{ record.name }}</td>
+                  <td class="mono">{{ record.accession || '-' }}</td>
+                  <td>{{ record.species || '-' }}</td>
+                  <td>
+                    <span class="type-badge" :class="record.sequenceType?.toLowerCase()">
+                      {{ record.sequenceType || 'DNA' }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="parsedRecords.length > 5" class="more-records">
+              + {{ parsedRecords.length - 5 }} 条更多记录
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 导入模式 -->
-      <div class="form-section">
-        <h4 class="section-label">导入模式</h4>
-        <div class="mode-selector">
-          <button
-            class="mode-btn"
-            :class="{ active: importMode === 'auto' }"
-            @click="importMode = 'auto'"
-          >
-            <span class="mode-icon">🤖</span>
-            <div class="mode-info">
-              <div class="mode-name">自动分配位置</div>
-              <div class="mode-desc">系统自动查找空余位置</div>
-            </div>
-          </button>
-          <button
-            class="mode-btn"
-            :class="{ active: importMode === 'manual' }"
-            @click="importMode = 'manual'"
-          >
-            <span class="mode-icon">📍</span>
-            <div class="mode-info">
-              <div class="mode-name">指定位置</div>
-              <div class="mode-desc">手动选择具体位置</div>
-            </div>
-          </button>
-        </div>
+      <!-- 底部按钮 -->
+      <div class="import-footer">
+        <button class="btn-cancel" @click="emit('close')">取消</button>
+        <button
+          class="btn-confirm"
+          @click="handleImport"
+          :disabled="!canImport || importing"
+        >
+          {{ importing ? '导入中...' : `导入 ${parsedRecords.length} 条记录` }}
+        </button>
       </div>
-
-      <!-- 手动选择位置（仅手动模式） -->
-      <div v-if="importMode === 'manual' && targetFreezerId" class="form-section">
-        <h4 class="section-label">选择目标位置</h4>
-        <div class="location-selector">
-          <div class="form-row">
-            <div class="form-group">
-              <label>层</label>
-              <select v-model="selectedShelfId" class="text-input">
-                <option value="">选择层</option>
-                <option v-for="shelf in targetFreezer?.shelves" :key="shelf.id" :value="shelf.id">
-                  {{ shelf.name }}
-                </option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>柜</label>
-              <select v-model="selectedCabinetId" class="text-input" :disabled="!selectedShelfId">
-                <option value="">选择柜</option>
-                <option v-for="cabinet in selectedShelf?.cabinets" :key="cabinet.id" :value="cabinet.id">
-                  {{ cabinet.name }}
-                </option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>抽屉</label>
-              <select v-model="selectedDrawerId" class="text-input" :disabled="!selectedCabinetId">
-                <option value="">选择抽屉</option>
-                <option v-for="drawer in selectedCabinet?.drawers" :key="drawer.id" :value="drawer.id">
-                  {{ drawer.name }}
-                </option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>冻存盒</label>
-              <select v-model="selectedBoxId" class="text-input" :disabled="!selectedDrawerId">
-                <option value="">选择冻存盒</option>
-                <option v-for="box in selectedDrawer?.boxes" :key="box.id" :value="box.id">
-                  {{ box.name }}
-                </option>
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 数据输入 -->
-      <div class="form-section">
-        <h4 class="section-label">输入样本数据</h4>
-        <div class="input-mode-tabs">
-          <button
-            class="tab-btn"
-            :class="{ active: dataInputMode === 'paste' }"
-            @click="dataInputMode = 'paste'"
-          >
-            📋 粘贴数据
-          </button>
-          <button
-            class="tab-btn"
-            :class="{ active: dataInputMode === 'file' }"
-            @click="dataInputMode = 'file'"
-          >
-            📁 上传文件
-          </button>
-        </div>
-
-        <!-- 粘贴模式 -->
-        <div v-if="dataInputMode === 'paste'" class="paste-area">
-          <textarea
-            v-model="pasteData"
-            class="data-textarea"
-            placeholder="粘贴CSV或JSON格式数据...&#10;&#10;CSV示例：&#10;name,accession,species,sequence_type&#10;Sample1,NC_000001,Escherichia coli,DNA&#10;&#10;JSON示例：&#10;[{&quot;name&quot;:&quot;Sample1&quot;,&quot;accession&quot;:&quot;NC_000001&quot;,&quot;species&quot;:&quot;Escherichia coli&quot;,&quot;sequenceType&quot;:&quot;DNA&quot;}]"
-            rows="12"
-          ></textarea>
-          <div class="format-hint">
-            支持 CSV 和 JSON 格式。CSV需要包含表头，字段包括：name, accession, species, strain, sequenceType, source, host, country, collectionDate
-          </div>
-        </div>
-
-        <!-- 文件模式 -->
-        <div v-if="dataInputMode === 'file'" class="file-upload-area">
-          <input
-            type="file"
-            ref="fileInput"
-            @change="handleFileUpload"
-            accept=".csv,.json,.tsv"
-            style="display: none"
-          />
-          <div class="upload-dropzone" @click="fileInput?.click()">
-            <div class="upload-icon"></div>
-            <div class="upload-text">点击或拖拽文件到此处</div>
-            <div class="upload-hint">支持 .csv, .json, .tsv 格式</div>
-          </div>
-          <div v-if="selectedFile" class="file-info">
-            <span class="file-name"></span>
-            <button class="remove-file-btn" @click="removeFile">✕</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 预览 -->
-      <div v-if="parsedRecords.length > 0" class="form-section">
-        <h4 class="section-label">预览 ({{ parsedRecords.length }} 条记录)</h4>
-        <div class="preview-table">
-          <table>
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>Accession</th>
-                <th>物种</th>
-                <th>类型</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(record, index) in parsedRecords.slice(0, 5)" :key="index">
-                <td>{{ record.name }}</td>
-                <td class="mono">{{ record.accession || '-' }}</td>
-                <td>{{ record.species || '-' }}</td>
-                <td>
-                  <span class="type-badge" :class="record.sequenceType?.toLowerCase()">
-                    {{ record.sequenceType || 'DNA' }}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div v-if="parsedRecords.length > 5" class="more-records">
-            + {{ parsedRecords.length - 5 }} 条更多记录
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 底部按钮 -->
-    <div class="import-footer">
-      <button class="btn-cancel" @click="emit('close')">取消</button>
-      <button
-        class="btn-confirm"
-        @click="handleImport"
-        :disabled="!canImport || importing"
-      >
-        {{ importing ? '导入中...' : `导入 ${parsedRecords.length} 条记录` }}
-      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 
@@ -307,11 +309,12 @@ function parseCSV(text: string): any[] {
   const lines = text.trim().split('\n')
   if (lines.length < 2) return []
   
-    const headers = lines[0]?.split(',').map(h => h.trim()) || []
+  const headers = lines[0]?.split(',').map(h => h.trim()) || []
   const records = []
   
   for (let i = 1; i < lines.length; i++) {
-      const values = lines[i]?.split(',').map(v => v.trim()) || []
+    const values = lines[i]?.split(',').map(v => v.trim()) || []
+    if (values.length < headers.length) continue
     const record: any = {}
     headers.forEach((header, index) => {
       record[header] = values[index] || ''
@@ -323,7 +326,6 @@ function parseCSV(text: string): any[] {
 }
 
 // 监听粘贴数据变化
-import { watch } from 'vue'
 watch(pasteData, (newValue) => {
   if (!newValue.trim()) {
     parsedRecords.value = []
@@ -439,12 +441,25 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
 .batch-import-panel {
   background: white;
   border-radius: 12px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   width: 700px;
-  max-height: 85vh;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -515,7 +530,6 @@ onUnmounted(() => {
   border: 2px solid #e2e8f0;
   border-radius: 10px;
   cursor: pointer;
-  transition: all 0.2s;
 }
 
 .mode-btn:hover {
@@ -590,6 +604,7 @@ onUnmounted(() => {
 .text-input:focus {
   outline: none;
   border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .text-input:disabled {
@@ -611,7 +626,8 @@ onUnmounted(() => {
   border-radius: 8px;
   font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s;
+  font-weight: 600;
+  color: #64748b;
 }
 
 .tab-btn.active {
@@ -631,7 +647,7 @@ onUnmounted(() => {
   padding: 12px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  font-family: 'Courier New', monospace;
+  font-family: 'Consolas', 'Monaco', monospace;
   font-size: 0.85rem;
   resize: vertical;
   min-height: 200px;
@@ -640,6 +656,7 @@ onUnmounted(() => {
 .data-textarea:focus {
   outline: none;
   border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .format-hint {
@@ -660,7 +677,7 @@ onUnmounted(() => {
   padding: 40px 20px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s;
+  background: #f8fafc;
 }
 
 .upload-dropzone:hover {
@@ -681,6 +698,7 @@ onUnmounted(() => {
   font-size: 0.9rem;
   color: #475569;
   margin-bottom: 4px;
+  font-weight: 600;
 }
 
 .upload-hint {
@@ -693,8 +711,9 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 10px 12px;
-  background: #f8fafc;
+  background: #eff6ff;
   border-radius: 8px;
+  border: 1px solid #bfdbfe;
 }
 
 .file-name::before {
@@ -718,6 +737,7 @@ onUnmounted(() => {
   background: #f8fafc;
   border-radius: 8px;
   overflow: hidden;
+  border: 1px solid #e2e8f0;
 }
 
 .preview-table table {
@@ -737,7 +757,7 @@ onUnmounted(() => {
   font-weight: 700;
   color: #64748b;
   text-transform: uppercase;
-  background: white;
+  background: #f1f5f9;
 }
 
 .preview-table td {
@@ -746,7 +766,7 @@ onUnmounted(() => {
 }
 
 .preview-table .mono {
-  font-family: 'Courier New', monospace;
+  font-family: 'Consolas', 'Monaco', monospace;
   font-size: 0.8rem;
 }
 
@@ -756,6 +776,7 @@ onUnmounted(() => {
   border-radius: 4px;
   font-size: 0.7rem;
   font-weight: 700;
+  text-transform: uppercase;
 }
 
 .type-badge.dna {
@@ -779,6 +800,7 @@ onUnmounted(() => {
   font-size: 0.8rem;
   color: #64748b;
   font-weight: 600;
+  background: white;
 }
 
 /* 底部按钮 */
@@ -798,7 +820,6 @@ onUnmounted(() => {
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
 }
 
 .btn-cancel {
@@ -808,32 +829,35 @@ onUnmounted(() => {
 }
 
 .btn-cancel:hover {
-  background: #f8fafc;
+  background: #f1f5f9;
+  border-color: #cbd5e1;
 }
 
 .btn-confirm {
   border: none;
   color: white;
   background: #2563eb;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
 }
 
 .btn-confirm:hover:not(:disabled) {
   background: #1d4ed8;
+  box-shadow: 0 6px 10px -1px rgba(37, 99, 235, 0.3);
 }
 
 .btn-confirm:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
-/* 自定义下拉框 */
+/* 选择冰箱下拉框扩展 */
 .select-box-neo {
-  background: #f8fafc;
+  background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   padding: 10px 12px;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   cursor: pointer;
   position: relative;
   display: flex;
@@ -841,42 +865,40 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.select-box-neo .arrow {
-  color: #94a3b8;
-  font-size: 0.6rem;
-  margin-left: 8px;
+.select-box-neo:hover {
+  border-color: #cbd5e1;
 }
 
 .dropdown-list {
   position: absolute;
-  top: 110%;
+  top: calc(100% + 4px);
   left: 0;
   right: 0;
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   z-index: 100;
   max-height: 200px;
   overflow-y: auto;
-  padding: 6px;
+  padding: 4px;
 }
 
-.dropdown-list .opt {
-  padding: 10px 12px;
-  font-size: 0.82rem;
+.opt {
+  padding: 8px 12px;
+  font-size: 0.85rem;
   border-radius: 6px;
-  cursor: pointer;
+  color: #475569;
 }
 
-.dropdown-list .opt:hover {
+.opt:hover {
   background: #f1f5f9;
   color: #2563eb;
 }
 
-.dropdown-list .opt.selected {
+.opt.selected {
+  background: #eff6ff;
   color: #2563eb;
   font-weight: 700;
-  background: #eff6ff;
 }
 </style>

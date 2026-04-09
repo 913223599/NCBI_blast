@@ -103,47 +103,81 @@ export const MOCK_SAMPLES: Partial<StrainRecord>[] = [
 ]
 
 /**
- * 自动填充脚本
+ * 自动填充脚本 - 适配 v6 编码系统
  */
-export function seedMockData(strainStore: any) {
-  // 查找一个可用的空槽位 (假设在第一个冰箱的第一格)
+export function seedMockData(strainStore: any, codeGen: any) {
+  // 查找一个可用的空槽位
   const freezer = strainStore.freezers[0]
-  if (!freezer) return
+  if (!freezer) {
+    console.warn('请先创建一个冰箱后再填充测试数据')
+    return
+  }
   
   const shelf = freezer.shelves[0]
-  if (!shelf) return
-
-  const cabinet = shelf.cabinets[0]
-  if (!cabinet) return
-
-  const drawer = cabinet.drawers[0]
-  if (!drawer) return
-
-  const box = drawer.boxes[0]
+  const cabinet = shelf?.cabinets[0]
+  const drawer = cabinet?.drawers[0]
+  const box = drawer?.boxes[0]
+  
   if (!box) return
 
+  // 预设一些分类映射 (与 builtinCodes.ts 中的内置代码对应)
+  const taxonMap: Record<string, any> = {
+    'Bacteria': { cat: '1', gen: 'AKF', spc: 'BXM' },
+    'Phage':    { cat: '3', gen: 'PHG', spc: 'TFA' }, // T04 -> TFA
+    'Virus':    { cat: '2', gen: 'COV', spc: 'SAR' }, // S02 -> SAR
+    'Plasmid':  { cat: '5', gen: 'VEC', spc: 'PCD' }, // D03 -> PCD
+    'Protein':  { cat: '8', gen: 'ENZ', spc: 'CAS' },
+    'CellLine': { cat: '6', gen: 'CEL', spc: 'HEK' }, // 293 -> HEK
+  }
+
+  const sources = ['ZC', 'AT', 'NC', 'BJ']
+
   MOCK_SAMPLES.forEach((mock, index) => {
-    // 获取盒内的真实位置标签 (如 A1, A2, ...)
     const positionObj = box.positions[index]
     if (!positionObj) return
     
     const pos = positionObj.label
-    
-    const record = strainStore.addRecord({
-      ...mock,
-      freezerId: freezer.id,
-      shelfId: shelf.id,
-      cabinetId: cabinet.id,
-      drawerId: drawer.id,
-      boxId: box.id,
-      position: pos
-    })
-    
-    strainStore.updatePositionOccupancy(
-      freezer.id, shelf.id, cabinet.id, drawer.id, box.id, pos,
-      true, record.id
-    )
+    const taxon = taxonMap[mock.sampleType as string] || { cat: '9', gen: 'OTH', spc: '001' }
+    const source = sources[index % sources.length]
+
+    try {
+      const sampleCode = codeGen.generate({
+        sourceCode: source,
+        categoryCode: taxon.cat,
+        genusCode: taxon.gen,
+        speciesCode: taxon.spc,
+        passage: index % 5
+      })
+
+      const taxonomyPath = `${taxon.cat}${taxon.gen}${taxon.spc}`
+      const serial = codeGen.counter.getCurrentValue(taxonomyPath)
+
+      const record = strainStore.addRecord({
+        ...mock,
+        sampleCode,
+        codeSource: source,
+        codeCategory: taxon.cat,
+        codeGenus: taxon.gen,
+        codeSpecies: taxon.spc,
+        codePassage: index % 5,
+        codeSerial: serial,
+        accession: sampleCode, 
+        freezerId: freezer.id,
+        shelfId: shelf.id,
+        cabinetId: cabinet.id,
+        drawerId: drawer.id,
+        boxId: box.id,
+        position: pos
+      })
+      
+      strainStore.updatePositionOccupancy(
+        freezer.id, shelf.id, cabinet.id, drawer.id, box.id, pos,
+        true, record.id
+      )
+    } catch (e) {
+      console.error('填充测试样本失败:', e)
+    }
   })
   
-  console.log('✅ 项目表单填充测试完成，已录入 6 种不同类型的全元数据样本。')
+  console.log('✅ v6 编码系统填充测试完成。')
 }

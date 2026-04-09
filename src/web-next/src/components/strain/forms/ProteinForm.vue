@@ -2,30 +2,39 @@
   <div class="metadata-form-grid">
     <div class="form-group">
       <label>蛋白浓度</label>
-      <input 
-        :value="modelValue.concentration" 
-        @input="updateField('concentration', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：5 mg/ml" 
-      />
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.concentration" 
+          @input="updateField('concentration', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：5" 
+        />
+        <span class="unit">mg/mL</span>
+      </div>
     </div>
     <div class="form-group">
-      <label>纯度 (%)</label>
-      <input 
-        :value="modelValue.purity" 
-        @input="updateField('purity', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：>95%" 
-      />
+      <label>纯度</label>
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.purity" 
+          @input="updateField('purity', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：95" 
+        />
+        <span class="unit">%</span>
+      </div>
     </div>
     <div class="form-group">
-      <label>分子量 (kDa)</label>
-      <input 
-        :value="modelValue.molecularWeight" 
-        @input="updateField('molecularWeight', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：48 kDa" 
-      />
+      <label>分子量</label>
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.molecularWeight" 
+          @input="updateField('molecularWeight', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：48" 
+        />
+        <span class="unit">kDa</span>
+      </div>
     </div>
     <div class="form-group">
       <label>缓冲液 (Buffer)</label>
@@ -86,5 +95,36 @@ function handleTagsInput(val: string) {
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   font-size: 0.85rem;
+  width: 100%;
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  overflow: hidden;
+}
+
+.input-with-unit .text-input {
+  border: none;
+  border-radius: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.input-with-unit .text-input:focus {
+  outline: none;
+}
+
+.input-with-unit .unit {
+  background: #f8fafc;
+  padding: 8px 12px;
+  border-left: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 </style>

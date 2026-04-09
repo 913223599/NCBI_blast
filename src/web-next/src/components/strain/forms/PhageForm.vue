@@ -2,12 +2,15 @@
   <div class="metadata-form-grid">
     <div class="form-group">
       <label>噬菌体效价</label>
-      <input 
-        :value="modelValue.potency" 
-        @input="updateField('potency', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：1x10^12 PFU/ml" 
-      />
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.potency" 
+          @input="updateField('potency', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：1x10^12" 
+        />
+        <span class="unit">PFU/mL</span>
+      </div>
     </div>
     <div class="form-group">
       <label>宿主菌株 (Host)</label>
@@ -46,22 +49,28 @@
       />
     </div>
     <div class="form-group">
-      <label>潜伏期 (min)</label>
-      <input 
-        :value="modelValue.latentPeriod" 
-        @input="updateField('latentPeriod', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：20 min" 
-      />
+      <label>潜伏期</label>
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.latentPeriod" 
+          @input="updateField('latentPeriod', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：20" 
+        />
+        <span class="unit">min</span>
+      </div>
     </div>
     <div class="form-group">
       <label>平均裂解量</label>
-      <input 
-        :value="modelValue.burstSize" 
-        @input="updateField('burstSize', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：100 PFU/cell" 
-      />
+      <div class="input-with-unit">
+        <input 
+          :value="modelValue.burstSize" 
+          @input="updateField('burstSize', ($event.target as HTMLInputElement).value)"
+          class="text-input" 
+          placeholder="如：100" 
+        />
+        <span class="unit">PFU/cell</span>
+      </div>
     </div>
   </div>
 </template>
@@ -117,6 +126,37 @@ onUnmounted(() => document.removeEventListener('click', closeDropdown))
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   font-size: 0.85rem;
+  width: 100%;
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  overflow: hidden;
+}
+
+.input-with-unit .text-input {
+  border: none;
+  border-radius: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.input-with-unit .text-input:focus {
+  outline: none;
+}
+
+.input-with-unit .unit {
+  background: #f8fafc;
+  padding: 8px 12px;
+  border-left: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* 自定义下拉框 */

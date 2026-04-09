@@ -36,15 +36,7 @@
       </div>
     </div>
 
-    <div class="form-group">
-      <label>传代次数</label>
-      <input 
-        :value="modelValue.passageNumber" 
-        @input="updateField('passageNumber', ($event.target as HTMLInputElement).value)"
-        class="text-input" 
-        placeholder="如：P3" 
-      />
-    </div>
+
     <div class="form-group">
       <label>容器规格</label>
       <input 
@@ -117,6 +109,37 @@ onUnmounted(() => document.removeEventListener('click', closeDropdown))
   border-radius: 6px;
   font-size: 0.85rem;
   background: white;
+  width: 100%;
+}
+
+.input-with-unit {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: white;
+  overflow: hidden;
+}
+
+.input-with-unit .text-input {
+  border: none;
+  border-radius: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.input-with-unit .text-input:focus {
+  outline: none;
+}
+
+.input-with-unit .unit {
+  background: #f8fafc;
+  padding: 8px 12px;
+  border-left: 1px solid #e2e8f0;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 .textarea-input {
   resize: vertical;
