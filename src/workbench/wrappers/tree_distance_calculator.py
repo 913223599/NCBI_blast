@@ -1,3 +1,4 @@
+import os
 import math
 import re
 import shutil
@@ -5,10 +6,15 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from src.workbench.wrappers.base_wrapper import BaseWrapper
+from src.workbench.wrappers.tree_id_manager import IDManager
 
 
 class DistanceCalculator(BaseWrapper):
     """负责演化距离矩阵的计算与解析"""
+    
+    def __init__(self):
+        super().__init__()
+        self.id_manager = IDManager()  # 委托ID管理职责
 
     def _get_threads(self, threads: int = None) -> int:
         if threads is None or threads <= 0:
@@ -16,33 +22,31 @@ class DistanceCalculator(BaseWrapper):
         return threads
 
     def fasta2dissim(self, input_fasta: Path, output_dm: Path, threads: int = None):
-        """Alignment-based dissimilarity (ID-Safe Tunneling)."""
+        """
+        Alignment-based dissimilarity (ID-Safe Tunneling).
+        
+        Returns:
+            ID映射字典 {short_id: original_id}
+        """
         n_threads = self._get_threads(threads)
         
-        # 核心改进：创建 ID 映射以防止 NCBI 工具在 Windows 下因长 ID 崩溃或截断
-        id_map = {}
-        sanitized_fasta = input_fasta.parent / f"{input_fasta.stem}_safe.fasta"
         try:
-            from Bio import SeqIO
-            records = list(SeqIO.parse(input_fasta, "fasta"))
-            safe_records = []
-            for i, rec in enumerate(records):
-                short_id = f"S{i:05d}"
-                id_map[short_id] = rec.id
-                rec.id = short_id
-                rec.description = ""
-                safe_records.append(rec)
-            SeqIO.write(safe_records, sanitized_fasta, "fasta")
+            # 委托给ID管理器进行安全化处理
+            sanitized_fasta, id_map = self.id_manager.sanitize_fasta(input_fasta)
             
             args = [str(sanitized_fasta.absolute()), "-threads", str(n_threads)]
             result = self._run_command("fasta2dissim.exe", args)
             
             # 后处理：保存包含短 ID 的中间矩阵，确保解析器能精准对齐
             output_dm.write_text(result.stdout, encoding='utf-8')
-            # 返回 ID 映射字典供后续还原
+            
             return id_map
+            
         finally:
-            if sanitized_fasta.exists(): sanitized_fasta.unlink()
+            # 清理临时文件
+            sanitized_fasta = input_fasta.parent / f"{input_fasta.stem}_safe.fasta"
+            if sanitized_fasta.exists(): 
+                sanitized_fasta.unlink()
 
     def prot_collection2dissim(self, input_path: Path, output_dm: Path, threads: int = None):
         """Build dissimilarity matrix from protein collection."""

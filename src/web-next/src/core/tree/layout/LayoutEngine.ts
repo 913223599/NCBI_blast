@@ -56,7 +56,7 @@ export const DEFAULT_SETTINGS: LayoutSettings = {
     showGuideLines: true,
     centerOffset: 0,
     sortMode: 'original',
-    labelDisplayMode: 'replace',
+    labelDisplayMode: 'original',
     visualGain: 0.1
 }
 

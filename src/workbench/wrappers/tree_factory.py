@@ -89,9 +89,6 @@ class TreeFactory(BaseWrapper):
             self.logger.error(f"Fundamental tree inference failure: {e}")
             return False
 
-    def exec_fast_tree(self, input_fasta: Path, output_nwk: Path, params: Dict[str, Any] = None):
-        return self.builder.exec_fast_tree(input_fasta, output_nwk, params)
-
     def tree_stats(self, tree_file: Path):
         """Silently compute stats. First try native then Biopython fallback."""
         try: 

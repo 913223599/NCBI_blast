@@ -25,6 +25,22 @@
           >
             📊 统计分析
           </button>
+
+          <div class="toolbar-divider"></div>
+
+          <button
+            class="toolbar-btn action-btn"
+            @click="showBatchImport = true"
+          >
+            📥 批量导入
+          </button>
+
+          <button
+            class="toolbar-btn action-btn"
+            @click="showCodeManager = true"
+          >
+            📖 编码管理
+          </button>
         </div>
         <div class="toolbar-right">
           <span class="shortcuts-hint">Ctrl+N: 添加冰箱 | Ctrl+I: 批量导入 | Ctrl+H: 帮助</span>
@@ -71,6 +87,14 @@
       :visible="showShortcutsHelp"
       @close="showShortcutsHelp = false"
     />
+
+    <!-- 编码对照表管理 -->
+    <div v-if="showCodeManager" class="code-manager-overlay" @click.self="showCodeManager = false">
+      <div class="code-manager-dialog">
+        <CodeLookupManager />
+        <button class="code-manager-close" @click="showCodeManager = false">✕</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -83,6 +107,7 @@ import AddFreezerDialog from '../components/strain/AddFreezerDialog.vue'
 import BatchImportDialog from '../components/strain/BatchImportDialog.vue'
 import SampleDetailDialog from '../components/strain/SampleDetailDialog.vue'
 import KeyboardShortcutsHelp from '../components/strain/KeyboardShortcutsHelp.vue'
+import CodeLookupManager from '../components/strain/CodeLookupManager.vue'
 import { useStrainStore } from '../stores/strain'
 import type { StrainRecord } from '../stores/strain'
 
@@ -90,6 +115,7 @@ const strain = useStrainStore()
 const showAddDialog = ref(false)
 const showBatchImport = ref(false)
 const showShortcutsHelp = ref(false)
+const showCodeManager = ref(false)
 const currentView = ref<'freezer' | 'stats'>('freezer')
 
 // 样本详情
@@ -242,6 +268,24 @@ onUnmounted(() => {
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
 }
 
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #e2e8f0;
+  margin: 0 4px;
+}
+
+.action-btn {
+  color: #2563eb;
+  border-color: #dbeafe;
+  background: #eff6ff;
+}
+
+.action-btn:hover {
+  background: #dbeafe;
+  border-color: #2563eb;
+}
+
 .toolbar-right {
   flex: 1;
   display: flex;
@@ -262,5 +306,51 @@ onUnmounted(() => {
 .hint-text {
   font-weight: 500;
   letter-spacing: 0.02em;
+}
+
+/* 编码管理弹窗 */
+.code-manager-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.code-manager-dialog {
+  background: white;
+  border-radius: 14px;
+  width: 750px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.2);
+  position: relative;
+}
+
+.code-manager-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: #f1f5f9;
+  border: none;
+  font-size: 1.1rem;
+  color: #64748b;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  z-index: 10;
+  transition: all 0.2s;
+}
+
+.code-manager-close:hover {
+  background: #f1f5f9;
+  color: #1e293b;
 }
 </style>

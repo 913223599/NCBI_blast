@@ -124,24 +124,34 @@ export interface CellMetadata extends BaseMetadata {
 
 export interface StrainRecord {
   id: string
-  accession: string
+  accession: string       // 这里现在主要作为"外部登录号"使用
   name: string
   species: string
-  strain: string
-  sampleType: SampleCategory // 样本具体类型
+  strain: string          // 株/品系
+
+  // === 14位新编码系统字段 ===
+  sampleCode?: string      // 完整 14 位编号: XXABBBCCCPNNNN
+  codeSource?: string      // 来源 (XX)
+  codeCategory?: string    // 大类 (A)
+  codeGenus?: string       // 属 (BBB)
+  codeSpecies?: string     // 种 (CCC)
+  codePassage?: number     // 传代 (P)
+  codeSerial?: number      // 流水号 (NNNN)
+
+  sampleType: SampleCategory
   sequenceType: 'DNA' | 'RNA' | 'Protein'
   sequence: string
   source: string
   host: string
   country: string
   collectionDate: string
-  metadata: Record<string, any> // 根据 sampleType 存储对应的元数据
-  freezerId?: string // 所属冰箱
-  shelfId?: string // 所属层
-  cabinetId?: string // 所属柜
-  drawerId?: string // 所属抽屉
-  boxId?: string // 所属冻存盒
-  position?: string // 位置编号（如 A1, B2）
+  metadata: Record<string, any>
+  freezerId?: string
+  shelfId?: string
+  cabinetId?: string
+  drawerId?: string
+  boxId?: string
+  position?: string
   addedAt: string
 }
 
@@ -172,6 +182,17 @@ export const useStrainStore = defineStore('strain', () => {
 
   /* ======== 数据状态 ======== */
   const records = ref<StrainRecord[]>([])
+  
+  // === 编码系统状态 (P1: 持久化支持) ===
+  const codeLookupEntries = ref<any[]>([]) // 存储 CodeLookupEntry[]
+  const sourceEntries = ref<any[]>([])      // 存储 SourceEntry[]
+  const serialCounters = ref<any[]>([])     // 存储 SerialCounter[]
+  const codeConfig = ref({
+    assignMode: 'sequential',
+    serialDigits: 4,
+    version: '1.0.0'
+  })
+  const isInitialized = ref(false)
   const filteredRecords = ref<StrainRecord[]>([])
   const searchFilters = ref<SearchFilters>({
     keyword: '',
@@ -196,14 +217,32 @@ export const useStrainStore = defineStore('strain', () => {
   async function initFromDatabase() {
     try {
       const bridge = getBridge()
-      bridge.db_load_all((jsonStr: string) => {
+      bridge.db_load_all(async (jsonStr: string) => {
         try {
           const data = JSON.parse(jsonStr)
           freezers.value = data.freezers || []
           records.value = data.records || []
+          
+          // 加载编码系统数据
+          if (data.codeLookup) {
+            codeLookupEntries.value = data.codeLookup.entries || []
+            sourceEntries.value = data.codeLookup.sources || []
+            serialCounters.value = data.codeLookup.counters || []
+            codeConfig.value = data.codeLookup.config || codeConfig.value
+          }
+          
+          // 彻底修复：如果加载后编码词条为空，立即静默注入内置默认数据
+          if (codeLookupEntries.value.length === 0) {
+            const { BUILTIN_LOOKUP_ENTRIES, BUILTIN_SOURCE_ENTRIES } = await import('../data/builtinCodes')
+            codeLookupEntries.value = [...BUILTIN_LOOKUP_ENTRIES]
+            sourceEntries.value = [...BUILTIN_SOURCE_ENTRIES]
+            console.log('[Strain Store] 数据库为空，已注入内置默认编码')
+          }
+
           applyFilters()
-          console.log(`[Strain Store] Loaded from SQLite: ${freezers.value.length} freezers, ${records.value.length} records`)
+          isInitialized.value = true
         } catch (e) {
+          isInitialized.value = true
           console.error('[Strain Store] Failed to parse DB data', e)
         }
       })
@@ -213,17 +252,42 @@ export const useStrainStore = defineStore('strain', () => {
       if (storedData) {
         freezers.value = storedData.freezers
         records.value = storedData.records
+        
+        // 加载备用存储中的编码数据
+        if ((storedData as any).codeLookup) {
+          codeLookupEntries.value = (storedData as any).codeLookup.entries || []
+          sourceEntries.value = (storedData as any).codeLookup.sources || []
+          serialCounters.value = (storedData as any).codeLookup.counters || []
+        }
       }
     }
   }
 
-  // 自动保存数据 (DB 模式下主要作为更新单项后的同步信号)
+  // 自动保存数据 - 防抖 300ms
+  let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
   function autoSave() {
-    // 同时也保留一份 LocalStorage 作为备份
-    saveToStorage({
-      freezers: freezers.value,
-      records: records.value
-    })
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    autoSaveTimer = setTimeout(() => {
+      const codeLookupData = {
+        entries: codeLookupEntries.value,
+        sources: sourceEntries.value,
+        counters: serialCounters.value,
+        config: codeConfig.value
+      }
+
+      saveToStorage({
+        freezers: freezers.value,
+        records: records.value,
+        // 增加编码系统数据的备份
+        codeLookup: codeLookupData
+      } as any)
+
+      try {
+        getBridge().db_save_code_lookup(JSON.stringify(codeLookupData))
+      } catch (e) {}
+
+      autoSaveTimer = null
+    }, 300)
   }
 
   /* ======== 统计 ======== */
@@ -497,7 +561,7 @@ export const useStrainStore = defineStore('strain', () => {
   function removeRecord(id: string) {
     const record = records.value.find(r => r.id === id)
     if (record) {
-      // 如果记录关联了位置，释放该位置
+      // 释放关联位置（内部不再单独 autoSave，由本函数末尾统一触发）
       if (record.freezerId && record.shelfId && record.cabinetId && record.drawerId && record.boxId && record.position) {
         updatePositionOccupancy(
           record.freezerId,
@@ -516,14 +580,15 @@ export const useStrainStore = defineStore('strain', () => {
         getBridge().db_delete_record(id)
       } catch (e) {}
     }
-    
+
+    // 批量更新内存状态（一次性触发响应式）
     records.value = records.value.filter(r => r.id !== id)
     selectedRecords.value.delete(id)
     if (activeRecord.value?.id === id) {
       activeRecord.value = null
     }
     applyFilters()
-    autoSave()
+    autoSave() // 防抖，300ms 内多次调用只执行一次
   }
 
   function updateRecord(id: string, updates: Partial<StrainRecord>) {
@@ -624,7 +689,8 @@ export const useStrainStore = defineStore('strain', () => {
       getBridge().db_save_freezer(JSON.stringify(freezer))
     } catch (e) {}
 
-    autoSave()
+    // 注意：不在此处调用 autoSave()，由上层调用方统一控制
+    // 避免 removeRecord -> updatePositionOccupancy -> autoSave 的重复写入
   }
 
   function clearAll() {
@@ -742,6 +808,37 @@ export const useStrainStore = defineStore('strain', () => {
     importText.value = ''
   }
 
+  /* ======== 维护功能：流水号重校准 ======== */
+  /**
+   * 扫描所有样本，将计数器重置为每个分类下的最大已用编号
+   */
+  function recalibrateCounters() {
+    const maxSerials: Record<string, number> = {}
+
+    // 1. 扫描所有记录，记录每个路径的最大流水号
+    records.value.forEach(record => {
+      if (record.codeCategory && record.codeGenus && record.codeSpecies && record.codeSerial) {
+        const key = `${record.codeCategory}${record.codeGenus}${record.codeSpecies}`
+        const serial = Number(record.codeSerial)
+        if (!maxSerials[key] || serial > maxSerials[key]) {
+          maxSerials[key] = serial
+        }
+      }
+    })
+
+    // 2. 更新计数器列表
+    const now = new Date().toISOString()
+    const updatedCounters = Object.entries(maxSerials).map(([key, maxVal]) => ({
+      counterKey: key,
+      currentValue: maxVal,
+      updatedAt: now
+    }))
+
+    serialCounters.value = updatedCounters
+    autoSave()
+    console.log(`[Strain Store] 计数器重校准完成，更新了 ${updatedCounters.length} 个分类路径`)
+  }
+
   /* ======== Actions: 导出 ======== */
   function exportSelected(format: 'csv' | 'fasta' | 'json'): string {
     const selected = records.value.filter(r => selectedRecords.value.has(r.id))
@@ -778,6 +875,11 @@ export const useStrainStore = defineStore('strain', () => {
     freezers,
     activeFreezerId,
     records,
+    codeLookupEntries,
+    sourceEntries,
+    serialCounters,
+    codeConfig,
+    isInitialized,
     filteredRecords,
     searchFilters,
     selectedRecords,
@@ -812,8 +914,10 @@ export const useStrainStore = defineStore('strain', () => {
     removeRecord,
     updateRecord,
     updatePositionOccupancy,
+    autoSave,
     clearAll,
     applyFilters,
+    recalibrateCounters,
     setSearchFilter,
     resetFilters,
     toggleSelect,

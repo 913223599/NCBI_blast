@@ -22,6 +22,63 @@ const props = defineProps<{
 
 const emit = defineEmits(['node-click', 'render-complete'])
 
+// 缓存 DOM 元素到原始 ID 的映射
+const nodeTextMap = new Map<Element, string>()
+
+// 公开方法：手动更新标签显示模式
+function updateLabelDisplayMode(mode: 'replace' | 'append' | 'original') {
+  console.log('[PhylotreeWidget.updateLabelDisplayMode] Called with mode:', mode)
+  
+  setTimeout(() => {
+    if (!svgHost.value) {
+      console.warn('[PhylotreeWidget] svgHost is null')
+      return
+    }
+    
+    const textElements = svgHost.value.querySelectorAll('.node text')
+    console.log(`[PhylotreeWidget] Found ${textElements.length} text elements`)
+    
+    if (textElements.length === 0) return
+    
+    // 如果缓存为空，初始化映射
+    if (nodeTextMap.size === 0) {
+      textElements.forEach((textEl: Element) => {
+        const currentText = textEl.textContent || ''
+        nodeTextMap.set(textEl, currentText.trim())
+      })
+      console.log(`[PhylotreeWidget] Initialized nodeTextMap with ${nodeTextMap.size} entries`)
+    }
+    
+    let updatedCount = 0
+    textElements.forEach((textEl: Element) => {
+      const originalId = nodeTextMap.get(textEl) || ''
+      const annotation = props.labelMap ? props.labelMap[originalId] : null
+      
+      let newText = originalId
+      if (annotation) {
+        if (mode === 'replace') {
+          newText = annotation
+        } else if (mode === 'append') {
+          newText = `[${annotation}] ${originalId}`
+        }
+        // 'original' mode: use originalId
+      }
+      
+      if (textEl.textContent !== newText) {
+        textEl.textContent = newText
+        updatedCount++
+      }
+    })
+    
+    console.log(`[PhylotreeWidget] Updated ${updatedCount}/${textElements.length} labels`)
+  }, 150)
+}
+
+// 暴露给父组件
+defineExpose({
+  updateLabelDisplayMode
+})
+
 const containerRef = ref<HTMLElement | null>(null)
 const svgHost = ref<HTMLElement | null>(null)
 let treeInstance: any = null
@@ -53,6 +110,9 @@ async function renderTree(nwk: string) {
 function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
   if (!svgHost.value || !nwk) return
   
+  // Reset debug flag on each render
+  ;(window as any)._phylotreeLogged = false
+  
   // 维护 1: 采用渐进式卸载，防止 DOM 僵死
   while (svgHost.value.firstChild) {
       svgHost.value.removeChild(svgHost.value.firstChild);
@@ -61,6 +121,7 @@ function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
   try {
     const isRadial = props.mode === 'circular' || props.mode === 'unrooted'
     console.log(`[PhyloTree-Debug] Render Call. Mode: ${props.mode}, Layout: ${isRadial ? 'radial' : 'linear'}, Labels: ${props.labelDisplayMode}`);
+    console.log('[PhyloTree-Debug] labelMap keys:', props.labelMap ? Object.keys(props.labelMap).slice(0, 3) : 'null');
     
     // 核心工具：分枝长度视觉增益补偿 (不再替换标签内容，保持 ID 原始性以实现动态切换)
     let processedNewick = nwk;
@@ -113,10 +174,27 @@ function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
           
           const annotation = props.labelMap ? props.labelMap[cleanId] : null;
 
+          // Debug: Log ALL nodes on first render
+          if (!window._phylotreeLogged) {
+              console.log(`[PhylotreeWidget] Rendering node: ${cleanId}, Annotation: ${annotation}, Mode: ${props.labelDisplayMode}`);
+          }
+
           // 核心修复：根据 labelDisplayMode 动态渲染
-          if (!annotation || props.labelDisplayMode === 'original') return cleanId;
-          if (props.labelDisplayMode === 'append') return `[${annotation}] ${cleanId}`;
-          return annotation; // 'replace' 模式
+          let result;
+          if (!annotation || props.labelDisplayMode === 'original') {
+              result = cleanId;
+          } else if (props.labelDisplayMode === 'append') {
+              result = `[${annotation}] ${cleanId}`;
+          } else {
+              result = annotation; // 'replace' 模式
+          }
+          
+          // Log first few nodes to verify
+          if (!window._phylotreeLogged && cleanId.includes('SEQ')) {
+              console.log(`[PhylotreeWidget] Node ${cleanId} -> ${result}`);
+          }
+          
+          return result;
       }
     }
 
@@ -165,8 +243,10 @@ watch(() => props.labelMap, () => {
   if (props.newick) renderTree(props.newick)
 }, { deep: true })
 
-watch(() => props.labelDisplayMode, () => {
-  if (props.newick) renderTree(props.newick)
+watch(() => props.labelDisplayMode, (newMode, oldMode) => {
+  console.log('[PhylotreeWidget] labelDisplayMode changed from', oldMode, 'to', newMode)
+  console.log('[PhylotreeWidget] labelMap keys:', props.labelMap ? Object.keys(props.labelMap).slice(0, 5) : 'null')
+  // 不再在此处执行 DOM 更新，由 TreeView 通过 updateLabelDisplayMode 统一调用
 })
 
 watch(() => props.visualGain, () => {

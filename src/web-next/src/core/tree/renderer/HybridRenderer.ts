@@ -107,7 +107,8 @@ export class HybridRenderer {
         const isModelChanged = (this.lastModel !== model) || (this.lastVersion !== model.version) || !this.lastModel
         const isSettingsChanged = (this.lastSettings?.sortMode !== settings.sortMode) ||
             (this.lastSettings?.mode !== settings.mode) ||
-            (this.lastSettings?.useBranchLengths !== settings.useBranchLengths)
+            (this.lastSettings?.useBranchLengths !== settings.useBranchLengths) ||
+            (this.lastSettings?.labelDisplayMode !== settings.labelDisplayMode)
 
         this.lastModel = model
         this.lastVersion = model.version
@@ -177,8 +178,21 @@ export class HybridRenderer {
             }
 
             let displayName = node.name || ""
-            if (node.name && this.annotations[node.name]) {
-                displayName = `[${this.annotations[node.name]}] ${node.name}`
+            const annotation = this.annotations[node.name || ""]
+            
+            // Debug: Log label rendering
+            if (node.name && (node.name === 'SEQ001' || node.name.includes('SEQ'))) {
+                console.log(`[HybridRenderer] Node: ${node.name}, Mode: ${s.labelDisplayMode}, Annotation: ${annotation}, DisplayName: ${displayName}`)
+            }
+            
+            // Apply labelDisplayMode
+            if (annotation) {
+                if (s.labelDisplayMode === 'replace') {
+                    displayName = annotation
+                } else if (s.labelDisplayMode === 'append') {
+                    displayName = `[${annotation}] ${node.name}`
+                }
+                // 'original' mode: keep the ID as-is
             }
 
             text.textContent = displayName

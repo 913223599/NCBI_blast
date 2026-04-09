@@ -181,6 +181,15 @@ class WebBridge(QObject):
     def db_delete_record(self, record_id):
         return get_strain_db_manager().delete_record(record_id)
 
+    @pyqtSlot(str, result=bool)
+    def db_save_code_lookup(self, lookup_json):
+        try:
+            data = json.loads(lookup_json)
+            return get_strain_db_manager().save_sys_config('codeLookup', data)
+        except Exception as e:
+            self.logger.error(f"DB Error (Save Code Lookup): {e}")
+            return False
+
     @pyqtSlot(result=str)
     def db_load_all(self):
         try:
@@ -202,6 +211,14 @@ class WebBridge(QObject):
             self.container.open_file_dialog(file_type)
         except Exception as e:
             self.logger.error(f"BRIDGE ERROR in open_file_dialog: {e}")
+
+    @pyqtSlot(str)
+    def open_external_url(self, url):
+        """Open URL in system default browser"""
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+        self.logger.info(f"Opening external URL: {url}")
+        QDesktopServices.openUrl(QUrl(url))
 
     @pyqtSlot(str, result=str)
     def get_annotations_by_hashes(self, hashes_json):
@@ -1770,7 +1787,8 @@ class WebContainer(QWidget):
                 self.logger.info(f"Injected tree data with manifest size: {len(id_to_hash)}")
             except Exception as e:
                 self.logger.error(f"Failed to read tree file: {e}")
-                self.web_view.page().runJavaScript(f"console.error('Failed to read tree file: {str(e)}'); alert('读取树文件失败: {str(e)}');")
+                safe_err = json.dumps(str(e))
+                self.web_view.page().runJavaScript(f"console.error('Failed to read tree file: ' + {safe_err}); alert('读取树文件失败: ' + {safe_err});")
         else:
              self.logger.warning("No tree file in result")
              self.web_view.page().runJavaScript("console.warn('No tree file generated.'); alert('建树失败：未生成结果文件');")

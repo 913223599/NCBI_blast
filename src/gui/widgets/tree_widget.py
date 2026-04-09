@@ -10,6 +10,7 @@ import logging
 
 from src.workbench.pipelines.analysis_pipeline import AnalysisPipeline
 from src.workbench.models.tool_config import ToolConfig
+from src.workbench.wrappers.tree_archive_manager import ArchiveManager
 
 class TreeWorker(QThread):
     finished = pyqtSignal(dict)
@@ -21,6 +22,7 @@ class TreeWorker(QThread):
         self.fasta_path = Path(fasta_path)
         self.mode = mode
         self.pipeline = AnalysisPipeline()
+        self.archiver = ArchiveManager()
         
     def run(self):
         try:
@@ -35,6 +37,37 @@ class TreeWorker(QThread):
                 self.progress.emit(step_data)
                 if "result" in step_data:
                     final_result = step_data["result"]
+            
+            # --- 核心改进：使用ArchiveManager进行聚合胶囊归档 ---
+            project_id = self.fasta_path.stem
+            
+            try:
+                # 准备需要归档的文件列表
+                result_files = {}
+                if "tree_file" in final_result:
+                    result_files["tree_file"] = final_result["tree_file"]
+                if "manifest_file" in final_result:
+                    result_files["manifest_file"] = final_result["manifest_file"]
+                
+                # 执行归档
+                archive_dir = self.archiver.create_session_archive(
+                    source_fasta=self.fasta_path,
+                    result_files=result_files,
+                    project_id=project_id
+                )
+                
+                # 更新结果中的文件路径为归档后的路径
+                if "tree_file" in result_files:
+                    final_result["tree_file"] = str(result_files["tree_file"])
+                if "manifest_file" in result_files:
+                    final_result["manifest_file"] = str(result_files["manifest_file"])
+                
+                # 清理临时工作区
+                self.archiver.cleanup_staging_area(project_id)
+                
+            except Exception as archive_err:
+                print(f"Archive execution failed (non-critical): {archive_err}")
+                # 归档失败不影响主流程，继续返回结果
             
             self.finished.emit(final_result)
         except Exception as e:

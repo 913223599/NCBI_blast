@@ -21,6 +21,7 @@ const isLoading = ref(false) // UI 层的加载状态
 const currentIdToHash = ref<Record<string, string>>({}) // 核心：ID 到 MD5 指纹的映射映射表
 const treeLeafIds = ref<string[]>([]) // 当前进化树含有的叶子节点 ID 列表
 const treeAnnotations = ref<Record<string, string>>({}) // ID -> 物种名的映射
+const phylotreeWidgetRef = ref<any>(null) // PhylotreeWidget 组件引用
 
 // 进化树渲染引擎切换监听：确保切换后立即重新绑定容器并重绘
 watch(renderEngine, (val) => {
@@ -38,6 +39,7 @@ watch(renderEngine, (val) => {
 // 监听树内容变化，自动拉取语义化注释
 watch(rawNewick, (newNwk) => {
     if (newNwk) {
+        console.log('[TreeView] Newick loaded, fetching annotations...')
         fetchTreeAnnotations(newNwk)
     }
 })
@@ -109,6 +111,9 @@ async function fetchTreeAnnotations(nwk: string) {
             }
 
             treeAnnotations.value = { ...newAnnotations }
+            
+            console.log(`[TreeView] Annotations updated: ${Object.keys(treeAnnotations.value).length} items`)
+            console.log('[TreeView] First 3 annotations:', Object.entries(treeAnnotations.value).slice(0, 3))
             
             // 深度补丁：同步通知 Hybrid 渲染内核更新标签
             if (renderer && typeof (renderer as any).updateAnnotations === 'function') {
@@ -358,7 +363,20 @@ function selectTreeOption(field: string, value: string) {
   else if (field === 'engine') treeWorkflows.engine = value
   else if (field === 'model') treeWorkflows.model = value
   else if (field === 'mode') settings.mode = value as any
-  else if (field === 'labelMode') settings.labelDisplayMode = value as any
+  else if (field === 'labelMode') {
+    console.log(`[TreeView] Switching label mode from ${settings.labelDisplayMode} to ${value}`)
+    settings.labelDisplayMode = value as any
+    
+    // 直接调用组件方法更新标签，不重建组件
+    setTimeout(() => {
+      if (phylotreeWidgetRef.value && typeof phylotreeWidgetRef.value.updateLabelDisplayMode === 'function') {
+        console.log('[TreeView] Calling phylotreeWidgetRef.updateLabelDisplayMode')
+        phylotreeWidgetRef.value.updateLabelDisplayMode(value as any)
+      } else {
+        console.warn('[TreeView] phylotreeWidgetRef not ready or method not found')
+      }
+    }, 100)
+  }
   openDropdown.value = null
 }
 function getMsaLabel() { return msaOptions.find(o => o.value === treeWorkflows.msa)?.label || treeWorkflows.msa }
@@ -878,6 +896,7 @@ onMounted(() => {
         
         <!-- PhyloTree D3 Engine -->
         <PhylotreeWidget 
+             ref="phylotreeWidgetRef"
              v-if="renderEngine === 'phylotree' && hasTree" 
              :newick="rawNewick" 
              :mode="settings.mode" 
@@ -885,7 +904,7 @@ onMounted(() => {
              :use-branch-lengths="settings.useBranchLengths"
              :label-display-mode="settings.labelDisplayMode"
              :visual-gain="settings.visualGain"
-             :key="`${settings.mode}-${settings.labelDisplayMode}-${settings.useBranchLengths}-${rawNewick?.length}`"
+             :key="`${settings.mode}-${settings.useBranchLengths}-${rawNewick?.length}`"
              @node-click="handleInternalNodeClick"
              @render-complete="isLoading = false"
              style="width: 100%; height: 100%;" 

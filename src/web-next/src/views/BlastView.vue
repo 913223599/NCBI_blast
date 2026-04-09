@@ -2,19 +2,48 @@
 /**
  * BlastView - BLAST 分析视图
  * 精简、现代、专业的工作区布局
+ * 
+ * 职责：
+ * - UI渲染和用户交互
+ * - 协调各个Composable模块
  */
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useBlastStore } from '../stores/blast'
 import { getBridge } from '../bridge/pyqt-bridge'
 import { useAppStore } from '../stores/app'
 import { useI18n } from '../locales'
+import { useBlastTaskManager } from '../composables/useBlastTaskManager'
+import { useBlastResultHandler } from '../composables/useBlastResultHandler'
+import { useBlastDetailViewer } from '../composables/useBlastDetailViewer'
 
 const blast = useBlastStore()
 const appStore = useAppStore()
 const { t } = useI18n()
 
+// 注入Composables
+const taskManager = useBlastTaskManager()
+const resultHandler = useBlastResultHandler()
+
+// 直接在组件内部管理弹窗状态，避免Composable在HMR时的状态泄漏
+const detailViewer = useBlastDetailViewer()
+
+// 立即强制锁定，防止任何意外弹出
+detailViewer._isLocked.value = true
+detailViewer._hasUserInteracted.value = false
+detailViewer._isOpenInternal.value = false
+detailViewer.closeDialog()
+
+// 创建本地计算属性，添加更严格的保护
+const shouldShowDetailDialog = computed(() => {
+  // 必须同时满足所有条件
+  const hasValidTitle = detailViewer.currentQueryTitle && 
+                        typeof detailViewer.currentQueryTitle === 'string' && 
+                        detailViewer.currentQueryTitle.trim().length > 0
+  
+  return detailViewer.showAllHitsDialog && hasValidTitle
+})
+
 /* -------- 核心状态 -------- */
-const isTranslating = ref(false)
 const activeSideTool = ref<'input' | 'params' | 'history'>('input')
 const isSidebarOpen = ref(true)
 const openDropdown = ref<string | null>(null)
@@ -31,109 +60,15 @@ function selectFiles(): void {
   }
 }
 
-const pollingTimers: Record<string, number> = {}
-
-function startPolling(taskId: string) {
-  if (pollingTimers[taskId]) return
-  pollingTimers[taskId] = window.setInterval(() => {
-    try {
-      getBridge().get_task_status(taskId, (resStr) => {
-        try {
-          const statusObj = resStr ? JSON.parse(resStr) : null
-          if (!statusObj || !statusObj.status) return
-
-          blast.updateTaskStatus(taskId, statusObj.status, statusObj.progress)
-          if (['done', 'completed', 'error', 'failed', 'cancelled'].includes(statusObj.status)) {
-            window.clearInterval(pollingTimers[taskId])
-            delete pollingTimers[taskId]
-            if (statusObj.status === 'done' || statusObj.status === 'completed') {
-              fetchTaskResults(taskId)
-            }
-          }
-        } catch (e) { /* ignore */ }
-      })
-    } catch {
-      window.clearInterval(pollingTimers[taskId])
-      delete pollingTimers[taskId]
-    }
-  }, 1000)
-}
-
-function fetchTaskResults(taskId: string) {
-  try {
-    getBridge().get_task_results(taskId, (resStr) => {
-      try {
-        const resultsArray = JSON.parse(resStr)
-        if (!Array.isArray(resultsArray)) return
-
-        const hits: any[] = []
-        for (const res of resultsArray) {
-          const queryId = res.sequence_id || '未知序列'
-          if (res.status === 'pending' || res.status === 'running') {
-              hits.push({
-                queryTitle: queryId,
-                speciesName: '等待比对...',
-                genusStrain: '',
-                geneSource: '',
-                seqType: '',
-                host: '',
-                alignLen: '',
-                identity: 0,
-                evalue: '-',
-                accession: '-',
-                hitTitle: '',
-                translatedName: null
-              })
-          } else if (res.data && Array.isArray(res.data) && res.data.length > 0) {
-            const bestHit = res.data[0]
-            hits.push({
-              queryTitle: queryId,
-              speciesName: bestHit.species || 'Unknown',
-              genusStrain: [bestHit.genus, bestHit.strain].filter(Boolean).join(' · ') || '',
-              geneSource: bestHit.gene_source || bestHit.gene_type || '',
-              seqType: bestHit.seq_type || '',
-              host: bestHit.host || '',
-              alignLen: bestHit.align_len || '',
-              identity: parseFloat(bestHit.similarity) || 0,
-              evalue: String(bestHit.evalue || 'N/A'),
-              accession: bestHit.acc || 'N/A',
-              hitTitle: bestHit.title || '',
-              translatedName: null
-            })
-          } else {
-             // Finished but no hits found
-             hits.push({
-                queryTitle: queryId,
-                speciesName: '未找到匹配项 (No Hits)',
-                genusStrain: '',
-                geneSource: '',
-                seqType: '',
-                host: '',
-                alignLen: '',
-                identity: 0,
-                evalue: '-',
-                accession: '-',
-                hitTitle: '',
-                translatedName: null
-             })
-          }
-        }
-        hits.sort((a, b) => a.queryTitle.localeCompare(b.queryTitle, undefined, { numeric: true, sensitivity: 'base' }))
-        blast.setResults(hits, '分析结果 (' + hits.length + ' 项)')
-      } catch (e) {
-        console.error('[Blast] 解析结果失败:', e)
-      }
-    })
-  } catch (error) {
-    console.warn('[Blast] 获取任务结果失败:', error)
-  }
-}
-
+/**
+ * 启动BLAST任务
+ */
 function launchBlast(): void {
   if (!blast.hasInput) {
     appStore.showNotification('请先选择序列文件或粘贴序列', 'warning')
     return
   }
+  
   try {
     const generatedTaskName = getFormattedTimestamp()
     const payload = JSON.stringify({
@@ -155,6 +90,7 @@ function launchBlast(): void {
       try {
         const res = JSON.parse(resStr)
         if (res.status === 'started' && res.task_id) {
+          // 添加任务到列表
           blast.addTask({
             taskId: res.task_id,
             fileName: generatedTaskName,
@@ -162,12 +98,20 @@ function launchBlast(): void {
             progress: 0,
             startTime: new Date().toISOString()
           })
+          
+          // 清空输入
           blast.clearFiles()
           blast.queryText = ''
+          
+          // 显示通知并切换到历史面板
           appStore.showNotification('任务已提交', 'success')
           activeSideTool.value = 'history'
           isSidebarOpen.value = true
-          startPolling(res.task_id)
+          
+          // 启动轮询，完成后自动获取结果
+          taskManager.startPolling(res.task_id, (taskId) => {
+            resultHandler.fetchTaskResults(taskId)
+          })
         } else {
           appStore.showNotification('启动失败: ' + (res.error || '未知错误'), 'error')
         }
@@ -177,138 +121,27 @@ function launchBlast(): void {
     })
   } catch (error) {
     console.error('[Blast] 启动失败:', error)
+    appStore.showNotification('启动失败', 'error')
   }
 }
 
+/**
+ * 导出结果（委托给ResultHandler）
+ */
 async function exportResults(): Promise<void> {
-  if (blast.results.length === 0) {
-    appStore.showNotification('没有结果可导出', 'warning')
-    return
-  }
-
-  // 检查是否存在未翻译的条目
-  const untranslatedCount = blast.results.filter(h => h.speciesName && !h.translatedName).length
-  if (untranslatedCount > 0) {
-    const confirmMsg = `存在 ${untranslatedCount} 条未翻译的物种条目。是否翻译后再导出？\n\n点击“确定”进行批量翻译，点击“取消”将直接导出当前结果（保留空白的翻译列）。`
-    if (window.confirm(confirmMsg)) {
-      await translateAll()
-      // 如果需要可以在翻译完成后自动导出，此处我们等用户手动导出，或者直接调用导出逻辑。
-      // 为防止翻译过程中用户改变主意，这里翻译完后继续下面的导出流程。
-      if (blast.results.filter(h => h.speciesName && !h.translatedName).length > 0) {
-          appStore.showNotification('部分翻译可能未完成，将执行导出。', 'info')
-      }
-    }
-  }
-
-  // 定义表头 - 拆分拉丁文名和翻译名
-  const headers = [
-    '查询序列',
-    '鉴定物种(中文翻译)',
-    '鉴定概率分布(中文翻译)',
-    '原始鉴定物种(拉丁文)',
-    '原始鉴定概率分布(拉丁文)',
-    '分类/菌株信息',
-    '基因/序列库', '相似度 (Identity)', 'E值', '访问号', '详细标题'
-  ]
-  
-  // 转换数据行
-  const rows = blast.results.map(h => {
-    // 翻译相关
-    const fullTrans = h.translatedName || ''
-    let mainTrans = fullTrans
-    let probTrans = '-'
-
-    // 拉丁文相关
-    const fullOriginal = h.speciesName || ''
-    let mainOriginal = fullOriginal
-    let probOriginal = '-'
-
-    // 处理百分比分布(共识算法结果) - 翻译名
-    if (fullTrans.includes('%') && fullTrans.includes('(')) {
-      const matchT = fullTrans.match(/^([^,(]+)\s*\(/)
-      if (matchT && matchT[1]) {
-        mainTrans = matchT[1].trim()
-        probTrans = fullTrans
-      }
-    }
-
-    // 处理百分比分布 - 原始名
-    if (fullOriginal.includes('%') && fullOriginal.includes('(')) {
-      const matchO = fullOriginal.match(/^([^,(]+)\s*\(/)
-      if (matchO && matchO[1]) {
-        mainOriginal = matchO[1].trim()
-        probOriginal = fullOriginal
-      }
-    }
-
-    return [
-      h.queryTitle,
-      mainTrans,
-      probTrans,
-      mainOriginal,
-      probOriginal,
-      h.genusStrain,
-      `${h.geneSource} (${h.seqType})`,
-      `${h.identity.toFixed(1)}%`,
-      h.evalue,
-      h.accession,
-      h.hitTitle
-    ]
-  })
-
-  // 生成 CSV 字符串（考虑 CSV 转义）
-  const csvContent = [
-    headers.join(','),
-    ...rows.map(row => 
-      row.map(cell => {
-        const str = String(cell || '').replace(/"/g, '""')
-        return `"${str}"`
-      }).join(',')
-    )
-  ].join('\n')
-
-  try {
-    getBridge().save_file(csvContent, 'blast_results.csv')
-    appStore.showNotification('导出指令已发送', 'success')
-  } catch (error) {
-    console.error('[Blast] Export error:', error)
-  }
+  await resultHandler.exportResults()
 }
 
+/**
+ * 批量翻译（委托给ResultHandler）
+ */
 async function translateAll(): Promise<void> {
-  if (blast.results.length === 0) return
-  if (isTranslating.value) return
-  isTranslating.value = true
-  appStore.showNotification(`开始翻译 ${blast.results.length} 条结果...`, 'info')
-  
-  const bridge = getBridge()
-  let translated = 0
-  
-  const translationPromises = blast.results
-    .filter(hit => hit.speciesName && !hit.translatedName)
-    .map(hit => new Promise<void>(resolve => {
-      bridge.translate_text(hit.speciesName, 'species', (result: string) => {
-        if (result && result !== hit.speciesName) {
-          hit.translatedName = result
-          translated++
-        }
-        resolve()
-      })
-    }))
-
-  await Promise.all(translationPromises)
-  
-  isTranslating.value = false
-  if (translated > 0) {
-    appStore.showNotification(`成功翻译 ${translated} 条新条目`, 'success')
-  } else {
-    appStore.showNotification('未发现需要翻译的新条目', 'info')
-  }
+  await resultHandler.translateAll()
 }
 
 function selectTask(taskId: string): void {
   blast.setActiveTask(taskId)
-  fetchTaskResults(taskId)
+  resultHandler.fetchTaskResults(taskId)
 }
 
 function toggleSideTool(tool: 'input' | 'params' | 'history') {
@@ -338,7 +171,7 @@ function commitRename(task: any) {
     const trimmed = editName.value.trim()
     if (trimmed && trimmed !== task.fileName) {
       task.fileName = trimmed
-      try { getBridge().rename_task(task.taskId, trimmed) } catch { }
+      taskManager.renameTask(task.taskId, trimmed)
     }
     editingTaskId.value = null
   }
@@ -346,36 +179,53 @@ function commitRename(task: any) {
 
 function clearAllHistory() {
   if (confirm('确定要清空所有分析历史吗？')) {
-    try { getBridge().clear_all_history(); blast.clearHistory(); } catch { }
+    taskManager.clearAllHistory()
   }
 }
 
 function deleteSingleTask(taskId: string, event: Event) {
   event.stopPropagation()
-  try { getBridge().delete_single_task(taskId); blast.removeTask(taskId); } catch { }
+  taskManager.deleteTask(taskId)
 }
 
 function pauseTask(taskId: string, event: Event) {
   event.stopPropagation()
-  try { getBridge().pause_blast_job(taskId); blast.updateTaskStatus(taskId, 'paused'); } catch { }
+  taskManager.pauseTask(taskId)
 }
 
 function resumeTask(taskId: string, event: Event) {
   event.stopPropagation()
-  try { getBridge().resume_blast_job(taskId); blast.updateTaskStatus(taskId, 'running'); startPolling(taskId); } catch { }
+  taskManager.resumeTask(taskId, (tid) => {
+    taskManager.startPolling(tid, (completedTaskId) => {
+      resultHandler.fetchTaskResults(completedTaskId)
+    })
+  })
 }
 
 function stopTask(taskId: string, event: Event) {
   event.stopPropagation()
   if (confirm('确定要取消此任务的执行吗？')) {
-    try { getBridge().stop_blast_job(taskId); blast.updateTaskStatus(taskId, 'cancelled'); } catch { }
+    taskManager.stopTask(taskId)
   }
 }
 
-
-
 function openNcbi(accession: string): void {
-  window.open(`https://www.ncbi.nlm.nih.gov/nuccore/${accession}`, '_blank')
+  if (!accession || accession === '-' || accession === 'N/A') {
+    appStore.showNotification('该条目无有效的NCBI访问号', 'warning')
+    return
+  }
+  
+  const url = `https://www.ncbi.nlm.nih.gov/nuccore/${accession}`
+  try {
+    getBridge().open_external_url(url)
+  } catch (e) {
+    console.error('Failed to open URL via bridge:', e)
+    window.open(url, '_blank')
+  }
+}
+
+function viewAllHits(csvFile: string, queryTitle: string): void {
+  detailViewer.viewAllHits(csvFile, queryTitle)
 }
 
 function toggleDropdown(id: string, event: Event) {
@@ -421,6 +271,15 @@ const PROGRAM_OPTIONS = [
 ]
 
 onMounted(() => {
+  // 防御性措施：确保弹窗始终处于关闭状态
+  // 在组件挂载时强制重置，防止Vite热更新导致的状态不一致
+  
+  // 立即强制重置所有状态
+  detailViewer._isLocked.value = true
+  detailViewer._hasUserInteracted.value = false
+  detailViewer._isOpenInternal.value = false
+  detailViewer.closeDialog()
+  
   document.addEventListener('click', () => { openDropdown.value = null; })
   setTimeout(() => {
     try {
@@ -432,12 +291,24 @@ onMounted(() => {
               taskId: t.task_id, fileName: t.task_name || getFormattedTimestamp(t.start_time),
               status: t.status, progress: t.progress || 0, startTime: t.start_time
             }))
-            blast.tasks.forEach(t => { if (t.status === 'running') startPolling(t.taskId) })
+            // 为运行中的任务启动轮询
+            blast.tasks.forEach(t => { 
+              if (t.status === 'running') {
+                taskManager.startPolling(t.taskId, (taskId) => {
+                  resultHandler.fetchTaskResults(taskId)
+                })
+              }
+            })
           }
         } catch { }
       })
     } catch { }
   }, 500)
+})
+
+// 组件卸载时清理资源
+onUnmounted(() => {
+  taskManager.cleanup()
 })
 </script>
 
@@ -603,7 +474,7 @@ onMounted(() => {
         <div class="results-header">
            <div class="title">📊 {{ blast.resultTitle }}</div>
            <div class="actions">
-              <button class="btn-ai" @click="translateAll" :disabled="isTranslating">{{ t('blast.btn.trans') }}</button>
+              <button class="btn-ai" @click="translateAll" :disabled="resultHandler.isTranslating">{{ t('blast.btn.trans') }}</button>
               <button class="btn-export" @click="exportResults">{{ t('blast.btn.export') }}</button>
            </div>
         </div>
@@ -616,6 +487,7 @@ onMounted(() => {
                  <th>{{ t('blast.res.bg') }}</th>
                  <th>{{ t('blast.res.id') }}</th>
                  <th>{{ t('blast.res.eval') }}</th>
+                 <th>详情</th>
                  <th>NCBI</th>
                </tr>
              </thead>
@@ -637,7 +509,28 @@ onMounted(() => {
                     </div>
                  </td>
                  <td class="mono">{{ h.evalue }}</td>
-                 <td><button class="link-btn" @click="openNcbi(h.accession)">🔗</button></td>
+                 <td>
+                   <button 
+                     v-if="h.csvFile" 
+                     class="detail-btn" 
+                     @click="viewAllHits(h.csvFile, h.queryTitle)"
+                     title="查看所有比对结果"
+                   >
+                     📋 全部
+                   </button>
+                   <span v-else class="no-link">-</span>
+                 </td>
+                 <td>
+                   <button 
+                     v-if="h.accession && h.accession !== '-' && h.accession !== 'N/A'" 
+                     class="link-btn" 
+                     @click="openNcbi(h.accession)"
+                     title="在NCBI中查看"
+                   >
+                     🔗
+                   </button>
+                   <span v-else class="no-link">-</span>
+                 </td>
                </tr>
              </tbody>
            </table>
@@ -645,6 +538,55 @@ onMounted(() => {
              <div class="icon">🧬</div>
              <p>{{ t('blast.hist.empty') }}</p>
            </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 所有比对结果弹窗 -->
+    <!-- 使用 shouldShowDetailDialog 本地计算属性，添加最严格的保护 -->
+    <div 
+      v-if="shouldShowDetailDialog" 
+      class="dialog-overlay" 
+      @click.self="detailViewer.closeDialog"
+    >
+      <div class="dialog-container">
+        <div class="dialog-header">
+          <h3>📋 {{ detailViewer.currentQueryTitle }} - 全部比对结果 ({{ detailViewer.allHitsData.length }} 条)</h3>
+          <button class="close-btn" @click="detailViewer.closeDialog">✕</button>
+        </div>
+        <div class="dialog-body scroll-v">
+          <table v-if="detailViewer.allHitsData.length > 0" class="detail-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>物种名称</th>
+                <th>相似度</th>
+                <th>E值</th>
+                <th>Accession</th>
+                <th>标题</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(hit, index) in detailViewer.allHitsData" :key="index">
+                <td>{{ index + 1 }}</td>
+                <td>{{ hit.species || '-' }}</td>
+                <td>
+                  <span :class="parseFloat(hit.similarity) >= 98 ? 'high-id' : 'low-id'">
+                    {{ hit.similarity }}
+                  </span>
+                </td>
+                <td class="mono">{{ hit.evalue }}</td>
+                <td class="mono">{{ hit.acc || '-' }}</td>
+                <td class="title-cell">{{ hit.title || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="empty-hint">
+            <p>加载中...</p>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn-primary" @click="detailViewer.closeDialog">关闭</button>
         </div>
       </div>
     </div>
@@ -889,6 +831,7 @@ tbody tr:hover { background: #fafbfc; }
 .mono { font-family: 'JetBrains Mono', monospace; color: #475569; font-size: 0.78rem; font-weight: 500; }
 .link-btn { background: #f1f5f9; border: none; padding: 6px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
 .link-btn:hover { background: #e2e8f0; transform: scale(1.1); }
+.no-link { color: #cbd5e1; font-size: 0.85rem; }
 
 .scroll-v { overflow-y: auto; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
 .scroll-v::-webkit-scrollbar { width: 6px; }
@@ -898,4 +841,156 @@ tbody tr:hover { background: #fafbfc; }
 .empty-hint { height: 80%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; text-align: center; }
 .empty-hint .icon { font-size: 3.5rem; opacity: 0.15; margin-bottom: 16px; }
 .empty-hint p { font-size: 0.9rem; font-weight: 500; }
+
+/* 详情按钮 */
+.detail-btn {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  transition: all 0.2s;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.25);
+}
+.detail-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(245, 158, 11, 0.35);
+}
+
+/* 弹窗样式 */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-container {
+  background: white;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 1200px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.dialog-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(to right, #f8fafc, #ffffff);
+  border-radius: 16px 16px 0 0;
+}
+
+.dialog-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.close-btn {
+  background: #f1f5f9;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1.2rem;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  background: #e2e8f0;
+  color: #ef4444;
+}
+
+.dialog-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.detail-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.detail-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f8fafc;
+  padding: 14px 16px;
+  text-align: left;
+  font-size: 0.72rem;
+  color: #64748b;
+  font-weight: 800;
+  border-bottom: 2px solid #e2e8f0;
+  z-index: 10;
+  text-transform: uppercase;
+}
+
+.detail-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.82rem;
+  vertical-align: middle;
+}
+
+.detail-table tbody tr:hover {
+  background: #fafbfc;
+}
+
+.detail-table .title-cell {
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #475569;
+}
+
+.dialog-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: flex-end;
+  background: #f8fafc;
+  border-radius: 0 0 16px 16px;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3);
+}
 </style>

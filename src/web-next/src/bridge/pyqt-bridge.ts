@@ -25,6 +25,7 @@ export interface PyBridge {
     request_file_load(fileType: string): void
     save_file(content: string, filenameHint: string, callback?: (success: boolean) => void): void
     open_results_dir(path: string): void
+    open_external_url(url: string): void
 
     /* BLAST 作业 */
     run_blast_job(paramsJson: string, callback?: (res: string) => void): void
@@ -39,6 +40,7 @@ export interface PyBridge {
     list_tree_sequences(callback: (res: string) => void): void
     clear_all_history(): void
     rename_task(taskId: string, newName: string): void
+    get_detailed_blast_results(csvFile: string, callback?: (res: string) => void): void
 
     /* 进化树 */
     request_tree_analysis(mode: string): void
@@ -78,6 +80,7 @@ export interface PyBridge {
     db_delete_record(recordId: string, callback?: (res: boolean) => void): void
     db_load_all(callback?: (res: string) => void): void
     db_clear_all(callback?: (res: boolean) => void): void
+    db_save_code_lookup(lookupJson: string, callback?: (res: boolean) => void): void
 
     [key: string]: (...args: any[]) => any
 }
