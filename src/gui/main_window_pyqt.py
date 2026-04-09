@@ -3,12 +3,8 @@ NCBI Bio-Station Shell (Refactored)
 Hosts Navigation and Modules (BLAST, SRA, Tree)
 """
 import os
-import sys
 from pathlib import Path
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QStackedWidget, 
                              QMenuBar, QMenu, QStatusBar, QMessageBox, QApplication)
-from PyQt6.QtCore import QProcess, QUrl
-from PyQt6.QtGui import QAction, QIcon
 
 # Modules
 # Modules

@@ -12,7 +12,6 @@ from pathlib import Path
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QFileDialog
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
-from PyQt6.QtCore import QUrl, QObject, pyqtSlot, pyqtSignal
 from PyQt6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 
 from src.blast.manager import get_blast_manager

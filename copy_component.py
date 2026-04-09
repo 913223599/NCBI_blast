@@ -4,7 +4,6 @@ NCBI BLAST 组件打包脚本
 自动将源代码复制到独立组件目录
 """
 
-import os
 import shutil
 from pathlib import Path
 

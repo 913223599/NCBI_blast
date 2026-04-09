@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional
 import json
 import logging
 
@@ -131,7 +130,6 @@ class AnalysisPipeline:
         try:
             self.logger.info("Using internal Python progressive aligner...")
             from Bio import SeqIO
-            from Bio.Align import PairwiseAligner
             sequences = list(SeqIO.parse(input_fasta, "fasta"))
             
             if len(sequences) < 2:

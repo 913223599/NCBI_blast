@@ -5,7 +5,6 @@
 
 import subprocess
 import shutil
-import os
 from pathlib import Path
 from Bio.Blast import NCBIXML
 

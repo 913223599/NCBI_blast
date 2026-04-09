@@ -2,7 +2,6 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLabel,
                              QFileDialog, QTextEdit, QSplitter)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
-from PyQt6.QtCore import QThread, pyqtSignal, QUrl, QTimer, QObject, pyqtSlot
 from pathlib import Path
 import json
 import logging

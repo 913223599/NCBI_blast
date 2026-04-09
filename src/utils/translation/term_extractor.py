@@ -8,7 +8,6 @@ import csv
 import json
 import re
 from pathlib import Path
-from typing import Tuple, Dict, List, Optional
 
 
 class TermExtractor:

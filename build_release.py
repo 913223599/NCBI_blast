@@ -4,7 +4,6 @@
 NCBI BLAST GUI 工业级构建脚本 (Industrial Build Script)
 """
 
-import os
 import shutil
 import subprocess
 import sys

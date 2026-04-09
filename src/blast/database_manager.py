@@ -6,7 +6,6 @@
 import os
 import shutil
 import subprocess
-from pathlib import Path
 import glob
 
 class DatabaseManager:

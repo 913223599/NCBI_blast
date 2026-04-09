@@ -3,7 +3,6 @@ import json
 import logging
 import hashlib
 from pathlib import Path
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +91,6 @@ class AnnotationManager:
                 for csv_file in task_dir.glob("*.csv"):
                     # 如果是汇总 CSV 或者已经命名的结果
                     try:
-                        from src.gui.widgets.web_container import WebBridge
                         # 借用解析逻辑 (注意：这里需要谨慎处理循环导入，但在脚本执行中没关系)
                         pass 
                     except: pass

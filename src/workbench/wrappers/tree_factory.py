@@ -1,6 +1,4 @@
-import os
 from pathlib import Path
-from typing import List, Optional, Union, Dict, Any
 
 from src.workbench.wrappers.base_wrapper import BaseWrapper
 from src.workbench.wrappers.tree_sequence_processor import SequenceProcessor

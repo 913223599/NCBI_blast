@@ -11,7 +11,6 @@ import re
 import time
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSignal, QObject, Qt, QThread, QModelIndex
 from PyQt6.QtGui import QColor, QAction, QStandardItemModel, QStandardItem, QBrush
 from PyQt6.QtWidgets import (QVBoxLayout, QPushButton, QTreeView,
                              QFileDialog, QMessageBox, QHeaderView, QMenu, QHBoxLayout, QGroupBox, QAbstractItemView)

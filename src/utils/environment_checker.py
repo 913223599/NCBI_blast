@@ -5,7 +5,6 @@
 
 import sys
 import os
-import subprocess
 import platform
 from typing import List, Tuple
 
@@ -36,8 +35,6 @@ class EnvironmentChecker:
     def check_pyqt(self) -> bool:
         """检查PyQt库及WebEngine组件是否可用"""
         try:
-            from PyQt6.QtWidgets import QApplication
-            from PyQt6.QtWebEngineWidgets import QWebEngineView
             self.checks.append("PyQt6 (含 WebEngine) 可用")
             return True
         except ImportError as e:
@@ -101,7 +98,6 @@ class EnvironmentChecker:
         if platform.system() == 'Windows':
             # 在Windows上检查是否有必要的运行时库
             try:
-                import ctypes
                 system_checks.append("系统: Windows")
             except:
                 self.errors.append("无法访问系统库")
@@ -147,7 +143,6 @@ class EnvironmentChecker:
         """检查模块路径是否正确设置"""
         # 检查gui模块是否可以被导入 - 修复导入路径
         try:
-            from src.gui.application_pyqt import main
             self.checks.append("src.gui模块可以正常导入")
             return True
         except ImportError as e:

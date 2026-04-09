@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTextBrowser, QPushButton, QHBoxLayout, 
     QListWidget, QSplitter, QFrame, QListWidgetItem
 )
-from PyQt6.QtGui import QFont, QColor
 
 from src.utils.help_manager import get_help_manager
 

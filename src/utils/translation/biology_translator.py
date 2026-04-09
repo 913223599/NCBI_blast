@@ -3,12 +3,9 @@
 负责生物学专业术语的翻译，结合本地数据库和AI翻译服务
 """
 
-import os
 import threading
 from typing import Optional
-from pathlib import Path
 
-from .translation_data_manager import TranslationDataManager
 from .qwen_translator import QwenTranslator
 from .term_extractor import TermExtractor  # 导入TermExtractor
 

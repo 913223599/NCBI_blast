@@ -1,6 +1,5 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 from pathlib import Path
-import json
 from src.workbench.pipelines.analysis_pipeline import AnalysisPipeline
 from src.workbench.models.tool_config import ToolConfig
 from src.workbench.wrappers.tree_archive_manager import ArchiveManager

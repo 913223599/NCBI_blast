@@ -7,7 +7,6 @@ from src.utils.config_manager import get_config_manager
 
 import json
 import logging
-import os
 from pathlib import Path
 from src.utils.config_manager import get_config_manager
 

@@ -2,27 +2,20 @@
 BLAST Analysis Module
 Migrated from original MainWindow
 """
-import os
-import sys
-import json
 from pathlib import Path
 
-from PyQt6.QtCore import pyqtSlot, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, 
                              QStatusBar, QMessageBox, QDialog, QSplitter)
 
 # Import original widgets components
 from src.gui.widgets.file_selector import FileSelectorWidget
-from src.gui.widgets.parameter_settings import ParameterSettingsWidget, AdvancedSettingsDialog
 from src.gui.widgets.control_panel import ControlPanelWidget
 from src.gui.widgets.result_viewer import ResultViewerWidget
-from src.gui.widgets.translation_debugger import TranslationDebuggerDialog
 from src.gui.widgets.task_name_dialog import TaskNameDialog
 
 
 # Threads and Processors
 from src.gui.threads.processing_thread import ProcessingThread, MultiSequenceProcessingThread
-from src.blast.batch_processor import BatchProcessor, MultiSequenceBatchProcessor
 from src.utils.config_manager import get_config_manager
 
 class BlastWidget(QWidget):

@@ -3,7 +3,6 @@
 负责管理和加载应用程序的帮助文档
 """
 
-import os
 import logging
 from pathlib import Path
 

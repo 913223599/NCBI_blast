@@ -1,7 +1,5 @@
 import subprocess
-import os
 import logging
-from typing import Optional, Dict, Any
 
 logger = logging.getLogger("GPUManager")
 

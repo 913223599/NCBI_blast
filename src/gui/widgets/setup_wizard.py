@@ -8,7 +8,6 @@ import shutil
 from PyQt6.QtWidgets import (QWizard, QWizardPage, QVBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QHBoxLayout, QFileDialog,
                              QMessageBox)
-from PyQt6.QtCore import Qt
 
 from src.utils.config_manager import get_config_manager
 

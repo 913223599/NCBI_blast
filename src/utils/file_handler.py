@@ -7,7 +7,6 @@ import os
 import warnings
 import logging
 from pathlib import Path
-from typing import Generator, Dict, Any, List, Union
 
 from Bio import SeqIO, BiopythonDeprecationWarning
 

@@ -7,7 +7,6 @@ import shutil
 import queue
 import time
 import re
-from enum import Enum, auto
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pathlib import Path
