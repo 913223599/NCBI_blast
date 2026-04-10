@@ -332,7 +332,6 @@ function handleConfirm() {
 .dialog-content {
   background: #ffffff;
   border-radius: 16px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   width: 850px;
   max-height: 90vh;
   display: flex;
@@ -654,7 +653,6 @@ function handleConfirm() {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
   z-index: 200;
   max-height: 250px;
   overflow-y: auto;

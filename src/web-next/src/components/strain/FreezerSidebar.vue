@@ -138,12 +138,10 @@ function getTotalBoxes(freezer: any): number {
   justify-content: center;
   gap: 8px;
   transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
 }
 
 .btn-add-freezer:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3);
 }
 
 .icon {
@@ -197,13 +195,11 @@ function getTotalBoxes(freezer: any): number {
   border-color: #cbd5e1;
   background: #f1f5f9;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .freezer-card.active {
   border-color: #2563eb;
   background: #eff6ff;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
 }
 
 .freezer-icon {

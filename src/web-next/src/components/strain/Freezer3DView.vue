@@ -376,11 +376,9 @@ onUnmounted(() => {
   position: absolute;
   top: 20px;
   right: 20px;
-  background: rgba(255, 255, 255, 0.95);
-  /* backdrop-filter removed to fix WebEngine flickering */
+  background: #ffffff;
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
   min-width: 200px;
 }
 
@@ -440,11 +438,9 @@ onUnmounted(() => {
   position: absolute;
   bottom: 20px;
   left: 20px;
-  background: rgba(255, 255, 255, 0.95);
-  /* backdrop-filter removed to fix WebEngine flickering */
+  background: #ffffff;
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
   min-width: 250px;
   max-width: 300px;
 }

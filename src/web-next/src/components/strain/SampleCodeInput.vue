@@ -706,7 +706,6 @@ function closeAllPanels(): void {
 .code-text-input:focus {
   outline: none;
   border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .validation-error {
@@ -792,7 +791,6 @@ function closeAllPanels(): void {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
   z-index: 1500;
   padding: 6px;
   min-width: 240px;

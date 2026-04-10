@@ -125,7 +125,6 @@ function handleConfirm() {
 .dialog-content {
   background: #ffffff;
   border-radius: 12px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
   width: 480px;
   max-height: 85vh;
   display: flex;
@@ -234,7 +233,6 @@ function handleConfirm() {
 .text-input:focus {
   outline: none;
   border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .form-row {
@@ -297,7 +295,6 @@ function handleConfirm() {
   border: none;
   color: white;
   background: #2563eb;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
 }
 
 .btn-confirm:hover:not(:disabled) {

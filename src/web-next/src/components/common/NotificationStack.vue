@@ -39,8 +39,6 @@ const appStore = useAppStore()
   color: #fff;
   font-size: 0.875rem;
   font-weight: 500;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  /* backdrop-filter removed to fix WebEngine flickering */
   max-width: 360px;
 }
 

@@ -87,7 +87,6 @@ defineEmits(['close'])
 .help-panel {
   background: white;
   border-radius: 16px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   max-width: 600px;
   width: 90%;
   max-height: 80vh;

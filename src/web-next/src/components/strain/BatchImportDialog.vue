@@ -457,7 +457,6 @@ onUnmounted(() => {
 .batch-import-panel {
   background: white;
   border-radius: 12px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   width: 700px;
   max-height: 90vh;
   display: flex;
@@ -604,7 +603,6 @@ onUnmounted(() => {
 .text-input:focus {
   outline: none;
   border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .text-input:disabled {
@@ -656,7 +654,6 @@ onUnmounted(() => {
 .data-textarea:focus {
   outline: none;
   border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .format-hint {
@@ -837,12 +834,10 @@ onUnmounted(() => {
   border: none;
   color: white;
   background: #2563eb;
-  box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
 }
 
 .btn-confirm:hover:not(:disabled) {
   background: #1d4ed8;
-  box-shadow: 0 6px 10px -1px rgba(37, 99, 235, 0.3);
 }
 
 .btn-confirm:disabled {
@@ -877,7 +872,6 @@ onUnmounted(() => {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
   z-index: 100;
   max-height: 200px;
   overflow-y: auto;

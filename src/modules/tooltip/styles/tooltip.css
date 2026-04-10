@@ -9,15 +9,12 @@
     z-index: 10000;
     max-width: 280px;
     padding: 8px 12px;
-    background: rgba(15, 23, 42, 0.95);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: #0f172a;
     color: #cbd5e1;
     font-size: 12px;
     line-height: 1.6;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border: 1px solid #334155;
     pointer-events: none;
     opacity: 0;
     transform: scale(0.8);
@@ -39,15 +36,15 @@
 
 /* 主题变体 */
 .tooltip-module.tooltip-light {
-    background: rgba(255, 255, 255, 0.95);
+    background: #ffffff;
     color: #334155;
-    border: 1px solid rgba(0, 0, 0, 0.1);
+    border: 1px solid #e2e8f0;
 }
 
 .tooltip-module.tooltip-dark {
-    background: rgba(15, 23, 42, 0.95);
+    background: #0f172a;
     color: #cbd5e1;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid #334155;
 }
 
 /* 内容容器 */
@@ -70,45 +67,45 @@
     top: 100%;
     left: 50%;
     transform: translateX(-50%);
-    border-top-color: rgba(15, 23, 42, 0.95);
+    border-top-color: #0f172a;
 }
 
 .tooltip-module.tooltip-placement-bottom .tooltip-arrow {
     bottom: 100%;
     left: 50%;
     transform: translateX(-50%);
-    border-bottom-color: rgba(15, 23, 42, 0.95);
+    border-bottom-color: #0f172a;
 }
 
 .tooltip-module.tooltip-placement-left .tooltip-arrow {
     left: 100%;
     top: 50%;
     transform: translateY(-50%);
-    border-left-color: rgba(15, 23, 42, 0.95);
+    border-left-color: #0f172a;
 }
 
 .tooltip-module.tooltip-placement-right .tooltip-arrow {
     right: 100%;
     top: 50%;
     transform: translateY(-50%);
-    border-right-color: rgba(15, 23, 42, 0.95);
+    border-right-color: #0f172a;
 }
 
 /* 浅色主题箭头 */
 .tooltip-module.tooltip-light.tooltip-placement-top .tooltip-arrow {
-    border-top-color: rgba(255, 255, 255, 0.95);
+    border-top-color: #ffffff;
 }
 
 .tooltip-module.tooltip-light.tooltip-placement-bottom .tooltip-arrow {
-    border-bottom-color: rgba(255, 255, 255, 0.95);
+    border-bottom-color: #ffffff;
 }
 
 .tooltip-module.tooltip-light.tooltip-placement-left .tooltip-arrow {
-    border-left-color: rgba(255, 255, 255, 0.95);
+    border-left-color: #ffffff;
 }
 
 .tooltip-module.tooltip-light.tooltip-placement-right .tooltip-arrow {
-    border-right-color: rgba(255, 255, 255, 0.95);
+    border-right-color: #ffffff;
 }
 
 /* 富文本内容样式 */
@@ -122,7 +119,7 @@
 }
 
 .tooltip-content code {
-    background: rgba(0, 0, 0, 0.2);
+    background: #1e293b;
     padding: 2px 4px;
     border-radius: 4px;
     font-family: 'Fira Code', monospace;

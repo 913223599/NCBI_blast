@@ -37,7 +37,6 @@ defineProps<{
   border-radius: 16px;
   padding: 40px 60px;
   text-align: center;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
   border: 3px dashed #2563eb;
 }
 

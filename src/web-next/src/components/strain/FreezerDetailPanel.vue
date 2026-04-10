@@ -995,7 +995,6 @@ function addShelf() {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .header-left {
@@ -1074,12 +1073,10 @@ function addShelf() {
 .btn-add-shelf {
   background: linear-gradient(135deg, #10b981, #059669);
   color: white;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
 }
 
 .btn-add-shelf:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 15px rgba(16, 185, 129, 0.3);
 }
 
 /* 视图切换 */
@@ -1117,7 +1114,6 @@ function addShelf() {
   background: white;
   border-radius: 16px;
   padding: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .level-navigation {
@@ -1181,7 +1177,6 @@ function addShelf() {
   border-color: #2563eb;
   background: #eff6ff;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .shelf-card.selected,
@@ -1189,7 +1184,6 @@ function addShelf() {
 .drawer-card.selected {
   border-color: #2563eb;
   background: #eff6ff;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
 }
 
 /* 缩略图 */
@@ -1256,7 +1250,6 @@ function addShelf() {
   border-radius: 2px;
   transition: height 0.3s ease;
   min-height: 2px;
-  box-shadow: 0 0 2px rgba(37, 99, 235, 0.3);
 }
 
 /* 电池型柱状图样式 */
@@ -1454,7 +1447,6 @@ function addShelf() {
 .box-tab.active {
   border-color: #2563eb;
   background: #eff6ff;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
 }
 
 /* 缩略图网格容器 */
@@ -1508,7 +1500,6 @@ function addShelf() {
   border-radius: 12px;
   padding: 20px;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .box-header {
@@ -1561,7 +1552,6 @@ function addShelf() {
   border: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
   overflow: hidden;
 }
 
@@ -1775,7 +1765,6 @@ function addShelf() {
 .position-cell.selected {
   background: #dbeafe !important;
   border-color: #2563eb !important;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
   z-index: 5;
 }
 
@@ -1798,7 +1787,6 @@ function addShelf() {
   height: 6px;
   border-radius: 50%;
   background: #ef4444; /* 改为红色，更显眼 */
-  box-shadow: 0 0 4px rgba(239, 68, 68, 0.5);
   margin-top: 1px;
 }
 
@@ -1808,7 +1796,6 @@ function addShelf() {
   border-radius: 16px;
   padding: 80px 20px;
   text-align: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .placeholder-content {

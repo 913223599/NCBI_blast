@@ -728,7 +728,6 @@ onUnmounted(() => {
 .dialog-content {
   background: #ffffff;
   border-radius: 12px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
   width: 640px;
   max-height: 85vh;
   display: flex;
@@ -1052,7 +1051,6 @@ onUnmounted(() => {
   outline: none;
   border-color: #2563eb;
   background: white;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .text-input.textarea {
@@ -1103,12 +1101,10 @@ onUnmounted(() => {
   border: none;
   color: white;
   background: #10b981;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.25);
 }
 
 .btn-save-footer:hover {
   background: #059669;
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
 /* 自定义下拉框样式 */
@@ -1145,7 +1141,6 @@ onUnmounted(() => {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
   z-index: 100;
   max-height: 200px;
   overflow-y: auto;
