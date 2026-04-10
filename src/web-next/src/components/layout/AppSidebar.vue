@@ -133,8 +133,8 @@ function isActive(item: NavItem): boolean {
   background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
   display: flex;
   flex-direction: column;
-  /* transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1); */
+  /* transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1); transform-origin: left; */
   overflow: hidden;
   z-index: 100;
 }
@@ -209,7 +209,7 @@ function isActive(item: NavItem): boolean {
   border-radius: 8px;
   cursor: pointer;
   color: #94a3b8;
-  transition: all 0.2s ease;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   white-space: nowrap;
 }
 
@@ -256,7 +256,7 @@ function isActive(item: NavItem): boolean {
   border-radius: 6px;
   cursor: pointer;
   color: #64748b;
-  transition: all 0.2s ease;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .toggle-btn:hover {

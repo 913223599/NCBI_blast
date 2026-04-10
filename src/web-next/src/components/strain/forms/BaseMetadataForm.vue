@@ -171,7 +171,7 @@ onUnmounted(() => document.removeEventListener('click', closeDropdown))
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  
   z-index: 100;
   padding: 4px;
 }

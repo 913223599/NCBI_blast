@@ -836,7 +836,7 @@ onMounted(() => {
                         <div v-for="item in g.items" :key="item.id" 
                              @click="handleLoadHistory(item, g)"
                              class="history-sub-item"
-                             style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s;">
+                             style="padding: 8px 12px; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-bottom: 1px solid #f1f5f9; backface-visibility: hidden; -webkit-backface-visibility: hidden; display: flex; backface-visibility: hidden; -webkit-backface-visibility: hidden; justify-content: space-between; backface-visibility: hidden; -webkit-backface-visibility: hidden; align-items: center; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: background 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;">
                             <div style="flex: 1; overflow: hidden;">
                                 <div style="font-weight: 600; font-size: 10px; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" :title="item.algorithm">{{ item.algorithm }}</div>
                                 <div style="font-size: 9px; color: #94a3b8; margin-top: 2px;">{{ new Date(item.time).toLocaleString() }}</div>
@@ -852,7 +852,7 @@ onMounted(() => {
                 <!-- 简易确认弹窗 (Confirm Modal) -->
                 <Teleport to="body">
                     <div v-if="showDeleteModal" class="neo-modal-overlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-                        <div class="neo-modal" style="background: white; border-radius: 12px; width: 400px; padding: 24px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);">
+                        <div class="neo-modal" style="background: white; border-radius: 12px; width: 400px; padding: 24px; ">
                             <h3 style="margin: 0 0 16px 0; font-size: 18px; color: #1e293b;">确认删除？</h3>
                             <p style="color: #64748b; font-size: 14px; line-height: 1.6;">
                                 你确定要删除此分析记录吗？你可以选择仅移除历史记录，或者同步彻底物理删除磁盘上的原始文件。
@@ -971,7 +971,7 @@ onMounted(() => {
 .btn-primary-run {
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   color: white; padding: 10px 24px; border-radius: 10px;
-  font-weight: 700; font-size: 0.85rem; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  font-weight: 700; font-size: 0.85rem; 
   display: flex; align-items: center; gap: 10px;
 }
 .btn-export {
@@ -984,7 +984,7 @@ onMounted(() => {
 
 /* 侧边栏 */
 .tree-sidebar {
-  width: 360px; background: white; transition: none;
+  width: 360px; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: white; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: none; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   display: flex; flex-direction: column; position: relative; z-index: 5;
   border-right: 1px solid #e2e8f0; overflow: visible;
 }
@@ -998,7 +998,7 @@ onMounted(() => {
   border-left: none; border-radius: 0 10px 10px 0;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; z-index: 10; font-size: 0.61rem; color: #94a3b8;
-  box-shadow: 2px 0 6px rgba(0,0,0,0.06);
+  
 }
 
 .section-title { font-size: 1rem; font-weight: 800; color: #0f172a; margin-bottom: 20px; }
@@ -1006,7 +1006,7 @@ onMounted(() => {
 /* UI 组件 */
 .upload-zone-neo {
   border: 2px dashed #cbd5e1; border-radius: 12px; padding: 24px; text-align: center;
-  cursor: pointer; transition: all 0.2s; background: #f8fafc;
+  cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: #f8fafc; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 .upload-zone-neo:hover { border-color: #2563eb; background: #f0f7ff; }
 .dz-icon { font-size: 1.8rem; display: block; margin-bottom: 8px; }
@@ -1042,7 +1042,7 @@ onMounted(() => {
   background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
   padding: 10px 14px; font-size: 0.82rem; cursor: pointer; position: relative;
   display: flex; justify-content: space-between; align-items: center;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 .select-box-neo:hover { border-color: #cbd5e1; }
 .select-box-neo .arrow { color: #94a3b8; font-size: 0.6rem; margin-left: 8px; }
@@ -1050,7 +1050,7 @@ onMounted(() => {
 .dropdown-list {
   position: absolute; top: 110%; left: 0; right: 0; background: white;
   border: 1px solid #e2e8f0; border-radius: 10px;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.12); z-index: 100;
+   z-index: 100;
   max-height: 250px; overflow-y: auto; padding: 6px;
 }
 .dropdown-list .opt {
@@ -1091,7 +1091,7 @@ onMounted(() => {
 /* Context Menu */
 .node-context-menu {
   position: fixed; z-index: 1000; background: white; padding: 6px; border-radius: 10px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15); border: 1px solid #e2e8f0; min-width: 160px;
+   border: 1px solid #e2e8f0; min-width: 160px;
 }
 .menu-title { font-size: 0.7rem; font-weight: 800; padding: 6px 12px; border-bottom: 1px solid #f1f5f9; color: #94a3b8; }
 .menu-action { padding: 10px 12px; font-size: 0.85rem; border-radius: 6px; cursor: pointer; }
@@ -1103,7 +1103,7 @@ onMounted(() => {
 .btn-block-primary {
   width: 100%; background: #2563eb; color: white; padding: 12px; border-radius: 10px;
   font-weight: 700; font-size: 0.85rem; border: none; cursor: pointer;
-  transition: background 0.2s, opacity 0.2s;
+  transition: background 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 .btn-block-primary:hover { background: #1d4ed8; }
 .btn-block-primary:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -1112,7 +1112,7 @@ onMounted(() => {
   width: 100%; padding: 12px; border-radius: 10px;
   font-weight: 600; font-size: 0.85rem; cursor: pointer;
   background: #f8fafc; border: 1px solid #cbd5e1; color: #334155;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 .btn-block-secondary:hover { background: #f1f5f9; border-color: #94a3b8; }
 .btn-block-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -1138,19 +1138,19 @@ onMounted(() => {
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+  
 }
 .btn-action-outline-mini:hover {
   background: #2563eb;
   color: white;
   border-color: #2563eb;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+  
 }
 .btn-action-outline-mini:active {
   transform: translateY(0);
@@ -1167,7 +1167,7 @@ onMounted(() => {
   overflow: hidden; margin-top: 15px;
 }
 .progress-bar-fill {
-  height: 100%; background: #2563eb; transition: width 0.3s ease;
+  height: 100%; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: #2563eb; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.3s ease; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform-origin: left; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .gpu-toggle-label {
@@ -1202,7 +1202,7 @@ onMounted(() => {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    
 }
 
 .promo-content {
@@ -1216,7 +1216,7 @@ onMounted(() => {
 
 .promo-content .icon {
     font-size: 24px;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+    
     flex-shrink: 0;
 }
 
@@ -1250,7 +1250,7 @@ onMounted(() => {
     font-size: 10px;
     font-weight: 700;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
     white-space: nowrap;
     flex-shrink: 0; /* 禁止按钮被挤压 */
 }
@@ -1258,7 +1258,7 @@ onMounted(() => {
 .btn-mini-promo:hover {
     background: #0284c7;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
+    
 }
 
 /* Custom Modal Styles (Zero Overhead) */
@@ -1269,7 +1269,7 @@ onMounted(() => {
 }
 .modal-card {
     background: #ffffff; border-radius: 12px; 
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    
     width: 440px; padding: 24px; 
 }
 .modal-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }

@@ -296,14 +296,14 @@ function getTotalBoxes(freezer: any): number {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 0.85rem;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   background: white;
 }
 
 .search-input:focus {
   outline: none;
   border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  
 }
 
 .clear-btn {
@@ -352,13 +352,13 @@ function getTotalBoxes(freezer: any): number {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  
 }
 
 .btn-add-freezer:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3);
+  
 }
 
 .icon {
@@ -385,7 +385,7 @@ function getTotalBoxes(freezer: any): number {
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .toggle-btn:hover {
@@ -440,7 +440,7 @@ function getTotalBoxes(freezer: any): number {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   position: relative;
 }
 
@@ -448,13 +448,13 @@ function getTotalBoxes(freezer: any): number {
   border-color: #cbd5e1;
   background: #f1f5f9;
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  
 }
 
 .freezer-card.active {
   border-color: #2563eb;
   background: #eff6ff;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+  
 }
 
 .freezer-icon {
@@ -513,7 +513,7 @@ function getTotalBoxes(freezer: any): number {
   cursor: pointer;
   padding: 4px;
   opacity: 0.6;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   flex-shrink: 0;
 }
 
@@ -533,7 +533,7 @@ function getTotalBoxes(freezer: any): number {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .sample-card:hover {
@@ -670,7 +670,7 @@ function getTotalBoxes(freezer: any): number {
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-mock:hover {

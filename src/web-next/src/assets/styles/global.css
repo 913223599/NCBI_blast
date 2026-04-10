@@ -13,6 +13,11 @@
     --text-secondary: #64748b;
     --text-muted: #94a3b8;
 
+    /* 渲染质量增强 */
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+
     --accent-blue: #3b82f6;
     --accent-green: #10b981;
     --accent-orange: #f59e0b;
@@ -116,4 +121,11 @@ button {
 
 ::-webkit-scrollbar-thumb:hover {
     background: #9ca3af;
+}
+
+/* 强制重置 - 去除全局毛玻璃和阴影效果 (解决 WebEngine 渲染卡顿) */
+* {
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
 }

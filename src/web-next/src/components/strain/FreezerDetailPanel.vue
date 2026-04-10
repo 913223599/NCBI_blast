@@ -1058,7 +1058,7 @@ function addShelf() {
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-edit {
@@ -1095,7 +1095,7 @@ function addShelf() {
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .view-tab:hover {
@@ -1131,7 +1131,7 @@ function addShelf() {
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .nav-btn:hover {
@@ -1165,7 +1165,7 @@ function addShelf() {
   border-radius: 12px;
   padding: 16px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1229,7 +1229,7 @@ function addShelf() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   position: relative;
   min-width: 40px;
   min-height: 40px;
@@ -1248,7 +1248,7 @@ function addShelf() {
   width: 100%;
   background: linear-gradient(to top, #2563eb, #3b82f6);
   border-radius: 2px;
-  transition: height 0.3s ease;
+  transition: height 0.3s ease; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   min-height: 2px;
 }
 
@@ -1281,7 +1281,7 @@ function addShelf() {
   bottom: 0;
   left: 0;
   width: 100%;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   min-height: 0;
 }
 
@@ -1306,7 +1306,7 @@ function addShelf() {
   height: 100%;
   background: #cbd5e1;
   border-radius: 1px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .dot-pixel.dot-active {
@@ -1331,7 +1331,7 @@ function addShelf() {
   height: 100%;
   background: #e2e8f0;
   border-radius: 0.5px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .pos-dot.pos-occupied {
@@ -1433,7 +1433,7 @@ function addShelf() {
   border: 2px solid #e2e8f0;
   border-radius: 10px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   font-size: 0.85rem;
   min-width: 90px;
   flex-shrink: 0;
@@ -1467,7 +1467,7 @@ function addShelf() {
   height: 100%;
   background: #f1f5f9;
   border-radius: 0.5px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .pos-thumb-pixel.pos-thumb-occupied {
@@ -1750,7 +1750,7 @@ function addShelf() {
   border-color: #3b82f6;
   background: #f1f5f9;
   z-index: 10;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  
 }
 
 .position-cell.occupied {

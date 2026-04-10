@@ -51,7 +51,7 @@
           <div class="progress-bar">
             <div
               class="progress-fill"
-              :style="{ width: getFreezerUsageRate(freezer) + '%' }"
+              :style="{ transform: `scaleX(${(getFreezerUsageRate(freezer)) / 100})`, transformOrigin: 'left' }"
               :class="getUsageLevel(getFreezerUsageRate(freezer))"
             ></div>
           </div>
@@ -74,7 +74,7 @@
           <div class="progress-bar">
             <div
               class="progress-fill dna"
-              :style="{ width: getTypePercentage('DNA') + '%' }"
+              :style="{ transform: `scaleX(${(getTypePercentage('DNA')) / 100})`, transformOrigin: 'left' }"
             ></div>
           </div>
         </div>
@@ -86,7 +86,7 @@
           <div class="progress-bar">
             <div
               class="progress-fill rna"
-              :style="{ width: getTypePercentage('RNA') + '%' }"
+              :style="{ transform: `scaleX(${(getTypePercentage('RNA')) / 100})`, transformOrigin: 'left' }"
             ></div>
           </div>
         </div>
@@ -98,7 +98,7 @@
           <div class="progress-bar">
             <div
               class="progress-fill protein"
-              :style="{ width: getTypePercentage('Protein') + '%' }"
+              :style="{ transform: `scaleX(${(getTypePercentage('Protein')) / 100})`, transformOrigin: 'left' }"
             ></div>
           </div>
         </div>
@@ -266,7 +266,7 @@ function downloadFile(content: string, filename: string, type: string) {
   display: flex;
   align-items: center;
   gap: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  
 }
 
 .stat-card.primary {
@@ -316,7 +316,7 @@ function downloadFile(content: string, filename: string, type: string) {
   border-radius: 12px;
   padding: 20px;
   margin-bottom: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  
 }
 
 .section-title {
@@ -375,7 +375,7 @@ function downloadFile(content: string, filename: string, type: string) {
 .progress-fill {
   height: 100%;
   border-radius: 4px;
-  transition: width 0.3s;
+  transition: transform 0.3s; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform-origin: left; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .progress-fill.low {
@@ -485,7 +485,7 @@ function downloadFile(content: string, filename: string, type: string) {
   font-weight: 600;
   color: #475569;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-export:hover {

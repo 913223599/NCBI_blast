@@ -137,7 +137,7 @@ function getTotalBoxes(freezer: any): number {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-add-freezer:hover {
@@ -187,7 +187,7 @@ function getTotalBoxes(freezer: any): number {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   position: relative;
 }
 
@@ -249,7 +249,7 @@ function getTotalBoxes(freezer: any): number {
   padding: 4px;
   border-radius: 6px;
   opacity: 0;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .freezer-card:hover .btn-delete {

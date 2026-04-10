@@ -129,7 +129,7 @@ function navigateTo(card: ActionCard): void {
   align-items: center;
   color: white;
   margin-bottom: var(--space-lg);
-  box-shadow: 0 8px 24px rgba(59, 130, 246, 0.25);
+  
 }
 
 .welcome-left h1 {
@@ -181,7 +181,7 @@ function navigateTo(card: ActionCard): void {
   border-radius: var(--radius-lg);
   padding: 20px;
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -189,7 +189,7 @@ function navigateTo(card: ActionCard): void {
 
 .action-card:hover {
   border-color: var(--accent-blue);
-  box-shadow: var(--shadow-lg);
+  
   transform: translateY(-3px);
 }
 
@@ -224,7 +224,7 @@ function navigateTo(card: ActionCard): void {
   font-size: 1.2rem;
   color: var(--text-muted);
   opacity: 0;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .action-card:hover .card-arrow {

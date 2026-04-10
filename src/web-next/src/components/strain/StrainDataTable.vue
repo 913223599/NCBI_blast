@@ -240,7 +240,7 @@ function triggerManual() {
   font-weight: 600;
   color: #475569;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .action-btn:hover {
@@ -258,6 +258,8 @@ function triggerManual() {
   background: white;
   border-radius: 12px;
   overflow: hidden;
+  /* 工业级渲染隔离：隔离布局计算，防止局部变动引起全局重排 */
+  contain: content;
 }
 
 .table-toolbar {
@@ -309,7 +311,7 @@ function triggerManual() {
   font-weight: 600;
   color: #475569;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-icon:hover:not(:disabled) {
@@ -348,7 +350,10 @@ function triggerManual() {
 .strain-table tbody tr {
   border-bottom: 1px solid #f1f5f9;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  /* 现代工业级懒渲染：只渲染视口附近的行 */
+  content-visibility: auto;
+  contain-intrinsic-size: 0 45px; /* 预估行高，防止滚动条抖动 */
 }
 
 .strain-table tbody tr:hover {
@@ -466,7 +471,7 @@ function triggerManual() {
   font-size: 1rem;
   padding: 4px;
   border-radius: 4px;
-  transition: background 0.2s;
+  transition: background 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .action-btn-small:hover {

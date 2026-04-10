@@ -177,7 +177,7 @@ kbd {
   font-size: 0.8rem;
   font-weight: 700;
   color: #475569;
-  box-shadow: 0 2px 0 #cbd5e1;
+  
   min-width: 24px;
   text-align: center;
 }

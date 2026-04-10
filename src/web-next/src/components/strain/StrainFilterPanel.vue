@@ -159,7 +159,7 @@ function handleReset() {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   font-size: 0.85rem;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   background: white;
 }
 
@@ -216,7 +216,7 @@ function handleReset() {
   font-weight: 600;
   color: #475569;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-reset:hover {

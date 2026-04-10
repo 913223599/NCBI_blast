@@ -250,7 +250,7 @@ onUnmounted(() => {
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -265,7 +265,7 @@ onUnmounted(() => {
   background: #2563eb;
   border-color: #2563eb;
   color: white;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  
 }
 
 .toolbar-divider {
@@ -326,7 +326,7 @@ onUnmounted(() => {
   max-width: 90vw;
   max-height: 80vh;
   overflow: hidden;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.2);
+  
   position: relative;
 }
 
@@ -346,7 +346,7 @@ onUnmounted(() => {
   justify-content: center;
   border-radius: 8px;
   z-index: 10;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .code-manager-close:hover {

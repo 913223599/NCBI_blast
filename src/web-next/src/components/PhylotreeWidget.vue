@@ -239,15 +239,19 @@ watch(() => props.mode, () => {
   if (props.newick) renderTree(props.newick)
 })
 
-watch(() => props.labelMap, () => {
-  if (props.newick) renderTree(props.newick)
+// 核心优化：当标签映射更新时，不再重绘整棵树（昂贵的 D3 操作），而是仅通过 DOM 补丁更新文本内容
+watch(() => props.labelMap, (newMap) => {
+  if (props.newick && newMap) {
+      console.log('[PhylotreeWidget] labelMap changed, performing DOM-only label sync.');
+      updateLabelDisplayMode(props.labelDisplayMode || 'replace');
+  }
 }, { deep: true })
 
 watch(() => props.labelDisplayMode, (newMode, oldMode) => {
   console.log('[PhylotreeWidget] labelDisplayMode changed from', oldMode, 'to', newMode)
-  console.log('[PhylotreeWidget] labelMap keys:', props.labelMap ? Object.keys(props.labelMap).slice(0, 5) : 'null')
-  // 不再在此处执行 DOM 更新，由 TreeView 通过 updateLabelDisplayMode 统一调用
+  updateLabelDisplayMode(newMode || 'replace');
 })
+
 
 watch(() => props.visualGain, () => {
   if (props.newick) renderTree(props.newick)
@@ -305,7 +309,7 @@ onUnmounted(() => {
   stroke: #64748b;
   stroke-width: 1.5px;
   stroke-linecap: round;
-  transition: stroke 0.2s, stroke-width 0.2s;
+  transition: stroke 0.2s, stroke-width 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 :deep(path.branch:hover) {
@@ -326,7 +330,7 @@ onUnmounted(() => {
   font-size: 13px;
   fill: #1e293b;
   cursor: pointer;
-  transition: fill 0.2s, font-weight 0.2s;
+  transition: fill 0.2s, font-weight 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 :deep(.node:hover text) {
@@ -339,7 +343,7 @@ onUnmounted(() => {
   stroke: #94a3b8;
   stroke-width: 1.5px;
   r: 4; /* 初始半径 */
-  transition: r 0.2s, fill 0.2s;
+  transition: r 0.2s, fill 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 :deep(.node:hover circle) {
@@ -374,7 +378,7 @@ onUnmounted(() => {
     cursor: pointer !important;
     text-decoration: none !important;
     display: block !important;
-    transition: all 0.2s !important;
+    transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 :deep(.phylotree-container .dropdown-item:hover), :deep(.phylotree-container a:hover) {
     background: #eff6ff !important; 

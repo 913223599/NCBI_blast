@@ -178,7 +178,7 @@ function handleConfirm() {
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .close-btn:hover {
@@ -227,7 +227,7 @@ function handleConfirm() {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   font-size: 0.9rem;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .text-input:focus {
@@ -278,7 +278,7 @@ function handleConfirm() {
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-cancel {

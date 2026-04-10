@@ -188,7 +188,7 @@ onUnmounted(() => {
   background: white;
   border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  
 }
 
 .search-bar {
@@ -216,13 +216,13 @@ onUnmounted(() => {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   font-size: 0.9rem;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .search-input:focus {
   outline: none;
   border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  
 }
 
 .clear-btn {
@@ -254,7 +254,7 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: #475569;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   white-space: nowrap;
 }
 
@@ -269,7 +269,7 @@ onUnmounted(() => {
 
 .arrow {
   font-size: 0.6rem;
-  transition: transform 0.2s;
+  transition: transform 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .arrow.open {
@@ -313,7 +313,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .select-box-neo:hover {
@@ -335,7 +335,7 @@ onUnmounted(() => {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  
   z-index: 100;
   max-height: 200px;
   overflow-y: auto;
@@ -347,7 +347,7 @@ onUnmounted(() => {
   font-size: 0.82rem;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .dropdown-list .opt:hover {
@@ -366,13 +366,13 @@ onUnmounted(() => {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 0.85rem;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .date-input:focus {
   outline: none;
   border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  
 }
 
 .filter-actions {
@@ -389,7 +389,7 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: #475569;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-reset:hover {

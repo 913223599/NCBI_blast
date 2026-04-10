@@ -144,7 +144,7 @@ function formatTime(isoString: string): string {
   border-radius: 10px;
   padding: 12px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .task-card:hover {
@@ -181,7 +181,7 @@ function formatTime(isoString: string): string {
   font-size: 1rem;
   padding: 4px;
   border-radius: 4px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .task-delete:hover {
@@ -246,7 +246,7 @@ function formatTime(isoString: string): string {
   height: 100%;
   background: linear-gradient(90deg, #2563eb, #3b82f6);
   border-radius: 3px;
-  transition: width 0.3s;
+  transition: transform 0.3s; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform-origin: left; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .progress-text {
@@ -274,7 +274,7 @@ function formatTime(isoString: string): string {
   font-weight: 600;
   color: #475569;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-clear:hover {

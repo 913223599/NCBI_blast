@@ -182,7 +182,7 @@ function downloadFile(content: string, filename: string, type: string) {
 .search-results-panel {
   background: white;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  
   overflow: hidden;
 }
 
@@ -223,7 +223,7 @@ function downloadFile(content: string, filename: string, type: string) {
   border-radius: 8px;
   font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-export:hover:not(:disabled) {
@@ -272,7 +272,7 @@ function downloadFile(content: string, filename: string, type: string) {
   padding: 14px 20px;
   border-bottom: 1px solid #f1f5f9;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .result-card:hover {
@@ -392,7 +392,7 @@ function downloadFile(content: string, filename: string, type: string) {
   border-radius: 6px;
   font-size: 0.9rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .action-btn:hover {
@@ -429,7 +429,7 @@ function downloadFile(content: string, filename: string, type: string) {
   font-size: 0.8rem;
   color: #475569;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-action:hover {

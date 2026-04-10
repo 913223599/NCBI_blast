@@ -112,7 +112,7 @@ function getCategories(): string[] {
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.02);
+  
 }
 
 .sidebar-header {
@@ -144,7 +144,7 @@ function getCategories(): string[] {
   cursor: pointer;
   font-size: 0.875rem;
   color: var(--text-secondary);
-  transition: all 0.15s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 .topic-item:hover { background: #f1f5f9; color: var(--text-primary); }
 .topic-item.active { background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); font-weight: 600; }

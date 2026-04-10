@@ -140,7 +140,7 @@ onUnmounted(() => {
   border: 1px solid var(--border-color);
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   user-select: none;
 }
 
@@ -151,7 +151,7 @@ onUnmounted(() => {
 
 .select-trigger.is-open {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  
 }
 
 .select-trigger.is-disabled {
@@ -171,7 +171,7 @@ onUnmounted(() => {
   font-size: 0.65rem;
   color: #94a3b8;
   margin-left: 8px;
-  transition: transform 0.2s;
+  transition: transform 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .is-open .select-arrow {
@@ -186,7 +186,7 @@ onUnmounted(() => {
   background: white;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  
   z-index: 1000;
   max-height: 200px;
   overflow-y: auto;
@@ -199,7 +199,7 @@ onUnmounted(() => {
   color: var(--text-primary);
   border-radius: 4px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .select-option:hover:not(.is-disabled) {
@@ -238,7 +238,7 @@ onUnmounted(() => {
 /* Animation */
 .dropdown-fade-enter-active,
 .dropdown-fade-leave-active {
-  transition: opacity 0.15s, transform 0.15s;
+  transition: opacity 0.15s, transform 0.15s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .dropdown-fade-enter-from,

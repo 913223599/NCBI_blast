@@ -670,7 +670,7 @@ onUnmounted(() => {
   cursor: pointer;
   border-radius: 10px;
   color: #64748b;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   font-weight: 600;
   font-size: 0.82rem;
 }
@@ -687,12 +687,12 @@ onUnmounted(() => {
   border-radius: 10px;
   font-weight: 700;
   font-size: 0.85rem;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.btn-primary-run:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3); }
+.btn-primary-run:hover:not(:disabled) { transform: translateY(-1px);  }
 
 /* 下方两栏容器 */
 .blast-main-area {
@@ -706,7 +706,7 @@ onUnmounted(() => {
 .blast-sidebar {
   width: 360px;
   background: white;
-  transition: none; /* 取消动画 */
+  transition: none; backface-visibility: hidden; -webkit-backface-visibility: hidden; /* 取消动画 */
   display: flex;
   flex-direction: column;
   position: relative;
@@ -752,7 +752,7 @@ onUnmounted(() => {
   z-index: 10;
   font-size: 0.61rem;
   color: #94a3b8;
-  box-shadow: 2px 0 6px rgba(0,0,0,0.06);
+  
 }
 .sidebar-collapse-toggle:hover { color: #2563eb; background: #f8fafc; }
 
@@ -761,9 +761,9 @@ onUnmounted(() => {
 
 .mode-tabs-neo { display: flex; background: #f1f5f9; padding: 4px; border-radius: 8px; margin-bottom: 20px; }
 .mode-tab { flex: 1; padding: 8px; font-size: 0.78rem; font-weight: 700; border-radius: 6px; color: #64748b; cursor: pointer; }
-.mode-tab.active { background: white; color: #2563eb; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.mode-tab.active { background: white; color: #2563eb;  }
 
-.drop-zone-neo { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 24px; text-align: center; cursor: pointer; transition: all 0.2s; }
+.drop-zone-neo { border: 2px dashed #cbd5e1; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 12px; backface-visibility: hidden; -webkit-backface-visibility: hidden; padding: 24px; backface-visibility: hidden; -webkit-backface-visibility: hidden; text-align: center; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .drop-zone-neo:hover { border-color: #2563eb; background: #f0f7ff; }
 .dz-icon { font-size: 1.8rem; display: block; margin-bottom: 8px; }
 .dz-text { font-size: 0.82rem; font-weight: 700; color: #475569; }
@@ -777,7 +777,7 @@ onUnmounted(() => {
 .form-group { margin-bottom: 20px; }
 .form-group label { font-size: 0.75rem; font-weight: 800; color: #64748b; margin-bottom: 8px; display: block; text-transform: uppercase; letter-spacing: 0.02em; }
 .select-box-neo { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 14px; font-size: 0.82rem; cursor: pointer; position: relative; display: flex; justify-content: space-between; align-items: center; }
-.dropdown-list { position: absolute; top: 110%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.12); z-index: 100; max-height: 250px; overflow-y: auto; padding: 6px; }
+.dropdown-list { position: absolute; top: 110%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 10px;  z-index: 100; max-height: 250px; overflow-y: auto; padding: 6px; }
 .dropdown-list .opt { padding: 10px 12px; font-size: 0.82rem; border-radius: 6px; }
 .dropdown-list .opt:hover { background: #f1f5f9; color: #2563eb; }
 .dropdown-list .group { padding: 8px 12px; font-size: 0.68rem; font-weight: 800; color: #94a3b8; text-transform: uppercase; }
@@ -790,14 +790,14 @@ onUnmounted(() => {
 
 /* 历史列表 */
 .history-list { margin-top: 10px; }
-.task-card { border: 1px solid #e2e8f0; border-radius: 14px; padding: 14px; margin-bottom: 10px; cursor: pointer; position: relative; transition: all 0.2s; background: #fff; }
-.task-card:hover { border-color: #cbd5e1; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-.task-card.active { border-color: #2563eb; background: #eff6ff; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1); }
+.task-card { border: 1px solid #e2e8f0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 14px; backface-visibility: hidden; -webkit-backface-visibility: hidden; padding: 14px; backface-visibility: hidden; -webkit-backface-visibility: hidden; margin-bottom: 10px; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; position: relative; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; background: #fff; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.task-card:hover { border-color: #cbd5e1;  }
+.task-card.active { border-color: #2563eb; background: #eff6ff;  }
 .task-card .title { font-size: 0.82rem; font-weight: 800; margin-bottom: 6px; color: #1e293b; }
 .task-card .meta { display: flex; justify-content: space-between; font-size: 0.68rem; color: #94a3b8; font-weight: 500; }
 .status.done, .status.completed { color: #16a34a; }
 .status.running { color: #2563eb; }
-.task-card .card-actions { position: absolute; top: 12px; right: 12px; opacity: 1; transition: opacity 0.2s; display: flex; gap: 4px; }
+.task-card .card-actions { position: absolute; backface-visibility: hidden; -webkit-backface-visibility: hidden; top: 12px; backface-visibility: hidden; -webkit-backface-visibility: hidden; right: 12px; backface-visibility: hidden; -webkit-backface-visibility: hidden; opacity: 1; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; display: flex; backface-visibility: hidden; -webkit-backface-visibility: hidden; gap: 4px; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 
 .task-card .card-actions button {
   background: white;
@@ -812,7 +812,7 @@ onUnmounted(() => {
   justify-content: center;
   margin-left: 4px;
   font-size: 0.85rem;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   color: #64748b;
 }
 .task-card .card-actions button:hover {
@@ -832,7 +832,7 @@ onUnmounted(() => {
   height: 100%;
   background-color: #3b82f6;
   border-radius: 3px;
-  transition: width 0.3s ease;
+  transition: transform 0.3s ease; backface-visibility: hidden; -webkit-backface-visibility: hidden; transform-origin: left; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 .progress-text {
   position: absolute;
@@ -851,9 +851,9 @@ onUnmounted(() => {
 .results-header { padding: 18px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #fff; }
 .results-header .title { font-size: 1.1rem; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 8px; }
 .actions { display: flex; gap: 10px; }
-.btn-ai { background: white; border: 1.5px solid #2563eb; color: #2563eb; padding: 8px 18px; border-radius: 10px; font-size: 0.78rem; font-weight: 800; cursor: pointer; transition: all 0.2s; }
-.btn-ai:hover:not(:disabled) { background: #2563eb; color: white; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2); }
-.btn-export { background: #f8fafc; border: 1px solid #e2e8f0; color: #475569; padding: 8px 18px; border-radius: 10px; font-size: 0.78rem; font-weight: 800; cursor: pointer; transition: all 0.2s; }
+.btn-ai { background: white; backface-visibility: hidden; -webkit-backface-visibility: hidden; border: 1.5px solid #2563eb; backface-visibility: hidden; -webkit-backface-visibility: hidden; color: #2563eb; backface-visibility: hidden; -webkit-backface-visibility: hidden; padding: 8px 18px; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 10px; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-size: 0.78rem; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-weight: 800; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.btn-ai:hover:not(:disabled) { background: #2563eb; color: white; transform: translateY(-1px);  }
+.btn-export { background: #f8fafc; backface-visibility: hidden; -webkit-backface-visibility: hidden; border: 1px solid #e2e8f0; backface-visibility: hidden; -webkit-backface-visibility: hidden; color: #475569; backface-visibility: hidden; -webkit-backface-visibility: hidden; padding: 8px 18px; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 10px; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-size: 0.78rem; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-weight: 800; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .btn-export:hover { background: #f1f5f9; border-color: #cbd5e1; }
 
 .btn-action-save {
@@ -865,7 +865,7 @@ onUnmounted(() => {
   font-size: 0.8rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   white-space: nowrap;
 }
 
@@ -873,7 +873,7 @@ onUnmounted(() => {
   background: #16a34a;
   color: white;
   border-color: #16a34a;
-  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+  
   transform: translateY(-1px);
 }
 
@@ -896,7 +896,7 @@ tbody tr:hover { background: #fafbfc; }
 .id-val.low-id { color: #94a3b8; }  /* 97%以下：灰色 */
 
 .mono { font-family: 'JetBrains Mono', monospace; color: #475569; font-size: 0.78rem; font-weight: 500; }
-.link-btn { background: #f1f5f9; border: none; padding: 6px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 0.85rem; }
+.link-btn { background: #f1f5f9; backface-visibility: hidden; -webkit-backface-visibility: hidden; border: none; backface-visibility: hidden; -webkit-backface-visibility: hidden; padding: 6px; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 6px; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-size: 0.85rem; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .link-btn:hover { background: #e2e8f0; transform: scale(1.1); }
 .no-link { color: #cbd5e1; font-size: 0.85rem; }
 
@@ -916,7 +916,7 @@ tbody tr:hover { background: #fafbfc; }
   font-weight: 600;
   padding: 2px 0;
   border-bottom: 1px solid transparent;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .view-all-link:hover {
@@ -926,7 +926,7 @@ tbody tr:hover { background: #fafbfc; }
 }
 
 .blast-row-neo {
-  transition: background-color 0.2s;
+  transition: background-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .blast-row-neo:hover {
@@ -959,7 +959,7 @@ tbody tr:hover { background: #fafbfc; }
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  
 }
 
 .dialog-header {
@@ -991,7 +991,7 @@ tbody tr:hover { background: #fafbfc; }
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .close-btn:hover {
@@ -1062,23 +1062,23 @@ tbody tr:hover { background: #fafbfc; }
   font-weight: 700;
   font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  
 }
 
 .btn-primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3);
+  
 }
 
 /* 弹窗过渡动画 */
 .dialog-fade-enter-active,
 .dialog-fade-leave-active {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .dialog-fade-enter-active .dialog-container {
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .dialog-fade-enter-from,

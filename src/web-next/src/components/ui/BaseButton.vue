@@ -50,7 +50,7 @@ const classes = computed(() => {
   border-radius: 6px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   white-space: nowrap;
   user-select: none;
 }
@@ -75,7 +75,7 @@ const classes = computed(() => {
 .btn-primary {
   background: var(--primary-color);
   color: white;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  
 }
 .btn-primary:hover:not(.is-disabled) {
   filter: brightness(1.1);
@@ -86,7 +86,7 @@ const classes = computed(() => {
   background: white;
   border-color: var(--border-color);
   color: var(--text-primary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  
 }
 .btn-secondary:hover:not(.is-disabled) {
   background: #f8fafc;

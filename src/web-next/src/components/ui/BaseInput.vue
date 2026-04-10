@@ -113,7 +113,7 @@ function handleInput(e: Event) {
   background-clip: padding-box;
   border: 1px solid var(--border-color);
   border-radius: 0.375rem;
-  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+  transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .with-prefix { padding-left: 2rem; }
@@ -132,7 +132,7 @@ function handleInput(e: Event) {
 .form-control:focus {
   border-color: var(--primary-color);
   outline: 0;
-  box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.25);
+  
 }
 
 .form-control:disabled {
@@ -146,7 +146,7 @@ function handleInput(e: Event) {
 }
 
 .has-error .form-control:focus {
-  box-shadow: 0 0 0 0.2rem rgba(239, 68, 68, 0.25);
+  
 }
 
 .error-msg {

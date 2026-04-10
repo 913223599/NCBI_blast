@@ -181,7 +181,7 @@ function handleNCBIDownload() {
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .mode-tab:hover {
@@ -191,7 +191,7 @@ function handleNCBIDownload() {
 .mode-tab.active {
   background: white;
   color: #2563eb;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  
 }
 
 .input-section {
@@ -206,7 +206,7 @@ function handleNCBIDownload() {
   padding: 32px 20px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   background: #f8fafc;
 }
 
@@ -245,7 +245,7 @@ function handleNCBIDownload() {
   font-size: 0.85rem;
   line-height: 1.6;
   resize: vertical;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .sequence-input:focus {
@@ -259,7 +259,7 @@ function handleNCBIDownload() {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   font-size: 0.85rem;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .text-input:focus {
@@ -290,13 +290,13 @@ function handleNCBIDownload() {
   font-weight: 700;
   font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 15px rgba(37, 99, 235, 0.3);
+  
 }
 
 .btn-primary:disabled {

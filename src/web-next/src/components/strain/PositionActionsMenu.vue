@@ -57,7 +57,7 @@ const emit = defineEmits(['view', 'edit', 'unbind', 'add'])
   padding: 10px 14px;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   font-size: 0.85rem;
   color: #475569;
 }

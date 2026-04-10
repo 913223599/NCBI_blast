@@ -38,15 +38,15 @@ defineProps<Props>()
   background: white;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: box-shadow 0.2s;
+  transition: box-shadow 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .base-card:hover {
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  
 }
 
 .card-header {

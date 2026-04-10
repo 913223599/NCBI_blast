@@ -7,6 +7,7 @@ import sys
 
 import psutil
 from PyQt6.QtWidgets import QApplication, QWizard
+from PyQt6.QtGui import QSurfaceFormat
 
 from src.gui.main_window_pyqt import MainWindow
 from src.gui.widgets.setup_wizard import SetupWizard

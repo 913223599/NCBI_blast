@@ -124,7 +124,7 @@ function handleClear() {
   cursor: pointer;
   border-radius: 10px;
   color: #64748b;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   font-weight: 600;
   font-size: 0.82rem;
 }
@@ -195,7 +195,7 @@ function handleClear() {
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-secondary {

@@ -476,7 +476,7 @@ function editTerm(term: any): void {
 .nav-icon { margin-right: 10px; }
 .settings-content { flex: 1; overflow-y: auto; padding: 32px 48px; }
 .panel h2 { font-size: 1.25rem; margin-bottom: 24px; color: var(--text-primary); }
-.glass-card { background: white; border: 1px solid var(--border-color); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
+.glass-card { background: white; border: 1px solid var(--border-color); border-radius: 12px; padding: 24px;  }
 .desc { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 24px; }
 .form-group { margin-bottom: 20px; position: relative; }
 .form-group label { display: block; font-weight: 600; font-size: 0.875rem; margin-bottom: 8px; }
@@ -489,7 +489,7 @@ function editTerm(term: any): void {
 .select-dropdown { 
   position: absolute; top: 105%; left: 0; right: 0; 
   background: white; border: 1px solid var(--border-color); 
-  border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); 
+  border-radius: 8px;  
   z-index: 999; max-height: 250px; overflow-y: auto;
 }
 .select-option { padding: 10px 14px; font-size: 0.875rem; color: var(--text-primary); cursor: pointer; }
@@ -521,7 +521,7 @@ function editTerm(term: any): void {
 .dict-grid-row {
   height: 52px;
   border-bottom: 1px solid var(--border-light);
-  transition: background 0.2s;
+  transition: background 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 .dict-grid-row:hover { background: #f8fafc; }
 .dict-virtual-container {
@@ -540,7 +540,7 @@ function editTerm(term: any): void {
 .source-tag.manual { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); }
 
 .dict-actions { display: flex; gap: 8px; justify-content: flex-end; overflow: visible; }
-.btn-icon-link { background: none; border: none; font-size: 1.05rem; cursor: pointer; padding: 4px; transition: transform 0.1s; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 4px; }
+.btn-icon-link { background: none; backface-visibility: hidden; -webkit-backface-visibility: hidden; border: none; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-size: 1.05rem; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; padding: 4px; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.1s; backface-visibility: hidden; -webkit-backface-visibility: hidden; display: inline-flex; backface-visibility: hidden; -webkit-backface-visibility: hidden; align-items: center; backface-visibility: hidden; -webkit-backface-visibility: hidden; justify-content: center; backface-visibility: hidden; -webkit-backface-visibility: hidden; width: 26px; backface-visibility: hidden; -webkit-backface-visibility: hidden; height: 26px; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 4px; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .btn-icon-link:hover { transform: scale(1.1); background: rgba(0,0,0,0.05); }
 
 .btn-premium { background: var(--accent-blue); color: white; border: none; padding: 10px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; }
@@ -552,13 +552,13 @@ function editTerm(term: any): void {
 .model-card { 
   display: flex; justify-content: space-between; align-items: center;
   padding: 12px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
-.model-card:hover { border-color: var(--accent-blue); background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+.model-card:hover { border-color: var(--accent-blue); background: white;  }
 .model-card-info { flex: 1; min-width: 0; }
 .model-card-name { font-weight: 600; font-size: 0.9rem; color: var(--text-primary); margin-bottom: 2px; }
 .model-card-key { font-size: 0.72rem; color: var(--text-muted); font-family: monospace; overflow: hidden; text-overflow: ellipsis; }
-.btn-delete-card { background: none; border: none; font-size: 1rem; color: #cbd5e1; cursor: pointer; padding: 4px; line-height: 1; transition: color 0.2s; }
+.btn-delete-card { background: none; backface-visibility: hidden; -webkit-backface-visibility: hidden; border: none; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-size: 1rem; backface-visibility: hidden; -webkit-backface-visibility: hidden; color: #cbd5e1; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; padding: 4px; backface-visibility: hidden; -webkit-backface-visibility: hidden; line-height: 1; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .btn-delete-card:hover { color: var(--accent-red); }
 
 .add-model-box { display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px dashed #e2e8f0; }
@@ -567,7 +567,7 @@ function editTerm(term: any): void {
 .btn-action-plus { 
   display: flex; align-items: center; justify-content: center; gap: 8px;
   background: white; border: 1px solid var(--accent-blue); color: var(--accent-blue);
-  padding: 10px; border-radius: 8px; font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: all 0.2s;
+  padding: 10px; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 8px; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-weight: 600; backface-visibility: hidden; -webkit-backface-visibility: hidden; font-size: 0.85rem; backface-visibility: hidden; -webkit-backface-visibility: hidden; cursor: pointer; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 .btn-action-plus:hover { background: var(--accent-blue); color: white; }
 .plus-icon { font-size: 1.2rem; line-height: 1; }
@@ -577,7 +577,7 @@ function editTerm(term: any): void {
 .dict-actions { display: flex; gap: 16px; justify-content: flex-end; }
 .btn-icon-link { 
   background: none; border: none; cursor: pointer; padding: 4px; 
-  font-size: 1.05rem; opacity: 0.4; transition: all 0.2s; 
+  font-size: 1.05rem; backface-visibility: hidden; -webkit-backface-visibility: hidden; opacity: 0.4; backface-visibility: hidden; -webkit-backface-visibility: hidden; transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden; 
   display: flex; align-items: center; justify-content: center;
 }
 .btn-icon-link:hover { opacity: 1; transform: scale(1.2); }

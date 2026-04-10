@@ -696,7 +696,7 @@ onUnmounted(() => {
 .dialog-content {
   background: #ffffff;
   border-radius: 16px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  
   width: 960px;
   max-height: 92vh;
   display: flex;
@@ -750,7 +750,7 @@ onUnmounted(() => {
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .close-btn:hover {
@@ -887,7 +887,7 @@ onUnmounted(() => {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 0.9rem;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   font-family: inherit;
   background: #f8fafc;
 }
@@ -896,7 +896,7 @@ onUnmounted(() => {
   outline: none;
   border-color: #2563eb;
   background: white;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  
 }
 
 .custom-select {
@@ -916,7 +916,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: all 0.2s ease;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   min-height: 40px;
 }
 
@@ -933,7 +933,7 @@ onUnmounted(() => {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  
   z-index: 1001; /* 确保高于其他表单项 */
   overflow: hidden;
   animation: dropdownIn 0.2s ease-out;
@@ -944,7 +944,7 @@ onUnmounted(() => {
   font-size: 0.88rem;
   color: #475569;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .select-option:hover {
@@ -1031,7 +1031,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s;
+  transition: background 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .num-btn:hover {
@@ -1098,7 +1098,7 @@ onUnmounted(() => {
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-cancel {
@@ -1116,12 +1116,12 @@ onUnmounted(() => {
   border: none;
   color: white;
   background: #2563eb;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  
 }
 
 .btn-confirm:hover:not(:disabled) {
   background: #1d4ed8;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+  
 }
 
 .btn-confirm:disabled {
@@ -1180,7 +1180,7 @@ onUnmounted(() => {
   background-color: #fff;
   border: 2px solid #cbd5e1;
   border-radius: 4px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .checkbox-container:hover input ~ .checkmark {
@@ -1224,7 +1224,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .select-box-neo:hover {
@@ -1246,7 +1246,7 @@ onUnmounted(() => {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+  
   z-index: 100;
   max-height: 200px;
   overflow-y: auto;
@@ -1258,7 +1258,7 @@ onUnmounted(() => {
   font-size: 0.82rem;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   display: flex;
   align-items: center;
   gap: 8px;

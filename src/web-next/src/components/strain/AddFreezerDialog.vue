@@ -362,7 +362,7 @@ function handleConfirm() {
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
   margin-left: auto;
 }
 
@@ -423,7 +423,7 @@ function handleConfirm() {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   font-size: 0.9rem;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .text-input:focus {
@@ -586,7 +586,7 @@ function handleConfirm() {
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .btn-cancel {
@@ -632,7 +632,7 @@ function handleConfirm() {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .select-box-neo:hover {
@@ -664,7 +664,7 @@ function handleConfirm() {
   font-size: 0.82rem;
   border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
 }
 
 .dropdown-list .opt:hover {
