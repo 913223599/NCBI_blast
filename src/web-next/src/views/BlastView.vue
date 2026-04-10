@@ -8,9 +8,11 @@
  * - 协调各个Composable模块
  */
 import { onMounted, onUnmounted, ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useBlastStore } from '../stores/blast'
-import { getBridge } from '../bridge/pyqt-bridge'
 import { useAppStore } from '../stores/app'
+import { useStrainStore } from '../stores/strain'
+import { getBridge } from '../bridge/pyqt-bridge'
 import { useI18n } from '../locales'
 import { useBlastTaskManager } from '../composables/useBlastTaskManager'
 import { useBlastResultHandler } from '../composables/useBlastResultHandler'
@@ -18,6 +20,8 @@ import { useBlastDetailViewer } from '../composables/useBlastDetailViewer'
 
 const blast = useBlastStore()
 const appStore = useAppStore()
+const strainStore = useStrainStore()
+const router = useRouter()
 const { t } = useI18n()
 
 // 注入Composables
@@ -231,6 +235,44 @@ function openNcbi(accession: string): void {
 
 function viewAllHits(csvFile: string, queryTitle: string): void {
   detailViewer.viewAllHits(csvFile, queryTitle)
+}
+
+/**
+ * 样本一键入库 (从大表触发)
+ */
+function saveToStore(hit: any) {
+  // 1. 尝试从 speciesName 中提取第一个干净的物种共识名
+  // e.g. "Aeromonas hydrophila(94%), ..." -> "Aeromonas hydrophila"
+  const rawSpecies = hit.translatedName || hit.speciesName || ''
+  const consensusMatch = rawSpecies.match(/^([A-Za-z]+)\s+([A-Za-z\.\-_0-9]+)/)
+  const cleanConsensus = consensusMatch 
+    ? `${consensusMatch[1]} ${consensusMatch[2].replace(/[,\(\)].*$/, '')}`.trim()
+    : rawSpecies
+
+  // 2. 构造一个符合样本库结构的初始对象
+  const draftRecord = {
+    // 优先使用清晰的共识名作为默认样本名，而不是 QueryID
+    name: cleanConsensus || hit.queryTitle,
+    species: cleanConsensus || rawSpecies,
+    accession: hit.accession,
+    strain: hit.genusStrain,
+    sequence: hit.rawSequence || '', 
+    metadata: {
+      blast_identity: hit.identity,
+      blast_evalue: hit.evalue,
+      blast_task_id: blast.activeTaskId,
+      blast_hit_title: hit.hitTitle,
+      original_query_id: hit.queryTitle // 保留原始 ID 备查
+    }
+  }
+
+  // 3. 将草稿存入 Pinia Store
+  strainStore.setPendingBlastDraft(draftRecord)
+
+  // 3. 跳转到菌毒种库页面
+  router.push('/strain')
+  
+  appStore.showNotification('已抓取鉴定结果，请选择一个存储孔位进行入库', 'success')
 }
 
 function toggleDropdown(id: string, event: Event) {
@@ -493,6 +535,7 @@ onUnmounted(() => {
                   <th>{{ t('blast.res.id') }}</th>
                   <th>{{ t('blast.res.eval') }}</th>
                   <th>NCBI</th>
+                  <th>操作</th>
                 </tr>
              </thead>
              <tbody>
@@ -527,6 +570,11 @@ onUnmounted(() => {
                    </button>
                    <span v-else class="no-link">-</span>
                  </td>
+                 <td>
+                    <button class="btn-action-save" @click="saveToStore(h)" title="入库">
+                      📥 入库
+                    </button>
+                  </td>
                </tr>
              </tbody>
            </table>
@@ -807,6 +855,27 @@ onUnmounted(() => {
 .btn-ai:hover:not(:disabled) { background: #2563eb; color: white; transform: translateY(-1px); box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2); }
 .btn-export { background: #f8fafc; border: 1px solid #e2e8f0; color: #475569; padding: 8px 18px; border-radius: 10px; font-size: 0.78rem; font-weight: 800; cursor: pointer; transition: all 0.2s; }
 .btn-export:hover { background: #f1f5f9; border-color: #cbd5e1; }
+
+.btn-action-save {
+  padding: 6px 12px;
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-action-save:hover {
+  background: #16a34a;
+  color: white;
+  border-color: #16a34a;
+  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+  transform: translateY(-1px);
+}
 
 .table-wrapper { flex: 1; overflow: auto; background: white; }
 table { width: 100%; border-collapse: separate; border-spacing: 0; }

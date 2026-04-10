@@ -68,26 +68,27 @@ export function useBlastDetailViewer() {
       
       try {
         const bridge = getBridge()
-        bridge.get_detailed_blast_results(csvFile, (resStr) => {
-          try {
-            const hits = JSON.parse(resStr)
-            if (Array.isArray(hits)) {
-              // 性能核心：等待弹窗动画彻底结束（约400ms）后再注入大量DOM节点
-              // 这样可以避免重绘和动画争抢主线程导致的“卡卡”感
-              setTimeout(() => {
-                allHitsData.value = hits
-              }, 400)
-            } else {
-              isOpenInternal.value = false
-            }
-          } catch {
-            isOpenInternal.value = false
-          }
-        })
-      } catch {
+        // [优化] 调用异步解析接口，不再等待回调返回大数据量
+        bridge.get_detailed_blast_results(csvFile)
+      } catch (error) {
+        console.error('[DetailViewer] Request error:', error)
         isOpenInternal.value = false
       }
     }, 50)
+  }
+
+  // [优化] 注册全局接收器，处理异步返回的大量比对数据
+  if (typeof window !== 'undefined') {
+    (window as any)._onDetailedResultsReady = (hits: any[]) => {
+      if (Array.isArray(hits)) {
+        // 延迟注入，确保弹窗动画丝滑
+        setTimeout(() => {
+          allHitsData.value = hits
+        }, 400)
+      } else {
+        isOpenInternal.value = false
+      }
+    }
   }
 
   /**

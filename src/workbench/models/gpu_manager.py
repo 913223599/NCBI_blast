@@ -1,5 +1,6 @@
 import logging
 import subprocess
+from typing import Dict, Any
 
 logger = logging.getLogger("GPUManager")
 
@@ -30,7 +31,7 @@ class GPUManager:
             is_ready = res.returncode == 0 and res.stdout.strip() != ""
             cls._wsl_capability_cache[cmd_name] = is_ready
             return is_ready
-        except:
+        except Exception:
             return False
 
     @staticmethod
@@ -46,7 +47,7 @@ class GPUManager:
             res = subprocess.run(["wsl", "-d", "Ubuntu", "wslpath", win_path], capture_output=True, encoding='utf-8', errors='replace')
             if res.returncode == 0:
                 return res.stdout.strip()
-        except:
+        except Exception:
             pass
 
         # Fallback to standard /mnt/<drive> manual translation

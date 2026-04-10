@@ -47,6 +47,7 @@ export interface BlastHit {
     evalue: string
     accession: string
     translatedName?: string | null
+    consensusList?: {name: string, pct: number}[]
     /** 查看详情所用的结果 CSV 路径 */
     csvFile?: string
 }
@@ -158,7 +159,14 @@ export const useBlastStore = defineStore('blast', () => {
 
     function updateTranslation(original: string, translated: string): void {
         results.value.forEach(hit => {
-            if (hit.speciesName.includes(original)) {
+            // Check structured list first
+            if (hit.consensusList && hit.consensusList.length > 0) {
+                const targetObj = hit.consensusList.find(c => c.name === original)
+                if (targetObj) {
+                    if (!hit.translatedName) hit.translatedName = hit.speciesName
+                    hit.translatedName = hit.translatedName.replace(original, translated)
+                }
+            } else if (hit.speciesName && hit.speciesName.includes(original)) {
                 if (!hit.translatedName) hit.translatedName = hit.speciesName
                 // 替换原文或之前的 (AI翻译中...) 占位符
                 const targetPattern = original + " (AI翻译中...)"
@@ -218,6 +226,7 @@ export const useBlastStore = defineStore('blast', () => {
                 evalue: String(bestHit.evalue || 'N/A'),
                 accession: bestHit.acc || 'N/A',
                 translatedName: null,
+                consensusList: bestHit.consensusList || [],
                 csvFile: resData.csv_file || ''
             }
         } else {

@@ -11,6 +11,7 @@ import time
 import traceback
 from pathlib import Path
 
+from PyQt6.QtCore import QObject, pyqtSignal, Qt, QThread
 from PyQt6.QtGui import QColor, QAction, QStandardItemModel, QStandardItem, QBrush
 from PyQt6.QtWidgets import (QVBoxLayout, QPushButton, QTreeView,
                              QFileDialog, QMessageBox, QHeaderView, QMenu, QHBoxLayout, QGroupBox, QAbstractItemView)
@@ -37,7 +38,8 @@ class TranslationWorker(QObject):
         """停止翻译工作"""
         self._is_running = False
 
-    def _clean_translated_text(self, original, translated):
+    @staticmethod
+    def _clean_translated_text(original, translated):
         """辅助方法：清理翻译文本中的标识符"""
         if not translated:
             return original
@@ -235,7 +237,8 @@ class ResultViewerWidget(QGroupBox):
         # 不需要 processEvents，正常 update 即可
         self.result_tree.update()
 
-    def _normalize_path(self, path_str):
+    @staticmethod
+    def _normalize_path(path_str):
         """统一路径格式，解决路径不一致导致的重复节点问题"""
         if not path_str:
             return ""
@@ -243,14 +246,15 @@ class ResultViewerWidget(QGroupBox):
             # [增强] 使用 resolve() 获取绝对路径，解决符号链接和相对路径问题
             p = Path(path_str).resolve()
             return os.path.normcase(str(p))
-        except Exception:
+        except (OSError, ValueError):
             # 降级处理
             try:
                 return os.path.normcase(os.path.normpath(os.path.abspath(path_str)))
-            except Exception:
+            except (OSError, ValueError):
                 return path_str
 
-    def _normalize_seq_id(self, raw_id):
+    @staticmethod
+    def _normalize_seq_id(raw_id):
         """
         统一序列ID格式，确保与 BatchProcessor 中的处理逻辑一致
         BatchProcessor: seq_id = sequence_info['id'].replace('|', '_').replace(' ', '_')
@@ -332,7 +336,8 @@ class ResultViewerWidget(QGroupBox):
         else:
             self._update_single_sequence_result(result)
 
-    def _calculate_overall_status(self, sequences_data):
+    @staticmethod
+    def _calculate_overall_status(sequences_data):
         """计算总体状态"""
         total_count = len(sequences_data)
         if total_count == 0:
@@ -614,7 +619,7 @@ class ResultViewerWidget(QGroupBox):
                         # 发现是同一个文件，更新映射并返回现有项
                         self.file_items[file_path] = item
                         return item
-                except Exception:
+                except (OSError, ValueError):
                     pass
         
         # [新增] 终极防御：如果文件名完全匹配，且我们没有找到其他匹配项，
@@ -733,7 +738,8 @@ class ResultViewerWidget(QGroupBox):
             if self._is_result_node(child):
                 parent_item.removeRow(i)
 
-    def _is_result_node(self, item):
+    @staticmethod
+    def _is_result_node(item):
         text = item.text()
         # 简单的启发式判断
         return text[0:2].isdigit() and '.' in text[:3] or text.startswith('读取失败') or text == "无详细结果"

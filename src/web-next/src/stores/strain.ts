@@ -212,6 +212,7 @@ export const useStrainStore = defineStore('strain', () => {
   /* ======== 选择状态 ======== */
   const selectedRecords = ref<Set<string>>(new Set())
   const activeRecord = ref<StrainRecord | null>(null)
+  const pendingBlastDraft = ref<any>(null)
 
   // 初始化时从数据库加载数据
   async function initFromDatabase() {
@@ -798,6 +799,16 @@ export const useStrainStore = defineStore('strain', () => {
     activeTaskId.value = null
   }
 
+  function setPendingBlastDraft(draft: any) {
+    pendingBlastDraft.value = draft
+  }
+
+  function consumePendingBlastDraft() {
+    const draft = pendingBlastDraft.value
+    pendingBlastDraft.value = null
+    return draft
+  }
+
   /* ======== Actions: 导入输入 ======== */
   function switchInputMode(mode: 'file' | 'text' | 'ncbi') {
     inputMode.value = mode
@@ -887,6 +898,11 @@ export const useStrainStore = defineStore('strain', () => {
     searchFilters,
     selectedRecords,
     activeRecord,
+    pendingBlastDraft,
+
+    // NEW IDENTIFICATION DRAFT SUPPORT
+    setPendingBlastDraft,
+    consumePendingBlastDraft,
 
     // Computed
     totalRecords,

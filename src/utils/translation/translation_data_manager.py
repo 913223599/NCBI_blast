@@ -3,6 +3,7 @@ import logging
 import os
 import sqlite3
 import threading
+import sys
 from pathlib import Path
 from typing import Dict, Optional, List
 
@@ -15,19 +16,18 @@ class TranslationDataManager:
 
     def preload(self):
         """
-        [启动优化] 在 GUI 启动前执行预加载，并在控制台显示进度
+        [启动优化] 在 GUI 启动前确保数据库就绪。
+        仅在首次运行或数据库由于损坏被重置时才显示迁移提示。
         """
-        print(f"\n[1/2] 正在同步生物医药翻译词条到 SQLite 数据库...", flush=True)
         self._init_db()
         self._check_and_migrate_with_progress()
-        print(f"[2/2] 词库加载完毕。共加载了 {self._get_count()} 条翻译。")
 
     def _check_and_migrate_with_progress(self):
-        """
-        带进度显示的迁移逻辑
-        """
+        """带进度显示的迁移逻辑"""
         if self._get_count() > 0:
             return
+
+        print(f"\n[!] 检测到新环境，正在将预置词库同步到 SQLite 数据库...", flush=True)
 
         csv_files = [
             self.project_root / "translation_data.csv",
@@ -107,7 +107,7 @@ class TranslationDataManager:
         self._conn.row_factory = sqlite3.Row # 使结果可通过列名访问
         
         # 3. 首次启动时自动迁移旧数据
-        self._check_and_migrate()
+        self._check_and_migrate_with_progress()
 
     def _check_integrity(self, path: Path) -> bool:
         """检查 SQLite 文件的完整性"""
@@ -221,41 +221,6 @@ class TranslationDataManager:
                 conn.close()
             except Exception as e:
                 logging.error(f"初始化翻译数据库失败: {e}")
-
-    def _check_and_migrate(self):
-        """检查并从旧的 CSV 文件迁移数据"""
-        # 检查是否已迁移过（通过查询数据库行数或标记）
-        if self._get_count() > 0:
-            return
-
-        logging.info("检测到新数据库，开始从 CSV 迁移旧数据...")
-        
-        # 定义要加载的 CSV 文件
-        csv_files = [
-            self.project_root / "translation_data.csv",
-            self.project_root / "predefined_terms.csv"
-        ]
-        
-        migrated_count = 0
-        for csv_file in csv_files:
-            if csv_file.exists():
-                try:
-                    with open(csv_file, 'r', encoding='utf-8') as f:
-                        reader = csv.DictReader(f)
-                        for row in reader:
-                            english = row.get('english', '').strip()
-                            chinese = row.get('chinese', '').strip()
-                            category = row.get('category', 'other').strip() or 'other'
-                            
-                            if english and chinese:
-                                # 内部 upsert, 不覆盖已存在项（保持优先级：数据文件顺序）
-                                if self._insert_if_not_exists(english, chinese, category, "migration"):
-                                    migrated_count += 1
-                except Exception as e:
-                    logging.error(f"迁移文件 {csv_file.name} 时出错: {e}")
-        
-        if migrated_count > 0:
-            logging.info(f"数据迁移完成，共导入 {migrated_count} 条记录")
 
     def _insert_if_not_exists(self, english: str, chinese: str, category: str, source: str) -> bool:
         """[内部方法] 插入数据（如果不存在）"""

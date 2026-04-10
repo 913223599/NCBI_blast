@@ -55,17 +55,46 @@ class BiologyTranslator:
 
     def translate_text(self, text: str, category: str = 'other', use_ai_override: Optional[bool] = None) -> str:
         """
-        翻译整段文本 - 逻辑优化版
-        优先顺序: 缓存 -> 规范化后本地数据库 -> 本地数据库 -> AI -> 原文
-        
-        Args:
-            text: 原文
-            category: 分类
-            use_ai_override: 强制指定是否使用 AI（默认使用实例化时的配置）
+        [SMART] 翻译整段文本 - 增加共识字符串拆解逻辑
         """
         if not text:
             return text
         
+        # 0. [核心优化] 识别并处理共识概率字符串 (例如: "Species A(90%), Species B(10%)")
+        import re
+        # 匹配模式: 文本(百分比%)
+        consensus_pattern = r'([^,()]+)\s*\(\s*\d+%\s*\)'
+        if ',' in text and '(' in text and '%' in text:
+            # 找到所有的匹配项及其对应的位置
+            matches = list(re.finditer(consensus_pattern, text))
+            if matches:
+                # 这是一个共识字符串，我们需要逐个拆解翻译
+                result_parts = []
+                last_end = 0
+                for match in matches:
+                    full_match = match.group(0) 
+                    pure_name = match.group(1).strip()
+                    start, end = match.span()
+                    result_parts.append(text[last_end:start])
+                    
+                    # 翻译这个纯名称
+                    # 如果当前允许使用 AI，我们允许在此处尝试翻译单个物种
+                    translated_name = self.translate_text(pure_name, category=category, use_ai_override=use_ai_override)
+                    
+                    reassembled = full_match.replace(pure_name, translated_name)
+                    result_parts.append(reassembled)
+                    last_end = end
+                
+                result_parts.append(text[last_end:])
+                final_text = "".join(result_parts)
+                
+                # 如果有任何一部分发生了变化（不管是本地还是 AI），都认为成功
+                if final_text != text:
+                    # 存入缓存以加速下次整体匹配
+                    with self._lock:
+                        self._translation_cache[text] = final_text
+                    return final_text
+
         # 使用覆盖配置或默认配置
         active_use_ai = use_ai_override if use_ai_override is not None else self.use_ai
             
@@ -145,18 +174,74 @@ class BiologyTranslator:
 
     def translate_batch(self, texts: list, category: str = 'species') -> dict:
         """
-        批量翻译文本
-        
-        Args:
-            texts (list): 文本列表
-            category (str): 分类，默认为物种名
-            
-        Returns:
-            dict: 翻译结果字典
+        [OPTIMIZED] 整合批量翻译：本地库优先 + AI 批量补偿 (修复复合文本AI乱翻译问题)
         """
+        import re
+        # 匹配模式: 文本(百分比%)
+        consensus_pattern = r'([^,()]+)\s*\(\s*\d+%\s*\)'
+        
+        pure_components = set()
+        
+        # 1. 扁平化：解析出所有的子结构，收集所有需要翻译的最基础词汇
+        for text in texts:
+            if not text:
+                continue
+            
+            if ',' in text and '(' in text and '%' in text:
+                matches = list(re.finditer(consensus_pattern, text))
+                if matches:
+                    for match in matches:
+                        pure_name = match.group(1).strip()
+                        pure_components.add(pure_name)
+                else:
+                    pure_components.add(text)
+            else:
+                pure_components.add(text)
+                    
+        # 2. 差集计算：对收集到的基础词汇检查本地缓存，选出未命中的移交 AI
+        to_ai_set = set()
+        for pure_text in pure_components:
+            clean_text = pure_text.strip()
+            # 基础词本身不再分割，如果在本地没找到直接返回原文说明必须走AI
+            part_res = self.translate_text(clean_text, category=category, use_ai_override=False)
+            if part_res == clean_text:
+                to_ai_set.add(clean_text)
+
+        # 3. 对未命中的最细粒度纯词条进行 AI 批量翻译
+        to_ai_list = list(to_ai_set)
+        if to_ai_list and self.use_ai and self.ai_translator:
+            try:
+                ai_results = self.ai_translator.batch_translate(to_ai_list)
+                for i, pure_text in enumerate(to_ai_list):
+                    if i < len(ai_results):
+                        ai_res = ai_results[i]
+                        # 自动存入本地库，以便下一阶段重新组装时可以直接命中
+                        if ai_res and ai_res != pure_text:
+                            with self._lock:
+                                self._translation_cache[pure_text] = ai_res
+                            if self.translation_data_manager:
+                                self.translation_data_manager.add_translation(
+                                    pure_text, ai_res, category=category, source="ai_batch"
+                                )
+                                try:
+                                    self.term_extractor.extract_and_store_key_terms(pure_text, ai_res)
+                                except:
+                                    pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Biology Batch AI Error: {e}")
+
+        # 4. 再一次完成全量组装
+        # 现在所有必需的短词均已存在于本地/缓存中（部分从 DB/内置，部分借由刚才的 AI 动态翻译而来）
+        # 我们对原始传入的混合 texts 直接调用 translate_text 即可完成最终切割替换。
         results = {}
         for text in texts:
-            results[text] = self.translate_text(text, category=category)
+            if not text:
+                results[text] = text
+                continue
+            res = self.translate_text(text, category=category, use_ai_override=False)
+            results[text] = res
+
         return results
 
     def search_translations(self, query: str, limit: int = 50) -> list:

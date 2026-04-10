@@ -57,7 +57,7 @@ class QwenTranslator:
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
     
-    def get_supported_models(self, return_keys_only=False) -> dict or list:
+    def get_supported_models(self, return_keys_only=False) -> dict | list:
         """获取支持的AI模型列表"""
         # 从配置文件获取支持的模型
         try:
@@ -227,30 +227,74 @@ class QwenTranslator:
             
         return self.translate_text(term)
     
-    def batch_translate(self, texts: list) -> list:
+    def translate_batch_llm(self, texts: List[str], source_lang: str = 'en', target_lang: str = 'zh') -> List[str]:
         """
-        批量翻译文本列表
+        [ULTRA-FAST] 真正的批量翻译：通过一个 Prompt 翻译多个词条
+        """
+        if not texts: return []
+        if len(texts) == 1: return [self.translate_text(texts[0])]
+
+        # 构造批量翻译提示词
+        texts_input = "\n".join([f"{i+1}. {txt}" for i, txt in enumerate(texts)])
+        prompt = f"""
+你是一位专业的生物学翻译专家。请将以下编号列表中的生物学英文名称翻译成中文。
+
+要求：
+1. 保持专业术语准确。
+2. 严格按输入顺序返回结果，每行一个。
+3. 不要输出编号，不要输出原文，不要输出任何解释内容。
+4. 微生物学名遵循：属名+种名 -> 标准中文名；属名+sp. -> XX菌属。
+
+待翻译列表：
+{texts_input}
+""".strip()
+
+        messages: List[ChatCompletionMessageParam] = [{"role": "user", "content": prompt}]
         
-        Args:
-            texts (list): 要翻译的文本列表
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[BatchAI] Sending {len(texts)} terms for translation...")
             
-        Returns:
-            list: 翻译后的文本列表
-        """
-        results = []
-        for text in texts:
-            try:
-                # 确保输入是字符串类型
-                if not isinstance(text, str):
-                    text = str(text)
-                    
-                translated = self.translate_text(text)
-                results.append(translated)
-            except Exception as e:
-                # 如果翻译失败，保留原文
-                print(f"翻译 '{text}' 时出错: {e}")
-                results.append(text)
-        return results
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                timeout=45.0  # 批量请求给更多时间
+            )
+            
+            import re
+            content = completion.choices[0].message.content.strip()
+            # 过滤思考过程
+            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+            
+            # 分割行，并清理可能的干扰
+            lines = [line.strip() for line in content.split('\n') if line.strip()]
+            
+            # 如果行数不对，尝试根据编号正则二次清洗
+            if len(lines) != len(texts):
+                cleaned_lines = []
+                for line in lines:
+                    # 尝试去掉 "1. " 这种前缀
+                    cleaned = re.sub(r'^\d+[\.\s、]+', '', line).strip()
+                    if cleaned: cleaned_lines.append(cleaned)
+                lines = cleaned_lines
+
+            # 最终补偿：如果依然不对，至少保证长度一致
+            if len(lines) > len(texts):
+                lines = lines[:len(texts)]
+            while len(lines) < len(texts):
+                lines.append(texts[len(lines)]) # 补齐原文
+                
+            return lines
+                
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Batch AI Error: {e}")
+            return texts # 出错退化为原文
+
+    def batch_translate(self, texts: list) -> list:
+        """批量翻译文本列表 (兼容旧接口并自动启用 LLM 批处理)"""
+        return self.translate_batch_llm(texts)
 
 
 def get_qwen_translator(api_key: Optional[str] = None, model: str = 'deepseek-r1') -> QwenTranslator:

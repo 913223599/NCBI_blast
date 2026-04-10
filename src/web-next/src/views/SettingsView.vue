@@ -83,6 +83,25 @@ function handleClickOutside(event: MouseEvent) {
   }
 }
 
+function getSourceClass(source: string | undefined): string {
+  if (!source) return 'manual';
+  if (source.includes('ai')) return 'ai';
+  if (source.includes('manual')) return 'manual';
+  if (source.includes('verified')) return 'verified';
+  return 'manual';
+}
+
+function getSourceLabel(source: string | undefined): string {
+  if (!source) return '手动录入';
+  if (source === 'ai_batch') return 'AI 批量智能提取';
+  if (source === 'ai') return 'AI 智能提取';
+  if (source === 'verified') return '已核对确信';
+  if (source === 'manual_web' || source === 'manual') return '用户录入';
+  if (source === 'migration') return '内置词库';
+  return '系统预设';
+}
+
+
 /* -------- 生命周期 -------- */
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
@@ -431,7 +450,7 @@ function editTerm(term: any): void {
                   <div class="td dict-zh-cell">{{ item.data.chinese }}</div>
                   <div class="td"><span class="dict-cat-tag">{{ item.data.category }}</span></div>
                   <div class="td">
-                    <span class="source-tag" :class="item.data.source">{{ item.data.source || 'manual' }}</span>
+                    <span class="source-tag" :class="getSourceClass(item.data.source)">{{ getSourceLabel(item.data.source) }}</span>
                   </div>
                   <div class="td text-right dict-actions">
                     <button v-if="proofreadMode && item.data.source !== 'verified'" class="btn-icon-link" @click="verifyTerm(item.data.english)" title="标记为已通过校对">✔️</button>

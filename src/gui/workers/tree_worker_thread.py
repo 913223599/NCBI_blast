@@ -47,9 +47,18 @@ class TreeWorker(QThread):
                 }
             )
             
+            import time
+            last_emit_time = 0
+            emit_interval = 0.1  # 至少间隔 100ms 才发送一次进度更新
+            
             final_result = {}
             for step_data in workflow:
-                self.progress.emit(step_data)
+                curr_time = time.time()
+                # 只有涉及到结果或者时间超过间隔才发送信号，防止信号风暴
+                if "result" in step_data or (curr_time - last_emit_time > emit_interval):
+                    self.progress.emit(step_data)
+                    last_emit_time = curr_time
+                    
                 if "result" in step_data:
                     final_result = step_data["result"]
             

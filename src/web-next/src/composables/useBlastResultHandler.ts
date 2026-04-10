@@ -78,7 +78,8 @@ export function useBlastResultHandler() {
       accession: '-',
       hitTitle: '',
       translatedName: null,
-      csvFile
+      csvFile,
+      rawSequence: ''
     }
   }
 
@@ -99,7 +100,9 @@ export function useBlastResultHandler() {
       accession: bestHit.acc || 'N/A',
       hitTitle: bestHit.title || '',
       translatedName: null,
-      csvFile
+      consensusList: bestHit.consensusList || [],
+      csvFile,
+      rawSequence: bestHit.raw_sequence || ''
     }
   }
 
@@ -120,7 +123,8 @@ export function useBlastResultHandler() {
       accession: '-',
       hitTitle: '',
       translatedName: null,
-      csvFile
+      csvFile,
+      rawSequence: ''
     }
   }
 
@@ -247,29 +251,34 @@ export function useBlastResultHandler() {
     appStore.showNotification(`开始翻译 ${blast.results.length} 条结果...`, 'info')
     
     const bridge = getBridge()
-    let translated = 0
+    const wordsToTranslate = new Set<string>()
     
-    const translationPromises = blast.results
-      .filter(hit => hit.speciesName && !hit.translatedName)
-      .map(hit => new Promise<void>(resolve => {
-        bridge.translate_text(hit.speciesName, 'species', (result: string) => {
-          if (result && result !== hit.speciesName) {
-            hit.translatedName = result
-            translated++
-          }
-          resolve()
-        })
-      }))
-
-    await Promise.all(translationPromises)
-    
-    isTranslating.value = false
-    
-    if (translated > 0) {
-      appStore.showNotification(`成功翻译 ${translated} 条新条目`, 'success')
-    } else {
+    blast.results.forEach(hit => {
+      if (!hit.translatedName) {
+        if (hit.consensusList && hit.consensusList.length > 0) {
+          hit.consensusList.forEach((c: any) => {
+            if (c.name) wordsToTranslate.add(c.name)
+          })
+        } else if (hit.speciesName) {
+          wordsToTranslate.add(hit.speciesName as string)
+        }
+      }
+    })
+      
+    if (wordsToTranslate.size === 0) {
+      isTranslating.value = false
       appStore.showNotification('未发现需要翻译的新条目', 'info')
+      return
     }
+
+    try {
+      bridge.translate_batch(JSON.stringify(Array.from(wordsToTranslate)), 'species')
+    } catch (e) {
+      console.error('[ResultHandler] Batch translation error:', e)
+    }
+
+    // 重置状态
+    setTimeout(() => { isTranslating.value = false }, 2000)
   }
 
   return {

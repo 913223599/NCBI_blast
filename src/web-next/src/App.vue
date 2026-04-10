@@ -112,6 +112,15 @@ onMounted(async () => {
       } catch (e) {
         console.error('Failed to parse translation update', e)
       }
+    } else if (type === 'detailed_results_ready') {
+      try {
+        const hits = typeof data === 'string' ? JSON.parse(data) : data
+        if ((window as any)._onDetailedResultsReady) {
+          (window as any)._onDetailedResultsReady(hits)
+        }
+      } catch (e) {
+        console.error('Failed to parse detailed results stream', e)
+      }
     }
   })
 

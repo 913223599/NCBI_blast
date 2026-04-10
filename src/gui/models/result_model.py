@@ -3,6 +3,7 @@
 用于 QTableView 的高性能数据模型
 """
 
+from PyQt6.QtCore import Qt, QAbstractItemModel, QModelIndex
 from PyQt6.QtGui import QColor
 
 class ResultItem:

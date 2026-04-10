@@ -268,32 +268,12 @@ class WebContainer(QWidget):
         self.web_view.reload()
 
     def handle_resize_event(self):
-        """顶级窗口调整大小或状态变更时触发，采用三重递进式刷新策略"""
+        """顶级窗口调整大小或状态变更时触发，仅执行基础通知"""
         if hasattr(self, 'web_view'):
-            self.web_view.update()
-            from PyQt6.QtCore import QTimer
-            QTimer.singleShot(100, self._force_redraw_cycle)
-            QTimer.singleShot(300, self._force_redraw_cycle)
-
-    def _force_redraw_cycle(self):
-        """强制重绘周期"""
-        if hasattr(self, 'web_view'):
-            js_code = """
-            (function(){
-                window.dispatchEvent(new Event('resize'));
-                if (window.app && window.app.syncViewLayouts) {
-                    window.app.syncViewLayouts();
-                }
-                document.body.style.opacity = '0.999';
-                setTimeout(() => { document.body.style.opacity = '1'; }, 0);
-            })();
-            """
+            # 仅在页面层面分发 resize 事件，不再强行修改样式触发重绘
+            js_code = "window.dispatchEvent(new Event('resize'));"
             self.web_view.page().runJavaScript(js_code)
             self.web_view.update()
-            if self.web_view.focusProxy():
-                self.web_view.focusProxy().repaint()
-            if self.window():
-                self.window().update()
 
     def open_file_dialog(self, file_type):
         """Open QFileDialog and handle file injection, including compressed archive support"""

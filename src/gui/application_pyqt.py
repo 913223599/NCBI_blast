@@ -21,29 +21,22 @@ class Application:
     """
     
     def __init__(self):
-        """
-        初始化应用程序
-        """
-        # 深度解决 Windows + NVIDIA/AMD 环境下的 GPU 闪烁 (Flickering) 问题
-        # 1. 禁用 DirectComposition 和 MPO (这是闪烁的头号元凶)
-        # 2. 强制使用 D3D11 后端
+        # 全面重置渲染引擎进入“标准加速模式”：
+        # 1. 移除所有引起锯齿的 D3D9/WARP 实验性后端，回归系统原生驱动。
+        # 2. 移除所有手动强化的重绘 Hack。
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
             "--ignore-gpu-blocklist "
-            "--enable-gpu-rasterization "
+            "--disable-gpu-program-cache "
+            "--disable-gpu-driver-bug-workarounds "
             "--enable-threaded-compositing "
-            "--disable-direct-composition "
-            "--disable-gpu-compositing "
             "--disable-background-timer-throttling "
             "--disable-features=Translate,MojoVideoEncodeAccelerator"
         )
         
-        # 强制 Qt 使用桌面级 D3D 渲染，避免软件层与硬件层的频率冲突
         if sys.platform == 'win32':
              os.environ["QT_OPENGL"] = "desktop"
-             # 补充：禁止底层叠加层
-             os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
         
-        # 启用高性能 UI 渲染属性
+        # 恢复 PyQt6 WebEngine 标准图形上下文共享
         from PyQt6.QtCore import Qt
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
         # Note: AA_EnableHighDpiScaling and AA_UseHighDpiPixmaps are default in PyQt6 and removed from enum.

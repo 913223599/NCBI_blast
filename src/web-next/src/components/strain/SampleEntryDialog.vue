@@ -29,7 +29,10 @@
             <!-- 样本编号 -->
             <div class="form-section">
               <h4 class="section-label">样本编号</h4>
-              <SampleCodeInput @update="handleCodeUpdate" />
+              <SampleCodeInput 
+                :initial-selections="initialCategorySelections"
+                @update="handleCodeUpdate" 
+              />
             </div>
 
             <!-- 核心标识 -->
@@ -256,10 +259,6 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits(['close', 'saved'])
 
-const strain = useStrainStore()
-const appStore = useAppStore()
-const codeGen = useCodeGenerator()
-
 // 表单数据
 const form = ref({
   name: '',
@@ -291,7 +290,119 @@ const form = ref({
   } as Record<string, any>
 })
 
+const strain = useStrainStore()
+const appStore = useAppStore()
+const codeGen = useCodeGenerator()
+
+// --- 录入状态控制 ---
 const aliquotCount = ref(1)
+
+// 初始编码选择建议 (来自 BLAST 等识别结果)
+const initialCategorySelections = ref<any>(null)
+
+/**
+ * 尝试根据学名自动匹配编号库中的属/种编码
+ * 支持解析复合鉴定字符串，例如 "Aeromonas hydrophila(94%), Aeromonas encheleia(2%)"
+ */
+function attemptTaxonomicMatch(fullIdentification: string) {
+  if (!fullIdentification) return null
+  
+  // 1. 提取推举共识 (第一组匹配项)
+  // 正则匹配: 字母+空格+字母 (忽略并兼容开头可能的标记字符和末尾的百分比)
+  const consensusMatch = fullIdentification.trim().match(/^[\*\s]*([A-Za-z]+)\s+([A-Za-z\.\-_0-9]+)/)
+  if (!consensusMatch) return null
+  
+  const genusPart = consensusMatch[1]
+  const speciesPart = consensusMatch[2]
+  
+  if (!genusPart || !speciesPart) return null
+  
+  const selections: any = {
+    category: '1', // 默认大类: 细菌 (1)
+    source: '01',   // 默认来源: 内部
+    passage: 0
+  }
+
+  // 清洗种名，去掉结尾可能存在的逗号或括号残余
+  const cleanSpecies = speciesPart.replace(/[,\(\)].*$/, '')
+
+  try {
+    // 1. 查找属 (Level 2)
+    const lowerGenus = genusPart.toLowerCase()
+    const genusEntries = strain.codeLookupEntries.filter(
+      e => e.level === 2 && 
+      (e.latinName?.toLowerCase() === lowerGenus || e.name === genusPart)
+    )
+    
+    if (genusEntries.length > 0) {
+      const matchedGenus = genusEntries[0]
+      if (!matchedGenus) return null
+
+      selections.genus = matchedGenus.code
+      selections.category = matchedGenus.parentPath // 自动对齐实际的大类
+      
+      // 2. 查找属下的种 (Level 3)
+      if (cleanSpecies) {
+        const lowerSpecies = cleanSpecies.toLowerCase()
+        const parentPath = matchedGenus.fullPath
+        const speciesEntries = strain.codeLookupEntries.filter(
+          e => e.level === 3 && 
+          e.parentPath === parentPath &&
+          (e.latinName?.toLowerCase() === lowerSpecies || e.name === cleanSpecies)
+        )
+        if (speciesEntries.length > 0) {
+          const matchedSpecies = speciesEntries[0]
+          if (matchedSpecies) {
+            selections.species = matchedSpecies.code
+          }
+        }
+      }
+    }
+    
+    return {
+      selections: selections.genus ? selections : null,
+      consensus: `${genusPart} ${cleanSpecies}`.trim()
+    }
+  } catch (e) {
+    console.warn('[Taxonomic Match] Failed:', e)
+    return null
+  }
+}
+
+onMounted(() => {
+  // 检测是否有来自 BLAST 的待入库草稿
+  if (strain.pendingBlastDraft) {
+    const draft = strain.consumePendingBlastDraft()
+    if (draft) {
+      // 自动尝试从鉴定结果匹配物种共识和编号系统
+      const matchResult = attemptTaxonomicMatch(draft.species)
+      const consensusName = matchResult?.consensus || draft.species
+      
+      Object.assign(form.value, {
+        name: consensusName, // 使用共识名称作为样本名
+        species: consensusName, // 使用共识名称作为物种名
+        accession: draft.accession || '',
+        strain: draft.strain || '',
+        sequence: draft.sequence || ''
+      })
+      
+      if (matchResult?.selections) {
+        initialCategorySelections.value = matchResult.selections
+      }
+      
+      // 合并元数据 (保留原始比对列表供参考，可存入 description 或 metadata)
+      if (draft.metadata) {
+        form.value.metadata = {
+          ...form.value.metadata,
+          ...draft.metadata,
+          original_identification: draft.species // 保留完整比对列表备份
+        }
+      }
+      
+      appStore.showNotification(`已推举物种共识: ${consensusName}`, 'success')
+    }
+  }
+})
 
 // 基因库同步状态
 const syncToGeneDB = ref(false)
@@ -416,9 +527,16 @@ function handleCodeUpdate(data: any): void {
 
   // 4. 解析物种名称（属 + 种）
   const resolved = codeGen.resolve(data.sampleCode)
-  if (resolved) {
-    // 自动合并属名和种名作为“物种名称”
-    form.value.species = `${resolved.genusName} ${resolved.speciesName}`.trim()
+  if (resolved && resolved.genusName !== '未知属') {
+    // 只有当从编号中解析出已知的属名时，才同步物种字段
+    const resolvedName = `${resolved.genusName} ${resolved.speciesName}`.trim()
+    form.value.species = resolvedName
+    
+    // 如果样本名称目前还是默认的长 ID 格式，则同步更新为推举名称
+    const isOriginalLongId = form.value.name.includes('.') && form.value.name.length > 10
+    if (!form.value.name || isOriginalLongId) {
+      form.value.name = resolvedName
+    }
   }
 
   // 5. 同步所有解析出的元数据

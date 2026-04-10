@@ -254,6 +254,14 @@ import { useCodeGenerator } from '../../composables/useCodeGenerator'
 const props = defineProps<{
   /** 初始编号（编辑场景） */
   initialCode?: string
+  /** 初始选择（新建/导入场景，例如来自 BLAST） */
+  initialSelections?: {
+    source?: string
+    category?: string
+    genus?: string
+    species?: string
+    passage?: number
+  }
 }>()
 
 const emit = defineEmits<{
@@ -608,10 +616,35 @@ onMounted(() => {
       mode.value = 'manual'
       manualCode.value = props.initialCode
     }
+  } else if (props.initialSelections) {
+    // 自动应用预填充的选项（例如来自 BLAST 的匹配结果）
+    mode.value = 'auto'
+    if (props.initialSelections.source) selectedSource.value = props.initialSelections.source
+    if (props.initialSelections.category) selectedCategory.value = props.initialSelections.category as CategoryCode
+    if (props.initialSelections.genus) selectedGenus.value = props.initialSelections.genus
+    if (props.initialSelections.species) selectedSpecies.value = props.initialSelections.species
+    if (props.initialSelections.passage !== undefined) selectedPassage.value = props.initialSelections.passage
+    
+    // 立即尝试生成编号
+    setTimeout(tryGenerate, 0)
   }
 
   document.addEventListener('click', closeAllPanels)
 })
+
+// 监听初始选择 props 的变化，支持动态预填
+watch(() => props.initialSelections, (newVal) => {
+  if (newVal) {
+    mode.value = 'auto'
+    if (newVal.source) selectedSource.value = newVal.source
+    if (newVal.category) selectedCategory.value = newVal.category as CategoryCode
+    if (newVal.genus) selectedGenus.value = newVal.genus
+    if (newVal.species) selectedSpecies.value = newVal.species
+    if (newVal.passage !== undefined) selectedPassage.value = newVal.passage
+    
+    setTimeout(tryGenerate, 0)
+  }
+}, { deep: true })
 
 onUnmounted(() => {
   document.removeEventListener('click', closeAllPanels)

@@ -40,7 +40,8 @@ export interface PyBridge {
     list_tree_sequences(callback: (res: string) => void): void
     clear_all_history(): void
     rename_task(taskId: string, newName: string): void
-    get_detailed_blast_results(csvFile: string, callback?: (res: string) => void): void
+    get_detailed_blast_results(csvFile: string): void
+    translate_batch(textsJson: string, category: string): void
 
     /* 进化树 */
     request_tree_analysis(mode: string): void

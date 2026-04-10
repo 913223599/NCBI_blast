@@ -377,7 +377,7 @@ onUnmounted(() => {
   top: 20px;
   right: 20px;
   background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(8px);
+  /* backdrop-filter removed to fix WebEngine flickering */
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
@@ -441,7 +441,7 @@ onUnmounted(() => {
   bottom: 20px;
   left: 20px;
   background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(8px);
+  /* backdrop-filter removed to fix WebEngine flickering */
   border-radius: 12px;
   padding: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);

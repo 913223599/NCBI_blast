@@ -405,7 +405,13 @@ class BlastManager:
                     self.store.save_task(task)
 
             def on_result(data):
-                # Ensure data is JSON serializable
+                # [核心增强] 为了支持一键入库，将原始序列内容回填到结果对象中
+                seq_id = data.get('sequence_id')
+                if seq_id:
+                    original_seq = next((s['sequence'] for s in sequences if s['id'] == seq_id), None)
+                    if original_seq:
+                        data['raw_sequence'] = original_seq
+
                 task.results.append(data)
                 self.store.save_result(task.task_id, data.get('sequence_id','?'), data)
                 # Notify active listeners (for real-time UI streaming)
