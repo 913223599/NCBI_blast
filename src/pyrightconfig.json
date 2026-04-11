@@ -1,0 +1,18 @@
+{
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        ".venv"
+    ],
+    "venvPath": "..",
+    "venv": ".venv",
+    "extraPaths": [
+        ".",
+        "../vendor/ete4",
+        "../vendor/ete4/ete4"
+    ],
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": "none",
+    "pythonVersion": "3.13",
+    "pythonPlatform": "Windows"
+}

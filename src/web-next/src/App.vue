@@ -8,7 +8,7 @@ import AppSidebar from './components/layout/AppSidebar.vue'
 import AppHeader from './components/layout/AppHeader.vue'
 import NotificationStack from './components/common/NotificationStack.vue'
 import { useAppStore } from './stores/app'
-import { initBridge, registerGlobalHandler } from './bridge/pyqt-bridge'
+import { setupBridge, registerGlobalHandler } from './bridge'
 
 const appStore = useAppStore()
 
@@ -93,45 +93,91 @@ onMounted(async () => {
     win.updateLoading = globalApp.updateLoading
   }
 
-  // 2. 初始化 QWebChannel 桥接
-  const bridge = await initBridge()
-
-  // 3. 注册通用事件处理
-  registerGlobalHandler('handleBridgeEvent', (type: any, data: any) => {
-    if (type === 'single_result_update') {
-      try {
-        const resultObj = typeof data === 'string' ? JSON.parse(data) : data
-        blastStore.appendSingleResult(resultObj)
-      } catch (e) {
-        console.error('Failed to parse single result stream', e)
-      }
-    } else if (type === 'translation_done') {
-      try {
-        const dataObj = typeof data === 'string' ? JSON.parse(data) : data
-        blastStore.updateTranslation(dataObj.original, dataObj.translated)
-      } catch (e) {
-        console.error('Failed to parse translation update', e)
-      }
-    } else if (type === 'detailed_results_ready') {
-      try {
-        const hits = typeof data === 'string' ? JSON.parse(data) : data
-        if ((window as any)._onDetailedResultsReady) {
-          (window as any)._onDetailedResultsReady(hits)
-        }
-      } catch (e) {
-        console.error('Failed to parse detailed results stream', e)
-      }
-    }
-  })
-
-  // 4. 通知 Python 页面已就绪
-  bridge.on_page_ready()
+  // 1. 全局加载状态控制
+  console.log('[App] 初始化应用...')
   
-  // 5. 初始化加载由后端注入的当前语言包
-  appStore.fetchTranslations()
+  // 2. 初始化桥接 (确保这是第一步且已完成)
+  try {
+    const bridge = await setupBridge()
+    console.log('[App] 桥接准备就绪')
 
-  // 6. 从 SQLite 数据库初始化样本数据
-  strainStore.initFromDatabase()
+    // 3. 注册通用事件处理
+    registerGlobalHandler('handleBridgeEvent', (type: any, data: any) => {
+      if (type === 'single_result_update') {
+        try {
+          const resultObj = typeof data === 'string' ? JSON.parse(data) : data
+          blastStore.appendSingleResult(resultObj)
+        } catch (e) {
+          console.error('Failed to parse single result stream', e)
+        }
+      } else if (type === 'translation_done') {
+        try {
+          const dataObj = typeof data === 'string' ? JSON.parse(data) : data
+          blastStore.updateTranslation(dataObj.original, dataObj.translated)
+        } catch (e) {
+          console.error('Failed to parse translation update', e)
+        }
+      } else if (type === 'detailed_results_ready') {
+        try {
+          const hits = typeof data === 'string' ? JSON.parse(data) : data
+          if ((window as any)._onDetailedResultsReady) {
+            (window as any)._onDetailedResultsReady(hits)
+          }
+        } catch (e) {
+          console.error('Failed to parse detailed results stream', e)
+        }
+      } else if (type === 'tree_progress') {
+        globalApp.updateLoading(data.percent || 0, data.msg || '正在分析...')
+      } else if (type === 'tree_finished') {
+        globalApp.hideLoading()
+        if ((window as any).treeView?.loadNewick) {
+          (window as any).treeView.loadNewick(
+            data.tree_file_content || data.tree_file, 
+            data.algorithm, 
+            data.source,
+            undefined,
+            false,
+            data.id_to_hash
+          )
+        }
+      } else if (type === 'tree_error') {
+        globalApp.hideLoading()
+        appStore.showNotification(`分析失败: ${data.error || data}`, 'error')
+      }
+    })
+
+    // 4. 初始化应用数据
+    console.log('[App] 正在同步后端数据...')
+    
+    // 通知 Python 页面已就绪
+    if (typeof bridge.on_page_ready === 'function') {
+      bridge.on_page_ready()
+    }
+    
+    // 加载语言 & 翻译
+    console.log('[App] 正在加载语言包...')
+    await appStore.fetchTranslations()
+
+    // 初始化各个数据库状态
+    console.log('[App] 正在初始化数据库...')
+    await strainStore.initFromDatabase()
+    
+    // 初始化树历史
+    appStore.initTreeHistory()
+    
+    // 如果有 loadAllHistory 等方法，也应在此调用
+    if (typeof (blastStore as any).loadAllHistory === 'function') {
+      await (blastStore as any).loadAllHistory()
+    }
+
+    console.log('[App] 初始化完成')
+    
+    // 全局禁用默认拖放行为（防止 Electron 意外导航）
+    window.addEventListener('dragover', (e) => e.preventDefault(), false)
+    window.addEventListener('drop', (e) => e.preventDefault(), false)
+  } catch (err) {
+    console.error('[App] 初始化链崩溃:', err)
+  }
 })
 </script>
 

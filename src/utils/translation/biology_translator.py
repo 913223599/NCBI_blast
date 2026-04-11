@@ -319,7 +319,7 @@ def get_global_biology_translator(data_file: str = None, use_ai: bool = True, ai
             # Auto-fetch API key from config if not provided
             if ai_api_key is None:
                 try:
-                    from src.utils.config_manager import get_config_manager
+                    from ..config_manager import get_config_manager
                     config = get_config_manager()
                     ai_api_key = config.get_api_key("dashscope")
                     

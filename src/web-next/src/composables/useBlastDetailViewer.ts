@@ -3,7 +3,7 @@
  */
 import { ref, computed, shallowRef } from 'vue'
 import { useAppStore } from '../stores/app'
-import { getBridge } from '../bridge/pyqt-bridge'
+import { getBridge } from '../bridge'
 
 export interface BlastHitDetail {
   species?: string

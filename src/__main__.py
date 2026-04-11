@@ -9,6 +9,14 @@
 
 def main():
     """应用程序入口，默认启动 GUI"""
+    # ─── 环境变量配置 (ETE4 数据重定向) ──────────────────
+    import os
+    from pathlib import Path
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    os.environ["XDG_DATA_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
+    os.environ["XDG_CONFIG_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
+    os.environ["XDG_CACHE_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
+
     # 0. 配置基础日志格式
     import logging
     logging.basicConfig(

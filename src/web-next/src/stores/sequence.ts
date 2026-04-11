@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getBridge } from '../bridge/pyqt-bridge'
+import { getBridge } from '../bridge'
 
 export interface SequenceRecord {
   id: string

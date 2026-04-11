@@ -1,11 +1,13 @@
 <template>
   <div class="phylotree-container" ref="containerRef">
-    <div id="phylotree-svg-host" ref="svgHost"></div>
+    <div :id="hostId" ref="svgHost"></div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+const hostId = 'phylotree-host-' + Math.random().toString(36).substring(2, 9)
+
 // @ts-ignore
 import { phylotree as Phylotree } from 'phylotree'
 import 'phylotree/dist/phylotree.css'
@@ -22,36 +24,33 @@ const props = defineProps<{
 
 const emit = defineEmits(['node-click', 'render-complete'])
 
-// 缓存 DOM 元素到原始 ID 的映射
-const nodeTextMap = new Map<Element, string>()
 
 // 公开方法：手动更新标签显示模式
 function updateLabelDisplayMode(mode: 'replace' | 'append' | 'original') {
   console.log('[PhylotreeWidget.updateLabelDisplayMode] Called with mode:', mode)
   
-  setTimeout(() => {
-    if (!svgHost.value) {
-      console.warn('[PhylotreeWidget] svgHost is null')
-      return
-    }
+  const applyUpdates = () => {
+    if (!svgHost.value) return
     
     const textElements = svgHost.value.querySelectorAll('.node text')
-    console.log(`[PhylotreeWidget] Found ${textElements.length} text elements`)
-    
     if (textElements.length === 0) return
     
-    // 如果缓存为空，初始化映射
-    if (nodeTextMap.size === 0) {
-      textElements.forEach((textEl: Element) => {
-        const currentText = textEl.textContent || ''
-        nodeTextMap.set(textEl, currentText.trim())
-      })
-      console.log(`[PhylotreeWidget] Initialized nodeTextMap with ${nodeTextMap.size} entries`)
-    }
-    
     let updatedCount = 0
-    textElements.forEach((textEl: Element) => {
-      const originalId = nodeTextMap.get(textEl) || ''
+    textElements.forEach((textEl: any) => {
+      // 1. 核心改进：优先尝试从 data-original-id 读取
+      // 如果没有，且当前 textContent 包含 [ ... ] 模式，说明是之前处于 append 模式渲染出的
+      let originalId = textEl.getAttribute('data-original-id')
+      if (!originalId) {
+          const currentText = textEl.textContent || ''
+          const match = currentText.match(/^\[.*\]\s+(.*)$/)
+          if (match) {
+              originalId = match[1]
+          } else {
+              originalId = currentText
+          }
+          textEl.setAttribute('data-original-id', originalId)
+      }
+
       const annotation = props.labelMap ? props.labelMap[originalId] : null
       
       let newText = originalId
@@ -61,7 +60,6 @@ function updateLabelDisplayMode(mode: 'replace' | 'append' | 'original') {
         } else if (mode === 'append') {
           newText = `[${annotation}] ${originalId}`
         }
-        // 'original' mode: use originalId
       }
       
       if (textEl.textContent !== newText) {
@@ -69,9 +67,15 @@ function updateLabelDisplayMode(mode: 'replace' | 'append' | 'original') {
         updatedCount++
       }
     })
-    
-    console.log(`[PhylotreeWidget] Updated ${updatedCount}/${textElements.length} labels`)
-  }, 150)
+    console.log(`[PhylotreeWidget] Label Mode Sync: ${mode}, Updated ${updatedCount}/${textElements.length} labels`)
+  }
+
+  // 立即尝试一次，如果不成功则延迟尝试
+  if (svgHost.value && svgHost.value.querySelectorAll('.node text').length > 0) {
+    applyUpdates()
+  } else {
+    setTimeout(applyUpdates, 200)
+  }
 }
 
 // 暴露给父组件
@@ -83,6 +87,9 @@ const containerRef = ref<HTMLElement | null>(null)
 const svgHost = ref<HTMLElement | null>(null)
 let treeInstance: any = null
 let resizeObserver: ResizeObserver | null = null
+let lastWidth = 0
+let lastHeight = 0
+let resizeTimer: any = null
 
 /**
  * 渲染入口：等待布局稳定后执行渲染
@@ -96,7 +103,15 @@ async function renderTree(nwk: string) {
   const measuredWidth = containerRef.value.clientWidth
   const measuredHeight = containerRef.value.clientHeight
 
+  // 1. 核心改进：增加尺寸判断阈值 (2px)，解决 ResizeObserver 微小抖动引发的无限回描
+  if (Math.abs(measuredWidth - lastWidth) < 2 && Math.abs(measuredHeight - lastHeight) < 2) {
+      return
+  }
+  
   if (measuredWidth <= 0 || measuredHeight <= 0) return
+
+  lastWidth = measuredWidth
+  lastHeight = measuredHeight
 
   // 再次检查，防止在异步等待期间组件被卸载
   if (!svgHost.value) return
@@ -149,9 +164,9 @@ function executeRender(nwk: string, maxWidth: number, maxHeight: number) {
     }
 
     // 维护 3: 注入渲染配置 (针对 v2.x 优化)
-    // 核心修复：直接传入 svgHost.value 作为 container，避免 show() 内部的 DOM 操作异常
+    // 核心修复：传入明确的 CSS 选择器，避免 phylotree.js 内部 querySelector([object]) 时导致语法错误崩盘
     const config = {
-      container: svgHost.value,  // 直接指定容器，不再手动 appendChild
+      container: '#' + hostId,  // 必须是字符串选择器
       width: maxWidth, 
       height: maxHeight,
       "layout": isRadial ? "radial" : "left-to-right",
@@ -264,16 +279,20 @@ watch(() => props.useBranchLengths, () => {
 onMounted(() => {
   if (props.newick) renderTree(props.newick)
   
-  // 维护 5: 启动自动尺寸监听
+  // 维护 5: 启动自动尺寸监听 (增加 300ms 防抖，防止布局剧烈变动时 CPU 爆满)
   if (containerRef.value) {
     resizeObserver = new ResizeObserver(() => {
-      if (props.newick) renderTree(props.newick)
+      if (resizeTimer) clearTimeout(resizeTimer)
+      resizeTimer = setTimeout(() => {
+        if (props.newick) renderTree(props.newick)
+      }, 300)
     })
     resizeObserver.observe(containerRef.value)
   }
 })
 
 onUnmounted(() => {
+  if (resizeTimer) clearTimeout(resizeTimer)
   if (resizeObserver) {
     resizeObserver.disconnect()
     resizeObserver = null

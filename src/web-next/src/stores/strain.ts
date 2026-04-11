@@ -173,7 +173,7 @@ export interface ImportTask {
   startTime: string
 }
 
-import { getBridge } from '../bridge/pyqt-bridge'
+import { getBridge } from '../bridge'
 
 export const useStrainStore = defineStore('strain', () => {
   /* ======== 冰箱管理 ======== */
@@ -215,53 +215,60 @@ export const useStrainStore = defineStore('strain', () => {
   const pendingBlastDraft = ref<any>(null)
 
   // 初始化时从数据库加载数据
-  async function initFromDatabase() {
-    try {
-      const bridge = getBridge()
-      bridge.db_load_all(async (jsonStr: string) => {
+  function initFromDatabase(): Promise<void> {
+    return new Promise((resolve) => {
         try {
-          const data = JSON.parse(jsonStr)
-          freezers.value = data.freezers || []
-          records.value = data.records || []
-          
-          // 加载编码系统数据
-          if (data.codeLookup) {
-            codeLookupEntries.value = data.codeLookup.entries || []
-            sourceEntries.value = data.codeLookup.sources || []
-            serialCounters.value = data.codeLookup.counters || []
-            codeConfig.value = data.codeLookup.config || codeConfig.value
-          }
-          
-          // 彻底修复：如果加载后编码词条为空，立即静默注入内置默认数据
-          if (codeLookupEntries.value.length === 0) {
-            const { BUILTIN_LOOKUP_ENTRIES, BUILTIN_SOURCE_ENTRIES } = await import('../data/builtinCodes')
-            codeLookupEntries.value = [...BUILTIN_LOOKUP_ENTRIES]
-            sourceEntries.value = [...BUILTIN_SOURCE_ENTRIES]
-            console.log('[Strain Store] 数据库为空，已注入内置默认编码')
-          }
+          const bridge = getBridge()
+          bridge.db_load_all(async (jsonStr: string) => {
+            try {
+              if (jsonStr && jsonStr !== 'null') {
+                  const data = JSON.parse(jsonStr)
+                  freezers.value = data.freezers || []
+                  records.value = data.records || []
+                  
+                  // 加载编码系统数据
+                  if (data.codeLookup) {
+                    codeLookupEntries.value = data.codeLookup.entries || []
+                    sourceEntries.value = data.codeLookup.sources || []
+                    serialCounters.value = data.codeLookup.counters || []
+                    codeConfig.value = data.codeLookup.config || codeConfig.value
+                  }
+                  
+                  // 注入内置默认数据
+                  if (codeLookupEntries.value.length === 0) {
+                    const { BUILTIN_LOOKUP_ENTRIES, BUILTIN_SOURCE_ENTRIES } = await import('../data/builtinCodes')
+                    codeLookupEntries.value = [...BUILTIN_LOOKUP_ENTRIES]
+                    sourceEntries.value = [...BUILTIN_SOURCE_ENTRIES]
+                  }
 
-          applyFilters()
-          isInitialized.value = true
+                  applyFilters()
+                  isInitialized.value = true
+                  console.log('[StrainStore] 菌株库加载完成')
+              }
+              resolve()
+            } catch (e) {
+              isInitialized.value = true
+              console.error('[Strain Store] Failed to parse DB data', e)
+              resolve()
+            }
+          })
         } catch (e) {
-          isInitialized.value = true
-          console.error('[Strain Store] Failed to parse DB data', e)
+          console.warn('[Strain Store] Bridge not ready, falling back to LocalStorage')
+          const storedData = loadFromStorage()
+          if (storedData) {
+            freezers.value = storedData.freezers
+            records.value = storedData.records
+            
+            // 加载备用存储中的编码数据
+            if ((storedData as any).codeLookup) {
+              codeLookupEntries.value = (storedData as any).codeLookup.entries || []
+              sourceEntries.value = (storedData as any).codeLookup.sources || []
+              serialCounters.value = (storedData as any).codeLookup.counters || []
+            }
+          }
+          resolve()
         }
-      })
-    } catch (e) {
-      console.warn('[Strain Store] Bridge not ready, falling back to LocalStorage')
-      const storedData = loadFromStorage()
-      if (storedData) {
-        freezers.value = storedData.freezers
-        records.value = storedData.records
-        
-        // 加载备用存储中的编码数据
-        if ((storedData as any).codeLookup) {
-          codeLookupEntries.value = (storedData as any).codeLookup.entries || []
-          sourceEntries.value = (storedData as any).codeLookup.sources || []
-          serialCounters.value = (storedData as any).codeLookup.counters || []
-        }
-      }
-    }
+    })
   }
 
   // 自动保存数据 - 防抖 300ms
@@ -752,6 +759,36 @@ export const useStrainStore = defineStore('strain', () => {
     filteredRecords.value = [...records.value]
   }
 
+  /**
+   * 按分类学类别搜索 (调用 ETE4 后端)
+   * @param category 分类名称 (例如: Bacillota, Enterobacterales)
+   */
+  async function searchByCategory(category: string) {
+    if (!category) {
+        resetFilters()
+        return
+    }
+    
+    try {
+        const bridge = getBridge()
+        // TypeScript 可能会报错说 search_strains_by_category 不存在（如果不重新生成 .d.ts）
+        // 这里采用 (bridge as any) 绕过，或确认类型已更新
+        const resultJson = await (bridge as any).search_strains_by_category(category)
+        const result = JSON.parse(resultJson)
+        
+        if (result.success) {
+            // 后端直接返回了符合该分类及其子类的所有记录
+            filteredRecords.value = result.records || []
+            console.log(`[StrainStore] Taxonomy search: ${category} found ${filteredRecords.value.length} matches.`);
+        }
+    } catch (e) {
+        console.error('[StrainStore] Taxonomy search failed', e)
+        // 降级回普通关键词搜索
+        searchFilters.value.keyword = category
+        applyFilters()
+    }
+  }
+
   /* ======== Actions: 选择管理 ======== */
   function toggleSelect(id: string) {
     if (selectedRecords.value.has(id)) {
@@ -939,6 +976,7 @@ export const useStrainStore = defineStore('strain', () => {
     recalibrateCounters,
     setSearchFilter,
     resetFilters,
+    searchByCategory,
     toggleSelect,
     selectAll,
     clearSelection,

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 
-from src.workbench.wrappers.base_wrapper import BaseWrapper
+from .base_wrapper import BaseWrapper
 
 
 class IQTreeWrapper(BaseWrapper):
@@ -48,7 +48,7 @@ class IQTreeWrapper(BaseWrapper):
         # Performance strategy: Set binary path (IQ-TREE 3)
         wsl_cmd = "/opt/iqtree3/iqtree-3.1.1-Linux-intel/bin/iqtree3"
         
-        from src.workbench.models.gpu_manager import GPUManager
+        from ..models.gpu_manager import GPUManager
         
         # Path translation for WSL (using original args)
         wsl_args = []

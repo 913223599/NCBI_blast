@@ -369,18 +369,56 @@ function attemptTaxonomicMatch(fullIdentification: string) {
   }
 }
 
+import { getBridge } from '../../bridge'
+
 onMounted(() => {
   // 检测是否有来自 BLAST 的待入库草稿
   if (strain.pendingBlastDraft) {
     const draft = strain.consumePendingBlastDraft()
     if (draft) {
-      // 自动尝试从鉴定结果匹配物种共识和编号系统
+      // 提取草稿种名以便同步
+      const queryName = draft.species || ''
+      
+      // 1. 发起后端自动同步 (此动作会拉取全分类、补充编码数据库字典并且补充翻译辞典)
+      if (queryName) {
+         getBridge().sync_taxonomy?.(queryName, (res: any) => {
+            if (res && res.success) {
+               // 重新拉取最新的编码库到内存
+               strain.initFromDatabase()
+               console.log("[SampleEntryDialog] Taxonomy Sync Success:", res.speciesName)
+               
+               // 覆盖推测的值，但绝对不碰前两位的来源(source)
+               initialCategorySelections.value = {
+                  ...initialCategorySelections.value,
+                  category: res.codeCategory,
+                  genus: res.codeGenus,
+                  species: res.codeSpecies,
+                  source: initialCategorySelections.value?.source || '',
+                  passage: initialCategorySelections.value?.passage || 0
+               }
+               
+               if (!draft.name || draft.name.includes('.')) {
+                   form.value.name = res.speciesName
+               }
+               form.value.species = res.speciesName
+               
+               appStore.showNotification(`分类已同步: 从大类到种的数据均已填入系统数据库`, 'success')
+            } else if (res && !res.success && res.reason) {
+               appStore.showNotification(res.reason, 'info')
+               console.warn("[SampleEntryDialog] Taxonomy Sync Warn:", res.reason)
+            }
+         })
+      }
+
+      // 2. 先尝试本地初步匹配物种共识予以垫底呈现
       const matchResult = attemptTaxonomicMatch(draft.species)
       const consensusName = matchResult?.consensus || draft.species
       
       Object.assign(form.value, {
-        name: consensusName, // 使用共识名称作为样本名
-        species: consensusName, // 使用共识名称作为物种名
+        // 核心修复：优先使用草稿中已有的 spliced name (Translated (Original))
+        // 仅当草稿名缺失或太短时，才退而求其次使用编号共识推举名
+        name: draft.name || consensusName, 
+        species: draft.species || consensusName,
         accession: draft.accession || '',
         strain: draft.strain || '',
         sequence: draft.sequence || ''
@@ -397,6 +435,12 @@ onMounted(() => {
           ...draft.metadata,
           original_identification: draft.species // 保留完整比对列表备份
         }
+      }
+      
+      // 自动勾选同步到基因库 (因为是从 BLAST 导入，用户通常期望关联序列)
+      if (form.value.sequence) {
+        syncToGeneDB.value = true
+        geneInfo.value.title = `${consensusName}_16S`
       }
       
       appStore.showNotification(`已推举物种共识: ${consensusName}`, 'success')

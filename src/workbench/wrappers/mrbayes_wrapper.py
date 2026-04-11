@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from src.workbench.wrappers.base_wrapper import BaseWrapper
+from .base_wrapper import BaseWrapper
 
 
 class MrBayesWrapper(BaseWrapper):

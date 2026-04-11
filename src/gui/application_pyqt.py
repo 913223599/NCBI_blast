@@ -9,10 +9,10 @@ import psutil
 from PyQt6.QtWidgets import QApplication, QWizard
 from PyQt6.QtGui import QSurfaceFormat
 
-from src.gui.main_window_pyqt import MainWindow
-from src.gui.widgets.setup_wizard import SetupWizard
-from src.utils.config_manager import get_config_manager
-from src.workbench.models.tool_config import ToolConfig
+from .main_window_pyqt import MainWindow
+from .widgets.setup_wizard import SetupWizard
+from ..utils.config_manager import get_config_manager
+from ..workbench.models.tool_config import ToolConfig
 
 
 class Application:
@@ -94,7 +94,7 @@ class Application:
         
         # 退出前同步翻译数据库（冷热备份策略）
         try:
-            from src.utils.translation.translation_data_manager import get_translation_data_manager
+            from ..utils.translation.translation_data_manager import get_translation_data_manager
             manager = get_translation_data_manager()
             manager.prepare_shutdown()
         except Exception as e:

@@ -80,7 +80,7 @@ class FileHandler:
 
     def read_fasta_file_iter(self, file_path: str) -> Generator[Dict[str, Any], None, None]:
         """
-        [优化] 迭代读取序列文件，支持 FASTA 和 ABI (.ab1) 格式。
+        [优化] 迭代读取序列文件，支持 FASTA、ABI (.ab1)、ZIP 压缩包及 GZ 压缩文件。
         
         Args:
             file_path (str): 文件路径
@@ -88,10 +88,95 @@ class FileHandler:
         Yields:
             dict: 包含序列信息的字典
         """
-        found_any = False
-        ext = Path(file_path).suffix.lower()
+        import zipfile
+        import gzip
+        import io
+        from Bio import SeqIO
         
-        # 针对 ABI 二进制格式的处理
+        found_any = False
+        p_path = Path(file_path)
+        ext = p_path.suffix.lower()
+        
+        # 1. 递归处理 ZIP 压缩包
+        if ext == '.zip':
+            try:
+                with zipfile.ZipFile(file_path, 'r') as zf:
+                    all_names = zf.namelist()
+                    valid_exts = ['.fasta', '.fas', '.fa', '.seq', '.txt', '.fna', '.ab1', '.abi']
+                    
+                    # 1. 筛选并去重
+                    to_process = []
+                    base_map = {} # stem -> [full_names]
+                    for name in all_names:
+                        ext = Path(name).suffix.lower()
+                        if ext in valid_exts:
+                            stem = Path(name).stem
+                            if stem not in base_map: base_map[stem] = []
+                            base_map[stem].append(name)
+                    
+                    for stem, names in base_map.items():
+                        if len(names) == 1:
+                            to_process.append(names[0])
+                        else:
+                            # 优先级：.seq > .fasta > .fa > .ab1
+                            priority = {'.seq': 1, '.fasta': 2, '.fas': 2, '.fa': 2, '.fna': 2, '.txt': 3, '.ab1': 4, '.abi': 4}
+                            names.sort(key=lambda x: priority.get(Path(x).suffix.lower(), 99))
+                            to_process.append(names[0])
+
+                    for name in to_process:
+                        # 对筛选后的文件进行解析
+                        with zf.open(name) as member:
+                                if name.lower().endswith(('.ab1', '.abi')):
+                                    try:
+                                        for record in SeqIO.parse(member, "abi"):
+                                            # 精简 ID：如果 ID 已经包含文件名则不再拼接
+                                            m_stem = Path(name).stem
+                                            rid = str(record.id)
+                                            fid = rid if m_stem in rid else f"{m_stem}::{rid}"
+                                            yield {
+                                                'id': fid,
+                                                'description': f"{name} - {record.description}",
+                                                'sequence': str(record.seq),
+                                                'length': len(record.seq)
+                                            }
+                                            found_any = True
+                                    except: pass
+                                else:
+                                    try:
+                                        text_member = io.TextIOWrapper(member, encoding='utf-8', errors='ignore')
+                                        for record in SeqIO.parse(text_member, "fasta"):
+                                            m_stem = Path(name).stem
+                                            rid = str(record.id).split()[0] if ' ' in str(record.id) else str(record.id)
+                                            fid = rid if m_stem in rid else f"{m_stem}::{rid}"
+                                            yield {
+                                                'id': fid,
+                                                'description': f"{name} - {record.description}",
+                                                'sequence': str(record.seq),
+                                                'length': len(record.seq)
+                                            }
+                                            found_any = True
+                                    except: pass
+                if found_any: return
+            except Exception as e:
+                logger.error(f"ZIP 压缩包解析失败: {e}")
+                
+        # 2. 处理 GZ 压缩文件
+        if ext == '.gz':
+            try:
+                with gzip.open(file_path, 'rt', encoding='utf-8', errors='ignore') as handle:
+                    for record in SeqIO.parse(handle, "fasta"):
+                        yield {
+                            'id': str(record.id),
+                            'description': str(record.description),
+                            'sequence': str(record.seq),
+                            'length': len(record.seq)
+                        }
+                        found_any = True
+                if found_any: return
+            except Exception as e:
+                logger.error(f"GZ 文件解析失败: {e}")
+
+        # 3. 针对 ABI 二进制格式的处理 (非压缩)
         if ext in ['.ab1', '.abi']:
             try:
                 with open(file_path, 'rb') as handle:
@@ -106,7 +191,6 @@ class FileHandler:
                 if found_any: return
             except Exception as e:
                 logger.error(f"ABI 解析失败: {e}")
-                # ABI 失败则不继续尝试文本解析
                 raise
 
         try:

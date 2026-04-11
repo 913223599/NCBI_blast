@@ -3,14 +3,18 @@ import { useAppStore } from '../stores/app'
 export function useI18n() {
   const appStore = useAppStore()
   
-  const t = (key: string): string => {
+  const t = (key: string, params?: Record<string, any>): string => {
     // 1. Check if backend-injected JSON translation exists
-    if (appStore.translations && appStore.translations[key]) {
-      return appStore.translations[key]
+    let text = (appStore.translations && appStore.translations[key]) || key
+    
+    // 2. Handle simple {variable} interpolation
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        text = text.replace(`{${k}}`, String(v))
+      })
     }
     
-    // 2. Fallback to key itself if not found
-    return key
+    return text
   }
 
   return { t }

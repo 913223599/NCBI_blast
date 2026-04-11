@@ -5,7 +5,7 @@
  * 使用自定义下拉组件解决 PyQt 环境下的布局重绘 Bug
  */
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { getBridge } from '../bridge/pyqt-bridge'
+import { getBridge } from '../bridge'
 import { useAppStore } from '../stores/app'
 
 import { useVirtualList } from '@vueuse/core'
@@ -15,6 +15,7 @@ const appStore = useAppStore()
 /* -------- 面板切换 -------- */
 const panels = [
   { id: 'ai-translation', label: 'AI & 翻译', icon: '🤖' },
+  { id: 'local-db', label: '本地数据库', icon: '💾' },
   { id: 'system-params', label: '系统参数', icon: '⚙️' },
   { id: 'user-interface', label: '界面显示', icon: '🖥️' },
   { id: 'dictionary', label: '词典管理', icon: '📖' }
@@ -29,6 +30,7 @@ const newModelKey = ref('')
 const newModelName = ref('')
 const saveStatus = ref<{ message: string; type: string } | null>(null)
 const selectedLocale = ref('zh_CN')
+const loadingDict = ref(false)
 
 // 词典管理状态
 const dictQuery = ref('')
@@ -51,11 +53,16 @@ const dictSelectRef = ref<HTMLElement | null>(null)
 let searchTimer: any = null
 
 const dictCategories = [
-  { id: 'species', label: '物种名 (Species)' },
-  { id: 'genus', label: '属名 (Genus)' },
-  { id: 'gene', label: '基因名 (Gene)' },
-  { id: 'location', label: '地理/来源' },
-  { id: 'other', label: '其他' }
+  { id: 'kingdom', label: '界 (Kingdom)' },
+  { id: 'phylum', label: '门 (Phylum)' },
+  { id: 'class_rank', label: '纲 (Class)' },
+  { id: 'order', label: '目 (Order)' },
+  { id: 'family', label: '科 (Family)' },
+  { id: 'genus', label: '属 (Genus)' },
+  { id: 'species', label: '物种 (Species)' },
+  { id: 'gene', label: '基因 (Gene)' },
+  { id: 'location', label: '地理/来源 (Location)' },
+  { id: 'other', label: '其他 (Other)' }
 ]
 
 /* -------- 工具函数 -------- */
@@ -116,7 +123,84 @@ watch(activePanel, (newVal) => {
   if (newVal === 'dictionary' && dictResults.value.length === 0) {
     loadDictionary()
   }
+  if (newVal === 'local-db') {
+    loadLocalDatabases()
+  }
 })
+
+/* -------- 数据库管理状态 -------- */
+const localDatabases = ref<any[]>([])
+const loadingDbs = ref(false)
+const dbInputFile = ref('')
+const dbTitle = ref('')
+const dbOutName = ref('')
+const dbType = ref('nucl')
+const isCreatingDb = ref(false)
+
+function loadLocalDatabases() {
+  loadingDbs.value = true
+  getBridge().list_local_databases((resStr: string) => {
+    loadingDbs.value = false
+    try {
+      localDatabases.value = JSON.parse(resStr)
+    } catch {
+      localDatabases.value = []
+    }
+  })
+}
+
+function browseFasta() {
+  getBridge().request_file_load('fasta')
+  // 兼容旧版回调，或者直接拦截
+  window.handleFileLoaded = (_content: string, type: string, path: string) => {
+    if (type === 'fasta' && path) {
+      dbInputFile.value = path
+      // 自动提取默认名称
+      const parts = path.split(/[/\\]/)
+      const lastPart = parts[parts.length - 1] || ''
+      const fileName = lastPart.split('.')[0] || 'new_database'
+      
+      if (!dbTitle.value) dbTitle.value = fileName
+      if (!dbOutName.value) dbOutName.value = fileName.replace(/[^a-zA-Z0-9]/g, '_')
+    }
+  }
+}
+
+function createDatabase() {
+  if (!dbInputFile.value || !dbTitle.value || !dbOutName.value) {
+    appStore.showNotification('请填齐数据库创建信息', 'warning')
+    return
+  }
+  isCreatingDb.value = true
+  getBridge().make_blast_db(
+    dbInputFile.value,
+    dbType.value,
+    dbTitle.value,
+    dbOutName.value,
+    (success: boolean, msg: string) => {
+      isCreatingDb.value = false
+      if (success) {
+        appStore.showNotification(msg, 'success')
+        loadLocalDatabases()
+        dbInputFile.value = ''; dbTitle.value = ''; dbOutName.value = ''
+      } else {
+        appStore.showNotification(`创建失败: ${msg}`, 'error')
+      }
+    }
+  )
+}
+
+function deleteDatabase(name: string) {
+  if (!confirm(`确定删除数据库 "${name}"? 此操作不可恢复。`)) return
+  getBridge().delete_database(name, (success: boolean) => {
+    if (success) {
+      appStore.showNotification('数据库已删除', 'info')
+      loadLocalDatabases()
+    } else {
+      appStore.showNotification('删除失败，文件可能被占用', 'error')
+    }
+  })
+}
 
 /* -------- 业务逻辑 -------- */
 async function loadSettings(): Promise<void> {
@@ -125,14 +209,23 @@ async function loadSettings(): Promise<void> {
     bridge.get_api_key('dashscope', (key: string) => { if (key) apiKey.value = key })
     bridge.get_ai_models?.((modelsStr: string) => {
       try {
-        aiModels.value = JSON.parse(modelsStr)
-        if (aiModels.value.length > 0 && !selectedModel.value) {
-          selectedModel.value = aiModels.value[0]?.key ?? ''
+        const models = JSON.parse(modelsStr)
+        if (Array.isArray(models)) {
+          aiModels.value = models
+          // 如果还没有选择模型，默认选择第一个
+          if (aiModels.value.length > 0 && !selectedModel.value) {
+            const firstModel = aiModels.value[0]
+            if (firstModel) selectedModel.value = firstModel.key
+          }
         }
-      } catch (e) { }
+      } catch (e) { console.error('[Settings] Parse models error:', e) }
     })
-    bridge.get_selected_model((savedModel: string) => {
-      if (savedModel) selectedModel.value = savedModel
+    
+    // 获取已选择的模型（覆盖之前的默认值）
+    bridge.get_selected_model?.((savedModel: string) => {
+      if (savedModel && savedModel !== 'None') {
+        selectedModel.value = savedModel
+      }
     })
   } catch (error) { console.warn('[Settings] Bridge not ready') }
 }
@@ -182,8 +275,10 @@ const proofreadMode = ref(false)
 
 /* -------- 词典管理逻辑 -------- */
 function loadDictionary(): void {
+  loadingDict.value = true
   // 解除只显示100条的限制，因为有了虚拟滚动，浏览器可以毫无压力处理几万条前端内存数据
   getBridge().get_all_dictionary_terms(proofreadMode.value, (termsStr: string) => {
+    loadingDict.value = false
     try { 
       const terms = JSON.parse(termsStr)
       dictResults.value = Array.isArray(terms) ? terms : [] 
@@ -230,7 +325,9 @@ function searchDictionary(): void {
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     if (!dictQuery.value.trim()) { loadDictionary(); return }
+    loadingDict.value = true
     getBridge().search_dictionary(dictQuery.value.trim(), proofreadMode.value, (resStr: string) => {
+      loadingDict.value = false
       try { dictResults.value = JSON.parse(resStr) } catch (e) { }
     })
   }, 300) // 300ms 防抖
@@ -271,6 +368,82 @@ function editTerm(term: any): void {
   newTermCat.value = term.category || 'species'
   document.querySelector('.add-term-form')?.scrollIntoView({ behavior: 'smooth' })
 }
+
+/* -------- 物种分类数据库管理 -------- */
+const taxStatus = ref<any>(null)
+let taxPollTimer: any = null
+
+async function refreshTaxStatus(): Promise<void> {
+  try {
+    const result = await getBridge().taxonomy_status()
+    taxStatus.value = result
+    
+    // 如果正在构建，自动轮询
+    if (result?.building && !taxPollTimer) {
+      taxPollTimer = setInterval(async () => {
+        try {
+          const updated = await getBridge().taxonomy_status()
+          taxStatus.value = updated
+          if (!updated?.building) {
+            clearInterval(taxPollTimer)
+            taxPollTimer = null
+            taxCheckResult.value = null
+            appStore.showNotification('物种分类数据库更新完成！', 'success')
+          }
+        } catch (pollError) {
+          console.error('[TaxStatus] Poll error:', pollError)
+        }
+      }, 2000)
+    }
+  } catch (fetchError) {
+    console.error('[TaxStatus] Fetch error:', fetchError)
+  }
+}
+
+async function triggerTaxUpdate(): Promise<void> {
+  if (taxStatus.value?.building) return
+  taxCheckResult.value = null
+  appStore.showNotification('已启动后台更新，从 NCBI FTP 下载最新物种分类库...', 'info')
+  try {
+    await getBridge().taxonomy_update()
+    // 立即开始轮询
+    await refreshTaxStatus()
+  } catch (updateError) {
+    appStore.showNotification('更新触发失败: ' + String(updateError), 'error')
+  }
+}
+
+const taxCheckResult = ref<any>(null)
+const taxChecking = ref(false)
+
+async function checkTaxUpdate(): Promise<void> {
+  taxChecking.value = true
+  taxCheckResult.value = null
+  try {
+    const result = await getBridge().taxonomy_check()
+    taxCheckResult.value = result
+    if (result?.hasUpdate) {
+      appStore.showNotification('发现新版本！点击"从 NCBI 在线更新" 进行下载。', 'info')
+    } else if (!result?.error) {
+      appStore.showNotification('当前数据库已是最新版本。', 'success')
+    }
+  } catch (checkError) {
+    taxCheckResult.value = { hasUpdate: false, error: String(checkError) }
+  } finally {
+    taxChecking.value = false
+  }
+}
+
+// 切换到 local-db 面板时自动加载一次状态
+watch(activePanel, (newVal) => {
+  if (newVal === 'local-db') {
+    refreshTaxStatus()
+  }
+})
+
+onUnmounted(() => {
+  if (taxPollTimer) clearInterval(taxPollTimer)
+})
 </script>
 
 <template>
@@ -361,6 +534,146 @@ function editTerm(term: any): void {
         </div>
       </div>
 
+      <!-- 本地数据库面板 -->
+      <div v-if="activePanel === 'local-db'" class="panel">
+        <div class="panel-header-simple">
+          <h2>💾 本地 BLAST 数据库管理</h2>
+          <p class="desc-sm">管理用于本地比对分析的核酸和蛋白质序列数据库。</p>
+        </div>
+
+        <div class="db-manager-grid">
+          <!-- 左侧：新建数据库 -->
+          <div class="glass-card">
+            <h3 style="font-size: 1rem; margin-bottom: 20px;">🔨 创建新数据库</h3>
+            <div class="form-group">
+              <label>输入 FASTA 文件</label>
+              <div class="input-with-btn">
+                <input v-model="dbInputFile" readonly class="form-input" placeholder="选择源文件..." />
+                <button class="btn-action" @click="browseFasta">浏览</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>数据库类型</label>
+              <select v-model="dbType" class="form-input select-native">
+                <option value="nucl">核酸 (Nucleotide)</option>
+                <option value="prot">蛋白质 (Protein)</option>
+              </select>
+            </div>
+            <div class="form-row" style="display: flex; gap: 12px;">
+              <div class="form-group" style="flex: 1;">
+                <label>数据库标题</label>
+                <input v-model="dbTitle" class="form-input" placeholder="显示名称 (如: 16S_Core)" />
+              </div>
+              <div class="form-group" style="flex: 1;">
+                <label>系统路径名</label>
+                <input v-model="dbOutName" class="form-input" placeholder="英文文件名" />
+              </div>
+            </div>
+            
+            <button class="btn-premium" style="width: 100%; margin-top: 10px;" :disabled="isCreatingDb" @click="createDatabase">
+              {{ isCreatingDb ? '⏳ 正在创建 (耗时取决于文件大小)...' : '🚀 开始创建数据库' }}
+            </button>
+          </div>
+
+          <!-- 右侧：现有库列表 -->
+          <div class="glass-card">
+            <h3 style="font-size: 1rem; margin-bottom: 20px;">📂 现有数据库 ({{ localDatabases.length }})</h3>
+            <div class="db-list-container scroll-v" style="max-height: 400px; overflow-y: auto;">
+              <div v-if="loadingDbs" class="loading-placeholder">加载中...</div>
+              <div v-else-if="localDatabases.length === 0" class="empty-state-sm">未发现本地数据库</div>
+              <div v-for="db in localDatabases" :key="db.name" class="db-item-card">
+                <div class="db-item-info">
+                  <div class="db-item-name">
+                    <span class="type-badge" :class="db.type">{{ db.type === 'nucl' ? '核酸' : '蛋白' }}</span>
+                    {{ db.name }}
+                  </div>
+                  <div class="db-item-path" :title="db.path">{{ db.path }}</div>
+                </div>
+                <button class="btn-icon-link" @click="deleteDatabase(db.name)" title="删除数据库">🗑️</button>
+              </div>
+            </div>
+            <button class="btn-action" style="width: 100%; margin-top: 16px;" @click="loadLocalDatabases">🔄 刷新列表</button>
+          </div>
+        </div>
+
+        <!-- 物种分类数据库 -->
+        <div class="glass-card" style="margin-top: 24px;">
+          <h3 style="font-size: 1rem; margin-bottom: 16px;">🧬 NCBI 物种分类数据库</h3>
+          <p class="desc-sm" style="margin-bottom: 16px;">
+            基于 NCBI Taxonomy 的离线物种谱系查询库。用于 BLAST 鉴定后自动填充分类信息及编码对照表。
+          </p>
+
+          <!-- 状态信息 -->
+          <div v-if="taxStatus" class="tax-status-grid">
+            <div class="tax-status-item">
+              <span class="tax-label">状态</span>
+              <span :class="['tax-badge', taxStatus.ready ? 'ready' : 'missing']">
+                {{ taxStatus.building ? '🔄 构建中...' : taxStatus.ready ? '✅ 就绪' : '❌ 未构建' }}
+              </span>
+            </div>
+            <div v-if="taxStatus.fileSizeMB" class="tax-status-item">
+              <span class="tax-label">文件大小</span>
+              <span class="tax-value">{{ taxStatus.fileSizeMB }} MB</span>
+            </div>
+            <div v-if="taxStatus.lastModified" class="tax-status-item">
+              <span class="tax-label">最后编译</span>
+              <span class="tax-value">{{ taxStatus.lastModified }}</span>
+            </div>
+            <div v-if="taxStatus.ageDays !== undefined" class="tax-status-item">
+              <span class="tax-label">距今</span>
+              <span :class="['tax-value', taxStatus.ageDays > 180 ? 'stale' : '']">
+                {{ Math.floor(taxStatus.ageDays) }} 天
+                <span v-if="taxStatus.ageDays > 180" style="color: #f59e0b; margin-left: 4px;">⚠ 建议更新</span>
+              </span>
+            </div>
+            <div v-if="taxStatus.dumpDate" class="tax-status-item">
+              <span class="tax-label">原始数据</span>
+              <span class="tax-value">{{ taxStatus.dumpDate }}</span>
+            </div>
+          </div>
+
+          <!-- 构建进度 -->
+          <div v-if="taxStatus?.building" class="tax-progress">
+            <div class="progress-bar-track">
+              <div class="progress-bar-fill animate-pulse" />
+            </div>
+            <p class="progress-text">{{ taxStatus.progress || '处理中...' }}</p>
+          </div>
+
+          <!-- 更新检查结果 -->
+          <div v-if="taxCheckResult" class="tax-check-banner" :class="taxCheckResult.hasUpdate ? 'has-update' : 'up-to-date'">
+            <template v-if="taxCheckResult.hasUpdate">
+              <span>🆕 发现新版本可用！远端 MD5: <code>{{ taxCheckResult.remoteMd5?.slice(0, 12) }}...</code></span>
+            </template>
+            <template v-else-if="taxCheckResult.error">
+              <span>⚠️ 检查失败: {{ taxCheckResult.error }}</span>
+            </template>
+            <template v-else>
+              <span>✅ 当前已是最新版本 (MD5 一致)</span>
+            </template>
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="tax-actions">
+            <button class="btn-action" @click="refreshTaxStatus">🔄 刷新状态</button>
+            <button
+              class="btn-action"
+              :disabled="taxStatus?.building || taxChecking"
+              @click="checkTaxUpdate"
+            >
+              {{ taxChecking ? '⏳ 检查中...' : '🔍 检查更新' }}
+            </button>
+            <button
+              class="btn-premium"
+              :disabled="taxStatus?.building"
+              @click="triggerTaxUpdate"
+            >
+              {{ taxStatus?.building ? '⏳ 更新中...' : '🌐 从 NCBI 在线更新' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- 界面显示面板 -->
       <div v-if="activePanel === 'user-interface'" class="panel">
         <h2>🖥️ 界面显示设置</h2>
@@ -444,6 +757,14 @@ function editTerm(term: any): void {
             </div>
             
             <div v-bind="containerProps" class="dict-virtual-container">
+              <div v-if="loadingDict" class="dict-loading-overlay">
+                <div class="neo-spinner"></div>
+                <span>加载词录中...</span>
+              </div>
+              <div v-else-if="dictResults.length === 0" class="dict-empty-overlay">
+                <span class="icon">🔍</span>
+                <span>未找到相关词条</span>
+              </div>
               <div v-bind="wrapperProps">
                 <div v-for="item in list" :key="item.index" class="dict-grid-row">
                   <div class="td dict-en-cell">{{ item.data.english }}</div>
@@ -460,7 +781,6 @@ function editTerm(term: any): void {
                 </div>
               </div>
             </div>
-            <div v-if="dictResults.length === 0" class="empty-hint">暂无词条，请在上方尝试录入或更改搜索条件</div>
           </div>
         </div>
       </div>
@@ -573,6 +893,52 @@ function editTerm(term: any): void {
 .plus-icon { font-size: 1.2rem; line-height: 1; }
 .empty-state-sm { grid-column: 1 / -1; padding: 20px; text-align: center; color: var(--text-muted); font-size: 0.85rem; background: #f8fafc; border-radius: 10px; border: 1px dashed #e2e8f0; }
 
+/* 词典加载动画与空状态 */
+.dict-virtual-container {
+  height: 500px;
+  overflow-y: auto;
+  position: relative;
+  background: #fdfdfd;
+}
+
+.dict-loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  z-index: 10;
+  backdrop-filter: blur(2px);
+}
+
+.neo-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #2563eb;
+  border-radius: 50%;
+  animation: neo-spin 1s linear infinite;
+}
+
+@keyframes neo-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.dict-empty-overlay {
+  padding: 80px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: #94a3b8;
+  font-size: 1.1rem;
+}
+.dict-empty-overlay .icon { font-size: 3rem; opacity: 0.3; }
+
 /* 词典行内操作按钮 */
 .dict-actions { display: flex; gap: 16px; justify-content: flex-end; }
 .btn-icon-link { 
@@ -582,6 +948,135 @@ function editTerm(term: any): void {
 }
 .btn-icon-link:hover { opacity: 1; transform: scale(1.2); }
 
+/* 数据库管理特有样式 */
+.db-manager-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+.input-with-btn { display: flex; gap: 8px; }
+.db-item-card { 
+  display: flex; justify-content: space-between; align-items: center; 
+  padding: 12px 16px; background: #f8fafc; border: 1px solid #e2e8f0; 
+  border-radius: 10px; margin-bottom: 10px;
+}
+.db-item-info { flex: 1; min-width: 0; }
+.db-item-name { font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; gap: 8px; }
+.db-item-path { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.type-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 800; color: white; }
+.type-badge.nucl { background: #2563eb; }
+.type-badge.prot { background: #16a34a; }
+
 .spacer { flex: 1; }
 .version-tag { font-size: 0.75rem; color: var(--text-muted); padding: 8px 14px; }
+
+/* ─── 物种分类数据库管理 ─── */
+
+.tax-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.tax-status-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  background: var(--bg-tertiary, #f8fafc);
+  border-radius: 8px;
+  border: 1px solid var(--border-light, #e2e8f0);
+}
+
+.tax-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tax-value {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+}
+
+.tax-value.stale {
+  color: #f59e0b;
+}
+
+.tax-badge {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.tax-badge.ready { color: #16a34a; }
+.tax-badge.missing { color: #dc2626; }
+
+.tax-progress {
+  margin: 16px 0;
+}
+
+.progress-bar-track {
+  height: 6px;
+  background: var(--border-light, #e2e8f0);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #2563eb, #7c3aed, #2563eb);
+  background-size: 200% 100%;
+  border-radius: 3px;
+}
+
+.progress-bar-fill.animate-pulse {
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.progress-text {
+  font-size: 0.78rem;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 8px;
+  text-align: center;
+}
+
+.tax-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tax-check-banner {
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.tax-check-banner.has-update {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+}
+
+.tax-check-banner.up-to-date {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.tax-check-banner code {
+  font-family: 'Consolas', monospace;
+  font-size: 0.75rem;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
 </style>

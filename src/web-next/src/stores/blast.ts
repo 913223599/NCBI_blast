@@ -47,9 +47,17 @@ export interface BlastHit {
     evalue: string
     accession: string
     translatedName?: string | null
+    /** 是否强制显示原文（即使已有译文） */
+    showOriginal?: boolean
+    /** 是否正在翻译中（用于 UI 加载动画） */
+    isTranslating?: boolean
     consensusList?: {name: string, pct: number}[]
     /** 查看详情所用的结果 CSV 路径 */
     csvFile?: string
+    /** 可视化所用的 XML 路径 */
+    xmlFile?: string
+    /** 原始序列内容 */
+    rawSequence?: string
 }
 
 export const useBlastStore = defineStore('blast', () => {
@@ -99,6 +107,14 @@ export const useBlastStore = defineStore('blast', () => {
         if (!files.value.includes(filePath)) {
             files.value.push(filePath)
         }
+    }
+
+    function addFiles(filePaths: string[]): void {
+        filePaths.forEach(path => {
+            if (!files.value.includes(path)) {
+                files.value.push(path)
+            }
+        })
     }
 
     function removeFile(filePath: string): void {
@@ -165,9 +181,18 @@ export const useBlastStore = defineStore('blast', () => {
                 if (targetObj) {
                     if (!hit.translatedName) hit.translatedName = hit.speciesName
                     hit.translatedName = hit.translatedName.replace(original, translated)
+                    hit.showOriginal = false // 确保回包后立刻展示为译文
                 }
             } else if (hit.speciesName && hit.speciesName.includes(original)) {
                 if (!hit.translatedName) hit.translatedName = hit.speciesName
+                
+                // [修复] 检查是否已经存在该翻译，防止出现 "贝莱斯芽孢杆菌 (贝莱斯芽孢杆菌)" 类似的双重翻译
+                // 如果当前字符串已经包含了 "Translated (Original)" 这种模式，且 Translated 已经对上了，就不再重复替换
+                const alreadySplicedPattern = `${translated} (${original})`
+                if (hit.translatedName.includes(alreadySplicedPattern)) {
+                    return
+                }
+
                 // 替换原文或之前的 (AI翻译中...) 占位符
                 const targetPattern = original + " (AI翻译中...)"
                 if (hit.translatedName.includes(targetPattern)) {
@@ -175,6 +200,7 @@ export const useBlastStore = defineStore('blast', () => {
                 } else {
                     hit.translatedName = hit.translatedName.replace(original, translated)
                 }
+                hit.showOriginal = false // 确保回包后立刻展示为译文
             }
         })
     }
@@ -227,7 +253,9 @@ export const useBlastStore = defineStore('blast', () => {
                 accession: bestHit.acc || 'N/A',
                 translatedName: null,
                 consensusList: bestHit.consensusList || [],
-                csvFile: resData.csv_file || ''
+                csvFile: resData.csv_file || '',
+                xmlFile: resData.xml_file || '',
+                rawSequence: resData.raw_sequence || ''
             }
         } else {
              // Finished but no hits
@@ -262,7 +290,7 @@ export const useBlastStore = defineStore('blast', () => {
         results, resultTitle,
         historyVisible,
         fileCount, hasInput,
-        switchInputMode, addFile, removeFile, clearFiles,
+        switchInputMode, addFile, addFiles, removeFile, clearFiles,
         toggleHistory, addTask, updateTaskStatus,
         setResults, clearHistory, setActiveTask, appendSingleResult,
         updateTranslation,

@@ -21,7 +21,8 @@ class ArchiveManager:
         Args:
             base_archive_dir: 基础归档目录，默认为 results/tree_results
         """
-        self.base_archive_dir = base_archive_dir or Path("results/tree_results")
+        from src.workbench.models.tool_config import ToolConfig
+        self.base_archive_dir = base_archive_dir or (ToolConfig.PROJECT_ROOT / "results" / "tree_results").resolve()
         self.base_archive_dir.mkdir(parents=True, exist_ok=True)
     
     def create_session_archive(self, 

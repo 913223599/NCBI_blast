@@ -348,15 +348,48 @@ class BlastManager:
                         final_file_paths.append(f_path)
                 else:
                     final_file_paths.append(f_path)
-            
             # 更新 Task Params 中的文件路径，确保持久化后的 params.json 指向归位后的文件
             task.params["files"] = final_file_paths
 
             # 提取序列内容
-            for f_path in final_file_paths:
-                for seq in fh.read_fasta_file_iter(f_path):
-                    sequences.append(seq)
-            
+            # 提取序列内容
+            def collect_sequences(path_list):
+                # 预处理：按主文件名去重，优先保留最有效的格式
+                filtered_paths = []
+                base_map = {} # stem -> [full_paths]
+                
+                for f_path in path_list:
+                    p = Path(f_path)
+                    if p.is_dir():
+                        # 递归扫描目录下的所有文件
+                        sub_files = [str(sf) for sf in p.rglob('*') if sf.is_file()]
+                        collect_sequences(sub_files)
+                    else:
+                        stem = p.stem
+                        if stem not in base_map: base_map[stem] = []
+                        base_map[stem].append(f_path)
+                
+                # 优先级映射：数值越小优先级越高
+                priority = {'.seq': 1, '.fasta': 2, '.fas': 2, '.fa': 2, '.fna': 2, '.txt': 3, '.ab1': 4, '.abi': 4}
+                
+                for stem, paths in base_map.items():
+                    if len(paths) == 1:
+                        filtered_paths.append(paths[0])
+                    elif len(paths) > 1:
+                        # 排序并取优先级最高的一个
+                        paths.sort(key=lambda x: priority.get(Path(x).suffix.lower(), 99))
+                        filtered_paths.append(paths[0])
+
+                # 执行读取
+                for f_path in filtered_paths:
+                    try:
+                        for seq in fh.read_fasta_file_iter(f_path):
+                            sequences.append(seq)
+                    except Exception as e:
+                        self.logger.warning(f"无法从文件 {f_path} 提取序列: {e}")
+
+            collect_sequences(final_file_paths)
+           
             # Extract from query text (Support Multi-FASTA parse)
             query_text = task.params.get("query", "").strip()
             if query_text:

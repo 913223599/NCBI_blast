@@ -5,7 +5,7 @@
  * 双栏布局：左侧主题列表 + 右侧内容区
  */
 import { ref, onMounted } from 'vue'
-import { getBridge } from '../bridge/pyqt-bridge'
+import { getBridge } from '../bridge'
 
 interface HelpTopic {
   id: string

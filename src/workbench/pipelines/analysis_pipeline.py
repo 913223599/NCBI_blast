@@ -311,3 +311,17 @@ class AnalysisPipeline:
                    "tree_file": str(final_nwk_file),
                    "id_to_hash": id_to_hash
                }}
+        
+        # 维护：持久化分析参数到存档，确保数据库丢失后仍可物理找回参数名称
+        try:
+            params_to_save = {
+                "engine": engine,
+                "model": model,
+                "msa": msa_method,
+                "bootstrap": p.get("bootstrap", 1000),
+                "method": method,
+                "time": int(os.path.getmtime(final_nwk_file) * 1000)
+            }
+            with open(output_dir / "analysis_params.json", "w", encoding='utf-8') as f:
+                json.dump(params_to_save, f, indent=4)
+        except: pass

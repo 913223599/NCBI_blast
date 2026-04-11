@@ -60,10 +60,7 @@ export class ViewportController {
     applyTransform() {
         if (!this.ticking) {
             window.requestAnimationFrame(() => {
-                if (this.svg) {
-                    this.svg.setAttribute("transform",
-                        `matrix(${this.matrix.a},0,0,${this.matrix.d},${this.matrix.e},${this.matrix.f})`)
-                }
+                // Remove root SVG transform to prevent double transformation (scaling/shifting twice).
                 this.onTransformChange?.()
                 this.ticking = false
             })

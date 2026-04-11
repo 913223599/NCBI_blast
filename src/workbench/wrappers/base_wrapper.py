@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import List, Optional, Union
 
-from src.workbench.models.tool_config import ToolConfig
+from ..models.tool_config import ToolConfig
 
 
 class WrapperError(Exception):

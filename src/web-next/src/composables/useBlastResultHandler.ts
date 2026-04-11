@@ -8,9 +8,9 @@
  * - 批量翻译
  */
 import { ref } from 'vue'
-import { useBlastStore } from '../stores/blast'
+import { useBlastStore, type BlastHit } from '../stores/blast'
 import { useAppStore } from '../stores/app'
-import { getBridge } from '../bridge/pyqt-bridge'
+import { getBridge } from '../bridge'
 
 export function useBlastResultHandler() {
   const blast = useBlastStore()
@@ -22,7 +22,7 @@ export function useBlastResultHandler() {
    */
   function fetchTaskResults(taskId: string) {
     try {
-      getBridge().get_task_results(taskId, (resStr) => {
+      getBridge().get_task_results(taskId, (resStr: string) => {
         try {
           const resultsArray = JSON.parse(resStr)
           if (!Array.isArray(resultsArray)) return
@@ -35,9 +35,9 @@ export function useBlastResultHandler() {
             if (res.status === 'pending' || res.status === 'running') {
               hits.push(createPendingHit(queryId, csvFile))
             } else if (res.data && Array.isArray(res.data) && res.data.length > 0) {
-              hits.push(createSuccessHit(queryId, res.data[0], csvFile))
+              hits.push(createSuccessHit(queryId, res.data[0], csvFile, res.xml_file, res.raw_sequence))
             } else {
-              hits.push(createNoHitsHit(queryId, csvFile))
+              hits.push(createNoHitsHit(queryId, csvFile, res.xml_file))
             }
           }
           
@@ -86,8 +86,8 @@ export function useBlastResultHandler() {
   /**
    * 创建成功的结果条目
    */
-  function createSuccessHit(queryId: string, bestHit: any, csvFile: string) {
-    return {
+  function createSuccessHit(queryId: string, bestHit: any, csvFile: string, xmlFile?: string, rawSequence?: string): BlastHit {
+    const hit: BlastHit = {
       queryTitle: queryId,
       speciesName: bestHit.species || 'Unknown',
       genusStrain: [bestHit.genus, bestHit.strain].filter(Boolean).join(' · ') || '',
@@ -102,14 +102,15 @@ export function useBlastResultHandler() {
       translatedName: null,
       consensusList: bestHit.consensusList || [],
       csvFile,
-      rawSequence: bestHit.raw_sequence || ''
+      xmlFile: xmlFile || bestHit.xml_file || '',
+      rawSequence: rawSequence || bestHit.raw_sequence || ''
     }
+
+    // 移除了原始的自动全屏触发翻译，改为前端按需点击触发
+    return hit
   }
 
-  /**
-   * 创建无匹配的结果条目
-   */
-  function createNoHitsHit(queryId: string, csvFile: string) {
+  function createNoHitsHit(queryId: string, csvFile: string, xmlFile?: string) {
     return {
       queryTitle: queryId,
       speciesName: '未找到匹配项 (No Hits)',
@@ -124,6 +125,7 @@ export function useBlastResultHandler() {
       hitTitle: '',
       translatedName: null,
       csvFile,
+      xmlFile: xmlFile || '',
       rawSequence: ''
     }
   }

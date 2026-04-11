@@ -8,7 +8,7 @@
  */
 import { ref } from 'vue'
 import { useBlastStore } from '../stores/blast'
-import { getBridge } from '../bridge/pyqt-bridge'
+import { getBridge } from '../bridge'
 
 export function useBlastTaskManager() {
   const blast = useBlastStore()

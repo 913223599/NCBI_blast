@@ -39,7 +39,7 @@ class TranslationDataManager:
 
         processed_files = 0
         migrated_count = 0
-        from src.utils.translation.term_extractor import TermExtractor
+        from .term_extractor import TermExtractor
         extractor = TermExtractor()
 
         for csv_file in csv_files:
@@ -394,7 +394,7 @@ class TranslationDataManager:
         智能修复分类：针对标记为 'other' 的条目，利用 TermExtractor 重新判定
         """
         results = {"total": 0, "fixed": 0, "remained": 0}
-        from src.utils.translation.term_extractor import TermExtractor
+        from .term_extractor import TermExtractor
         extractor = TermExtractor()
         
         try:

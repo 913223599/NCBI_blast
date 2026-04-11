@@ -1,0 +1,14 @@
+{
+  "name": "ncbi-blast-electron-shell",
+  "version": "1.0.0",
+  "description": "NCBI Bio-Station — Electron Shell (Python Sidecar Architecture)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "dependencies": {
+    "electron": "^35.0.0"
+  },
+  "devDependencies": {}
+}

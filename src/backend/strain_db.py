@@ -3,6 +3,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import List, Dict, Any
 
 
 class StrainDBManager:
@@ -78,7 +79,18 @@ class StrainDBManager:
                     self.logger.info(f"Database Migration: Adding column {col_name} to records table")
                     cursor.execute(f"ALTER TABLE records ADD COLUMN {col_name} {col_type}")
 
-            # 4. 系统配置表 - 存储编码字典等全局设置
+            # 4. 进化树历史记录表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS tree_history (
+                    id TEXT PRIMARY KEY,
+                    source_file TEXT,
+                    name TEXT,
+                    items_json TEXT, -- 存储 items 数组的 JSON
+                    updated_at TEXT
+                )
+            ''')
+
+            # 5. 系统配置表 - 存储编码字典等全局设置
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS sys_config (
                     key TEXT PRIMARY KEY,
@@ -286,6 +298,231 @@ class StrainDBManager:
         except Exception as e:
             self.logger.error(f"Error loading data: {e}")
             return {'freezers': [], 'records': []}
+
+    def search_by_species_list(self, species_names: List[str]) -> List[Dict[str, Any]]:
+        """根据物种列表筛选记录"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            placeholders = ", ".join(["?"] * len(species_names))
+            cursor.execute(f'SELECT * FROM records WHERE species IN ({placeholders})', tuple(species_names))
+            
+            records = []
+            for row in cursor.fetchall():
+                # 复用转换逻辑 (由于代码块限制，这里简化，实际开发中建议提取私有方法)
+                records.append({
+                    'id': row['id'],
+                    'name': row['name'],
+                    'species': row['species'],
+                    'strain': row['strain'],
+                    'accession': row['accession']
+                })
+            conn.close()
+            return records
+        except Exception as e:
+            self.logger.error(f"Search by species list error: {e}")
+            return []
+
+    def save_tree_history(self, history_data):
+        """保存进化树项目组历史"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            
+            for group in history_data:
+                gid = group.get('id')
+                source = group.get('sourceFile')
+                name = group.get('name')
+                items = json.dumps(group.get('items', []))
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO tree_history (id, source_file, name, items_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (gid, source, name, items, now))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving tree history: {e}")
+            return False
+
+    def load_tree_history(self):
+        """加载进化树历史，如果数据库为空则尝试从物理归档扫描恢复"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 1. 先尝试从数据库读取
+            cursor.execute('SELECT * FROM tree_history ORDER BY updated_at DESC')
+            rows = cursor.fetchall()
+            
+            # 2. 检查是否已经执行过首次自动重建
+            cursor.execute('SELECT value FROM sys_config WHERE key = "tree_history_reconstructed"')
+            reconstructed_flag = cursor.fetchone()
+            
+            if not rows and not reconstructed_flag:
+                # 仅在数据库为空且从未执行过重建时，才触发自动扫描
+                self.logger.info("First time initialization: RECONSTRUCTION START")
+                conn.close() # 调用重建前先释放当前连接锁
+                
+                self._reconstruct_from_fs()
+                
+                # 重新打开并记录重建已完成
+                conn = sqlite3.connect(self.db_path)
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('INSERT OR REPLACE INTO sys_config (key, value, updated_at) VALUES (?, ?, ?)',
+                             ('tree_history_reconstructed', 'true', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                conn.commit()
+
+                cursor.execute('SELECT * FROM tree_history ORDER BY updated_at DESC')
+                rows = cursor.fetchall()
+                self.logger.info("First time initialization: RECONSTRUCTION FINISHED")
+
+            history = []
+            for row in rows:
+                history.append({
+                    'id': row['id'],
+                    'sourceFile': row['source_file'],
+                    'name': row['name'],
+                    'items': json.loads(row['items_json'] or '[]')
+                })
+            conn.close()
+            return history
+        except Exception as e:
+            self.logger.error(f"Error loading tree history: {e}")
+            return []
+
+    def _reconstruct_from_fs(self):
+        """内部方法：从文件系统物理扫描并填充索引数据库"""
+        import re
+        import os
+        import hashlib
+        results_dir = self.db_path.parent.parent / "results" / "tree_results"
+        if not results_dir.exists(): return
+        
+        history_map = {}
+        for p_dir in results_dir.iterdir():
+            if not p_dir.is_dir(): continue
+            p_id = p_dir.name
+            if p_id not in history_map: history_map[p_id] = []
+            # 预提取：尝试在父文件夹找通用的 FASTA (针对同一比对任务的不同构树 Session)
+            parent_fasta = None
+            for ext in ("*.fasta", "*.fa", "*.seq", "*.fna"):
+                f_list = list(p_dir.glob(ext))
+                if f_list:
+                    parent_fasta = f_list[0]
+                    break
+
+            for s_dir in p_dir.iterdir():
+                if not s_dir.is_dir(): continue
+                nwk = next(s_dir.glob("*.nwk"), None)
+                if not nwk: continue
+                
+                # 优先在 session 目录找，找不到用父目录的
+                fasta = None
+                for ext in ("*.fasta", "*.fa", "*.seq", "*.fna", "*.txt"):
+                    f_list = list(s_dir.glob(ext))
+                    if f_list:
+                        fasta = f_list[0]
+                        break
+                if not fasta: fasta = parent_fasta
+                
+                try:
+                    mtime = s_dir.stat().st_mtime
+                    id_to_hash = {}
+                    algorithm = "Archived Task"
+                    
+                    # 优先从 metadata 恢复参数命名
+                    params_file = s_dir / "analysis_params.json"
+                    if params_file.exists():
+                        try:
+                            params = json.loads(params_file.read_text(encoding='utf-8'))
+                            msa = params.get("msa", "Rapid").upper()
+                            engine = params.get("engine", "NJ").upper()
+                            model = params.get("model", "JC").upper()
+                            algorithm = f"{msa} / {engine} ({model})"
+                        except: pass
+                    
+                    # 尝试从 manifest 恢复指纹
+                    manifest_file = s_dir / "sequence_manifest.json"
+                    if manifest_file.exists():
+                        try:
+                            id_to_hash = json.loads(manifest_file.read_text(encoding='utf-8'))
+                        except: pass
+                    
+                    # 如果没有 manifest 但有 FASTA，手动生成指纹
+                    if not id_to_hash and fasta and fasta.exists():
+                        try:
+                            self.logger.info(f"Generating fingerprints from: {fasta}")
+                            content = fasta.read_text(encoding='utf-8', errors='ignore')
+                            sections = content.split('>')
+                            for sec in sections:
+                                if not sec.strip(): continue
+                                lines = sec.split('\n')
+                                header = lines[0].strip()
+                                seq_id = header.split()[0].replace("'", "").replace('"', '').strip()
+                                seq_body = "".join(lines[1:]).strip().upper()
+                                if seq_id and seq_body:
+                                    md5 = hashlib.md5(seq_body.encode()).hexdigest()
+                                    id_to_hash[seq_id] = md5
+                            self.logger.info(f"Generated {len(id_to_hash)} fingerprints for {s_dir.name}")
+                        except Exception as e:
+                            self.logger.warning(f"Fingerprint generation failed for {fasta}: {e}")
+
+                    items_data = {
+                        "id": os.urandom(4).hex(),
+                        "algorithm": algorithm,
+                        "nwk": nwk.read_text(encoding='utf-8', errors='ignore'),
+                        "filePath": str(fasta) if fasta else "",
+                        "archiveFile": f"{p_id}/{s_dir.name}/{fasta.name}" if fasta else "",
+                        "idToHash": id_to_hash if id_to_hash else None,
+                        "time": int(mtime * 1000)
+                    }
+                    history_map[p_id].append(items_data)
+                except: continue
+        
+        if not history_map: return
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            for p_id, items in history_map.items():
+                if not items: continue
+                items.sort(key=lambda x: x['time'], reverse=True)
+                logical_id = re.sub(r'^Tree_\d+_\d+_', '', p_id)
+                display_name = logical_id.replace(".fasta", "").replace(".seq", "")
+                
+                # 提取基准源文件路径 (取最近一次分析的归档路径)
+                base_source = items[0].get("archiveFile", "")
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO tree_history (id, source_file, name, items_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (p_id, base_source, display_name, 
+                       json.dumps(items), datetime.fromtimestamp(items[0]['time']/1000).strftime('%Y-%m-%d %H:%M:%S')))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            self.logger.error(f"Failed to save reconstructed history: {e}")
+
+    def delete_tree_history_group(self, group_id):
+        """删除进化树项目组"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM tree_history WHERE id = ?', (group_id,))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error deleting tree history: {e}")
+            return False
 
     def clear_all(self):
         """清除所有数据"""
