@@ -1010,7 +1010,7 @@ onMounted(() => {
         <PhylotreeWidget ref="phylotreeWidgetRef" v-if="renderEngine === 'phylotree' && hasTree" :newick="rawNewick"
           :mode="settings.mode" :label-map="treeAnnotations" :use-branch-lengths="settings.useBranchLengths"
           :label-display-mode="settings.labelDisplayMode" :visual-gain="settings.visualGain"
-          :key="`${settings.mode}-${settings.useBranchLengths}-${rawNewick?.length}`"
+          :key="`${settings.mode}-${settings.useBranchLengths}-${settings.sortMode}-${rawNewick?.length}`"
           @node-click="handleInternalNodeClick" @render-complete="isLoading = false"
           style="width: 100%; height: 100%;" />
 

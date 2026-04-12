@@ -22,6 +22,12 @@ export interface TreeNode {
 }
 
 /**
+ * 分类学排序哨兵值：用于未命名节点在分类学排序中的占位
+ * 设定为 'zzz' 使未命名节点排到末尾
+ */
+const TAXONOMY_SORT_SENTINEL = 'zzz'
+
+/**
  * 进化树核心数据模型 (Station 2.0)
  */
 export class TreeModel {
@@ -100,6 +106,8 @@ export class TreeModel {
         this.maxHeight = 0
         if (!this.root) return
 
+        // Issue #5: 使用确定性递增计数器替代 Math.random()，
+        // 保证相同拓扑下生成相同 ID 序列，避免渲染器缓存失效
         let idCounter = 0
         const stack: { node: TreeNode, depth: number, height: number, parent: TreeNode | null }[] = [
             { node: this.root, depth: 0, height: 0, parent: null }
@@ -109,8 +117,7 @@ export class TreeModel {
             const item = stack.pop()
             if (!item) continue
             const { node, depth, height, parent } = item
-            // 唯一 ID 保护：定根后 ID 必须重刷，防止渲染器缓存错误
-            node.id = `tree_n_${Math.random().toString(36).substr(2, 4)}_${idCounter++}`
+            node.id = `tree_n_v${this.version}_${idCounter++}`
             node.depth = depth
             node.heightFromRoot = height
             node.parent = parent
@@ -212,13 +219,13 @@ export class TreeModel {
         const _recursiveWeight = (node: TreeNode): { count: number, minTaxon: string, maxDist: number } => {
             if (node.isLeaf) {
                 node.leafCount = 1
-                node.minTaxon = node.name || 'zzz' // 用于分类学代理排序
+                node.minTaxon = node.name || TAXONOMY_SORT_SENTINEL
                 node.maxDistToLeaf = 0
                 return { count: 1, minTaxon: node.minTaxon, maxDist: 0 }
             }
 
             let count = 0
-            let minTax = node.name || 'zzz'
+            let minTax = node.name || TAXONOMY_SORT_SENTINEL
             let maxD = 0
 
             if (node.children) {

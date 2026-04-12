@@ -1,4 +1,4 @@
-import { initBridge as initElectron } from './electron-bridge';
+import { initBridge as initElectron, onEvent as electronOnEvent } from './electron-bridge';
 import { initBridge as initPyQt } from './pyqt-bridge';
 
 /** 检测当前是否运行在 Electron 环境中 */
@@ -60,4 +60,12 @@ async function setupBridge() {
     return await initBridge();
 }
 
-export { initBridge, getBridge, registerGlobalHandler, setupBridge, isElectronEnvironment };
+function onEvent(handler: (eventType: string, data: any) => void): () => void {
+    if (isElectronEnvironment()) {
+        return electronOnEvent(handler);
+    }
+    // PyQt 环境暂未实现该通用订阅接口，返回空清理函数
+    return () => {};
+}
+
+export { initBridge, getBridge, registerGlobalHandler, setupBridge, isElectronEnvironment, onEvent };

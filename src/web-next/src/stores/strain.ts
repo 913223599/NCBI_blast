@@ -173,7 +173,7 @@ export interface ImportTask {
   startTime: string
 }
 
-import { getBridge } from '../bridge'
+import { getBridge, onEvent } from '../bridge'
 
 export const useStrainStore = defineStore('strain', () => {
   /* ======== 冰箱管理 ======== */
@@ -252,6 +252,29 @@ export const useStrainStore = defineStore('strain', () => {
               resolve()
             }
           })
+
+          // 注册全局翻译回调
+          onEvent((type: string, data: any) => {
+            if (type === 'translation_done') {
+                const { original, translated } = data as { original: string, translated: string };
+                if (!original || !translated) return;
+
+                // 更新编码对照表中的匹配项
+                let changed = false;
+                codeLookupEntries.value.forEach(entry => {
+                    const latin = entry.latinName || entry.name;
+                    if (latin === original && entry.name !== translated) {
+                        // 格式化为：中文(拉丁文)
+                        entry.name = `${translated}(${original})`;
+                        changed = true;
+                    }
+                });
+
+                if (changed) {
+                    autoSave();
+                }
+            }
+          });
         } catch (e) {
           console.warn('[Strain Store] Bridge not ready, falling back to LocalStorage')
           const storedData = loadFromStorage()

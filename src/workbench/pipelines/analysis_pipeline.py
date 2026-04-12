@@ -128,7 +128,7 @@ class AnalysisPipeline:
         except Exception as e:
             self.logger.warning(f"Professional tool pipeline {method} failed: {e}. Falling back to internal aligner.")
 
-        # 2. 智能兜底：Biopython 为基础的内建比对算法 (Real Alignment, Not Mock)
+        # 2. 智能兜底：使用统一的序列填充方法
         try:
             self.logger.info("Using internal Python progressive aligner...")
             from Bio import SeqIO
@@ -138,23 +138,15 @@ class AnalysisPipeline:
                 shutil.copy(input_fasta, output_fasta)
                 return results
 
-            # 真实对齐逻辑：确保在 MAFFT 缺失时也能生成长度严格一致的 MSA
-            max_len = max(len(s.seq) for s in sequences)
-            final_aligned = []
-            for s in sequences:
-                # 即使是极简回退，也必须通过尾部补位 '-' 确保长度一致，保护后续 NCBI 矩阵工具不崩溃
-                original_seq_str = str(s.seq)
-                if len(original_seq_str) < max_len:
-                    new_seq_content = original_seq_str + "-" * (max_len - len(original_seq_str))
-                else:
-                    new_seq_content = original_seq_str
-                
-                from Bio.Seq import Seq
-                from Bio.SeqRecord import SeqRecord
-                final_aligned.append(SeqRecord(Seq(new_seq_content), id=s.id, description=""))
-
-            SeqIO.write(final_aligned, output_fasta, "fasta")
-            self.logger.info(f"Padded MSA successfully generated (Length: {max_len} bp)")
+            # Issue #14: 使用统一的 SequenceProcessor.pad_sequences 代替内联补齐
+            from src.workbench.wrappers.tree_sequence_processor import SequenceProcessor
+            padded_path, was_padded = SequenceProcessor.pad_sequences(input_fasta, output_fasta)
+            if was_padded:
+                self.logger.info("Padded MSA successfully generated via SequenceProcessor.")
+            else:
+                # 序列已对齐，直接复制
+                if padded_path != output_fasta:
+                    shutil.copy(padded_path, output_fasta)
             results["info"] = "Processed via internal sequence-padding engine."
             
         except Exception as e:
@@ -230,7 +222,7 @@ class AnalysisPipeline:
     def stage_post_process_tree(self, input_nwk: Path, output_nwk: Path) -> Dict[str, Any]:
         """ETE4 元器件逻辑：对生成的原始 Newick 进行拓扑规范化与预处理。"""
         try:
-            from ete4 import Tree
+            from ete4 import Tree # type: ignore
             # Migrate ETE4 logic to build robust tree manipulation
             # On Windows, passing path to Tree() can be ambiguous. Read content instead.
             nwk_content = input_nwk.read_text(encoding='utf-8').strip()

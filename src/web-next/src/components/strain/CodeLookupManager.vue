@@ -19,6 +19,9 @@
         <button class="action-btn" :class="{ active: activeTab === 'maintenance' }" @click="activeTab = 'maintenance'">
           🛠️ 维护
         </button>
+        <button class="action-btn secondary" @click="handleTranslateAll" :disabled="isTranslating">
+          🌐 {{ isTranslating ? '正在翻译...' : '全量翻译' }}
+        </button>
       </div>
     </div>
 
@@ -56,6 +59,12 @@
                 <span class="node-code">{{ genus.code }}</span>
                 <span class="node-name">{{ genus.name }}</span>
                 <span v-if="genus.latinName" class="node-latin">{{ genus.latinName }}</span>
+                <button 
+                  v-if="genus.latinName && !hasChinese(genus.name)"
+                  class="node-action-btn translate"
+                  title="自动翻译"
+                  @click.stop="handleTranslateEntry(genus.fullPath)"
+                >🌐</button>
                 <span class="node-count">{{ getSpeciesCount(catCode, genus.code) }} 种</span>
                 <button
                   v-if="!genus.isBuiltin"
@@ -80,6 +89,12 @@
                     <span class="node-code">{{ species.code }}</span>
                     <span class="node-name">{{ species.name }}</span>
                     <span v-if="species.latinName" class="node-latin">{{ species.latinName }}</span>
+                    <button 
+                      v-if="species.latinName && !hasChinese(species.name)"
+                      class="node-action-btn translate"
+                      title="自动翻译"
+                      @click.stop="handleTranslateEntry(species.fullPath)"
+                    >🌐</button>
                     <button
                       v-if="!species.isBuiltin"
                       class="node-action-btn delete"
@@ -466,6 +481,39 @@ function handleRecalibrate(): void {
 function handleClearUnusedCounters(): void {
   appStore.showNotification('清理完成', 'success')
 }
+
+/** 检测字符串中是否包含中文字符 */
+function hasChinese(str: string | undefined): boolean {
+  if (!str) return false
+  return /[\u4e00-\u9fa5]/.test(str)
+}
+
+/* ========== 翻译逻辑 ========== */
+const isTranslating = ref(false)
+
+async function handleTranslateEntry(fullPath: string) {
+  try {
+    await codeGen.lookup.translateEntry(fullPath)
+    appStore.showNotification('翻译完成', 'success')
+  } catch (e) {
+    appStore.showNotification('翻译失败', 'error')
+  }
+}
+
+async function handleTranslateAll() {
+  if (confirm('确认对所有未翻译(即中文名与学名相同或为空)的词条进行批量 AI 翻译？')) {
+    isTranslating.value = true
+    try {
+      await codeGen.lookup.translateAllEntries()
+      appStore.showNotification('批量翻译任务已提交，结果将陆续更新', 'info')
+    } catch (e) {
+      appStore.showNotification('提交批量翻译失败', 'error')
+    } finally {
+      // 批量翻译是后台异步推送的，这里先结束 loading
+      setTimeout(() => { isTranslating.value = false }, 1000)
+    }
+  }
+}
 </script>
 
 <style scoped>
@@ -522,6 +570,15 @@ function handleClearUnusedCounters(): void {
   background: #2563eb;
   border-color: #2563eb;
   color: white;
+}
+
+.action-btn.secondary {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+
+.action-btn.secondary:hover {
+  background: #eff6ff;
 }
 
 .action-btn:hover:not(.active) {
@@ -713,6 +770,16 @@ function handleClearUnusedCounters(): void {
 
 .node-action-btn.toggle.disabled {
   color: #d1d5db;
+}
+
+.node-action-btn.translate {
+  color: #2563eb;
+  opacity: 0.6;
+}
+
+.node-action-btn.translate:hover {
+  opacity: 1;
+  background: #eff6ff;
 }
 
 /* 添加行 */

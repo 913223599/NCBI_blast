@@ -17,6 +17,9 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# 工具搜索的根目录相对偏移层数（从本文件到项目根）
+_PROJECT_ROOT_PARENT_LEVELS = 2  # src/analysis -> 项目根
+
 class NcbiTreeToolWrapper:
     """
     NCBI tree-tool 工具集的 Python 封装
@@ -38,8 +41,8 @@ class NcbiTreeToolWrapper:
             if path.exists() or path.with_suffix('.exe').exists():
                 return str(path)
                 
-        # 2. 在项目源代码目录中查找 (假设用户在源码目录编译了)
-        project_root = Path(__file__).resolve().parents[3]
+        # 2. 在项目源代码目录中查找 (按相对层级定位)
+        project_root = Path(__file__).resolve().parents[_PROJECT_ROOT_PARENT_LEVELS]
         source_bin_path = project_root / "src" / "analysis" / "tree-tool-master" / "dm" / name
         if source_bin_path.exists() or source_bin_path.with_suffix('.exe').exists():
             return str(source_bin_path)

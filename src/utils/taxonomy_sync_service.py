@@ -132,10 +132,16 @@ class TaxonomySyncService:
         if not genus_entry:
             existing_genera = [e['code'] for e in entries if e.get('level') == 2 and e.get('parentPath') == str(domain_type)]
             new_genus_code = self._generate_next_code(existing_genera, 3, alpha=True)
+            
+            # 尝试翻译属名
+            translated_genus = self.ai_translator.translate_text(genus_part, category='genus')
+            # 格式化为：中文(拉丁文)
+            display_name = f"{translated_genus}({genus_part})" if translated_genus != genus_part else genus_part
+            
             genus_entry = {
                 "parentPath": str(domain_type),
                 "code": new_genus_code,
-                "name": genus_part,
+                "name": display_name,
                 "latinName": genus_part,
                 "level": 2,
                 "fullPath": f"{domain_type}{new_genus_code}",
@@ -159,10 +165,24 @@ class TaxonomySyncService:
         if not species_entry:
             existing_species = [e['code'] for e in entries if e.get('level') == 3 and e.get('parentPath') == genus_entry['fullPath']]
             new_spec_code = self._generate_next_code(existing_species, 3, alpha=True)
+            
+            # 尝试翻译种名
+            translated_species = self.ai_translator.translate_text(clean_name, category='species')
+            if translated_species == clean_name and species_part:
+                # 如果种名全称没翻译，尝试翻译种加词部分
+                translated_species = self.ai_translator.translate_text(species_part, category='species')
+            
+            # 格式化为：中文(拉丁文)
+            final_name = translated_species
+            if translated_species and translated_species != clean_name and translated_species != species_part:
+                final_name = f"{translated_species}({clean_name})"
+            elif not translated_species:
+                final_name = species_part if species_part else "sp."
+
             species_entry = {
                 "parentPath": genus_entry['fullPath'],
                 "code": new_spec_code,
-                "name": species_part if species_part else "sp.",
+                "name": final_name,
                 "latinName": clean_name,
                 "level": 3,
                 "fullPath": f"{genus_entry['fullPath']}{new_spec_code}",

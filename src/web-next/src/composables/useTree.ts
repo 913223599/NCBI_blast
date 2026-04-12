@@ -20,11 +20,22 @@ export function useTree() {
     const initialNewick = ref<string | null>(null)
     const isRerooted = ref(false)
     const currentSource = ref<string>('Unknown') // 追踪当前树对应的原始归档文件路径
+    const currentIdToHash = ref<Record<string, string>>({}) // 记录当前的 ID 映射关系 (Issue #5)
 
     // Initialize
     onMounted(() => {
         if (containerRef.value) {
             renderer.mount(containerRef.value)
+        }
+        
+        // Issue #5: 尝试从 sessionStorage 恢复树状态
+        try {
+            const savedSource = sessionStorage.getItem('tree_current_source')
+            const savedIdToHash = sessionStorage.getItem('tree_current_id_to_hash')
+            if (savedSource) currentSource.value = savedSource
+            if (savedIdToHash) currentIdToHash.value = JSON.parse(savedIdToHash)
+        } catch (e) {
+            console.warn('Failed to restore tree state from session storage', e)
         }
     })
 
@@ -66,6 +77,15 @@ export function useTree() {
                 hasTree.value = true
                 currentSource.value = sourceFile // 存入当前源
                 nodeCount.value = newModel.getLeafCount()
+                if (idToHash) {
+                    currentIdToHash.value = idToHash
+                }
+                
+                // Issue #5: 状态持久化，防止 F5 刷新丢失状态导致 ID 还原失败
+                try {
+                    sessionStorage.setItem('tree_current_source', currentSource.value)
+                    sessionStorage.setItem('tree_current_id_to_hash', JSON.stringify(currentIdToHash.value || {}))
+                } catch (e) { }
                 
                 // 核心维护：仅对明确的新分析进行归档，持久化指纹映射
                 if (appStore && !skipHistory && algorithm !== 'Auto-Redraw') {
@@ -152,6 +172,7 @@ export function useTree() {
         nodeCount,
         renderer,
         rawNewick,
-        currentSource
+        currentSource,
+        currentIdToHash
     }
 }

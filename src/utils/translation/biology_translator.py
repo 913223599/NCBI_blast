@@ -8,6 +8,7 @@ from typing import Optional
 
 from .qwen_translator import QwenTranslator
 from .term_extractor import TermExtractor  # 导入TermExtractor
+from ..taxonomy_provider import get_taxonomy_provider
 
 
 class BiologyTranslator:
@@ -141,18 +142,32 @@ class BiologyTranslator:
                     if ai_result and ai_result != text:
                         # 恢复并加强自动保存机制：AI 翻译成功后应记录，下次可从本地库秒级返回
                         if self.translation_data_manager:
-                            # 1. 使用专用的保存方法，标记来源为 AI
-                            self.translation_data_manager.add_translation(
-                                text, 
-                                ai_result, 
-                                category=category if category else 'species', 
-                                source="ai"
-                            )
-                            # 2. 调用术语提取深度学习分析（如有）
-                            try:
-                                self.term_extractor.extract_and_store_key_terms(text, ai_result)
-                            except:
-                                pass
+                            # [VALIDATION] 如果分类目录为物种或属，强制从离线分类数据库校验其拉丁名合法性
+                            is_valid = True
+                            if category in ('species', 'genus'):
+                                try:
+                                    tax_provider = get_taxonomy_provider()
+                                    lineage = tax_provider.get_lineage_details(text)
+                                    if not lineage:
+                                        import logging
+                                        logging.getLogger(__name__).warning(f"[Taxonomy Validation] 拉丁名 '{text}' 未在分类数据库中找到，跳过存入词库。")
+                                        is_valid = False
+                                except:
+                                    pass # 容错处理
+                            
+                            if is_valid:
+                                # 1. 使用专用的保存方法，标记来源为 AI
+                                self.translation_data_manager.add_translation(
+                                    text, 
+                                    ai_result, 
+                                    category=category if category else 'species', 
+                                    source="ai"
+                                )
+                                # 2. 调用术语提取深度学习分析（如有）
+                                try:
+                                    self.term_extractor.extract_and_store_key_terms(text, ai_result)
+                                except:
+                                    pass
                         
                         # 移除原先带有的 [AI] 前缀，保证界面的清洁度和词库的标准性
                         result = ai_result
@@ -220,13 +235,24 @@ class BiologyTranslator:
                             with self._lock:
                                 self._translation_cache[pure_text] = ai_res
                             if self.translation_data_manager:
-                                self.translation_data_manager.add_translation(
-                                    pure_text, ai_res, category=category, source="ai_batch"
-                                )
-                                try:
-                                    self.term_extractor.extract_and_store_key_terms(pure_text, ai_res)
-                                except:
-                                    pass
+                                # [VALIDATION] 批量处理也增加校验逻辑
+                                is_valid = True
+                                if category in ('species', 'genus'):
+                                    try:
+                                        tax_provider = get_taxonomy_provider()
+                                        lineage = tax_provider.get_lineage_details(pure_text)
+                                        if not lineage:
+                                            is_valid = False
+                                    except: pass
+                                
+                                if is_valid:
+                                    self.translation_data_manager.add_translation(
+                                        pure_text, ai_res, category=category, source="ai_batch"
+                                    )
+                                    try:
+                                        self.term_extractor.extract_and_store_key_terms(pure_text, ai_res)
+                                    except:
+                                        pass
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error(f"Biology Batch AI Error: {e}")

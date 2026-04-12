@@ -892,23 +892,49 @@ async def get_help_content(topic_id: str):
 
 @app.get("/api/core/annotations")
 async def get_annotations(hashes: str):
+    from ..utils.translation.biology_translator import get_global_biology_translator
     import re
-    from ..workbench.models.annotation_manager import get_annotation_manager
     try:
         hash_list = json.loads(hashes)
-        mapping = get_annotation_manager().get_annotations_by_hashes(hash_list)
-        clean_mapping = {}
-        for hash_key, identity in mapping.items():
+        from ..workbench.models.annotation_manager import get_annotation_manager
+        am = get_annotation_manager()
+        mapping = am.get_annotations_by_hashes(hash_list)
+        
+        raw_names = []
+        hash_to_raw = {}
+        for h, identity in mapping.items():
             if identity:
                 match = re.search(r'^([A-Z][a-z]+(?:\s+[a-z]+))', identity.strip())
-                if match:
-                    clean_mapping[hash_key] = match.group(1)
-                else:
-                    clean_mapping[hash_key] = identity.split(';')[0].split(' strain')[0].split(' genome')[0].strip()
+                raw_name = match.group(1) if match else identity.split(';')[0].split(' strain')[0].split(' genome')[0].strip()
+                raw_names.append(raw_name)
+                hash_to_raw[h] = raw_name
             else:
-                clean_mapping[hash_key] = identity
+                hash_to_raw[h] = None
+                
+        # 执行批量翻译
+        unique_raw = list(set([n for n in raw_names if n]))
+        translator = get_global_biology_translator()
+        translated_map = translator.translate_batch(unique_raw, category='species')
+        
+        clean_mapping = {}
+        for h, raw in hash_to_raw.items():
+            if not raw:
+                clean_mapping[h] = ""
+                continue
+            
+            translated = translated_map.get(raw, raw)
+            # 用户规则：格式化为 中文(拉丁文)
+            if translated and translated != raw:
+                if '(' in translated and ')' in translated:
+                    clean_mapping[h] = translated
+                else:
+                    clean_mapping[h] = f"{translated}({raw})"
+            else:
+                clean_mapping[h] = raw
+                
         return clean_mapping
     except Exception as exc:
+        logger.error(f"Failed to get_annotations: {exc}")
         return {}
 
 
@@ -935,13 +961,22 @@ class TreeAnalyzeRequest(BaseModel):
 
 @app.post("/api/tree/analyze")
 async def analyze_tree(req: TreeAnalyzeRequest):
-    """启动进化树构建流水线 (后台任务)"""
+    """
+    启动进化树构建流水线（后台任务，线程安全）。
+
+    Issue #1: 使用 TaskManager 替代裸 threading.Thread，
+    防止多次点击启动重复任务，并支持任务追踪/取消。
+    """
     from ..workbench.pipelines.analysis_pipeline import AnalysisPipeline
     from ..workbench.wrappers.tree_archive_manager import ArchiveManager
     from ..workbench.models.tool_config import ToolConfig
-    import threading
+    from ..workbench.models.task_manager import get_task_manager
 
-    def worker():
+    def worker(cancel_event=None):
+        # Issue #15: 性能监控 - 记录总耗时
+        import time as _time
+        task_start = _time.time()
+
         try:
             # 找到要处理的文件
             abs_workspace = (PROJECT_ROOT / "results" / "tree_workspace").resolve()
@@ -958,15 +993,25 @@ async def analyze_tree(req: TreeAnalyzeRequest):
                 paths = [str(Path(f)) for f in req.files]
             else:
                 # 扩大识别范围，支持压缩包和测序原始文件 (与 BLAST 对齐)
+                found_paths = []
                 for ext in ("*.fasta", "*.seq", "*.fa", "*.fna", "*.zip", "*.gz", "*.ab1", "*.abi"):
                     found = list(abs_workspace.glob(ext))
-                    logger.info(f"[Tree] Glob {ext} found: {found}")
-                    paths.extend([str(f) for f in found])
+                    found_paths.extend([str(f) for f in found])
+                
+                # 关键修复：根据文件名 stem 进行去重 (优先 fasta > seq > ab1)
+                paths = get_best_files(found_paths)
+                logger.info(f"[Tree] Deduplicated paths: {paths}")
             
             if not paths:
                 msg = f"工作区为空 (路径: {abs_workspace}), 现有文件: {len(all_entries)} 个"
                 logger.warning(msg)
                 broadcaster.broadcast_sync("tree_error", {"error": "工作区为空，请先上传序列并等待预处理完成"})
+                return
+
+            # Issue #1: 检查取消信号
+            if cancel_event and cancel_event.is_set():
+                logger.info("[Tree] Task cancelled before file merge")
+                broadcaster.broadcast_sync("tree_error", {"error": "任务已取消"})
                 return
 
             target_path = Path(paths[0])
@@ -999,6 +1044,12 @@ async def analyze_tree(req: TreeAnalyzeRequest):
                 
             target_path = merged_path
 
+            # Issue #1: 检查取消信号（文件合并后）
+            if cancel_event and cancel_event.is_set():
+                logger.info("[Tree] Task cancelled after file merge")
+                broadcaster.broadcast_sync("tree_error", {"error": "任务已取消"})
+                return
+
             pipeline = AnalysisPipeline()
             archiver = ArchiveManager()
             
@@ -1018,6 +1069,14 @@ async def analyze_tree(req: TreeAnalyzeRequest):
             
             final_result = {}
             for step_data in workflow:
+                # Issue #1: 每一步检查取消信号
+                if cancel_event and cancel_event.is_set():
+                    logger.info("[Tree] Task cancelled during pipeline execution")
+                    broadcaster.broadcast_sync("tree_error", {"error": "任务已取消"})
+                    return
+
+                # Issue #15: 在进度推送中附加阶段耗时
+                step_data["elapsed"] = round(_time.time() - task_start, 2)
                 # 实时推送进度
                 broadcaster.broadcast_sync("tree_progress", step_data)
                 if "result" in step_data:
@@ -1048,22 +1107,68 @@ async def analyze_tree(req: TreeAnalyzeRequest):
             # 构造算法描述供历史记录显示
             algorithm = f"{req.msa.upper()} / {req.engine.upper()} ({req.model.upper()})"
 
+            # Issue #15: 总耗时记录
+            total_elapsed = round(_time.time() - task_start, 2)
+            logger.info(f"[Tree] Pipeline completed in {total_elapsed}s (sequences: {sequence_count})")
+
             # 推送最终完成信号
             finish_payload = {
                 "tree_file_content": tree_content,
                 "tree_file": str(result_files.get("tree_file", "")),
                 "algorithm": algorithm,
                 "source": str(archive_dir.relative_to(PROJECT_ROOT / "results")),
-                "id_to_hash": final_result.get("id_to_hash", {})
+                "id_to_hash": final_result.get("id_to_hash", {}),
+                "elapsed": total_elapsed,
             }
             broadcaster.broadcast_sync("tree_finished", finish_payload)
             
         except Exception as e:
-            logger.error(f"Tree worker error: {e}")
+            logger.error(f"Tree worker error: {e}", exc_info=True)
             broadcaster.broadcast_sync("tree_error", {"error": str(e)})
 
-    threading.Thread(target=worker, daemon=True).start()
-    return {"status": "started"}
+    # Issue #1: 使用 TaskManager 替代裸线程
+    task_mgr = get_task_manager()
+    
+    # 检查是否已有同类型任务正在运行
+    active = task_mgr.get_active_tasks("tree_analysis")
+    if active:
+        return {
+            "status": "rejected",
+            "reason": "已有一个进化树分析任务正在运行中，请等待完成后再启动新任务",
+            "active_task_id": active[0]["task_id"],
+        }
+
+    task_id = task_mgr.submit_task("tree_analysis", worker)
+    if task_id is None:
+        return {"status": "rejected", "reason": "任务提交失败，系统繁忙"}
+    
+    return {"status": "started", "task_id": task_id}
+
+
+# Issue #10: 统一的异步任务查询接口
+@app.get("/api/tree/task/{task_id}")
+async def get_tree_task_status(task_id: str):
+    """查询进化树分析任务的当前状态"""
+    from ..workbench.models.task_manager import get_task_manager
+    status = get_task_manager().get_task_status(task_id)
+    if status is None:
+        return {"found": False, "error": f"Task {task_id} not found"}
+    return {"found": True, **status}
+
+
+@app.post("/api/tree/task/{task_id}/cancel")
+async def cancel_tree_task(task_id: str):
+    """请求取消一个正在执行的进化树任务"""
+    from ..workbench.models.task_manager import get_task_manager
+    success = get_task_manager().cancel_task(task_id)
+    return {"success": success}
+
+
+@app.get("/api/tree/tasks")
+async def list_tree_tasks():
+    """列出所有活跃的进化树分析任务"""
+    from ..workbench.models.task_manager import get_task_manager
+    return {"tasks": get_task_manager().get_active_tasks("tree_analysis")}
 
 
 class RerootRequest(BaseModel):
@@ -1397,12 +1502,52 @@ class HashQueryRequest(BaseModel):
 
 @app.post("/api/translate/hashes")
 async def get_annotations_by_hashes(req: HashQueryRequest):
-    """根据序列 MD5 哈希批量获取语义注释"""
+    """根据序列 MD5 哈希批量获取语义注释 (含 AI 翻译补偿)"""
+    from ..utils.translation.biology_translator import get_global_biology_translator
+    import re
     try:
         from ..workbench.models.annotation_manager import get_annotation_manager
         am = get_annotation_manager()
         mapping = am.get_annotations_by_hashes(req.hashes)
-        return mapping
+        
+        # 收集唯一原料名称
+        raw_names = []
+        hash_to_raw = {}
+        for h, identity in mapping.items():
+            if identity:
+                # 尽量提取物种名
+                match = re.search(r'^([A-Z][a-z]+(?:\s+[a-z]+))', identity.strip())
+                raw = match.group(1) if match else identity.split(';')[0].split(' strain')[0].split(' genome')[0].strip()
+                raw_names.append(raw)
+                hash_to_raw[h] = raw
+            else:
+                hash_to_raw[h] = None
+
+        # 批量翻译
+        unique_raw = list(set([n for n in raw_names if n]))
+        translator = get_global_biology_translator()
+        translated_map = translator.translate_batch(unique_raw, category='species')
+        
+        results = {}
+        for h, raw in hash_to_raw.items():
+            if not raw:
+                results[h] = ""
+                continue
+            
+            translated = translated_map.get(raw, raw)
+            # 格式化
+            if translated and translated != raw:
+                if '(' in translated and ')' in translated:
+                    results[h] = translated
+                else:
+                    results[h] = f"{translated}({raw})"
+            else:
+                results[h] = raw
+                
+        return results
+    except Exception as exc:
+        logger.error(f"Failed to get_annotations_by_hashes: {exc}")
+        return {}
     except Exception as exc:
         logger.error(f"Failed to query annotations by hashes: {exc}")
         return {}

@@ -16,6 +16,7 @@ import { CATEGORY_MAP } from '../types/codeSystem'
 import {
   DEFAULT_CODE_CONFIG,
 } from '../data/builtinCodes'
+import { getBridge } from '../bridge'
 
 /** 3位字母编码的正则（大写 A-Z） */
 const CODE_PATTERN = /^[A-Z]{3}$/
@@ -351,14 +352,45 @@ export function useCodeLookup() {
     markChanged()
   }
 
+  /** 翻译所有未翻译的词条 */
+  async function translateAllEntries() {
+    const bridge = getBridge()
+    const entriesToTranslate = strainStore.codeLookupEntries.filter(
+      (e) => e.name === e.latinName || !e.name
+    )
+    if (entriesToTranslate.length === 0) return
+
+    const texts = entriesToTranslate.map((e) => e.latinName || e.name)
+    await bridge.translate_batch(JSON.stringify(texts), 'species')
+  }
+
+  /** 翻译单个词条并更新 Store */
+  async function translateEntry(fullPath: string) {
+    const entry = strainStore.codeLookupEntries.find((e) => e.fullPath === fullPath)
+    if (!entry) return
+
+    const textToTranslate = entry.latinName || entry.name
+    if (!textToTranslate) return
+
+    const bridge = getBridge()
+    return new Promise<void>((resolve) => {
+      bridge.translate_text(textToTranslate, 'species', (translated: string) => {
+        if (translated && translated !== textToTranslate) {
+          // 格式化为：中文(拉丁文)
+          entry.name = `${translated}(${textToTranslate})`
+          markChanged()
+        }
+        resolve()
+      })
+    })
+  }
+
   /** 导出全部（用于持久化） */
-  function exportLookupData(): {
-    entries: CodeLookupEntry[]
-    sources: SourceEntry[]
-  } {
+  function exportLookupData() {
     return {
       entries: [...strainStore.codeLookupEntries],
       sources: [...strainStore.sourceEntries],
+      counters: [...strainStore.serialCounters],
     }
   }
 
@@ -376,6 +408,10 @@ export function useCodeLookup() {
     getSourceName,
     resolveTaxonomyPath,
     searchEntries,
+
+    // 翻译
+    translateEntry,
+    translateAllEntries,
 
     // 来源管理
     isSourceCodeAvailable,
