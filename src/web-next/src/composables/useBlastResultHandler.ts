@@ -79,7 +79,8 @@ export function useBlastResultHandler() {
       hitTitle: '',
       translatedName: null,
       csvFile,
-      rawSequence: ''
+      rawSequence: '',
+      status: 'pending'
     }
   }
 
@@ -106,7 +107,8 @@ export function useBlastResultHandler() {
       rawSequence: rawSequence || bestHit.raw_sequence || ''
     }
 
-    // 移除了原始的自动全屏触发翻译，改为前端按需点击触发
+    // [NEW] 明确设置状态为 success
+    hit.status = 'success'
     return hit
   }
 
@@ -126,7 +128,8 @@ export function useBlastResultHandler() {
       translatedName: null,
       csvFile,
       xmlFile: xmlFile || '',
-      rawSequence: ''
+      rawSequence: '',
+      status: 'no_hits'
     }
   }
 
@@ -158,7 +161,9 @@ export function useBlastResultHandler() {
     const csvContent = generateCsvContent()
     
     try {
-      getBridge().save_file(csvContent, 'blast_results.csv')
+      // 添加 UTF-8 BOM (\uFEFF) 以防止 Excel 打开 CSV 时出现乱码
+      const csvWithBom = '\uFEFF' + csvContent
+      getBridge().save_file(csvWithBom, 'blast_results.csv')
       appStore.showNotification('导出指令已发送', 'success')
     } catch (error) {
       console.error('[ResultHandler] Export error:', error)

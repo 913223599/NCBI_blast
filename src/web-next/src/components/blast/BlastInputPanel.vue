@@ -21,23 +21,31 @@ function handleDragOver(e: DragEvent) {
   e.stopPropagation()
 }
 
-function handleDrop(e: DragEvent) {
+async function handleDrop(e: DragEvent) {
   e.preventDefault()
   e.stopPropagation()
   
   if (e.dataTransfer && e.dataTransfer.files.length > 0) {
     const filePaths: string[] = []
-    for (let i = 0; i < e.dataTransfer.files.length; i++) {
-        const file = e.dataTransfer.files[i]
-        const path = getBridge().get_path_for_file(file)
-        if (path) {
-            filePaths.push(path)
-        }
+    const files = Array.from(e.dataTransfer.files)
+    
+    for (const f of files) {
+      const path = getBridge().get_path_for_file(f)
+      if (path) {
+        filePaths.push(path)
+      }
     }
     
     if (filePaths.length > 0) {
-        blast.addFiles(filePaths)
-        appStore.showNotification(t('blast.notify.files_loaded', { count: filePaths.length }), 'success')
+        appStore.showNotification(`正在处理 ${filePaths.length} 个导入项...`, 'info')
+        const res = await getBridge().process_blast_files(filePaths)
+        if (res && res.success && res.paths) {
+            blast.addFiles(res.paths)
+            appStore.showNotification(`成功导入 ${res.paths.length} 个序列文件`, 'success')
+        } else {
+            // Fallback
+            blast.addFiles(filePaths)
+        }
     }
   }
 }
@@ -81,17 +89,18 @@ function handleDrop(e: DragEvent) {
 .mode-tab.active { background: white; color: #2563eb; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
 
 .file-area { display: flex; flex-direction: column; gap: 12px; }
-.drop-zone-neo { border: 2px dashed #e2e8f0; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: all 0.2s; background: #f8fafc; }
-.drop-zone-neo:hover { border-color: #2563eb; background: #eff6ff; }
-.dz-icon { font-size: 1.8rem; color: #2563eb; }
-.dz-text { font-size: 0.75rem; color: #64748b; font-weight: 600; }
 
-.file-list-neo { display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto; }
-.file-item-neo { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; }
-.file-item-neo .name { font-size: 0.75rem; color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-zone-neo { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; background: #f8fafc; }
+.drop-zone-neo:hover { border-color: #2563eb; background: #f0f7ff; }
+.dz-icon { font-size: 1.5rem; color: #2563eb; }
+.dz-text { font-size: 0.75rem; color: #64748b; font-weight: 600; margin-top: 4px; display: block; }
+
+.file-list-neo { display: flex; flex-direction: column; gap: 6px; max-height: 600px; overflow-y: auto; padding-right: 4px; }
+.file-item-neo { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; flex-shrink: 0; min-height: 36px; }
+.file-item-neo .name { font-size: 0.75rem; color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; margin-right: 8px; }
 .file-item-neo .del { background: none; border: none; color: #94a3b8; cursor: pointer; padding: 2px 6px; }
 .file-item-neo .del:hover { color: #ef4444; }
 
-.neo-textarea { width: 100%; height: 200px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: #334155; resize: none; outline: none; transition: all 0.2s; }
+.neo-textarea { width: 100%; height: 350px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: #334155; resize: none; outline: none; transition: all 0.2s; }
 .neo-textarea:focus { border-color: #2563eb; background: white; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
 </style>

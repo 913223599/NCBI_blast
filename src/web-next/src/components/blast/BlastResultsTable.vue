@@ -173,7 +173,10 @@ function openNcbi(accession: string): void {
               </div>
             </td>
             <td>
-              <div class="id-val" :class="h.identity >= 97 ? 'high-id' : 'low-id'">
+              <div v-if="h.status === 'pending'" class="pending-spinner">
+                <span class="spinner-icon">⏳</span>
+              </div>
+              <div v-else class="id-val" :class="h.identity >= 97 ? 'high-id' : 'low-id'">
                 {{ h.identity.toFixed(1) }}%
               </div>
             </td>
@@ -256,6 +259,13 @@ td { padding: 16px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
 .btn-ai:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-export { background: white; color: #475569; }
 .btn-export:hover { background: #f8fafc; border-color: #cbd5e1; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spinner-icon { display: inline-block; animation: spin 2s linear infinite; }
+.pending-spinner { font-size: 1.1rem; color: #94a3b8; text-align: center; }
 
 @keyframes pulse-opacity {
   0% { opacity: 1; }

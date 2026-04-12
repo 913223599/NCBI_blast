@@ -51,16 +51,32 @@ class TaxonomySyncService:
             self.tax_provider.start_build_process()
             return {"success": False, "reason": "后台正在首次编译离线分类数据库，请稍后重试。"}
 
-        # 1. Parse genus and species name
+        logger.info(f"[TaxonomySync] Auto-resolving input: {full_name}")
+
+        # ─── 增强解析逻辑 ───
+        # 1. 如果包含括号 (如: 密歇根克雷伯氏菌 (Klebsiella michiganensis))，优先提取括号内的拉丁名
+        paren_match = re.search(r'\(([^)]+)\)', full_name)
+        if paren_match:
+            candidate = paren_match.group(1).strip()
+            # 简单校验提取的是否包含字母（防止提取到纯数字或其他杂质）
+            if re.search(r'[A-Za-z]', candidate):
+                full_name = candidate
+
+        # 2. 移除所有非 ASCII 字符 (针对直接带中文的情况)
+        # 这会将 "密歇根克雷伯氏菌 Klebsiella michiganensis" 变为 " Klebsiella michiganensis"
+        full_name = re.sub(r'[^\x00-\x7f]', ' ', full_name).strip()
+
+        # 3. 执行标准的双名法正则匹配
         match = re.match(r'^[\*\s]*([A-Za-z]+)\s+([A-Za-z\.\-_0-9]+)', full_name)
         if not match:
-            return {"success": False, "reason": "未能解析出标准的双名法物种名称"}
+            return {"success": False, "reason": f"未能解析出标准的双名法物种名称: {full_name}"}
         
         genus_part = match.group(1)
-        species_part = match.group(2).replace('(', '').replace(')', '').replace(',', '')
+        # 归一化处理：去掉 ( ) , 等符号，并且统一将 'sp.' 简化为 'sp' 以免重复编码
+        species_part = match.group(2).replace('(', '').replace(')', '').replace(',', '').rstrip('.')
         clean_name = f"{genus_part} {species_part}".strip()
         
-        logger.info(f"[TaxonomySync] Auto-resolving: {clean_name}")
+        logger.info(f"[TaxonomySync] Resolved to: {clean_name}")
         
         lineage = self.tax_provider.get_lineage_details(clean_name)
         if not lineage:
@@ -107,7 +123,12 @@ class TaxonomySyncService:
         entries = code_lookup.get("entries", [])
         
         # Ensure Genus
-        genus_entry = next((e for e in entries if e.get('level') == 2 and (e.get('latinName') == genus_part or e.get('name') == genus_part)), None)
+        genus_part_lower = genus_part.lower()
+        genus_entry = next((e for e in entries if e.get('level') == 2 and (
+            (e.get('latinName') or '').lower() == genus_part_lower or 
+            (e.get('name') or '').lower() == genus_part_lower
+        )), None)
+        
         if not genus_entry:
             existing_genera = [e['code'] for e in entries if e.get('level') == 2 and e.get('parentPath') == str(domain_type)]
             new_genus_code = self._generate_next_code(existing_genera, 3, alpha=True)
@@ -124,7 +145,17 @@ class TaxonomySyncService:
             entries.append(genus_entry)
             
         # Ensure Species
-        species_entry = next((e for e in entries if e.get('level') == 3 and e.get('parentPath') == genus_entry['fullPath'] and (e.get('latinName') == species_part or e.get('name') == clean_name)), None)
+        species_part_lower = species_part.lower()
+        clean_name_lower = clean_name.lower()
+        
+        # 兼容性匹配：检查 latinName 是否匹配全称，或者 name 是否匹配种名部分
+        species_entry = next((e for e in entries if e.get('level') == 3 
+                              and e.get('parentPath') == genus_entry['fullPath'] 
+                              and (
+                                  (e.get('latinName') or '').lower() == clean_name_lower or 
+                                  (e.get('name') or '').lower() == species_part_lower
+                              )), None)
+        
         if not species_entry:
             existing_species = [e['code'] for e in entries if e.get('level') == 3 and e.get('parentPath') == genus_entry['fullPath']]
             new_spec_code = self._generate_next_code(existing_species, 3, alpha=True)

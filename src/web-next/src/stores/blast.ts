@@ -58,6 +58,8 @@ export interface BlastHit {
     xmlFile?: string
     /** 原始序列内容 */
     rawSequence?: string
+    /** 序列状态: pending, success, no_hits */
+    status?: string
 }
 
 export const useBlastStore = defineStore('blast', () => {
@@ -103,18 +105,26 @@ export const useBlastStore = defineStore('blast', () => {
         inputMode.value = mode
     }
 
+    function sortFiles(): void {
+        files.value.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+    }
+
     function addFile(filePath: string): void {
         if (!files.value.includes(filePath)) {
             files.value.push(filePath)
+            sortFiles()
         }
     }
 
     function addFiles(filePaths: string[]): void {
+        let changed = false
         filePaths.forEach(path => {
             if (!files.value.includes(path)) {
                 files.value.push(path)
+                changed = true
             }
         })
+        if (changed) sortFiles()
     }
 
     function removeFile(filePath: string): void {

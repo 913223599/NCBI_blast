@@ -12,9 +12,44 @@ import os
 import sys
 import threading
 import re
+import shutil
+import zipfile
+import time
 from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+def natural_sort_key(s):
+    """
+    实现自然排序算法的 Key 函数 (例如使得 2 位于 10 之前)
+    """
+    return [int(text) if text.isdigit() else text.lower() for text in re.split('([0-9]+)', s)]
+
+def get_best_files(file_names: list[str]) -> list[str]:
+    """
+    根据优先级对同名但不同后缀的文件进行去重。
+    优先级顺序: .fasta > .seq > .ab1
+    """
+    priority = {
+        '.fasta': 10, '.fas': 10, '.fa': 10, '.fna': 10,
+        '.seq': 8,
+        '.txt': 5,
+        '.ab1': 3, '.abi': 3,
+        '.nwk': 1, '.newick': 1
+    }
+    
+    # stem -> (best_prio, best_name)
+    best_map = {}
+    for name in file_names:
+        p = Path(name)
+        stem = p.stem.lower()
+        suffix = p.suffix.lower()
+        prio = priority.get(suffix, 0)
+        
+        if stem not in best_map or prio > best_map[stem][0]:
+            best_map[stem] = (prio, name)
+            
+    return [v[1] for v in best_map.values()]
 
 # 确保项目根目录在 sys.path 中
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -254,7 +289,13 @@ async def get_task_results(task_id: str):
         if 'csv_file' in res and os.path.exists(res['csv_file']):
             top_hits = _parse_blast_csv(res['csv_file'], limit=50)
             best_hit = _select_consensus_hit(top_hits)
-            res['data'] = [best_hit] if best_hit else []
+            if best_hit:
+                res['data'] = [best_hit]
+                # [FIX] 如果磁盘上已有解析成功的数据，确保状态为 completed，防止 UI 卡在 pending
+                if res.get('status') == 'pending':
+                    res['status'] = 'completed'
+            else:
+                res['data'] = []
     return results
 
 
@@ -916,7 +957,8 @@ async def analyze_tree(req: TreeAnalyzeRequest):
             if req.files:
                 paths = [str(Path(f)) for f in req.files]
             else:
-                for ext in ("*.fasta", "*.seq", "*.fa", "*.fna"):
+                # 扩大识别范围，支持压缩包和测序原始文件 (与 BLAST 对齐)
+                for ext in ("*.fasta", "*.seq", "*.fa", "*.fna", "*.zip", "*.gz", "*.ab1", "*.abi"):
                     found = list(abs_workspace.glob(ext))
                     logger.info(f"[Tree] Glob {ext} found: {found}")
                     paths.extend([str(f) for f in found])
@@ -928,23 +970,34 @@ async def analyze_tree(req: TreeAnalyzeRequest):
                 return
 
             target_path = Path(paths[0])
-            # 如果有多个文件，先合并
-            if len(paths) > 1:
-                timestamp = datetime.now().strftime("%m%d_%H%M")
-                merge_name = f"Merged_{len(paths)}_Seqs_{timestamp}.fasta"
-                merged_path = abs_workspace / merge_name
-                with open(merged_path, 'w', encoding='utf-8') as tmp:
-                    for p_str in paths:
-                        p_obj = Path(p_str)
-                        with open(p_str, 'r', encoding='utf-8', errors='ignore') as src:
-                            content = src.read().strip()
-                            if not content: continue
-                            if content.startswith('>'):
-                                tmp.write(f"{content}\n")
-                            else:
-                                clean_seq = "".join(content.split())
-                                tmp.write(f">{p_obj.stem}\n{clean_seq}\n")
-                target_path = merged_path
+            # 统一使用 FileHandler 提取序列 (支持 ZIP, GZ, AB1, 编码自动识别)
+            from ..utils.file_handler import FileHandler
+            fh = FileHandler()
+
+            # 如果有多个文件，或者包含压缩包/ABI等需要转换的文件，统一合并并标准化为 FASTA
+            # 注意：合并后的文件存放在 results 根目录，避免污染 tree_workspace (会被 glob 重复加载)
+            timestamp = datetime.now().strftime("%m%d_%H%M%S")
+            merge_name = f"Tree_Job_Input_{timestamp}.fasta"
+            merged_path = (PROJECT_ROOT / "results" / merge_name).resolve()
+            
+            sequence_count = 0
+            with open(merged_path, 'w', encoding='utf-8') as tmp:
+                for p_str in paths:
+                    try:
+                        for seq_info in fh.read_fasta_file_iter(p_str):
+                            sid = seq_info.get('id', 'unknown')
+                            seq = seq_info.get('sequence', '')
+                            if sid and seq:
+                                tmp.write(f">{sid}\n{seq}\n")
+                                sequence_count += 1
+                    except Exception as e:
+                        logger.error(f"Failed to extract from {p_str}: {e}")
+            
+            if sequence_count == 0:
+                broadcaster.broadcast_sync("tree_error", {"error": "未能在选定文件中找到有效序列 (可能格式不符或压缩包内无序列)"})
+                return
+                
+            target_path = merged_path
 
             pipeline = AnalysisPipeline()
             archiver = ArchiveManager()
@@ -1152,15 +1205,120 @@ class AddWorkspaceFilesRequest(BaseModel):
 
 @app.post("/api/tree/workspace/add")
 async def add_tree_workspace_files(req: AddWorkspaceFilesRequest):
-    import shutil
     try:
         workspace = Path("results/tree_workspace")
         workspace.mkdir(parents=True, exist_ok=True)
+        
+        valid_exts = {'.fasta', '.fas', '.fa', '.seq', '.txt', '.fna', '.ab1', '.abi', '.nwk', '.newick'}
+        
         for p_str in req.paths:
             src_path = Path(p_str)
-            if src_path.exists():
+            if not src_path.exists():
+                 continue
+            
+            # 如果是压缩包，解压有效序列到工作区
+            if src_path.suffix.lower() == '.zip':
+                try:
+                    with zipfile.ZipFile(src_path, 'r') as zf:
+                        for member_name in zf.namelist():
+                            if member_name.endswith('/') or '__MACOSX' in member_name:
+                                continue
+                            m_path = Path(member_name)
+                            if m_path.suffix.lower() in valid_exts:
+                                target_name = m_path.name
+                                if (workspace / target_name).exists():
+                                    target_name = f"{src_path.stem}_{target_name}"
+                                
+                                with zf.open(member_name) as source, open(workspace / target_name, 'wb') as target:
+                                    shutil.copyfileobj(source, target)
+                                logger.info(f"[Tree] Extracted {member_name} from zip to workspace")
+                except Exception as ze:
+                    logger.error(f"Failed to extract zip {src_path}: {ze}")
+            else:
                 shutil.copy(src_path, workspace / src_path.name)
+                
         return {"success": True}
+    except Exception as exc:
+        logger.error(f"Add workspace files error: {exc}")
+        return {"success": False, "error": str(exc)}
+
+class ProcessBlastFilesRequest(BaseModel):
+    paths: list[str]
+
+@app.post("/api/blast/process_files")
+async def process_blast_files(req: ProcessBlastFilesRequest):
+    """
+    处理 BLAST 上传文件：
+    1. 识别并解压 ZIP 压缩包
+    2. 进行文件去重（相同 stem 保留最高优先级后缀）
+    3. 返回最终可用于分析的文件路径清单
+    """
+    extracted_root = Path("results/extracted")
+    extracted_root.mkdir(parents=True, exist_ok=True)
+    
+    session_dir = extracted_root / f"staged_{int(time.time())}_{os.getpid()}"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    
+    input_paths = []
+    valid_exts = {'.fasta', '.fas', '.fa', '.seq', '.txt', '.fna', '.ab1', '.abi'}
+    
+    try:
+        for p_str in req.paths:
+            src_path = Path(p_str)
+            if not src_path.exists(): continue
+            
+            if src_path.suffix.lower() == '.zip':
+                try:
+                    with zipfile.ZipFile(src_path, 'r') as zf:
+                        # 先收集 ZIP 内所有有效成员
+                        members_map = {} # stem -> (priority, member_name)
+                        priority_config = {
+                            '.fasta': 10, '.fas': 10, '.fa': 10, '.fna': 10,
+                            '.seq': 8, '.txt': 5, '.ab1': 3, '.abi': 3
+                        }
+                        
+                        for member_name in zf.namelist():
+                            if member_name.endswith('/') or '__MACOSX' in member_name: continue
+                            m_path = Path(member_name)
+                            suffix = m_path.suffix.lower()
+                            if suffix in valid_exts:
+                                stem = m_path.stem.lower()
+                                prio = priority_config.get(suffix, 0)
+                                if stem not in members_map or prio > members_map[stem][0]:
+                                    members_map[stem] = (prio, member_name)
+                        
+                        # 只解压每个 stem 下优先级最高的一个
+                        for _, (prio, member_name) in members_map.items():
+                            m_path = Path(member_name)
+                            target_path = session_dir / m_path.name
+                            counter = 1
+                            while target_path.exists():
+                                target_path = session_dir / f"{m_path.stem}_{counter}{m_path.suffix}"
+                                counter += 1
+                            
+                            with zf.open(member_name) as source, open(target_path, 'wb') as target:
+                                shutil.copyfileobj(source, target)
+                            input_paths.append(str(target_path.resolve()))
+                except Exception as ze:
+                    logger.error(f"Blast zip extraction failed: {ze}")
+            else:
+                input_paths.append(str(src_path.resolve()))
+        
+        # 对最终列表再次进行全局去重（针对混合上传的情况）
+        final_file_map = {} # stem -> (priority, path)
+        priority_cfg = {
+            '.fasta': 10, '.fas': 10, '.fa': 10, '.fna': 10,
+            '.seq': 8, '.txt': 5, '.ab1': 3, '.abi': 3
+        }
+        for p in input_paths:
+            path_obj = Path(p)
+            stem = path_obj.stem.lower()
+            suffix = path_obj.suffix.lower()
+            prio = priority_cfg.get(suffix, 0)
+            if stem not in final_file_map or prio > final_file_map[stem][0]:
+                final_file_map[stem] = (prio, p)
+                
+        return {"success": True, "paths": [v[1] for v in final_file_map.values()]}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -1190,9 +1348,15 @@ async def list_tree_sequences():
         workspace = (PROJECT_ROOT / "results" / "tree_workspace").resolve()
         workspace.mkdir(parents=True, exist_ok=True)
         files = []
-        for ext in ("*.fasta", "*.seq", "*.fa", "*.fna", "*.nwk", "*.txt"):
+        # 扩展工作区可见格式
+        for ext in ("*.fasta", "*.seq", "*.fa", "*.fna", "*.nwk", "*.txt", "*.zip", "*.gz", "*.ab1", "*.abi"):
             files.extend([f.name for f in workspace.glob(ext)])
-        return sorted(list(set(files)))
+        
+        # 去重：同名文件只保留优先级最高的一个 (seq > ab1)
+        best_files = get_best_files(list(set(files)))
+        
+        # 使用自然排序返回文件列表
+        return sorted(best_files, key=natural_sort_key)
     except Exception:
         return []
 

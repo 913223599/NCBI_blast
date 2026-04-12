@@ -243,6 +243,11 @@ const electronBridge = {
     },
 
     // ═══ BLAST 任务管理（通过 HTTP）═══
+    async process_blast_files(paths: string[]) {
+        const result = await apiPost('/api/blast/process_files', { paths });
+        return result;
+    },
+
     async run_blast_job(paramsJson: string, callback?: (res: string) => void) {
         const params = JSON.parse(paramsJson);
         const result = await apiPost('/api/blast/run', params);

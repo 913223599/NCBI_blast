@@ -56,6 +56,30 @@ class BlastXmlParser:
                     
                     yield row_data
 
+    def parse_single_record(self, blast_record) -> Iterator[Dict[str, Any]]:
+        """
+        解析单个 BioPython Blast Record 对象（用于批处理）
+        """
+        for alignment in blast_record.alignments:
+            extracted_data = self._extract_metadata(alignment.title)
+            for hsp in alignment.hsps:
+                row_data = extracted_data.copy()
+                identity_pct = (hsp.identities / hsp.align_length * 100) if hsp.align_length > 0 else 0
+                row_data.update({
+                    'length': alignment.length,
+                    'hsps_count': 1,
+                    'e_value': hsp.expect,
+                    'align_length': hsp.align_length,
+                    'identities': hsp.identities,
+                    'identity_pct': identity_pct,
+                    'gaps': hsp.gaps,
+                    'query_start': hsp.query_start,
+                    'query_end': hsp.query_end,
+                    'sbjct_start': hsp.sbjct_start,
+                    'sbjct_end': hsp.sbjct_end
+                })
+                yield row_data
+
     def _extract_metadata(self, title: str) -> Dict[str, str]:
         """
         从标题中提取生物学元数据 (访问号, 物种, 基因等)

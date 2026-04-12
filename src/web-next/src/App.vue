@@ -8,7 +8,7 @@ import AppSidebar from './components/layout/AppSidebar.vue'
 import AppHeader from './components/layout/AppHeader.vue'
 import NotificationStack from './components/common/NotificationStack.vue'
 import { useAppStore } from './stores/app'
-import { setupBridge, registerGlobalHandler } from './bridge'
+import { setupBridge, registerGlobalHandler, getBridge } from './bridge'
 
 const appStore = useAppStore()
 
@@ -22,45 +22,54 @@ onMounted(async () => {
 
   // 1. 立即定义全局桥接回调，确保 Python 随时可以调用
   const globalApp = {
-    handleFileLoaded: (content: string, type: string, path: string) => {
+    handleFileLoaded: async (content: string, type: string, path: string) => {
       console.log(`[Bridge->App] File Loaded: ${path} (${type})`)
-      appStore.showNotification(`已从本地添加文件: ${path.split(/[/\\]/).pop()}`, 'success')
       
-      const currentRoute = window.location.hash // Simple way to check route in SPA
+      const currentRoute = window.location.hash
       if (currentRoute.includes('tree')) {
-         // 如果在进化树页面，且加载的是 tree 类型或通用 fasta
          if (type === 'tree') {
             (window as any).treeView?.loadNewick(content)
+            appStore.showNotification(`已解析树结构: ${path.split(/[/\\]/).pop()}`, 'success')
          } else {
-            // 提示：Tree 页面目前主要通过 side panel 处理序列，
-            // 但如果用户直接拖入 fasta，我们可以尝试后续支持
             appStore.showNotification('检测到序列文件，请在左侧面板点击“载入”', 'info')
          }
       } else {
-         // 默认逻辑：放入 BLAST
+         // BLAST 逻辑：支持解压
          if (type === 'fasta' || type === 'sequence' || !type) {
-           blastStore.addFile(path)
+            if (path.toLowerCase().endsWith('.zip')) {
+               appStore.showNotification(`正在解压并识别序列: ${path.split(/[/\\]/).pop()}`, 'info')
+               const res = await getBridge().process_blast_files([path])
+               if (res && res.success && res.paths) {
+                  res.paths.forEach((p: string) => blastStore.addFile(p))
+                  appStore.showNotification(`成功载入 ${res.paths.length} 条序列`, 'success')
+               }
+            } else {
+               blastStore.addFile(path)
+               appStore.showNotification(`已添加序列文件: ${path.split(/[/\\]/).pop()}`, 'success')
+            }
          }
       }
     },
-    handleFilesDropped: (paths: string[]) => {
+    handleFilesDropped: async (paths: string[]) => {
       console.log('[Bridge->App] Files Dropped:', paths)
       const currentRoute = window.location.hash
       
       if (currentRoute.includes('tree')) {
-        // [修复] 如果在进化树页面，不应该进入 BLAST 列表
-        appStore.showNotification(`检测到 ${paths.length} 个文件拖入进化树工作区`, 'success')
-        // 这里可以调用 treeView 组件的方法来处理这些路径
+        appStore.showNotification(`正在导入 ${paths.length} 个项目到进化树工作区...`, 'info')
         if ((window as any).treeView?.handleExternalFiles) {
           (window as any).treeView.handleExternalFiles(paths)
-        } else {
-          // Fallback: 提示用户在左侧操作
-          console.warn('TreeView has no handleExternalFiles handler yet.')
         }
       } else {
-        // BLAST 页面逻辑
-        appStore.showNotification(`检测到 ${paths.length} 个文件拖入比对列表`, 'info')
-        paths.forEach(p => blastStore.addFile(p))
+        // BLAST 页面逻辑：支持解压
+        appStore.showNotification(`正在处理 ${paths.length} 个比对项...`, 'info')
+        const res = await getBridge().process_blast_files(paths)
+        if (res && res.success && res.paths) {
+           res.paths.forEach((p: string) => blastStore.addFile(p))
+           appStore.showNotification(`成功导入 ${res.paths.length} 个比对文件`, 'success')
+        } else {
+           // Fallback if unpack failed
+           paths.forEach(p => blastStore.addFile(p))
+        }
       }
     },
     showNotification: (msg: string, type: string = 'info') => {

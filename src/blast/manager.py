@@ -354,37 +354,65 @@ class BlastManager:
             # 提取序列内容
             # 提取序列内容
             def collect_sequences(path_list):
-                # 预处理：按主文件名去重，优先保留最有效的格式
-                filtered_paths = []
-                base_map = {} # stem -> [full_paths]
+                # 预处理：按路径去重，并处理目录
+                target_files = []
+                # 记录已添加的绝对路径，防止重复处理同一文件
+                processed_paths = set()
                 
-                for f_path in path_list:
+                # 内部整理函数
+                def get_all_files(ps):
+                    files = []
+                    for p_str in ps:
+                        p = Path(p_str).resolve()
+                        if p.is_dir():
+                            # 递归扫描目录
+                            files.extend([str(sf) for sf in p.rglob('*') if sf.is_file()])
+                        elif p.is_file():
+                            files.append(str(p))
+                    return files
+
+                all_extracted_files = get_all_files(path_list)
+                
+                # 统一优先级映射：数值越大优先级越高 (与 api_server.py 对齐)
+                priority_map = {
+                    '.fasta': 10, '.fas': 10, '.fa': 10, '.fna': 10,
+                    '.seq': 8,
+                    '.txt': 5,
+                    '.ab1': 3, '.abi': 3,
+                    '.nwk': 1, '.newick': 1
+                }
+                
+                # 改进的去重：仅对同一目录下的同名文件进行格式优选 (e.g. sample.seq vs sample.ab1)
+                # 而不同目录下的同名文件 (e.g. a/1.seq vs b/1.seq) 应该全部保留
+                dir_groups = {} # parent_dir -> { stem -> [full_paths] }
+                
+                for f_path in all_extracted_files:
                     p = Path(f_path)
-                    if p.is_dir():
-                        # 递归扫描目录下的所有文件
-                        sub_files = [str(sf) for sf in p.rglob('*') if sf.is_file()]
-                        collect_sequences(sub_files)
-                    else:
-                        stem = p.stem
-                        if stem not in base_map: base_map[stem] = []
-                        base_map[stem].append(f_path)
+                    parent = str(p.parent)
+                    stem = p.stem.lower()
+                    if parent not in dir_groups: dir_groups[parent] = {}
+                    if stem not in dir_groups[parent]: dir_groups[parent][stem] = []
+                    dir_groups[parent][stem].append(f_path)
                 
-                # 优先级映射：数值越小优先级越高
-                priority = {'.seq': 1, '.fasta': 2, '.fas': 2, '.fa': 2, '.fna': 2, '.txt': 3, '.ab1': 4, '.abi': 4}
-                
-                for stem, paths in base_map.items():
-                    if len(paths) == 1:
-                        filtered_paths.append(paths[0])
-                    elif len(paths) > 1:
-                        # 排序并取优先级最高的一个
-                        paths.sort(key=lambda x: priority.get(Path(x).suffix.lower(), 99))
-                        filtered_paths.append(paths[0])
+                for parent, stems in dir_groups.items():
+                    for stem, paths in stems.items():
+                        if len(paths) == 1:
+                            target_files.append(paths[0])
+                        else:
+                            # [FIX] 与 api_server 对齐，使用 reverse=True 配合 大值优先
+                            paths.sort(key=lambda x: priority_map.get(Path(x).suffix.lower(), 0), reverse=True)
+                            target_files.append(paths[0])
 
                 # 执行读取
-                for f_path in filtered_paths:
+                for f_path in target_files:
+                    if f_path in processed_paths: continue
                     try:
+                        count_in_file = 0
                         for seq in fh.read_fasta_file_iter(f_path):
                             sequences.append(seq)
+                            count_in_file += 1
+                        processed_paths.add(f_path)
+                        self.logger.debug(f"从 {f_path} 提取了 {count_in_file} 条序列")
                     except Exception as e:
                         self.logger.warning(f"无法从文件 {f_path} 提取序列: {e}")
 
@@ -421,6 +449,9 @@ class BlastManager:
                         "sequence_id": seq_id,
                         "status": "pending"
                     }
+                    # [CRITICAL FIX] 把占位符存入数据库，防止刷新页面或重选任务时列表变空
+                    self.store.save_result(task.task_id, seq_id, pending_data)
+                    
                     # Emit to UI
                     if self.result_listeners:
                         for cb in self.result_listeners:

@@ -401,10 +401,60 @@ if (typeof document !== 'undefined') {
 function handleFileUpload(e: Event) {
   const files = (e.target as HTMLInputElement).files
   if (files) {
-    selectedFiles.value = Array.from(files)
-    appStore.showNotification(`已添加 ${files.length} 个本地序列文件`, 'info')
-      // 关键修复：清除 DOM 值，确保下次选同一个文件也能触发 change 事件
-      ; (e.target as HTMLInputElement).value = ''
+    // 关键：在 Electron 环境下获取真实物理路径
+    const paths: string[] = []
+    const rawFiles: File[] = []
+    
+    const fileList = Array.from(files)
+    for (const f of fileList) {
+      const path = getBridge().get_path_for_file(f)
+      if (path) {
+        paths.push(path)
+      } else {
+        rawFiles.push(f)
+      }
+    }
+
+    if (paths.length > 0) {
+      // 如果有路径，直接提交到工作区
+      appStore.showNotification(`检测到 ${paths.length} 个本地文件，正在同步并解压...`, 'info')
+      getBridge().add_tree_workspace_files(JSON.stringify(paths)).then(() => {
+         refreshWorkspace()
+         appStore.showNotification('工作区内容已更新', 'success')
+      })
+    }
+    
+    // 对于无法获取路径的文件（如果有），保留在 selectedFiles 中进行文本读取
+    selectedFiles.value = rawFiles
+    
+    // 关键修复：清除 DOM 值，确保下次选同一个文件也能触发 change 事件
+    ; (e.target as HTMLInputElement).value = ''
+  }
+}
+
+function handleDragOver(e: DragEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+function handleDropLocal(e: DragEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  
+  if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+    const paths: string[] = []
+    const files = Array.from(e.dataTransfer.files)
+    
+    for (const f of files) {
+      const path = getBridge().get_path_for_file(f)
+      if (path) {
+        paths.push(path)
+      }
+    }
+    
+    if (paths.length > 0) {
+      handleExternalFiles(paths)
+    }
   }
 }
 
@@ -416,6 +466,13 @@ async function importSequences() {
     try {
       let combinedContent = ''
       for (const file of selectedFiles.value) {
+        // 只有非二进制且有 text 方法的文件才尝试文本读取
+        const isBinary = file.name.endsWith('.zip') || file.name.endsWith('.gz') || file.name.endsWith('.ab1') || file.name.endsWith('.abi');
+        if (isBinary) {
+           appStore.showNotification(`跳过二进制文件文本预览: ${file.name}`, 'warning');
+           continue;
+        }
+
         const text = await file.text()
         if (!text.trim().startsWith('>')) {
           combinedContent += `>${file.name}\n${text}\n`
@@ -424,12 +481,14 @@ async function importSequences() {
         }
       }
 
-      try {
-        const bridge = await initBridge()
-        if (bridge && typeof bridge.save_tree_sequences === 'function') {
-          await bridge.save_tree_sequences(combinedContent)
-        }
-      } catch (err) { }
+      if (combinedContent) {
+        try {
+          const bridge = await initBridge()
+          if (bridge && typeof bridge.save_tree_sequences === 'function') {
+            await bridge.save_tree_sequences(combinedContent)
+          }
+        } catch (err) { }
+      }
 
       selectedFiles.value = []
       appStore.showNotification('序列已完全载入内核，准备执行 MSA 预处理...', 'success')
@@ -478,14 +537,35 @@ async function requestAnalysis() {
   }
 }
 
-onMounted(() => {
-  appStore.initTreeHistory()
-})
+async function handleExternalFiles(paths: string[]) {
+  if (!paths || paths.length === 0) return
+
+  const firstPath = paths[0]
+  if (paths.length === 1 && firstPath && (firstPath.endsWith('.nwk') || firstPath.endsWith('.newick') || firstPath.endsWith('.tree'))) {
+    appStore.showNotification(`正在加载树文件...`, 'info')
+    const bridge = getBridge()
+    // @ts-ignore
+    if (bridge && typeof bridge.read_result_file === 'function') {
+      // @ts-ignore
+      const content = await bridge.read_result_file(firstPath)
+      if (content) loadNewick(content)
+    }
+  } else {
+    appStore.showNotification(`正在将 ${paths.length} 个文件载入并解压...`, 'info')
+    const bridge = await initBridge()
+    // @ts-ignore
+    if (bridge && typeof bridge.add_tree_workspace_files === 'function') {
+      // @ts-ignore
+      await bridge.add_tree_workspace_files(JSON.stringify(paths))
+      refreshWorkspace()
+    }
+    appStore.showNotification('工作区序列载入成功', 'success')
+  }
+}
 
 function handleInternalNodeClick(nodeData: any) {
   if (!nodeData) return
   selectedNode.value = nodeData
-  // 如果是外部交互，弹出在鼠标中心
   const mouseEvent = window.event as MouseEvent
   if (mouseEvent) {
     menuPos.value = { x: mouseEvent.clientX, y: mouseEvent.clientY }
@@ -516,6 +596,7 @@ function closeMenu() {
 
 onMounted(() => {
   appStore.setPageTitle('进化树分析')
+  appStore.initTreeHistory()
   refreshWorkspace()
 
   // @ts-ignore
@@ -537,34 +618,7 @@ onMounted(() => {
       if (msg) loadingMsg.value = msg
       if (percent !== undefined) loadingProgress.value = percent
     },
-    handleExternalFiles: (paths: string[]) => {
-      if (!paths || paths.length === 0) return
-
-      const firstPath = paths[0]
-      if (paths.length === 1 && firstPath && (firstPath.endsWith('.nwk') || firstPath.endsWith('.newick') || firstPath.endsWith('.tree'))) {
-        appStore.showNotification(`正在加载树文件...`, 'info')
-        const bridge = getBridge()
-        // @ts-ignore
-        if (bridge && typeof bridge.read_result_file === 'function') {
-          // @ts-ignore
-          bridge.read_result_file(firstPath).then((content: string) => {
-            if (content) loadNewick(content)
-          })
-        }
-      } else {
-        appStore.showNotification(`正在将 ${paths.length} 个文件载入工作区...`, 'info')
-        initBridge().then(bridge => {
-          // @ts-ignore
-          if (bridge && typeof bridge.add_tree_workspace_files === 'function') {
-            // @ts-ignore
-            bridge.add_tree_workspace_files(JSON.stringify(paths))
-            setTimeout(() => refreshWorkspace(), 500)
-          }
-          appStore.showNotification('序列已添加，请点击“载入并预处理”进入下一步', 'success')
-        })
-      }
-    }
-
+    handleExternalFiles
   }
 
   initBridge().then(bridge => {
@@ -666,10 +720,15 @@ onMounted(() => {
           <!-- 采集面板 -->
           <div v-if="activeSideTool === 'input'" class="panel-section">
             <h3 class="section-title">▶ 数据采集</h3>
-            <div class="upload-zone-neo" @click="fileInput?.click()">
+            <div 
+              class="upload-zone-neo" 
+              @click="fileInput?.click()"
+              @dragover="handleDragOver"
+              @drop="handleDropLocal"
+            >
               <span class="dz-icon">📁</span>
-              <span class="dz-text">{{ (selectedFiles?.length || 0) > 0 ? `已选 ${selectedFiles.length} 个文件` : '上传 FASTA/SEQ' }}</span>
-              <input type="file" ref="fileInput" hidden multiple @change="handleFileUpload" />
+              <span class="dz-text">{{ (selectedFiles?.length || 0) > 0 ? `已选 ${selectedFiles.length} 个文件` : '上传序列/压缩包' }}</span>
+              <input type="file" ref="fileInput" hidden multiple accept=".fasta,.fas,.fa,.seq,.txt,.fna,.zip,.gz,.ab1,.abi" @change="handleFileUpload" />
             </div>
 
             <div class="input-divider">待分析清单 (Workspace)</div>
@@ -1170,7 +1229,7 @@ onMounted(() => {
 
 /* 工作区列表样式 */
 .workspace-list-neo {
-  height: 320px;
+  height: 450px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
