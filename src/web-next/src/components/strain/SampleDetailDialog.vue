@@ -478,7 +478,14 @@ const METADATA_LABELS: Record<string, string> = {
   lifestyle: '生活史类型',
   latentPeriod: '潜伏期',
   burstSize: '裂解量',
-  morphology: '形态分类'
+  morphology: '形态分类',
+  // BLAST 关联元数据
+  blast_identity: '比对相似度 (%)',
+  blast_evalue: 'E值 (e-value)',
+  blast_task_id: '比对任务 ID',
+  blast_hit_title: '最佳比对标题',
+  original_query_id: '原始查询序列 ID',
+  blast_accession: '比对编号'
 }
 
 const TYPE_SPECIFIC_KEYS: Record<string, string[]> = {

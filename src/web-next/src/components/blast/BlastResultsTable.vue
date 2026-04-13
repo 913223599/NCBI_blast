@@ -60,7 +60,7 @@ function toggleTranslateAll() {
 function handleRowTranslate(h: any) {
   if (h.translatedName) {
     // 已经有翻译了，单纯在这两条之间切换
-    h.showOriginal = h.showOriginal === false ? true : false
+    h.showOriginal = h.showOriginal !== true
   } else if (h.speciesName && h.speciesName !== 'Unknown' && !h.isTranslating) {
     // 按需发起单条翻译
     h.isTranslating = true

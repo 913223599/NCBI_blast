@@ -87,7 +87,7 @@ export const useBlastStore = defineStore('blast', () => {
     const activeTaskId = ref<string | null>(null)
 
     /* -------- 结果 -------- */
-    const results = shallowRef<BlastHit[]>([])
+    const results = ref<BlastHit[]>([]) // 使用标准 ref 以支持行内状态（翻译切换/加载动画）
     const resultTitle = ref('分析结果')
 
     /* -------- 历史面板可见 -------- */

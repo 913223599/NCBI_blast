@@ -44,7 +44,7 @@ export function useSyncActions(state: any, recordsActions: any) {
 
           // 核心治理：Object.freeze 是防止内存溢出的唯一真神
           if (data.freezers) {
-            freezers.value = Object.freeze(data.freezers)
+            freezers.value = data.freezers
             const map: Record<string, string> = {}
             const indexLoc = (f: any) => {
               map[f.id] = f.name
@@ -61,24 +61,27 @@ export function useSyncActions(state: any, recordsActions: any) {
                 })
               })
             }
-            data.freezers.forEach(indexLoc)
-            locationMap.value = Object.freeze(map)
+            locationMap.value = map
           }
 
           if (data.records) {
             // 彻底脱水，仅保留列表展示必须字段
             const dehydrated = data.records.map((r: any) => {
                const { sequence, metadata, ...rest } = r
-               return Object.freeze(rest)
+               // 暂时保留对历史记录的冻结以防内存溢出，但主目录必须保持活跃
+               return rest
             })
-            records.value = Object.freeze(dehydrated)
+            records.value = dehydrated
           }
 
           if (data.codeLookup) {
-            codeLookupEntries.value = Object.freeze(data.codeLookup.entries || [])
-            sourceEntries.value = Object.freeze(data.codeLookup.sources || [])
-            serialCounters.value = Object.freeze(data.codeLookup.counters || [])
-            codeConfig.value = data.codeLookup.config || codeConfig.value
+            codeLookupEntries.value = data.codeLookup.entries || []
+            sourceEntries.value = data.codeLookup.sources || []
+            serialCounters.value = data.codeLookup.counters || []
+            codeConfig.value = {
+              ...codeConfig.value,
+              ...data.codeLookup.config
+            }
           }
 
           recordsActions.applyFilters()
@@ -101,23 +104,33 @@ export function useSyncActions(state: any, recordsActions: any) {
     if (cleanupHandler) return
     
     cleanupHandler = onEvent((type: string, data: any) => {
+      // 1. 同步全量数据 (通常由其他端修改触发)
       if (type === 'data_updated' && data.module === 'strains') {
-        // 二次防御：只有信号明确来自其他端才触发加载
         initFromDatabase();
       }
       
-      // 核心修复：处理 AI 批量翻译推送的结果
+      // 2. 差异同步：词典更新
+      if (type === 'data_updated' && data.module === 'dictionary') {
+        const bridge = getBridge()
+        bridge.db_load_code_lookup((res: any) => {
+          if (res && res.counters) {
+            serialCounters.value = res.counters
+          }
+          if (res && res.entries) {
+            codeLookupEntries.value = res.entries
+          }
+        })
+      }
+      
+      // 3. 处理 AI 翻译推送的结果
       if (type === 'translation_done' && data.original) {
         const entries = [...codeLookupEntries.value]; 
         let changed = false;
         
-        // 查找所有匹配原学名的词条并更新
         for (let i = 0; i < entries.length; i++) {
            const entry = entries[i];
-           // 如果名称尚未翻译（为空或等于学名），则填充翻译结果
            if (entry.latinName === data.original || entry.name === data.original) {
               if (data.translated && data.translated !== data.original) {
-                 // 核心修正：避免直接修改可能被冻结的对象，使用浅拷贝更新以确保响应式触发
                  entries[i] = { 
                     ...entry, 
                     name: `${data.translated}(${data.original})`,

@@ -260,8 +260,12 @@ function handleCodeUpdate(data: any) {
   const inferred = CATEGORY_CODE_TO_SAMPLE_TYPE[data.codeCategory]; if (inferred) form.value.sampleType = inferred
   const res = codeGen.resolve(data.sampleCode)
   if (res && res.genusName !== '未知属') {
-    const name = `${res.genusName} ${res.speciesName}`.trim()
-    form.value.species = name; if (!form.value.name || form.value.name.includes('.')) form.value.name = name
+    // 核心改进：如果已经识别到“种”，则直接使用种名（种名通常已包含属名信息），避免冗余堆叠
+    const name = res.speciesName !== '未知种' ? res.speciesName : res.genusName
+    form.value.species = name
+    if (!form.value.name || form.value.name.includes('.')) {
+      form.value.name = name
+    }
   }
 }
 
@@ -308,9 +312,18 @@ function handleConfirm() {
   }
 
   // 1. 先准备记录并生成本地 ID (以便同步关联序列)
+  const generateUUID = () => {
+    if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) return (crypto as any).randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+  }
+  
   const records = targetPositions.map(pos => ({ 
     ...form.value, 
-    id: crypto.randomUUID(), 
+    id: generateUUID(), 
     freezerId: props.freezerId, 
     shelfId: props.shelfId, 
     cabinetId: props.cabinetId, 

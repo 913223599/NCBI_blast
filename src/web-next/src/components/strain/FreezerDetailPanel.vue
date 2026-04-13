@@ -616,18 +616,18 @@ function selectDrawer(drawer: any) {
 }
 
 function handlePositionHover(position: any, box: any) {
-  if (position.occupied) {
-    const sample = getSampleByPosition(
-      strain.activeFreezer!.id,
-      selectedShelf.value.id,
-      selectedCabinet.value.id,
-      selectedDrawer.value.id,
-      box.id,
-      position.label
-    )
-    if (sample) {
-      hoveredSample.value = sample
-    }
+  // 核心修正：不直接信任 position.occupied
+  const sample = getSampleByPosition(
+    strain.activeFreezer!.id,
+    selectedShelf.value.id,
+    selectedCabinet.value.id,
+    selectedDrawer.value.id,
+    box.id,
+    position.label
+  )
+  
+  if (sample) {
+    hoveredSample.value = sample
   } else {
     hoveredSample.value = null
   }
@@ -672,7 +672,14 @@ function translateMetadataKey(key: string): string {
     titer: '滴度',
     serotype: '血清型',
     lifestyle: '生活史类型',
-    morphology: '形态学'
+    morphology: '形态学',
+    // BLAST 关联元数据
+    blast_identity: '比对相似度 (%)',
+    blast_evalue: 'E值 (e-value)',
+    blast_task_id: '比对任务 ID',
+    blast_hit_title: '最佳比对标题',
+    original_query_id: '原始查询序列 ID',
+    blast_accession: '比对编号'
   }
   return dict[key] || key
 }
@@ -699,26 +706,26 @@ function navigateToLevel(level: 'shelf' | 'cabinet' | 'drawer' | 'box') {
 function handlePositionLeftClick(position: any, box: any) {
   // 如果当前有序选（拖拽结束），则优先触发此处的点击拦截逻辑
   if (selectedIndices.value.size > 1) {
-    // 已经在 handleGlobalMouseUp 中处理了
     return
   }
 
-  if (position.occupied) {
+  // 核心修正：不直接信任 position.occupied 属性（可能存在响应式延迟）
+  // 直接从 store 记录中通过位置反查是否存在样本
+  const sample = getSampleByPosition(
+    strain.activeFreezer!.id,
+    selectedShelf.value.id,
+    selectedCabinet.value.id,
+    selectedDrawer.value.id,
+    box.id,
+    position.label
+  )
+
+  if (sample) {
     // 显示样本详情
-    const sample = getSampleByPosition(
-      strain.activeFreezer!.id,
-      selectedShelf.value.id,
-      selectedCabinet.value.id,
-      selectedDrawer.value.id,
-      box.id,
-      position.label
-    )
-    if (sample) {
-      selectedSample.value = sample
-      showDetailDialog.value = true
-    }
+    selectedSample.value = sample
+    showDetailDialog.value = true
   } else {
-    // 清除可能存在的旧选择
+    // 确实没样本，清空选区进入录入模式
     selectedIndices.value.clear()
     
     // 显示录入对话框
