@@ -1,0 +1,17 @@
+{
+    "ui.btn.save_as_template": "Store Template",
+    "ui.confirm.delete_template": "Are you sure you want to delete/hide this template?",
+    "ui.confirm.overwrite_template": "Are you sure you want to overwrite this template with the current layout?",
+    "ui.msg.template_loaded": "Successfully loaded template: {name}",
+    "ui.msg.template_saved": "Template successfully saved to local library",
+    "ui.msg.template_updated": "Template updated",
+    "ui.prompt.template_name": "Please enter template name:",
+    "ui.sidebar.search_templates": "Search my templates...",
+    "ui.tab.nodes": "Tool Nodes",
+    "ui.tab.templates": "Templates",
+    "ui.template.fast_bio_chain_desc": "Standard pipeline from FASTA input to dissimilarity computation, tree building, and report printing.",
+    "ui.template.fast_bio_chain_name": "Standard Bio-Evolutionary Pipeline",
+    "ui.template.new_workflow": "New Workflow",
+    "ui.template.no_templates": "No saved templates. Configure a flow and click 'Store Template'.",
+    "ui_font_size": "Font Size"
+}

@@ -386,6 +386,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, toRaw, onMounted, onUnmounted } from 'vue'
+import { useI18n } from '../../locales'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import type { StrainRecord } from '../../stores/strain'
@@ -393,6 +394,7 @@ import SampleEntryDialog from './SampleEntryDialog.vue'
 import SampleDetailDialog from './SampleDetailDialog.vue'
 import EditFreezerDialog from './EditFreezerDialog.vue'
 
+const { t } = useI18n()
 const strain = useStrainStore()
 const appStore = useAppStore()
 
@@ -510,7 +512,7 @@ function getShelfUsage(shelf: any): number {
       }
     }
   }
-  const usedPositions = strain.records.filter(r => 
+  const usedPositions = strain.records.filter((r: StrainRecord) => 
     r.freezerId === strain.activeFreezer!.id && r.shelfId === shelf.id
   ).length
   return totalPositions > 0 ? (usedPositions / totalPositions) * 100 : 0
@@ -524,7 +526,7 @@ function getCabinetUsage(shelfId: string, cabinet: any): number {
       totalPositions += box.rows * box.cols
     }
   }
-  const usedPositions = strain.records.filter(r => 
+  const usedPositions = strain.records.filter((r: StrainRecord) => 
     r.freezerId === strain.activeFreezer!.id && 
     r.shelfId === shelfId && 
     r.cabinetId === cabinet.id
@@ -538,7 +540,7 @@ function getDrawerUsage(shelfId: string, cabinetId: string, drawer: any): number
   for (const box of (drawer.boxes || [])) {
     totalPositions += box.rows * box.cols
   }
-  const usedPositions = strain.records.filter(r => 
+  const usedPositions = strain.records.filter((r: StrainRecord) => 
     r.freezerId === strain.activeFreezer!.id && 
     r.shelfId === shelfId && 
     r.cabinetId === cabinetId && 
@@ -549,7 +551,7 @@ function getDrawerUsage(shelfId: string, cabinetId: string, drawer: any): number
 
 function getBoxUsage(shelfId: string, cabinetId: string, drawerId: string, box: any): number {
   const totalPositions = box.rows * box.cols
-  const usedPositions = strain.records.filter(r => 
+  const usedPositions = strain.records.filter((r: StrainRecord) => 
     r.freezerId === strain.activeFreezer!.id &&
     r.shelfId === shelfId &&
     r.cabinetId === cabinetId &&
@@ -562,7 +564,7 @@ function getBoxUsage(shelfId: string, cabinetId: string, drawerId: string, box: 
 // 检查位置是否被占用（查询 records）
 function isPositionOccupied(shelfId: string, cabinetId: string, drawerId: string, boxId: string, posLabel: string): boolean {
   if (!strain.activeFreezer) return false
-  return strain.records.some(r => 
+  return strain.records.some((r: StrainRecord) => 
     r.freezerId === strain.activeFreezer!.id &&
     r.shelfId === shelfId &&
     r.cabinetId === cabinetId &&
@@ -648,40 +650,8 @@ function getFilteredMetadata(metadata: any) {
 
 // 快速翻译元数据键名
 function translateMetadataKey(key: string): string {
-  const dict: any = {
-    concentration: '浓度',
-    potency: '效价/滴度',
-    storageMedium: '储存介质',
-    biosafetyLevel: '生物安全等级',
-    cultureCondition: '培养条件',
-    resistance: '抗性',
-    genotype: '基因型',
-    hostStrain: '宿主菌株',
-    marker: '筛选标记',
-    backbone: '载体骨干',
-    promoter: '启动子',
-    insertName: '插入片段',
-    plasmidSize: '大小',
-    purity: '纯度',
-    molecularWeight: '分子量',
-    buffer: '缓冲液',
-    tags: '标签',
-    cellType: '细胞类型',
-    medium: '培养基',
-    doublingTime: '倍增时间',
-    titer: '滴度',
-    serotype: '血清型',
-    lifestyle: '生活史类型',
-    morphology: '形态学',
-    // BLAST 关联元数据
-    blast_identity: '比对相似度 (%)',
-    blast_evalue: 'E值 (e-value)',
-    blast_task_id: '比对任务 ID',
-    blast_hit_title: '最佳比对标题',
-    original_query_id: '原始查询序列 ID',
-    blast_accession: '比对编号'
-  }
-  return dict[key] || key
+  // 链接到全局词库 (metadata.前缀声明在 d:\NCBI blast\src\resources\locales\zh_CN\metadata.json)
+  return t(`metadata.${key}`)
 }
 
 function navigateToLevel(level: 'shelf' | 'cabinet' | 'drawer' | 'box') {
@@ -832,7 +802,7 @@ function getSampleByPosition(
   boxId: string,
   position: string
 ): StrainRecord | null {
-  return strain.records.find(r => 
+  return strain.records.find((r: StrainRecord) => 
     r.freezerId === freezerId &&
     r.shelfId === shelfId &&
     r.cabinetId === cabinetId &&
@@ -889,7 +859,7 @@ function updateBoxOccupancy() {
     if (record.freezerId !== freezerId || !record.boxId || !record.position) continue
     const box = boxMap.get(record.boxId)
     if (!box) continue
-    const pos = box.positions.find(p => p.label === record.position)
+    const pos = box.positions.find((p: any) => p.label === record.position)
     if (pos) {
       pos.occupied = true
       pos.sampleId = record.id

@@ -1,0 +1,20 @@
+{
+  "strain.dialog.entry_title": "录入样本",
+  "strain.dialog.detail_title": "样本详情",
+  "strain.label.name": "样本名称",
+  "strain.label.code": "样本编号",
+  "strain.label.type": "样本类型",
+  "strain.label.seq_type": "序列类型",
+  "strain.label.accession": "Accession 号 / 外部 ID",
+  "strain.label.species": "物种名称",
+  "strain.label.host": "宿主 / 来源",
+  "strain.label.date": "采集日期",
+  "strain.label.metadata": "详细业务元数据",
+  "strain.placeholder.name": "例如: E. coli K-12",
+  "strain.placeholder.accession": "如: ATCC, NCBI 登录号...",
+  "strain.placeholder.host": "Human, Soil, Water...",
+  "strain.msg.save_success": "样本数据已成功入库",
+  "strain.msg.save_error": "样本名称不能为空",
+  "strain.msg.delete_confirm": "确定要删除样本 \"{name}\" 吗？",
+  "strain.msg.delete_success": "样本已从库中移除"
+}

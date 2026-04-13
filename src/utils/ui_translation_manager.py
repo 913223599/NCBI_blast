@@ -24,19 +24,36 @@ class UITranslationManager:
         return cls._instance
 
     def load_all_translations(self):
-        """Load all translation files from locales directory"""
+        """Load all translation files from locales directory recursively"""
         if not self.locales_path.exists():
             logging.error(f"Locales path not found: {self.locales_path}")
             return
 
+        # 1. 扫描顶级 JSON 文件 (保持向后兼容)
         for file in self.locales_path.glob("*.json"):
             lang_code = file.stem
-            try:
-                with open(file, 'r', encoding='utf-8') as f:
-                    self.translations[lang_code] = json.load(f)
-                logging.info(f"Loaded translation pack: {lang_code}")
-            except Exception as e:
-                logging.error(f"Failed to load translation file {file}: {e}")
+            self._load_file(file, lang_code)
+
+        # 2. 扫描语言子目录 (模块化支持)
+        for sub_dir in self.locales_path.iterdir():
+            if sub_dir.is_dir():
+                lang_code = sub_dir.name
+                # 递归扫描子目录下的所有 json
+                for file in sub_dir.rglob("*.json"):
+                    self._load_file(file, lang_code)
+
+    def _load_file(self, file: Path, lang_code: str):
+        """内部方法：加载单个翻译文件并合并到指定语言包"""
+        try:
+            with open(file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if lang_code not in self.translations:
+                    self.translations[lang_code] = {}
+                # 平铺合并，允许不同模块文件共存
+                self.translations[lang_code].update(data)
+                logging.info(f"Loaded translation pack fragment: {lang_code}/{file.name}")
+        except Exception as e:
+            logging.error(f"Failed to load translation file {file}: {e}")
 
     def get_language(self):
         """Get current language code, default zh_CN"""

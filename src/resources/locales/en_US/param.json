@@ -1,0 +1,22 @@
+{
+    "param.AA": "Protein Mode",
+    "param.GLOBAL": "Global Alignment",
+    "param.MATCH_LEN": "Min Match Length",
+    "param.UNKNOWN_STRAND": "Unknown Strand",
+    "param.algo": "Search Algorithm",
+    "param.fmt": "Export Format",
+    "param.k": "K-mer Size",
+    "param.method": "Distance Method",
+    "param.outgroup": "Outgroup",
+    "param_database": "Database",
+    "param_evalue": "E-Value Threshold",
+    "param_filter": "Filter Low Complexity",
+    "param_gap_extend": "Gap Extension",
+    "param_gap_open": "Gap Opening",
+    "param_hitlist": "Max Hits",
+    "param_matrix": "Matrix",
+    "param_program": "Program",
+    "param_threads": "Processing Threads",
+    "param_threads_tip": "Set the number of local CPU cores to use. Recommended not to exceed physical cores.",
+    "parameter_settings_title": "Parameters"
+}

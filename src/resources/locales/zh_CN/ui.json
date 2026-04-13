@@ -1,0 +1,19 @@
+{
+    "ui.btn.arrange_hint": "自动整理节点布局",
+    "ui.btn.save_as_template": "保存到库",
+    "ui.confirm.delete_template": "确定要删除/隐藏此模板吗？",
+    "ui.confirm.overwrite_template": "确定要使用当前布局覆盖此模板吗？",
+    "ui.msg.arranged": "节点布局已自动整理",
+    "ui.msg.template_loaded": "已成功加载流程模板：{name}",
+    "ui.msg.template_saved": "模板已成功保存到本地库",
+    "ui.msg.template_updated": "模板已更新",
+    "ui.prompt.template_name": "请输入模板名称:",
+    "ui.sidebar.search_templates": "搜索我的流程模板...",
+    "ui.tab.nodes": "工具节点",
+    "ui.tab.templates": "流程模板",
+    "ui.template.fast_bio_chain_desc": "从 FASTA 输入到差异矩阵导出、距离法建树并打印报表的专业全流程。",
+    "ui.template.fast_bio_chain_name": "标准进化分析链 (Standard Bio-Evolution Chain)",
+    "ui.template.new_workflow": "新工作流",
+    "ui.template.no_templates": "暂无保存的模板，请配置后点击“保存到库”",
+    "ui_font_size": "字体大小"
+}

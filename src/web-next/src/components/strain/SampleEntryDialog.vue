@@ -6,7 +6,7 @@
         <div class="header-left">
           <div class="icon-wrapper">🧬</div>
           <div>
-            <h3 class="dialog-title">录入样本</h3>
+            <h3 class="dialog-title">{{ t('strain.dialog.entry_title') }}</h3>
             <p class="dialog-subtitle">{{ positionPath }}</p>
           </div>
         </div>
@@ -21,7 +21,7 @@
 
             <!-- 样本编号 -->
             <div class="form-section">
-              <h4 class="section-label">样本编号</h4>
+              <h4 class="section-label">{{ t('strain.label.code') }}</h4>
               <SampleCodeInput 
                 :initial-selections="initialCategorySelections"
                 @update="handleCodeUpdate" 
@@ -32,17 +32,17 @@
             <div class="form-section">
               <h4 class="section-label">样本核心信息</h4>
               <div class="form-group required">
-                <label>样本名称 <span class="required-mark">*</span></label>
-                <input v-model="form.name" class="text-input" placeholder="例如: E. coli K-12" />
+                <label>{{ t('strain.label.name') }} <span class="required-mark">*</span></label>
+                <input v-model="form.name" class="text-input" :placeholder="t('strain.placeholder.name')" />
               </div>
 
               <div class="form-row">
                 <div class="form-group">
-                  <label>样本类型</label>
+                  <label>{{ t('strain.label.type') }}</label>
                   <div class="read-only-field">{{ getSampleTypeLabel() }}</div>
                 </div>
                 <div class="form-group">
-                  <label>序列类型</label>
+                  <label>{{ t('strain.label.seq_type') }}</label>
                   <div class="custom-select" @click.stop="toggleDropdown('sequenceType')">
                     <div class="select-trigger">
                       {{ getSequenceTypeLabel() }}
@@ -59,11 +59,11 @@
 
               <div class="form-row">
                 <div class="form-group">
-                  <label>外部/关联 ID</label>
-                  <input v-model="form.accession" class="text-input" placeholder="如: ATCC, NCBI登录号..." />
+                  <label>{{ t('strain.label.accession') }}</label>
+                  <input v-model="form.accession" class="text-input" :placeholder="t('strain.placeholder.accession')" />
                 </div>
                 <div class="form-group">
-                  <label>物种名称</label>
+                  <label>{{ t('strain.label.species') }}</label>
                   <div class="read-only-field">{{ form.species || '等待编号生成...' }}</div>
                 </div>
               </div>
@@ -73,11 +73,11 @@
               <h4 class="section-label">来源与采集</h4>
               <div class="form-row">
                 <div class="form-group">
-                  <label>宿主/来源</label>
-                  <input v-model="form.host" class="text-input" placeholder="Human, Soil..." />
+                  <label>{{ t('strain.label.host') }}</label>
+                  <input v-model="form.host" class="text-input" :placeholder="t('strain.placeholder.host')" />
                 </div>
                 <div class="form-group">
-                  <label>采集日期</label>
+                  <label>{{ t('strain.label.date') }}</label>
                   <input v-model="form.collectionDate" class="text-input" type="date" />
                 </div>
               </div>
@@ -141,7 +141,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { useI18n } from '../../locales'
 import { useStrainStore, type SampleCategory } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useSequenceStore } from '../../stores/sequence'
@@ -167,8 +168,12 @@ interface Props {
 const props = defineProps<Props>()
 const emit = defineEmits(['close', 'saved'])
 
-const strain = useStrainStore(); const appStore = useAppStore(); const sequenceStore = useSequenceStore()
-const codeGen = useCodeGenerator(); const { attemptTaxonomicMatch, syncTaxonomyToBackend } = useTaxonomySync()
+const { t } = useI18n()
+const strain = useStrainStore()
+const appStore = useAppStore()
+const sequenceStore = useSequenceStore()
+const codeGen = useCodeGenerator()
+const { attemptTaxonomicMatch, syncTaxonomyToBackend } = useTaxonomySync()
 
 const form = ref({
   name: '', accession: '', species: '', strain: '', sampleType: '' as SampleCategory | '',

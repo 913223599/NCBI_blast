@@ -379,10 +379,13 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, onUnmounted } from 'vue'
+import { useI18n } from '../../locales'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useSequenceStore } from '../../stores/sequence'
 import type { StrainRecord } from '../../stores/strain'
+
+const { t } = useI18n()
 
 import BaseMetadataForm from './forms/BaseMetadataForm.vue'
 import MicrobeForm from './forms/MicrobeForm.vue'
@@ -441,53 +444,7 @@ const SAMPLE_TYPE_OPTIONS = [
   { value: 'Other', label: '其他 (Other)' }
 ]
 
-const METADATA_LABELS: Record<string, string> = {
-  storageDate: '入库日期',
-  storageMedium: '保存介质',
-  passageNumber: '传代次数',
-  biosafetyLevel: '安全等级',
-  containerType: '容器规格',
-  description: '备注说明',
-  hostStrain: '宿主菌株',
-  genotype: '基因型',
-  resistance: '抗性',
-  cultureCondition: '培养条件',
-  growthTemp: '生长温度',
-  backbone: '骨架',
-  insertName: '插入片段',
-  plasmidSize: '质粒大小',
-  marker: '筛选标记',
-  isExpression: '表达载体',
-  promoter: '启动子',
-  titer: '病毒滴度',
-  serotype: '血清型',
-  potency: '效价浓度',
-  envelope: '包膜',
-  inactivationMethod: '灭活方法',
-  purity: '纯度',
-  concentration: '浓度',
-  buffer: '缓冲液',
-  molecularWeight: '分子量',
-  tags: '纯化标签',
-  cellType: '细胞类型',
-  medium: '培养基',
-  doublingTime: '倍增时间',
-  authentication: '鉴定编号',
-  // 噬菌体
-  hostRange: '宿主范围',
-  lifestyle: '生活史类型',
-  latentPeriod: '潜伏期',
-  burstSize: '裂解量',
-  morphology: '形态分类',
-  // BLAST 关联元数据
-  blast_identity: '比对相似度 (%)',
-  blast_evalue: 'E值 (e-value)',
-  blast_task_id: '比对任务 ID',
-  blast_hit_title: '最佳比对标题',
-  original_query_id: '原始查询序列 ID',
-  blast_accession: '比对编号'
-}
-
+// 元数据标签由全局 i18n 系统 metadata.* 统一代理管理
 const TYPE_SPECIFIC_KEYS: Record<string, string[]> = {
   Bacteria: ['concentration', 'cultureCondition', 'growthTemp', 'resistance', 'genotype'],
   Fungi: ['concentration', 'cultureCondition', 'growthTemp', 'resistance', 'genotype'],
@@ -637,7 +594,7 @@ function toggleDropdown(name: string) {
 }
 
 function getMetadataLabel(key: string): string {
-  return METADATA_LABELS[key] || key
+  return t(`metadata.${key}`)
 }
 
 function isFullWidthMetadata(key: string, val: any): boolean {

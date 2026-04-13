@@ -1,0 +1,20 @@
+{
+  "strain.dialog.entry_title": "Sample Entry",
+  "strain.dialog.detail_title": "Sample Details",
+  "strain.label.name": "Sample Name",
+  "strain.label.code": "Sample Code",
+  "strain.label.type": "Sample Type",
+  "strain.label.seq_type": "Sequence Type",
+  "strain.label.accession": "Accession / External ID",
+  "strain.label.species": "Species Name",
+  "strain.label.host": "Host / Source",
+  "strain.label.date": "Collection Date",
+  "strain.label.metadata": "Business Metadata",
+  "strain.placeholder.name": "e.g. E. coli K-12",
+  "strain.placeholder.accession": "e.g. ATCC, NCBI Accession...",
+  "strain.placeholder.host": "Human, Soil, Water...",
+  "strain.msg.save_success": "Sample successfully stored",
+  "strain.msg.save_error": "Sample name cannot be empty",
+  "strain.msg.delete_confirm": "Are you sure you want to delete sample \"{name}\"?",
+  "strain.msg.delete_success": "Sample removed from library"
+}
