@@ -83,13 +83,10 @@ class IDManager:
         # 按 key 长度降序排列，防止短 key 意外匹配长 key 的前缀
         sorted_keys = sorted(id_map.keys(), key=len, reverse=True)
         
-        # 构建单一正则：匹配 Newick 分隔符之间的完整标识符
-        # 使用零宽断言匹配 Newick 分隔符边界
-        newick_delimiters = r'(?<=[\(\),;:]|^)'
-        newick_following = r'(?=[\(\),;:]|$|:)'
-        
+        # 核心修复：由于 Python 标准 re 模块不支持变长后行断言 (look-behind)，
+        # 且短 ID 格式固定为 S00000 (字母+数字)，使用单词边界 \b 是最安全、兼容性最好的方案。
         escaped_keys = [re.escape(key) for key in sorted_keys]
-        pattern = newick_delimiters + r'(' + '|'.join(escaped_keys) + r')' + newick_following
+        pattern = r'\b(' + '|'.join(escaped_keys) + r')\b'
         
         def _replacer(match: re.Match) -> str:
             matched_id = match.group(1)

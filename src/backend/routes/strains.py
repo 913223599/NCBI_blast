@@ -171,3 +171,42 @@ async def load_sequences_by_sample(sample_id: str):
 async def sync_taxonomy(req: TaxonomySyncRequest):
     from ...utils.taxonomy_sync_service import get_taxonomy_sync_service
     return get_taxonomy_sync_service().sync_taxonomy_from_name(req.species_name)
+
+@router.post("/api/strains/import_paths")
+async def import_strains_from_paths(req: dict, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
+    """支持通过物理路径批量导入菌种 (复用 Common 上传后的暂存路径)"""
+    from ...utils.file_handler import FileHandler
+    from ...backend.strain_db import get_strain_db_manager
+    
+    paths = req.get("paths", [])
+    if not paths:
+        return {"success": False, "error": "未提供有效路径"}
+    
+    fh = FileHandler()
+    db = get_strain_db_manager()
+    count = 0
+    
+    try:
+        invalidate_cache()
+        for p in paths:
+            # 使用 FileHandler 的迭代读取功能 (支持 ZIP/GZ/ABI)
+            for seq_info in fh.read_fasta_file_iter(p):
+                # 构造符合数据库要求的记录对象
+                record = {
+                    "sampleId": seq_info['id'],
+                    "species": seq_info.get('description', ''),
+                    "sequence": seq_info['sequence'],
+                    # 关键：不存储巨大的 metadata
+                    "createdAt": time.strftime('%Y-%m-%d %H:%M:%S'),
+                    "updatedAt": time.strftime('%Y-%m-%d %H:%M:%S')
+                }
+                if db.save_record(record):
+                    count += 1
+        
+        if count > 0 and x_client_id:
+            await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
+            
+        return {"success": True, "count": count}
+    except Exception as e:
+        logger.error(f"批量导入路径失败: {e}")
+        return {"success": False, "error": str(e)}

@@ -213,15 +213,17 @@ export class TreeModel {
      * 第二步：计算排序权重 (Weight Calculation)
      * 在排序前先预计算各支系的度衡量，避免排序过程中的重复递归
      */
-    prepareWeights(_mode: 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance') {
+    prepareWeights(_mode: 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance', annotations?: Record<string, string>) {
         if (!this.root) return
         
         const _recursiveWeight = (node: TreeNode): { count: number, minTaxon: string, maxDist: number } => {
             if (node.isLeaf) {
                 node.leafCount = 1
-                node.minTaxon = node.name || TAXONOMY_SORT_SENTINEL
+                // 核心增强：如果存在分类学字典，则优先使用识别出的物种名参与排序搜索
+                const identity = annotations ? (annotations[node.name || ''] || node.name || TAXONOMY_SORT_SENTINEL) : (node.name || TAXONOMY_SORT_SENTINEL);
+                node.minTaxon = identity
                 node.maxDistToLeaf = 0
-                return { count: 1, minTaxon: node.minTaxon, maxDist: 0 }
+                return { count: 1, minTaxon: identity, maxDist: 0 }
             }
 
             let count = 0
@@ -248,12 +250,12 @@ export class TreeModel {
      * 第三步：执行拓扑排序 (Topological Sorting)
      * 目的：调整 Children 列表的逻辑顺序
      */
-    applySorting(type: 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance' | 'original') {
+    applySorting(type: 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance' | 'original', annotations?: Record<string, string>) {
         if (!this.root) return
         
         // 1. 如果不是原始序列，先预计算权重
         if (type !== 'original') {
-            this.prepareWeights(type as any)
+            this.prepareWeights(type as any, annotations)
         }
         
         // 2. 深度优先遍历并执行排序

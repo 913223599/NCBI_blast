@@ -32,37 +32,46 @@ const appStore = useAppStore()
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const isDragging = ref(false)
 
+const isProcessing = ref(false)
+
 /**
  * 核心处理逻辑：将 File 对象数组转化为后端路径数组
  */
 async function processFiles(files: File[]) {
+  if (isProcessing.value) return;
+  
   const bridge = getBridge()
   const processedPaths: string[] = []
   
+  isProcessing.value = true
   appStore.showNotification(`正在处理 ${files.length} 个文件...`, 'info')
 
-  for (const f of files) {
-    // 1. 尝试获取本地物理路径 (Electron)
-    const localPath = bridge.get_path_for_file(f)
-    if (localPath) {
-      processedPaths.push(localPath)
-    } else {
-      // 2. 网页端：执行流式上传
-      try {
+  try {
+    for (const f of files) {
+      // 1. 尝试获取本地物理路径 (Electron)
+      const localPath = bridge.get_path_for_file(f)
+      if (localPath) {
+        processedPaths.push(localPath)
+      } else {
+        // 2. 网页端：执行流式上传
         const res = await bridge.upload_file(f)
-        if (res.success && res.path) {
-          processedPaths.push(res.path)
+        if (res.success && (res.path || res.paths)) {
+          // 兼容单文件 path 或多文件 paths
+          if (res.path) processedPaths.push(res.path)
+          if (res.paths) processedPaths.push(...res.paths)
         } else {
-          appStore.showNotification(`上传失败: ${f.name} - ${res.error || '未知错误'}`, 'error')
+          appStore.showNotification(`上传失败: ${f.name} - ${res.error || '未授权或后端无响应'}`, 'error')
         }
-      } catch (err) {
-        emit('error', `文件 ${f.name} 处理异常`)
       }
     }
-  }
 
-  if (processedPaths.length > 0) {
-    emit('success', processedPaths)
+    if (processedPaths.length > 0) {
+      emit('success', processedPaths)
+    }
+  } catch (err) {
+    emit('error', `文件处理异常: ${err}`)
+  } finally {
+    isProcessing.value = false
   }
 }
 
@@ -75,7 +84,8 @@ function handleClick() {
   
   if (isElectron) {
     // Electron 环境使用原生对话框
-    bridge.request_file_load(props.type)
+    // Electron 环境使用原生对话框，传递多选意图
+    bridge.request_file_load(props.type, props.multiple)
     // 注意：request_file_load 通常是在 bridge 内部通过 handleFileLoaded 回调全局的
     // 为了让通用组件能拿到结果，我们需要在这里手动拦截或通过全局事件发送
   } else {
@@ -96,6 +106,8 @@ function handleDrop(e: DragEvent) {
   isDragging.value = false
   if (e.dataTransfer?.files.length) {
     processFiles(Array.from(e.dataTransfer.files))
+  } else {
+    isProcessing.value = false // 兜底：防止空的 drop 行为锁死组件
   }
 }
 </script>

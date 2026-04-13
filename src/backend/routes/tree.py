@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from ..broadcaster import broadcaster
+from ...utils.universal_parser import UniversalParser
 
 # 获取项目根目录 (相对于 src/backend/routes/)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -65,6 +66,11 @@ class SaveSequencesRequest(BaseModel):
 class RecallRequest(BaseModel):
     source_filename: str
 
+class TreeAddRequest(BaseModel):
+    # 兼容多种前端写法：支持单路径字符串或路径列表
+    path: Optional[str] = None
+    paths: Optional[List[str]] = None
+
 class DeleteFilesRequest(BaseModel):
     paths: list[str]
 
@@ -88,7 +94,8 @@ async def analyze_tree(req: TreeAnalyzeRequest):
             if req.files:
                 found_paths = [str(Path(f)) for f in req.files]
             else:
-                for ext in ("*.fasta", "*.seq", "*.fa", "*.fna", "*.zip", "*.gz", "*.ab1", "*.abi"):
+                # 核心修复：排除 .zip 和 .gz，防止 UniversalParser 重复提取已解压的文件
+                for ext in ("*.fasta", "*.seq", "*.fa", "*.fna", "*.ab1", "*.abi"):
                     found_paths.extend([str(f) for f in workspace.glob(ext)])
                 found_paths = get_best_files(found_paths)
             
@@ -98,9 +105,7 @@ async def analyze_tree(req: TreeAnalyzeRequest):
 
             if cancel_event and cancel_event.is_set(): return
 
-            # 序列标准化合并
-            from ...utils.file_handler import FileHandler
-            fh = FileHandler()
+            # [优化] 使用通用解析器统一提取序列，支持 ZIP/ABI/GZ 自动剥离
             timestamp = datetime.now().strftime("%m%d_%H%M%S")
             merged_path = (PROJECT_ROOT / "results" / f"Tree_Job_Input_{timestamp}.fasta").resolve()
             
@@ -108,12 +113,13 @@ async def analyze_tree(req: TreeAnalyzeRequest):
             with open(merged_path, 'w', encoding='utf-8') as tmp:
                 for p_str in found_paths:
                     try:
-                        for seq_info in fh.read_fasta_file_iter(p_str):
+                        # 指向通用解析模块，处理各种嵌套或压缩格式
+                        for seq_info in UniversalParser.parse_iter(p_str):
                             if seq_info.get('id') and seq_info.get('sequence'):
                                 tmp.write(f">{seq_info['id']}\n{seq_info['sequence']}\n")
                                 sequence_count += 1
                     except Exception as e:
-                        logger.error(f"Failed to extract from {p_str}: {e}")
+                        logger.error(f"Failed to extract from {p_str} using UniversalParser: {e}")
             
             if sequence_count == 0:
                 broadcaster.broadcast_sync("tree_error", {"error": "未找到有效序列"})
@@ -245,10 +251,51 @@ async def list_tree_sequences():
     try:
         ws = (PROJECT_ROOT / "results" / "tree_workspace").resolve()
         files = []
+        # 增加对目录内解压后文件的识别
         for ext in ("*.fasta", "*.seq", "*.fa", "*.fna", "*.nwk", "*.txt", "*.zip", "*.gz", "*.ab1", "*.abi"):
             files.extend([f.name for f in ws.glob(ext)])
         return sorted(get_best_files(list(set(files))), key=natural_sort_key)
     except Exception: return []
+
+@router.post("/api/tree/workspace/add")
+async def add_to_workspace(req: TreeAddRequest):
+    """将上传后的临时文件转移/归纳到进化树工作区"""
+    try:
+        source_paths = req.paths if req.paths else ([req.path] if req.path else [])
+        if not source_paths:
+            return {"success": False, "error": "未提供有效路径"}
+            
+        ws_dir = (PROJECT_ROOT / "results" / "tree_workspace").resolve()
+        ws_dir.mkdir(parents=True, exist_ok=True)
+        
+        counts = {"files": 0, "sequences": 0}
+        for p_str in source_paths:
+            staged_path = Path(p_str)
+            if not staged_path.exists(): continue
+                
+            target_name = staged_path.name
+            dest_file = ws_dir / target_name
+            
+            # 将原始文件（或是压缩包）保存到工作区
+            shutil.copy2(staged_path, dest_file)
+            counts["files"] += 1
+            
+            # 使用 UniversalParser 进行 ZIP 自动展开探测 (如果需要)
+            if target_name.lower().endswith(".zip"):
+                try:
+                    with zipfile.ZipFile(dest_file, 'r') as zip_ref:
+                        # 仅提取序列相关后缀的文件，防止污染工作区
+                        valid_exts = ('.fasta', '.fas', '.fa', '.fna', '.seq', '.txt', '.ab1', '.abi', '.nwk')
+                        for member in zip_ref.namelist():
+                            if member.lower().endswith(valid_exts) and not member.startswith('__MACOSX'):
+                                zip_ref.extract(member, ws_dir)
+                except: pass
+
+        logger.info(f"📂 [PhyloWS] 已同步进工作区: {counts['files']}个资源")
+        return {"success": True, "count": counts["files"]}
+    except Exception as e:
+        logger.error(f"Tree workspace add error: {e}")
+        return {"success": False, "error": str(e)}
 
 @router.delete("/api/tree/workspace")
 async def clear_tree_workspace():

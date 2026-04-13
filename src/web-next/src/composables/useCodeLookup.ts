@@ -34,7 +34,7 @@ export function useCodeLookup() {
 
   /** 内部强制刷新 Store (防抖保存) */
   const markChanged = () => {
-    if (!strainStore.isInitialized) return 
+    if (!strainStore.isInitialized) return
     strainStore.autoSave()
   }
 
@@ -152,7 +152,7 @@ export function useCodeLookup() {
       isBuiltin: false,
       enabled: true,
     }
-    strainStore.sourceEntries.push(newEntry)
+    strainStore.sourceEntries = [...strainStore.sourceEntries, newEntry]
     markChanged()
     return newEntry
   }
@@ -161,10 +161,10 @@ export function useCodeLookup() {
   function updateSource(code: string, updates: Partial<Pick<SourceEntry, 'name' | 'description'>>): boolean {
     const entry = strainStore.sourceEntries.find((item) => item.code === code)
     if (!entry) return false
-    
+
     if (updates.name) entry.name = updates.name
     if (updates.description !== undefined) entry.description = updates.description
-    
+
     markChanged()
     return true
   }
@@ -219,7 +219,7 @@ export function useCodeLookup() {
         .map((entry) => entry.code)
     )
 
-    // 从 AAA 开始遍历到 ZZZ
+    // 从 AAA 开始遍历到 ZZZ，执行插空分配
     for (let first = 0; first < 26; first++) {
       for (let second = 0; second < 26; second++) {
         for (let third = 0; third < 26; third++) {
@@ -233,7 +233,7 @@ export function useCodeLookup() {
         }
       }
     }
-    return null // 所有编码耗尽（理论上不会发生：17576 种组合）
+    return null
   }
 
   /** 分配下一个可用编码（随机模式） */
@@ -308,9 +308,20 @@ export function useCodeLookup() {
       enabled: true,
     }
 
-    strainStore.codeLookupEntries.push(newEntry)
+    strainStore.codeLookupEntries = [...strainStore.codeLookupEntries, newEntry]
     markChanged()
     return newEntry
+  }
+
+  /** 更新现有词条信息 */
+  function updateLookupEntry(fullPath: string, updates: Partial<{ name: string; latinName: string; description: string }>) {
+    strainStore.codeLookupEntries = strainStore.codeLookupEntries.map(entry => {
+      if (entry.fullPath === fullPath) {
+        return { ...entry, ...updates, verified: true } // 修改过的手动标记为 verified
+      }
+      return entry
+    })
+    markChanged()
   }
 
   /** 删除词条（仅非预置；删除属时同时删除其下所有种） */
@@ -385,6 +396,71 @@ export function useCodeLookup() {
     })
   }
 
+  /* ========== NCBI 分类学校对 ========== */
+
+  /**
+   * 一键与本地 NCBI 数据库比对，校验属种层级
+   */
+  async function auditWithNCBI() {
+    const bridge = getBridge()
+    // 仅比对未校验且有学名的词条
+    const entriesToAudit = strainStore.codeLookupEntries.filter(
+      (e) => !e.verified && e.latinName
+    )
+    if (entriesToAudit.length === 0) return { success: true, count: 0 }
+
+    const latinNames = entriesToAudit.map((e) => e.latinName!)
+    
+    return new Promise<{ success: boolean; count: number }>((resolve) => {
+      bridge.taxonomy_audit_batch(latinNames, (res: any) => {
+        if (res.success && res.results) {
+          let correctedCount = 0
+          res.results.forEach((resItem: any) => {
+            if (!resItem.valid) return
+
+            // 寻找对应的内存词条
+            const targetEntry = strainStore.codeLookupEntries.find(
+              (e) => e.latinName === resItem.name
+            )
+            if (!targetEntry) return
+
+            // 校对逻辑：比较层级与官方 Rank
+            const isGenus = resItem.rank === 'genus'
+            const isSpecies = resItem.rank === 'species' || resItem.rank === 'subspecies'
+            
+            if (isGenus && targetEntry.level === 3) {
+              // 错误：属被存成了种。标记为错误并记录 correctRank
+              console.warn(`[Audit] Mismatch: ${resItem.name} is a GENUS but stored as SPECIES.`);
+              (targetEntry as any).errorRank = 'genus'
+            } else if (isSpecies && targetEntry.level === 2) {
+              // 错误：种被存成了属
+              console.warn(`[Audit] Mismatch: ${resItem.name} is a SPECIES but stored as GENUS.`);
+              (targetEntry as any).errorRank = 'species'
+            } else {
+              // 校验成功，打上标记，下次不再比对
+              targetEntry.verified = true
+            }
+            correctedCount++
+          })
+          
+          markChanged()
+          resolve({ success: true, count: correctedCount })
+        } else {
+          resolve({ success: false, count: 0 })
+        }
+      })
+    })
+  }
+
+  /** 手动标记已校验 */
+  function markAsVerified(fullPath: string) {
+    const entry = strainStore.codeLookupEntries.find((e) => e.fullPath === fullPath)
+    if (entry) {
+      entry.verified = true
+      markChanged()
+    }
+  }
+
   /** 导出全部（用于持久化） */
   function exportLookupData() {
     return {
@@ -413,6 +489,10 @@ export function useCodeLookup() {
     translateEntry,
     translateAllEntries,
 
+    // NCBI 校对
+    auditWithNCBI,
+    markAsVerified,
+
     // 来源管理
     isSourceCodeAvailable,
     addSource,
@@ -425,6 +505,7 @@ export function useCodeLookup() {
     allocateCode,
     addLookupEntry,
     removeLookupEntry,
+    updateLookupEntry,
     toggleLookupEnabled,
 
     // 持久化

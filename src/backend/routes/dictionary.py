@@ -10,6 +10,8 @@ from ..broadcaster import broadcaster
 logger = logging.getLogger("api_server")
 router = APIRouter(tags=["Dictionary"])
 
+from ...utils.taxonomy_provider import get_taxonomy_provider
+
 # ─── 模型定义 ─────────────────────────────────────────
 
 class TranslateRequest(BaseModel):
@@ -165,4 +167,36 @@ async def verify_term(english: str):
             return {"success": success}
         return {"success": False}
     except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+@router.post("/api/taxonomy/audit")
+async def audit_taxonomy_batch(req: BatchTranslateRequest):
+    """
+    通过本地 NCBI 数据库核实一组学名的真实 Rank
+    """
+    try:
+        from ...utils.taxonomy_provider import get_taxonomy_provider
+        provider = get_taxonomy_provider()
+        if not provider.is_ready:
+            return {"success": False, "error": "本地分类学数据库未就绪"}
+        
+        results = []
+        for name in req.texts:
+            details = provider.get_lineage_details(name)
+            if not details:
+                results.append({"name": name, "rank": "unknown", "valid": False})
+                continue
+            
+            # 找到最具体的 rank（通常是最后一条）
+            info = details[-1]
+            results.append({
+                "name": name,
+                "rank": info["rank"],
+                "taxid": info["taxid"],
+                "valid": True
+            })
+            
+        return {"success": True, "results": results}
+    except Exception as exc:
+        logger.error(f"Taxonomy audit error: {exc}")
         return {"success": False, "error": str(exc)}

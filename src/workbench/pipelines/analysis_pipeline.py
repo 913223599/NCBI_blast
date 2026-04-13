@@ -53,32 +53,78 @@ class AnalysisPipeline:
         except Exception:
             return {"count": 1, "type": "dna"}
 
+    def _deduplicate_fasta(self, input_path: Path, output_path: Path) -> Dict[str, str]:
+        """
+        去重处理：为重复的序列 ID 增加 _1, _2 等后缀。确保兼容 IQ-TREE。
+        返回: {new_id: original_id} 的映射表
+        """
+        from Bio import SeqIO
+        seen = {}
+        mapping = {}
+        unique_records = []
+        
+        # 兼容处理：如果输入和输出路径相同，先读入内存
+        self.logger.info(f"Deduplicating sequences in {input_path.name}...")
+        
+        records = list(SeqIO.parse(input_path, "fasta"))
+        for record in records:
+            name = record.id
+            if name in seen:
+                seen[name] += 1
+                new_name = f"{name}_{seen[name]}"
+                self.logger.warning(f"Duplicate sequence name detected: {name} -> {new_name}")
+                record.id = new_name
+                record.name = new_name # 强制同步
+                record.description = "" # 清除冗余描述防止某些引擎解析出错
+                mapping[new_name] = name
+            else:
+                seen[name] = 1
+                mapping[name] = name
+            unique_records.append(record)
+            
+        with open(output_path, "w", encoding='utf-8') as f:
+            SeqIO.write(unique_records, f, "fasta")
+            
+        return mapping
+
     # --- Phase 1: FASTA (Inlet) ---
     def stage_fasta_process(self, input_fasta: Path, output_dir: Path) -> Dict[str, Any]:
-        """FASTA 元器件逻辑：进行 QC 并准备序列。"""
+        """FASTA 元器件逻辑：进行 QC 并在必要时执行去重重命名。"""
         results = {"status": "success"}
-        seq_info = self._detect_sequence_info(input_fasta)
+        
+        # 1. 强制执行去重（核心修复：应对 IQ-TREE 重名崩溃）
+        sanitized_fasta = output_dir / "input_sanitized.fasta"
+        try:
+            name_mapping = self._deduplicate_fasta(input_fasta, sanitized_fasta)
+            results["sanitized_file"] = str(sanitized_fasta)
+            results["name_mapping"] = name_mapping
+        except Exception as e:
+            self.logger.error(f"Fasta deduplication failed: {e}")
+            sanitized_fasta = input_fasta # 降级使用原始文件
+            
+        # 2. 探针检测
+        seq_info = self._detect_sequence_info(sanitized_fasta)
         results["seq_type"] = seq_info["type"]
         results["seq_count"] = seq_info["count"]
         
         try:
-            results["qc"] = self.tree_tools.qc_stats(input_fasta)
+            results["qc"] = self.tree_tools.qc_stats(sanitized_fasta)
             
-            # 核心改进：生成序列指纹清单 (ID -> MD5 Hash)
+            # 3. 序列指纹清单 (ID -> MD5 Hash)
             from src.workbench.models.annotation_manager import get_annotation_manager
             from Bio import SeqIO
             am = get_annotation_manager()
             manifest = {}
-            for rec in SeqIO.parse(input_fasta, "fasta"):
+            for rec in SeqIO.parse(sanitized_fasta, "fasta"):
                 seq_hash = am.generate_hash(str(rec.seq))
                 manifest[rec.id] = seq_hash
             
-            # 持久化清单到结果目录，供识别系统调用
+            # 4. 持久化清单到结果目录
             manifest_path = output_dir / "sequence_manifest.json"
             with open(manifest_path, 'w', encoding='utf-8') as f:
                 json.dump(manifest, f, indent=4)
             results["manifest_file"] = str(manifest_path)
-            results["id_to_hash"] = manifest  # 透传给后续步骤
+            results["id_to_hash"] = manifest
             
         except Exception as e:
             results["qc_error"] = str(e)
@@ -260,11 +306,15 @@ class AnalysisPipeline:
         p["seq_type"] = fasta_res.get("seq_type", "dna")
         p["seq_count"] = fasta_res.get("seq_count", 0)
         id_to_hash = fasta_res.get("id_to_hash", {})
+        
+        # 关键修正：后续步骤应使用去重后的 sanitized 文件
+        processed_fasta = Path(fasta_res.get("sanitized_file", str(input_fasta)))
+        
         self.logger.info(f"Pipeline: Auto-detected {p['seq_count']} sequences ({p['seq_type']}) in input.")
         
         yield {"step": "msa", "progress": 25, "message": f"执行 {msa_method} 多序列比对..."}
         msa_file = output_dir / f"{input_fasta.stem}_aligned.fasta"
-        self.stage_msa_alignment(input_fasta, msa_file, method=msa_method)
+        self.stage_msa_alignment(processed_fasta, msa_file, method=msa_method)
         
         dm_file = None
         id_map = {}

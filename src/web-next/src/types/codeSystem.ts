@@ -68,6 +68,9 @@ export interface CodeLookupEntry {
 
   /** 是否启用 */
   enabled: boolean
+
+  /** 分类学官方核校验标记 */
+  verified?: boolean
 }
 
 /* ========== 来源字典 ========== */
@@ -192,3 +195,4 @@ export interface CodeValidationResult {
   /** 错误信息列表 */
   errors: string[]
 }
+

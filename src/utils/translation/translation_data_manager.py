@@ -299,18 +299,26 @@ class TranslationDataManager:
         """添加或更新翻译条目"""
         english = english.strip()
         chinese = chinese.strip()
-        if not english or not chinese:
+        if not english:
             return False
 
         with self._lock:
             try:
                 cursor = self._conn.cursor()
+                
+                # 如果中文名为空，且条目不存在，则拦截
+                if not chinese:
+                   cursor.execute('SELECT chinese FROM translations WHERE english = ?', (english,))
+                   if not cursor.fetchone():
+                       return False
+                
+                # 执行插入或更新
                 cursor.execute('''
                     INSERT INTO translations (english, chinese, category, source)
                     VALUES (?, ?, ?, ?)
                     ON CONFLICT(english) DO UPDATE SET
-                        chinese = excluded.chinese,
-                        category = excluded.category,
+                        chinese = CASE WHEN excluded.chinese != '' THEN excluded.chinese ELSE translations.chinese END,
+                        category = CASE WHEN excluded.category != '' THEN excluded.category ELSE translations.category END,
                         source = excluded.source,
                         created_at = CURRENT_TIMESTAMP
                 ''', (english, chinese, category, source))

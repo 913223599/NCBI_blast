@@ -105,13 +105,63 @@ export function useSyncActions(state: any, recordsActions: any) {
         // 二次防御：只有信号明确来自其他端才触发加载
         initFromDatabase();
       }
+      
+      // 核心修复：处理 AI 批量翻译推送的结果
+      if (type === 'translation_done' && data.original) {
+        const entries = codeLookupEntries.value;
+        let changed = false;
+        
+        // 查找所有匹配原学名的词条并更新
+        for (const entry of entries) {
+           // 如果名称尚未翻译（为空或等于学名），则填充翻译结果
+           if (entry.latinName === data.original || entry.name === data.original) {
+              if (data.translated && data.translated !== data.original) {
+                 entry.name = `${data.translated}(${data.original})`;
+                 changed = true;
+              }
+           }
+        }
+        
+        if (changed) {
+           codeLookupEntries.value = [...entries]; // 触发响应式更新
+           autoSave(); // 立即执行异步持久化
+        }
+      }
     })
+  }
+
+  /**
+   * 自动持久化保存：将前端所有配置项同步到数据库
+   */
+  async function autoSave() {
+    if (!isInitialized.value) return
+    
+    try {
+      const bridge = getBridge()
+      const data = {
+        entries: [...codeLookupEntries.value],
+        sources: [...sourceEntries.value],
+        counters: [...serialCounters.value],
+        config: codeConfig.value
+      }
+      
+      // 执行持久化写入
+      bridge.db_save_code_lookup(data, (success: boolean) => {
+        if (success) {
+          console.log('[Sync] CodeLookup data persisted successfully');
+        } else {
+          console.warn('[Sync] Failed to persist lookup data');
+        }
+      })
+    } catch (e) {
+      console.error('[Sync] AutoSave failed', e)
+    }
   }
 
   return {
     initFromDatabase,
     setupSync,
-    autoSave: () => {},  
+    autoSave, // 暴露真实的保存函数
     cleanup: () => {
       if (cleanupHandler) {
         cleanupHandler();

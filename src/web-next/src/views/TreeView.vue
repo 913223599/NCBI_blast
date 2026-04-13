@@ -161,6 +161,7 @@ function executeDelete(physical: boolean) {
 
 
 const isSidebarOpen = ref(true)
+const workspaceResetKey = ref(0)
 const activeSideTool = ref<'input' | 'analysis' | 'display'>('input')
 const workspaceFiles = ref<string[]>([])
 const selectedFiles = ref<any[]>([])
@@ -295,7 +296,12 @@ async function refreshWorkspace() {
     if (bridge && typeof bridge.list_tree_sequences === 'function') {
       bridge.list_tree_sequences((res: string) => {
         try {
-          workspaceFiles.value = JSON.parse(res) || []
+          const files = JSON.parse(res) || []
+          // 核心过滤：不显示压缩包本身，只显示解压后的内容
+          workspaceFiles.value = files.filter((f: string) => {
+            const ext = f.toLowerCase().split('.').pop();
+            return !['zip', 'gz', 'tar', 'rar', '7z'].includes(ext || '');
+          })
         } catch (e) {
           console.error("Failed to parse workspace files", e)
         }
@@ -316,8 +322,10 @@ async function clearWorkspace() {
       // @ts-ignore
       bridge.clear_tree_workspace((res: boolean) => {
         workspaceFiles.value = [] // 立即同步前端列表
+        selectedFiles.value = [] 
+        workspaceResetKey.value++ // 强制重置上传组件状态 machine
         if (res) {
-          appStore.showNotification('工作区已清空', 'success')
+          appStore.showNotification('工作区已完成初始化重置', 'success')
         } else {
           appStore.showNotification('部分文件被占用，无法完全清空', 'warning')
         }
@@ -365,7 +373,11 @@ function selectTreeOption(field: string, value: string) {
   if (field === 'msa') treeWorkflows.msa = value
   else if (field === 'engine') treeWorkflows.engine = value
   else if (field === 'model') treeWorkflows.model = value
-  else if (field === 'mode') settings.mode = value as any
+  else if (field === 'sortMode') {
+    // 关键修复：分类学排序需要注入已识别的注释字典
+    applyTreeSorting(value as any, treeAnnotations.value)
+    appStore.showNotification(`进化树拓扑已按 [${value}] 重新排序`, 'info')
+  }
   else if (field === 'labelMode') {
     console.log(`[TreeView] Switching label mode from ${settings.labelDisplayMode} to ${value}`)
     settings.labelDisplayMode = value as any
@@ -664,6 +676,7 @@ onMounted(() => {
           <div v-if="activeSideTool === 'input'" class="panel-section">
             <h3 class="section-title">▶ 数据采集</h3>
             <UniversalUpload 
+              :key="workspaceResetKey"
               type="tree"
               accept=".fasta,.fas,.fa,.seq,.txt,.fna,.zip,.gz,.ab1,.abi,.nwk"
               label="上传序列 / 拖拽发育成树"
@@ -841,7 +854,7 @@ onMounted(() => {
                 <div v-if="openDropdown === 'sortMode'" class="dropdown-list">
                   <div v-for="o in sortModeOptions" :key="o.value" class="opt"
                     :class="{ selected: settings.sortMode === o.value }"
-                    @click.stop="applyTreeSorting(o.value as any); openDropdown = null">{{ o.label }}</div>
+                    @click.stop="selectTreeOption('sortMode', o.value)">{{ o.label }}</div>
                 </div>
               </div>
             </div>

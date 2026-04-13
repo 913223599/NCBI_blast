@@ -14,6 +14,8 @@ import sys
 import re
 import psutil
 import time
+import platform
+import logging.handlers
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -44,6 +46,18 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger("api_server")
+
+# ─── Windows asyncio 稳定性补丁 ────────────────────────
+if platform.system() == "Windows":
+    # 抑制 proactor_events.py 中的已知断言错误
+    # 该错误是 asyncio 内部 Bug，通常不影响业务逻辑但会产生大量冗余日志
+    class AsyncioAssertionFilter(logging.Filter):
+        def filter(self, record):
+            return "assert f is self._write_fut" not in record.getMessage()
+    
+    logging.getLogger("asyncio").addFilter(AsyncioAssertionFilter())
+    logger.info("🔧 已应用 Windows asyncio 稳定性补丁 (日志过滤)")
+
 print(">>> Python API Server Process Started", flush=True)
 
 # ─── 资源监控 ─────────────────────────────────────────
@@ -161,13 +175,15 @@ app.add_middleware(
 )
 
 # 动态载入分散在各路由模块的接口
-from .routes import blast, strains, dictionary, tree, settings, core
+from .routes import blast, strains, dictionary, tree, settings, core, common, taxonomy
 
+app.include_router(common.router)
 app.include_router(blast.router)
 app.include_router(strains.router)
 app.include_router(dictionary.router)
 app.include_router(tree.router)
 app.include_router(settings.router)
+app.include_router(taxonomy.router)
 app.include_router(core.router)
 
 @app.websocket("/ws")

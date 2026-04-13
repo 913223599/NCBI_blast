@@ -131,10 +131,10 @@ export function useTree() {
         }
     }
 
-    function applyTreeSorting(mode: typeof settings.sortMode) {
+    function applyTreeSorting(mode: typeof settings.sortMode, annotations?: Record<string, string>) {
         if (hasTree.value && model.value) {
             settings.sortMode = mode
-            model.value.applySorting(mode)
+            model.value.applySorting(mode, annotations)
             rawNewick.value = model.value.getNewick()
             updateLayout()
             renderer.fitView(model.value)

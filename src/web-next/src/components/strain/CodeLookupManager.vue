@@ -22,6 +22,9 @@
         <button class="action-btn secondary" @click="handleTranslateAll" :disabled="isTranslating">
           🌐 {{ isTranslating ? '正在翻译...' : '全量翻译' }}
         </button>
+        <button class="action-btn secondary" @click="handleTaxonomyAudit" :disabled="isAuditing">
+          🛡️ {{ isAuditing ? '正在校核...' : 'NCBI校核' }}
+        </button>
       </div>
     </div>
 
@@ -56,26 +59,34 @@
                 @click="toggleExpand(genus.fullPath)"
               >
                 <span class="expand-icon">{{ isExpanded(genus.fullPath) ? '▼' : '▶' }}</span>
-                <span class="node-code">{{ genus.code }}</span>
-                <span class="node-name">{{ genus.name }}</span>
-                <span v-if="genus.latinName" class="node-latin">{{ genus.latinName }}</span>
-                <button 
-                  v-if="genus.latinName && !hasChinese(genus.name)"
-                  class="node-action-btn translate"
-                  title="自动翻译"
-                  @click.stop="handleTranslateEntry(genus.fullPath)"
-                >🌐</button>
-                <span class="node-count">{{ getSpeciesCount(catCode, genus.code) }} 种</span>
-                <button
-                  v-if="!genus.isBuiltin"
-                  class="node-action-btn delete"
-                  @click.stop="handleDeleteGenus(genus.fullPath)"
-                >✕</button>
-                <button
-                  class="node-action-btn toggle"
-                  :class="{ disabled: !genus.enabled }"
-                  @click.stop="handleToggleGenus(genus.fullPath)"
-                >{{ genus.enabled ? '●' : '○' }}</button>
+                <div class="row-main">
+                  <span class="node-code">{{ genus.code }}</span>
+                  <span class="row-name">
+                    {{ genus.name }}
+                    <span v-if="genus.verified" class="verified-badge" title="NCBI 官方分类学认证">🛡️</span>
+                  </span>
+                  <span v-if="genus.latinName" class="node-latin">{{ genus.latinName }}</span>
+                </div>
+                <div class="row-actions">
+                  <button 
+                    v-if="genus.latinName && !hasChinese(genus.name)"
+                    class="node-action-btn translate"
+                    @click.stop="handleTranslateEntry(genus.fullPath)"
+                    title="AI 智能翻译"
+                  >🤖</button>
+                  <button class="node-action-btn edit" @click.stop="startEdit(genus)" title="手动修正名称">✏️</button>
+                  <button 
+                    v-if="!genus.isBuiltin"
+                    class="node-action-btn delete" 
+                    @click.stop="handleDeleteGenus(genus.fullPath)"
+                    title="删除此分类条目"
+                  >✕</button>
+                  <button
+                    class="node-action-btn toggle"
+                    :class="{ disabled: !genus.enabled }"
+                    @click.stop="handleToggleGenus(genus.fullPath)"
+                  >{{ genus.enabled ? '●' : '○' }}</button>
+                </div>
               </div>
 
               <!-- 种列表 -->
@@ -86,25 +97,34 @@
                   class="tree-node"
                 >
                   <div class="node-row level-3">
-                    <span class="node-code">{{ species.code }}</span>
-                    <span class="node-name">{{ species.name }}</span>
-                    <span v-if="species.latinName" class="node-latin">{{ species.latinName }}</span>
-                    <button 
-                      v-if="species.latinName && !hasChinese(species.name)"
-                      class="node-action-btn translate"
-                      title="自动翻译"
-                      @click.stop="handleTranslateEntry(species.fullPath)"
-                    >🌐</button>
-                    <button
-                      v-if="!species.isBuiltin"
-                      class="node-action-btn delete"
-                      @click.stop="handleDeleteSpecies(species.fullPath)"
-                    >✕</button>
-                    <button
-                      class="node-action-btn toggle"
-                      :class="{ disabled: !species.enabled }"
-                      @click.stop="handleToggleSpecies(species.fullPath)"
-                    >{{ species.enabled ? '●' : '○' }}</button>
+                    <div class="row-main">
+                      <span class="node-code">{{ species.code }}</span>
+                      <span class="row-name">
+                        {{ species.name }}
+                        <span v-if="species.verified" class="verified-badge" title="NCBI 官方分类学认证">🛡️</span>
+                      </span>
+                      <span v-if="species.latinName" class="node-latin">{{ species.latinName }}</span>
+                    </div>
+                    <div class="row-actions">
+                      <button 
+                        v-if="species.latinName && !hasChinese(species.name)"
+                        class="node-action-btn translate"
+                        title="自动翻译"
+                        @click.stop="handleTranslateEntry(species.fullPath)"
+                      >🌐</button>
+                      <button class="node-action-btn edit" @click.stop="startEdit(species)" title="手动修正名称">✏️</button>
+                      <button
+                        v-if="!species.isBuiltin"
+                        class="node-action-btn delete"
+                        @click.stop="handleDeleteSpecies(species.fullPath)"
+                        title="删除此分类条目"
+                      >✕</button>
+                      <button
+                        class="node-action-btn toggle"
+                        :class="{ disabled: !species.enabled }"
+                        @click.stop="handleToggleSpecies(species.fullPath)"
+                      >{{ species.enabled ? '●' : '○' }}</button>
+                    </div>
                   </div>
                 </div>
 
@@ -290,6 +310,34 @@
         </div>
       </div>
     </div>
+    <div v-if="isEditModalOpen" class="modal-overlay" @click.self="isEditModalOpen = false">
+      <div class="edit-modal premium-card animate-slide-up">
+        <div class="modal-header">
+          <span class="modal-icon">✏️</span>
+          <div class="header-text">
+            <h3>手动修正分类名称</h3>
+            <p>修正编码 {{ editingEntry?.code }} 对应的层级名称信息</p>
+          </div>
+          <button class="btn-close-sm" @click="isEditModalOpen = false">✕</button>
+        </div>
+        
+        <div class="edit-form">
+          <div class="form-item">
+            <label>中文名称 (描述)</label>
+            <input v-model="editForm.name" class="premium-input" placeholder="输入准确的中文名称..." />
+          </div>
+          <div class="form-item">
+            <label>拉丁名 (学名)</label>
+            <input v-model="editForm.latinName" class="premium-input" placeholder="输入准确的拉丁学名..." />
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn-glass" @click="isEditModalOpen = false">取消</button>
+          <button class="btn-premium" @click="saveManualEdit">确认修改并在全局应用</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -298,11 +346,17 @@ import { ref, computed } from 'vue'
 import type { CategoryCode, ResolvedCode } from '../../types/codeSystem'
 import { CATEGORY_MAP } from '../../types/codeSystem'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
+import { useCodeLookup } from '../../composables/useCodeLookup'
 
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 
 const codeGen = useCodeGenerator()
+const { 
+  removeLookupEntry,
+  auditWithNCBI,
+  updateLookupEntry
+} = useCodeLookup()
 const strain = useStrainStore()
 const appStore = useAppStore()
 
@@ -321,6 +375,32 @@ function toggleExpand(nodeKey: string): void {
     expandedNodes.value.delete(nodeKey)
   } else {
     expandedNodes.value.add(nodeKey)
+  }
+}
+
+/* ========== 编辑逻辑 ========== */
+const isEditModalOpen = ref(false)
+const editingEntry = ref<any>(null)
+const editForm = ref({ name: '', latinName: '' })
+
+function startEdit(entry: any) {
+  editingEntry.value = entry
+  editForm.value = {
+    name: entry.name,
+    latinName: entry.latinName || ''
+  }
+  isEditModalOpen.value = true
+}
+
+function saveManualEdit() {
+  if (editingEntry.value) {
+    updateLookupEntry(editingEntry.value.fullPath, {
+      name: editForm.value.name,
+      latinName: editForm.value.latinName
+    })
+    isEditModalOpen.value = false
+    editingEntry.value = null
+    appStore.showNotification('分类名称已手动修正', 'success')
   }
 }
 
@@ -511,6 +591,26 @@ async function handleTranslateAll() {
     } finally {
       // 批量翻译是后台异步推送的，这里先结束 loading
       setTimeout(() => { isTranslating.value = false }, 1000)
+    }
+  }
+}
+
+const isAuditing = ref(false)
+
+async function handleTaxonomyAudit() {
+  if (confirm('确认与本地 NCBI 数据库比对校核所有未验证词条的层级正确性？')) {
+    isAuditing.value = true
+    try {
+      const res = await codeGen.lookup.auditWithNCBI()
+      if (res.success) {
+        appStore.showNotification(`分类学校核完成，已标记 ${res.count} 条记录为已验证`, 'success')
+      } else {
+        appStore.showNotification('核核失败，请确保本地分类学数据库已就绪', 'error')
+      }
+    } catch (e) {
+      appStore.showNotification('校核过程发生错误', 'error')
+    } finally {
+      isAuditing.value = false
     }
   }
 }
@@ -712,6 +812,156 @@ async function handleTranslateAll() {
   cursor: default;
 }
 
+.row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.row-name {
+  font-weight: 600;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.node-action-btn.edit {
+  color: #6366f1;
+}
+.node-action-btn.edit:hover {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+/* 弹窗样式重构 */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3000;
+  backdrop-filter: blur(10px) saturate(180%);
+}
+
+.premium-card {
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  border-radius: 24px;
+  width: 440px;
+  padding: 32px;
+  position: relative;
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.modal-icon {
+  font-size: 2rem;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+
+.header-text h3 {
+  margin: 0; font-size: 1.25rem; color: #1e293b;
+}
+
+.header-text p {
+  margin: 4px 0 0; font-size: 0.85rem; color: #64748b;
+}
+
+.btn-close-sm {
+  position: absolute;
+  top: 24px; right: 24px;
+  background: none; border: none; font-size: 1.2rem;
+  color: #94a3b8; cursor: pointer; transition: 0.2s;
+}
+.btn-close-sm:hover { color: #ef4444; transform: rotate(90deg); }
+
+.edit-form {
+  display: grid; gap: 20px;
+}
+
+.form-item {
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.form-item label {
+  font-size: 0.78rem; font-weight: 600; color: #475569;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+
+.premium-input {
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  color: #1e293b;
+}
+
+.premium-input:focus {
+  outline: none;
+  background: white;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+}
+
+.modal-footer {
+  margin-top: 32px;
+  display: flex; gap: 12px;
+}
+
+.btn-glass {
+  flex: 1;
+  padding: 12px;
+  background: #f1f5f9;
+  border: none; border-radius: 12px;
+  font-weight: 600; color: #64748b;
+  cursor: pointer; transition: 0.2s;
+}
+.btn-glass:hover { background: #e2e8f0; color: #475569; }
+
+.btn-premium {
+  flex: 2;
+  padding: 12px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: none; border-radius: 12px;
+  font-weight: 600; color: white;
+  cursor: pointer; transition: 0.2s;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+.btn-premium:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.4);
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 .expand-icon {
   font-size: 0.6rem;
   color: #94a3b8;
@@ -729,10 +979,6 @@ async function handleTranslateAll() {
   font-weight: 700;
   min-width: 36px;
   text-align: center;
-}
-
-.node-name {
-  flex: 1;
 }
 
 .node-latin {

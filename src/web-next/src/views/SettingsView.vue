@@ -390,12 +390,58 @@ function deleteTerm(english: string): void {
     if (success) { loadDictionary(); appStore.showNotification('已删除', 'info') }
   })
 }
-
 function editTerm(term: any): void {
   newTermEn.value = term.english
   newTermZh.value = term.chinese
   newTermCat.value = term.category || 'species'
   document.querySelector('.add-term-form')?.scrollIntoView({ behavior: 'smooth' })
+}
+
+const isAuditing = ref(false)
+function handleTaxonomyAudit(): void {
+  const termsToAudit = dictResults.value
+    .filter(t => t.english)
+    .map(t => t.english)
+  
+  if (termsToAudit.length === 0) {
+    appStore.showNotification('当前没有需要校核的未识别词条', 'info')
+    return
+  }
+
+  if (confirm(`确认对当前显示的 ${termsToAudit.length} 条词条进行 NCBI 官方分类等级校核？`)) {
+    isAuditing.value = true
+    getBridge().taxonomy_audit_batch(termsToAudit, (res: any) => {
+      if (res.success && res.results) {
+        let taskCount = res.results.length
+        let doneCount = 0
+        
+        res.results.forEach((item: any) => {
+          if (item.valid && item.rank) {
+            // 同步 Rank 到分类，并标记为已核对
+            getBridge().save_dictionary_term(item.name, '', item.rank, (ok: boolean) => {
+              getBridge().verify_dictionary_term(item.name, () => {
+                doneCount++
+                if (doneCount === taskCount) {
+                  isAuditing.value = false
+                  appStore.showNotification('NCBI 批量校核与分类修正完成', 'success')
+                  loadDictionary()
+                }
+              })
+            })
+          } else {
+            doneCount++
+            if (doneCount === taskCount) {
+              isAuditing.value = false
+              loadDictionary()
+            }
+          }
+        })
+      } else {
+        isAuditing.value = false
+        appStore.showNotification('校核失败，请检查本地分类数据库状态', 'error')
+      }
+    })
+  }
 }
 
 /* -------- 物种分类数据库管理 -------- */
@@ -819,6 +865,9 @@ onUnmounted(() => {
               <input type="checkbox" v-model="proofreadMode" @change="loadDictionary" />
               开启纯净校对模式
             </label>
+            <button class="btn-action" style="padding: 8px 16px;" @click="handleTaxonomyAudit" :disabled="isAuditing || loadingDict">
+              🛡️ {{ isAuditing ? '校核中...' : 'NCBI校核' }}
+            </button>
             <button class="btn-action" style="padding: 8px 16px;" @click="exportDictionaryCSV">⬇️ 导出完整词库 (CSV)</button>
             <button class="btn-action" style="padding: 8px 16px;" @click="loadDictionary">🔄 刷新数据</button>
           </div>

@@ -233,7 +233,7 @@ const electronBridge = {
     sync_event: signals.sync_event,
 
     // ═══ 文件操作（通过 Electron IPC）═══
-    request_file_load(fileType: string) {
+    request_file_load(fileType: string, multiple: boolean = false) {
         const electron = window.electronAPI;
         if (!electron) {
             console.warn('[Bridge] 当前处于非 Electron 环境，无法调用原生文件对话框。');
@@ -252,11 +252,24 @@ const electronBridge = {
                 { name: 'All Files', extensions: ['*'] }
             ]
         };
+
+        const properties = ['openFile'];
+        if (multiple) properties.push('multiSelections');
+
         electron.openFileDialog({
-            title: `Open ${fileType}`,
-            filters: filterMap[fileType] || [{ name: 'All Files', extensions: ['*'] }]
+            title: `批量导入: ${fileType === 'fasta' ? '序列文件' : '进化树文件'}`,
+            filters: filterMap[fileType] || [{ name: 'All Files', extensions: ['*'] }],
+            properties: properties
         }).then(async (paths: string[] | null) => {
             if (!paths || paths.length === 0) return;
+            
+            // 批量模式直接调用处理函数
+            if (multiple && (window as any).treeView?.handleExternalFiles) {
+                (window as any).treeView.handleExternalFiles(paths);
+                return;
+            }
+
+            // 单文件兼容逻辑 (Legacy)
             const filePath = paths[0];
             if (!filePath) return;
             const content = await electron.readFile(filePath);
@@ -602,6 +615,10 @@ const electronBridge = {
         const result = await apiPost('/api/strain/sys_config/codeLookup', data);
         callback?.(result.success);
     },
+    async taxonomy_audit_batch(texts: string[], callback?: (res: any) => void) {
+        const result = await apiPost('/api/taxonomy/audit', { texts });
+        callback?.(result);
+    },
 
     async db_save_sequence(seqJson: string, callback?: (res: boolean) => void) {
         const data = JSON.parse(seqJson);
@@ -725,7 +742,7 @@ const electronBridge = {
             const formData = new FormData();
             formData.append('file', file);
             
-            const response = await fetch(`${API_BASE}/api/blast/upload`, {
+            const response = await fetch(`${API_BASE}/api/common/upload`, {
                 method: 'POST',
                 body: formData
             });
