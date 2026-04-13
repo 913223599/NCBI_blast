@@ -68,6 +68,7 @@
                   <span v-if="genus.latinName" class="node-latin">{{ genus.latinName }}</span>
                 </div>
                 <div class="row-actions">
+                  <span class="child-count-pill">{{ getSpeciesList(catCode, genus.code).length }} 种</span>
                   <button 
                     v-if="genus.latinName && !hasChinese(genus.name)"
                     class="node-action-btn translate"
@@ -840,7 +841,17 @@ async function handleTaxonomyAudit() {
   background: rgba(99, 102, 241, 0.1);
 }
 
-/* 弹窗样式重构 */
+.child-count-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-right: 4px;
+  border: 1px solid #e2e8f0;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;

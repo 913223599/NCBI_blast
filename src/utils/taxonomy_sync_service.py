@@ -16,28 +16,32 @@ class TaxonomySyncService:
         self.ai_translator = get_global_biology_translator()
 
     def _generate_next_code(self, current_codes: List[str], length: int, alpha: bool = False) -> str:
-        """Helper to generate the next sequential code (e.g., AAA, AAB, or 01, 02)."""
-        if not current_codes:
-            return "A" * length if alpha else "01" if length == 2 else "0" * (length - 1) + "1"
-        
-        current_codes.sort()
-        last_code = current_codes[-1]
+        """
+        [插空算法] 彻底同步前端逻辑：
+        从 AAA (或 01) 开始遍历，找到第一个未被占用的位置。
+        """
+        from string import ascii_uppercase
+        existing_set = set(current_codes)
         
         if alpha:
-            # Increment AAA -> AAB
-            val = 0
-            for char in last_code:
-                val = val * 26 + (ord(char) - ord('A'))
-            val += 1
-            res = ""
-            for _ in range(length):
-                res = chr(ord('A') + (val % 26)) + res
-                val //= 26
-            return res
+            # 暴力遍历 AAA -> ZZZ (对于 3 位编码，总共 17576 种组合，毫秒级)
+            chars = ascii_uppercase
+            for i in range(26**length):
+                code = ""
+                temp_i = i
+                for _ in range(length):
+                    code = chars[temp_i % 26] + code
+                    temp_i //= 26
+                if code not in existing_set:
+                    return code
+            return "ZZZ" # 溢出兜底
         else:
-            # Increment 01 -> 02
-            val = int(last_code) + 1
-            return str(val).zfill(length)
+            # 遍历 01 -> 99
+            for i in range(1, 10**length):
+                code = str(i).zfill(length)
+                if code not in existing_set:
+                    return code
+            return "99"
 
     def sync_taxonomy_from_name(self, full_name: str) -> Dict[str, Any]:
         """
@@ -66,15 +70,15 @@ class TaxonomySyncService:
         # 这会将 "密歇根克雷伯氏菌 Klebsiella michiganensis" 变为 " Klebsiella michiganensis"
         full_name = re.sub(r'[^\x00-\x7f]', ' ', full_name).strip()
 
-        # 3. 执行标准的双名法正则匹配
-        match = re.match(r'^[\*\s]*([A-Za-z]+)\s+([A-Za-z\.\-_0-9]+)', full_name)
+        # 3. 执行标准的双名法正则匹配 (增强宽容度)
+        match = re.search(r'([A-Za-z]+)\s+([A-Za-z\.\-_0-9]+)', full_name)
         if not match:
             return {"success": False, "reason": f"未能解析出标准的双名法物种名称: {full_name}"}
         
-        genus_part = match.group(1)
+        genus_part = match.group(1).capitalize() # 规范化首字母大写
         # 归一化处理：去掉 ( ) , 等符号，并且统一将 'sp.' 简化为 'sp' 以免重复编码
-        species_part = match.group(2).replace('(', '').replace(')', '').replace(',', '').rstrip('.')
-        clean_name = f"{genus_part} {species_part}".strip()
+        species_suffix = match.group(2).replace('(', '').replace(')', '').replace(',', '').rstrip('.')
+        clean_name = f"{genus_part} {species_suffix}".strip()
         
         logger.info(f"[TaxonomySync] Resolved to: {clean_name}")
         
@@ -151,7 +155,7 @@ class TaxonomySyncService:
             entries.append(genus_entry)
             
         # Ensure Species
-        species_part_lower = species_part.lower()
+        species_suffix_lower = species_suffix.lower()
         clean_name_lower = clean_name.lower()
         
         # 兼容性匹配：检查 latinName 是否匹配全称，或者 name 是否匹配种名部分
@@ -159,7 +163,7 @@ class TaxonomySyncService:
                               and e.get('parentPath') == genus_entry['fullPath'] 
                               and (
                                   (e.get('latinName') or '').lower() == clean_name_lower or 
-                                  (e.get('name') or '').lower() == species_part_lower
+                                  (e.get('name') or '').lower() == species_suffix_lower
                               )), None)
         
         if not species_entry:
@@ -168,16 +172,16 @@ class TaxonomySyncService:
             
             # 尝试翻译种名
             translated_species = self.ai_translator.translate_text(clean_name, category='species')
-            if translated_species == clean_name and species_part:
+            if translated_species == clean_name and species_suffix:
                 # 如果种名全称没翻译，尝试翻译种加词部分
-                translated_species = self.ai_translator.translate_text(species_part, category='species')
+                translated_species = self.ai_translator.translate_text(species_suffix, category='species')
             
             # 格式化为：中文(拉丁文)
             final_name = translated_species
-            if translated_species and translated_species != clean_name and translated_species != species_part:
+            if translated_species and translated_species != clean_name and translated_species != species_suffix:
                 final_name = f"{translated_species}({clean_name})"
             elif not translated_species:
-                final_name = species_part if species_part else "sp."
+                final_name = species_suffix if species_suffix else "sp."
 
             species_entry = {
                 "parentPath": genus_entry['fullPath'],
@@ -194,6 +198,12 @@ class TaxonomySyncService:
         # Save back to database — 保留完整的 codeLookup 对象，只更新 entries
         code_lookup["entries"] = entries
         self.db_manager.save_sys_config('codeLookup', code_lookup)
+        
+        # 核心修正：由于修改了系统配置，必须让 strains.py 中的内存缓存失效，否则前端刷新拿不到最新编码
+        try:
+            from ..backend.routes.strains import invalidate_cache
+            invalidate_cache()
+        except: pass
         
         return {
             "success": True,

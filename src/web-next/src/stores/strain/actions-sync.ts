@@ -108,54 +108,67 @@ export function useSyncActions(state: any, recordsActions: any) {
       
       // 核心修复：处理 AI 批量翻译推送的结果
       if (type === 'translation_done' && data.original) {
-        const entries = codeLookupEntries.value;
+        const entries = [...codeLookupEntries.value]; 
         let changed = false;
         
         // 查找所有匹配原学名的词条并更新
-        for (const entry of entries) {
+        for (let i = 0; i < entries.length; i++) {
+           const entry = entries[i];
            // 如果名称尚未翻译（为空或等于学名），则填充翻译结果
            if (entry.latinName === data.original || entry.name === data.original) {
               if (data.translated && data.translated !== data.original) {
-                 entry.name = `${data.translated}(${data.original})`;
+                 // 核心修正：避免直接修改可能被冻结的对象，使用浅拷贝更新以确保响应式触发
+                 entries[i] = { 
+                    ...entry, 
+                    name: `${data.translated}(${data.original})`,
+                    verified: true 
+                 };
                  changed = true;
               }
            }
         }
         
         if (changed) {
-           codeLookupEntries.value = [...entries]; // 触发响应式更新
-           autoSave(); // 立即执行异步持久化
+           codeLookupEntries.value = entries; 
+           autoSave(); 
         }
       }
     })
   }
 
+  let autoSaveTimer: any = null
+  
   /**
-   * 自动持久化保存：将前端所有配置项同步到数据库
+   * 自动持久化保存：具备防抖能力，防止批量更新时产生请求海啸
    */
   async function autoSave() {
     if (!isInitialized.value) return
     
-    try {
-      const bridge = getBridge()
-      const data = {
-        entries: [...codeLookupEntries.value],
-        sources: [...sourceEntries.value],
-        counters: [...serialCounters.value],
-        config: codeConfig.value
-      }
-      
-      // 执行持久化写入
-      bridge.db_save_code_lookup(data, (success: boolean) => {
-        if (success) {
-          console.log('[Sync] CodeLookup data persisted successfully');
-        } else {
-          console.warn('[Sync] Failed to persist lookup data');
+    // 清除上一个定时器
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    
+    // 设置 800ms 防抖，确保批量操作完成后只触发一次网络 IO
+    autoSaveTimer = setTimeout(async () => {
+      try {
+        const bridge = getBridge()
+        const data = {
+          entries: [...codeLookupEntries.value],
+          sources: [...sourceEntries.value],
+          counters: [...serialCounters.value],
+          config: codeConfig.value
         }
-      })
-    } catch (e) {
-      console.error('[Sync] AutoSave failed', e)
-    }
+        
+        bridge.db_save_code_lookup(data, (success: boolean) => {
+          if (success) {
+            console.log('[Sync] CodeLookup data persisted (debounced)');
+          }
+        })
+      } catch (e) {
+        console.error('[Sync] AutoSave failed', e)
+      } finally {
+        autoSaveTimer = null
+      }
+    }, 800)
   }
 
   return {

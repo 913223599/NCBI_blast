@@ -138,6 +138,10 @@ class BiologyTranslator:
                     logging.getLogger(__name__).warning("请求了 AI 翻译，但尚未配置有效 API Key。")
             else:
                 try:
+                    import logging
+                    log = logging.getLogger(__name__)
+                    log.info(f"[AI] 正在调用模型 '{self.ai_model}' 翻译: {text}")
+                    
                     ai_result = self.ai_translator.translate_text(text)
                     if ai_result and ai_result != text:
                         # 恢复并加强自动保存机制：AI 翻译成功后应记录，下次可从本地库秒级返回

@@ -626,7 +626,16 @@ onMounted(() => {
     if (props.initialSelections.passage !== undefined) selectedPassage.value = props.initialSelections.passage
     
     // 立即尝试生成编号
-    setTimeout(tryGenerate, 0)
+    setTimeout(() => {
+      // 关键修复：如果来源为空，自动选择第一个可用来源（XX）
+      if (!selectedSource.value) {
+        const firstSource = codeGen.lookup.enabledSources.value[0]
+        if (firstSource) {
+          selectedSource.value = firstSource.code
+        }
+      }
+      tryGenerate()
+    }, 0)
   }
 
   document.addEventListener('click', closeAllPanels)

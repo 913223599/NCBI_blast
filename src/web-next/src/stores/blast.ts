@@ -185,34 +185,39 @@ export const useBlastStore = defineStore('blast', () => {
     }
 
     function updateTranslation(original: string, translated: string): void {
-        results.value.forEach(hit => {
+        // 创建新数组以触发 shallowRef 响应式
+        results.value = results.value.map(hit => {
+            let updatedHit = { ...hit }
+            let changed = false
+
             // Check structured list first
             if (hit.consensusList && hit.consensusList.length > 0) {
                 const targetObj = hit.consensusList.find(c => c.name === original)
                 if (targetObj) {
-                    if (!hit.translatedName) hit.translatedName = hit.speciesName
-                    hit.translatedName = hit.translatedName.replace(original, translated)
-                    hit.showOriginal = false // 确保回包后立刻展示为译文
+                    if (!updatedHit.translatedName) updatedHit.translatedName = hit.speciesName
+                    updatedHit.translatedName = updatedHit.translatedName.replace(original, translated)
+                    updatedHit.showOriginal = false 
+                    changed = true
                 }
             } else if (hit.speciesName && hit.speciesName.includes(original)) {
-                if (!hit.translatedName) hit.translatedName = hit.speciesName
+                if (!updatedHit.translatedName) updatedHit.translatedName = hit.speciesName
                 
-                // [修复] 检查是否已经存在该翻译，防止出现 "贝莱斯芽孢杆菌 (贝莱斯芽孢杆菌)" 类似的双重翻译
-                // 如果当前字符串已经包含了 "Translated (Original)" 这种模式，且 Translated 已经对上了，就不再重复替换
                 const alreadySplicedPattern = `${translated} (${original})`
-                if (hit.translatedName.includes(alreadySplicedPattern)) {
-                    return
+                if (updatedHit.translatedName.includes(alreadySplicedPattern)) {
+                    return hit // No change needed
                 }
 
-                // 替换原文或之前的 (AI翻译中...) 占位符
                 const targetPattern = original + " (AI翻译中...)"
-                if (hit.translatedName.includes(targetPattern)) {
-                    hit.translatedName = hit.translatedName.replace(targetPattern, translated)
+                if (updatedHit.translatedName.includes(targetPattern)) {
+                    updatedHit.translatedName = updatedHit.translatedName.replace(targetPattern, translated)
                 } else {
-                    hit.translatedName = hit.translatedName.replace(original, translated)
+                    updatedHit.translatedName = updatedHit.translatedName.replace(original, translated)
                 }
-                hit.showOriginal = false // 确保回包后立刻展示为译文
+                updatedHit.showOriginal = false 
+                changed = true
             }
+            
+            return changed ? updatedHit : hit
         })
     }
 

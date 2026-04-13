@@ -202,13 +202,44 @@ onMounted(async () => {
     if (draft.species) {
       const syncRes: any = await syncTaxonomyToBackend(draft.species)
       if (syncRes) {
-        initialCategorySelections.value = { category: syncRes.codeCategory, genus: syncRes.codeGenus, species: syncRes.codeSpecies }
-        form.value.name = syncRes.speciesName; form.value.species = syncRes.speciesName
+        initialCategorySelections.value = { 
+          category: syncRes.codeCategory, 
+          genus: syncRes.codeGenus, 
+          species: syncRes.codeSpecies 
+        }
+        form.value.name = syncRes.speciesName; 
+        form.value.species = syncRes.speciesName
+        
+        // 关键修复：同步成功后，必须立即触发一次数据联动，否则 sampleType 为空导致无法提交
+        handleCodeUpdate({
+          sampleCode: '', // 初始占空，等待 SampleCodeInput 接管
+          codeCategory: syncRes.codeCategory,
+          codeGenus: syncRes.codeGenus,
+          codeSpecies: syncRes.codeSpecies,
+          generationRequest: {
+            category: syncRes.codeCategory,
+            genus: syncRes.codeGenus,
+            species: syncRes.codeSpecies
+          }
+        })
       }
     }
 
     const match = attemptTaxonomicMatch(draft.species); const consensus = match?.consensus || draft.species
-    Object.assign(form.value, { name: form.value.name || consensus, species: form.value.species || consensus, sequence: draft.sequence || '' })
+    
+    // 深度合并草稿信息，确保 BLAST 的 identity, evalue 等 metadata 不丢失
+    Object.assign(form.value, { 
+      name: form.value.name || consensus, 
+      species: form.value.species || consensus, 
+      sequence: draft.sequence || '',
+      accession: draft.accession || form.value.accession,
+      strain: draft.strain || '',
+      metadata: {
+        ...form.value.metadata,
+        ...(draft.metadata || {})
+      }
+    })
+    
     if (form.value.sequence) { syncToGeneDB.value = true; geneInfo.value.title = `${consensus}_16S` }
   }
 })
@@ -237,7 +268,21 @@ function handleCodeUpdate(data: any) {
 function handleConfirm() {
   if (!canSubmit.value) return
   if (pendingRequest.value) {
-    const code = codeGen.commit(pendingRequest.value); form.value.sampleCode = code; form.value.accession = code
+    try {
+      const code = codeGen.commit(pendingRequest.value)
+      form.value.sampleCode = code
+      form.value.accession = code
+    } catch (err: any) {
+      console.error('[SampleEntryDialog] 编码提交失败:', err)
+      appStore.showNotification(`入库失败: ${err.message}`, 'error')
+      return
+    }
+  }
+
+  // 最终校验：确保 14 位编号已生成
+  if (!form.value.sampleCode && !form.value.accession) {
+    appStore.showNotification('无法入库：样本编号尚未生成，请检查分类选择是否完整', 'warning')
+    return
   }
 
   // 计算目标位置列表

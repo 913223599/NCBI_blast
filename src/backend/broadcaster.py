@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from typing import List, Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -16,9 +17,14 @@ class EventBroadcaster:
         # 记录 WebSocket -> client_id 的映射
         self.connections: Dict[WebSocket, str] = {}
         self._lock = threading.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def connect(self, websocket: WebSocket, client_id: str = "unknown"):
         """处理新连接进入，记录其唯一的 client_id"""
+        # 记录主线程循环，确保后续从其它线程广播时能正确调度
+        if not self._loop:
+            self._loop = asyncio.get_running_loop()
+            
         await websocket.accept()
         with self._lock:
             self.connections[websocket] = client_id
@@ -41,19 +47,25 @@ class EventBroadcaster:
             "type": event_type, 
             "data": data or {},
             "sender_id": exclude_id, # 让接收端也能知道是谁发的
-            "timestamp": asyncio.get_event_loop().time()
+            "timestamp": time.time()
         }
         message = json.dumps(payload, ensure_ascii=False)
         
         targets = []
         with self._lock:
-            for ws, cid in self.connections.items():
-                if exclude_id and cid == exclude_id:
-                    continue
-                targets.append(ws)
+            targets = list(self.connections.keys())
+
+        if not targets:
+            return
 
         disconnected = []
         for connection in targets:
+            # 广播阶段需再次检查 cid 过滤
+            with self._lock:
+                cid = self.connections.get(connection)
+                if not cid or (exclude_id and cid == exclude_id):
+                    continue
+
             try:
                 await connection.send_text(message)
             except Exception:
@@ -64,17 +76,23 @@ class EventBroadcaster:
             self.disconnect(conn)
 
     def broadcast_sync(self, event_type: str, data: Optional[Dict[str, Any]] = None, exclude_id: Optional[str] = None):
-        """同步接口兼容"""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(self.broadcast(event_type, data, exclude_id))
-            else:
-                loop.run_until_complete(self.broadcast(event_type, data, exclude_id))
-        except RuntimeError:
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            new_loop.run_until_complete(self.broadcast(event_type, data, exclude_id))
+        """同步接口兼容：优先使用主循环，不产生多余线程/循环"""
+        if self._loop and self._loop.is_running():
+            # 线程安全地调度广播任务到主线程 EventLoop
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast(event_type, data, exclude_id), 
+                self._loop
+            )
+        else:
+            # 兜底 logic: 如果还没 connect 过就没 loop，或者 loop 停了
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.ensure_future(self.broadcast(event_type, data, exclude_id))
+                else:
+                    loop.run_until_complete(self.broadcast(event_type, data, exclude_id))
+            except RuntimeError:
+                pass # 忽略无循环状态下的广播
 
 # 导出单例
 broadcaster = EventBroadcaster()
