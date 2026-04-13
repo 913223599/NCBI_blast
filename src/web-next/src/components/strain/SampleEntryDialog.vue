@@ -651,7 +651,7 @@ function handleConfirm() {
   }
 
   // 记录实际入库的数据
-  const recordsToBatch = []
+  const recordsToBatch: any[] = []
 
   targetPositions.forEach((posLabel) => {
     // 创建数据草稿

@@ -1,4 +1,4 @@
-import { getBridge } from '../../bridge'
+import { getBridge, onEvent } from '../../bridge'
 
 export function useSyncActions(state: any, recordsActions: any) {
   const { 
@@ -13,15 +13,25 @@ export function useSyncActions(state: any, recordsActions: any) {
   } = state
 
   let isLoading = false
+  // 物理级“冷却时间”记录，哪怕是页面刷新也无法绕过（存入 sessionStorage）
+  const getCooldown = () => {
+    return parseInt(sessionStorage.getItem('sync_cooldown') || '0');
+  }
+  const setCooldown = () => {
+    sessionStorage.setItem('sync_cooldown', Date.now().toString());
+  }
 
-  /**
-   * 纯静态加载逻辑：
-   * 仅在启动或手动刷新时执行一次。
-   * 完全剥离 WebSocket 监听，杜绝任何“被动触发”的可能性。
-   */
   async function initFromDatabase() {
-    if (isLoading) return
+    const now = Date.now();
+    const lastSync = getCooldown();
+    
+    // 如果 2500ms 内刚加载过，或者正在加载中，坚决拦截
+    if (isLoading || (now - lastSync < 2500)) {
+      return;
+    }
+
     isLoading = true
+    setCooldown();
     
     try {
       const bridge = getBridge()
@@ -32,10 +42,11 @@ export function useSyncActions(state: any, recordsActions: any) {
           const data = typeof result === 'string' ? JSON.parse(result) : result
           if (!data) { isLoading = false; return }
 
-          // A. 冰箱管理 (使用极简 Object.freeze 隔离)
+          // 核心治理：Object.freeze 是防止内存溢出的唯一真神
           if (data.freezers) {
+            freezers.value = Object.freeze(data.freezers)
             const map: Record<string, string> = {}
-            data.freezers.forEach((f: any) => {
+            const indexLoc = (f: any) => {
               map[f.id] = f.name
               f.shelves?.forEach((s: any) => {
                 map[s.id] = s.name
@@ -49,14 +60,13 @@ export function useSyncActions(state: any, recordsActions: any) {
                   })
                 })
               })
-            })
-            freezers.value = Object.freeze(data.freezers)
+            }
+            data.freezers.forEach(indexLoc)
             locationMap.value = Object.freeze(map)
           }
 
-          // B. 样本记录 (使用 Object.freeze 物理断绝对响应式系统的依赖)
           if (data.records) {
-            // 脱水处理：列表页不需要庞大的序列/元数据
+            // 彻底脱水，仅保留列表展示必须字段
             const dehydrated = data.records.map((r: any) => {
                const { sequence, metadata, ...rest } = r
                return Object.freeze(rest)
@@ -64,7 +74,6 @@ export function useSyncActions(state: any, recordsActions: any) {
             records.value = Object.freeze(dehydrated)
           }
 
-          // C. 系统配置
           if (data.codeLookup) {
             codeLookupEntries.value = Object.freeze(data.codeLookup.entries || [])
             sourceEntries.value = Object.freeze(data.codeLookup.sources || [])
@@ -75,7 +84,7 @@ export function useSyncActions(state: any, recordsActions: any) {
           recordsActions.applyFilters()
           isInitialized.value = true
         } catch (e) {
-          console.error('[StrainStore] Parse Error', e)
+          console.error('[Sync] Parse Error', e)
         } finally {
           isLoading = false
         }
@@ -85,10 +94,29 @@ export function useSyncActions(state: any, recordsActions: any) {
     }
   }
 
+  /* ======== 安全同步逻辑 ======== */
+  let cleanupHandler: (() => void) | null = null
+
+  function setupSync() {
+    if (cleanupHandler) return
+    
+    cleanupHandler = onEvent((type: string, data: any) => {
+      if (type === 'data_updated' && data.module === 'strains') {
+        // 二次防御：只有信号明确来自其他端才触发加载
+        initFromDatabase();
+      }
+    })
+  }
+
   return {
     initFromDatabase,
-    setupSync: () => {}, // 物理删止同步订阅
-    autoSave: () => {},  // 彻底禁用自动保存，防止竞态
-    cleanup: () => {}
+    setupSync,
+    autoSave: () => {},  
+    cleanup: () => {
+      if (cleanupHandler) {
+        cleanupHandler();
+        cleanupHandler = null;
+      }
+    }
   }
 }

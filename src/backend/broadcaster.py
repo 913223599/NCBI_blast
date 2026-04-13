@@ -9,89 +9,72 @@ logger = logging.getLogger("broadcaster")
 
 class EventBroadcaster:
     """
-    统一广播模块 - 负责管理所有端（Electron/Web）的实时状态同步
-    
-    职责：
-    1. 管理 WebSocket 活动连接池。
-    2. 提供异步与同步环境兼容的广播接口。
-    3. 屏蔽底层通信细节，实现业务逻辑与消息分发的解耦。
+    升级版广播模块 - 具备发送者识别与排除能力，防止同步死循环。
     """
 
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        # 记录 WebSocket -> client_id 的映射
+        self.connections: Dict[WebSocket, str] = {}
         self._lock = threading.Lock()
 
-    async def connect(self, websocket: WebSocket):
-        """处理新连接进入"""
+    async def connect(self, websocket: WebSocket, client_id: str = "unknown"):
+        """处理新连接进入，记录其唯一的 client_id"""
         await websocket.accept()
         with self._lock:
-            # 检查是否已存在相同连接,防止重复添加
-            if websocket not in self.active_connections:
-                self.active_connections.append(websocket)
-                logger.info(f"WebSocket 客户端已接入。当前总连接数: {len(self.active_connections)}")
-            else:
-                logger.warning("检测到重复的 WebSocket 连接,已忽略")
+            self.connections[websocket] = client_id
+            logger.info(f"WebSocket 接入: ID={client_id}, 当前总连接数: {len(self.connections)}")
 
     def disconnect(self, websocket: WebSocket):
         """处理连接断开"""
         with self._lock:
-            if websocket in self.active_connections:
-                self.active_connections.remove(websocket)
-        logger.info(f"WebSocket 客户端已离开。剩余连接数: {len(self.active_connections)}")
+            if websocket in self.connections:
+                client_id = self.connections.pop(websocket)
+                logger.info(f"WebSocket 离开: ID={client_id}, 剩余连接数: {len(self.connections)}")
 
-    async def broadcast(self, event_type: str, data: Optional[Dict[str, Any]] = None):
+    async def broadcast(self, event_type: str, data: Optional[Dict[str, Any]] = None, exclude_id: Optional[str] = None):
         """
-        核心异步广播接口
-        :param event_type: 事件类型标识 (如 'data_updated', 'task_progress')
-        :param data: 消息负载
+        核心广播逻辑：
+        :param exclude_id: 如果指定，将不会向该 ID 的客户端发送消息（防止回环）
         """
-        message = json.dumps({
+        # 构建消息包，包含发送者信息
+        payload = {
             "type": event_type, 
             "data": data or {},
+            "sender_id": exclude_id, # 让接收端也能知道是谁发的
             "timestamp": asyncio.get_event_loop().time()
-        }, ensure_ascii=False)
+        }
+        message = json.dumps(payload, ensure_ascii=False)
         
-        disconnected = []
-        # 创建副本进行遍历，避免锁竞争时间过长
+        targets = []
         with self._lock:
-            targets = list(self.active_connections)
-        
-        # 性能监控:记录广播目标数量
-        if len(targets) > 5:
-            logger.warning(f"⚠️ 广播目标过多: {len(targets)} 个连接,事件={event_type}")
-            
+            for ws, cid in self.connections.items():
+                if exclude_id and cid == exclude_id:
+                    continue
+                targets.append(ws)
+
+        disconnected = []
         for connection in targets:
             try:
                 await connection.send_text(message)
-                logger.debug(f"已向客户端 {connection.client} 发送 {event_type} 事件")
-            except Exception as e:
-                logger.warning(f"向客户端发送消息失败: {e}")
+            except Exception:
                 disconnected.append(connection)
-        
-        if targets:
-            logger.info(f"广播完成: 事件={event_type}, 目标数={len(targets)}")
         
         # 清理失效连接
         for conn in disconnected:
             self.disconnect(conn)
 
-    def broadcast_sync(self, event_type: str, data: Optional[Dict[str, Any]] = None):
-        """
-        同步兼容接口 - 允许在普通的 Python 函数/线程中触发广播
-        会自动寻找或创建事件循环来处理异步发送任务。
-        """
+    def broadcast_sync(self, event_type: str, data: Optional[Dict[str, Any]] = None, exclude_id: Optional[str] = None):
+        """同步接口兼容"""
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # 如果当前线程已有运行中的循环，以此循环提交任务
-                asyncio.ensure_future(self.broadcast(event_type, data))
+                asyncio.ensure_future(self.broadcast(event_type, data, exclude_id))
             else:
-                loop.run_until_complete(self.broadcast(event_type, data))
+                loop.run_until_complete(self.broadcast(event_type, data, exclude_id))
         except RuntimeError:
-            # 针对没有事件循环的纯后台线程 (如 BLAST Worker)
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
-            new_loop.run_until_complete(self.broadcast(event_type, data))
+            new_loop.run_until_complete(self.broadcast(event_type, data, exclude_id))
 
-# 导出单例，确保全项目使用同一个连接池
+# 导出单例
 broadcaster = EventBroadcaster()

@@ -2,7 +2,7 @@ import logging
 import time
 import json
 import asyncio
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from pydantic import BaseModel
 from typing import Optional, List
 from ..broadcaster import broadcaster
@@ -91,53 +91,67 @@ async def strain_load_all():
         return {"freezers": [], "records": [], "error": str(e)}
 
 @router.post("/api/strain/freezer")
-async def save_freezer(req: FreezerRequest):
+async def save_freezer(req: FreezerRequest, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
     from ...backend.strain_db import get_strain_db_manager
     invalidate_cache()
     success = get_strain_db_manager().save_freezer(req.data)
+    if success and x_client_id:
+        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
     return {"success": success}
 
 @router.delete("/api/strain/freezer/{freezer_id}")
-async def delete_freezer(freezer_id: str):
+async def delete_freezer(freezer_id: str, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
     from ...backend.strain_db import get_strain_db_manager
     invalidate_cache()
     success = get_strain_db_manager().delete_freezer(freezer_id)
+    if success and x_client_id:
+        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
     return {"success": success}
 
 @router.post("/api/strain/record")
-async def save_record(req: RecordRequest):
+async def save_record(req: RecordRequest, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
     from ...backend.strain_db import get_strain_db_manager
     invalidate_cache()
     success = get_strain_db_manager().save_record(req.data)
+    if success and x_client_id:
+        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
     return {"success": success}
 
 @router.delete("/api/strain/record/{record_id}")
-async def delete_record(record_id: str):
+async def delete_record(record_id: str, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
     from ...backend.strain_db import get_strain_db_manager
     invalidate_cache()
     success = get_strain_db_manager().delete_record(record_id)
+    if success and x_client_id:
+        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
     return {"success": success}
 
 @router.post("/api/strain/records/batch")
-async def save_records_batch(req: dict):
+async def save_records_batch(req: dict, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
     from ...backend.strain_db import get_strain_db_manager
     invalidate_cache()
     data_list = req.get("data", [])
     success = get_strain_db_manager().save_records_batch(data_list)
+    if success and x_client_id:
+        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
     return {"success": success}
 
 @router.post("/api/strain/sys_config/codeLookup")
-async def save_code_lookup(req: dict):
+async def save_code_lookup(req: dict, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
     from ...backend.strain_db import get_strain_db_manager
     invalidate_cache()
     success = get_strain_db_manager().save_sys_config('codeLookup', req)
+    if success and x_client_id:
+        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
     return {"success": success}
 
 @router.post("/api/strain/clear")
-async def strain_clear_all():
+async def strain_clear_all(x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
     from ...backend.strain_db import get_strain_db_manager
     invalidate_cache()
     success = get_strain_db_manager().clear_all()
+    if success and x_client_id:
+        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
     return {"success": success}
 
 # ─── 序列、分类学等其它接口逻辑顺延保持不变 (略) ────────────────

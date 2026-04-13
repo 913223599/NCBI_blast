@@ -46,6 +46,17 @@ export const useStrainStore = defineStore('strain', () => {
   const hasData = computed(() => s.records.value.length > 0)
   const filteredCount = computed(() => s.filteredRecords.value.length)
   const selectedCount = computed(() => s.selectedRecords.value.size)
+  const totalRecords = computed(() => s.records.value.length)
+  
+  const uniqueSpecies = computed(() => {
+    const set = new Set(s.records.value.map(r => r.species).filter(Boolean))
+    return Array.from(set).sort()
+  })
+  
+  const uniqueCountries = computed(() => {
+    const set = new Set(s.records.value.map(r => r.country).filter(Boolean))
+    return Array.from(set).sort()
+  })
 
   // 5. 定义主 Store 暴露的额外逻辑
   function setActiveRecord(record: StrainRecord | null) {
@@ -126,6 +137,9 @@ export const useStrainStore = defineStore('strain', () => {
     hasData,
     filteredCount,
     selectedCount,
+    totalRecords,
+    uniqueSpecies,
+    uniqueCountries,
     setActiveRecord,
     setActiveFreezer,
     setSearchFilter,

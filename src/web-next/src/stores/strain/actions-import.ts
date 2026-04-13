@@ -55,6 +55,9 @@ export function useImportActions(state: any) {
     addTask,
     updateTaskStatus,
     removeTask,
+    clearTasks() {
+      importTasks.value = []
+    },
     switchInputMode,
     clearImportInput
   }

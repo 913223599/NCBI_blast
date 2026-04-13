@@ -201,7 +201,30 @@ export const useAppStore = defineStore('app', () => {
         })
     }
 
-    // 自动化同步已按需彻底禁用
+    // ─── 数据同步订阅 (带来源排除与防抖保护) ───────────────────────────────────────
+    let syncTimer: ReturnType<typeof setTimeout> | null = null;
+    try {
+        const bridge = getBridge();
+        bridge.sync_event.connect((data: any) => {
+            if (!data || !data.module) return;
+            
+            // 防抖：防止多个信号瞬间堆叠导致的并发加载
+            if (syncTimer) clearTimeout(syncTimer);
+            syncTimer = setTimeout(() => {
+                if (data.module === 'tree' || data.module === 'trees' || data.module === 'all') {
+                    console.log('[AppStore] 收到远程进化树更新，同步中...');
+                    initTreeHistory();
+                }
+                if (data.module === 'dictionary' || data.module === 'dictionaries' || data.module === 'config' || data.module === 'all') {
+                    console.log('[AppStore] 收到远程词库/配置更新，同步中...');
+                    fetchTranslations();
+                }
+                syncTimer = null;
+            }, 500);
+        });
+    } catch (e) {
+        console.warn('[AppStore] WebSocket 同步订阅失败');
+    }
 
     return {
         locale,

@@ -26,10 +26,18 @@ declare global {
     }
 }
 
+// 生成当前会话的唯一标识符，用于排除广播回环
+const MY_CLIENT_ID = 'client_' + Math.random().toString(36).substring(2, 10);
+
+/** 获取当前客户端 ID */
+export function getClientId() {
+    return MY_CLIENT_ID;
+}
+
 // ─── 配置常量 ─────────────────────────────────────
 // 默认地址 (Electron 环境)
 let API_BASE = 'http://127.0.0.1:8765';
-let WS_URL = 'ws://127.0.0.1:8765/ws';
+let WS_URL = `ws://127.0.0.1:8765/ws?client_id=${MY_CLIENT_ID}`;
 
 // 【自适应逻辑强化】
 if (typeof window !== 'undefined') {
@@ -40,7 +48,7 @@ if (typeof window !== 'undefined') {
         console.log(`[ElectronBridge] 检测到外部浏览器访问，自动切换 API 基址至: ${origin}`);
         API_BASE = origin;
         const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
-        WS_URL = `${wsProtocol}//${window.location.host}/ws`;
+        WS_URL = `${wsProtocol}//${window.location.host}/ws?client_id=${MY_CLIENT_ID}`;
     }
 }
 
@@ -66,7 +74,10 @@ async function apiPost(endpoint: string, body?: any): Promise<any> {
     try {
         const response = await fetch(`${API_BASE}${endpoint}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-Client-ID': MY_CLIENT_ID
+            },
             body: body ? JSON.stringify(body) : undefined
         });
         
@@ -89,7 +100,10 @@ async function apiPost(endpoint: string, body?: any): Promise<any> {
 
 async function apiDelete(endpoint: string): Promise<any> {
     try {
-        const response = await fetch(`${API_BASE}${endpoint}`, { method: 'DELETE' });
+        const response = await fetch(`${API_BASE}${endpoint}`, { 
+            method: 'DELETE',
+            headers: { 'X-Client-ID': MY_CLIENT_ID }
+        });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return await response.json();
     } catch (err) {

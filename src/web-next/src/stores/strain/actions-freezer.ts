@@ -4,7 +4,7 @@ import type { Freezer } from './types'
 export function useFreezerActions(state: any) {
   const { freezers, activeFreezerId } = state
 
-  function addFreezer(freezer: Omit<Freezer, 'id' | 'createdAt' | 'updatedAt'>) {
+  function addFreezer(freezer: Omit<Freezer, 'id' | 'createdAt' | 'updatedAt'>): Freezer {
     const now = new Date().toISOString()
     const newFreezer: Freezer = {
       ...freezer,
@@ -18,6 +18,8 @@ export function useFreezerActions(state: any) {
     try {
       getBridge().db_save_freezer(newFreezer)
     } catch (e) {}
+    
+    return newFreezer
   }
 
   function updateFreezer(id: string, updates: Partial<Freezer>) {

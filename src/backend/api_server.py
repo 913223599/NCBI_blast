@@ -170,11 +170,11 @@ app.include_router(tree.router)
 app.include_router(settings.router)
 app.include_router(core.router)
 
-# ─── 6. 核心服务端点 (WS/Health) ──────────────────────
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """由 broadcaster 托管的长连接通道"""
-    await broadcaster.connect(websocket)
+    """由 broadcaster 托管的长连接通道，支持 client_id 识别"""
+    client_id = websocket.query_params.get("client_id", "unknown")
+    await broadcaster.connect(websocket, client_id)
     try:
         while True:
             msg = await websocket.receive_text()

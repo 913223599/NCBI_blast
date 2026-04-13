@@ -8,7 +8,7 @@ import AppSidebar from './components/layout/AppSidebar.vue'
 import AppHeader from './components/layout/AppHeader.vue'
 import NotificationStack from './components/common/NotificationStack.vue'
 import { useAppStore } from './stores/app'
-import { setupBridge, registerGlobalHandler, getBridge } from './bridge'
+import { setupBridge, registerGlobalHandler, getBridge, getClientId } from './bridge'
 
 const appStore = useAppStore()
 
@@ -105,10 +105,18 @@ onMounted(async () => {
   // 1. 全局加载状态控制
   console.log('[App] 初始化应用...')
   
-  // 2. 初始化桥接 (确保这是第一步且已完成)
-  try {
-    const bridge = await setupBridge()
-    console.log('[App] 桥接准备就绪')
+    // 2. 初始化桥接 (并强制进行版本/身份检查)
+    try {
+      const bridge = await setupBridge()
+      console.log('[App] 桥接准备就绪')
+      
+      const clientId = getClientId();
+      if (!clientId || clientId === 'unknown') {
+         alert('检测到系统版本更新，请刷新页面以加载最新安全组件');
+         window.location.reload();
+         return;
+      }
+      console.log(`[App] 身份验证成功: ${clientId}`);
 
     // 3. 注册通用事件处理
     registerGlobalHandler('handleBridgeEvent', (type: any, data: any) => {

@@ -1,4 +1,4 @@
-import { initBridge as initElectron, onEvent as electronOnEvent } from './electron-bridge';
+import { initBridge as initElectron, onEvent as electronOnEvent, getClientId } from './electron-bridge';
 import { initBridge as initPyQt } from './pyqt-bridge';
 
 /** 检测当前是否运行在 Electron 环境中 */
@@ -111,4 +111,4 @@ async function setupBridge() {
     return await initBridge();
 }
 
-export { initBridge, getBridge, registerGlobalHandler, setupBridge, isElectronEnvironment, onEvent };
+export { initBridge, getBridge, registerGlobalHandler, setupBridge, isElectronEnvironment, onEvent, getClientId };

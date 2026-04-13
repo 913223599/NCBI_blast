@@ -270,7 +270,7 @@ class StrainDBManager:
                        source, host, collection_date, freezer_id, shelf_id, cabinet_id, 
                        drawer_id, box_id, position, sample_code, code_source, 
                        code_category, code_genus, code_species, code_passage, 
-                       code_serial, country, metadata, added_at 
+                       code_serial, country, added_at 
                 FROM records
             ''')
             records = []
@@ -300,7 +300,6 @@ class StrainDBManager:
                     'codePassage': row['code_passage'],
                     'codeSerial': row['code_serial'],
                     'country': row['country'],
-                    'metadata': json.loads(row['metadata'] or '{}'),
                     'addedAt': row['added_at']
                 })
             # 加载系统配置
