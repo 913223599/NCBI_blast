@@ -349,7 +349,7 @@ async function handleImport() {
   importing.value = true
   
   try {
-    let importedCount = 0
+    const recordsToImport = []
     
     for (const recordData of parsedRecords.value) {
       const record = {
@@ -373,9 +373,9 @@ async function handleImport() {
         position: ''
       }
       
-      // 自动模式下查找空闲位置
+      // 自动模式下查找空闲位置 (改进逻辑：排除已选中的位置)
       if (importMode.value === 'auto') {
-        const position = findFreePosition()
+        const position = findFreePosition(recordsToImport.map(r => r.boxId + '_' + r.position))
         if (!position) {
           appStore.showNotification('存储空间不足', 'warning')
           break
@@ -387,13 +387,15 @@ async function handleImport() {
         record.position = position.position
       }
       
-      strain.addRecord(record)
-      importedCount++
+      recordsToImport.push(record)
     }
     
-    appStore.showNotification(`成功导入 ${importedCount} 条样本`, 'success')
-    emit('imported', importedCount)
-    emit('close')
+    if (recordsToImport.length > 0) {
+      strain.addRecords(recordsToImport)
+      appStore.showNotification(`成功导入 ${recordsToImport.length} 条样本`, 'success')
+      emit('imported', recordsToImport.length)
+      emit('close')
+    }
   } catch (error) {
     appStore.showNotification('导入失败: ' + error, 'error')
     console.error(error)
@@ -402,7 +404,7 @@ async function handleImport() {
   }
 }
 
-function findFreePosition(): { shelfId: string; cabinetId: string; drawerId: string; boxId: string; position: string } | null {
+function findFreePosition(excludeIds: string[] = []): { shelfId: string; cabinetId: string; drawerId: string; boxId: string; position: string } | null {
   if (!targetFreezer.value) return null
   
   for (const shelf of targetFreezer.value.shelves) {
@@ -410,7 +412,8 @@ function findFreePosition(): { shelfId: string; cabinetId: string; drawerId: str
       for (const drawer of cabinet.drawers) {
         for (const box of drawer.boxes) {
           for (const pos of box.positions) {
-            if (!pos.occupied) {
+            const posId = box.id + '_' + pos.label
+            if (!pos.occupied && !excludeIds.includes(posId)) {
               return {
                 shelfId: shelf.id,
                 cabinetId: cabinet.id,

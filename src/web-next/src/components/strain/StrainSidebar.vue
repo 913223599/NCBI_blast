@@ -115,12 +115,6 @@
       </div>
     </div>
 
-    <!-- 底部调试工具 (仅测试用) -->
-    <div class="sidebar-footer">
-      <button class="btn-mock" @click="runMockSeed">
-        🧪 填充测试数据
-      </button>
-    </div>
   </aside>
 </template>
 
@@ -129,7 +123,6 @@ import { ref, computed } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import type { StrainRecord } from '../../stores/strain'
-import { seedMockData } from '../../utils/mockStrainData'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 
 const strain = useStrainStore()
@@ -142,18 +135,28 @@ const viewMode = ref<'freezers' | 'samples'>('freezers')
 const searchKeyword = ref('')
 
 const groupedRecords = computed(() => {
-  const map = new Map<string, { main: StrainRecord, count: number, positions: string[] }>()
+  const map = new Map<string, { main: StrainRecord, count: number, records: StrainRecord[], positions: string[] }>()
   for (const record of strain.filteredRecords) {
      const key = record.sampleCode || record.accession || record.id
      if (!map.has(key)) {
-       map.set(key, { main: record, count: 1, positions: [getLocationPath(record)] })
+       map.set(key, { main: record, count: 1, records: [record], positions: [] })
      } else {
        const group = map.get(key)!
        group.count++
-       group.positions.push(getLocationPath(record))
+       group.records.push(record)
      }
   }
-  return Array.from(map.values())
+  
+  // 核心性能优化：仅显示前 300 条侧边栏记录，防止几万个 DOM 节点导致页面崩溃或卡死
+  // 同时，只有进入显示列表前 300 项的数据，我们才花时间去计算高开销的冰箱层级路径（getLocationPath）
+  const results = Array.from(map.values()).slice(0, 300)
+  for (const group of results) {
+     // 最多只计算前 3 个位置，避免样本太多时展开的提示框占满屏幕并消耗性能
+     const posRecords = group.records.slice(0, 3)
+     group.positions = posRecords.map(r => getLocationPath(r))
+     if (group.records.length > 3) group.positions.push(`... 等共 ${group.count} 个位置`)
+  }
+  return results
 })
 
 let searchTimer: number | null = null
@@ -178,7 +181,7 @@ function selectFreezer(id: string) {
 }
 
 function deleteFreezer(id: string) {
-  const freezer = strain.freezers.find(f => f.id === id)
+  const freezer = strain.freezers.find((f: any) => f.id === id)
   if (!freezer) return
   
   if (window.confirm(`确定要删除冰箱"${freezer.name}"吗？\n该操作将同时删除冰箱内的所有样本记录。`)) {
@@ -191,36 +194,22 @@ function handleSampleClick(record: StrainRecord) {
   emit('sampleClick', record)
 }
 
-function runMockSeed() {
-  if (strain.freezers.length === 0) {
-    appStore.showNotification('请先添加至少一个冰箱', 'warning')
-    return
-  }
-  seedMockData(strain, codeGen)
-  appStore.showNotification('已成功生成 6 条符合 v6 规范的测试样本', 'success')
-}
 
 function getLocationPath(record: StrainRecord): string {
   if (!record.freezerId || !record.position) return '-'
   
-  const freezer = strain.freezers.find(f => f.id === record.freezerId)
-  if (!freezer) return '-'
-  
-  const shelf = freezer.shelves.find(s => s.id === record.shelfId)
-  const cabinet = shelf?.cabinets.find(c => c.id === record.cabinetId)
-  const drawer = cabinet?.drawers.find(d => d.id === record.drawerId)
-  const box = drawer?.boxes.find(b => b.id === record.boxId)
-  
+  // 性能优化：使用全局预构建的 ID -> Name 映射字典，实现 O(1) 极速查找
+  const map = strain.locationMap
   const parts = [
-    freezer.name,
-    shelf?.name,
-    cabinet?.name,
-    drawer?.name,
-    box?.name,
+    map[record.freezerId],
+    record.shelfId ? map[record.shelfId] : null,
+    record.cabinetId ? map[record.cabinetId] : null,
+    record.drawerId ? map[record.drawerId] : null,
+    record.boxId ? map[record.boxId] : null,
     record.position
   ].filter(Boolean)
   
-  return parts.join(' → ')
+  return parts.length > 0 ? parts.join(' → ') : '-'
 }
 
 function getTotalCabinets(freezer: any): number {
@@ -653,29 +642,4 @@ function getTotalBoxes(freezer: any): number {
   white-space: nowrap;
 }
 
-/* 底部调试工具 */
-.sidebar-footer {
-  padding: 12px 16px;
-  border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
-}
-
-.btn-mock {
-  width: 100%;
-  padding: 8px;
-  background: white;
-  border: 1px dashed #cbd5e1;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #64748b;
-  cursor: pointer;
-  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
-}
-
-.btn-mock:hover {
-  background: #f1f5f9;
-  border-color: #94a3b8;
-  color: #1e293b;
-}
 </style>

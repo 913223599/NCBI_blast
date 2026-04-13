@@ -1,8 +1,9 @@
 /**
  * BLAST 分析状态管理 (Pinia Store)
  */
+import { ref, computed, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { getBridge } from '../bridge'
 
 /** BLAST 参数 */
 export interface BlastParams {
@@ -86,7 +87,7 @@ export const useBlastStore = defineStore('blast', () => {
     const activeTaskId = ref<string | null>(null)
 
     /* -------- 结果 -------- */
-    const results = ref<BlastHit[]>([])
+    const results = shallowRef<BlastHit[]>([])
     const resultTitle = ref('分析结果')
 
     /* -------- 历史面板可见 -------- */
@@ -227,7 +228,7 @@ export const useBlastStore = defineStore('blast', () => {
         
         if (resData.status === 'pending' || resData.status === 'running') {
             if (existingIdx === -1) {
-                results.value.push({
+                results.value = [...results.value, {
                     queryTitle: queryId,
                     hitTitle: '',
                     speciesName: '等待比对...',
@@ -240,7 +241,7 @@ export const useBlastStore = defineStore('blast', () => {
                     evalue: '-',
                     accession: '-',
                     translatedName: null
-                })
+                }]
                 resultTitle.value = `分析结果 (共 ${results.value.length} 项)`
             }
             return
@@ -286,12 +287,14 @@ export const useBlastStore = defineStore('blast', () => {
         }
 
         if (existingIdx !== -1) {
-             results.value[existingIdx] = updatedHit
+             results.value = results.value.map((h, i) => i === existingIdx ? updatedHit : h)
         } else {
-             results.value.push(updatedHit)
+             results.value = [...results.value, updatedHit]
         }
         resultTitle.value = `分析结果 (共 ${results.value.length} 项)`
     }
+
+    // 自动化同步已禁用
 
     return {
         inputMode, files, queryText,

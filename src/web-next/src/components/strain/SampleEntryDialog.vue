@@ -651,11 +651,11 @@ function handleConfirm() {
   }
 
   // 记录实际入库的数据
-  let savedCount = 0
+  const recordsToBatch = []
 
   targetPositions.forEach((posLabel) => {
-    // 创建样本记录
-    const record = strain.addRecord({
+    // 创建数据草稿
+    const recordData = {
       ...form.value,
       sampleType: form.value.sampleType as SampleCategory,
       freezerId: props.freezerId,
@@ -664,15 +664,22 @@ function handleConfirm() {
       drawerId: props.drawerId,
       boxId: props.boxId,
       position: posLabel
-    })
+    }
+    recordsToBatch.push(recordData)
+  })
 
-    // 同步到基因库 (仅第一管，避免重复录入序列)
-    if (syncToGeneDB.value && savedCount === 0 && form.value.sequence) {
+  if (recordsToBatch.length > 0) {
+    // 执行批量录入
+    strain.addRecords(recordsToBatch)
+    
+    // 处理关联逻辑（如基因库同步，仅针对首个样本）
+    const firstRecord = recordsToBatch[0]
+    if (syncToGeneDB.value && form.value.sequence) {
       sequenceStore.saveSequence({
-        sampleId: record.id,
+        sampleId: firstRecord.id, // 这里 addRecords 内部会为每条记录生成 ID
         sampleCode: form.value.sampleCode || form.value.accession || '',
         seqType: geneInfo.value.seqType,
-        title: geneInfo.value.title || `${record.sampleCode || record.name}-${geneInfo.value.seqType}`,
+        title: geneInfo.value.title || `${firstRecord.sampleCode || firstRecord.name}-${geneInfo.value.seqType}`,
         sequence: form.value.sequence,
         seqLen: form.value.sequence.replace(/[\s\r\n]/g, '').length,
         metadata: {
@@ -681,20 +688,17 @@ function handleConfirm() {
         }
       })
     }
+    
+    // 更新本地位置占用状态
+    targetPositions.forEach(posLabel => {
+      strain.updatePositionOccupancy(
+        props.freezerId, props.shelfId, props.cabinetId, props.drawerId, props.boxId,
+        posLabel, true
+      )
+    })
+  }
 
-    // 更新位置占用状态
-    strain.updatePositionOccupancy(
-      props.freezerId,
-      props.shelfId,
-      props.cabinetId,
-      props.drawerId,
-      props.boxId,
-      posLabel,
-      true,
-      record.id
-    )
-    savedCount++
-  })
+  const savedCount = recordsToBatch.length
 
   if (savedCount < (props.selectedPositions?.length || aliquotCount.value)) {
     appStore.showNotification(`部分位置录入失败，仅成功录入 ${savedCount} 管`, 'warning')

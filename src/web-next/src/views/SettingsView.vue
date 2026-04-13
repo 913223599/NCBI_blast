@@ -6,6 +6,7 @@
  */
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { getBridge } from '../bridge'
+import UniversalUpload from '../components/common/UniversalUpload.vue'
 import { useAppStore } from '../stores/app'
 
 import { useVirtualList } from '@vueuse/core'
@@ -149,20 +150,17 @@ function loadLocalDatabases() {
   })
 }
 
-function browseFasta() {
-  getBridge().request_file_load('fasta')
-  // 兼容旧版回调，或者直接拦截
-  window.handleFileLoaded = (_content: string, type: string, path: string) => {
-    if (type === 'fasta' && path) {
-      dbInputFile.value = path
-      // 自动提取默认名称
-      const parts = path.split(/[/\\]/)
-      const lastPart = parts[parts.length - 1] || ''
-      const fileName = lastPart.split('.')[0] || 'new_database'
-      
-      if (!dbTitle.value) dbTitle.value = fileName
-      if (!dbOutName.value) dbOutName.value = fileName.replace(/[^a-zA-Z0-9]/g, '_')
-    }
+function onFastaUploaded(filePaths: string[]) {
+  if (filePaths.length > 0 && filePaths[0]) {
+    const path = filePaths[0]
+    dbInputFile.value = path
+    // 自动提取默认名称
+    const parts = path.split(/[/\\]/)
+    const lastPart = parts[parts.length - 1] || ''
+    const fileName = lastPart.split('.')[0] || 'new_database'
+    
+    if (!dbTitle.value) dbTitle.value = fileName
+    if (!dbOutName.value) dbOutName.value = fileName.replace(/[^a-zA-Z0-9]/g, '_')
   }
 }
 
@@ -227,7 +225,38 @@ async function loadSettings(): Promise<void> {
         selectedModel.value = savedModel
       }
     })
+
+    // 获取局域网共享状态
+    loadLanShareInfo()
   } catch (error) { console.warn('[Settings] Bridge not ready') }
+}
+
+const lanEnabled = ref(false)
+const lanShareInfo = ref<any>(null)
+
+async function loadLanShareInfo() {
+  const result = await getBridge().get_lan_share_info()
+  if (result) {
+    lanEnabled.value = result.enabled
+    lanShareInfo.value = result
+  }
+}
+
+async function saveLanSettings() {
+  const result = await getBridge().save_lan_share_settings(lanEnabled.value)
+  if (result.success) {
+    appStore.showNotification(result.message || '系统参数已保存', 'success')
+  } else {
+    appStore.showNotification('保存失败: ' + result.error, 'error')
+  }
+}
+
+function copyToClipboard(text: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    appStore.showNotification('链接已复制到剪贴板', 'success')
+  }).catch(() => {
+    appStore.showNotification('复制失败，请手动选择复制', 'error')
+  })
 }
 
 function addModel(): void {
@@ -547,10 +576,14 @@ onUnmounted(() => {
             <h3 style="font-size: 1rem; margin-bottom: 20px;">🔨 创建新数据库</h3>
             <div class="form-group">
               <label>输入 FASTA 文件</label>
-              <div class="input-with-btn">
-                <input v-model="dbInputFile" readonly class="form-input" placeholder="选择源文件..." />
-                <button class="btn-action" @click="browseFasta">浏览</button>
-              </div>
+              <UniversalUpload 
+                type="fasta"
+                accept=".fasta,.fas,.fa"
+                label="拖入或选择源文件以构建数据库"
+                :multiple="false"
+                @success="onFastaUploaded"
+              />
+              <div v-if="dbInputFile" class="db-file-hint">已选: {{ dbInputFile }}</div>
             </div>
             <div class="form-group">
               <label>数据库类型</label>
@@ -674,7 +707,50 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 界面显示面板 -->
+      <!-- 系统参数面板 -->
+      <div v-if="activePanel === 'system-params'" class="panel">
+        <h2>⚙️ 系统参数 & 远程共享</h2>
+        
+        <div class="glass-card">
+          <h3 style="font-size: 1rem; margin-bottom: 20px;">🌐 局域网服务共享</h3>
+          <p class="desc-sm" style="margin-bottom: 20px;">
+            开启后，同一局域网下的其他电脑、平板可通过 IP 地址直接访问并使用本工作台。
+          </p>
+
+          <div class="lan-setting-row">
+            <div class="lan-status">
+              <div class="lan-toggle">
+                <span>局域网共享服务状态</span>
+                <label class="switch">
+                  <input type="checkbox" v-model="lanEnabled">
+                  <span class="slider round"></span>
+                </label>
+              </div>
+              <div v-if="lanEnabled && lanShareInfo" class="lan-info-card">
+                <div class="lan-link-box">
+                  <span class="lan-label">专用访问链接：</span>
+                  <div class="copy-url-group">
+                    <code class="url-text">http://{{ lanShareInfo.ip }}:{{ lanShareInfo.port }}</code>
+                    <button class="btn-copy" @click="copyToClipboard(`http://${lanShareInfo.ip}:${lanShareInfo.port}`)">复制</button>
+                  </div>
+                </div>
+                <div class="lan-hint">
+                  提示：请确保防火墙允许端口 {{ lanShareInfo.port }} 的入站访问。
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions-row" style="margin-top: 24px;">
+            <button class="btn-premium" @click="saveLanSettings">保存参数设置</button>
+          </div>
+        </div>
+
+        <div class="glass-card" style="margin-top: 24px;">
+          <h3 style="font-size: 1rem; margin-bottom: 16px;">📂 存储与路径</h3>
+          <p class="desc-sm">配置文件路径：<code>{{ appStore.projectRoot || '...' }}\config.json</code></p>
+        </div>
+      </div>
       <div v-if="activePanel === 'user-interface'" class="panel">
         <h2>🖥️ 界面显示设置</h2>
         <div class="glass-card">
@@ -1079,4 +1155,22 @@ onUnmounted(() => {
   padding: 2px 6px;
   border-radius: 4px;
 }
+
+/* 局域网分享专用样式 */
+.lan-toggle { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 24px; }
+.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+input:checked + .slider { background-color: var(--accent-blue); }
+input:checked + .slider:before { transform: translateX(20px); }
+
+.lan-info-card { background: #f1f5f9; padding: 20px; border-radius: 12px; border-left: 4px solid var(--accent-blue); }
+.lan-link-box { margin-bottom: 12px; }
+.lan-label { font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 6px; }
+.copy-url-group { display: flex; align-items: center; gap: 10px; }
+.url-text { flex: 1; background: white; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-family: monospace; font-size: 0.95rem; color: var(--accent-blue); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-copy { background: white; border: 1px solid var(--border-color); padding: 7px 14px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }
+.btn-copy:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+.lan-hint { font-size: 0.75rem; color: var(--text-muted); }
 </style>

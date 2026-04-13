@@ -11,7 +11,26 @@ class StrainDBManager:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
+        # 性能优化:使用连接池避免频繁打开关闭数据库
+        self._conn_cache = None
         self._init_db()
+
+    def _get_connection(self):
+        """获取数据库连接(带缓存)"""
+        if self._conn_cache is None:
+            self._conn_cache = sqlite3.connect(self.db_path)
+            self._conn_cache.row_factory = sqlite3.Row
+        return self._conn_cache
+    
+    def _close_connection(self):
+        """关闭数据库连接"""
+        if self._conn_cache:
+            try:
+                self._conn_cache.close()
+            except:
+                pass
+            finally:
+                self._conn_cache = None
 
     def _init_db(self):
         """初始化数据库表结构及版本迁移"""
@@ -147,74 +166,64 @@ class StrainDBManager:
 
     def save_record(self, record_data):
         """保存或更新样本记录 (适应 14 位编号系统)"""
+        return self.save_records_batch([record_data])
+
+    def save_records_batch(self, records_list):
+        """批量保存样本记录 (单一事务提高性能)"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
-            
-            rid = record_data.get('id')
-            metadata = json.dumps(record_data.get('metadata', {}))
             now = datetime.now().isoformat()
             
-            # 映射前端驼峰到后端下划线字段
+            # 使用与 save_record 相同的字段映射逻辑
             fields_mapping = [
-                ('id', 'id'),
-                ('name', 'name'),
-                ('accession', 'accession'),
-                ('species', 'species'),
-                ('strain', 'strain'),
-                ('sample_type', 'sampleType'),
-                ('sequence_type', 'sequenceType'),
-                ('source', 'source'),
-                ('host', 'host'),
-                ('collection_date', 'collectionDate'),
-                ('freezer_id', 'freezerId'),
-                ('shelf_id', 'shelfId'),
-                ('cabinet_id', 'cabinetId'),
-                ('drawer_id', 'drawerId'),
-                ('box_id', 'boxId'),
-                ('position', 'position'),
-                ('sample_code', 'sampleCode'),
-                ('code_source', 'codeSource'),
-                ('code_category', 'codeCategory'),
-                ('code_genus', 'codeGenus'),
-                ('code_species', 'codeSpecies'),
-                ('code_passage', 'codePassage'),
-                ('code_serial', 'codeSerial'),
-                ('sequence', 'sequence'),
-                ('country', 'country')
+                ('id', 'id'), ('name', 'name'), ('accession', 'accession'),
+                ('species', 'species'), ('strain', 'strain'), ('sample_type', 'sampleType'),
+                ('sequence_type', 'sequenceType'), ('source', 'source'), ('host', 'host'),
+                ('collection_date', 'collectionDate'), ('freezer_id', 'freezerId'),
+                ('shelf_id', 'shelfId'), ('cabinet_id', 'cabinetId'), ('drawer_id', 'drawerId'),
+                ('box_id', 'boxId'), ('position', 'position'), ('sample_code', 'sampleCode'),
+                ('code_source', 'codeSource'), ('code_category', 'codeCategory'),
+                ('code_genus', 'codeGenus'), ('code_species', 'codeSpecies'),
+                ('code_passage', 'codePassage'), ('code_serial', 'codeSerial'),
+                ('sequence', 'sequence'), ('country', 'country')
             ]
-            
             col_names = [m[0] for m in fields_mapping] + ['metadata', 'added_at']
-            values = [record_data.get(m[1]) for m in fields_mapping]
-            values.append(metadata)
-            values.append(record_data.get('addedAt') or now)
-            
             cols_str = ", ".join(col_names)
             placeholders = ", ".join(["?"] * len(col_names))
             
-            cursor.execute(f'''
+            data_to_insert = []
+            for record_data in records_list:
+                metadata = json.dumps(record_data.get('metadata', {}))
+                values = [record_data.get(m[1]) for m in fields_mapping]
+                values.append(metadata)
+                values.append(record_data.get('addedAt') or now)
+                data_to_insert.append(tuple(values))
+
+            cursor.executemany(f'''
                 INSERT OR REPLACE INTO records ({cols_str})
                 VALUES ({placeholders})
-            ''', tuple(values))
+            ''', data_to_insert)
             
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
-            self.logger.error(f"Error saving record: {e}")
+            self.logger.error(f"Error saving batch records: {e}")
+            self._close_connection()  # 异常时关闭连接
             return False
 
     def delete_record(self, record_id):
         """删除样本记录"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('DELETE FROM records WHERE id = ?', (record_id,))
             conn.commit()
-            conn.close()
+            # 性能优化:不立即关闭连接,复用连接池
             return True
         except Exception as e:
             self.logger.error(f"Error deleting record: {e}")
+            self._close_connection()  # 异常时关闭连接
             return False
 
     def save_sys_config(self, key, value_data):
@@ -255,8 +264,15 @@ class StrainDBManager:
                     'updatedAt': row['updated_at']
                 })
             
-            # 加载记录
-            cursor.execute('SELECT * FROM records')
+            # 加载记录 (核心优化：列表不加载庞大的 sequence 字段，防止内存溢出)
+            cursor.execute('''
+                SELECT id, name, accession, species, strain, sample_type, sequence_type, 
+                       source, host, collection_date, freezer_id, shelf_id, cabinet_id, 
+                       drawer_id, box_id, position, sample_code, code_source, 
+                       code_category, code_genus, code_species, code_passage, 
+                       code_serial, country, metadata, added_at 
+                FROM records
+            ''')
             records = []
             for row in cursor.fetchall():
                 records.append({
@@ -283,7 +299,6 @@ class StrainDBManager:
                     'codeSpecies': row['code_species'],
                     'codePassage': row['code_passage'],
                     'codeSerial': row['code_serial'],
-                    'sequence': row['sequence'],
                     'country': row['country'],
                     'metadata': json.loads(row['metadata'] or '{}'),
                     'addedAt': row['added_at']
@@ -527,16 +542,21 @@ class StrainDBManager:
     def clear_all(self):
         """清除所有数据"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('DELETE FROM records')
             cursor.execute('DELETE FROM freezers')
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             self.logger.error(f"Error clearing data: {e}")
+            self._close_connection()
             return False
+    
+    def cleanup(self):
+        """清理数据库连接(在应用关闭时调用)"""
+        self._close_connection()
+        self.logger.info("StrainDB connection pool cleaned up")
 
 _strain_db_manager = None
 

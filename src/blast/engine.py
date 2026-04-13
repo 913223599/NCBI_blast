@@ -128,10 +128,8 @@ class BlastEngine:
         if not to_process:
             return
 
-        # [性能增强] 动态计算批大小，尝试充分利用用户设置的并发数
-        # 例如：20条序列，4线程 -> 批大小=5，这样可以并开4个连接提高速度
-        num_to_process = len(to_process)
-        batch_size = max(1, min(self.MAX_BATCH_SIZE, (num_to_process + max_threads - 1) // max_threads))
+        # [优化] 只有当序列总数超过上限时才进行任务分片，小批量任务优先打包为一个请求
+        batch_size = self.MAX_BATCH_SIZE # 默认为 10
         
         batches = []
         current_batch = []

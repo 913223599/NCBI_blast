@@ -3,8 +3,25 @@
  * 管理语言、主题、通知等应用级别状态
  */
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, shallowRef, markRaw } from 'vue'
 import { getBridge } from '../bridge'
+
+export interface TreeHistoryItem {
+    id: string;
+    algorithm: string;
+    nwk: string;
+    filePath?: string;
+    idToHash?: Record<string, string>;
+    time: number;
+    archiveFile?: string;
+}
+
+export interface TreeHistoryGroup {
+    id: string;
+    sourceFile: string;
+    name: string;
+    items: TreeHistoryItem[];
+}
 
 export const useAppStore = defineStore('app', () => {
     /* -------- 状态 -------- */
@@ -13,12 +30,8 @@ export const useAppStore = defineStore('app', () => {
     const notifications = ref<Array<{ id: number; message: string; type: string }>>([])
     const pageTitle = ref('Dashboard')
     const translations = ref<Record<string, string>>({})
-    const treeHistory = ref<Array<{ 
-        id: string; 
-        sourceFile: string; 
-        name: string; 
-        items: Array<{ id: string; algorithm: string; nwk: string; filePath?: string; idToHash?: Record<string, string>; time: number; archiveFile?: string }> 
-    }>>([])
+    const treeHistory = shallowRef<TreeHistoryGroup[]>([])
+    const projectRoot = ref('')
 
     /* -------- 计算属性 -------- */
     const isZhCN = computed(() => locale.value === 'zh_CN')
@@ -31,9 +44,8 @@ export const useAppStore = defineStore('app', () => {
                 bridge.db_load_tree_history((res: string) => {
                     if (res && res !== 'null') {
                         try {
-                            console.log('[AppStore] Tree history raw response length:', res.length)
-                            treeHistory.value = JSON.parse(res) || []
-                            console.log('[AppStore] 进化树历史加载成功，项数:', treeHistory.value.length)
+                            const parsed = JSON.parse(res) || []
+                            treeHistory.value = Object.freeze(parsed)
                         } catch (e) {
                             console.error('Failed to parse tree history', e)
                         }
@@ -70,13 +82,13 @@ export const useAppStore = defineStore('app', () => {
             time: Date.now() 
         }
 
-        const groupIndex = treeHistory.value.findIndex(g => g.id === projectId)
+        const groupIndex = treeHistory.value.findIndex((g: TreeHistoryGroup) => g.id === projectId)
 
         if (groupIndex !== -1) {
             const group = treeHistory.value[groupIndex]
             if (group) {
                 group.items = [newItem, ...group.items].slice(0, 20)
-                treeHistory.value = [group, ...treeHistory.value.filter(g => g.id !== projectId)]
+                treeHistory.value = [group, ...treeHistory.value.filter((g: TreeHistoryGroup) => g.id !== projectId)]
             }
         } else {
             const displayName = projectId.replace(/\.[^/.]+$/, "")
@@ -103,7 +115,7 @@ export const useAppStore = defineStore('app', () => {
     }
 
     function removeTreeHistory(groupId: string, itemId?: string, physical: boolean = false): void {
-        const groupIndex = treeHistory.value.findIndex(g => g.id === groupId)
+        const groupIndex = treeHistory.value.findIndex((g: TreeHistoryGroup) => g.id === groupId)
         if (groupIndex === -1) return
         const group = treeHistory.value[groupIndex]
         if (!group) return
@@ -116,9 +128,9 @@ export const useAppStore = defineStore('app', () => {
             } catch (e) { }
         } else {
             // 删除组内单个项
-            group.items = group.items.filter(i => i.id !== itemId)
+            group.items = group.items.filter((i: TreeHistoryItem) => i.id !== itemId)
             if (group.items.length === 0) {
-                treeHistory.value = treeHistory.value.filter(g => g.id !== groupId)
+                treeHistory.value = treeHistory.value.filter((g: TreeHistoryGroup) => g.id !== groupId)
                 try { getBridge().db_delete_tree_history(groupId, physical) } catch (e) { }
             } else {
                 // 如果只删项但不删组物理目录，目前后端 db_save_tree_history 仅支持全量覆盖
@@ -137,6 +149,13 @@ export const useAppStore = defineStore('app', () => {
         const stored = localStorage.getItem('sidebar_collapsed')
         if (stored === 'true') {
             sidebarCollapsed.value = true
+        }
+        
+        // 初始化项目根路径
+        if (window.electronAPI?.getProjectRoot) {
+            window.electronAPI.getProjectRoot().then((root: string) => {
+                projectRoot.value = root
+            })
         }
     }
 
@@ -182,6 +201,8 @@ export const useAppStore = defineStore('app', () => {
         })
     }
 
+    // 自动化同步已按需彻底禁用
+
     return {
         locale,
         sidebarCollapsed,
@@ -189,6 +210,7 @@ export const useAppStore = defineStore('app', () => {
         pageTitle,
         translations,
         treeHistory,
+        projectRoot,
         isZhCN,
         toggleSidebar,
         initSidebarState,

@@ -27,8 +27,22 @@ declare global {
 }
 
 // ─── 配置常量 ─────────────────────────────────────
-const API_BASE = 'http://127.0.0.1:8765';
-const WS_URL = 'ws://127.0.0.1:8765/ws';
+// 默认地址 (Electron 环境)
+let API_BASE = 'http://127.0.0.1:8765';
+let WS_URL = 'ws://127.0.0.1:8765/ws';
+
+// 【自适应逻辑强化】
+if (typeof window !== 'undefined') {
+    const { protocol, hostname, port, origin } = window.location;
+    
+    // 如果是通过浏览器直接访问 (非 Vite 开发模式的 5173 端口)
+    if (port !== '5173' && (protocol === 'http:' || protocol === 'https:')) {
+        console.log(`[ElectronBridge] 检测到外部浏览器访问，自动切换 API 基址至: ${origin}`);
+        API_BASE = origin;
+        const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:';
+        WS_URL = `${wsProtocol}//${window.location.host}/ws`;
+    }
+}
 
 // ─── HTTP 辅助函数 ────────────────────────────────
 
@@ -113,7 +127,8 @@ class BridgeSignal {
 /** 全局事件分发器实例 */
 const signals = {
     recall_event: new BridgeSignal(),
-    blast_event: new BridgeSignal()
+    blast_event: new BridgeSignal(),
+    sync_event: new BridgeSignal()
 };
 
 function connectWebSocket(): void {
@@ -138,12 +153,22 @@ function connectWebSocket(): void {
 
     wsConnection.onmessage = (event) => {
         try {
-            const msg = JSON.parse(event.data);
+            const raw = event.data;
+            if (raw === '{"type": "pong"}') return; // 快速跳过心跳回包
+
+            const msg = JSON.parse(raw);
             if (msg.type === 'pong') return;
 
-            // 1. 分发给所有监听器
+            // 1. 分发给所有监听器 (Legacy 模式)
             for (const handler of eventHandlers) {
                 handler(msg.type, msg.data);
+            }
+
+            // 2. 分发给特定的信号槽 (Modern 模式)
+            if (msg.type === 'data_updated') {
+                signals.sync_event.emit(msg.data);
+            } else if (msg.type === 'single_result_update') {
+                signals.blast_event.emit(msg.type, JSON.stringify(msg.data));
             }
 
             // 2. 映射到特定信号对象 (兼容旧架构)
@@ -191,11 +216,16 @@ const electronBridge = {
     // 信号对象
     recall_event: signals.recall_event,
     blast_event: signals.blast_event,
+    sync_event: signals.sync_event,
 
     // ═══ 文件操作（通过 Electron IPC）═══
     request_file_load(fileType: string) {
         const electron = window.electronAPI;
-        if (!electron) return;
+        if (!electron) {
+            console.warn('[Bridge] 当前处于非 Electron 环境，无法调用原生文件对话框。');
+            (window as any).app?.showNotification('局域网模式暂不支持直接读取本地文件，请使用上传逻辑', 'warning');
+            return;
+        }
 
         const filterMap: Record<string, any[]> = {
             fasta: [
@@ -484,6 +514,14 @@ const electronBridge = {
     async save_api_key(service: string, key: string) {
         await apiPost(`/api/settings/api_key/${service}`, { key });
     },
+    
+    async get_lan_share_info() {
+        return await apiGet('/api/settings/lan_info');
+    },
+
+    async save_lan_share_settings(enabled: boolean) {
+        return await apiPost('/api/settings/lan_share', { enabled });
+    },
 
     async save_selected_model(modelKey: string, callback?: (res: boolean) => void) {
         const result = await apiPost('/api/settings/ai_model', { model_key: modelKey });
@@ -511,9 +549,8 @@ const electronBridge = {
     },
 
     // ═══ 菌种库（通过 HTTP）═══
-    async db_save_freezer(freezerJson: string, callback?: (res: boolean) => void) {
-        const data = JSON.parse(freezerJson);
-        const result = await apiPost('/api/strain/freezer', { data });
+    async db_save_freezer(freezer: any, callback?: (res: boolean) => void) {
+        const result = await apiPost('/api/strain/freezer', { data: freezer });
         callback?.(result.success);
     },
 
@@ -522,9 +559,13 @@ const electronBridge = {
         callback?.(result.success);
     },
 
-    async db_save_record(recordJson: string, callback?: (res: boolean) => void) {
-        const data = JSON.parse(recordJson);
-        const result = await apiPost('/api/strain/record', { data });
+    async db_save_record(record: any, callback?: (res: boolean) => void) {
+        const result = await apiPost('/api/strain/record', { data: record });
+        callback?.(result.success);
+    },
+    
+    async db_save_records_batch(records: any[], callback?: (res: boolean) => void) {
+        const result = await apiPost('/api/strain/records/batch', { data: records });
         callback?.(result.success);
     },
 
@@ -533,9 +574,9 @@ const electronBridge = {
         callback?.(result.success);
     },
 
-    async db_load_all(callback?: (res: string) => void) {
+    async db_load_all(callback?: (res: any) => void) {
         const result = await apiGet('/api/strain/load');
-        callback?.(JSON.stringify(result));
+        callback?.(result);
     },
 
     async db_clear_all(callback?: (res: boolean) => void) {
@@ -543,8 +584,7 @@ const electronBridge = {
         callback?.(result.success);
     },
 
-    async db_save_code_lookup(lookupJson: string, callback?: (res: boolean) => void) {
-        const data = JSON.parse(lookupJson);
+    async db_save_code_lookup(data: any, callback?: (res: boolean) => void) {
         const result = await apiPost('/api/strain/sys_config/codeLookup', data);
         callback?.(result.success);
     },
@@ -645,20 +685,41 @@ const electronBridge = {
         return JSON.stringify(result);
     },
 
+    async import_sequences_to_strains(paths: string[]) {
+        return await apiPost('/api/strains/import_paths', { paths });
+    },
+
     // ═══ 分类学与家谱 (NCBI ETE4) ═══
     async get_taxonomy_lineage(query: string) {
         const result = await apiGet(`/api/taxonomy/lineage?query=${encodeURIComponent(query)}`);
-        return JSON.stringify(result);
+        return result;
     },
 
     async search_strains_by_category(category: string) {
-        const result = await apiGet(`/api/strains/search_by_category?category=${encodeURIComponent(category)}`);
-        return JSON.stringify(result);
+        const result = await apiGet(`/api/strain/search/category?category=${category}`);
+        return result;
     },
 
     /** 获取拖拽文件的绝对路径 (需 preload 支持) */
     get_path_for_file(file: File): string {
         return window.electronAPI?.getPathForFile(file) || '';
+    },
+
+    /** 支持网页端上传文件到服务器 */
+    async upload_file(file: File): Promise<any> {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const response = await fetch(`${API_BASE}/api/blast/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            return await response.json();
+        } catch (err) {
+            console.error('[ElectronBridge] 文件上传失败:', err);
+            return { success: false, error: String(err) };
+        }
     }
 };
 

@@ -68,7 +68,7 @@
         </thead>
         <tbody>
           <tr
-            v-for="record in strain.filteredRecords"
+            v-for="record in displayedRecords"
             :key="record.id"
             class="table-row"
             :class="{
@@ -115,6 +115,12 @@
           </tr>
         </tbody>
       </table>
+      
+      <!-- 渲染截断提示 -->
+      <div v-if="strain.filteredRecords.length > 500" class="render-limit-notice">
+        由于数据量极大，为确保性能，此处仅显示前 500 条数据。（共 {{ strain.filteredRecords.length }} 条）
+        请使用左侧面板进行检索以查看更多。
+      </div>
     </div>
 
     <!-- 详情面板（浮动） -->
@@ -127,12 +133,18 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import StrainDetailPanel from './StrainDetailPanel.vue'
 
 const strain = useStrainStore()
 const appStore = useAppStore()
+
+// 性能截断：最多渲染 500 行，否则几千几万行 DOM 会直接卡死浏览器
+const displayedRecords = computed(() => {
+  return strain.filteredRecords.slice(0, 500)
+})
 
 function toggleSelectAll(event: Event) {
   const checked = (event.target as HTMLInputElement).checked
@@ -161,7 +173,7 @@ function deleteRecord(id: string) {
 function handleDeleteSelected() {
   if (strain.selectedCount === 0) return
   if (window.confirm(`确定要删除选中的 ${strain.selectedCount} 条记录吗？`)) {
-    strain.selectedRecords.forEach(id => strain.removeRecord(id))
+    strain.selectedRecords.forEach((id: string) => strain.removeRecord(id))
     appStore.showNotification(`已删除 ${strain.selectedCount} 条记录`, 'success')
   }
 }
@@ -476,5 +488,14 @@ function triggerManual() {
 
 .action-btn-small:hover {
   background: #f1f5f9;
+}
+
+.render-limit-notice {
+  text-align: center;
+  padding: 16px;
+  background: #fffbeb;
+  color: #b45309;
+  font-size: 0.85rem;
+  border-top: 1px solid #fef3c7;
 }
 </style>

@@ -4,45 +4,27 @@
 
     <!-- 导入模式切换 -->
     <div class="mode-tabs">
-      <button
-        class="mode-tab"
-        :class="{ active: strain.inputMode === 'file' }"
-        @click="strain.switchInputMode('file')"
-      >
+      <button class="mode-tab" :class="{ active: strain.inputMode === 'file' }" @click="strain.switchInputMode('file')">
         文件上传
       </button>
-      <button
-        class="mode-tab"
-        :class="{ active: strain.inputMode === 'text' }"
-        @click="strain.switchInputMode('text')"
-      >
+      <button class="mode-tab" :class="{ active: strain.inputMode === 'text' }" @click="strain.switchInputMode('text')">
         文本输入
       </button>
-      <button
-        class="mode-tab"
-        :class="{ active: strain.inputMode === 'ncbi' }"
-        @click="strain.switchInputMode('ncbi')"
-      >
+      <button class="mode-tab" :class="{ active: strain.inputMode === 'ncbi' }" @click="strain.switchInputMode('ncbi')">
         NCBI下载
       </button>
     </div>
 
     <!-- 文件上传模式 -->
     <div v-if="strain.inputMode === 'file'" class="input-section">
-      <div class="drop-zone" @click="handleFileSelect" @dragover.prevent @drop.prevent="handleDrop">
-        <span class="drop-icon">📤</span>
-        <span class="drop-text">点击或拖拽FASTA文件到此处</span>
-        <span class="drop-hint">支持 .fasta, .fa, .fas 格式</span>
-      </div>
+      <UniversalUpload type="fasta" accept=".fasta,.fas,.fa,.fna,.seq,.ab1,.abi,.zip,.gb,.gbk,.embl" label="上传或拖入新的菌种序列"
+        @success="onFilesUploaded" />
     </div>
 
     <!-- 文本输入模式 -->
     <div v-if="strain.inputMode === 'text'" class="input-section">
-      <textarea
-        v-model="strain.importText"
-        class="sequence-input"
-        placeholder="粘贴FASTA格式序列...&#10;&#10;>Sequence1&#10;ATCGATCGATCG&#10;&#10;>Sequence2&#10;GCTAGCTAGCTA"
-      />
+      <textarea v-model="strain.importText" class="sequence-input"
+        placeholder="粘贴FASTA格式序列...&#10;&#10;>Sequence1&#10;ATCGATCGATCG&#10;&#10;>Sequence2&#10;GCTAGCTAGCTA" />
       <button class="btn-primary" @click="handleImportText" :disabled="!strain.importText.trim()">
         导入序列
       </button>
@@ -52,20 +34,12 @@
     <div v-if="strain.inputMode === 'ncbi'" class="input-section">
       <div class="form-group">
         <label>NCBI Accession / 登录号</label>
-        <input
-          v-model="ncbiAccession"
-          class="text-input"
-          placeholder="例如：NC_045512.2, MN908947.3"
-        />
+        <input v-model="ncbiAccession" class="text-input" placeholder="例如：NC_045512.2, MN908947.3" />
       </div>
       <div class="form-group">
         <label>批量导入（每行一个）</label>
-        <textarea
-          v-model="ncbiBatchAccessions"
-          class="sequence-input"
-          placeholder="NC_045512.2&#10;MN908947.3&#10;MT019530.1"
-          rows="6"
-        />
+        <textarea v-model="ncbiBatchAccessions" class="sequence-input"
+          placeholder="NC_045512.2&#10;MN908947.3&#10;MT019530.1" rows="6" />
       </div>
       <button class="btn-primary" @click="handleNCBIDownload" :disabled="!canDownloadNCBI">
         从NCBI下载
@@ -90,7 +64,8 @@
 import { ref, computed } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
-import { getBridge } from '../../bridge/pyqt-bridge'
+import { getBridge } from '../../bridge'
+import UniversalUpload from '../common/UniversalUpload.vue'
 
 const strain = useStrainStore()
 const appStore = useAppStore()
@@ -103,26 +78,38 @@ const canDownloadNCBI = computed(() => {
 })
 
 const pendingTasks = computed(() => {
-  return strain.importTasks.filter(t => ['queued', 'running'].includes(t.status)).length
+  return (strain.importTasks as any[]).filter(t => ['queued', 'running'].includes(t.status)).length
 })
 
 const completedTasks = computed(() => {
-  return strain.importTasks.filter(t => t.status === 'done').length
+  return (strain.importTasks as any[]).filter(t => t.status === 'done').length
 })
 
-function handleFileSelect() {
-  try {
-    getBridge().request_file_load('fasta')
-  } catch (error) {
-    console.warn('[Strain] Bridge not available:', error)
-    appStore.showNotification('文件选择功能不可用', 'error')
-  }
-}
+async function onFilesUploaded(filePaths: string[]) {
+  if (filePaths.length === 0) return
 
-function handleDrop(event: DragEvent) {
-  event.preventDefault()
-  // TODO: 处理拖拽文件
-  appStore.showNotification('拖拽功能开发中', 'info')
+  appStore.showNotification(`正在从 ${filePaths.length} 个文件中提取菌种信息...`, 'info')
+  try {
+    const bridge = getBridge()
+    // 调用后端的导入逻辑（假设后端已有处理路径的接口）
+    if (typeof bridge.import_sequences_to_strains === 'function') {
+      const res = await bridge.import_sequences_to_strains(filePaths)
+      if (res && res.success) {
+        appStore.showNotification(`导入成功: 新增 ${res.count} 条记录`, 'success')
+        // 刷新列表
+        if (typeof (strain as any).fetchStrains === 'function') {
+          (strain as any).fetchStrains()
+        }
+      } else {
+        appStore.showNotification(`导入失败: ${res?.error || '处理异常'}`, 'error')
+      }
+    } else {
+      // 临时方案：如果后端还没准备好批量路径接口，提示用户
+      appStore.showNotification('后端批量导入接口对接中，请先使用文本模式', 'warning')
+    }
+  } catch (e) {
+    appStore.showNotification('导入过程出错', 'error')
+  }
 }
 
 function handleImportText() {
@@ -181,7 +168,9 @@ function handleNCBIDownload() {
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
-  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  transition: transform 0.2s, opacity 0.2s;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .mode-tab:hover {
@@ -191,7 +180,7 @@ function handleNCBIDownload() {
 .mode-tab.active {
   background: white;
   color: #2563eb;
-  
+
 }
 
 .input-section {
@@ -206,7 +195,9 @@ function handleNCBIDownload() {
   padding: 32px 20px;
   text-align: center;
   cursor: pointer;
-  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  transition: transform 0.2s, opacity 0.2s;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
   background: #f8fafc;
 }
 
@@ -245,7 +236,9 @@ function handleNCBIDownload() {
   font-size: 0.85rem;
   line-height: 1.6;
   resize: vertical;
-  transition: border-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  transition: border-color 0.2s;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .sequence-input:focus {
@@ -259,7 +252,9 @@ function handleNCBIDownload() {
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   font-size: 0.85rem;
-  transition: border-color 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+  transition: border-color 0.2s;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .text-input:focus {
@@ -290,13 +285,15 @@ function handleNCBIDownload() {
   font-weight: 700;
   font-size: 0.85rem;
   cursor: pointer;
-  transition: transform 0.2s, opacity 0.2s; backface-visibility: hidden; -webkit-backface-visibility: hidden;
-  
+  transition: transform 0.2s, opacity 0.2s;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  
+
 }
 
 .btn-primary:disabled {

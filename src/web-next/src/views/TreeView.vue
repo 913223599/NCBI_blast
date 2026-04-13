@@ -8,6 +8,7 @@ import { useTree } from '../composables/useTree'
 import { useAppStore } from '../stores/app'
 import { getBridge, initBridge } from '../bridge'
 import PhylotreeWidget from '../components/PhylotreeWidget.vue'
+import UniversalUpload from '../components/common/UniversalUpload.vue'
 
 const appStore = useAppStore()
 const {
@@ -398,65 +399,7 @@ if (typeof document !== 'undefined') {
   document.addEventListener('click', () => { openDropdown.value = null })
 }
 
-function handleFileUpload(e: Event) {
-  const files = (e.target as HTMLInputElement).files
-  if (files) {
-    // 关键：在 Electron 环境下获取真实物理路径
-    const paths: string[] = []
-    const rawFiles: File[] = []
-    
-    const fileList = Array.from(files)
-    for (const f of fileList) {
-      const path = getBridge().get_path_for_file(f)
-      if (path) {
-        paths.push(path)
-      } else {
-        rawFiles.push(f)
-      }
-    }
-
-    if (paths.length > 0) {
-      // 如果有路径，直接提交到工作区
-      appStore.showNotification(`检测到 ${paths.length} 个本地文件，正在同步并解压...`, 'info')
-      getBridge().add_tree_workspace_files(JSON.stringify(paths)).then(() => {
-         refreshWorkspace()
-         appStore.showNotification('工作区内容已更新', 'success')
-      })
-    }
-    
-    // 对于无法获取路径的文件（如果有），保留在 selectedFiles 中进行文本读取
-    selectedFiles.value = rawFiles
-    
-    // 关键修复：清除 DOM 值，确保下次选同一个文件也能触发 change 事件
-    ; (e.target as HTMLInputElement).value = ''
-  }
-}
-
-function handleDragOver(e: DragEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-}
-
-function handleDropLocal(e: DragEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-  
-  if (e.dataTransfer && e.dataTransfer.files.length > 0) {
-    const paths: string[] = []
-    const files = Array.from(e.dataTransfer.files)
-    
-    for (const f of files) {
-      const path = getBridge().get_path_for_file(f)
-      if (path) {
-        paths.push(path)
-      }
-    }
-    
-    if (paths.length > 0) {
-      handleExternalFiles(paths)
-    }
-  }
-}
+// 移除了旧的手动上传处理函数，统一改由 UniversalUpload.vue 结合 handleExternalFiles 处理
 
 async function importSequences() {
   if (selectedFiles.value.length > 0) {
@@ -720,16 +663,12 @@ onMounted(() => {
           <!-- 采集面板 -->
           <div v-if="activeSideTool === 'input'" class="panel-section">
             <h3 class="section-title">▶ 数据采集</h3>
-            <div 
-              class="upload-zone-neo" 
-              @click="fileInput?.click()"
-              @dragover="handleDragOver"
-              @drop="handleDropLocal"
-            >
-              <span class="dz-icon">📁</span>
-              <span class="dz-text">{{ (selectedFiles?.length || 0) > 0 ? `已选 ${selectedFiles.length} 个文件` : '上传序列/压缩包' }}</span>
-              <input type="file" ref="fileInput" hidden multiple accept=".fasta,.fas,.fa,.seq,.txt,.fna,.zip,.gz,.ab1,.abi" @change="handleFileUpload" />
-            </div>
+            <UniversalUpload 
+              type="tree"
+              accept=".fasta,.fas,.fa,.seq,.txt,.fna,.zip,.gz,.ab1,.abi,.nwk"
+              label="上传序列 / 拖拽发育成树"
+              @success="handleExternalFiles"
+            />
 
             <div class="input-divider">待分析清单 (Workspace)</div>
 

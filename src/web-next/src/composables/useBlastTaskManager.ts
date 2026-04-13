@@ -22,7 +22,7 @@ export function useBlastTaskManager() {
     
     pollingTimers[taskId] = window.setInterval(() => {
       try {
-        getBridge().get_task_status(taskId, (resStr) => {
+        getBridge().get_task_status(taskId, (resStr: string) => {
           try {
             const statusObj = resStr ? JSON.parse(resStr) : null
             if (!statusObj || !statusObj.status) return

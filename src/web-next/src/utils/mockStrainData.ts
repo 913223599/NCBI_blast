@@ -141,7 +141,7 @@ export function seedMockData(strainStore: any, codeGen: any) {
     const source = sources[index % sources.length]
 
     try {
-      const sampleCode = codeGen.generate({
+      const sampleCode = codeGen.commit({
         sourceCode: source,
         categoryCode: taxon.cat,
         genusCode: taxon.gen,

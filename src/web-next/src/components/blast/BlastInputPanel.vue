@@ -3,51 +3,39 @@ import { useBlastStore } from '../../stores/blast'
 import { useAppStore } from '../../stores/app'
 import { getBridge } from '../../bridge'
 import { useI18n } from '../../locales'
+import UniversalUpload from '../common/UniversalUpload.vue'
 
 const blast = useBlastStore()
 const appStore = useAppStore()
 const { t } = useI18n()
 
-function selectFiles(): void {
-  try {
-    getBridge().request_file_load('fasta')
-  } catch (error) {
-    console.warn('[Blast] Bridge not available:', error)
-  }
-}
-
-function handleDragOver(e: DragEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-}
-
-async function handleDrop(e: DragEvent) {
-  e.preventDefault()
-  e.stopPropagation()
+/**
+ * 处理上传成功的路径
+ */
+async function onUploadSuccess(filePaths: string[]) {
+  const bridge = getBridge()
+  appStore.showNotification(`正在处理 ${filePaths.length} 个导入项...`, 'info')
   
-  if (e.dataTransfer && e.dataTransfer.files.length > 0) {
-    const filePaths: string[] = []
-    const files = Array.from(e.dataTransfer.files)
-    
-    for (const f of files) {
-      const path = getBridge().get_path_for_file(f)
-      if (path) {
-        filePaths.push(path)
-      }
-    }
-    
-    if (filePaths.length > 0) {
-        appStore.showNotification(`正在处理 ${filePaths.length} 个导入项...`, 'info')
-        const res = await getBridge().process_blast_files(filePaths)
-        if (res && res.success && res.paths) {
-            blast.addFiles(res.paths)
-            appStore.showNotification(`成功导入 ${res.paths.length} 个序列文件`, 'success')
-        } else {
-            // Fallback
-            blast.addFiles(filePaths)
-        }
-    }
+  const res = await bridge.process_blast_files(filePaths)
+  if (res && res.success && res.paths) {
+    blast.addFiles(res.paths)
+    appStore.showNotification(`成功导入 ${res.paths.length} 个序列文件`, 'success')
+  } else {
+    blast.addFiles(filePaths)
   }
+}
+
+/**
+ * 智能显示文件名：剥离后端增加的 8位 UUID 前缀
+ */
+function getDisplayName(fullPath: string) {
+  const fileName = fullPath.split(/[/\\]/).pop() || ''
+  // 匹配格式: 8位16进制 + 下划线 (例如: a1b2c3d4_test.fasta)
+  const uuidPattern = /^[0-9a-f]{8}_/
+  if (uuidPattern.test(fileName)) {
+    return fileName.substring(9)
+  }
+  return fileName
 }
 </script>
 
@@ -60,18 +48,15 @@ async function handleDrop(e: DragEvent) {
     </div>
     
     <div v-if="blast.inputMode === 'file'" class="file-area">
-      <div 
-        class="drop-zone-neo" 
-        @click="selectFiles"
-        @dragover="handleDragOver"
-        @drop="handleDrop"
-      >
-        <span class="dz-icon">📤</span>
-        <span class="dz-text">{{ t('blast.input.drop') }}</span>
-      </div>
+      <UniversalUpload 
+        type="fasta"
+        accept=".fasta,.fas,.fa,.fna,.seq,.ab1,.abi,.zip"
+        :label="t('blast.input.drop')"
+        @success="onUploadSuccess"
+      />
       <div class="file-list-neo">
          <div v-for="f in blast.files" :key="f" class="file-item-neo">
-           <span class="name">{{ f.split(/[/\\]/).pop() }}</span>
+           <span class="name" :title="f">{{ getDisplayName(f) }}</span>
            <button class="del" @click="blast.removeFile(f)">✕</button>
          </div>
       </div>
