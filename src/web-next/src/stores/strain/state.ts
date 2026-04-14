@@ -31,7 +31,12 @@ export function useStrainState() {
     sequenceType: '',
     country: '',
     dateFrom: '',
-    dateTo: ''
+    dateTo: '',
+    minLength: null,
+    maxLength: null,
+    integrityOnly: false,
+    sortKey: 'accession',
+    sortOrder: null
   })
 
   /* ======== 导入状态 ======== */

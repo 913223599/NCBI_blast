@@ -469,7 +469,12 @@ const TYPE_SPECIFIC_KEYS: Record<string, string[]> = {
 const expectedMetadataKeys = computed(() => {
   const baseKeys = ['storageDate', 'storageMedium', 'biosafetyLevel', 'passageNumber', 'containerType', 'description']
   const specificKeys = TYPE_SPECIFIC_KEYS[props.record.sampleType] || []
-  return [...baseKeys, ...specificKeys]
+  
+  // 获取实际存在于 record.metadata 中的所有键
+  const actualKeys = props.record.metadata ? Object.keys(props.record.metadata) : []
+  
+  // 合并建议键与实际键，并去重
+  return [...new Set([...baseKeys, ...specificKeys, ...actualKeys])]
 })
 
 const METADATA_UNITS: Record<string, string | Record<string, string>> = {

@@ -105,9 +105,13 @@ async def analyze_tree(req: TreeAnalyzeRequest):
 
             if cancel_event and cancel_event.is_set(): return
 
-            # [优化] 使用通用解析器统一提取序列，支持 ZIP/ABI/GZ 自动剥离
-            timestamp = datetime.now().strftime("%m%d_%H%M%S")
-            merged_path = (PROJECT_ROOT / "results" / f"Tree_Job_Input_{timestamp}.fasta").resolve()
+            # [优化] 使用专用 Job 目录管理所有过程垃圾文件，防止 results 根目录混乱
+            timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+            job_id = f"Tree_Job_{timestamp}"
+            job_dir = (PROJECT_ROOT / "results" / "tree_workspace" / "jobs" / job_id).resolve()
+            job_dir.mkdir(parents=True, exist_ok=True)
+            
+            merged_path = job_dir / f"{job_id}_input.fasta"
             
             sequence_count = 0
             with open(merged_path, 'w', encoding='utf-8') as tmp:
@@ -130,7 +134,7 @@ async def analyze_tree(req: TreeAnalyzeRequest):
             
             workflow = pipeline.run_full_pipeline(
                 merged_path, 
-                ToolConfig.RESULTS_DIR, 
+                job_dir, # 关键：将所有中间文件限制在 Job 目录内
                 method=req.mode,
                 params={
                     "engine": req.engine, "msa": req.msa, "model": req.model,
@@ -149,7 +153,7 @@ async def analyze_tree(req: TreeAnalyzeRequest):
             
             # 归档归纳
             res_files = {k: final_result[k] for k in ["tree_file", "manifest_file"] if k in final_result}
-            archive_dir = archiver.create_session_archive(merged_path, res_files, merged_path.stem)
+            archive_dir = archiver.create_session_archive(merged_path, res_files, job_id)
             
             tree_content = ""
             if "tree_file" in res_files:
@@ -328,9 +332,19 @@ async def delete_tree_history(group_id: str, physical: bool = False):
     try:
         success = get_strain_db_manager().delete_tree_history_group(group_id)
         if physical:
+            # 1. 清理正式归档目录
             archive_dir = (PROJECT_ROOT / "results" / "tree_results" / group_id).resolve()
             if archive_dir.exists() and archive_dir.is_dir():
                 shutil.rmtree(archive_dir)
+            
+            # 2. 【核心优化】清理过程产生的 Job 目录（垃圾文件集中地）
+            # 映射规则：group_id 包含 timestamp，找到对应 jobs 目录
+            # 示例：Tree_History_240414_102214 -> Tree_Job_240414_102214
+            job_id_guess = group_id.replace("Tree_History_", "Tree_Job_")
+            job_dir = (PROJECT_ROOT / "results" / "tree_workspace" / "jobs" / job_id_guess).resolve()
+            if job_dir.exists() and job_dir.is_dir():
+                logger.info(f"🧹 清理过程垃圾文件夹: {job_dir}")
+                shutil.rmtree(job_dir)
         return {"success": success}
     except Exception as exc:
         return {"success": False, "error": str(exc)}

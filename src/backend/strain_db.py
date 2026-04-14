@@ -213,17 +213,24 @@ class StrainDBManager:
             return False
 
     def delete_record(self, record_id):
-        """删除样本记录"""
+        """删除单个样本记录"""
+        return self.delete_records_batch([record_id])
+
+    def delete_records_batch(self, record_ids: List[str]):
+        """批量删除样本记录"""
+        if not record_ids:
+            return True
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute('DELETE FROM records WHERE id = ?', (record_id,))
+            # 使用 IN 语句进行批量删除
+            placeholders = ", ".join(["?"] * len(record_ids))
+            cursor.execute(f'DELETE FROM records WHERE id IN ({placeholders})', tuple(record_ids))
             conn.commit()
-            # 性能优化:不立即关闭连接,复用连接池
             return True
         except Exception as e:
-            self.logger.error(f"Error deleting record: {e}")
-            self._close_connection()  # 异常时关闭连接
+            self.logger.error(f"Error deleting batch records: {e}")
+            self._close_connection()
             return False
 
     def save_sys_config(self, key, value_data):

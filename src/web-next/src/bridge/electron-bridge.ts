@@ -601,6 +601,11 @@ const electronBridge = {
         callback?.(result.success);
     },
 
+    async db_delete_records_batch(recordIds: string[], callback?: (res: boolean) => void) {
+        const result = await apiPost('/api/strain/records/delete_batch', { ids: recordIds });
+        callback?.(result.success);
+    },
+
     async db_load_all(callback?: (res: any) => void) {
         const result = await apiGet('/api/strain/load');
         callback?.(result);

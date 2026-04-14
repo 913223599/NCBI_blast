@@ -126,6 +126,16 @@ async def delete_record(record_id: str, x_client_id: Optional[str] = Header(None
         await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
     return {"success": success}
 
+@router.post("/api/strain/records/delete_batch")
+async def delete_records_batch(req: dict, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
+    from ...backend.strain_db import get_strain_db_manager
+    invalidate_cache()
+    ids = req.get("ids", [])
+    success = get_strain_db_manager().delete_records_batch(ids)
+    if success and x_client_id:
+        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
+    return {"success": success}
+
 @router.post("/api/strain/records/batch")
 async def save_records_batch(req: dict, x_client_id: Optional[str] = Header(None, alias="X-Client-ID")):
     from ...backend.strain_db import get_strain_db_manager

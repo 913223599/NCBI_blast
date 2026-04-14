@@ -103,6 +103,11 @@ export interface SearchFilters {
   country: string
   dateFrom: string
   dateTo: string
+  minLength?: number | null
+  maxLength?: number | null
+  integrityOnly?: boolean
+  sortKey?: string
+  sortOrder?: 'asc' | 'desc' | null
 }
 
 export interface ImportTask {

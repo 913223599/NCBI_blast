@@ -25,6 +25,13 @@
           >
             📊 统计分析
           </button>
+          <button
+            class="toolbar-btn"
+            :class="{ active: currentView === 'list' }"
+            @click="currentView = 'list'"
+          >
+            📑 列表视图
+          </button>
 
           <div class="toolbar-divider"></div>
 
@@ -57,6 +64,9 @@
 
         <!-- 统计面板 -->
         <StatisticsPanel v-if="currentView === 'stats'" />
+
+        <!-- 列表视图（表格） -->
+        <StrainListContainer v-if="currentView === 'list'" />
       </div>
     </main>
 
@@ -99,10 +109,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import StrainSidebar from '../components/strain/StrainSidebar.vue'
 import FreezerDetailPanel from '../components/strain/FreezerDetailPanel.vue'
 import StatisticsPanel from '../components/strain/StatisticsPanel.vue'
+import StrainListContainer from '../components/strain/list/StrainListContainer.vue'
 import AddFreezerDialog from '../components/strain/AddFreezerDialog.vue'
 import BatchImportDialog from '../components/strain/BatchImportDialog.vue'
 import SampleDetailDialog from '../components/strain/SampleDetailDialog.vue'
@@ -116,29 +127,32 @@ const showAddDialog = ref(false)
 const showBatchImport = ref(false)
 const showShortcutsHelp = ref(false)
 const showCodeManager = ref(false)
-const currentView = ref<'freezer' | 'stats'>('freezer')
+const currentView = ref<'freezer' | 'stats' | 'list'>('freezer')
 
 // 样本详情
 const showSampleDetail = ref(false)
-const selectedSample = ref<StrainRecord | null>(null)
+const selectedSample = computed(() => strain.activeRecord)
+
+// 自动监听详情打开
+watch(() => strain.activeRecord, (newVal) => {
+  if (newVal) showSampleDetail.value = true
+})
 
 function handleFreezerAdded(freezerId: string) {
   strain.setActiveFreezer(freezerId)
 }
 
 function handleSampleClick(record: StrainRecord) {
-  selectedSample.value = record
-  showSampleDetail.value = true
+  strain.setActiveRecord(record)
 }
 
 function handleShowSampleDetail(record: StrainRecord) {
-  selectedSample.value = record
-  showSampleDetail.value = true
+  strain.setActiveRecord(record)
 }
 
 function handleSampleDeleted() {
   showSampleDetail.value = false
-  selectedSample.value = null
+  strain.setActiveRecord(null)
 }
 
 function handleBatchImported() {

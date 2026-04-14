@@ -67,8 +67,8 @@ export function useSyncActions(state: any, recordsActions: any) {
           if (data.records) {
             // 彻底脱水，仅保留列表展示必须字段
             const dehydrated = data.records.map((r: any) => {
-               const { sequence, metadata, ...rest } = r
-               // 暂时保留对历史记录的冻结以防内存溢出，但主目录必须保持活跃
+               const { sequence, ...rest } = r
+               // 核心治理：元数据对于 UI 展示至关重要，必须保留；仅脱水巨大的序列字段
                return rest
             })
             records.value = dehydrated

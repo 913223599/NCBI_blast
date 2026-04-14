@@ -14,9 +14,28 @@ export function useRecordsActions(state: any, autoSave: () => void) {
 
   /** 应用过滤器 */
   function applyFilters() {
-    const { keyword, species, sequenceType, country, dateFrom, dateTo } = searchFilters.value
+    const { 
+      keyword, species, sequenceType, country, dateFrom, dateTo,
+      minLength, maxLength, integrityOnly 
+    } = searchFilters.value
 
     filteredRecords.value = markRaw(records.value.filter((record: StrainRecord) => {
+      // 核心业务：数据完整性检查 (关键字段缺失项)
+      if (integrityOnly) {
+        const isMissing = !record.accession || !record.species || !record.collectionDate
+        if (!isMissing) return false
+      }
+
+      // 核心业务：序列长度区间筛选
+      if (minLength !== null && minLength !== undefined && minLength !== '') {
+        const len = record.sequence?.length || 0
+        if (len < Number(minLength)) return false
+      }
+      if (maxLength !== null && maxLength !== undefined && maxLength !== '') {
+        const len = record.sequence?.length || 0
+        if (len > Number(maxLength)) return false
+      }
+
       if (keyword) {
         const kw = keyword.toLowerCase()
         const matchKeyword =
@@ -34,6 +53,31 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       if (dateTo && record.collectionDate > dateTo) return false
       return true
     }))
+
+    // 执行排序
+    if (searchFilters.value.sortOrder) {
+      const key = searchFilters.value.sortKey as keyof StrainRecord
+      const order = searchFilters.value.sortOrder === 'asc' ? 1 : -1
+      
+      filteredRecords.value.sort((a: StrainRecord, b: StrainRecord) => {
+        const valA = String(a[key] || '')
+        const valB = String(b[key] || '')
+        return valA.localeCompare(valB, undefined, { numeric: true }) * order
+      })
+    }
+  }
+
+  /** 切换排序状态 */
+  function toggleSort(key: string) {
+    if (searchFilters.value.sortKey === key) {
+      if (searchFilters.value.sortOrder === 'asc') searchFilters.value.sortOrder = 'desc'
+      else if (searchFilters.value.sortOrder === 'desc') searchFilters.value.sortOrder = null
+      else searchFilters.value.sortOrder = 'asc'
+    } else {
+      searchFilters.value.sortKey = key
+      searchFilters.value.sortOrder = 'asc'
+    }
+    applyFilters()
   }
 
   function resetFilters() {
@@ -159,6 +203,19 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     applyFilters()
   }
 
+  function removeRecordsBatch(ids: string[]) {
+    if (!ids.length) return
+    records.value = records.value.filter((r: StrainRecord) => !ids.includes(r.id))
+    ids.forEach(id => {
+      selectedRecords.value.delete(id)
+      if (activeRecord.value?.id === id) activeRecord.value = null
+    })
+    try {
+      getBridge().db_delete_records_batch(ids)
+    } catch (e) {}
+    applyFilters()
+  }
+
   function toggleSelect(id: string) {
     if (selectedRecords.value.has(id)) {
       selectedRecords.value.delete(id)
@@ -198,12 +255,14 @@ export function useRecordsActions(state: any, autoSave: () => void) {
 
   return {
     applyFilters,
+    toggleSort,
     resetFilters,
     searchByCategory,
     addRecord,
     addRecords,
     updateRecord,
     removeRecord,
+    removeRecordsBatch,
     toggleSelect,
     selectAll,
     clearSelection,
