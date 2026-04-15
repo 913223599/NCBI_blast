@@ -251,7 +251,7 @@
                     v-for="pos in box.positions"
                     :key="pos.label"
                     class="pos-thumb-pixel"
-                    :class="{ 'pos-thumb-occupied': isPositionOccupied(selectedShelf?.id || '', selectedCabinet?.id || '', selectedDrawer?.id || '', box.id, pos.label) }"
+                    :class="{ 'pos-thumb-occupied': pos.occupied }"
                   ></div>
                 </div>
                 <span class="box-tab-name">{{ box.name }}</span>
@@ -331,7 +331,7 @@
                       :key="pos.label"
                       class="position-cell"
                       :class="{ 
-                        occupied: activeBox ? isPositionOccupied(selectedShelf?.id || '', selectedCabinet?.id || '', selectedDrawer?.id || '', activeBox.id, pos.label) : false,
+                        occupied: pos.occupied,
                         selected: selectedIndices.has(Number(idx))
                       }"
                       @mousedown="handlePositionMouseDown(Number(idx), pos)"
@@ -339,7 +339,7 @@
                       @click="handlePositionLeftClick(pos, activeBox)"
                     >
                       <div class="pos-label">{{ pos.label }}</div>
-                      <div v-if="activeBox && isPositionOccupied(selectedShelf?.id || '', selectedCabinet?.id || '', selectedDrawer?.id || '', activeBox.id, pos.label)" class="pos-indicator"></div>
+                      <div v-if="pos.occupied" class="pos-indicator"></div>
                     </div>
                   </div>
                 </div>
@@ -501,64 +501,56 @@ function getDrawerCount(cabinet: any): number {
   return (cabinet.drawers || []).length
 }
 
-// 计算使用率（基于 records 实时统计，解决状态不同步问题）
+// 计算使用率（基于物理占位 occupied 实时递归统计，彻底解决导入样本缺少层级 ID 导致的 0% 问题）
+function getBoxUsedCountAndTotal(box: any) {
+  if (!box || !box.positions) return { used: 0, total: 0 }
+  const total = box.rows * box.cols
+  const used = box.positions.filter((p: any) => p.occupied).length
+  return { used, total }
+}
+
 function getShelfUsage(shelf: any): number {
-  if (!strain.activeFreezer) return 0
   let totalPositions = 0
-  for (const cabinet of shelf.cabinets) {
-    for (const drawer of cabinet.drawers) {
-      for (const box of drawer.boxes) {
-        totalPositions += box.rows * box.cols
-      }
-    }
-  }
-  const usedPositions = strain.records.filter((r: StrainRecord) => 
-    r.freezerId === strain.activeFreezer!.id && r.shelfId === shelf.id
-  ).length
+  let usedPositions = 0
+  shelf.cabinets.forEach((c: any) => {
+    c.drawers.forEach((d: any) => {
+      d.boxes.forEach((b: any) => {
+        const stats = getBoxUsedCountAndTotal(b)
+        totalPositions += stats.total
+        usedPositions += stats.used
+      })
+    })
+  })
   return totalPositions > 0 ? (usedPositions / totalPositions) * 100 : 0
 }
 
 function getCabinetUsage(shelfId: string, cabinet: any): number {
-  if (!strain.activeFreezer) return 0
   let totalPositions = 0
-  for (const drawer of cabinet.drawers) {
-    for (const box of drawer.boxes) {
-      totalPositions += box.rows * box.cols
-    }
-  }
-  const usedPositions = strain.records.filter((r: StrainRecord) => 
-    r.freezerId === strain.activeFreezer!.id && 
-    r.shelfId === shelfId && 
-    r.cabinetId === cabinet.id
-  ).length
+  let usedPositions = 0
+  cabinet.drawers.forEach((d: any) => {
+    d.boxes.forEach((b: any) => {
+      const stats = getBoxUsedCountAndTotal(b)
+      totalPositions += stats.total
+      usedPositions += stats.used
+    })
+  })
   return totalPositions > 0 ? (usedPositions / totalPositions) * 100 : 0
 }
 
 function getDrawerUsage(shelfId: string, cabinetId: string, drawer: any): number {
-  if (!strain.activeFreezer) return 0
   let totalPositions = 0
-  for (const box of (drawer.boxes || [])) {
-    totalPositions += box.rows * box.cols
-  }
-  const usedPositions = strain.records.filter((r: StrainRecord) => 
-    r.freezerId === strain.activeFreezer!.id && 
-    r.shelfId === shelfId && 
-    r.cabinetId === cabinetId && 
-    r.drawerId === drawer.id
-  ).length
+  let usedPositions = 0
+  drawer.boxes.forEach((b: any) => {
+    const stats = getBoxUsedCountAndTotal(b)
+    totalPositions += stats.total
+    usedPositions += stats.used
+  })
   return totalPositions > 0 ? (usedPositions / totalPositions) * 100 : 0
 }
 
-function getBoxUsage(shelfId: string, cabinetId: string, drawerId: string, box: any): number {
-  const totalPositions = box.rows * box.cols
-  const usedPositions = strain.records.filter((r: StrainRecord) => 
-    r.freezerId === strain.activeFreezer!.id &&
-    r.shelfId === shelfId &&
-    r.cabinetId === cabinetId &&
-    r.drawerId === drawerId &&
-    r.boxId === box.id
-  ).length
-  return totalPositions > 0 ? (usedPositions / totalPositions) * 100 : 0
+function getBoxUsage(shelfId: string | undefined, cabinetId: string | undefined, drawerId: string | undefined, box: any): number {
+  const stats = getBoxUsedCountAndTotal(box)
+  return stats.total > 0 ? (stats.used / stats.total) * 100 : 0
 }
 
 // 检查位置是否被占用（查询 records）
@@ -618,18 +610,9 @@ function selectDrawer(drawer: any) {
 }
 
 function handlePositionHover(position: any, box: any) {
-  // 核心修正：不直接信任 position.occupied
-  const sample = getSampleByPosition(
-    strain.activeFreezer!.id,
-    selectedShelf.value.id,
-    selectedCabinet.value.id,
-    selectedDrawer.value.id,
-    box.id,
-    position.label
-  )
-  
-  if (sample) {
-    hoveredSample.value = sample
+  // 直接通过 pos.sampleId 索引，不再依赖不稳定的坐标搜索
+  if (position?.sampleId) {
+    hoveredSample.value = strain.records.find((r: any) => r.id === position.sampleId) || null
   } else {
     hoveredSample.value = null
   }
@@ -679,36 +662,29 @@ function handlePositionLeftClick(position: any, box: any) {
     return
   }
 
-  // 核心修正：不直接信任 position.occupied 属性（可能存在响应式延迟）
-  // 直接从 store 记录中通过位置反查是否存在样本
-  const sample = getSampleByPosition(
-    strain.activeFreezer!.id,
-    selectedShelf.value.id,
-    selectedCabinet.value.id,
-    selectedDrawer.value.id,
-    box.id,
-    position.label
-  )
-
-  if (sample) {
-    // 显示样本详情
-    selectedSample.value = sample
-    showDetailDialog.value = true
-  } else {
-    // 确实没样本，清空选区进入录入模式
-    selectedIndices.value.clear()
-    
-    // 显示录入对话框
-    entryPosition.value = {
-      freezerId: strain.activeFreezer!.id,
-      shelfId: selectedShelf.value.id,
-      cabinetId: selectedCabinet.value.id,
-      drawerId: selectedDrawer.value.id,
-      boxId: box.id,
-      position: position.label
+  // 直接通过 sampleId 跳转详情，100% 准确性且无性能开销
+  if (position?.sampleId) {
+    const sample = strain.records.find((r: any) => r.id === position.sampleId)
+    if (sample) {
+      selectedSample.value = sample
+      showDetailDialog.value = true
+      return
     }
-    showEntryDialog.value = true
   }
+
+  // 确实没样本，清空选区进入录入模式
+  selectedIndices.value.clear()
+  
+  // 显示录入对话框
+  entryPosition.value = {
+    freezerId: strain.activeFreezer!.id,
+    shelfId: selectedShelf.value.id,
+    cabinetId: selectedCabinet.value.id,
+    drawerId: selectedDrawer.value.id,
+    boxId: box.id,
+    position: position.label
+  }
+  showEntryDialog.value = true
 }
 
 // 鼠标按下：开始框选

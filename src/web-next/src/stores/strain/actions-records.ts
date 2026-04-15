@@ -131,8 +131,9 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     return newRecord
   }
 
-  function addRecords(recordsToAdd: any[]) {
-    if (!recordsToAdd.length) return
+  /** 批量添加样本记录 (带 Promise 支持，用于链式保存) */
+  function addRecords(recordsToAdd: any[]): Promise<boolean> {
+    if (!recordsToAdd.length) return Promise.resolve(true)
     
     const now = new Date().toISOString()
     const processedRecords: StrainRecord[] = recordsToAdd.map(data => ({
@@ -165,21 +166,26 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       addedAt: data.addedAt || now
     }))
 
+    // 1. 同步更本地状态
     records.value = [...records.value, ...processedRecords]
-    
-    setIsUpdating(true)
-    try {
-      const bridge = getBridge()
-      bridge.db_save_records_batch(processedRecords, (success: boolean) => {
-        setIsUpdating(false)
-        if (!success) console.error('[StrainStore] 批量保存失败')
-      })
-    } catch (e) {
-      setIsUpdating(false)
-      console.error('[StrainStore] 批量保存异常:', e)
-    }
-
     applyFilters()
+    
+    // 2. 开启护盾并返回保存状态
+    setIsUpdating(true)
+    return new Promise((resolve) => {
+      try {
+        const bridge = getBridge()
+        bridge.db_save_records_batch(processedRecords, (success: boolean) => {
+          if (!success) console.error('[StrainStore] 批量保存数据失败')
+          // 注意：此处不再执行 setIsUpdating(false)，交给链式调用的终点处理
+          resolve(success)
+        })
+      } catch (e) {
+        setIsUpdating(false)
+        console.error('[StrainStore] 批量保存异常:', e)
+        resolve(false)
+      }
+    })
   }
 
   function updateRecord(id: string, updates: Partial<StrainRecord>) {
@@ -213,6 +219,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     try {
       getBridge().db_delete_records_batch(ids)
     } catch (e) {}
+
     applyFilters()
   }
 

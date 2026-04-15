@@ -22,7 +22,7 @@ export const useStrainStore = defineStore('strain', () => {
   const recordsModule = useRecordsActions(s, autoSaveProxy)
   const freezerModule = useFreezerActions(s)
   const importModule = useImportActions(s)
-  const syncModule = useSyncActions(s, recordsModule)
+  const syncModule = useSyncActions(s, recordsModule, freezerModule)
 
   // 绑定真正的实现
   realAutoSave = syncModule.autoSave

@@ -1,6 +1,6 @@
 import { getBridge, onEvent } from '../../bridge'
 
-export function useSyncActions(state: any, recordsActions: any) {
+export function useSyncActions(state: any, recordsActions: any, freezerActions: any) {
   const { 
     freezers, 
     records, 
@@ -44,34 +44,26 @@ export function useSyncActions(state: any, recordsActions: any) {
 
           // 核心治理：Object.freeze 是防止内存溢出的唯一真神
           if (data.freezers) {
+            console.log('[Sync] 收到后端冰箱结构更新，准备同步数据...')
             freezers.value = data.freezers
-            const map: Record<string, string> = {}
-            const indexLoc = (f: any) => {
-              map[f.id] = f.name
-              f.shelves?.forEach((s: any) => {
-                map[s.id] = s.name
-                s.cabinets?.forEach((c: any) => {
-                  map[c.id] = c.name
-                  c.drawers?.forEach((d: any) => {
-                    map[d.id] = d.name
-                    d.boxes?.forEach((b: any) => {
-                      map[b.id] = b.name
-                    })
-                  })
-                })
-              })
-            }
-            locationMap.value = map
           }
 
           if (data.records) {
-            // 彻底脱水，仅保留列表展示必须字段
-            const dehydrated = data.records.map((r: any) => {
+            // 核心治理：脱水巨大的序列字段，但必须保留所有的物理坐标字段以供拓扑刷新
+            const processed = data.records.map((r: any) => {
                const { sequence, ...rest } = r
-               // 核心治理：元数据对于 UI 展示至关重要，必须保留；仅脱水巨大的序列字段
-               return rest
+               // 必须确保返回给 Store 的对象具有统一的驼峰命名字段
+               return {
+                 ...rest,
+                 freezerId: r.freezer_id || r.freezerId,
+                 shelfId: r.shelf_id || r.shelfId,
+                 cabinetId: r.cabinet_id || r.cabinetId,
+                 drawerId: r.drawer_id || r.drawerId,
+                 boxId: r.box_id || r.boxId,
+                 position: r.position
+               }
             })
-            records.value = dehydrated
+            records.value = processed
           }
 
           if (data.codeLookup) {
@@ -85,7 +77,19 @@ export function useSyncActions(state: any, recordsActions: any) {
           }
 
           recordsActions.applyFilters()
+          
+          console.log(`[Sync] 数据加载完成: ${records.value.length} 条样本, ${freezers.value.length} 个冰箱`)
+
+          // 关键修复：初始加载完成后，强制根据最新的 records 同步一次物理拓扑
+          // 彻底解决“重启后不亮”的问题：不再依赖数据库里的 structure 状态，而是在内存中根据 records 动态重建
+          if (freezerActions?.refreshFreezerOccupancy) {
+            console.log(`[Sync] 正在从 ${records.value.length} 条样本记录中恢复物理占用拓补...`)
+            // 立即执行一次同步 (false 表示不写回数据库)
+            freezerActions.refreshFreezerOccupancy(false)
+          }
+
           isInitialized.value = true
+          console.log('[Sync] 系统初始化完成')
         } catch (e) {
           console.error('[Sync] Parse Error', e)
         } finally {
@@ -106,7 +110,15 @@ export function useSyncActions(state: any, recordsActions: any) {
     cleanupHandler = onEvent((type: string, data: any) => {
       // 1. 同步全量数据 (通常由其他端修改触发)
       if (type === 'data_updated' && data.module === 'strains') {
-        initFromDatabase();
+        const isLocalUpdating = state.getIsUpdating()
+        console.log(`[Sync] 收到同步信号 | 模块: strains | 本地护盾状态: ${isLocalUpdating}`)
+        
+        // 如果本地正在执行原子更新，拦截来自后端的全量刷新请求，防止竞态覆盖
+        if (!isLocalUpdating) {
+          initFromDatabase();
+        } else {
+          console.log('[Sync] 本地正在写入，跳过本次后端信号拦截')
+        }
       }
       
       // 2. 差异同步：词典更新

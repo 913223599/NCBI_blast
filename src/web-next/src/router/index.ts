@@ -37,6 +37,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '设置', icon: 'settings' }
     },
     {
+        path: '/assembly',
+        name: 'assembly',
+        component: () => import('../views/AssemblyView.vue'),
+        meta: { title: '基因组拼接', icon: 'assembly' }
+    },
+    {
         path: '/help',
         name: 'help',
         component: () => import('../views/HelpView.vue'),

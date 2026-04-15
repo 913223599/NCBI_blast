@@ -21,6 +21,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'dashboard', label: '仪表盘', icon: 'dashboard', route: '/', category: '主要' },
   { id: 'strain', label: '菌毒种库', icon: 'strain', route: '/strain', category: '分析工具' },
+  { id: 'assembly', label: '基因组拼接', icon: 'assembly', route: '/assembly', category: '分析工具' },
   { id: 'blast', label: 'BLAST 分析', icon: 'blast', route: '/blast', category: '分析工具' },
   { id: 'tree', label: '进化树', icon: 'tree', route: '/tree', category: '分析工具' },
   { id: 'settings', label: '设置', icon: 'settings', route: '/settings', category: '系统' },
@@ -95,6 +96,12 @@ function isActive(item: NavItem): boolean {
             <!-- Tree -->
             <template v-else-if="item.icon === 'tree'">
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </template>
+            <!-- Assembly -->
+            <template v-else-if="item.icon === 'assembly'">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+              <line x1="12" y1="22.08" x2="12" y2="12" />
             </template>
             <!-- Settings -->
             <template v-else-if="item.icon === 'settings'">

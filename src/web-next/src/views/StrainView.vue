@@ -138,6 +138,22 @@ watch(() => strain.activeRecord, (newVal) => {
   if (newVal) showSampleDetail.value = true
 })
 
+// 关键修复：当记录数量变化（如批量删除）时，如果身处平铺视图，强制刷新物理映射
+watch(() => strain.records.length, () => {
+  if (currentView.value === 'freezer') {
+    console.log('[StrainView] 记录数发生变化，同步物理拓扑...')
+    strain.refreshFreezerOccupancy(false)
+  }
+})
+
+// 关键修复：当用户从列表切水平铺视图时，触发强制重绘检查
+watch(currentView, (newView) => {
+  if (newView === 'freezer') {
+    console.log('[StrainView] 切换至平铺视图，执行自愈刷新...')
+    strain.refreshFreezerOccupancy(false)
+  }
+})
+
 function handleFreezerAdded(freezerId: string) {
   strain.setActiveFreezer(freezerId)
 }
@@ -153,12 +169,14 @@ function handleShowSampleDetail(record: StrainRecord) {
 function handleSampleDeleted() {
   showSampleDetail.value = false
   strain.setActiveRecord(null)
+  // 核心修复：删除请求完成后，立刻刷新物理映射状态
+  strain.refreshFreezerOccupancy(false)
 }
 
 function handleBatchImported() {
   // 刷新统计
-  if (currentView.value === 'stats') {
-    // 触发重新计算
+  if (currentView.value === 'freezer') {
+    strain.refreshFreezerOccupancy(false)
   }
 }
 

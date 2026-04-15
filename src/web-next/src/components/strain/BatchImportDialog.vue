@@ -103,56 +103,47 @@
           </div>
         </div>
 
-        <!-- 数据输入 -->
         <div class="form-section">
-          <h4 class="section-label">输入样本数据</h4>
-          <div class="input-mode-tabs">
-            <button
-              class="tab-btn"
-              :class="{ active: dataInputMode === 'paste' }"
-              @click="dataInputMode = 'paste'"
-            >
-              📋 粘贴数据
-            </button>
-            <button
-              class="tab-btn"
-              :class="{ active: dataInputMode === 'file' }"
-              @click="dataInputMode = 'file'"
-            >
-              📁 上传文件
-            </button>
-          </div>
-
-          <!-- 粘贴模式 -->
-          <div v-if="dataInputMode === 'paste'" class="paste-area">
-            <textarea
-              v-model="pasteData"
-              class="data-textarea"
-              placeholder="粘贴CSV或JSON格式数据...&#10;&#10;CSV示例：&#10;name,accession,species,sequence_type&#10;Sample1,NC_000001,Escherichia coli,DNA&#10;&#10;JSON示例：&#10;[{&quot;name&quot;:&quot;Sample1&quot;,&quot;accession&quot;:&quot;NC_000001&quot;,&quot;species&quot;:&quot;Escherichia coli&quot;,&quot;sequenceType&quot;:&quot;DNA&quot;}]"
-              rows="12"
-            ></textarea>
-            <div class="format-hint">
-              支持 CSV 和 JSON 格式。CSV需要包含表头，字段包括：name, accession, species, strain, sequenceType, source, host, country, collectionDate
+          <div class="section-header-flex">
+            <h4 class="section-label">输入样本数据</h4>
+            <div class="template-selector">
+              <span class="template-label">📥 下载模板:</span>
+              <div class="template-btns">
+                <button class="t-btn" @click="downloadTemplate('Bacteria')">微生物/细菌</button>
+                <button class="t-btn" @click="downloadTemplate('Fungi')">真菌</button>
+                <button class="t-btn" @click="downloadTemplate('Phage')">噬菌体</button>
+                <button class="t-btn" @click="downloadTemplate('Virus')">病毒</button>
+                <button class="t-btn" @click="downloadTemplate('Plasmid')">质粒/载体</button>
+                <button class="t-btn" @click="downloadTemplate('CellLine')">细胞系</button>
+                <button class="t-btn" @click="downloadTemplate('General')">通用</button>
+              </div>
             </div>
           </div>
 
           <!-- 文件模式 -->
-          <div v-if="dataInputMode === 'file'" class="file-upload-area">
+          <div class="file-upload-area">
             <input
               type="file"
-              ref="fileInput"
+              ref="fileInputRef"
               @change="handleFileUpload"
-              accept=".csv,.json,.tsv"
+              accept=".xlsx,.csv,.json,.tsv"
+              multiple
               style="display: none"
             />
-            <div class="upload-dropzone" @click="fileInput?.click()">
+            <div class="upload-dropzone" @click="fileInputRef?.click()">
               <div class="upload-icon"></div>
               <div class="upload-text">点击或拖拽文件到此处</div>
-              <div class="upload-hint">支持 .csv, .json, .tsv 格式</div>
+              <div class="upload-hint">支持 .xlsx, .csv, .json, .tsv 格式</div>
             </div>
-            <div v-if="selectedFile" class="file-info">
-              <span class="file-name"></span>
-              <button class="remove-file-btn" @click="removeFile">✕</button>
+            <div v-if="selectedFiles.length > 0" class="file-status-bar-group">
+              <div v-for="(file, idx) in selectedFiles" :key="idx" class="file-status-bar">
+                <div class="file-info">
+                  <span class="file-icon">📄</span>
+                  <span class="file-name-label">待导入:</span>
+                  <span class="file-name">{{ file.name }}</span>
+                </div>
+                <button class="remove-btn" @click="removeFile(idx)" title="移除">✕</button>
+              </div>
             </div>
           </div>
         </div>
@@ -202,15 +193,30 @@
         </button>
       </div>
     </div>
+
+    <!-- 智能分配回执对话框 -->
+    <AllocationReceiptDialog
+      v-model:show="showReceipt"
+      :results="allocationResults"
+      @confirm="handleConfirmPlacement"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import ExcelJS from 'exceljs'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { AllocationCoordinator } from '../../modules/BioSpatial-Coordinator'
+import AllocationReceiptDialog from '../../modules/BioSpatial-Coordinator/ui/AllocationReceiptDialog.vue'
+import { useCodeGenerator } from '../../composables/useCodeGenerator'
+import { TopologyScanner } from '../../modules/BioSpatial-Coordinator/core/TopologyScanner'
+import type { CategoryCode } from '../../types/codeSystem'
 
-const fileInput = ref<HTMLInputElement | null>(null)
+import { ImportTemplateManager } from '../../modules/BioSpatial-Coordinator/core/ImportTemplateManager'
+
+const fileInputRef = ref<HTMLInputElement | null>(null)
 
 const strain = useStrainStore()
 const appStore = useAppStore()
@@ -219,17 +225,29 @@ const emit = defineEmits(['close', 'imported'])
 const openDropdown = ref<string | null>(null)
 const targetFreezerId = ref<string>('')
 const importMode = ref<'auto' | 'manual'>('auto')
-const dataInputMode = ref<'paste' | 'file'>('paste')
-const pasteData = ref('')
-const selectedFile = ref<File | null>(null)
+const dataInputMode = ref<'file'>('file')
+const selectedFiles = ref<File[]>([])
 const parsedRecords = ref<any[]>([])
 const importing = ref(false)
+
+const codeGen = useCodeGenerator()
+
+const SAMPLE_TYPE_TO_CATEGORY: Record<string, string> = {
+  '细菌': '1', 'Bacteria': '1', '病毒': '2', 'Virus': '2',
+  '噬菌体': '3', 'Phage': '3', '真菌': '4', 'Fungi': '4', '质粒/载体': '5', 'Plasmid': '5', 'Vector': '5',
+  '细胞': '6', 'CellLine': '6', '核酸': '7', '蛋白/抗体': '8', '样本/其他': '9', 'Other': '9'
+}
 
 // 手动位置选择
 const selectedShelfId = ref('')
 const selectedCabinetId = ref('')
 const selectedDrawerId = ref('')
 const selectedBoxId = ref('')
+
+// 智能配位相关状态
+const showReceipt = ref(false)
+const allocationResults = ref<any[]>([])
+const finalRecordsToImport = ref<any[]>([])
 
 const targetFreezer = computed(() => 
   strain.freezers.find(f => f.id === targetFreezerId.value) || null
@@ -279,69 +297,128 @@ function selectFreezer(id: string) {
 
 function handleFileUpload(event: Event) {
   const input = event.target as HTMLInputElement
-  if (input.files && input.files[0]) {
-    selectedFile.value = input.files[0]
-    parseFile(selectedFile.value)
+  if (input.files && input.files.length > 0) {
+    const newFiles = Array.from(input.files)
+    selectedFiles.value = [...selectedFiles.value, ...newFiles]
+    parseFiles(newFiles)
+    input.value = ''
   }
 }
 
-function removeFile() {
-  selectedFile.value = null
-  parsedRecords.value = []
+function removeFile(index: number) {
+  selectedFiles.value.splice(index, 1)
+  if (selectedFiles.value.length === 0) {
+    parsedRecords.value = []
+  } else {
+    // 重新解析所有剩余文件以更新预览 (全量重解析保证顺序和正确性)
+    parsedRecords.value = []
+    parseFiles(selectedFiles.value)
+  }
+}
+
+async function parseFiles(files: File[]) {
+  for (const file of files) {
+    await parseFile(file)
+  }
 }
 
 async function parseFile(file: File) {
   try {
-    const text = await file.text()
-    if (file.name.endsWith('.json')) {
-      parsedRecords.value = JSON.parse(text)
+    let records: any[] = []
+    if (file.name.endsWith('.xlsx')) {
+      records = await parseXLSX(file)
+    } else if (file.name.endsWith('.json')) {
+      const text = await file.text()
+      records = JSON.parse(text)
     } else {
-      parsedRecords.value = parseCSV(text)
+      const text = await file.text()
+      const { records: csvRecords, detectedType } = parseCSV(text)
+      records = csvRecords
+      if (detectedType) {
+        appStore.showNotification(`文件 [${file.name}] 检测到类型: ${detectedType}`, 'info')
+      }
     }
-    appStore.showNotification(`成功解析 ${parsedRecords.value.length} 条记录`, 'success')
+    parsedRecords.value = [...parsedRecords.value, ...records]
+    appStore.showNotification(`成功解析 [${file.name}] ${records.length} 条记录`, 'success')
   } catch (error) {
-    appStore.showNotification('文件解析失败，请检查格式', 'error')
+    appStore.showNotification(`文件 [${file.name}] 解析失败`, 'error')
     console.error(error)
   }
 }
 
-function parseCSV(text: string): any[] {
-  const lines = text.trim().split('\n')
-  if (lines.length < 2) return []
+async function parseXLSX(file: File): Promise<any[]> {
+  const workbook = new ExcelJS.Workbook()
+  const arrayBuffer = await file.arrayBuffer()
+  await workbook.xlsx.load(arrayBuffer)
   
-  const headers = lines[0]?.split(',').map(h => h.trim()) || []
-  const records = []
+  const worksheet = workbook.getWorksheet(1)
+  if (!worksheet) return []
+
+  const records: any[] = []
+  const headers: string[] = []
   
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i]?.split(',').map(v => v.trim()) || []
-    if (values.length < headers.length) continue
+  // 第一行作为表头
+  const firstRow = worksheet.getRow(1)
+  firstRow.eachCell((cell, colNumber) => {
+    headers[colNumber] = cell.text.trim().toLowerCase()
+  })
+
+  // 处理数据行
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return // 跳过表头
+    
     const record: any = {}
-    headers.forEach((header, index) => {
-      record[header] = values[index] || ''
+    row.eachCell((cell, colNumber) => {
+      const header = headers[colNumber]
+      if (header) {
+        // Excel 中可能存在 RichText 或 其它复杂类型，统一取 text
+        record[header] = cell.text.trim()
+      }
     })
-    records.push(record)
-  }
-  
+    
+    if (Object.keys(record).length > 0) {
+      records.push(record)
+    }
+  })
+
   return records
 }
 
-// 监听粘贴数据变化
-watch(pasteData, (newValue) => {
-  if (!newValue.trim()) {
-    parsedRecords.value = []
-    return
+function parseCSV(text: string): { records: any[], detectedType: string | null } {
+  const lines = text.trim().split('\n')
+  if (lines.length < 2) return { records: [], detectedType: null }
+  
+  const headers = lines[0]?.split(',').map(h => h.trim().toLowerCase()) || []
+  const records: any[] = []
+
+  // --- 智能表头指纹识别 ---
+  let detectedType: string | null = null
+  if (headers.includes('backbone') || headers.includes('vector')) detectedType = 'Plasmid'
+  else if (headers.includes('titer') || headers.includes('potency')) detectedType = 'Virus'
+  else if (headers.includes('resistance')) {
+     if (headers.includes('culturecondition')) detectedType = 'Bacteria' // 默认微生物
+  }
+  else if (headers.includes('celltype')) detectedType = 'CellLine'
+  else if (headers.includes('hoststrain') && !headers.includes('backbone')) detectedType = 'Phage'
+  
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i]?.split(',').map(v => v.trim()) || []
+    if (values.length === 0 || (values.length === 1 && values[0] === '')) continue
+    const record: any = {}
+    
+    headers.forEach((header, index) => {
+      if (header) record[header] = values[index] || ''
+    })
+
+    // 如果识别到了类型且数据中没有明确给，则自动补全
+    if (detectedType && !record.sampletype) record.sampletype = detectedType
+    
+    records.push(record)
   }
   
-  try {
-    if (newValue.trim().startsWith('[')) {
-      parsedRecords.value = JSON.parse(newValue)
-    } else {
-      parsedRecords.value = parseCSV(newValue)
-    }
-  } catch {
-    parsedRecords.value = []
-  }
-})
+  return { records, detectedType }
+}
+
 
 async function handleImport() {
   if (!canImport.value || importing.value) return
@@ -349,85 +426,240 @@ async function handleImport() {
   importing.value = true
   
   try {
-    const recordsToImport = []
+    // 1. 系统化数据预处理 (编号申领 + 分类学对齐)
+    const processedBatch: any[] = []
     
-    for (const recordData of parsedRecords.value) {
-      const record = {
-        name: recordData.name || 'Unknown',
-        accession: recordData.accession || '',
-        species: recordData.species || '',
-        strain: recordData.strain || '',
-        sampleType: (recordData.sampleType as any) || 'Other',
-        sequenceType: (recordData.sequenceType || recordData.sequence_type || 'DNA') as 'DNA' | 'RNA' | 'Protein',
-        sequence: recordData.sequence || '',
-        source: recordData.source || '',
-        host: recordData.host || '',
-        country: recordData.country || '',
-        collectionDate: recordData.collectionDate || '',
-        metadata: {},
-        freezerId: targetFreezerId.value,
-        shelfId: importMode.value === 'manual' ? selectedShelfId.value : '',
-        cabinetId: importMode.value === 'manual' ? selectedCabinetId.value : '',
-        drawerId: importMode.value === 'manual' ? selectedDrawerId.value : '',
-        boxId: importMode.value === 'manual' ? selectedBoxId.value : '',
-        position: ''
+    for (let recordData of parsedRecords.value) {
+      // 1.0 标准化键名 (解决大小写不匹配导致的导入数据丢失问题)
+      const normalizedData: Record<string, any> = {}
+      for (const [key, val] of Object.entries(recordData)) {
+        normalizedData[key.toLowerCase().replace(/\s/g, '')] = val
       }
       
-      // 自动模式下查找空闲位置 (改进逻辑：排除已选中的位置)
-      if (importMode.value === 'auto') {
-        const position = findFreePosition(recordsToImport.map(r => r.boxId + '_' + r.position))
-        if (!position) {
-          appStore.showNotification('存储空间不足', 'warning')
-          break
+      const sampleType = (normalizedData.sampletype as any) || 'Other'
+      const species = normalizedData.species || 'Unknown'
+      const genusName = TopologyScanner.getGenus(species)
+      const speciesName = species.replace(genusName, '').trim() || 'sp.'
+      
+      // 映射大类编码
+      const categoryCode = (SAMPLE_TYPE_TO_CATEGORY[sampleType] || '9') as CategoryCode
+      
+      // 1. 精确解析或自动创建属 (BBB)
+      let genusEntry = strain.codeLookupEntries.find(
+        e => e.level === 2 && e.parentPath === categoryCode && e.name === genusName
+      )
+      
+      if (!genusEntry) {
+        genusEntry = codeGen.lookup.addLookupEntry(2, categoryCode, genusName, genusName) as any
+      }
+      
+      // 2. 精确解析或自动创建种 (CCC)
+      let speciesEntry = strain.codeLookupEntries.find(
+        e => e.level === 3 && e.parentPath === genusEntry!.fullPath && e.name === speciesName
+      )
+      
+      if (!speciesEntry) {
+        speciesEntry = codeGen.lookup.addLookupEntry(3, genusEntry!.fullPath, speciesName, speciesName) as any
+      }
+
+      // 映射来源编码
+      let sourceCode = 'XX'
+      if (normalizedData.source) {
+        const sourceEntry = (strain as any).sourceEntries.find((e: any) => e.name === normalizedData.source)
+        if (sourceEntry) {
+          sourceCode = sourceEntry.code
+        } else {
+          const rawCode = String(normalizedData.source).substring(0, 2).toUpperCase()
+          if (/^[A-Z0-9]{2}$/.test(rawCode)) sourceCode = rawCode
         }
-        record.shelfId = position.shelfId
-        record.cabinetId = position.cabinetId
-        record.drawerId = position.drawerId
-        record.boxId = position.boxId
-        record.position = position.position
       }
+
+      // 获取或申领编号
+      let finalAccession = normalizedData.accession || normalizedData.id
+      let sampleCode = ''
       
-      recordsToImport.push(record)
+      if (!finalAccession || finalAccession.length !== 14) {
+        const request = {
+          sourceCode: sourceCode,
+          categoryCode: categoryCode,
+          genusCode: genusEntry!.code,
+          speciesCode: speciesEntry!.code,
+          passage: parseInt(normalizedData.passagenumber || '0', 10) || 0
+        }
+        sampleCode = codeGen.commit(request)
+        finalAccession = sampleCode 
+      }
+
+      // 动态构建元数据 (仅保留有值的有效字段)
+      const metadata: Record<string, any> = {
+        biosafetyLevel: normalizedData.biosafetylevel || '',
+        passageNumber: normalizedData.passagenumber || '',
+        batchNumber: normalizedData.batchnumber || '',
+        storageDate: normalizedData.storagedate || '',
+        storageMedium: normalizedData.storagemedium || '',
+        description: normalizedData.description || ''
+      }
+
+      const specialFields: Record<string, string> = {
+        resistance: 'resistance',
+        concentration: 'concentration',
+        culturecondition: 'cultureCondition',
+        growthtemp: 'growthTemp',
+        backbone: 'backbone',
+        insertname: 'insertName',
+        hoststrain: 'hostStrain',
+        marker: 'marker',
+        isexpression: 'isExpression',
+        titer: 'titer',
+        potency: 'potency',
+        serotype: 'serotype',
+        inactivationmethod: 'inactivationMethod',
+        celltype: 'cellType',
+        medium: 'medium',
+        authentication: 'authentication'
+      }
+
+      Object.entries(specialFields).forEach(([rawKey, camelKey]) => {
+        if (normalizedData[rawKey] && normalizedData[rawKey] !== '-') {
+          metadata[camelKey] = normalizedData[rawKey]
+        }
+      })
+
+      processedBatch.push({
+        name: normalizedData.name || 'Unknown',
+        accession: finalAccession,
+        sampleCode: sampleCode || finalAccession,
+        species: species,
+        strain: normalizedData.strain || '',
+        sampleType: sampleType,
+        sequenceType: (normalizedData.sequencetype || normalizedData.sequence_type || 'DNA') as 'DNA' | 'RNA' | 'Protein',
+        sequence: normalizedData.sequence || '',
+        source: normalizedData.source || '',
+        host: normalizedData.host || '',
+        country: normalizedData.country || '',
+        collectionDate: normalizedData.collectiondate || '',
+        metadata: metadata,
+        freezerId: targetFreezerId.value,
+        codeSource: sourceCode,
+        codeCategory: categoryCode,
+        codeGenus: genusEntry!.code,
+        codeSpecies: speciesEntry!.code,
+        codeSerial: parseInt(finalAccession.slice(-4), 10)
+      })
     }
-    
-    if (recordsToImport.length > 0) {
-      strain.addRecords(recordsToImport)
-      appStore.showNotification(`成功导入 ${recordsToImport.length} 条样本`, 'success')
-      emit('imported', recordsToImport.length)
-      emit('close')
+
+    if (importMode.value === 'auto') {
+      // 2. 调用已强化的分拨引擎 (执行严格隔离规则)
+      const currentFreezers = strain.freezers.filter(f => f.id === targetFreezerId.value)
+      const results = AllocationCoordinator.processBatchAssignment(
+        processedBatch, 
+        { freezers: currentFreezers, records: strain.records }
+      )
+
+      allocationResults.value = results
+      
+      if (results.length === 0) {
+        appStore.showNotification('未能在冰箱中找到符合“生物安全隔离”规则的空位（同属只能同种，大类禁止混装）', 'error')
+        importing.value = false
+        return
+      }
+
+      if (results.length < processedBatch.length) {
+        appStore.showNotification(`受制于生物安全隔离规则，仅自动分配了 ${results.length}/${processedBatch.length} 条记录`, 'warning')
+      }
+
+      // 3. 构建最终入库对象
+      finalRecordsToImport.value = results.map(res => ({
+        ...res.record,
+        boxId: res.allocatedBoxId,
+        position: res.positionLabel,
+        shelfId: '', 
+        cabinetId: '',
+        drawerId: ''
+      }))
+
+      showReceipt.value = true
+    } else {
+      // 手动模式：使用已预处理（包含系统编号）的记录
+      const recordsToImport: any[] = []
+      for (const recordData of processedBatch) {
+        recordsToImport.push({
+          ...recordData,
+          shelfId: selectedShelfId.value,
+          cabinetId: selectedCabinetId.value,
+          drawerId: selectedDrawerId.value,
+          boxId: selectedBoxId.value,
+          position: ''
+        })
+      }
+      saveToStore(recordsToImport)
     }
   } catch (error) {
-    appStore.showNotification('导入失败: ' + error, 'error')
+    appStore.showNotification('配位计算失败: ' + error, 'error')
     console.error(error)
   } finally {
     importing.value = false
   }
 }
 
-function findFreePosition(excludeIds: string[] = []): { shelfId: string; cabinetId: string; drawerId: string; boxId: string; position: string } | null {
-  if (!targetFreezer.value) return null
-  
-  for (const shelf of targetFreezer.value.shelves) {
-    for (const cabinet of shelf.cabinets) {
-      for (const drawer of cabinet.drawers) {
-        for (const box of drawer.boxes) {
-          for (const pos of box.positions) {
-            const posId = box.id + '_' + pos.label
-            if (!pos.occupied && !excludeIds.includes(posId)) {
-              return {
-                shelfId: shelf.id,
-                cabinetId: cabinet.id,
-                drawerId: drawer.id,
-                boxId: box.id,
-                position: pos.label
-              }
-            }
-          }
-        }
-      }
-    }
+function handleConfirmPlacement() {
+  saveToStore(finalRecordsToImport.value)
+}
+
+async function downloadTemplate(type: string = 'General') {
+  try {
+    // 每次下载前从数据库刷新最新的来源列表
+    await (strain as any).initFromDatabase()
+  } catch (err) {
+    console.warn('同步来源词典失败', err)
   }
-  return null
+
+  const sources = (strain as any).sourceEntries?.map((e: any) => e.name) || []
+  
+  // 使用模块化管理类生成 Excel
+  const { blob, fileName } = await ImportTemplateManager.generateXLSX(type, sources)
+  
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.setAttribute('href', url)
+  link.setAttribute('download', fileName)
+  link.style.visibility = 'hidden'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+async function saveToStore(records: any[]) {
+  if (records.length === 0) return
+  
+  importing.value = true // 使用已有的 importing 状态作为 UI 锁
+  try {
+    console.log(`[Import] 开始链式入库事务... 总计 ${records.length} 条`)
+    
+    // 1. 保存样本记录 (内部会开启 setIsUpdating 护盾)
+    const success = await strain.addRecords(records)
+    
+    if (success) {
+      console.log('[Import] 样本保存成功，同步刷新拓扑映射...')
+      // 2. 刷新物理拓扑 (shouldSave=true)，此过程会继续持有护盾
+      strain.refreshFreezerOccupancy(true)
+      
+      // 3. 补偿计数器校准
+      strain.recalibrateCounters()
+      
+      appStore.showNotification(`成功导入 ${records.length} 条样本并校准拓扑`, 'success')
+      emit('imported', records.length)
+      emit('close')
+    } else {
+      appStore.showNotification('部分样本保存失败，请检查数据库连接', 'error')
+    }
+  } catch (error) {
+    console.error('[Import Transaction Error]', error)
+    appStore.showNotification('事务提交过程中发生异常', 'error')
+  } finally {
+    importing.value = false
+  }
 }
 
 function handleClickOutside() {
@@ -507,13 +739,70 @@ onUnmounted(() => {
   margin-bottom: 24px;
 }
 
+.section-header-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
 .section-label {
   font-size: 0.85rem;
   font-weight: 700;
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin: 0 0 12px 0;
+  margin: 0;
+}
+
+.download-link {
+  font-size: 0.8rem;
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.2s;
+}
+
+.download-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+/* 模板选择器样式 */
+.template-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.template-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.template-btns {
+  display: flex;
+  gap: 6px;
+}
+
+.t-btn {
+  padding: 4px 10px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.t-btn:hover {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+  transform: translateY(-1px);
 }
 
 /* 导入模式选择 */
@@ -706,29 +995,66 @@ onUnmounted(() => {
   color: #94a3b8;
 }
 
-.file-info {
+.file-status-bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.file-status-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 12px;
+  padding: 8px 14px;
   background: #eff6ff;
-  border-radius: 8px;
   border: 1px solid #bfdbfe;
+  border-left: 4px solid #3b82f6;
+  border-radius: 8px;
+  transition: all 0.2s;
 }
 
-.file-name::before {
-  content: '📄 ';
+.file-status-bar:hover {
+  background: #dbeafe;
 }
 
-.remove-file-btn {
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.file-icon { font-size: 1.2rem; }
+
+.file-name-label {
+  font-size: 0.8rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.file-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remove-btn {
   background: none;
   border: none;
   color: #94a3b8;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 1.2rem;
+  padding: 0 4px;
+  transition: color 0.2s;
 }
 
-.remove-file-btn:hover {
+.remove-btn:hover {
   color: #ef4444;
 }
 

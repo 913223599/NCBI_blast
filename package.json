@@ -6,5 +6,8 @@
         "dev": "npm run dev --prefix src/web-next",
         "build": "npm run build --prefix src/web-next",
         "preview": "npm run preview --prefix src/web-next"
+    },
+    "dependencies": {
+        "exceljs": "^4.4.0"
     }
 }

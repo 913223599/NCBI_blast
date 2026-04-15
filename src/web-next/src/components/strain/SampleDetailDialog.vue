@@ -523,17 +523,21 @@ const SEQUENCE_TYPE_OPTIONS = [
   { value: 'Protein', label: 'Protein (蛋白)' }
 ]
 
-// 计算位置路径
+// 计算位置路径：优先从全量索引 map 中获取解析好的路径
 const positionPath = computed(() => {
-  const freezer = strain.freezers.find(f => f.id === props.record.freezerId)
-  if (!freezer) return ''
+  const fId = props.record.freezerId || ''
+  const bId = props.record.boxId || ''
   
-  const shelf = freezer.shelves.find(s => s.id === props.record.shelfId)
-  const cabinet = shelf?.cabinets.find(c => c.id === props.record.cabinetId)
-  const drawer = cabinet?.drawers.find(d => d.id === props.record.drawerId)
-  const box = drawer?.boxes.find(b => b.id === props.record.boxId)
+  // 1. 优先尝试复合键 (更高精度)
+  const compositeKey = `${fId}|${bId}`
+  if (strain.locationMap[compositeKey]) return strain.locationMap[compositeKey]
   
-  return `${freezer.name} → ${shelf?.name} → ${cabinet?.name} → ${drawer?.name} → ${box?.name}`
+  // 2. 尝试单一 ID 键
+  if (strain.locationMap[bId]) return strain.locationMap[bId]
+  
+  // 3. 最后退化为基本名称显示
+  const freezer = strain.freezers.find(f => f.id === fId)
+  return freezer ? `${freezer.name} / 未索引层 / ${bId}` : '未知位置'
 })
 
 function toggleEditMode() {
