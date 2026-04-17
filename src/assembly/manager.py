@@ -150,17 +150,21 @@ class AssemblyManager:
         ctx.update("r1", Path(r1_input))
         ctx.update("r2", Path(r2_input))
         
+        from .steps.phage_annotation import PhageAnnotationStep
+        
         # 2. 定义步骤序列 (深度模块化：根据物种类型动态编排)
         pipeline_steps = [QualityControlStep(ctx)]
         
-        # 🔗 噬菌体专项：插入宿主剔除步骤
+        # 🔗 噬菌体专项：插入宿主剔除步骤与专项注释
         if sample_type == "PHAGE":
             pipeline_steps.append(HostCleanerStep(ctx))
-            
-        pipeline_steps.extend([
-            AssemblerStep(ctx),
-            AnnotationStep(ctx)
-        ])
+            pipeline_steps.append(AssemblerStep(ctx))
+            pipeline_steps.append(PhageAnnotationStep(ctx))
+        else:
+            pipeline_steps.extend([
+                AssemblerStep(ctx),
+                AnnotationStep(ctx)
+            ])
         
         logging.info(f"--- [Pipeline Start] Type: {sample_type} | Tasks: {len(pipeline_steps)} | Task: {task_id} ---")
         
