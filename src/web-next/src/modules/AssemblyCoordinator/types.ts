@@ -17,7 +17,8 @@ export type AssemblyStage = typeof AssemblyStage[keyof typeof AssemblyStage];
 export const SequencingTech = {
   ILLUMINA: 'ILLUMINA',
   NANOPORE: 'NANOPORE',
-  PACBIO_HIFI: 'PACBIO_HIFI'
+  PACBIO_HIFI: 'PACBIO_HIFI',
+  SANGER: 'SANGER' // 新增: 一代测序 (.ab1, .seq)
 } as const;
 
 export type SequencingTech = typeof SequencingTech[keyof typeof SequencingTech];
@@ -26,6 +27,7 @@ export const SampleType = {
   BACTERIA: 'BACTERIA',
   VIRUS: 'VIRUS',
   PHAGE: 'PHAGE',
+  AMPLICON: 'AMPLICON', // 新增: 16S, 18S 扩增子数据
   OTHER: 'OTHER'
 } as const;
 

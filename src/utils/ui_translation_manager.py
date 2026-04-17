@@ -29,10 +29,13 @@ class UITranslationManager:
             logging.error(f"Locales path not found: {self.locales_path}")
             return
 
+        counts = {}
+
         # 1. 扫描顶级 JSON 文件 (保持向后兼容)
         for file in self.locales_path.glob("*.json"):
             lang_code = file.stem
             self._load_file(file, lang_code)
+            counts[lang_code] = counts.get(lang_code, 0) + 1
 
         # 2. 扫描语言子目录 (模块化支持)
         for sub_dir in self.locales_path.iterdir():
@@ -41,6 +44,11 @@ class UITranslationManager:
                 # 递归扫描子目录下的所有 json
                 for file in sub_dir.rglob("*.json"):
                     self._load_file(file, lang_code)
+                    counts[lang_code] = counts.get(lang_code, 0) + 1
+
+        if counts:
+            summary = ", ".join([f"{k}: {v} fragments" for k, v in counts.items()])
+            logging.info(f"UI Translations loaded: {summary}")
 
     def _load_file(self, file: Path, lang_code: str):
         """内部方法：加载单个翻译文件并合并到指定语言包"""
@@ -51,7 +59,6 @@ class UITranslationManager:
                     self.translations[lang_code] = {}
                 # 平铺合并，允许不同模块文件共存
                 self.translations[lang_code].update(data)
-                logging.info(f"Loaded translation pack fragment: {lang_code}/{file.name}")
         except Exception as e:
             logging.error(f"Failed to load translation file {file}: {e}")
 

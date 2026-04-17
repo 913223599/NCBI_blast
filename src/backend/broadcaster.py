@@ -5,6 +5,7 @@ import threading
 import time
 from typing import List, Dict, Any, Optional
 from fastapi import WebSocket, WebSocketDisconnect
+from .utils.json_encoder import BioJsonEncoder
 
 logger = logging.getLogger("broadcaster")
 
@@ -93,6 +94,36 @@ class EventBroadcaster:
                     loop.run_until_complete(self.broadcast(event_type, data, exclude_id))
             except RuntimeError:
                 pass # 忽略无循环状态下的广播
+
+    async def broadcast_to_client(self, client_id: str, event_type: str, data: Optional[Dict[str, Any]] = None):
+        """定向广播：仅发送给特定 client_id 的客户端"""
+        payload = {
+            "type": event_type, 
+            "data": data or {},
+            "timestamp": time.time()
+        }
+        from .utils.json_encoder import BioJsonEncoder
+        message = json.dumps(payload, ensure_ascii=False, cls=BioJsonEncoder)
+        
+        targets = []
+        with self._lock:
+            for conn, cid in self.connections.items():
+                if cid == client_id:
+                    targets.append(conn)
+
+        for connection in targets:
+            try:
+                await connection.send_text(message)
+            except Exception:
+                self.disconnect(connection)
+
+    def broadcast_to_client_sync(self, client_id: str, event_type: str, data: Optional[Dict[str, Any]] = None):
+        """定向广播的同步包装"""
+        if self._loop and self._loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self.broadcast_to_client(client_id, event_type, data), 
+                self._loop
+            )
 
 # 导出单例
 broadcaster = EventBroadcaster()

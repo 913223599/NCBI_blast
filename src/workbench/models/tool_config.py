@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Dict, Any
 
 logger = logging.getLogger("ToolConfig")
 
@@ -20,6 +21,35 @@ class ToolConfig:
 
     # Output directories
     RESULTS_DIR = PROJECT_ROOT / "results"
+    ASSEMBLY_RESULTS_DIR = RESULTS_DIR / "assembly"
+
+    # Assembly / 16S Databases Configuration
+    DATABASE_ROOT = PROJECT_ROOT / "database"
+    AMPLICON_DATABASES = {
+        "silva": DATABASE_ROOT / "16s" / "silva_138.fasta",
+        "greengenes": DATABASE_ROOT / "16s" / "gg_13_8.fasta",
+        "rdp": DATABASE_ROOT / "16s" / "rdp_train_18.fasta"
+    }
+
+    # Common Primers (V3-V4 etc)
+    PRIMERS = {
+        "V3-V4_F": "CCTACGGGNGGCWGCAG",
+        "V3-V4_R": "GACTACHVGGGTATCTAATCC"
+    }
+
+    # Remote Databases Registry (Loaded dynamically from database/registry.json)
+    @classmethod
+    def get_remote_registry(cls) -> Dict[str, Any]:
+        registry_path = cls.DATABASE_ROOT / "registry.json"
+        if not registry_path.exists():
+            return {}
+        try:
+            import json
+            with open(registry_path, 'r', encoding='utf-8') as f:
+                return json.load(f).get("remotes", {})
+        except Exception as e:
+            logger.error(f"Failed to load database registry: {e}")
+            return {}
 
     # Performance
     MAX_THREADS = max(1, (os.cpu_count() or 4) - 1)

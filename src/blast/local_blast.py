@@ -9,6 +9,8 @@ import threading
 from pathlib import Path
 
 from Bio.Blast import NCBIXML
+from ..workbench.models.tool_config import ToolConfig
+from ..backend.utils.compat import get_short_path_name
 
 # 全局并发控制：限制同时运行的 blastn 进程数，防止 CPU 过载
 # 默认为 4，可根据 CPU 核心数调整
@@ -22,8 +24,10 @@ class LocalBlastExecutor:
 
     def __init__(self, database_path="database/nt"):
         self.database_path = database_path
-        # 根据操作系统自动查找可执行文件，Windows下可能需要.exe后缀
-        self.blast_bin = "blastn"
+        try:
+            self.blast_bin = str(ToolConfig.get_tool_path("blastn"))
+        except:
+            self.blast_bin = "blastn"
 
     def check_blast_installation(self):
         """
@@ -43,37 +47,54 @@ class LocalBlastExecutor:
     def execute_local_blast(self, sequence_file, output_file, max_hits=50):
         """执行本地BLAST搜索"""
         if not self.check_blast_installation():
-            raise FileNotFoundError(f"未找到BLAST可执行文件: {self.blast_bin}，请确保已安装并添加到PATH环境变量。")
+            raise FileNotFoundError(f"未找到BLAST可执行文件: {self.blast_bin}")
 
         if not Path(sequence_file).exists():
              raise FileNotFoundError(f"序列文件不存在: {sequence_file}")
 
-        # 构建BLAST命令行参数
+        # 核心优化：使用短路径解决 Windows 空格与内存映射问题
+        bin_path = get_short_path_name(self.blast_bin)
+        
+        # 将输入输出文件转为绝对路径后取短路径
+        abs_in = str(Path(sequence_file).resolve())
+        abs_out = str(Path(output_file).resolve())
+        
+        # 确定数据库目录并作为工作目录
+        db_full_path = Path(self.database_path).resolve()
+        db_dir = str(db_full_path.parent)
+        db_name = db_full_path.name
+        
+        short_db_dir = get_short_path_name(db_dir)
+        short_in = get_short_path_name(abs_in)
+        short_out = get_short_path_name(abs_out)
+
+        # 构建BLAST命令行参数 (相对于 CWD)
         blast_cmd = [
-            self.blast_bin,
-            "-query", str(sequence_file),
-            "-db", str(self.database_path),
-            "-out", str(output_file),
-            "-outfmt", "5",  # XML格式输出
+            f'"{bin_path}"',
+            "-query", f'"{short_in}"',
+            "-db", f'"{db_name}"',
+            "-out", f'"{short_out}"',
+            "-outfmt", "5",
             "-max_target_seqs", str(max_hits),
             "-evalue", "10.0"
         ]
 
+        cmd_str = " ".join(blast_cmd)
+
         try:
-            print(f"正在执行本地BLAST搜索: {Path(sequence_file).name} (等待信号量...)")
+            print(f"🚀 [LocalBLAST] 执行比对 (CWD: {short_db_dir}): {cmd_str}")
             
-            # 获取信号量，限制并发数
             with _local_blast_semaphore:
-                print(f"已获取信号量，开始执行: {Path(sequence_file).name}")
-                # 使用 capture_output=True 捕获输出，text=True 确保返回字符串
+                # 关键：在 Windows 下必须在无空格的 CWD 中运行或使用 shell=True 配合引号
                 subprocess.run(
-                    blast_cmd,
+                    cmd_str,
+                    cwd=short_db_dir,
+                    shell=True,
                     capture_output=True,
                     text=True,
                     check=True
                 )
             
-            # 兼容性处理：检查输出文件是否生成，如果未生成但也没报错，可能是权限等问题
             if not Path(output_file).exists():
                 raise RuntimeError(f"BLAST执行看似成功但未生成输出文件: {output_file}")
                 

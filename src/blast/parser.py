@@ -97,13 +97,18 @@ class BlastXmlParser:
         }
         
         # 1. 提取访问号
-        accession_match = re.search(r'gi\|.*?\|.*?\|([A-Za-z0-9_.]+)\|', title)
-        if accession_match:
-            metadata['accession'] = accession_match.group(1)
+        # SILVA 格式: gnl|BL_ORD_ID|数字 [Accession] [Taxonomy]
+        silva_acc_m = re.search(r'gnl\|BL_ORD_ID\|\d+\s+([A-Z0-9._]+)', title)
+        if silva_acc_m:
+            metadata['accession'] = silva_acc_m.group(1)
         else:
-            other_match = re.search(r'([A-Za-z0-9_.]+)(?:\.[0-9]+)?', title)
-            if other_match:
-                metadata['accession'] = other_match.group(1)
+            accession_match = re.search(r'gi\|.*?\|.*?\|([A-Za-z0-9_.]+)\|', title)
+            if accession_match:
+                metadata['accession'] = accession_match.group(1)
+            else:
+                other_match = re.search(r'([A-Za-z0-9_.]+)(?:\.[0-9]+)?', title)
+                if other_match:
+                    metadata['accession'] = other_match.group(1)
 
         # 2. 提取基因类型 (核酸)
         gene_patterns = [
@@ -170,22 +175,39 @@ class BlastXmlParser:
                 break
 
         # 6. 提取物种和属名
-        species_patterns = [
-            r'([A-Z][a-z]+(?:\s+[a-z]+)?)\s+(?:16S|23S|18S|rRNA|strain|isolate|clone)',
-            r'([A-Z][a-z]+\s+[a-z]+)\s+(?:strain|isolate|clone|gene|protein)',
-            r'([A-Z][a-z]+\s+[a-z]+)\s+(?:complete|partial|gene|protein)',
-            r'([A-Z][a-z]+\s+[a-z]+)',
-            r'(Uncultured\s+\w+)', r'(Environmental\s+sample)',
-            r'(Synthetic\s+construct)', r'(Artificial\s+sequence)',
-            r'(Vector\s+p[A-Z0-9]+)', r'([A-Z][a-z]+\s+phage)',
-            r'(Bacteriophage\s+[A-Za-z0-9]+)', r'(Phage\s+[A-Za-z0-9]+)',
-        ]
-        for p in species_patterns:
-            # 移除 re.IGNORECASE 以确保属名首字母大写，避免误匹配 gene for 等描述词
-            m = re.search(p, title)
-            if m:
-                metadata['species'] = m.group(1)
-                break
+        # 针对 SILVA 的分号分隔路径处理
+        if ';' in title:
+            # 常见 SILVA 格式: ... Bacteria;Proteobacteria;...;Vibrio;Vibrio sp.
+            parts = [p.strip() for p in title.split(';')]
+            if len(parts) > 1:
+                # 取最末端非空部分
+                last_part = parts[-1]
+                # 有些末端可能是空或非法字符，循环往回找
+                idx = -1
+                while not last_part and abs(idx) < len(parts):
+                    idx -= 1
+                    last_part = parts[idx]
+                
+                # 如果末端包含物种名 (通常首字母大写)
+                if last_part and re.search(r'^[A-Z]', last_part):
+                     metadata['species'] = last_part
+        
+        if not metadata['species']:
+            species_patterns = [
+                r'([A-Z][a-z]+(?:\s+[a-z]+)?)\s+(?:16S|23S|18S|rRNA|strain|isolate|clone)',
+                r'([A-Z][a-z]+\s+[a-z]+)\s+(?:strain|isolate|clone|gene|protein)',
+                r'([A-Z][a-z]+\s+[a-z]+)\s+(?:complete|partial|gene|protein)',
+                r'([A-Z][a-z]+\s+[a-z]+)',
+                r'(Uncultured\s+\w+)', r'(Environmental\s+sample)',
+                r'(Synthetic\s+construct)', r'(Artificial\s+sequence)',
+                r'(Vector\s+p[A-Z0-9]+)', r'([A-Z][a-z]+\s+phage)',
+                r'(Bacteriophage\s+[A-Za-z0-9]+)', r'(Phage\s+[A-Za-z0-9]+)',
+            ]
+            for p in species_patterns:
+                m = re.search(p, title)
+                if m:
+                    metadata['species'] = m.group(1)
+                    break
 
         # 7. 提取备选物种名 (方括号中的信息通常是 NCBI 格式下的物种名)
         host_m = re.search(r'\[([^\]]+)\]', title)

@@ -183,7 +183,23 @@ async def process_blast_files(req: ProcessBlastFilesRequest):
 @router.get("/api/blast/databases")
 async def list_databases():
     from ...blast.database_manager import DatabaseManager
-    return DatabaseManager().list_local_databases()
+    from ..utils.bio_db_manager import bio_db_manager
+    
+    # 1. 获取用户自建数据库
+    user_dbs = DatabaseManager().list_local_databases()
+    
+    # 2. 获取已就绪的系统级生物数据库
+    bio_dbs = []
+    for db in bio_db_manager.list_all_status():
+        if db.get('installed'):
+            bio_dbs.append({
+                'name': db.get('db_id'),
+                'type': 'nucl',
+                'path': db.get('db_id'), # 逻辑路径
+                'display_name': f"🧬 {db.get('name')} ({db.get('version')})"
+            })
+            
+    return user_dbs + bio_dbs
 
 @router.post("/api/blast/database/make")
 async def make_database(req: MakeDbRequest):

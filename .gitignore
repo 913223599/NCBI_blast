@@ -80,6 +80,7 @@ tools/mafft/
 tools/ncbi_dist/
 tools/iqtree3_win/
 tools/iqtree_new/
+tools/miniconda/
 scripts/
 src/resources/update_locales.py
 src/workbench/bin/

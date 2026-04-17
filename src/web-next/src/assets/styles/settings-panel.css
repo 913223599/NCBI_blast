@@ -1,0 +1,209 @@
+/**
+ * NCBI BLAST Pro - Settings Design System
+ * 一套专门为生物信息工作站定制的高级 UI 系统
+ */
+
+:root {
+  --p-primary: #3b82f6;
+  --p-primary-hover: #2563eb;
+  --p-bg: #f8fafc;
+  --p-card-bg: #ffffff;
+  --p-text: #1e293b;
+  --p-text-muted: #64748b;
+  --p-border: #e2e8f0;
+  --p-radius: 12px;
+  --p-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
+/* 布局容器 */
+.panel {
+  padding: 32px 40px;
+  max-width: 1000px;
+  margin: 0 auto;
+  animation: panelFadeIn 0.3s ease-out;
+}
+
+.panel-header {
+  margin-bottom: 32px;
+}
+
+.panel-header h2 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--p-text);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.panel-header .desc {
+  font-size: 0.95rem;
+  color: var(--p-text-muted);
+}
+
+/* 玻璃拟态/卡片系统 */
+.p-card {
+  background: var(--p-card-bg);
+  border: 1px solid var(--p-border);
+  border-radius: var(--p-radius);
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: var(--p-shadow);
+  transition: transform 0.2s;
+}
+
+.p-card h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--p-text);
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 栅格系统 */
+.p-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+/* 表单系统 */
+.p-form-group {
+  margin-bottom: 20px;
+}
+
+.p-form-group label {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--p-text-muted);
+  margin-bottom: 8px;
+}
+
+.p-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 14px;
+  background: #fdfdfd;
+  border: 1px solid var(--p-border);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  color: var(--p-text);
+  transition: all 0.2s;
+}
+
+.p-input:focus {
+  border-color: var(--p-primary);
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+  outline: none;
+}
+
+/* 按钮系统 */
+.p-btn {
+  height: 42px;
+  padding: 0 20px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s;
+  border: none;
+  font-size: 0.9rem;
+}
+
+.p-btn-primary {
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: white;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.p-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+}
+
+.p-btn-outline {
+  background: white;
+  border: 1px solid var(--p-border);
+  color: var(--p-text);
+}
+
+.p-btn-outline:hover:not(:disabled) {
+  border-color: var(--p-primary);
+  color: var(--p-primary);
+  background: #f0f7ff;
+}
+
+.p-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+/* 状态与进度 */
+.p-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.p-status-dot.active {
+  background: #10b981;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+  animation: p-pulse 2s infinite;
+}
+
+.p-progress-bar {
+  height: 6px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 12px 0;
+}
+
+.p-progress-bar .fill {
+  height: 100%;
+  background: var(--p-primary);
+  transition: width 0.3s ease;
+}
+
+/* 词典/列表专用样式 */
+.p-table-row {
+  display: grid;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  transition: background 0.2s;
+}
+
+.p-table-row:hover {
+  background: #f8fafc;
+}
+
+.p-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+@keyframes panelFadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes p-pulse {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}

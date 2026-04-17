@@ -120,11 +120,23 @@ function stopPythonSidecar() {
     if (pythonProcess) {
         console.log('[Electron] 正在响应生命周期事件，停止 Python Sidecar...');
         pythonProcess.kill('SIGTERM');
+        
+        // 🔗 强力物理关断：如果存在运行中的 WSL，物理切断它
+        // 注意：这能解决 Python 未能安全退出导致 WSL 挂起的问题
+        try {
+            const { execSync } = require('child_process');
+            console.log('[Electron] 正在强制清理 WSL (Ubuntu) 分发版...');
+            execSync('wsl --terminate Ubuntu', { stdio: 'ignore' });
+            console.log('[Electron] WSL 已强制关闭');
+        } catch (e) {
+            // 忽略错误（说明可能已经关闭）
+        }
+
         setTimeout(() => {
             if (pythonProcess && !pythonProcess.killed) {
                 pythonProcess.kill('SIGKILL');
             }
-        }, 3000);
+        }, 1500);
     }
 }
 
@@ -134,10 +146,10 @@ function createWindow() {
     try {
         console.log('[Electron] 正在创建主窗口...');
         mainWindow = new BrowserWindow({
-            width: 1440,
-            height: 920,
-            minWidth: 1240,
-            minHeight: 800,
+            width: 1280,
+            height: 800,
+            minWidth: 1024,
+            minHeight: 720,
             title: 'NCBI BLAST 专业版 | 工作台',
             backgroundColor: '#0f172a',
             show: false,

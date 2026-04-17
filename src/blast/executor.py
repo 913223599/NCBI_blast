@@ -3,6 +3,7 @@ BLAST executor module
 Communication with NCBI servers
 """
 
+import os
 import logging
 import ssl
 import threading
@@ -11,6 +12,7 @@ import urllib.error
 from urllib.request import HTTPSHandler, build_opener, install_opener
 
 from Bio.Blast import NCBIWWW
+from .local_blast import LocalBlastExecutor
 
 # Constants
 MIN_SEQUENCE_LENGTH = 5
@@ -30,6 +32,7 @@ def delay_before_request():
 class BlastExecutor:
     def __init__(self):
         self._setup_ssl()
+        self.local_executor = None # 延迟初始化
 
     def _setup_ssl(self):
         try:
@@ -94,6 +97,52 @@ class BlastExecutor:
                 blast_params[ncbi_key] = kwargs[key]
 
         try:
+            # 优先检查是否为已部署的本地生物数据库 (16S/18S)
+            from ..backend.utils.bio_db_manager import bio_db_manager
+            
+            if database in bio_db_manager.dbs:
+                db_obj = bio_db_manager.dbs[database]
+                if db_obj.get_status().get('installed'):
+                    # 发现已就绪的本地索引，执行本地比对
+                    # 获取索引的基础路径（不含后缀）
+                    db_ver = db_obj.config.get("version", "latest")
+                    if database == 'silva':
+                        index_path = str(db_obj.base_dir / f"silva_{db_ver}")
+                    elif database == 'ncbi_16s':
+                        index_path = str(db_obj.base_dir / "16S_ribosomal_RNA")
+                    else:
+                        index_path = str(db_obj.base_dir / f"{database}_{db_ver}")
+                    
+                    # 初始化本地执行器（如果尚未初始化）
+                    if not self.local_executor:
+                        self.local_executor = LocalBlastExecutor(database_path=index_path)
+                    
+                    self.local_executor.database_path = index_path
+                    
+                    logging.info(f"🚀 [LocalBLAST] 命中心统级本地库: {database} -> {index_path}")
+                    
+                    # 准备临时输入文件
+                    import tempfile
+                    from pathlib import Path
+                    with tempfile.NamedTemporaryFile(suffix=".fasta", delete=False, mode='w') as tmp:
+                        tmp.write(sequence)
+                        tmp_in = tmp.name
+                    
+                    tmp_out = tmp_in.replace(".fasta", ".xml")
+                    
+                    try:
+                        # 执行本地比对，返回 XML 文件的 Handle
+                        self.local_executor.execute_local_blast(tmp_in, tmp_out, max_hits=kwargs.get('hitlist_size', 50))
+                        if os.path.exists(tmp_out):
+                            return open(tmp_out, 'r')
+                        else:
+                            raise RuntimeError("Local BLAST failed to generate XML output")
+                    finally:
+                        # 延迟清理输入文件
+                        try: os.unlink(tmp_in)
+                        except: pass
+            
+            # 回退到原有的 NCBI 联机比对逻辑
             return NCBIWWW.qblast(**blast_params)
         except Exception as e:
             raise e

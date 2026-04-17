@@ -324,9 +324,32 @@ onUnmounted(() => {
 .btn-primary-run:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .blast-main-area { flex: 1; display: flex; overflow: hidden; background: #f8fafc; }
-.blast-sidebar { width: 360px; background: white; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; position: relative; z-index: 5; }
-.blast-sidebar.collapsed { width: 0; border-right: none; }
-.sidebar-content { flex: 1; overflow-y: auto; padding: 20px; width: 360px; }
+.blast-sidebar { 
+  width: auto; 
+  background: transparent; 
+  display: flex; 
+  flex-direction: column; 
+  position: relative; 
+  z-index: 5; 
+}
+.blast-sidebar.collapsed { width: 0; }
+.sidebar-content { 
+  flex: 1; 
+  overflow-y: auto; 
+  overflow-x: hidden;
+  padding: 20px; 
+  width: 360px; 
+  box-sizing: border-box; 
+  background: white;
+  border-right: 1px solid #e2e8f0;
+  transition: width 0.3s ease, padding 0.3s ease, opacity 0.2s;
+}
+.collapsed .sidebar-content {
+  width: 0;
+  padding: 0;
+  opacity: 0;
+  border-right: none;
+}
 .sidebar-collapse-toggle { position: absolute; right: -12px; top: 50%; transform: translateY(-50%); width: 24px; height: 48px; background: white; border: 1px solid #e2e8f0; border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; font-size: 0.7rem; color: #94a3b8; box-shadow: 2px 0 8px rgba(0,0,0,0.05); }
 .sidebar-collapse-toggle:hover { color: #2563eb; background: #f8fafc; }
 </style>

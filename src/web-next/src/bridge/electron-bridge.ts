@@ -233,18 +233,18 @@ const electronBridge = {
     sync_event: signals.sync_event,
 
     // ═══ 文件操作（通过 Electron IPC）═══
-    request_file_load(fileType: string, multiple: boolean = false) {
+    async request_file_load(fileType: string, multiple: boolean = false): Promise<string[] | null> {
         const electron = window.electronAPI;
         if (!electron) {
             console.warn('[Bridge] 当前处于非 Electron 环境，无法调用原生文件对话框。');
             (window as any).app?.showNotification('局域网模式暂不支持直接读取本地文件，请使用上传逻辑', 'warning');
-            return;
+            return null;
         }
 
         const filterMap: Record<string, any[]> = {
             fasta: [
-                { name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'seq', 'ab1', 'abi'] },
-                { name: 'Archives', extensions: ['zip'] },
+                { name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'seq', 'ab1', 'abi', 'fastq', 'fq', 'gz', 'fastq.gz', 'fq.gz'] },
+                { name: 'Archives', extensions: ['zip', 'tar.gz'] },
                 { name: 'All Files', extensions: ['*'] }
             ],
             tree: [
@@ -256,27 +256,20 @@ const electronBridge = {
         const properties = ['openFile'];
         if (multiple) properties.push('multiSelections');
 
-        electron.openFileDialog({
+        const paths = await electron.openFileDialog({
             title: `批量导入: ${fileType === 'fasta' ? '序列文件' : '进化树文件'}`,
             filters: filterMap[fileType] || [{ name: 'All Files', extensions: ['*'] }],
             properties: properties
-        }).then(async (paths: string[] | null) => {
-            if (!paths || paths.length === 0) return;
-            
-            // 批量模式直接调用处理函数
-            if (multiple && (window as any).treeView?.handleExternalFiles) {
-                (window as any).treeView.handleExternalFiles(paths);
-                return;
-            }
-
-            // 单文件兼容逻辑 (Legacy)
-            const filePath = paths[0];
-            if (!filePath) return;
-            const content = await electron.readFile(filePath);
-            if (content && (window as any).app?.handleFileLoaded) {
-                (window as any).app.handleFileLoaded(content, fileType, filePath);
-            }
         });
+
+        if (!paths || paths.length === 0) return null;
+        
+        // 批量模式：尝试触发旧版 treeView 兼容逻辑 (可选)
+        if (multiple && (window as any).treeView?.handleExternalFiles) {
+            (window as any).treeView.handleExternalFiles(paths);
+        }
+
+        return paths;
     },
 
     async save_file(content: string, filenameHint: string, callback?: (success: boolean) => void) {
@@ -756,6 +749,68 @@ const electronBridge = {
             console.error('[ElectronBridge] 文件上传失败:', err);
             return { success: false, error: String(err) };
         }
+    },
+    /** 启动基因组拼接任务 */
+    async run_assembly_job(params: any): Promise<any> {
+        return await apiPost('/api/assembly/run', {
+            ...params,
+            client_id: MY_CLIENT_ID
+        });
+    },
+
+    /** 启动基因组拼接任务 (别名, 兼容 useAssembly.ts) */
+    async start_assembly_pipeline(params: any): Promise<any> {
+        return await this.run_assembly_job(params);
+    },
+
+    // ═══ 生物分析数据库 (16S/18S) ═══
+    async get_all_db_status(callback?: (res: any) => void) {
+        const result = await apiGet('/api/database/status');
+        callback?.(result);
+        return result;
+    },
+
+    async trigger_db_update(dbId: string, callback?: (res: any) => void) {
+        const result = await apiPost(`/api/database/update/${dbId}`);
+        callback?.(result);
+        return result;
+    },
+
+    async get_blast_databases() {
+        return await apiGet('/api/blast/databases');
+    },
+    
+    /** 手动触发 Conda 环境部署 */
+    async setup_assembly_env() {
+        return await apiPost('/api/assembly/setup_conda');
+    },
+
+    /** 获取拼接任务历史 */
+    async get_assembly_history() {
+        return await apiGet('/api/assembly/history');
+    },
+
+    /** 删除拼接任务数据 */
+    async delete_assembly_task(taskId: string) {
+        return await apiDelete(`/api/assembly/tasks/${taskId}`);
+    },
+
+    /** 强制停止运行中的任务 */
+    async stop_assembly_task(taskId: string) {
+        return await apiPost(`/api/assembly/${taskId}/stop`);
+    },
+
+    // ═══ 序列分析历史 (Pairwise/Reference/Matrix) ═══
+    async fetchAnalysisHistory() {
+        return await apiGet('/api/analysis/history');
+    },
+
+    async deleteAnalysisHistory(recordId: number) {
+        return await apiDelete(`/api/analysis/history/${recordId}`);
+    },
+
+    async fetchAnalysisDetail(recordId: number) {
+        return await apiGet(`/api/analysis/history/${recordId}`);
     }
 };
 

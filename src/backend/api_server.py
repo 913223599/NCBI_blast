@@ -57,6 +57,19 @@ if platform.system() == "Windows":
     
     logging.getLogger("asyncio").addFilter(AsyncioAssertionFilter())
     logger.info("🔧 已应用 Windows asyncio 稳定性补丁 (日志过滤)")
+    
+    # ─── 信号处理加速退出 (针对 Electron 生命周期优化) ───
+    import signal
+    def handle_exit(sig, frame):
+        logger.info(f"接收到信号 {sig}，正在强制清理 WSL 环境...")
+        try:
+            from src.assembly.env.wsl_manager import WSLManager
+            WSLManager.shutdown_distro()
+        except: pass
+        sys.exit(0)
+        
+    signal.signal(signal.SIGTERM, handle_exit)
+    signal.signal(signal.SIGINT, handle_exit)
 
 print(">>> Python API Server Process Started", flush=True)
 
@@ -107,6 +120,12 @@ async def lifespan(app: FastAPI):
     get_blast_manager().result_listeners.append(_on_blast_result)
     logger.info("BLAST 事件总线已连接")
 
+    # B2. 初始化组装任务队列工作线程
+    from .routes.assembly import execute_assembly_pipeline
+    from .utils.assembly_queue import assembly_queue
+    asyncio.create_task(assembly_queue.start_workers(execute_assembly_pipeline))
+    logger.info("Assembly 任务队列工作线程已启动")
+
     # D. 初始化局域网共享功能 (始终挂载路由以支持实时开关)
     try:
         from .lan_share import LanShareManager
@@ -133,6 +152,14 @@ async def lifespan(app: FastAPI):
         from .strain_db import get_strain_db_manager
         get_strain_db_manager().cleanup()
         logger.info("StrainDB 连接池已清理")
+    except: pass
+
+    # E. 清理 WSL 运行环境 (释放内存与后台进程)
+    try:
+        from ..assembly.env.wsl_manager import WSLManager
+        if WSLManager.is_available():
+            logger.info("正在关闭 WSL (Ubuntu) 分发版以释放内存...")
+            WSLManager.shutdown_distro()
     except: pass
 
 def _on_blast_result(task_id: str, data: dict):
@@ -175,7 +202,7 @@ app.add_middleware(
 )
 
 # 动态载入分散在各路由模块的接口
-from .routes import blast, strains, dictionary, tree, settings, core, common, taxonomy
+from .routes import blast, strains, dictionary, tree, settings, core, common, taxonomy, assembly
 
 app.include_router(common.router)
 app.include_router(blast.router)
@@ -185,6 +212,12 @@ app.include_router(tree.router)
 app.include_router(settings.router)
 app.include_router(taxonomy.router)
 app.include_router(core.router)
+
+# 注册基因组拼接与数据库管理路由
+from .routes import assembly, database, analysis
+app.include_router(assembly.router, prefix="/api")
+app.include_router(database.router, prefix="/api")
+app.include_router(analysis.router, prefix="/api")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

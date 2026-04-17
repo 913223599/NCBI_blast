@@ -86,7 +86,7 @@ async def search_dictionary(query: str, proofread_mode: bool = False):
         
         q = f"%{query}%"
         if proofread_mode:
-            cursor.execute("SELECT english, chinese, category, source FROM translations WHERE (english LIKE ? OR chinese LIKE ?) AND source IN ('ai', 'ai_batch') ORDER BY created_at DESC LIMIT 500", (q, q))
+            cursor.execute("SELECT english, chinese, category, source FROM translations WHERE (english LIKE ? OR chinese LIKE ?) AND (source != 'verified' OR source IS NULL) ORDER BY created_at DESC LIMIT 500", (q, q))
         else:
             cursor.execute("SELECT english, chinese, category, source FROM translations WHERE (english LIKE ? OR chinese LIKE ?) ORDER BY created_at DESC LIMIT 500", (q, q))
             
@@ -109,7 +109,7 @@ async def get_all_terms(proofread_mode: bool = False, limit: int = 2000):
         cursor = conn.cursor()
         
         if proofread_mode:
-            cursor.execute("SELECT english, chinese, category, source FROM translations WHERE source IN ('ai', 'ai_batch') ORDER BY created_at DESC LIMIT ?", (limit,))
+            cursor.execute("SELECT english, chinese, category, source FROM translations WHERE (source != 'verified' OR source IS NULL) ORDER BY created_at DESC LIMIT ?", (limit,))
         else:
             cursor.execute('SELECT english, chinese, category, source FROM translations ORDER BY created_at DESC LIMIT ?', (limit,))
             

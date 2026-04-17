@@ -77,49 +77,86 @@ def parse_blast_csv(csv_path: str, limit: int = None) -> list:
     return data
 
 def select_consensus_hit(hits: list) -> dict:
-    """共识投票选择最佳命中 (复刻自原 api_server.py)"""
-    from collections import Counter
+    """共识投票选择最佳命中 (优化版)"""
     if not hits:
         return None
 
+    # 1. 获取最高相似度作为基准，动态确定门槛
+    try:
+        first_sim = float(str(hits[0].get('similarity', '0')).replace('%', ''))
+    except:
+        first_sim = 0.0
+    
+    # 动态门槛：只要进入最高分 0.5% 范围内的都视为“高可信”候选
+    # 如果最高分很高 (>98)，则门槛更严；如果最高分一般，则门槛放宽
+    threshold = max(90.0, first_sim - 0.5)
+    
     high_identity_hits = []
     for hit in hits:
-        sim_str = str(hit.get('similarity', '0%')).replace('%', '').strip()
         try:
-            if float(sim_str) >= 98.0:
+            sim = float(str(hit.get('similarity', '0')).replace('%', ''))
+            if sim >= threshold:
                 high_identity_hits.append(hit)
-        except (ValueError, TypeError):
+        except:
             continue
 
-    target_hits = high_identity_hits if high_identity_hits else hits
+    # 如果有多个最高分的 hit (例如相似度完全一样)，则进入共识统计
+    target_hits = high_identity_hits if high_identity_hits else [hits[0]]
     if len(target_hits) == 1:
         return target_hits[0]
 
-    generic_names = {'bacterium', 'uncultured bacterium', 'uncultured organism', 'unidentified', 'unknown', 'n/a', ''}
+    generic_names = {
+        'bacterium', 'uncultured bacterium', 'uncultured organism', 'unidentified', 
+        'unknown', 'n/a', '', 'bacteria', 'archaea', 'eukaryota', 'metagenome', 
+        'environmental sample', 'uncultured', 'organism'
+    }
     species_counter = Counter()
     species_to_hit = {}
+    
+    max_sim = first_sim
+
     for hit in target_hits:
         species = (hit.get('species') or '').strip()
         species_lower = species.lower()
         if species_lower and species_lower not in generic_names:
-            species_counter[species] += 1
+            # 权重计算：相似度越接近最高值，权重越高
+            try:
+                curr_sim = float(str(hit.get('similarity', '0')).replace('%', ''))
+                # 权重因子：距离最高分越远，权重衰减越快
+                # 如果 diff 是 0，权重是 2.0 (给绝对第一名加成)；如果 diff 是 0.5，权重是 0.5
+                diff = max_sim - curr_sim
+                weight = 2.0 if diff < 0.01 else max(0.2, 1.0 - diff * 2.0)
+            except:
+                weight = 1.0
+                
+            species_counter[species] += weight
             if species not in species_to_hit:
                 species_to_hit[species] = hit
 
     if not species_counter:
         return target_hits[0]
 
-    total_valid = sum(species_counter.values())
+    total_weight = sum(species_counter.values())
     top_entries = species_counter.most_common(5)
+    
     prob_parts = []
     consensus_list = []
-    for name, count in top_entries:
-        pct = (count / total_valid) * 100
+    for name, weight in top_entries:
+        pct = (weight / total_weight) * 100
+        if pct < 5 and len(prob_parts) > 0:
+            continue
         prob_parts.append(f"{name}({pct:.0f}%)")
         consensus_list.append({"name": name, "pct": round(pct)})
 
     consensus_species = top_entries[0][0]
     best_hit = dict(species_to_hit[consensus_species])
-    best_hit['species'] = ", ".join(prob_parts)
+    
+    # 极致优化：如果第一名权重占比极高 (>80%)，直接显示具体物种，不显示混合列表
+    first_weight_pct = (top_entries[0][1] / total_weight) * 100
+    if first_weight_pct > 80:
+        best_hit['species'] = consensus_species
+    else:
+        best_hit['species'] = ", ".join(prob_parts)
+        
     best_hit['consensusList'] = consensus_list
     return best_hit

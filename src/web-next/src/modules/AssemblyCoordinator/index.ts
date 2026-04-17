@@ -10,11 +10,13 @@ export { GPUAccelerationStrategy } from './strategies/GPUAccelerationStrategy';
 
 import { AssemblyEngine } from './core/AssemblyEngine';
 import { GPUAccelerationStrategy } from './strategies/GPUAccelerationStrategy';
+import { SangerAssembler } from './core/SangerAssembler';
 
 /**
  * 模块单例
  */
 export const assemblyCoordinator = {
   engine: new AssemblyEngine(),
-  gpu: new GPUAccelerationStrategy()
+  gpu: new GPUAccelerationStrategy(),
+  sanger: new SangerAssembler()
 };
