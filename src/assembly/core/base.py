@@ -16,6 +16,10 @@ class PipelineContext:
         self.is_wsl = config.get("is_wsl", False)
         self.data: Dict[str, Any] = {}
         self.history: List[Dict[str, Any]] = []
+        
+        # 🔗 运行时内部工具对象 (不参与 JSON 序列化)
+        self.gpu_manager: Any = None
+        self.gpu_env: Optional[Dict[str, str]] = None
 
     def update(self, key: str, value: Any):
         self.data[key] = value

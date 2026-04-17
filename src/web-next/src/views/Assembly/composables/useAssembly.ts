@@ -129,7 +129,7 @@ export function useAssembly() {
     }
   }
 
-  const resumeTask = (task: any) => {
+  const restoreTaskToState = (task: any) => {
     let configObj: any = {};
     try {
       configObj = typeof task.config === 'string' ? JSON.parse(task.config) : task.config || {};
@@ -141,35 +141,29 @@ export function useAssembly() {
     taskState.name = task.name;
     const rawType = task.sampleType || task.sample_type || configObj.sample_type || 'BACTERIA';
     taskState.sampleType = rawType;
-    taskState.tech = task.tech;
+    taskState.tech = task.tech || configObj.tech || 'ILLUMINA';
     
     if (params.host_filter_db) {
       const db = String(params.host_filter_db);
       if (db.startsWith('ncbi:')) {
         taskState.selectedHostDb = 'search_ncbi';
         taskState.ncbiSearchTerm = db.replace('ncbi:', '');
-      } else {
+      } else if (db && db !== 'default_ecoli') {
         taskState.selectedHostDb = 'custom';
         taskState.customHostPath = db;
       }
     }
+    return rawType;
+  }
+
+  const resumeTask = (task: any) => {
+    const rawType = restoreTaskToState(task);
     startTask({ taskId: task.id, reset: false, forceSampleType: rawType });
   };
 
   const restartTask = (task: any) => {
     if (!confirm('确定要清除所有进度并从头开始运行吗？')) return;
-    let configObj: any = {};
-    try {
-      configObj = typeof task.config === 'string' ? JSON.parse(task.config) : task.config || {};
-    } catch(e) {}
-    const params = configObj.params || {};
-
-    if (params.input_files) selectedFiles.value = params.input_files;
-    taskState.name = task.name;
-    const rawType = task.sampleType || task.sample_type || configObj.sample_type || 'BACTERIA';
-    taskState.sampleType = rawType;
-    taskState.tech = task.tech;
-    
+    const rawType = restoreTaskToState(task);
     startTask({ taskId: task.id, reset: true, forceSampleType: rawType });
   };
 

@@ -55,11 +55,12 @@ class HostCleanerStep(BaseAssemblyStep):
 
         if self.on_progress: self.on_progress(5, "正在映射测序数据到宿主基因组...")
         
-        # 命令 1：比对并直接输出到 BAM (过滤出未比对对端 Read)
+        # 命令 1：比对并直接输出到 BAM (支持多线程压缩)
+        threads = str(self.context.config.get("threads", 8))
         minimap_cmd = [
-            "minimap2", "-ax", "sr", "-t", str(self.context.config.get("threads", 8)),
+            "minimap2", "-ax", "sr", "-t", threads,
             str(host_db), str(r1), str(r2), "|",
-            "samtools", "view", "-b", "-f", "12", "-o", str(bam_file)
+            "samtools", "view", "-@", threads, "-b", "-f", "12", "-o", str(bam_file)
         ]
         
         ret = await self.runner.run_command(minimap_cmd, is_shell=True)
@@ -67,10 +68,11 @@ class HostCleanerStep(BaseAssemblyStep):
 
         if self.on_progress: self.on_progress(60, "正在提取未比对序列 (宿主剔除)...")
         
-        # 命令 2：将 BAM 还原为双端 FASTQ
+        # 命令 2：将 BAM 还原为双端 FASTQ (增加多线程支持)
         if self.on_progress: self.on_progress(80, "正在生成清洗后的 Fastq 文件...")
         restore_cmd = [
-            "samtools", "fastq", "-1", str(filtered_r1), "-2", str(filtered_r2),
+            "samtools", "fastq", "-@", threads, 
+            "-1", str(filtered_r1), "-2", str(filtered_r2),
             "-0", "/dev/null", "-s", "/dev/null", "-n", str(bam_file)
         ]
         ret = await self.runner.run_command(restore_cmd)

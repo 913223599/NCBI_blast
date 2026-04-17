@@ -233,7 +233,7 @@ const electronBridge = {
     sync_event: signals.sync_event,
 
     // ═══ 文件操作（通过 Electron IPC）═══
-    async request_file_load(fileType: string, multiple: boolean = false): Promise<string[] | null> {
+    async request_file_load(fileType: string | string[], multiple: boolean = false): Promise<string[] | null> {
         const electron = window.electronAPI;
         if (!electron) {
             console.warn('[Bridge] 当前处于非 Electron 环境，无法调用原生文件对话框。');
@@ -241,24 +241,34 @@ const electronBridge = {
             return null;
         }
 
-        const filterMap: Record<string, any[]> = {
-            fasta: [
+        // 🔗 智能标题识别
+        let dialogTitle = '批量导入: 序列文件';
+        let filters: any[] = [];
+
+        if (fileType === 'tree') {
+            dialogTitle = '批量导入: 进化树文件';
+            filters = [{ name: 'Tree Files', extensions: ['nwk', 'newick', 'txt'] }];
+        } else if (fileType === 'fasta' || Array.isArray(fileType)) {
+            // 如果是数组或者 fasta 标识，都视为序列文件
+            dialogTitle = '批量导入: 测序数据/序列文件';
+            filters = [
                 { name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'seq', 'ab1', 'abi', 'fastq', 'fq', 'gz', 'fastq.gz', 'fq.gz'] },
-                { name: 'Archives', extensions: ['zip', 'tar.gz'] },
-                { name: 'All Files', extensions: ['*'] }
-            ],
-            tree: [
-                { name: 'Tree Files', extensions: ['nwk', 'newick', 'txt'] },
-                { name: 'All Files', extensions: ['*'] }
-            ]
-        };
+                { name: 'Archives', extensions: ['zip', 'tar.gz'] }
+            ];
+        } else {
+            dialogTitle = '批量导入: 文件';
+            filters = [{ name: 'All Files', extensions: ['*'] }];
+        }
+
+        // 确保包含“所有文件”选项
+        filters.push({ name: 'All Files', extensions: ['*'] });
 
         const properties = ['openFile'];
         if (multiple) properties.push('multiSelections');
 
         const paths = await electron.openFileDialog({
-            title: `批量导入: ${fileType === 'fasta' ? '序列文件' : '进化树文件'}`,
-            filters: filterMap[fileType] || [{ name: 'All Files', extensions: ['*'] }],
+            title: dialogTitle,
+            filters: filters,
             properties: properties
         });
 

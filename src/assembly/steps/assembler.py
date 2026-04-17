@@ -65,6 +65,25 @@ class AssemblerStep(BaseAssemblyStep):
 
         max_mem = self.context.config.get("max_memory", 16)
         
+        # 🔗 噬菌体专项优化：在宿主剔除后进行高深度下采样
+        # 此时已经除去了大量宿主 Reads，剩余主要为噬菌体。200k reads 足够覆盖 100-300kb 的基因组。
+        if self.context.config.get("sample_type") == "PHAGE":
+            sampling_dir = out_dir / "sampling"
+            sampling_dir.mkdir(parents=True, exist_ok=True)
+            sampled_r1 = sampling_dir / "sampled_R1.fq.gz"
+            sampled_r2 = sampling_dir / "sampled_R2.fq.gz"
+            
+            self.logger.info("🧪 开启噬菌体拼接采样优化 (Target: 200k clean reads)...")
+            fastp_cmd = [
+                "fastp", "-i", str(r1), "-I", str(r2),
+                "-o", str(sampled_r1), "-O", str(sampled_r2),
+                "--reads_to_process", "200000", "--thread", str(self.context.config.get("threads", 4))
+            ]
+            
+            await self.runner.run_command(fastp_cmd)
+            # 切换后续拼接输入为采样后的数据
+            r1, r2 = sampled_r1, sampled_r2
+            
         cmd = [
             unicycler_bin,
             "-1", str(r1), "-2", str(r2),
@@ -72,15 +91,19 @@ class AssemblerStep(BaseAssemblyStep):
             "--threads", str(self.context.config.get("threads", 8))
         ]
         
-        # 🔗 动态内存控制：通过 SPAdes 后端限制内存
-        cmd.extend(["--spades_options", f"--memory {max_mem}"])
+        # 🔗 动态内存控制：通过 SPAdes 后端参数传递
+        spades_opts = [f"--memory {max_mem}"]
+        self.logger.info(f"🚀 SPAdes 引擎内存限制已设置为: {max_mem}GB")
         
-        # 🔗 2. 命令执行
+        cmd.extend(["--spades_options", " ".join(spades_opts)])
+        
+        # 🔗 2. 命令执行 (WSL 下必须开启 is_shell 以确保 --spades_options 的复合引号能被正确透传)
         returncode = await self.runner.run_command(
             cmd, 
             cwd=out_dir.parent,
-            env=self.context.get("gpu_env"),
-            on_output=output_handler
+            env=self.context.gpu_env,
+            on_output=output_handler,
+            is_shell=True
         )
         
         if returncode == 0:

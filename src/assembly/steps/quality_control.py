@@ -63,14 +63,14 @@ class QualityControlStep(BaseAssemblyStep):
             "--thread", str(self.context.config.get("threads", 4)),
             "--detect_adapter_for_pe", "--correction"
         ]
-        
+
         if self.on_progress: self.on_progress(5, "正在启动过滤引擎...")
         
         # 3. 使用 Runner 执行 (注入 GPU 环境)
         returncode = await self.runner.run_command(
             cmd, 
             cwd=out_dir,
-            env=self.context.get("gpu_env"),
+            env=self.context.gpu_env,
             on_output=output_handler
         )
         

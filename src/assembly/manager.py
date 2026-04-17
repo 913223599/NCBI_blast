@@ -141,12 +141,14 @@ class AssemblyManager:
             except Exception as e:
                 self.logger.error(f"清理任务目录失败: {e}")
         
+        # 🔗 GPU 加速环境准备 (挂载为内部属性，不进入 ctx.data 序列化)
         ctx = PipelineContext(task_id, task_dir, config)
+        ctx.gpu_manager = self.gpu_manager
+        ctx.gpu_env = self.gpu_manager.get_acceleration_env()
         
         # 注入初始输入与环境
         ctx.update("r1", Path(r1_input))
         ctx.update("r2", Path(r2_input))
-        ctx.update("gpu_env", gpu_env)
         
         # 2. 定义步骤序列 (深度模块化：根据物种类型动态编排)
         pipeline_steps = [QualityControlStep(ctx)]
@@ -182,6 +184,8 @@ class AssemblyManager:
                     
                     if host_id.startswith("ncbi:"):
                         species = host_id.replace("ncbi:", "").strip()
+                        if not species:
+                            raise ValueError("NCBI 宿主菌名称不能为空，请在设置中输入菌株名称（如 Escherichia coli）。")
                         resolved_path_str = await self.ncbi_downloader.fetch_reference_genome(species)
                         if not resolved_path_str:
                             raise ValueError(f"无法从 NCBI 获取物种 '{species}' 的参考基因组，请检查网络连接或尝试手动上传参考文件。")
@@ -228,6 +232,7 @@ class AssemblyManager:
             
             self._report_progress(task_id, "COMPLETED", 100, "success")
             from src.backend.utils.assembly_db import assembly_db
+            
             assembly_db.finalize_task(task_id, "completed", {"results": ctx.data})
             logging.info(f"--- [Pipeline Success] Task: {task_id} ---")
             return {
