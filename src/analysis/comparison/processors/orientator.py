@@ -64,7 +64,7 @@ class SequenceOrientator:
         """
         try:
             from src.assembly.env.wsl_manager import WSLManager
-            linux_path = WSLManager.window_to_linux_path(str(path.absolute()))
+            linux_path = WSLManager.to_wsl_path(str(path.absolute()))
             if linux_path: return linux_path
         except: pass
 

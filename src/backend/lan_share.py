@@ -99,14 +99,14 @@ class LanShareManager:
         all_ips = self.get_local_ips()
         
         logger.info("\n" + "═"*60)
-        logger.info("  🚀 局域网共享已就绪！ (LAN Share Ready)")
+        logger.info("  [LAN] 局域网共享已就绪！ (LAN Share Ready)")
         logger.info("  同网络的外部设备可通过以下地址访问此工作台：")
         for ip in all_ips:
-            logger.info(f"  👉  http://{ip}:{port}")
+            logger.info(f"  ->  http://{ip}:{port}")
         
         # 检查 dist 目录是否存在，给用户提醒
         if not self.dist_path.exists():
-            logger.warning("  ⚠️  警告：检测到项目未进行 Build，局域网用户可能无法加载界面。")
+            logger.warning("  [!] 警告：检测到项目未进行 Build，局域网用户可能无法加载界面。")
             logger.warning("  请运行 `npm run build` 生成生产环境静态资源。")
             
         logger.info("═"*60 + "\n")

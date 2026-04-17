@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 def run():
-    src_dir = Path("d:\\NCBI blast\\src\\web-next\\src")
+    src_dir = Path(__file__).resolve().parents[2] / "src" / "web-next" / "src"
     count = 0
     for root, dirs, files in os.walk(src_dir):
         for name in files:

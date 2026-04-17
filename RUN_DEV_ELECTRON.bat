@@ -11,6 +11,10 @@ echo =======================================
 echo   NCBI BLAST Pro - Electron Dev Mode
 echo =======================================
 echo [Status] Project Root: %PROJECT_ROOT%
+echo [0/4] Cleaning up zombie processes...
+taskkill /F /IM python.exe /T >nul 2>&1
+taskkill /F /IM electron.exe /T >nul 2>&1
+timeout /t 1 /nobreak >nul
 
 REM 0. Check Node/NPM environment
 where npm >nul 2>&1

@@ -21,6 +21,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+# ─── 0. Windows 控制台 UTF‑8 支持 ───────────────────────
+import sys, io
+if sys.platform.startswith("win"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+
 # ─── 1. 项目根目录初始化 (必须保留) ────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -56,7 +62,7 @@ if platform.system() == "Windows":
             return "assert f is self._write_fut" not in record.getMessage()
     
     logging.getLogger("asyncio").addFilter(AsyncioAssertionFilter())
-    logger.info("🔧 已应用 Windows asyncio 稳定性补丁 (日志过滤)")
+    logger.info("[Config] 已应用 Windows asyncio 稳定性补丁 (日志过滤)")
     
     # ─── 信号处理加速退出 (针对 Electron 生命周期优化) ───
     import signal
@@ -126,17 +132,21 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(assembly_queue.start_workers(execute_assembly_pipeline))
     logger.info("Assembly 任务队列工作线程已启动")
 
-    # D. 初始化局域网共享功能 (始终挂载路由以支持实时开关)
+    # D. 打印局域网共享地址与初始化 WSL 环境
     try:
         from .lan_share import LanShareManager
         from ..utils.config_manager import get_config_manager
         lan_mgr = LanShareManager(app)
-        lan_mgr.setup()
-        
         if get_config_manager().get_config_value("lan_share", False):
             lan_mgr.print_share_info(port=8765)
+            
+        # 🔗 核心增强：预热 WSL 软链接 (解决 Windows 目录带空格导致的分析失败)
+        from src.assembly.env.wsl_manager import WSLManager
+        if WSLManager.is_available():
+            WSLManager.ensure_project_link()
+            logger.info("WSL 项目软链接已准备就绪")
     except Exception as e:
-        logger.error(f"局域网共享模块加载失败: {e}")
+        logger.error(f"WSL/局域网共享初始化失败: {e}")
 
     yield
 
@@ -193,6 +203,13 @@ def _on_blast_result(task_id: str, data: dict):
 # ─── 5. 应用实例化与路由挂载 ────────────────────────────
 app = FastAPI(title="NCBI Bio-Station API", lifespan=lifespan)
 
+# 初始化局域网共享管理 (暂不 setup，等待业务路由注册完成)
+try:
+    from .lan_share import LanShareManager
+    lan_mgr = LanShareManager(app)
+except Exception as e:
+    logger.error(f"局域网共享模块初始化失败: {e}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -218,6 +235,14 @@ from .routes import assembly, database, analysis
 app.include_router(assembly.router, prefix="/api")
 app.include_router(database.router, prefix="/api")
 app.include_router(analysis.router, prefix="/api")
+
+# 最后：启动局域网共享路由 (确保通配符路由 /{full_path} 不会屏蔽业务 API)
+try:
+    if 'lan_mgr' in locals():
+        lan_mgr.setup()
+        logger.info("局域网共享路由已挂载 (位于业务路由之后)")
+except Exception as e:
+    logger.error(f"局域网共享路由延迟加载失败: {e}")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

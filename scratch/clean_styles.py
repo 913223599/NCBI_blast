@@ -57,5 +57,5 @@ def clean_styles(directory):
     print(f'Total files modified: {change_count}')
 
 if __name__ == "__main__":
-    target_dir = r'd:\NCBI blast\src\web-next\src'
+    target_dir = Path(__file__).resolve().parents[2] / "src" / "web-next" / "src"
     clean_styles(target_dir)

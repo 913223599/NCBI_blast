@@ -1,6 +1,6 @@
 from pathlib import Path
 
-DOCS_ROOT = Path(r"d:\PycharmProjects\NCBI blast\tools\docs\detailed")
+DOCS_ROOT = Path(__file__).resolve().parents[2] / "tools" / "docs" / "detailed"
 
 def scan_errors():
     files = list(DOCS_ROOT.glob("*.txt"))

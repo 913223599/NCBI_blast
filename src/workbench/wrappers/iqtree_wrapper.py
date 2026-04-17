@@ -118,7 +118,9 @@ class IQTreeWrapper(BaseWrapper):
                 str_val = str(val)
                 # 检测 Windows 路径特征（包含驱动器号和路径分隔符）
                 if ":" in str_val and ("/" in str_val or "\\" in str_val):
-                    wsl_args.append(GPUManager.to_wsl_path(str_val))
+                    # 关键修复：在 WSL 中执行时，如果路径有空格，必须包裹单引号
+                    linux_path = GPUManager.to_wsl_path(str_val)
+                    wsl_args.append(f"'{linux_path}'")
                 else:
                     wsl_args.append(str_val)
 

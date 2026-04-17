@@ -405,13 +405,29 @@ class StrainDBManager:
                 rows = cursor.fetchall()
                 self.logger.info("First time initialization: RECONSTRUCTION FINISHED")
 
+            # --- 动态路径适配 (Issue: 磁盘迁移后历史记录路径依旧指向 D:\) ---
+            from src.workbench.models.tool_config import ToolConfig
+            current_root = str(ToolConfig.PROJECT_ROOT).rstrip("\\/")
+            
             history = []
             for row in rows:
+                items = json.loads(row['items_json'] or '[]')
+                
+                # 对每一条记录进行路径重定向尝试
+                for item in items:
+                    fp = item.get('filePath', '')
+                    if fp and (":" in fp or fp.startswith("/mnt/")):
+                        # 如果路径不在当前根目录下且路径包含 "results"
+                        if "results" in fp and not fp.startswith(current_root):
+                            rel_part = fp.split("results")[-1].lstrip("\\/")
+                            new_fp = str(ToolConfig.PROJECT_ROOT / "results" / rel_part)
+                            item['filePath'] = new_fp
+                            
                 history.append({
                     'id': row['id'],
                     'sourceFile': row['source_file'],
                     'name': row['name'],
-                    'items': json.loads(row['items_json'] or '[]')
+                    'items': items
                 })
             conn.close()
             return history

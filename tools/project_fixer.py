@@ -200,7 +200,8 @@ class ProjectFixer:
         print(f"   检查的Python: {len(list(self.project_root.rglob('*.py')))}")
 
 def main():
-    project_root = Path(__file__).parent.parent  # D:\NCBI blast
+    # 自动定位项目根目录，避免硬编码盘符
+    project_root = Path(__file__).resolve().parents[2]
     fixer = ProjectFixer(project_root)
     fixer.scan_and_fix()
 

@@ -43,7 +43,8 @@ def fix_json_file(filepath):
 
 def main():
     """主函数：扫描并修复项目中的所有 JSON 文件"""
-    project_root = Path(__file__).parent.parent  # D:\NCBI blast
+    # 自动定位项目根目录，避免硬编码盘符
+    project_root = Path(__file__).resolve().parents[2]
     print(f"🔍 正在扫描项目目录: {project_root}")
     
     fixed_count = 0

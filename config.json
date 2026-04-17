@@ -38,8 +38,8 @@
     "sra_tools": "tools/ncbi_dist/bin/sra-tools",
     "tree_tools_bin": "tools/ncbi_dist/bin/tree-tools"
   },
-  "sra_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\sra-tools",
-  "tree_tools_bin_path": "D:\\PycharmProjects\\NCBI blast\\tools\\ncbi_dist\\bin\\tree-tools",
+  "sra_tools_bin_path": "./tools/ncbi_dist/bin/sra-tools",
+  "tree_tools_bin_path": "./tools/ncbi_dist/bin/tree-tools",
   "language": "zh_CN",
   "lan_share": true,
   "_test_key_": "_test_value_",

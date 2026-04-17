@@ -2,8 +2,8 @@ import concurrent.futures
 import subprocess
 from pathlib import Path
 
-TOOLS_ROOT = Path(r"d:\PycharmProjects\NCBI blast\tools\ncbi_dist\bin")
-DOCS_ROOT = Path(r"d:\PycharmProjects\NCBI blast\tools\docs\detailed")
+TOOLS_ROOT = Path(__file__).resolve().parents[2] / "tools" / "ncbi_dist" / "bin"
+DOCS_ROOT = Path(__file__).resolve().parents[2] / "tools" / "docs" / "detailed"
 
 def get_help(tool_path):
     tool_name = tool_path.name

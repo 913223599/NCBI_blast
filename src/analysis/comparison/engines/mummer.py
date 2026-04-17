@@ -22,6 +22,29 @@ class MummerEngine:
         task_uuid = str(uuid.uuid4())[:8]
         tmp_dir = f"/tmp/mummer_{task_uuid}"
         
+        # 预处理：确保文件在 Windows 侧已经是合规的 FASTA 格式 (符合 Linux 换行规范)
+        def _ensure_fasta(p: Path):
+            raw_content = p.read_text(encoding='utf-8', errors='ignore').strip()
+            # 统一转换为 LF 换行，清理所有 \r
+            clean_seq = raw_content.replace('\r\n', '\n').replace('\r', '\n')
+            
+            if not clean_seq.startswith(">"):
+                self.logger.info(f"正在为非标准序列文件补全 FASTA 头部: {p.name}")
+                # 构造标准头，并确保 sequence 部分和文件末尾都有换行
+                clean_seq = f">{p.stem}\n{clean_seq}\n"
+            else:
+                # 即使有头部，也确保末尾有换行符，防止 MUMmer 报错
+                if not clean_seq.endswith('\n'):
+                    clean_seq += '\n'
+                    
+            p.write_text(clean_seq, encoding='utf-8', newline='\n')
+        
+        try:
+            _ensure_fasta(ref_path)
+            _ensure_fasta(query_path)
+        except Exception as e:
+            self.logger.warning(f"FASTA 预修复失败 (非严重错误): {e}")
+
         linux_ref = self._to_wsl(ref_path)
         linux_query = self._to_wsl(query_path)
         
@@ -31,23 +54,33 @@ class MummerEngine:
         linux_final_coords = self._to_wsl(final_coords)
         linux_final_delta = self._to_wsl(final_delta)
 
-        # 1. 在 WSL 内部构建环境 (使用单引号封装 linux 路径)
-        init_cmd = ["wsl", "-d", self.wsl_distro, "-u", "root", "bash", "-c", 
-                    f"mkdir -p {tmp_dir} && cp '{linux_ref}' {tmp_dir}/ref.fa && cp '{linux_query}' {tmp_dir}/query.fa"]
+        # 核心增强：组合所有步骤为单一原子操作，防止 WSL 跨进程状态丢失或竞争
+        # 同时增加调试诊断信息 (ls -l)
+        combined_bash = (
+            f"mkdir -p '{tmp_dir}' && "
+            f"cp '{linux_ref}' '{tmp_dir}/ref.fa' && "
+            f"cp '{linux_query}' '{tmp_dir}/query.fa' && "
+            f"ls -l '{tmp_dir}' && "
+            f"cd '{tmp_dir}' && "
+            f"nucmer --maxmatch -p run ref.fa query.fa && "
+            f"show-coords -r -T -H run.delta > run.coords && "
+            f"cp run.coords '{linux_final_coords}' && "
+            f"cp run.delta '{linux_final_delta}' && "
+            f"rm -rf '{tmp_dir}'"
+        )
         
-        # 2. 执行 nucmer
-        run_cmd = ["wsl", "-d", self.wsl_distro, "-u", "root", "bash", "-c", 
-                   f"cd {tmp_dir} && nucmer --maxmatch -p run ref.fa query.fa && show-coords -r -T -H run.delta > run.coords"]
+        full_cmd = ["wsl", "-d", self.wsl_distro, "-u", "root", "bash", "-c", combined_bash]
         
-        # 3. 将结果搬运回宿主机
-        sync_cmd = ["wsl", "-d", self.wsl_distro, "-u", "root", "bash", "-c", 
-                    f"cp {tmp_dir}/run.coords '{linux_final_coords}' && cp {tmp_dir}/run.delta '{linux_final_delta}' && rm -rf {tmp_dir}"]
-
         try:
-            self.logger.info(f"🚀 [WSL-Sandbox] 启动隔离计算: {tmp_dir}")
-            subprocess.run(init_cmd, check=True)
-            subprocess.run(run_cmd, check=True)
-            subprocess.run(sync_cmd, check=True)
+            self.logger.info(f"🚀 [WSL-Atomic] 启动原子计算任务: {tmp_dir}")
+            # 使用 capture_output 获取详细错误
+            result = subprocess.run(full_cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
+            
+            if result.returncode != 0:
+                self.logger.error(f"WSL 原子任务失败 (Code {result.returncode})")
+                self.logger.error(f"STDOUT: {result.stdout}")
+                self.logger.error(f"STDERR: {result.stderr}")
+                raise RuntimeError(f"Alignment sandbox error: {result.stderr}")
             
             # 4. 解析结果
             alignments = self._parse_coords(final_coords)
@@ -57,8 +90,8 @@ class MummerEngine:
                 "summary": self._generate_summary(alignments)
             }
         except Exception as e:
-            self.logger.error(f"MUMmer 隔离运行失败: {e}")
-            raise RuntimeError(f"Alignment sandbox error: {e}")
+            self.logger.error(f"MUMmer 运行异常: {e}")
+            raise
 
     def _parse_coords(self, coords_file: Path) -> List[Dict[str, Any]]:
         results = []
@@ -91,7 +124,7 @@ class MummerEngine:
         """
         try:
             from src.assembly.env.wsl_manager import WSLManager
-            linux_path = WSLManager.window_to_linux_path(str(path.absolute()))
+            linux_path = WSLManager.to_wsl_path(str(path.absolute()))
             if linux_path: return linux_path
         except: pass
 

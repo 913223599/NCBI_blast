@@ -25,7 +25,7 @@ class AssemblyTaskQueue:
         if self.workers:
             return
             
-        logger.info(f"🚀 [Queue] 启动 {self._max_workers} 个组装任务工作流")
+        logger.info(f"[Queue] 启动 {self._max_workers} 个组装任务工作流")
         for i in range(self._max_workers):
             worker = asyncio.create_task(self._worker_loop(i, processor_func))
             self.workers.append(worker)
@@ -37,19 +37,19 @@ class AssemblyTaskQueue:
             payload = await self._queue.get()
             task_id = payload.get('task_id')
             
-            logger.info(f"👷 [Worker-{worker_id}] 开始处理任务: {task_id}")
+            logger.info(f"[Worker-{worker_id}] 开始处理任务: {task_id}")
             try:
                 await processor_func(payload)
             except Exception as e:
-                logger.error(f"❌ [Worker-{worker_id}] 任务执行崩溃: {task_id}, 错误: {e}")
+                logger.error(f"[Worker-{worker_id}] 任务执行崩溃: {task_id}, 错误: {e}")
             finally:
                 self._queue.task_done()
-                logger.info(f"✅ [Worker-{worker_id}] 任务处理结束: {task_id}")
+                logger.info(f"[Worker-{worker_id}] 任务处理结束: {task_id}")
 
     async def add_task(self, payload: Dict[str, Any]):
         """生产者：添加任务到队列"""
         await self._queue.put(payload)
-        logger.info(f"📥 [Queue] 任务已入队: {payload.get('task_id')}")
+        logger.info(f"[Queue] 任务已入队: {payload.get('task_id')}")
 
     def get_queue_size(self) -> int:
         return self._queue.qsize()

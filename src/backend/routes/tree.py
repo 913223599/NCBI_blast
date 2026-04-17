@@ -159,11 +159,17 @@ async def analyze_tree(req: TreeAnalyzeRequest):
             if "tree_file" in res_files:
                 tree_content = Path(res_files["tree_file"]).read_text(encoding='utf-8', errors='ignore')
 
+            # 安全地计算相对路径，防止跨盘符或解析不一致导致的 crash
+            try:
+                source_rel = str(archive_dir.relative_to(PROJECT_ROOT / "results"))
+            except ValueError:
+                source_rel = str(archive_dir).split("results")[-1].lstrip("\\/")
+
             broadcaster.broadcast_sync("tree_finished", {
                 "tree_file_content": tree_content,
                 "tree_file": str(res_files.get("tree_file", "")),
                 "algorithm": f"{req.msa.upper()} / {req.engine.upper()} ({req.model.upper()})",
-                "source": str(archive_dir.relative_to(PROJECT_ROOT / "results")),
+                "source": source_rel,
                 "id_to_hash": final_result.get("id_to_hash", {}),
                 "elapsed": round(_time.time() - task_start, 2),
             })
