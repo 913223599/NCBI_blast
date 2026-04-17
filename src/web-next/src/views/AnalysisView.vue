@@ -6,7 +6,7 @@
  * 遵循模块化设计，每个工具为一个独立的子组件。
  */
 import { ref } from 'vue'
-import DotplotWorkspace from './Analysis/components/DotplotWorkspace.vue'
+import ComparisonModule from './Analysis/modules/comparison/ComparisonModule.vue'
 
 interface AnalysisTool {
   id: string;
@@ -25,9 +25,9 @@ const tools = ref<AnalysisTool[]>([
     status: 'ready'
   },
   { 
-    id: 'dotplot', 
-    title: '共线性散点图', 
-    description: '使用 Minimap2 进行序列比对，可视化基因组结构变异与重排。', 
+    id: 'comparison', 
+    title: '全场景共线性分析', 
+    description: '基于 MUMmer 3.0 架构，支持极性自动检测、结构变异提取与高精度点图。', 
     icon: '📈',
     status: 'ready'
   },
@@ -60,7 +60,7 @@ function selectTool(tool: AnalysisTool) {
     <header class="analysis-header">
       <div class="header-content">
         <h1>组装分析工作台</h1>
-        <p>组装后的深度验证与特征挖掘，支持 QUAST、Minimap2 等核心算法。</p>
+        <p>组装后的深度验证与特征挖掘，支持 QUAST、MUMmer 3.0 高精度比对管线。</p>
       </div>
       <div class="header-stats" v-if="!activeTool">
          <div class="stat-badge">
@@ -95,7 +95,7 @@ function selectTool(tool: AnalysisTool) {
 
       <!-- 具体工具占位符 -->
       <div v-else class="tool-workspace">
-        <DotplotWorkspace v-if="activeTool === 'dotplot'" />
+        <ComparisonModule v-if="activeTool === 'comparison'" />
         <div v-else class="workspace-placeholder">
            <div class="empty-icon">{{ tools.find(t => t.id === activeTool)?.icon }}</div>
            <h2>{{ tools.find(t => t.id === activeTool)?.title }} 模块开发中</h2>

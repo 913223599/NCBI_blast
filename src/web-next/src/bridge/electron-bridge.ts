@@ -241,23 +241,34 @@ const electronBridge = {
             return null;
         }
 
-        // 🔗 智能标题识别
-        let dialogTitle = '批量导入: 序列文件';
+        // 🔗 智能标题识别 (区分分析场景与拼接场景)
+        let dialogTitle = '批量导入: 文件';
         let filters: any[] = [];
 
         if (fileType === 'tree') {
-            dialogTitle = '批量导入: 进化树文件';
-            filters = [{ name: 'Tree Files', extensions: ['nwk', 'newick', 'txt'] }];
-        } else if (fileType === 'fasta' || Array.isArray(fileType)) {
-            // 如果是数组或者 fasta 标识，都视为序列文件
-            dialogTitle = '批量导入: 测序数据/序列文件';
+            dialogTitle = '批量导入: 进化树数据 (序列/树文件)';
             filters = [
-                { name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'seq', 'ab1', 'abi', 'fastq', 'fq', 'gz', 'fastq.gz', 'fq.gz'] },
+                { name: 'Tree Files', extensions: ['nwk', 'newick', 'tree', 'txt'] },
+                { name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'fna', 'seq', 'txt'] },
+                { name: 'Archives', extensions: ['zip', 'gz'] }
+            ];
+        } else if (fileType === 'fasta') {
+            // BLAST 或 序列分析场景
+            dialogTitle = '批量导入: 序列文件 (FASTA)';
+            filters = [
+                { name: 'FASTA 序列', extensions: ['fasta', 'fas', 'fa', 'fna', 'seq', 'txt'] },
+                { name: 'Sanger 测序', extensions: ['ab1', 'abi'] }
+            ];
+        } else if (Array.isArray(fileType)) {
+            // 组装拼接场景
+            dialogTitle = '批量导入: 测序原始数据 (FASTQ/AB1)';
+            filters = [
+                { name: 'Sequencing Reads', extensions: ['fastq', 'fq', 'gz', 'fastq.gz', 'fq.gz', 'ab1'] },
                 { name: 'Archives', extensions: ['zip', 'tar.gz'] }
             ];
         } else {
-            dialogTitle = '批量导入: 文件';
-            filters = [{ name: 'All Files', extensions: ['*'] }];
+            dialogTitle = '批量导入: 序列文件';
+            filters = [{ name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'seq', 'ab1', 'abi', 'fastq', 'fq', 'gz'] }];
         }
 
         // 确保包含“所有文件”选项
@@ -821,6 +832,23 @@ const electronBridge = {
 
     async fetchAnalysisDetail(recordId: number) {
         return await apiGet(`/api/analysis/history/${recordId}`);
+    },
+
+    async run_comparison_pipeline(payload: string): Promise<string> {
+        const result = await apiPost('/api/analysis/comparison/run', JSON.parse(payload));
+        return JSON.stringify(result);
+    },
+
+    async get_comparison_history() {
+        return await apiGet('/api/analysis/comparison/history');
+    },
+
+    async delete_comparison_task(task_id: string) {
+        return await apiDelete(`/api/analysis/comparison/${task_id}`);
+    },
+
+    async get_comparison_task_results(task_id: string) {
+        return await apiGet(`/api/analysis/comparison/${task_id}/results`);
     }
 };
 

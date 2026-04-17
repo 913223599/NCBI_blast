@@ -61,9 +61,76 @@ async def start_alignment(req: AlignmentRequest):
         logger.error(f"Analysis task failed: {str(e)}")
         return {"success": False, "error": str(e)}
 
+from src.analysis.comparison.pipeline import ComparisonPipeline
+
+class ComparisonRequest(BaseModel):
+    ref: str
+    query: str
+    options: Optional[dict] = {}
+
+@router.post("/comparison/run")
+async def run_comparison(req: ComparisonRequest):
+    """
+    运行高精度共线性分析（MUMmer 架构）
+    """
+    task_id = f"CMP_{os.urandom(4).hex()}"
+    base_dir = Path("results/comparison") / task_id
+    
+    logger.info(f"🚀 [Pipeline] 启动高精度共线性对比: {task_id}")
+    
+    try:
+        pipeline = ComparisonPipeline(base_dir)
+        # 显式传递 task_id 以便 Manager 内部索引文件
+        req.options["task_id"] = task_id
+        result = await pipeline.execute(req.ref, req.query, req.options)
+        
+        return {"status": "success", "task_id": task_id, "data": result}
+    except Exception as e:
+        logger.error(f"Comparison pipeline failed: {str(e)}")
+        return {"status": "error", "message": str(e)}
+
+@router.get("/comparison/history")
+async def get_comparison_history_list():
+    """获取共线性分析专用历史列表"""
+    from src.analysis.comparison.manager import get_comparison_manager
+    return get_comparison_manager().list_history()
+
+@router.delete("/comparison/{task_id}")
+async def delete_comparison_task_entry(task_id: str):
+    """彻底删除共线性分析任务（含物理文件）"""
+    from src.analysis.comparison.manager import get_comparison_manager
+    success = get_comparison_manager().delete_task(task_id)
+    return {"status": "success" if success else "failed"}
+
+@router.get("/comparison/{task_id}/results")
+async def get_comparison_task_results(task_id: str):
+    """获取指定任务的详细比对数据结果"""
+    from src.analysis.comparison.engines.mummer import MummerEngine
+    base_dir = Path("results/comparison") / task_id
+    coords_file = base_dir / "reports" / "mummer_run.coords"
+    
+    if not coords_file.exists():
+        raise HTTPException(status_code=404, detail="Results file not found or task failed")
+        
+    engine = MummerEngine()
+    alignments = engine._parse_coords(coords_file)
+    
+    # 尝试加载参数
+    params = {}
+    params_file = base_dir / "params.json"
+    if params_file.exists():
+        import json
+        with open(params_file, 'r') as f: params = json.load(f)
+
+    return {
+        "task_id": task_id,
+        "alignments": alignments,
+        "metadata": params
+    }
+
 @router.get("/history")
 async def get_analysis_history():
-    """获取所有简略分析历史"""
+    """获取所有简略分析历史 (Legacy)"""
     return {"data": adb.get_history()}
 
 @router.get("/history/{record_id}")

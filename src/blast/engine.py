@@ -47,9 +47,13 @@ class BlastEngine:
         self.result_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
     def _init_results_dir(self) -> Path:
+        # 由 Manager 注入的 root/results/blast/{task_id}
         root = Path(__file__).resolve().parent.parent.parent
-        dir_path = root / "results" / self.task_id
-        dir_path.mkdir(parents=True, exist_ok=True)
+        dir_path = root / "results" / "blast" / self.task_id
+        
+        # 强制创建子目录结构
+        (dir_path / "reports").mkdir(parents=True, exist_ok=True)
+        (dir_path / "xml_raw").mkdir(parents=True, exist_ok=True)
         
         try:
             params_file = dir_path / "params.json"
@@ -101,7 +105,7 @@ class BlastEngine:
             seq_id = seq.get('id', 'unknown')
             query_str = seq.get('sequence', '')
             safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', seq_id)
-            csv_path = self.results_dir / f"{safe_id}.csv"
+            csv_path = self.results_dir / "reports" / f"{safe_id}.csv"
             
             # 必须重算 Hash，否则缓存项将无法连接进化树
             seq_hash = get_annotation_manager().generate_hash(query_str)
@@ -229,12 +233,12 @@ class BlastEngine:
                 seq_hash = get_annotation_manager().generate_hash(query_str)
                 
                 # 保存结果
-                csv_path = self.results_dir / f"{safe_id}.csv"
+                csv_path = self.results_dir / "reports" / f"{safe_id}.csv"
                 results_data = list(self.parser.parse_single_record(record))
                 self.converter.save_parsed_to_csv(results_data, str(csv_path))
 
-                # 保存原始 XML 以供可视化查阅 (全量保存 Batch XML，以后再按需拆分提升性能)
-                batch_xml_path = self.results_dir / f"batch_{int(time.time())}_{i}.xml"
+                # 保存原始 XML 以供可视化查阅
+                batch_xml_path = self.results_dir / "xml_raw" / f"batch_{int(time.time())}_{i}.xml"
                 try:
                     with open(batch_xml_path, 'w', encoding='utf-8') as f_xml:
                         f_xml.write(xml_content)

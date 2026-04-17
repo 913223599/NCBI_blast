@@ -78,16 +78,16 @@ async function processFiles(files: File[]) {
 /**
  * 点击触发：区分 Electron 和 Web
  */
-function handleClick() {
+async function handleClick() {
   const bridge = getBridge()
   const isElectron = !!(window as any).electronAPI
   
   if (isElectron) {
-    // Electron 环境使用原生对话框
-    // Electron 环境使用原生对话框，传递多选意图
-    bridge.request_file_load(props.type, props.multiple)
-    // 注意：request_file_load 通常是在 bridge 内部通过 handleFileLoaded 回调全局的
-    // 为了让通用组件能拿到结果，我们需要在这里手动拦截或通过全局事件发送
+    // Electron 环境使用原生对话框，并处理返回的路径
+    const paths = await bridge.request_file_load(props.type, props.multiple)
+    if (paths && paths.length > 0) {
+      emit('success', paths)
+    }
   } else {
     // 网页环境触发隐藏的 Input
     fileInputRef.value?.click()

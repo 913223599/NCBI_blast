@@ -243,9 +243,10 @@ class BlastManager:
         self.tasks: Dict[str, BlastTask] = {}
         # Absolute project root detection
         self.root_dir = Path(__file__).resolve().parent.parent.parent
-        self.results_dir = self.root_dir / "results"
+        self.results_dir = self.root_dir / "results" / "blast"
         self.results_dir.mkdir(parents=True, exist_ok=True)
         
+        # 结果数据库也直接放入 blast 子目录，实现模块化存储
         self.store = BlastStore(db_path=str(self.results_dir / "blast_meta.db"))
         self.logger = logging.getLogger("BlastManager")
         self.result_listeners = [] # [callback(task_id, result_data)]
