@@ -188,7 +188,7 @@ function connectWebSocket(): void {
             // 2. 映射到特定信号对象 (兼容旧架构)
             if (msg.type === 'recall_result') {
                 signals.recall_event.emit(msg.data.success, msg.data.message || msg.data.recalled_name);
-            } else if (['single_result_update', 'task_progress', 'batch_translation_result', 'tree_progress', 'tree_finished', 'tree_error'].includes(msg.type)) {
+            } else if (['translation_done', 'single_result_update', 'task_progress', 'batch_translation_result', 'tree_progress', 'tree_finished', 'tree_error'].includes(msg.type)) {
                 signals.blast_event.emit(msg.type, JSON.stringify(msg.data));
             }
 
@@ -370,10 +370,11 @@ const electronBridge = {
 
     async get_detailed_blast_results(csvFile: string) {
         const result = await apiGet(`/api/blast/detailed/${encodeURIComponent(csvFile)}`);
-        // 推送到旧的全局事件系统
+        // 兼容性保留：推送到旧的全局事件系统
         if (window.handleBridgeEvent) {
             window.handleBridgeEvent('detailed_results_ready', result);
         }
+        return result; // 返回结果供 async/await 使用
     },
 
     // ═══ 本地数据库管理（通过 HTTP）═══
@@ -814,6 +815,21 @@ const electronBridge = {
     /** 删除拼接任务数据 */
     async delete_assembly_task(taskId: string) {
         return await apiDelete(`/api/assembly/tasks/${taskId}`);
+    },
+
+    /** 获取拼接任务分析报告 */
+    async get_assembly_report(taskId: string) {
+        return await apiGet(`/api/assembly/report/${taskId}`);
+    },
+
+    /** 导出拼接报告为 HTML 文件 */
+    async export_assembly_report(taskId: string) {
+        return await apiGet(`/api/assembly/report/${taskId}/export`);
+    },
+
+    /** 获取未注释蛋白序列（用于 BLAST 比对） */
+    async get_unannotated_proteins(taskId: string) {
+        return await apiGet(`/api/assembly/report/${taskId}/unannotated_proteins`);
     },
 
     /** 强制停止运行中的任务 */

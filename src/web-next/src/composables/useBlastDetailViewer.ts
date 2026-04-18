@@ -62,16 +62,23 @@ export function useBlastDetailViewer() {
     currentQueryTitle.value = null
     
     // 使用setTimeout确保Vue完成基本的弹窗背景更新
-    setTimeout(() => {
+    setTimeout(async () => {
       currentQueryTitle.value = queryTitle.trim()
       isOpenInternal.value = true
       
       try {
         const bridge = getBridge()
-        // [优化] 调用异步解析接口，不再等待回调返回大数据量
-        bridge.get_detailed_blast_results(csvFile)
+        // [优化] 直接等待异步解析接口返回数据，不再依赖不稳定的全局回调
+        const hits = await bridge.get_detailed_blast_results(csvFile)
+        if (Array.isArray(hits)) {
+           allHitsData.value = hits
+        } else {
+           console.error('[DetailViewer] Invalid hits format:', hits)
+           appStore.showNotification('解析结果格式错误', 'error')
+        }
       } catch (error) {
         console.error('[DetailViewer] Request error:', error)
+        appStore.showNotification('获取详细比对结果失败', 'error')
         isOpenInternal.value = false
       }
     }, 50)

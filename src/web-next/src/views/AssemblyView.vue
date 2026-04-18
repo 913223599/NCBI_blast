@@ -3,8 +3,9 @@
  * AssemblyView - 二代基因组拼接仪表盘 (重构版)
  * 采用左侧配置、右侧操作的专业布局，最大化提升操作流流畅度。
  */
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useAssembly } from './Assembly/composables/useAssembly'
+import { onEvent } from '../bridge'
 import AssemblyStepper from './Assembly/components/AssemblyStepper.vue'
 import FileUploadZone from './Assembly/components/FileUploadZone.vue'
 import ConfigPanel from './Assembly/components/ConfigPanel.vue'
@@ -35,7 +36,8 @@ const handleOpenResults = async (taskId: string) => {
 onMounted(async () => {
   if (typeof fetchHistory === 'function') await fetchHistory();
   
-  ;(window as any).handleBridgeEvent = async (type: string, data: any) => {
+  let cleanup: (() => void) | null = null;
+  cleanup = onEvent(async (type: string, data: any) => {
     // 1. 处理过程进度 (来自 AssemblyManager)
     if (type === 'assembly_progress') {
       if (data.progress !== undefined) {
@@ -79,7 +81,11 @@ onMounted(async () => {
         await fetchHistory();
       }
     }
-  };
+  });
+
+  onUnmounted(() => {
+    if (cleanup) cleanup();
+  });
 })
 </script>
 

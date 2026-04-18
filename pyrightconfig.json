@@ -2,7 +2,8 @@
     "exclude": [
         "**/node_modules",
         "**/__pycache__",
-        ".venv"
+        ".venv",
+        "**/__pyrefly_virtual__"
     ],
     "venvPath": ".",
     "venv": ".venv",

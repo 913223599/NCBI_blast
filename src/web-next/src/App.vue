@@ -8,7 +8,7 @@ import AppSidebar from './components/layout/AppSidebar.vue'
 import AppHeader from './components/layout/AppHeader.vue'
 import NotificationStack from './components/common/NotificationStack.vue'
 import { useAppStore } from './stores/app'
-import { setupBridge, registerGlobalHandler, getBridge, getClientId } from './bridge'
+import { setupBridge, registerGlobalHandler, getBridge, getClientId, onEvent } from './bridge'
 
 const appStore = useAppStore()
 
@@ -118,8 +118,8 @@ onMounted(async () => {
       }
       console.log(`[App] 身份验证成功: ${clientId}`);
 
-    // 3. 注册通用事件处理
-    registerGlobalHandler('handleBridgeEvent', (type: any, data: any) => {
+    // 3. 注册通用事件处理 (使用 onEvent 支持多端监听，防止 Overwrite)
+    onEvent((type: any, data: any) => {
       if (type === 'single_result_update') {
         try {
           const resultObj = typeof data === 'string' ? JSON.parse(data) : data

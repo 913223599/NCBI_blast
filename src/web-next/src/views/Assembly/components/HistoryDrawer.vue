@@ -1,11 +1,25 @@
 
 <script setup lang="ts">
+import { ref } from 'vue'
+import AssemblyReportDialog from './AssemblyReportDialog.vue'
+
 const props = defineProps<{
   show: boolean;
   history: any[];
 }>();
 
 const emit = defineEmits(['close', 'select', 'delete', 'resume', 'restart']);
+
+// ─── 报告弹窗状态 ───
+const showReport = ref(false)
+const reportTaskId = ref('')
+const reportTaskName = ref('')
+
+const handleViewReport = (task: any) => {
+  reportTaskId.value = task.id
+  reportTaskName.value = task.name || '未命名任务'
+  showReport.value = true
+}
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return '--';
@@ -24,7 +38,7 @@ const getStatusLabel = (status: string) => {
 };
 
 const handleDelete = (id: string) => {
-  if (confirm('确定要删除该历史任务吗？相关物理文件将保留在服务器。')) {
+  if (confirm('确定要删除该历史任务吗？数据库记录与物理文件将被一并永久删除，此操作不可恢复。')) {
     emit('delete', id);
   }
 };
@@ -101,6 +115,13 @@ const handleOpenFolder = async (task: any) => {
             >
               📁 查看结果
             </button>
+            <button
+              v-if="task.status === 'completed'"
+              class="op-btn report-btn"
+              @click.stop="handleViewReport(task)"
+            >
+              📋 分析报告
+            </button>
             <button class="op-btn restart-btn" @click.stop="emit('restart', task)">
               🔄 重新开始
             </button>
@@ -114,6 +135,14 @@ const handleOpenFolder = async (task: any) => {
       </div>
     </div>
   </div>
+
+  <!-- 分析报告弹窗 -->
+  <AssemblyReportDialog
+    :show="showReport"
+    :taskId="reportTaskId"
+    :taskName="reportTaskName"
+    @close="showReport = false"
+  />
 </template>
 
 <style scoped>
@@ -203,6 +232,16 @@ const handleOpenFolder = async (task: any) => {
 .open-btn:hover {
   background: #dbeafe;
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.1);
+}
+
+.report-btn {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+.report-btn:hover {
+  background: #dcfce7;
+  box-shadow: 0 4px 12px rgba(21, 128, 61, 0.1);
 }
 
 .restart-btn {

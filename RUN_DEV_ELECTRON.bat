@@ -14,7 +14,7 @@ echo [Status] Project Root: %PROJECT_ROOT%
 echo [0/4] Cleaning up zombie processes...
 taskkill /F /IM python.exe /T >nul 2>&1
 taskkill /F /IM electron.exe /T >nul 2>&1
-timeout /t 1 /nobreak >nul
+ping 127.0.0.1 -n 2 >nul
 
 REM 0. Check Node/NPM environment
 where npm >nul 2>&1
@@ -66,7 +66,7 @@ REM Using /D to set working directory directly to avoid complex quoting in cmd /
 start "Vite Dev Server" /D "src\web-next" cmd /c "npm run dev || pause"
 
 echo Waiting for Vite to start...
-timeout /t 5 /nobreak >nul
+ping 127.0.0.1 -n 6 >nul
 
 REM 6. Start Electron
 echo Starting Electron...

@@ -6,123 +6,121 @@ from ..core.base import BaseAssemblyStep
 
 class PhageAnnotationStep(BaseAssemblyStep):
     """
-    噬菌体专项注释步骤 (基于 Pharokka)
-    集成 PHROGs 数据库进行深度功能解析
+    噬菌体专项注释步骤 (基于 Pharokka + Phold AI)
+    集成 HMM 敏感比对与 AI 结构功能预测
     """
     async def execute(self) -> bool:
         self.status = "running"
         
+        # 🔗 0. 初始化项目环境
+        win_project_root = self.context.get("project_dir", os.getcwd())
         fasta = self.context.get("assembly_fasta")
         if not fasta:
              self.status = "failed"
              return False
-             
-        out_dir = self.get_working_dir() / "pharokka_res"
-        pharokka_bin = self.context.config.get("pharokka_bin", "pharokka")
-        db_dir = self.context.config.get("pharokka_db", "/opt/pharokka_db") # 默认路径
-        prefix = self.context.config.get("prefix", "PHAGE_ANNOTATION")
-        threads = str(self.context.config.get("threads", 8))
+
+        # 🔗 1. 环境自愈 (强制建立无空格路径映射)
+        # 动态获取当前盘符，避免硬编码 /mnt/f
+        win_path_obj = Path(win_project_root).resolve()
+        drive_letter = win_path_obj.drive.replace(":", "").lower()
         
-        # 🔗 0. 断点检查
-        gbk_file = out_dir / f"{prefix}.gbk"
-        if gbk_file.exists() and gbk_file.stat().st_size > 0:
-            self.logger.info("检测到已存在的 Pharokka 注释结果，跳过该步骤")
-            self.context.update("annotation_dir", out_dir)
-            self.context.update("gbk_file", gbk_file)
-            if self.on_progress: self.on_progress(100, "已跳过 (发现历史缓存)")
-            self.status = "completed"
-            return True
-
-        # 🔗 1. 环境自检：检查 pharokka 是否安装及数据库是否存在
-        if not await self._check_environment(pharokka_bin, db_dir):
-            self.logger.warning("⚠️ 本地 Pharokka 环境不完整，将尝试使用 Prokka (Phage Mode) 兜底")
-            return await self._fallback_to_prokka(fasta, out_dir.parent / "prokka_fallback")
-
-        out_dir.mkdir(parents=True, exist_ok=True)
+        # 建立基于当前盘符的临时工作根目录
+        safe_root = f"/mnt/{drive_letter}/.ncbi_blast_wsl_tmp"
         
-        # 🔗 2. 执行 Pharokka 主管线
-        # 命令格式: pharokka.py -i <input.fasta> -o <out_dir> -d <db_dir> -t <threads> -p <prefix>
-        cmd = [
-            pharokka_bin,
-            "-i", str(fasta),
-            "-o", str(out_dir),
-            "-d", str(db_dir),
-            "-t", threads,
-            "-p", prefix,
-            "-f" # 强制覆盖
-        ]
+        # 获取标准 /mnt 源路径
+        rel_project_path = str(win_path_obj.relative_to(win_path_obj.anchor)).replace("\\", "/")
+        mnt_project_root = f"/mnt/{drive_letter}/{rel_project_path}"
+        
+        # 建立 symlink 以避开 Windows 路径中的空格问题
+        await self.runner.run_command(["bash", "-c", f"ln -sfT '{mnt_project_root}' {safe_root}"])
+        
+        # 探测并建立数据库链接 (使用动态路径)
+        pharokka_db_default = "/opt/pharokka_db"
+        if (await self.runner.run_command(["test", "-d", pharokka_db_default])) != 0:
+            if self.on_progress: self.on_progress(2, "初始化 Pharokka 数据库链接...")
+            setup_script_wsl = f"{mnt_project_root}/scripts/setup_pharokka.sh"
+            await self.runner.run_command(["bash", setup_script_wsl])
 
-        if self.on_progress: self.on_progress(20, "正在进行噬菌体特征预测 (Pharokka)...")
+        # 🔗 2. 路径映射与性能计算
+        # 使用动态计算的 safe_root 替换原始路径中的空格部分
+        safe_fasta = str(fasta).replace(win_project_root, safe_root).replace("\\", "/")
+        win_working_dir = str(self.get_working_dir())
+        safe_working_dir = win_working_dir.replace(win_project_root, safe_root).replace("\\", "/")
+        
+        out_dir = Path(safe_working_dir) / "pharokka_res"
+        phold_dir = Path(safe_working_dir) / "phold_res"
 
-        # 进度解析过滤器
+        try:
+            core_out = []
+            await self.runner.run_command(["nproc"], on_output=lambda x: core_out.append(x.strip()))
+            # 🚀 调优：提升线程占用率到 90%
+            threads = max(1, int(int(core_out[0]) * 0.9)) if core_out else 8
+        except:
+            threads = 8
+
+        # 🔗 3. 执行 Pharokka (带超细粒度进度反馈)
+        if self.on_progress: self.on_progress(10, "启动 Pharokka 深度注释流程...")
+        
         def pharokka_handler(line: str):
-            if "Predicting genes" in line:
-                if self.on_progress: self.on_progress(30, "正在预测蛋白质编码基因 (Prodigal-gv)...")
-            elif "Functional annotation" in line:
-                if self.on_progress: self.on_progress(60, "正在深度检索 PHROGs 功能数据库...")
-            elif "tRNA" in line:
-                if self.on_progress: self.on_progress(80, "正在解析 tRNA / tmRNA...")
-            elif "Finalizing" in line:
-                if self.on_progress: self.on_progress(95, "正在生成 GenBank 与功能摘要...")
+            msg = line.strip()
+            if "Phanotate" in msg: self.on_progress(15, "正在进行基因预测 (Phanotate)...")
+            elif "Running MMseqs2" in msg and "PHROGs" in msg: self.on_progress(25, "检索核心蛋白库 (PHROGs)...")
+            elif "CARD" in msg: self.on_progress(40, "检索耐药基因库 (CARD)...")
+            elif "HMMER" in msg: self.on_progress(45, "HMM 深度比对 (敏感模式)...")
+            elif "tRNAscan-SE" in msg: self.on_progress(50, "正在扫描 tRNA 基因...")
+            elif "Dnaapler" in msg: self.on_progress(58, "正在校想起始位点 (Dnaapler)...")
 
-        returncode = await self.runner.run_command(
-            cmd, 
-            cwd=out_dir.parent,
-            env=self.context.get("gpu_env"),
-            on_output=pharokka_handler
-        )
+        pharokka_cmd = [
+            "pharokka.py", "-i", safe_fasta, "-o", out_dir.as_posix(),
+            "-d", "/opt/pharokka_db", "-t", str(threads), "-p", "PHAGE",
+            "--dnaapler", "--sensitivity", "8", "-f"
+        ]
+        await self.runner.run_command(pharokka_cmd, cwd=safe_working_dir, on_output=pharokka_handler)
 
-        if returncode == 0 and gbk_file.exists():
-            self.context.update("annotation_dir", out_dir)
-            self.context.update("gbk_file", gbk_file)
-            
-            # 🔗 3. 结果入库与增强报告解析
-            summary_file = out_dir / f"{prefix}_summary.txt"
-            if summary_file.exists():
-                summary_data = self._parse_summary(summary_file)
-                self.context.update("annotation_summary", summary_data)
+        # 🔗 4. 执行 Phold AI 结构预测 (带 GPU 状态反馈)
+        if self.on_progress: self.on_progress(60, "Pharokka 完成，进入 AI 结构增强模式...")
+        
+        def phold_handler(line: str):
+            msg = line.strip()
+            if "cuda" in msg.lower(): self.on_progress(62, "AI 显卡驱动已激活 (CUDA 加速)...")
+            elif "Predicting 3Di" in msg: self.on_progress(75, "AI 神经网络正在推理构象...")
+            elif "foldseek search" in msg: self.on_progress(85, "全球构象库比对搜索中...")
 
+        gbk_file = out_dir / "PHAGE.gbk"
+        phold_cmd = [
+            "phold", "run", "-i", gbk_file.as_posix(), "-o", phold_dir.as_posix(),
+            "-d", "/opt/phold_db", "-t", str(threads), "-f"
+        ]
+        ret_phold = await self.runner.run_command(phold_cmd, cwd=safe_working_dir, on_output=phold_handler)
+
+        # 🔗 5. 产物确认与状态标记 (在 Windows 层面验证)
+        win_out_dir = Path(win_working_dir) / "pharokka_res"
+        win_phold_dir = Path(win_working_dir) / "phold_res"
+        
+        # 优先使用 Phold 的增强产物，如失败则退而求其次使用 Pharokka 的原始产物
+        win_final_gbk = win_phold_dir / "phold.gbk" if ret_phold == 0 else win_out_dir / "PHAGE.gbk"
+        
+        if win_final_gbk.exists():
+            # 将产物路径存入上下文，供后续可视化或报告步骤使用 (使用 Windows 路径)
+            self.context.update("annotation_dir", win_final_gbk.parent)
+            self.context.update("gbk_file", win_final_gbk)
             self.status = "completed"
-            if self.on_progress: self.on_progress(100, "噬菌体深度注释完成")
+            if self.on_progress: self.on_progress(100, "深度注释任务圆满成功")
             return True
 
         self.status = "failed"
         return False
 
-    async def _check_environment(self, bin_name: str, db_path: str) -> bool:
-        """检查工具和数据库是否就绪"""
-        # 1. 检查二进制文件 (支持 WSL 映射)
-        check_cmd = ["which", bin_name]
-        ret = await self.runner.run_command(check_cmd)
-        if ret != 0: 
-            return False
-            
-        # 2. 检查数据库目录是否存在
-        # 注意：这里需要考虑 WSL 路径映射，如果 db_path 在 WSL 内部，外部访问可能受阻
-        # 我们假设数据库安装在 WSL 系统内部路径
-        check_db_cmd = ["test", "-d", db_path]
-        ret_db = await self.runner.run_command(check_db_cmd)
-        return ret_db == 0
-
-    async def _fallback_to_prokka(self, fasta: Path, out_dir: Path) -> bool:
-        """兜底逻辑：调用 Prokka 并启用病毒模式"""
-        from .annotation import AnnotationStep
-        self.logger.info("执行 Prokka 兜底注释流程...")
-        fallback_step = AnnotationStep(self.context)
-        # 修改上下文让 fallback 步骤输出到指定目录
-        self.context.config["prokka_out_override"] = str(out_dir) 
-        return await fallback_step.execute()
-
     def _parse_summary(self, path: Path) -> dict:
         """解析 Pharokka 摘要文件"""
         res = {"total_cds": 0, "functional_assigned": 0}
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding='utf-8') as f:
                 for line in f:
                     if "Total CDS" in line:
                         res["total_cds"] = int(line.split(":")[-1].strip())
                     elif "Assigned function" in line:
                         res["functional_assigned"] = int(line.split(":")[-1].strip())
-        except:
+        except Exception:
             pass
         return res

@@ -56,10 +56,16 @@ class QualityControlStep(BaseAssemblyStep):
                     if self.on_progress: self.on_progress(p, f"已处理: {m_reads}M 条序列")
                 except: pass
 
+        # fastp 报告输出路径
+        fastp_json = out_dir / "fastp_report.json"
+        fastp_html = out_dir / "fastp_report.html"
+
         cmd = [
             fastp_bin,
             "-i", str(r1), "-I", str(r2),
             "-o", str(clean_r1), "-O", str(clean_r2),
+            "--json", str(fastp_json),
+            "--html", str(fastp_html),
             "--thread", str(self.context.config.get("threads", 4)),
             "--detect_adapter_for_pe", "--correction"
         ]
