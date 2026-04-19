@@ -141,7 +141,7 @@ class ReportExporter:
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>PhageScope Diagnostic Report — {self.task_dir.name}</title>
+<title>PhageScope™ 噬菌体基因组诊断报告 — {self.task_dir.name}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
 :root {{ --c1:#1a4da1; --c2:#2563eb; --bg:#f4f7fa; --txt:#1e293b; --bd:#e2e8f0; }}
@@ -192,122 +192,122 @@ footer{{ margin-top:60px; padding-top:16px; border-top:1px solid var(--bd); disp
 
 <header>
   <div>
-    <h1>PhageScope™ Diagnostic Report</h1>
-    <p style="margin:4px 0 0;color:#64748b;font-size:14px;">噬菌体全基因组高通量测序深度诊断分析</p>
+    <h1>PhageScope™ 噬菌体基因组诊断报告</h1>
+    <p style="margin:4px 0 0;color:#64748b;font-size:14px;">高通量测序全基因组深度诊断分析 · 自动化流水线生成</p>
   </div>
-  <div class="meta">TASK: {self.task_dir.name}<br>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+  <div class="meta">任务编号: {self.task_dir.name}<br>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
 </header>
 
 <!-- ═══ 1. QC ═══ -->
 <section>
-<h2>1. 测序质控与过滤审计 (Sequencing QC)</h2>
+<h2>1. 测序质控与过滤审计</h2>
 
 <div class="grid g4" style="margin-bottom:20px;">
-  <div class="card"><span class="lbl">Total Reads (Raw)</span><span class="val">{fmt_reads(before.get('total_reads',0))}</span></div>
-  <div class="card"><span class="lbl">Total Reads (Clean)</span><span class="val">{fmt_reads(after.get('total_reads',0))}</span></div>
-  <div class="card"><span class="lbl">Duplication Rate</span><span class="val">{fmt_pct(dup_rate)}</span></div>
-  <div class="card"><span class="lbl">Insert Size Peak</span><span class="val">{insert_peak} bp</span></div>
+  <div class="card"><span class="lbl">原始序列数</span><span class="val">{fmt_reads(before.get('total_reads',0))}</span></div>
+  <div class="card"><span class="lbl">清洁序列数</span><span class="val">{fmt_reads(after.get('total_reads',0))}</span></div>
+  <div class="card"><span class="lbl">重复率</span><span class="val">{fmt_pct(dup_rate)}</span></div>
+  <div class="card"><span class="lbl">插入片段峰值</span><span class="val">{insert_peak} bp</span></div>
 </div>
 
-<h3>过滤前后对比 (Before / After Filtering)</h3>
+<h3>过滤前后对比</h3>
 <table>
-  <thead><tr><th>Metric</th><th>Before Filtering</th><th>After Filtering</th></tr></thead>
+  <thead><tr><th>指标</th><th>过滤前</th><th>过滤后</th></tr></thead>
   <tbody>
-    <tr><td>Total Reads</td><td>{fmt_reads(before.get('total_reads',0))}</td><td>{fmt_reads(after.get('total_reads',0))}</td></tr>
-    <tr><td>Total Bases</td><td>{fmt_bp(before.get('total_bases',0))}</td><td>{fmt_bp(after.get('total_bases',0))}</td></tr>
-    <tr><td>Q20</td><td>{fmt_pct(before.get('q20_rate',0))}</td><td>{fmt_pct(after.get('q20_rate',0))}</td></tr>
-    <tr><td>Q30</td><td>{fmt_pct(before.get('q30_rate',0))}</td><td>{fmt_pct(after.get('q30_rate',0))}</td></tr>
-    <tr><td>GC Content</td><td>{fmt_pct(before.get('gc_content',0))}</td><td>{fmt_pct(after.get('gc_content',0))}</td></tr>
-    <tr><td>Mean Length R1 / R2</td>
+    <tr><td>总序列数 (Reads)</td><td>{fmt_reads(before.get('total_reads',0))}</td><td>{fmt_reads(after.get('total_reads',0))}</td></tr>
+    <tr><td>总碱基数 (Bases)</td><td>{fmt_bp(before.get('total_bases',0))}</td><td>{fmt_bp(after.get('total_bases',0))}</td></tr>
+    <tr><td>Q20 比率</td><td>{fmt_pct(before.get('q20_rate',0))}</td><td>{fmt_pct(after.get('q20_rate',0))}</td></tr>
+    <tr><td>Q30 比率</td><td>{fmt_pct(before.get('q30_rate',0))}</td><td>{fmt_pct(after.get('q30_rate',0))}</td></tr>
+    <tr><td>GC 含量</td><td>{fmt_pct(before.get('gc_content',0))}</td><td>{fmt_pct(after.get('gc_content',0))}</td></tr>
+    <tr><td>平均读长 R1 / R2</td>
         <td>{before.get('read1_mean_length',0)} / {before.get('read2_mean_length',0)} bp</td>
         <td>{after.get('read1_mean_length',0)} / {after.get('read2_mean_length',0)} bp</td></tr>
   </tbody>
 </table>
 
-<h3>过滤统计 (Filtering Summary)</h3>
+<h3>过滤统计</h3>
 <table>
-<thead><tr><th>Category</th><th>Reads</th><th>Proportion</th></tr></thead>
+<thead><tr><th>过滤类别</th><th>序列数</th><th>占比</th></tr></thead>
 <tbody>
-  <tr><td>✅ Passed Filters</td><td><strong>{fmt_reads(passed)}</strong></td><td><span class="tag tag-ok">{passed_pct}%</span></td></tr>
-  <tr><td>Low Quality</td><td>{low_quality:,}</td><td>{fmt_pct(low_quality / total_before)}</td></tr>
-  <tr><td>Too many N</td><td>{too_many_n:,}</td><td>{fmt_pct(too_many_n / total_before)}</td></tr>
-  <tr><td>Too Short</td><td>{too_short:,}</td><td>{fmt_pct(too_short / total_before)}</td></tr>
-  <tr><td>Too Long</td><td>{too_long:,}</td><td>{fmt_pct(too_long / total_before)}</td></tr>
-  <tr><td>Adapter Trimmed</td><td>{adapter_trimmed:,}</td><td>{fmt_pct(adapter_trimmed / total_before)}</td></tr>
-  <tr><td>Base Corrected (Overlap)</td><td>{corrected:,}</td><td>--</td></tr>
+  <tr><td>✅ 通过质控</td><td><strong>{fmt_reads(passed)}</strong></td><td><span class="tag tag-ok">{passed_pct}%</span></td></tr>
+  <tr><td>低质量剔除</td><td>{low_quality:,}</td><td>{fmt_pct(low_quality / total_before)}</td></tr>
+  <tr><td>N 碱基过多</td><td>{too_many_n:,}</td><td>{fmt_pct(too_many_n / total_before)}</td></tr>
+  <tr><td>过短剔除</td><td>{too_short:,}</td><td>{fmt_pct(too_short / total_before)}</td></tr>
+  <tr><td>过长剔除</td><td>{too_long:,}</td><td>{fmt_pct(too_long / total_before)}</td></tr>
+  <tr><td>接头修剪</td><td>{adapter_trimmed:,}</td><td>{fmt_pct(adapter_trimmed / total_before)}</td></tr>
+  <tr><td>碱基校正 (重叠区)</td><td>{corrected:,}</td><td>--</td></tr>
 </tbody>
 </table>
 
-<h3>质量曲线与碱基组成 (Quality & Base Content)</h3>
+<h3>质量曲线与碱基组成</h3>
 <div class="grid g3">
-  <div class="chart-box"><p>Per-base Quality (R1 + R2)</p><canvas id="cQuality"></canvas></div>
-  <div class="chart-box"><p>Base Content (R1 After)</p><canvas id="cBase"></canvas></div>
-  <div class="chart-box"><p>Insert Size Distribution</p><canvas id="cInsert"></canvas></div>
+  <div class="chart-box"><p>碱基质量分布 (R1 + R2)</p><canvas id="cQuality"></canvas></div>
+  <div class="chart-box"><p>碱基组成分布 (过滤后 R1)</p><canvas id="cBase"></canvas></div>
+  <div class="chart-box"><p>插入片段长度分布</p><canvas id="cInsert"></canvas></div>
 </div>
 </section>
 
 <!-- ═══ 2. Assembly ═══ -->
 <section>
-<h2>2. 基因组组装与拓扑分析 (Assembly Metrics)</h2>
+<h2>2. 基因组组装与拓扑分析</h2>
 <div class="grid g4">
-  <div class="card"><span class="lbl">Total Length</span><span class="val">{fmt_bp(asm.get('total_length',0))}</span></div>
-  <div class="card"><span class="lbl">GC Content</span><span class="val">{asm.get('gc_content',0)}%</span></div>
+  <div class="card"><span class="lbl">基因组总长</span><span class="val">{fmt_bp(asm.get('total_length',0))}</span></div>
+  <div class="card"><span class="lbl">GC 含量</span><span class="val">{asm.get('gc_content',0)}%</span></div>
   <div class="card"><span class="lbl">N50</span><span class="val">{fmt_bp(asm.get('n50',0))}</span></div>
-  <div class="card"><span class="lbl">Avg Depth</span><span class="val">{asm.get('avg_depth',0)}x</span></div>
+  <div class="card"><span class="lbl">平均测序深度</span><span class="val">{asm.get('avg_depth',0)}x</span></div>
 </div>
 <table>
-<thead><tr><th>Metric</th><th>Value</th><th>Notes</th></tr></thead>
+<thead><tr><th>指标</th><th>数值</th><th>备注</th></tr></thead>
 <tbody>
-  <tr><td>Contigs</td><td>{asm.get('num_contigs',0)}</td><td>L50 = {asm.get('l50',0)}</td></tr>
-  <tr><td>Longest / Shortest</td><td>{fmt_bp(asm.get('longest',0))} / {fmt_bp(asm.get('shortest',0))}</td><td>Size range</td></tr>
-  <tr><td>Topology</td><td><span class="tag tag-ok">{'Circular' if asm.get('is_circular') else 'Linear'}</span></td><td>Determined by Unicycler overlap detection</td></tr>
+  <tr><td>Contig 数量</td><td>{asm.get('num_contigs',0)}</td><td>L50 = {asm.get('l50',0)}</td></tr>
+  <tr><td>最长 / 最短 Contig</td><td>{fmt_bp(asm.get('longest',0))} / {fmt_bp(asm.get('shortest',0))}</td><td>长度范围</td></tr>
+  <tr><td>拓扑结构</td><td><span class="tag tag-ok">{'Circular (环形)' if asm.get('is_circular') else 'Linear (线性)'}</span></td><td>由 Unicycler 重叠检测确定</td></tr>
 </tbody>
 </table>
 </section>
 
 <!-- ═══ 3. CheckV ═══ -->
 <section>
-<h2>3. 基因组质量评估 (CheckV Quality Assessment)</h2>
+<h2>3. 基因组质量评估 (CheckV)</h2>
 <div class="grid g4">
-  <div class="card"><span class="lbl">Quality</span><span class="val">{checkv.get('quality','--')}</span></div>
-  <div class="card"><span class="lbl">Completeness</span><span class="val">{checkv.get('completeness','--')}%</span></div>
-  <div class="card"><span class="lbl">Contamination</span><span class="val">{checkv.get('contamination','0')}%</span></div>
-  <div class="card"><span class="lbl">Gene Count</span><span class="val">{checkv.get('gene_count',0)}</span></div>
+  <div class="card"><span class="lbl">质量等级</span><span class="val">{checkv.get('quality','--')}</span></div>
+  <div class="card"><span class="lbl">完整度</span><span class="val">{checkv.get('completeness','--')}%</span></div>
+  <div class="card"><span class="lbl">污染度</span><span class="val">{checkv.get('contamination','0')}%</span></div>
+  <div class="card"><span class="lbl">基因总数</span><span class="val">{checkv.get('gene_count',0)}</span></div>
 </div>
 <table>
-<thead><tr><th>Field</th><th>Value</th></tr></thead>
+<thead><tr><th>评估项</th><th>结果</th></tr></thead>
 <tbody>
-  <tr><td>MIUViG Quality</td><td>{checkv.get('miuvig_quality','--')}</td></tr>
-  <tr><td>Completeness Method</td><td>{checkv.get('completeness_method','--')}</td></tr>
-  <tr><td>Viral Genes / Host Genes</td><td>{checkv.get('viral_genes',0)} / {checkv.get('host_genes',0)}</td></tr>
-  <tr><td>Provirus</td><td>{checkv.get('provirus','No')}</td></tr>
-  <tr><td>kmer Frequency</td><td>{checkv.get('kmer_freq','--')}</td></tr>
+  <tr><td>MIUViG 质量标准</td><td>{checkv.get('miuvig_quality','--')}</td></tr>
+  <tr><td>完整度评估方法</td><td>{checkv.get('completeness_method','--')}</td></tr>
+  <tr><td>病毒基因数 / 宿主基因数</td><td>{checkv.get('viral_genes',0)} / {checkv.get('host_genes',0)}</td></tr>
+  <tr><td>前噬菌体 (Provirus)</td><td>{checkv.get('provirus','No')}</td></tr>
+  <tr><td>kmer 频率</td><td>{checkv.get('kmer_freq','--')}</td></tr>
 </tbody>
 </table>
 </section>
 
 <!-- ═══ 4. Annotation ═══ -->
 <section>
-<h2>4. 基因组功能注释 (Functional Annotation)</h2>
+<h2>4. 基因组功能注释</h2>
 <div class="grid g4" style="margin-bottom:20px;">
-  <div class="card"><span class="lbl">Total Features</span><span class="val">{len(all_genes)}</span></div>
-  <div class="card"><span class="lbl">CDS</span><span class="val">{type_counts.get('CDS',0)}</span></div>
-  <div class="card"><span class="lbl">tRNA</span><span class="val">{type_counts.get('tRNA',0)}</span></div>
-  <div class="card"><span class="lbl">Pseudogene</span><span class="val">{type_counts.get('pseudogene',0)}</span></div>
+  <div class="card"><span class="lbl">注释特征总数</span><span class="val">{len(all_genes)}</span></div>
+  <div class="card"><span class="lbl">编码序列 (CDS)</span><span class="val">{type_counts.get('CDS',0)}</span></div>
+  <div class="card"><span class="lbl">转运 RNA (tRNA)</span><span class="val">{type_counts.get('tRNA',0)}</span></div>
+  <div class="card"><span class="lbl">假基因</span><span class="val">{type_counts.get('pseudogene',0)}</span></div>
 </div>
 
-<h3>功能分类统计 (Function Distribution)</h3>
+<h3>功能分类统计</h3>
 <table>
-<thead><tr><th>Function Category</th><th>Count</th><th>Proportion</th></tr></thead>
+<thead><tr><th>功能类别</th><th>数量</th><th>占比</th></tr></thead>
 <tbody>
 {func_rows_html}
 </tbody>
 </table>
 
-<h3>CDS 注释详表 (Gene Annotations)</h3>
+<h3>CDS 注释详表</h3>
 <div style="max-height:400px;overflow-y:auto;border:1px solid var(--bd);border-radius:8px;">
 <table>
-<thead><tr><th>CDS ID</th><th>Position</th><th>Strand</th><th>Function</th><th>Product</th></tr></thead>
+<thead><tr><th>基因 ID</th><th>位置</th><th>链方向</th><th>功能分类</th><th>产物名称</th></tr></thead>
 <tbody>
 {cds_table_rows}
 </tbody>
@@ -317,33 +317,33 @@ footer{{ margin-top:60px; padding-top:16px; border-top:1px solid var(--bd); disp
 
 <!-- ═══ 5. Safety ═══ -->
 <section>
-<h2>5. 安全性与生活史审计 (Safety & Lifestyle Audit)</h2>
+<h2>5. 安全性与生活史审计</h2>
 <table>
-<thead><tr><th>Assessment</th><th>Result</th><th>Significance</th></tr></thead>
+<thead><tr><th>评估项目</th><th>结果</th><th>生物学意义</th></tr></thead>
 <tbody>
-  <tr><td>Lifestyle</td><td><strong>{audit.get('lifestyle','Unknown')}</strong></td><td>Lytic phages preferred for therapy</td></tr>
-  <tr><td>Integrase (lysogeny marker)</td><td>{'<span class="tag tag-warn">Detected</span>' if integrase_found else '<span class="tag tag-ok">Not Found</span>'}</td><td>Primary lysogeny evidence</td></tr>
-  <tr><td>Repressor (lysogeny marker)</td><td>{'<span class="tag tag-warn">Detected</span>' if repressor_found else '<span class="tag tag-ok">Not Found</span>'}</td><td>Secondary lysogeny evidence</td></tr>
-  <tr><td>Anti-CRISPR</td><td>{audit.get('anti_crispr','None')}</td><td>Host defense evasion</td></tr>
-  <tr><td>Virulence Genes (VFDB)</td><td>{'Clear' if not audit.get('virulence') else audit.get('virulence')}</td><td>VFDB database</td></tr>
-  <tr><td>AMR Genes (CARD)</td><td>{'Clear' if not audit.get('resistance') else audit.get('resistance')}</td><td>CARD database</td></tr>
-  <tr><td>Overall Safety</td><td><span class="tag {'tag-ok' if 'Secure' in str(safety) or 'Clear' in str(safety) else 'tag-warn'}">{safety}</span></td><td>Composite verdict</td></tr>
+  <tr><td>生活方式 (Lifestyle)</td><td><strong>{audit.get('lifestyle','Unknown')}</strong></td><td>裂解性噬菌体优先用于治疗</td></tr>
+  <tr><td>整合酶 (Integrase)</td><td>{'<span class="tag tag-warn">检出</span>' if integrase_found else '<span class="tag tag-ok">未检出</span>'}</td><td>溶源性一级证据</td></tr>
+  <tr><td>阻遏蛋白 (Repressor)</td><td>{'<span class="tag tag-warn">检出</span>' if repressor_found else '<span class="tag tag-ok">未检出</span>'}</td><td>溶源性二级证据</td></tr>
+  <tr><td>抗 CRISPR 蛋白</td><td>{audit.get('anti_crispr','未检出')}</td><td>宿主防御逃逸能力</td></tr>
+  <tr><td>毒力因子 (VFDB)</td><td>{'未检出' if not audit.get('virulence') else audit.get('virulence')}</td><td>基于 VFDB 数据库比对</td></tr>
+  <tr><td>耐药基因 (CARD)</td><td>{'未检出' if not audit.get('resistance') else audit.get('resistance')}</td><td>基于 CARD 数据库比对</td></tr>
+  <tr><td>综合安全评级</td><td><span class="tag {'tag-ok' if 'Secure' in str(safety) or 'Clear' in str(safety) or 'Pending' in str(safety) else 'tag-warn'}">{safety}</span></td><td>综合裁定</td></tr>
 </tbody>
 </table>
 </section>
 
 <!-- ═══ 6. Genome Map ═══ -->
 <section>
-<h2>6. 全景基因组注释图谱 (Integrated Genome Map)</h2>
+<h2>6. 全景基因组注释图谱</h2>
 <div class="map-box">
-  {f'<img src="data:image/png;base64,{map_b64}" alt="Genome Map">' if map_b64 else '<p style="color:#94a3b8;">No visualization data available.</p>'}
+  {f'<img src="data:image/png;base64,{map_b64}" alt="基因组图谱">' if map_b64 else '<p style="color:#94a3b8;">暂无可视化数据</p>'}
 </div>
 </section>
 
 <footer>
-  <span>NCBI Bio-Station Pro v2.5</span>
-  <span>PhageScope™ Diagnostic Engine</span>
-  <span>&copy; 2026 Phage Genomics</span>
+  <span>NCBI Bio-Station Pro v2.5 · 分析流水线自动生成</span>
+  <span>PhageScope™ 诊断引擎</span>
+  <span>&copy; 2026 噬菌体基因组分析平台</span>
 </footer>
 
 </div><!-- .page -->
@@ -374,7 +374,7 @@ if (qR1.length > 0) {{
     options: {{
       responsive:true, maintainAspectRatio:false,
       plugins: {{ legend:{{ position:'bottom', labels:{{ boxWidth:12 }} }} }},
-      scales: {{ y:{{ min:20, max:42, title:{{ display:true, text:'Phred (Q)' }} }}, x:{{ title:{{ display:true, text:'Position (bp)' }} }} }}
+      scales: {{ y:{{ min:20, max:42, title:{{ display:true, text:'Phred 质量值 (Q)' }} }}, x:{{ title:{{ display:true, text:'碱基位置 (bp)' }} }} }}
     }}
   }});
 }}
@@ -395,7 +395,7 @@ if (baseA.length > 0) {{
     options: {{
       responsive:true, maintainAspectRatio:false,
       plugins: {{ legend:{{ position:'bottom', labels:{{ boxWidth:12 }} }} }},
-      scales: {{ y:{{ min:0.15, max:0.35, title:{{ display:true, text:'Proportion' }} }}, x:{{ title:{{ display:true, text:'Position (bp)' }} }} }}
+      scales: {{ y:{{ min:0.15, max:0.35, title:{{ display:true, text:'碱基比例' }} }}, x:{{ title:{{ display:true, text:'碱基位置 (bp)' }} }} }}
     }}
   }});
 }}
@@ -409,12 +409,12 @@ if (insertH.length > 0) {{
     type:'bar',
     data: {{
       labels: sliced.map((_,i) => s+i),
-      datasets: [{{ label:'Read Pairs', data:sliced, backgroundColor:'rgba(37,99,235,.6)', borderWidth:0 }}]
+      datasets: [{{ label:'读对数', data:sliced, backgroundColor:'rgba(37,99,235,.6)', borderWidth:0 }}]
     }},
     options: {{
       responsive:true, maintainAspectRatio:false,
       plugins: {{ legend:{{ display:false }} }},
-      scales: {{ y:{{ title:{{ display:true, text:'Count' }} }}, x:{{ title:{{ display:true, text:'Insert Size (bp)' }} }} }}
+      scales: {{ y:{{ title:{{ display:true, text:'计数' }} }}, x:{{ title:{{ display:true, text:'插入片段长度 (bp)' }} }} }}
     }}
   }});
 }}

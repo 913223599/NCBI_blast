@@ -64,11 +64,24 @@ class AssemblyReportParser:
                 data = json.load(f)
 
             summary = data.get("summary", {})
+
+            # 为前端 Vue 组件注入短名别名
+            # fastp 原始 key: passed_filter_reads → Vue 期望: passed
+            raw_filter = data.get("filtering_result", {})
+            filtering = {
+                **raw_filter,
+                "passed": raw_filter.get("passed_filter_reads", 0),
+                "low_quality": raw_filter.get("low_quality_reads", 0),
+                "too_many_N": raw_filter.get("too_many_N_reads", 0),
+                "too_short": raw_filter.get("too_short_reads", 0),
+                "too_long": raw_filter.get("too_long_reads", 0),
+            }
+
             return {
                 "status": "ok",
                 "before": summary.get("before_filtering", {}),
                 "after": summary.get("after_filtering", {}),
-                "filtering": data.get("filtering_result", {}),
+                "filtering": filtering,
                 "duplication": data.get("duplication", {}),
                 "insert_size": data.get("insert_size", {}),
                 "adapter_cutting": data.get("adapter_cutting", {}),
