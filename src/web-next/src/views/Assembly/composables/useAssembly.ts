@@ -85,6 +85,10 @@ export function useAssembly() {
     isRunning.value = true;
     currentStep.value = 0;
     
+    // 💡 彻底重置瞬时进度状态，防止 UI 残留历史数据
+    taskState.progress = 0;
+    taskState.stage = AssemblyStage.PREPROCESSING;
+    
     try {
       let hostDb = taskState.selectedHostDb;
       if (hostDb === 'search_ncbi') {

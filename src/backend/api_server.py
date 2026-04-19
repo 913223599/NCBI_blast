@@ -121,10 +121,14 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning(f"翻译库加载警告: {exc}")
 
-    # B. 注册 BLAST 监听回调 (连接 Sidecar 进程)
-    from ..blast.manager import get_blast_manager
-    get_blast_manager().result_listeners.append(_on_blast_result)
-    logger.info("BLAST 事件总线已连接")
+    # B. 强制启动 BLAST 引擎 (防止冷启动导致的鉴定任务无响应)
+    try:
+        from ..blast.manager import get_blast_manager
+        mgr = get_blast_manager()
+        mgr.result_listeners.append(_on_blast_result)
+        logger.info("🚀 BLAST 引擎与事件总线已全速激活")
+    except Exception as eb:
+        logger.error(f"BLAST 引擎启动失败: {eb}")
 
     # B2. 初始化组装任务队列工作线程
     from .routes.assembly import execute_assembly_pipeline
@@ -243,6 +247,12 @@ try:
         logger.info("局域网共享路由已挂载 (位于业务路由之后)")
 except Exception as e:
     logger.error(f"局域网共享路由延迟加载失败: {e}")
+
+# 🎉 开放组装与报告产物的静态资源展示
+from fastapi.staticfiles import StaticFiles
+results_dir = PROJECT_ROOT / "results"
+results_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/static_results", StaticFiles(directory=str(results_dir)), name="results")
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

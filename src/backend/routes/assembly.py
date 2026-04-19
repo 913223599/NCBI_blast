@@ -73,6 +73,21 @@ async def get_assembly_report(task_id: str):
     report = parser.generate_report()
     return BioResponse.ok(report)
 
+@router.get("/report/{task_id}/plot")
+async def get_assembly_plot(task_id: str):
+    """专用接口：返回总装报告的集成圈图文件流 (采用动态搜索机制)"""
+    from fastapi.responses import FileResponse
+    task_dir = AssemblyStorage.get_task_dir(task_id)
+    plot_dir = task_dir / "phageannotationstep" / "phage_plot"
+    
+    if plot_dir.exists():
+        # 搜索所有 png 文件，按大小降序排列（通常最大的图是高清图）
+        png_files = sorted(list(plot_dir.glob("*.png")), key=lambda x: x.stat().st_size, reverse=True)
+        if png_files:
+            return FileResponse(png_files[0], media_type="image/png")
+            
+    return BioResponse.fail("Plot not found", code=444)
+
 @router.get("/report/{task_id}/export")
 async def export_assembly_report(task_id: str):
     """导出拼接任务的正式 HTML 报告"""
@@ -86,67 +101,12 @@ async def export_assembly_report(task_id: str):
     parser = AssemblyReportParser(task_dir)
     report = parser.generate_report()
     
-    exporter = ReportExporter(task_id, report)
-    html_path = exporter.export_html(task_dir)
+    exporter = ReportExporter(task_dir)
+    html_path = exporter.export_html(report)
     
     return BioResponse.ok({
-        "path": str(html_path),
+        "path": str(html_path.resolve()),
         "filename": html_path.name
-    })
-
-@router.get("/report/{task_id}/unannotated_proteins")
-async def get_unannotated_proteins(task_id: str):
-    """提取未注释的蛋白序列（用于后续 BLAST 比对）"""
-    from Bio import SeqIO
-    
-    task_dir = AssemblyStorage.get_task_dir(task_id)
-    anno_dir = task_dir / "phageannotationstep"
-    
-    # 优先使用 Phold 产物，否则用 Pharokka 产物
-    phold_faa = anno_dir / "phold_res" / "phold_aa.fasta"
-    pharokka_faa = anno_dir / "pharokka_res" / "phanotate.faa"
-    
-    faa_file = phold_faa if phold_faa.exists() else pharokka_faa
-    if not faa_file.exists():
-        return BioResponse.fail("未找到蛋白序列文件")
-    
-    # 读取 Phold 预测结果，筛选出 unknown function 的 CDS ID
-    unknown_ids = set()
-    phold_tsv = anno_dir / "phold_res" / "phold_per_cds_predictions.tsv"
-    pharokka_tsv = anno_dir / "pharokka_res" / "PHAGE_cds_final_merged_output.tsv"
-    
-    import csv
-    tsv_file = phold_tsv if phold_tsv.exists() else pharokka_tsv
-    if tsv_file.exists():
-        with open(tsv_file, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f, delimiter="\t")
-            for row in reader:
-                func = row.get("function", "").strip().lower()
-                if func in ("unknown function", "hypothetical protein", ""):
-                    cds_id = row.get("cds_id", "")
-                    if cds_id:
-                        unknown_ids.add(cds_id)
-    
-    # 从 FASTA 中提取对应序列
-    sequences = []
-    for record in SeqIO.parse(faa_file, "fasta"):
-        rec_id = record.id.strip()
-        # 如果有 TSV 过滤，仅提取未注释的；否则全量导出
-        if not unknown_ids or rec_id in unknown_ids:
-            sequences.append({
-                "id": rec_id,
-                "description": record.description,
-                "sequence": str(record.seq)
-            })
-    
-    # 同时生成 FASTA 文本
-    fasta_text = "\n".join([f">{s['id']} {s['description']}\n{s['sequence']}" for s in sequences])
-    
-    return BioResponse.ok({
-        "count": len(sequences),
-        "total_in_file": sum(1 for _ in SeqIO.parse(faa_file, "fasta")),
-        "sequences": sequences[:100],  # 前端展示限 100 条
-        "fasta_text": fasta_text
     })
 
 

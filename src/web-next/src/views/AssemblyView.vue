@@ -33,10 +33,11 @@ const handleOpenResults = async (taskId: string) => {
   }
 };
 
+let cleanup: (() => void) | null = null;
+
 onMounted(async () => {
   if (typeof fetchHistory === 'function') await fetchHistory();
   
-  let cleanup: (() => void) | null = null;
   cleanup = onEvent(async (type: string, data: any) => {
     // 1. 处理过程进度 (来自 AssemblyManager)
     if (type === 'assembly_progress') {
@@ -82,11 +83,11 @@ onMounted(async () => {
       }
     }
   });
+});
 
-  onUnmounted(() => {
-    if (cleanup) cleanup();
-  });
-})
+onUnmounted(() => {
+  if (cleanup) cleanup();
+});
 </script>
 
 <template>

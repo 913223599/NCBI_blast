@@ -19,8 +19,7 @@ const loading = ref(false)
 const error = ref('')
 const activeTab = ref('overview')
 const exporting = ref(false)
-const blastLoading = ref(false)
-const unannotatedCount = ref(0)
+
 
 const tabs = [
   { key: 'overview', label: '总览', icon: '📊' },
@@ -70,36 +69,7 @@ async function handleExport() {
   }
 }
 
-async function handleBlastUnannotated() {
-  blastLoading.value = true
-  try {
-    const bridge = getBridge()
-    const res = await bridge.get_unannotated_proteins(props.taskId)
-    const data = res?.data || res
-    unannotatedCount.value = data?.count || 0
-    
-    if (data?.fasta_text && data.count > 0) {
-      // 将未注释蛋白提交到 BLAST 模块
-      const blastQuery = data.fasta_text
-      // 通过全局事件总线发起 BLAST 任务
-      await bridge.run_blast_job({
-        query: blastQuery,
-        program: 'blastp',
-        database: 'nr',
-        evalue: 0.001,
-        hitlist_size: 10,
-        task_name: `Annotate_${data.count}_Unknown_Proteins`
-      })
-      alert(`已提交 ${data.count} 条未注释蛋白序列到 BLAST 模块进行比对。\n请切换到“BLAST”页面查看进度。`)
-    } else {
-      alert('未找到未注释的蛋白序列，全部 CDS 已有功能鉴定。')
-    }
-  } catch (e: any) {
-    alert('提取失败: ' + (e.message || e))
-  } finally {
-    blastLoading.value = false
-  }
-}
+
 
 // ─── 计算属性 ─────────────────────────────────────
 
@@ -108,6 +78,14 @@ const funcList = computed(() => report.value?.annotation?.pharokka?.functions ||
 const asmInfo = computed(() => report.value?.assembly || {})
 const qcInfo = computed(() => report.value?.qc || {})
 const pholdInfo = computed(() => report.value?.annotation?.phold || null)
+const backfillInfo = computed(() => report.value?.annotation?.phagescope_backfill || null)
+const checkvInfo = computed(() => report.value?.checkv || null)
+
+const visualMapUrl = computed(() => {
+  const mapSuffix = report.value?.annotation?.visual_map
+  if (!mapSuffix) return null
+  return `http://127.0.0.1:8765/api/assembly/report/${props.taskId}/plot?t=${new Date().getTime()}`
+})
 
 const funcChartData = computed(() => {
   const items = funcList.value.filter((f: any) => f.name !== 'CDS' && f.count > 0)
@@ -247,6 +225,33 @@ function getFuncColor(name: string): string {
                   <div class="stat-sub" v-if="qcInfo.after">Q30: {{ pct(qcInfo.after.q30_rate) }}</div>
                 </div>
               </div>
+
+              <!-- CheckV 质量评估卡片 -->
+              <div class="stat-card checkv-card" v-if="checkvInfo" :class="checkvInfo.quality?.toLowerCase().replace(' ', '-')">
+                <div class="card-icon">🛡️</div>
+                <div class="card-body">
+                  <h4>质量评估</h4>
+                  <div class="stat-value">{{ checkvInfo.quality || '--' }}</div>
+                  <div class="stat-sub">完整度: {{ checkvInfo.completeness }}% | 污染度: {{ checkvInfo.contamination }}%</div>
+                </div>
+              </div>
+
+              <div class="stat-card backfill-card" v-if="backfillInfo">
+                <div class="card-icon">🧬</div>
+                <div class="card-body">
+                  <h4>PhageScope 回填</h4>
+                  <div class="stat-value">+{{ backfillInfo.hits }}</div>
+                  <div class="stat-sub">扫描 {{ backfillInfo.unknown_before }} 个未知蛋白</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 全景基因组图谱 (集成化展示) -->
+            <div class="section-block" v-if="visualMapUrl" style="margin-top: 24px;">
+              <h3 class="section-title">全景集成基因组图谱 (AI & Reference)</h3>
+              <div class="visual-map-container" style="text-align: center; background: #fff; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color);">
+                <img :src="visualMapUrl" alt="Integrated Phage Map" style="max-width: 100%; height: auto; border-radius: 4px;" />
+              </div>
             </div>
 
             <!-- 功能分类可视化 -->
@@ -368,7 +373,7 @@ function getFuncColor(name: string): string {
                 <thead><tr><th>#</th><th>ID</th><th>长度</th></tr></thead>
                 <tbody>
                   <tr v-for="(c, i) in asmInfo.contigs" :key="c.id">
-                    <td>{{ i + 1 }}</td>
+                    <td>{{ Number(i) + 1 }}</td>
                     <td class="mono">{{ c.id }}</td>
                     <td>{{ formatBp(c.length) }}</td>
                   </tr>
@@ -380,16 +385,57 @@ function getFuncColor(name: string): string {
 
           <!-- ═══ 注释 Tab ═══ -->
           <div v-if="activeTab === 'annotation'" class="tab-content">
-            <div v-if="report.annotation">
-              <!-- 未注释蛋白 BLAST 操作区 -->
-              <div class="blast-action-bar">
-                <div class="blast-info">
-                  <span>🤔 大量 CDS 标记为 <strong>unknown function</strong>？</span>
-                  <span class="blast-hint">可将未注释的蛋白序列提交到 NCBI BLAST 进行深度比对鉴定</span>
+              <!-- PhageScope 自动回填报告 -->
+              <div class="backfill-status-bar" :class="{ 'has-data': backfillInfo }">
+                <span class="icon">🧬</span>
+                <div class="txt">
+                  <p class="main">PhageScope 本地蛋白库自动回填</p>
+                  <p class="sub" v-if="backfillInfo">
+                    扫描 {{ backfillInfo.unknown_before }} 个未知蛋白，命中 {{ backfillInfo.hits }} 个 ({{ backfillInfo.hit_rate }}%)
+                  </p>
+                  <p class="sub" v-else>流水线在注释完成后自动将未知蛋白与 PhageScope 104万条蛋白序列进行本地比对</p>
                 </div>
-                <button class="blast-submit-btn" @click="handleBlastUnannotated" :disabled="blastLoading">
-                  {{ blastLoading ? '提取中...' : '🚀 BLAST 比对未注释蛋白' }}
-                </button>
+                <span class="auto-badge" v-if="backfillInfo">✅ +{{ backfillInfo.hits }} 已回填</span>
+                <span class="auto-badge pending" v-else>⏳ 待执行</span>
+              </div>
+
+              <!-- PhageScope 回填统计卡片 -->
+              <div v-if="backfillInfo" class="backfill-stats-grid">
+                <div class="bf-stat">
+                  <label>总 CDS</label>
+                  <span>{{ backfillInfo.total_cds }}</span>
+                </div>
+                <div class="bf-stat">
+                  <label>未知蛋白</label>
+                  <span>{{ backfillInfo.unknown_before }}</span>
+                </div>
+                <div class="bf-stat highlight">
+                  <label>PhageScope 命中</label>
+                  <span>{{ backfillInfo.hits }}</span>
+                </div>
+                <div class="bf-stat">
+                  <label>命中率</label>
+                  <span>{{ backfillInfo.hit_rate }}%</span>
+                </div>
+              </div>
+
+              <!-- PhageScope 命中详情表 -->
+              <div v-if="backfillInfo?.details?.length" style="margin-bottom: 24px">
+                <h3 class="section-title">PhageScope 回填详情</h3>
+                <div class="table-scroll" style="max-height: 240px">
+                  <table class="data-table compact">
+                    <thead>
+                      <tr><th>CDS ID</th><th>比对产物</th><th>E-value</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="d in backfillInfo.details" :key="d.cds_id">
+                        <td class="mono">{{ d.cds_id }}</td>
+                        <td class="product-cell" :title="d.product">{{ d.product }}</td>
+                        <td class="mono">{{ d.evalue }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <!-- Phold 预测详情表 -->
@@ -436,9 +482,8 @@ function getFuncColor(name: string): string {
                   </tbody>
                 </table>
               </div>
+              <div v-else class="empty-section"><p>暂无注释数据</p></div>
             </div>
-            <div v-else class="empty-section"><p>暂无注释数据</p></div>
-          </div>
         </div>
       </div>
     </div>
@@ -589,34 +634,42 @@ function getFuncColor(name: string): string {
 /* ─── 总览网格 ─── */
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 28px;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
 }
 
 .stat-card {
-  padding: 20px;
-  border-radius: 14px;
+  padding: 12px;
+  border-radius: 8px;
   display: flex;
-  gap: 14px;
+  gap: 10px;
   align-items: flex-start;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .stat-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .genome-card { background: linear-gradient(135deg, #eff6ff, #dbeafe); }
 .contig-card { background: linear-gradient(135deg, #f5f3ff, #ede9fe); }
 .cds-card { background: linear-gradient(135deg, #ecfdf5, #d1fae5); }
 .qc-card { background: linear-gradient(135deg, #fef3c7, #fde68a40); }
+.backfill-card { background: linear-gradient(135deg, #f0fdf4, #bbf7d0); }
+.checkv-card { background: #f8fafc; border: 1px solid #e2e8f0; }
 
-.card-icon { font-size: 28px; }
-.card-body h4 { margin: 0 0 4px; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-value { font-size: 22px; font-weight: 800; color: #1e293b; }
-.stat-sub { font-size: 12px; color: #64748b; margin-top: 4px; }
+/* CheckV 质量等级 */
+.checkv-card.complete, .checkv-card.high-quality { border-left: 4px solid #10b981; background: #ecfdf5; }
+.checkv-card.medium-quality { border-left: 4px solid #f59e0b; background: #fffbeb; }
+.checkv-card.low-quality { border-left: 4px solid #ef4444; background: #fef2f2; }
+
+
+.card-icon { font-size: 20px; }
+.card-body h4 { margin: 0 0 2px; font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-value { font-size: 16px; font-weight: 800; color: #1e293b; }
+.stat-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
 
 /* ─── 功能条形图 ─── */
 .section-block { margin-bottom: 28px; }
@@ -769,51 +822,90 @@ function getFuncColor(name: string): string {
   color: #475569;
 }
 
-/* ─── BLAST 操作区 ─── */
-.blast-action-bar {
+/* ─── PhageScope 自动回填状态条 ─── */
+.backfill-status-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 16px 20px;
-  background: linear-gradient(135deg, #eff6ff, #f5f3ff);
-  border: 1px solid #dbeafe;
-  border-radius: 12px;
+  padding: 16px 22px;
+  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+  border: 1px solid #a7f3d0;
+  border-radius: 14px;
+  margin-bottom: 24px;
+}
+
+.backfill-status-bar .icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.backfill-status-bar .txt {
+  flex: 1;
+}
+
+.backfill-status-bar .txt .main {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #065f46;
+}
+
+.backfill-status-bar .txt .sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #047857;
+  line-height: 1.4;
+}
+
+.auto-badge {
+  padding: 6px 14px;
+  background: #059669;
+  color: white;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+}
+
+.auto-badge.pending {
+  background: #94a3b8;
+}
+
+/* ─── PhageScope 回填统计卡片 ─── */
+.backfill-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
   margin-bottom: 20px;
 }
 
-.blast-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-  color: #334155;
+.bf-stat {
+  text-align: center;
+  padding: 12px;
+  background: #f0fdf4;
+  border-radius: 10px;
+  border: 1px solid #d1fae5;
 }
 
-.blast-hint {
+.bf-stat.highlight {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+}
+
+.bf-stat label {
+  display: block;
   font-size: 11px;
-  color: #64748b;
+  color: #047857;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
-.blast-submit-btn {
-  padding: 10px 20px;
-  background: linear-gradient(135deg, #2563eb, #7c3aed);
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s;
-}
-.blast-submit-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.3);
-}
-.blast-submit-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.bf-stat span {
+  font-size: 20px;
+  font-weight: 800;
+  color: #065f46;
 }
 
 /* ─── 动画 ─── */

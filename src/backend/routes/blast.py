@@ -30,6 +30,7 @@ class BlastJobRequest(BaseModel):
     evalue: float = 0.05
     hitlist_size: int = 50
     task_name: Optional[str] = None
+    auto_backfill_task_id: Optional[str] = None
 
 class RenameRequest(BaseModel):
     new_name: str

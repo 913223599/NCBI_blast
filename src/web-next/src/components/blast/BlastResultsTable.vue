@@ -160,7 +160,7 @@ function openNcbi(accession: string): void {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="h in blast.results" :key="h.accession" class="blast-row-neo" :class="{ 'translating-pulse': h.isTranslating }">
+          <tr v-for="(h, idx) in blast.results" :key="h.queryTitle + idx" class="blast-row-neo" :class="{ 'translating-pulse': h.isTranslating }">
             <td class="mono">{{ h.queryTitle }}</td>
             <td class="detail-cell-neo" @click="handleRowTranslate(h)">
               <div class="sp">

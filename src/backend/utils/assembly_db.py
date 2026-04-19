@@ -40,12 +40,15 @@ class AssemblyDB:
                 )
             ''')
             
-            # 2. 动态迁移：检查是否存在 sample_type 列 (兼容旧库)
+            # 2. 动态迁移：检查是否存在新列 (兼容旧库)
             cursor = conn.execute("PRAGMA table_info(assembly_tasks)")
             columns = [col[1] for col in cursor.fetchall()]
             if 'sample_type' not in columns:
                 logger.info("🛠️ 正在迁移数据库: 添加 sample_type 列...")
                 conn.execute('ALTER TABLE assembly_tasks ADD COLUMN sample_type TEXT')
+            if 'duration_seconds' not in columns:
+                logger.info("🛠️ 正在迁移数据库: 添加 duration_seconds 列...")
+                conn.execute('ALTER TABLE assembly_tasks ADD COLUMN duration_seconds REAL')
             
             conn.commit()
 
@@ -74,13 +77,20 @@ class AssemblyDB:
             conn.commit()
 
     def finalize_task(self, task_id: str, status: str, results: Dict[str, Any] = None):
-        """标记任务结束并存储结果摘要"""
+        """标记任务结束并存储结果摘要，补全耗时统计"""
         now = time.time()
+        
+        # 自动计算耗时
+        duration = 0
+        task = self.get_task(task_id)
+        if task and task.get('created_at'):
+            duration = now - task['created_at']
+
         results_str = json.dumps(results, cls=BioJsonEncoder) if results else None
         with sqlite3.connect(self.DB_PATH) as conn:
             conn.execute(
-                "UPDATE assembly_tasks SET status = ?, results = ?, updated_at = ?, progress = 100.0 WHERE id = ?",
-                (status, results_str, now, task_id)
+                "UPDATE assembly_tasks SET status = ?, results = ?, updated_at = ?, progress = 100.0, duration_seconds = ? WHERE id = ?",
+                (status, results_str, now, duration, task_id)
             )
             conn.commit()
 

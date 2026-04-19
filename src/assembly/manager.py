@@ -8,6 +8,7 @@ from .core.base import PipelineContext
 from .steps.quality_control import QualityControlStep
 from .steps.host_cleaner import HostCleanerStep
 from .steps.assembler import AssemblerStep
+from .steps.correction import ConsensusCorrectionStep
 from .steps.annotation import AnnotationStep
 from .env.dependency_manager import DependencyManager
 from .engine.gpu_config import GPUConfigManager
@@ -159,15 +160,24 @@ class AssemblyManager:
         if sample_type == "PHAGE":
             pipeline_steps.append(HostCleanerStep(ctx))
             pipeline_steps.append(AssemblerStep(ctx))
+            pipeline_steps.append(ConsensusCorrectionStep(ctx))
             pipeline_steps.append(PhageAnnotationStep(ctx))
         else:
             pipeline_steps.extend([
                 AssemblerStep(ctx),
+                ConsensusCorrectionStep(ctx),
                 AnnotationStep(ctx)
             ])
         
         logging.info(f"--- [Pipeline Start] Type: {sample_type} | Tasks: {len(pipeline_steps)} | Task: {task_id} ---")
         
+        # 🔗 1.5 环境自愈预检：确保所有步骤所需的工具和数据库已就绪
+        try:
+            self._report_progress(task_id, "环境自愈", 0, "running")
+            await self._prepare_environment(sample_type, pipeline_steps)
+        except Exception as e:
+            self.logger.warning(f"⚠️ 环境预检/自愈过程中发生异常 (非致命): {e}")
+
         try:
             for i, step in enumerate(pipeline_steps):
                 # 链路注册：支持外部停止
@@ -192,13 +202,18 @@ class AssemblyManager:
                             raise ValueError("NCBI 宿主菌名称不能为空，请在设置中输入菌株名称（如 Escherichia coli）。")
                         resolved_path_str = await self.ncbi_downloader.fetch_reference_genome(species)
                         if not resolved_path_str:
-                            raise ValueError(f"无法从 NCBI 获取物种 '{species}' 的参考基因组，请检查网络连接或尝试手动上传参考文件。")
-                        actual_path = Path(resolved_path_str)
+                            self.logger.warning(f"⚠️ 无法从 NCBI 获取物种 '{species}' 的参考基因组，将自动跳过宿主剔除步骤直接进行组装。")
+                            actual_path = None
+                        else:
+                            actual_path = Path(resolved_path_str)
                     else:
                         actual_path = self.host_resolver.resolve(host_id)
                     
                     if actual_path:
                         config["params"]["host_filter_db"] = str(actual_path)
+                    elif host_id.startswith("ncbi:"):
+                        # 对于 NCBI 下载失败的情况，前面已经报过 warning 了，这里将其置空以便 Step 内部自动跳过
+                        config["params"]["host_filter_db"] = None
                     else:
                         raise ValueError(f"指定的宿主数据库 '{host_id}' 未能通过物理路径解析。")
 
@@ -206,7 +221,9 @@ class AssemblyManager:
                     "QualityControlStep": "数据质控",
                     "HostCleanerStep": "宿主剔除",
                     "AssemblerStep": "基因组组装",
-                    "AnnotationStep": "功能注释"
+                    "ConsensusCorrectionStep": "一致性校正",
+                    "AnnotationStep": "功能注释",
+                    "PhageAnnotationStep": "功能注释",
                 }
                 current_stage = stage_map.get(step_name, step_name)
                 
@@ -225,8 +242,17 @@ class AssemblyManager:
                 step.on_progress = step_progress_callback
                 
                 logging.info(f"正在执行步骤: {step_name}")
+                start_time = time.time()
                 success = await step.execute()
+                duration = time.time() - start_time
                 
+                # 收集遥测数据（耗时与版本占位器）
+                if "telemetry" not in ctx.data: ctx.data["telemetry"] = {"steps": {}}
+                ctx.data["telemetry"]["steps"][step_name] = {
+                    "duration": round(duration, 2),
+                    "status": "success" if success else "failed"
+                }
+
                 if not success:
                     logging.error(f"步骤 {step_name} 失败，流水线终止。")
                     self._report_progress(task_id, "FAILED", overall_progress, "failed")
@@ -279,3 +305,41 @@ class AssemblyManager:
     async def run_bacteria_pipeline(self, *args, **kwargs):
         """兼容性别名：默认运行细菌流水线"""
         return await self.run_pipeline(*args, sample_type="BACTERIA", **kwargs)
+
+    async def _prepare_environment(self, sample_type: str, steps: List[Any]):
+        """
+        深度自愈：检查流水线各步骤的依赖，缺失时自动触发部署脚本
+        """
+        # 1. 确定必须具备的核心工具
+        critical_tools = ["fastp", "unicycler", "bwa", "samtools", "minimap2"]
+        if sample_type == "PHAGE":
+            critical_tools.extend(["polypolish", "checkv"])
+            
+        # 2. 差量检查
+        missing = [t for t in critical_tools if not self.env_manager.check_tool_installed(t)]
+        
+        # 3. 检查 Pharokka 数据库 (噬菌体模式独有)
+        pharokka_db_ready = (self.project_root / "database" / "pharokka_db").exists()
+        
+        if missing or (sample_type == "PHAGE" and not pharokka_db_ready):
+            self.logger.info(f"🛠️ 发现环境不完整! 缺失工具: {missing}, 准备执行自动化部署自愈程序...")
+            
+            from .engine.runner import CommandRunner
+            runner = CommandRunner("EnvRepair", self.logger, is_wsl=True)
+            
+            # 使用项目内置的万能部署脚本
+            setup_script = self.project_root / "scripts" / "setup_assembly_env.sh"
+            if setup_script.exists():
+                # 转换 Windows 路径为 WSL 路径
+                from .env.wsl_manager import WSLManager
+                wsl_script = WSLManager.to_wsl_path(str(setup_script))
+                
+                # 提示用户，因为这可能需要几分钟
+                self.logger.info("⏳ 正在运行 scripts/setup_assembly_env.sh，这可能需要约 1-5 分钟，请耐心等待...")
+                await runner.run_command(["bash", wsl_script])
+                self.logger.info("✅ 自动化部署自愈程序执行完毕")
+            else:
+                self.logger.error("❌ 找不到部署脚本 scripts/setup_assembly_env.sh，请检查项目完整性。")
+        else:
+            self.logger.info("✅ 环境工具预检通过")
+

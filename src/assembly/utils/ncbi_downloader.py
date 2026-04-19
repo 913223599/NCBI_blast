@@ -25,6 +25,17 @@ class NCBIDownloader:
         
         zip_file = target_dir / "genome.zip"
         
+        # 🔗 0. 缓存检查：如果目录中已存在提取好的 Fasta，直接返回
+        existing_fasta = self._find_fasta_in_bundle(target_dir)
+        if existing_fasta:
+            self.logger.info(f"✨ 发现本地已缓存的 {species_name} 参考基因组: {Path(existing_fasta).name}")
+            return existing_fasta
+            
+        # 如果 zip 文件存在但没有对应的 fna，说明上次下载可能中断或损坏，尝试删除重下
+        if zip_file.exists():
+            self.logger.warning(f"检测到可能损坏的基因组安装包，正在清理并重新尝试下载...")
+            zip_file.unlink()
+        
         # 1. 启动专用任务执行器
         runner = CommandRunner(f"NCBI-{safe_name}", self.logger, is_wsl=True)
         

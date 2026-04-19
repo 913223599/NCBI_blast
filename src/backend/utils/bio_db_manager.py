@@ -7,6 +7,8 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from .response import BioResponse
+import time
+from datetime import datetime
 from ...workbench.models.tool_config import ToolConfig
 
 logger = logging.getLogger("api_server")
@@ -27,13 +29,36 @@ class BioDatabase:
         self.base_dir = ToolConfig.DATABASE_ROOT / config.get("local_folder", db_id)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
+    def _get_dir_info(self) -> tuple[float, str]:
+        total_size = 0
+        latest_mtime = 0
+        try:
+            if self.base_dir.exists():
+                for f in self.base_dir.rglob('*'):
+                    if f.is_file():
+                        stat = f.stat()
+                        total_size += stat.st_size
+                        if stat.st_mtime > latest_mtime:
+                            latest_mtime = stat.st_mtime
+        except Exception:
+            pass
+        
+        size_mb = round(total_size / (1024 * 1024), 2)
+        mtime_str = datetime.fromtimestamp(latest_mtime).strftime('%Y-%m-%d %H:%M:%S') if latest_mtime > 0 else '未知'
+        return size_mb, mtime_str
+
     def get_status(self) -> Dict[str, Any]:
         """获取当前本地库状态 (基础实现)"""
+        size_mb, mtime_str = self._get_dir_info()
         return {
             "db_id": self.db_id,
             "name": self.name,
             "installed": False,
-            "version": self.config.get("version", "Unknown")
+            "version": self.config.get("version", "Unknown"),
+            "size_mb": size_mb,
+            "last_modified": mtime_str,
+            "category": self.config.get("category", "未分类数据库"),
+            "url": self.config.get("url", "local_only")
         }
 
 class SilvaDatabase(BioDatabase):
@@ -167,6 +192,89 @@ class Ncbi16SDatabase(BioDatabase):
             logger.error(f"NCBI 同步失败: {e}")
             return False
 
+class PhageScopeDatabase(BioDatabase):
+    """
+    PhageScope 噬菌体高精度注释库专用管理器
+    """
+    def get_status(self) -> Dict[str, Any]:
+        is_indexed = (self.base_dir / "phagescope_proteins.psq").exists()
+        status = super().get_status()
+        status.update({
+            "installed": is_indexed,
+            "path": str(self.base_dir) if is_indexed else None
+        })
+        return status
+
+    async def update_database(self):
+        try:
+            import sys
+            script_path = ToolConfig.PROJECT_ROOT / "database" / "fetch_phagescope.py"
+            
+            logger.info(f">>> [PhageScope] 启动本地抓取与构建脚本: {script_path}")
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(script_path),
+                cwd=str(ToolConfig.PROJECT_ROOT)
+            )
+            await proc.communicate()
+            return proc.returncode == 0
+        except Exception as e:
+            logger.error(f"PhageScope 同步失败: {e}")
+            return False
+
+class PharokkaDatabase(BioDatabase):
+    """Pharokka 10GB 综合数据库"""
+    def get_status(self) -> Dict[str, Any]:
+        is_installed = self.base_dir.exists() and any(self.base_dir.iterdir())
+        status = super().get_status()
+        status.update({
+            "installed": is_installed,
+            "path": str(self.base_dir) if is_installed else None
+        })
+        return status
+
+    async def update_database(self):
+        try:
+            import re
+            project_root = str(ToolConfig.PROJECT_ROOT).replace('\\', '/')
+            m = re.match(r"^([A-Za-z]):/(.*)", project_root)
+            if not m: return False
+            mnt_path = f"/mnt/{m.group(1).lower()}/{m.group(2)}/scripts/setup_pharokka.sh"
+            
+            logger.info(f">>> [Pharokka] 启动底层部署脚本: {mnt_path}")
+            proc = await asyncio.create_subprocess_shell(f'wsl -d Ubuntu -u root bash "{mnt_path}"')
+            await proc.communicate()
+            return proc.returncode == 0
+        except Exception as e:
+            logger.error(f"Pharokka 同步失败: {e}")
+            return False
+
+class PholdDatabase(BioDatabase):
+    """Phold AI 结构数据库"""
+    def get_status(self) -> Dict[str, Any]:
+        is_installed = self.base_dir.exists() and any(self.base_dir.iterdir())
+        status = super().get_status()
+        status.update({
+            "installed": is_installed,
+            "path": str(self.base_dir) if is_installed else None
+        })
+        return status
+
+    async def update_database(self):
+        try:
+            import re
+            project_root = str(ToolConfig.PROJECT_ROOT).replace('\\', '/')
+            m = re.match(r"^([A-Za-z]):/(.*)", project_root)
+            if not m: return False
+            mnt_path = f"/mnt/{m.group(1).lower()}/{m.group(2)}/scripts/setup_phold.sh"
+            
+            logger.info(f">>> [Phold] 启动底层部署脚本: {mnt_path}")
+            proc = await asyncio.create_subprocess_shell(f'wsl -d Ubuntu -u root bash "{mnt_path}"')
+            await proc.communicate()
+            return proc.returncode == 0
+        except Exception as e:
+            logger.error(f"Phold 同步失败: {e}")
+            return False
+
 class BioDbManager:
     """
     数据库管理门面 (Facade)
@@ -185,6 +293,12 @@ class BioDbManager:
                 self.dbs[db_id] = SilvaDatabase(db_id, config)
             elif "ncbi_16s" in db_id.lower() or "16s_ribosomal" in db_id.lower():
                 self.dbs[db_id] = Ncbi16SDatabase(db_id, config)
+            elif "phagescope" in db_id.lower():
+                self.dbs[db_id] = PhageScopeDatabase(db_id, config)
+            elif "pharokka" in db_id.lower():
+                self.dbs[db_id] = PharokkaDatabase(db_id, config)
+            elif "phold" in db_id.lower():
+                self.dbs[db_id] = PholdDatabase(db_id, config)
             else:
                 self.dbs[db_id] = BioDatabase(db_id, config)
 

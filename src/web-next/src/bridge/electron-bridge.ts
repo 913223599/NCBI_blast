@@ -827,10 +827,7 @@ const electronBridge = {
         return await apiGet(`/api/assembly/report/${taskId}/export`);
     },
 
-    /** 获取未注释蛋白序列（用于 BLAST 比对） */
-    async get_unannotated_proteins(taskId: string) {
-        return await apiGet(`/api/assembly/report/${taskId}/unannotated_proteins`);
-    },
+
 
     /** 强制停止运行中的任务 */
     async stop_assembly_task(taskId: string) {

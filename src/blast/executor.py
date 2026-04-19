@@ -97,6 +97,46 @@ class BlastExecutor:
                 blast_params[ncbi_key] = kwargs[key]
 
         try:
+            # === PhageScope 本地蛋白库快速通道 ===
+            phagescope_aliases = {'phagescope_proteins', 'phagescope_rep'}
+            if database in phagescope_aliases:
+                from pathlib import Path as _Path
+                # 动态解析数据库根目录 (相对于项目根)
+                project_root = _Path(__file__).resolve().parent.parent.parent
+                ps_index = project_root / "database" / "phagescope" / "phagescope_proteins"
+                
+                if ps_index.with_suffix(".psq").exists():
+                    import tempfile
+                    if not self.local_executor:
+                        self.local_executor = LocalBlastExecutor(
+                            database_path=str(ps_index), program="blastp"
+                        )
+                    self.local_executor.database_path = str(ps_index)
+                    
+                    logging.info(f"🧬 [PhageScope] 命中本地噬菌体蛋白库: {ps_index}")
+                    
+                    with tempfile.NamedTemporaryFile(suffix=".fasta", delete=False, mode='w') as tmp:
+                        tmp.write(sequence)
+                        tmp_in = tmp.name
+                    
+                    tmp_out = tmp_in.replace(".fasta", ".xml")
+                    
+                    try:
+                        self.local_executor.execute_local_blast(
+                            tmp_in, tmp_out,
+                            max_hits=kwargs.get('hitlist_size', 50),
+                            program="blastp"
+                        )
+                        if os.path.exists(tmp_out):
+                            return open(tmp_out, 'r')
+                        else:
+                            raise RuntimeError("PhageScope local BLAST failed to generate output")
+                    finally:
+                        try: os.unlink(tmp_in)
+                        except: pass
+                else:
+                    logging.warning(f"⚠️ [PhageScope] 本地库索引未就绪: {ps_index}")
+
             # 优先检查是否为已部署的本地生物数据库 (16S/18S)
             from ..backend.utils.bio_db_manager import bio_db_manager
             
@@ -119,7 +159,7 @@ class BlastExecutor:
                     
                     self.local_executor.database_path = index_path
                     
-                    logging.info(f"🚀 [LocalBLAST] 命中心统级本地库: {database} -> {index_path}")
+                    logging.info(f"🚀 [LocalBLAST] 命中本地库: {database} -> {index_path}")
                     
                     # 准备临时输入文件
                     import tempfile

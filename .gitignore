@@ -109,3 +109,15 @@ build_release.py
 # 测试数据
 # ================================
 test_data/
+
+# ================================
+# 大文件和临时结果
+# ================================
+archive/
+sample_refinement.faa
+test_refinement.faa
+validation_audit_res.json
+*aligned_r*.sam
+
+# Generated virtual directories
+__pyrefly_virtual__/

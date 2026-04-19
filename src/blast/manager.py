@@ -184,8 +184,24 @@ class TaskScheduler:
     
     def submit(self, task: BlastTask):
         """Submit a task to the priority queue."""
+        self._ensure_workers_alive()
         self.queue.put(task)
         logger.info(f"Task {task.task_id} submitted (Priority: {task.priority})")
+
+    def _ensure_workers_alive(self):
+        """Self-healing: 确保工人线程始终在线"""
+        with self._lock:
+            # 清理已经死掉的线程引用
+            self._workers = [t for t in self._workers if t.is_alive()]
+            
+            # 补齐空位
+            missing = self.max_workers - len(self._workers)
+            if missing > 0:
+                logger.warning(f"Detected {missing} missing/dead BLAST workers. Reviving...")
+                for i in range(missing):
+                    t = threading.Thread(target=self._worker_loop, name=f"BlastWorker-Revived-{time.time()}", daemon=True)
+                    self._workers.append(t)
+                    t.start()
 
     def _worker_loop(self):
         while not self._shutdown_event.is_set():
@@ -495,6 +511,48 @@ class BlastManager:
             # Cleanup
             task.transition_to(TaskStatus.COMPLETED)
             self.store.save_task(task)
+
+            # ✨ [SILENT PIPELINE HOOK] 自动回填逻辑
+            auto_task_id = task.params.get("auto_backfill_task_id")
+            if auto_task_id:
+                try:
+                    self.logger.info(f"🚀 Triggering AUTO-BACKFILL for Assembly Task: {auto_task_id}")
+                    from src.backend.utils.assembly_storage import AssemblyStorage
+                    from src.backend.utils.assembly_gbk_fixer import GBKAnnotationBackfiller
+                    from src.backend.utils.blast_utils import parse_blast_csv
+                    
+                    # 1. 搜集所有 Hit 结果
+                    hits_to_backfill = {}
+                    task_results = self.get_task_results(task.task_id)
+                    for res in task_results:
+                        csv_file = res.get('csv_file')
+                        if csv_file and os.path.exists(csv_file):
+                            top_hits = parse_blast_csv(csv_file, limit=1)
+                            if top_hits:
+                                best = top_hits[0]
+                                # 保持与 apply_blast_hits 预期的格式一致
+                                hits_to_backfill[res['sequence_id']] = {
+                                    "product": best.get('stitle', 'hypothetical protein'),
+                                    "evalue": best.get('evalue', 'N/A'),
+                                    "accession": best.get('saccession', 'N/A')
+                                }
+                    
+                    if hits_to_backfill:
+                        # 2. 定位 GBK 文件并应用
+                        task_dir = AssemblyStorage.get_task_dir(auto_task_id)
+                        anno_dir = task_dir / "phageannotationstep"
+                        phold_gbk = anno_dir / "phold_res" / "phold.gbk"
+                        pharokka_gbk = anno_dir / "pharokka_res" / "PHAGE.gbk"
+                        base_gbk = phold_gbk if phold_gbk.exists() else pharokka_gbk
+                        
+                        if base_gbk and base_gbk.exists():
+                            fixer = GBKAnnotationBackfiller(base_gbk)
+                            fixer.apply_blast_hits(hits_to_backfill)
+                            self.logger.info(f"✅ AUTO-BACKFILL COMPLETED for {len(hits_to_backfill)} proteins.")
+                        else:
+                            self.logger.warning(f"❌ AUTO-BACKFILL SKIPPED: Base GBK not found in {anno_dir}")
+                except Exception as eb:
+                    self.logger.error(f"💥 AUTO-BACKFILL FAILED inside manager: {eb}", exc_info=True)
 
         except Exception as e:
             self.logger.error(f"Task {task.task_id} failed: {e}", exc_info=True)

@@ -37,6 +37,14 @@ const getStatusLabel = (status: string) => {
   return map[status] || status;
 };
 
+const formatDuration = (seconds?: number) => {
+  if (!seconds || seconds < 1) return '';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return `${m}m ${s > 0 ? s + 's' : ''}`;
+};
+
 const handleDelete = (id: string) => {
   if (confirm('确定要删除该历史任务吗？数据库记录与物理文件将被一并永久删除，此操作不可恢复。')) {
     emit('delete', id);
@@ -129,6 +137,7 @@ const handleOpenFolder = async (task: any) => {
 
           <div class="item-footer">
             <span class="task-id">ID: {{ task.id.substring(3, 11) }}</span>
+            <span class="duration" v-if="task.duration_seconds">⏱️ {{ formatDuration(task.duration_seconds) }}</span>
             <span class="time">{{ formatDate(task.created_at) }}</span>
           </div>
         </div>

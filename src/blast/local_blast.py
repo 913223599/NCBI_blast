@@ -22,12 +22,13 @@ class LocalBlastExecutor:
     使用本地数据库进行BLAST搜索
     """
 
-    def __init__(self, database_path="database/nt"):
+    def __init__(self, database_path="database/nt", program="blastn"):
         self.database_path = database_path
+        self.program = program
         try:
-            self.blast_bin = str(ToolConfig.get_tool_path("blastn"))
+            self.blast_bin = str(ToolConfig.get_tool_path(program))
         except:
-            self.blast_bin = "blastn"
+            self.blast_bin = program
 
     def check_blast_installation(self):
         """
@@ -44,16 +45,23 @@ class LocalBlastExecutor:
         print("方法二：从NCBI网站下载")
         print(f"  https://ftp.ncbi.nih.gov/blast/db/")
 
-    def execute_local_blast(self, sequence_file, output_file, max_hits=50):
-        """执行本地BLAST搜索"""
-        if not self.check_blast_installation():
-            raise FileNotFoundError(f"未找到BLAST可执行文件: {self.blast_bin}")
+    def execute_local_blast(self, sequence_file, output_file, max_hits=50, program=None):
+        """执行本地BLAST搜索，支持 blastn/blastp 等多种程序"""
+        # 允许每次调用时覆盖程序类型
+        active_program = program or self.program
+        try:
+            active_bin = str(ToolConfig.get_tool_path(active_program))
+        except Exception:
+            active_bin = active_program
+
+        if not shutil.which(active_bin):
+            raise FileNotFoundError(f"未找到BLAST可执行文件: {active_bin}")
 
         if not Path(sequence_file).exists():
              raise FileNotFoundError(f"序列文件不存在: {sequence_file}")
 
         # 核心优化：使用短路径解决 Windows 空格与内存映射问题
-        bin_path = get_short_path_name(self.blast_bin)
+        bin_path = get_short_path_name(active_bin)
         
         # 将输入输出文件转为绝对路径后取短路径
         abs_in = str(Path(sequence_file).resolve())

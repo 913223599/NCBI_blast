@@ -132,15 +132,14 @@ class BlastEngine:
         if not to_process:
             return
 
-        # [优化] 只有当序列总数超过上限时才进行任务分片，小批量任务优先打包为一个请求
-        batch_size = self.MAX_BATCH_SIZE # 默认为 10
+        # [优化] 只有当序列总数超过上限时才进行任务分片
+        batch_size = self.MAX_BATCH_SIZE 
         
         batches = []
         current_batch = []
         current_char_count = 0
         for seq in to_process:
             seq_len = len(seq.get('sequence', ''))
-            # 使用动态计算的 batch_size
             if len(current_batch) >= batch_size or (current_char_count + seq_len) > self.BATCH_CHAR_LIMIT:
                 if current_batch: batches.append(current_batch)
                 current_batch = [seq]
@@ -150,7 +149,9 @@ class BlastEngine:
                 current_char_count += seq_len
         if current_batch: batches.append(current_batch)
 
-        executor = ThreadPoolExecutor(max_workers=max_threads)
+        # 🚀 提速：增加并发数到 4，减少由于串行等待 NCBI 响应造成的延迟
+        final_max_workers = max(max_threads, 4)
+        executor = ThreadPoolExecutor(max_workers=final_max_workers)
         try:
             futures = []
             for batch in batches:
@@ -189,7 +190,6 @@ class BlastEngine:
         prog = ('blastp' if detected_type == 'protein' else 'blastn') if auto_prog == 'auto' else auto_prog
         db = self.settings.get('database')
         
-        # 自动化库切换 (保持原逻辑)
         if prog == 'blastp' and db == 'nt' and auto_prog == 'auto': db = 'nr'
         elif prog == 'blastn' and db == 'nr' and auto_prog == 'auto': db = 'nt'
         if not db: db = 'nr' if 'p' in prog else 'nt'
@@ -215,6 +215,14 @@ class BlastEngine:
             xml_content = handle.read()
             handle.close()
             
+            # ✨ [加速核心1] 每个 Batch 只写一次原始 XML，避免对同一个大文件进行 10 次冗余写入
+            batch_xml_path = self.results_dir / "xml_raw" / f"batch_{int(time.time())}.xml"
+            try:
+                with open(batch_xml_path, 'w', encoding='utf-8') as f_xml:
+                    f_xml.write(xml_content)
+            except Exception as xml_err:
+                logger.warning(f"Failed to save batch XML: {xml_err}")
+
             from Bio.Blast import NCBIXML
             records = NCBIXML.parse(io.StringIO(xml_content))
             
@@ -229,21 +237,12 @@ class BlastEngine:
                 query_str = orig_seq.get('sequence', '')
                 safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', sid)
                 
-                # 计算 MD5 指纹以便于连接进化树模块
                 seq_hash = get_annotation_manager().generate_hash(query_str)
                 
                 # 保存结果
                 csv_path = self.results_dir / "reports" / f"{safe_id}.csv"
                 results_data = list(self.parser.parse_single_record(record))
                 self.converter.save_parsed_to_csv(results_data, str(csv_path))
-
-                # 保存原始 XML 以供可视化查阅
-                batch_xml_path = self.results_dir / "xml_raw" / f"batch_{int(time.time())}_{i}.xml"
-                try:
-                    with open(batch_xml_path, 'w', encoding='utf-8') as f_xml:
-                        f_xml.write(xml_content)
-                except Exception as xml_err:
-                    logger.warning(f"Failed to save batch XML: {xml_err}")
 
                 results.append({
                     "task_id": self.task_id,

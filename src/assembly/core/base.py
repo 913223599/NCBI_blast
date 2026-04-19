@@ -59,3 +59,43 @@ class BaseAssemblyStep(abc.ABC):
         path = self.context.base_dir / self.__class__.__name__.lower()
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    async def get_best_wsl_tmp_dir(self, required_gb: float = 5.0) -> str:
+        """
+        🚀 智能内存/硬盘路由逻辑
+        根据需要的空间大小，决策在 /dev/shm (内存盘) 还是 /tmp (原生硬盘) 执行
+        """
+        if not self.context.is_wsl:
+            return str(self.get_working_dir()).replace("\\", "/")
+
+        tmp_root = "/tmp"
+        try:
+            # 1. 尝试扩容内存盘 (仅在第一次调用时或必要时尝试，需要 root 权限，WSL runner 默认具备)
+            # 我们直接尝试将其上限设为 40G (针对用户 48G 内存)
+            await self.runner.run_command(["mount", "-o", "remount,size=40G", "/dev/shm"], is_shell=True)
+            
+            # 2. 探测当前剩余空间
+            out = []
+            def collect(line): out.append(line)
+            await self.runner.run_command(["df", "-k", "/dev/shm"], is_shell=True, on_output=collect)
+            
+            # 解析 df -k 输出 (通常第二行是数据)
+            # Filesystem     1K-blocks  Used Available Use% Mounted on
+            # tmpfs           41943040     4  41943036   1% /dev/shm
+            for line in out:
+                if "/dev/shm" in line:
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        avail_kb = int(parts[3])
+                        avail_gb = avail_kb / (1024 * 1024)
+                        if avail_gb >= required_gb:
+                            tmp_root = "/dev/shm"
+                            self.logger.info(f"⚡ 内存盘空间充足 ({avail_gb:.1f}G > {required_gb}G)，激活内存首选模式")
+                        else:
+                            self.logger.warn(f"🐢 内存盘空闲不足 ({avail_gb:.1f}G < {required_gb}G)，降级至原生 EXT4 存储")
+                    break
+        except Exception as e:
+            self.logger.warn(f"内存盘探测异常: {e}，默认使用 /tmp")
+
+        wsl_tmp_path = f"{tmp_root}/asm_{self.context.task_id}_{self.__class__.__name__.lower()}"
+        return wsl_tmp_path
