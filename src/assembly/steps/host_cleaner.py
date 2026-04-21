@@ -78,6 +78,13 @@ class HostCleanerStep(BaseAssemblyStep):
         ret = await self.runner.run_command(restore_cmd)
         
         if ret == 0 and filtered_r1.exists():
+            if self.on_progress: self.on_progress(95, "正在执行垃圾回收 (销毁临时映射 BAM)...")
+            # ♻️ 核心 GC: 立刻销毁数百 GB 的巨无霸对齐 BAM，仅保留提纯的 Reads
+            try:
+                bam_file.unlink(missing_ok=True)
+            except Exception as e:
+                self.logger.warning(f"无法清理残留文件 {bam_file}: {e}")
+                
             if self.on_progress: self.on_progress(100, "宿主剔除已完成")
             self.context.update("clean_r1", filtered_r1)
             self.context.update("clean_r2", filtered_r2)

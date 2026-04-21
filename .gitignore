@@ -121,3 +121,11 @@ validation_audit_res.json
 
 # Generated virtual directories
 __pyrefly_virtual__/
+
+# ================================
+# 🔐 安全敏感文件 (含 API 密钥，绝不提交)
+# ================================
+config.json
+.env
+.env.*
+*.secret

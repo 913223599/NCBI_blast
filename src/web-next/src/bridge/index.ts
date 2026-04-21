@@ -88,16 +88,15 @@ function getBridge() {
 /** 全局事件转发 */
 function onEvent(handler: (eventType: string, data: any) => void): () => void {
     if (_cachedBridge) {
-        if (isElectronEnvironment()) return electronOnEvent(handler);
-        return () => {};
+        // 允许所有桥接模式尝试监听事件。
+        // electron-bridge.ts 的 onEvent 实现在非 Electron 环境下通过 WebSocket 工作。
+        return electronOnEvent(handler);
     }
     
     // 如果桥接没好，先存起来
     let cleanup: any = null;
-    _readyCallbacks.push((bridge) => {
-        if (isElectronEnvironment()) {
-            cleanup = electronOnEvent(handler);
-        }
+    _readyCallbacks.push(() => {
+        cleanup = electronOnEvent(handler);
     });
     
     return () => { if (cleanup) cleanup(); };

@@ -13,7 +13,8 @@ class AssemblyDB:
     AssemblyDB - 负责任务元数据的持久化存储与历史追溯
     单一职责：管理任务在 SQLite 中的状态记录
     """
-    DB_PATH = Path("database/assembly.db")
+    # 使用 __file__ 计算绝对路径，避免依赖运行时 CWD
+    DB_PATH = Path(__file__).resolve().parent.parent.parent.parent / "database" / "assembly.db"
 
     def __init__(self):
         self.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -49,6 +50,9 @@ class AssemblyDB:
             if 'duration_seconds' not in columns:
                 logger.info("🛠️ 正在迁移数据库: 添加 duration_seconds 列...")
                 conn.execute('ALTER TABLE assembly_tasks ADD COLUMN duration_seconds REAL')
+            
+            # 3. 开启 WAL 模式，防止多 Worker 并发写入时 "database is locked"
+            conn.execute("PRAGMA journal_mode=WAL")
             
             conn.commit()
 

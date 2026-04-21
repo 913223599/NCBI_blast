@@ -159,14 +159,16 @@ async def lifespan(app: FastAPI):
         from ..utils.translation.translation_data_manager import get_translation_data_manager
         get_translation_data_manager().prepare_shutdown()
         logger.info("资源已安全回收")
-    except: pass
+    except Exception as e:
+        logger.warning(f"翻译库关闭失败: {e}")
     
     # D. 清理数据库连接池
     try:
         from .strain_db import get_strain_db_manager
         get_strain_db_manager().cleanup()
         logger.info("StrainDB 连接池已清理")
-    except: pass
+    except Exception as e:
+        logger.warning(f"StrainDB 清理失败: {e}")
 
     # E. 清理 WSL 运行环境 (释放内存与后台进程)
     try:
@@ -174,7 +176,8 @@ async def lifespan(app: FastAPI):
         if WSLManager.is_available():
             logger.info("正在关闭 WSL (Ubuntu) 分发版以释放内存...")
             WSLManager.shutdown_distro()
-    except: pass
+    except Exception as e:
+        logger.warning(f"WSL 关闭失败: {e}")
 
 def _on_blast_result(task_id: str, data: dict):
     """处理 BLAST 实时任务结果的回调钩子"""
@@ -202,7 +205,8 @@ def _on_blast_result(task_id: str, data: dict):
                     last_known_id=data.get('sequence_id'),
                     blast_identity=name
                 )
-        except: pass
+        except Exception as cb_e:
+            logger.debug(f"标注回调失败 (skip): {cb_e}")
 
 # ─── 5. 应用实例化与路由挂载 ────────────────────────────
 app = FastAPI(title="NCBI Bio-Station API", lifespan=lifespan)

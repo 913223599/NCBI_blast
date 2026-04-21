@@ -12,8 +12,8 @@ class AssemblyStorage:
     遵循单一职责原则，处理所有与文件存储相关的物理操作
     """
     
-    # 基础存储路径
-    BASE_DIR = Path("results/assembly")
+    # 基础存储路径 (使用 __file__ 确保不依赖运行时 CWD)
+    BASE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "results" / "assembly"
 
     @classmethod
     def get_task_dir(cls, task_id: str) -> Path:

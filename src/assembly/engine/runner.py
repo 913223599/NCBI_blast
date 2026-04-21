@@ -30,9 +30,11 @@ class CommandRunner:
                           cwd: Optional[Path] = None,
                           env: Optional[Dict[str, str]] = None,
                           on_output: Optional[Callable[[str], None]] = None,
-                          is_shell: bool = False) -> int:
+                          is_shell: bool = False,
+                          timeout: Optional[float] = 14400.0) -> int:
         """
         执行命令并持续监控输出 (支持 WSL 自动转换)
+        :param timeout: 最长等待秒数，默认 4 小时。设为 None 则无限等待（不推荐）。
         """
         if self.is_wsl:
             from ..env.wsl_manager import WSLManager
@@ -50,8 +52,6 @@ class CommandRunner:
             
             # 2. 封装为 WSL 命令
             if is_shell:
-                # 管道模式：使用 bash -c
-                # 💡 关键修复：内部参数使用单引号，避免与外部 bash -c 的双引号产生转义冲突
                 shell_parts = []
                 for c in final_cmd_args:
                     c_str = str(c)
@@ -64,8 +64,6 @@ class CommandRunner:
                 cmd_to_exec = ["wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", shell_str]
                 use_shell = False 
             else:
-                # 💡 关键修复：非 shell 模式下严禁手动加引号！
-                # subprocess_exec 会自动处理参数中的空格。
                 cmd_to_exec = ["wsl", "-d", "Ubuntu", "-u", "root"] + [str(c) for c in final_cmd_args]
                 use_shell = False
             cwd_to_exec = None 
@@ -80,7 +78,8 @@ class CommandRunner:
 
         start_time = time.time()
         display_cmd = cmd_to_exec if isinstance(cmd_to_exec, str) else " ".join(cmd_to_exec)
-        self.logger.info(f"开始执行: {display_cmd}")
+        timeout_desc = f"{timeout/3600:.1f}h" if timeout else "无限制"
+        self.logger.info(f"开始执行 (超时: {timeout_desc}): {display_cmd}")
 
         try:
             if use_shell:
@@ -108,7 +107,6 @@ class CommandRunner:
                     try:
                         line = await stream.readline()
                         if line:
-                            # ⚠️ 修复点: 强制 utf-8 且 ignore 错误字符
                             decoded_line = line.decode('utf-8', errors='ignore').strip()
                             if on_output:
                                 on_output(decoded_line)
@@ -120,12 +118,28 @@ class CommandRunner:
                         self.logger.error(f"读取流时出错: {str(e)}")
                         break
 
-            await asyncio.gather(
-                read_stream(process.stdout, False),
-                read_stream(process.stderr, True)
-            )
+            async def _run():
+                await asyncio.gather(
+                    read_stream(process.stdout, False),
+                    read_stream(process.stderr, True)
+                )
+                return await process.wait()
 
-            returncode = await process.wait()
+            try:
+                returncode = await asyncio.wait_for(_run(), timeout=timeout)
+            except asyncio.TimeoutError:
+                self.logger.error(
+                    f"⏰ 命令执行超时 ({timeout_desc})，强制终止: {display_cmd[:120]}"
+                )
+                try:
+                    process.terminate()
+                    await asyncio.sleep(1)
+                    if process.returncode is None:
+                        process.kill()
+                except Exception:
+                    pass
+                return -9  # 约定超时返回 -9
+
             self.current_process = None
             duration = time.time() - start_time
             
@@ -139,3 +153,4 @@ class CommandRunner:
         except Exception as e:
             self.logger.error(f"子进程启动失败: {str(e)}")
             return -1
+

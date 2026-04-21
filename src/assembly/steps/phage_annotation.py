@@ -4,7 +4,9 @@ import re
 import shutil
 import logging
 from pathlib import Path
+from typing import Dict, Any, Optional, List
 from ..core.base import BaseAssemblyStep
+from ...workbench.models.tool_config import ToolConfig
 
 logger = logging.getLogger("Assembly.PhageAnnotationStep")
 
@@ -204,21 +206,51 @@ class PhageAnnotationStep(BaseAssemblyStep):
             except Exception as e:
                 logger.warning(f"[Annotation] 圈图渲染过程发生异常: {e}")
 
-            # 🔗 8. 深度挖掘 PhageScope 元数据 (Lifestyle, Host, Safety, Anti-CRISPR)
-            if self.on_progress: self.on_progress(98, "正在启动 PhageScope 五重维度深度审计...")
+            # 🔗 8. 安全性审计 — 双层架构
+            if self.on_progress: self.on_progress(97, "正在执行安全性审计 (直接检测 + 参考推断)...")
             try:
+                # ─── Tier 1: 直接扫描用户 CDS 注释 (基于实际序列的证据) ───
+                anno_tsv = next(win_pharokka_out.rglob("Integrated_Final_Annotations.tsv"), None)
+                direct_scan = self._direct_safety_scan(anno_tsv)
+
+                # ─── Tier 2: PhageScope 参考元数据查表 (辅助推断) ───
                 mash_hit_file = win_pharokka_out / "PHAGE_top_hits_mash_inphared.tsv"
-                audit_data = self._mine_phagescope_metadata(mash_hit_file)
-                self.context.update("phagescope_audit", audit_data)
+                ref_audit = self._mine_phagescope_metadata(mash_hit_file)
+
+                # ─── Tier 3: 深度宿主溯源挖掘 (基于 300万+ 序列指纹库) ───
+                host_results = await self._deep_host_prediction(win_work_path / "assembly.fasta", threads)
+                self.context.update("host_prediction", host_results)
+
+                # ─── 基于全基因组 Prophage 比对，判定噬菌体生活史 (Temperate 判断) ───
+                has_strong_prophage = False
+                for hit in host_results.get("top_hits", []):
+                    if "Prophage" in hit.get("db_source", "") and hit.get("confidence") == "High":
+                        has_strong_prophage = True
+                        break
                 
+                if has_strong_prophage:
+                    ref_audit["lifestyle"] = "Temperate (Provirus - High Confidence)"
+
+                # ─── 合并分析结果 ───
+                audit_data = self._merge_safety_audit(direct_scan, ref_audit)
+                
+                # 注入深度宿主预测至最终审计字典 (用于报告生成)
+                audit_data["host_prediction_enhanced"] = host_results
+                self.context.update("phagescope_audit", audit_data)
+
                 # 同步分类信息
                 existing_class = self.context.get("classification") or {}
                 existing_class.update(audit_data.get("taxonomy_info", {}))
                 self.context.update("classification", existing_class)
-                
-                logger.info(f"✅ PhageScope 深度审计完成：Lifestyle={audit_data['lifestyle']}, Safety={audit_data['safety_status']}")
+
+                logger.info(
+                    f"✅ 安全审计完成: "
+                    f"直接检测 AMR={len(direct_scan.get('amr_genes',[]))} VF={len(direct_scan.get('virulent_factors',[]))} "
+                    f"ACR={direct_scan.get('anti_crispr','N/A')} | "
+                    f"Safety={audit_data['safety_status']}"
+                )
             except Exception as e:
-                logger.warning(f"[Annotation] PhageScope advanced mining failed: {e}")
+                logger.warning(f"[Annotation] Safety audit failed: {e}")
 
             # 🔗 8.5 自动化硬核生信指标审计 (GC%, Density, tRNA Details)
             if self.on_progress: self.on_progress(99, "正在计算硬核生信指标 (GC%, 基因密度, tRNA 谱系)...")
@@ -265,6 +297,267 @@ class PhageAnnotationStep(BaseAssemblyStep):
 
         self.status = "failed"
         return False
+    def _direct_safety_scan(self, annotation_tsv: Path) -> dict:
+        """
+        Tier 1: 基于序列比对的安全性直接检测。
+        从用户注释结果提取 CDS 蛋白序列，blastp 比对本地 PhageScope 蛋白库
+        (phagescope_proteins, 105万条序列)，然后将命中蛋白 ID 交叉查询
+        AMR/VF/Anti-CRISPR 元数据表，判定安全性。
+        """
+        import csv
+        import subprocess
+
+        result = {
+            "amr_genes": [],
+            "virulent_factors": [],
+            "anti_crispr": "Not Detected",
+            "anti_crispr_genes": [],
+            "lysogeny_markers": [],
+        }
+
+        if not annotation_tsv or not annotation_tsv.exists():
+            logger.warning("[SafetyScan] 注释文件未找到，跳过直接安全检测")
+            return result
+
+        # ─── 1. 从注释结果提取 CDS 蛋白序列 ───
+        query_faa = annotation_tsv.parent / "query_proteins.faa"
+        try:
+            n_proteins = 0
+            with open(annotation_tsv, "r", encoding="utf-8") as f_in, \
+                 open(query_faa, "w", encoding="utf-8") as f_out:
+                reader = csv.DictReader(f_in, delimiter="\t")
+                for row in reader:
+                    if row.get("Type") == "CDS" and row.get("Translation"):
+                        cds_id = row.get("ID", f"CDS_{n_proteins}")
+                        product = row.get("Product", "")
+                        f_out.write(f">{cds_id} {product}\n{row['Translation']}\n")
+                        n_proteins += 1
+            logger.info(f"[SafetyScan] 提取 {n_proteins} 条 CDS 蛋白序列")
+        except Exception as e:
+            logger.warning(f"[SafetyScan] 蛋白序列提取失败: {e}")
+            return result
+
+        if n_proteins == 0:
+            return result
+
+        # ─── 2. 定位本地 PhageScope 蛋白库 ───
+        project_root = Path(self.context.get("project_dir", os.getcwd())).resolve()
+        phagescope_db = project_root / "database" / "phagescope"
+        blast_db = phagescope_db / "phagescope_proteins"
+        meta_base = phagescope_db / "metadata"
+
+        # 检查 BLAST 索引是否存在
+        if not blast_db.with_suffix(".psq").exists():
+            logger.warning(f"[SafetyScan] PhageScope BLAST 数据库不存在: {blast_db}.psq")
+            return result
+
+        # ─── 3. 构建安全蛋白 ID 索引 (从元数据表) ───
+        amr_index = {}   # protein_id -> CARD hit description
+        vf_index = {}    # protein_id -> VFDB hit description
+        acr_index = {}   # protein_id -> source
+
+        for tsv_file in (meta_base / "amr").glob("*.tsv"):
+            try:
+                with open(tsv_file, encoding="utf-8") as mf:
+                    for row in csv.DictReader(mf, delimiter="\t"):
+                        pid = row.get("Protein_id", "")
+                        if pid:
+                            amr_index[pid] = row.get("Aligned_Protein_in_CARD", "")
+            except Exception:
+                pass
+
+        for tsv_file in (meta_base / "virulent_factor").glob("*.tsv"):
+            try:
+                with open(tsv_file, encoding="utf-8") as mf:
+                    for row in csv.DictReader(mf, delimiter="\t"):
+                        pid = row.get("Protein_id", "")
+                        if pid:
+                            vf_index[pid] = row.get("Aligned_Protein_in_VFDB", "")
+            except Exception:
+                pass
+
+        for tsv_file in (meta_base / "anti_crispr").glob("*.tsv"):
+            try:
+                with open(tsv_file, encoding="utf-8") as mf:
+                    for row in csv.DictReader(mf, delimiter="\t"):
+                        pid = row.get("Protein_ID", "")
+                        if pid:
+                            acr_index[pid] = row.get("Source", "")
+            except Exception:
+                pass
+
+        logger.info(
+            f"[SafetyScan] 安全蛋白索引: AMR={len(amr_index)}, "
+            f"VF={len(vf_index)}, ACR={len(acr_index)}"
+        )
+
+        # ─── 4. blastp 比对 PhageScope 蛋白库 ───
+        def to_wsl(p: Path) -> str:
+            s = str(p.resolve()).replace("\\", "/")
+            if len(s) >= 2 and s[1] == ":":
+                return f"/mnt/{s[0].lower()}/{s[2:].lstrip('/')}"
+            return s
+
+        out_file = annotation_tsv.parent / "phagescope_blast_hits.tsv"
+        wsl_db_dir = to_wsl(phagescope_db)
+        wsl_query = to_wsl(query_faa)
+        wsl_out = to_wsl(out_file)
+
+        # BLAST -db 不支持路径中的空格，通过 symlink 解决
+        blast_script = (
+            f'ln -sf "{wsl_db_dir}" /tmp/phagescope_db && '
+            f'blastp '
+            f'-query "{wsl_query}" '
+            f'-db /tmp/phagescope_db/phagescope_proteins '
+            f'-out "{wsl_out}" '
+            f'-outfmt "6 qseqid sseqid pident length evalue bitscore" '
+            f'-evalue 1e-10 -max_target_seqs 5 -num_threads 4'
+        )
+        cmd = ["wsl", "-d", "Ubuntu", "--", "bash", "-c", blast_script]
+
+        try:
+            logger.info("[SafetyScan] 正在运行 blastp vs PhageScope 蛋白库 (105万条)...")
+            subprocess.run(cmd, timeout=300, capture_output=True, text=True)
+        except Exception as e:
+            logger.warning(f"[SafetyScan] blastp 运行异常: {e}")
+            return result
+
+        # ─── 5. 解析命中结果并交叉查询安全元数据 ───
+        if out_file.exists():
+            with open(out_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    cols = line.strip().split("\t")
+                    if len(cols) < 6:
+                        continue
+
+                    cds_id = cols[0]
+                    target_id = cols[1]  # PhageScope 蛋白 ID
+                    identity = float(cols[2])
+                    evalue = cols[4]
+                    bitscore = float(cols[5])
+
+                    hit_info = {
+                        "cds_id": cds_id,
+                        "target_id": target_id,
+                        "identity": identity,
+                        "evalue": evalue,
+                        "bitscore": bitscore,
+                        "evidence": "sequence_alignment",
+                    }
+
+                    # 交叉查询 AMR 表
+                    if target_id in amr_index:
+                        hit_info["description"] = amr_index[target_id]
+                        result["amr_genes"].append(hit_info)
+
+                    # 交叉查询 VF 表
+                    if target_id in vf_index:
+                        hit_info_vf = dict(hit_info)
+                        hit_info_vf["description"] = vf_index[target_id]
+                        result["virulent_factors"].append(hit_info_vf)
+
+                    # 交叉查询 Anti-CRISPR 表
+                    if target_id in acr_index:
+                        hit_info_acr = dict(hit_info)
+                        hit_info_acr["source"] = acr_index[target_id]
+                        result["anti_crispr_genes"].append(hit_info_acr)
+
+        if result["anti_crispr_genes"]:
+            n = len(result["anti_crispr_genes"])
+            result["anti_crispr"] = f"Detected ({n} Acr proteins)"
+
+        # ─── 6. 溶源性标志扫描 (从注释文本) ───
+        LYSOGENY_KEYWORDS = [
+            "integrase", "recombinase", "excisionase",
+            "repressor", "transposase", "lysogeny", "prophage",
+        ]
+        try:
+            with open(annotation_tsv, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter="\t")
+                for row in reader:
+                    text = " ".join([
+                        row.get("Product", ""),
+                        row.get("Function", ""),
+                    ]).lower()
+                    for kw in LYSOGENY_KEYWORDS:
+                        if kw in text:
+                            result["lysogeny_markers"].append({
+                                "cds_id": row.get("ID", "?"),
+                                "product": row.get("Product", ""),
+                                "keyword": kw,
+                            })
+                            break
+        except Exception:
+            pass
+
+        logger.info(
+            f"[SafetyScan] 序列比对检测完成: "
+            f"AMR={len(result['amr_genes'])}, "
+            f"VF={len(result['virulent_factors'])}, "
+            f"ACR={len(result['anti_crispr_genes'])}, "
+            f"Lysogeny={len(result['lysogeny_markers'])}"
+        )
+        return result
+
+    def _merge_safety_audit(self, direct: dict, reference: dict) -> dict:
+        """
+        合并双层审计结果:
+        - direct: Tier 1 直接检测 (基于用户 CDS 注释, 高置信)
+        - reference: Tier 2 参考推断 (基于 PhageScope 元数据, 辅助)
+
+        直接检测结果优先级高于参考推断。
+        """
+        merged = dict(reference)  # 以参考数据为基础 (含 taxonomy, lifestyle 等)
+
+        # ─── AMR: 直接检测优先 ───
+        direct_amr = direct.get("amr_genes", [])
+        ref_amr = reference.get("amr_genes", [])
+        merged["amr_genes_direct"] = direct_amr
+        merged["amr_genes_reference"] = ref_amr
+        # 合并为统一列表
+        merged["amr_genes"] = direct_amr if direct_amr else ref_amr
+
+        # ─── VF: 直接检测优先 ───
+        direct_vf = direct.get("virulent_factors", [])
+        ref_vf = reference.get("virulent_factors", [])
+        merged["virulent_factors_direct"] = direct_vf
+        merged["virulent_factors_reference"] = ref_vf
+        merged["virulent_factors"] = direct_vf if direct_vf else ref_vf
+
+        # ─── Anti-CRISPR: 直接检测优先 ───
+        direct_acr = direct.get("anti_crispr", "Not Detected")
+        ref_acr = reference.get("anti_crispr", "Not Detected")
+        if "Detected" in str(direct_acr):
+            merged["anti_crispr"] = direct_acr
+            merged["anti_crispr_evidence"] = "direct"
+        elif "Detected" in str(ref_acr):
+            merged["anti_crispr"] = ref_acr
+            merged["anti_crispr_evidence"] = "reference"
+        else:
+            merged["anti_crispr"] = "Not Detected"
+            merged["anti_crispr_evidence"] = "none"
+
+        # ─── 溶源性标志 ───
+        merged["lysogeny_markers"] = direct.get("lysogeny_markers", [])
+
+        # ─── 综合安全评级 ───
+        has_amr = bool(merged["amr_genes"])
+        has_vf = bool(merged["virulent_factors"])
+        has_acr = "Detected" in str(merged["anti_crispr"])
+        has_lysogeny = bool(merged["lysogeny_markers"])
+
+        if has_amr and has_vf:
+            merged["safety_status"] = "Caution (AMR + VF Detected)"
+        elif has_amr:
+            merged["safety_status"] = "Warning (AMR Detected)"
+        elif has_vf:
+            merged["safety_status"] = "Warning (VF Detected)"
+        elif has_lysogeny:
+            merged["safety_status"] = "Review (Lysogeny Markers Found)"
+        else:
+            merged["safety_status"] = "Secure (Clear)"
+
+        return merged
 
     def _mine_phagescope_metadata(self, mash_hit_path: Path) -> dict:
         """多维挖掘 PhageScope 专家知识库"""
@@ -325,31 +618,60 @@ class PhageAnnotationStep(BaseAssemblyStep):
                     if audit["lifestyle"] != "Unknown": break
 
             # 3. 抗生素耐药 (AMR) 审计
-            amr_p = meta_base / "amr" / "amr_meta_data.tsv"
-            if amr_p.exists():
-                with open(amr_p, "r", encoding="utf-8") as mf:
-                    for line in mf:
-                        if top_id in line:
-                            audit["amr_genes"].append(line.split("\t")[-1].strip())
-                            audit["safety_status"] = "Warning (AMR Detected)"
+            # 实际文件: Genbank_antimicrobial_resistance_gene_data.tsv, RefSeq_...
+            # 表结构: Protein_id | Aligned_Protein_in_CARD | Phage_id | Phage_Source
+            amr_dir = meta_base / "amr"
+            if amr_dir.exists():
+                for amr_file in amr_dir.glob("*.tsv"):
+                    try:
+                        with open(amr_file, "r", encoding="utf-8") as mf:
+                            reader = csv.DictReader(mf, delimiter="\t")
+                            for row in reader:
+                                if row.get("Phage_id") == top_id:
+                                    hit = row.get("Aligned_Protein_in_CARD", "")
+                                    audit["amr_genes"].append(hit)
+                                    audit["safety_status"] = "Warning (AMR Detected)"
+                    except Exception as e:
+                        logger.debug(f"[PhageScope] AMR scan {amr_file.name}: {e}")
 
             # 4. 毒力因子 (VF) 审计
-            vf_p = meta_base / "virulent_factor" / "virulent_factor_meta_data.tsv"
-            if vf_p.exists():
-                with open(vf_p, "r", encoding="utf-8") as mf:
-                    for line in mf:
-                        if top_id in line:
-                            audit["virulent_factors"].append(line.split("\t")[-1].strip())
-                            audit["safety_status"] = "Warning (VF Detected)" if "Warning" not in audit["safety_status"] else "Caution (AMR+VF)"
+            # 实际文件: Genbank_virulent_factor_data.tsv, RefSeq_...
+            # 表结构: Protein_id | Aligned_Protein_in_VFDB | Phage_id | Phage_Source
+            vf_dir = meta_base / "virulent_factor"
+            if vf_dir.exists():
+                for vf_file in vf_dir.glob("*.tsv"):
+                    try:
+                        with open(vf_file, "r", encoding="utf-8") as mf:
+                            reader = csv.DictReader(mf, delimiter="\t")
+                            for row in reader:
+                                if row.get("Phage_id") == top_id:
+                                    hit = row.get("Aligned_Protein_in_VFDB", "")
+                                    audit["virulent_factors"].append(hit)
+                                    if "Warning" not in audit["safety_status"]:
+                                        audit["safety_status"] = "Warning (VF Detected)"
+                                    else:
+                                        audit["safety_status"] = "Caution (AMR+VF)"
+                    except Exception as e:
+                        logger.debug(f"[PhageScope] VF scan {vf_file.name}: {e}")
 
             # 5. Anti-CRISPR 检测
-            acr_p = meta_base / "anti_crispr" / "anti_crispr_meta_data.tsv"
-            if acr_p.exists():
-                with open(acr_p, "r", encoding="utf-8") as mf:
-                    for line in mf:
-                        if top_id in line:
-                            audit["anti_crispr"] = "Detected (Acr System Found)"
-                            break
+            # 实际文件: genbank_phage_anticrispr_protein_meta_data.tsv, refseq_..., phagesdb_...
+            # 表结构: Phage_ID | Protein_ID | Source | Phage_source
+            acr_dir = meta_base / "anti_crispr"
+            acr_proteins = []
+            if acr_dir.exists():
+                for acr_file in acr_dir.glob("*.tsv"):
+                    try:
+                        with open(acr_file, "r", encoding="utf-8") as mf:
+                            reader = csv.DictReader(mf, delimiter="\t")
+                            for row in reader:
+                                if row.get("Phage_ID") == top_id:
+                                    acr_proteins.append(row.get("Protein_ID", ""))
+                    except Exception as e:
+                        logger.debug(f"[PhageScope] ACR scan {acr_file.name}: {e}")
+            if acr_proteins:
+                audit["anti_crispr"] = f"Detected ({len(acr_proteins)} Acr proteins)"
+                audit["anti_crispr_proteins"] = acr_proteins
 
             # 6. [新增] 蛋白深层理化与功能分类挖掘 (Deep Protein Audit)
             logger.info(f"[PhageScope] 正在为 {top_id} 提取深层蛋白功能谱...")
@@ -385,6 +707,201 @@ class PhageAnnotationStep(BaseAssemblyStep):
             logger.warning(f"[PhageScope Audit] Process error: {e}")
             
         return audit
+
+    async def _deep_host_prediction(self, fasta_path: Path, threads: int) -> dict:
+        """
+        基于分块 Mash 库的低内存宿主指认
+        策略：先查小库(Phage 17K)，再逐块查大库(Prophage chunk_*.msh)
+        每块查完释放内存，峰值内存控制在 ~3GB
+        """
+        result = {
+            "top_hits": [],
+            "status": "No database found",
+            "source": "Local Phage/Prophage Chunked Fingerprints"
+        }
+
+        db_dir = ToolConfig.DATABASE_ROOT
+        from ..env.wsl_manager import WSLManager
+        safe_fasta = WSLManager.to_wsl_path(str(fasta_path))
+
+        # 构建数据库列表：小库 + 分块大库
+        dbs = []
+        small_db = db_dir / "Phage.17770sequence.fasta.gz.msh"
+        if small_db.exists():
+            dbs.append(("Phage.17K", small_db))
+
+        # 自动发现分块索引 (chunk_01.msh ~ chunk_XX.msh)
+        chunk_files = sorted(db_dir.glob("chunk_*.msh"))
+        for cf in chunk_files:
+            dbs.append((f"Prophage.{cf.stem}", cf))
+
+        # 兼容旧版：如果没有分块但有完整大库，退回使用完整库
+        if not chunk_files:
+            full_db = db_dir / "Prophage.3281395sequence.fasta.gz.msh"
+            if full_db.exists():
+                dbs.append(("Prophage.Full", full_db))
+
+        if not dbs:
+            return result
+
+        all_hits = []
+        total_dbs = len(dbs)
+        for idx, (db_name, db_path) in enumerate(dbs, 1):
+            safe_db = WSLManager.to_wsl_path(str(db_path))
+            cmd = ["mash", "dist", "-p", str(threads), safe_db, safe_fasta]
+
+            if self.on_progress:
+                self.on_progress(
+                    97, f"Host prediction: querying {db_name} ({idx}/{total_dbs})..."
+                )
+            logger.info(f"[HostPred] Chunk {idx}/{total_dbs}: {db_name}")
+
+            output = []
+            def capture_out(line): output.append(line)
+
+            ret = await self.runner.run_command(cmd, on_output=capture_out)
+            if ret == 0:
+                # 只保留每个块的 Top 20（避免内存膨胀）
+                chunk_hits = []
+                for line in output:
+                    cols = line.strip().split("\t")
+                    if len(cols) >= 5:
+                        try:
+                            dist = float(cols[2])
+                        except ValueError:
+                            continue
+                        if dist < 0.10:
+                            # 估算置信度: distance < 0.05 -> High, < 0.10 -> Med
+                            if dist < 0.05:
+                                conf_level = "High"
+                            else:
+                                conf_level = "Medium"
+                                
+                            chunk_hits.append({
+                                "accession": cols[0].split("|")[0].split(".")[0],
+                                "full_id": cols[0],
+                                "distance": dist,
+                                "similarity": f"{(1.0 - dist)*100:.2f}%",
+                                "confidence": conf_level,
+                                "p_value": cols[3],
+                                "hashes": cols[4],
+                                "db_source": db_name
+                            })
+                # 每块只取前 20，释放余下数据
+                chunk_hits.sort(key=lambda x: x["distance"])
+                all_hits.extend(chunk_hits[:20])
+                del output, chunk_hits
+
+            logger.info(f"[HostPred] Chunk {idx}/{total_dbs} done, cumulative hits: {len(all_hits)}")
+
+        if not all_hits:
+            result["status"] = "No significant match found"
+            return result
+
+        # 全局排序，取前 50
+        all_hits.sort(key=lambda x: x["distance"])
+        top_candidates = all_hits[:50]
+
+        # 加载本地映射表补全描述
+        meta_cache = {}
+        for tsv_name in ["Phage.17770sequence.metadata.tsv", "Prophage.3281395sequence.metadata.tsv"]:
+            tsv_path = db_dir / tsv_name
+            if tsv_path.exists():
+                meta_cache[tsv_name] = tsv_path
+
+        for cand in top_candidates:
+            cand["description"] = "Unknown"
+            for tsv_name, tsv_path in meta_cache.items():
+                try:
+                    with open(tsv_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            if cand["full_id"] in line:
+                                parts = line.strip().split("\t")
+                                if len(parts) > 1 and parts[1] != "Unknown":
+                                    cand["description"] = parts[1]
+                                break
+                except Exception:
+                    pass
+                if cand["description"] != "Unknown":
+                    break
+
+        # 对前 15 名中仍为 Unknown 的进行 NCBI 在线嗅探
+        if self.on_progress:
+            self.on_progress(98, "Host prediction: resolving taxonomy via NCBI...")
+
+        for cand in top_candidates[:15]:
+            if cand["description"] == "Unknown":
+                ext_info = await self._silent_ncbi_fetch(cand["accession"])
+                if ext_info:
+                    cand["description"] = ext_info
+
+        result["top_hits"] = top_candidates[:10]
+        result["status"] = "Success"
+        return result
+
+    async def _silent_ncbi_fetch(self, accession: str) -> Optional[str]:
+        """
+        静默向 NCBI 索取物种描述元数据
+        支持 WGS accession（如 DAGGVC010000033）通过 nuccore 页面标题解析
+        """
+        import urllib.request
+        import json
+
+        # 方案 1: NCBI nuccore docsum 页面（对 WGS accession 最可靠）
+        try:
+            url = f"https://www.ncbi.nlm.nih.gov/nuccore/{accession}.1?report=docsum"
+            req = urllib.request.Request(url, headers={"User-Agent": "PhageScope/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as response:
+                html = response.read().decode("utf-8", errors="ignore")
+                # 页面 title 格式: "TPA_asm: Klebsiella pneumoniae strain XXX ..."
+                import re
+                title_match = re.search(r"<title>(?:TPA_asm:\s*)?(.+?)\s*-\s*(?:Nucleotide)?", html)
+                if title_match:
+                    title = title_match.group(1).strip()
+                    # 提取物种名（通常是前两个词: Genus species）
+                    words = title.split()
+                    if len(words) >= 2:
+                        organism = f"{words[0]} {words[1]}"
+                        return organism
+        except Exception:
+            pass
+
+        # 方案 2: Entrez esummary API
+        try:
+            search_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=nuccore&term={accession}&retmode=json"
+            with urllib.request.urlopen(search_url, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                uid_list = data.get("esearchresult", {}).get("idlist", [])
+                if uid_list:
+                    sum_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=nuccore&id={uid_list[0]}&retmode=json"
+                    with urllib.request.urlopen(sum_url, timeout=5) as resp2:
+                        summary = json.loads(resp2.read().decode())
+                        uid = uid_list[0]
+                        organism = summary.get("result", {}).get(uid, {}).get("organism")
+                        if organism:
+                            return organism
+        except Exception:
+            pass
+
+        # 方案 3: datasets CLI（如果系统安装了 NCBI datasets）
+        try:
+            cmd = ["datasets", "summary", "genome", "accession", accession, "--format", "json"]
+            output = []
+            def capture_out(line): output.append(line)
+            ret = await self.runner.run_command(cmd, on_output=capture_out)
+            if ret == 0:
+                data = json.loads("".join(output))
+                reports = data.get("reports", [])
+                if reports:
+                    org = reports[0].get("assembly_info", {}).get("biosample", {}).get("description", {}).get("organism", {})
+                    name = org.get("organism_name") or org.get("scientific_name")
+                    if name:
+                        return name
+        except Exception:
+            pass
+
+        return None
+
 
     async def _silent_backfill(self, gbk_path: Path, threads: int):
         """静默自动比对并回填注释 (使用本地 PhageScope 蛋白库)"""

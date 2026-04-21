@@ -262,12 +262,17 @@ export function useBlastResultHandler() {
     
     blast.results.forEach(hit => {
       if (!hit.translatedName) {
+        // [OPTIMIZATION] 始终把完整的 speciesName 加入翻译列表
+        // 这样后端可以利用其中的上下文（如共识百分比）进行整体重组，还原度更高
+        if (hit.speciesName && hit.speciesName !== 'Unknown') {
+          wordsToTranslate.add(hit.speciesName as string)
+        }
+
+        // 同时保留拆解翻译能力，以防某些行没有走共识算法路径
         if (hit.consensusList && hit.consensusList.length > 0) {
           hit.consensusList.forEach((c: any) => {
             if (c.name) wordsToTranslate.add(c.name)
           })
-        } else if (hit.speciesName) {
-          wordsToTranslate.add(hit.speciesName as string)
         }
       }
     })

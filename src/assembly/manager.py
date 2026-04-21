@@ -121,6 +121,7 @@ class AssemblyManager:
                     config.get("name", "New Task"), 
                     sample_id, 
                     sample_type, 
+                    config.get("tech", "NGS"),
                     config
                 )
         except Exception as e:
@@ -260,6 +261,32 @@ class AssemblyManager:
                     assembly_db.finalize_task(task_id, "error", {"failed_step": step_name})
                     return {"status": "failed", "step": step_name, "task_id": task_id}
             
+            # 🔗 终态垃圾清理 (Global Task Garbage Collection)
+            if config.get("auto_clean_intermediates", True):
+                self._report_progress(task_id, "资源回收", 99, "running")
+                self.logger.info("♻️ 流水线完结，正在清理测序中段缓存数据以保护物理磁盘空间...")
+                try:
+                    # 1. 销毁 Fastp 或 HostCleaner 留下的未过滤大块 FASTQ
+                    for k in ["clean_r1", "clean_r2"]:
+                        fpath = ctx.get(k)
+                        if fpath and Path(fpath).exists():
+                            Path(fpath).unlink(missing_ok=True)
+                            
+                    # 2. 销毁噬菌组智能深度采样 (Downsampling) 的副本
+                    sampling_dir = task_dir / "unicycler_run" / "sampling"
+                    if sampling_dir.exists():
+                        import shutil
+                        shutil.rmtree(sampling_dir, ignore_errors=True)
+                        
+                    # 3. 销毁 Fastp 原始过滤产物
+                    fastp_dir = task_dir / "fastp_filtered"
+                    if fastp_dir.exists():
+                        for f in fastp_dir.glob("*.fastq.gz"):
+                            f.unlink(missing_ok=True)
+                            
+                except Exception as gc_e:
+                    self.logger.warning(f"⚠️ 全局垃圾回收执行异常 (跳过): {gc_e}")
+
             self._report_progress(task_id, "COMPLETED", 100, "success")
             from src.backend.utils.assembly_db import assembly_db
             

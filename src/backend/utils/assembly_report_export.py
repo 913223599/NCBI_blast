@@ -76,17 +76,107 @@ class ReportExporter:
         # ─── 注释数据 ───
         all_genes = anno.get("phold", {}).get("predictions", [])
         cds_genes = [g for g in all_genes if g.get("type", "CDS") == "CDS"]
-        integrase_found = any(
-            "integrase" in (g.get("product") or "").lower()
-            for g in all_genes
-        )
-        repressor_found = any(
-            "repressor" in (g.get("product") or "").lower()
-            for g in all_genes
-        )
 
-        # 安全评级 — 从审计数据动态取
-        safety = audit.get("safety_verdict", audit.get("safety", "Pending Review"))
+        def _gene_text(g):
+            """合并 product + function 文本用于关键词搜索"""
+            return ((g.get("product") or "") + " " + (g.get("function") or "")).lower()
+
+        integrase_found = any("integrase" in _gene_text(g) for g in all_genes)
+        repressor_found = any("repressor" in _gene_text(g) for g in all_genes)
+        excisionase_found = any("excisionase" in _gene_text(g) for g in all_genes)
+
+        # ─── 安全审计数据 (双层架构) ───
+        safety = audit.get("safety_status", "Pending Review")
+
+        # AMR: 优先直接检测，其次参考推断
+        amr_direct = audit.get("amr_genes_direct", [])
+        amr_ref = audit.get("amr_genes_reference", [])
+        amr_list = audit.get("amr_genes", [])
+        if isinstance(amr_list, list) and amr_list:
+            amr_display = f"{len(amr_list)} 个检出"
+            amr_evidence = "blastp 序列比对" if amr_direct else "参考推断 (PhageScope)"
+        else:
+            amr_display = "未检出"
+            amr_evidence = ""
+
+        # VF: 优先直接检测，其次参考推断
+        vf_direct = audit.get("virulent_factors_direct", [])
+        vf_ref = audit.get("virulent_factors_reference", [])
+        vf_list = audit.get("virulent_factors", [])
+        if isinstance(vf_list, list) and vf_list:
+            vf_display = f"{len(vf_list)} 个检出"
+            vf_evidence = "blastp 序列比对" if vf_direct else "参考推断 (PhageScope)"
+        else:
+            vf_display = "未检出"
+            vf_evidence = ""
+
+        # Anti-CRISPR
+        acr_raw = audit.get("anti_crispr", "未检出")
+        acr_display = "未检出" if acr_raw in ("Not Detected", "None", None, "") else acr_raw
+        acr_evidence = audit.get("anti_crispr_evidence", "")
+        acr_evidence_zh = {"direct": "Diamond blastp 序列比对", "reference": "参考推断 (PhageScope)"}.get(acr_evidence, "")
+
+        # 溶源性标志 (来自直接检测)
+        lysogeny_markers = audit.get("lysogeny_markers", [])
+
+        # 宿主溯源 & 分类
+        host_origin = audit.get("host_origin", "--")
+        taxonomy = audit.get("taxonomy_info", {})
+        tax_name = taxonomy.get("top_hit_name", "--")
+        tax_class = taxonomy.get("Classification", "--")
+        tax_genus = taxonomy.get("Genus", "--")
+        tax_family = taxonomy.get("Family", "--")
+        tax_host = taxonomy.get("Host", host_origin)
+
+        # ─── 深度宿主指认 (Tier 3: 分块 Mash 比对) ───
+        host_enhanced = audit.get("host_prediction_enhanced", {})
+        host_hits = host_enhanced.get("top_hits", [])
+        host_matches_html = ""
+        if host_hits:
+            match_rows = []
+            for i, hit in enumerate(host_hits, 1):
+                sim_val = hit.get("similarity", "0%")
+                desc = hit.get("description", "Unknown Organism")
+                acc = hit.get("accession", "N/A")
+                dist = hit.get("distance", "--")
+                conf = hit.get("confidence", "Low")
+                pval = hit.get("p_value", "--")
+                hashes = hit.get("hashes", "--")
+                src = hit.get("db_source", "--")
+                
+                # 置信度颜色编码
+                if conf == "High":
+                    conf_badge = "<span class='tag tag-ok'>High</span>"
+                elif conf == "Medium":
+                    conf_badge = "<span class='tag tag-warn'>Medium</span>"
+                else:
+                    conf_badge = "<span style='color:#94a3b8;'>Low</span>"
+                
+                src_badge = f"<span style='background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;font-size:0.8em;'>{src}</span>"
+                match_rows.append(
+                    f"<tr>"
+                    f"<td style='text-align:center;font-weight:bold;'>{i}</td>"
+                    f"<td>{conf_badge}</td>"
+                    f"<td>{desc}</td>"
+                    f"<td class='mono' style='font-size:0.85em;'>{acc}</td>"
+                    f"<td style='font-size:0.85em;'>{dist}</td>"
+                    f"<td style='font-size:0.85em;'>{pval}</td>"
+                    f"<td>{src_badge}</td>"
+                    f"</tr>"
+                )
+            host_matches_html = (
+                "<table class='data-table' style='width:100%;font-size:0.9em;'>"
+                "<thead><tr>"
+                "<th>#</th><th>Confidence</th><th>Host Organism</th>"
+                "<th>Accession</th><th>Distance</th><th>P-value</th>"
+                "<th>Source</th>"
+                "</tr></thead><tbody>"
+                + "\n".join(match_rows)
+                + "</tbody></table>"
+            )
+        else:
+            host_matches_html = "<span style='color:#94a3b8;'>未发现显著高同源原噬菌体 (ANI < 80%)</span>"
+
 
         # ─── 格式化辅助函数 ───
         def fmt_reads(n):
@@ -141,7 +231,7 @@ class ReportExporter:
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>PhageScope™ 噬菌体基因组诊断报告 — {self.task_dir.name}</title>
+<title>噬菌体基因组报告 — {self.task_dir.name}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
 :root {{ --c1:#1a4da1; --c2:#2563eb; --bg:#f4f7fa; --txt:#1e293b; --bd:#e2e8f0; }}
@@ -192,7 +282,7 @@ footer{{ margin-top:60px; padding-top:16px; border-top:1px solid var(--bd); disp
 
 <header>
   <div>
-    <h1>PhageScope™ 噬菌体基因组诊断报告</h1>
+    <h1>Phage blast 噬菌体基因组报告</h1>
     <p style="margin:4px 0 0;color:#64748b;font-size:14px;">高通量测序全基因组深度诊断分析 · 自动化流水线生成</p>
   </div>
   <div class="meta">任务编号: {self.task_dir.name}<br>生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
@@ -318,16 +408,41 @@ footer{{ margin-top:60px; padding-top:16px; border-top:1px solid var(--bd); disp
 <!-- ═══ 5. Safety ═══ -->
 <section>
 <h2>5. 安全性与生活史审计</h2>
+
+<h3>溶源性证据搜索</h3>
 <table>
-<thead><tr><th>评估项目</th><th>结果</th><th>生物学意义</th></tr></thead>
+<thead><tr><th>标志物</th><th>检测结果</th><th>生物学意义</th></tr></thead>
 <tbody>
-  <tr><td>生活方式 (Lifestyle)</td><td><strong>{audit.get('lifestyle','Unknown')}</strong></td><td>裂解性噬菌体优先用于治疗</td></tr>
-  <tr><td>整合酶 (Integrase)</td><td>{'<span class="tag tag-warn">检出</span>' if integrase_found else '<span class="tag tag-ok">未检出</span>'}</td><td>溶源性一级证据</td></tr>
-  <tr><td>阻遏蛋白 (Repressor)</td><td>{'<span class="tag tag-warn">检出</span>' if repressor_found else '<span class="tag tag-ok">未检出</span>'}</td><td>溶源性二级证据</td></tr>
-  <tr><td>抗 CRISPR 蛋白</td><td>{audit.get('anti_crispr','未检出')}</td><td>宿主防御逃逸能力</td></tr>
-  <tr><td>毒力因子 (VFDB)</td><td>{'未检出' if not audit.get('virulence') else audit.get('virulence')}</td><td>基于 VFDB 数据库比对</td></tr>
-  <tr><td>耐药基因 (CARD)</td><td>{'未检出' if not audit.get('resistance') else audit.get('resistance')}</td><td>基于 CARD 数据库比对</td></tr>
-  <tr><td>综合安全评级</td><td><span class="tag {'tag-ok' if 'Secure' in str(safety) or 'Clear' in str(safety) or 'Pending' in str(safety) else 'tag-warn'}">{safety}</span></td><td>综合裁定</td></tr>
+  <tr><td>整合酶 (Integrase)</td><td>{'<span class="tag tag-warn">检出</span>' if integrase_found else '<span class="tag tag-ok">未检出</span>'}</td><td>溶源性一级证据 — 催化噬菌体DNA整合至宿主基因组</td></tr>
+  <tr><td>阻遏蛋白 (Repressor)</td><td>{'<span class="tag tag-warn">检出</span>' if repressor_found else '<span class="tag tag-ok">未检出</span>'}</td><td>溶源性二级证据 — 维持溶源状态的转录调控因子</td></tr>
+  <tr><td>切除酶 (Excisionase)</td><td>{'<span class="tag tag-warn">检出</span>' if excisionase_found else '<span class="tag tag-ok">未检出</span>'}</td><td>溶源性三级证据 — 催化前噬菌体从宿主基因组切除</td></tr>
+  <tr><td>附着位点 (attP)</td><td><span class="tag tag-info">待实验验证</span></td><td>需结合湿实验确认噬菌体末端附着序列</td></tr>
+</tbody>
+</table>
+
+<h3>安全性评估</h3>
+<p style="font-size:12px;color:#64748b;margin:-8px 0 12px;">检测方法: Tier 1 blastp 序列比对 (CDS → PhageScope 蛋白库 105万条, E≤1e-10) + 交叉查询 AMR/VF/ACR 元数据表</p>
+<table>
+<thead><tr><th>评估项目</th><th>结果</th><th>证据来源</th></tr></thead>
+<tbody>
+  <tr><td>生活方式 (Lifestyle)</td><td><strong>{audit.get('lifestyle','Unknown')}</strong></td><td>参考推断 (PhageScope)</td></tr>
+  <tr><td>毒力因子 (VFDB)</td><td><span class="tag {'tag-warn' if vf_list else 'tag-ok'}">{vf_display}</span></td><td>{vf_evidence if vf_evidence else '—'}</td></tr>
+  <tr><td>耐药基因 (CARD)</td><td><span class="tag {'tag-warn' if amr_list else 'tag-ok'}">{amr_display}</span></td><td>{amr_evidence if amr_evidence else '—'}</td></tr>
+  <tr><td>抗 CRISPR 蛋白</td><td>{acr_display}</td><td>{acr_evidence_zh if acr_evidence_zh else '—'}</td></tr>
+  <tr><td>综合安全评级</td><td><span class="tag {'tag-ok' if 'Secure' in str(safety) or 'Clear' in str(safety) else 'tag-warn'}">{safety}</span></td><td>基于以上指标综合裁定</td></tr>
+</tbody>
+</table>
+
+<h3>宿主范围与分类溯源</h3>
+<table>
+<thead><tr><th>分类项</th><th>结果</th></tr></thead>
+<tbody>
+  <tr><td>宿主来源 (Host Origin)</td><td><strong>{tax_host}</strong></td></tr>
+  <tr><td>最近参考基因组</td><td>{tax_name}</td></tr>
+  <tr><td>分类谱系</td><td class="mono">{tax_class}</td></tr>
+  <tr><td>科 (Family)</td><td>{tax_family}</td></tr>
+  <tr><td>属 (Genus)</td><td>{tax_genus}</td></tr>
+  <tr><td>3M+ 库同源性证据</td><td style="line-height:1.4;">{host_matches_html}</td></tr>
 </tbody>
 </table>
 </section>
@@ -342,7 +457,7 @@ footer{{ margin-top:60px; padding-top:16px; border-top:1px solid var(--bd); disp
 
 <footer>
   <span>NCBI Bio-Station Pro v2.5 · 分析流水线自动生成</span>
-  <span>PhageScope™ 诊断引擎</span>
+  <span>Phage blast 诊断引擎</span>
   <span>&copy; 2026 噬菌体基因组分析平台</span>
 </footer>
 

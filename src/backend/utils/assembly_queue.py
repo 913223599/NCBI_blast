@@ -11,17 +11,24 @@ class AssemblyTaskQueue:
     """
     
     _instance = None
-    _queue = asyncio.Queue()
     _max_workers = 2  # 限制同时运行的组装任务数量 (可配置)
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(AssemblyTaskQueue, cls).__new__(cls)
             cls._instance.workers = []
+            # 延迟初始化 Queue，避免在模块导入时绑定到不存在的事件循环
+            cls._instance._queue = None
         return cls._instance
+
+    def _ensure_queue(self):
+        """确保 Queue 在事件循环内被正确初始化"""
+        if self._queue is None:
+            self._queue = asyncio.Queue()
 
     async def start_workers(self, processor_func: Callable[[Dict[str, Any]], Awaitable[None]]):
         """启动后台工作线程"""
+        self._ensure_queue()
         if self.workers:
             return
             
@@ -48,6 +55,7 @@ class AssemblyTaskQueue:
 
     async def add_task(self, payload: Dict[str, Any]):
         """生产者：添加任务到队列"""
+        self._ensure_queue()
         await self._queue.put(payload)
         logger.info(f"[Queue] 任务已入队: {payload.get('task_id')}")
 

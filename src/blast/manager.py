@@ -583,26 +583,7 @@ class BlastManager:
                     task.transition_to(TaskStatus.PAUSED)
                     self.store.save_task(task)
 
-    def resume_task(self, task_id: str):
-        """Request resume of a paused task, or restart a cancelled/failed task from breakpoint."""
-        with self._lock:
-            if task_id in self.tasks:
-                task = self.tasks[task_id]
-                
-                # 1. Resume from Paused (Thread still alive)
-                if task.status == TaskStatus.PAUSED and getattr(task, 'engine', None):
-                    task.engine.resume()
-                    task.transition_to(TaskStatus.RUNNING)
-                    self.store.save_task(task)
-                    self.logger.info(f"Resumed paused task: {task_id}")
-                    
-                # 2. Resubmit from Cancelled/Failed (Thread dead, breakpoint continuation)
-                elif task.status in [TaskStatus.CANCELLED, TaskStatus.FAILED, 'error', 'failed', 'cancelled']:
-                    task.transition_to(TaskStatus.PENDING)
-                    task.error = None
-                    self.store.save_task(task)
-                    self.scheduler.submit(task)
-                    self.logger.info(f"Resubmitted stopped task for breakpoint continuation: {task_id}")
+
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Query status of a specific task."""

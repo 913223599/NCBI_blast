@@ -185,40 +185,57 @@ export const useBlastStore = defineStore('blast', () => {
     }
 
     function updateTranslation(original: string, translated: string): void {
-        // 创建新数组以触发 shallowRef 响应式
-        results.value = results.value.map(hit => {
-            let updatedHit = { ...hit }
-            let changed = false
+        if (!original || !translated || original === translated) return
 
-            // Check structured list first
+        let changedAny = false
+        // 使用 forEach 进行原地更新，避免大规模 results.value.map 导致的性能问题和潜在的竞态
+        results.value.forEach(hit => {
+            // 检查结构化列表 (共识算法路径)
             if (hit.consensusList && hit.consensusList.length > 0) {
                 const targetObj = hit.consensusList.find(c => c.name === original)
                 if (targetObj) {
-                    if (!updatedHit.translatedName) updatedHit.translatedName = hit.speciesName
-                    updatedHit.translatedName = updatedHit.translatedName.replace(original, translated)
-                    updatedHit.showOriginal = false 
-                    changed = true
+                    if (!hit.translatedName) hit.translatedName = hit.speciesName
+                    
+                    // 使用正则全局替换，确保所有匹配项都被替换，且防止部分匹配导致的错误
+                    // 比如 original 是 "Bacillus", 不应该误替换 "Bacillus velezensis" 中的一部分（除非确实是按分量翻译）
+                    // 鉴于 consensusList 本身就是拆解后的词素，这里使用 replace 是安全的
+                    const prevTrans = hit.translatedName
+                    hit.translatedName = hit.translatedName.split(original).join(translated)
+                    
+                    if (prevTrans !== hit.translatedName) {
+                        hit.showOriginal = false
+                        changedAny = true
+                    }
                 }
-            } else if (hit.speciesName && hit.speciesName.includes(original)) {
-                if (!updatedHit.translatedName) updatedHit.translatedName = hit.speciesName
+            } 
+            
+            // 兜底逻辑：如果 speciesName 直接包含原文 (非共识路径或作为补充)
+            if (hit.speciesName === original || hit.speciesName.includes(original)) {
+                if (!hit.translatedName) hit.translatedName = hit.speciesName
                 
+                // 防止重复拼接，如 "贝莱斯芽孢杆菌 (Bacillus velezensis)"
                 const alreadySplicedPattern = `${translated} (${original})`
-                if (updatedHit.translatedName.includes(alreadySplicedPattern)) {
-                    return hit // No change needed
+                if (hit.translatedName.includes(alreadySplicedPattern)) {
+                    return
                 }
 
-                const targetPattern = original + " (AI翻译中...)"
-                if (updatedHit.translatedName.includes(targetPattern)) {
-                    updatedHit.translatedName = updatedHit.translatedName.replace(targetPattern, translated)
-                } else {
-                    updatedHit.translatedName = updatedHit.translatedName.replace(original, translated)
+                const prevTrans = hit.translatedName
+                hit.translatedName = hit.translatedName.split(original).join(translated)
+                
+                if (prevTrans !== hit.translatedName) {
+                    hit.showOriginal = false
+                    changedAny = true
                 }
-                updatedHit.showOriginal = false 
-                changed = true
             }
-            
-            return changed ? updatedHit : hit
         })
+
+        // 虽然内容已更新，但如果需要触发某些依赖 results 整体的响应式（如计算属性），
+        // 可以在此处执行一次浅拷贝赋值（如果使用了 shallowRef 的话）。
+        // 目前使用的是 ref，内部对象属性更新已足够触发组件更新。
+        if (changedAny) {
+            // 强制触发一次响应式更新（针对某些不支持深度监听的 UI 组件）
+            results.value = [...results.value]
+        }
     }
 
     function appendSingleResult(resultObj: any): void {
