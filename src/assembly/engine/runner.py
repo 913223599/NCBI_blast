@@ -42,10 +42,14 @@ class CommandRunner:
             final_cmd_args = []
             for arg in cmd:
                 arg_str = str(arg)
-                # 🔗 关键修复：排除 URL (http/https/ftp)
-                is_url = arg_str.startswith(("http://", "https://", "ftp://"))
                 
-                if not is_url and (":\\" in arg_str or ":/" in arg_str):
+                # 🔗 核心修复：只要是 WSL 指令，强制禁止任何反斜杠出现在参数中
+                # 先进行初步的反斜杠清洗
+                arg_str = arg_str.replace('\\', '/')
+                
+                is_url = arg_str.startswith(("http://", "https://", "ftp://"))
+                # 如果包含盘符特征，尝试进行 WSL 挂载路径转换 (如 F:/ ➔ /mnt/f/)
+                if not is_url and (":/" in arg_str):
                     final_cmd_args.append(WSLManager.to_wsl_path(arg_str))
                 else:
                     final_cmd_args.append(arg_str)

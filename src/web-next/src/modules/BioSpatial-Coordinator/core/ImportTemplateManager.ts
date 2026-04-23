@@ -14,7 +14,7 @@ export interface TemplateDefinition {
 export class ImportTemplateManager {
   // 定义通用字段，所有模板都会包含这些基础元数据
   private static readonly COMMON_HEADERS = [
-    'name', 'species', 'strain', 'sampleType', 'source', 'sequenceType', 
+    'name', 'species', 'strain', 'sampleType', 'quantity', 'source', 'sequenceType', 
     'host', 'country', 'collectionDate', 'storageDate', 'storageMedium', 'biosafetyLevel', 
     'passageNumber', 'batchNumber', 'sequence', 'description'
   ];
@@ -25,6 +25,7 @@ export class ImportTemplateManager {
     species: 'Escherichia coli',
     strain: 'K-12 MG1655',
     sampleType: 'Bacteria',
+    quantity: '1',
     source: '研究所仓库',
     sequenceType: 'DNA',
     host: 'Homo sapiens',

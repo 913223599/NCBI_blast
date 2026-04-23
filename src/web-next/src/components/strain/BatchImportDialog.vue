@@ -429,66 +429,70 @@ async function handleImport() {
     // 1. 系统化数据预处理 (编号申领 + 分类学对齐)
     const processedBatch: any[] = []
     
-    for (let recordData of parsedRecords.value) {
-      // 1.0 标准化键名 (解决大小写不匹配导致的导入数据丢失问题)
-      const normalizedData: Record<string, any> = {}
-      for (const [key, val] of Object.entries(recordData)) {
-        normalizedData[key.toLowerCase().replace(/\s/g, '')] = val
-      }
-      
-      const sampleType = (normalizedData.sampletype as any) || 'Other'
-      const species = normalizedData.species || 'Unknown'
-      const genusName = TopologyScanner.getGenus(species)
-      const speciesName = species.replace(genusName, '').trim() || 'sp.'
-      
-      // 映射大类编码
-      const categoryCode = (SAMPLE_TYPE_TO_CATEGORY[sampleType] || '9') as CategoryCode
-      
-      // 1. 精确解析或自动创建属 (BBB)
-      let genusEntry = strain.codeLookupEntries.find(
-        e => e.level === 2 && e.parentPath === categoryCode && e.name === genusName
-      )
-      
-      if (!genusEntry) {
-        genusEntry = codeGen.lookup.addLookupEntry(2, categoryCode, genusName, genusName) as any
-      }
-      
-      // 2. 精确解析或自动创建种 (CCC)
-      let speciesEntry = strain.codeLookupEntries.find(
-        e => e.level === 3 && e.parentPath === genusEntry!.fullPath && e.name === speciesName
-      )
-      
-      if (!speciesEntry) {
-        speciesEntry = codeGen.lookup.addLookupEntry(3, genusEntry!.fullPath, speciesName, speciesName) as any
-      }
-
-      // 映射来源编码
-      let sourceCode = 'XX'
-      if (normalizedData.source) {
-        const sourceEntry = (strain as any).sourceEntries.find((e: any) => e.name === normalizedData.source)
-        if (sourceEntry) {
-          sourceCode = sourceEntry.code
-        } else {
-          const rawCode = String(normalizedData.source).substring(0, 2).toUpperCase()
-          if (/^[A-Z0-9]{2}$/.test(rawCode)) sourceCode = rawCode
+      for (let recordData of parsedRecords.value) {
+        // 1.0 标准化键名 (解决大小写不匹配导致的导入数据丢失问题)
+        const normalizedData: Record<string, any> = {}
+        for (const [key, val] of Object.entries(recordData)) {
+          normalizedData[key.toLowerCase().replace(/\s/g, '').replace(/_/g, '')] = val
         }
-      }
+        
+        // --- 关键改进：支持“备份数量”字段 ---
+        const qtyRaw = normalizedData.quantity || normalizedData.count || normalizedData.备份数量 || normalizedData.数量 || '1';
+        const quantity = Math.max(1, parseInt(qtyRaw, 10) || 1);
 
-      // 获取或申领编号
-      let finalAccession = normalizedData.accession || normalizedData.id
-      let sampleCode = ''
-      
-      if (!finalAccession || finalAccession.length !== 14) {
-        const request = {
-          sourceCode: sourceCode,
-          categoryCode: categoryCode,
-          genusCode: genusEntry!.code,
-          speciesCode: speciesEntry!.code,
-          passage: parseInt(normalizedData.passagenumber || '0', 10) || 0
+        const sampleType = (normalizedData.sampletype as any) || 'Other'
+        const species = normalizedData.species || 'Unknown'
+        const genusName = TopologyScanner.getGenus(species)
+        const speciesName = species.replace(genusName, '').trim() || 'sp.'
+        
+        // 映射大类编码
+        const categoryCode = (SAMPLE_TYPE_TO_CATEGORY[sampleType] || '9') as CategoryCode
+        
+        // 1. 精确解析或自动创建属 (BBB)
+        let genusEntry = strain.codeLookupEntries.find(
+          e => e.level === 2 && e.parentPath === categoryCode && e.name === genusName
+        )
+        if (!genusEntry) {
+          genusEntry = codeGen.lookup.addLookupEntry(2, categoryCode, genusName, genusName) as any
         }
-        sampleCode = codeGen.commit(request)
-        finalAccession = sampleCode 
-      }
+        
+        // 2. 精确解析或自动创建种 (CCC)
+        let speciesEntry = strain.codeLookupEntries.find(
+          e => e.level === 3 && e.parentPath === genusEntry!.fullPath && e.name === speciesName
+        )
+        if (!speciesEntry) {
+          speciesEntry = codeGen.lookup.addLookupEntry(3, genusEntry!.fullPath, speciesName, speciesName) as any
+        }
+
+        // 映射来源编码
+        let sourceCode = 'XX'
+        if (normalizedData.source) {
+          const sourceEntry = (strain as any).sourceEntries.find((e: any) => e.name === normalizedData.source)
+          if (sourceEntry) {
+            sourceCode = sourceEntry.code
+          } else {
+            const rawCode = String(normalizedData.source).substring(0, 2).toUpperCase()
+            if (/^[A-Z0-9]{2}$/.test(rawCode)) sourceCode = rawCode
+          }
+        }
+
+        // --- 核心逻辑变更：同一行的备份共享同一个 Accession ---
+        let finalAccession = normalizedData.accession || normalizedData.id
+        let sampleCode = ''
+        
+        if (!finalAccession || finalAccession.length !== 14) {
+          const request = {
+            sourceCode: sourceCode,
+            categoryCode: categoryCode,
+            genusCode: genusEntry!.code,
+            speciesCode: speciesEntry!.code,
+            passage: parseInt(normalizedData.passagenumber || '0', 10) || 0
+          }
+          sampleCode = codeGen.commit(request)
+          finalAccession = sampleCode 
+        }
+
+        for (let i = 0; i < quantity; i++) {
 
       // 动态构建元数据 (仅保留有值的有效字段)
       const metadata: Record<string, any> = {
@@ -525,27 +529,28 @@ async function handleImport() {
         }
       })
 
-      processedBatch.push({
-        name: normalizedData.name || 'Unknown',
-        accession: finalAccession,
-        sampleCode: sampleCode || finalAccession,
-        species: species,
-        strain: normalizedData.strain || '',
-        sampleType: sampleType,
-        sequenceType: (normalizedData.sequencetype || normalizedData.sequence_type || 'DNA') as 'DNA' | 'RNA' | 'Protein',
-        sequence: normalizedData.sequence || '',
-        source: normalizedData.source || '',
-        host: normalizedData.host || '',
-        country: normalizedData.country || '',
-        collectionDate: normalizedData.collectiondate || '',
-        metadata: metadata,
-        freezerId: targetFreezerId.value,
-        codeSource: sourceCode,
-        codeCategory: categoryCode,
-        codeGenus: genusEntry!.code,
-        codeSpecies: speciesEntry!.code,
-        codeSerial: parseInt(finalAccession.slice(-4), 10)
-      })
+        processedBatch.push({
+          name: normalizedData.name || 'Unknown',
+          accession: finalAccession,
+          sampleCode: sampleCode || finalAccession,
+          species: species,
+          strain: normalizedData.strain || '',
+          sampleType: sampleType,
+          sequenceType: (normalizedData.sequencetype || normalizedData.sequence_type || 'DNA') as 'DNA' | 'RNA' | 'Protein',
+          sequence: normalizedData.sequence || '',
+          source: normalizedData.source || '',
+          host: normalizedData.host || '',
+          country: normalizedData.country || '',
+          collectionDate: normalizedData.collectiondate || '',
+          metadata: metadata,
+          freezerId: targetFreezerId.value,
+          codeSource: sourceCode,
+          codeCategory: categoryCode,
+          codeGenus: genusEntry!.code,
+          codeSpecies: speciesEntry!.code,
+          codeSerial: parseInt(finalAccession.slice(-4), 10)
+        })
+      }
     }
 
     if (importMode.value === 'auto') {

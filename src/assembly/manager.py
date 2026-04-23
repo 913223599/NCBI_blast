@@ -175,7 +175,7 @@ class AssemblyManager:
         # 🔗 1.5 环境自愈预检：确保所有步骤所需的工具和数据库已就绪
         try:
             self._report_progress(task_id, "环境自愈", 0, "running")
-            await self._prepare_environment(sample_type, pipeline_steps)
+            await self._prepare_environment(sample_type, pipeline_steps, config.get("tech", "ILLUMINA"))
         except Exception as e:
             self.logger.warning(f"⚠️ 环境预检/自愈过程中发生异常 (非致命): {e}")
 
@@ -333,12 +333,17 @@ class AssemblyManager:
         """兼容性别名：默认运行细菌流水线"""
         return await self.run_pipeline(*args, sample_type="BACTERIA", **kwargs)
 
-    async def _prepare_environment(self, sample_type: str, steps: List[Any]):
+    async def _prepare_environment(self, sample_type: str, steps: List[Any], tech: str = "ILLUMINA"):
         """
         深度自愈：检查流水线各步骤的依赖，缺失时自动触发部署脚本
         """
-        # 1. 确定必须具备的核心工具
+        # 1. 确定二代测序必须具备的核心工具 (NGS 基础链)
         critical_tools = ["fastp", "unicycler", "bwa", "samtools", "minimap2"]
+        
+        # 🔗 2. 按需追加：只有三代测序任务才检查 Flye
+        if tech.upper() in ["NANOPORE", "PACBIO_HIFI"]:
+            critical_tools.append("flye")
+
         if sample_type == "PHAGE":
             critical_tools.extend(["polypolish", "checkv"])
             

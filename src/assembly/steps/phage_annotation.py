@@ -210,7 +210,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
             if self.on_progress: self.on_progress(97, "正在执行安全性审计 (直接检测 + 参考推断)...")
             try:
                 # ─── Tier 1: 直接扫描用户 CDS 注释 (基于实际序列的证据) ───
-                anno_tsv = next(win_pharokka_out.rglob("Integrated_Final_Annotations.tsv"), None)
+                anno_tsv = next(win_work_path.glob("Integrated_Final_Annotations.tsv"), None)
                 direct_scan = self._direct_safety_scan(anno_tsv)
 
                 # ─── Tier 2: PhageScope 参考元数据查表 (辅助推断) ───
@@ -218,7 +218,8 @@ class PhageAnnotationStep(BaseAssemblyStep):
                 ref_audit = self._mine_phagescope_metadata(mash_hit_file)
 
                 # ─── Tier 3: 深度宿主溯源挖掘 (基于 300万+ 序列指纹库) ───
-                host_results = await self._deep_host_prediction(win_work_path / "assembly.fasta", threads)
+                # 💡 核心修复：使用动态 fasta 变量 (polished_assembly.fasta)，而不是硬编码路径
+                host_results = await self._deep_host_prediction(fasta, threads)
                 self.context.update("host_prediction", host_results)
 
                 # ─── 基于全基因组 Prophage 比对，判定噬菌体生活史 (Temperate 判断) ───

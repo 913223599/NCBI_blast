@@ -155,7 +155,7 @@ const setSampleType = (type: string) => {
   padding: 8px; border: 1px solid #f1f5f9; border-radius: 6px; background: #f8fafc;
   font-size: 12px; color: #64748b; cursor: pointer; transition: all 0.2s;
 }
-.tech-btn.active { background: #1e293b; color: white; border-color: #1e293b; }
+.tech-btn.active { background: #3b82f6; color: white; border-color: #3b82f6; font-weight: 700; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.2); }
 
 .ncbi-search-box, .custom-host-box { 
   margin-top: 10px; padding: 12px; background: #f0f7ff; border: 1px dashed #3b82f6; border-radius: 8px; 
