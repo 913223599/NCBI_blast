@@ -129,3 +129,20 @@ config.json
 .env
 .env.*
 *.secret
+
+# ================================
+# 🗑️ 临时和调试文件
+# ================================
+jumbo_log*.txt
+tmp_*.py
+check_qc.py
+fix_pfam.py
+merge_vdb.py
+save_ref.py
+stop
+translations.db
+translations_backup.db
+scratch/*.py
+scratch/*.sh
+scratch/*.json
+scratch/context_AS.json

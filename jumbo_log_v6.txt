@@ -1,5 +1,0 @@
-2026-05-08 01:29:29,749 - Assembly.GPU - INFO - ✨ 发现可用 GPU 加速设备: NVIDIA GeForce RTX 4070 Laptop GPU
-2026-05-08 01:29:29,749 - Assembly.GPU - INFO - 已注入 GPU 加速上下文。
-2026-05-08 01:29:29,750 - Assembly.QualityControlStep - INFO - 🚀 自动资源调优: 物理核心数=32, 分配 Fastp 线程=16
-2026-05-08 01:29:29,753 - Assembly.QualityControlStep - INFO - 检测为双端测序 (Paired-End) 数据
-2026-05-08 01:29:29,754 - Assembly.QualityControlStep - INFO - 开始执行 (超时: 4.0h): wsl -d Ubuntu -u root fastp -i /ncbi_blast_link/test_data/ncbi_samples/SRR30664648_1.fastq.gz -o /ncbi_blast_link/results/assembly/test_SRR30664648_jumbo/qualitycontrolstep/test_SRR30664648_jumbo_R1.clean.fq.gz --json /ncbi_blast_link/results/assembly/test_SRR30664648_jumbo/qualitycontrolstep/fastp_report.json --html /ncbi_blast_link/results/assembly/test_SRR30664648_jumbo/qualitycontrolstep/fastp_report.html --thread 16 -I /ncbi_blast_link/test_data/ncbi_samples/SRR30664648_2.fastq.gz -O /ncbi_blast_link/results/assembly/test_SRR30664648_jumbo/qualitycontrolstep/test_SRR30664648_jumbo_R2.clean.fq.gz --detect_adapter_for_pe --correction
