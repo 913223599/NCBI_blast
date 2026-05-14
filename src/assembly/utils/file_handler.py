@@ -25,8 +25,17 @@ class AssemblyFileHandler:
         if p1.suffix not in valid_exts or p2.suffix not in valid_exts:
             return False
             
-        # 3. 双端配对简单校验 (通常文件名中包含 R1/R2)
-        if "R1" in p1.name and "R2" not in p2.name:
+        # 3. 双端配对校验 (支持常见的 R1/R2, _1/_2 模式)
+        import re
+        r1_patterns = [r"[_.]R1[_.]", r"[_.]1[_.]", r"_1\.fastq", r"_1\.fq"]
+        r2_patterns = [r"[_.]R2[_.]", r"[_.]2[_.]", r"_2\.fastq", r"_2\.fq"]
+        
+        has_r1 = any(re.search(p, p1.name, re.I) for p in r1_patterns)
+        has_r2 = any(re.search(p, p2.name, re.I) for p in r2_patterns)
+        
+        if has_r1 and not has_r2:
+             return False
+        if has_r2 and not has_r1:
              return False
              
         return True

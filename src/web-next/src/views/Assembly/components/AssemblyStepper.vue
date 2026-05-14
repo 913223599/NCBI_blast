@@ -22,7 +22,16 @@ const assemblySteps = computed(() => {
   }
   
   base.push(
-    { id: '基因组组装', title: '基因组组装', icon: '🧩' },
+    { id: '读长合并', title: '读长合并', icon: '🔗' },
+    { id: '基因组组装', title: '基因组组装', icon: '🧩' }
+  );
+
+  if (props.sampleType === SampleType.PHAGE || props.sampleType === 'PHAGE') {
+    base.push({ id: '前噬菌体分离', title: '前噬菌体分离', icon: '✂️' });
+  }
+
+  base.push(
+    { id: '支架构建', title: '支架构建', icon: '🏗️' },
     { id: '一致性校正', title: '一致性校正', icon: '✨' },
     { id: '功能注释', title: '功能注释', icon: '📖' }
   );

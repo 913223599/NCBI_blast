@@ -17,7 +17,7 @@ class BiologyTranslator:
     支持本地数据库和AI翻译相结合的翻译模式
     """
     
-    def __init__(self, data_file: str = None, use_ai: bool = True, ai_api_key: str = None, ai_model: str = "deepseek-r1"):
+    def __init__(self, data_file: Optional[str] = None, use_ai: bool = True, ai_api_key: Optional[str] = None, ai_model: str = "deepseek-r1"):
         """
         初始化生物学翻译器
         
@@ -39,6 +39,7 @@ class BiologyTranslator:
         self.term_extractor = TermExtractor(self.translation_data_manager)
         
         # 初始化AI翻译器（如果启用）
+        self.ai_translator: Optional['QwenTranslator'] = None
         if use_ai and ai_api_key:
             try:
                 self.ai_translator = QwenTranslator(api_key=ai_api_key, model=ai_model)
@@ -61,7 +62,12 @@ class BiologyTranslator:
         if not text:
             return text
         
-        # 0. [核心优化] 识别并处理共识概率字符串 (例如: "Species A(90%), Species B(10%)")
+        # 0. 线程安全的快速缓存访问 (全匹配优先)
+        with self._lock:
+            if text in self._translation_cache:
+                return self._translation_cache[text]
+        
+        # 1. [核心优化] 识别并处理共识概率字符串 (例如: "Species A(90%), Species B(10%)")
         import re
         # 匹配模式: 文本(百分比%)
         consensus_pattern = r'([^,()]+)\s*\(\s*\d+%\s*\)'
@@ -72,15 +78,17 @@ class BiologyTranslator:
                 # 这是一个共识字符串，我们需要逐个拆解翻译
                 result_parts = []
                 last_end = 0
+                fully_translated = True
                 for match in matches:
                     full_match = match.group(0) 
                     pure_name = match.group(1).strip()
                     start, end = match.span()
                     result_parts.append(text[last_end:start])
                     
-                    # 翻译这个纯名称
-                    # 如果当前允许使用 AI，我们允许在此处尝试翻译单个物种
+                    # 翻译这个纯名称 (允许递归，但会被上面的全匹配缓存拦截)
                     translated_name = self.translate_text(pure_name, category=category, use_ai_override=use_ai_override)
+                    if translated_name == pure_name:
+                        fully_translated = False
                     
                     reassembled = full_match.replace(pure_name, translated_name)
                     result_parts.append(reassembled)
@@ -89,21 +97,14 @@ class BiologyTranslator:
                 result_parts.append(text[last_end:])
                 final_text = "".join(result_parts)
                 
-                # 如果有任何一部分发生了变化（不管是本地还是 AI），都认为成功
                 if final_text != text:
-                    # 存入缓存以加速下次整体匹配
-                    with self._lock:
-                        self._translation_cache[text] = final_text
+                    if fully_translated:
+                        with self._lock:
+                            self._translation_cache[text] = final_text
                     return final_text
 
         # 使用覆盖配置或默认配置
         active_use_ai = use_ai_override if use_ai_override is not None else self.use_ai
-            
-        # 线程安全的缓存访问
-        with self._lock:
-            if text in self._translation_cache:
-                # print(f"[Debug] Cache hit: {text}")
-                return self._translation_cache[text]
         
         original_text = text
         
@@ -156,7 +157,7 @@ class BiologyTranslator:
                                         import logging
                                         logging.getLogger(__name__).warning(f"[Taxonomy Validation] 拉丁名 '{text}' 未在分类数据库中找到，跳过存入词库。")
                                         is_valid = False
-                                except:
+                                except Exception:
                                     pass # 容错处理
                             
                             if is_valid:
@@ -186,12 +187,10 @@ class BiologyTranslator:
         # 5. 默认返回原文
         # 注意：如果是只查询本地 (use_ai_override == False)，不要把英文原文存入缓存，
         # 否则后续真正的 AI 后台线程调用时，会在第 0 步直接命中这个原文缓存，导致 AI 彻底失效！
-        if active_use_ai:
-            with self._lock:
-                self._translation_cache[original_text] = original_text
+        # 修改：为了防止 AI 调用失败（欠费/网络异常）后把原文存入缓存导致假死，移除这里的自动原文缓存逻辑。
         return original_text
 
-    def translate_batch(self, texts: list, category: str = 'species') -> dict:
+    def translate_batch(self, texts: list, category: str = 'species', on_result_ready=None) -> dict:
         """
         [OPTIMIZED] 整合批量翻译：本地库优先 + AI 批量补偿 (修复复合文本AI乱翻译问题)
         """
@@ -226,11 +225,48 @@ class BiologyTranslator:
             if part_res == clean_text:
                 to_ai_set.add(clean_text)
 
+        # 2.5 优化：立刻挑选出不需要 AI 即可完成翻译的文本，并尽早返回
+        results = {}
+        pending_texts = []
+        for text in texts:
+            if not text:
+                continue
+            
+            needs_ai = False
+            if ',' in text and '(' in text and '%' in text:
+                matches = list(re.finditer(consensus_pattern, text))
+                if matches:
+                    for match in matches:
+                        if match.group(1).strip() in to_ai_set:
+                            needs_ai = True
+                            break
+                elif text in to_ai_set:
+                    needs_ai = True
+            elif text in to_ai_set:
+                needs_ai = True
+                
+            if not needs_ai:
+                # 纯本地即可完成
+                res = self.translate_text(text, category=category, use_ai_override=False)
+                results[text] = res
+                if on_result_ready:
+                    on_result_ready(text, res)
+            else:
+                pending_texts.append(text)
+
         # 3. 对未命中的最细粒度纯词条进行 AI 批量翻译
         to_ai_list = list(to_ai_set)
         if to_ai_list and self.use_ai and self.ai_translator:
             try:
-                ai_results = self.ai_translator.batch_translate(to_ai_list)
+                # [FIX] 防止大批量请求超出 LLM max_tokens 导致尾部被原样截断 (Anti-Truncation Chunking)
+                CHUNK_SIZE = 30
+                ai_results = []
+                
+                for i in range(0, len(to_ai_list), CHUNK_SIZE):
+                    chunk = to_ai_list[i:i + CHUNK_SIZE]
+                    chunk_res = self.ai_translator.batch_translate(chunk)
+                    ai_results.extend(chunk_res)
+                    
                 for i, pure_text in enumerate(to_ai_list):
                     if i < len(ai_results):
                         ai_res = ai_results[i]
@@ -262,15 +298,12 @@ class BiologyTranslator:
                 logging.getLogger(__name__).error(f"Biology Batch AI Error: {e}")
 
         # 4. 再一次完成全量组装
-        # 现在所有必需的短词均已存在于本地/缓存中（部分从 DB/内置，部分借由刚才的 AI 动态翻译而来）
-        # 我们对原始传入的混合 texts 直接调用 translate_text 即可完成最终切割替换。
-        results = {}
-        for text in texts:
-            if not text:
-                results[text] = text
-                continue
+        # 对 pending_texts 直接调用 translate_text 即可完成最终切割替换。
+        for text in pending_texts:
             res = self.translate_text(text, category=category, use_ai_override=False)
             results[text] = res
+            if on_result_ready:
+                on_result_ready(text, res)
 
         return results
 
@@ -308,7 +341,7 @@ class BiologyTranslator:
                 self._translation_cache[original] = f"{translation}"
 
 
-def get_biology_translator(data_file: str = None, use_ai: bool = True, ai_api_key: str = None, ai_model: str = "deepseek-r1") -> BiologyTranslator:
+def get_biology_translator(data_file: Optional[str] = None, use_ai: bool = True, ai_api_key: Optional[str] = None, ai_model: str = "deepseek-r1") -> BiologyTranslator:
     """
     获取生物学翻译器实例
     
@@ -329,7 +362,7 @@ _global_translator = None
 _global_lock = threading.Lock()
 
 
-def get_global_biology_translator(data_file: str = None, use_ai: bool = True, ai_api_key: str = None, ai_model: str = "deepseek-r1") -> BiologyTranslator:
+def get_global_biology_translator(data_file: Optional[str] = None, use_ai: bool = True, ai_api_key: Optional[str] = None, ai_model: str = "deepseek-r1") -> BiologyTranslator:
     """
     获取全局生物学翻译器实例（线程安全的单例模式）
     

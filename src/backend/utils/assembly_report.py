@@ -107,11 +107,22 @@ class AssemblyReportParser:
         host_dir = self.task_dir / "hostcleanerstep"
         if not host_dir.exists():
             return {"status": "empty"}
+
+        result = {"status": "ok"}
+
+        # 读取持久化的宿主污染统计
+        stats_json = host_dir / "host_stats.json"
+        if stats_json.exists():
+            try:
+                with open(stats_json, "r", encoding="utf-8") as f:
+                    stats = json.load(f)
+                result["host_contamination_percent"] = stats.get("host_contamination_percent", 0)
+            except Exception as e:
+                logger.warning(f"[Report] host_stats.json parse failed: {e}")
+
         bam = host_dir / "mapped_to_host.bam"
-        return {
-            "status": "ok",
-            "bam_size_mb": round(bam.stat().st_size / 1048576, 1) if bam.exists() else 0
-        }
+        result["bam_size_mb"] = str(round(bam.stat().st_size / 1048576, 1)) if bam.exists() else "0"
+        return result
 
     # ═══════════════════════════════════════════════════
     # 组装解析 — 使用精修后的 FASTA
@@ -123,11 +134,37 @@ class AssemblyReportParser:
             "total_length": 0, "gc_content": 0.0,
         }
 
-        # 优先解析精修后的 FASTA, 回退到原始组装
-        fasta = self.task_dir / "consensuscorrectionstep" / "polished_assembly.fasta"
-        if not fasta.exists():
-            fasta = self.task_dir / "assemblerstep" / "unicycler_run" / "assembly.fasta"
-        if not fasta.exists():
+        # 🚀 提升解析优先级：重排产物 > 精修组装 > 支架构建 > 纯化噬菌体 > 原始组装
+        # 优先解析最下游的 FASTA, 依次回退
+        fasta_candidates = [
+            self.task_dir / "phageannotationstep" / "champion_ordered.fasta",
+            self.task_dir / "consensuscorrectionstep" / "polished_assembly.fasta",
+            self.task_dir / "scaffoldingstep" / "scaffolds.clean.fasta",
+            self.task_dir / "prophageseparatorstep" / "separated_phage.fasta",
+            self.task_dir / "assemblerstep" / "assembly_run" / "assembly.fasta",
+            self.task_dir / "assemblerstep" / "unicycler_run" / "assembly.fasta",
+            # 💡 [新增] 兜底匹配：搜索任何 .fasta 或 .fna 文件 (按修改时间排序)
+        ]
+        
+        fasta = None
+        for cand in fasta_candidates:
+            if cand.exists() and cand.stat().st_size > 0:
+                fasta = cand
+                break
+        
+        if not fasta:
+            # 🚀 [自动愈合] 如果已知路径均未命中，进行深度搜索
+            all_fastas = sorted(
+                list(self.task_dir.glob("**/*.fasta")) + list(self.task_dir.glob("**/*.fna")),
+                key=lambda x: x.stat().st_size, reverse=True
+            )
+            # 过滤掉中间文件 (如 .tmp, .temp)
+            for f in all_fastas:
+                if "tmp" not in f.name.lower() and "temp" not in f.name.lower() and f.stat().st_size > 1000:
+                    fasta = f
+                    break
+
+        if not fasta:
             return result
 
         contigs = []
@@ -366,6 +403,10 @@ class AssemblyReportParser:
             )
             if pngs:
                 result["visual_map"] = f"phageannotationstep/phage_plot/{pngs[0].name}"
+            
+            tree_png = anno_dir / "phage_plot" / "phage_phylogeny.png"
+            if tree_png.exists():
+                result["phylogeny_map"] = f"phageannotationstep/phage_plot/phage_phylogeny.png"
 
         return result
 
@@ -391,7 +432,18 @@ class AssemblyReportParser:
 
             report["telemetry"] = results.get("telemetry")
             report["phagescope_audit"] = results.get("phagescope_audit", {})
-
+            
+            # 🚀 深度暴露 V5 工业管道新增评估参数
+            report["host_prediction"] = results.get("host_prediction", {})
+            report["lifecycle_prediction"] = results.get("lifecycle_prediction", {})
+            report["correction_metadata"] = results.get("correction_metadata", {})
+            # 如果存在溶源分离记录，提取隔离出的病毒 Contig 数量与切口数据
+            if "vibrant_contigs" in results or "phi_spy_results" in results:
+                report["prophage_separation"] = {
+                    "vibrant_contigs": results.get("vibrant_contigs", 0),
+                    "phi_spy_results": results.get("phi_spy_results", {})
+                }
+            
             # 注入基因组元信息到前端期望位置
             gm = results.get("genomic_metrics", {})
             if report.get("annotation"):

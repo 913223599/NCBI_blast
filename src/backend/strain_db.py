@@ -20,6 +20,9 @@ class StrainDBManager:
         if self._conn_cache is None:
             self._conn_cache = sqlite3.connect(self.db_path)
             self._conn_cache.row_factory = sqlite3.Row
+            # 开启高并发读写模式
+            self._conn_cache.execute('PRAGMA journal_mode=WAL')
+            self._conn_cache.execute('PRAGMA synchronous=NORMAL')
         return self._conn_cache
     
     def _close_connection(self):
@@ -127,7 +130,7 @@ class StrainDBManager:
     def save_freezer(self, freezer_data):
         """保存或更新冰箱"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             fid = freezer_data.get('id')
@@ -144,7 +147,6 @@ class StrainDBManager:
             ''', (fid, name, model, location, structure, fid, now, now))
             
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             self.logger.error(f"Error saving freezer: {e}")
@@ -153,12 +155,11 @@ class StrainDBManager:
     def delete_freezer(self, freezer_id):
         """删除冰箱及其关联记录"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('DELETE FROM records WHERE freezer_id = ?', (freezer_id,))
             cursor.execute('DELETE FROM freezers WHERE id = ?', (freezer_id,))
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             self.logger.error(f"Error deleting freezer: {e}")
@@ -223,9 +224,9 @@ class StrainDBManager:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            # 使用 IN 语句进行批量删除
-            placeholders = ", ".join(["?"] * len(record_ids))
-            cursor.execute(f'DELETE FROM records WHERE id IN ({placeholders})', tuple(record_ids))
+            # 规避 SQLite 默认变量绑定数量上限限制
+            data_to_delete = [(rid,) for rid in record_ids]
+            cursor.executemany('DELETE FROM records WHERE id = ?', data_to_delete)
             conn.commit()
             return True
         except Exception as e:
@@ -236,7 +237,7 @@ class StrainDBManager:
     def save_sys_config(self, key, value_data):
         """保存系统全局配置项"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             now = datetime.now().isoformat()
             cursor.execute('''
@@ -244,7 +245,6 @@ class StrainDBManager:
                 VALUES (?, ?, ?)
             ''', (key, json.dumps(value_data), now))
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             self.logger.error(f"Error saving sys config {key}: {e}")
@@ -253,8 +253,7 @@ class StrainDBManager:
     def load_all_data(self):
         """加载所有冰箱和记录数据"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             # 加载冰箱
@@ -314,7 +313,6 @@ class StrainDBManager:
             row = cursor.fetchone()
             code_lookup = json.loads(row['value']) if row and row['value'] else None
 
-            conn.close()
             return {'freezers': freezers, 'records': records, 'codeLookup': code_lookup}
         except Exception as e:
             self.logger.error(f"Error loading data: {e}")
@@ -322,25 +320,28 @@ class StrainDBManager:
 
     def search_by_species_list(self, species_names: List[str]) -> List[Dict[str, Any]]:
         """根据物种列表筛选记录"""
+        if not species_names:
+            return []
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
+            conn = self._get_connection()
             cursor = conn.cursor()
             
-            placeholders = ", ".join(["?"] * len(species_names))
-            cursor.execute(f'SELECT * FROM records WHERE species IN ({placeholders})', tuple(species_names))
-            
             records = []
-            for row in cursor.fetchall():
-                # 复用转换逻辑 (由于代码块限制，这里简化，实际开发中建议提取私有方法)
-                records.append({
-                    'id': row['id'],
-                    'name': row['name'],
-                    'species': row['species'],
-                    'strain': row['strain'],
-                    'accession': row['accession']
-                })
-            conn.close()
+            chunk_size = 900
+            for i in range(0, len(species_names), chunk_size):
+                chunk = species_names[i:i + chunk_size]
+                placeholders = ", ".join(["?"] * len(chunk))
+                cursor.execute(f'SELECT * FROM records WHERE species IN ({placeholders})', tuple(chunk))
+                
+                for row in cursor.fetchall():
+                    # 复用转换逻辑 (由于代码块限制，这里简化，实际开发中建议提取私有方法)
+                    records.append({
+                        'id': row['id'],
+                        'name': row['name'],
+                        'species': row['species'],
+                        'strain': row['strain'],
+                        'accession': row['accession']
+                    })
             return records
         except Exception as e:
             self.logger.error(f"Search by species list error: {e}")
@@ -349,7 +350,7 @@ class StrainDBManager:
     def save_tree_history(self, history_data):
         """保存进化树项目组历史"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             now = datetime.now().isoformat()
             
@@ -365,7 +366,6 @@ class StrainDBManager:
                 ''', (gid, source, name, items, now))
             
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             self.logger.error(f"Error saving tree history: {e}")
@@ -374,8 +374,7 @@ class StrainDBManager:
     def load_tree_history(self):
         """加载进化树历史，如果数据库为空则尝试从物理归档扫描恢复"""
         try:
-            conn = sqlite3.connect(self.db_path)
-            conn.row_factory = sqlite3.Row
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             # 1. 先尝试从数据库读取
@@ -389,14 +388,10 @@ class StrainDBManager:
             if not rows and not reconstructed_flag:
                 # 仅在数据库为空且从未执行过重建时，才触发自动扫描
                 self.logger.info("First time initialization: RECONSTRUCTION START")
-                conn.close() # 调用重建前先释放当前连接锁
                 
                 self._reconstruct_from_fs()
                 
-                # 重新打开并记录重建已完成
-                conn = sqlite3.connect(self.db_path)
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
+                # 记录重建已完成
                 cursor.execute('INSERT OR REPLACE INTO sys_config (key, value, updated_at) VALUES (?, ?, ?)',
                              ('tree_history_reconstructed', 'true', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                 conn.commit()
@@ -429,7 +424,6 @@ class StrainDBManager:
                     'name': row['name'],
                     'items': items
                 })
-            conn.close()
             return history
         except Exception as e:
             self.logger.error(f"Error loading tree history: {e}")
@@ -527,7 +521,7 @@ class StrainDBManager:
         if not history_map: return
         
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             for p_id, items in history_map.items():
                 if not items: continue
@@ -544,18 +538,16 @@ class StrainDBManager:
                 ''', (p_id, base_source, display_name, 
                        json.dumps(items), datetime.fromtimestamp(items[0]['time']/1000).strftime('%Y-%m-%d %H:%M:%S')))
             conn.commit()
-            conn.close()
         except Exception as e:
             self.logger.error(f"Failed to save reconstructed history: {e}")
 
     def delete_tree_history_group(self, group_id):
         """删除进化树项目组"""
         try:
-            conn = sqlite3.connect(self.db_path)
+            conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute('DELETE FROM tree_history WHERE id = ?', (group_id,))
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             self.logger.error(f"Error deleting tree history: {e}")

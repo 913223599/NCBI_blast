@@ -37,23 +37,40 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
         if not assembly_fasta or not Path(assembly_fasta).exists():
             logger.warning("未发现原始组装序列，跳过校正步骤")
             return True
-
-        # 🔗 利用标准 WSLManager 进行路径转换 (自动处理软链接映射)
+            
+        tech = (self.context.config.get("tech") or "ILLUMINA").upper()
+        # 🔗 默认不对纯二代数据进行额外打磨，除非配置中明确要求或属于混合/三代测序场景
+        if tech not in ["NANOPORE", "PACBIO_HIFI"]:
+            if not self.context.config.get("params", {}).get("do_polishing", False):
+                self.logger.info("✅ 纯二代模式：使用 SPAdes/Unicycler 标准产物。如需 Q50 级精度，请在配置中开启 do_polishing。")
+                self.status = "completed"
+                return True
+            self.logger.info("⚡ 正在通过 Polypolish 对纯二代组装进行超精细校正 (Q50 模式)...")
         from ..env.wsl_manager import WSLManager
         safe_fasta = WSLManager.to_wsl_path(str(assembly_fasta))
         safe_r1 = WSLManager.to_wsl_path(str(r1)) if r1 else None
         safe_r2 = WSLManager.to_wsl_path(str(r2)) if r2 else None
         
-        # 🔬 执行 Polypolish 精修 (内部已优化为内存盘模式)
-        polished_result = await self._run_polypolish(safe_fasta, safe_r1, safe_r2)
+        # 🚨 三路判定：根据是否有短读长辅助来选择校正引擎
+        # A) 有短读长 → Polypolish (短读长修复长读长组装的 Indel 错误)
+        # B) 纯 Nanopore/PacBio 无短读长 → Medaka (神经网络自校正)
+        has_short_reads = safe_r1 and safe_r2
+        
+        polished_result = None
+        if has_short_reads:
+            self.logger.info("🔬 混合校正模式：使用 Polypolish (短读长打磨长读长组装)")
+            polished_result = await self._run_polypolish(safe_fasta, safe_r1, safe_r2)
+        else:
+            self.logger.info("🧠 纯长读长模式：使用 Medaka 神经网络进行自校正")
+            polished_result = await self._run_medaka(safe_fasta, tech)
         
         if polished_result:
-            # 持久化汇总数据供报告导出
             import json
+            engine = "Polypolish" if has_short_reads else "Medaka"
             summary = {
                 "status": "ok",
-                "tool": "Polypolish",
-                "description": "Short-read consensus polishing (Illumina)",
+                "tool": engine,
+                "description": f"{engine} consensus polishing for long-read assembly",
                 "output_file": polished_result.name
             }
             with open(Path(self.get_working_dir()) / "correction_summary.json", "w") as f:
@@ -63,10 +80,64 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
             self.status = "completed"
             return True
         
-        # 如果精修失败，我们保留原始组装，不中断流水线
         logger.warning("一致性校正未成功完成，保留原始组装序列继续后续流程")
         self.status = "completed"
         return True
+
+    async def _run_medaka(self, safe_fasta: str, tech: str):
+        """
+        Medaka 神经网络校正：专为纯 Nanopore/PacBio 场景设计
+        不依赖短读长，使用原始长读长数据进行自身一致性校正
+        """
+        from ..env.wsl_manager import WSLManager
+        
+        # 检查 Medaka 是否可用
+        ret_medaka = await self.runner.run_command(["which", "medaka"])
+        if ret_medaka != 0:
+            self.logger.info("[Medaka] 未安装，降级跳过纯长读长校正 (Flye 已内置基础打磨)")
+            return None
+        
+        wsl_tmp_outdir = await self.get_best_wsl_tmp_dir(required_gb=10.0)
+        await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir], is_shell=True)
+        await self.runner.run_command(["mkdir", "-p", wsl_tmp_outdir], is_shell=True)
+        
+        win_polished = Path(self.get_working_dir()) / "polished_assembly.fasta"
+        medaka_out = f"{wsl_tmp_outdir}/medaka_out"
+        
+        # 获取原始长读长
+        raw_reads = self.context.get("r1")
+        if not raw_reads:
+            return None
+        safe_reads = WSLManager.to_wsl_path(str(raw_reads))
+        
+        # 选择模型 (r1041_e82_400bps 是 R10.4 的默认, 对 R9.4 用 r941_min_sup_g507)
+        model = "r1041_e82_400bps_sup_v5.0.0" if tech == "NANOPORE" else "default"
+        
+        try:
+            if self.on_progress: self.on_progress(10, "Medaka: 正在进行神经网络一致性校正...")
+            
+            cmd = [
+                "medaka_polish", safe_fasta, safe_reads, medaka_out,
+                "--threads", str(max(1, (os.cpu_count() or 8) - 1))
+            ]
+            if model != "default":
+                cmd.extend(["--model", model])
+            
+            ret = await self.runner.run_command(cmd)
+            
+            consensus = f"{medaka_out}/consensus.fasta"
+            if ret == 0 and (await self.runner.run_command(["test", "-s", consensus])) == 0:
+                await self.runner.run_command(["cp", "-f", consensus, WSLManager.to_wsl_path(str(win_polished))], is_shell=True)
+                if win_polished.exists() and win_polished.stat().st_size > 500:
+                    self.logger.info(f"[Medaka] 神经网络校正完成: {win_polished.name}")
+                    return win_polished
+            
+            return None
+        except Exception as e:
+            self.logger.warning(f"[Medaka] 校正异常: {e}")
+            return None
+        finally:
+            await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir], is_shell=True)
 
     async def _run_polypolish(self, safe_fasta: str, safe_r1: str, safe_r2: str):
         """
@@ -75,7 +146,7 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
         # 🔗 极速飞升：申请 10GB 左右的内存空间进行密集比对计算
         wsl_tmp_outdir = await self.get_best_wsl_tmp_dir(required_gb=10.0)
         
-        # 本地化路径：在内存盘内执行所有密集 IO，彻底摆脱 Windows NTFS 瓶颈
+        # 本地化路径：在内存盘内执行所有密集 IO
         local_fasta = f"{wsl_tmp_outdir}/ref.fasta"
         sam_r1 = f"{wsl_tmp_outdir}/aligned_r1.sam"
         sam_r2 = f"{wsl_tmp_outdir}/aligned_r2.sam"
@@ -100,30 +171,61 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
             await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir], is_shell=True)
             await self.runner.run_command(["mkdir", "-p", wsl_tmp_outdir], is_shell=True)
             
-            # 将参考序列拷贝入内存盘进行本地化索引 (防止在慢速盘上建立索引)
-            await self.runner.run_command(["cp", safe_fasta, local_fasta], is_shell=True)
+            cpu_count = os.cpu_count() or 8
+            threads = str(max(1, cpu_count - 1))
+            
+            # 🚨 移除了原有的 seqtk 随机抽样！
+            # 原因是对于极高同源或长读长的打磨，我们依赖所有的短序列进行全面压制纠错，
+            # 随机采样不仅不适合打磨，而且会将靶标覆盖度人为拉低。
+            # 直接让 bwa mem 全量跑，抛弃的比对结果也只是计算成本而已。
 
-            threads = str(self.context.config.get("threads", 8))
+            # 将参考序列拷贝入内存盘进行本地化索引
+            await self.runner.run_command(["cp", safe_fasta, local_fasta], is_shell=True)
             
             # Step 1: 建立 BWA 索引
-            if self.on_progress: self.on_progress(10, "正在建立内存级比对索引...")
+            if self.on_progress: self.on_progress(10, "正在建立内存级靶向序列比对索引...")
             await self.runner.run_command(["bwa", "index", local_fasta])
 
-            # Step 2: 独立比对 R1 和 R2
-            if self.on_progress: self.on_progress(30, "正在执行内存级超导比对 R1...")
-            await self.runner.run_command(["bash", "-c", f'bwa mem -t {threads} -a "{local_fasta}" "{safe_r1}" > "{sam_r1}"'])
+            # --- 🚀 新增：双路并行比对调度 ---
+            if self.on_progress: self.on_progress(30, "正在全核并发执行双向回比对 (R1+R2)...")
             
-            if self.on_progress: self.on_progress(50, "正在执行内存级超导比对 R2...")
-            await self.runner.run_command(["bash", "-c", f'bwa mem -t {threads} -a "{local_fasta}" "{safe_r2}" > "{sam_r2}"'])
+            # 平分线程数
+            total_threads = int(threads)
+            p_threads = max(1, total_threads // 2)
             
+            from ..engine.runner import CommandRunner
+            runner_r1 = CommandRunner(f"{self.__class__.__name__}.R1", is_wsl=True)
+            runner_r2 = CommandRunner(f"{self.__class__.__name__}.R2", is_wsl=True)
+
+            cmd1 = ["bash", "-c", f'bwa mem -t {p_threads} -a "{local_fasta}" "{safe_r1}" > "{sam_r1}"']
+            cmd2 = ["bash", "-c", f'bwa mem -t {p_threads} -a "{local_fasta}" "{safe_r2}" > "{sam_r2}"']
+
+            import asyncio
+            # 同时拉起两个比对进程
+            retcodes = await asyncio.gather(
+                runner_r1.run_command(cmd1, silence_errors=True),
+                runner_r2.run_command(cmd2, silence_errors=True)
+            )
+
+            if any(r != 0 for r in retcodes):
+                logger.error("并行回比对过程中发生错误")
+                return None
+
             # Step 3: Polypolish 过滤
             if self.on_progress: self.on_progress(70, "正在执行内存级结果过滤...")
             await self.runner.run_command(["polypolish", "filter", "--in1", sam_r1, "--in2", sam_r2, "--out1", filtered_r1, "--out2", filtered_r2])
+
+            # 🔗 关键释放 1：过滤完成后，原始巨型 SAM 已无用，立刻删除释放几十 GB 内存
+            self.logger.info("🗑️ 释放中间比对文件 (aligned_r*.sam)...")
+            await self.runner.run_command(["rm", "-f", sam_r1, sam_r2], is_shell=True)
 
             # Step 4: 执行精修
             if self.on_progress: self.on_progress(85, "正在合成纠错序列 (Polypolish)...")
             ret_polish = await self.runner.run_command(["bash", "-c", f'polypolish polish "{local_fasta}" "{filtered_r1}" "{filtered_r2}" > "{local_polished}"'])
             
+            # 🔗 关键释放 2：精修完成后，过滤后的 SAM 也已无用，立刻删除
+            await self.runner.run_command(["rm", "-f", filtered_r1, filtered_r2], is_shell=True)
+
             if ret_polish == 0:
                 # 提取唯一产物
                 await self.runner.run_command(["cp", "-f", local_polished, str(win_polished_fasta)], is_shell=True)
@@ -137,7 +239,7 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
             logger.warning(f"[Polypolish] 内存精修发生异常: {e}")
             return None
         finally:
-            # 🔗 强效回收：不论成败，立即销毁内存中的所有临时 SAM/索引文件，释放系统 RAM
-            self.logger.info(f"♻️ 正在销毁精修临时数据，释放空间: {wsl_tmp_outdir}")
+            # 🔗 终态回收：确保 wsl_tmp_outdir 文件夹被彻底移除
+            self.logger.info(f"♻️ 正在销毁精修临时目录: {wsl_tmp_outdir}")
             await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir], is_shell=True)
 

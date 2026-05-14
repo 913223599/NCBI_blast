@@ -2,12 +2,16 @@
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-import time
+import time as _time
 
 from .core.base import PipelineContext
 from .steps.quality_control import QualityControlStep
 from .steps.host_cleaner import HostCleanerStep
 from .steps.assembler import AssemblerStep
+from .steps.prophage_separator import ProphageSeparatorStep
+from .steps.merger import ReadMergerStep
+from .steps.gap_filler import GapFillerStep
+from .steps.scaffolder import ScaffoldingStep
 from .steps.correction import ConsensusCorrectionStep
 from .steps.annotation import AnnotationStep
 from .env.dependency_manager import DependencyManager
@@ -58,6 +62,10 @@ class AssemblyManager:
         if target_id in self.active_steps:
             step = self.active_steps[target_id]
             self.logger.warning(f"🛑 正在强制停止任务: {target_id}")
+            
+            if hasattr(step, 'context'):
+                step.context.is_aborted = True
+                
             if hasattr(step, 'runner'):
                 # 💡 强制终止底层 WSL 进程
                 step.runner.terminate()
@@ -80,8 +88,6 @@ class AssemblyManager:
         通用基因组流水线 (支持 BACTERIA, PHAGE, VIRUS 等)
         """
         # 0. 格式与完整性预检
-        # ...
-        # 0. 格式与完整性预检
         if not self.file_handler.validate_fastq_pair(r1_input, r2_input):
             return {"status": "error", "message": "输入文件格式不正确或双端不匹配 (仅支持 .fastq.gz / .fq.gz)"}
             
@@ -90,7 +96,7 @@ class AssemblyManager:
 
         # 自动生成样本 ID
         sample_id = self.file_handler.get_sample_id(r1_input)
-        task_id = task_id or f"{sample_id}_{int(time.time())}"
+        task_id = task_id or f"{sample_id}_{int(_time.time())}"
 
         # 1. 环境预检
         # 2. 硬件资源评估 (动态线程与 GPU)
@@ -133,20 +139,54 @@ class AssemblyManager:
         config["is_wsl"] = self.env_manager.is_wsl
         task_dir = self.results_base / task_id
         
-        # 🔗 核心修复：支持任务重置 (Reset)
+        # 🔗 核心修复：支持任务重置 (Reset)，加入 Windows 鲁棒性清理逻辑
         if config.get("reset") and task_dir.exists():
             self.logger.warning(f"正在重置任务 {task_id}，清理旧数据...")
             import shutil
-            try:
-                shutil.rmtree(task_dir)
-                task_dir.mkdir(parents=True)
-            except Exception as e:
-                self.logger.error(f"清理任务目录失败: {e}")
+            import time
+            from .env.wsl_manager import WSLManager
+            
+            # 采用 3 次重试 + WSL 强力清理模式
+            cleanup_success = False
+            for i in range(3):
+                try:
+                    # 尝试 1: 标准递归删除
+                    shutil.rmtree(task_dir)
+                    cleanup_success = True
+                    break
+                except Exception:
+                    # 尝试 2: 如果是 Windows 文件锁，尝试利用 WSL 暴力铲除 (通常比 Windows API 更有效)
+                    try:
+                        wsl_path = WSLManager.to_wsl_path(str(task_dir))
+                        # 启动一个临时的 runner 或直接调用 os.system
+                        import os
+                        os.system(f"wsl -d Ubuntu -u root rm -rf {wsl_path}")
+                        if not task_dir.exists():
+                            cleanup_success = True
+                            break
+                    except: pass
+                    
+                    self.logger.warning(f"⚠️ 文件夹可能被占用，正在进行第 {i+1}/3 次重试...")
+                    time.sleep(1.5)
+            
+            if not cleanup_success:
+                self.logger.error(f"❌ 无法清理旧任务目录，请手动关闭打开该目录的文件夹或程序后再重试")
+            else:
+                task_dir.mkdir(parents=True, exist_ok=True)
+                self.logger.info(f"✅ 任务目录 {task_id} 重置成功")
         
-        # 🔗 GPU 加速环境准备 (挂载为内部属性，不进入 ctx.data 序列化)
+        # GPU 加速环境准备 (挂载为内部属性，不进入 ctx.data 序列化)
         ctx = PipelineContext(task_id, task_dir, config)
         ctx.gpu_manager = self.gpu_manager
         ctx.gpu_env = self.gpu_manager.get_acceleration_env()
+        
+        # 注入 ShmManager (内存盘统一资源管理器)
+        if self.env_manager.is_wsl:
+            from .core.shm_manager import ShmManager
+            from .engine.runner import CommandRunner
+            shm_runner = CommandRunner("ShmManager", is_wsl=True)
+            total_mem = max_mem_gb  # 使用已探测的物理内存
+            ctx.shm = ShmManager(task_id, shm_runner, float(total_mem))
         
         # 注入初始输入与环境
         ctx.update("r1", Path(r1_input))
@@ -155,20 +195,36 @@ class AssemblyManager:
         from .steps.phage_annotation import PhageAnnotationStep
         
         # 2. 定义步骤序列 (深度模块化：根据物种类型动态编排)
-        pipeline_steps = [QualityControlStep(ctx)]
+        from .core.base import BaseAssemblyStep
+        pipeline_steps: List[BaseAssemblyStep] = [QualityControlStep(ctx)]
         
+        # 🔗 获取是否需要提前停止
+        stop_early = config.get("params", {}).get("stop_after_assembly", False)
+
         # 🔗 噬菌体专项：插入宿主剔除步骤与专项注释
         if sample_type == "PHAGE":
             pipeline_steps.append(HostCleanerStep(ctx))
+            pipeline_steps.append(ReadMergerStep(ctx))
             pipeline_steps.append(AssemblerStep(ctx))
-            pipeline_steps.append(ConsensusCorrectionStep(ctx))
-            pipeline_steps.append(PhageAnnotationStep(ctx))
+            # 🧬 纯化与前噬菌体分离：无论是裂解态（需过滤宿主污染）还是溶源态（需切割找靶），
+            # ProphageSeparatorStep 内部的 VIBRANT/VirSorter2 都是必经的过滤漏斗！
+            self.logger.info("🧬 激活噬菌体纯化与分离模块 (PhiSpy/VIBRANT 双路寻靶过滤)")
+            pipeline_steps.append(ProphageSeparatorStep(ctx))
+            pipeline_steps.append(GapFillerStep(ctx))
+            pipeline_steps.append(ScaffoldingStep(ctx))
+            if not stop_early:
+                pipeline_steps.append(ConsensusCorrectionStep(ctx))
+                pipeline_steps.append(PhageAnnotationStep(ctx))
         else:
-            pipeline_steps.extend([
-                AssemblerStep(ctx),
-                ConsensusCorrectionStep(ctx),
-                AnnotationStep(ctx)
-            ])
+            pipeline_steps.append(ReadMergerStep(ctx))
+            pipeline_steps.append(AssemblerStep(ctx))
+            pipeline_steps.append(GapFillerStep(ctx))
+            pipeline_steps.append(ScaffoldingStep(ctx))
+            if not stop_early:
+                pipeline_steps.extend([
+                    ConsensusCorrectionStep(ctx),
+                    AnnotationStep(ctx)
+                ])
         
         logging.info(f"--- [Pipeline Start] Type: {sample_type} | Tasks: {len(pipeline_steps)} | Task: {task_id} ---")
         
@@ -180,48 +236,41 @@ class AssemblyManager:
             self.logger.warning(f"⚠️ 环境预检/自愈过程中发生异常 (非致命): {e}")
 
         try:
-            for i, step in enumerate(pipeline_steps):
+            for step_index, step in enumerate(pipeline_steps):
+                if getattr(ctx, "is_aborted", False):
+                    self.logger.warning("❌ 流水线中止，任务已经被用户打断")
+                    break
+                    
                 # 链路注册：支持外部停止
                 self.active_steps[task_id] = step
                 step_name = step.__class__.__name__
                 
-                # 🔗 额外逻辑：如果已完成，且未要求重置，则提前恢复上下文并同步进度
+                # 🔗 如果已完成，跳过
                 if not config.get("reset") and step.is_completed():
                     self.logger.info(f"⏭️ 步骤 {step_name} 已有结果，跳过计算。")
-                    # 同步指标到数据库（针对断点续传后的前端显示）
-                    overall_p = ((i + 1) / len(pipeline_steps)) * 100
+                    overall_p = ((step_index + 1) / len(pipeline_steps)) * 100
                     self._report_progress(task_id, step_name, overall_p, "completed")
                     continue
                 
-                # 🔗 额外逻辑：如果是 HostCleaner，解析物理数据库路径
+                # 针对 HostCleaner 的参数解析 (保持原有逻辑)
                 if step_name == "HostCleanerStep":
                     host_id = config.get("params", {}).get("host_filter_db", "default_ecoli")
-                    
-                    if host_id.startswith("ncbi:"):
+                    if host_id and host_id.startswith("ncbi:"):
                         species = host_id.replace("ncbi:", "").strip()
-                        if not species:
-                            raise ValueError("NCBI 宿主菌名称不能为空，请在设置中输入菌株名称（如 Escherichia coli）。")
                         resolved_path_str = await self.ncbi_downloader.fetch_reference_genome(species)
-                        if not resolved_path_str:
-                            self.logger.warning(f"⚠️ 无法从 NCBI 获取物种 '{species}' 的参考基因组，将自动跳过宿主剔除步骤直接进行组装。")
-                            actual_path = None
-                        else:
-                            actual_path = Path(resolved_path_str)
-                    else:
+                        config["params"]["host_filter_db"] = resolved_path_str if resolved_path_str else None
+                    elif host_id:
                         actual_path = self.host_resolver.resolve(host_id)
-                    
-                    if actual_path:
-                        config["params"]["host_filter_db"] = str(actual_path)
-                    elif host_id.startswith("ncbi:"):
-                        # 对于 NCBI 下载失败的情况，前面已经报过 warning 了，这里将其置空以便 Step 内部自动跳过
-                        config["params"]["host_filter_db"] = None
-                    else:
-                        raise ValueError(f"指定的宿主数据库 '{host_id}' 未能通过物理路径解析。")
+                        config["params"]["host_filter_db"] = str(actual_path) if actual_path else None
 
                 stage_map = {
                     "QualityControlStep": "数据质控",
                     "HostCleanerStep": "宿主剔除",
+                    "ReadMergerStep": "读长合并",
                     "AssemblerStep": "基因组组装",
+                    "ProphageSeparatorStep": "前噬菌体分离",
+                    "ScaffoldingStep": "支架构建",
+                    "GapFillerStep": "局部补洞",
                     "ConsensusCorrectionStep": "一致性校正",
                     "AnnotationStep": "功能注释",
                     "PhageAnnotationStep": "功能注释",
@@ -229,25 +278,23 @@ class AssemblyManager:
                 current_stage = stage_map.get(step_name, step_name)
                 
                 # 初始步骤进度
-                overall_progress = (i / len(pipeline_steps)) * 100
+                overall_progress = (step_index / len(pipeline_steps)) * 100
                 self._report_progress(task_id, current_stage, overall_progress, "running")
                 
                 # 注入进度感知回调
                 def step_progress_callback(p, sub_status=None):
-                    # 计算相对于整个流水线的细粒度进度
                     current_step_p = overall_progress + (p / len(pipeline_steps))
-                    # 如果有具体子状态，拼接到枚举名称后，方便前端显示
                     display_stage = f"{current_stage} ({sub_status})" if sub_status else current_stage
                     self._report_progress(task_id, display_stage, current_step_p, "running")
 
                 step.on_progress = step_progress_callback
                 
-                logging.info(f"正在执行步骤: {step_name}")
-                start_time = time.time()
+                self.logger.info(f"🚀 正在执行步骤 [{step_index+1}/{len(pipeline_steps)}]: {step_name}")
+                start_time = _time.time()
                 success = await step.execute()
-                duration = time.time() - start_time
+                duration = _time.time() - start_time
                 
-                # 收集遥测数据（耗时与版本占位器）
+                # 遥测记录
                 if "telemetry" not in ctx.data: ctx.data["telemetry"] = {"steps": {}}
                 ctx.data["telemetry"]["steps"][step_name] = {
                     "duration": round(duration, 2),
@@ -255,9 +302,8 @@ class AssemblyManager:
                 }
 
                 if not success:
-                    logging.error(f"步骤 {step_name} 失败，流水线终止。")
+                    self.logger.error(f"❌ 步骤 {step_name} 失败，流水线终止。")
                     self._report_progress(task_id, "FAILED", overall_progress, "failed")
-                    from src.backend.utils.assembly_db import assembly_db
                     assembly_db.finalize_task(task_id, "error", {"failed_step": step_name})
                     return {"status": "failed", "step": step_name, "task_id": task_id}
             
@@ -266,11 +312,15 @@ class AssemblyManager:
                 self._report_progress(task_id, "资源回收", 99, "running")
                 self.logger.info("♻️ 流水线完结，正在清理测序中段缓存数据以保护物理磁盘空间...")
                 try:
-                    # 1. 销毁 Fastp 或 HostCleaner 留下的未过滤大块 FASTQ
-                    for k in ["clean_r1", "clean_r2"]:
+                    # 1. 销毁 Fastp 或 HostCleaner 或 ReadMerger 留下的未过滤大块 FASTQ
+                    for k in ["clean_r1", "clean_r2", "merged_reads", "unmerged_r1", "unmerged_r2"]:
                         fpath = ctx.get(k)
                         if fpath and Path(fpath).exists():
-                            Path(fpath).unlink(missing_ok=True)
+                            # 🚨 严格审计：只删除巨大的测序文件 (.fastq.gz / .fq.gz)
+                            # 必须保留小文件（如 .report / .log / .json 等以便回溯分析）
+                            p = Path(fpath)
+                            if p.suffix in [".gz", ".fastq", ".fq"]:
+                                p.unlink(missing_ok=True)
                             
                     # 2. 销毁噬菌组智能深度采样 (Downsampling) 的副本
                     sampling_dir = task_dir / "unicycler_run" / "sampling"
@@ -307,6 +357,24 @@ class AssemblyManager:
             return {"status": "error", "message": str(e)}
         finally:
             self.active_steps.pop(task_id, None)
+            # 全局资源回收: 通过 ShmManager 清理所有内存盘和临时目录残留
+            try:
+                if ctx.shm:
+                    import asyncio
+                    asyncio.ensure_future(ctx.shm.cleanup_all())
+                elif self.env_manager.is_wsl:
+                    from .engine.runner import CommandRunner
+                    cleanup_runner = CommandRunner("ShmCleanup", is_wsl=True)
+                    import asyncio
+                    asyncio.ensure_future(
+                        cleanup_runner.run_command([
+                            "bash", "-c",
+                            f"find /dev/shm /tmp -maxdepth 1 -name 'asm_{task_id}_*' "
+                            f"-exec rm -rf {{}} + 2>/dev/null || true"
+                        ], silence_errors=True)
+                    )
+            except Exception:
+                pass
 
     def _report_progress(self, task_id: str, step: str, progress: float, status: str):
         """通过 WebSocket 广播进度数据，并持久化到数据库"""
@@ -320,7 +388,7 @@ class AssemblyManager:
                 "step": step,
                 "progress": round(progress, 2),
                 "status": status,
-                "timestamp": time.time()
+                "timestamp": _time.time()
             })
             
             # 2. 同步到数据库
@@ -346,6 +414,10 @@ class AssemblyManager:
 
         if sample_type == "PHAGE":
             critical_tools.extend(["polypolish", "checkv"])
+            # 🧬 前噬菌体分离模式：当提供宿主基因组时追加工具检查
+            host_genome = self._get_config_value(steps, "host_genome")
+            if host_genome:
+                critical_tools.extend(["phispy", "prokka"])
             
         # 2. 差量检查
         missing = [t for t in critical_tools if not self.env_manager.check_tool_installed(t)]
@@ -357,7 +429,7 @@ class AssemblyManager:
             self.logger.info(f"🛠️ 发现环境不完整! 缺失工具: {missing}, 准备执行自动化部署自愈程序...")
             
             from .engine.runner import CommandRunner
-            runner = CommandRunner("EnvRepair", self.logger, is_wsl=True)
+            runner = CommandRunner("EnvRepair", is_wsl=True)
             
             # 使用项目内置的万能部署脚本
             setup_script = self.project_root / "scripts" / "setup_assembly_env.sh"
@@ -375,3 +447,11 @@ class AssemblyManager:
         else:
             self.logger.info("✅ 环境工具预检通过")
 
+    def _get_config_value(self, steps: List[Any], key: str) -> Optional[str]:
+        """从步骤上下文或全局配置中安全提取参数值"""
+        for step in steps:
+            if hasattr(step, 'context') and hasattr(step.context, 'config'):
+                val = step.context.config.get("params", {}).get(key)
+                if val:
+                    return val
+        return None

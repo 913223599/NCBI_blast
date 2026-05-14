@@ -16,9 +16,22 @@ const handleFileDrop = async (e: DragEvent) => {
   if (props.disabled) return;
   isDragging.value = false;
   const files = e.dataTransfer?.files;
-  if (files && files.length > 0) {
-     const paths = Array.from(files).map(f => (f as any).path);
-     emit('update:selectedFiles', [...props.selectedFiles, ...paths]);
+  if (!files || files.length === 0) return;
+
+  const paths = Array.from(files)
+    .map(f => {
+      try {
+        const electronPath = (window as any).electronAPI?.getPathForFile?.(f);
+        return electronPath || (f as any).path;
+      } catch (err) {
+        console.error('File path extraction error:', err);
+        return null;
+      }
+    })
+    .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+  
+  if (paths.length > 0) {
+    emit('update:selectedFiles', [...props.selectedFiles.filter(f => !!f), ...paths]);
   }
 };
 
@@ -38,8 +51,10 @@ const removeFile = (index: number) => {
 };
 
 const getFileIcon = (path: string) => {
-  if (path.endsWith('.ab1')) return '📝';
-  if (path.endsWith('.gz') || path.endsWith('.fastq')) return '🧬';
+  if (!path || typeof path !== 'string') return '📄';
+  const lowerPath = path.toLowerCase();
+  if (lowerPath.endsWith('.ab1')) return '📝';
+  if (lowerPath.endsWith('.gz') || lowerPath.endsWith('.fastq') || lowerPath.endsWith('.fq')) return '🧬';
   return '📄';
 };
 </script>
@@ -72,11 +87,13 @@ const getFileIcon = (path: string) => {
       </div>
 
       <div v-else class="file-list">
-        <div v-for="(file, idx) in selectedFiles" :key="idx" class="file-item" @click.stop>
-          <span class="file-icon">{{ getFileIcon(file) }}</span>
-          <span class="file-name" :title="file">{{ file.split(/[\\/]/).pop() }}</span>
-          <button @click.stop="removeFile(idx)" class="remove-btn" v-if="!disabled">×</button>
-        </div>
+        <template v-for="(file, idx) in selectedFiles" :key="idx">
+          <div v-if="file" class="file-item" @click.stop>
+            <span class="file-icon">{{ getFileIcon(file) }}</span>
+            <span class="file-name" :title="file">{{ String(file).split(/[\\/]/).pop() }}</span>
+            <button @click.stop="removeFile(idx)" class="remove-btn" v-if="!disabled">×</button>
+          </div>
+        </template>
         <div class="add-more" v-if="!disabled" @click.stop="selectFilesManually">+ 继续添加文件</div>
       </div>
     </div>

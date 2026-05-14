@@ -60,8 +60,18 @@ if platform.system() == "Windows":
     class AsyncioAssertionFilter(logging.Filter):
         def filter(self, record):
             return "assert f is self._write_fut" not in record.getMessage()
+            
+    class WebsocketsTransferFilter(logging.Filter):
+        def filter(self, record):
+            if record.exc_info:
+                exc_type, exc_value, exc_tb = record.exc_info
+                if isinstance(exc_value, OSError) and getattr(exc_value, 'winerror', None) == 121:
+                    return False
+            return True
     
     logging.getLogger("asyncio").addFilter(AsyncioAssertionFilter())
+    logging.getLogger("websockets.server").addFilter(WebsocketsTransferFilter())
+    logging.getLogger("websockets.protocol").addFilter(WebsocketsTransferFilter())
     logger.info("[Config] 已应用 Windows asyncio 稳定性补丁 (日志过滤)")
     
     # ─── 信号处理加速退出 (针对 Electron 生命周期优化) ───
@@ -130,11 +140,11 @@ async def lifespan(app: FastAPI):
     except Exception as eb:
         logger.error(f"BLAST 引擎启动失败: {eb}")
 
-    # B2. 初始化组装任务队列工作线程
+    # B2. 初始化组装任务队列工作线程 (持久化串行队列)
     from .routes.assembly import execute_assembly_pipeline
-    from .utils.assembly_queue import assembly_queue
-    asyncio.create_task(assembly_queue.start_workers(execute_assembly_pipeline))
-    logger.info("Assembly 任务队列工作线程已启动")
+    from .utils.persistent_queue import persistent_queue
+    asyncio.create_task(persistent_queue.start_workers(execute_assembly_pipeline))
+    logger.info("🚀 Assembly 持久化串行队列引擎已启动 (max_workers=1)")
 
     # D. 打印局域网共享地址与初始化 WSL 环境
     try:
@@ -200,9 +210,10 @@ def _on_blast_result(task_id: str, data: dict):
                 # 物种名学名规范化
                 match = re.search(r'^([A-Z][a-z]+(?:\s+[a-z]+)?)', identity.strip())
                 name = match.group(1) if match else identity.split(';')[0].strip()
+                seq_id = data.get('sequence_id', '')
                 get_annotation_manager().update_annotation(
-                    sequence_hash=data.get('sequence_id'),
-                    last_known_id=data.get('sequence_id'),
+                    sequence_hash=str(seq_id),
+                    last_known_id=str(seq_id),
                     blast_identity=name
                 )
         except Exception as cb_e:
@@ -212,6 +223,7 @@ def _on_blast_result(task_id: str, data: dict):
 app = FastAPI(title="NCBI Bio-Station API", lifespan=lifespan)
 
 # 初始化局域网共享管理 (暂不 setup，等待业务路由注册完成)
+lan_mgr = None
 try:
     from .lan_share import LanShareManager
     lan_mgr = LanShareManager(app)
@@ -246,7 +258,7 @@ app.include_router(analysis.router, prefix="/api")
 
 # 最后：启动局域网共享路由 (确保通配符路由 /{full_path} 不会屏蔽业务 API)
 try:
-    if 'lan_mgr' in locals():
+    if lan_mgr is not None:
         lan_mgr.setup()
         logger.info("局域网共享路由已挂载 (位于业务路由之后)")
 except Exception as e:
@@ -269,6 +281,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if msg == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
     except WebSocketDisconnect:
+        broadcaster.disconnect(websocket)
+    except Exception as e:
+        logger.debug(f"WebSocket 异常断开 (ID={client_id}): {e}")
         broadcaster.disconnect(websocket)
 
 if __name__ == "__main__":

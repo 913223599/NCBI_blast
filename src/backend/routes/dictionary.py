@@ -51,17 +51,15 @@ async def translate_batch(req: BatchTranslateRequest):
             chunks = [req.texts[i:i + CHUNK_SIZE] for i in range(0, len(req.texts), CHUNK_SIZE)]
             for chunk in chunks:
                 try:
-                    results = translator.translate_batch(chunk, category=req.category)
-                    logger.info(f"批量翻译批次完成: 大小={len(chunk)}, 成功解析={len(results)}")
-                    
-                    for orig, tran in results.items():
-                        # 即使翻译结果与原文相同，也进行广播，让前端知道进度或确认状态
-                        # 以前只在 tran != orig 时广播，可能导致前端一直在等待
+                    def on_ready(orig, tran):
                         broadcaster.broadcast_sync("translation_done", {
                             "original": orig, 
                             "translated": tran,
                             "success": tran != orig
                         })
+                        
+                    results = translator.translate_batch(chunk, category=req.category, on_result_ready=on_ready)
+                    logger.info(f"批量翻译批次完成: 大小={len(chunk)}, 成功解析={len(results)}")
                 except Exception as exc:
                     logger.error(f"批量翻译批次崩溃: {exc}", exc_info=True)
 

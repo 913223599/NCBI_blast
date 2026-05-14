@@ -6,13 +6,19 @@ const props = defineProps<{
   onStart: () => void;
   onToggleHistory: () => void;
   canStart: boolean;
+  queueCount?: number;
 }>();
 </script>
 
 <template>
   <div class="action-bar">
     <div class="info-group">
-      <h2>基因组拼接</h2>
+      <div class="title-with-badge">
+        <h2>基因组拼接</h2>
+        <span v-if="queueCount && queueCount > 0" class="queue-badge-mini">
+          {{ queueCount }} 个动态
+        </span>
+      </div>
       <p>面向高通量测序数据的一站式处理平台</p>
     </div>
     
@@ -24,8 +30,8 @@ const props = defineProps<{
       <button v-if="isRunning" class="stop-btn" @click="onStop">
         <span class="pulse-dot"></span> 停止执行
       </button>
-      <button v-else class="start-btn" :disabled="!canStart" @click="onStart">
-        启动流水线
+      <button class="start-btn" :disabled="!canStart" @click="onStart">
+        {{ isRunning ? '加入队列' : '启动流水线' }}
       </button>
     </div>
   </div>
@@ -35,6 +41,12 @@ const props = defineProps<{
 .action-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; }
 .info-group h2 { font-size: 20px; color: #1e293b; margin: 0; font-weight: 700; letter-spacing: -0.5px; }
 .info-group p { font-size: 12px; color: #64748b; margin: 0; opacity: 0.8; }
+
+.title-with-badge { display: flex; align-items: center; gap: 8px; }
+.queue-badge-mini {
+  background: rgba(59, 130, 246, 0.1); color: #3b82f6; font-size: 10px; padding: 2px 8px;
+  border-radius: 20px; font-weight: 600; border: 1px solid rgba(59, 130, 246, 0.2);
+}
 
 .btn-group { display: flex; gap: 10px; align-items: center; }
 

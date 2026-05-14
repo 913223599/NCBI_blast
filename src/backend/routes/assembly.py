@@ -10,7 +10,7 @@ logger = logging.getLogger("assembly_route")
 from ..broadcaster import broadcaster
 from ..utils.response import BioResponse
 from ..utils.assembly_storage import AssemblyStorage
-from ..utils.assembly_queue import assembly_queue
+from ..utils.persistent_queue import persistent_queue as assembly_queue
 
 from src.assembly.manager import AssemblyManager
 from ..utils.assembly_db import assembly_db
@@ -33,7 +33,17 @@ async def run_assembly_job(payload: Dict[str, Any]):
     # 1. 准备物理存储
     AssemblyStorage.get_task_dir(task_id)
     
-    # 2. 加入队列处理
+    # 2. 持久化到数据库
+    sample_id = payload.get('sample_id', 'Unknown')
+    name = payload.get('name', 'Assembly Task')
+    sample_type = payload.get('sample_type', 'BACTERIA')
+    tech = payload.get('tech', 'ILLUMINA')
+    config = payload.get('config', {})
+    logger.info(f"📝 Creating task in DB: {task_id}")
+    assembly_db.create_task(task_id, name, sample_id, sample_type, tech, config)
+    logger.info(f"✅ Task created in DB: {task_id}")
+    
+    # 3. 加入队列处理
     await assembly_queue.add_task(payload)
     
     return BioResponse.ok({
@@ -112,9 +122,12 @@ async def export_assembly_report(task_id: str):
 
 @router.delete("/tasks/{task_id}")
 async def delete_assembly_task(task_id: str):
-    """清理任务记录与物理文件"""
+    """清理任务记录与物理文件，并同时从内存队列中摘除"""
     from ..utils.assembly_db import assembly_db
     from ..utils.assembly_storage import AssemblyStorage
+    
+    # 0. 尝试从活动等待队列中摘除 (支持 UI 的即时反应)
+    assembly_queue.remove_task_from_queue(task_id)
     
     # 1. 删除数据库记录
     assembly_db.delete_task(task_id)
@@ -123,9 +136,81 @@ async def delete_assembly_task(task_id: str):
     task_dir = AssemblyStorage.get_task_dir(task_id)
     if task_dir.exists():
         import shutil
-        shutil.rmtree(task_dir)
+        shutil.rmtree(task_dir, ignore_errors=True)
         
     return BioResponse.ok(f"Task {task_id} and its files have been removed.")
+
+@router.post("/queue/reorder")
+async def reorder_assembly_queue(payload: Dict[str, Any]):
+    """处理前端发来的拖拽重排序请求"""
+    task_ids = payload.get("task_ids", [])
+    if task_ids and isinstance(task_ids, list):
+        assembly_queue.reorder_queue(task_ids)
+    return BioResponse.ok("Queue successfully reordered")
+
+@router.get("/queue")
+async def get_queue_status():
+    """获取当前队列状态快照"""
+    snapshot = await assembly_queue.get_queue_status()
+    return BioResponse.ok(snapshot)
+
+@router.post("/batch")
+async def submit_batch(payload: Dict[str, Any]):
+    """
+    批量提交多组测序文件：
+    payload.file_groups: [[R1, R2], [R1, R2], ...]
+    每组自动生成独立的 task_id 进入队列
+    """
+    import time as _time
+    file_groups = payload.get('file_groups', [])
+    base_config = payload.get('config', {})
+    sample_type = payload.get('sample_type', 'BACTERIA')
+    tech = payload.get('tech', 'ILLUMINA')
+    task_name_prefix = payload.get('name_prefix', 'Batch')
+
+    created_ids = []
+    for idx, group in enumerate(file_groups):
+        if len(group) < 2:
+            continue
+        task_id = f"AS_{int(_time.time() * 1000)}_{idx}"
+        task_payload = {
+            'task_id': task_id,
+            'name': f"{task_name_prefix}_{idx + 1}",
+            'sample_type': sample_type,
+            'tech': tech,
+            'config': {
+                **base_config,
+                'params': {
+                    **base_config.get('params', {}),
+                    'input_files': list(group)
+                }
+            }
+        }
+        AssemblyStorage.get_task_dir(task_id)
+        
+        # 🔗 关键：持久化到数据库，使 queue 接口能读到
+        import os as _os
+        sample_id = _os.path.basename(group[0]).split('.')[0] if group else 'Sample'
+        
+        logger.info(f"📝 Batch: Creating task in DB: {task_id}")
+        assembly_db.create_task(
+            task_id, 
+            task_payload['name'], 
+            sample_id, 
+            sample_type, 
+            tech, 
+            task_payload['config']
+        )
+        logger.info(f"✅ Batch: Task created in DB: {task_id}")
+        
+        await assembly_queue.add_task(task_payload)
+        created_ids.append(task_id)
+
+    return BioResponse.ok({
+        'message': f'{len(created_ids)} tasks queued',
+        'task_ids': created_ids,
+        'queue_size': assembly_queue.get_queue_size()
+    })
 
 @router.post("/{task_id}/stop")
 async def stop_assembly_task(task_id: str):

@@ -17,6 +17,7 @@
         }
     ],
     "extraPaths": [
+        ".",
         "./src",
         "./vendor/ete4",
         "./vendor/ete4/ete4"

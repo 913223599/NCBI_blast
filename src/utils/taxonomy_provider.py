@@ -31,7 +31,7 @@ class TaxonomyProvider:
         with cls._lock:
             if cls._instance is None:
                 inst = super(TaxonomyProvider, cls).__new__(cls)
-                inst._ncbi = None
+                inst._local = threading.local()
                 inst._is_building = False
                 inst._build_progress = ""
                 cls._instance = inst
@@ -115,7 +115,7 @@ class TaxonomyProvider:
 
     @property
     def ncbi(self):
-        if self._ncbi is None:
+        if not hasattr(self._local, "ncbi"):
             if not self.is_ready:
                 raise RuntimeError(
                     "Taxonomy sqlite database is not built yet. "
@@ -125,12 +125,12 @@ class TaxonomyProvider:
                 self._ensure_ete4_path()
                 from ete4.ncbi_taxonomy.ncbiquery import NCBITaxa  # type: ignore
 
-                self._ncbi = NCBITaxa(dbfile=self.db_path, update=False)
+                self._local.ncbi = NCBITaxa(dbfile=self.db_path, update=False)
                 logger.info(f"ETE4 NCBITaxa initialized successfully using {self.db_path}.")
             except Exception as exc:
                 logger.error(f"Failed to initialize NCBITaxa: {exc}")
                 raise
-        return self._ncbi
+        return self._local.ncbi
 
     # ────────── 构建 / 更新 ──────────
 
@@ -248,7 +248,9 @@ class TaxonomyProvider:
                 logger.info("No local taxdump found. ETE4 will download from NCBI.")
                 tmp_ncbi = NCBITaxa(dbfile=self.db_path, update=True)
 
-            self._ncbi = tmp_ncbi
+            if not hasattr(self, "_local"):
+                self._local = threading.local()
+            self._local.ncbi = tmp_ncbi
             self._build_progress = "构建完成！"
             logger.info("Taxonomy DB built successfully.")
         except Exception as exc:

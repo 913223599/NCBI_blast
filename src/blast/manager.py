@@ -113,8 +113,8 @@ class BlastTask:
         self.progress = 0
         self.results = []
         self.error = None
-        self.start_time = datetime.now()
-        self.end_time = None
+        self.start_time: Optional[datetime] = datetime.now()
+        self.end_time: Optional[datetime] = None
         self.engine = None
         self.created_at = time.time() # For FIFO in same priority
 
@@ -599,10 +599,23 @@ class BlastManager:
             # Merge with in-memory status (for 'running' ones & 'queued' ones)
             for t in stored_tasks:
                 tid = t['task_id']
+                
+                # [FIX] 从 params 中提取 task_name 供前端显示
+                if isinstance(t.get('params'), str):
+                    try:
+                        parsed_params = json.loads(t['params'])
+                        t['task_name'] = parsed_params.get('task_name')
+                    except:
+                        pass
+                elif isinstance(t.get('params'), dict):
+                    t['task_name'] = t['params'].get('task_name')
+
                 if tid in self.tasks:
                     mem_t = self.tasks[tid]
                     t['status'] = mem_t.status
                     t['progress'] = mem_t.progress
+                    if 'task_name' in mem_t.params:
+                        t['task_name'] = mem_t.params['task_name']
             return stored_tasks
 
     def get_task_results(self, task_id: str) -> List[Dict[str, Any]]:
@@ -696,6 +709,19 @@ class BlastManager:
                         target_task.start_time = datetime.fromisoformat(target['start_time']) if target['start_time'] else None
                         self.store.save_task(target_task)
                         break
+
+            # [FIX] 也要同步更新物理文件夹里的 params.json，防止断点续传/重载时名字被覆盖回来
+            task_dir = self.results_dir / task_id
+            params_file = task_dir / "params.json"
+            if params_file.exists():
+                try:
+                    with open(params_file, 'r', encoding='utf-8') as f:
+                        disk_params = json.load(f)
+                    disk_params['task_name'] = new_name
+                    with open(params_file, 'w', encoding='utf-8') as f:
+                        json.dump(disk_params, f, indent=4, ensure_ascii=False)
+                except Exception as e:
+                    self.logger.warning(f"Failed to update params.json during rename: {e}")
 
     def resume_task(self, task_id: str):
         """Resume a failed/cancelled task from its last physical checkpoint."""

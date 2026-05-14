@@ -5,13 +5,14 @@ import logging
 import re
 from pathlib import Path
 from collections import Counter
+from typing import Optional
 
 logger = logging.getLogger("api_server")
 
 # 全局缓存，防止频繁读取大文件
 _result_cache = {}
 
-def parse_blast_csv(csv_path: str, limit: int = None) -> list:
+def parse_blast_csv(csv_path: str, limit: Optional[int] = None) -> list:
     """带缓存的 BLAST CSV 解析器 (复刻自原 api_server.py)"""
     csv_path_obj = Path(csv_path)
     if not csv_path_obj.exists():
@@ -76,7 +77,7 @@ def parse_blast_csv(csv_path: str, limit: int = None) -> list:
         logger.error(f"CSV Parse Error in blast_utils: {exc}")
     return data
 
-def select_consensus_hit(hits: list) -> dict:
+def select_consensus_hit(hits: list) -> Optional[dict]:
     """共识投票选择最佳命中 (优化版)"""
     if not hits:
         return None
@@ -110,8 +111,8 @@ def select_consensus_hit(hits: list) -> dict:
         'unknown', 'n/a', '', 'bacteria', 'archaea', 'eukaryota', 'metagenome', 
         'environmental sample', 'uncultured', 'organism'
     }
-    species_counter = Counter()
-    species_to_hit = {}
+    species_counter: dict[str, float] = {}
+    species_to_hit: dict[str, dict] = {}
     
     max_sim = first_sim
 
@@ -129,7 +130,7 @@ def select_consensus_hit(hits: list) -> dict:
             except:
                 weight = 1.0
                 
-            species_counter[species] += weight
+            species_counter[species] = species_counter.get(species, 0.0) + weight
             if species not in species_to_hit:
                 species_to_hit[species] = hit
 
@@ -137,7 +138,7 @@ def select_consensus_hit(hits: list) -> dict:
         return target_hits[0]
 
     total_weight = sum(species_counter.values())
-    top_entries = species_counter.most_common(5)
+    top_entries = sorted(species_counter.items(), key=lambda x: x[1], reverse=True)[:5]
     
     prob_parts = []
     consensus_list = []

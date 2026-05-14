@@ -1,6 +1,6 @@
 {
   "api_keys": {
-    "dashscope": "sk-a0ecff19a71649deaa6009ae66687bdb"
+    "dashscope": "sk-bf1f07a1c36a49118485d6f2d35d0583"
   },
   "supported_models": [
     {
@@ -10,6 +10,14 @@
     {
       "key": "qwen3-max-2026-01-23",
       "name": "qwen3-max"
+    },
+    {
+      "key": "qwen3.6-max-preview",
+      "name": "qwen3.6-max-preview"
+    },
+    {
+      "key": "qwen3.5-plus-2026-04-20",
+      "name": "qwen3.5-plus-2026-04-20"
     }
   ],
   "advanced_settings": {
@@ -30,7 +38,7 @@
     "use_cache": true,
     "thread_count": 1,
     "request_timeout": 9,
-    "ai_model": "qwen3-max-2026-01-23"
+    "ai_model": "qwen3.5-plus-2026-04-20"
   },
   "setup_completed": true,
   "blast_bin_path": "C:\\Program Files\\NCBI\\blast-2.16.0+\\bin",

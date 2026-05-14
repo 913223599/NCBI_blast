@@ -65,7 +65,7 @@ class AssemblyDB:
 
         with sqlite3.connect(self.DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO assembly_tasks (id, name, sample_id, sample_type, tech, status, last_step, config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO assembly_tasks (id, name, sample_id, sample_type, tech, status, last_step, config, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (task_id, name, sample_id, sample_type, tech, "pending", "INITIALIZING", json.dumps(config, cls=BioJsonEncoder), now, now)
             )
             conn.commit()
@@ -118,6 +118,24 @@ class AssemblyDB:
             cursor = conn.execute("SELECT * FROM assembly_tasks WHERE id = ?", (task_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
+
+    def get_incomplete_tasks(self) -> List[Dict[str, Any]]:
+        """获取所有未完结的任务 (pending/queued/running)，按创建时间排序"""
+        with sqlite3.connect(self.DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM assembly_tasks WHERE status IN ('pending', 'queued', 'running') ORDER BY created_at ASC"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_queued_tasks(self) -> List[Dict[str, Any]]:
+        """获取所有等待中的任务 (仅 pending)，按创建时间排序"""
+        with sqlite3.connect(self.DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM assembly_tasks WHERE status = 'pending' ORDER BY created_at ASC"
+            )
+            return [dict(row) for row in cursor.fetchall()]
 
 # 单例导出
 assembly_db = AssemblyDB()

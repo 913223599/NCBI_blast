@@ -54,7 +54,8 @@ class QwenTranslator:
         # 初始化OpenAI客户端，使用DashScope的兼容模式
         self.client = OpenAI(
             api_key=self.api_key,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            max_retries=5  # 🚀 增加重试次数
         )
     
     def get_supported_models(self, return_keys_only=False) -> dict | list:
@@ -93,7 +94,7 @@ class QwenTranslator:
                 messages=messages,
                 max_tokens=20 # 允许返回翻译结果
             )
-            response_content = completion.choices[0].message.content.strip()
+            response_content = (completion.choices[0].message.content or "").strip()
             return True, f"验证成功！模型响应: '{response_content}'"
         except Exception as e:
             err_msg = str(e)
@@ -172,7 +173,7 @@ class QwenTranslator:
             completion = self.client.chat.completions.create(
                 model=self.model,  # 使用配置的模型
                 messages=messages,
-                timeout=15.0 # 设置 15 秒超时，防止无限挂起
+                timeout=60.0 # 🚀 提高超时到 60 秒，Qwen-Max 推理较慢
             )
             
             # 输出API返回的完整内容用于调试
@@ -184,7 +185,7 @@ class QwenTranslator:
             # print("=" * 50)
             
             import re
-            content = completion.choices[0].message.content.strip()
+            content = (completion.choices[0].message.content or "").strip()
             # 过滤掉 DeepSeek-R1 这种模型产生的 <think> 思考过程标签
             content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
             return content
@@ -195,10 +196,10 @@ class QwenTranslator:
             logger = logging.getLogger(__name__)
             
             # 精确匹配欠费相关错误
-            if 'Arrearage' in err_msg or 'overdue-payment' in err_msg:
+            if 'Arrearage' in err_msg or 'overdue-payment' in err_msg or 'FreeTierOnly' in err_msg or 'free tier' in err_msg.lower():
                 if not QwenTranslator._has_arrearage:
                     QwenTranslator._has_arrearage = True
-                    logger.error(f"[严重错误] AI 翻译账户欠费，已进入静默模式。")
+                    logger.error(f"[严重错误] AI 翻译账户欠费或免费额度已耗尽，已进入静默模式。")
                     if QwenTranslator._on_arrearage_callback:
                         QwenTranslator._on_arrearage_callback()
                 return text
@@ -251,6 +252,11 @@ class QwenTranslator:
 
         messages: List[ChatCompletionMessageParam] = [{"role": "user", "content": prompt}]
         
+        if QwenTranslator._has_arrearage:
+            import logging
+            logging.getLogger(__name__).warning(f"[DEBUG] _has_arrearage is TRUE! Skipping batch network request.")
+            return texts
+
         try:
             import logging
             logger = logging.getLogger(__name__)
@@ -259,27 +265,27 @@ class QwenTranslator:
             completion = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                timeout=45.0  # 批量请求给更多时间
+                timeout=120.0  # 🚀 批量请求给 120 秒，确保长列表稳定返回
             )
             
             import re
-            content = completion.choices[0].message.content.strip()
+            content = (completion.choices[0].message.content or "").strip()
             # 过滤思考过程
             content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
             
             # 分割行，并清理可能的干扰
             lines = [line.strip() for line in content.split('\n') if line.strip()]
             
-            # 如果行数不对，尝试根据编号正则二次清洗
-            if len(lines) != len(texts):
-                cleaned_lines = []
-                for line in lines:
-                    # 尝试去掉 "1. " 这种前缀
-                    cleaned = re.sub(r'^\d+[\.\s、]+', '', line).strip()
-                    if cleaned: cleaned_lines.append(cleaned)
-                lines = cleaned_lines
+            # 始终执行正则清洗以去除大模型自作主张加的编号前缀（如 "1. "）
+            cleaned_lines = []
+            import re
+            for line in lines:
+                cleaned = re.sub(r'^\d+[\.\s、]+', '', line).strip()
+                if cleaned:
+                    cleaned_lines.append(cleaned)
+            lines = cleaned_lines
 
-            # 最终补偿：如果依然不对，至少保证长度一致
+            # 最终补偿：如果行数依然不对，至少保证长度一致
             if len(lines) > len(texts):
                 lines = lines[:len(texts)]
             while len(lines) < len(texts):
@@ -288,8 +294,18 @@ class QwenTranslator:
             return lines
                 
         except Exception as e:
+            err_msg = str(e)
             import logging
-            logging.getLogger(__name__).error(f"Batch AI Error: {e}")
+            logger = logging.getLogger(__name__)
+            
+            if 'Arrearage' in err_msg or 'overdue-payment' in err_msg or 'FreeTierOnly' in err_msg or 'free tier' in err_msg.lower():
+                if not QwenTranslator._has_arrearage:
+                    QwenTranslator._has_arrearage = True
+                    logger.error(f"[严重错误] 批量AI翻译账户欠费或免费额度已耗尽，已进入静默模式。")
+                    if QwenTranslator._on_arrearage_callback:
+                        QwenTranslator._on_arrearage_callback()
+
+            logger.error(f"Batch AI Error: {err_msg}")
             return texts # 出错退化为原文
 
     def batch_translate(self, texts: list) -> list:
@@ -335,7 +351,7 @@ if __name__ == "__main__":
         print("=" * 50)
         # 获取模型名称（如果有的话）
         supported_models = translator.get_supported_models()
-        model_name = supported_models.get(translator.model, translator.model)
+        model_name = supported_models.get(translator.model, translator.model) if isinstance(supported_models, dict) else translator.model
         print(f"使用模型: {translator.model} ({model_name})")
         print("-" * 50)
         

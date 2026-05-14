@@ -22,10 +22,10 @@ const exporting = ref(false)
 
 
 const tabs = [
-  { key: 'overview', label: '总览', icon: '📊' },
-  { key: 'qc', label: '质控', icon: '🧪' },
-  { key: 'assembly', label: '组装', icon: '🧬' },
-  { key: 'annotation', label: '注释', icon: '🔬' },
+  { key: 'overview', label: '总览' },
+  { key: 'qc', label: '质控' },
+  { key: 'assembly', label: '组装' },
+  { key: 'annotation', label: '注释' },
 ]
 
 watch(() => props.show, async (val) => {
@@ -80,6 +80,14 @@ const qcInfo = computed(() => report.value?.qc || {})
 const pholdInfo = computed(() => report.value?.annotation?.phold || null)
 const backfillInfo = computed(() => report.value?.annotation?.phagescope_backfill || null)
 const checkvInfo = computed(() => report.value?.checkv || null)
+const hostCleanerInfo = computed(() => report.value?.host_cleaning?.host_contamination_percent || null)
+
+// V5 新增字段解析
+const lifecycleInfo = computed(() => report.value?.lifecycle_prediction || null)
+const prophageInfo = computed(() => report.value?.prophage_separation || null)
+const correctionInfo = computed(() => report.value?.correction_metadata || null)
+const hostPredictionInfo = computed(() => report.value?.host_prediction || null)
+const auditInfo = computed(() => report.value?.phagescope_audit || null)
 
 const visualMapUrl = computed(() => {
   const mapSuffix = report.value?.annotation?.visual_map
@@ -144,12 +152,12 @@ function getFuncColor(name: string): string {
         <!-- 头部 -->
         <header class="report-header">
           <div class="header-left">
-            <h2>📋 拼接分析报告</h2>
+            <h2>拼接分析报告</h2>
             <span class="task-label">{{ taskName || taskId }}</span>
           </div>
           <div class="header-actions">
             <button class="header-btn export-btn" @click="handleExport" :disabled="exporting || !report">
-              {{ exporting ? '导出中...' : '📤 导出报告' }}
+              {{ exporting ? '导出中...' : '导出报告' }}
             </button>
             <button class="close-btn" @click="emit('close')">✕</button>
           </div>
@@ -157,14 +165,8 @@ function getFuncColor(name: string): string {
 
         <!-- 标签导航 -->
         <nav class="tab-nav">
-          <button
-            v-for="tab in tabs"
-            :key="tab.key"
-            class="tab-btn"
-            :class="{ active: activeTab === tab.key }"
-            @click="activeTab = tab.key"
-          >
-            <span class="tab-icon">{{ tab.icon }}</span>
+          <button v-for="tab in tabs" :key="tab.key" class="tab-btn" :class="{ active: activeTab === tab.key }"
+            @click="activeTab = tab.key">
             {{ tab.label }}
           </button>
         </nav>
@@ -179,7 +181,7 @@ function getFuncColor(name: string): string {
 
         <div class="report-body" v-else-if="error">
           <div class="error-state">
-            <p>⚠️ {{ error }}</p>
+            <p>{{ error }}</p>
             <button @click="fetchReport">重试</button>
           </div>
         </div>
@@ -188,36 +190,8 @@ function getFuncColor(name: string): string {
           <!-- ═══ 总览 Tab ═══ -->
           <div v-if="activeTab === 'overview'" class="tab-content">
             <div class="overview-grid">
-              <!-- 基因组概览卡片 -->
-              <div class="stat-card genome-card">
-                <div class="card-icon">🧬</div>
-                <div class="card-body">
-                  <h4>基因组</h4>
-                  <div class="stat-value">{{ formatBp(parseInt(genomeInfo.length) || asmInfo.total_length || 0) }}</div>
-                  <div class="stat-sub" v-if="genomeInfo.gc_perc">GC: {{ (parseFloat(genomeInfo.gc_perc) * 100).toFixed(1) }}%</div>
-                </div>
-              </div>
-
-              <div class="stat-card contig-card">
-                <div class="card-icon">📐</div>
-                <div class="card-body">
-                  <h4>Contigs</h4>
-                  <div class="stat-value">{{ asmInfo.num_contigs || '--' }}</div>
-                  <div class="stat-sub" v-if="asmInfo.n50">N50: {{ formatBp(asmInfo.n50) }}</div>
-                </div>
-              </div>
-
-              <div class="stat-card cds-card">
-                <div class="card-icon">🔬</div>
-                <div class="card-body">
-                  <h4>预测 CDS</h4>
-                  <div class="stat-value">{{ funcList.find((f: any) => f.name === 'CDS')?.count || pholdInfo?.total_cds || '--' }}</div>
-                  <div class="stat-sub" v-if="genomeInfo.cds_coding_density">编码密度: {{ genomeInfo.cds_coding_density }}%</div>
-                </div>
-              </div>
-
+              <!-- ===== 1. 基础检控与宿主鉴定区 ===== -->
               <div class="stat-card qc-card">
-                <div class="card-icon">🧪</div>
                 <div class="card-body">
                   <h4>质控</h4>
                   <div class="stat-value" v-if="qcInfo.after">{{ formatReads(qcInfo.after.total_reads) }}</div>
@@ -226,22 +200,108 @@ function getFuncColor(name: string): string {
                 </div>
               </div>
 
+              <!-- 宿主剔除卡片 -->
+              <div class="stat-card host-card" v-if="hostCleanerInfo !== null">
+                <div class="card-body">
+                  <h4>宿主成分</h4>
+                  <div class="stat-value">{{ hostCleanerInfo.toFixed(1) }}%</div>
+                  <div class="stat-sub">Kraken2 已剔除背景</div>
+                </div>
+              </div>
+
+              <!-- V5 追加：MASH 宿主溯源预测 -->
+              <div class="stat-card" style="background: linear-gradient(135deg, #fff7ed, #ffedd5)" v-if="hostPredictionInfo && hostPredictionInfo.top_hit_species">
+                <div class="card-body">
+                  <h4>MASH 宿主溯源</h4>
+                  <div class="stat-value" style="font-size: 13px; margin-top:2px;" :title="hostPredictionInfo.top_hit_species">{{ hostPredictionInfo.top_hit_species }}</div>
+                  <div class="stat-sub">P-value: {{ hostPredictionInfo.p_value }} | 距离: {{ hostPredictionInfo.distance }}</div>
+                </div>
+              </div>
+
+              <!-- ===== 2. 组装与形态提取区 ===== -->
+              <!-- 基因组概览卡片 -->
+              <div class="stat-card genome-card">
+                <div class="card-body">
+                  <h4>基因组</h4>
+                  <div class="stat-value">{{ formatBp(parseInt(genomeInfo.length) || asmInfo.total_length || 0) }}</div>
+                  <div class="stat-sub" v-if="genomeInfo.gc_perc">GC: {{ (parseFloat(genomeInfo.gc_perc) * 100).toFixed(1) }}%</div>
+                </div>
+              </div>
+
+              <div class="stat-card contig-card">
+                <div class="card-body">
+                  <h4>Contigs</h4>
+                  <div class="stat-value">{{ asmInfo.num_contigs || '--' }}</div>
+                  <div class="stat-sub" v-if="asmInfo.n50">N50: {{ formatBp(asmInfo.n50) }}</div>
+                </div>
+              </div>
+
+              <!-- V5 追加：一致性校正遥测 -->
+              <div class="stat-card" style="background: linear-gradient(135deg, #f8fafc, #e2e8f0)" v-if="correctionInfo && correctionInfo.engine">
+                <div class="card-body">
+                  <h4>一致性校正</h4>
+                  <div class="stat-value">{{ correctionInfo.engine === 'medaka' ? 'Medaka (RNN)' : 'Polypolish' }}</div>
+                  <div class="stat-sub" v-if="correctionInfo.engine === 'polypolish'">修复错误: {{ correctionInfo.fixed_errors || 0 }} 处</div>
+                  <div class="stat-sub" v-if="correctionInfo.engine === 'medaka'">单碱基自动推断极化修复</div>
+                </div>
+              </div>
+
+              <!-- V5 追加：前噬菌体/杂质萃取记录 -->
+              <div class="stat-card" style="background: linear-gradient(135deg, #fdf4ff, #fae8ff)" v-if="prophageInfo && prophageInfo.vibrant_contigs > 0">
+                <div class="card-body">
+                  <h4>VIBRANT 脱敏纯化</h4>
+                  <div class="stat-value">{{ prophageInfo.vibrant_contigs }} 条</div>
+                  <div class="stat-sub">已从中切割/提纯出有效游离病毒 Contigs</div>
+                </div>
+              </div>
+
+              <!-- ===== 3. 注释与质量评估区 ===== -->
               <!-- CheckV 质量评估卡片 -->
               <div class="stat-card checkv-card" v-if="checkvInfo" :class="checkvInfo.quality?.toLowerCase().replace(' ', '-')">
-                <div class="card-icon">🛡️</div>
                 <div class="card-body">
-                  <h4>质量评估</h4>
+                  <h4>CheckV 完整度</h4>
                   <div class="stat-value">{{ checkvInfo.quality || '--' }}</div>
                   <div class="stat-sub">完整度: {{ checkvInfo.completeness }}% | 污染度: {{ checkvInfo.contamination }}%</div>
                 </div>
               </div>
 
+              <div class="stat-card cds-card">
+                <div class="card-body">
+                  <h4>预测 CDS</h4>
+                  <div class="stat-value">{{funcList.find((f: any) => f.name === 'CDS')?.count || pholdInfo?.total_cds || '--' }}</div>
+                  <div class="stat-sub" v-if="genomeInfo.cds_coding_density">编码密度: {{ genomeInfo.cds_coding_density }}%</div>
+                </div>
+              </div>
+
+              <!-- PhageScope 回填卡片 -->
               <div class="stat-card backfill-card" v-if="backfillInfo">
-                <div class="card-icon">🧬</div>
                 <div class="card-body">
                   <h4>PhageScope 回填</h4>
                   <div class="stat-value">+{{ backfillInfo.hits }}</div>
                   <div class="stat-sub">扫描 {{ backfillInfo.unknown_before }} 个未知蛋白</div>
+                </div>
+              </div>
+
+              <!-- ===== 4. 临床转化与致病性审计红线 ===== -->
+              <!-- V5 追加：BacpHLiP 生活史预测/药用安全 -->
+              <div class="stat-card" style="background: linear-gradient(135deg, #f0fdfa, #ccfbf1)" v-if="lifecycleInfo && lifecycleInfo.lifestyle">
+                <div class="card-body">
+                  <h4>生活史 (药源安全)</h4>
+                  <div class="stat-value" :style="{ color: lifecycleInfo.lifestyle === 'Virulent' ? '#10b981' : '#ef4444' }">
+                    {{ lifecycleInfo.lifestyle === 'Virulent' ? '裂解 (安全)' : '温和 (风险)' }}
+                  </div>
+                  <div class="stat-sub">Virulent: {{ (lifecycleInfo.virulent_prob * 100).toFixed(1) }}%</div>
+                </div>
+              </div>
+
+              <!-- V5 追加：毒力因子与抗性基因 (AMR) 监控 -->
+              <div class="stat-card" :style="{ background: (auditInfo?.amr_genes?.length || auditInfo?.virulence_factors?.length) ? 'linear-gradient(135deg, #fef2f2, #fee2e2)' : 'linear-gradient(135deg, #f0fdf4, #dcfce7)' }" v-if="auditInfo">
+                <div class="card-body">
+                  <h4>毒力与耐药库审计</h4>
+                  <div class="stat-value" :style="{ color: (auditInfo?.amr_genes?.length || auditInfo?.virulence_factors?.length) ? '#ef4444' : '#10b981' }">
+                    {{ (auditInfo?.amr_genes?.length || auditInfo?.virulence_factors?.length) ? '检出风险物质' : '清白 (未检出)' }}
+                  </div>
+                  <div class="stat-sub">AMR: {{ auditInfo.amr_genes?.length || 0 }} 项 | 毒力因子: {{ auditInfo.virulence_factors?.length || 0 }} 项</div>
                 </div>
               </div>
             </div>
@@ -249,8 +309,10 @@ function getFuncColor(name: string): string {
             <!-- 全景基因组图谱 (集成化展示) -->
             <div class="section-block" v-if="visualMapUrl" style="margin-top: 24px;">
               <h3 class="section-title">全景集成基因组图谱 (AI & Reference)</h3>
-              <div class="visual-map-container" style="text-align: center; background: #fff; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color);">
-                <img :src="visualMapUrl" alt="Integrated Phage Map" style="max-width: 100%; height: auto; border-radius: 4px;" />
+              <div class="visual-map-container"
+                style="text-align: center; background: #fff; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color);">
+                <img :src="visualMapUrl" alt="Integrated Phage Map"
+                  style="max-width: 100%; height: auto; border-radius: 4px;" />
               </div>
             </div>
 
@@ -258,17 +320,11 @@ function getFuncColor(name: string): string {
             <div class="section-block" v-if="funcChartData.length > 0">
               <h3 class="section-title">功能分类分布</h3>
               <div class="func-bar-chart">
-                <div
-                  v-for="item in funcChartData"
-                  :key="item.name"
-                  class="func-bar-row"
-                >
+                <div v-for="item in funcChartData" :key="item.name" class="func-bar-row">
                   <span class="func-label" :title="item.name">{{ item.name }}</span>
                   <div class="func-bar-track">
-                    <div
-                      class="func-bar-fill"
-                      :style="{ width: Math.max(item.pct, 3) + '%', background: getFuncColor(item.name) }"
-                    ></div>
+                    <div class="func-bar-fill"
+                      :style="{ width: Math.max(item.pct, 3) + '%', background: getFuncColor(item.name) }"></div>
                   </div>
                   <span class="func-count">{{ item.count }}</span>
                 </div>
@@ -281,22 +337,34 @@ function getFuncColor(name: string): string {
               <div class="confidence-bars">
                 <div class="conf-item">
                   <span class="conf-label high">High</span>
-                  <div class="conf-track"><div class="conf-fill high" :style="{ width: (confidenceSummary.high / confidenceSummary.total * 100) + '%' }"></div></div>
+                  <div class="conf-track">
+                    <div class="conf-fill high"
+                      :style="{ width: (confidenceSummary.high / confidenceSummary.total * 100) + '%' }"></div>
+                  </div>
                   <span class="conf-num">{{ confidenceSummary.high }}</span>
                 </div>
                 <div class="conf-item">
                   <span class="conf-label medium">Medium</span>
-                  <div class="conf-track"><div class="conf-fill medium" :style="{ width: (confidenceSummary.medium / confidenceSummary.total * 100) + '%' }"></div></div>
+                  <div class="conf-track">
+                    <div class="conf-fill medium"
+                      :style="{ width: (confidenceSummary.medium / confidenceSummary.total * 100) + '%' }"></div>
+                  </div>
                   <span class="conf-num">{{ confidenceSummary.medium }}</span>
                 </div>
                 <div class="conf-item">
                   <span class="conf-label low">Low</span>
-                  <div class="conf-track"><div class="conf-fill low" :style="{ width: (confidenceSummary.low / confidenceSummary.total * 100) + '%' }"></div></div>
+                  <div class="conf-track">
+                    <div class="conf-fill low"
+                      :style="{ width: (confidenceSummary.low / confidenceSummary.total * 100) + '%' }"></div>
+                  </div>
                   <span class="conf-num">{{ confidenceSummary.low }}</span>
                 </div>
                 <div class="conf-item">
                   <span class="conf-label none">None</span>
-                  <div class="conf-track"><div class="conf-fill none" :style="{ width: (confidenceSummary.none / confidenceSummary.total * 100) + '%' }"></div></div>
+                  <div class="conf-track">
+                    <div class="conf-fill none"
+                      :style="{ width: (confidenceSummary.none / confidenceSummary.total * 100) + '%' }"></div>
+                  </div>
                   <span class="conf-num">{{ confidenceSummary.none }}</span>
                 </div>
               </div>
@@ -309,7 +377,11 @@ function getFuncColor(name: string): string {
               <h3 class="section-title">过滤前后对比</h3>
               <table class="data-table">
                 <thead>
-                  <tr><th>指标</th><th>过滤前</th><th>过滤后</th></tr>
+                  <tr>
+                    <th>指标</th>
+                    <th>过滤前</th>
+                    <th>过滤后</th>
+                  </tr>
                 </thead>
                 <tbody>
                   <tr>
@@ -342,19 +414,38 @@ function getFuncColor(name: string): string {
 
               <h3 class="section-title" style="margin-top: 24px">过滤统计</h3>
               <div class="filter-stats">
-                <div class="filter-item pass"><span>通过</span><strong>{{ formatReads(qcInfo.filtering.passed) }}</strong></div>
-                <div class="filter-item fail"><span>低质量</span><strong>{{ formatReads(qcInfo.filtering.low_quality) }}</strong></div>
-                <div class="filter-item fail"><span>过多 N</span><strong>{{ formatReads(qcInfo.filtering.too_many_N) }}</strong></div>
-                <div class="filter-item fail"><span>过短</span><strong>{{ formatReads(qcInfo.filtering.too_short) }}</strong></div>
+                <div class="filter-item pass"><span>通过</span><strong>{{ formatReads(qcInfo.filtering.passed) }}</strong>
+                </div>
+                <div class="filter-item fail"><span>低质量</span><strong>{{ formatReads(qcInfo.filtering.low_quality)
+                    }}</strong></div>
+                <div class="filter-item fail"><span>过多 N</span><strong>{{ formatReads(qcInfo.filtering.too_many_N)
+                    }}</strong></div>
+                <div class="filter-item fail"><span>过短</span><strong>{{ formatReads(qcInfo.filtering.too_short)
+                    }}</strong></div>
+              </div>
+
+              <div class="host-filtration-details" v-if="hostCleanerInfo !== null" style="margin-top: 24px">
+                <h3 class="section-title">宿主污染详细评估 (Genus-level Kraken2)</h3>
+                <div class="host-warn-box" :class="{ 'warning': hostCleanerInfo > 50 }">
+                  <div class="warn-icon">{{ hostCleanerInfo > 50 ? '⚠️' : '✅' }}</div>
+                  <div class="warn-content">
+                    <p class="warn-txt">检测到样本中含有 <strong>{{ hostCleanerInfo.toFixed(2) }}%</strong> 的宿主背景序列。</p>
+                    <p class="warn-desc" v-if="hostCleanerInfo > 50">高污染背景。已通过分类排除策略强行剥离宿主信号，当前组装仅针对 <strong>{{ (100 -
+                        hostCleanerInfo).toFixed(2) }}%</strong> 的非宿主序列。已开启支架连接强化，以对抗由于背景过高导致的潜在覆盖度不均。</p>
+                    <p class="warn-desc" v-else>宿主背景较低，样本纯净度良好。已完成物种专项分类清洗。</p>
+                  </div>
+                </div>
               </div>
             </div>
             <div v-else-if="qcInfo.status === 'partial'" class="partial-info">
               <p>质控已完成（清洁数据已生成），但未找到 fastp 详细报告。</p>
               <div v-for="f in qcInfo.clean_files" :key="f.name" class="file-tag">
-                📄 {{ f.name }} ({{ f.size_mb }} MB)
+                {{ f.name }} ({{ f.size_mb }} MB)
               </div>
             </div>
-            <div v-else class="empty-section"><p>暂无质控数据</p></div>
+            <div v-else class="empty-section">
+              <p>暂无质控数据</p>
+            </div>
           </div>
 
           <!-- ═══ 组装 Tab ═══ -->
@@ -370,7 +461,13 @@ function getFuncColor(name: string): string {
 
               <h3 class="section-title" style="margin-top: 24px">Contig 列表</h3>
               <table class="data-table">
-                <thead><tr><th>#</th><th>ID</th><th>长度</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>ID</th>
+                    <th>长度</th>
+                  </tr>
+                </thead>
                 <tbody>
                   <tr v-for="(c, i) in asmInfo.contigs" :key="c.id">
                     <td>{{ Number(i) + 1 }}</td>
@@ -380,110 +477,124 @@ function getFuncColor(name: string): string {
                 </tbody>
               </table>
             </div>
-            <div v-else class="empty-section"><p>暂无组装数据</p></div>
+            <div v-else class="empty-section">
+              <p>暂无组装数据</p>
+            </div>
           </div>
 
           <!-- ═══ 注释 Tab ═══ -->
           <div v-if="activeTab === 'annotation'" class="tab-content">
-              <!-- PhageScope 自动回填报告 -->
-              <div class="backfill-status-bar" :class="{ 'has-data': backfillInfo }">
-                <span class="icon">🧬</span>
-                <div class="txt">
-                  <p class="main">PhageScope 本地蛋白库自动回填</p>
-                  <p class="sub" v-if="backfillInfo">
-                    扫描 {{ backfillInfo.unknown_before }} 个未知蛋白，命中 {{ backfillInfo.hits }} 个 ({{ backfillInfo.hit_rate }}%)
-                  </p>
-                  <p class="sub" v-else>流水线在注释完成后自动将未知蛋白与 PhageScope 104万条蛋白序列进行本地比对</p>
-                </div>
-                <span class="auto-badge" v-if="backfillInfo">✅ +{{ backfillInfo.hits }} 已回填</span>
-                <span class="auto-badge pending" v-else>⏳ 待执行</span>
+            <!-- PhageScope 自动回填报告 -->
+            <div class="backfill-status-bar" :class="{ 'has-data': backfillInfo }">
+              <div class="txt">
+                <p class="main">PhageScope 本地蛋白库自动回填</p>
+                <p class="sub" v-if="backfillInfo">
+                  扫描 {{ backfillInfo.unknown_before }} 个未知蛋白，命中 {{ backfillInfo.hits }} 个 ({{ backfillInfo.hit_rate }}%)
+                </p>
+                <p class="sub" v-else>流水线在注释完成后自动将未知蛋白与 PhageScope 104万条蛋白序列进行本地比对</p>
               </div>
+              <span class="auto-badge" v-if="backfillInfo">+{{ backfillInfo.hits }} 已回填</span>
+              <span class="auto-badge pending" v-else>待执行</span>
+            </div>
 
-              <!-- PhageScope 回填统计卡片 -->
-              <div v-if="backfillInfo" class="backfill-stats-grid">
-                <div class="bf-stat">
-                  <label>总 CDS</label>
-                  <span>{{ backfillInfo.total_cds }}</span>
-                </div>
-                <div class="bf-stat">
-                  <label>未知蛋白</label>
-                  <span>{{ backfillInfo.unknown_before }}</span>
-                </div>
-                <div class="bf-stat highlight">
-                  <label>PhageScope 命中</label>
-                  <span>{{ backfillInfo.hits }}</span>
-                </div>
-                <div class="bf-stat">
-                  <label>命中率</label>
-                  <span>{{ backfillInfo.hit_rate }}%</span>
-                </div>
+            <!-- PhageScope 回填统计卡片 -->
+            <div v-if="backfillInfo" class="backfill-stats-grid">
+              <div class="bf-stat">
+                <label>总 CDS</label>
+                <span>{{ backfillInfo.total_cds }}</span>
               </div>
-
-              <!-- PhageScope 命中详情表 -->
-              <div v-if="backfillInfo?.details?.length" style="margin-bottom: 24px">
-                <h3 class="section-title">PhageScope 回填详情</h3>
-                <div class="table-scroll" style="max-height: 240px">
-                  <table class="data-table compact">
-                    <thead>
-                      <tr><th>CDS ID</th><th>比对产物</th><th>E-value</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="d in backfillInfo.details" :key="d.cds_id">
-                        <td class="mono">{{ d.cds_id }}</td>
-                        <td class="product-cell" :title="d.product">{{ d.product }}</td>
-                        <td class="mono">{{ d.evalue }}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+              <div class="bf-stat">
+                <label>未知蛋白</label>
+                <span>{{ backfillInfo.unknown_before }}</span>
               </div>
-
-              <!-- Phold 预测详情表 -->
-              <div v-if="pholdInfo?.predictions?.length">
-                <h3 class="section-title">CDS 功能预测 (Phold AI + Pharokka)</h3>
-                <div class="table-scroll">
-                  <table class="data-table compact">
-                    <thead>
-                      <tr>
-                        <th>CDS ID</th>
-                        <th>位置</th>
-                        <th>链</th>
-                        <th>功能</th>
-                        <th>产物</th>
-                        <th>方法</th>
-                        <th>置信度</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="p in pholdInfo.predictions" :key="p.cds_id">
-                        <td class="mono">{{ p.cds_id }}</td>
-                        <td class="mono">{{ p.start }}-{{ p.end }}</td>
-                        <td>{{ p.strand }}</td>
-                        <td><span class="func-tag" :style="{ background: getFuncColor(p.function) + '20', color: getFuncColor(p.function) }">{{ p.function }}</span></td>
-                        <td class="product-cell" :title="p.product">{{ p.product }}</td>
-                        <td><span class="method-tag">{{ p.method || 'none' }}</span></td>
-                        <td><span class="conf-tag" :class="p.confidence">{{ p.confidence || 'none' }}</span></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+              <div class="bf-stat highlight">
+                <label>PhageScope 命中</label>
+                <span>{{ backfillInfo.hits }}</span>
               </div>
+              <div class="bf-stat">
+                <label>命中率</label>
+                <span>{{ backfillInfo.hit_rate }}%</span>
+              </div>
+            </div>
 
-              <!-- Pharokka 功能统计表 -->
-              <div v-else-if="funcList.length" style="margin-top: 20px">
-                <h3 class="section-title">功能分类统计 (Pharokka)</h3>
-                <table class="data-table">
-                  <thead><tr><th>类别</th><th>数量</th></tr></thead>
+            <!-- PhageScope 命中详情表 -->
+            <div v-if="backfillInfo?.details?.length" style="margin-bottom: 24px">
+              <h3 class="section-title">PhageScope 回填详情</h3>
+              <div class="table-scroll" style="max-height: 240px">
+                <table class="data-table compact">
+                  <thead>
+                    <tr>
+                      <th>CDS ID</th>
+                      <th>比对产物</th>
+                      <th>E-value</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    <tr v-for="f in funcList" :key="f.name">
-                      <td>{{ f.name }}</td>
-                      <td>{{ f.count }}</td>
+                    <tr v-for="d in backfillInfo.details" :key="d.cds_id">
+                      <td class="mono">{{ d.cds_id }}</td>
+                      <td class="product-cell" :title="d.product">{{ d.product }}</td>
+                      <td class="mono">{{ d.evalue }}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              <div v-else class="empty-section"><p>暂无注释数据</p></div>
             </div>
+
+            <!-- Phold 预测详情表 -->
+            <div v-if="pholdInfo?.predictions?.length">
+              <h3 class="section-title">CDS 功能预测 (Phold AI + Pharokka)</h3>
+              <div class="table-scroll">
+                <table class="data-table compact">
+                  <thead>
+                    <tr>
+                      <th>CDS ID</th>
+                      <th>位置</th>
+                      <th>链</th>
+                      <th>功能</th>
+                      <th>产物</th>
+                      <th>方法</th>
+                      <th>置信度</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="p in pholdInfo.predictions" :key="p.cds_id">
+                      <td class="mono">{{ p.cds_id }}</td>
+                      <td class="mono">{{ p.start }}-{{ p.end }}</td>
+                      <td>{{ p.strand }}</td>
+                      <td><span class="func-tag"
+                          :style="{ background: getFuncColor(p.function) + '20', color: getFuncColor(p.function) }">{{
+                          p.function }}</span></td>
+                      <td class="product-cell" :title="p.product">{{ p.product }}</td>
+                      <td><span class="method-tag">{{ p.method || 'none' }}</span></td>
+                      <td><span class="conf-tag" :class="p.confidence">{{ p.confidence || 'none' }}</span></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Pharokka 功能统计表 -->
+            <div v-else-if="funcList.length" style="margin-top: 20px">
+              <h3 class="section-title">功能分类统计 (Pharokka)</h3>
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>类别</th>
+                    <th>数量</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="f in funcList" :key="f.name">
+                    <td>{{ f.name }}</td>
+                    <td>{{ f.count }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div v-else class="empty-section">
+              <p>暂无注释数据</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -553,9 +664,11 @@ function getFuncColor(name: string): string {
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
+
 .export-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.35);
 }
+
 .export-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -579,6 +692,7 @@ function getFuncColor(name: string): string {
   cursor: pointer;
   transition: background 0.2s;
 }
+
 .close-btn:hover {
   background: rgba(255, 255, 255, 0.3);
 }
@@ -653,50 +767,207 @@ function getFuncColor(name: string): string {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.genome-card { background: linear-gradient(135deg, #eff6ff, #dbeafe); }
-.contig-card { background: linear-gradient(135deg, #f5f3ff, #ede9fe); }
-.cds-card { background: linear-gradient(135deg, #ecfdf5, #d1fae5); }
-.qc-card { background: linear-gradient(135deg, #fef3c7, #fde68a40); }
-.backfill-card { background: linear-gradient(135deg, #f0fdf4, #bbf7d0); }
-.checkv-card { background: #f8fafc; border: 1px solid #e2e8f0; }
+.genome-card {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+}
+
+.contig-card {
+  background: linear-gradient(135deg, #f5f3ff, #ede9fe);
+}
+
+.cds-card {
+  background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+}
+
+.qc-card {
+  background: linear-gradient(135deg, #fef3c7, #fde68a40);
+}
+
+.host-card {
+  background: linear-gradient(135deg, #fff1f2, #ffe4e6);
+}
+
+.backfill-card {
+  background: linear-gradient(135deg, #f0fdf4, #bbf7d0);
+}
+
+.checkv-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
 
 /* CheckV 质量等级 */
-.checkv-card.complete, .checkv-card.high-quality { border-left: 4px solid #10b981; background: #ecfdf5; }
-.checkv-card.medium-quality { border-left: 4px solid #f59e0b; background: #fffbeb; }
-.checkv-card.low-quality { border-left: 4px solid #ef4444; background: #fef2f2; }
+.checkv-card.complete,
+.checkv-card.high-quality {
+  border-left: 4px solid #10b981;
+  background: #ecfdf5;
+}
+
+.checkv-card.medium-quality {
+  border-left: 4px solid #f59e0b;
+  background: #fffbeb;
+}
+
+.checkv-card.low-quality {
+  border-left: 4px solid #ef4444;
+  background: #fef2f2;
+}
 
 
-.card-icon { font-size: 20px; }
-.card-body h4 { margin: 0 0 2px; font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-value { font-size: 16px; font-weight: 800; color: #1e293b; }
-.stat-sub { font-size: 11px; color: #64748b; margin-top: 2px; }
+.card-icon {
+  font-size: 20px;
+}
+
+.card-body h4 {
+  margin: 0 0 2px;
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 16px;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.stat-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
 
 /* ─── 功能条形图 ─── */
-.section-block { margin-bottom: 28px; }
-.section-title { font-size: 15px; font-weight: 700; color: #1e293b; margin: 0 0 14px; }
+.section-block {
+  margin-bottom: 28px;
+}
 
-.func-bar-chart { display: flex; flex-direction: column; gap: 8px; }
-.func-bar-row { display: flex; align-items: center; gap: 12px; }
-.func-label { width: 200px; font-size: 12px; color: #475569; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
-.func-bar-track { flex: 1; height: 20px; background: #f1f5f9; border-radius: 6px; overflow: hidden; }
-.func-bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease; min-width: 4px; }
-.func-count { width: 32px; font-size: 13px; font-weight: 700; color: #334155; text-align: right; }
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 14px;
+}
+
+.func-bar-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.func-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.func-label {
+  width: 200px;
+  font-size: 12px;
+  color: #475569;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.func-bar-track {
+  flex: 1;
+  height: 20px;
+  background: #f1f5f9;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.func-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.5s ease;
+  min-width: 4px;
+}
+
+.func-count {
+  width: 32px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  text-align: right;
+}
 
 /* ─── 置信度条 ─── */
-.confidence-bars { display: flex; flex-direction: column; gap: 10px; }
-.conf-item { display: flex; align-items: center; gap: 12px; }
-.conf-label { width: 70px; font-size: 12px; font-weight: 600; text-align: right; }
-.conf-label.high { color: #059669; }
-.conf-label.medium { color: #d97706; }
-.conf-label.low { color: #dc2626; }
-.conf-label.none { color: #94a3b8; }
-.conf-track { flex: 1; height: 14px; background: #f1f5f9; border-radius: 4px; overflow: hidden; }
-.conf-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
-.conf-fill.high { background: #10b981; }
-.conf-fill.medium { background: #f59e0b; }
-.conf-fill.low { background: #ef4444; }
-.conf-fill.none { background: #cbd5e1; }
-.conf-num { width: 36px; font-size: 13px; font-weight: 700; color: #334155; }
+.confidence-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conf-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.conf-label {
+  width: 70px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.conf-label.high {
+  color: #059669;
+}
+
+.conf-label.medium {
+  color: #d97706;
+}
+
+.conf-label.low {
+  color: #dc2626;
+}
+
+.conf-label.none {
+  color: #94a3b8;
+}
+
+.conf-track {
+  flex: 1;
+  height: 14px;
+  background: #f1f5f9;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.conf-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.conf-fill.high {
+  background: #10b981;
+}
+
+.conf-fill.medium {
+  background: #f59e0b;
+}
+
+.conf-fill.low {
+  background: #ef4444;
+}
+
+.conf-fill.none {
+  background: #cbd5e1;
+}
+
+.conf-num {
+  width: 36px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
 
 /* ─── 数据表格 ─── */
 .data-table {
@@ -722,15 +993,38 @@ function getFuncColor(name: string): string {
   color: #334155;
 }
 
-.data-table tbody tr:hover { background: #f8fafc; }
-.data-table.compact td { padding: 6px 10px; font-size: 12px; }
-.data-table.compact th { padding: 8px 10px; font-size: 12px; }
+.data-table tbody tr:hover {
+  background: #f8fafc;
+}
 
-.table-scroll { max-height: 480px; overflow-y: auto; border-radius: 10px; border: 1px solid #e2e8f0; }
+.data-table.compact td {
+  padding: 6px 10px;
+  font-size: 12px;
+}
 
-.mono { font-family: 'Cascadia Code', 'JetBrains Mono', monospace; font-size: 11px; }
+.data-table.compact th {
+  padding: 8px 10px;
+  font-size: 12px;
+}
 
-.product-cell { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.table-scroll {
+  max-height: 480px;
+  overflow-y: auto;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+}
+
+.mono {
+  font-family: 'Cascadia Code', 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.product-cell {
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .func-tag {
   display: inline-block;
@@ -757,37 +1051,92 @@ function getFuncColor(name: string): string {
   font-size: 10px;
   font-weight: 700;
 }
-.conf-tag.high { background: #ecfdf5; color: #059669; }
-.conf-tag.medium { background: #fffbeb; color: #d97706; }
-.conf-tag.low { background: #fef2f2; color: #dc2626; }
-.conf-tag.none { background: #f1f5f9; color: #94a3b8; }
+
+.conf-tag.high {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.conf-tag.medium {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.conf-tag.low {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.conf-tag.none {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
 
 /* ─── QC 过滤统计 ─── */
-.filter-stats { display: flex; gap: 12px; }
+.filter-stats {
+  display: flex;
+  gap: 12px;
+}
+
 .filter-item {
   flex: 1;
   padding: 14px;
   border-radius: 10px;
   text-align: center;
 }
-.filter-item span { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
-.filter-item strong { font-size: 18px; color: #1e293b; }
-.filter-item.pass { background: #ecfdf5; }
-.filter-item.fail { background: #fef2f2; }
+
+.filter-item span {
+  display: block;
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.filter-item strong {
+  font-size: 18px;
+  color: #1e293b;
+}
+
+.filter-item.pass {
+  background: #ecfdf5;
+}
+
+.filter-item.fail {
+  background: #fef2f2;
+}
 
 /* ─── 组装统计 ─── */
-.asm-stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.asm-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
 .asm-stat {
   text-align: center;
   padding: 16px;
   background: #f8fafc;
   border-radius: 10px;
 }
-.asm-stat label { display: block; font-size: 11px; color: #64748b; margin-bottom: 6px; text-transform: uppercase; }
-.asm-stat span { font-size: 18px; font-weight: 800; color: #1e293b; }
+
+.asm-stat label {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.asm-stat span {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1e293b;
+}
 
 /* ─── 状态 ─── */
-.loading-state, .error-state, .empty-section {
+.loading-state,
+.error-state,
+.empty-section {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -797,11 +1146,45 @@ function getFuncColor(name: string): string {
 }
 
 .spinner {
-  width: 36px; height: 36px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #3b82f6;
+  width: 36px;
+  height: 36px;
+  border: 4px solid #f1f5f9;
+  border-top-color: #2563eb;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: spin 1s linear infinite;
+  margin-bottom: 12px;
+}
+
+/* ─── 宿主详细提示框 ─── */
+.host-warn-box {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+}
+
+.host-warn-box.warning {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.warn-icon {
+  font-size: 24px;
+}
+
+.warn-txt {
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 4px;
+}
+
+.warn-desc {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
 }
 
 .file-tag {
@@ -909,15 +1292,54 @@ function getFuncColor(name: string): string {
 }
 
 /* ─── 动画 ─── */
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes scaleIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 @media (max-width: 768px) {
-  .overview-grid { grid-template-columns: repeat(2, 1fr); }
-  .asm-stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .filter-stats { flex-wrap: wrap; }
-  .func-label { width: 120px; }
-  .report-dialog { width: 96vw; max-height: 94vh; }
+  .overview-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .asm-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .filter-stats {
+    flex-wrap: wrap;
+  }
+
+  .func-label {
+    width: 120px;
+  }
+
+  .report-dialog {
+    width: 96vw;
+    max-height: 94vh;
+  }
 }
 </style>

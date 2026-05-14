@@ -84,7 +84,7 @@ class AnnotationStep(BaseAssemblyStep):
         returncode = await self.runner.run_command(
             cmd, 
             cwd=out_dir.parent,
-            env=self.context.get("gpu_env"),
+            env=self.context.gpu_env,
             on_output=prokka_handler
         )
         
@@ -97,7 +97,7 @@ class AnnotationStep(BaseAssemblyStep):
             
             self.logger.info("自愈完成，正在进行第二次重试...")
             if self.on_progress: self.on_progress(20, "自愈成功，正在重试注释...")
-            returncode = await self.runner.run_command(cmd, cwd=out_dir.parent, env=self.context.get("gpu_env"))
+            returncode = await self.runner.run_command(cmd, cwd=out_dir.parent, env=self.context.gpu_env)
 
         if returncode == 0:
             if gbk_file.exists():

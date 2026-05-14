@@ -4,7 +4,7 @@ import json
 import asyncio
 from fastapi import APIRouter, Header
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Any, Optional, List
 from ..broadcaster import broadcaster
 
 logger = logging.getLogger("api_server")
@@ -66,16 +66,16 @@ async def strain_load_all():
         log_resources(force=False)
         
         # 核心数据库操作
-        all_data = get_strain_db_manager().load_all_data()
+        all_data: dict[str, Any] = get_strain_db_manager().load_all_data()
         elapsed = (time.time() - start_time) * 1000
         
         # --- 性能硬限流开始 ---
         # 如果样本总量巨大，这里强行只取前 2000 条。
         # 目的是从物理层切断 22GB 级别的 JS 堆内存压力（JSON解析是内存溢出主因）。
-        total_records = all_data.get('records', [])
+        total_records = all_data.get('records') or []
         limit = 2000
         if len(total_records) > limit:
-            logger.warning(f"🚨 [MemoryGuard] 发现 {len(total_records)} 条记录，正在强制切片至前 {limit} 条以防止前端崩溃。")
+            logger.warning(f"[MemoryGuard] 发现 {len(total_records)} 条记录，正在强制切片至前 {limit} 条以防止前端崩溃。")
             all_data['records'] = total_records[:limit]
             all_data['is_truncated'] = True
             all_data['total_count'] = len(total_records)
@@ -84,7 +84,7 @@ async def strain_load_all():
         _cached_data = all_data
         _last_load_time = now
         
-        logger.info(f"✅ [Load] 全部加载成功: {len(all_data['records'])}条记录, 耗时{elapsed:.0f}ms")
+        logger.info(f"[Load] 全部加载成功: {len(all_data.get('records') or [])}条记录, 耗时{elapsed:.0f}ms")
         return all_data
     except Exception as e:
         logger.error(f"❌ [Error] /api/strain/load 发生异常: {e}")
@@ -152,7 +152,8 @@ async def save_code_lookup(req: dict, x_client_id: Optional[str] = Header(None, 
     invalidate_cache()
     success = get_strain_db_manager().save_sys_config('codeLookup', req)
     if success and x_client_id:
-        await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)
+        # 词典变更只广播 dictionary 信号，避免触发全量 strains 重载循环
+        await broadcaster.broadcast("data_updated", {"module": "dictionary"}, exclude_id=x_client_id)
     return {"success": success}
 
 @router.post("/api/strain/clear")

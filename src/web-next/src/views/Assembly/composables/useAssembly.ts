@@ -13,6 +13,10 @@ export function useAssembly() {
   const selectedFiles = ref<string[]>([])
   const showResults = ref(false)
 
+  // 🔗 队列状态追踪
+  const queueStatus = ref<any[]>([])
+  const queuePaused = ref(false)
+
   const taskState = reactive({
     id: '',
     name: 'New_Assembly_Task',
@@ -22,7 +26,15 @@ export function useAssembly() {
     selectedHostDb: 'search_ncbi',
     ncbiSearchTerm: '',
     customHostPath: '',
+    estimatedGenomeSize: 100000,
+    targetCoverage: 300,
+    highResolutionKmer: false,
+    stopAfterAssembly: false,
+    mergeReads: false,
     useGPU: true,
+    isLysogenic: false,
+    isStrictParentStrain: true,
+    doPolishing: false,
     progress: 0,
     stage: AssemblyStage.PREPROCESSING as AssemblyStage
   })
@@ -74,7 +86,7 @@ export function useAssembly() {
 
   // 2. 启动任务
   const startTask = async (options: { taskId?: string, reset?: boolean, forceSampleType?: string } = {}) => {
-    if (isRunning.value) return;
+    // 允许在运行时追加队列，移除 if (isRunning.value) return;
     
     // 如果是全新任务，必须选择文件
     if (!options.taskId && selectedFiles.value.length === 0) {
@@ -82,12 +94,14 @@ export function useAssembly() {
       return;
     }
     
-    isRunning.value = true;
-    currentStep.value = 0;
+    // 如果当前空闲，则重置进度面板
+    if (!isRunning.value) {
+      currentStep.value = 0;
+      taskState.progress = 0;
+      taskState.stage = AssemblyStage.PREPROCESSING;
+    }
     
-    // 💡 彻底重置瞬时进度状态，防止 UI 残留历史数据
-    taskState.progress = 0;
-    taskState.stage = AssemblyStage.PREPROCESSING;
+    isRunning.value = true;
     
     try {
       let hostDb = taskState.selectedHostDb;
@@ -122,11 +136,38 @@ export function useAssembly() {
           params: {
             database: taskState.selectedDatabase,
             host_filter_db: hostDb,
-            input_files: sortedFiles
+            input_files: sortedFiles,
+            estimated_genome_size: taskState.estimatedGenomeSize || 100000,
+            target_coverage: taskState.targetCoverage || 300,
+            high_res_kmer: taskState.highResolutionKmer,
+            stop_after_assembly: taskState.stopAfterAssembly,
+            merge_reads: taskState.mergeReads,
+            host_genome: hostDb, // 支持从 host_filter_db 共享为 host_genome
+            is_lysogenic: taskState.isLysogenic,
+            is_strict_parent_strain: taskState.isStrictParentStrain,
+            do_polishing: taskState.doPolishing
           }
         }
       };
       await getBridge().start_assembly_pipeline(payload);
+      
+      // 🔗 提交成功后清空文件列表，方便添加下一个任务到队列
+      selectedFiles.value = [];
+      
+      // 自动递增任务名称，防止重名
+      if (taskState.name) {
+          const match = taskState.name.match(/(.*)_(\d+)$/);
+          if (match && match[1] !== undefined && match[2] !== undefined) {
+              const base = match[1];
+              const num = parseInt(match[2]);
+              taskState.name = `${base}_${num + 1}`;
+          } else {
+              taskState.name = `${taskState.name}_1`;
+          }
+      }
+
+      // 🔗 启动后立即刷新历史列表，确保 UI 状态一致
+      await fetchHistory();
     } catch (err) {
       isRunning.value = false;
       console.error('Start failed:', err);
@@ -156,6 +197,31 @@ export function useAssembly() {
         taskState.selectedHostDb = 'custom';
         taskState.customHostPath = db;
       }
+    }
+    
+    if (params.estimated_genome_size) {
+      taskState.estimatedGenomeSize = params.estimated_genome_size;
+    }
+    if (params.target_coverage) {
+      taskState.targetCoverage = params.target_coverage;
+    }
+    if (params.high_res_kmer !== undefined) {
+      taskState.highResolutionKmer = !!params.high_res_kmer;
+    }
+    if (params.stop_after_assembly !== undefined) {
+      taskState.stopAfterAssembly = !!params.stop_after_assembly;
+    }
+    if (params.merge_reads !== undefined) {
+      taskState.mergeReads = !!params.merge_reads;
+    }
+    if (params.is_lysogenic !== undefined) {
+      taskState.isLysogenic = !!params.is_lysogenic;
+    }
+    if (params.is_strict_parent_strain !== undefined) {
+      taskState.isStrictParentStrain = !!params.is_strict_parent_strain;
+    }
+    if (params.do_polishing !== undefined) {
+      taskState.doPolishing = !!params.do_polishing;
     }
     return rawType;
   }
@@ -188,14 +254,73 @@ export function useAssembly() {
     }
   }
 
+  // 🔗 队列状态更新 (由 WebSocket 事件驱动)
+  const updateQueueStatus = (data: any) => {
+    if (data.queue) queueStatus.value = data.queue
+    if (data.paused !== undefined) queuePaused.value = data.paused
+  }
+
+  // 🔗 将等待队列重排序请求发送到后端
+  const reorderQueue = async (taskIds: string[]) => {
+    try {
+      await getBridge().reorder_assembly_queue(taskIds)
+      // 请求重新获取一下队列状态（虽然广播也会推过来）
+    } catch (err) {
+      console.error('Reorder queue failed:', err)
+    }
+  }
+
+  // 🔗 批量提交：将多组 [R1, R2] 文件一次性提交到队列
+  const submitBatch = async (fileGroups: string[][], options: any = {}) => {
+    if (fileGroups.length === 0) return
+    try {
+      const payload = {
+        file_groups: fileGroups,
+        sample_type: options.sampleType || taskState.sampleType,
+        tech: options.tech || taskState.tech,
+        name_prefix: options.namePrefix || taskState.name,
+        config: {
+          params: {
+            database: taskState.selectedDatabase,
+            host_filter_db: taskState.selectedHostDb === 'search_ncbi'
+              ? `ncbi:${taskState.ncbiSearchTerm}`
+              : taskState.selectedHostDb === 'custom'
+                ? taskState.customHostPath
+                : taskState.selectedHostDb,
+            estimated_genome_size: taskState.estimatedGenomeSize,
+            target_coverage: taskState.targetCoverage,
+            high_res_kmer: taskState.highResolutionKmer,
+            stop_after_assembly: taskState.stopAfterAssembly,
+            host_genome: taskState.selectedHostDb === 'search_ncbi'
+              ? `ncbi:${taskState.ncbiSearchTerm}`
+              : taskState.selectedHostDb === 'custom'
+                ? taskState.customHostPath
+                : taskState.selectedHostDb,
+            is_lysogenic: taskState.isLysogenic,
+            is_strict_parent_strain: taskState.isStrictParentStrain,
+            do_polishing: taskState.doPolishing
+          }
+        }
+      }
+      await getBridge().submit_assembly_batch(payload)
+      await fetchHistory()
+    } catch (err) {
+      console.error('Batch submit failed:', err)
+    }
+  }
+
   return {
     taskState, isRunning, currentStep, history, selectedFiles, showResults,
+    queueStatus, queuePaused,
     fetchHistory: fetchHistory as () => Promise<void>,
     pickCustomHost: pickCustomHost as () => Promise<void>,
     startTask: startTask as (opt?: any) => Promise<void>,
     resumeTask: resumeTask as (task: any) => void,
     restartTask: restartTask as (task: any) => void,
     stopTask: stopTask as (id: string) => Promise<void>,
-    deleteTask: deleteTask as (id: string) => Promise<void>
+    deleteTask: deleteTask as (id: string) => Promise<void>,
+    updateQueueStatus,
+    reorderQueue,
+    submitBatch
   }
 }

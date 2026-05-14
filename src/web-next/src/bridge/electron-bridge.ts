@@ -294,13 +294,41 @@ const electronBridge = {
     },
 
     async save_file(content: string, filenameHint: string, callback?: (success: boolean) => void) {
-        const path = await window.electronAPI?.saveFileDialog({
-            defaultPath: filenameHint
-        });
-        if (path) {
-            const success = await window.electronAPI?.writeFile(path, content);
-            callback?.(success ?? false);
-        } else {
+        const electron = window.electronAPI;
+        
+        // 🔗 方案 A: Electron 原生保存对话框
+        if (electron) {
+            const path = await electron.saveFileDialog({
+                defaultPath: filenameHint
+            });
+            if (path) {
+                const success = await electron.writeFile(path, content);
+                callback?.(success ?? false);
+                return;
+            }
+            callback?.(false);
+            return;
+        }
+
+        // 🔗 方案 B: 浏览器通用下载回滚 (支持网页端/局域网模式)
+        try {
+            console.log('[Bridge] 正在通过浏览器 Blob 模式导出文件...');
+            const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            
+            link.setAttribute('href', url);
+            link.setAttribute('download', filenameHint || 'export.csv');
+            link.style.visibility = 'hidden';
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            URL.revokeObjectURL(url);
+            callback?.(true);
+        } catch (err) {
+            console.error('[Bridge] 浏览器导出失败:', err);
             callback?.(false);
         }
     },
@@ -635,6 +663,11 @@ const electronBridge = {
         const result = await apiPost('/api/strain/sys_config/codeLookup', data);
         callback?.(result.success);
     },
+
+    async db_load_code_lookup(callback?: (res: any) => void) {
+        const result = await apiGet('/api/strain/load');
+        callback?.(result?.codeLookup || null);
+    },
     async taxonomy_audit_batch(texts: string[], callback?: (res: any) => void) {
         const result = await apiPost('/api/taxonomy/audit', { texts });
         callback?.(result);
@@ -832,6 +865,21 @@ const electronBridge = {
     /** 强制停止运行中的任务 */
     async stop_assembly_task(taskId: string) {
         return await apiPost(`/api/assembly/${taskId}/stop`);
+    },
+
+    /** 获取当前组装队列状态快照 */
+    async get_assembly_queue() {
+        return await apiGet('/api/assembly/queue');
+    },
+
+    /** 拖拽重排序等待队列 */
+    async reorder_assembly_queue(taskIds: string[]) {
+        return await apiPost('/api/assembly/queue/reorder', { task_ids: taskIds });
+    },
+
+    /** 批量提交多组测序文件到队列 */
+    async submit_assembly_batch(params: any): Promise<any> {
+        return await apiPost('/api/assembly/batch', params);
     },
 
     // ═══ 序列分析历史 (Pairwise/Reference/Matrix) ═══
