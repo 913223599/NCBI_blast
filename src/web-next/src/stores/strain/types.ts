@@ -99,6 +99,7 @@ export interface StrainRecord {
 export interface SearchFilters {
   keyword: string
   species: string
+  sampleType: string
   sequenceType: string
   country: string
   dateFrom: string

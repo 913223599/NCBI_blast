@@ -69,6 +69,7 @@ Thumbs.db
 # 测试和临时目录
 # ================================
 test/
+scratch/
 .lingma/rules/
 test/temp_test_tree/
 
@@ -142,7 +143,5 @@ save_ref.py
 stop
 translations.db
 translations_backup.db
-scratch/*.py
-scratch/*.sh
-scratch/*.json
-scratch/context_AS.json
+src/nucmer.error
+src/test_shm.py

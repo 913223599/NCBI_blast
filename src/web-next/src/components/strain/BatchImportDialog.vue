@@ -425,6 +425,10 @@ async function handleImport() {
   
   importing.value = true
   
+  // --- 安全阈值：防止 quantity 膨胀导致前端内存溢出 ---
+  const MAX_QUANTITY_PER_ROW = 50
+  const MAX_TOTAL_EXPANSION = 5000
+
   try {
     // 1. 系统化数据预处理 (编号申领 + 分类学对齐)
     const processedBatch: any[] = []
@@ -436,9 +440,18 @@ async function handleImport() {
           normalizedData[key.toLowerCase().replace(/\s/g, '').replace(/_/g, '')] = val
         }
         
-        // --- 关键改进：支持“备份数量”字段 ---
+        // --- 关键改进：支持"备份数量"字段，并增加安全上限 ---
         const qtyRaw = normalizedData.quantity || normalizedData.count || normalizedData.备份数量 || normalizedData.数量 || '1';
-        const quantity = Math.max(1, parseInt(qtyRaw, 10) || 1);
+        const quantity = Math.min(MAX_QUANTITY_PER_ROW, Math.max(1, parseInt(qtyRaw, 10) || 1));
+
+        // 膨胀总量预检
+        if (processedBatch.length + quantity > MAX_TOTAL_EXPANSION) {
+          appStore.showNotification(
+            `安全限制：总膨胀量已达 ${MAX_TOTAL_EXPANSION} 条上限，后续记录将被跳过。请分批导入。`,
+            'warning'
+          )
+          break
+        }
 
         const sampleType = (normalizedData.sampletype as any) || 'Other'
         const species = normalizedData.species || 'Unknown'
@@ -492,9 +505,7 @@ async function handleImport() {
           finalAccession = sampleCode 
         }
 
-        for (let i = 0; i < quantity; i++) {
-
-      // 动态构建元数据 (仅保留有值的有效字段)
+      // 将 metadata 构建提到 quantity 循环外，避免重复计算
       const metadata: Record<string, any> = {
         biosafetyLevel: normalizedData.biosafetylevel || '',
         passageNumber: normalizedData.passagenumber || '',
@@ -529,29 +540,30 @@ async function handleImport() {
         }
       })
 
-        processedBatch.push({
-          name: normalizedData.name || 'Unknown',
-          accession: finalAccession,
-          sampleCode: sampleCode || finalAccession,
-          species: species,
-          strain: normalizedData.strain || '',
-          sampleType: sampleType,
-          sequenceType: (normalizedData.sequencetype || normalizedData.sequence_type || 'DNA') as 'DNA' | 'RNA' | 'Protein',
-          sequence: normalizedData.sequence || '',
-          source: normalizedData.source || '',
-          host: normalizedData.host || '',
-          country: normalizedData.country || '',
-          collectionDate: normalizedData.collectiondate || '',
-          metadata: metadata,
-          freezerId: targetFreezerId.value,
-          codeSource: sourceCode,
-          codeCategory: categoryCode,
-          codeGenus: genusEntry!.code,
-          codeSpecies: speciesEntry!.code,
-          codeSerial: parseInt(finalAccession.slice(-4), 10)
-        })
+        for (let i = 0; i < quantity; i++) {
+          processedBatch.push({
+            name: normalizedData.name || 'Unknown',
+            accession: finalAccession,
+            sampleCode: sampleCode || finalAccession,
+            species: species,
+            strain: normalizedData.strain || '',
+            sampleType: sampleType,
+            sequenceType: (normalizedData.sequencetype || normalizedData.sequence_type || 'DNA') as 'DNA' | 'RNA' | 'Protein',
+            sequence: normalizedData.sequence || '',
+            source: normalizedData.source || '',
+            host: normalizedData.host || '',
+            country: normalizedData.country || '',
+            collectionDate: normalizedData.collectiondate || '',
+            metadata: { ...metadata },
+            freezerId: targetFreezerId.value,
+            codeSource: sourceCode,
+            codeCategory: categoryCode,
+            codeGenus: genusEntry!.code,
+            codeSpecies: speciesEntry!.code,
+            codeSerial: parseInt(finalAccession.slice(-4), 10)
+          })
+        }
       }
-    }
 
     if (importMode.value === 'auto') {
       // 2. 调用已强化的分拨引擎 (执行严格隔离规则)

@@ -42,14 +42,20 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
           const data = typeof result === 'string' ? JSON.parse(result) : result
           if (!data) { isLoading = false; return }
 
-          // 核心治理：Object.freeze 是防止内存溢出的唯一真神
+          // 防护：如果后端返回了 throttled 状态，不要用空数据覆盖已有的内存状态
+          if (data.status === 'throttled') {
+            console.log('[Sync] 后端节流中，保留当前内存数据')
+            isLoading = false
+            return
+          }
+
           if (data.freezers) {
             console.log('[Sync] 收到后端冰箱结构更新，准备同步数据...')
             freezers.value = data.freezers
           }
 
           if (data.records) {
-            // 核心治理：脱水巨大的序列字段，但必须保留所有的物理坐标字段以供拓扑刷新
+            // 脱水巨大的序列字段，但必须保留所有的物理坐标字段以供拓扑刷新
             const processed = data.records.map((r: any) => {
                const { sequence, ...rest } = r
                // 必须确保返回给 Store 的对象具有统一的驼峰命名字段
@@ -64,6 +70,11 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
                }
             })
             records.value = processed
+          }
+
+          // 适配后端的 total_count 字段，存入 state 供 UI 准确显示
+          if (typeof data.total_count === 'number') {
+            state.serverTotalCount.value = data.total_count
           }
 
           if (data.codeLookup) {
@@ -81,7 +92,7 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
           console.log(`[Sync] 数据加载完成: ${records.value.length} 条样本, ${freezers.value.length} 个冰箱`)
 
           // 关键修复：初始加载完成后，强制根据最新的 records 同步一次物理拓扑
-          // 彻底解决“重启后不亮”的问题：不再依赖数据库里的 structure 状态，而是在内存中根据 records 动态重建
+          // 彻底解决"重启后不亮"的问题：不再依赖数据库里的 structure 状态，而是在内存中根据 records 动态重建
           if (freezerActions?.refreshFreezerOccupancy) {
             console.log(`[Sync] 正在从 ${records.value.length} 条样本记录中恢复物理占用拓补...`)
             // 立即执行一次同步 (false 表示不写回数据库)

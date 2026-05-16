@@ -37,10 +37,10 @@ class ScaffoldingStep(BaseAssemblyStep):
             self.logger.warning("未检测到输入序列，跳过 Scaffolding")
             return True
 
-        # 2. 智能触发检查：即便单 Contig，含 N 也要补
         if self._should_skip_scaffolding(assembly_path):
             self.logger.info("🎉 序列已完美闭合且无 Gap，智能跳过。")
             self.context.update("scaffold_path", assembly_path)
+            self.context.update("assembly_fasta", assembly_path)
             return True
 
         self.logger.info("开始执行学术级支架构建 (Targeted Gap-Closer Mode)...")
@@ -61,6 +61,7 @@ class ScaffoldingStep(BaseAssemblyStep):
             if not success:
                 self.logger.warning("支架构建生成异常，回退使用原始组装产物")
                 self.context.update("scaffold_path", assembly_path)
+                self.context.update("assembly_fasta", assembly_path)
                 return True
 
             # 6. 后处理：学术提纯与统计学清洗
@@ -70,10 +71,16 @@ class ScaffoldingStep(BaseAssemblyStep):
             
             await self.runner.run_command(["cp", "-f", wsl_raw_scaffold, str(win_raw_scaffold)])
             
+            wsl_graph = f"{spades_out}/assembly_graph_with_scaffolds.gfa"
+            win_graph = self.get_working_dir() / "assembly_graph.gfa"
+            if await self.runner.run_command(["test", "-f", wsl_graph]) == 0:
+                await self.runner.run_command(["cp", "-f", wsl_graph, str(win_graph)])
+            
             self.logger.info("启动 MAD-Sigma 深度分布过滤与 DTR 拓扑验证...")
             self._clean_scaffolds_advanced(str(win_raw_scaffold), str(final_clean))
 
             self.context.update("scaffold_path", str(final_clean))
+            self.context.update("assembly_fasta", str(final_clean))
             self.logger.info(f"支架补接圆满完成，最终产物: {final_clean.name}")
             return True
         finally:
@@ -115,14 +122,13 @@ class ScaffoldingStep(BaseAssemblyStep):
         bwa_t = max(1, int(total_threads * 0.75))
         sam_t = max(1, total_threads - bwa_t)
 
-        # 🔗 核心修复：将 BWA 比对输出转为 BAM 以防爆盘，并分离 Samtools 提取以防管道截断
         bam_file = f"{tmp_dir}/mapped.bam"
-        bwa_cmd = f"bwa mem -t {bwa_t} {bwa_idx} {WSLManager.to_wsl_path(str(r1))} {WSLManager.to_wsl_path(str(r2))} | samtools view -@ {sam_t} -b - > {bam_file}"
+        bwa_cmd = f"bwa mem -t {bwa_t} '{bwa_idx}' '{WSLManager.to_wsl_path(str(r1))}' '{WSLManager.to_wsl_path(str(r2))}' | samtools view -@ {sam_t} -b - > '{bam_file}'"
         self.logger.info("🎣 正在靶向比对跨 Gap 区域 Reads (第一阶段: bwa mem -> bam)...")
         await self.runner.run_command(bwa_cmd, is_shell=True)
         
         extract_cmd = (
-            f"samtools fastq -@ {sam_t} -F 2304 -G 12 -1 {m_r1} -2 {m_r2} -s /dev/null -0 /dev/null {bam_file}"
+            f"samtools fastq -@ {sam_t} -F 2304 -G 12 -1 '{m_r1}' -2 '{m_r2}' -s /dev/null -0 /dev/null '{bam_file}'"
         )
         self.logger.info("🎣 正在靶向钓取跨 Gap 区域 Reads (-F 2304)...")
         await self.runner.run_command(extract_cmd, is_shell=True)
@@ -158,7 +164,8 @@ class ScaffoldingStep(BaseAssemblyStep):
             
             # 1. 动态特征提取
             max_len = max(len(r.seq) for r in records)
-            len_cutoff = min(1000, int(0.5 * max_len))
+            # 提升 len_cutoff，确保 main_cov 由真正的主序列决定，而不是被大量小碎片带偏
+            len_cutoff = max(5000, int(0.05 * max_len))
             
             # 2. 深度统计建模 (MAD 1.4826)
             covs = []
@@ -170,31 +177,43 @@ class ScaffoldingStep(BaseAssemblyStep):
             if covs:
                 med_cov = statistics.median(covs)
                 mad = statistics.median([abs(c - med_cov) for c in covs])
-                # 保底逻辑：防止深度极度一致导致 sigma=0，引发除零异常
                 sigma = max(1.4826 * mad, 0.05 * med_cov) 
+                
+                # 🚨 修复：基准深度绝对不能取 max(covs)，否则会被高拷贝质粒或折叠重复序列带偏！
+                # 必须使用中位数，它能稳健地代表主体基因组的真实深度。
                 main_cov = med_cov
             else:
-                main_cov = max([float(m.group(1)) 
-                                for r in records if (m := re.search(r"cov_([\d\.]+)", r.description))] + [1.0])
+                # 若没有符合长度条件的序列，退化为取所有序列中位深度
+                all_covs = [float(m.group(1)) for r in records if (m := re.search(r"cov_([\d\.]+)", r.description))]
+                main_cov = statistics.median(all_covs) if all_covs else 1.0
                 sigma = max(0.5 * main_cov, 0.1)
 
-            noise_threshold = max(3.0, main_cov * 0.05) if main_cov > 10 else 1.0
+            # 统一计算噪音阈值：主体深度的 15%，保底 3x
+            noise_threshold = max(3.0, main_cov * 0.15) if main_cov > 10 else 1.0
             clean_records = []
             
             for r in records:
-                if len(r.seq) < 300: 
-                    continue # 抛弃绝对无意义的短片段
+                if len(r.seq) < 1000: 
+                    continue # 抛弃绝对无意义的短片段，将底线从 300bp 提升至 1000bp
                 
                 m = re.search(r"cov_([\d\.]+)", r.description)
                 c = float(m.group(1)) if m else 0.0
                 z_score = abs(c - main_cov) / sigma
                 
-                # A. 噪音拦截：极低深度大概率是宿主污染或比对杂质
-                if c < (main_cov * 0.1) and len(r.seq) < (0.3 * max_len):
-                    self.logger.warning(f"🚫 拦截极低深度杂质: {r.id} ({c}x << {main_cov:.1f}x)")
+                # 动态短片段阈值 (例如最长 174kb，则阈值约 8.7kb，保底 2000bp)
+                base_len_threshold = max(2000, int(0.05 * max_len))
+                
+                # A. 低深度噪音拦截：使用严谨的统计相对阈值 (15% main_cov)
+                if c < noise_threshold and len(r.seq) < base_len_threshold:
+                    self.logger.warning(f"🚫 拦截低深度杂质: {r.id} ({c}x < {noise_threshold:.1f}x)")
                     continue
                 
-                if c < noise_threshold and len(r.seq) < (0.3 * max_len):
+                # B. 高深度短杂质拦截：放宽至 3.5 倍，防错杀噬菌体末端长反向重复序列等正常元件
+                if c > (main_cov * 3.5) and len(r.seq) < base_len_threshold:
+                    self.logger.warning(f"🚫 拦截高深度重复小片段: {r.id} ({c}x > {main_cov * 3.5:.1f}x)")
+                    continue
+
+                if c < (noise_threshold * 0.5) and len(r.seq) < (0.5 * max_len): # 对于稍长一点的序列，阈值进一步放宽
                     continue
                 
                 # B. Z-score 打标 (高深度嵌合或重复序列预警)
@@ -205,11 +224,13 @@ class ScaffoldingStep(BaseAssemblyStep):
                 if len(r.seq) > 2000 and "circular=true" not in r.description.lower():
                     seq_str = str(r.seq).upper()
                     head_seed = seq_str[:100]
-                    tail_region = seq_str[-3000:]
+                    # 防止由于序列短于 3000bp 导致 tail_region 包含 head_seed
+                    tail_region_start = max(100, len(seq_str) - 3000)
+                    tail_region = seq_str[tail_region_start:]
                     
                     if head_seed in tail_region:
                         pos = tail_region.find(head_seed)
-                        overlap = 3000 - pos
+                        overlap = len(tail_region) - pos
                         r.description += f" [circular_verified:DTR={overlap}bp]"
                         self.logger.info(f"⭕ 已验证 DTR 环形拓扑: {r.id} (Overlap={overlap}bp)")
                 
@@ -239,11 +260,13 @@ class ScaffoldingStep(BaseAssemblyStep):
         target_dir = await self.get_best_wsl_tmp_dir(required_gb=12.0)
         
         # 🔗 核心修复：确保目录清空
-        await self.runner.run_command(["rm", "-rf", target_dir], is_shell=True)
-        await self.runner.run_command(["mkdir", "-p", target_dir], is_shell=True)
+        await self.runner.run_command(["rm", "-rf", target_dir])
+        await self.runner.run_command(["mkdir", "-p", target_dir])
         return target_dir
 
     def _bypass_step(self):
         fallback = self.context.get("assembly_path") or self.context.get("assembly_fasta")
         if fallback:
             self.context.update("scaffold_path", fallback)
+            self.context.update("assembly_fasta", fallback)
+        return False

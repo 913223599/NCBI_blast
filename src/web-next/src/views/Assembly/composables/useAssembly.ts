@@ -35,6 +35,7 @@ export function useAssembly() {
     isLysogenic: false,
     isStrictParentStrain: true,
     doPolishing: false,
+    enableDeepAudit: false,
     progress: 0,
     stage: AssemblyStage.PREPROCESSING as AssemblyStage
   })
@@ -145,7 +146,8 @@ export function useAssembly() {
             host_genome: hostDb, // 支持从 host_filter_db 共享为 host_genome
             is_lysogenic: taskState.isLysogenic,
             is_strict_parent_strain: taskState.isStrictParentStrain,
-            do_polishing: taskState.doPolishing
+            do_polishing: taskState.doPolishing,
+            enable_deep_audit: taskState.enableDeepAudit
           }
         }
       };
@@ -223,6 +225,9 @@ export function useAssembly() {
     if (params.do_polishing !== undefined) {
       taskState.doPolishing = !!params.do_polishing;
     }
+    if (params.enable_deep_audit !== undefined) {
+      taskState.enableDeepAudit = !!params.enable_deep_audit;
+    }
     return rawType;
   }
 
@@ -298,7 +303,8 @@ export function useAssembly() {
                 : taskState.selectedHostDb,
             is_lysogenic: taskState.isLysogenic,
             is_strict_parent_strain: taskState.isStrictParentStrain,
-            do_polishing: taskState.doPolishing
+            do_polishing: taskState.doPolishing,
+            enable_deep_audit: taskState.enableDeepAudit
           }
         }
       }

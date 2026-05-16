@@ -91,10 +91,16 @@ function handleExport() {
 }
 
 function handleClear() {
-  if (window.confirm('确定要清空所有菌毒种库数据吗？此操作不可撤销。')) {
-    strain.clearAll()
-    appStore.showNotification('已清空所有数据', 'success')
+  const input = window.prompt(
+    '此操作将永久清空所有菌毒种库数据且不可撤销！\n\n如确认操作，请在下方输入 DELETE 后点击确定：'
+  )
+  if (input === null) return // 用户取消
+  if (input.trim().toUpperCase() !== 'DELETE') {
+    appStore.showNotification('校验码不匹配，操作已取消', 'warning')
+    return
   }
+  strain.clearAll()
+  appStore.showNotification('已清空所有数据', 'success')
 }
 </script>
 

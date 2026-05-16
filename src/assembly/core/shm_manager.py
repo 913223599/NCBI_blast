@@ -37,8 +37,8 @@ class ShmManager:
     """
 
     # 策略常量
-    SHM_RATIO = 0.30          # 内存盘最大占用物理内存的比例
-    SHM_CAP_GB = 12           # 内存盘绝对上限 (GB)
+    SHM_RATIO = 0.50          # 内存盘最大占用物理内存的比例
+    SHM_CAP_GB = 24           # 内存盘绝对上限 (GB)
     OS_RESERVE_GB = 4         # 为操作系统和缓存预留的内存 (GB)
     DIAG_RETAIN_SECONDS = 3600  # 诊断现场保留时长 (秒)
 
@@ -97,11 +97,17 @@ class ShmManager:
         try:
             out = []
             await self.runner.run_command(
-                ["bash", "-c", "df -BG /dev/shm | tail -n 1 | awk '{print $4}' | sed 's/G//'"],
+                ["bash", "-c", "df -BG /dev/shm"],
                 on_output=out.append, silence_errors=True
             )
-            if out and out[0].strip().isdigit():
-                return float(out[0].strip())
+            # 倒序查找输出行，避免因为 WSL 的代理警告导致提取失败
+            for line in reversed(out):
+                if "/dev/shm" in line:
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        avail_str = parts[3].replace("G", "")
+                        if avail_str.isdigit():
+                            return float(avail_str)
         except Exception:
             pass
         return 0.0

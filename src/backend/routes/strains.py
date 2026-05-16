@@ -42,7 +42,8 @@ async def strain_load_all():
     """
     性能保卫战：
     1. 内存快照机制，减少磁盘IO压力。
-    2. 硬切片限流：默认只拉取前 2000 条，防止前端渲染 10 万条导致的 22GB 内存海啸。
+    2. 数据库层已做序列字段脱水优化（load_all_data 不含 sequence），安全全量下发。
+    3. 始终附带 total_count 供前端准确显示。
     """
     from ...backend.strain_db import get_strain_db_manager
     from ..api_server import log_resources
@@ -52,12 +53,12 @@ async def strain_load_all():
     
     # 命中快照缓存
     if _cached_data is not None and (now - _last_load_time < _LOAD_CACHE_MS):
-        logger.info(f"⚡ [Cache] 命中内存快照 ({now - _last_load_time:.0f}ms)")
+        logger.info(f"[Cache] 命中内存快照 ({now - _last_load_time:.0f}ms)")
         return _cached_data
     
     # 强制防抖保护
     if now - _last_load_time < _LOAD_DEBOUNCE_MS:
-        logger.warning(f"⚠️ [FlowControl] 请求过频且无快照，拦截以防止IO风暴")
+        logger.warning(f"[FlowControl] 请求过频且无快照，拦截以防止IO风暴")
         return {"freezers": [], "records": [], "status": "throttled"}
 
     try:
@@ -65,29 +66,21 @@ async def strain_load_all():
         # 记录后端资源情况
         log_resources(force=False)
         
-        # 核心数据库操作
+        # 核心数据库操作 (load_all_data 已在 SQL 层排除 sequence/metadata 大字段)
         all_data: dict[str, Any] = get_strain_db_manager().load_all_data()
         elapsed = (time.time() - start_time) * 1000
         
-        # --- 性能硬限流开始 ---
-        # 如果样本总量巨大，这里强行只取前 2000 条。
-        # 目的是从物理层切断 22GB 级别的 JS 堆内存压力（JSON解析是内存溢出主因）。
+        # 始终附带 total_count，确保前端可以准确报告数据总量
         total_records = all_data.get('records') or []
-        limit = 2000
-        if len(total_records) > limit:
-            logger.warning(f"[MemoryGuard] 发现 {len(total_records)} 条记录，正在强制切片至前 {limit} 条以防止前端崩溃。")
-            all_data['records'] = total_records[:limit]
-            all_data['is_truncated'] = True
-            all_data['total_count'] = len(total_records)
-        # --- 性能硬限流结束 ---
+        all_data['total_count'] = len(total_records)
         
         _cached_data = all_data
         _last_load_time = now
         
-        logger.info(f"[Load] 全部加载成功: {len(all_data.get('records') or [])}条记录, 耗时{elapsed:.0f}ms")
+        logger.info(f"[Load] 全部加载成功: {len(total_records)}条记录, 耗时{elapsed:.0f}ms")
         return all_data
     except Exception as e:
-        logger.error(f"❌ [Error] /api/strain/load 发生异常: {e}")
+        logger.error(f"[Error] /api/strain/load 发生异常: {e}")
         return {"freezers": [], "records": [], "error": str(e)}
 
 @router.post("/api/strain/freezer")
@@ -195,24 +188,29 @@ async def import_strains_from_paths(req: dict, x_client_id: Optional[str] = Head
     
     fh = FileHandler()
     db = get_strain_db_manager()
-    count = 0
     
     try:
         invalidate_cache()
+        # 收集所有序列到列表，统一批量写入，避免逐条事务造成的 I/O 风暴
+        batch_records = []
+        now_str = time.strftime('%Y-%m-%d %H:%M:%S')
         for p in paths:
             # 使用 FileHandler 的迭代读取功能 (支持 ZIP/GZ/ABI)
             for seq_info in fh.read_fasta_file_iter(p):
-                # 构造符合数据库要求的记录对象
-                record = {
+                batch_records.append({
                     "sampleId": seq_info['id'],
                     "species": seq_info.get('description', ''),
                     "sequence": seq_info['sequence'],
-                    # 关键：不存储巨大的 metadata
-                    "createdAt": time.strftime('%Y-%m-%d %H:%M:%S'),
-                    "updatedAt": time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                if db.save_record(record):
-                    count += 1
+                    "createdAt": now_str,
+                    "updatedAt": now_str
+                })
+        
+        count = 0
+        if batch_records:
+            # 单事务批量写入
+            success = db.save_records_batch(batch_records)
+            if success:
+                count = len(batch_records)
         
         if count > 0 and x_client_id:
             await broadcaster.broadcast("data_updated", {"module": "strains"}, exclude_id=x_client_id)

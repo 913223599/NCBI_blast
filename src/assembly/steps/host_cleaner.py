@@ -111,18 +111,17 @@ class HostCleanerStep(BaseAssemblyStep):
             
             confidence = 0.0
 
-            cmd = [
-                "kraken2",
-                "--db", WSLManager.to_wsl_path(str(db_dir)),
-                "--paired", WSLManager.to_wsl_path(str(r1)), WSLManager.to_wsl_path(str(r2)),
-                "--unclassified-out", shm_unclassified_pattern, 
-                "--confidence", str(confidence), # 动态置信度
-                "--report", kraken_report,
-                "--threads", str(optimal_threads),
-                "--output", "/dev/null"
-            ]
+            cmd = (
+                f"kraken2 --db '{WSLManager.to_wsl_path(str(db_dir))}' "
+                f"--paired '{WSLManager.to_wsl_path(str(r1))}' '{WSLManager.to_wsl_path(str(r2))}' "
+                f"--unclassified-out '{shm_unclassified_pattern}' "
+                f"--confidence {confidence} "
+                f"--report '{kraken_report}' "
+                f"--threads {optimal_threads} "
+                f"--output /dev/null"
+            )
             
-            ret = await self.runner.run_command(cmd)
+            ret = await self.runner.run_command(cmd, is_shell=True)
             if ret != 0: return False
 
             # 解析报告 (统计污染率)
@@ -183,7 +182,10 @@ class HostCleanerStep(BaseAssemblyStep):
             
         finally:
             self.logger.info("♻️ 释放内存资源...")
-            await self.runner.run_command(["rm", "-rf", shm_dir])
+            if self.context.shm:
+                await self.context.shm.release(self.__class__.__name__.lower())
+            else:
+                await self.runner.run_command(["rm", "-rf", shm_dir])
 
     async def _build_mini_kraken_db(self, fasta: Path, db_dir: Path, taxid: int = 1350, species_name: str = "HostGenus"):
         """构建最小化 Kraken2 参考数据库"""
@@ -191,7 +193,10 @@ class HostCleanerStep(BaseAssemblyStep):
         wsl_fa = WSLManager.to_wsl_path(str(fasta))
         cpu = os.cpu_count() or 16
         
-        await self.runner.run_command(["mkdir", "-p", f"{wsl_db}/taxonomy", f"{wsl_db}/library"])
+        # 所有路径通过 bash -c + 单引号包裹，防止空格/括号等特殊字符被 shell 误解析
+        await self.runner.run_command(
+            f"mkdir -p '{wsl_db}/taxonomy' '{wsl_db}/library'", is_shell=True
+        )
         
         # 使用 chr() 彻底避开任何 shell 转义和路径替换问题
         nodes_py = (
@@ -201,7 +206,9 @@ class HostCleanerStep(BaseAssemblyStep):
             f"f.write(f'{taxid}{{t}}|{{t}}1{{t}}|{{t}}species{{t}}|{{t}}{{n}}'); "
             "f.close()"
         )
-        await self.runner.run_command(["python3", "-c", nodes_py, f"{wsl_db}/taxonomy/nodes.dmp"])
+        await self.runner.run_command(
+            f"python3 -c \"{nodes_py}\" '{wsl_db}/taxonomy/nodes.dmp'", is_shell=True
+        )
         
         names_py = (
             "import sys; f=open(sys.argv[1],'w'); "
@@ -210,13 +217,25 @@ class HostCleanerStep(BaseAssemblyStep):
             f"f.write(f'{taxid}{{t}}|{{t}}{species_name}{{t}}|{{t}}{{t}}|{{t}}scientific name{{t}}|{{n}}'); "
             "f.close()"
         )
-        await self.runner.run_command(["python3", "-c", names_py, f"{wsl_db}/taxonomy/names.dmp"])
+        await self.runner.run_command(
+            f"python3 -c \"{names_py}\" '{wsl_db}/taxonomy/names.dmp'", is_shell=True
+        )
         
-        await self.runner.run_command(["bash", "-c", f"sed 's/>/>kraken:taxid|{taxid}|/' {wsl_fa} > {wsl_db}/library/host.fna"])
-        await self.runner.run_command(["kraken2-build", "--add-to-library", f"{wsl_db}/library/host.fna", "--db", wsl_db])
+        # sed 命令: 路径用单引号包裹防止括号/空格被 bash 解析
+        await self.runner.run_command(
+            f"sed 's/>/>kraken:taxid|{taxid}|/' '{wsl_fa}' > '{wsl_db}/library/host.fna'",
+            is_shell=True
+        )
+        await self.runner.run_command(
+            f"kraken2-build --add-to-library '{wsl_db}/library/host.fna' --db '{wsl_db}'",
+            is_shell=True
+        )
         
         self.logger.info(f"🔨 正在构建 Kraken2 索引 ({species_name}, 线程={cpu})...")
-        await self.runner.run_command(["kraken2-build", "--build", "--db", wsl_db, "--threads", str(cpu)])
+        await self.runner.run_command(
+            f"kraken2-build --build --db '{wsl_db}' --threads {cpu}",
+            is_shell=True
+        )
 
     async def _parse_kraken_report_raw(self, report_wsl_path: str, taxid: int = 1350, species_name: str = "HostGenus") -> float:
         """从内存盘读取 Kraken2 报告并解析宿主占比"""
@@ -309,12 +328,12 @@ class HostCleanerStep(BaseAssemblyStep):
             runner_r1 = CommandRunner(f"{self.__class__.__name__}.Zip1", is_wsl=True)
             runner_r2 = CommandRunner(f"{self.__class__.__name__}.Zip2", is_wsl=True)
 
-            cmd1 = ["bash", "-c", f"{zip_tool} -c {shm_clean_r1} > {WSLManager.to_wsl_path(str(final_r1))}"]
-            cmd2 = ["bash", "-c", f"{zip_tool} -c {shm_clean_r2} > {WSLManager.to_wsl_path(str(final_r2))}"]
+            cmd1 = f"{zip_tool} -c '{shm_clean_r1}' > '{WSLManager.to_wsl_path(str(final_r1))}'"
+            cmd2 = f"{zip_tool} -c '{shm_clean_r2}' > '{WSLManager.to_wsl_path(str(final_r2))}'"
 
             retcodes = await asyncio.gather(
-                runner_r1.run_command(cmd1),
-                runner_r2.run_command(cmd2)
+                runner_r1.run_command(cmd1, is_shell=True),
+                runner_r2.run_command(cmd2, is_shell=True)
             )
 
             if any(r != 0 for r in retcodes):

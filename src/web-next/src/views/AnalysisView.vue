@@ -7,6 +7,7 @@
  */
 import { ref } from 'vue'
 import ComparisonModule from './Analysis/modules/comparison/ComparisonModule.vue'
+import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue'
 
 interface AnalysisTool {
   id: string;
@@ -18,32 +19,18 @@ interface AnalysisTool {
 
 const tools = ref<AnalysisTool[]>([
   { 
-    id: 'quast', 
-    title: '组装质量评估', 
-    description: '集成 QUAST，分析 N50、GC 含量、基因特征覆盖度等关键指标。', 
-    icon: '📊',
-    status: 'ready'
-  },
-  { 
     id: 'comparison', 
-    title: '全场景共线性分析', 
-    description: '基于 MUMmer 3.0 架构，支持极性自动检测、结构变异提取与高精度点图。', 
+    title: '全场景共线性分析 4.0', 
+    description: '统一 MUMmer/Minimap2 引擎，极性自动校正、SNP/INDEL 变异检测与交互式点图。', 
     icon: '📈',
     status: 'ready'
   },
   { 
-    id: 'cleaner', 
-    title: '接头/引物清理', 
-    description: '检测并切除组装序列末端的接头、引物残留，确保引物库洁净。', 
-    icon: '✂️',
-    status: 'beta'
-  },
-  { 
-    id: 'circular', 
-    title: '环化验证', 
-    description: '针对噬菌体/质粒，验证序列首尾重合度以确认成环状态。', 
-    icon: '🔄',
-    status: 'coming_soon'
+    id: 'viewer', 
+    title: '序列交互式可视化', 
+    description: '提供类似 SnapGene 的交互式序列与注释查看器，支持环形 (Circular) 与线性 (Linear) 模式，兼容 GenBank/GFF。', 
+    icon: '🧬',
+    status: 'ready'
   }
 ])
 
@@ -96,6 +83,7 @@ function selectTool(tool: AnalysisTool) {
       <!-- 具体工具占位符 -->
       <div v-else class="tool-workspace">
         <ComparisonModule v-if="activeTool === 'comparison'" />
+        <GenomeViewerModule v-else-if="activeTool === 'viewer'" />
         <div v-else class="workspace-placeholder">
            <div class="empty-icon">{{ tools.find(t => t.id === activeTool)?.icon }}</div>
            <h2>{{ tools.find(t => t.id === activeTool)?.title }} 模块开发中</h2>
@@ -115,7 +103,7 @@ function selectTool(tool: AnalysisTool) {
 }
 
 .analysis-header {
-  padding: 32px 40px;
+  padding: 12px 24px;
   background: white;
   border-bottom: 1px solid #e2e8f0;
   display: flex;
@@ -125,25 +113,33 @@ function selectTool(tool: AnalysisTool) {
 
 .header-content h1 {
   margin: 0;
-  font-size: 24px;
+  font-size: 18px;
   color: #1e293b;
   letter-spacing: -0.5px;
 }
 
 .header-content p {
-  margin: 4px 0 0;
+  margin: 2px 0 0;
   color: #64748b;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .back-btn {
   background: #f1f5f9;
   border: none;
-  padding: 8px 16px;
-  border-radius: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
   color: #475569;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+}
+
+.analysis-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .tools-grid {
@@ -151,6 +147,7 @@ function selectTool(tool: AnalysisTool) {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
   padding: 32px 40px;
+  overflow-y: auto;
 }
 
 .tool-card {
@@ -238,9 +235,9 @@ function selectTool(tool: AnalysisTool) {
 .tool-workspace {
   flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
 }
 
 .workspace-placeholder {

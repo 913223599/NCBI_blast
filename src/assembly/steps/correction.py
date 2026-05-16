@@ -31,8 +31,15 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
     async def execute(self) -> bool:
         self.status = "running"
         assembly_fasta = self.context.get("assembly_fasta")
-        r1 = self.context.get("clean_r1") or self.context.get("r1")
-        r2 = self.context.get("clean_r2") or self.context.get("r2")
+        # 1. 严格隔离优先级：未合并纯净双端 > 去宿主双端 > 原始数据
+        r1 = self.context.get("unmerged_r1") or self.context.get("clean_r1") or self.context.get("r1")
+        r2 = self.context.get("unmerged_r2") or self.context.get("clean_r2") or self.context.get("r2")
+        
+        is_phage = self.context.config.get("sample_type", "").upper() == "PHAGE"
+        if is_phage and r1 == self.context.get("r1") and not self.context.get("clean_r1"):
+            self.logger.warning("🚨 [隔离审计预警] 未检测到去宿主环节的 Clean Reads！")
+            self.logger.warning("🚨 Polypolish 将使用包含宿主背景的原始数据进行一致性校正。")
+            self.logger.warning("🚨 这极可能导致噬菌体高同源区域发生宿主碱基反向突变漂移，请核查后续 SNP！")
         
         if not assembly_fasta or not Path(assembly_fasta).exists():
             logger.warning("未发现原始组装序列，跳过校正步骤")
@@ -51,26 +58,24 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
         safe_r1 = WSLManager.to_wsl_path(str(r1)) if r1 else None
         safe_r2 = WSLManager.to_wsl_path(str(r2)) if r2 else None
         
-        # 🚨 三路判定：根据是否有短读长辅助来选择校正引擎
-        # A) 有短读长 → Polypolish (短读长修复长读长组装的 Indel 错误)
-        # B) 纯 Nanopore/PacBio 无短读长 → Medaka (神经网络自校正)
+        # 🚨 我们明确这是一个纯二代 (Illumina) 短读长平台
+        # 故彻底移除与 Nanopore/PacBio 相关的三代 Medaka 分支
         has_short_reads = safe_r1 and safe_r2
         
         polished_result = None
         if has_short_reads:
-            self.logger.info("🔬 混合校正模式：使用 Polypolish (短读长打磨长读长组装)")
+            self.logger.info("🔬 精修模式：使用 Polypolish (全量短读长进行组装打磨)")
             polished_result = await self._run_polypolish(safe_fasta, safe_r1, safe_r2)
         else:
-            self.logger.info("🧠 纯长读长模式：使用 Medaka 神经网络进行自校正")
-            polished_result = await self._run_medaka(safe_fasta, tech)
+            self.logger.warning("未检测到有效短读长，无法执行 Polypolish 打磨。")
         
         if polished_result:
             import json
-            engine = "Polypolish" if has_short_reads else "Medaka"
+            engine = "Polypolish"
             summary = {
                 "status": "ok",
                 "tool": engine,
-                "description": f"{engine} consensus polishing for long-read assembly",
+                "description": f"{engine} consensus polishing for short-read assembly",
                 "output_file": polished_result.name
             }
             with open(Path(self.get_working_dir()) / "correction_summary.json", "w") as f:
@@ -84,65 +89,14 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
         self.status = "completed"
         return True
 
-    async def _run_medaka(self, safe_fasta: str, tech: str):
-        """
-        Medaka 神经网络校正：专为纯 Nanopore/PacBio 场景设计
-        不依赖短读长，使用原始长读长数据进行自身一致性校正
-        """
-        from ..env.wsl_manager import WSLManager
-        
-        # 检查 Medaka 是否可用
-        ret_medaka = await self.runner.run_command(["which", "medaka"])
-        if ret_medaka != 0:
-            self.logger.info("[Medaka] 未安装，降级跳过纯长读长校正 (Flye 已内置基础打磨)")
-            return None
-        
-        wsl_tmp_outdir = await self.get_best_wsl_tmp_dir(required_gb=10.0)
-        await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir], is_shell=True)
-        await self.runner.run_command(["mkdir", "-p", wsl_tmp_outdir], is_shell=True)
-        
-        win_polished = Path(self.get_working_dir()) / "polished_assembly.fasta"
-        medaka_out = f"{wsl_tmp_outdir}/medaka_out"
-        
-        # 获取原始长读长
-        raw_reads = self.context.get("r1")
-        if not raw_reads:
-            return None
-        safe_reads = WSLManager.to_wsl_path(str(raw_reads))
-        
-        # 选择模型 (r1041_e82_400bps 是 R10.4 的默认, 对 R9.4 用 r941_min_sup_g507)
-        model = "r1041_e82_400bps_sup_v5.0.0" if tech == "NANOPORE" else "default"
-        
-        try:
-            if self.on_progress: self.on_progress(10, "Medaka: 正在进行神经网络一致性校正...")
-            
-            cmd = [
-                "medaka_polish", safe_fasta, safe_reads, medaka_out,
-                "--threads", str(max(1, (os.cpu_count() or 8) - 1))
-            ]
-            if model != "default":
-                cmd.extend(["--model", model])
-            
-            ret = await self.runner.run_command(cmd)
-            
-            consensus = f"{medaka_out}/consensus.fasta"
-            if ret == 0 and (await self.runner.run_command(["test", "-s", consensus])) == 0:
-                await self.runner.run_command(["cp", "-f", consensus, WSLManager.to_wsl_path(str(win_polished))], is_shell=True)
-                if win_polished.exists() and win_polished.stat().st_size > 500:
-                    self.logger.info(f"[Medaka] 神经网络校正完成: {win_polished.name}")
-                    return win_polished
-            
-            return None
-        except Exception as e:
-            self.logger.warning(f"[Medaka] 校正异常: {e}")
-            return None
-        finally:
-            await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir], is_shell=True)
+
 
     async def _run_polypolish(self, safe_fasta: str, safe_r1: str, safe_r2: str):
         """
         Polypolish 短读长精修：将原始 Clean Reads 比对回组装序列
         """
+        from ..env.wsl_manager import WSLManager
+        
         # 🔗 极速飞升：申请 10GB 左右的内存空间进行密集比对计算
         wsl_tmp_outdir = await self.get_best_wsl_tmp_dir(required_gb=10.0)
         
@@ -168,8 +122,8 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
                 return None
 
             # 准备内存空间
-            await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir], is_shell=True)
-            await self.runner.run_command(["mkdir", "-p", wsl_tmp_outdir], is_shell=True)
+            await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir])
+            await self.runner.run_command(["mkdir", "-p", wsl_tmp_outdir])
             
             cpu_count = os.cpu_count() or 8
             threads = str(max(1, cpu_count - 1))
@@ -180,7 +134,7 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
             # 直接让 bwa mem 全量跑，抛弃的比对结果也只是计算成本而已。
 
             # 将参考序列拷贝入内存盘进行本地化索引
-            await self.runner.run_command(["cp", safe_fasta, local_fasta], is_shell=True)
+            await self.runner.run_command(["cp", safe_fasta, local_fasta])
             
             # Step 1: 建立 BWA 索引
             if self.on_progress: self.on_progress(10, "正在建立内存级靶向序列比对索引...")
@@ -217,18 +171,18 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
 
             # 🔗 关键释放 1：过滤完成后，原始巨型 SAM 已无用，立刻删除释放几十 GB 内存
             self.logger.info("🗑️ 释放中间比对文件 (aligned_r*.sam)...")
-            await self.runner.run_command(["rm", "-f", sam_r1, sam_r2], is_shell=True)
+            await self.runner.run_command(["rm", "-f", sam_r1, sam_r2])
 
             # Step 4: 执行精修
             if self.on_progress: self.on_progress(85, "正在合成纠错序列 (Polypolish)...")
             ret_polish = await self.runner.run_command(["bash", "-c", f'polypolish polish "{local_fasta}" "{filtered_r1}" "{filtered_r2}" > "{local_polished}"'])
             
             # 🔗 关键释放 2：精修完成后，过滤后的 SAM 也已无用，立刻删除
-            await self.runner.run_command(["rm", "-f", filtered_r1, filtered_r2], is_shell=True)
+            await self.runner.run_command(["rm", "-f", filtered_r1, filtered_r2])
 
             if ret_polish == 0:
                 # 提取唯一产物
-                await self.runner.run_command(["cp", "-f", local_polished, str(win_polished_fasta)], is_shell=True)
+                await self.runner.run_command(["cp", "-f", local_polished, WSLManager.to_wsl_path(str(win_polished_fasta))])
                 if win_polished_fasta.exists() and win_polished_fasta.stat().st_size > 500:
                     logger.info(f"[Polypolish] 内存级精修成功: {win_polished_fasta.name}")
                     return win_polished_fasta
@@ -241,5 +195,8 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
         finally:
             # 🔗 终态回收：确保 wsl_tmp_outdir 文件夹被彻底移除
             self.logger.info(f"♻️ 正在销毁精修临时目录: {wsl_tmp_outdir}")
-            await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir], is_shell=True)
+            if self.context.shm:
+                await self.context.shm.release(self.__class__.__name__.lower())
+            else:
+                await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir])
 

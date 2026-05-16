@@ -47,6 +47,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
         if (!matchKeyword) return false
       }
       if (species && record.species !== species) return false
+      if (searchFilters.value.sampleType && record.sampleType !== searchFilters.value.sampleType) return false
       if (sequenceType && record.sequenceType !== sequenceType) return false
       if (country && record.country !== country) return false
       if (dateFrom && record.collectionDate < dateFrom) return false
@@ -84,6 +85,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     searchFilters.value = {
       keyword: '',
       species: '',
+      sampleType: '',
       sequenceType: '',
       country: '',
       dateFrom: '',

@@ -66,6 +66,8 @@ class AssemblerStep(BaseAssemblyStep):
 
         cmd_str = ""
         handler = None
+        returncode = -1
+        found_fasta = False
 
         # 🔗 技术路线判定
         if tech in ["NANOPORE", "PACBIO_HIFI"]:
@@ -88,48 +90,16 @@ class AssemblerStep(BaseAssemblyStep):
         else:
             # --- 二代方案 (自适应路由) ---
             params = self.context.config.get("params", {})
-            final_r1 = WSLManager.to_wsl_path(str(self.context.get("unmerged_r1") or r1))
-            final_r2 = WSLManager.to_wsl_path(str(self.context.get("unmerged_r2") or r2))
-            final_s = None
+            final_r1_orig = WSLManager.to_wsl_path(str(self.context.get("unmerged_r1") or r1))
+            final_r2_orig = WSLManager.to_wsl_path(str(self.context.get("unmerged_r2") or r2))
+            final_s_orig = None
             merged = self.context.get("merged_reads")
             if merged and Path(merged).exists():
-                final_s = WSLManager.to_wsl_path(str(merged))
-
-            # 执行智能降采样
-            if sample_type == "PHAGE" and final_r1 and final_r2:
-                e_size = params.get("estimated_genome_size") or self.context.config.get("estimated_genome_size", 100000)
-                target_coverage = params.get("target_coverage") or self.context.config.get("target_coverage", 300)
-                target_reads = max(50000, int((e_size * target_coverage) / (150 * 2)))
-                
-                self.logger.info(f"🧪 智能随机采样: 预估={e_size/1000:.0f}kb, 目标深度={target_coverage}x")
-                if self.on_progress: self.on_progress(2, "阶段: 执行随机子集采样 (300x)...")
-                
-                sampling_dir = f"{wsl_tmp_outdir}/sampling"
-                await self.runner.run_command(["mkdir", "-p", sampling_dir], is_shell=True)
-                r1_s, r2_s = f"{sampling_dir}/S1.fq.gz", f"{sampling_dir}/S2.fq.gz"
-                
-                # 检查是否可用 pigz
-                has_pigz = (await self.runner.run_command(["which", "pigz"], silence_errors=True)) == 0
-                zip_tool = f"pigz -p {max(1, optimal_threads//2)}" if has_pigz else "gzip"
-                
-                # 修复：安全使用单引号包裹路径
-                sample_cmd = (
-                    f"seqtk sample -s100 '{final_r1}' {target_reads} | {zip_tool} > '{r1_s}' && "
-                    f"seqtk sample -s100 '{final_r2}' {target_reads} | {zip_tool} > '{r2_s}'"
-                )
-                # 🔗 执行采样 (包含管道操作，必须以 Shell 模式运行字符串命令)
-                ret_sample = await self.runner.run_command(sample_cmd, is_shell=True)
-                
-                # 🔗 指令检查 (原子指令，强制使用列表模式，不再手动包裹引号)
-                if ret_sample == 0 and await self.runner.run_command(["test", "-s", r1_s]) == 0:
-                    final_r1, final_r2 = r1_s, r2_s
-                else:
-                    self.logger.warning("降采样工具 seqtk 失败或未安装，已自动回退使用全部原始数据")
+                final_s_orig = WSLManager.to_wsl_path(str(merged))
 
             # 🚀 极限 I/O 加速: 自动将 Windows 文件系统的输入拷入 WSL 内部
             async def preload_to_ram(src_path: Optional[str], target_name: str) -> Optional[str]:
                 if src_path and "/mnt/c/" in src_path:
-                    # 🛡️ 增加超大文件防护：超过 5GB 坚决不进内存盘，防止把系统爆掉
                     try:
                         win_p = src_path.replace("/mnt/c/", "c:/")
                         size_gb = Path(win_p).stat().st_size / (1024 ** 3)
@@ -145,94 +115,139 @@ class AssemblerStep(BaseAssemblyStep):
                         return shm_path
                 return src_path
 
-            final_s = await preload_to_ram(final_s, "merged_cache.fq.gz")
-            if final_r1 != f"{wsl_tmp_outdir}/sampling/S1.fq.gz": # 如果没有被采样，预热原始数据
-                final_r1 = await preload_to_ram(final_r1, "R1_cache.fq.gz")
-                final_r2 = await preload_to_ram(final_r2, "R2_cache.fq.gz")
+            base_cov = params.get("target_coverage") or self.context.config.get("target_coverage", 300)
+            target_coverages = [base_cov, 100, "FULL"]
+            e_size = params.get("estimated_genome_size") or self.context.config.get("estimated_genome_size", 100000)
 
-            self.logger.info("🧪 [常规模式] 启动 Unicycler 引擎")
-            mode = params.get("mode") or ("bold" if sample_type == "PHAGE" else "normal")
-            min_len = params.get("min_fasta_length") or 200
 
-            spades_tmp_dir = f"{wsl_tmp_outdir}/spades_tmp"
-            # 🚀 SPAdes v4.0.0+ 内存管理优化
-            # 增加一个冗余的 -m 参数在最后，尝试对抗 Unicycler 的默认注入
-            spades_opts = f"--memory {max_mem} --tmp-dir {spades_tmp_dir} -m {max_mem * 1024}"
 
-            cmd_list = [
-                unicycler_bin, "-1", f"'{final_r1}'", "-2", f"'{final_r2}'",
-                "-o", f"'{wsl_tmp_outdir}'", "--threads", threads,
-                "--mode", mode, "--min_fasta_length", str(min_len),
-                "--spades_options", f"'{spades_opts}'"
-            ]
-            if final_s:
-                cmd_list.extend(["-s", f"'{final_s}'"])
-            
-            cmd_str = " ".join(cmd_list)
+            for attempt, current_cov in enumerate(target_coverages):
+                self.logger.info(f"🔄 启动组装循环 (第 {attempt+1} 次尝试), 目标深度: {current_cov}x")
+                
+                await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir])
+                await self.runner.run_command(["mkdir", "-p", wsl_tmp_outdir])
+                
+                final_r1, final_r2, final_s = final_r1_orig, final_r2_orig, final_s_orig
 
-            def unicycler_detailed_handler(line: str):
-                line = line.strip()
-                if "K-mer size" in line:
-                    try:
-                        k = int(line.split("size")[-1].replace(":", "").strip())
-                        p = 10 + int(((k - 21) / (127 - 21)) * 40)
-                        if self.on_progress: self.on_progress(p, f"Unicycler: K-mer {k}...")
-                    except: pass
-            handler = unicycler_detailed_handler
+                if sample_type == "PHAGE" and final_r1 and final_r2 and current_cov != "FULL":
+                    target_reads = max(50000, int((e_size * current_cov) / (150 * 2)))
+                    self.logger.info(f"🧪 智能随机采样: 预估={e_size/1000:.0f}kb, 目标深度={current_cov}x")
+                    if self.on_progress: self.on_progress(2, f"阶段: 执行随机子集采样 ({current_cov}x)...")
+                    
+                    sampling_dir = f"{wsl_tmp_outdir}/sampling"
+                    await self.runner.run_command(["mkdir", "-p", sampling_dir])
+                    r1_s, r2_s = f"{sampling_dir}/S1.fq.gz", f"{sampling_dir}/S2.fq.gz"
+                    
+                    has_pigz = (await self.runner.run_command(["which", "pigz"], silence_errors=True)) == 0
+                    zip_tool = f"pigz -p {max(1, optimal_threads//2)}" if has_pigz else "gzip"
+                    
+                    sample_cmd = (
+                        f"seqtk sample -s100 '{final_r1}' {target_reads} | {zip_tool} > '{r1_s}' && "
+                        f"seqtk sample -s100 '{final_r2}' {target_reads} | {zip_tool} > '{r2_s}'"
+                    )
+                    ret_sample = await self.runner.run_command(sample_cmd, is_shell=True)
+                    
+                    if ret_sample == 0 and await self.runner.run_command(["test", "-s", r1_s]) == 0:
+                        final_r1, final_r2 = r1_s, r2_s
+                    else:
+                        self.logger.warning("降采样工具 seqtk 失败或未安装，已自动回退使用全部原始数据")
 
-        returncode = -1
-        try:
-            # 修复：如果是完整的命令字符串，必须以 shell 执行
-            returncode = await self.runner.run_command(cmd_str, on_output=handler, is_shell=True)
-            
-            if self.context.config.get("use_gpu") and returncode == 0:
-                self.logger.info("🚀 GPU 加速模块已就绪")
+                final_s = await preload_to_ram(final_s, "merged_cache.fq.gz")
+                if final_r1 != f"{wsl_tmp_outdir}/sampling/S1.fq.gz":
+                    final_r1 = await preload_to_ram(final_r1, "R1_cache.fq.gz")
+                    final_r2 = await preload_to_ram(final_r2, "R2_cache.fq.gz")
 
-        except Exception as e:
-            self.logger.error(f"引擎执行过程产生未捕获异常: {e}")
-            returncode = -1
-            
-        finally:
-            # 修复：无论成功失败，都先回收日志和产物，然后再执行销毁操作
-            await self.runner.run_command(["mkdir", "-p", str(out_dir)], is_shell=True)
-            potential_fastas = ["assembly.fasta", "scaffolds.fasta"]
-            graph_names = ["assembly.gfa", "assembly_graph.gfa"]
-            log_names = ["unicycler.log", "flye.log", "assembly.log"]
-            
-            found_fasta = False
-            for f_name in potential_fastas:
-                src = f"{wsl_tmp_outdir}/{f_name}"
-                if await self.runner.run_command(["test", "-f", src]) == 0:
-                    await self.runner.run_command(["cp", "-f", src, f"{out_dir}/assembly.fasta"])
-                    if returncode == 0: self.logger.info(f"✅ 成功捕获序列产物: {f_name}")
-                    found_fasta = True
-                    break
-            
-            for names, dest in [(graph_names, "assembly.gfa"), (log_names, "assembly.log")]:
-                for n in names:
-                    src = f"{wsl_tmp_outdir}/{n}"
+                self.logger.info(f"🧪 [常规模式] 启动 Unicycler 引擎 (尝试 {attempt+1})")
+                mode = params.get("mode") or ("bold" if sample_type == "PHAGE" else "normal")
+                min_len = params.get("min_fasta_length") or 200
+
+                spades_tmp_dir = f"{wsl_tmp_outdir}/spades_tmp"
+                spades_opts = f"--memory {max_mem} --tmp-dir {spades_tmp_dir} -m {max_mem * 1024}"
+
+                cmd_list = [
+                    unicycler_bin, "-1", f"'{final_r1}'", "-2", f"'{final_r2}'",
+                    "-o", f"'{wsl_tmp_outdir}'", "--threads", threads,
+                    "--mode", mode, "--min_fasta_length", str(min_len),
+                    "--spades_options", f"'{spades_opts}'"
+                ]
+                if final_s:
+                    cmd_list.extend(["-s", f"'{final_s}'"])
+                
+                cmd_str = " ".join(cmd_list)
+
+                def unicycler_detailed_handler(line: str):
+                    line = line.strip()
+                    if "K-mer size" in line:
+                        try:
+                            k = int(line.split("size")[-1].replace(":", "").strip())
+                            p = 10 + int(((k - 21) / (127 - 21)) * 40)
+                            if self.on_progress: self.on_progress(p, f"Unicycler: K-mer {k}...")
+                        except: pass
+                handler = unicycler_detailed_handler
+
+                try:
+                    returncode = await self.runner.run_command(cmd_str, on_output=handler, is_shell=True)
+                    if self.context.config.get("use_gpu") and returncode == 0:
+                        self.logger.info("🚀 GPU 加速模块已就绪")
+                except Exception as e:
+                    self.logger.error(f"引擎执行过程产生未捕获异常: {e}")
+                    returncode = -1
+                    
+                # 收割产物
+                await self.runner.run_command(["mkdir", "-p", WSLManager.to_wsl_path(str(out_dir))])
+                potential_fastas = ["assembly.fasta", "scaffolds.fasta"]
+                graph_names = ["assembly.gfa", "assembly_graph.gfa"]
+                log_names = ["unicycler.log", "flye.log", "assembly.log"]
+                
+                found_fasta = False
+                for f_name in potential_fastas:
+                    src = f"{wsl_tmp_outdir}/{f_name}"
                     if await self.runner.run_command(["test", "-f", src]) == 0:
-                        await self.runner.run_command(["cp", "-f", src, f"{out_dir}/{dest}"])
+                        await self.runner.run_command(["cp", "-f", src, f"{out_dir}/assembly.fasta"])
+                        if returncode == 0: self.logger.info(f"✅ 成功捕获序列产物: {f_name}")
+                        found_fasta = True
                         break
-            
-            # 特外捕获 SPAdes 内部日志
-            spades_log = f"{wsl_tmp_outdir}/spades_assembly/spades.log"
-            if await self.runner.run_command(["test", "-f", spades_log]) == 0:
-                await self.runner.run_command(["cp", "-f", spades_log, f"{out_dir}/spades.log"])
+                
+                for names, dest in [(graph_names, "assembly.gfa"), (log_names, "assembly.log")]:
+                    for n in names:
+                        src = f"{wsl_tmp_outdir}/{n}"
+                        if await self.runner.run_command(["test", "-f", src]) == 0:
+                            await self.runner.run_command(["cp", "-f", src, f"{out_dir}/{dest}"])
+                            break
+                
+                spades_log = f"{wsl_tmp_outdir}/spades_assembly/spades.log"
+                if await self.runner.run_command(["test", "-f", spades_log]) == 0:
+                    await self.runner.run_command(["cp", "-f", spades_log, f"{out_dir}/spades.log"])
 
-            # 通过 ShmManager 释放工作空间 (支持诊断保留)
+                if returncode == 0 and found_fasta:
+                    break  # 成功，跳出重试循环
+                else:
+                    log_file = out_dir / "assembly.log"
+                    reason = self._diagnose_failure(log_file)
+                    self.logger.error(f"❌ 第 {attempt+1} 次组装尝试失败: {reason}")
+                    
+                    if "内存空间不足" in reason or "bad_alloc" in reason or "未知报错" in reason:
+                        if attempt + 1 < len(target_coverages):
+                            self.logger.info("⚠️ 触发内存过载防线，将降低深度重试...")
+                            continue
+                    elif "深度过低" in reason:
+                        if current_cov != "FULL":
+                            self.logger.info("⚠️ 测序深度不足，将提升数据量重试...")
+                            continue
+                    
+                    # 其他无法挽救的错误
+                    break
+
+            # 循环结束后的清理逻辑
             step_key = self.__class__.__name__.lower()
             if self.context.shm:
-                await self.context.shm.release(
-                    step_key, retain_for_diagnostics=(returncode != 0)
-                )
+                await self.context.shm.release(step_key, retain_for_diagnostics=(returncode != 0))
             elif returncode == 0:
                 self.logger.info(f"正在执行回收清理: {wsl_tmp_outdir}")
                 await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir])
             else:
-                self.logger.warning(f"组装失败，已保留现场以供诊断: {wsl_tmp_outdir}")
+                self.logger.warning(f"组装彻底失败，已保留现场以供诊断: {wsl_tmp_outdir}")
 
-        # 只有在程序正常退出，且成功找到了 fasta 才判定成功
         if returncode == 0 and found_fasta:
             assembly_fasta = out_dir / "assembly.fasta"
             if assembly_fasta.exists() and assembly_fasta.stat().st_size > 0:
@@ -244,7 +259,6 @@ class AssemblerStep(BaseAssemblyStep):
         else:
             log_file = out_dir / "assembly.log"
             reason = self._diagnose_failure(log_file)
-            self.logger.error(f"组装失败: {reason}")
             if self.on_progress: self.on_progress(0, f"Error: {reason}")
         
         self.status = "failed"

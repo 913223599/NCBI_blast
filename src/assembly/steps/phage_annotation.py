@@ -122,249 +122,272 @@ class PhageAnnotationStep(BaseAssemblyStep):
                     checkv_result = self._parse_checkv(quality_summary)
                     self.context.update("checkv", checkv_result)
                     
-                    # 4.1 选取冠军序列 (Champion Selection)
-                    # 基于 CheckV 指标选取质量最高的序列作为核心展示对象，优化基因圈图视觉重心
-                    champion_id = checkv_result.get("champion_id")
-                    if champion_id:
-                        logger.info(f"🏆 选取冠军序列: {champion_id} (质量评分最高)，正在重排 FASTA 以优化绘图...")
-                        reordered_fasta = win_work_path / "champion_ordered.fasta"
-                        if await self._reorder_fasta_for_best_results(fasta, reordered_fasta, champion_id):
-                            safe_fasta = to_safe(reordered_fasta)
-                            # 更新上下文，确保后续所有的绘图和统计优先使用重排后的主记录
-                            self.context.update("scaffold_path", reordered_fasta)
+                    # 4.1 CheckV 质量关卡 (Quality Gate)
+                    # 利用 CheckV 的评估结果，在进入 Pharokka 注释之前，
+                    # 过滤掉确认为非病毒的细菌垃圾碎片。
+                    # 只保留: viral_genes > 0 或 checkv_quality 为 High/Medium/Complete 的序列。
+                    filtered_fasta = win_work_path / "checkv_filtered.fasta"
+                    gate_kept = self._checkv_quality_gate(quality_summary, Path(str(fasta)), filtered_fasta)
+                    if gate_kept > 0:
+                        fasta = filtered_fasta
+                        safe_fasta = to_safe(filtered_fasta)
+                        self.context.update("assembly_fasta", filtered_fasta)
+                    
+                    # 4.2 选取多分支序列 (Multi-Phage Branching)
+                    # 动态切割模块：将所有高质量的 CheckV 结果切分为独立的 FASTA
+                    safe_fasta_list = []
+                    phage_bins_dir = win_work_path / "phage_bins"
+                    phage_bins_dir.mkdir(exist_ok=True)
+                    
+                    if fasta and fasta.exists():
+                        records = list(SeqIO.parse(str(fasta), "fasta"))
+                        for rec in records:
+                            # 过滤太短的片段 (例如 < 2000bp 的垃圾碎片，如果前面没过滤干净)
+                            if len(rec.seq) < 1500: continue
+                            bin_fasta = phage_bins_dir / f"{rec.id}.fasta"
+                            SeqIO.write([rec], str(bin_fasta), "fasta")
+                            safe_fasta_list.append((rec.id, bin_fasta, to_safe(bin_fasta)))
+                    
+                    if not safe_fasta_list:
+                        logger.error("没有高质量序列通过 CheckV 检查。")
+                        self.status = "failed"
+                        return False
+
+                    logger.info(f"[Branching] 检测到 {len(safe_fasta_list)} 个独立的高质量噬菌体序列，准备进入并发注释流...")
+                    
+                    # 使用 Semaphore 限制重型 AI 工具并发，防 OOM
+                    sem = asyncio.Semaphore(1)
+                    multi_phages = []
+                    
+                    async def process_with_sem(p_id, p_fasta, p_safe_fasta):
+                        async with sem:
+                            return await self._process_single_phage_bin(
+                                p_id, p_fasta, p_safe_fasta, phage_bins_dir, threads, to_safe
+                            )
+                            
+                    tasks = [process_with_sem(pid, pf, psf) for pid, pf, psf in safe_fasta_list]
+                    results = await asyncio.gather(*tasks)
+                    
+                    for res in results:
+                        if res: multi_phages.append(res)
+                        
+                    self.context.update("multi_phages", multi_phages)
+                    
+                    if multi_phages:
+                        # 兼容性处理：把最长的噬菌体结果作为主结果放在外层上下文，防止部分老代码崩溃
+                        best_phage = max(multi_phages, key=lambda x: x.get("genomic_metrics", {}).get("total_length", 0))
+                        self.context.update("gbk_file", str(best_phage.get("gbk_file", "")))
+                        self.context.update("plot_file", str(best_phage.get("plot_file", "")))
+                        self.context.update("phagescope_audit", best_phage.get("audit_data"))
+                        self.context.update("genomic_metrics", best_phage.get("genomic_metrics"))
+                        self.context.update("annotation_dir", str(best_phage.get("annotation_dir", "")))
+                        
+                    self.status = "completed"
+                    if self.on_progress: self.on_progress(100, "多路智能注释与审计任务执行完成")
+                    return True
+
                 else:
                     logger.warning("[CheckV] 引擎或数据库未找到，已跳过质量评估模块。")
                     self.context.update("checkv", {"checkv_quality": "Skipped (CheckV not found)"})
+                    self.status = "failed"
+                    return False
             except Exception as e:
                 logger.warning(f"[CheckV] 质量评估模块抛出异常 (非致命): {e}")
+                self.status = "failed"
+                return False
 
-            # ---------------------------------------------------------
-            # 5. Pharokka 主干基因注释
-            # ---------------------------------------------------------
-            if self.on_progress: self.on_progress(10, "启动 Pharokka 注释流程...")
-            def pharokka_handler(line: str):
-                """精准捕捉 Pharokka 进度用于前端展示"""
-                msg = line.strip()
-                if self.on_progress:
-                    if "Phanotate" in msg: self.on_progress(12, "正在进行基因预测 (Phanotate)...")
-                    elif "HMMER" in msg: self.on_progress(42, "HMMER 结构域分析...")
-                    elif "tRNAscan-SE" in msg: self.on_progress(45, "正在扫描 tRNA 基因...")
-                    elif "MinCED" in msg: self.on_progress(48, "正在扫描 CRISPR 阵列...")
+        except Exception as e:
+            logger.error(f"❌ [Annotation] 核心流程执行过程中发生严重异常: {e}", exc_info=True)
+            self.status = "failed"
+            return False
 
-            safe_pharokka_out = to_safe(win_pharokka_out)
-            pharokka_cmd = [
+    async def _process_single_phage_bin(self, p_id: str, fasta: Path, safe_fasta: str, parent_dir: Path, threads: int, to_safe) -> dict:
+        """处理单个噬菌体实体的全套注释、结构预测与画图流水线"""
+        win_work_path = parent_dir / p_id
+        win_work_path.mkdir(exist_ok=True)
+        safe_work_dir = to_safe(win_work_path)
+        
+        win_pharokka_out = win_work_path / "pharokka_res"
+        win_phold_out = win_work_path / "phold_res"
+        win_pharokka_out.mkdir(exist_ok=True)
+        win_phold_out.mkdir(exist_ok=True)
+        
+        from typing import Any
+        result_dict: dict[str, Any] = {"contig_id": p_id, "fasta": str(fasta)}
+        
+        logger.info(f"🚀 开始处理噬菌体实体: {p_id}")
+        
+        # 5. Pharokka 主干基因注释
+        def pharokka_handler(line: str):
+            if self.on_progress: self.on_progress(15, f"[{p_id}] 正在运行 Pharokka 注释...")
+
+        safe_pharokka_out = to_safe(win_pharokka_out)
+        pharokka_cmd = [
+            "pharokka.py", "-i", safe_fasta, "-o", safe_pharokka_out,
+            "-d", "/opt/pharokka_db", "-t", str(threads), "-p", "PHAGE",
+            "--dnaapler", "--sensitivity", "8", "-f"
+        ]
+        
+        pharokka_success = False
+        try:
+            ret_pharokka = await self.runner.run_command(pharokka_cmd, cwd=safe_work_dir, on_output=pharokka_handler, silence_errors=True)
+            if ret_pharokka == 0 and (win_pharokka_out / "PHAGE.gbk").exists():
+                pharokka_success = True
+        except Exception as e:
+            logger.warning(f"[{p_id}] Pharokka 运行异常: {e}")
+
+        if not pharokka_success:
+            logger.warning(f"[{p_id}] Pharokka (--dnaapler) 运行未能正常生成 GBK (可能是未找到大亚基等原因)，准备降级重试 (移除 dnaapler)...")
+            pharokka_fallback_cmd = [
                 "pharokka.py", "-i", safe_fasta, "-o", safe_pharokka_out,
                 "-d", "/opt/pharokka_db", "-t", str(threads), "-p", "PHAGE",
-                "--dnaapler", "--sensitivity", "8", "-f"
+                "--sensitivity", "8", "-f"
             ]
+            await self.runner.run_command(pharokka_fallback_cmd, cwd=safe_work_dir, on_output=pharokka_handler)
+        
+        # 6. Phold AI 结构深度增强
+        def phold_handler(line: str):
+            if self.on_progress: self.on_progress(60, f"[{p_id}] AI 结构折叠中...")
             
-            logger.info("启动 Pharokka 主干注释流...")
-            await self.runner.run_command(pharokka_cmd, cwd=safe_work_dir, on_output=pharokka_handler)
-            
-            # ---------------------------------------------------------
-            # 6. Phold AI 结构深度增强
-            # ---------------------------------------------------------
-            if self.on_progress: self.on_progress(60, "Pharokka 完成，进入 Phold AI 结构增强模式...")
-            def phold_handler(line: str):
-                msg = line.strip()
-                if self.on_progress:
-                    if "cuda" in msg.lower() or "gpu" in msg.lower(): 
-                        self.on_progress(61, "AI 显卡驱动已激活，加速折叠中...")
-                    elif "Foldseek" in msg: 
-                        self.on_progress(82, "利用 Foldseek 进行结构比对...")
-                # 捕获网络异常日志，方便排查
-                if "ConnectError" in msg or "Network is unreachable" in msg:
-                    logger.warning(f"[Phold] 检测到网络异常 (非致命，已启用离线模式): {msg}")
+        safe_gbk_for_phold = to_safe(win_pharokka_out / "PHAGE.gbk")
+        phold_base_cmd = " ".join([
+            "phold", "run", "-i", safe_gbk_for_phold, "-o", to_safe(win_phold_out), 
+            "-d", "/opt/phold_db", "-t", str(threads), "-f", "--sensitivity", "9.5"
+        ])
+        
+        offline_env = "export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1"
+        hf_token = os.environ.get("HF_TOKEN") or (self.context.get("params") or {}).get("hf_token")
+        if hf_token: offline_env += f" HF_TOKEN={hf_token}"
+        
+        phold_cmd = ["bash", "-c", f"{offline_env} && {phold_base_cmd}"]
+        ret_phold = await self.runner.run_command(phold_cmd, cwd=safe_work_dir, on_output=phold_handler, is_shell=True)
+        
+        win_final_gbk = win_phold_out / "phold.gbk" if ret_phold == 0 else win_pharokka_out / "PHAGE.gbk"
 
-            safe_gbk_for_phold = to_safe(win_pharokka_out / "PHAGE.gbk")
-            phold_base_cmd = " ".join([
-                "phold", "run", "-i", safe_gbk_for_phold, "-o", to_safe(win_phold_out), 
-                "-d", "/opt/phold_db", "-t", str(threads), "-f", "--sensitivity", "9.5"
-            ])
-            
-            # 强制离线模式: 防止 huggingface_hub / transformers 在加载本地已缓存模型时
-            # 仍尝试通过 httpx 连接 HF API 验证版本，导致 ConnectError 致命中断。
-            # ProstT5 模型已完整缓存在 /opt/phold_db，无需联网。
-            offline_env = "export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1"
-            
-            hf_token = os.environ.get("HF_TOKEN") or (self.context.get("params") or {}).get("hf_token")
-            if hf_token:
-                logger.info("检测到 HuggingFace Token，启用远程大模型提速。")
-                offline_env += f" HF_TOKEN={hf_token}"
-            
-            phold_cmd = ["bash", "-c", f"{offline_env} && {phold_base_cmd}"]
-            ret_phold = await self.runner.run_command(phold_cmd, cwd=safe_work_dir, on_output=phold_handler, is_shell=True)
-            
-            # 如果 Phold 失败，优雅降级到 Pharokka 产物
-            if ret_phold != 0:
-                logger.warning(f"[Phold] AI 增强模块退出码={ret_phold}，降级使用 Pharokka 基础注释产物")
-            win_final_gbk = win_phold_out / "phold.gbk" if ret_phold == 0 else win_pharokka_out / "PHAGE.gbk"
+        if win_final_gbk.exists():
+            records = list(SeqIO.parse(win_final_gbk, "genbank"))
 
-            # ---------------------------------------------------------
-            # 7. 内存级注释精修 (Backfill & dbAPIS)
-            # ---------------------------------------------------------
-            if win_final_gbk.exists():
-                logger.info(f"🧬 加载 GenBank 到内存进行专家级修补: {win_final_gbk.name}")
-                # 核心优化点：在内存中加载，避免反复序列化导致的磁盘 I/O 阻塞
-                records = list(SeqIO.parse(win_final_gbk, "genbank"))
+            # 7. 内存级注释精修
+            if self.on_progress: self.on_progress(90, f"[{p_id}] 专家库回填与防御系统扫描...")
+            await self._silent_backfill(records, win_final_gbk.parent, threads)
+            apis_hits = await self._run_apis_hmm_scan(records, win_final_gbk.parent)
+            
+            with open(win_final_gbk, "w", encoding="utf-8") as f:
+                SeqIO.write(records, f, "genbank")
 
-                # 7.1 本地专家库回填 (未知蛋白靶向打捞)
-                if self.on_progress: self.on_progress(90, "正在打捞未知功能蛋白...")
-                await self._silent_backfill(records, win_final_gbk.parent, threads)
-                
-                # 7.2 抗噬菌体防御系统 HMM 扫描
-                if self.on_progress: self.on_progress(95, "正在扫描抗噬菌体防御系统 (dbAPIS)...")
-                apis_hits = await self._run_apis_hmm_scan(records, win_final_gbk.parent)
-                
-                # 7.3 一次性写回硬盘 (原子操作)
-                logger.info("💾 将所有修正后的注释统一写回硬盘...")
-                with open(win_final_gbk, "w", encoding="utf-8") as f:
-                    SeqIO.write(records, f, "genbank")
+            integrated_tsv = win_work_path / "Integrated_Final_Annotations.tsv"
+            await asyncio.to_thread(self._generate_final_tsv, records, integrated_tsv)
 
-                # 7.4 生成供前端快速渲染的 TSV 格式
-                integrated_tsv = win_work_path / "Integrated_Final_Annotations.tsv"
-                await asyncio.to_thread(self._generate_final_tsv, records, integrated_tsv)
-
-                # ---------------------------------------------------------
-                # 8. 深度安全性与分类审计 (Audit)
-                # ---------------------------------------------------------
-                if self.on_progress: self.on_progress(96, "正在执行深度安全性与分类审计...")
-                audit_data = None
+            # 8. 深度安全性与分类审计 (默认跳过，通过参数开启)
+            audit_data = None
+            enable_deep_audit = (self.context.get("params") or {}).get("enable_deep_audit", False)
+            
+            if enable_deep_audit:
                 try:
-                    # 异步并行执行多维度的安全检测和溯源
                     direct_scan = await self._direct_safety_scan(integrated_tsv, threads)
-                    
                     mash_hit_tsv = win_pharokka_out / "PHAGE_top_hits_mash_inphared.tsv"
                     ref_audit = await asyncio.to_thread(self._mine_phagescope_metadata, mash_hit_tsv)
                     
                     host_results = await self._deep_host_prediction(fasta, threads)
                     lifecycle_results = await self._run_bacphlip_prediction(win_final_gbk)
                     
-                    # 融合审计数据
                     audit_data = self._merge_safety_audit(direct_scan, ref_audit)
                     audit_data["host_prediction_enhanced"] = host_results
                     audit_data["amr_genes_direct"] = direct_scan.get("amr_genes", [])
                     audit_data["amr_genes_reference"] = ref_audit.get("amr_genes", [])
                     audit_data["virulent_factors_direct"] = direct_scan.get("virulent_factors", [])
                     audit_data["virulent_factors_reference"] = ref_audit.get("virulent_factors", [])
-                    
-                    # 只要直接比对扫到了，就以直接比对为准
                     audit_data["anti_crispr_evidence"] = "direct" if "Detected" in str(direct_scan.get("anti_crispr", "")) else "reference"
+                    if apis_hits: audit_data["defense_systems"] = apis_hits
                     
-                    if apis_hits:
-                        audit_data["defense_systems"] = apis_hits
+                    result_dict["audit_data"] = audit_data
+                    result_dict["host_prediction"] = host_results
+                    result_dict["lifecycle_prediction"] = lifecycle_results
 
-                    self.context.update("phagescope_audit", audit_data)
-                    self.context.update("host_prediction", host_results)
-                    self.context.update("lifecycle_prediction", lifecycle_results)
-
-                    # 系统发育树放进线程池绘制，防阻塞主循环
                     win_plot_dir = win_work_path / "phage_plot"
                     win_plot_dir.mkdir(parents=True, exist_ok=True)
                     tree_png = win_plot_dir / "phage_phylogeny.png"
                     await asyncio.to_thread(self._generate_phylogeny_image, audit_data, tree_png)
-                    if tree_png.exists(): 
-                        self.context.update("phylogeny_file", tree_png)
-                        
+                    if tree_png.exists(): result_dict["phylogeny_file"] = str(tree_png)
                 except Exception as audit_e: 
-                    logger.error(f"[Audit] 安全审计模块发生异常: {audit_e}")
+                    logger.error(f"[{p_id}] 安全审计模块异常: {audit_e}")
+            else:
+                logger.info(f"[{p_id}] 深度安全审计和宿主预测已被设置为跳过 (默认不选)")
+                # 即使跳过了重度审计，也将轻量级的防御系统扫描结果塞入 audit_data 中供前端展示
+                audit_data = {}
+                if apis_hits: audit_data["defense_systems"] = apis_hits
+                result_dict["audit_data"] = audit_data
 
-                # ---------------------------------------------------------
-                # 10. 硬核生信指标统计 (Genomic Metrics)
-                # ---------------------------------------------------------
-                try:
-                    total_len, total_gc_bases, cds_len = 0, 0, 0
-                    trna_list, is_circular = [], "Linear"
-                    
+            # 10. 硬核生信指标统计
+            try:
+                total_len, total_gc_bases, cds_len = 0, 0, 0
+                trna_list, is_circular = [], "Linear"
+                for rec in records:
+                    seq_len = len(rec.seq)
+                    total_len += seq_len
+                    seq_upper = str(rec.seq).upper()
+                    total_gc_bases += seq_upper.count("G") + seq_upper.count("C")
+                    if "circular" in rec.annotations.get("topology", "").lower(): is_circular = "Circular"
+                    for feat in rec.features:
+                        if feat.type == "CDS": cds_len += int(feat.location.end - feat.location.start)
+                        elif feat.type == "tRNA":
+                            note = feat.qualifiers.get("note", ["--"])[0]
+                            trna_list.append(note.replace("tRNA-", ""))
+                
+                gc_content = (total_gc_bases / total_len * 100) if total_len > 0 else 0
+                metrics = {
+                    "total_length": total_len,
+                    "gc_content": f"{gc_content:.2f}%",
+                    "coding_density": f"{(cds_len/total_len*100):.2f}%" if total_len > 0 else "0%",
+                    "topology": is_circular,
+                    "tRNA_details": ", ".join(sorted(set(trna_list))) if trna_list else "None"
+                }
+                result_dict["genomic_metrics"] = metrics
+            except Exception as e: 
+                logger.warning(f"[{p_id}] 指标计算失败: {e}")
+
+            # 11. 全景基因组圈图绘制
+            win_plot_dir = win_work_path / "phage_plot"
+            try:
+                if audit_data:
                     for rec in records:
-                        seq_len = len(rec.seq)
-                        total_len += seq_len
-                        # 严谨计算 GC 含量
-                        seq_upper = str(rec.seq).upper()
-                        total_gc_bases += seq_upper.count("G") + seq_upper.count("C")
-                        
-                        if "circular" in rec.annotations.get("topology", "").lower(): 
-                            is_circular = "Circular"
-                            
                         for feat in rec.features:
-                            if feat.type == "CDS": 
-                                cds_len += int(feat.location.end - feat.location.start)
-                            elif feat.type == "tRNA":
-                                note = feat.qualifiers.get("note", ["--"])[0]
-                                trna_list.append(note.replace("tRNA-", ""))
-                    
-                    gc_content = (total_gc_bases / total_len * 100) if total_len > 0 else 0
-                    metrics = {
-                        "total_length": total_len,
-                        "gc_content": f"{gc_content:.2f}%",
-                        "coding_density": f"{(cds_len/total_len*100):.2f}%" if total_len > 0 else "0%",
-                        "topology": is_circular,
-                        "tRNA_details": ", ".join(sorted(set(trna_list))) if trna_list else "None"
-                    }
-                    self.context.update("genomic_metrics", metrics)
-                    logger.info(f"基因组指标统计完成: GC={metrics['gc_content']}, 密度={metrics['coding_density']}")
-                except Exception as e: 
-                    logger.warning(f"[Metrics] 指标计算失败: {e}")
+                            if feat.type in ["CDS", "tRNA", "tmRNA"]:
+                                cid = feat.qualifiers.get("locus_tag", [feat.qualifiers.get("ID", [""])[0]])[0]
+                                if cid:
+                                    for hit in audit_data.get("amr_genes_direct", []):
+                                        if hit.get("cds_id") == cid:
+                                            feat.qualifiers["AMR_Gene_Family"] = [hit.get("description", "AMR_Gene")]
+                                    for hit in audit_data.get("virulent_factors_direct", []):
+                                        if hit.get("cds_id") == cid:
+                                            feat.qualifiers["vfdb_short_name"] = [hit.get("description", "Virulence_Factor")]
+                
+                with open(win_final_gbk, "w", encoding="utf-8") as f:
+                    SeqIO.write(records, f, "genbank")
 
-                # ---------------------------------------------------------
-                # 10. 全景基因组圈图绘制 (Plotting)
-                # ---------------------------------------------------------
-                if self.on_progress: self.on_progress(98, "绘制基因组全景圈图...")
-                win_plot_dir = win_work_path / "phage_plot"
-                try:
-                    # 将毒力和耐药数据注入内存中的 records，并同步回写到 GBK
-                    if audit_data:
-                        for rec in records:
-                            for feat in rec.features:
-                                if feat.type in ["CDS", "tRNA", "tmRNA"]:
-                                    cid = feat.qualifiers.get("locus_tag", [feat.qualifiers.get("ID", [""])[0]])[0]
-                                    if cid:
-                                        for hit in audit_data.get("amr_genes_direct", []):
-                                            if hit.get("cds_id") == cid:
-                                                feat.qualifiers["AMR_Gene_Family"] = [hit.get("description", "AMR_Gene")]
-                                        for hit in audit_data.get("virulent_factors_direct", []):
-                                            if hit.get("cds_id") == cid:
-                                                feat.qualifiers["vfdb_short_name"] = [hit.get("description", "Virulence_Factor")]
-                    
-                    with open(win_final_gbk, "w", encoding="utf-8") as f:
-                        SeqIO.write(records, f, "genbank")
+                updated_gff = win_work_path / "updated_phage.gff"
+                await asyncio.to_thread(self._sync_gff_annotations, records, win_pharokka_out / "PHAGE.gff", updated_gff, audit_data)
+                
+                win_plot_dir.mkdir(parents=True, exist_ok=True)
+                # 修改点：将画图名称改为噬菌体 ID
+                plot_cmd = [
+                    "pharokka_plotter.py", "-i", to_safe(fasta), 
+                    "--gff", to_safe(updated_gff), 
+                    "--genbank", to_safe(win_final_gbk), 
+                    "-o", to_safe(win_plot_dir), "-f", "-p", p_id.replace("|", "_")
+                ]
+                await self.runner.run_command(plot_cmd, cwd=safe_work_dir)
+                png_files = list(win_plot_dir.glob("*.png"))
+                if png_files: result_dict["plot_file"] = str(png_files[0])
+            except Exception as e: 
+                logger.warning(f"[{p_id}] 圈图绘制失败: {e}")
 
-                    # 在绘图前实时生成 GFF，并注入上一步的毒力和耐药数据
-                    updated_gff = win_work_path / "updated_phage.gff"
-                    await asyncio.to_thread(self._sync_gff_annotations, records, win_pharokka_out / "PHAGE.gff", updated_gff, audit_data)
-                    
-                    win_plot_dir.mkdir(parents=True, exist_ok=True)
-                    plot_cmd = [
-                        "pharokka_plotter.py", "-i", to_safe(fasta), 
-                        "--gff", to_safe(updated_gff), 
-                        "--genbank", to_safe(win_final_gbk), 
-                        "-o", to_safe(win_plot_dir), "-f", "-p", "phage_plot_1"
-                    ]
-                    await self.runner.run_command(plot_cmd, cwd=safe_work_dir)
-                    png_files = list(win_plot_dir.glob("*.png"))
-                    if png_files: 
-                        self.context.update("plot_file", png_files[0])
-                        logger.info(f"📊 圈图生成成功: {png_files[0].name}")
-                except Exception as e: 
-                    logger.warning(f"圈图绘制失败 (非致命): {e}")
+            result_dict["annotation_dir"] = str(win_final_gbk.parent)
+            result_dict["gbk_file"] = str(win_final_gbk)
+            
+        return result_dict
 
-                # ---------------------------------------------------------
-                # 流程收尾
-                # ---------------------------------------------------------
-                self.context.update("annotation_dir", win_final_gbk.parent)
-                self.context.update("gbk_file", win_final_gbk)
-                self.status = "completed"
-                if self.on_progress: self.on_progress(100, "智能注释与审计任务执行完成")
-                return True
 
-            # 如果流程走到这里，说明最终的 GBK 文件没生成
-            self.status = "failed"
-            return False
-
-        except Exception as e:
-            logger.error(f"❌ [Annotation] 核心流程执行过程中发生严重异常: {e}", exc_info=True)
-            self.status = "failed"
-            return False
 
     # =========================================================================
     # 辅助核心子程序 (Auxiliary Sub-routines)
@@ -943,6 +966,86 @@ class PhageAnnotationStep(BaseAssemblyStep):
             logger.warning(f"解析 CheckV 报告或选取冠军时发生错误: {e}")
         return result
 
+    def _checkv_quality_gate(self, quality_tsv: Path, input_fasta: Path, output_fasta: Path) -> int:
+        """
+        CheckV 质量关卡：基于 quality_summary.tsv 过滤输入 FASTA，
+        只保留经 CheckV 确认含有病毒基因或达到中等以上质量的序列。
+        
+        保留条件 (满足任一即可):
+          1. viral_genes > 0 (含有病毒特征基因)
+          2. checkv_quality 为 High-quality / Medium-quality / Complete
+          3. 序列被标记为 provirus (前噬菌体区段)
+        
+        Returns: 保留的序列数量。如果过滤后为空则回退到原始输入。
+        """
+        import csv
+        
+        if not quality_tsv.exists() or not input_fasta.exists():
+            return 0
+        
+        # Step 1: 解析 CheckV 结果，标记通过质量关卡的 contig ID
+        accepted_quality = {"High-quality", "Medium-quality", "Complete"}
+        passed_ids = set()
+        total_contigs = 0
+        
+        try:
+            with open(quality_tsv, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f, delimiter="\t")
+                for row in reader:
+                    total_contigs += 1
+                    contig_id = row.get("contig_id", "")
+                    quality = row.get("checkv_quality", "Not-determined")
+                    provirus = row.get("provirus", "No")
+                    
+                    try:
+                        viral_genes = int(row.get("viral_genes", 0))
+                    except (ValueError, TypeError):
+                        viral_genes = 0
+                    
+                    # 判定条件
+                    if viral_genes > 0:
+                        passed_ids.add(contig_id)
+                        logger.info(f"  [QualityGate] PASS (viral_genes={viral_genes}): {contig_id}")
+                    elif quality in accepted_quality:
+                        passed_ids.add(contig_id)
+                        logger.info(f"  [QualityGate] PASS (quality={quality}): {contig_id}")
+                    elif provirus == "Yes":
+                        passed_ids.add(contig_id)
+                        logger.info(f"  [QualityGate] PASS (provirus): {contig_id}")
+                    else:
+                        logger.debug(f"  [QualityGate] REJECT: {contig_id} (quality={quality}, viral_genes={viral_genes})")
+        except Exception as e:
+            logger.warning(f"[QualityGate] 解析 CheckV 质量报告失败: {e}")
+            return 0
+        
+        if not passed_ids:
+            logger.warning(f"[QualityGate] CheckV 未发现任何合格病毒序列，跳过过滤以保留原始数据")
+            return 0
+        
+        # Step 2: 过滤 FASTA
+        kept_records = []
+        rejected_count = 0
+        for rec in SeqIO.parse(str(input_fasta), "fasta"):
+            if rec.id in passed_ids:
+                kept_records.append(rec)
+            else:
+                rejected_count += 1
+        
+        if not kept_records:
+            logger.warning(f"[QualityGate] 过滤后无剩余序列，回退到原始输入")
+            return 0
+        
+        # Step 3: 写入过滤后的 FASTA
+        with open(output_fasta, "w") as f:
+            SeqIO.write(kept_records, f, "fasta")
+        
+        logger.info(
+            f"[QualityGate] CheckV 质量关卡执行完毕: "
+            f"{total_contigs} -> {len(kept_records)} 条 "
+            f"(剔除 {rejected_count} 条非病毒垃圾碎片)"
+        )
+        return len(kept_records)
+
     async def _reorder_fasta_for_best_results(self, input_fa: Path, output_fa: Path, champion_id: str) -> bool:
         """重排 FASTA 文件，确保冠军序列排在第一位，以利于 Pharokka 绘图"""
         try:
@@ -1015,7 +1118,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
             
             # 若 HMMER 压库文件不存在，自动进行索引构建
             if not (hmm_path.parent / (hmm_path.name + ".h3m")).exists():
-                await self.runner.run_command(["hmmpress", "-f", WSLManager.to_wsl_path(str(hmm_path))], is_shell=True)
+                await self.runner.run_command(["hmmpress", "-f", WSLManager.to_wsl_path(str(hmm_path))])
 
             domtbl = out_dir / "apis.domtbl"
             cmd = [

@@ -8,6 +8,7 @@ import csv
 import json
 import logging
 import math
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -198,15 +199,20 @@ class AssemblyReportParser:
                         cid = parts[0]
                         seq_parts = []
                         header_meta = {}
-                        for p in parts[1:]:
-                            if "=" in p:
-                                k, v = p.split("=", 1)
-                                if k == "circular":
-                                    header_meta["circular"] = (v.lower() == "true")
-                                elif k == "depth":
-                                    header_meta["depth"] = float(v.rstrip("x"))
-                                elif k == "length":
-                                    pass  # 我们自己计算
+                        
+                        # 解析 circular
+                        if "circular=true" in line.lower() or "_circular" in line.lower():
+                            header_meta["circular"] = True
+                            
+                        # 解析 depth (兼容 Unicycler 和 SPAdes)
+                        m_depth = re.search(r'depth=([\d\.]+)x?', line)
+                        if m_depth:
+                            header_meta["depth"] = float(m_depth.group(1))
+                        else:
+                            m_cov = re.search(r'cov_([\d\.]+)', line)
+                            if m_cov:
+                                header_meta["depth"] = float(m_cov.group(1))
+
                     else:
                         seq_parts.append(line.strip())
 

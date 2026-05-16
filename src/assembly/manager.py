@@ -109,12 +109,11 @@ class AssemblyManager:
         
         import psutil
         total_mem = psutil.virtual_memory().total
-        # 尽可能使用空余内存，保留 1GB 给系统 (单位 GB)
-        max_mem_gb = max(2, (total_mem // (1024**3)) - 1)
+        # 如果用户没有显式指定 max_memory，则交由底层步骤基于 ShmManager 动态获取
+        # 不再在此处强制设死 max_memory_gb，避免挤占内存盘空间
         
         config = config or {}
         config["sample_type"] = sample_type
-        config["max_memory"] = max_mem_gb
         
         threads = config.get("threads") or default_threads
         config["threads"] = threads
@@ -185,8 +184,8 @@ class AssemblyManager:
             from .core.shm_manager import ShmManager
             from .engine.runner import CommandRunner
             shm_runner = CommandRunner("ShmManager", is_wsl=True)
-            total_mem = max_mem_gb  # 使用已探测的物理内存
-            ctx.shm = ShmManager(task_id, shm_runner, float(total_mem))
+            total_mem_gb = total_mem / (1024**3)
+            ctx.shm = ShmManager(task_id, shm_runner, total_mem_gb)
         
         # 注入初始输入与环境
         ctx.update("r1", Path(r1_input))

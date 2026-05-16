@@ -157,6 +157,14 @@ const setSampleType = (type: string) => {
         <p class="search-hint">※ 利用原始 reads 执行共识打磨，将精度从 Q30 提升至 Q45+。适合发表高分论文或精细变异分析。</p>
       </div>
 
+      <div class="field-item checkbox-group" v-if="taskState.sampleType === 'PHAGE'">
+        <label class="checkbox-label highlight-label">
+          <input type="checkbox" v-model="taskState.enableDeepAudit" :disabled="isRunning">
+          开启深度安全审计 (HMM 防御系统与宿主预测)
+        </label>
+        <p class="search-hint">※ 利用大规模环境元数据与专家库 (PhageScope) 深度预测潜在宿主与安全性。计算较耗时，默认关闭。</p>
+      </div>
+
       <div class="field-item checkbox-group">
         <label class="checkbox-label highlight-label">
           <input type="checkbox" v-model="taskState.stopAfterAssembly" :disabled="isRunning">

@@ -46,7 +46,12 @@ export const useStrainStore = defineStore('strain', () => {
   const hasData = computed(() => s.records.value.length > 0)
   const filteredCount = computed(() => s.filteredRecords.value.length)
   const selectedCount = computed(() => s.selectedRecords.value.size)
-  const totalRecords = computed(() => s.records.value.length)
+  const totalRecords = computed(() => {
+    // 优先使用后端返回的 serverTotalCount，确保数据总量统计准确
+    const serverCount = s.serverTotalCount.value
+    const localCount = s.records.value.length
+    return serverCount > localCount ? serverCount : localCount
+  })
   
   const uniqueSpecies = computed(() => {
     const set = new Set(s.records.value.map(r => r.species).filter(Boolean))

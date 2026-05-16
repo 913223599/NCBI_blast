@@ -9,8 +9,23 @@
         v-model="keyword"
         class="text-input"
         placeholder="搜索名称、物种、登录号..."
-        @input="handleSearch"
+        @input="handleSearchDebounced"
       />
+    </div>
+
+    <!-- 样本类型筛选 -->
+    <div class="form-group">
+      <label>样本类型</label>
+      <select v-model="sampleType" class="select-input" @change="handleFilter">
+        <option value="">全部类型</option>
+        <option value="Bacteria">细菌</option>
+        <option value="Virus">病毒</option>
+        <option value="Phage">噬菌体</option>
+        <option value="Fungi">真菌</option>
+        <option value="Plasmid">质粒/载体</option>
+        <option value="CellLine">细胞系</option>
+        <option value="Other">其他</option>
+      </select>
     </div>
 
     <!-- 物种筛选 -->
@@ -96,17 +111,24 @@ const strain = useStrainStore()
 
 const keyword = ref('')
 const species = ref('')
+const sampleType = ref('')
 const sequenceTypes = ref<string[]>([])
 const country = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
 
-function handleSearch() {
-  strain.setSearchFilter('keyword', keyword.value)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+function handleSearchDebounced() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    strain.setSearchFilter('keyword', keyword.value)
+  }, 300)
 }
 
 function handleFilter() {
   strain.setSearchFilter('species', species.value)
+  strain.setSearchFilter('sampleType', sampleType.value)
   strain.setSearchFilter('sequenceType', sequenceTypes.value.join(','))
   strain.setSearchFilter('country', country.value)
   strain.setSearchFilter('dateFrom', dateFrom.value)
@@ -116,6 +138,7 @@ function handleFilter() {
 function handleReset() {
   keyword.value = ''
   species.value = ''
+  sampleType.value = ''
   sequenceTypes.value = []
   country.value = ''
   dateFrom.value = ''

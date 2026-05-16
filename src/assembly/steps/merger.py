@@ -126,4 +126,7 @@ class ReadMergerStep(BaseAssemblyStep):
         finally:
             # ♻️ 资源回收：确保无论成功失败，内存盘资源一定被释放
             self.logger.info("♻️ 清理合并阶段内存盘缓存...")
-            await self.runner.run_command(f"rm -rf '{wsl_tmp_outdir}'", is_shell=True)
+            if self.context.shm:
+                await self.context.shm.release(self.__class__.__name__.lower())
+            else:
+                await self.runner.run_command(f"rm -rf '{wsl_tmp_outdir}'", is_shell=True)

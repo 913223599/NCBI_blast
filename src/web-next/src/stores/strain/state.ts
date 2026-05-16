@@ -28,6 +28,7 @@ export function useStrainState() {
   const searchFilters = ref<SearchFilters>({
     keyword: '',
     species: '',
+    sampleType: '',
     sequenceType: '',
     country: '',
     dateFrom: '',
@@ -51,6 +52,7 @@ export function useStrainState() {
   const activeRecord = ref<StrainRecord | null>(null)
   const pendingBlastDraft = ref<any>(null)
   const locationMap = ref<Record<string, string>>({}) // ID -> Name 快速索引
+  const serverTotalCount = ref<number>(0) // 后端返回的真实数据总量
 
   /* ======== 运行时标志 ======== */
   let isPerformingLocalUpdate = false
@@ -76,6 +78,7 @@ export function useStrainState() {
     activeRecord,
     pendingBlastDraft,
     locationMap,
+    serverTotalCount,
     getIsUpdating: () => isPerformingLocalUpdate,
     getLastLocalUpdateTime: () => lastLocalUpdateTime,
     setIsUpdating: (val: boolean) => { 
