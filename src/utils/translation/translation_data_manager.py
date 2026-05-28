@@ -251,7 +251,7 @@ class TranslationDataManager:
         except Exception:
             return 0
 
-    def get_translation(self, english_text: str, category: str = None) -> Optional[str]:
+    def get_translation(self, english_text: str, category: Optional[str] = None) -> Optional[str]:
         """
         获取中文翻译
         优先从内存缓存读取，缓存穿透则读库并回填
@@ -334,7 +334,7 @@ class TranslationDataManager:
         """更新翻译条目（别名）"""
         self.add_translation(english, chinese, category)
 
-    def contains(self, english_text: str, category: str = None) -> bool:
+    def contains(self, english_text: str, category: Optional[str] = None) -> bool:
         """检查是否存在"""
         return self.get_translation(english_text, category) is not None
 
@@ -446,6 +446,121 @@ class TranslationDataManager:
         更新特定条目的中文翻译 (支持新增/覆盖)
         """
         return self.add_translation(english, new_chinese, category=category, source='manual_correction')
+
+    def get_dictionary_stats(self) -> dict:
+        """获取词库统计信息"""
+        try:
+            with self._lock:
+                cursor = self._conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM translations")
+                total = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM translations WHERE source != 'verified' OR source IS NULL")
+                pending = cursor.fetchone()[0]
+                return {"total": total, "pending": pending}
+        except Exception as e:
+            logging.error(f"获取词库统计失败: {e}")
+            return {"total": 0, "pending": 0}
+
+    def get_dictionary_page(self, page: int = 1, limit: int = 100, query: Optional[str] = None, category: str = "all", proofread_mode: bool = False) -> dict:
+        """分页获取词库数据"""
+        try:
+            with self._lock:
+                cursor = self._conn.cursor()
+                conditions = []
+                params = []
+                if proofread_mode:
+                    conditions.append("(source != 'verified' OR source IS NULL)")
+                if category != "all":
+                    conditions.append("category = ?")
+                    params.append(category)
+                if query and query.strip():
+                    q = f"%{query.strip()}%"
+                    conditions.append("(english LIKE ? OR chinese LIKE ?)")
+                    params.extend([q, q])
+                
+                where_clause = ""
+                if conditions:
+                    where_clause = "WHERE " + " AND ".join(conditions)
+                
+                count_sql = f"SELECT COUNT(*) FROM translations {where_clause}"
+                cursor.execute(count_sql, tuple(params))
+                total = cursor.fetchone()[0]
+                
+                offset = (page - 1) * limit
+                select_sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+                select_params = params + [limit, offset]
+                cursor.execute(select_sql, tuple(select_params))
+                
+                terms = [{'english': r['english'], 'chinese': r['chinese'], 'category': r['category'], 'source': r['source']} for r in cursor.fetchall()]
+                return {"items": terms, "total": total, "page": page, "limit": limit}
+        except Exception as e:
+            logging.error(f"分页获取词库数据失败: {e}")
+            return {"items": [], "total": 0, "page": page, "limit": limit}
+
+    def get_dictionary_all(self, query: Optional[str] = None, category: str = "all", proofread_mode: bool = False, limit: int = -1) -> list:
+        """获取所有词库数据 (可带条件)"""
+        try:
+            with self._lock:
+                cursor = self._conn.cursor()
+                conditions = []
+                params = []
+                if proofread_mode:
+                    conditions.append("(source != 'verified' OR source IS NULL)")
+                if category != "all":
+                    conditions.append("category = ?")
+                    params.append(category)
+                if query and query.strip():
+                    q = f"%{query.strip()}%"
+                    conditions.append("(english LIKE ? OR chinese LIKE ?)")
+                    params.extend([q, q])
+                
+                where_clause = ""
+                if conditions:
+                    where_clause = "WHERE " + " AND ".join(conditions)
+                
+                if limit == -1 or limit > 1000000:
+                    sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC"
+                    cursor.execute(sql, tuple(params))
+                else:
+                    sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC LIMIT ?"
+                    cursor.execute(sql, tuple(params + [limit]))
+                
+                terms = [{'english': r['english'], 'chinese': r['chinese'], 'category': r['category'], 'source': r['source']} for r in cursor.fetchall()]
+                return terms
+        except Exception as e:
+            logging.error(f"获取全量词库数据失败: {e}")
+            return []
+
+    def delete_translation_entry(self, english: str) -> bool:
+        """安全删除词条并清理缓存"""
+        if not english: return False
+        try:
+            with self._lock:
+                cursor = self._conn.cursor()
+                cursor.execute('DELETE FROM translations WHERE english = ?', (english,))
+                success = self._conn.total_changes > 0
+                self._conn.commit()
+                if english in self._cache:
+                    del self._cache[english]
+                return success
+        except Exception as e:
+            logging.error(f"删除词条失败: {e}")
+            return False
+
+    def verify_translation_entry(self, english: str) -> bool:
+        """验证词条并同步更新缓存"""
+        if not english: return False
+        try:
+            with self._lock:
+                cursor = self._conn.cursor()
+                cursor.execute("UPDATE translations SET source = 'verified' WHERE english = ?", (english,))
+                success = self._conn.total_changes > 0
+                self._conn.commit()
+                return success
+        except Exception as e:
+            logging.error(f"验证词条失败: {e}")
+            return False
+
 
 
 # 全局单例管理器实例

@@ -96,7 +96,7 @@ async def get_assembly_plot(task_id: str):
         if png_files:
             return FileResponse(png_files[0], media_type="image/png")
             
-    return BioResponse.fail("Plot not found", code=444)
+    return BioResponse.fail("Plot not found")
 
 @router.get("/report/{task_id}/export")
 async def export_assembly_report(task_id: str):
@@ -237,11 +237,11 @@ async def execute_assembly_pipeline(payload: Dict[str, Any]):
     from ...assembly.env.conda_resolver import CondaResolver
     from ..utils.assembly_db import assembly_db
     
-    task_id = payload.get('task_id')
-    client_id = payload.get('client_id', 'unknown')
-    tech = payload.get('tech')
+    task_id = str(payload.get('task_id', ''))
+    client_id = str(payload.get('client_id', 'unknown'))
+    tech = str(payload.get('tech', ''))
     input_files = payload.get('config', {}).get('params', {}).get('input_files', [])
-    sample_type = payload.get('sample_type', 'BACTERIA')
+    sample_type = str(payload.get('sample_type', 'BACTERIA'))
     
     # 提前初始化一次 DB（兜底）
     if not assembly_db.get_task(task_id):
@@ -284,6 +284,17 @@ async def execute_assembly_pipeline(payload: Dict[str, Any]):
             status = "finished" if results.get("status") == "success" else "error"
             await broadcaster.broadcast_to_client(client_id, "assembly_status", {
                 "task_id": task_id, "status": status, "results": results.get("outputs")
+            })
+        else:
+            # --- 2. 一代测序 (Sanger) 路线处理 ---
+            error_msg = "Sanger 测序流水线当前处于功能开发中 (Under Development)，暂不支持该操作。"
+            logger.warning(f"Task {task_id}: {error_msg}")
+            
+            # 主动置为失败，防止前端死等
+            assembly_db.finalize_task(task_id, "error", {"error": error_msg})
+            assembly_db.update_task_progress(task_id, "SANGER_NOT_IMPLEMENTED", 0, "error")
+            await broadcaster.broadcast_to_client(client_id, "assembly_status", {
+                "task_id": task_id, "status": "error", "error": error_msg
             })
 
     except Exception as e:

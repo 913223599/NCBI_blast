@@ -29,7 +29,7 @@ def sync_assets():
     
     sync_jobs = [
         # (Src, Dest_Relative_to_Internal)
-        (PROJECT_ROOT / "src" / "web", "src/web"),
+        (PROJECT_ROOT / "src" / "web-next" / "dist", "src/web-next/dist"),
         (PROJECT_ROOT / "src" / "resources", "src/resources"),
         (PROJECT_ROOT / "resources", "resources"),  # 顶级资源目录 (帮助文档)
     ]
@@ -88,12 +88,12 @@ def verify():
     print("[Phase] Verifying build health & Resource Audit...")
     checks = [
         ("EXE 入口", DIST_DIR / "NCBI_BLAST_GUI.exe"),
-        ("QtWebEngine", INTERNAL_DIR / "PyQt6/Qt6/bin/Qt6WebEngineCore.dll"),
-        ("前端 index", INTERNAL_DIR / "src/web/index.html"),
+        # ("QtWebEngine", INTERNAL_DIR / "PyQt6/Qt6/bin/Qt6WebEngineCore.dll"), # 已切换至 Electron 架构
+        ("前端 index", INTERNAL_DIR / "src/web-next/dist/index.html"),
         ("BLAST 引擎", INTERNAL_DIR / "bin/blastn.exe"),
         ("建树工具 (fasta2dissim)", INTERNAL_DIR / "bin/tree-tools/fasta2dissim.exe"),
         ("翻译分类规则", INTERNAL_DIR / "src/utils/translation/classification_rules.json"),
-        ("帮助文档资源", INTERNAL_DIR / "resources/docs/help_zh.md"),
+        ("帮助文档资源", INTERNAL_DIR / "resources/help/quick_start.md"),
     ]
     
     failed = False

@@ -359,21 +359,17 @@ class AssemblyManager:
             # 全局资源回收: 通过 ShmManager 清理所有内存盘和临时目录残留
             try:
                 if ctx.shm:
-                    import asyncio
-                    asyncio.ensure_future(ctx.shm.cleanup_all())
+                    await ctx.shm.cleanup_all()
                 elif self.env_manager.is_wsl:
                     from .engine.runner import CommandRunner
                     cleanup_runner = CommandRunner("ShmCleanup", is_wsl=True)
-                    import asyncio
-                    asyncio.ensure_future(
-                        cleanup_runner.run_command([
-                            "bash", "-c",
-                            f"find /dev/shm /tmp -maxdepth 1 -name 'asm_{task_id}_*' "
-                            f"-exec rm -rf {{}} + 2>/dev/null || true"
-                        ], silence_errors=True)
-                    )
-            except Exception:
-                pass
+                    await cleanup_runner.run_command([
+                        "bash", "-c",
+                        f"find /dev/shm /tmp -maxdepth 1 -name 'asm_{task_id}_*' "
+                        f"-exec rm -rf {{}} + 2>/dev/null || true"
+                    ], silence_errors=True)
+            except Exception as e:
+                self.logger.warning(f"⚠️ 资源回收异常: {e}")
 
     def _report_progress(self, task_id: str, step: str, progress: float, status: str):
         """通过 WebSocket 广播进度数据，并持久化到数据库"""

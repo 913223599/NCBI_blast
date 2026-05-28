@@ -78,19 +78,8 @@ async def search_dictionary(query: str, proofread_mode: bool = False):
         translator = get_global_biology_translator()
         data_mgr = translator.translation_data_manager
         if not data_mgr: return []
-        
-        conn = sqlite3.connect(data_mgr.db_path)
-        cursor = conn.cursor()
-        
-        q = f"%{query}%"
-        if proofread_mode:
-            cursor.execute("SELECT english, chinese, category, source FROM translations WHERE (english LIKE ? OR chinese LIKE ?) AND (source != 'verified' OR source IS NULL) ORDER BY created_at DESC LIMIT 500", (q, q))
-        else:
-            cursor.execute("SELECT english, chinese, category, source FROM translations WHERE (english LIKE ? OR chinese LIKE ?) ORDER BY created_at DESC LIMIT 500", (q, q))
-            
-        terms = [{'english': r[0], 'chinese': r[1], 'category': r[2], 'source': r[3]} for r in cursor.fetchall()]
-        conn.close()
-        return terms
+        # Fallback to general search with limit
+        return data_mgr.get_dictionary_all(query=query, proofread_mode=proofread_mode, limit=500)
     except Exception as exc:
         logger.error(f"Dict search error: {exc}")
         return []
@@ -108,36 +97,7 @@ async def get_all_terms(
         data_mgr = translator.translation_data_manager
         if not data_mgr:
             return []
-        conn = sqlite3.connect(data_mgr.db_path)
-        cursor = conn.cursor()
-        
-        conditions = []
-        params = []
-        
-        if proofread_mode:
-            conditions.append("(source != 'verified' OR source IS NULL)")
-        if category != "all":
-            conditions.append("category = ?")
-            params.append(category)
-        if query and query.strip():
-            q = f"%{query.strip()}%"
-            conditions.append("(english LIKE ? OR chinese LIKE ?)")
-            params.extend([q, q])
-            
-        where_clause = ""
-        if conditions:
-            where_clause = "WHERE " + " AND ".join(conditions)
-            
-        if limit == -1 or limit > 1000000:
-            sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC"
-            cursor.execute(sql, tuple(params))
-        else:
-            sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC LIMIT ?"
-            cursor.execute(sql, tuple(params + [limit]))
-            
-        terms = [{'english': r[0], 'chinese': r[1], 'category': r[2], 'source': r[3]} for r in cursor.fetchall()]
-        conn.close()
-        return terms
+        return data_mgr.get_dictionary_all(query=query, category=category, proofread_mode=proofread_mode, limit=limit)
     except Exception as exc:
         logger.error(f"Dict load error: {exc}")
         return []
@@ -156,53 +116,10 @@ async def get_dictionary_page(
         data_mgr = translator.translation_data_manager
         if not data_mgr:
             return {"items": [], "total": 0, "page": page, "limit": limit}
-            
-        conn = sqlite3.connect(data_mgr.db_path)
-        cursor = conn.cursor()
-        
-        conditions = []
-        params = []
-        
-        if proofread_mode:
-            conditions.append("(source != 'verified' OR source IS NULL)")
-            
-        if category != "all":
-            conditions.append("category = ?")
-            params.append(category)
-            
-        if query and query.strip():
-            q = f"%{query.strip()}%"
-            conditions.append("(english LIKE ? OR chinese LIKE ?)")
-            params.extend([q, q])
-            
-        where_clause = ""
-        if conditions:
-            where_clause = "WHERE " + " AND ".join(conditions)
-            
-        # 1. 查询总条数
-        count_sql = f"SELECT COUNT(*) FROM translations {where_clause}"
-        cursor.execute(count_sql, tuple(params))
-        total = cursor.fetchone()[0]
-        
-        # 2. 查询分页数据
-        offset = (page - 1) * limit
-        select_sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
-        select_params = params + [limit, offset]
-        cursor.execute(select_sql, tuple(select_params))
-        
-        terms = [{'english': r[0], 'chinese': r[1], 'category': r[2], 'source': r[3]} for r in cursor.fetchall()]
-        conn.close()
-        
-        return {
-            "items": terms,
-            "total": total,
-            "page": page,
-            "limit": limit
-        }
+        return data_mgr.get_dictionary_page(page=page, limit=limit, query=query, category=category, proofread_mode=proofread_mode)
     except Exception as exc:
         logger.error(f"Dict page load error: {exc}")
         return {"items": [], "total": 0, "page": page, "limit": limit}
-
 
 @router.get("/api/dictionary/stats")
 async def get_dictionary_stats():
@@ -212,18 +129,7 @@ async def get_dictionary_stats():
         data_mgr = translator.translation_data_manager
         if not data_mgr:
             return {"total": 0, "pending": 0}
-            
-        conn = sqlite3.connect(data_mgr.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM translations")
-        total = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM translations WHERE source != 'verified' OR source IS NULL")
-        pending = cursor.fetchone()[0]
-        
-        conn.close()
-        return {"total": total, "pending": pending}
+        return data_mgr.get_dictionary_stats()
     except Exception as exc:
         logger.error(f"Dict stats error: {exc}")
         return {"total": 0, "pending": 0}
@@ -247,19 +153,10 @@ async def delete_term(english: str = ""):
     try:
         translator = get_global_biology_translator()
         data_mgr = translator.translation_data_manager
-        if data_mgr and data_mgr.db_path.exists():
-            conn = sqlite3.connect(data_mgr.db_path)
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM translations WHERE english = ?', (english,))
-            success = conn.total_changes > 0
-            conn.commit()
-            conn.close()
-            if english in data_mgr._cache:
-                del data_mgr._cache[english]
-            if success:
-                await broadcaster.broadcast("data_updated", {"module": "dictionary"})
-            return {"success": success}
-        return {"success": False}
+        success = data_mgr.delete_translation_entry(english)
+        if success:
+            await broadcaster.broadcast("data_updated", {"module": "dictionary"})
+        return {"success": success}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
@@ -269,17 +166,10 @@ async def verify_term(english: str = ""):
     try:
         translator = get_global_biology_translator()
         data_mgr = translator.translation_data_manager
-        if data_mgr and data_mgr.db_path.exists():
-            conn = sqlite3.connect(data_mgr.db_path)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE translations SET source = 'verified' WHERE english = ?", (english,))
-            success = conn.total_changes > 0
-            conn.commit()
-            conn.close()
-            if success:
-                await broadcaster.broadcast("data_updated", {"module": "dictionary"})
-            return {"success": success}
-        return {"success": False}
+        success = data_mgr.verify_translation_entry(english)
+        if success:
+            await broadcaster.broadcast("data_updated", {"module": "dictionary"})
+        return {"success": success}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
