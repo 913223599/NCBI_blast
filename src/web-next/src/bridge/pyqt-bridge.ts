@@ -64,6 +64,8 @@ export interface PyBridge {
     delete_dictionary_term(english: string, callback?: (res: boolean) => void): void
     verify_dictionary_term(english: string, callback?: (res: boolean) => void): void
     get_all_dictionary_terms(proofread_mode?: boolean | ((res: string) => void), callback?: (res: string) => void): void
+    get_dictionary_page(page: number, limit: number, query: string, category: string, proofreadMode: boolean, callback?: (res: string) => void): void
+    get_all_dictionary_terms_for_export(proofreadMode: boolean, category: string, query: string, callback?: (res: string) => void): void
 
     /* 帮助 */
     get_help_structure(): void

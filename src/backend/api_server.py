@@ -286,7 +286,12 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.debug(f"WebSocket 异常断开 (ID={client_id}): {e}")
         broadcaster.disconnect(websocket)
 
-if __name__ == "__main__":
+def start_server(host="0.0.0.0", port=8765):
+    """启动 FastAPI 后端服务"""
     import uvicorn
-    # 监听 0.0.0.0 以支持局域网共享访问
-    uvicorn.run(app, host="0.0.0.0", port=8765, log_level="info")
+    # 监听 host 以支持局域网共享访问
+    logger.info(f"🚀 正在启动 API 服务器: http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+if __name__ == "__main__":
+    start_server()

@@ -96,7 +96,12 @@ async def search_dictionary(query: str, proofread_mode: bool = False):
         return []
 
 @router.get("/api/dictionary/all")
-async def get_all_terms(proofread_mode: bool = False, limit: int = 2000):
+async def get_all_terms(
+    proofread_mode: bool = False, 
+    limit: int = 2000, 
+    category: str = "all", 
+    query: Optional[str] = None
+):
     from ...utils.translation.biology_translator import get_global_biology_translator
     try:
         translator = get_global_biology_translator()
@@ -106,10 +111,29 @@ async def get_all_terms(proofread_mode: bool = False, limit: int = 2000):
         conn = sqlite3.connect(data_mgr.db_path)
         cursor = conn.cursor()
         
+        conditions = []
+        params = []
+        
         if proofread_mode:
-            cursor.execute("SELECT english, chinese, category, source FROM translations WHERE (source != 'verified' OR source IS NULL) ORDER BY created_at DESC LIMIT ?", (limit,))
+            conditions.append("(source != 'verified' OR source IS NULL)")
+        if category != "all":
+            conditions.append("category = ?")
+            params.append(category)
+        if query and query.strip():
+            q = f"%{query.strip()}%"
+            conditions.append("(english LIKE ? OR chinese LIKE ?)")
+            params.extend([q, q])
+            
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+            
+        if limit == -1 or limit > 1000000:
+            sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC"
+            cursor.execute(sql, tuple(params))
         else:
-            cursor.execute('SELECT english, chinese, category, source FROM translations ORDER BY created_at DESC LIMIT ?', (limit,))
+            sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC LIMIT ?"
+            cursor.execute(sql, tuple(params + [limit]))
             
         terms = [{'english': r[0], 'chinese': r[1], 'category': r[2], 'source': r[3]} for r in cursor.fetchall()]
         conn.close()
@@ -117,6 +141,92 @@ async def get_all_terms(proofread_mode: bool = False, limit: int = 2000):
     except Exception as exc:
         logger.error(f"Dict load error: {exc}")
         return []
+
+@router.get("/api/dictionary/page")
+async def get_dictionary_page(
+    page: int = 1,
+    limit: int = 100,
+    query: Optional[str] = None,
+    category: str = "all",
+    proofread_mode: bool = False
+):
+    from ...utils.translation.biology_translator import get_global_biology_translator
+    try:
+        translator = get_global_biology_translator()
+        data_mgr = translator.translation_data_manager
+        if not data_mgr:
+            return {"items": [], "total": 0, "page": page, "limit": limit}
+            
+        conn = sqlite3.connect(data_mgr.db_path)
+        cursor = conn.cursor()
+        
+        conditions = []
+        params = []
+        
+        if proofread_mode:
+            conditions.append("(source != 'verified' OR source IS NULL)")
+            
+        if category != "all":
+            conditions.append("category = ?")
+            params.append(category)
+            
+        if query and query.strip():
+            q = f"%{query.strip()}%"
+            conditions.append("(english LIKE ? OR chinese LIKE ?)")
+            params.extend([q, q])
+            
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+            
+        # 1. 查询总条数
+        count_sql = f"SELECT COUNT(*) FROM translations {where_clause}"
+        cursor.execute(count_sql, tuple(params))
+        total = cursor.fetchone()[0]
+        
+        # 2. 查询分页数据
+        offset = (page - 1) * limit
+        select_sql = f"SELECT english, chinese, category, source FROM translations {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        select_params = params + [limit, offset]
+        cursor.execute(select_sql, tuple(select_params))
+        
+        terms = [{'english': r[0], 'chinese': r[1], 'category': r[2], 'source': r[3]} for r in cursor.fetchall()]
+        conn.close()
+        
+        return {
+            "items": terms,
+            "total": total,
+            "page": page,
+            "limit": limit
+        }
+    except Exception as exc:
+        logger.error(f"Dict page load error: {exc}")
+        return {"items": [], "total": 0, "page": page, "limit": limit}
+
+
+@router.get("/api/dictionary/stats")
+async def get_dictionary_stats():
+    from ...utils.translation.biology_translator import get_global_biology_translator
+    try:
+        translator = get_global_biology_translator()
+        data_mgr = translator.translation_data_manager
+        if not data_mgr:
+            return {"total": 0, "pending": 0}
+            
+        conn = sqlite3.connect(data_mgr.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM translations")
+        total = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM translations WHERE source != 'verified' OR source IS NULL")
+        pending = cursor.fetchone()[0]
+        
+        conn.close()
+        return {"total": total, "pending": pending}
+    except Exception as exc:
+        logger.error(f"Dict stats error: {exc}")
+        return {"total": 0, "pending": 0}
 
 @router.post("/api/dictionary/save")
 async def save_term(req: DictTermRequest):
@@ -131,8 +241,8 @@ async def save_term(req: DictTermRequest):
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
-@router.delete("/api/dictionary/term/{english}")
-async def delete_term(english: str):
+@router.delete("/api/dictionary/term")
+async def delete_term(english: str = ""):
     from ...utils.translation.biology_translator import get_global_biology_translator
     try:
         translator = get_global_biology_translator()
@@ -153,8 +263,8 @@ async def delete_term(english: str):
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
-@router.post("/api/dictionary/verify/{english}")
-async def verify_term(english: str):
+@router.post("/api/dictionary/verify")
+async def verify_term(english: str = ""):
     from ...utils.translation.biology_translator import get_global_biology_translator
     try:
         translator = get_global_biology_translator()

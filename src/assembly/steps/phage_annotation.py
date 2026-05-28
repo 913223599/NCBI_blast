@@ -133,54 +133,30 @@ class PhageAnnotationStep(BaseAssemblyStep):
                         safe_fasta = to_safe(filtered_fasta)
                         self.context.update("assembly_fasta", filtered_fasta)
                     
-                    # 4.2 选取多分支序列 (Multi-Phage Branching)
-                    # 动态切割模块：将所有高质量的 CheckV 结果切分为独立的 FASTA
-                    safe_fasta_list = []
-                    phage_bins_dir = win_work_path / "phage_bins"
-                    phage_bins_dir.mkdir(exist_ok=True)
+                    # 4.2 统一多序列处理 (Unified Multi-FASTA Processing)
+                    # 取消了原有的多分支切割与重型 AI 循环，将 CheckV 过滤后的所有高质量
+                    # Contigs 作为一个单一实体 (Multi-FASTA) 发送给下游工具链，这符合组装分析
+                    # 的真实状态并能百倍加速运行。
                     
-                    if fasta and fasta.exists():
-                        records = list(SeqIO.parse(str(fasta), "fasta"))
-                        for rec in records:
-                            # 过滤太短的片段 (例如 < 2000bp 的垃圾碎片，如果前面没过滤干净)
-                            if len(rec.seq) < 1500: continue
-                            bin_fasta = phage_bins_dir / f"{rec.id}.fasta"
-                            SeqIO.write([rec], str(bin_fasta), "fasta")
-                            safe_fasta_list.append((rec.id, bin_fasta, to_safe(bin_fasta)))
-                    
-                    if not safe_fasta_list:
-                        logger.error("没有高质量序列通过 CheckV 检查。")
+                    if not fasta or not fasta.exists() or fasta.stat().st_size == 0:
+                        logger.error("经过 CheckV 质量关卡后，没有足够高质量的序列。")
                         self.status = "failed"
                         return False
-
-                    logger.info(f"[Branching] 检测到 {len(safe_fasta_list)} 个独立的高质量噬菌体序列，准备进入并发注释流...")
-                    
-                    # 使用 Semaphore 限制重型 AI 工具并发，防 OOM
-                    sem = asyncio.Semaphore(1)
-                    multi_phages = []
-                    
-                    async def process_with_sem(p_id, p_fasta, p_safe_fasta):
-                        async with sem:
-                            return await self._process_single_phage_bin(
-                                p_id, p_fasta, p_safe_fasta, phage_bins_dir, threads, to_safe
-                            )
-                            
-                    tasks = [process_with_sem(pid, pf, psf) for pid, pf, psf in safe_fasta_list]
-                    results = await asyncio.gather(*tasks)
-                    
-                    for res in results:
-                        if res: multi_phages.append(res)
                         
-                    self.context.update("multi_phages", multi_phages)
+                    logger.info(f"✅ 统一批处理模式: 将整体组装产物作为单实体发送进行并行注释...")
                     
-                    if multi_phages:
-                        # 兼容性处理：把最长的噬菌体结果作为主结果放在外层上下文，防止部分老代码崩溃
-                        best_phage = max(multi_phages, key=lambda x: x.get("genomic_metrics", {}).get("total_length", 0))
-                        self.context.update("gbk_file", str(best_phage.get("gbk_file", "")))
-                        self.context.update("plot_file", str(best_phage.get("plot_file", "")))
-                        self.context.update("phagescope_audit", best_phage.get("audit_data"))
-                        self.context.update("genomic_metrics", best_phage.get("genomic_metrics"))
-                        self.context.update("annotation_dir", str(best_phage.get("annotation_dir", "")))
+                    # 假名 p_id 用于统一命名输出画图与文件前缀
+                    p_id = "Phage_Assembly" 
+                    unified_result = await self._process_phage_assembly(
+                        p_id, fasta, safe_fasta, win_work_path, threads, to_safe
+                    )
+                    
+                    if unified_result:
+                        self.context.update("gbk_file", str(unified_result.get("gbk_file", "")))
+                        self.context.update("plot_file", str(unified_result.get("plot_file", "")))
+                        self.context.update("phagescope_audit", unified_result.get("audit_data"))
+                        self.context.update("genomic_metrics", unified_result.get("genomic_metrics"))
+                        self.context.update("annotation_dir", str(unified_result.get("annotation_dir", "")))
                         
                     self.status = "completed"
                     if self.on_progress: self.on_progress(100, "多路智能注释与审计任务执行完成")
@@ -201,9 +177,9 @@ class PhageAnnotationStep(BaseAssemblyStep):
             self.status = "failed"
             return False
 
-    async def _process_single_phage_bin(self, p_id: str, fasta: Path, safe_fasta: str, parent_dir: Path, threads: int, to_safe) -> dict:
-        """处理单个噬菌体实体的全套注释、结构预测与画图流水线"""
-        win_work_path = parent_dir / p_id
+    async def _process_phage_assembly(self, p_id: str, fasta: Path, safe_fasta: str, parent_dir: Path, threads: int, to_safe) -> dict:
+        """处理整个 Multi-FASTA 序列实体的全套注释、结构预测与画图流水线"""
+        win_work_path = parent_dir / "unified_annotation"
         win_work_path.mkdir(exist_ok=True)
         safe_work_dir = to_safe(win_work_path)
         

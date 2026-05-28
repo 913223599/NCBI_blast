@@ -8,7 +8,7 @@ import csv
 import json
 import re
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Optional
 
 
 class TermExtractor:
@@ -105,15 +105,30 @@ class TermExtractor:
         elif term.startswith('['):
             term = term[1:].strip()
             
-        # 2. 定义需要彻底裁剪的噪音关键字（及其后续所有内容）
-        # 这些词通常标志着非规范化部分的开始
+        # 2. 预处理特殊连写（如 "gen. 1 sp." 缩减为 "gen. sp."）
+        # 保留可能存在的前缀 "n. "
+        term = re.sub(r'(?i)\b(n\.\s+)?gen\..*?(n\.\s+)?sp\.$', 
+                      lambda m: (m.group(1) or '') + 'gen. ' + (m.group(2) or '') + 'sp.', term)
+                      
+        # 3. 定义必须彻底裁剪关键字（遇到即断）
+        # 这些词通常是实验编号、株系名的开始
         strip_keywords = [
             'strain', 'isolate', 'clone', 'serotype', 'subtype', 
-            'str.', 'str', 'isolate:', 'type:', 'sample', 'accession'
+            'str.', 'str', 'sp.', 'sp', 'isolate:', 'type:', 'sample', 'accession',
+            'mixed', 'library', 'environmental', 'enrichment', 'culture',
+            'bv', 'bv.', 'biovar', 'serovar', 'pv', 'pv.', 'pathovar'
         ]
         
         # 3. 定义需要保留但需要裁剪后续编号的关键字
-        keep_keywords = ['phage', 'sp.', 'subsp.', 'var.', 'ssp.']
+        keep_keywords = [
+            'phage', 
+            'bacterium', 'archaeon', 'crenarchaeote', 'thaumarchaeote', 'euryarchaeote', 'virus', 'endosymbiont', 'symbiont',
+            'microorganism', 'prokaryote', 'cyanobacterium', 'actinobacterium',
+            'vector', 'plasmid', 'cosmid', 'phagemid', 'replicon', 'element',
+            'transposon', 'integron', 'plasposon', 'operon', 'promoter', 'enhancer',
+            'fungus', 'yeast', 'template', 'driver', 'construct',
+            'clone', 'isolate', 'strain', 'sample', 'tip', 'cell'
+        ]
 
         # 4. 执行基于关键字的裁剪
         words = term.split()
@@ -126,11 +141,65 @@ class TermExtractor:
             if lower_word in strip_keywords:
                 break
                 
-            # 如果遇到保留关键字
-            if lower_word in [k.strip('.') for k in keep_keywords] or word.lower() in keep_keywords:
+            is_keep = False
+            for k in keep_keywords:
+                if lower_word == k.strip('.') or word.lower() == k:
+                    is_keep = True
+                    break
+                
+                # 处理 sp.1 这种连写的情况
+                if k == 'sp.':
+                    if lower_word.startswith('sp.') and lower_word[3:].isdigit():
+                        word = 'sp.'
+                        is_keep = True
+                        break
+                        
+            if is_keep:
                 normalized_words.append(word)
-                break # 保留关键字通常是名称的最后有效部分（如 xxx phage）
+                break
+                
+            # 处理带有特定种加词/亚种加词的分类学修饰符 (如 cf., aff., var., subsp., ssp., f.)
+            # 我们需要保留这个修饰符，以及紧跟在它后面的一个单词，然后截断剩余的所有后缀（例如实验编号）
+            modifiers = ['cf.', 'aff.', 'var.', 'subsp.', 'ssp.', 'f.', 'sp.']
+            matched_mod = None
+            word_l = word.lower()
+            for mod in modifiers:
+                if word_l == mod or (word_l.startswith(mod) and word_l[len(mod):].isdigit()):
+                    matched_mod = mod
+                    break
+            
+            if matched_mod:
+                if matched_mod == 'sp.':
+                    break
+                normalized_words.append(matched_mod)
+                # 如果这个修饰符后面还有单词，那么保留下一个单词（即种加词/变种名）
+                if i + 1 < len(words):
+                    normalized_words.append(words[i + 1])
+                break
+                
+            is_keep = False
+            for k in keep_keywords:
+                        
+                # 特殊后缀及连体数字匹配：遇到类似 proteobacterium, kirkovirus, 或者 virus-10, vectorXYZ 的情况
+                if k in ['bacterium', 'virus', 'archaeon', 'fungus', 'symbiont', 'phage', 'vector', 'plasmid', 'element', 'transposon', 'integron', 'plasposon', 'operon', 'promoter', 'enhancer']:
+                    # 匹配 "core_noun" + "可选连字符/下划线" + "数字/大写字母标识符"
+                    # 放弃 re.IGNORECASE，改为手动构建忽略大小写的关键字前缀，避免污染后缀大写字母的严格校验
+                    k_pattern = ''.join([f"[{c.upper()}{c.lower()}]" for c in k])
+                    pattern = r"^(.*?" + k_pattern + r")([-_]+([0-9]+.*|[A-Z]+.*)|[0-9]+.*|[A-Z]{2,}.*|[A-Z][0-9]+.*)$"
+                    match = re.search(pattern, word)
+                    if match:
+                        word = match.group(1) # 剔除垃圾后缀，保留纯学术词根
+                        is_keep = True
+                        break
+                    elif lower_word.endswith(k):
+                        is_keep = True
+                        break
 
+            if is_keep:
+                normalized_words.append(word)
+                break # 保留关键字通常是名称的最后有效部分（如 xxx phage），其后的内容皆为随机编号
+
+            # 如果单词本身没有被 is_keep 拦截，也没有被 modifier 拦截，才加进去
             normalized_words.append(word)
             
         # 重新组合
@@ -139,17 +208,41 @@ class TermExtractor:
         if normalized_term == term:
             # 强化正则：必须包含数字或特定的 ID 格式，避免误删普通单词
             patterns = [
-                (r'\s+v?B_[A-Za-z0-9_]+$', re.IGNORECASE),  # 匹配 vB_xxxx
-                (r'\s+[A-Z\d_\-]{2,}$', 0),                 # 匹配全大写/数字的 ID (至少2位)
-                (r'\s+[A-Za-z]*\d+[A-Za-z0-9]*$', 0),       # 匹配包含数字的 ID
-                (r'\s+[A-Z]+[A-Za-z]*\d+$', 0),             # 匹配以大写开头且包含数字的 ID
+                (r'\s+v?B_[A-Za-z0-9_]+$', re.IGNORECASE),
+                (r'\s+\(ex\b.*$', re.IGNORECASE),                 # 剔除 (ex Author 2020) 等文献命名痕迹
+                (r'\s+\(in:\s.*?\)$', re.IGNORECASE),             # 剔除 NCBI 特有的 (in: cyanobacteria) 备注
+                (r'\s+clone[_\-].*$', re.IGNORECASE),             # 剔除 clone_xxx 变种
+                (r'\s+=$', 0),                                    # 剔除末尾孤立的等号
+                (r'\s+(DSM|ATCC|KCTC|LMG|JCM|CBS|NRRL|CCUG|CECT|NCTC|CIP|NBRC|BCCM)\s*\d+.*$', re.IGNORECASE), # 培养物保藏中心编号
+                (r'\s+[A-Z\d_\-\/\#\:]{2,}$', 0),                 # 匹配带有 /, #, : 的大写或数字混合 ID
+                (r'\s+[A-Za-z0-9]+[-_]+[A-Za-z0-9\-_]*\d+[\w\.\-\/\#\:]*$', 0), # 匹配类似 MRSA-Lux-17, Rs-09-161 这种连字符数字混合物
+                (r'\s+[A-Za-z]*\d+[\w\.\-\/\#\:]*$', 0),          # 匹配包含数字并可能带有特殊字符的 ID
+                (r'\s+[A-Z][a-z]*\-\d+$', 0),                     # 匹配类似 Jan-44 这种格式
+                (r'\s+(bv|biovar|serovar|pv|str|strain|subsp|var)\b.*$', re.IGNORECASE), # 匹配尾随遗漏的修饰符
             ]
-            for pattern, flags in patterns:
-                new_term = re.sub(pattern, '', normalized_term, flags=flags)
-                if new_term != normalized_term:
-                    normalized_term = new_term
+            
+            while True:
+                new_term = normalized_term
+                for pattern, flags in patterns:
+                    new_term = re.sub(pattern, '', new_term, flags=flags)
+                if new_term == normalized_term:
                     break
+                normalized_term = new_term
         
+        # 5. 动态智能环境样本 (uncultured / unidentified) 裁剪
+        # 抛弃硬编码，改为动态识别：只要遇到包含数字、下划线、或者是全大写字母(如 XYZ)的单词，即视为进入了随机编号/采样区
+        norm_lower_check = normalized_term.lower()
+        if norm_lower_check.startswith('uncultured ') or norm_lower_check.startswith('unidentified '):
+            words = normalized_term.split()
+            if len(words) > 1:
+                kept_words = [words[0]]
+                for word in words[1:]:
+                    # 判断当前单词是否为编号特征：包含数字、包含下划线、或是大于1个字符的全大写(如 A01, BD_contig, XYZ)
+                    if re.search(r'\d', word) or '_' in word or (word.isupper() and len(word) > 1):
+                        break
+                    kept_words.append(word)
+                normalized_term = ' '.join(kept_words)
+                
         return normalized_term.strip()
 
     def _normalize_chinese_term(self, chinese_term: str, original_english: str) -> str:
@@ -208,8 +301,6 @@ class TermExtractor:
         else:
             # 英文没有被规范化，返回原始中文
             return chinese_term
-        
-        return chinese_term
 
     def _filter_meaningful_terms(self, original: str, translated: str) -> Tuple[str, str]:
         """
@@ -554,7 +645,7 @@ class TermExtractor:
         # 默认返回 'other'
         return 'other'
 
-    def _translate_term_from_db(self, term: str, category: str = None) -> str:
+    def _translate_term_from_db(self, term: str, category: Optional[str] = None) -> str:
         """
         从内存缓存中获取术语翻译 (替代原有的文件读取方法)
         """

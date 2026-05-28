@@ -29,6 +29,29 @@ class BioDatabase:
         self.base_dir = ToolConfig.DATABASE_ROOT / config.get("local_folder", db_id)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
+    def _update_registry_version(self, new_version: str):
+        """
+        更新本地注册表中的版本号，写回 registry.json 并同步当前实例 config
+        """
+        registry_path = ToolConfig.DATABASE_ROOT / "registry.json"
+        if not registry_path.exists():
+            return
+        try:
+            import json
+            with open(registry_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            if "remotes" in data and self.db_id in data["remotes"]:
+                data["remotes"][self.db_id]["version"] = new_version
+                
+                with open(registry_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                
+                self.config["version"] = new_version
+                logger.info(f"已成功持久化更新 {self.db_id} 的版本号为: {new_version}")
+        except Exception as e:
+            logger.error(f"持久化更新版本号失败: {e}")
+
     def _get_dir_info(self) -> tuple[float, str]:
         total_size = 0
         latest_mtime = 0
@@ -90,16 +113,23 @@ class SilvaDatabase(BioDatabase):
             target_gz = self.base_dir / "download.fasta.gz"
             target_fasta = self.base_dir / "source.fasta"
 
-            # 1. 下载
+            # 1. 下载 (在后台线程池中运行以防止阻塞 asyncio 事件循环)
             logger.info(f">>> [Download] 开始载入 {self.name}: {download_url}")
-            urllib.request.urlretrieve(download_url, target_gz)
+            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_gz)
             
-            # 2. 解压 (这里需要 gunzip，Python 内置 gzip 模块支持)
-            import gzip
-            import shutil
-            with gzip.open(target_gz, 'rb') as f_in:
-                with open(target_fasta, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+            # 2. 解压 (在后台线程池中运行)
+            def _extract_gz():
+                import gzip
+                with gzip.open(target_gz, 'rb') as f_in:
+                    with open(target_fasta, 'wb') as f_out:
+                        while True:
+                            chunk = f_in.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            assert isinstance(chunk, bytes)
+                            f_out.write(chunk)
+            
+            await asyncio.to_thread(_extract_gz)
             
             # 3. 构建 BLAST 索引
             await self.build_index(str(target_fasta))
@@ -174,19 +204,30 @@ class Ncbi16SDatabase(BioDatabase):
         利用之前编写的修复/下载逻辑进行更新
         """
         download_url = self.config.get("url")
+        if not download_url:
+            raise ValueError(f"No download URL configured for {self.db_id}")
         target_gz = self.base_dir / "16S_ribosomal_RNA.tar.gz"
         expected_md5 = self.config.get("version_md5", "32557aa0b65998ee65064999ae802705")
 
         try:
-            # 下载与校验逻辑 (复用之前成功的修复逻辑)
+            # 下载与校验逻辑 (在后台线程池中运行以防止阻塞 asyncio 事件循环)
             logger.info(f">>> [NCBI] 正在同步 16S 官方库...")
-            urllib.request.urlretrieve(download_url, str(target_gz) + ".tmp")
+            await asyncio.to_thread(urllib.request.urlretrieve, download_url, str(target_gz) + ".tmp")
             
             # (简写校验步骤...)
             os.replace(str(target_gz) + ".tmp", target_gz)
             
-            with tarfile.open(target_gz) as t:
-                t.extractall(path=self.base_dir)
+            # 提取 tar 压缩文件 (在后台线程池中运行)
+            def _extract_tar():
+                with tarfile.open(target_gz) as t:
+                    t.extractall(path=self.base_dir)
+            
+            await asyncio.to_thread(_extract_tar)
+            
+            # 同步更新本地注册表的版本号为当前的年月
+            current_version = datetime.now().strftime("%Y-%m")
+            self._update_registry_version(current_version)
+            
             return True
         except Exception as e:
             logger.error(f"NCBI 同步失败: {e}")
@@ -216,7 +257,12 @@ class PhageScopeDatabase(BioDatabase):
                 cwd=str(ToolConfig.PROJECT_ROOT)
             )
             await proc.communicate()
-            return proc.returncode == 0
+            
+            if proc.returncode == 0:
+                current_version = f"v1.0-{datetime.now().strftime('%Y-%m')}"
+                self._update_registry_version(current_version)
+                return True
+            return False
         except Exception as e:
             logger.error(f"PhageScope 同步失败: {e}")
             return False
@@ -243,7 +289,12 @@ class PharokkaDatabase(BioDatabase):
             logger.info(f">>> [Pharokka] 启动底层部署脚本: {mnt_path}")
             proc = await asyncio.create_subprocess_shell(f'wsl -d Ubuntu -u root bash "{mnt_path}"')
             await proc.communicate()
-            return proc.returncode == 0
+            
+            if proc.returncode == 0:
+                current_version = f"{datetime.now().strftime('%Y-%m')} (Latest)"
+                self._update_registry_version(current_version)
+                return True
+            return False
         except Exception as e:
             logger.error(f"Pharokka 同步失败: {e}")
             return False
@@ -270,7 +321,12 @@ class PholdDatabase(BioDatabase):
             logger.info(f">>> [Phold] 启动底层部署脚本: {mnt_path}")
             proc = await asyncio.create_subprocess_shell(f'wsl -d Ubuntu -u root bash "{mnt_path}"')
             await proc.communicate()
-            return proc.returncode == 0
+            
+            if proc.returncode == 0:
+                current_version = f"{datetime.now().strftime('%Y-%m')} (Latest)"
+                self._update_registry_version(current_version)
+                return True
+            return False
         except Exception as e:
             logger.error(f"Phold 同步失败: {e}")
             return False

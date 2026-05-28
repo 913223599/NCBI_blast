@@ -465,12 +465,12 @@ const electronBridge = {
     },
 
     async delete_dictionary_term(english: string, callback?: (res: boolean) => void) {
-        const result = await apiDelete(`/api/dictionary/term/${encodeURIComponent(english)}`);
+        const result = await apiDelete(`/api/dictionary/term?english=${encodeURIComponent(english)}`);
         callback?.(result.success);
     },
 
     async verify_dictionary_term(english: string, callback?: (res: boolean) => void) {
-        const result = await apiPost(`/api/dictionary/verify/${encodeURIComponent(english)}`);
+        const result = await apiPost(`/api/dictionary/verify?english=${encodeURIComponent(english)}`);
         callback?.(result.success);
     },
 
@@ -484,6 +484,24 @@ const electronBridge = {
         }
         const result = await apiGet(`/api/dictionary/all?proofread_mode=${proofreadMode}`);
         actualCallback?.(JSON.stringify(result));
+    },
+
+    async get_dictionary_page(page: number, limit: number, query: string, category: string, proofreadMode: boolean, callback?: (res: string) => void) {
+        const url = `/api/dictionary/page?page=${page}&limit=${limit}&query=${encodeURIComponent(query)}&category=${category}&proofread_mode=${proofreadMode}`;
+        const result = await apiGet(url);
+        callback?.(JSON.stringify(result));
+    },
+
+    async get_all_dictionary_terms_for_export(proofreadMode: boolean, category: string, query: string, callback?: (res: string) => void) {
+        const url = `/api/dictionary/all?proofread_mode=${proofreadMode}&category=${category}&query=${encodeURIComponent(query)}&limit=-1`;
+        const result = await apiGet(url);
+        callback?.(JSON.stringify(result));
+    },
+
+    async get_dictionary_stats(callback?: (res: any) => void) {
+        const result = await apiGet('/api/dictionary/stats');
+        callback?.(result);
+        return result;
     },
 
     // ═══ 进化树（通过 HTTP + WS 推送）═══

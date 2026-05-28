@@ -139,7 +139,7 @@ function selectTool(tool: AnalysisTool) {
   flex: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .tools-grid {
@@ -237,7 +237,7 @@ function selectTool(tool: AnalysisTool) {
   display: flex;
   flex-direction: column;
   padding: 0;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .workspace-placeholder {

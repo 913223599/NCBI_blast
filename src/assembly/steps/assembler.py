@@ -162,7 +162,7 @@ class AssemblerStep(BaseAssemblyStep):
                 min_len = params.get("min_fasta_length") or 200
 
                 spades_tmp_dir = f"{wsl_tmp_outdir}/spades_tmp"
-                spades_opts = f"--memory {max_mem} --tmp-dir {spades_tmp_dir} -m {max_mem * 1024}"
+                spades_opts = f"--memory {max_mem} --tmp-dir {spades_tmp_dir} -m {max_mem * 1024}".strip()
 
                 cmd_list = [
                     unicycler_bin, "-1", f"'{final_r1}'", "-2", f"'{final_r2}'",
@@ -235,8 +235,42 @@ class AssemblerStep(BaseAssemblyStep):
                             self.logger.info("⚠️ 测序深度不足，将提升数据量重试...")
                             continue
                     
-                    # 其他无法挽救的错误
-                    break
+            # 🚀 双引擎打捞 (Dual-Engine Fallback): 如果 Unicycler 彻底失败或碎片化严重，启动 SPAdes Meta 模式
+            if not found_fasta or returncode != 0:
+                self.logger.warning("⚠️ Unicycler/默认组装失败，自动触发 SPAdes --meta 备用引擎...")
+                fallback_out = f"{wsl_tmp_outdir}/fallback_spades"
+                await self.runner.run_command(["rm", "-rf", fallback_out])
+                
+                final_r1, final_r2 = final_r1_orig, final_r2_orig
+                if sample_type == "PHAGE" and final_r1 and final_r2:
+                    self.logger.info("备用引擎启用前降采样保护机制...")
+                    target_reads = 1000000 # 预设固定 100W 条 reads
+                    sampling_dir = f"{wsl_tmp_outdir}/sampling_fallback"
+                    await self.runner.run_command(["mkdir", "-p", sampling_dir])
+                    r1_s, r2_s = f"{sampling_dir}/S1.fq.gz", f"{sampling_dir}/S2.fq.gz"
+                    has_pigz = (await self.runner.run_command(["which", "pigz"], silence_errors=True)) == 0
+                    zip_tool = f"pigz -p {max(1, optimal_threads//2)}" if has_pigz else "gzip"
+                    sample_cmd = f"seqtk sample -s100 '{final_r1}' {target_reads} | {zip_tool} > '{r1_s}' && seqtk sample -s100 '{final_r2}' {target_reads} | {zip_tool} > '{r2_s}'"
+                    if await self.runner.run_command(sample_cmd, is_shell=True) == 0 and await self.runner.run_command(["test", "-s", r1_s]) == 0:
+                        final_r1, final_r2 = r1_s, r2_s
+                        
+                spades_cmd = [
+                    "spades.py", "--meta", "-1", f"'{final_r1}'", "-2", f"'{final_r2}'",
+                    "-o", f"'{fallback_out}'", "-t", threads, "-m", str(max_mem)
+                ]
+                def fallback_handler(line: str):
+                    if "K-mer" in line and self.on_progress: self.on_progress(50, "SPAdes Meta: 迭代 K-mer 中...")
+                    elif "Assembling" in line and self.on_progress: self.on_progress(70, "SPAdes Meta: 正在构建支架...")
+                
+                fallback_ret = await self.runner.run_command(" ".join(spades_cmd), on_output=fallback_handler, is_shell=True)
+                if fallback_ret == 0:
+                    fallback_fasta = f"{fallback_out}/scaffolds.fasta"
+                    if await self.runner.run_command(["test", "-f", fallback_fasta]) == 0:
+                        await self.runner.run_command(["mkdir", "-p", WSLManager.to_wsl_path(str(out_dir))])
+                        await self.runner.run_command(["cp", "-f", fallback_fasta, f"{out_dir}/assembly.fasta"])
+                        self.logger.info("✅ SPAdes Meta 备用引擎打捞成功！")
+                        found_fasta = True
+                        returncode = 0
 
             # 循环结束后的清理逻辑
             step_key = self.__class__.__name__.lower()
