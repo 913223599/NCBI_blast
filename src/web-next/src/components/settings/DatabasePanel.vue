@@ -132,6 +132,11 @@ function triggerUpdate(db: any) {
   if (db.type === 'tax') {
     triggerTaxUpdate()
   } else {
+    if (db.installed) {
+      if (!confirm(`【${db.name}】当前已完整就绪。\n\n系统暂未检测到必须的远端版本变更。强制更新将重新下载并构建庞大的数据库文件（可能耗时较长），是否确定要继续覆盖更新？`)) {
+        return
+      }
+    }
     triggerBioDbUpdate(db.id)
   }
 }

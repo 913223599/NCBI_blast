@@ -117,7 +117,7 @@ function resetFilters() {
 }
 
 function getColumnLabel(key: string): string {
-  const labels: Record<string, string> = { accession: '登录', species: '物种', strain: '菌株', sequenceType: '类型', source: '来源', host: '宿主', country: '地区', collectionDate: '日期' }
+  const labels: Record<string, string> = { accession: '登录号', species: '物种', strain: '菌株', sequenceType: '类型', source: '来源', host: '宿主', country: '地区', collectionDate: '采集时间', addedAt: '录入时间', location: '位置' }
   return labels[key] || key
 }
 

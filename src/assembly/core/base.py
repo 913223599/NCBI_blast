@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 from ..engine.runner import CommandRunner
 
+# 全局模块级物理内存缓存，避免跨任务重复探测
+_CACHED_SYSTEM_TOTAL_MEMORY_GB = None
+
 class PipelineContext:
     """
     流水线上下文
@@ -102,11 +105,16 @@ class BaseAssemblyStep(abc.ABC):
         ⚠️ WSL2 的 /proc/meminfo MemTotal 包含 Windows Pagefile，会严重虚高
         优先通过 Windows WMI 获取真实物理内存
         """
+        global _CACHED_SYSTEM_TOTAL_MEMORY_GB
+        if _CACHED_SYSTEM_TOTAL_MEMORY_GB is not None:
+            return _CACHED_SYSTEM_TOTAL_MEMORY_GB
+
         gb = 16.0
         try:
             # 优先从 context 获取 (缓存)
             if "system_total_memory_gb" in self.context.data:
-                return self.context.data["system_total_memory_gb"]
+                _CACHED_SYSTEM_TOTAL_MEMORY_GB = self.context.data["system_total_memory_gb"]
+                return _CACHED_SYSTEM_TOTAL_MEMORY_GB
 
             # 方案 1: 通过 WSL 调用 Windows PowerShell 获取真实物理内存
             out_win = []
@@ -166,6 +174,8 @@ class BaseAssemblyStep(abc.ABC):
                                 break
                                 
                 self.context.data["system_total_memory_gb"] = gb
+                _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb
                 return gb
         except: pass
-        return gb or 16.0
+        _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb or 16.0
+        return _CACHED_SYSTEM_TOTAL_MEMORY_GB

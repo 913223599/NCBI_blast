@@ -181,8 +181,9 @@ class ConsensusCorrectionStep(BaseAssemblyStep):
             await self.runner.run_command(["rm", "-f", filtered_r1, filtered_r2])
 
             if ret_polish == 0:
-                # 提取唯一产物
-                await self.runner.run_command(["cp", "-f", local_polished, WSLManager.to_wsl_path(str(win_polished_fasta))])
+                # 🚀 I/O 优化：先在内存盘内完成产物，再一次性搬运
+                wsl_win_polished = WSLManager.to_wsl_path(str(win_polished_fasta))
+                await self.runner.run_command(["cp", "-f", local_polished, wsl_win_polished])
                 if win_polished_fasta.exists() and win_polished_fasta.stat().st_size > 500:
                     logger.info(f"[Polypolish] 内存级精修成功: {win_polished_fasta.name}")
                     return win_polished_fasta

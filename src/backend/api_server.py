@@ -6,15 +6,26 @@ api_server.py — NCBI Bio-Station 入口 (V2.0 模块化版本)
 底层解析工具迁移至 src/backend/utils/blast_utils.py (含解析缓存)。
  WebSocket 广播已由 src/backend/broadcaster.py 统一管理。
 """
+import sys
+import platform
+import collections
+
+# ─── 紧急补丁：修复 Windows WMI/CMD 卡死导致的 platform 模块挂起 ───
+if sys.platform.startswith("win"):
+    platform.system = lambda: "Windows"
+    platform.machine = lambda: "AMD64"
+    platform.release = lambda: "10"
+    platform.version = lambda: "10.0.19041"
+    uname_result = collections.namedtuple("uname_result", ["system", "node", "release", "version", "machine", "processor"])
+    platform.uname = lambda: uname_result("Windows", "Node", "10", "10.0.19041", "AMD64", "AMD64")
+
 import asyncio
 import json
 import logging
 import os
-import sys
 import re
 import psutil
 import time
-import platform
 import logging.handlers
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -22,10 +33,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 # ─── 0. Windows 控制台 UTF‑8 支持 ───────────────────────
-import sys, io
-if sys.platform.startswith("win"):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+# import sys, io
+# if sys.platform.startswith("win"):
+#     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+#     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 # ─── 1. 项目根目录初始化 (必须保留) ────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -54,7 +65,7 @@ logging.basicConfig(
 logger = logging.getLogger("api_server")
 
 # ─── Windows asyncio 稳定性补丁 ────────────────────────
-if platform.system() == "Windows":
+if sys.platform.startswith("win"):
     # 抑制 proactor_events.py 中的已知断言错误
     # 该错误是 asyncio 内部 Bug，通常不影响业务逻辑但会产生大量冗余日志
     class AsyncioAssertionFilter(logging.Filter):
@@ -255,6 +266,7 @@ from .routes import assembly, database, analysis
 app.include_router(assembly.router, prefix="/api")
 app.include_router(database.router, prefix="/api")
 app.include_router(analysis.router, prefix="/api")
+
 
 # 最后：启动局域网共享路由 (确保通配符路由 /{full_path} 不会屏蔽业务 API)
 try:

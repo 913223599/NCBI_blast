@@ -11,25 +11,65 @@ echo =======================================
 echo   NCBI BLAST Pro - Electron Dev Mode
 echo =======================================
 echo [Status] Project Root: %PROJECT_ROOT%
-echo [0/4] Cleaning up zombie processes...
-taskkill /F /IM python.exe /T >nul 2>&1
-taskkill /F /IM electron.exe /T >nul 2>&1
+echo [0/4] Cleaning up zombie processes (Skipped global kill)...
+REM taskkill /F /IM python.exe /T >nul 2>&1
+REM taskkill /F /IM electron.exe /T >nul 2>&1
 ping 127.0.0.1 -n 2 >nul
 
-REM 0. Check Node/NPM environment
+REM 0. Check and Install Node.js
 where npm >nul 2>&1
 if errorlevel 1 (
-    echo [ERROR] 'npm' not found in PATH. Please install Node.js.
+    echo [WARN] Node.js not found in PATH.
+    echo [INFO] Attempting to auto-install Node.js via winget...
+    winget install OpenJS.NodeJS --silent --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+        echo [ERROR] Auto-install failed. Please install Node.js manually from https://nodejs.org/
+        pause
+        exit /b 1
+    )
+    echo [INFO] Node.js installed successfully.
+    echo [INFO] Please close this window and run the script again to refresh environment variables.
     pause
-    exit /b 1
+    exit /b 0
+)
+
+REM 0.5. Check and Install Python
+where python >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] Python not found in PATH.
+    echo [INFO] Attempting to auto-install Python 3 via winget...
+    winget install Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+        echo [ERROR] Auto-install failed. Please install Python manually from https://www.python.org/
+        pause
+        exit /b 1
+    )
+    echo [INFO] Python installed successfully.
+    echo [INFO] Please close this window and run the script again to refresh environment variables.
+    pause
+    exit /b 0
 )
 
 REM 1. Check Python VENV
+REM 验证现有的虚拟环境是否有效（防止直接复制带来的路径失效问题）
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" --version >nul 2>&1
+    if errorlevel 1 (
+        echo [WARN] Existing .venv is broken ^(likely copied from another device^).
+        echo [INFO] Recreating virtual environment...
+        rmdir /s /q .venv
+    )
+)
+
 if not exist ".venv\Scripts\python.exe" (
-    echo [ERROR] No .venv found at %PROJECT_ROOT%.venv
-    echo Please create a virtual environment first.
-    pause
-    exit /b 1
+    echo [INFO] Auto-creating Python virtual environment...
+    python -m venv .venv
+    if errorlevel 1 (
+        echo [ERROR] Failed to create virtual environment.
+        pause
+        exit /b 1
+    )
+    echo [INFO] Virtual environment created successfully.
 )
 
 REM 2. Check Electron deps

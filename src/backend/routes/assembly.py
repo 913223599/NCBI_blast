@@ -215,13 +215,13 @@ async def submit_batch(payload: Dict[str, Any]):
 @router.post("/{task_id}/stop")
 async def stop_assembly_task(task_id: str):
     """强制停止正在运行的流水线"""
-    success = manager.stop_task(task_id)
-    if success:
+    actual_id = manager.stop_task(task_id)
+    if actual_id:
         # 同步数据库状态
-        assembly_db.finalize_task(task_id, "aborted", {"message": "User requested abort"})
+        assembly_db.finalize_task(actual_id, "aborted", {"message": "User requested abort"})
         # 广播给前端
         broadcaster.broadcast_sync("assembly_progress", {
-            "task_id": task_id,
+            "task_id": actual_id,
             "step": "ABORTED",
             "progress": 0,
             "status": "error"

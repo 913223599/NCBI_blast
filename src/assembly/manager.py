@@ -37,6 +37,9 @@ class AssemblyManager:
         # 活跃任务追踪 (用于强制停止)
         self.active_steps: Dict[str, Any] = {}
         
+        # 🚀 内存探测缓存：避免频繁调用 systeminfo.exe
+        self._cached_total_mem_gb: Optional[float] = None
+        
         from .utils.ncbi_downloader import NCBIDownloader
         from .utils.path_resolver import HostPathResolver
         self.ncbi_downloader = NCBIDownloader(project_root, self.logger)
@@ -47,36 +50,55 @@ class AssemblyManager:
             from .env.wsl_manager import WSLManager
             WSLManager.ensure_project_link()
 
-    def stop_task(self, task_id: str):
-        """外部调用：强制停止指定任务"""
+    def stop_task(self, task_id: str) -> Optional[str]:
+        """外部调用：强制停止指定任务 (支持多 Worker 跨进程斩断)"""
         target_id = task_id
         
         # 🔗 智能识别：支持 "current" 别名，自动匹配当前活跃任务
         if task_id == "current":
-            if self.active_steps:
+            from src.backend.utils.assembly_db import assembly_db
+            running_tasks = [t for t in assembly_db.get_incomplete_tasks() if t.get('status') == 'running']
+            if running_tasks:
+                target_id = running_tasks[-1]['id']
+            elif self.active_steps:
                 target_id = list(self.active_steps.keys())[-1]
             else:
-                self.logger.warning("⚠️ 尝试停止 'current' 任务，但活跃任务列表为空。")
-                return False
+                self.logger.warning("⚠️ 尝试停止 'current' 任务，但活跃任务列表为空且无运行中的任务。")
+                return None
 
+        # 1. 标记数据库状态为 ABORTED
+        from src.backend.utils.assembly_db import assembly_db
+        assembly_db.update_task_progress(target_id, "ABORTED", 0, "aborted")
+        
+        # 2. 尝试在本地内存中终止 (如果是当前 Worker 启动的任务)
+        terminated_locally = False
         if target_id in self.active_steps:
             step = self.active_steps[target_id]
-            self.logger.warning(f"🛑 正在强制停止任务: {target_id}")
+            self.logger.warning(f"🛑 正在强制停止本地任务: {target_id}")
             
             if hasattr(step, 'context'):
                 step.context.is_aborted = True
-                
             if hasattr(step, 'runner'):
-                # 💡 强制终止底层 WSL 进程
                 step.runner.terminate()
             
-            # 标记数据库状态
-            from src.backend.utils.assembly_db import assembly_db
-            assembly_db.update_task_progress(target_id, "ABORTED", 0, "aborted")
-            
             self.active_steps.pop(target_id, None)
-            return True
-        return False
+            terminated_locally = True
+        
+        # 3. 跨 Worker 进程斩断：利用 WSL pkill 根据 task_id 路径特征杀进程
+        self.logger.warning(f"🛑 正在跨 Worker/WSL 全局清理任务进程: {target_id}")
+        try:
+            import subprocess
+            from .env.wsl_manager import WSLManager
+            distro = WSLManager.get_best_distro()
+            # pkill -9 -f 会杀死命令行中包含 task_id 的所有进程
+            cmd = f"pkill -9 -f {target_id}"
+            subprocess.run(["wsl", "-d", distro, "-u", "root", "bash", "-c", cmd], capture_output=True, timeout=5)
+        except Exception as e:
+            self.logger.error(f"跨进程终止失败: {e}")
+            if not terminated_locally:
+                return None
+
+        return target_id
 
     async def run_pipeline(self, 
                            task_id: Optional[str], 
@@ -104,11 +126,14 @@ class AssemblyManager:
         from src.backend.utils.assembly_db import assembly_db
         
         total_cpus = os.cpu_count() or 4
-        # 默认使用 75% 的逻辑处理器，但预留至少 2 个核心给系统
         default_threads = max(2, total_cpus - 4) if total_cpus > 8 else total_cpus
         
-        import psutil
-        total_mem = psutil.virtual_memory().total
+        # 🚀 内存探测优化：只执行一次并缓存结果
+        if self._cached_total_mem_gb is None:
+            import psutil
+            total_mem = psutil.virtual_memory().total
+            self._cached_total_mem_gb = total_mem / (1024**3)
+        total_mem_gb = self._cached_total_mem_gb
         # 如果用户没有显式指定 max_memory，则交由底层步骤基于 ShmManager 动态获取
         # 不再在此处强制设死 max_memory_gb，避免挤占内存盘空间
         
@@ -157,9 +182,8 @@ class AssemblyManager:
                     # 尝试 2: 如果是 Windows 文件锁，尝试利用 WSL 暴力铲除 (通常比 Windows API 更有效)
                     try:
                         wsl_path = WSLManager.to_wsl_path(str(task_dir))
-                        # 启动一个临时的 runner 或直接调用 os.system
-                        import os
-                        os.system(f"wsl -d Ubuntu -u root rm -rf {wsl_path}")
+                        distro = WSLManager.get_best_distro()
+                        os.system(f"wsl -d {distro} -u root rm -rf {wsl_path}")
                         if not task_dir.exists():
                             cleanup_success = True
                             break
@@ -184,7 +208,6 @@ class AssemblyManager:
             from .core.shm_manager import ShmManager
             from .engine.runner import CommandRunner
             shm_runner = CommandRunner("ShmManager", is_wsl=True)
-            total_mem_gb = total_mem / (1024**3)
             ctx.shm = ShmManager(task_id, shm_runner, total_mem_gb)
         
         # 注入初始输入与环境
@@ -319,7 +342,9 @@ class AssemblyManager:
                             # 必须保留小文件（如 .report / .log / .json 等以便回溯分析）
                             p = Path(fpath)
                             if p.suffix in [".gz", ".fastq", ".fq"]:
-                                p.unlink(missing_ok=True)
+                                # 💡 保护机制：确保只清理当前任务目录内部产生的临时大文件，且绝不能与原始输入路径冲突
+                                if task_dir in p.parents and p.resolve() != Path(r1_input).resolve() and p.resolve() != Path(r2_input).resolve():
+                                    p.unlink(missing_ok=True)
                             
                     # 2. 销毁噬菌组智能深度采样 (Downsampling) 的副本
                     sampling_dir = task_dir / "unicycler_run" / "sampling"

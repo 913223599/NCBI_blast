@@ -60,55 +60,59 @@ class ProphageSeparatorStep(BaseAssemblyStep):
         cpu_count = os.cpu_count() or 8
         threads = max(1, cpu_count - 1)
 
+        import asyncio
+
         # 结果收集器
         phispy_regions: List[Dict] = []
         vibrant_results: Dict[str, List] = {"complete_phages": [], "integrated_prophages": []}
 
-        # ─── 1. PhiSpy 路径: 从宿主基因组检测前噬菌体 ───
-        if host_genome and Path(host_genome).exists():
-            if self.on_progress:
-                self.on_progress(5, "PhiSpy: 正在从宿主基因组中检测前噬菌体区域...")
-            phispy_regions = await self._run_phispy(
-                host_genome_path=Path(host_genome),
-                work_dir=out_dir,
-                threads=threads
-            )
-            self.logger.info(f"📊 PhiSpy 检测到 {len(phispy_regions)} 个前噬菌体区域")
-        else:
-            self.logger.info("未提供宿主基因组，跳过 PhiSpy 路径")
+        # 定义并行的 PhiSpy 协程任务
+        async def run_phispy_task():
+            if host_genome and Path(host_genome).exists():
+                self.logger.info("✨ [并发引擎] 启动 PhiSpy 宿主基因组检测...")
+                regions = await self._run_phispy(
+                    host_genome_path=Path(host_genome),
+                    work_dir=out_dir,
+                    threads=max(1, threads // 2)
+                )
+                self.logger.info(f"📊 [并发引擎] PhiSpy 检测完成，识别到 {len(regions)} 个前噬菌体区域")
+                return regions
+            return []
 
-        # ─── 1.5 后置宿主 Contig 级过滤 (溶源模式专属) ───
-        # 🚨 审计修复：当 is_lysogenic=True 导致跳过了 Kraken2 读段剔除，
-        # 组装器产物中会包含大量的纯宿主 Contigs（可能占 90%+）。
-        # 必须在分箱之前先用 Minimap2 做一次 Contig 级的物理大扫除，
-        # 否则 VIBRANT/VirSorter2 的 HMM 会被海量宿主序列淹没导致漏检。
-        is_lysogenic = self.context.config.get("params", {}).get("is_lysogenic", False)
-        if is_lysogenic and host_genome and Path(host_genome).exists():
-            if self.on_progress:
-                self.on_progress(35, "后置宿主大扫除: Minimap2 剔除宿主级 Contigs...")
+        # 定义并行的 VIBRANT (包含前置去宿主) 协程任务
+        async def run_vibrant_task():
+            nonlocal assembly_fasta
+            is_lysogenic = self.context.config.get("params", {}).get("is_lysogenic", False)
+            if is_lysogenic and host_genome and Path(host_genome).exists():
+                self.logger.info("✨ [并发引擎] 启动后置宿主 Contig 级大扫除 (Minimap2)...")
+                pre_filter_fasta = out_dir / "pre_vibrant_filtered.fasta"
+                host_removed = await self._bwa_subtract_host(
+                    assembly_fasta=Path(assembly_fasta),
+                    host_fasta=Path(host_genome),
+                    output_fasta=pre_filter_fasta,
+                    threads=max(1, threads // 2)
+                )
+                if host_removed and pre_filter_fasta.exists() and pre_filter_fasta.stat().st_size > 0:
+                    self.logger.info(f"🧹 [并发引擎] 宿主 Contig 级过滤完成，仅保留候选序列用于 VIBRANT 分箱")
+                    assembly_fasta = pre_filter_fasta
             
-            pre_filter_fasta = out_dir / "pre_vibrant_filtered.fasta"
-            host_removed = await self._bwa_subtract_host(
-                assembly_fasta=Path(assembly_fasta),
-                host_fasta=Path(host_genome),
-                output_fasta=pre_filter_fasta,
-                threads=threads
+            self.logger.info("✨ [并发引擎] 启动 VIBRANT 组装产物分箱...")
+            results = await self._run_vibrant(
+                assembly_path=Path(assembly_fasta),
+                work_dir=out_dir,
+                threads=max(1, threads // 2) if host_genome and Path(host_genome).exists() else threads
             )
-            if host_removed and pre_filter_fasta.exists() and pre_filter_fasta.stat().st_size > 0:
-                self.logger.info(f"🧹 后置宿主过滤完成, 剩余纯候选序列用于 VIBRANT 分箱")
-                assembly_fasta = pre_filter_fasta
-            else:
-                self.logger.warning("后置宿主过滤未生效，使用原始组装产物继续")
+            self.logger.info(f"📊 [并发引擎] VIBRANT 识别完成，完整游离噬菌体: {len(results.get('complete_phages', []))} 条, 前噬菌体片段: {len(results.get('integrated_prophages', []))} 个")
+            return results
 
-        # ─── 2. VIBRANT 路径: 从组装 contigs 中识别噬菌体 ───
         if self.on_progress:
-            self.on_progress(40, "VIBRANT: 正在对组装 contigs 进行噬菌体分箱...")
-        vibrant_results = await self._run_vibrant(
-            assembly_path=Path(assembly_fasta),
-            work_dir=out_dir,
-            threads=threads
+            self.on_progress(5, "并发调度：正在并发启动 PhiSpy 宿主检测 与 VIBRANT 组装分箱...")
+
+        # 并发执行两条路径，大幅节省整体拼装时间
+        phispy_regions, vibrant_results = await asyncio.gather(
+            run_phispy_task(),
+            run_vibrant_task()
         )
-        self.logger.info(f"📊 VIBRANT 识别到 {len(vibrant_results.get('complete_phages', []))} 条完整噬菌体, {len(vibrant_results.get('integrated_prophages', []))} 个前噬菌体片段")
 
         # ─── 3. 交叉验证与序列提取 ───
         if self.on_progress:
@@ -727,20 +731,57 @@ class ProphageSeparatorStep(BaseAssemblyStep):
     @staticmethod
     def _calc_tnf(seq_str: str) -> list:
         """计算归一化四核苷酸频率向量 (256维)"""
-        import itertools
-        from collections import Counter
+        try:
+            import numpy as np
+            
+            # 建立映射表 A=0, C=1, G=2, T=3, 其他=-1
+            mapping = np.full(256, -1, dtype=np.int8)
+            mapping[ord('A')] = 0; mapping[ord('a')] = 0
+            mapping[ord('C')] = 1; mapping[ord('c')] = 1
+            mapping[ord('G')] = 2; mapping[ord('g')] = 2
+            mapping[ord('T')] = 3; mapping[ord('t')] = 3
 
-        tetramers = [''.join(t) for t in itertools.product("ACGT", repeat=4)]
-        seq = seq_str.upper()
-        counts = Counter()
-        for i in range(len(seq) - 3):
-            kmer = seq[i:i+4]
-            if all(c in "ACGT" for c in kmer):
-                counts[kmer] += 1
-        total = sum(counts.values())
-        if total == 0:
-            return [0.0] * 256
-        return [counts.get(t, 0) / total for t in tetramers]
+            # 快速将字符串转为 byte 数组并映射
+            seq_bytes = np.frombuffer(seq_str.encode('ascii', errors='ignore'), dtype=np.uint8)
+            encoded = mapping[seq_bytes]
+            
+            if len(encoded) < 4:
+                return [0.0] * 256
+
+            # 滑动窗口切片 indices (4-mer)
+            w0 = encoded[:-3]
+            w1 = encoded[1:-2]
+            w2 = encoded[2:-1]
+            w3 = encoded[3:]
+
+            # 过滤包含非 ACGT 碱基 (即 -1) 的 kmer
+            valid = (w0 >= 0) & (w1 >= 0) & (w2 >= 0) & (w3 >= 0)
+            
+            # 将 4 个核苷酸合并为 0-255 的平坦整数索引
+            kmer_indices = w0[valid] * 64 + w1[valid] * 16 + w2[valid] * 4 + w3[valid]
+            
+            # 使用 bincount 并发/向量化求和计数
+            counts = np.bincount(kmer_indices, minlength=256)
+            total = counts.sum()
+            if total == 0:
+                return [0.0] * 256
+            
+            return (counts / total).tolist()
+        except ImportError:
+            import itertools
+            from collections import Counter
+
+            tetramers = [''.join(t) for t in itertools.product("ACGT", repeat=4)]
+            seq = seq_str.upper()
+            counts = Counter()
+            for i in range(len(seq) - 3):
+                kmer = seq[i:i+4]
+                if all(c in "ACGT" for c in kmer):
+                    counts[kmer] += 1
+            total = sum(counts.values())
+            if total == 0:
+                return [0.0] * 256
+            return [counts.get(t, 0) / total for t in tetramers]
 
     @staticmethod
     def _tnf_cosine_distance(a: list, b: list) -> float:
