@@ -77,14 +77,41 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
             state.serverTotalCount.value = data.total_count
           }
 
+          // 关键修复：确保 codeLookup 数据正确挂载
+          console.log('[Sync] 检查 codeLookup 数据:', !!data.codeLookup)
           if (data.codeLookup) {
-            codeLookupEntries.value = data.codeLookup.entries || []
+            const entries = data.codeLookup.entries || []
+            console.log(`[Sync] 加载 codeLookup: ${entries.length} 个条目`)
+            
+            // 调试日志：显示前几个条目的详细信息
+            if (entries.length > 0) {
+              console.log('[Sync] Sample entries:')
+              entries.slice(0, 5).forEach((entry: any, idx: number) => {
+                console.log(`  [${idx}] level=${entry.level}, fullPath="${entry.fullPath}", parentPath="${entry.parentPath}", name=${entry.name}`)
+              })
+              
+              // 统计各级别数量
+              const levelCounts: Record<number, number> = {}
+              entries.forEach((e: any) => {
+                const level = e.level || 0
+                levelCounts[level] = (levelCounts[level] || 0) + 1
+              })
+              console.log('[Sync] Entries by level:', levelCounts)
+            }
+            
+            codeLookupEntries.value = entries
             sourceEntries.value = data.codeLookup.sources || []
             serialCounters.value = data.codeLookup.counters || []
             codeConfig.value = {
               ...codeConfig.value,
               ...data.codeLookup.config
             }
+          } else {
+            console.warn('[Sync] 后端未返回 codeLookup 数据，使用空数组')
+            // 确保至少初始化为空数组，避免 undefined 导致的错误
+            codeLookupEntries.value = []
+            sourceEntries.value = []
+            serialCounters.value = []
           }
 
           recordsActions.applyFilters()

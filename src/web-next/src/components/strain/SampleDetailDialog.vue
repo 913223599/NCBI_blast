@@ -565,11 +565,21 @@ function handleSave() {
     return
   }
 
-  strain.updateRecord(props.record.id, {
+  const updatedCount = strain.updateRecord(props.record.id, {
     ...editForm
   })
 
-  appStore.showNotification('样本信息已更新', 'success')
+  // 根据更新数量显示不同的提示
+  if (updatedCount > 1) {
+    const sampleCode = props.record.sampleCode || props.record.accession
+    appStore.showNotification(
+      `已同步更新 ${updatedCount} 条编号为「${sampleCode}」的备份菌株`,
+      'success'
+    )
+  } else {
+    appStore.showNotification('样本信息已更新', 'success')
+  }
+  
   isEditing.value = false
 }
 

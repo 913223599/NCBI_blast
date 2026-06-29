@@ -18,7 +18,7 @@
       <!-- 数据表格区域 -->
       <div class="table-area">
         <StrainListTable
-          :records="displayedRecords"
+          :records="groupedRecords"
           :selected-ids="strainStore.selectedRecords"
           :active-id="strainStore.activeRecord?.id"
           :visibility="columnVisibility"
@@ -26,6 +26,7 @@
           :sort-order="strainStore.searchFilters.sortOrder"
           @rowClick="handleRowClick"
           @toggleSelect="handleToggleSelect"
+          @shiftSelect="handleShiftSelect"
           @viewDetail="handleViewDetail"
           @deleteRow="handleDeleteRow"
           @sort="key => strainStore.toggleSort(key)"
@@ -54,7 +55,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive } from 'vue'
-import { useStrainStore } from '../../../stores/strain'
+import { useStrainStore, type StrainRecord } from '../../../stores/strain'
 import { useAppStore } from '../../../stores/app'
 import StrainListAdvancedSearch from './StrainListAdvancedSearch.vue'
 import StrainListToolbar from './StrainListToolbar.vue'
@@ -94,6 +95,31 @@ const displayedRecords = computed(() => {
   return strainStore.filteredRecords.slice(0, RENDER_LIMIT)
 })
 
+// 按 accession 分组，将相同登录号的样本折叠显示
+const groupedRecords = computed(() => {
+  const groupMap: Record<string, StrainRecord[]> = {}
+  
+  for (const record of displayedRecords.value) {
+    const key = record.accession || `no-accession-${record.id}`
+    if (!groupMap[key]) {
+      groupMap[key] = []
+    }
+    groupMap[key].push(record)
+  }
+  
+  // 转换为数组格式，每个组只保留第一条记录作为代表
+  const result: Array<{ representative: StrainRecord; duplicates: StrainRecord[] }> = []
+  for (const records of Object.values(groupMap)) {
+    if (records && records.length > 0) {
+      result.push({
+        representative: records[0]!,
+        duplicates: records.slice(1)
+      })
+    }
+  }
+  return result
+})
+
 const filterStats = computed(() => {
   const records = strainStore.filteredRecords
   const total = records.length
@@ -126,6 +152,10 @@ function handleToggleSelectAll(checked: boolean) {
 
 function handleToggleSelect(id: string) {
   strainStore.toggleSelect(id)
+}
+
+function handleShiftSelect(fromId: string, toId: string, allIds: string[]) {
+  strainStore.shiftSelectRange(fromId, toId, allIds)
 }
 
 function handleRowClick(record: any) {

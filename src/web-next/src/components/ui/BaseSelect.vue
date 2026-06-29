@@ -89,7 +89,7 @@ onUnmounted(() => {
       <transition name="dropdown-fade">
         <div v-if="isOpen" class="select-dropdown">
           <div 
-            v-for="opt in options" 
+            v-for="opt in (options || [])"
             :key="opt.value"
             class="select-option"
             :class="{ 'is-selected': opt.value === modelValue, 'is-disabled': opt.disabled }"
@@ -97,7 +97,7 @@ onUnmounted(() => {
           >
             {{ opt.label }}
           </div>
-          <div v-if="options.length === 0" class="empty-options">
+          <div v-if="!options || options.length === 0" class="empty-options">
             无可用选项
           </div>
         </div>

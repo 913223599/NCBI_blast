@@ -32,10 +32,10 @@
 
         <div class="input-item">
           <label>物种分类</label>
-          <select v-model="filters.species" @change="handleInput">
-            <option value="">所有已知物种</option>
-            <option v-for="s in uniqueSpecies" :key="s" :value="s">{{ s }}</option>
-          </select>
+          <SpeciesTreeSelector 
+            v-model="filters.species" 
+            @change="handleInput"
+          />
         </div>
 
         <div class="input-item">
@@ -60,8 +60,8 @@
       <!-- 平铺式列管理 -->
       <section class="column-visibility-grid">
         <label v-for="(visible, key) in columnVisibility" :key="key" class="col-check-label">
-          <input type="checkbox" v-model="columnVisibility[key]" @change="emit('updateColumns', columnVisibility)" />
-          <span>{{ getColumnLabel(key) }}</span>
+          <input type="checkbox" v-model="columnVisibility[String(key)]" @change="emit('updateColumns', columnVisibility)" />
+          <span>{{ getColumnLabel(String(key)) }}</span>
         </label>
       </section>
     </div>
@@ -80,6 +80,8 @@
 import { computed, ref, reactive } from 'vue'
 import { useStrainStore } from '../../../stores/strain'
 import { useAppStore } from '../../../stores/app'
+import SpeciesTreeSelector from '../SpeciesTreeSelector.vue'
+import { useCodeGenerator } from '../../../composables/useCodeGenerator'
 
 const props = defineProps<{
   stats: { total: number } | null,
@@ -93,7 +95,24 @@ const appStore = useAppStore()
 const filters = strainStore.searchFilters as any
 
 const uniqueSpecies = computed(() => strainStore.uniqueSpecies)
-const columnVisibility = reactive({ ...props.initialColumns })
+const columnVisibility = reactive<Record<string, boolean>>({ ...props.initialColumns })
+
+// 将编码对照表路径转换为显示名称的辅助函数
+function speciesPathToDisplayName(fullPath: string): string {
+  if (!fullPath) return ''
+  // 尝试从对照表中获取名称
+  const { lookup } = useCodeGenerator()
+  const entry = lookup.findByFullPath(fullPath)
+  if (entry) {
+    let label = entry.name
+    if (entry.latinName) {
+      label += ` (${entry.latinName})`
+    }
+    return label
+  }
+  // 如果找不到，直接返回原值（兼容旧数据）
+  return fullPath
+}
 
 const integrityOnly = ref(false)
 function toggleIntegrityCheck() {
@@ -116,9 +135,10 @@ function resetFilters() {
   strainStore.resetFilters()
 }
 
-function getColumnLabel(key: string): string {
+function getColumnLabel(key: string | number): string {
+  const k = String(key)
   const labels: Record<string, string> = { accession: '登录号', species: '物种', strain: '菌株', sequenceType: '类型', source: '来源', host: '宿主', country: '地区', collectionDate: '采集时间', addedAt: '录入时间', location: '位置' }
-  return labels[key] || key
+  return labels[k] || k
 }
 
 function handleExportFiltered() {
