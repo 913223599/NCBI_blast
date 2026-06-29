@@ -16,6 +16,11 @@ export function useRecordsActions(state: any, autoSave: () => void) {
   // 获取 codeGen 实例用于物种路径解析
   const codeGen = useCodeGenerator()
   const lookup = codeGen.lookup
+  
+  // 获取 codeLookup entries 用于属级别筛选
+  function getEntries() {
+    return lookup.lookupEntries?.value ?? []
+  }
 
   // shiftSelectRange 的 Map 缓存：避免每次 shift-click 都重建
   let _cachedRecordById: Map<string, StrainRecord> | null = null
@@ -83,7 +88,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
         if (!matchKeyword) return false
       }
       if (species) {
-        // 物种筛选：基于编码对照表的路径匹配
+        // 物种筛选：支持三级结构（大类/属/种）
         // species 可能是：
         // - 完整路径（如 "1AKFBXM"）- 物种级别 (level 3)
         // - 属路径（如 "1AKF"）- 属级别 (level 2)
@@ -91,26 +96,45 @@ export function useRecordsActions(state: any, autoSave: () => void) {
         
         const selectedEntry = lookup.findByFullPath(species)
         
-        // 构建记录的完整物种路径
-        const recordSpeciesPath = `${record.codeCategory || ''}${record.codeGenus || ''}${record.codeSpecies || ''}`
-        
         let matches = false
         
         if (selectedEntry) {
           // 在 codeLookup 中找到了对应条目，根据层级进行匹配
           if (selectedEntry.level === 3) {
-            // 选择了物种级别，精确匹配 fullPath
-            matches = recordSpeciesPath === species
+            // 选择了物种级别：通过名称匹配
+            // 提取物种名称（去掉括号中的拉丁名）
+            const speciesName = selectedEntry.name.split('(')[0].trim()
+            matches = record.name.includes(speciesName) || 
+                      record.species?.includes(speciesName) ||
+                      `${record.codeCategory}${record.codeGenus}${record.codeSpecies}` === species
           } else if (selectedEntry.level === 2) {
-            // 选择了属级别，匹配该属下所有物种（fullPath 以 genus 开头）
-            matches = recordSpeciesPath.startsWith(species)
+            // 选择了属级别：获取该属下所有物种的名称，然后匹配记录
+            const genusName = selectedEntry.name.split('(')[0].trim()
+            
+            // 获取该属下的所有物种
+            const entries = getEntries()
+            const speciesInGenus = entries.filter(
+              e => e.level === 3 && e.parentPath === species && e.enabled
+            )
+            
+            if (speciesInGenus.length > 0) {
+              // 有预定义的物种列表，通过名称匹配
+              const speciesNames = speciesInGenus.map(sp => sp.name.split('(')[0].trim())
+              matches = speciesNames.some(name => 
+                record.name.includes(name) || record.species?.includes(name)
+              )
+            } else {
+              // 没有预定义物种，尝试通过属名匹配
+              matches = record.name.includes(genusName) || 
+                        record.species?.includes(genusName) ||
+                        record.codeGenus === selectedEntry.code
+            }
           } else if (selectedEntry.level === 1) {
-            // 选择了大类级别，匹配该大类下所有物种（codeCategory 等于大类代码）
+            // 选择了大类级别，匹配该大类下所有物种
             matches = record.codeCategory === species
           }
         } else {
-          // 未在 codeLookup 中找到对应条目，尝试作为大类代码处理（兼容没有 Level 1 条目的情况）
-          // 如果 species 是单个字符（如 "1", "4"），则认为是大类代码
+          // 未在 codeLookup 中找到对应条目，尝试作为大类代码处理
           if (species.length === 1) {
             matches = record.codeCategory === species
           }
