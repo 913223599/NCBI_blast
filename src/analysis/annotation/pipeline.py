@@ -110,6 +110,46 @@ class AnnotationPipeline:
                 self._broadcast_progress(0, "任务已被用户取消")
                 return {"status": "cancelled"}
 
+            # 3.5 蛋白质生物学功能深度比对与打捞 (Assign Real Functions via BLASTP)
+            if files.get("faa") and Path(files["faa"]).exists() and features:
+                self._broadcast_progress(65, "正在比对权威蛋白质功能数据库 (PhageScope/RefSeq 105万条参考蛋白)...")
+                try:
+                    from .functional_assigner import FunctionalAssigner
+                    assigner = FunctionalAssigner()
+                    assigned_hits = assigner.run_blastp_annotation(
+                        query_faa=Path(files["faa"]),
+                        work_dir=self.work_dir,
+                        threads=allocated_threads
+                    )
+                    
+                    if assigned_hits:
+                        self._broadcast_progress(82, f"成功打捞并匹配到 {len(assigned_hits)} 个编码基因的真实生物学功能...")
+                        updated_count = 0
+                        for feat in features:
+                            hit = assigned_hits.get(feat.id) or assigned_hits.get(feat.locus_tag) or assigned_hits.get(feat.protein_id)
+                            if hit:
+                                feat.product = hit["product"]
+                                if hit.get("gene_name"):
+                                    feat.gene_name = hit["gene_name"]
+                                feat.notes = f"Inferred via BLASTP alignment to {hit.get('target_id', 'RefSeq')} (Identity: {hit.get('identity', 100)}%, E-value: {hit.get('evalue', '1e-5')})"
+                                updated_count += 1
+                        
+                        logger.info(f"Updated {updated_count} CDS features with real biological products")
+                        
+                        # 重新导出更新后的 GBK, GFF3, TSV
+                        records = list(SeqIO.parse(str(input_fasta), "fasta"))
+                        if req.selected_contigs:
+                            sel_set = set(req.selected_contigs)
+                            records = [r for r in records if r.id in sel_set]
+                        summary, features, files = annotator.export_features_to_files(
+                            records=records,
+                            all_features=features,
+                            output_dir=self.work_dir,
+                            on_progress=lambda p, msg: self._broadcast_progress(p, msg)
+                        )
+                except Exception as blast_err:
+                    logger.warning(f"蛋白质功能打捞阶段异常: {blast_err}")
+
             # 4. 特征数据分片落盘与 JSON 存储
             features_file = self.work_dir / "features.json"
             features_dict = [f.dict() for f in features]

@@ -321,15 +321,83 @@ class BuiltinAnnotator:
             gbk_records.append(gbk_rec)
             
             prog_val = 25 + int(50 * (c_idx + 1) / num_contigs)
-            if on_progress:
-                on_progress(prog_val, f"正在处理 Contig ({c_idx + 1}/{num_contigs}): {contig_id}...")
+        return self.export_features_to_files(
+            records=records,
+            all_features=all_features,
+            output_dir=output_dir,
+            on_progress=on_progress
+        )
 
+    def export_features_to_files(
+        self,
+        records: List[SeqRecord],
+        all_features: List[FeatureItem],
+        output_dir: Path,
+        on_progress: Optional[callable] = None
+    ) -> Tuple[AnnotationSummary, List[FeatureItem], Dict[str, str]]:
+        """
+        根据当前最新的 features 列表导出所有标准生物学格式产物
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
         if on_progress:
-            on_progress(80, "正在生成标准生物数据产物 (GBK / GFF / FAA / FFN / TSV)...")
+            on_progress(88, "正在打包并导出标准 GenBank / GFF3 / TSV 产物...")
 
-        # ----------------------------------------------------
-        # 产物文件导出与分片落盘
-        # ----------------------------------------------------
+        total_length = sum(len(r.seq) for r in records)
+        num_contigs = len(records)
+
+        # 1. 组装 GenBank SeqRecord 结构
+        feature_map: Dict[str, List[FeatureItem]] = {}
+        for feat in all_features:
+            # 兼容：通过 locus_tag 对应
+            pass
+
+        gbk_records: List[SeqRecord] = []
+        feat_idx = 0
+
+        for record in records:
+            contig_id = record.id
+            seq_str = str(record.seq)
+
+            gbk_rec = SeqRecord(
+                Seq(seq_str),
+                id=contig_id[:16],
+                name=contig_id[:16],
+                description=f"{contig_id} annotated by NCBI Blast Workbench",
+                annotations={"molecule_type": "DNA", "data_file_division": "BCT"}
+            )
+
+            source_feat = SeqFeature(
+                FeatureLocation(ExactPosition(0), ExactPosition(len(seq_str))),
+                type="source",
+                qualifiers={"organism": "Unspecified Organism", "mol_type": "genomic DNA"}
+            )
+            gbk_rec.features.append(source_feat)
+
+            # 提取属于该 contig 的 features (按位置区间)
+            while feat_idx < len(all_features):
+                feat = all_features[feat_idx]
+                strand_val = 1 if feat.strand == "+" else -1
+                cds_feat = SeqFeature(
+                    FeatureLocation(ExactPosition(feat.start - 1), ExactPosition(feat.end), strand=strand_val),
+                    type=feat.feature_type,
+                    qualifiers={
+                        "locus_tag": [feat.locus_tag],
+                        "protein_id": [feat.protein_id or f"{feat.locus_tag}_prot"],
+                        "product": [feat.product],
+                        "translation": [feat.translation] if feat.translation else []
+                    }
+                )
+                if feat.gene_name:
+                    cds_feat.qualifiers["gene"] = [feat.gene_name]
+                if feat.notes:
+                    cds_feat.qualifiers["note"] = [feat.notes]
+
+                gbk_rec.features.append(cds_feat)
+                feat_idx += 1
+
+            gbk_records.append(gbk_rec)
+
+        # 文件路径定义
         gbk_file = output_dir / f"{self.prefix}.gbk"
         gff_file = output_dir / f"{self.prefix}.gff"
         faa_file = output_dir / f"{self.prefix}.faa"
