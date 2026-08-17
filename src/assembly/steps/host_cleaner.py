@@ -137,14 +137,11 @@ class HostCleanerStep(BaseAssemblyStep):
             except Exception as _e:
                 self.logger.warning(f"无法保存 host_stats.json: {_e}")
 
-            # 3. 将结果写回硬盘
-            shm_clean_r1 = f"{shm_dir}/clean_1.fq"
-            shm_clean_r2 = f"{shm_dir}/clean_2.fq"
             # 3. 将结果并行写回硬盘 (并发封包技术)
             final_r1 = out_dir / "clean_filtered_R1.fq.gz"
             final_r2 = out_dir / "clean_filtered_R2.fq.gz"
             
-            msg = "正在并发展开数据封包 (Parallel Gzip)..."
+            msg = "正在内存盘内并发展开数据封包 (Parallel Gzip)..."
             if self.on_progress: self.on_progress(85, msg)
             self.logger.info(msg)
             
@@ -162,10 +159,16 @@ class HostCleanerStep(BaseAssemblyStep):
             runner_r1 = CommandRunner(f"{self.__class__.__name__}.Zip1", is_wsl=True)
             runner_r2 = CommandRunner(f"{self.__class__.__name__}.Zip2", is_wsl=True)
 
-            cmd1 = f"{zip_tool} -c '{shm_clean_r1}' > '{WSLManager.to_wsl_path(str(final_r1))}'"
-            cmd2 = f"{zip_tool} -c '{shm_clean_r2}' > '{WSLManager.to_wsl_path(str(final_r2))}'"
+            # 🚀 I/O 优化：先在内存盘内完成压缩，再一次性搬运到 Windows 盘
+            shm_clean_r1 = f"{shm_dir}/clean_1.fq"
+            shm_clean_r2 = f"{shm_dir}/clean_2.fq"
+            shm_gz_r1 = f"{shm_dir}/clean_1.fq.gz"
+            shm_gz_r2 = f"{shm_dir}/clean_2.fq.gz"
+            
+            cmd1 = f"{zip_tool} -c '{shm_clean_r1}' > '{shm_gz_r1}'"
+            cmd2 = f"{zip_tool} -c '{shm_clean_r2}' > '{shm_gz_r2}'"
 
-            # 🔗 并发封包 (使用干净的指令字符串 + is_shell=True)
+            # 🔗 并发封包 (在极速内存盘中进行)
             retcodes = await asyncio.gather(
                 runner_r1.run_command(cmd1, is_shell=True),
                 runner_r2.run_command(cmd2, is_shell=True)
@@ -174,6 +177,12 @@ class HostCleanerStep(BaseAssemblyStep):
             if any(r != 0 for r in retcodes):
                 self.logger.error("并发封包过程中发生致命错误")
                 return False
+
+            # 🚀 原子搬运：将压缩好的文件从内存盘拷贝到 Windows 目标目录
+            wsl_final_r1 = WSLManager.to_wsl_path(str(final_r1))
+            wsl_final_r2 = WSLManager.to_wsl_path(str(final_r2))
+            await self.runner.run_command(["cp", shm_gz_r1, wsl_final_r1])
+            await self.runner.run_command(["cp", shm_gz_r2, wsl_final_r2])
             
             self.context.update("clean_r1", final_r1)
             self.context.update("clean_r2", final_r2)
@@ -316,7 +325,7 @@ class HostCleanerStep(BaseAssemblyStep):
             final_r1 = out_dir / "clean_filtered_R1.fq.gz"
             final_r2 = out_dir / "clean_filtered_R2.fq.gz"
             
-            msg = "正在并发展开数据封包 (Parallel Gzip)..."
+            msg = "正在内存盘内并发展开数据封包 (Parallel Gzip)..."
             if self.on_progress: self.on_progress(80, msg)
             self.logger.info(msg)
             
@@ -328,8 +337,12 @@ class HostCleanerStep(BaseAssemblyStep):
             runner_r1 = CommandRunner(f"{self.__class__.__name__}.Zip1", is_wsl=True)
             runner_r2 = CommandRunner(f"{self.__class__.__name__}.Zip2", is_wsl=True)
 
-            cmd1 = f"{zip_tool} -c '{shm_clean_r1}' > '{WSLManager.to_wsl_path(str(final_r1))}'"
-            cmd2 = f"{zip_tool} -c '{shm_clean_r2}' > '{WSLManager.to_wsl_path(str(final_r2))}'"
+            # 🚀 I/O 优化：先在内存盘内完成压缩，再一次性搬运
+            shm_gz_r1 = f"{shm_dir}/clean_R1.fq.gz"
+            shm_gz_r2 = f"{shm_dir}/clean_R2.fq.gz"
+            
+            cmd1 = f"{zip_tool} -c '{shm_clean_r1}' > '{shm_gz_r1}'"
+            cmd2 = f"{zip_tool} -c '{shm_clean_r2}' > '{shm_gz_r2}'"
 
             retcodes = await asyncio.gather(
                 runner_r1.run_command(cmd1, is_shell=True),
@@ -339,6 +352,12 @@ class HostCleanerStep(BaseAssemblyStep):
             if any(r != 0 for r in retcodes):
                 self.logger.error("并发封包过程中发生致命错误")
                 return False
+            
+            # 🚀 原子搬运
+            wsl_final_r1 = WSLManager.to_wsl_path(str(final_r1))
+            wsl_final_r2 = WSLManager.to_wsl_path(str(final_r2))
+            await self.runner.run_command(["cp", shm_gz_r1, wsl_final_r1])
+            await self.runner.run_command(["cp", shm_gz_r2, wsl_final_r2])
             
             self.context.update("clean_r1", final_r1)
             self.context.update("clean_r2", final_r2)

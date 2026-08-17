@@ -74,7 +74,9 @@ const columnVisibility = reactive({
   source: false, // 默认隐藏一些不常用的
   host: false,
   country: true,
-  collectionDate: true
+  collectionDate: true,
+  addedAt: false,
+  location: true
 })
 
 const activeFilterCount = computed(() => {

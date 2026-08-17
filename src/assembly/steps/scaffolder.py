@@ -69,12 +69,12 @@ class ScaffoldingStep(BaseAssemblyStep):
             wsl_raw_scaffold = f"{spades_out}/scaffolds.fasta"
             win_raw_scaffold = self.get_working_dir() / "scaffolds.raw.fasta"
             
-            await self.runner.run_command(["cp", "-f", wsl_raw_scaffold, str(win_raw_scaffold)])
+            await self.runner.run_command(["cp", "-f", wsl_raw_scaffold, WSLManager.to_wsl_path(str(win_raw_scaffold))])
             
             wsl_graph = f"{spades_out}/assembly_graph_with_scaffolds.gfa"
             win_graph = self.get_working_dir() / "assembly_graph.gfa"
             if await self.runner.run_command(["test", "-f", wsl_graph]) == 0:
-                await self.runner.run_command(["cp", "-f", wsl_graph, str(win_graph)])
+                await self.runner.run_command(["cp", "-f", wsl_graph, WSLManager.to_wsl_path(str(win_graph))])
             
             self.logger.info("启动 MAD-Sigma 深度分布过滤与 DTR 拓扑验证...")
             self._clean_scaffolds_advanced(str(win_raw_scaffold), str(final_clean))
@@ -164,8 +164,11 @@ class ScaffoldingStep(BaseAssemblyStep):
             
             # 1. 动态特征提取
             max_len = max(len(r.seq) for r in records)
-            # 提升 len_cutoff，确保 main_cov 由真正的主序列决定，而不是被大量小碎片带偏
-            len_cutoff = max(5000, int(0.05 * max_len))
+            # 针对微型基因组（如噬菌体）的自适应阈值调整
+            if max_len < 10000:
+                len_cutoff = max(1000, int(0.1 * max_len))
+            else:
+                len_cutoff = max(5000, int(0.05 * max_len))
             
             # 2. 深度统计建模 (MAD 1.4826)
             covs = []
@@ -220,19 +223,40 @@ class ScaffoldingStep(BaseAssemblyStep):
                 if main_cov > 10.0 and z_score > 3.5 and c > main_cov:
                     r.description += f" [Repeat_Candidate|Z={z_score:.1f}]"
                 
-                # C. 环形验证 (DTR Check)
+                # C. 环形验证 (DTR Check - 严格平齐匹配)
                 if len(r.seq) > 2000 and "circular=true" not in r.description.lower():
                     seq_str = str(r.seq).upper()
                     head_seed = seq_str[:100]
-                    # 防止由于序列短于 3000bp 导致 tail_region 包含 head_seed
                     tail_region_start = max(100, len(seq_str) - 3000)
                     tail_region = seq_str[tail_region_start:]
                     
-                    if head_seed in tail_region:
-                        pos = tail_region.find(head_seed)
+                    pos = tail_region.find(head_seed)
+                    if pos != -1:
                         overlap = len(tail_region) - pos
-                        r.description += f" [circular_verified:DTR={overlap}bp]"
-                        self.logger.info(f"⭕ 已验证 DTR 环形拓扑: {r.id} (Overlap={overlap}bp)")
+                        # 严格末端平齐比对：必须且只需头部 overlap 长度的前缀与序列最末尾的后缀完全一致
+                        if overlap >= 50 and overlap < len(seq_str) and seq_str[:overlap] == seq_str[-overlap:]:
+                            r.description += f" [circular_verified:DTR={overlap}bp]"
+                            self.logger.info(f"⭕ 已验证 DTR 环形拓扑: {r.id} (Overlap={overlap}bp)")
+                
+                # D. 线性末端反向重复序列验证与修剪 (ITR Check & Trim)
+                if len(r.seq) > 2000 and "circular_verified:DTR=" not in r.description:
+                    seq_str = str(r.seq).upper()
+                    head_seed = seq_str[:100]
+                    tail_region_start = max(100, len(seq_str) - 3000)
+                    tail_region = seq_str[tail_region_start:]
+                    
+                    rc_head_seed = self._reverse_complement(head_seed)
+                    pos = tail_region.find(rc_head_seed)
+                    if pos != -1:
+                        overlap = len(tail_region) - pos
+                        if overlap >= 50 and overlap < len(seq_str):
+                            prefix = seq_str[:overlap]
+                            suffix = seq_str[-overlap:]
+                            if prefix == self._reverse_complement(suffix):
+                                # 物理修剪尾部冗余的反向重复序列，还原单拷贝物理图谱
+                                r.seq = r.seq[:-overlap]
+                                r.description += f" [circular_verified:ITR_trimmed={overlap}bp]"
+                                self.logger.info(f"⭕ 已验证并修剪 ITR 末端反向重复拓扑: {r.id} (Trimmed={overlap}bp)")
                 
                 clean_records.append(r)
                 
@@ -270,3 +294,9 @@ class ScaffoldingStep(BaseAssemblyStep):
             self.context.update("scaffold_path", fallback)
             self.context.update("assembly_fasta", fallback)
         return False
+
+    @staticmethod
+    def _reverse_complement(seq: str) -> str:
+        """快速互补反转 DNA 序列"""
+        rc_map = str.maketrans("ACGTN", "TGCAN")
+        return seq.translate(rc_map)[::-1]

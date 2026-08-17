@@ -30,8 +30,8 @@ class AssemblerStep(BaseAssemblyStep):
 
         self.status = "running"
         cpu_count = os.cpu_count() or 8
-        optimal_threads = max(1, cpu_count - 1)
-        self.logger.info(f"🚀 自动资源调优: 物理核心数={cpu_count}, 分配线程={optimal_threads}")
+        optimal_threads = self.context.config.get("params", {}).get("threads") or max(1, cpu_count - 1)
+        self.logger.info(f"🚀 自动资源调优: 物理核心数={cpu_count}, 自适应/手动分配线程={optimal_threads}")
 
         tech = (self.context.config.get("tech") or "ILLUMINA").upper()
         sample_type = (self.context.config.get("sample_type") or "PHAGE").upper()
@@ -203,8 +203,8 @@ class AssemblerStep(BaseAssemblyStep):
                 for f_name in potential_fastas:
                     src = f"{wsl_tmp_outdir}/{f_name}"
                     if await self.runner.run_command(["test", "-f", src]) == 0:
-                        await self.runner.run_command(["cp", "-f", src, f"{out_dir}/assembly.fasta"])
-                        if returncode == 0: self.logger.info(f"✅ 成功捕获序列产物: {f_name}")
+                        await self.runner.run_command(["cp", "-f", src, WSLManager.to_wsl_path(str(out_dir / "assembly.fasta"))])
+                        if returncode == 0: self.logger.info(f"成功捕获序列产物: {f_name}")
                         found_fasta = True
                         break
                 
@@ -212,12 +212,12 @@ class AssemblerStep(BaseAssemblyStep):
                     for n in names:
                         src = f"{wsl_tmp_outdir}/{n}"
                         if await self.runner.run_command(["test", "-f", src]) == 0:
-                            await self.runner.run_command(["cp", "-f", src, f"{out_dir}/{dest}"])
+                            await self.runner.run_command(["cp", "-f", src, WSLManager.to_wsl_path(str(out_dir / dest))])
                             break
                 
                 spades_log = f"{wsl_tmp_outdir}/spades_assembly/spades.log"
                 if await self.runner.run_command(["test", "-f", spades_log]) == 0:
-                    await self.runner.run_command(["cp", "-f", spades_log, f"{out_dir}/spades.log"])
+                    await self.runner.run_command(["cp", "-f", spades_log, WSLManager.to_wsl_path(str(out_dir / "spades.log"))])
 
                 if returncode == 0 and found_fasta:
                     break  # 成功，跳出重试循环
@@ -267,8 +267,8 @@ class AssemblerStep(BaseAssemblyStep):
                     fallback_fasta = f"{fallback_out}/scaffolds.fasta"
                     if await self.runner.run_command(["test", "-f", fallback_fasta]) == 0:
                         await self.runner.run_command(["mkdir", "-p", WSLManager.to_wsl_path(str(out_dir))])
-                        await self.runner.run_command(["cp", "-f", fallback_fasta, f"{out_dir}/assembly.fasta"])
-                        self.logger.info("✅ SPAdes Meta 备用引擎打捞成功！")
+                        await self.runner.run_command(["cp", "-f", fallback_fasta, WSLManager.to_wsl_path(str(out_dir / "assembly.fasta"))])
+                        self.logger.info("SPAdes Meta 备用引擎打捞成功！")
                         found_fasta = True
                         returncode = 0
 

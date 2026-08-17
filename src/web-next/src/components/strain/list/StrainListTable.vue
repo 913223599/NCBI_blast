@@ -23,7 +23,13 @@
           <th v-if="visibility.host" class="col-host">宿主</th>
           <th v-if="visibility.country" class="col-country">地区</th>
           <th v-if="visibility.collectionDate" class="col-date sortable" @click="emit('sort', 'collectionDate')">
-            日期 <span class="sort-icon">{{ getSortIcon('collectionDate') }}</span>
+            采集时间 <span class="sort-icon">{{ getSortIcon('collectionDate') }}</span>
+          </th>
+          <th v-if="visibility.addedAt" class="col-date sortable" @click="emit('sort', 'addedAt')">
+            录入时间 <span class="sort-icon">{{ getSortIcon('addedAt') }}</span>
+          </th>
+          <th v-if="visibility.location" class="col-location">
+            位置
           </th>
           <th class="col-actions">操作</th>
         </tr>
@@ -67,6 +73,10 @@
           <td v-if="visibility.host" class="col-host">{{ record.host || '-' }}</td>
           <td v-if="visibility.country" class="col-country">{{ record.country || '-' }}</td>
           <td v-if="visibility.collectionDate" class="col-date">{{ record.collectionDate || '-' }}</td>
+          <td v-if="visibility.addedAt" class="col-date">{{ record.addedAt ? new Date(record.addedAt).toLocaleDateString() : '-' }}</td>
+          <td v-if="visibility.location" class="col-location" :title="getLocationString(record)">
+            {{ getLocationString(record) }}
+          </td>
           <td class="col-actions">
             <div class="action-btns">
               <button class="action-btn-mini edit" @click.stop="emit('viewDetail', record)" title="编辑详情">
@@ -89,7 +99,10 @@
 </template>
 
 <script setup lang="ts">
+import { useStrainStore } from '../../../stores/strain'
 import type { StrainRecord } from '../../../stores/strain'
+
+const strainStore = useStrainStore()
 
 const props = defineProps<{
   records: StrainRecord[]
@@ -107,6 +120,16 @@ function getSortIcon(key: string) {
   if (props.sortOrder === 'asc') return '🔼'
   if (props.sortOrder === 'desc') return '🔽'
   return '↕️'
+}
+
+function getLocationString(record: StrainRecord) {
+  if (record.freezerId && record.boxId) {
+    const map = strainStore.locationMap
+    const path = map[`${record.freezerId}|${record.boxId}`] || map[record.boxId] || '未知位置'
+    return record.position ? `${path} - ${record.position}` : path
+  }
+  if (record.position) return record.position
+  return '-'
 }
 </script>
 
@@ -194,6 +217,7 @@ function getSortIcon(key: string) {
 .col-host { width: 100px; }
 .col-country { width: 100px; }
 .col-date { width: 100px; }
+.col-location { width: 180px; }
 .col-actions { width: 90px; text-align: center; }
 
 .accession-tag {

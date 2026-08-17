@@ -113,12 +113,20 @@ export const useStrainStore = defineStore('strain', () => {
   }
 
   function generateCSV(data: StrainRecord[]): string {
-    const headers = ['Accession', 'Name', 'Species', 'Strain', 'Type', 'Source', 'Host', 'Country', 'Date']
-    const rows = data.map(r =>
-      [r.accession, r.name, r.species, r.strain, r.sampleType, r.source, r.host, r.country, r.collectionDate]
-        .map(v => `"${String(v || '').replace(/"/g, '""')}"`)
-        .join(',')
-    )
+    const headers = ['Accession', 'Name', 'Species', 'Strain', 'Type', 'Source', 'Host', 'Country', 'Collection Date', 'Entry Time', 'Location']
+    const rows = data.map(r => {
+      let locationStr = '-'
+      if (r.freezerId && r.boxId) {
+        const path = s.locationMap.value[`${r.freezerId}|${r.boxId}`] || s.locationMap.value[r.boxId] || '未知位置'
+        locationStr = r.position ? `${path} - ${r.position}` : path
+      } else if (r.position) {
+        locationStr = r.position
+      }
+      return [
+        r.accession, r.name, r.species, r.strain, r.sampleType, 
+        r.source, r.host, r.country, r.collectionDate, r.addedAt, locationStr
+      ].map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(',')
+    })
     return [headers.join(','), ...rows].join('\n')
   }
 

@@ -62,15 +62,14 @@ class CommandRunner:
         # 2. 跨平台执行指令构建
         # ==========================================
         if self.is_wsl:
+            from ..env.wsl_manager import WSLManager
+            distro = WSLManager.get_best_distro()
             if is_shell:
-                # 🔗 纠偏：如果是 Shell 片段，将参数合并为单一字符串
-                # 警告：不要在这里给 shell_str 加双引号，由 asyncio 处理 argv 的引号
                 shell_str = " ".join([str(c) for c in final_cmd_args])
-                cmd_to_exec = ["wsl", "-d", "Ubuntu", "-u", "root", "bash", "-c", shell_str]
+                cmd_to_exec = ["wsl", "-d", distro, "-u", "root", "bash", "-c", shell_str]
                 use_shell = False 
             else:
-                # 列表直调模式
-                cmd_to_exec = ["wsl", "-d", "Ubuntu", "-u", "root"] + [str(c) for c in final_cmd_args]
+                cmd_to_exec = ["wsl", "-d", distro, "-u", "root"] + [str(c) for c in final_cmd_args]
                 use_shell = False
             cwd_to_exec = None 
         else:
