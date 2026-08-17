@@ -290,7 +290,7 @@ class ProteinComparer:
                 best_c_cnt = 0
                 best_r_cnt = 0
                 best_in_cnt = 0
-                best_doms = self._calculate_domains(len(pa.translation), [], 100.0)
+                best_doms = self._calculate_domains(len(pa.translation), [], 100.0, category=pa.category, product=pa.product)
                 best_concl = "双样本全长氨基酸序列 100% 逐位一致，核心催化与组装结构高度锁定。"
             else:
                 # 2. 同名优先检索与高相似度序列对齐
@@ -302,7 +302,9 @@ class ProteinComparer:
                 search_cands = same_prod_cands if same_prod_cands else candidates
 
                 for pb in search_cands:
-                    ident, muts, diffs, aln_a, markup, aln_b, c_cnt, r_cnt, in_cnt, doms, concl = self._align_and_diff(pa.translation, pb.translation)
+                    ident, muts, diffs, aln_a, markup, aln_b, c_cnt, r_cnt, in_cnt, doms, concl = self._align_and_diff(
+                        pa.translation, pb.translation, category=pa.category, product=pa.product
+                    )
                     if ident > best_identity:
                         best_identity = ident
                         best_match = pb
@@ -480,7 +482,73 @@ class ProteinComparer:
         
         return "other_mutation", "理化性质变异"
 
-    def _align_and_diff(self, seq_a: str, seq_b: str) -> Tuple[
+    @staticmethod
+    def _get_domain_names(category: str, product: str) -> Tuple[str, str, str]:
+        """依据蛋白质功能分类与产品名称动态推导 N端、中段、C端 结构域名称"""
+        p_lower = product.lower()
+        
+        # 1. 尾管 / 尾鞘 / 尾柱状骨架结构 (优先于一般 tail_fiber 判定，避免 tail tube 误判为尾丝)
+        if any(k in p_lower for k in ["tail tube", "tail sheath", "tube", "sheath", "major tail"]):
+            return (
+                "N-端环状聚合界面 (Ring Assembly N-term)",
+                "中段管壁/鞘层骨架区 (Conduit Core)",
+                "C-端末端对接区 (Distal Interface C-term)"
+            )
+        
+        # 2. 尾丝 / 纤突 / 受体结合系统
+        if category == "tail_fiber" or any(k in p_lower for k in ["tail fiber", "fiber", "spike", "receptor"]):
+            return (
+                "N-端基板锚定域 (Baseplate-binding N-term)",
+                "中段三聚体骨架区 (Shaft / Trimer Core)",
+                "C-端受体结合与纤突域 (Distal RBD / Spike)"
+            )
+            
+        # 3. 裂解系统与溶菌酶
+        if category == "lysis" or any(k in p_lower for k in ["lysin", "lysozyme", "holin", "spanin", "peptidase", "endopeptidase"]):
+            return (
+                "N-端跨膜/催化活性域 (Catalytic / TM Domain)",
+                "中段柔性连接区 (Flexible Linker)",
+                "C-端细胞壁结合域 (Cell-Wall Binding CBD)"
+            )
+            
+        # 4. 衣壳与头部形态发生
+        if category == "capsid_head" or any(k in p_lower for k in ["capsid", "head", "coat", "portal", "scaffold", "vertex", "capsomer"]):
+            return (
+                "N-端衣壳组装前导域 (Prohead Assembly N-term)",
+                "中段壳粒核心折叠区 (Capsomer Core)",
+                "C-端外表面与顶角加固区 (Vertex / Surface C-term)"
+            )
+            
+        # 5. DNA 复制与修饰酶
+        if category == "replication" or any(k in p_lower for k in ["polymerase", "helicase", "primase", "ligase", "nuclease"]):
+            return (
+                "N-端调节与核酸外切域 (Regulatory / Exonuclease)",
+                "中段核心催化活性中心 (Catalytic Polymerase Core)",
+                "C-端核酸结合与夹钳区 (DNA-Binding Clamp)"
+            )
+            
+        # 6. 基因组包装与末端酶
+        if category == "packaging" or any(k in p_lower for k in ["terminase", "packaging", "large subunit", "small subunit"]):
+            return (
+                "N-端 ATP 结合与驱动中心 (ATPase Engine N-term)",
+                "中段能量转换与传动区 (Translocation Transducer)",
+                "C-端 DNA 剪切与 Portal 结合区 (Endonuclease & Portal-binding)"
+            )
+            
+        # 7. 通用 / 未知功能蛋白
+        return (
+            "N-端近端区域 (N-terminal Region)",
+            "中央核心骨架区 (Central Core Region)",
+            "C-端远端区域 (C-terminal Region)"
+        )
+
+    def _align_and_diff(
+        self,
+        seq_a: str,
+        seq_b: str,
+        category: str = "other",
+        product: str = ""
+    ) -> Tuple[
         float, List[MutationSite], int, str, str, str, int, int, int, List[RegionDomainItem], str
     ]:
         """
@@ -496,7 +564,7 @@ class ProteinComparer:
         
         if seq_a == seq_b:
             markup = "|" * len(seq_a)
-            doms = self._calculate_domains(len(seq_a), [], 100.0)
+            doms = self._calculate_domains(len(seq_a), [], 100.0, category=category, product=product)
             return 100.0, [], 0, seq_a, markup, seq_b, 0, 0, 0, doms, "全长序列 100% 严格保守，核心功能完全锁定"
 
         # 快速模式：若长度相同，直接逐字符比对
@@ -531,8 +599,8 @@ class ProteinComparer:
 
             ident = round(((len(seq_a) - diff_count) / len(seq_a)) * 100.0, 2)
             aligned_markup = "".join(markup_chars)
-            domains = self._calculate_domains(len(seq_a), mutations, ident)
-            conclusion = self._generate_hotspot_conclusion(domains, mutations, ident)
+            domains = self._calculate_domains(len(seq_a), mutations, ident, category=category, product=product)
+            conclusion = self._generate_hotspot_conclusion(domains, mutations, ident, category=category, product=product)
 
             return ident, mutations, diff_count, aln_a, aligned_markup, aln_b, cons_cnt, rad_cnt, indel_cnt, domains, conclusion
 
@@ -584,8 +652,8 @@ class ProteinComparer:
 
             ident = round((matches / max(len(seq_a), len(seq_b))) * 100.0, 2)
             aligned_markup = "".join(markup_chars)
-            domains = self._calculate_domains(max(len(seq_a), len(seq_b)), mutations, ident)
-            conclusion = self._generate_hotspot_conclusion(domains, mutations, ident)
+            domains = self._calculate_domains(max(len(seq_a), len(seq_b)), mutations, ident, category=category, product=product)
+            conclusion = self._generate_hotspot_conclusion(domains, mutations, ident, category=category, product=product)
 
             return ident, mutations, diff_count, aln_a, aligned_markup, aln_b, cons_cnt, rad_cnt, indel_cnt, domains, conclusion
         except Exception as e:
@@ -593,9 +661,16 @@ class ProteinComparer:
             max_len = max(len(seq_a), len(seq_b))
             return 0.0, [], max_len, seq_a, " " * max_len, seq_b, 0, 0, max_len, [], "比对异常"
 
-    @staticmethod
-    def _calculate_domains(total_len: int, mutations: List[MutationSite], global_ident: float) -> List[RegionDomainItem]:
-        """将全长划分为 N-端近端结构域、中段骨架区、C-端远端/受体结合区 进行分段统计"""
+    @classmethod
+    def _calculate_domains(
+        cls,
+        total_len: int,
+        mutations: List[MutationSite],
+        global_ident: float,
+        category: str = "other",
+        product: str = ""
+    ) -> List[RegionDomainItem]:
+        """将全长划分为 N-端近端、中段骨架区、C-端远端 结构域，结合蛋白大类动态赋予生物学命名"""
         if total_len <= 0:
             return []
 
@@ -605,10 +680,12 @@ class ProteinComparer:
         d2_end = part_len * 2
         d3_end = total_len
 
+        n_name, m_name, c_name = cls._get_domain_names(category, product)
+
         ranges = [
-            ("N-端近端结构域 (Base/Connector)", 1, d1_end),
-            ("中段骨架区 (Shaft/Trimer Core)", d1_end + 1, d2_end),
-            ("C-端远端受体结合域 (Distal RBD)", d2_end + 1, d3_end)
+            (n_name, 1, d1_end),
+            (m_name, d1_end + 1, d2_end),
+            (c_name, d2_end + 1, d3_end)
         ]
 
         results = []
@@ -637,24 +714,72 @@ class ProteinComparer:
         return results
 
     @staticmethod
-    def _generate_hotspot_conclusion(domains: List[RegionDomainItem], mutations: List[MutationSite], global_ident: float) -> str:
-        """基于结构域分布生成生物学意义洞察结论"""
+    def _generate_hotspot_conclusion(
+        domains: List[RegionDomainItem],
+        mutations: List[MutationSite],
+        global_ident: float,
+        category: str = "other",
+        product: str = ""
+    ) -> str:
+        """基于生物学功能类别、结构域拓扑分布与理化突变性质生成综合研判结论"""
         if not mutations:
-            return "双样本全长氨基酸序列 100% 一致，核心催化与组装位点高度保守。"
+            return "双样本全长氨基酸序列 100% 严格一致，核心催化与组装结构高度锁定。"
+
+        total_mut = len(mutations)
+        cons_cnt = sum(1 for m in mutations if m.impact_type == "conservative")
+        rad_cnt = total_mut - cons_cnt
+        charge_flips = sum(1 for m in mutations if m.impact_type == "charge_flip")
+        indels = sum(1 for m in mutations if m.impact_type == "indel")
+
+        # 微观理化性质点评后缀
+        chem_notes = []
+        if indels > 0:
+            chem_notes.append(f"伴随 {indels} 处插入/缺失(Indel)位移")
+        if charge_flips > 0:
+            chem_notes.append(f"检出 {charge_flips} 处电荷反转(+/-颠覆)")
+        elif rad_cnt > 0:
+            chem_notes.append(f"包含 {rad_cnt} 处显著变异(极性/位阻改变)")
+        elif rad_cnt == 0:
+            chem_notes.append("全部为同类保守替换")
+
+        chem_suffix = f"（{'，'.join(chem_notes)}）" if chem_notes else ""
+
+        # 低频散发变异（置信度保护：<=2 处突变不妄断区域性富集热点）
+        if total_mut <= 2:
+            return f"全长仅检出 {total_mut} 处散发性单点变异（相似度 {global_ident}%）{chem_suffix}，未形成区域性突变热点，蛋白质整体三维构象与基本活性预期保持一致。"
 
         if len(domains) == 3:
             d1, d2, d3 = domains[0], domains[1], domains[2]
-            total_mut = len(mutations)
-            d3_pct = round((d3.mutation_count / total_mut) * 100, 1) if total_mut > 0 else 0
-            
-            if d3_pct >= 60.0:
-                return f"变异显著富集于 C-端受体结合区域 (占全蛋白突变总数的 {d3_pct}%)，而 N-端结构域仍维持 {d1.identity_pct}% 高保守度。此特征高度提示噬菌体在保持尾丝装配连接结构的同时，通过 C-端识别纤突分化以实现宿主谱（Host Range）变异。"
-            elif d1.identity_pct >= 95.0 and d3.identity_pct >= 95.0:
-                return f"变异在全长序列散在分布，主要是局部同类保守氨基酸微调，蛋白质整体三维构象与基本活性预期保持高度一致。"
-            elif d1.mutation_count >= d3.mutation_count and d1.mutation_count >= d2.mutation_count:
-                return f"变异主要富集于 N-端前导/锚定区 (占比 {round(d1.mutation_count/total_mut*100, 1)}%)，可能影响其与衣壳基板的组装适配效率。"
+            d1_pct = round((d1.mutation_count / total_mut) * 100, 1)
+            d2_pct = round((d2.mutation_count / total_mut) * 100, 1)
+            d3_pct = round((d3.mutation_count / total_mut) * 100, 1)
+            p_lower = product.lower()
 
-        return f"全长检出 {len(mutations)} 处序列变异，平均相似度 {global_ident}%，建议结合三维受体结合口袋进一步观察理化微环境改变。"
+            # 分支 1: C-端显著富集 (>=60%)
+            if d3_pct >= 60.0:
+                if any(k in p_lower for k in ["tail tube", "tail sheath", "tube", "sheath", "major tail"]):
+                    return f"变异主要富集于 C-端末端对接区 (占全长突变总数的 {d3_pct}%)，而 N-端环状聚合核心保持 {d1.identity_pct}% 严格保守。提示尾管主体通道结构高度稳定，C-端局部变异主要用于适配基板/穿刺界面的微环境协同{chem_suffix}。"
+                elif category == "tail_fiber" or any(k in p_lower for k in ["tail fiber", "fiber", "spike", "receptor"]):
+                    return f"变异显著富集于 C-端受体结合与纤突区域 (占全长突变总数的 {d3_pct}%)，而 N-端基板锚定域维持 {d1.identity_pct}% 高保守度。此特征提示噬菌体在保持尾部装配连接的同时，通过 C-端纤突分化以实现宿主谱（Host Range）适应性演化{chem_suffix}。"
+                elif category == "lysis" or any(k in p_lower for k in ["lysin", "lysozyme", "holin", "peptidase"]):
+                    return f"变异主要富集于 C-端细胞壁结合域 (CBD，占比 {d3_pct}%)，催化活性区维持 {d1.identity_pct}% 保守。提示在保持水解活性的同时，可能发生宿主细胞壁吸附特异性的微调{chem_suffix}。"
+                else:
+                    return f"变异显著富集于 C-端功能区 (占全长突变总数的 {d3_pct}%)，N-端与核心骨架区保持良好保守度{chem_suffix}。"
+
+            # 分支 2: N-端显著富集 (>=60%)
+            elif d1_pct >= 60.0:
+                return f"变异显著富集于 N-端前导/锚定区 (占比 {d1_pct}%)，而中段与 C-端功能核心维持 {d3.identity_pct}% 保守度。提示可能涉及亚基组装起始界面、前导肽剪切或复合体接口的适配微调{chem_suffix}。"
+
+            # 分支 3: 中段核心区显著富集 (>=60%)
+            elif d2_pct >= 60.0:
+                return f"变异主要富集于中段核心骨架区 (占比 {d2_pct}%)，两端界面保持相对稳定。需关注中段二次结构单元（α-螺旋束/β-折叠）的侧链堆叠与空间构象刚性{chem_suffix}。"
+
+            # 分支 4: 全长散在均匀分布 (各段均 >= 90%)
+            elif d1.identity_pct >= 90.0 and d2.identity_pct >= 90.0 and d3.identity_pct >= 90.0:
+                return f"变异在全长序列均匀散在分布（相似度 {global_ident}%）{chem_suffix}，无明显局部突变热点，蛋白质三维折叠构象与核心功能预期保持高度一致。"
+
+        # 兜底：多区域广泛分歧
+        return f"全长检出 {total_mut} 处多点分歧变异（平均相似度 {global_ident}%）{chem_suffix}，覆盖多个结构域，提示两样本在该同源蛋白上发生了较显著的序列演化分化。"
 
     @staticmethod
     def export_to_csv(result: ProteinComparisonResult) -> str:
