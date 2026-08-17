@@ -120,6 +120,7 @@ class AnnotationManager:
         task["features"] = features
         task["feature_count"] = len(features)
         task["gbk_content"] = gbk_content
+        task["work_dir"] = str(task_work_dir.resolve())
         return task
 
     def get_task_file_path(self, task_id: str, file_type: str) -> Optional[Path]:

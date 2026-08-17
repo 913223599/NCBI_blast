@@ -3,6 +3,7 @@
  * AnnotationResults - 功能注释结果展示面板
  */
 import { ref, computed } from 'vue';
+import { getBridge } from '../../../../../bridge';
 import type { AnnotationTaskItem, FeatureItem } from '../types';
 
 const props = defineProps<{
@@ -13,6 +14,16 @@ const emit = defineEmits<{
   (e: 'open-in-viewer', gbkText: string, taskName: string): void;
   (e: 'download', fileType: string): void;
 }>();
+
+function openResultsFolder() {
+  const workDir = (props.task as any).work_dir;
+  if (workDir) {
+    const bridge = getBridge();
+    bridge.open_results_dir?.(workDir);
+  } else {
+    alert(`结果保存在: results/annotations/${props.task.task_id}`);
+  }
+}
 
 // 筛选与搜索状态
 const searchQuery = ref<string>('');
@@ -113,13 +124,19 @@ function formatNumber(num?: number | null): string {
           在序列交互可视化中查看
         </button>
 
-        <!-- 下载菜单组 -->
+        <!-- 下载与打开文件夹菜单组 -->
         <div class="export-dropdown-group">
           <button class="export-btn" @click="emit('download', 'gbk')">下载 GenBank (.gbk)</button>
           <button class="export-btn secondary" @click="emit('download', 'gff')">GFF3</button>
           <button class="export-btn secondary" @click="emit('download', 'faa')">蛋白 FASTA</button>
           <button class="export-btn secondary" @click="emit('download', 'ffn')">基因 FASTA</button>
           <button class="export-btn secondary" @click="emit('download', 'tsv')">TSV 表格</button>
+          <button class="export-btn folder-btn" @click="openResultsFolder" title="在 Windows 资源管理器中打开结果所在文件夹">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            打开文件夹
+          </button>
         </div>
       </div>
     </div>
@@ -412,6 +429,21 @@ function formatNumber(num?: number | null): string {
 .export-btn.secondary:hover {
   background: #e2e8f0;
   color: #1e293b;
+}
+
+.export-btn.folder-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+}
+
+.export-btn.folder-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #2563eb;
 }
 
 .kpi-grid {
