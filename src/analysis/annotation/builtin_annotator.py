@@ -355,8 +355,8 @@ class BuiltinAnnotator:
         feat_idx = 0
 
         for record in records:
-            contig_id = str(record.id or "Contig")
-            seq_str = str(record.seq or "")
+            contig_id = record.id or "Contig"
+            seq_str = str(record.seq) if record.seq is not None else ""
             rec_id = contig_id[:16] if contig_id else "Contig"
 
             gbk_rec = SeqRecord(
@@ -458,7 +458,7 @@ class BuiltinAnnotator:
         )
 
         with open(summary_file, "w", encoding="utf-8") as f:
-            f.write(summary.json() if hasattr(summary, 'json') else summary.model_dump_json())
+            f.write(summary.model_dump_json() if hasattr(summary, 'model_dump_json') else summary.json())
 
         output_files = {
             "gbk": str(gbk_file.resolve()),
