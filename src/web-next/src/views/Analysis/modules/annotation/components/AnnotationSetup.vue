@@ -60,13 +60,43 @@ function clearPasteData() {
   form.fasta_content = '';
 }
 
-// 处理本地文件上传
+// 文件 input 引用
+const fileInputRef = ref<HTMLInputElement | null>(null);
+
+// 处理选择文件触发 (区分 Electron 原生对话框与 Web Input)
+async function handleUploadClick() {
+  const bridge = getBridge();
+  const isElectron = !!(window as any).electronAPI;
+  
+  if (isElectron) {
+    const paths = await bridge.request_file_load('fasta', false);
+    if (paths && paths.length > 0) {
+      setLocalFilePath(paths[0]);
+    }
+  } else {
+    fileInputRef.value?.click();
+  }
+}
+
+// 设置本地物理路径
+function setLocalFilePath(filePath: string) {
+  form.fasta_path = filePath;
+  const baseName = filePath.split(/[/\\]/).pop() || filePath;
+  uploadedFileName.value = baseName;
+  if (!form.task_name || form.task_name.startsWith('Annotation_')) {
+    form.task_name = baseName.replace(/\.[^/.]+$/, '') + '_Anno';
+  }
+}
+
+// 处理 HTML input 选择文件
 async function handleFileSelected(e: any) {
   const file = e.target?.files?.[0];
   if (!file) return;
   await processFile(file);
+  e.target.value = '';
 }
 
+// 处理拖拽文件
 function handleFileDrop(e: DragEvent) {
   isDragging.value = false;
   const file = e.dataTransfer?.files?.[0];
@@ -74,24 +104,27 @@ function handleFileDrop(e: DragEvent) {
   processFile(file);
 }
 
+// 核心文件解析逻辑 (优先获取本地物理路径，纯 Web 下走 bridge.upload_file)
 async function processFile(file: File) {
-  uploadedFileName.value = file.name;
+  const bridge = getBridge();
+  const baseName = file.name;
+  uploadedFileName.value = baseName;
+
+  // 1. Electron 桌面端环境：直接获取物理绝对路径
+  const localPath = bridge.get_path_for_file?.(file) || (file as any).path || '';
+  if (localPath) {
+    setLocalFilePath(localPath);
+    return;
+  }
+
+  // 2. 纯 Web 浏览器环境：通过 bridge 执行上传
   isUploading.value = true;
   try {
-    const formData = new FormData();
-    formData.append('file', file);
-    const res = await fetch('/api/common/upload', {
-      method: 'POST',
-      body: formData
-    });
-    const data = await res.json();
-    if (data.success && data.path) {
-      form.fasta_path = data.path;
-      if (!form.task_name || form.task_name.startsWith('Annotation_')) {
-        form.task_name = file.name.replace(/\.[^/.]+$/, '') + '_Anno';
-      }
+    const res = await bridge.upload_file(file);
+    if (res && res.success && res.path) {
+      setLocalFilePath(res.path);
     } else {
-      throw new Error(data.error || '上传解析失败');
+      throw new Error(res?.error || '服务器暂存文件失败');
     }
   } catch (err: any) {
     alert(`文件上传失败: ${err.message}`);
@@ -209,23 +242,24 @@ onMounted(() => {
 
     <!-- 2. 序列输入主体 -->
     <div class="source-content">
-      <!-- 2.1 文件上传 -->
+      <!-- 2.1 文件上传 / 本地选择 -->
       <div 
         v-if="inputMode === 'upload'" 
         class="drop-zone"
         :class="{ dragging: isDragging, 'has-file': !!uploadedFileName }"
+        @click="handleUploadClick"
         @dragover.prevent="isDragging = true"
         @dragleave.prevent="isDragging = false"
         @drop.prevent="handleFileDrop"
       >
         <input 
           type="file" 
-          id="fasta-file-input" 
+          ref="fileInputRef" 
           hidden 
           accept=".fasta,.fa,.fna,.fsa,.seq,.txt" 
           @change="handleFileSelected" 
         />
-        <label for="fasta-file-input" class="drop-label">
+        <div class="drop-label">
           <div class="drop-icon">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.8">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -237,6 +271,7 @@ onMounted(() => {
           <div class="drop-text">
             <template v-if="uploadedFileName">
               <span class="file-name-highlight">{{ uploadedFileName }}</span>
+              <span v-if="form.fasta_path" class="file-path-hint" :title="form.fasta_path">{{ form.fasta_path }}</span>
               <span class="sub-tip">点击重新选择或拖拽替换文件</span>
             </template>
             <template v-else>
@@ -244,7 +279,7 @@ onMounted(() => {
               <span class="sub-tip">支持 .fasta / .fa / .fna / .fsa 格式（基因组 Contigs 或 Scaffolds）</span>
             </template>
           </div>
-        </label>
+        </div>
       </div>
 
       <!-- 2.2 粘贴文本 -->
@@ -496,6 +531,20 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 700;
   color: #065f46;
+}
+
+.file-path-hint {
+  font-size: 11px;
+  color: #047857;
+  background: #d1fae5;
+  padding: 2px 8px;
+  border-radius: 4px;
+  max-width: 460px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 2px auto 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .main-tip {
