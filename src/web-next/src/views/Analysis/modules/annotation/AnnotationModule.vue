@@ -32,7 +32,16 @@ const {
 } = useAnnotation();
 
 // 是否显示新建任务表单
-const showSetupForm = ref<boolean>(true);
+const showSetupForm = ref<boolean>(false);
+
+onMounted(async () => {
+  await fetchHistory();
+  if (historyTasks.value.length > 0 && !activeTaskId.value) {
+    await loadTaskResult(historyTasks.value[0].task_id);
+  } else if (historyTasks.value.length === 0) {
+    showSetupForm.value = true;
+  }
+});
 
 async function onRunTask(params: AnnotationRunParams) {
   showSetupForm.value = false;

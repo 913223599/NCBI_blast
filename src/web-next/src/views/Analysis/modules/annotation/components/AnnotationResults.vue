@@ -96,6 +96,16 @@ function formatNumber(num?: number | null): string {
   if (num === undefined || num === null) return '0';
   return num.toLocaleString();
 }
+// 安全审计详情展开状态
+const showSafetyDetails = ref<boolean>(false);
+
+const totalSafetyHits = computed(() => {
+  if (!props.task.safety_audit) return 0;
+  const amr = props.task.safety_audit.amr_genes?.length || 0;
+  const vf = props.task.safety_audit.virulent_factors?.length || 0;
+  const acr = props.task.safety_audit.anti_crispr_genes?.length || 0;
+  return amr + vf + acr;
+});
 </script>
 
 <template>
@@ -199,44 +209,53 @@ function formatNumber(num?: number | null): string {
           <span class="audit-chip chip-info">
             Anti-CRISPR: {{ task.safety_audit.anti_crispr_status }}
           </span>
+          <button 
+            v-if="totalSafetyHits > 0" 
+            class="toggle-details-btn" 
+            @click="showSafetyDetails = !showSafetyDetails"
+          >
+            {{ showSafetyDetails ? '收起详情' : `查看详情 (${totalSafetyHits})` }}
+          </button>
         </div>
       </div>
 
-      <!-- 详细命中列表展示 (如有) -->
-      <div class="safety-details-grid" v-if="task.safety_audit.amr_genes.length || task.safety_audit.virulent_factors.length || task.safety_audit.anti_crispr_genes.length">
-        <div class="safety-box" v-if="task.safety_audit.amr_genes.length">
-          <div class="box-title amr">耐药基因 (CARD)</div>
-          <div class="box-list">
-            <div class="box-item" v-for="(item, idx) in task.safety_audit.amr_genes" :key="idx">
-              <span class="tag-cds">{{ item.cds_id }}</span>
-              <span class="tag-desc">{{ item.description }}</span>
-              <span class="tag-meta">相似度: {{ item.identity }}% | E={{ item.evalue }}</span>
+      <!-- 详细命中列表展示 (折叠展开) -->
+      <transition name="slide-fade">
+        <div class="safety-details-grid" v-if="showSafetyDetails && totalSafetyHits > 0">
+          <div class="safety-box" v-if="task.safety_audit.amr_genes.length">
+            <div class="box-title amr">耐药基因 (CARD)</div>
+            <div class="box-list">
+              <div class="box-item" v-for="(item, idx) in task.safety_audit.amr_genes" :key="idx">
+                <span class="tag-cds">{{ item.cds_id }}</span>
+                <span class="tag-desc">{{ item.description }}</span>
+                <span class="tag-meta">相似度: {{ item.identity }}% | E={{ item.evalue }}</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="safety-box" v-if="task.safety_audit.virulent_factors.length">
-          <div class="box-title vf">毒力因子 (VFDB)</div>
-          <div class="box-list">
-            <div class="box-item" v-for="(item, idx) in task.safety_audit.virulent_factors" :key="idx">
-              <span class="tag-cds">{{ item.cds_id }}</span>
-              <span class="tag-desc">{{ item.description }}</span>
-              <span class="tag-meta">相似度: {{ item.identity }}% | E={{ item.evalue }}</span>
+          <div class="safety-box" v-if="task.safety_audit.virulent_factors.length">
+            <div class="box-title vf">毒力因子 (VFDB)</div>
+            <div class="box-list">
+              <div class="box-item" v-for="(item, idx) in task.safety_audit.virulent_factors" :key="idx">
+                <span class="tag-cds">{{ item.cds_id }}</span>
+                <span class="tag-desc">{{ item.description }}</span>
+                <span class="tag-meta">相似度: {{ item.identity }}% | E={{ item.evalue }}</span>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="safety-box" v-if="task.safety_audit.anti_crispr_genes.length">
-          <div class="box-title acr">Anti-CRISPR (Acr) 逃逸因子</div>
-          <div class="box-list">
-            <div class="box-item" v-for="(item, idx) in task.safety_audit.anti_crispr_genes" :key="idx">
-              <span class="tag-cds">{{ item.cds_id }}</span>
-              <span class="tag-desc">{{ item.source || item.description || 'Acr Protein' }}</span>
-              <span class="tag-meta">相似度: {{ item.identity }}%</span>
+          <div class="safety-box" v-if="task.safety_audit.anti_crispr_genes.length">
+            <div class="box-title acr">Anti-CRISPR (Acr) 逃逸因子 (前 20 条)</div>
+            <div class="box-list">
+              <div class="box-item" v-for="(item, idx) in task.safety_audit.anti_crispr_genes.slice(0, 20)" :key="idx">
+                <span class="tag-cds">{{ item.cds_id }}</span>
+                <span class="tag-desc">{{ item.source || item.description || 'Acr Protein' }}</span>
+                <span class="tag-meta">相似度: {{ item.identity }}%</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </transition>
     </div>
 
     <!-- 3. 特征数据明细表格 -->
@@ -827,5 +846,171 @@ function formatNumber(num?: number | null): string {
   font-size: 12px;
   color: #64748b;
   font-weight: 600;
+}
+
+/* 深度生物安全性与宿主防御逃逸审计卡片 */
+.safety-audit-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.safety-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.safety-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  color: #1e293b;
+}
+
+.safety-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.safety-badge.passed {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.safety-badge.warning {
+  background: #fffbeb;
+  color: #d97706;
+  border: 1px solid #fde68a;
+}
+
+.safety-summary-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.audit-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.audit-chip.chip-ok {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #e2e8f0;
+}
+
+.audit-chip.chip-alert {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.audit-chip.chip-info {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+
+.toggle-details-btn {
+  background: white;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.toggle-details-btn:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #2563eb;
+}
+
+.safety-details-grid {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #f1f5f9;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.safety-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.box-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.box-title.amr { color: #dc2626; }
+.box-title.vf { color: #d97706; }
+.box-title.acr { color: #2563eb; }
+
+.box-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.box-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  gap: 8px;
+}
+
+.tag-cds {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  color: #0f172a;
+  background: #f1f5f9;
+  padding: 2px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.tag-desc {
+  flex: 1;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag-meta {
+  font-size: 10px;
+  color: #64748b;
+  flex-shrink: 0;
 }
 </style>

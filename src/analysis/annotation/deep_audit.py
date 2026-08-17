@@ -77,6 +77,11 @@ class DeepSafetyAuditor:
 
         bash_cmd = f"cd \"{wsl_db_dir}\" && blastp -query \"{wsl_query}\" -db phagescope_proteins -out \"{wsl_out}\" -outfmt \"6 qseqid sseqid pident length evalue bitscore\" -evalue 1e-10 -max_target_seqs 5 -num_threads {threads}"
 
+        # 临时存储最优 hit
+        amr_hits: Dict[str, dict] = {}
+        vf_hits: Dict[str, dict] = {}
+        acr_hits: Dict[str, dict] = {}
+
         try:
             res = subprocess.run(["wsl", "bash", "-c", bash_cmd], capture_output=True, timeout=300)
             if res.returncode == 0 and out_tsv.exists() and out_tsv.stat().st_size > 0:
@@ -86,38 +91,51 @@ class DeepSafetyAuditor:
                         if len(cols) < 6:
                             continue
                         cds_id, target_id, identity, align_len, evalue, bitscore = cols[:6]
+                        try:
+                            ident_val = float(identity)
+                            score_val = float(bitscore)
+                        except ValueError:
+                            continue
+
                         hit_item = {
                             "cds_id": cds_id,
                             "target_id": target_id,
-                            "identity": float(identity),
+                            "identity": ident_val,
                             "align_len": int(align_len),
                             "evalue": evalue,
-                            "bitscore": float(bitscore)
+                            "bitscore": score_val
                         }
 
-                        # 耐药基因匹配
+                        # 耐药基因匹配 (取该 CDS 的最高分)
                         if target_id in amr_index:
-                            h = dict(hit_item)
-                            h["description"] = amr_index[target_id]
-                            audit_result["amr_genes"].append(h)
+                            if cds_id not in amr_hits or score_val > amr_hits[cds_id]["bitscore"]:
+                                h = dict(hit_item)
+                                h["description"] = amr_index[target_id]
+                                amr_hits[cds_id] = h
 
-                        # 毒力因子匹配
+                        # 毒力因子匹配 (取最高分)
                         if target_id in vf_index:
-                            h = dict(hit_item)
-                            h["description"] = vf_index[target_id]
-                            audit_result["virulent_factors"].append(h)
+                            if cds_id not in vf_hits or score_val > vf_hits[cds_id]["bitscore"]:
+                                h = dict(hit_item)
+                                h["description"] = vf_index[target_id]
+                                vf_hits[cds_id] = h
 
-                        # Anti-CRISPR 匹配
+                        # Anti-CRISPR 匹配 (取最高分)
                         if target_id in acr_index:
-                            h = dict(hit_item)
-                            h["source"] = acr_index[target_id]
-                            audit_result["anti_crispr_genes"].append(h)
+                            if cds_id not in acr_hits or score_val > acr_hits[cds_id]["bitscore"]:
+                                h = dict(hit_item)
+                                h["source"] = acr_index[target_id]
+                                acr_hits[cds_id] = h
         except Exception as e:
             logger.warning(f"Safety audit BLASTP failed: {e}")
 
+        audit_result["amr_genes"] = list(amr_hits.values())
+        audit_result["virulent_factors"] = list(vf_hits.values())
+        audit_result["anti_crispr_genes"] = list(acr_hits.values())
+
         # 3. 结果汇总与合规评级
         if audit_result["anti_crispr_genes"]:
-            audit_result["anti_crispr_status"] = f"Detected ({len(audit_result['anti_crispr_genes'])} Acr proteins)"
+            audit_result["anti_crispr_status"] = f"Detected ({len(audit_result['anti_crispr_genes'])} unique Acr genes)"
 
         if audit_result["amr_genes"]:
             audit_result["safety_passed"] = False
