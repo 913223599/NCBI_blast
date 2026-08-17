@@ -60,6 +60,7 @@ function onOpenViewer(gbkText: string, taskName: string) {
 function onStartNew() {
   showSetupForm.value = true;
   activeTaskId.value = '';
+  currentTask.value = null;
 }
 </script>
 
@@ -96,7 +97,7 @@ function onStartNew() {
         </div>
       </aside>
 
-      <!-- 2. 右侧主工作区 -->
+      <!-- 2. 右侧主工作区 (严格互斥渲染) -->
       <main class="main-content">
         <!-- 错误横幅 -->
         <transition name="slide-fade">
@@ -112,13 +113,13 @@ function onStartNew() {
           </div>
         </transition>
 
-        <!-- 2.1 新建配置面板 -->
+        <!-- 2.1 新建配置面板 (新建模式独占) -->
         <section v-if="showSetupForm || (!isRunning && !currentTask)" class="section-setup">
           <AnnotationSetup :is-running="isRunning" @run="onRunTask" />
         </section>
 
         <!-- 2.2 运行进度与终端面板 -->
-        <section v-if="isRunning && currentTask" class="section-progress">
+        <section v-else-if="isRunning && currentTask" class="section-progress">
           <AnnotationProgress 
             :progress="currentTask.progress" 
             :current-step="currentTask.current_step"
@@ -129,7 +130,7 @@ function onStartNew() {
         </section>
 
         <!-- 2.3 结果展示面板 -->
-        <section v-if="!isRunning && currentTask && currentTask.status === 'completed'" class="section-results">
+        <section v-else-if="currentTask && currentTask.status === 'completed'" class="section-results">
           <AnnotationResults 
             :task="currentTask"
             @open-in-viewer="(gbk, name) => onOpenViewer(gbk, name)"
@@ -138,7 +139,7 @@ function onStartNew() {
         </section>
 
         <!-- 2.4 任务失败或取消占位 -->
-        <section v-if="!isRunning && currentTask && currentTask.status !== 'completed' && !showSetupForm" class="status-box">
+        <section v-else-if="currentTask" class="status-box">
           <div class="status-box-content">
             <div class="status-icon" :class="currentTask.status">
               <svg v-if="currentTask.status === 'failed'" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -150,7 +151,7 @@ function onStartNew() {
             </div>
             <h3>任务状态: {{ currentTask.status === 'failed' ? '分析失败' : '已取消' }}</h3>
             <p>{{ currentTask.error_msg || currentTask.current_step }}</p>
-            <button class="retry-btn" @click="showSetupForm = true">重新配置分析</button>
+            <button class="retry-btn" @click="onStartNew">重新配置分析</button>
           </div>
         </section>
       </main>
