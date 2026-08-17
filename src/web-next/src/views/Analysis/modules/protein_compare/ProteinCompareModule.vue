@@ -3,7 +3,7 @@
  * ProteinCompareModule - 核心蛋白跨样本比对与变异分析工作台
  * 职责：对比两个噬菌体/细菌注释结果中的尾丝、裂解酶、衣壳等关键蛋白，展示氨基酸变异、突变位点及导出 CSV
  */
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getBridge } from '../../../../bridge';
 import type { 
   ComparableTaskItem, 
@@ -29,6 +29,22 @@ const statusFilter = ref<string>('ALL');
 // 比对结果数据
 const comparisonResult = ref<ProteinComparisonResultPayload | null>(null);
 
+// 窗口自适应宽度监控 (小窗口化适配)
+const windowWidth = ref<number>(typeof window !== 'undefined' ? window.innerWidth : 1440);
+
+function onWindowResize() {
+  windowWidth.value = window.innerWidth;
+}
+
+// 动态对齐每行氨基酸字符数
+const dynamicBlockSize = computed(() => {
+  if (windowWidth.value >= 1650) return 60;
+  if (windowWidth.value >= 1350) return 45;
+  if (windowWidth.value >= 1100) return 35;
+  if (windowWidth.value >= 850) return 25;
+  return 20;
+});
+
 // 展开查看序列详情的行 ID
 const expandedRowKey = ref<string | null>(null);
 
@@ -42,9 +58,14 @@ const categories = [
   { key: 'packaging', label: '基因组包装末端酶 (Packaging)' }
 ];
 
-// 2. 初始化载入可比对的任务列表
+// 2. 初始化载入可比对的任务列表与窗口监听
 onMounted(async () => {
   await fetchTasks();
+  window.addEventListener('resize', onWindowResize);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onWindowResize);
 });
 
 async function fetchTasks() {
@@ -637,7 +658,7 @@ function copyText(text: string) {
 
                       <div class="dense-align-body">
                         <div 
-                          v-for="block in generateAlignmentBlocks(row, 60)" 
+                          v-for="block in generateAlignmentBlocks(row, dynamicBlockSize)" 
                           :key="block.blockIndex"
                           class="dense-align-block"
                         >
@@ -1049,11 +1070,14 @@ function copyText(text: string) {
 }
 
 .table-wrapper {
+  width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .compare-table {
   width: 100%;
+  min-width: 820px;
   border-collapse: collapse;
   font-size: 12px;
   text-align: left;
@@ -1065,6 +1089,7 @@ function copyText(text: string) {
   font-weight: 700;
   padding: 10px 12px;
   border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
 }
 
 .compare-table td {
@@ -1076,6 +1101,7 @@ function copyText(text: string) {
 .col-num {
   color: #94a3b8;
   font-weight: 600;
+  width: 40px;
 }
 
 .cat-badge {
@@ -1085,6 +1111,8 @@ function copyText(text: string) {
   padding: 2px 6px;
   border-radius: 4px;
   font-weight: 600;
+  white-space: nowrap;
+  display: inline-block;
 }
 
 .status-pill {
@@ -1421,11 +1449,13 @@ function copyText(text: string) {
 .dense-align-block {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 4px 6px;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.04);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .dense-meta-left,
@@ -1433,7 +1463,7 @@ function copyText(text: string) {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 54px;
+  width: 50px;
   flex-shrink: 0;
   font-size: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -1452,7 +1482,10 @@ function copyText(text: string) {
   display: flex;
   align-items: center;
   gap: 1px;
+  flex: 1;
+  min-width: 0;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .dense-col {
@@ -1463,6 +1496,7 @@ function copyText(text: string) {
   cursor: help;
   padding: 1px;
   border-radius: 2px;
+  flex-shrink: 0;
 }
 
 .dense-col:hover {
@@ -1519,6 +1553,45 @@ function copyText(text: string) {
 .d-mk.mk-conservative { color: #38bdf8; font-weight: 900; }
 .d-mk.mk-radical { color: #ef4444; font-weight: 900; }
 .d-mk.mk-indel { color: #a855f7; }
+
+/* 响应式媒体查询 (针对小窗口与窄屏设备) */
+@media (max-width: 1200px) {
+  .protein-compare-container {
+    padding: 12px 14px;
+  }
+  .compare-header-card {
+    padding: 14px 16px;
+  }
+  .compact-insight-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .compact-domain-ruler-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .domain-mini-list {
+    flex-wrap: wrap;
+  }
+  .sample-selection-grid {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 900px) {
+  .header-main-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .dense-meta-left,
+  .dense-meta-right {
+    width: 38px;
+    font-size: 9px;
+  }
+}
 
 /* 分页 */
 .pagination-bar {
