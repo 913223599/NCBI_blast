@@ -42,15 +42,16 @@ async def get_comparable_tasks(limit: int = 50):
         tasks = annotation_db.list_tasks(limit=limit)
         completed_tasks = []
         for t in tasks:
-            if t.status == "completed":
+            if t.get("status") == "completed":
+                summary = t.get("summary") or {}
                 completed_tasks.append({
-                    "task_id": t.task_id,
-                    "task_name": t.task_name,
-                    "sample_type": t.sample_type,
-                    "engine": t.engine,
-                    "cds_count": t.summary.get("cds_count", 0) if t.summary else 0,
-                    "total_length": t.summary.get("total_length", 0) if t.summary else 0,
-                    "created_at": t.created_at
+                    "task_id": t.get("task_id"),
+                    "task_name": t.get("task_name"),
+                    "sample_type": t.get("sample_type"),
+                    "engine": t.get("engine"),
+                    "cds_count": summary.get("cds_count", 0),
+                    "total_length": summary.get("total_length", 0),
+                    "created_at": t.get("created_at")
                 })
         return {"success": True, "data": completed_tasks}
     except Exception as e:
@@ -64,21 +65,25 @@ async def run_protein_comparison(req: RunCompareRequest):
     try:
         # 1. 查找样本 A 数据
         rec_a = annotation_db.get_task(req.sample_a_id)
-        if not rec_a or rec_a.status != "completed":
+        if not rec_a or rec_a.get("status") != "completed":
             raise HTTPException(status_code=404, detail=f"未找到样本 A 或该任务尚未完成: {req.sample_a_id}")
         
         # 2. 查找样本 B 数据
         rec_b = annotation_db.get_task(req.sample_b_id)
-        if not rec_b or rec_b.status != "completed":
+        if not rec_b or rec_b.get("status") != "completed":
             raise HTTPException(status_code=404, detail=f"未找到样本 B 或该任务尚未完成: {req.sample_b_id}")
 
-        sample_a_name = req.sample_a_name or rec_a.task_name or req.sample_a_id
-        sample_b_name = req.sample_b_name or rec_b.task_name or req.sample_b_id
+        sample_a_name = req.sample_a_name or rec_a.get("task_name") or req.sample_a_id
+        sample_b_name = req.sample_b_name or rec_b.get("task_name") or req.sample_b_id
 
-        # 3. 载入蛋白质
+        # 3. 载入蛋白质 (从结果目录)
+        from pathlib import Path
+        work_dir_a = Path(r"f:\NCBI blast\results\annotations") / req.sample_a_id
+        work_dir_b = Path(r"f:\NCBI blast\results\annotations") / req.sample_b_id
+
         comparer = ProteinComparer()
-        proteins_a = comparer.load_proteins_from_annotation(rec_a.work_dir)
-        proteins_b = comparer.load_proteins_from_annotation(rec_b.work_dir)
+        proteins_a = comparer.load_proteins_from_annotation(work_dir_a)
+        proteins_b = comparer.load_proteins_from_annotation(work_dir_b)
 
         if not proteins_a:
             raise HTTPException(status_code=400, detail=f"样本 A ({sample_a_name}) 中未提取到任何有效蛋白质 CDS")
@@ -112,12 +117,16 @@ async def export_comparison_csv(req: RunCompareRequest):
         if not rec_a or not rec_b:
             raise HTTPException(status_code=404, detail="样本记录不存在")
 
-        sample_a_name = req.sample_a_name or rec_a.task_name
-        sample_b_name = req.sample_b_name or rec_b.task_name
+        sample_a_name = req.sample_a_name or rec_a.get("task_name") or req.sample_a_id
+        sample_b_name = req.sample_b_name or rec_b.get("task_name") or req.sample_b_id
+
+        from pathlib import Path
+        work_dir_a = Path(r"f:\NCBI blast\results\annotations") / req.sample_a_id
+        work_dir_b = Path(r"f:\NCBI blast\results\annotations") / req.sample_b_id
 
         comparer = ProteinComparer()
-        proteins_a = comparer.load_proteins_from_annotation(rec_a.work_dir)
-        proteins_b = comparer.load_proteins_from_annotation(rec_b.work_dir)
+        proteins_a = comparer.load_proteins_from_annotation(work_dir_a)
+        proteins_b = comparer.load_proteins_from_annotation(work_dir_b)
 
         result = comparer.compare_two_samples(
             sample_a_name=sample_a_name,
