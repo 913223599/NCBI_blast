@@ -931,6 +931,10 @@ const electronBridge = {
     },
 
     // ═══ 组装分析：功能注释 (Genome Annotation) ═══
+    async inspect_annotation_fasta(payload: { fasta_path?: string; fasta_content?: string }): Promise<any> {
+        return await apiPost('/api/analysis/annotation/inspect', payload);
+    },
+
     async run_annotation_task(payload: any): Promise<any> {
         return await apiPost('/api/analysis/annotation/run', payload);
     },

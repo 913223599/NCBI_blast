@@ -9,11 +9,24 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from src.analysis.annotation.types import AnnotationRunRequest
+from src.analysis.annotation.types import AnnotationRunRequest, FastaInspectRequest
 from src.analysis.annotation.manager import get_annotation_manager
 
 logger = logging.getLogger("api.analysis.annotation")
 router = APIRouter(prefix="/analysis/annotation", tags=["Annotation"])
+
+
+@router.post("/inspect")
+async def inspect_fasta(req: FastaInspectRequest):
+    """
+    快速预检查并解析 FASTA 序列的 Contig 列表与长度统计
+    """
+    if not req.fasta_path and not (req.fasta_content and req.fasta_content.strip()):
+        raise HTTPException(status_code=400, detail="必须提供 fasta_path 或 fasta_content")
+
+    manager = get_annotation_manager()
+    result = manager.inspect_fasta(fasta_path=req.fasta_path, fasta_content=req.fasta_content)
+    return result
 
 
 @router.post("/run")

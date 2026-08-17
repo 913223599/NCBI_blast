@@ -171,6 +171,13 @@ class AnnotationPipeline:
         if not records:
             raise ValueError("解析 FASTA 失败，未检测到有效序列")
 
+        # 如果用户指定了选定 Contig 集合，精准过滤
+        if req.selected_contigs and len(req.selected_contigs) > 0:
+            selected_set = set(req.selected_contigs)
+            records = [r for r in records if r.id in selected_set]
+            if not records:
+                raise ValueError("未匹配到任何用户勾选的 Contig 序列")
+
         filtered = [r for r in records if len(r.seq) >= req.min_contig_len]
         if not filtered:
             # 若全部小于阈值，保留最长的一条

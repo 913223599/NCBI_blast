@@ -35,6 +35,70 @@ class AnnotationManager:
         self._active_pipelines: Dict[str, AnnotationPipeline] = {}
         self._initialized = True
 
+    def inspect_fasta(self, fasta_path: Optional[str] = None, fasta_content: Optional[str] = None) -> Dict[str, Any]:
+        """
+        快速预检查并解析 FASTA 序列元信息（Contig ID, 长度, GC% 等）
+        用于前端展示序列选择列表
+        """
+        from Bio import SeqIO
+        import io
+
+        records = []
+        if fasta_content and fasta_content.strip():
+            raw_text = fasta_content.strip()
+            if not raw_text.startswith(">"):
+                raw_text = f">Sequence_1\n{raw_text}"
+            records = list(SeqIO.parse(io.StringIO(raw_text), "fasta"))
+        elif fasta_path and Path(fasta_path).exists():
+            with open(fasta_path, "r", encoding="utf-8", errors="ignore") as f:
+                records = list(SeqIO.parse(f, "fasta"))
+
+        if not records:
+            return {
+                "success": False,
+                "error": "未检测到有效的 FASTA 序列内容或文件不存在",
+                "num_contigs": 0,
+                "total_length": 0,
+                "gc_content": 0.0,
+                "contigs": []
+            }
+
+        contigs = []
+        total_len = 0
+        total_gc_bases = 0
+
+        for r in records:
+            seq_str = str(r.seq).upper()
+            seq_len = len(seq_str)
+            total_len += seq_len
+            gc_count = seq_str.count("G") + seq_str.count("C")
+            total_gc_bases += gc_count
+            gc_pct = round((gc_count / seq_len * 100.0), 2) if seq_len > 0 else 0.0
+            
+            desc = r.description
+            if desc.startswith(r.id):
+                desc = desc[len(r.id):].strip()
+
+            contigs.append({
+                "id": r.id,
+                "description": desc,
+                "length_bp": seq_len,
+                "gc_content": gc_pct,
+                "selected": True
+            })
+
+        # 按长度降序排列
+        contigs.sort(key=lambda x: x["length_bp"], reverse=True)
+        overall_gc = round((total_gc_bases / total_len * 100.0), 2) if total_len > 0 else 0.0
+
+        return {
+            "success": True,
+            "num_contigs": len(contigs),
+            "total_length": total_len,
+            "gc_content": overall_gc,
+            "contigs": contigs
+        }
+
     async def submit_task(self, req: AnnotationRunRequest) -> Dict[str, Any]:
         """提交并启动异步注释任务"""
         task_id = f"ANNO_{os.urandom(4).hex().upper()}"

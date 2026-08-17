@@ -2,9 +2,10 @@
 /**
  * AnnotationSetup - 功能注释输入与参数配置面板
  */
-import { ref, reactive, onMounted } from 'vue';
+import { ref, reactive, watch, onMounted } from 'vue';
 import { getBridge } from '../../../../../bridge';
-import type { AnnotationRunParams } from '../types';
+import type { AnnotationRunParams, ContigMetaItem, FastaInspectResult } from '../types';
+import ContigSelector from './ContigSelector.vue';
 
 const props = defineProps<{
   isRunning: boolean;
@@ -35,6 +36,13 @@ const uploadedFileName = ref<string>('');
 const isUploading = ref<boolean>(false);
 const isDragging = ref<boolean>(false);
 
+// FASTA 预扫描与 Contig 选择状态
+const inspectedContigs = ref<ContigMetaItem[]>([]);
+const inspectTotalLength = ref<number>(0);
+const inspectGc = ref<number>(0);
+const isInspecting = ref<boolean>(false);
+const selectedContigIds = ref<string[]>([]);
+
 // 组装历史列表 (从拼接管线导入)
 const assemblyHistory = ref<any[]>([]);
 const selectedAssemblyTask = ref<string>('');
@@ -54,10 +62,50 @@ function loadSampleData() {
   inputMode.value = 'paste';
   form.fasta_content = SAMPLE_FASTA;
   form.task_name = 'Sample_Plasmid_Annotation';
+  inspectCurrentFasta();
 }
 
 function clearPasteData() {
   form.fasta_content = '';
+  inspectedContigs.value = [];
+  selectedContigIds.value = [];
+}
+
+// 快速预扫描当前输入的 FASTA
+async function inspectCurrentFasta() {
+  const hasPath = (inputMode.value === 'upload' || inputMode.value === 'assembly') && !!form.fasta_path;
+  const hasContent = inputMode.value === 'paste' && !!form.fasta_content && form.fasta_content.trim().length > 0;
+
+  if (!hasPath && !hasContent) {
+    inspectedContigs.value = [];
+    selectedContigIds.value = [];
+    return;
+  }
+
+  isInspecting.value = true;
+  try {
+    const bridge = getBridge();
+    const payload = {
+      fasta_path: hasPath ? form.fasta_path : undefined,
+      fasta_content: hasContent ? form.fasta_content : undefined
+    };
+    const res: FastaInspectResult = await bridge.inspect_annotation_fasta(payload);
+    if (res && res.success && res.contigs) {
+      inspectedContigs.value = res.contigs;
+      inspectTotalLength.value = res.total_length;
+      inspectGc.value = res.gc_content;
+      selectedContigIds.value = res.contigs.map(c => c.id);
+    } else {
+      inspectedContigs.value = [];
+      selectedContigIds.value = [];
+    }
+  } catch (e) {
+    console.warn('[AnnotationSetup] 预检查 FASTA 异常:', e);
+    inspectedContigs.value = [];
+    selectedContigIds.value = [];
+  } finally {
+    isInspecting.value = false;
+  }
 }
 
 // 文件 input 引用
@@ -86,6 +134,7 @@ function setLocalFilePath(filePath: string) {
   if (!form.task_name || form.task_name.startsWith('Annotation_')) {
     form.task_name = baseName.replace(/\.[^/.]+$/, '') + '_Anno';
   }
+  inspectCurrentFasta();
 }
 
 // 处理 HTML input 选择文件
@@ -158,6 +207,7 @@ function onAssemblyTaskSelected() {
     form.fasta_path = task.assembly_fasta || task.output_fasta || `results/assembly/${task.task_id}/final_assembly.fasta`;
     form.task_name = `${task.name || task.task_id}_Anno`;
     form.sample_type = task.sample_type || 'BACTERIA';
+    inspectCurrentFasta();
   }
 }
 
@@ -177,7 +227,16 @@ function onSubmit() {
     return;
   }
 
-  emit('run', { ...form });
+  // 检查 Contig 勾选
+  if (inspectedContigs.value.length > 1 && selectedContigIds.value.length === 0) {
+    alert('检测到多条 Contig，请在序列列表中至少勾选 1 条序列进行分析');
+    return;
+  }
+
+  emit('run', {
+    ...form,
+    selected_contigs: inspectedContigs.value.length > 1 ? selectedContigIds.value : undefined
+  });
 }
 
 onMounted(() => {
@@ -319,6 +378,22 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 2.5 序列筛选与包含配置 (当序列数 > 1 时呈现) -->
+    <div v-if="isInspecting" class="inspect-loading-banner">
+      <svg class="spin-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+      </svg>
+      <span>正在解析序列 Contig 列表与长度分布...</span>
+    </div>
+    
+    <ContigSelector
+      v-else-if="inspectedContigs.length > 1"
+      :contigs="inspectedContigs"
+      :total-length="inspectTotalLength"
+      :overall-gc="inspectGc"
+      @update:selection="val => selectedContigIds = val"
+    />
 
     <!-- 3. 参数配置表单 -->
     <div class="params-grid">
@@ -491,6 +566,33 @@ onMounted(() => {
 
 .source-content {
   margin-bottom: 20px;
+}
+
+.inspect-loading-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 16px;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .drop-zone {

@@ -2,6 +2,23 @@
  * 功能注释 TypeScript 类型定义
  */
 
+export interface ContigMetaItem {
+  id: string;
+  description: string;
+  length_bp: number;
+  gc_content: number;
+  selected: boolean;
+}
+
+export interface FastaInspectResult {
+  success: boolean;
+  error?: string;
+  num_contigs: number;
+  total_length: number;
+  gc_content: number;
+  contigs: ContigMetaItem[];
+}
+
 export interface AnnotationRunParams {
   task_name: string;
   sample_type: 'BACTERIA' | 'PHAGE' | 'VIRUS' | 'GENERAL';
@@ -12,6 +29,7 @@ export interface AnnotationRunParams {
   genetic_code: number;
   min_contig_len: number;
   threads?: number;
+  selected_contigs?: string[];
 }
 
 export interface FeatureItem {
