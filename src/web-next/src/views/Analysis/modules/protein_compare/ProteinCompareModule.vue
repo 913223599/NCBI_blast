@@ -205,21 +205,30 @@ function getStatusLabel(status: string) {
   }
 }
 
+interface AlignmentCharCol {
+  colIdx: number;
+  charA: string;
+  charB: string;
+  markup: string;
+  posA?: number;
+  posB?: number;
+  status: 'identical' | 'conservative' | 'radical' | 'indel';
+  tooltip: string;
+}
+
 interface AlignmentBlock {
   blockIndex: number;
   startPosA: number;
   endPosA: number;
   startPosB: number;
   endPosB: number;
-  seqA: string;
-  markup: string;
-  seqB: string;
+  columns: AlignmentCharCol[];
 }
 
-function generateAlignmentBlocks(row: ProteinComparisonRowItem, blockSize: number = 60): AlignmentBlock[] {
+function generateAlignmentBlocks(row: ProteinComparisonRowItem, blockSize: number = 40): AlignmentBlock[] {
   const alnA = row.aligned_seq_a || row.sample_a_seq || '';
   const alnB = row.aligned_seq_b || row.sample_b_seq || '';
-  const markup = row.aligned_markup || '|'.repeat(alnA.length);
+  const markup = row.aligned_markup || '';
   
   if (!alnA || !alnB) return [];
 
@@ -234,26 +243,63 @@ function generateAlignmentBlocks(row: ProteinComparisonRowItem, blockSize: numbe
     const chunkB = alnB.slice(i, i + blockSize);
     const chunkMarkup = markup.slice(i, i + blockSize);
 
-    const nonGapA = chunkA.replace(/-/g, '').length;
-    const nonGapB = chunkB.replace(/-/g, '').length;
+    const columns: AlignmentCharCol[] = [];
+    const blockStartA = realPosA + 1;
+    const blockStartB = realPosB + 1;
 
-    const startA = realPosA + 1;
-    const endA = realPosA + nonGapA;
-    const startB = realPosB + 1;
-    const endB = realPosB + nonGapB;
+    for (let cIdx = 0; cIdx < chunkA.length; cIdx++) {
+      const ca = chunkA[cIdx] || '-';
+      const cb = chunkB[cIdx] || '-';
+      const mk = chunkMarkup[cIdx] || (ca === cb ? '|' : (ca === '-' || cb === '-' ? '-' : ' '));
 
-    realPosA = endA;
-    realPosB = endB;
+      let curPosA: number | undefined;
+      let curPosB: number | undefined;
+
+      if (ca !== '-') {
+        realPosA += 1;
+        curPosA = realPosA;
+      }
+      if (cb !== '-') {
+        realPosB += 1;
+        curPosB = realPosB;
+      }
+
+      let status: 'identical' | 'conservative' | 'radical' | 'indel' = 'identical';
+      let tooltip = `位点 ${curPosA || curPosB}: ${ca} (一致)`;
+
+      if (ca === '-' || cb === '-') {
+        status = 'indel';
+        tooltip = `位点 ${curPosA || curPosB}: 插入/缺失 (Indel)`;
+      } else if (ca === cb) {
+        status = 'identical';
+        tooltip = `位点 ${curPosA}: ${ca} (完全相同)`;
+      } else if (mk === '+') {
+        status = 'conservative';
+        tooltip = `位点 ${curPosA}: ${ca} -> ${cb} (同类保守替换)`;
+      } else {
+        status = 'radical';
+        tooltip = `位点 ${curPosA}: ${ca} -> ${cb} (显著理化变异/电荷极性改变)`;
+      }
+
+      columns.push({
+        colIdx: i + cIdx + 1,
+        charA: ca,
+        charB: cb,
+        markup: mk,
+        posA: curPosA,
+        posB: curPosB,
+        status,
+        tooltip
+      });
+    }
 
     blocks.push({
       blockIndex: Math.floor(i / blockSize) + 1,
-      startPosA: startA,
-      endPosA: endA,
-      startPosB: startB,
-      endPosB: endB,
-      seqA: chunkA,
-      markup: chunkMarkup,
-      seqB: chunkB
+      startPosA: blockStartA,
+      endPosA: realPosA,
+      startPosB: blockStartB,
+      endPosB: realPosB,
+      columns
     });
   }
 
@@ -638,29 +684,37 @@ function copyText(text: string) {
 
                       <div class="alignment-blocks-container">
                         <div 
-                          v-for="block in generateAlignmentBlocks(row, 60)" 
+                          v-for="block in generateAlignmentBlocks(row, 40)" 
                           :key="block.blockIndex"
-                          class="align-block"
+                          class="align-block-card"
                         >
-                          <div class="align-line line-a">
-                            <span class="line-label">Query (A)</span>
-                            <span class="line-pos">{{ block.startPosA }}</span>
-                            <span class="line-seq">{{ block.seqA }}</span>
-                            <span class="line-pos end">{{ block.endPosA }}</span>
+                          <div class="block-meta-row">
+                            <span class="block-num">分子对齐区段 #{{ block.blockIndex }}</span>
+                            <span class="block-coord">A: {{ block.startPosA }}..{{ block.endPosA }} aa | B: {{ block.startPosB }}..{{ block.endPosB }} aa</span>
                           </div>
 
-                          <div class="align-line line-markup">
-                            <span class="line-label"></span>
-                            <span class="line-pos"></span>
-                            <span class="line-seq markup">{{ block.markup }}</span>
-                            <span class="line-pos end"></span>
-                          </div>
+                          <div class="char-matrix-wrapper">
+                            <!-- 标签列 -->
+                            <div class="col-labels">
+                              <span class="lbl-row">Query (A)</span>
+                              <span class="lbl-row mk">Match</span>
+                              <span class="lbl-row">Sbjct (B)</span>
+                            </div>
 
-                          <div class="align-line line-b">
-                            <span class="line-label">Sbjct (B)</span>
-                            <span class="line-pos">{{ block.startPosB }}</span>
-                            <span class="line-seq">{{ block.seqB }}</span>
-                            <span class="line-pos end">{{ block.endPosB }}</span>
+                            <!-- 逐字符对齐列 -->
+                            <div class="col-chars-grid">
+                              <div 
+                                v-for="col in block.columns" 
+                                :key="col.colIdx" 
+                                class="char-col"
+                                :class="`col-${col.status}`"
+                                :title="col.tooltip"
+                              >
+                                <span class="char-cell char-a" :class="`char-${col.status}`">{{ col.charA }}</span>
+                                <span class="char-cell char-mk" :class="`mk-${col.status}`">{{ col.markup === ' ' ? '•' : col.markup }}</span>
+                                <span class="char-cell char-b" :class="`char-${col.status}`">{{ col.charB }}</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1528,64 +1582,154 @@ function copyText(text: string) {
 .alignment-blocks-container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 14px 18px;
-  border-radius: 8px;
+  gap: 16px;
+  background: #090d16;
+  padding: 16px 20px;
+  border-radius: 10px;
   overflow-x: auto;
 }
 
-.align-block {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.align-block-card {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  padding: 10px 14px;
 }
 
-.align-line {
+.block-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.block-num {
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.block-coord {
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: ui-monospace, monospace;
+}
+
+.char-matrix-wrapper {
   display: flex;
   align-items: center;
-  font-size: 12px;
-  line-height: 1.3;
+  gap: 10px;
 }
 
-.line-label {
-  width: 75px;
+.col-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 70px;
+  flex-shrink: 0;
+}
+
+.lbl-row {
+  font-size: 11px;
+  height: 22px;
+  display: flex;
+  align-items: center;
   color: #94a3b8;
-  font-size: 10px;
+  font-weight: 600;
 }
 
-.line-pos {
-  width: 40px;
+.lbl-row.mk {
   color: #64748b;
   font-size: 10px;
-  text-align: right;
-  margin-right: 8px;
 }
 
-.line-pos.end {
-  width: 40px;
-  margin-left: 8px;
-  text-align: left;
+.col-chars-grid {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
-.line-seq {
-  letter-spacing: 2.2px;
-  white-space: pre;
+.char-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+  padding: 2px 1px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
 }
 
-.line-seq.markup {
+.char-col:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-2px);
+}
+
+.char-cell {
+  width: 20px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 3px;
+  user-select: none;
+}
+
+/* 状态着色 */
+.char-cell.char-identical {
+  background: transparent;
+  color: #cbd5e1;
+}
+
+.char-cell.char-conservative {
+  background: #0284c7;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.4);
+}
+
+.char-cell.char-radical {
+  background: #dc2626;
+  color: #ffffff;
+  font-weight: 900;
+  box-shadow: 0 1px 4px rgba(220, 38, 38, 0.6);
+}
+
+.char-cell.char-indel {
+  background: #7c3aed;
+  color: #ffffff;
+}
+
+/* Match 连线行 */
+.char-cell.char-mk {
+  font-size: 11px;
+  height: 18px;
+}
+
+.mk-identical {
   color: #38bdf8;
   font-weight: 800;
 }
 
-.line-a .line-seq {
-  color: #f8fafc;
+.mk-conservative {
+  color: #38bdf8;
+  font-weight: 900;
 }
 
-.line-b .line-seq {
-  color: #cbd5e1;
+.mk-radical {
+  color: #ef4444;
+  font-weight: 900;
+}
+
+.mk-indel {
+  color: #a855f7;
+  font-weight: 800;
 }
 
 /* 分页 */
