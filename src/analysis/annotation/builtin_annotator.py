@@ -7,7 +7,7 @@ import re
 import os
 import math
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Optional, Tuple, Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -228,7 +228,7 @@ class BuiltinAnnotator:
         return sorted(selected, key=lambda x: (x["contig"], x["start"]))
 
     def annotate_fasta(self, fasta_file_path: Path, output_dir: Path, 
-                       on_progress: Optional[callable] = None) -> Tuple[AnnotationSummary, List[FeatureItem], Dict[str, str]]:
+                       on_progress: Optional[Callable[[int, str], None]] = None) -> Tuple[AnnotationSummary, List[FeatureItem], Dict[str, str]]:
         """
         执行完整注释并生成标准格式文件集
         """
@@ -333,7 +333,7 @@ class BuiltinAnnotator:
         records: List[SeqRecord],
         all_features: List[FeatureItem],
         output_dir: Path,
-        on_progress: Optional[callable] = None
+        on_progress: Optional[Callable[[int, str], None]] = None
     ) -> Tuple[AnnotationSummary, List[FeatureItem], Dict[str, str]]:
         """
         根据当前最新的 features 列表导出所有标准生物学格式产物
@@ -342,7 +342,7 @@ class BuiltinAnnotator:
         if on_progress:
             on_progress(88, "正在打包并导出标准 GenBank / GFF3 / TSV 产物...")
 
-        total_length = sum(len(r.seq) for r in records)
+        total_length = sum(len(r.seq) for r in records if r.seq is not None)
         num_contigs = len(records)
 
         # 1. 组装 GenBank SeqRecord 结构
@@ -355,13 +355,14 @@ class BuiltinAnnotator:
         feat_idx = 0
 
         for record in records:
-            contig_id = record.id
-            seq_str = str(record.seq)
+            contig_id = str(record.id or "Contig")
+            seq_str = str(record.seq or "")
+            rec_id = contig_id[:16] if contig_id else "Contig"
 
             gbk_rec = SeqRecord(
                 Seq(seq_str),
-                id=contig_id[:16],
-                name=contig_id[:16],
+                id=rec_id,
+                name=rec_id,
                 description=f"{contig_id} annotated by NCBI Blast Workbench",
                 annotations={"molecule_type": "DNA", "data_file_division": "BCT"}
             )
@@ -434,7 +435,7 @@ class BuiltinAnnotator:
                 f.write(f"{feat.locus_tag}\t{feat.feature_type}\t{feat.start}\t{feat.end}\t{feat.strand}\t{feat.length_bp}\t{feat.protein_length_aa or 0}\t{feat.molecular_weight_kda or 0.0}\t{feat.product}\n")
 
         # 统计指标
-        full_all_seq = "".join(str(r.seq) for r in records)
+        full_all_seq = "".join(str(r.seq) for r in records if r.seq is not None)
         gc_val = self.calculate_gc(full_all_seq)
         cds_cnt = len(all_features)
         total_coding_bp = sum(f.length_bp for f in all_features)
@@ -457,7 +458,7 @@ class BuiltinAnnotator:
         )
 
         with open(summary_file, "w", encoding="utf-8") as f:
-            f.write(summary.json())
+            f.write(summary.json() if hasattr(summary, 'json') else summary.model_dump_json())
 
         output_files = {
             "gbk": str(gbk_file.resolve()),

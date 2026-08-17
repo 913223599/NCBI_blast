@@ -279,9 +279,10 @@ class ProteinComparer:
                     match_status = "divergent"
 
                 cat_info = PROTEIN_CATEGORIES.get(pa.category, {"label": "其他功能蛋白"})
+                label_str = str(cat_info.get("label", pa.category))
                 rows.append(ProteinComparisonRow(
                     category=pa.category,
-                    category_label=cat_info.get("label", pa.category),
+                    category_label=label_str,
                     sample_a_id=pa.id,
                     sample_a_tag=pa.locus_tag,
                     sample_a_product=pa.product,
@@ -305,9 +306,10 @@ class ProteinComparer:
             else:
                 # 样本 A 独有
                 cat_info = PROTEIN_CATEGORIES.get(pa.category, {"label": "其他功能蛋白"})
+                label_str = str(cat_info.get("label", pa.category))
                 rows.append(ProteinComparisonRow(
                     category=pa.category,
-                    category_label=cat_info.get("label", pa.category),
+                    category_label=label_str,
                     sample_a_id=pa.id,
                     sample_a_tag=pa.locus_tag,
                     sample_a_product=pa.product,
@@ -325,9 +327,10 @@ class ProteinComparer:
         for pb in filtered_b:
             if pb.id not in matched_b_ids:
                 cat_info = PROTEIN_CATEGORIES.get(pb.category, {"label": "其他功能蛋白"})
+                label_str = str(cat_info.get("label", pb.category))
                 rows.append(ProteinComparisonRow(
                     category=pb.category,
-                    category_label=cat_info.get("label", pb.category),
+                    category_label=label_str,
                     sample_a_id="",
                     sample_a_tag="[样本A缺失]",
                     sample_a_product="未检出匹配同源基因",

@@ -78,8 +78,8 @@ const selectedStats = computed(() => {
 });
 
 // 切换单条选择
-function toggleSelect(id: string, event?: MouseEvent, index?: number) {
-  if (event && event.shiftKey && lastSelectedIndex.value !== null && index !== undefined) {
+function toggleSelect(id: string, event?: MouseEvent | Event, index?: number) {
+  if (event && (event as MouseEvent).shiftKey && lastSelectedIndex.value !== null && index !== undefined) {
     // Shift 范围连选
     const start = Math.min(lastSelectedIndex.value, index);
     const end = Math.max(lastSelectedIndex.value, index);

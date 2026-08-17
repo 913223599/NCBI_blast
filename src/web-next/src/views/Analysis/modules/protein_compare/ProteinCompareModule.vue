@@ -4,7 +4,7 @@
  * 职责：对比两个噬菌体/细菌注释结果中的尾丝、裂解酶、衣壳等关键蛋白，展示氨基酸变异、突变位点及导出 CSV
  */
 import { ref, computed, onMounted } from 'vue';
-import { getBridge } from '../../../../../bridge';
+import { getBridge } from '../../../../bridge';
 import type { 
   ComparableTaskItem, 
   ProteinComparisonResultPayload, 
@@ -56,12 +56,12 @@ async function fetchTasks() {
     if (res && res.success) {
       availableTasks.value = res.data || [];
       // 默认选择前两条不同的任务
-      if (availableTasks.value.length >= 2) {
+      if (availableTasks.value.length >= 2 && availableTasks.value[0] && availableTasks.value[1]) {
         sampleAId.value = availableTasks.value[0].task_id;
         sampleBId.value = availableTasks.value[1].task_id;
         // 自动触发一次默认比对
         await executeComparison();
-      } else if (availableTasks.value.length === 1) {
+      } else if (availableTasks.value.length === 1 && availableTasks.value[0]) {
         sampleAId.value = availableTasks.value[0].task_id;
       }
     }
