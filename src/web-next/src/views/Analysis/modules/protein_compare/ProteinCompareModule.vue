@@ -572,93 +572,52 @@ function copyText(text: string) {
                 </td>
               </tr>
 
-              <!-- 展开的高维度生物学与分子对齐详情 -->
+              <!-- 展开的高密度专业分子对齐与结构域洞察面板 -->
               <tr v-if="expandedRowKey === `${row.sample_a_id}_${row.sample_b_id || 'none'}`" class="detail-row">
                 <td colspan="8">
-                  <div class="detail-container">
+                  <div class="compact-detail-panel">
                     
-                    <!-- 1. 生物学变异洞察与结构域分布卡片 -->
-                    <div class="insight-card">
-                      <div class="insight-header">
-                        <div class="insight-title-wrap">
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <line x1="12" y1="16" x2="12" y2="12" />
-                            <line x1="12" y1="8" x2="12.01" y2="8" />
-                          </svg>
-                          <span class="insight-title">生物学变异机制与结构域分布洞察</span>
-                        </div>
-                        <div class="impact-badges">
-                          <span class="impact-badge conservative" title="维持侧链极性与三维疏水核心">
-                            保守同类替换: {{ row.conservative_mutation_cnt || 0 }} 处
-                          </span>
-                          <span class="impact-badge radical" title="改变氨基酸电荷、酸碱度或亲疏水性">
-                            显著理化变异: {{ row.radical_mutation_cnt || 0 }} 处
-                          </span>
-                          <span v-if="row.indel_cnt" class="impact-badge indel" title="氨基酸插入或缺失">
-                            Indel 分歧: {{ row.indel_cnt }} aa
-                          </span>
-                        </div>
+                    <!-- 1. 紧凑型顶部统计与洞察栏 (一行整合) -->
+                    <div class="compact-insight-bar">
+                      <div class="bar-left">
+                        <span class="compact-concl-tag">综合研判</span>
+                        <span class="compact-concl-text">{{ row.hotspot_conclusion || '双样本具有高度同源性。' }}</span>
                       </div>
-
-                      <div class="insight-body">
-                        <div class="conclusion-box">
-                          <span class="conclusion-label">综合研判:</span>
-                          <span class="conclusion-text">{{ row.hotspot_conclusion || '两样本具有高度同源性。' }}</span>
-                        </div>
-
-                        <!-- 3 大结构域保守性对比看板 -->
-                        <div v-if="row.region_domains && row.region_domains.length > 0" class="domain-grid">
-                          <div 
-                            v-for="(dom, dIdx) in row.region_domains" 
-                            :key="dIdx"
-                            :class="['domain-card', `status-${dom.status}`]"
-                          >
-                            <div class="dom-header">
-                              <span class="dom-name">{{ dom.name }}</span>
-                              <span class="dom-range">{{ dom.start }}..{{ dom.end }} aa ({{ dom.length }} aa)</span>
-                            </div>
-                            <div class="dom-stat-row">
-                              <div class="dom-ident">{{ dom.identity_pct }}% 一致性</div>
-                              <div class="dom-mut-count">
-                                <span>变异: {{ dom.mutation_count }} 处</span>
-                                <span class="dom-sub-cnt">(保守 {{ dom.conservative_count }} / 显著 {{ dom.radical_count }})</span>
-                              </div>
-                            </div>
-                            <div class="dom-bar-track">
-                              <div 
-                                class="dom-bar-fill" 
-                                :class="`fill-${dom.status}`"
-                                :style="{ width: `${dom.identity_pct}%` }"
-                              ></div>
-                            </div>
-                          </div>
-                        </div>
+                      <div class="bar-right">
+                        <span class="mini-stat-pill cons">保守替换: {{ row.conservative_mutation_cnt || 0 }}</span>
+                        <span class="mini-stat-pill rad">显著变异: {{ row.radical_mutation_cnt || 0 }}</span>
+                        <span v-if="row.indel_cnt" class="mini-stat-pill indel">Indel: {{ row.indel_cnt }} aa</span>
                       </div>
                     </div>
 
-                    <!-- 2. 全长变异空间分布标尺 (Linear Mutation Hotspot Ruler) -->
-                    <div class="ruler-card" v-if="row.mutations && row.mutations.length > 0">
-                      <div class="ruler-header">
-                        <span class="ruler-title">全长变异空间分布标尺 (1 ~ {{ Math.max(row.sample_a_len, row.sample_b_len || 0) }} aa)</span>
-                        <div class="ruler-legend">
-                          <span class="legend-item"><span class="legend-dot green"></span> 同类保守替换</span>
-                          <span class="legend-item"><span class="legend-dot orange"></span> 理化性质转变</span>
-                          <span class="legend-item"><span class="legend-dot red"></span> 插入/缺失</span>
+                    <!-- 2. 结构域微型分段条与热点标尺 (一体化紧凑排版) -->
+                    <div class="compact-domain-ruler-row">
+                      <!-- 3 大结构域微型状态条 -->
+                      <div v-if="row.region_domains && row.region_domains.length > 0" class="domain-mini-list">
+                        <div 
+                          v-for="(dom, dIdx) in row.region_domains" 
+                          :key="dIdx"
+                          :class="['domain-mini-pill', `status-${dom.status}`]"
+                          :title="`${dom.name}: ${dom.start}..${dom.end} aa, 一致性 ${dom.identity_pct}%, 变异 ${dom.mutation_count} 处`"
+                        >
+                          <span class="dom-mini-title">{{ dom.name.split(' ')[0] }}</span>
+                          <span class="dom-mini-val">{{ dom.identity_pct }}%</span>
+                          <span class="dom-mini-cnt">({{ dom.mutation_count }} 变异)</span>
                         </div>
                       </div>
 
-                      <div class="ruler-track-container">
-                        <div class="ruler-axis">
-                          <span>1 aa (N-端)</span>
-                          <span>{{ Math.round(Math.max(row.sample_a_len, row.sample_b_len || 0) / 2) }} aa (中段)</span>
-                          <span>{{ Math.max(row.sample_a_len, row.sample_b_len || 0) }} aa (C-端)</span>
+                      <!-- 微型标尺 -->
+                      <div class="compact-ruler-wrap" v-if="row.mutations && row.mutations.length > 0">
+                        <div class="ruler-axis-mini">
+                          <span>1 aa</span>
+                          <span class="ruler-label-mid">全长变异空间分布 ({{ Math.max(row.sample_a_len, row.sample_b_len || 0) }} aa)</span>
+                          <span>{{ Math.max(row.sample_a_len, row.sample_b_len || 0) }} aa</span>
                         </div>
-                        <div class="ruler-track">
+                        <div class="ruler-track-mini">
                           <div 
                             v-for="(m, mIdx) in row.mutations" 
                             :key="mIdx"
-                            :class="['ruler-mutation-dot', m.impact_type || 'conservative']"
+                            :class="['ruler-dot-mini', m.impact_type || 'conservative']"
                             :style="{ left: `${getMutationPosPct(m.pos, Math.max(row.sample_a_len, row.sample_b_len || 0))}%` }"
                             :title="m.description"
                           ></div>
@@ -666,55 +625,46 @@ function copyText(text: string) {
                       </div>
                     </div>
 
-                    <!-- 3. NCBI BLAST 风格双向序列逐位着色对齐视轨 -->
-                    <div class="alignment-card">
-                      <div class="alignment-header">
-                        <div class="align-title-row">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2">
-                            <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" />
-                            <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
-                          </svg>
-                          <span class="alignment-title">双向序列逐位对齐视轨 (Pairwise Sequence Alignment Track)</span>
-                        </div>
-                        <div class="align-actions">
-                          <button class="mini-btn" @click="copyText(row.aligned_seq_a || row.sample_a_seq)">复制样本 A 序列</button>
-                          <button v-if="row.sample_b_seq" class="mini-btn" @click="copyText(row.aligned_seq_b || row.sample_b_seq)">复制样本 B 序列</button>
+                    <!-- 3. 高密度分子逐位对齐视轨 (流线型，每行 60 aa) -->
+                    <div class="compact-alignment-track">
+                      <div class="track-toolbar">
+                        <span class="track-title">双向分子逐位对齐视轨 (每行 60 氨基酸)</span>
+                        <div class="track-actions">
+                          <button class="mini-copy-btn" @click="copyText(row.aligned_seq_a || row.sample_a_seq)">复制 A 序列</button>
+                          <button v-if="row.sample_b_seq" class="mini-copy-btn" @click="copyText(row.aligned_seq_b || row.sample_b_seq)">复制 B 序列</button>
                         </div>
                       </div>
 
-                      <div class="alignment-blocks-container">
+                      <div class="dense-align-body">
                         <div 
-                          v-for="block in generateAlignmentBlocks(row, 40)" 
+                          v-for="block in generateAlignmentBlocks(row, 60)" 
                           :key="block.blockIndex"
-                          class="align-block-card"
+                          class="dense-align-block"
                         >
-                          <div class="block-meta-row">
-                            <span class="block-num">分子对齐区段 #{{ block.blockIndex }}</span>
-                            <span class="block-coord">A: {{ block.startPosA }}..{{ block.endPosA }} aa | B: {{ block.startPosB }}..{{ block.endPosB }} aa</span>
+                          <div class="dense-meta-left">
+                            <span class="lbl-a">A: {{ block.startPosA }}</span>
+                            <span class="lbl-mk">Match</span>
+                            <span class="lbl-b">B: {{ block.startPosB }}</span>
+                          </div>
+                          
+                          <div class="dense-char-stream">
+                            <div 
+                              v-for="col in block.columns" 
+                              :key="col.colIdx" 
+                              class="dense-col"
+                              :class="`col-${col.status}`"
+                              :title="col.tooltip"
+                            >
+                              <span class="d-char char-a" :class="`char-${col.status}`">{{ col.charA }}</span>
+                              <span class="d-mk" :class="`mk-${col.status}`">{{ col.markup === ' ' ? '•' : col.markup }}</span>
+                              <span class="d-char char-b" :class="`char-${col.status}`">{{ col.charB }}</span>
+                            </div>
                           </div>
 
-                          <div class="char-matrix-wrapper">
-                            <!-- 标签列 -->
-                            <div class="col-labels">
-                              <span class="lbl-row">Query (A)</span>
-                              <span class="lbl-row mk">Match</span>
-                              <span class="lbl-row">Sbjct (B)</span>
-                            </div>
-
-                            <!-- 逐字符对齐列 -->
-                            <div class="col-chars-grid">
-                              <div 
-                                v-for="col in block.columns" 
-                                :key="col.colIdx" 
-                                class="char-col"
-                                :class="`col-${col.status}`"
-                                :title="col.tooltip"
-                              >
-                                <span class="char-cell char-a" :class="`char-${col.status}`">{{ col.charA }}</span>
-                                <span class="char-cell char-mk" :class="`mk-${col.status}`">{{ col.markup === ' ' ? '•' : col.markup }}</span>
-                                <span class="char-cell char-b" :class="`char-${col.status}`">{{ col.charB }}</span>
-                              </div>
-                            </div>
+                          <div class="dense-meta-right">
+                            <span class="lbl-a">{{ block.endPosA }}</span>
+                            <span class="lbl-mk"></span>
+                            <span class="lbl-b">{{ block.endPosB }}</span>
                           </div>
                         </div>
                       </div>
@@ -1269,468 +1219,378 @@ function copyText(text: string) {
   background: #e2e8f0;
 }
 
-/* 展开详情卡片与生物学洞察 */
+/* 展开详情紧凑高密度面板 */
 .detail-row td {
   background: #f8fafc;
-  padding: 18px 24px;
+  padding: 10px 16px;
 }
 
-.detail-container {
+.compact-detail-panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
 }
 
-/* 1. 生物学变异洞察卡片 */
-.insight-card {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 16px 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-}
-
-.insight-header {
+/* 1. 紧凑型顶部统计与洞察栏 */
+.compact-insight-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #f1f5f9;
+  gap: 10px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 12px;
 }
 
-.insight-title-wrap {
+.bar-left {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.insight-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.impact-badges {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.impact-badge {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-.impact-badge.conservative {
+.compact-concl-tag {
   background: #eff6ff;
   color: #2563eb;
   border: 1px solid #bfdbfe;
-}
-
-.impact-badge.radical {
-  background: #fff7ed;
-  color: #ea580c;
-  border: 1px solid #fed7aa;
-}
-
-.impact-badge.indel {
-  background: #fef2f2;
-  color: #dc2626;
-  border: 1px solid #fecaca;
-}
-
-.conclusion-box {
-  background: #f8fafc;
-  border-left: 3px solid #2563eb;
-  padding: 8px 12px;
-  border-radius: 0 6px 6px 0;
-  font-size: 12px;
-  line-height: 1.5;
-  margin-bottom: 14px;
-}
-
-.conclusion-label {
+  font-size: 11px;
   font-weight: 700;
-  color: #1e293b;
-  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
 
-.conclusion-text {
+.compact-concl-text {
+  font-size: 12px;
   color: #334155;
+  line-height: 1.4;
 }
 
-/* 3大结构域看板 */
-.domain-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+.bar-right {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.mini-stat-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.mini-stat-pill.cons { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.mini-stat-pill.rad { background: #fff7ed; color: #ea580c; border: 1px solid #fed7aa; }
+.mini-stat-pill.indel { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+
+/* 2. 结构域微型分段条与热点标尺 */
+.compact-domain-ruler-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
-}
-
-.domain-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 10px 14px;
-}
-
-.domain-card.status-conserved { border-color: #a7f3d0; background: #f0fdf4; }
-.domain-card.status-moderate { border-color: #bfdbfe; background: #eff6ff; }
-.domain-card.status-hypervariable { border-color: #fed7aa; background: #fff7ed; }
-
-.dom-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
-
-.dom-name {
-  font-size: 11px;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.dom-range {
-  font-size: 10px;
-  color: #64748b;
-  font-family: monospace;
-}
-
-.dom-stat-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-  margin-bottom: 6px;
-}
-
-.dom-ident {
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.dom-mut-count {
-  font-size: 10px;
-  color: #64748b;
-}
-
-.dom-sub-cnt {
-  margin-left: 4px;
-  color: #94a3b8;
-}
-
-.dom-bar-track {
-  width: 100%;
-  height: 5px;
-  background: #e2e8f0;
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.dom-bar-fill {
-  height: 100%;
-}
-
-.dom-bar-fill.fill-conserved { background: #10b981; }
-.dom-bar-fill.fill-moderate { background: #3b82f6; }
-.dom-bar-fill.fill-hypervariable { background: #f97316; }
-
-/* 2. 标尺 */
-.ruler-card {
   background: white;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 14px 18px;
-}
-
-.ruler-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.ruler-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.ruler-legend {
-  display: flex;
-  gap: 12px;
-  font-size: 11px;
-  color: #64748b;
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.legend-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.legend-dot.green { background: #10b981; }
-.legend-dot.orange { background: #f97316; }
-.legend-dot.red { background: #ef4444; }
-
-.ruler-track-container {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.ruler-axis {
-  display: flex;
-  justify-content: space-between;
-  font-size: 10px;
-  color: #94a3b8;
-  font-family: monospace;
-}
-
-.ruler-track {
-  width: 100%;
-  height: 12px;
-  background: #f1f5f9;
-  border: 1px solid #cbd5e1;
   border-radius: 6px;
-  position: relative;
+  padding: 6px 12px;
 }
 
-.ruler-mutation-dot {
-  position: absolute;
-  top: 1px;
-  width: 3px;
-  height: 8px;
-  border-radius: 1px;
-  transform: translateX(-50%);
-  cursor: pointer;
-  transition: transform 0.1s ease;
-}
-
-.ruler-mutation-dot:hover {
-  transform: translateX(-50%) scale(1.6);
-  z-index: 10;
-}
-
-.ruler-mutation-dot.conservative { background: #10b981; }
-.ruler-mutation-dot.charge_flip,
-.ruler-mutation-dot.charge_shift,
-.ruler-mutation-dot.polarity_shift { background: #f97316; }
-.ruler-mutation-dot.indel { background: #ef4444; }
-.ruler-mutation-dot.other_mutation { background: #64748b; }
-
-/* 3. 对齐视图 */
-.alignment-card {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 14px 18px;
-}
-
-.alignment-header {
+.domain-mini-list {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #f1f5f9;
+  gap: 6px;
 }
 
-.align-title-row {
+.domain-mini-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.alignment-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-.align-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.mini-btn {
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
+  gap: 4px;
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
-  cursor: pointer;
-  color: #475569;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
 }
 
-.mini-btn:hover {
-  background: #f1f5f9;
-  color: #1e293b;
-}
+.domain-mini-pill.status-conserved { background: #f0fdf4; border-color: #a7f3d0; color: #166534; }
+.domain-mini-pill.status-moderate { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+.domain-mini-pill.status-hypervariable { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
 
-.alignment-blocks-container {
+.dom-mini-title { font-weight: 700; }
+.dom-mini-val { font-weight: 800; font-family: ui-monospace, monospace; }
+.dom-mini-cnt { font-size: 10px; opacity: 0.75; }
+
+.compact-ruler-wrap {
+  flex: 1;
+  min-width: 260px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  background: #090d16;
-  padding: 16px 20px;
-  border-radius: 10px;
-  overflow-x: auto;
+  gap: 2px;
 }
 
-.align-block-card {
-  background: #111827;
-  border: 1px solid #1f2937;
-  border-radius: 8px;
-  padding: 10px 14px;
-}
-
-.block-meta-row {
+.ruler-axis-mini {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.block-num {
-  font-size: 11px;
-  font-weight: 700;
-  color: #38bdf8;
-}
-
-.block-coord {
-  font-size: 11px;
+  font-size: 10px;
   color: #94a3b8;
   font-family: ui-monospace, monospace;
 }
 
-.char-matrix-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.col-labels {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 70px;
-  flex-shrink: 0;
-}
-
-.lbl-row {
-  font-size: 11px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  color: #94a3b8;
+.ruler-label-mid {
   font-weight: 600;
-}
-
-.lbl-row.mk {
   color: #64748b;
-  font-size: 10px;
 }
 
-.col-chars-grid {
+.ruler-track-mini {
+  width: 100%;
+  height: 8px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  position: relative;
+}
+
+.ruler-dot-mini {
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 6px;
+  border-radius: 1px;
+  transform: translateX(-50%);
+}
+
+.ruler-dot-mini.conservative { background: #10b981; }
+.ruler-dot-mini.charge_flip,
+.ruler-dot-mini.charge_shift,
+.ruler-dot-mini.polarity_shift { background: #f97316; }
+.ruler-dot-mini.indel { background: #ef4444; }
+
+/* 3. 高密度分子逐位对齐视轨 */
+.compact-alignment-track {
+  background: #090d16;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.track-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.track-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.track-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mini-copy-btn {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.mini-copy-btn:hover {
+  background: #334155;
+  color: white;
+}
+
+.dense-align-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.dense-align-block {
   display: flex;
   align-items: center;
-  gap: 3px;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  gap: 8px;
+  padding: 4px 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-.char-col {
+.dense-meta-left,
+.dense-meta-right {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 54px;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.dense-meta-left .lbl-a,
+.dense-meta-right .lbl-a { color: #f8fafc; }
+
+.dense-meta-left .lbl-mk,
+.dense-meta-right .lbl-mk { color: #64748b; font-size: 9px; }
+
+.dense-meta-left .lbl-b,
+.dense-meta-right .lbl-b { color: #cbd5e1; }
+
+.dense-char-stream {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  overflow-x: auto;
+}
+
+.dense-col {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   cursor: help;
-  padding: 2px 1px;
-  border-radius: 4px;
-  transition: all 0.15s ease;
+  padding: 1px;
+  border-radius: 2px;
 }
 
-.char-col:hover {
-  background: rgba(255, 255, 255, 0.12);
-  transform: translateY(-2px);
+.dense-col:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
-.char-cell {
-  width: 20px;
-  height: 22px;
+.d-char {
+  width: 15px;
+  height: 17px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  border-radius: 3px;
+  border-radius: 2px;
   user-select: none;
 }
 
-/* 状态着色 */
-.char-cell.char-identical {
+.d-char.char-identical {
   background: transparent;
   color: #cbd5e1;
 }
 
-.char-cell.char-conservative {
+.d-char.char-conservative {
   background: #0284c7;
   color: #ffffff;
-  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.4);
+  font-weight: 800;
 }
 
-.char-cell.char-radical {
+.d-char.char-radical {
   background: #dc2626;
   color: #ffffff;
   font-weight: 900;
-  box-shadow: 0 1px 4px rgba(220, 38, 38, 0.6);
 }
 
-.char-cell.char-indel {
+.d-char.char-indel {
   background: #7c3aed;
   color: #ffffff;
 }
 
-/* Match 连线行 */
-.char-cell.char-mk {
-  font-size: 11px;
-  height: 18px;
-}
-
-.mk-identical {
-  color: #38bdf8;
+.d-mk {
+  width: 15px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
   font-weight: 800;
+  user-select: none;
 }
 
-.mk-conservative {
-  color: #38bdf8;
-  font-weight: 900;
+.d-mk.mk-identical { color: #38bdf8; }
+.d-mk.mk-conservative { color: #38bdf8; font-weight: 900; }
+.d-mk.mk-radical { color: #ef4444; font-weight: 900; }
+.d-mk.mk-indel { color: #a855f7; }
+
+/* 分页 */
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid #f1f5f9;
 }
 
-.mk-radical {
-  color: #ef4444;
-  font-weight: 900;
+.page-size-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
 }
 
-.mk-indel {
-  color: #a855f7;
-  font-weight: 800;
+.page-select {
+  padding: 3px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 12px;
 }
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-btn {
+  background: white;
+  border: 1px solid #cbd5e1;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.page-info {
+  font-size: 12px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.empty-placeholder {
+  background: white;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.empty-placeholder h3 {
+  margin: 12px 0 6px;
+  color: #1e293b;
+  font-size: 15px;
+}
+
+.empty-placeholder p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+</style>
 
 /* 分页 */
 .pagination-bar {
