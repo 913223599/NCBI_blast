@@ -953,6 +953,19 @@ const electronBridge = {
 
     async cancel_annotation_task(taskId: string): Promise<any> {
         return await apiPost(`/api/analysis/annotation/${taskId}/cancel`, {});
+    },
+
+    // ═══ 组装分析：核心蛋白跨样本比对 (Protein Comparison) ═══
+    async get_protein_compare_categories(): Promise<any> {
+        return await apiGet('/api/analysis/protein_compare/categories');
+    },
+
+    async get_comparable_annotation_tasks(): Promise<any> {
+        return await apiGet('/api/analysis/protein_compare/tasks');
+    },
+
+    async run_protein_comparison(payload: { sample_a_id: string; sample_b_id: string; sample_a_name?: string; sample_b_name?: string; category: string }): Promise<any> {
+        return await apiPost('/api/analysis/protein_compare/run', payload);
     }
 };
 

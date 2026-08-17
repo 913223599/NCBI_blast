@@ -262,11 +262,12 @@ app.include_router(taxonomy.router)
 app.include_router(core.router)
 
 # 注册基因组拼接与数据库管理路由
-from .routes import assembly, database, analysis, annotation
+from .routes import assembly, database, analysis, annotation, protein_compare
 app.include_router(assembly.router, prefix="/api")
 app.include_router(database.router, prefix="/api")
 app.include_router(analysis.router, prefix="/api")
 app.include_router(annotation.router, prefix="/api")
+app.include_router(protein_compare.router)
 
 
 # 最后：启动局域网共享路由 (确保通配符路由 /{full_path} 不会屏蔽业务 API)

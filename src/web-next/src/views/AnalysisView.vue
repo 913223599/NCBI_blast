@@ -8,12 +8,13 @@ import { ref } from 'vue'
 import ComparisonModule from './Analysis/modules/comparison/ComparisonModule.vue'
 import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue'
 import AnnotationModule from './Analysis/modules/annotation/AnnotationModule.vue'
+import ProteinCompareModule from './Analysis/modules/protein_compare/ProteinCompareModule.vue'
 
 interface AnalysisTool {
   id: string;
   title: string;
   description: string;
-  iconType: 'chart' | 'dna' | 'book';
+  iconType: 'chart' | 'dna' | 'book' | 'compare';
   status: 'ready' | 'beta' | 'coming_soon';
 }
 
@@ -30,6 +31,13 @@ const tools = ref<AnalysisTool[]>([
     title: '全基因组功能注释', 
     description: '基于 Prokka / Pharokka / 内置高精度引擎进行 CDS、tRNA、rRNA 预测与蛋白功能注释，支持 FASTA 提交与三维圈图联动。', 
     iconType: 'book',
+    status: 'ready'
+  },
+  { 
+    id: 'protein_compare', 
+    title: '核心蛋白跨样本比对分析', 
+    description: '对比两个噬菌体/细菌样本中尾丝、裂解酶、衣壳与复制酶等关键基因的同源性、一致性、氨基酸点突变与变异图谱。', 
+    iconType: 'compare',
     status: 'ready'
   },
   { 
@@ -98,6 +106,13 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
               <line x1="9" y1="7" x2="15" y2="7" />
               <line x1="9" y1="11" x2="13" y2="11" />
             </svg>
+            <svg v-else-if="tool.iconType === 'compare'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2.2">
+              <path d="M16 3h5v5" />
+              <path d="M4 20L21 3" />
+              <path d="M21 16v5h-5" />
+              <path d="M15 15l6 6" />
+              <path d="M4 4l5 5" />
+            </svg>
             <svg v-else-if="tool.iconType === 'dna'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.2">
               <path d="M2 15c6.667-6 13.333 0 20-6" />
               <path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993" />
@@ -126,6 +141,7 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
           v-else-if="activeTool === 'annotation'" 
           @open-viewer="handleOpenViewerFromAnnotation" 
         />
+        <ProteinCompareModule v-else-if="activeTool === 'protein_compare'" />
         <GenomeViewerModule 
           v-else-if="activeTool === 'viewer'" 
           :initial-gbk="viewerInitialGbk"
