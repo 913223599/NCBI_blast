@@ -205,6 +205,66 @@ function getStatusLabel(status: string) {
   }
 }
 
+interface AlignmentBlock {
+  blockIndex: number;
+  startPosA: number;
+  endPosA: number;
+  startPosB: number;
+  endPosB: number;
+  seqA: string;
+  markup: string;
+  seqB: string;
+}
+
+function generateAlignmentBlocks(row: ProteinComparisonRowItem, blockSize: number = 60): AlignmentBlock[] {
+  const alnA = row.aligned_seq_a || row.sample_a_seq || '';
+  const alnB = row.aligned_seq_b || row.sample_b_seq || '';
+  const markup = row.aligned_markup || '|'.repeat(alnA.length);
+  
+  if (!alnA || !alnB) return [];
+
+  const totalLen = Math.max(alnA.length, alnB.length);
+  const blocks: AlignmentBlock[] = [];
+
+  let realPosA = 0;
+  let realPosB = 0;
+
+  for (let i = 0; i < totalLen; i += blockSize) {
+    const chunkA = alnA.slice(i, i + blockSize);
+    const chunkB = alnB.slice(i, i + blockSize);
+    const chunkMarkup = markup.slice(i, i + blockSize);
+
+    const nonGapA = chunkA.replace(/-/g, '').length;
+    const nonGapB = chunkB.replace(/-/g, '').length;
+
+    const startA = realPosA + 1;
+    const endA = realPosA + nonGapA;
+    const startB = realPosB + 1;
+    const endB = realPosB + nonGapB;
+
+    realPosA = endA;
+    realPosB = endB;
+
+    blocks.push({
+      blockIndex: Math.floor(i / blockSize) + 1,
+      startPosA: startA,
+      endPosA: endA,
+      startPosB: startB,
+      endPosB: endB,
+      seqA: chunkA,
+      markup: chunkMarkup,
+      seqB: chunkB
+    });
+  }
+
+  return blocks;
+}
+
+function getMutationPosPct(pos: number, totalLen: number): number {
+  if (totalLen <= 0) return 0;
+  return Math.min(100, Math.max(0, (pos / totalLen) * 100));
+}
+
 function toggleExpandRow(row: ProteinComparisonRowItem) {
   const key = `${row.sample_a_id}_${row.sample_b_id || 'none'}`;
   if (expandedRowKey.value === key) {
@@ -216,7 +276,7 @@ function toggleExpandRow(row: ProteinComparisonRowItem) {
 
 function copyText(text: string) {
   navigator.clipboard.writeText(text);
-  alert('氨基酸序列已复制到剪贴板');
+  alert('内容已复制到剪贴板');
 }
 </script>
 
@@ -466,36 +526,146 @@ function copyText(text: string) {
                 </td>
               </tr>
 
-              <!-- 展开的序列与突变详情 -->
+              <!-- 展开的高维度生物学与分子对齐详情 -->
               <tr v-if="expandedRowKey === `${row.sample_a_id}_${row.sample_b_id || 'none'}`" class="detail-row">
                 <td colspan="8">
                   <div class="detail-container">
-                    <div class="mutation-box" v-if="row.mutations && row.mutations.length > 0">
-                      <div class="box-head">突变位点明细 (共 {{ row.mutations.length }} 处):</div>
-                      <div class="mutation-tags">
-                        <span v-for="(m, mIdx) in row.mutations" :key="mIdx" class="mut-tag">
-                          {{ m.description }}
-                        </span>
+                    
+                    <!-- 1. 生物学变异洞察与结构域分布卡片 -->
+                    <div class="insight-card">
+                      <div class="insight-header">
+                        <div class="insight-title-wrap">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="12" y1="16" x2="12" y2="12" />
+                            <line x1="12" y1="8" x2="12.01" y2="8" />
+                          </svg>
+                          <span class="insight-title">生物学变异机制与结构域分布洞察</span>
+                        </div>
+                        <div class="impact-badges">
+                          <span class="impact-badge conservative" title="维持侧链极性与三维疏水核心">
+                            保守同类替换: {{ row.conservative_mutation_cnt || 0 }} 处
+                          </span>
+                          <span class="impact-badge radical" title="改变氨基酸电荷、酸碱度或亲疏水性">
+                            显著理化变异: {{ row.radical_mutation_cnt || 0 }} 处
+                          </span>
+                          <span v-if="row.indel_cnt" class="impact-badge indel" title="氨基酸插入或缺失">
+                            Indel 分歧: {{ row.indel_cnt }} aa
+                          </span>
+                        </div>
+                      </div>
+
+                      <div class="insight-body">
+                        <div class="conclusion-box">
+                          <span class="conclusion-label">综合研判:</span>
+                          <span class="conclusion-text">{{ row.hotspot_conclusion || '两样本具有高度同源性。' }}</span>
+                        </div>
+
+                        <!-- 3 大结构域保守性对比看板 -->
+                        <div v-if="row.region_domains && row.region_domains.length > 0" class="domain-grid">
+                          <div 
+                            v-for="(dom, dIdx) in row.region_domains" 
+                            :key="dIdx"
+                            :class="['domain-card', `status-${dom.status}`]"
+                          >
+                            <div class="dom-header">
+                              <span class="dom-name">{{ dom.name }}</span>
+                              <span class="dom-range">{{ dom.start }}..{{ dom.end }} aa ({{ dom.length }} aa)</span>
+                            </div>
+                            <div class="dom-stat-row">
+                              <div class="dom-ident">{{ dom.identity_pct }}% 一致性</div>
+                              <div class="dom-mut-count">
+                                <span>变异: {{ dom.mutation_count }} 处</span>
+                                <span class="dom-sub-cnt">(保守 {{ dom.conservative_count }} / 显著 {{ dom.radical_count }})</span>
+                              </div>
+                            </div>
+                            <div class="dom-bar-track">
+                              <div 
+                                class="dom-bar-fill" 
+                                :class="`fill-${dom.status}`"
+                                :style="{ width: `${dom.identity_pct}%` }"
+                              ></div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
-                    <div class="seq-compare-grid">
-                      <div class="seq-box">
-                        <div class="seq-head">
-                          <span>样本 A 氨基酸序列 ({{ row.sample_a_len }} aa)</span>
-                          <button class="copy-btn" @click="copyText(row.sample_a_seq)">复制</button>
+                    <!-- 2. 全长变异空间分布标尺 (Linear Mutation Hotspot Ruler) -->
+                    <div class="ruler-card" v-if="row.mutations && row.mutations.length > 0">
+                      <div class="ruler-header">
+                        <span class="ruler-title">全长变异空间分布标尺 (1 ~ {{ Math.max(row.sample_a_len, row.sample_b_len || 0) }} aa)</span>
+                        <div class="ruler-legend">
+                          <span class="legend-item"><span class="legend-dot green"></span> 同类保守替换</span>
+                          <span class="legend-item"><span class="legend-dot orange"></span> 理化性质转变</span>
+                          <span class="legend-item"><span class="legend-dot red"></span> 插入/缺失</span>
                         </div>
-                        <div class="seq-content">{{ row.sample_a_seq || '无序列' }}</div>
                       </div>
 
-                      <div class="seq-box">
-                        <div class="seq-head">
-                          <span>样本 B 氨基酸序列 ({{ row.sample_b_len }} aa)</span>
-                          <button v-if="row.sample_b_seq" class="copy-btn" @click="copyText(row.sample_b_seq)">复制</button>
+                      <div class="ruler-track-container">
+                        <div class="ruler-axis">
+                          <span>1 aa (N-端)</span>
+                          <span>{{ Math.round(Math.max(row.sample_a_len, row.sample_b_len || 0) / 2) }} aa (中段)</span>
+                          <span>{{ Math.max(row.sample_a_len, row.sample_b_len || 0) }} aa (C-端)</span>
                         </div>
-                        <div class="seq-content">{{ row.sample_b_seq || '无序列' }}</div>
+                        <div class="ruler-track">
+                          <div 
+                            v-for="(m, mIdx) in row.mutations" 
+                            :key="mIdx"
+                            :class="['ruler-mutation-dot', m.impact_type || 'conservative']"
+                            :style="{ left: `${getMutationPosPct(m.pos, Math.max(row.sample_a_len, row.sample_b_len || 0))}%` }"
+                            :title="m.description"
+                          ></div>
+                        </div>
                       </div>
                     </div>
+
+                    <!-- 3. NCBI BLAST 风格双向序列逐位着色对齐视轨 -->
+                    <div class="alignment-card">
+                      <div class="alignment-header">
+                        <div class="align-title-row">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2">
+                            <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" />
+                            <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
+                          </svg>
+                          <span class="alignment-title">双向序列逐位对齐视轨 (Pairwise Sequence Alignment Track)</span>
+                        </div>
+                        <div class="align-actions">
+                          <button class="mini-btn" @click="copyText(row.aligned_seq_a || row.sample_a_seq)">复制样本 A 序列</button>
+                          <button v-if="row.sample_b_seq" class="mini-btn" @click="copyText(row.aligned_seq_b || row.sample_b_seq)">复制样本 B 序列</button>
+                        </div>
+                      </div>
+
+                      <div class="alignment-blocks-container">
+                        <div 
+                          v-for="block in generateAlignmentBlocks(row, 60)" 
+                          :key="block.blockIndex"
+                          class="align-block"
+                        >
+                          <div class="align-line line-a">
+                            <span class="line-label">Query (A)</span>
+                            <span class="line-pos">{{ block.startPosA }}</span>
+                            <span class="line-seq">{{ block.seqA }}</span>
+                            <span class="line-pos end">{{ block.endPosA }}</span>
+                          </div>
+
+                          <div class="align-line line-markup">
+                            <span class="line-label"></span>
+                            <span class="line-pos"></span>
+                            <span class="line-seq markup">{{ block.markup }}</span>
+                            <span class="line-pos end"></span>
+                          </div>
+
+                          <div class="align-line line-b">
+                            <span class="line-label">Sbjct (B)</span>
+                            <span class="line-pos">{{ block.startPosB }}</span>
+                            <span class="line-seq">{{ block.seqB }}</span>
+                            <span class="line-pos end">{{ block.endPosB }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
                   </div>
                 </td>
               </tr>
@@ -1045,91 +1215,377 @@ function copyText(text: string) {
   background: #e2e8f0;
 }
 
-/* 展开详情 */
+/* 展开详情卡片与生物学洞察 */
 .detail-row td {
   background: #f8fafc;
-  padding: 16px 20px;
+  padding: 18px 24px;
 }
 
 .detail-container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
-.mutation-box {
+/* 1. 生物学变异洞察卡片 */
+.insight-card {
   background: white;
   border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 10px 14px;
+  border-radius: 10px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
-.box-head {
-  font-size: 12px;
+.insight-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.insight-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.insight-title {
+  font-size: 13px;
   font-weight: 700;
   color: #1e293b;
-  margin-bottom: 6px;
 }
 
-.mutation-tags {
+.impact-badges {
   display: flex;
+  gap: 8px;
   flex-wrap: wrap;
-  gap: 6px;
 }
 
-.mut-tag {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fee2e2;
+.impact-badge {
   font-size: 11px;
-  font-family: monospace;
-  padding: 2px 6px;
+  font-weight: 700;
+  padding: 2px 8px;
   border-radius: 4px;
 }
 
-.seq-compare-grid {
+.impact-badge.conservative {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+
+.impact-badge.radical {
+  background: #fff7ed;
+  color: #ea580c;
+  border: 1px solid #fed7aa;
+}
+
+.impact-badge.indel {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.conclusion-box {
+  background: #f8fafc;
+  border-left: 3px solid #2563eb;
+  padding: 8px 12px;
+  border-radius: 0 6px 6px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
+.conclusion-label {
+  font-weight: 700;
+  color: #1e293b;
+  margin-right: 6px;
+}
+
+.conclusion-text {
+  color: #334155;
+}
+
+/* 3大结构域看板 */
+.domain-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
 }
 
-.seq-box {
-  background: white;
+.domain-card {
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: 8px;
+  padding: 10px 14px;
 }
 
-.seq-head {
+.domain-card.status-conserved { border-color: #a7f3d0; background: #f0fdf4; }
+.domain-card.status-moderate { border-color: #bfdbfe; background: #eff6ff; }
+.domain-card.status-hypervariable { border-color: #fed7aa; background: #fff7ed; }
+
+.dom-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.dom-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.dom-range {
+  font-size: 10px;
+  color: #64748b;
+  font-family: monospace;
+}
+
+.dom-stat-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 11px;
-  font-weight: 700;
-  color: #475569;
   margin-bottom: 6px;
 }
 
-.copy-btn {
-  background: #f1f5f9;
-  border: 1px solid #cbd5e1;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  cursor: pointer;
+.dom-ident {
+  font-weight: 700;
+  color: #0f172a;
 }
 
-.seq-content {
-  font-family: monospace;
-  font-size: 11px;
+.dom-mut-count {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.dom-sub-cnt {
+  margin-left: 4px;
+  color: #94a3b8;
+}
+
+.dom-bar-track {
+  width: 100%;
+  height: 5px;
+  background: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.dom-bar-fill {
+  height: 100%;
+}
+
+.dom-bar-fill.fill-conserved { background: #10b981; }
+.dom-bar-fill.fill-moderate { background: #3b82f6; }
+.dom-bar-fill.fill-hypervariable { background: #f97316; }
+
+/* 2. 标尺 */
+.ruler-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.ruler-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.ruler-title {
+  font-size: 12px;
+  font-weight: 700;
   color: #1e293b;
-  word-break: break-all;
-  max-height: 120px;
-  overflow-y: auto;
-  line-height: 1.4;
+}
+
+.ruler-legend {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.legend-dot.green { background: #10b981; }
+.legend-dot.orange { background: #f97316; }
+.legend-dot.red { background: #ef4444; }
+
+.ruler-track-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ruler-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: monospace;
+}
+
+.ruler-track {
+  width: 100%;
+  height: 12px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  position: relative;
+}
+
+.ruler-mutation-dot {
+  position: absolute;
+  top: 1px;
+  width: 3px;
+  height: 8px;
+  border-radius: 1px;
+  transform: translateX(-50%);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.ruler-mutation-dot:hover {
+  transform: translateX(-50%) scale(1.6);
+  z-index: 10;
+}
+
+.ruler-mutation-dot.conservative { background: #10b981; }
+.ruler-mutation-dot.charge_flip,
+.ruler-mutation-dot.charge_shift,
+.ruler-mutation-dot.polarity_shift { background: #f97316; }
+.ruler-mutation-dot.indel { background: #ef4444; }
+.ruler-mutation-dot.other_mutation { background: #64748b; }
+
+/* 3. 对齐视图 */
+.alignment-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+
+.alignment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.align-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.alignment-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.align-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.mini-btn {
   background: #f8fafc;
-  padding: 8px;
+  border: 1px solid #cbd5e1;
+  font-size: 11px;
+  padding: 2px 8px;
   border-radius: 4px;
+  cursor: pointer;
+  color: #475569;
+}
+
+.mini-btn:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+}
+
+.alignment-blocks-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 14px 18px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.align-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.align-line {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.line-label {
+  width: 75px;
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.line-pos {
+  width: 40px;
+  color: #64748b;
+  font-size: 10px;
+  text-align: right;
+  margin-right: 8px;
+}
+
+.line-pos.end {
+  width: 40px;
+  margin-left: 8px;
+  text-align: left;
+}
+
+.line-seq {
+  letter-spacing: 2.2px;
+  white-space: pre;
+}
+
+.line-seq.markup {
+  color: #38bdf8;
+  font-weight: 800;
+}
+
+.line-a .line-seq {
+  color: #f8fafc;
+}
+
+.line-b .line-seq {
+  color: #cbd5e1;
 }
 
 /* 分页 */

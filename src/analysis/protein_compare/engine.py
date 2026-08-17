@@ -66,7 +66,22 @@ class MutationSite(BaseModel):
     pos: int
     ref_aa: str
     alt_aa: str
+    impact_type: str = "conservative"  # 'conservative', 'charge_flip', 'charge_shift', 'polarity_shift', 'indel'
+    impact_label: str = "同类保守替换"
     description: str
+
+
+class RegionDomainItem(BaseModel):
+    """蛋白质特定区段（N端、中段、C端）保守性与变异分布"""
+    name: str  # "N-端结构域", "中段骨架区", "C-端受体/功能区"
+    start: int
+    end: int
+    length: int
+    identity_pct: float
+    mutation_count: int
+    conservative_count: int
+    radical_count: int
+    status: str  # 'conserved' (>=95%), 'moderate' (80-95%), 'hypervariable' (<80%)
 
 
 class ProteinComparisonRow(BaseModel):
@@ -93,12 +108,22 @@ class ProteinComparisonRow(BaseModel):
     sample_b_seq: Optional[str] = None
     
     # 比对与变异判定
-    match_status: str  # 'identical' (100%), 'highly_conserved' (>=98%), 'divergent' (<98%), 'unique_a', 'unique_b'
+    match_status: str  # 'identical' (100%), 'highly_conserved' (>=95%), 'divergent' (<95%), 'unique_a', 'unique_b'
     identity_pct: float = 0.0
     diff_count: int = 0
     mutations: List[MutationSite] = []
     length_diff: int = 0
     notes: Optional[str] = None
+
+    # 高维生物学分析指标
+    aligned_seq_a: str = ""
+    aligned_markup: str = ""
+    aligned_seq_b: str = ""
+    conservative_mutation_cnt: int = 0
+    radical_mutation_cnt: int = 0
+    indel_cnt: int = 0
+    hotspot_conclusion: str = ""
+    region_domains: List[RegionDomainItem] = []
 
 
 class ProteinComparisonResult(BaseModel):
@@ -251,6 +276,14 @@ class ProteinComparer:
                 best_identity = 100.0
                 best_mutations = []
                 best_diff_cnt = 0
+                best_aln_a = pa.translation
+                best_markup = "|" * len(pa.translation)
+                best_aln_b = exact_cand.translation
+                best_c_cnt = 0
+                best_r_cnt = 0
+                best_in_cnt = 0
+                best_doms = self._calculate_domains(len(pa.translation), [], 100.0)
+                best_concl = "双样本全长氨基酸序列 100% 逐位一致，核心催化与组装结构高度锁定。"
             else:
                 # 2. 同名优先检索与高相似度序列对齐
                 pa_prod_lower = pa.product.lower()
@@ -261,12 +294,20 @@ class ProteinComparer:
                 search_cands = same_prod_cands if same_prod_cands else candidates
 
                 for pb in search_cands:
-                    ident, muts, diffs = self._align_and_diff(pa.translation, pb.translation)
+                    ident, muts, diffs, aln_a, markup, aln_b, c_cnt, r_cnt, in_cnt, doms, concl = self._align_and_diff(pa.translation, pb.translation)
                     if ident > best_identity:
                         best_identity = ident
                         best_match = pb
                         best_mutations = muts
                         best_diff_cnt = diffs
+                        best_aln_a = aln_a
+                        best_markup = markup
+                        best_aln_b = aln_b
+                        best_c_cnt = c_cnt
+                        best_r_cnt = r_cnt
+                        best_in_cnt = in_cnt
+                        best_doms = doms
+                        best_concl = concl
 
             # 判定匹配状态
             if best_match and best_identity >= 40.0:
@@ -301,7 +342,15 @@ class ProteinComparer:
                     identity_pct=round(best_identity, 2),
                     diff_count=best_diff_cnt,
                     mutations=best_mutations,
-                    length_diff=abs(pa.length_aa - best_match.length_aa)
+                    length_diff=abs(pa.length_aa - best_match.length_aa),
+                    aligned_seq_a=best_aln_a if 'best_aln_a' in locals() else pa.translation,
+                    aligned_markup=best_markup if 'best_markup' in locals() else "|" * len(pa.translation),
+                    aligned_seq_b=best_aln_b if 'best_aln_b' in locals() else best_match.translation,
+                    conservative_mutation_cnt=best_c_cnt if 'best_c_cnt' in locals() else 0,
+                    radical_mutation_cnt=best_r_cnt if 'best_r_cnt' in locals() else 0,
+                    indel_cnt=best_in_cnt if 'best_in_cnt' in locals() else 0,
+                    hotspot_conclusion=best_concl if 'best_concl' in locals() else "",
+                    region_domains=best_doms if 'best_doms' in locals() else []
                 ))
             else:
                 # 样本 A 独有
@@ -320,7 +369,8 @@ class ProteinComparer:
                     match_status="unique_a",
                     identity_pct=0.0,
                     diff_count=pa.length_aa,
-                    mutations=[]
+                    mutations=[],
+                    hotspot_conclusion="该基因在目标样本中未检出对应同源序列，属于样本 A 特异性基因。"
                 ))
 
         # 检查样本 B 中独有的未配对蛋白
@@ -348,7 +398,8 @@ class ProteinComparer:
                     match_status="unique_b",
                     identity_pct=0.0,
                     diff_count=pb.length_aa,
-                    mutations=[]
+                    mutations=[],
+                    hotspot_conclusion="该基因在基准样本中缺失，属于样本 B 新增特异性基因。"
                 ))
 
         # 汇总统计
@@ -393,82 +444,209 @@ class ProteinComparer:
             rows=rows
         )
 
-    def _align_and_diff(self, seq_a: str, seq_b: str) -> Tuple[float, List[MutationSite], int]:
-        """执行氨基酸序列全局比对并提取突变详情"""
+    @staticmethod
+    def _classify_mutation(ref_aa: str, alt_aa: str) -> Tuple[str, str]:
+        """判定单点突变的物理化学特性改变"""
+        if ref_aa == "-" or alt_aa == "-":
+            return "indel", "插入/缺失 (Indel)"
+        
+        hydrophobic = set("AVLIPMFW")
+        polar = set("STCNQY")
+        positive = set("KRH")
+        negative = set("DE")
+        
+        r, a = ref_aa.upper(), alt_aa.upper()
+        if r == a:
+            return "identical", "完全相同"
+        
+        if (r in positive and a in negative) or (r in negative and a in positive):
+            return "charge_flip", "电荷反转 (+/- 颠覆)"
+        if (r in positive and a not in positive) or (a in positive and r not in positive) or \
+           (r in negative and a not in negative) or (a in negative and r not in negative):
+            return "charge_shift", "电荷改变 (酸碱性质增减)"
+        if (r in hydrophobic and a in polar) or (r in polar and a in hydrophobic):
+            return "polarity_shift", "极性/疏水性转变"
+        if (r in hydrophobic and a in hydrophobic) or (r in polar and a in polar) or \
+           (r in positive and a in positive) or (r in negative and a in negative):
+            return "conservative", "同类保守替换 (理化性质维持)"
+        
+        return "other_mutation", "理化性质变异"
+
+    def _align_and_diff(self, seq_a: str, seq_b: str) -> Tuple[
+        float, List[MutationSite], int, str, str, str, int, int, int, List[RegionDomainItem], str
+    ]:
+        """
+        执行氨基酸序列全局比对并提取多维度生物学指标：
+        1. 一致性与突变位点
+        2. BLAST 风格逐位对齐串 (aligned_a, markup, aligned_b)
+        3. 理化变异统计 (保守替换、显著变异、Indel)
+        4. 结构域三段分段分析 (N端、中段、C端) 与突变富集热点结论
+        """
         if not seq_a or not seq_b:
-            return 0.0, [], max(len(seq_a), len(seq_b))
+            max_len = max(len(seq_a), len(seq_b))
+            return 0.0, [], max_len, seq_a, " " * max_len, seq_b, 0, 0, max_len, [], "序列缺失"
         
         if seq_a == seq_b:
-            return 100.0, [], 0
+            markup = "|" * len(seq_a)
+            doms = self._calculate_domains(len(seq_a), [], 100.0)
+            return 100.0, [], 0, seq_a, markup, seq_b, 0, 0, 0, doms, "全长序列 100% 严格保守，核心功能完全锁定"
 
-        # 快速模式：若长度相同，直接逐字符比对，极速且无对齐溢出风险
+        # 快速模式：若长度相同，直接逐字符比对
         if len(seq_a) == len(seq_b):
-            matches = sum(1 for ca, cb in zip(seq_a, seq_b) if ca == cb)
-            diff_count = len(seq_a) - matches
+            aln_a, aln_b = seq_a, seq_b
+            markup_chars = []
             mutations: List[MutationSite] = []
+            diff_count = 0
+            cons_cnt, rad_cnt, indel_cnt = 0, 0, 0
+
             for idx, (ca, cb) in enumerate(zip(seq_a, seq_b)):
-                if ca != cb:
-                    if len(mutations) < 50:
-                        mutations.append(MutationSite(
-                            pos=idx + 1,
-                            ref_aa=ca,
-                            alt_aa=cb,
-                            description=f"位置 {idx + 1}: {ca} -> {cb}"
-                        ))
-            ident = (matches / len(seq_a)) * 100.0
-            return round(ident, 2), mutations, diff_count
+                if ca == cb:
+                    markup_chars.append("|")
+                else:
+                    diff_count += 1
+                    imp_type, imp_label = self._classify_mutation(ca, cb)
+                    if imp_type == "conservative":
+                        markup_chars.append("+")
+                        cons_cnt += 1
+                    else:
+                        markup_chars.append(" ")
+                        rad_cnt += 1
+
+                    mutations.append(MutationSite(
+                        pos=idx + 1,
+                        ref_aa=ca,
+                        alt_aa=cb,
+                        impact_type=imp_type,
+                        impact_label=imp_label,
+                        description=f"位点 {idx + 1}: {ca} -> {cb} ({imp_label})"
+                    ))
+
+            ident = round(((len(seq_a) - diff_count) / len(seq_a)) * 100.0, 2)
+            aligned_markup = "".join(markup_chars)
+            domains = self._calculate_domains(len(seq_a), mutations, ident)
+            conclusion = self._generate_hotspot_conclusion(domains, mutations, ident)
+
+            return ident, mutations, diff_count, aln_a, aligned_markup, aln_b, cons_cnt, rad_cnt, indel_cnt, domains, conclusion
 
         # 长度不同时：调用 PairwiseAligner 全局比对
         try:
             alignments = self.aligner.align(seq_a, seq_b)
-            # 使用 next(iter(...)) 安全获取首个最优比对，避免触发 len() 路径数溢出
             best_aln = next(iter(alignments), None)
             if best_aln is None:
-                return 0.0, [], max(len(seq_a), len(seq_b))
+                max_len = max(len(seq_a), len(seq_b))
+                return 0.0, [], max_len, seq_a, " " * max_len, seq_b, 0, 0, max_len, [], "无有效比对路径"
 
-            aln_a, aln_b = best_aln[0], best_aln[1]
-
-            matches = 0
+            aln_a, aln_b = str(best_aln[0]), str(best_aln[1])
+            markup_chars = []
             mutations = []
             diff_count = 0
+            cons_cnt, rad_cnt, indel_cnt = 0, 0, 0
             real_pos_a = 0
+            matches = 0
 
             for ca, cb in zip(aln_a, aln_b):
                 if ca != "-":
                     real_pos_a += 1
                 
-                if ca == cb:
+                if ca == cb and ca != "-":
                     matches += 1
+                    markup_chars.append("|")
                 else:
                     diff_count += 1
-                    if len(mutations) < 50:
-                        if ca != "-" and cb != "-":
-                            mutations.append(MutationSite(
-                                pos=real_pos_a,
-                                ref_aa=ca,
-                                alt_aa=cb,
-                                description=f"位置 {real_pos_a}: {ca} -> {cb}"
-                            ))
-                        elif ca == "-":
-                            mutations.append(MutationSite(
-                                pos=real_pos_a,
-                                ref_aa="-",
-                                alt_aa=cb,
-                                description=f"位置 {real_pos_a}: 插入 {cb}"
-                            ))
-                        else:
-                            mutations.append(MutationSite(
-                                pos=real_pos_a,
-                                ref_aa=ca,
-                                alt_aa="-",
-                                description=f"位置 {real_pos_a}: 缺失 {ca}"
-                            ))
+                    imp_type, imp_label = self._classify_mutation(ca, cb)
+                    if imp_type == "conservative":
+                        markup_chars.append("+")
+                        cons_cnt += 1
+                    elif imp_type == "indel":
+                        markup_chars.append("-")
+                        indel_cnt += 1
+                    else:
+                        markup_chars.append(" ")
+                        rad_cnt += 1
 
-            ident = (matches / max(len(seq_a), len(seq_b))) * 100.0
-            return round(ident, 2), mutations, diff_count
+                    pos_display = real_pos_a if ca != "-" else max(1, real_pos_a)
+                    mutations.append(MutationSite(
+                        pos=pos_display,
+                        ref_aa=ca,
+                        alt_aa=cb,
+                        impact_type=imp_type,
+                        impact_label=imp_label,
+                        description=f"位点 {pos_display}: {ca} -> {cb} ({imp_label})"
+                    ))
+
+            ident = round((matches / max(len(seq_a), len(seq_b))) * 100.0, 2)
+            aligned_markup = "".join(markup_chars)
+            domains = self._calculate_domains(max(len(seq_a), len(seq_b)), mutations, ident)
+            conclusion = self._generate_hotspot_conclusion(domains, mutations, ident)
+
+            return ident, mutations, diff_count, aln_a, aligned_markup, aln_b, cons_cnt, rad_cnt, indel_cnt, domains, conclusion
         except Exception as e:
-            logger.warning(f"对齐比对异常，使用长度估算: {e}")
-            return 0.0, [], max(len(seq_a), len(seq_b))
+            logger.warning(f"对齐比对异常: {e}")
+            max_len = max(len(seq_a), len(seq_b))
+            return 0.0, [], max_len, seq_a, " " * max_len, seq_b, 0, 0, max_len, [], "比对异常"
+
+    @staticmethod
+    def _calculate_domains(total_len: int, mutations: List[MutationSite], global_ident: float) -> List[RegionDomainItem]:
+        """将全长划分为 N-端近端结构域、中段骨架区、C-端远端/受体结合区 进行分段统计"""
+        if total_len <= 0:
+            return []
+
+        # 划分为 3 段
+        part_len = max(1, total_len // 3)
+        d1_end = part_len
+        d2_end = part_len * 2
+        d3_end = total_len
+
+        ranges = [
+            ("N-端近端结构域 (Base/Connector)", 1, d1_end),
+            ("中段骨架区 (Shaft/Trimer Core)", d1_end + 1, d2_end),
+            ("C-端远端受体结合域 (Distal RBD)", d2_end + 1, d3_end)
+        ]
+
+        results = []
+        for name, s, e in ranges:
+            l = max(1, e - s + 1)
+            # 统计该区间内的突变
+            sub_muts = [m for m in mutations if s <= m.pos <= e]
+            mut_cnt = len(sub_muts)
+            c_cnt = sum(1 for m in sub_muts if m.impact_type == "conservative")
+            r_cnt = mut_cnt - c_cnt
+            sub_ident = max(0.0, round(((l - mut_cnt) / l) * 100.0, 2))
+
+            status = "conserved" if sub_ident >= 95.0 else ("moderate" if sub_ident >= 80.0 else "hypervariable")
+            results.append(RegionDomainItem(
+                name=name,
+                start=s,
+                end=e,
+                length=l,
+                identity_pct=sub_ident,
+                mutation_count=mut_cnt,
+                conservative_count=c_cnt,
+                radical_count=r_cnt,
+                status=status
+            ))
+
+        return results
+
+    @staticmethod
+    def _generate_hotspot_conclusion(domains: List[RegionDomainItem], mutations: List[MutationSite], global_ident: float) -> str:
+        """基于结构域分布生成生物学意义洞察结论"""
+        if not mutations:
+            return "双样本全长氨基酸序列 100% 一致，核心催化与组装位点高度保守。"
+
+        if len(domains) == 3:
+            d1, d2, d3 = domains[0], domains[1], domains[2]
+            total_mut = len(mutations)
+            d3_pct = round((d3.mutation_count / total_mut) * 100, 1) if total_mut > 0 else 0
+            
+            if d3_pct >= 60.0:
+                return f"变异显著富集于 C-端受体结合区域 (占全蛋白突变总数的 {d3_pct}%)，而 N-端结构域仍维持 {d1.identity_pct}% 高保守度。此特征高度提示噬菌体在保持尾丝装配连接结构的同时，通过 C-端识别纤突分化以实现宿主谱（Host Range）变异。"
+            elif d1.identity_pct >= 95.0 and d3.identity_pct >= 95.0:
+                return f"变异在全长序列散在分布，主要是局部同类保守氨基酸微调，蛋白质整体三维构象与基本活性预期保持高度一致。"
+            elif d1.mutation_count >= d3.mutation_count and d1.mutation_count >= d2.mutation_count:
+                return f"变异主要富集于 N-端前导/锚定区 (占比 {round(d1.mutation_count/total_mut*100, 1)}%)，可能影响其与衣壳基板的组装适配效率。"
+
+        return f"全长检出 {len(mutations)} 处序列变异，平均相似度 {global_ident}%，建议结合三维受体结合口袋进一步观察理化微环境改变。"
 
     @staticmethod
     def export_to_csv(result: ProteinComparisonResult) -> str:

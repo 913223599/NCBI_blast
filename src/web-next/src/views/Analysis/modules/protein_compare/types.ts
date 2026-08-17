@@ -16,7 +16,21 @@ export interface MutationSiteItem {
   pos: number;
   ref_aa: string;
   alt_aa: string;
+  impact_type?: string;
+  impact_label?: string;
   description: string;
+}
+
+export interface RegionDomainItem {
+  name: string;
+  start: number;
+  end: number;
+  length: number;
+  identity_pct: number;
+  mutation_count: number;
+  conservative_count: number;
+  radical_count: number;
+  status: 'conserved' | 'moderate' | 'hypervariable';
 }
 
 export interface ProteinComparisonRowItem {
@@ -45,6 +59,15 @@ export interface ProteinComparisonRowItem {
   mutations: MutationSiteItem[];
   length_diff: number;
   notes?: string;
+
+  aligned_seq_a?: string;
+  aligned_markup?: string;
+  aligned_seq_b?: string;
+  conservative_mutation_cnt?: number;
+  radical_mutation_cnt?: number;
+  indel_cnt?: number;
+  hotspot_conclusion?: string;
+  region_domains?: RegionDomainItem[];
 }
 
 export interface ProteinComparisonResultPayload {
