@@ -1,0 +1,129 @@
+# -*- coding: utf-8 -*-
+"""
+功能注释任务 SQLite 数据库持久化层
+"""
+import sqlite3
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+
+class AnnotationDB:
+    def __init__(self, db_path: str = "database/annotation.db"):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS annotation_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    task_name TEXT,
+                    sample_type TEXT,
+                    engine TEXT,
+                    status TEXT,
+                    progress INTEGER DEFAULT 0,
+                    current_step TEXT,
+                    error_msg TEXT,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    summary_json TEXT,
+                    files_json TEXT
+                )
+            ''')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_anno_status ON annotation_tasks(status)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_anno_created ON annotation_tasks(created_at)')
+            conn.commit()
+
+    def create_task(self, task_id: str, task_name: str, sample_type: str, engine: str) -> bool:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                INSERT INTO annotation_tasks 
+                (task_id, task_name, sample_type, engine, status, progress, current_step, created_at, updated_at, summary_json, files_json)
+                VALUES (?, ?, ?, ?, 'pending', 0, '任务初始化中...', ?, ?, '{}', '{}')
+            ''', (task_id, task_name, sample_type, engine, now_str, now_str))
+            conn.commit()
+        return True
+
+    def update_progress(self, task_id: str, progress: int, current_step: str, status: str = "running"):
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                UPDATE annotation_tasks 
+                SET progress = ?, current_step = ?, status = ?, updated_at = ?
+                WHERE task_id = ?
+            ''', (progress, current_step, status, now_str, task_id))
+            conn.commit()
+
+    def mark_completed(self, task_id: str, summary: Dict[str, Any], files: Dict[str, str]):
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                UPDATE annotation_tasks 
+                SET status = 'completed', progress = 100, current_step = '注释已完成', 
+                    summary_json = ?, files_json = ?, updated_at = ?
+                WHERE task_id = ?
+            ''', (json.dumps(summary, ensure_ascii=False), json.dumps(files, ensure_ascii=False), now_str, task_id))
+            conn.commit()
+
+    def mark_failed(self, task_id: str, error_msg: str):
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                UPDATE annotation_tasks 
+                SET status = 'failed', current_step = '分析失败', error_msg = ?, updated_at = ?
+                WHERE task_id = ?
+            ''', (error_msg, now_str, task_id))
+            conn.commit()
+
+    def mark_cancelled(self, task_id: str):
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                UPDATE annotation_tasks 
+                SET status = 'cancelled', current_step = '已取消', updated_at = ?
+                WHERE task_id = ?
+            ''', (now_str, task_id))
+            conn.commit()
+
+    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('SELECT * FROM annotation_tasks WHERE task_id = ?', (task_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            data = dict(row)
+            data["summary"] = json.loads(data.get("summary_json") or "{}")
+            data["files"] = json.loads(data.get("files_json") or "{}")
+            return data
+
+    def list_tasks(self, limit: int = 50) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('''
+                SELECT task_id, task_name, sample_type, engine, status, progress, current_step, error_msg, created_at, updated_at, summary_json, files_json
+                FROM annotation_tasks 
+                ORDER BY created_at DESC LIMIT ?
+            ''', (limit,))
+            results = []
+            for row in cursor.fetchall():
+                data = dict(row)
+                data["summary"] = json.loads(data.get("summary_json") or "{}")
+                data["files"] = json.loads(data.get("files_json") or "{}")
+                results.append(data)
+            return results
+
+    def delete_task(self, task_id: str) -> bool:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('DELETE FROM annotation_tasks WHERE task_id = ?', (task_id,))
+            conn.commit()
+        return True
+
+
+# 全局单例
+annotation_db = AnnotationDB()

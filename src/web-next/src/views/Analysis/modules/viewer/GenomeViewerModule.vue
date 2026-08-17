@@ -355,12 +355,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, triggerRef } from 'vue';
+import { ref, computed, watch, triggerRef, onMounted } from 'vue';
 import { parseGenBank, parseFasta } from './utils/parser';
 import { calculateGC, calculateORFs, calculateEnzymes } from './utils/calculations';
 import { getCircularPath, getLinearPath, getEnzymeCircularLabel, getEnzymeLinearLabel, getFeatureColor, formatLength } from './utils/render';
 import { extractFeatureSequence, translateDNA } from './utils/sequence';
 import { TrackLayoutEngine } from './core/TrackLayoutEngine';
+
+const props = defineProps<{
+  initialGbk?: string;
+  initialName?: string;
+}>();
 
 // --- State ---
 const fileName = ref('');
@@ -472,64 +477,82 @@ const filteredFeatures = computed(() => {
 });
 
 // 解析引擎
+// 解析引擎
+function loadFromText(text: string, name: string, isGbk: boolean) {
+  if (!text) return;
+  fileName.value = name || 'Annotated_Genome';
+
+  let parsed;
+  if (isGbk) {
+    parsed = parseGenBank(text);
+  } else {
+    parsed = parseFasta(text);
+  }
+
+  rawSequence.value = parsed.sequence;
+  sequenceLength.value = parsed.sequence.length;
+
+  // 清空旧缓存并重置视图
+  gcPathData.value = ''; gcSkewPathData.value = '';
+  orfFeatures.value = []; enzymeFeatures.value = [];
+  showGC.value = false; selectedORFFrames.value = []; showEnzymes.value = false;
+  
+  // Reset layout engine
+  layoutEngine.value = new TrackLayoutEngine();
+  layoutEngine.value.addGroup('main', 0);
+
+  const trackEnds = new Array(20).fill(0);
+  const sortedFeatures = parsed.features.sort((a: any, b: any) => a.start - b.start);
+
+  let maxTrack = 0;
+  sortedFeatures.forEach((f: any) => {
+    let assignedTrack = 0;
+    for (let i = 0; i < 20; i++) {
+      if (f.start > trackEnds[i] + 100) {
+        assignedTrack = i;
+        trackEnds[i] = f.end;
+        break;
+      }
+    }
+    f.track = assignedTrack;
+    if (assignedTrack > maxTrack) maxTrack = assignedTrack;
+  });
+  
+  layoutEngine.value.setLayer({
+    id: 'main-cds', groupId: 'main', type: 'feature', direction: 'outer',
+    rowHeight: trackWidth + 4, rowCount: maxTrack + 1, gap: 10, order: 0
+  });
+  layoutTrigger.value++;
+
+  features.value = sortedFeatures;
+  zoomLevel.value = 1; panX.value = 0; panY.value = 0;
+  selectedFeature.value = null;
+}
+
 function handleFileUpload(e: any) {
   const file = e.target.files[0];
   if (!file) return;
-  fileName.value = file.name;
-
   const reader = new FileReader();
   reader.onload = (event) => {
     const text = event.target?.result as string;
     const ext = file.name.split('.').pop()?.toLowerCase();
-
-    let parsed;
-    if (ext && ['gbk', 'gb', 'genbank'].includes(ext)) {
-      parsed = parseGenBank(text);
-    } else {
-      parsed = parseFasta(text);
-    }
-
-    rawSequence.value = parsed.sequence;
-    sequenceLength.value = parsed.sequence.length;
-
-    // 清空旧缓存并重置视图
-    gcPathData.value = ''; gcSkewPathData.value = '';
-    orfFeatures.value = []; enzymeFeatures.value = [];
-    showGC.value = false; selectedORFFrames.value = []; showEnzymes.value = false;
-    
-    // Reset layout engine
-    layoutEngine.value = new TrackLayoutEngine();
-    layoutEngine.value.addGroup('main', 0);
-
-    const trackEnds = new Array(20).fill(0);
-    const sortedFeatures = parsed.features.sort((a: any, b: any) => a.start - b.start);
-
-    let maxTrack = 0;
-    sortedFeatures.forEach((f: any) => {
-      let assignedTrack = 0;
-      for (let i = 0; i < 20; i++) {
-        if (f.start > trackEnds[i] + 100) {
-          assignedTrack = i;
-          trackEnds[i] = f.end;
-          break;
-        }
-      }
-      f.track = assignedTrack;
-      if (assignedTrack > maxTrack) maxTrack = assignedTrack;
-    });
-    
-    layoutEngine.value.setLayer({
-      id: 'main-cds', groupId: 'main', type: 'feature', direction: 'outer',
-      rowHeight: trackWidth + 4, rowCount: maxTrack + 1, gap: 10, order: 0
-    });
-    layoutTrigger.value++;
-
-    features.value = sortedFeatures;
-    zoomLevel.value = 1; panX.value = 0; panY.value = 0;
-    selectedFeature.value = null;
+    const isGbk = !!(ext && ['gbk', 'gb', 'genbank'].includes(ext));
+    loadFromText(text, file.name, isGbk);
   };
   reader.readAsText(file);
 }
+
+onMounted(() => {
+  if (props.initialGbk) {
+    loadFromText(props.initialGbk, props.initialName || 'Annotated_Genome.gbk', true);
+  }
+});
+
+watch(() => props.initialGbk, (newVal) => {
+  if (newVal) {
+    loadFromText(newVal, props.initialName || 'Annotated_Genome.gbk', true);
+  }
+});
 
 // 附加计算监听
 watch(showGC, (val) => {

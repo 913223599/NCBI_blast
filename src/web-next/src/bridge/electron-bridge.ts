@@ -928,6 +928,27 @@ const electronBridge = {
 
     async get_comparison_task_results(task_id: string) {
         return await apiGet(`/api/analysis/comparison/${task_id}/results`);
+    },
+
+    // ═══ 组装分析：功能注释 (Genome Annotation) ═══
+    async run_annotation_task(payload: any): Promise<any> {
+        return await apiPost('/api/analysis/annotation/run', payload);
+    },
+
+    async get_annotation_history(limit: number = 50): Promise<any> {
+        return await apiGet(`/api/analysis/annotation/history?limit=${limit}`);
+    },
+
+    async get_annotation_result(taskId: string): Promise<any> {
+        return await apiGet(`/api/analysis/annotation/${taskId}/result`);
+    },
+
+    async delete_annotation_task(taskId: string): Promise<any> {
+        return await apiDelete(`/api/analysis/annotation/${taskId}`);
+    },
+
+    async cancel_annotation_task(taskId: string): Promise<any> {
+        return await apiPost(`/api/analysis/annotation/${taskId}/cancel`, {});
     }
 };
 

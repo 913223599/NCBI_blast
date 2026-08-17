@@ -1,19 +1,19 @@
-
 <script setup lang="ts">
 /**
- * AnalysisView - 组装分析模块入口
- * 职责：提供组装后的深度分析工具集（质控、共线性、清理）
+ * AnalysisView - 组装分析工作台入口
+ * 职责：提供组装后的深度分析工具集（全场景共线性分析、序列交互式可视化、全基因组功能注释）
  * 遵循模块化设计，每个工具为一个独立的子组件。
  */
 import { ref } from 'vue'
 import ComparisonModule from './Analysis/modules/comparison/ComparisonModule.vue'
 import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue'
+import AnnotationModule from './Analysis/modules/annotation/AnnotationModule.vue'
 
 interface AnalysisTool {
   id: string;
   title: string;
   description: string;
-  icon: string;
+  iconType: 'chart' | 'dna' | 'book';
   status: 'ready' | 'beta' | 'coming_soon';
 }
 
@@ -22,23 +22,40 @@ const tools = ref<AnalysisTool[]>([
     id: 'comparison', 
     title: '全场景共线性分析 4.0', 
     description: '统一 MUMmer/Minimap2 引擎，极性自动校正、SNP/INDEL 变异检测与交互式点图。', 
-    icon: '📈',
+    iconType: 'chart',
+    status: 'ready'
+  },
+  { 
+    id: 'annotation', 
+    title: '全基因组功能注释', 
+    description: '基于 Prokka / Pharokka / 内置高精度引擎进行 CDS、tRNA、rRNA 预测与蛋白功能注释，支持 FASTA 提交与三维圈图联动。', 
+    iconType: 'book',
     status: 'ready'
   },
   { 
     id: 'viewer', 
     title: '序列交互式可视化', 
     description: '提供类似 SnapGene 的交互式序列与注释查看器，支持环形 (Circular) 与线性 (Linear) 模式，兼容 GenBank/GFF。', 
-    icon: '🧬',
+    iconType: 'dna',
     status: 'ready'
   }
 ])
 
 const activeTool = ref<string | null>(null)
 
+// 传递给 GenomeViewer 的跨模块数据
+const viewerInitialGbk = ref<string>('')
+const viewerInitialName = ref<string>('')
+
 function selectTool(tool: AnalysisTool) {
   if (tool.status === 'coming_soon') return
   activeTool.value = tool.id
+}
+
+function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: string }) {
+  viewerInitialGbk.value = payload.gbkText
+  viewerInitialName.value = payload.taskName
+  activeTool.value = 'viewer'
 }
 </script>
 
@@ -47,7 +64,7 @@ function selectTool(tool: AnalysisTool) {
     <header class="analysis-header">
       <div class="header-content">
         <h1>组装分析工作台</h1>
-        <p>组装后的深度验证与特征挖掘，支持 QUAST、MUMmer 3.0 高精度比对管线。</p>
+        <p>组装后的深度验证与特征挖掘，支持 QUAST、MUMmer 3.0、全基因组功能注释与 SnapGene 序列可视化。</p>
       </div>
       <div class="header-stats" v-if="!activeTool">
          <div class="stat-badge">
@@ -56,7 +73,7 @@ function selectTool(tool: AnalysisTool) {
          </div>
       </div>
       <button v-else class="back-btn" @click="activeTool = null">
-        ← 返回工具列表
+        &larr; 返回工具列表
       </button>
     </header>
 
@@ -69,7 +86,29 @@ function selectTool(tool: AnalysisTool) {
           :class="['tool-card', tool.status]"
           @click="selectTool(tool)"
         >
-          <div class="tool-icon-mini">{{ tool.icon }}</div>
+          <div class="tool-icon-mini">
+            <!-- 矢量 SVG 图标：严禁 Emoji -->
+            <svg v-if="tool.iconType === 'chart'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2">
+              <path d="M3 3v18h18" />
+              <path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3" />
+            </svg>
+            <svg v-else-if="tool.iconType === 'book'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              <line x1="9" y1="7" x2="15" y2="7" />
+              <line x1="9" y1="11" x2="13" y2="11" />
+            </svg>
+            <svg v-else-if="tool.iconType === 'dna'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.2">
+              <path d="M2 15c6.667-6 13.333 0 20-6" />
+              <path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993" />
+              <path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993" />
+              <path d="M17 6l-2.5-2.5" />
+              <path d="M14 8l-4-4" />
+              <path d="M7 18l2.5 2.5" />
+              <path d="M3.5 14.5l.5.5" />
+              <path d="M20 9.5l.5.5" />
+            </svg>
+          </div>
           <div class="tool-body">
             <div class="tool-title-row">
               <h3>{{ tool.title }}</h3>
@@ -80,12 +119,19 @@ function selectTool(tool: AnalysisTool) {
         </div>
       </div>
 
-      <!-- 具体工具占位符 -->
+      <!-- 具体工具工作区 -->
       <div v-else class="tool-workspace">
         <ComparisonModule v-if="activeTool === 'comparison'" />
-        <GenomeViewerModule v-else-if="activeTool === 'viewer'" />
+        <AnnotationModule 
+          v-else-if="activeTool === 'annotation'" 
+          @open-viewer="handleOpenViewerFromAnnotation" 
+        />
+        <GenomeViewerModule 
+          v-else-if="activeTool === 'viewer'" 
+          :initial-gbk="viewerInitialGbk"
+          :initial-name="viewerInitialName"
+        />
         <div v-else class="workspace-placeholder">
-           <div class="empty-icon">{{ tools.find(t => t.id === activeTool)?.icon }}</div>
            <h2>{{ tools.find(t => t.id === activeTool)?.title }} 模块开发中</h2>
            <p>正在拉取 {{ activeTool }} 算法引擎，请稍候...</p>
         </div>
@@ -124,15 +170,40 @@ function selectTool(tool: AnalysisTool) {
   font-size: 12px;
 }
 
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #f1f5f9;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.stat-badge .label {
+  color: #64748b;
+}
+
+.stat-badge .value {
+  color: #2563eb;
+  font-weight: 700;
+}
+
 .back-btn {
   background: #f1f5f9;
   border: none;
-  padding: 6px 12px;
+  padding: 6px 14px;
   border-radius: 6px;
   color: #475569;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s;
+}
+
+.back-btn:hover {
+  background: #e2e8f0;
+  color: #1e293b;
 }
 
 .analysis-content {
@@ -144,7 +215,7 @@ function selectTool(tool: AnalysisTool) {
 
 .tools-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
   padding: 32px 40px;
   overflow-y: auto;
@@ -154,7 +225,7 @@ function selectTool(tool: AnalysisTool) {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 16px;
+  padding: 18px;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
@@ -167,10 +238,10 @@ function selectTool(tool: AnalysisTool) {
   border-color: #3b82f6;
   background: #f0f7ff;
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
+  transform: translateY(-2px);
 }
 
 .tool-icon-mini {
-  font-size: 24px;
   width: 44px;
   height: 44px;
   background: #f8fafc;
@@ -179,6 +250,7 @@ function selectTool(tool: AnalysisTool) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border: 1px solid #e2e8f0;
 }
 
 .tool-body {
@@ -190,14 +262,14 @@ function selectTool(tool: AnalysisTool) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .tool-title-row h3 {
   margin: 0;
   font-size: 15px;
   color: #1e293b;
-  font-weight: 600;
+  font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -243,12 +315,7 @@ function selectTool(tool: AnalysisTool) {
 .workspace-placeholder {
   text-align: center;
   max-width: 400px;
-}
-
-.empty-icon {
-  font-size: 64px;
-  margin-bottom: 24px;
-  opacity: 0.8;
+  margin: 60px auto;
 }
 
 .workspace-placeholder h2 { color: #1e293b; margin: 0 0 12px; }

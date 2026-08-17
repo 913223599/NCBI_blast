@@ -1,6 +1,7 @@
 import { getBridge } from '../../bridge'
 import type { StrainRecord } from './types'
 import { markRaw } from 'vue'
+import { useCodeGenerator } from '../../composables/useCodeGenerator'
 
 export function useRecordsActions(state: any, autoSave: () => void) {
   const { 
@@ -11,6 +12,46 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     activeRecord,
     setIsUpdating
   } = state
+
+  // 获取 codeGen 实例用于物种路径解析
+  const codeGen = useCodeGenerator()
+  const lookup = codeGen.lookup
+  
+  // 获取 codeLookup entries 用于属级别筛选
+  function getEntries() {
+    return lookup.lookupEntries?.value ?? []
+  }
+
+  // shiftSelectRange 的 Map 缓存：避免每次 shift-click 都重建
+  let _cachedRecordById: Map<string, StrainRecord> | null = null
+  let _cachedAccessionMap: Map<string, string[]> | null = null
+  let _mapsDirty = true
+
+  function invalidateLookupMaps() {
+    _mapsDirty = true
+  }
+
+  function ensureLookupMaps() {
+    if (!_mapsDirty && _cachedRecordById && _cachedAccessionMap) return
+    const recordById = new Map<string, StrainRecord>()
+    const accessionMap = new Map<string, string[]>()
+    for (let i = 0, len = records.value.length; i < len; i++) {
+      const record = records.value[i]
+      recordById.set(record.id, record)
+      const acc = record.accession
+      if (acc) {
+        const list = accessionMap.get(acc)
+        if (list) {
+          list.push(record.id)
+        } else {
+          accessionMap.set(acc, [record.id])
+        }
+      }
+    }
+    _cachedRecordById = recordById
+    _cachedAccessionMap = accessionMap
+    _mapsDirty = false
+  }
 
   /** 应用过滤器 */
   function applyFilters() {
@@ -46,7 +87,62 @@ export function useRecordsActions(state: any, autoSave: () => void) {
           record.source.toLowerCase().includes(kw)
         if (!matchKeyword) return false
       }
-      if (species && record.species !== species) return false
+      if (species) {
+        // 物种筛选：支持三级结构（大类/属/种）
+        // species 可能是：
+        // - 完整路径（如 "1AKFBXM"）- 物种级别 (level 3)
+        // - 属路径（如 "1AKF"）- 属级别 (level 2)
+        // - 大类代码（如 "1"）- 大类级别 (level 1)
+        
+        const selectedEntry = lookup.findByFullPath(species)
+        
+        let matches = false
+        
+        if (selectedEntry) {
+          // 在 codeLookup 中找到了对应条目，根据层级进行匹配
+          if (selectedEntry.level === 3) {
+            // 选择了物种级别：通过名称匹配
+            // 提取物种名称（去掉括号中的拉丁名）
+            const speciesName = selectedEntry.name.split('(')[0].trim()
+            matches = record.name.includes(speciesName) || 
+                      record.species?.includes(speciesName) ||
+                      `${record.codeCategory}${record.codeGenus}${record.codeSpecies}` === species
+          } else if (selectedEntry.level === 2) {
+            // 选择了属级别：获取该属下所有物种的名称，然后匹配记录
+            const genusName = selectedEntry.name.split('(')[0].trim()
+            
+            // 获取该属下的所有物种
+            const entries = getEntries()
+            const speciesInGenus = entries.filter(
+              e => e.level === 3 && e.parentPath === species && e.enabled
+            )
+            
+            if (speciesInGenus.length > 0) {
+              // 有预定义的物种列表，通过名称匹配
+              const speciesNames = speciesInGenus.map(sp => sp.name.split('(')[0].trim())
+              matches = speciesNames.some(name => 
+                record.name.includes(name) || record.species?.includes(name)
+              )
+            } else {
+              // 没有预定义物种，尝试通过属名匹配
+              matches = record.name.includes(genusName) || 
+                        record.species?.includes(genusName) ||
+                        record.codeGenus === selectedEntry.code
+            }
+          } else if (selectedEntry.level === 1) {
+            // 选择了大类级别，匹配该大类下所有物种
+            matches = record.codeCategory === species
+          }
+        } else {
+          // 未在 codeLookup 中找到对应条目，尝试作为大类代码处理
+          if (species.length === 1) {
+            matches = record.codeCategory === species
+          }
+          // 否则跳过筛选（保持原有行为）
+        }
+        
+        if (!matches) return false
+      }
       if (searchFilters.value.sampleType && record.sampleType !== searchFilters.value.sampleType) return false
       if (sequenceType && record.sequenceType !== sequenceType) return false
       if (country && record.country !== country) return false
@@ -115,10 +211,11 @@ export function useRecordsActions(state: any, autoSave: () => void) {
   function addRecord(record: Omit<StrainRecord, 'id' | 'addedAt'>) {
     const newRecord: StrainRecord = {
       ...record,
-      id: `record_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `record_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
       addedAt: new Date().toISOString()
     }
     records.value = [...records.value, newRecord]
+    invalidateLookupMaps()
     
     setIsUpdating(true)
     try {
@@ -170,6 +267,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
 
     // 1. 同步更本地状态
     records.value = [...records.value, ...processedRecords]
+    invalidateLookupMaps()
     applyFilters()
     
     // 2. 开启护盾并返回保存状态
@@ -190,19 +288,56 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     })
   }
 
-  function updateRecord(id: string, updates: Partial<StrainRecord>) {
-    records.value = records.value.map((r: StrainRecord) => r.id === id ? { ...r, ...updates } : r)
-    const record = records.value.find((r: StrainRecord) => r.id === id)
-    if (record) {
+  function updateRecord(id: string, updates: Partial<StrainRecord>): number {
+    // 查找当前记录的 sampleCode
+    const targetRecord = records.value.find((r: StrainRecord) => r.id === id)
+    if (!targetRecord) return 0
+
+    const sampleCode = targetRecord.sampleCode || targetRecord.accession
+    
+    // 如果有 sampleCode，则同步更新所有同号备份菌株
+    if (sampleCode && sampleCode.trim()) {
+      const backupRecords = records.value.filter(
+        (r: StrainRecord) => (r.sampleCode || r.accession) === sampleCode
+      )
+      
+      // 批量更新所有同号记录
+      records.value = records.value.map((r: StrainRecord) => {
+        if ((r.sampleCode || r.accession) === sampleCode) {
+          return { ...r, ...updates }
+        }
+        return r
+      })
+      invalidateLookupMaps()
+      
+      // 将所有更新的记录保存到数据库
       try {
-        getBridge().db_save_record(record)
-      } catch (e) {}
+        getBridge().db_save_records_batch(backupRecords.map((r: StrainRecord) => ({ ...r, ...updates })))
+      } catch (e) {
+        console.error('[StrainStore] 同步更新备份菌株失败:', e)
+      }
+      
+      applyFilters()
+      return backupRecords.length
+    } else {
+      // 没有 sampleCode，只更新单条记录
+      records.value = records.value.map((r: StrainRecord) => r.id === id ? { ...r, ...updates } : r)
+      invalidateLookupMaps()
+      const record = records.value.find((r: StrainRecord) => r.id === id)
+      if (record) {
+        try {
+          getBridge().db_save_record(record)
+        } catch (e) {}
+      }
+      
+      applyFilters()
+      return 1
     }
-    applyFilters()
   }
 
   function removeRecord(id: string) {
     records.value = records.value.filter((r: StrainRecord) => r.id !== id)
+    invalidateLookupMaps()
     selectedRecords.value.delete(id)
     if (activeRecord.value?.id === id) activeRecord.value = null
     try {
@@ -214,6 +349,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
   function removeRecordsBatch(ids: string[]) {
     if (!ids.length) return
     records.value = records.value.filter((r: StrainRecord) => !ids.includes(r.id))
+    invalidateLookupMaps()
     ids.forEach(id => {
       selectedRecords.value.delete(id)
       if (activeRecord.value?.id === id) activeRecord.value = null
@@ -231,6 +367,48 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     } else {
       selectedRecords.value.add(id)
     }
+  }
+
+  /** Shift 键范围选择 */
+  function shiftSelectRange(fromId: string, toId: string, allIds: string[]) {
+    // 用 indexOf 一次性完成查找 + 存在性判断，避免 includes 的冗余遍历
+    const fromIndex = allIds.indexOf(fromId)
+    const toIndex = allIds.indexOf(toId)
+    
+    if (fromIndex === -1 || toIndex === -1) {
+      console.warn('[shiftSelectRange] ID not found in list, fallback to toggle')
+      toggleSelect(toId)
+      return
+    }
+    
+    const startIndex = fromIndex < toIndex ? fromIndex : toIndex
+    const endIndex = fromIndex < toIndex ? toIndex : fromIndex
+    
+    // 使用缓存的 Map，仅在数据变化时重建
+    ensureLookupMaps()
+    const recordById = _cachedRecordById!
+    const accessionMap = _cachedAccessionMap!
+    
+    // 选中范围内的所有记录，并自动包含同 accession 的所有备份
+    const idsToAdd = new Set<string>()
+    for (let i = startIndex; i <= endIndex; i++) {
+      const id = allIds[i]
+      if (!id) continue
+      idsToAdd.add(id)
+      
+      const record = recordById.get(id)
+      if (record?.accession) {
+        const allBackupIds = accessionMap.get(record.accession)
+        if (allBackupIds) {
+          for (const bid of allBackupIds) {
+            idsToAdd.add(bid)
+          }
+        }
+      }
+    }
+    
+    // 批量添加选中的 ID
+    idsToAdd.forEach((id: string) => selectedRecords.value.add(id))
   }
 
   function selectAll() {
@@ -273,6 +451,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     removeRecord,
     removeRecordsBatch,
     toggleSelect,
+    shiftSelectRange,
     selectAll,
     clearSelection,
     recalibrateCounters,
@@ -281,6 +460,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       const bridge = getBridge()
       await bridge.strain_clear_all()
       records.value = []
+      invalidateLookupMaps()
       applyFilters()
     }
   }

@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/NCBI blast.iml" filepath="$PROJECT_DIR$/.idea/NCBI blast.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/ete4.iml" filepath="$PROJECT_DIR$/.idea/ete4.iml" />
     </modules>
   </component>
 </project>

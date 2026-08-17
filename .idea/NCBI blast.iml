@@ -3,7 +3,6 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/tool-master" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/vendor/ete4" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/src/cache" />
       <excludeFolder url="file://$MODULE_DIR$/src/results" />
       <excludeFolder url="file://$MODULE_DIR$/dist" />
@@ -16,8 +15,9 @@
       <excludeFolder url="file://$MODULE_DIR$/.venv/ete3" />
       <excludeFolder url="file://$MODULE_DIR$/.venv/share" />
       <excludeFolder url="file://$MODULE_DIR$/test" />
+      <excludeFolder url="file://$MODULE_DIR$/.venv" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.13" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.14 (NCBI blast)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
