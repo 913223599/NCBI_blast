@@ -458,7 +458,7 @@ class BuiltinAnnotator:
         )
 
         with open(summary_file, "w", encoding="utf-8") as f:
-            f.write(summary.model_dump_json() if hasattr(summary, 'model_dump_json') else summary.json())
+            f.write(summary.model_dump_json())
 
         output_files = {
             "gbk": str(gbk_file.resolve()),

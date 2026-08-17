@@ -99,7 +99,7 @@ async def run_protein_comparison(req: RunCompareRequest):
             target_category=req.category
         )
 
-        return {"success": True, "data": result.dict()}
+        return {"success": True, "data": result.model_dump()}
 
     except HTTPException:
         raise
