@@ -22,7 +22,7 @@ export interface FastaInspectResult {
 export interface AnnotationRunParams {
   task_name: string;
   sample_type: 'BACTERIA' | 'PHAGE' | 'VIRUS' | 'GENERAL';
-  engine: 'auto' | 'prokka' | 'pharokka' | 'prodigal' | 'builtin';
+  engine: 'auto' | 'phold' | 'prokka' | 'pharokka' | 'prodigal' | 'builtin';
   fasta_path?: string;
   fasta_content?: string;
   prefix: string;

@@ -416,8 +416,9 @@ onMounted(() => {
         <label>注释引擎</label>
         <select v-model="form.engine" class="custom-select">
           <option value="auto">自动智能调度 (Auto Engine)</option>
-          <option value="prokka">Prokka 标准全特征注释</option>
+          <option value="phold">Phold AI 结构深度增强 (3D Folding / ESMFold)</option>
           <option value="pharokka">Pharokka 噬菌体专用引擎</option>
+          <option value="prokka">Prokka 标准全特征注释</option>
           <option value="prodigal">Prodigal 极速 CDS 预测</option>
           <option value="builtin">内置高精度多核引擎 (零依赖)</option>
         </select>
