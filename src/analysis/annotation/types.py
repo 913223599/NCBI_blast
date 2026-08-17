@@ -81,6 +81,27 @@ class AnnotationSummary(BaseModel):
     avg_gene_length: float = 0.0
 
 
+class SafetyHitItem(BaseModel):
+    """单个安全命中条目 (AMR/毒力因子/Anti-CRISPR)"""
+    cds_id: str
+    target_id: str
+    identity: float
+    evalue: str
+    bitscore: float
+    description: Optional[str] = None
+    source: Optional[str] = None
+
+
+class SafetyAuditResult(BaseModel):
+    """全套生物安全性审计结果"""
+    safety_passed: bool = True
+    anti_crispr_status: str = "Not Detected"
+    risk_warnings: List[str] = Field(default_factory=list)
+    amr_genes: List[SafetyHitItem] = Field(default_factory=list)
+    virulent_factors: List[SafetyHitItem] = Field(default_factory=list)
+    anti_crispr_genes: List[SafetyHitItem] = Field(default_factory=list)
+
+
 class AnnotationTaskRecord(BaseModel):
     """注释任务持久化记录"""
     task_id: str
@@ -95,3 +116,5 @@ class AnnotationTaskRecord(BaseModel):
     updated_at: str
     summary: Optional[AnnotationSummary] = None
     files: Dict[str, str] = Field(default_factory=dict)
+    safety_audit: Optional[SafetyAuditResult] = None
+    checkv_quality: Optional[str] = None

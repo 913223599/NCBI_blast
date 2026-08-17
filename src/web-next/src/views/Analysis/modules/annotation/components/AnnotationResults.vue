@@ -177,6 +177,68 @@ function formatNumber(num?: number | null): string {
       </div>
     </div>
 
+    <!-- 2.5 深度生物安全审计与防御系统扫描卡片 -->
+    <div class="safety-audit-card" v-if="task.safety_audit">
+      <div class="safety-header">
+        <div class="safety-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" :stroke="task.safety_audit.safety_passed ? '#10b981' : '#f59e0b'" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+          <span>生物安全性与宿主防御逃逸审计</span>
+          <span class="safety-badge" :class="task.safety_audit.safety_passed ? 'passed' : 'warning'">
+            {{ task.safety_audit.safety_passed ? '安全合规 (未检出已知高危耐药/毒力)' : '注意 (检出潜在耐药/毒力风险)' }}
+          </span>
+        </div>
+        <div class="safety-summary-badges">
+          <span class="audit-chip" :class="task.safety_audit.amr_genes.length ? 'chip-alert' : 'chip-ok'">
+            CARD 耐药基因: {{ task.safety_audit.amr_genes.length }}
+          </span>
+          <span class="audit-chip" :class="task.safety_audit.virulent_factors.length ? 'chip-alert' : 'chip-ok'">
+            VFDB 毒力因子: {{ task.safety_audit.virulent_factors.length }}
+          </span>
+          <span class="audit-chip chip-info">
+            Anti-CRISPR: {{ task.safety_audit.anti_crispr_status }}
+          </span>
+        </div>
+      </div>
+
+      <!-- 详细命中列表展示 (如有) -->
+      <div class="safety-details-grid" v-if="task.safety_audit.amr_genes.length || task.safety_audit.virulent_factors.length || task.safety_audit.anti_crispr_genes.length">
+        <div class="safety-box" v-if="task.safety_audit.amr_genes.length">
+          <div class="box-title amr">耐药基因 (CARD)</div>
+          <div class="box-list">
+            <div class="box-item" v-for="(item, idx) in task.safety_audit.amr_genes" :key="idx">
+              <span class="tag-cds">{{ item.cds_id }}</span>
+              <span class="tag-desc">{{ item.description }}</span>
+              <span class="tag-meta">相似度: {{ item.identity }}% | E={{ item.evalue }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="safety-box" v-if="task.safety_audit.virulent_factors.length">
+          <div class="box-title vf">毒力因子 (VFDB)</div>
+          <div class="box-list">
+            <div class="box-item" v-for="(item, idx) in task.safety_audit.virulent_factors" :key="idx">
+              <span class="tag-cds">{{ item.cds_id }}</span>
+              <span class="tag-desc">{{ item.description }}</span>
+              <span class="tag-meta">相似度: {{ item.identity }}% | E={{ item.evalue }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="safety-box" v-if="task.safety_audit.anti_crispr_genes.length">
+          <div class="box-title acr">Anti-CRISPR (Acr) 逃逸因子</div>
+          <div class="box-list">
+            <div class="box-item" v-for="(item, idx) in task.safety_audit.anti_crispr_genes" :key="idx">
+              <span class="tag-cds">{{ item.cds_id }}</span>
+              <span class="tag-desc">{{ item.source || item.description || 'Acr Protein' }}</span>
+              <span class="tag-meta">相似度: {{ item.identity }}%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 3. 特征数据明细表格 -->
     <div class="features-section">
       <div class="table-toolbar">

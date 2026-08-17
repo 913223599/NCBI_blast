@@ -31,9 +31,21 @@ class AnnotationDB:
                     created_at TEXT,
                     updated_at TEXT,
                     summary_json TEXT,
-                    files_json TEXT
+                    files_json TEXT,
+                    safety_audit_json TEXT,
+                    checkv_json TEXT
                 )
             ''')
+            # 兼容：为已存在的旧表增量增加列
+            try:
+                conn.execute('ALTER TABLE annotation_tasks ADD COLUMN safety_audit_json TEXT')
+            except Exception:
+                pass
+            try:
+                conn.execute('ALTER TABLE annotation_tasks ADD COLUMN checkv_json TEXT')
+            except Exception:
+                pass
+
             conn.execute('CREATE INDEX IF NOT EXISTS idx_anno_status ON annotation_tasks(status)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_anno_created ON annotation_tasks(created_at)')
             conn.commit()
@@ -43,8 +55,8 @@ class AnnotationDB:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
                 INSERT INTO annotation_tasks 
-                (task_id, task_name, sample_type, engine, status, progress, current_step, created_at, updated_at, summary_json, files_json)
-                VALUES (?, ?, ?, ?, 'pending', 0, '任务初始化中...', ?, ?, '{}', '{}')
+                (task_id, task_name, sample_type, engine, status, progress, current_step, created_at, updated_at, summary_json, files_json, safety_audit_json, checkv_json)
+                VALUES (?, ?, ?, ?, 'pending', 0, '任务初始化中...', ?, ?, '{}', '{}', '{}', '{}')
             ''', (task_id, task_name, sample_type, engine, now_str, now_str))
             conn.commit()
         return True
@@ -59,15 +71,23 @@ class AnnotationDB:
             ''', (progress, current_step, status, now_str, task_id))
             conn.commit()
 
-    def mark_completed(self, task_id: str, summary: Dict[str, Any], files: Dict[str, str]):
+    def mark_completed(self, task_id: str, summary: Dict[str, Any], files: Dict[str, str], 
+                       safety_audit: Optional[Dict[str, Any]] = None, checkv: Optional[Dict[str, Any]] = None):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
                 UPDATE annotation_tasks 
                 SET status = 'completed', progress = 100, current_step = '注释已完成', 
-                    summary_json = ?, files_json = ?, updated_at = ?
+                    summary_json = ?, files_json = ?, safety_audit_json = ?, checkv_json = ?, updated_at = ?
                 WHERE task_id = ?
-            ''', (json.dumps(summary, ensure_ascii=False), json.dumps(files, ensure_ascii=False), now_str, task_id))
+            ''', (
+                json.dumps(summary, ensure_ascii=False), 
+                json.dumps(files, ensure_ascii=False),
+                json.dumps(safety_audit or {}, ensure_ascii=False),
+                json.dumps(checkv or {}, ensure_ascii=False),
+                now_str, 
+                task_id
+            ))
             conn.commit()
 
     def mark_failed(self, task_id: str, error_msg: str):
@@ -100,13 +120,15 @@ class AnnotationDB:
             data = dict(row)
             data["summary"] = json.loads(data.get("summary_json") or "{}")
             data["files"] = json.loads(data.get("files_json") or "{}")
+            data["safety_audit"] = json.loads(data.get("safety_audit_json") or "{}")
+            data["checkv"] = json.loads(data.get("checkv_json") or "{}")
             return data
 
     def list_tasks(self, limit: int = 50) -> List[Dict[str, Any]]:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute('''
-                SELECT task_id, task_name, sample_type, engine, status, progress, current_step, error_msg, created_at, updated_at, summary_json, files_json
+                SELECT task_id, task_name, sample_type, engine, status, progress, current_step, error_msg, created_at, updated_at, summary_json, files_json, safety_audit_json, checkv_json
                 FROM annotation_tasks 
                 ORDER BY created_at DESC LIMIT ?
             ''', (limit,))
@@ -115,6 +137,8 @@ class AnnotationDB:
                 data = dict(row)
                 data["summary"] = json.loads(data.get("summary_json") or "{}")
                 data["files"] = json.loads(data.get("files_json") or "{}")
+                data["safety_audit"] = json.loads(data.get("safety_audit_json") or "{}")
+                data["checkv"] = json.loads(data.get("checkv_json") or "{}")
                 results.append(data)
             return results
 

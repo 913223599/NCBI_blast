@@ -67,6 +67,25 @@ export interface AnnotationSummary {
   avg_gene_length: number;
 }
 
+export interface SafetyHitItem {
+  cds_id: string;
+  target_id: string;
+  identity: number;
+  evalue: string;
+  bitscore: number;
+  description?: string;
+  source?: string;
+}
+
+export interface SafetyAuditResult {
+  safety_passed: boolean;
+  anti_crispr_status: string;
+  risk_warnings: string[];
+  amr_genes: SafetyHitItem[];
+  virulent_factors: SafetyHitItem[];
+  anti_crispr_genes: SafetyHitItem[];
+}
+
 export interface AnnotationTaskItem {
   task_id: string;
   task_name: string;
@@ -83,6 +102,8 @@ export interface AnnotationTaskItem {
   features?: FeatureItem[];
   feature_count?: number;
   gbk_content?: string;
+  safety_audit?: SafetyAuditResult;
+  checkv_quality?: string;
 }
 
 export interface ProgressEventPayload {

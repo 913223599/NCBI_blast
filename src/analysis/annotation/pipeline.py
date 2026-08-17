@@ -123,7 +123,7 @@ class AnnotationPipeline:
                     )
                     
                     if assigned_hits:
-                        self._broadcast_progress(82, f"成功打捞并匹配到 {len(assigned_hits)} 个编码基因的真实生物学功能...")
+                        self._broadcast_progress(78, f"成功打捞并匹配到 {len(assigned_hits)} 个编码基因的真实生物学功能...")
                         updated_count = 0
                         for feat in features:
                             hit = assigned_hits.get(feat.id) or assigned_hits.get(feat.locus_tag) or assigned_hits.get(feat.protein_id)
@@ -150,6 +150,26 @@ class AnnotationPipeline:
                 except Exception as blast_err:
                     logger.warning(f"蛋白质功能打捞阶段异常: {blast_err}")
 
+            # 3.8 深度生物安全性与毒力耐药审计 (CARD / VFDB / Anti-CRISPR Audit)
+            safety_audit_res: Optional[Dict[str, Any]] = None
+            if files.get("faa") and Path(files["faa"]).exists():
+                self._broadcast_progress(88, "正在执行生物安全性审计 (CARD耐药基因/VFDB毒力因子/Anti-CRISPR逃逸扫描)...")
+                try:
+                    from .deep_audit import DeepSafetyAuditor
+                    auditor = DeepSafetyAuditor()
+                    safety_audit_res = auditor.run_safety_audit(
+                        query_faa=Path(files["faa"]),
+                        work_dir=self.work_dir,
+                        threads=allocated_threads
+                    )
+                    # 落盘 safety_audit.json
+                    audit_file = self.work_dir / "safety_audit.json"
+                    with open(audit_file, "w", encoding="utf-8") as f:
+                        json.dump(safety_audit_res, f, ensure_ascii=False, indent=2)
+                    files["safety_audit_json"] = str(audit_file.resolve())
+                except Exception as audit_err:
+                    logger.warning(f"生物安全审计阶段异常: {audit_err}")
+
             # 4. 特征数据分片落盘与 JSON 存储
             features_file = self.work_dir / "features.json"
             features_dict = [f.dict() for f in features]
@@ -159,15 +179,21 @@ class AnnotationPipeline:
 
             # 5. 持久化至数据库
             summary_dict = summary.dict() if summary else {}
-            annotation_db.mark_completed(self.task_id, summary_dict, files)
+            annotation_db.mark_completed(
+                task_id=self.task_id, 
+                summary=summary_dict, 
+                files=files,
+                safety_audit=safety_audit_res
+            )
             
             # 广播完成事件
             final_res = {
                 "task_id": self.task_id,
                 "summary": summary_dict,
                 "feature_count": len(features),
-                "features_sample": [f.dict() for f in features[:100]],  # 首次返回前100条供轻量展示
-                "files": files
+                "features_sample": [f.dict() for f in features[:100]],
+                "files": files,
+                "safety_audit": safety_audit_res
             }
             broadcaster.broadcast_sync("annotation_completed", final_res)
             return final_res
