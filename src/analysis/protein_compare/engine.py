@@ -260,6 +260,14 @@ class ProteinComparer:
             best_identity = 0.0
             best_mutations: List[MutationSite] = []
             best_diff_cnt = 0
+            best_aln_a: str = pa.translation
+            best_markup: str = "|" * len(pa.translation)
+            best_aln_b: str = ""
+            best_c_cnt: int = 0
+            best_r_cnt: int = 0
+            best_in_cnt: int = 0
+            best_doms: List[RegionDomainItem] = []
+            best_concl: str = ""
             
             # 1. 优先检查 100% 序列完全相同的候选
             if pa.translation in seq_to_b and seq_to_b[pa.translation]:
@@ -343,14 +351,14 @@ class ProteinComparer:
                     diff_count=best_diff_cnt,
                     mutations=best_mutations,
                     length_diff=abs(pa.length_aa - best_match.length_aa),
-                    aligned_seq_a=best_aln_a if 'best_aln_a' in locals() else pa.translation,
-                    aligned_markup=best_markup if 'best_markup' in locals() else "|" * len(pa.translation),
-                    aligned_seq_b=best_aln_b if 'best_aln_b' in locals() else best_match.translation,
-                    conservative_mutation_cnt=best_c_cnt if 'best_c_cnt' in locals() else 0,
-                    radical_mutation_cnt=best_r_cnt if 'best_r_cnt' in locals() else 0,
-                    indel_cnt=best_in_cnt if 'best_in_cnt' in locals() else 0,
-                    hotspot_conclusion=best_concl if 'best_concl' in locals() else "",
-                    region_domains=best_doms if 'best_doms' in locals() else []
+                    aligned_seq_a=best_aln_a,
+                    aligned_markup=best_markup,
+                    aligned_seq_b=best_aln_b if best_aln_b else best_match.translation,
+                    conservative_mutation_cnt=best_c_cnt,
+                    radical_mutation_cnt=best_r_cnt,
+                    indel_cnt=best_in_cnt,
+                    hotspot_conclusion=best_concl,
+                    region_domains=best_doms
                 ))
             else:
                 # 样本 A 独有
