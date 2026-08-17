@@ -55,15 +55,6 @@ async function fetchTasks() {
     const res = await bridge.get_comparable_annotation_tasks?.();
     if (res && res.success) {
       availableTasks.value = res.data || [];
-      // 默认选择前两条不同的任务
-      if (availableTasks.value.length >= 2 && availableTasks.value[0] && availableTasks.value[1]) {
-        sampleAId.value = availableTasks.value[0].task_id;
-        sampleBId.value = availableTasks.value[1].task_id;
-        // 自动触发一次默认比对
-        await executeComparison();
-      } else if (availableTasks.value.length === 1 && availableTasks.value[0]) {
-        sampleAId.value = availableTasks.value[0].task_id;
-      }
     }
   } catch (err: any) {
     console.warn('[ProteinCompare] 获取任务列表失败:', err);
@@ -117,7 +108,8 @@ async function executeComparison() {
 // 切换分类筛选
 async function selectCategoryTab(catKey: string) {
   selectedCategory.value = catKey;
-  if (sampleAId.value && sampleBId.value) {
+  // 仅在用户已经执行过比对时，切换分类才重新计算
+  if (comparisonResult.value && sampleAId.value && sampleBId.value) {
     await executeComparison();
   }
 }
@@ -259,7 +251,7 @@ function copyText(text: string) {
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
             <span v-if="isComparing" class="btn-spinner"></span>
-            <span>{{ isComparing ? '比对计算中...' : '重新比对' }}</span>
+            <span>{{ isComparing ? '比对计算中...' : (comparisonResult ? '重新比对' : '开始比对') }}</span>
           </button>
 
           <button 
@@ -287,7 +279,7 @@ function copyText(text: string) {
               {{ availableTasks.find(t => t.task_id === sampleAId)?.cds_count || 0 }} CDS
             </span>
           </div>
-          <select v-model="sampleAId" class="sample-select" @change="executeComparison">
+          <select v-model="sampleAId" class="sample-select">
             <option value="" disabled>-- 请选择基准注释任务 --</option>
             <option v-for="t in availableTasks" :key="t.task_id" :value="t.task_id">
               {{ t.task_name }} ({{ t.sample_type }}, {{ t.cds_count }} CDS) - {{ t.task_id }}
@@ -306,7 +298,7 @@ function copyText(text: string) {
               {{ availableTasks.find(t => t.task_id === sampleBId)?.cds_count || 0 }} CDS
             </span>
           </div>
-          <select v-model="sampleBId" class="sample-select" @change="executeComparison">
+          <select v-model="sampleBId" class="sample-select">
             <option value="" disabled>-- 请选择比对目标注释任务 --</option>
             <option v-for="t in availableTasks" :key="t.task_id" :value="t.task_id">
               {{ t.task_name }} ({{ t.sample_type }}, {{ t.cds_count }} CDS) - {{ t.task_id }}
