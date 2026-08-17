@@ -63,73 +63,36 @@ class AnnotationPipeline:
             features: List[FeatureItem] = []
             files: Dict[str, str] = {}
 
-            # 3. 引擎决策与执行
-            if engine_to_use == "phold":
-                # 显式指定 Phold AI 结构增强引擎
-                self._broadcast_progress(20, "正在进行前置 ORF 预测并构建 Phold 输入模型...")
-                annotator = BuiltinAnnotator(
-                    genetic_code=req.genetic_code,
-                    min_orf_len_bp=req.min_contig_len,
-                    prefix=prefix
-                )
-                summary, features, files = annotator.annotate_fasta(
-                    fasta_file_path=input_fasta,
-                    output_dir=self.work_dir,
-                    on_progress=lambda p, msg: self._broadcast_progress(p, msg)
-                )
+            # 3. 基础 ORF 预测与初始特征提取
+            annotator = BuiltinAnnotator(
+                genetic_code=req.genetic_code,
+                min_orf_len_bp=req.min_contig_len,
+                prefix=prefix
+            )
 
-                # 调度 Phold AI 3D 结构折叠增强
-                if files.get("gbk") and Path(files["gbk"]).exists():
-                    self._broadcast_progress(40, "正在调度 Phold AI 蛋白质三维结构折叠预测与特征增强 (ESMFold/Foldseek)...")
-                    try:
-                        phold_summary, phold_features, phold_files = await self._run_phold_engine(
-                            input_gbk=Path(files["gbk"]),
-                            input_fasta=input_fasta,
-                            threads=allocated_threads,
-                            prefix=prefix
-                        )
-                        if phold_features:
-                            summary, features, files = phold_summary, phold_features, phold_files
-                            self._broadcast_progress(60, f"Phold 结构感知完成，已成功增强 {len(features)} 个特征...")
-                    except Exception as phold_err:
-                        logger.warning(f"Phold 执行异常，自动衔接后续同源打捞: {phold_err}")
-                        self._broadcast_progress(50, "Phold 结构增强已处理，正在进入专家库同源打捞...")
-
-            elif engine_to_use in ["prokka", "pharokka", "auto"]:
-                # 尝试通过外部生物信息工具链运行
+            if engine_to_use in ["prokka", "pharokka"] and engine_to_use != "phold":
+                # 尝试通过外部 Prokka 生物信息工具链运行
                 prokka_success = False
-                if engine_to_use != "builtin":
-                    try:
-                        summary, features, files = await self._run_external_engine(
-                            input_fasta=input_fasta,
-                            req=req,
-                            threads=allocated_threads,
-                            prefix=prefix
-                        )
-                        prokka_success = True
-                    except Exception as ext_err:
-                        logger.warning(f"外部注释引擎执行异常或未安装，正在无缝切换至内置高精度引擎: {ext_err}")
-                        self._broadcast_progress(20, "外部工具链未就绪，已切换至内置高性能注释引擎...", f"提示: {ext_err}")
-
-                if not prokka_success:
-                    # 降级至内置高性能引擎
-                    annotator = BuiltinAnnotator(
-                        genetic_code=req.genetic_code,
-                        min_orf_len_bp=req.min_contig_len,
+                try:
+                    summary, features, files = await self._run_external_engine(
+                        input_fasta=input_fasta,
+                        req=req,
+                        threads=allocated_threads,
                         prefix=prefix
                     )
+                    prokka_success = True
+                except Exception as ext_err:
+                    logger.warning(f"外部注释引擎执行异常或未安装，正在无缝切换至内置高精度引擎: {ext_err}")
+                    self._broadcast_progress(20, "外部工具链未就绪，已切换至内置高性能注释引擎...", f"提示: {ext_err}")
+
+                if not prokka_success:
                     summary, features, files = annotator.annotate_fasta(
                         fasta_file_path=input_fasta,
                         output_dir=self.work_dir,
                         on_progress=lambda p, msg: self._broadcast_progress(p, msg)
                     )
             else:
-                # 显式指定内置引擎
-                annotator = BuiltinAnnotator(
-                    genetic_code=req.genetic_code,
-                    min_orf_len_bp=req.min_contig_len,
-                    prefix=prefix
-                )
+                # 默认/内置/Phold 模式：由内置多核引擎极速生成高质量 ORF 与初级模型
                 summary, features, files = annotator.annotate_fasta(
                     fasta_file_path=input_fasta,
                     output_dir=self.work_dir,
@@ -141,9 +104,9 @@ class AnnotationPipeline:
                 self._broadcast_progress(0, "任务已被用户取消")
                 return {"status": "cancelled"}
 
-            # 3.5 蛋白质生物学功能深度比对与打捞 (Assign Real Functions via BLASTP)
+            # 3.5 【第一阶段：先用 PhageScope 105万权威噬菌体蛋白库进行多核同源打捞】
             if files.get("faa") and Path(files["faa"]).exists() and features:
-                self._broadcast_progress(65, "正在比对权威蛋白质功能数据库 (PhageScope/RefSeq 105万条参考蛋白)...")
+                self._broadcast_progress(45, "正在比对权威蛋白质功能数据库 (PhageScope 105万条参考蛋白库)...")
                 try:
                     from .functional_assigner import FunctionalAssigner
                     assigner = FunctionalAssigner()
@@ -154,7 +117,7 @@ class AnnotationPipeline:
                     )
                     
                     if assigned_hits:
-                        self._broadcast_progress(78, f"成功打捞并匹配到 {len(assigned_hits)} 个编码基因的真实生物学功能...")
+                        self._broadcast_progress(60, f"成功打捞并赋予 {len(assigned_hits)} 个编码基因的已知生物学功能...")
                         updated_count = 0
                         for feat in features:
                             hit = assigned_hits.get(feat.id) or assigned_hits.get(feat.locus_tag) or assigned_hits.get(feat.protein_id)
@@ -167,7 +130,7 @@ class AnnotationPipeline:
                         
                         logger.info(f"Updated {updated_count} CDS features with real biological products")
                         
-                        # 重新导出更新后的 GBK, GFF3, TSV
+                        # 重新导出赋予已知功能后的中间 GBK, GFF3, TSV
                         records = list(SeqIO.parse(str(input_fasta), "fasta"))
                         if req.selected_contigs:
                             sel_set = set(req.selected_contigs)
@@ -179,7 +142,43 @@ class AnnotationPipeline:
                             on_progress=lambda p, msg: self._broadcast_progress(p, msg)
                         )
                 except Exception as blast_err:
-                    logger.warning(f"蛋白质功能打捞阶段异常: {blast_err}")
+                    logger.warning(f"PhageScope 蛋白质功能打捞阶段异常: {blast_err}")
+
+            # 3.6 【第二阶段：后用 Phold AI 蛋白质三维结构空间构象折叠增强】
+            if engine_to_use == "phold" and files.get("gbk") and Path(files["gbk"]).exists():
+                self._broadcast_progress(70, "正在调度 Phold AI 蛋白质三维结构折叠预测与特征增强 (ESMFold/Foldseek)...")
+                try:
+                    phold_summary, phold_features, phold_files = await self._run_phold_engine(
+                        input_gbk=Path(files["gbk"]),
+                        input_fasta=input_fasta,
+                        threads=allocated_threads,
+                        prefix=prefix
+                    )
+                    if phold_features:
+                        # 将 Phold 的三维结构预测特征与已有 PhageScope 注释进行智能融合
+                        for pf in phold_features:
+                            match_feat = next((f for f in features if f.locus_tag == pf.locus_tag or f.id == pf.id), None)
+                            if match_feat:
+                                if ("hypothetical" in match_feat.product.lower() or "unknown" in match_feat.product.lower()) and "hypothetical" not in pf.product.lower():
+                                    match_feat.product = pf.product
+                                if pf.notes:
+                                    match_feat.notes = f"{match_feat.notes}; {pf.notes}" if match_feat.notes else pf.notes
+
+                        # 重新写盘最终融合成果
+                        records = list(SeqIO.parse(str(input_fasta), "fasta"))
+                        if req.selected_contigs:
+                            sel_set = set(req.selected_contigs)
+                            records = [r for r in records if r.id in sel_set]
+                        summary, features, files = annotator.export_features_to_files(
+                            records=records,
+                            all_features=features,
+                            output_dir=self.work_dir,
+                            on_progress=lambda p, msg: self._broadcast_progress(p, msg)
+                        )
+                        self._broadcast_progress(82, f"Phold 结构感知与功能融合完成，已生成增强型 GBK 模型...")
+                except Exception as phold_err:
+                    logger.warning(f"Phold 执行异常，保留 PhageScope 注释结果: {phold_err}")
+                    self._broadcast_progress(80, "Phold 结构感知已处理，保留高质量同源注释结果...")
 
             # 3.8 深度生物安全性与毒力耐药审计 (CARD / VFDB / Anti-CRISPR Audit)
             safety_audit_res: Optional[Dict[str, Any]] = None
@@ -290,9 +289,9 @@ class AnnotationPipeline:
                                   threads: int, prefix: str) -> Tuple[AnnotationSummary, List[FeatureItem], Dict[str, str]]:
         """调用 WSL / Linux 中的 Prokka 执行深度注释"""
         from ...assembly.env.wsl_manager import WSLManager
-        from ...assembly.core.runner import StepRunner
+        from ...assembly.engine.runner import CommandRunner
 
-        runner = StepRunner(logger)
+        runner = CommandRunner(step_name="Prokka", logger=logger, is_wsl=True)
         
         # 检查 Prokka 是否存在
         has_prokka = (await runner.run_command(["which", "prokka"], silence_errors=True)) == 0
@@ -412,9 +411,9 @@ class AnnotationPipeline:
     async def _run_phold_engine(self, input_gbk: Path, input_fasta: Path,
                                threads: int, prefix: str) -> Tuple[AnnotationSummary, List[FeatureItem], Dict[str, str]]:
         """调用 WSL 中的 phold 执行 3D 蛋白质结构折叠感知与功能增强"""
-        from ...assembly.core.runner import StepRunner
+        from ...assembly.engine.runner import CommandRunner
 
-        runner = StepRunner(logger)
+        runner = CommandRunner(step_name="Phold", logger=logger, is_wsl=True)
         has_phold = (await runner.run_command(["which", "phold"], silence_errors=True)) == 0
         if not has_phold:
             raise RuntimeError("宿主环境中未安装 Phold 工具")
