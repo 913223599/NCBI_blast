@@ -189,9 +189,16 @@ async function fetchAssemblyHistory() {
   isAssemblyLoading.value = true;
   try {
     const bridge = getBridge();
-    const res = await bridge.fetchAssemblyHistory?.() || await (await fetch('/api/assembly/history')).json();
+    let res: any = null;
+    if (typeof bridge.fetchAssemblyHistory === 'function') {
+      res = await bridge.fetchAssemblyHistory();
+    } else if (typeof bridge.get_assembly_history === 'function') {
+      res = await bridge.get_assembly_history();
+    }
     if (res && res.data) {
-      assemblyHistory.value = (res.data || []).filter((t: any) => t.status === 'SUCCESS' || t.status === 'completed');
+      assemblyHistory.value = (res.data || []).filter((t: any) => 
+        t.status === 'SUCCESS' || t.status === 'completed' || t.status === 'success'
+      );
     }
   } catch (e) {
     console.warn('[AnnotationSetup] 获取组装历史失败:', e);

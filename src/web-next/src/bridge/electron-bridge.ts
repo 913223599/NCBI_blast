@@ -863,6 +863,10 @@ const electronBridge = {
         return await apiGet('/api/assembly/history');
     },
 
+    async fetchAssemblyHistory() {
+        return await apiGet('/api/assembly/history');
+    },
+
     /** 删除拼接任务数据 */
     async delete_assembly_task(taskId: string) {
         return await apiDelete(`/api/assembly/tasks/${taskId}`);
