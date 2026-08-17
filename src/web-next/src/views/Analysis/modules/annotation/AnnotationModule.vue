@@ -3,7 +3,7 @@
  * AnnotationModule - 基因组功能注释工作台主模块
  * 采用 侧边栏-主内容 桌面端双栏架构
  */
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { useAnnotation } from './composables/useAnnotation';
 import AnnotationHistory from './components/AnnotationHistory.vue';
 import AnnotationSetup from './components/AnnotationSetup.vue';
