@@ -65,7 +65,8 @@ class HomologyEngine(BaseAnnotationEngine):
         hits_map = assigner.run_blastp_annotation(
             query_faa=query_faa,
             work_dir=work_dir,
-            threads=threads
+            threads=threads,
+            on_progress=on_progress
         )
 
         if not hits_map:

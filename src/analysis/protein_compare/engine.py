@@ -367,6 +367,107 @@ class ProteinComparer:
 
         return proteins
 
+    @classmethod
+    def load_proteins_from_file(cls, file_path: Path) -> Tuple[List[ProteinItem], Dict[str, Any]]:
+        """
+        直接从单个外部文件中解析蛋白质特征 (全面支持 .gbk, .gb, .genbank, .faa, .fasta, .json)
+        返回: (proteins, metadata)
+        """
+        p = Path(file_path)
+        if not p.exists():
+            raise FileNotFoundError(f"文件不存在: {p}")
+
+        suffix = p.suffix.lower()
+        proteins: List[ProteinItem] = []
+        meta: Dict[str, Any] = {
+            "file_name": p.name,
+            "file_size": p.stat().st_size,
+            "file_type": suffix,
+            "total_length": 0,
+            "cds_count": 0
+        }
+
+        # 1. GenBank 文件解析
+        if suffix in [".gbk", ".gb", ".genbank"]:
+            total_bp = 0
+            with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                for rec in SeqIO.parse(f, "genbank"):
+                    if rec.seq:
+                        total_bp += len(rec.seq)
+                    for feat in rec.features:
+                        if feat.type == "CDS":
+                            q = feat.qualifiers
+                            lt = q.get("locus_tag", q.get("protein_id", [f"feat_{len(proteins)+1}"]))[0] if hasattr(q, "get") else f"feat_{len(proteins)+1}"
+                            prod = q.get("product", ["hypothetical protein"])[0]
+                            trans = q.get("translation", [""])[0]
+                            if not trans and feat.location and rec.seq:
+                                try:
+                                    trans = str(feat.extract(rec.seq).translate(to_stop=True))
+                                except Exception:
+                                    pass
+                            if not trans:
+                                continue
+                            
+                            direct_cat = q.get("function", q.get("category", [None]))[0]
+                            notes = q.get("note", [None])[0]
+                            cat = cls.classify_protein(prod, direct_cat=direct_cat, notes=notes)
+                            f_start = int(feat.location.start) + 1 if feat.location else 0
+                            f_end = int(feat.location.end) if feat.location else 0
+                            f_strand = "+" if (feat.location and feat.location.strand >= 0) else "-"
+
+                            proteins.append(ProteinItem(
+                                id=lt,
+                                locus_tag=lt,
+                                product=prod,
+                                translation=trans,
+                                length_aa=len(trans),
+                                start=f_start,
+                                end=f_end,
+                                strand=f_strand,
+                                category=cat
+                            ))
+            meta["total_length"] = total_bp
+
+        # 2. 氨基酸 FASTA 文件 (.faa / .fasta)
+        elif suffix in [".faa", ".fasta", ".fa", ".fna"]:
+            with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                for idx, rec in enumerate(SeqIO.parse(f, "fasta"), start=1):
+                    seq = str(rec.seq).strip().upper()
+                    if not seq:
+                        continue
+                    header = rec.description or rec.id
+                    prod = "hypothetical protein"
+                    if " " in header:
+                        prod = header.split(" ", 1)[1].strip()
+                    elif "_" in header or "-" in header:
+                        prod = header
+
+                    cat = cls.classify_protein(prod)
+                    lt = rec.id or f"prot_{idx:05d}"
+                    proteins.append(ProteinItem(
+                        id=lt,
+                        locus_tag=lt,
+                        product=prod,
+                        translation=seq,
+                        length_aa=len(seq),
+                        start=0,
+                        end=len(seq) * 3,
+                        strand="+",
+                        category=cat
+                    ))
+
+        # 3. JSON 文件
+        elif suffix == ".json":
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    proteins = cls.load_proteins_from_annotation(data)
+                elif isinstance(data, dict) and "features" in data:
+                    proteins = cls.load_proteins_from_annotation(data["features"])
+
+        meta["cds_count"] = len(proteins)
+        return proteins, meta
+
     def compare_two_samples(
         self,
         sample_a_name: str,

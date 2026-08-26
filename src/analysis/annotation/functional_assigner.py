@@ -11,7 +11,7 @@ import logging
 import subprocess
 import shutil
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Set, Callable, Tuple
 
 logger = logging.getLogger("analysis.annotation.functional_assigner")
 
@@ -33,12 +33,12 @@ class FunctionalAssigner:
         posix = p.as_posix().replace(f"{p.drive}/", "")
         return f"/mnt/{drive}/{posix}"
 
-    def _load_metadata_for_ids(self, target_ids: Set[str]) -> Dict[str, Dict[str, str]]:
+    def _load_metadata_for_ids(self, target_ids: Set[str]) -> Dict[str, Dict[str, Optional[str]]]:
         """从元数据 TSV 表中快速按需检索 Target Protein_ID 的真实功能描述"""
         if not target_ids:
             return {}
 
-        results: Dict[str, Dict[str, str]] = {}
+        results: Dict[str, Dict[str, Optional[str]]] = {}
         tsv_files = [
             self.meta_protein_dir / "refseq_phage_annotated_protein_meta_data.tsv",
             self.meta_protein_dir / "genbank_phage_annotated_protein_meta_data.tsv",
@@ -68,7 +68,7 @@ class FunctionalAssigner:
 
         return results
 
-    def _clean_product_name(self, raw_prod: str) -> str:
+    def _clean_product_name(self, raw_prod: Optional[str]) -> str:
         """清洗并规范化功能描述文本 (自动解码 URL 编码与多余引号)"""
         if not raw_prod:
             return "hypothetical protein"
@@ -86,7 +86,8 @@ class FunctionalAssigner:
         work_dir: Path,
         threads: int = 8,
         evalue_threshold: float = 1e-5,
-        identity_threshold: float = 30.0
+        identity_threshold: float = 30.0,
+        on_progress: Optional[Callable[[int, str, Optional[str]], None]] = None
     ) -> Dict[str, Dict[str, Any]]:
         """
         对 query_faa 蛋白质文件执行本地 BLASTP 并映射真实功能
@@ -95,6 +96,9 @@ class FunctionalAssigner:
         if not query_faa.exists() or query_faa.stat().st_size == 0:
             logger.warning("Query FAA is empty or missing")
             return {}
+
+        if on_progress:
+            on_progress(10, "正在构建 BLASTP 同源检索任务 (多核并行)...", None)
 
         out_tsv = work_dir / "blastp_functional_hits.tsv"
         db_path = self.phagescope_dir / "phagescope_proteins"
@@ -112,6 +116,8 @@ class FunctionalAssigner:
             bash_cmd = f"cd \"{wsl_db_dir}\" && blastp -query \"{wsl_query}\" -db phagescope_proteins -out \"{wsl_out}\" -outfmt \"6 qseqid sseqid pident length evalue bitscore stitle\" -evalue {evalue_threshold} -max_target_seqs 1 -num_threads {threads}"
             
             try:
+                if on_progress:
+                    on_progress(35, "正在比对 105 万条 PhageScope 权威噬菌体蛋白库...", bash_cmd)
                 cmd = ["wsl", "bash", "-c", bash_cmd]
                 logger.info(f"Running functional BLASTP via WSL (threads={threads})...")
                 res = subprocess.run(cmd, capture_output=True, timeout=300)
@@ -124,6 +130,8 @@ class FunctionalAssigner:
         # 若 WSL 未成功，尝试本地 Windows blastp
         if not blast_success and shutil.which("blastp"):
             try:
+                if on_progress:
+                    on_progress(45, "正在通过本地 BLASTP 检索参考数据库...", None)
                 logger.info("Attempting native Windows blastp...")
                 cmd = [
                     "blastp",
@@ -140,6 +148,9 @@ class FunctionalAssigner:
                     blast_success = True
             except Exception as e:
                 logger.warning(f"Native blastp execution failed: {e}")
+
+        if on_progress:
+            on_progress(85, "BLASTP 检索完成，正在解析同源注释与可信度评分...", None)
 
         if not out_tsv.exists() or out_tsv.stat().st_size == 0:
             logger.warning("No BLASTP output generated, keeping base annotations")

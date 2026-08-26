@@ -241,7 +241,7 @@ const electronBridge = {
             return null;
         }
 
-        // 🔗 智能标题识别 (区分分析场景与拼接场景)
+        // 🔗 智能标题与过滤器识别 (区分分析、注释、进化树与原始测序场景)
         let dialogTitle = '批量导入: 文件';
         let filters: any[] = [];
 
@@ -252,6 +252,16 @@ const electronBridge = {
                 { name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'fna', 'seq', 'txt'] },
                 { name: 'Archives', extensions: ['zip', 'gz'] }
             ];
+        } else if (fileType === 'annotation' || fileType === 'gbk' || fileType === 'protein') {
+            // 注释与蛋白质比对场景
+            dialogTitle = '选择导入: 注释与蛋白质序列文件 (GBK/FASTA)';
+            filters = [
+                { name: '注释与序列文件', extensions: ['gbk', 'gb', 'genbank', 'faa', 'fasta', 'fa', 'fna', 'gff', 'gff3', 'json'] },
+                { name: 'GenBank 文件 (*.gbk, *.gb, *.genbank)', extensions: ['gbk', 'gb', 'genbank'] },
+                { name: 'FASTA 序列 (*.fasta, *.faa, *.fa, *.fna)', extensions: ['fasta', 'faa', 'fa', 'fna'] },
+                { name: 'GFF 注释 (*.gff, *.gff3)', extensions: ['gff', 'gff3'] },
+                { name: 'JSON 特征 (*.json)', extensions: ['json'] }
+            ];
         } else if (fileType === 'fasta') {
             // BLAST 或 序列分析场景
             dialogTitle = '批量导入: 序列文件 (FASTA)';
@@ -260,15 +270,31 @@ const electronBridge = {
                 { name: 'Sanger 测序', extensions: ['ab1', 'abi'] }
             ];
         } else if (Array.isArray(fileType)) {
-            // 组装拼接场景
-            dialogTitle = '批量导入: 测序原始数据 (FASTQ/AB1)';
-            filters = [
-                { name: 'Sequencing Reads', extensions: ['fastq', 'fq', 'gz', 'fastq.gz', 'fq.gz', 'ab1'] },
-                { name: 'Archives', extensions: ['zip', 'tar.gz'] }
-            ];
+            // 判断数组中的文件类型特征
+            const isAnnoOrProt = fileType.some(ext => ['gbk', 'gb', 'genbank', 'faa', 'gff', 'gff3'].includes(ext.toLowerCase()));
+            const isReads = fileType.some(ext => ['fastq', 'fq', 'ab1'].includes(ext.toLowerCase()));
+
+            if (isAnnoOrProt) {
+                dialogTitle = '选择导入: 注释与蛋白质序列文件 (GBK/FASTA)';
+                filters = [
+                    { name: '注释与序列文件', extensions: fileType },
+                    { name: 'GenBank 文件 (*.gbk, *.gb)', extensions: ['gbk', 'gb', 'genbank'] },
+                    { name: 'FASTA 序列 (*.fasta, *.faa, *.fa)', extensions: ['fasta', 'faa', 'fa', 'fna'] }
+                ];
+            } else if (isReads) {
+                // 组装拼接场景
+                dialogTitle = '批量导入: 测序原始数据 (FASTQ/AB1)';
+                filters = [
+                    { name: 'Sequencing Reads', extensions: ['fastq', 'fq', 'gz', 'fastq.gz', 'fq.gz', 'ab1'] },
+                    { name: 'Archives', extensions: ['zip', 'tar.gz'] }
+                ];
+            } else {
+                dialogTitle = '批量导入: 序列文件';
+                filters = [{ name: 'Supported Files', extensions: fileType }];
+            }
         } else {
             dialogTitle = '批量导入: 序列文件';
-            filters = [{ name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'seq', 'ab1', 'abi', 'fastq', 'fq', 'gz'] }];
+            filters = [{ name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'seq', 'ab1', 'abi', 'fastq', 'fq', 'gz', 'gbk', 'gb'] }];
         }
 
         // 确保包含“所有文件”选项
@@ -970,6 +996,13 @@ const electronBridge = {
 
     async run_protein_comparison(payload: { sample_a_id: string; sample_b_id: string; sample_a_name?: string; sample_b_name?: string; category: string }): Promise<any> {
         return await apiPost('/api/analysis/protein_compare/run', payload);
+    },
+
+    async import_external_compare_file(filePath: string, taskName?: string): Promise<any> {
+        return await apiPost('/api/analysis/protein_compare/import_external', {
+            file_path: filePath,
+            task_name: taskName
+        });
     }
 };
 

@@ -414,30 +414,30 @@ onMounted(() => {
       </div>
 
       <div class="form-group">
-        <label>样本类型</label>
+        <label>样本生物类型</label>
         <select v-model="form.sample_type" class="custom-select">
-          <option value="BACTERIA">细菌 (Bacteria / Standard)</option>
-          <option value="PHAGE">噬菌体 (Bacteriophage)</option>
-          <option value="VIRUS">病毒 (Viruses)</option>
-          <option value="GENERAL">通用生物 (General)</option>
+          <option value="PHAGE">噬菌体 (Bacteriophage - 优先 PHROGs & 3D结构)</option>
+          <option value="BACTERIA">细菌 (Bacteria / Archaea - 优先 Prokka全特征)</option>
+          <option value="VIRUS">病毒 / 质粒 (Viruses & Plasmids)</option>
+          <option value="GENERAL">通用原核生物 (General)</option>
         </select>
       </div>
 
       <div class="form-group">
-        <label>注释引擎</label>
+        <label>注释引擎模式</label>
         <select v-model="form.engine" class="custom-select">
-          <option value="auto">自动智能调度 (Auto Engine)</option>
-          <option value="phold">Phold AI 结构深度增强 (3D Folding / ESMFold)</option>
-          <option value="pharokka">Pharokka 噬菌体专用引擎</option>
-          <option value="prokka">Prokka 标准全特征注释</option>
-          <option value="prodigal">Prodigal 极速 CDS 预测</option>
-          <option value="builtin">内置高精度多核引擎 (零依赖)</option>
+          <option value="auto">全自动多引擎流式级联 (推荐: 主干预测 + 同源打捞 + 3D补漏)</option>
+          <option value="pharokka">Pharokka 噬菌体专用引擎 (主干基准 + 级联互补)</option>
+          <option value="prokka">Prokka 微生物标准注释引擎 (主干基准 + 级联互补)</option>
+          <option value="prodigal">Prodigal 机器学习极速 CDS 识别 (主干基准 + 级联互补)</option>
+          <option value="phold">Phold AI 3D 空间构象感知引擎 (结构折叠深度补漏)</option>
+          <option value="builtin">内置高精度多核引擎 (零依赖纯 Python 极速模式)</option>
         </select>
       </div>
 
       <div class="form-group">
-        <label>位点前缀 (Prefix)</label>
-        <input type="text" v-model="form.prefix" placeholder="如 ANNO / BACT" class="text-input" />
+        <label>位点前缀 (Locus Prefix)</label>
+        <input type="text" v-model="form.prefix" placeholder="如 ANNO / BUCT551" class="text-input" />
       </div>
     </div>
 
@@ -455,7 +455,7 @@ onMounted(() => {
         >
           <polyline points="9 18 15 12 9 6" />
         </svg>
-        高级算法调优参数 (密码子表 / 长度阈值)
+        高级算法调优参数 (密码子表 / 过滤长度 / 流式级联开关)
       </button>
 
       <div v-show="showAdvanced" class="advanced-body">
@@ -463,8 +463,8 @@ onMounted(() => {
           <div class="form-group">
             <label>遗传密码子表 (Genetic Code)</label>
             <select v-model.number="form.genetic_code" class="custom-select">
-              <option :value="11">Code 11: 细菌、古菌与质粒标准</option>
-              <option :value="1">Code 1: 标准通用密码子</option>
+              <option :value="11">Code 11: 细菌、古菌、质粒与多数噬菌体标准</option>
+              <option :value="1">Code 1: 标准通用密码子 (Standard)</option>
               <option :value="4">Code 4: 支原体/螺旋体密码子</option>
             </select>
           </div>
@@ -476,23 +476,23 @@ onMounted(() => {
         </div>
 
         <div class="waterfall-options-box">
-          <div class="opt-box-title">多引擎流式级联互补配置</div>
+          <div class="opt-box-title">多引擎流式级联与漏斗互补配置 (Streaming Waterfall Pipeline)</div>
           <div class="opt-checkbox-grid">
-            <label class="checkbox-label">
+            <label class="checkbox-label" title="开启后将按顺序流经各引擎，自动补全前序引擎标记为 hypothetical protein 的未知基因">
               <input type="checkbox" v-model="form.enable_waterfall" />
-              <span>启用多引擎级联互补 (推荐)</span>
+              <span>启用多引擎流式级联互补 (推荐开启: 逐层漏斗式消除未知蛋白)</span>
             </label>
-            <label class="checkbox-label">
+            <label class="checkbox-label" title="利用 105 万权威 PhageScope 蛋白库进行多核 BLASTP 并行比对打捞">
               <input type="checkbox" v-model="form.enable_homology" />
-              <span>PhageScope 105万参考蛋白同源打捞</span>
+              <span>PhageScope 105万权威参考蛋白库同源打捞</span>
             </label>
-            <label class="checkbox-label">
+            <label class="checkbox-label" title="基于 ESMFold 三维空间折叠与 Foldseek 空间构象识别，破解同源弱的结构蛋白">
               <input type="checkbox" v-model="form.enable_phold" />
-              <span>Phold AI 3D 空间结构感知 (Foldseek)</span>
+              <span>Phold AI 蛋白质三维结构折叠与空间感知增强 (Foldseek 3D补漏)</span>
             </label>
-            <label class="checkbox-label">
+            <label class="checkbox-label" title="针对耐药基因、毒力因子及 Anti-CRISPR 防御逃逸系统进行深度安全审计">
               <input type="checkbox" v-model="form.enable_safety_audit" />
-              <span>CARD/VFDB/Anti-CRISPR 生物安全审计</span>
+              <span>CARD耐药 / VFDB毒力 / Anti-CRISPR 生物安全性与防御系统审计</span>
             </label>
           </div>
         </div>

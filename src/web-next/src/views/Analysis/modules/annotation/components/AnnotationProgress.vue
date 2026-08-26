@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'cancel'): void;
+  (e: 'view-results'): void;
 }>();
 
 const logContainerRef = ref<HTMLDivElement | null>(null);
@@ -37,15 +38,33 @@ function copyLogs() {
   <div class="annotation-progress-card">
     <div class="progress-header">
       <div class="header-left">
-        <div class="pulsing-dot"></div>
+        <div class="pulsing-dot" :class="{ completed: progress >= 100 }"></div>
         <div class="header-text">
-          <h3>注释分析管线正在高速执行</h3>
+          <h3>{{ progress >= 100 ? '注释分析已全部完成' : '注释分析管线正在高速执行' }}</h3>
           <p class="step-desc">{{ currentStep || '正在调度生物信息学计算引擎...' }}</p>
         </div>
       </div>
       <div class="header-right">
-        <span class="pct-badge">{{ progress }}%</span>
-        <button class="cancel-btn" @click="emit('cancel')" title="中止当前任务">
+        <span class="pct-badge" :class="{ completed: progress >= 100 }">{{ progress }}%</span>
+        
+        <button 
+          v-if="progress >= 100" 
+          class="view-result-btn" 
+          @click="emit('view-results')" 
+          title="点击直接切换并查看注释可视化成果"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          查看分析结果
+        </button>
+
+        <button 
+          v-else 
+          class="cancel-btn" 
+          @click="emit('cancel')" 
+          title="中止当前任务"
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
@@ -139,6 +158,38 @@ function copyLogs() {
   font-size: 18px;
   font-weight: 800;
   color: #2563eb;
+}
+
+.pct-badge.completed {
+  color: #16a34a;
+}
+
+.pulsing-dot.completed {
+  background: #16a34a;
+  box-shadow: 0 0 0 0 rgba(22, 163, 74, 0.7);
+  animation: none;
+}
+
+.view-result-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: 1px solid #047857;
+  color: white;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);
+  transition: all 0.2s ease;
+}
+
+.view-result-btn:hover {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(16, 185, 129, 0.4);
 }
 
 .cancel-btn {

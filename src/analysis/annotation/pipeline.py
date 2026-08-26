@@ -39,24 +39,38 @@ class AnnotationPipeline:
         self.work_dir = Path(work_dir)
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self._is_cancelled = False
+        self._current_max_progress = 0
 
     def cancel(self):
         self._is_cancelled = True
 
     def _broadcast_progress(self, progress: int, step_desc: str, log_line: Optional[str] = None):
-        """实时广播任务进度与控制台日志"""
+        """实时广播任务进度与控制台日志 (单调递增保护，严禁进度倒退)"""
+        p = max(self._current_max_progress, min(100, progress))
+        self._current_max_progress = p
+
         data = {
             "task_id": self.task_id,
-            "progress": progress,
+            "progress": p,
             "current_step": step_desc,
             "log": log_line
         }
         broadcaster.broadcast_sync("annotation_progress", data)
-        annotation_db.update_progress(self.task_id, progress, step_desc)
+        annotation_db.update_progress(self.task_id, p, step_desc)
+
+    def _make_stage_progress(self, start_pct: int, end_pct: int, stage_prefix: str = ""):
+        """为子引擎创建专用的动态相对进度映射器 (将子任务 0%~100% 线性映射至全局 [start_pct, end_pct])"""
+        def on_sub_progress(sub_pct: int, msg: str, log: Optional[str] = None):
+            clamped_sub = max(0, min(100, sub_pct))
+            mapped = int(start_pct + (clamped_sub / 100.0) * (end_pct - start_pct))
+            full_msg = f"{stage_prefix} {msg}".strip() if stage_prefix else msg
+            self._broadcast_progress(mapped, full_msg, log)
+        return on_sub_progress
 
     async def execute(self, req: AnnotationRunRequest) -> Dict[str, Any]:
         """执行全套多引擎流式级联互补注释流程"""
         try:
+            self._current_max_progress = 0
             self._broadcast_progress(5, "正在初始化注释工作区与输入序列...")
             
             # 1. 准备输入 FASTA 文件
@@ -83,8 +97,9 @@ class AnnotationPipeline:
             )
 
             # ==========================================
-            # 阶段 1: 基础结构与全特征预测 (Primary Model)
+            # 阶段 1: 基础结构与全特征预测 (Primary Model: 10% ~ 38%)
             # ==========================================
+            stage1_progress = self._make_stage_progress(10, 38, "【阶段 1/5】")
             self._broadcast_progress(10, "【阶段 1/5】正在生成基础特征与 CDS 预测模型...")
             primary_success = False
 
@@ -98,7 +113,7 @@ class AnnotationPipeline:
                             req=req,
                             threads=allocated_threads,
                             prefix=prefix,
-                            on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                            on_progress=stage1_progress
                         )
                         primary_success = True
                     except Exception as e:
@@ -114,7 +129,7 @@ class AnnotationPipeline:
                             req=req,
                             threads=allocated_threads,
                             prefix=prefix,
-                            on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                            on_progress=stage1_progress
                         )
                         primary_success = True
                     except Exception as e:
@@ -130,7 +145,7 @@ class AnnotationPipeline:
                             req=req,
                             threads=allocated_threads,
                             prefix=prefix,
-                            on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                            on_progress=stage1_progress
                         )
                         primary_success = True
                     except Exception as e:
@@ -148,7 +163,7 @@ class AnnotationPipeline:
                                 req=req,
                                 threads=allocated_threads,
                                 prefix=prefix,
-                                on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                                on_progress=stage1_progress
                             )
                             primary_success = True
                         except Exception as e:
@@ -164,7 +179,7 @@ class AnnotationPipeline:
                                 req=req,
                                 threads=allocated_threads,
                                 prefix=prefix,
-                                on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                                on_progress=stage1_progress
                             )
                             primary_success = True
                         except Exception as e:
@@ -179,7 +194,7 @@ class AnnotationPipeline:
                     req=req,
                     threads=allocated_threads,
                     prefix=prefix,
-                    on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                    on_progress=stage1_progress
                 )
 
             if self._is_cancelled:
@@ -196,12 +211,13 @@ class AnnotationPipeline:
 
             total_cds = sum(1 for f in features if f.feature_type == "CDS")
             unanno_cds = sum(1 for f in features if f.feature_type == "CDS" and AnnotationFuser.is_unannotated(f.product))
-            self._broadcast_progress(35, f"【阶段 1 完成】已构建 {len(features)} 个特征 (CDS: {total_cds} 个，待赋予功能: {unanno_cds} 个)")
+            self._broadcast_progress(38, f"【阶段 1 完成】已构建 {len(features)} 个基础特征 (CDS: {total_cds} 个，待打捞功能: {unanno_cds} 个)")
 
             # ==========================================
-            # 阶段 2: 权威数据库多核同源打捞 (Homology Rescue)
+            # 阶段 2: 权威数据库多核同源打捞 (Homology Rescue: 40% ~ 58%)
             # ==========================================
             if req.enable_homology and files.get("faa") and Path(files["faa"]).exists() and unanno_cds > 0:
+                stage2_progress = self._make_stage_progress(40, 58, "【阶段 2/5: 同源打捞】")
                 self._broadcast_progress(40, "【阶段 2/5】流经 PhageScope 105万条权威蛋白库进行同源打捞...")
                 try:
                     homo_eng = HomologyEngine()
@@ -210,7 +226,7 @@ class AnnotationPipeline:
                         query_faa=Path(files["faa"]),
                         work_dir=self.work_dir,
                         threads=allocated_threads,
-                        on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                        on_progress=stage2_progress
                     )
                     
                     if updated_cnt > 0:
@@ -231,12 +247,13 @@ class AnnotationPipeline:
             unanno_cds = sum(1 for f in features if f.feature_type == "CDS" and AnnotationFuser.is_unannotated(f.product))
 
             # ==========================================
-            # 阶段 3: 专业领域特征流式互补 (Domain / Specific Engine)
+            # 阶段 3: 专业领域特征流式互补 (Domain / Specific Engine: 60% ~ 72%)
             # ==========================================
             # 若主引擎不是 Pharokka，但处于噬菌体模式且有未注释基因，流经 Pharokka 补充 PHROGs 分类与缺失位点
             if req.sample_type.upper() in ["PHAGE", "VIRUS"] and primary_engine_choice not in ["pharokka"] and unanno_cds > 0:
                 pharokka_eng = PharokkaEngine()
                 if await pharokka_eng.is_available():
+                    stage3_progress = self._make_stage_progress(60, 72, "【阶段 3/5: 级联互补】")
                     self._broadcast_progress(60, "【阶段 3/5】流经 Pharokka 噬菌体专用模型库执行 PHROGs 互补...")
                     try:
                         pharokka_feats, _ = await pharokka_eng.run(
@@ -245,7 +262,7 @@ class AnnotationPipeline:
                             req=req,
                             threads=allocated_threads,
                             prefix=prefix,
-                            on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                            on_progress=stage3_progress
                         )
                         if pharokka_feats:
                             features, p_upd = AnnotationFuser.merge_by_coordinates(
@@ -255,7 +272,7 @@ class AnnotationPipeline:
                                 overlap_threshold=0.75
                             )
                             if p_upd > 0:
-                                self._broadcast_progress(68, f"Pharokka 成功补充并修正 {p_upd} 个基因特征与 PHROGs 分类...")
+                                self._broadcast_progress(72, f"Pharokka 成功补充并修正 {p_upd} 个基因特征与 PHROGs 分类...")
                                 _, features, files = annotator_helper.export_features_to_files(
                                     records=records,
                                     all_features=features,
@@ -271,20 +288,21 @@ class AnnotationPipeline:
             unanno_cds = sum(1 for f in features if f.feature_type == "CDS" and AnnotationFuser.is_unannotated(f.product))
 
             # ==========================================
-            # 阶段 4: Phold AI 蛋白质三维结构感知增强 (3D AI Structure Rescue)
+            # 阶段 4: Phold AI 蛋白质三维结构感知增强 (3D AI Structure Rescue: 74% ~ 88%)
             # ==========================================
             should_run_phold = req.enable_phold or primary_engine_choice == "phold"
             if should_run_phold and files.get("gbk") and Path(files["gbk"]).exists() and unanno_cds > 0:
                 phold_eng = PholdEngine()
                 if await phold_eng.is_available():
-                    self._broadcast_progress(70, "【阶段 4/5】流经 Phold AI 进行 3D 空间结构感知与 Foldseek 补漏...")
+                    stage4_progress = self._make_stage_progress(74, 88, "【阶段 4/5: 3D构象感知】")
+                    self._broadcast_progress(74, "【阶段 4/5】流经 Phold AI 进行 3D 空间结构感知与 Foldseek 补漏...")
                     try:
                         phold_upd = await phold_eng.complement_from_gbk(
                             features=features,
                             input_gbk=Path(files["gbk"]),
                             work_dir=self.work_dir,
                             threads=allocated_threads,
-                            on_progress=lambda p, m, l: self._broadcast_progress(p, m, l)
+                            on_progress=stage4_progress
                         )
                         if phold_upd > 0:
                             _, features, files = annotator_helper.export_features_to_files(
@@ -295,17 +313,18 @@ class AnnotationPipeline:
                     except Exception as phold_err:
                         logger.warning(f"Phold 3D 空间结构增强阶段异常: {phold_err}")
 
-            # 阶段 5: 全量重新评估并补齐功能分类大类
+            # 阶段 5: 全量重新评估并补齐功能分类大类 (89%)
+            self._broadcast_progress(89, "【阶段 5/5】正在重新梳理并归纳基因功能大类分类...")
             for f in features:
                 if not f.category:
                     f.category = AnnotationFuser.infer_category(f.product, f.notes)
 
             # ==========================================
-            # 阶段 6: 深度生物安全性与防御系统审计 (CARD / VFDB / Anti-CRISPR)
+            # 阶段 6: 深度生物安全性与防御系统审计 (CARD / VFDB / Anti-CRISPR: 90% ~ 95%)
             # ==========================================
             safety_audit_res: Optional[Dict[str, Any]] = None
             if req.enable_safety_audit and files.get("faa") and Path(files["faa"]).exists():
-                self._broadcast_progress(88, "【阶段 5/5】正在执行生物安全性审计 (CARD耐药基因/VFDB毒力因子/Anti-CRISPR逃逸扫描)...")
+                self._broadcast_progress(91, "正在执行生物安全性审计 (CARD耐药基因/VFDB毒力因子/Anti-CRISPR逃逸扫描)...")
                 try:
                     from .deep_audit import DeepSafetyAuditor
                     auditor = DeepSafetyAuditor()
@@ -322,9 +341,9 @@ class AnnotationPipeline:
                     logger.warning(f"生物安全审计阶段异常: {audit_err}")
 
             # ==========================================
-            # 阶段 7: 生成最终标准成果与落盘
+            # 阶段 7: 生成最终标准成果与落盘 (96% ~ 99%)
             # ==========================================
-            self._broadcast_progress(95, "正在汇总多引擎级联结果并生成标准 GenBank/GFF3 成果...")
+            self._broadcast_progress(96, "正在汇总多引擎级联结果并生成标准 GenBank/GFF3 成果...")
 
             # 最终文件导出
             final_summary, features, files = annotator_helper.export_features_to_files(
@@ -356,7 +375,10 @@ class AnnotationPipeline:
                 safety_audit=safety_audit_res
             )
             
-            # 广播完成事件
+            # 1. 广播 100% 进度
+            self._broadcast_progress(100, f"注释全部完成 (总特征数: {len(features)}, 已知功能: {comprehensive_summary.annotated_count}, 未知: {comprehensive_summary.hypothetical_count})")
+
+            # 2. 最终广播完成事件
             final_res = {
                 "task_id": self.task_id,
                 "summary": summary_dict,
@@ -366,7 +388,6 @@ class AnnotationPipeline:
                 "safety_audit": safety_audit_res
             }
             broadcaster.broadcast_sync("annotation_completed", final_res)
-            self._broadcast_progress(100, f"注释全部完成 (总特征数: {len(features)}, 已知功能: {comprehensive_summary.annotated_count}, 未知: {comprehensive_summary.hypothetical_count})")
             return final_res
 
         except Exception as e:

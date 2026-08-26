@@ -85,6 +85,75 @@ async function fetchTasks() {
   }
 }
 
+// 导入外部文件状态
+const isImporting = ref<boolean>(false);
+const importTarget = ref<'A' | 'B'>('A');
+const fileInputRef = ref<HTMLInputElement | null>(null);
+
+async function triggerFileImport(target: 'A' | 'B') {
+  importTarget.value = target;
+  try {
+    const bridge = getBridge();
+    // 优先尝试原生 Electron 路径对话框
+    if (bridge.request_file_load) {
+      const paths = await bridge.request_file_load('annotation');
+      if (paths && paths.length > 0 && paths[0]) {
+        await processExternalFile(paths[0], target);
+        return;
+      }
+    }
+  } catch (e) {
+    console.log('[ProteinCompare] 尝试调用原生文件对话框未响应，降级为 HTML 文件选择');
+  }
+
+  // 降级触发 HTML input
+  if (fileInputRef.value) {
+    fileInputRef.value.value = '';
+    fileInputRef.value.click();
+  }
+}
+
+async function onFileInputChange(event: Event) {
+  const target = event.target as HTMLInputElement;
+  if (!target || !target.files || target.files.length === 0) return;
+  const file = target.files[0];
+  if (!file) return;
+  // 获取文件绝对路径 (Electron 环境下 file.path) 或名称
+  const filePath = (file as any).path || file.name;
+  await processExternalFile(filePath, importTarget.value);
+}
+
+async function processExternalFile(filePath: string, target: 'A' | 'B') {
+  if (!filePath) return;
+  isImporting.value = true;
+  errorMessage.value = null;
+  try {
+    const bridge = getBridge();
+    const res = await bridge.import_external_compare_file?.(filePath);
+    if (res && res.success && res.data) {
+      const imported = res.data;
+      const existIdx = availableTasks.value.findIndex(t => t.task_id === imported.task_id);
+      if (existIdx >= 0) {
+        availableTasks.value[existIdx] = imported;
+      } else {
+        availableTasks.value.unshift(imported);
+      }
+
+      if (target === 'A') {
+        sampleAId.value = imported.task_id;
+      } else {
+        sampleBId.value = imported.task_id;
+      }
+    } else {
+      throw new Error(res?.detail || res?.message || '导入外部文件失败');
+    }
+  } catch (err: any) {
+    errorMessage.value = `导入外部文件失败: ${err.message}`;
+  } finally {
+    isImporting.value = false;
+  }
+}
+
 // 3. 执行跨样本比对
 async function executeComparison() {
   if (!sampleAId.value || !sampleBId.value) {
@@ -397,17 +466,47 @@ function copyText(text: string) {
         </div>
       </div>
 
+      <!-- 隐藏的文件选择 input -->
+      <input 
+        type="file" 
+        ref="fileInputRef" 
+        accept=".gbk,.gb,.genbank,.faa,.fasta,.fa,.json" 
+        @change="onFileInputChange" 
+        style="display: none;" 
+      />
+
       <!-- 样本选择下拉选择器 -->
       <div class="sample-selection-grid">
         <div class="sample-box">
           <div class="sample-header">
-            <span class="sample-tag tag-a">基准样本 (Sample A)</span>
-            <span v-if="sampleAId" class="sample-info">
-              {{ availableTasks.find(t => t.task_id === sampleAId)?.cds_count || 0 }} CDS
-            </span>
+            <div class="header-left">
+              <span class="sample-tag tag-a">基准样本 (Sample A)</span>
+              <span v-if="sampleAId" class="sample-info">
+                {{ availableTasks.find(t => t.task_id === sampleAId)?.cds_count || 0 }} CDS
+              </span>
+            </div>
+            <button 
+              type="button" 
+              class="import-ext-btn" 
+              :disabled="isImporting" 
+              @click="triggerFileImport('A')"
+              title="直接选择或导入本地外部 GenBank/FAA 文件作为基准样本"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <span>{{ isImporting && importTarget === 'A' ? '导入中...' : '导入外部文件' }}</span>
+            </button>
           </div>
-          <select v-model="sampleAId" class="sample-select">
-            <option value="" disabled>-- 请选择基准注释任务 --</option>
+          <select 
+            v-model="sampleAId" 
+            class="sample-select"
+            @change="(e: any) => { if (e.target.value === '__IMPORT__') { sampleAId = ''; triggerFileImport('A'); } }"
+          >
+            <option value="" disabled>-- 请选择基准注释任务或导入外部文件 --</option>
+            <option value="__IMPORT__" class="opt-import">➕ 选择并导入本地外部文件 (.gbk / .gb / .faa)...</option>
             <option v-for="t in availableTasks" :key="t.task_id" :value="t.task_id">
               {{ t.task_name }} ({{ t.sample_type }}, {{ t.cds_count }} CDS) - {{ t.task_id }}
             </option>
@@ -420,13 +519,34 @@ function copyText(text: string) {
 
         <div class="sample-box">
           <div class="sample-header">
-            <span class="sample-tag tag-b">对比目标 (Sample B)</span>
-            <span v-if="sampleBId" class="sample-info">
-              {{ availableTasks.find(t => t.task_id === sampleBId)?.cds_count || 0 }} CDS
-            </span>
+            <div class="header-left">
+              <span class="sample-tag tag-b">对比目标 (Sample B)</span>
+              <span v-if="sampleBId" class="sample-info">
+                {{ availableTasks.find(t => t.task_id === sampleBId)?.cds_count || 0 }} CDS
+              </span>
+            </div>
+            <button 
+              type="button" 
+              class="import-ext-btn" 
+              :disabled="isImporting" 
+              @click="triggerFileImport('B')"
+              title="直接选择或导入本地外部 GenBank/FAA 文件作为对比目标"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <span>{{ isImporting && importTarget === 'B' ? '导入中...' : '导入外部文件' }}</span>
+            </button>
           </div>
-          <select v-model="sampleBId" class="sample-select">
-            <option value="" disabled>-- 请选择比对目标注释任务 --</option>
+          <select 
+            v-model="sampleBId" 
+            class="sample-select"
+            @change="(e: any) => { if (e.target.value === '__IMPORT__') { sampleBId = ''; triggerFileImport('B'); } }"
+          >
+            <option value="" disabled>-- 请选择比对目标注释任务或导入外部文件 --</option>
+            <option value="__IMPORT__" class="opt-import">➕ 选择并导入本地外部文件 (.gbk / .gb / .faa)...</option>
             <option v-for="t in availableTasks" :key="t.task_id" :value="t.task_id">
               {{ t.task_name }} ({{ t.sample_type }}, {{ t.cds_count }} CDS) - {{ t.task_id }}
             </option>
@@ -870,6 +990,38 @@ function copyText(text: string) {
   align-items: center;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-ext-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.import-ext-btn:hover:not(:disabled) {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #93c5fd;
+}
+
+.import-ext-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .sample-tag {
   font-size: 11px;
   font-weight: 700;
@@ -904,6 +1056,12 @@ function copyText(text: string) {
   font-size: 13px;
   color: #1e293b;
   outline: none;
+}
+
+.opt-import {
+  color: #2563eb;
+  font-weight: 600;
+  background: #f8fafc;
 }
 
 .vs-divider {

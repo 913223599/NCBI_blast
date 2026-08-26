@@ -57,11 +57,42 @@ class PharokkaEngine(BaseAnnotationEngine):
         ]
 
         if on_progress:
-            on_progress(25, "正在调度 Pharokka 噬菌体专用引擎分析...", " ".join(cmd))
+            on_progress(5, "正在初始化并调度 Pharokka 噬菌体专用引擎分析...", " ".join(cmd))
 
+        current_pct = 5
         def on_pharokka_line(line: str):
-            if on_progress and ("PHROGs" in line or "tRNA" in line or "Running" in line):
-                on_progress(35, f"Pharokka 正在运行: {line.strip()[:60]}...", line)
+            nonlocal current_pct
+            if not on_progress or not line:
+                return
+            
+            clean_l = line.strip()
+            # 依据 Pharokka 实际输出流水动态计算相对进度 (5% -> 98%)
+            if "phanotate" in clean_l.lower() or "validate" in clean_l.lower():
+                current_pct = max(current_pct, 12)
+                on_progress(current_pct, "Pharokka [1/8]: 正在执行 Phanotate 基因识别...", clean_l)
+            elif "tRNAscan" in clean_l or "tRNA" in clean_l:
+                current_pct = max(current_pct, 25)
+                on_progress(current_pct, "Pharokka [2/8]: 正在扫描 tRNA-scan 特征...", clean_l)
+            elif "MinCED" in clean_l or "CRISPR" in clean_l:
+                current_pct = max(current_pct, 38)
+                on_progress(current_pct, "Pharokka [3/8]: 正在探测 MinCED CRISPR 结构域...", clean_l)
+            elif "Aragorn" in clean_l or "tmRNA" in clean_l:
+                current_pct = max(current_pct, 50)
+                on_progress(current_pct, "Pharokka [4/8]: 正在运行 Aragorn 终止子与 tmRNA 识别...", clean_l)
+            elif "MMseqs2 on PHROGs" in clean_l or "run_mmseqs" in clean_l:
+                current_pct = max(current_pct, 65)
+                on_progress(current_pct, "Pharokka [5/8]: 正在比对 PHROGs 噬菌体特异性同源数据库...", clean_l)
+            elif "CARD" in clean_l or "VFDB" in clean_l:
+                current_pct = max(current_pct, 78)
+                on_progress(current_pct, "Pharokka [6/8]: 正在扫描 CARD 耐药与 VFDB 毒力数据库...", clean_l)
+            elif "PyHMMER on PHROGs" in clean_l or "pyhmmer" in clean_l:
+                current_pct = max(current_pct, 90)
+                on_progress(current_pct, "Pharokka [7/8]: 正在执行 PyHMMER 隐马尔可夫模型深度扫描...", clean_l)
+            elif "topfunction" in clean_l or "mash" in clean_l or "GenBank" in clean_l:
+                current_pct = max(current_pct, 98)
+                on_progress(current_pct, "Pharokka [8/8]: 正在整合 PHROGs 噬菌体分类并生成标准模型...", clean_l)
+            elif "Running" in clean_l or "INFO" in clean_l:
+                on_progress(current_pct, f"Pharokka 正在运行: {clean_l[:55]}...", clean_l)
 
         ret = await runner.run_command(cmd, cwd=work_dir, on_output=on_pharokka_line)
         if ret != 0:

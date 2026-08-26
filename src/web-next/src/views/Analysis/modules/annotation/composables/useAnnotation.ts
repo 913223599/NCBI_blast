@@ -157,13 +157,23 @@ export function useAnnotation() {
         if (match) {
           match.progress = payload.progress;
           match.current_step = payload.current_step;
-          match.status = 'running';
+          if (payload.progress < 100 && match.status !== 'completed') {
+            match.status = 'running';
+          }
+        }
+
+        // 若进度达到 100%，自动切换为 completed 并拉取结果
+        if (payload.progress >= 100) {
+          if (activeTaskId.value === payload.task_id || currentTask.value?.task_id === payload.task_id) {
+            loadTaskResult(payload.task_id);
+            isRunning.value = false;
+          }
+          fetchHistory();
         }
       } else if (eventType === 'annotation_completed') {
-        if (activeTaskId.value === data.task_id) {
-          loadTaskResult(data.task_id);
-          isRunning.value = false;
-        }
+        // 收到完成广播直接拉取并展示结果
+        loadTaskResult(data.task_id);
+        isRunning.value = false;
         fetchHistory();
       }
     });

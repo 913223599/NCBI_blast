@@ -32,11 +32,12 @@ class PholdEngine(BaseAnnotationEngine):
     def _cleanup_gpu_memory(self):
         """显存红线保护与垃圾回收"""
         try:
-            import torch
-            if torch.cuda.is_available():
+            import importlib
+            torch = importlib.import_module("torch")
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
-        except ImportError:
+        except Exception:
             pass
         gc.collect()
 
@@ -94,9 +95,26 @@ class PholdEngine(BaseAnnotationEngine):
             f"export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 && phold run -i \"{wsl_gbk}\" -o \"{wsl_out}\" -d /opt/phold_db -t {threads} -f"
         ]
 
+        current_phold_pct = 5
         def on_phold_output(line: str):
-            if on_progress and ("Foldseek" in line or "ESM" in line or "predict" in line):
-                on_progress(75, f"Phold 正在运行: {line.strip()[:60]}...", line)
+            nonlocal current_phold_pct
+            if not on_progress or not line:
+                return
+            clean_l = line.strip()
+            if "createdb" in clean_l or "Foldseek createdb" in clean_l:
+                current_phold_pct = max(current_phold_pct, 25)
+                on_progress(current_phold_pct, "Phold AI [1/4]: 正在构建蛋白质空间特征数据库 (Foldseek)...", clean_l)
+            elif "easy-search" in clean_l or "structure match" in clean_l or "searching" in clean_l.lower():
+                current_phold_pct = max(current_phold_pct, 50)
+                on_progress(current_phold_pct, "Phold AI [2/4]: 正在执行 Foldseek 三维构象空间比对...", clean_l)
+            elif "predict" in clean_l or "ESM" in clean_l or "prostt5" in clean_l or "embedding" in clean_l.lower():
+                current_phold_pct = max(current_phold_pct, 75)
+                on_progress(current_phold_pct, "Phold AI [3/4]: 正在执行深度学习 3D 结构折叠空间感知...", clean_l)
+            elif "topfunction" in clean_l or "merge" in clean_l or "filter" in clean_l.lower():
+                current_phold_pct = max(current_phold_pct, 95)
+                on_progress(current_phold_pct, "Phold AI [4/4]: 正在筛选最优结构预测并生成增强模型...", clean_l)
+            else:
+                on_progress(current_phold_pct, f"Phold AI 正在运行: {clean_l[:55]}...", clean_l)
 
         ret = await runner.run_command(cmd, cwd=work_dir, on_output=on_phold_output)
         

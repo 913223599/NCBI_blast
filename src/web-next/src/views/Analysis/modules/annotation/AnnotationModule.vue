@@ -127,6 +127,7 @@ function onStartNew() {
             :logs="consoleLogs"
             :task-id="currentTask.task_id"
             @cancel="cancelTask(currentTask.task_id)"
+            @view-results="loadTaskResult(currentTask.task_id)"
           />
         </section>
 
