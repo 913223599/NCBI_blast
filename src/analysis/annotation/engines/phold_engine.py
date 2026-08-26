@@ -169,6 +169,6 @@ class PholdEngine(BaseAnnotationEngine):
         )
 
         if on_progress:
-            on_progress(82, f"Phold AI 结构感知成功额外识别出 {updated_count} 个结构功能蛋白 (剩余 {unannotated_count - updated_count} 个未知)...", None)
+            on_progress(100, f"Phold AI 结构感知成功额外识别出 {updated_count} 个结构功能蛋白 (剩余 {unannotated_count - updated_count} 个未知)...", None)
 
         return updated_count

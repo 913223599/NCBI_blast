@@ -54,6 +54,15 @@ async function onSelectHistory(item: AnnotationTaskItem) {
   await loadTaskResult(item.task_id);
 }
 
+async function onViewResults(taskId: string) {
+  showSetupForm.value = false;
+  isRunning.value = false;
+  if (currentTask.value) {
+    currentTask.value.status = 'completed';
+  }
+  await loadTaskResult(taskId);
+}
+
 function onOpenViewer(gbkText: string, taskName: string) {
   emit('open-viewer', { gbkText, taskName });
 }
@@ -127,7 +136,7 @@ function onStartNew() {
             :logs="consoleLogs"
             :task-id="currentTask.task_id"
             @cancel="cancelTask(currentTask.task_id)"
-            @view-results="loadTaskResult(currentTask.task_id)"
+            @view-results="onViewResults(currentTask.task_id)"
           />
         </section>
 

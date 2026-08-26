@@ -76,8 +76,15 @@ export function useAnnotation() {
       const bridge = getBridge();
       const res = await bridge.get_annotation_result(taskId);
       if (res && res.success && res.data) {
-        currentTask.value = res.data;
-        isRunning.value = res.data.status === 'running' || res.data.status === 'pending';
+        const data = res.data;
+        // 关键防守：若进度>=100或已有特征，强制确认为完成态，解除 running 锁定
+        if (data.progress >= 100 || data.status === 'completed' || (data.features && data.features.length > 0)) {
+          data.status = 'completed';
+          isRunning.value = false;
+        } else {
+          isRunning.value = data.status === 'running' || data.status === 'pending';
+        }
+        currentTask.value = data;
       } else {
         throw new Error('未获取到有效任务数据');
       }

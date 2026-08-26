@@ -102,6 +102,7 @@ class AnnotationPipeline:
             stage1_progress = self._make_stage_progress(10, 38, "【阶段 1/5】")
             self._broadcast_progress(10, "【阶段 1/5】正在生成基础特征与 CDS 预测模型...")
             primary_success = False
+            actual_primary_engine = "builtin"
 
             if primary_engine_choice == "pharokka":
                 pharokka_eng = PharokkaEngine()
@@ -116,6 +117,7 @@ class AnnotationPipeline:
                             on_progress=stage1_progress
                         )
                         primary_success = True
+                        actual_primary_engine = "pharokka"
                     except Exception as e:
                         logger.warning(f"Pharokka 运行异常，准备自动降级: {e}")
 
@@ -132,6 +134,7 @@ class AnnotationPipeline:
                             on_progress=stage1_progress
                         )
                         primary_success = True
+                        actual_primary_engine = "prokka"
                     except Exception as e:
                         logger.warning(f"Prokka 运行异常，准备自动降级: {e}")
 
@@ -148,6 +151,7 @@ class AnnotationPipeline:
                             on_progress=stage1_progress
                         )
                         primary_success = True
+                        actual_primary_engine = "prodigal"
                     except Exception as e:
                         logger.warning(f"Prodigal 运行异常，准备自动降级: {e}")
 
@@ -166,6 +170,7 @@ class AnnotationPipeline:
                                 on_progress=stage1_progress
                             )
                             primary_success = True
+                            actual_primary_engine = "pharokka"
                         except Exception as e:
                             logger.info(f"Auto 调度 Pharokka 异常，切换备选: {e}")
 
@@ -182,6 +187,7 @@ class AnnotationPipeline:
                                 on_progress=stage1_progress
                             )
                             primary_success = True
+                            actual_primary_engine = "prodigal"
                         except Exception as e:
                             logger.info(f"Auto 调度 Prodigal 异常，切换内置引擎: {e}")
 
@@ -196,6 +202,7 @@ class AnnotationPipeline:
                     prefix=prefix,
                     on_progress=stage1_progress
                 )
+                actual_primary_engine = "builtin"
 
             if self._is_cancelled:
                 annotation_db.mark_cancelled(self.task_id)
@@ -249,8 +256,8 @@ class AnnotationPipeline:
             # ==========================================
             # 阶段 3: 专业领域特征流式互补 (Domain / Specific Engine: 60% ~ 72%)
             # ==========================================
-            # 若主引擎不是 Pharokka，但处于噬菌体模式且有未注释基因，流经 Pharokka 补充 PHROGs 分类与缺失位点
-            if req.sample_type.upper() in ["PHAGE", "VIRUS"] and primary_engine_choice not in ["pharokka"] and unanno_cds > 0:
+            # 若主引擎实际使用的不是 Pharokka（例如使用了 Prodigal/Prokka/Builtin），且处于噬菌体模式并有未注释基因，才流经 Pharokka 补充 PHROGs 分类
+            if req.sample_type.upper() in ["PHAGE", "VIRUS"] and actual_primary_engine != "pharokka" and unanno_cds > 0:
                 pharokka_eng = PharokkaEngine()
                 if await pharokka_eng.is_available():
                     stage3_progress = self._make_stage_progress(60, 72, "【阶段 3/5: 级联互补】")
@@ -366,7 +373,10 @@ class AnnotationPipeline:
                 json.dump(features_dict, f, ensure_ascii=False)
             files["features_json"] = str(features_file.resolve())
 
-            # 持久化至数据库
+            # 1. 广播 100% 进度
+            self._broadcast_progress(100, f"注释全部完成 (总特征数: {len(features)}, 已知功能: {comprehensive_summary.annotated_count}, 未知: {comprehensive_summary.hypothetical_count})")
+
+            # 2. 持久化至数据库 (状态明确设置为 completed)
             summary_dict = comprehensive_summary.model_dump()
             annotation_db.mark_completed(
                 task_id=self.task_id, 
@@ -374,11 +384,8 @@ class AnnotationPipeline:
                 files=files,
                 safety_audit=safety_audit_res
             )
-            
-            # 1. 广播 100% 进度
-            self._broadcast_progress(100, f"注释全部完成 (总特征数: {len(features)}, 已知功能: {comprehensive_summary.annotated_count}, 未知: {comprehensive_summary.hypothetical_count})")
 
-            # 2. 最终广播完成事件
+            # 3. 最终广播完成事件
             final_res = {
                 "task_id": self.task_id,
                 "summary": summary_dict,

@@ -59,7 +59,7 @@ class HomologyEngine(BaseAnnotationEngine):
             return 0
 
         if on_progress:
-            on_progress(45, f"正在比对权威同源数据库 (PhageScope 105万参考蛋白库，待打捞 {unannotated_count} 个基因)...", None)
+            on_progress(10, f"正在比对权威同源数据库 (PhageScope 105万参考蛋白库，待打捞 {unannotated_count} 个基因)...", None)
 
         assigner = FunctionalAssigner()
         hits_map = assigner.run_blastp_annotation(
@@ -91,6 +91,6 @@ class HomologyEngine(BaseAnnotationEngine):
                 updated_count += 1
 
         if on_progress:
-            on_progress(58, f"权威同源库成功赋予并更新 {updated_count} 个基因的生物学功能 (剩余 {unannotated_count - updated_count} 个待补充)...", None)
+            on_progress(100, f"权威同源库成功赋予并更新 {updated_count} 个基因的生物学功能 (剩余 {unannotated_count - updated_count} 个待补充)...", None)
 
         return updated_count

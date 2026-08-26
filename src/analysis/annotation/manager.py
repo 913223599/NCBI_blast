@@ -145,8 +145,21 @@ class AnnotationManager:
         return False
 
     def list_history(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """获取注释历史列表"""
-        return annotation_db.list_tasks(limit=limit)
+        """获取注释历史列表并自动纠正完成态任务"""
+        tasks = annotation_db.list_tasks(limit=limit)
+        for t in tasks:
+            if t.get("status") == "running" and t.get("progress", 0) >= 100:
+                t["status"] = "completed"
+                # 异步或同步更新数据库
+                try:
+                    annotation_db.mark_completed(
+                        task_id=t["task_id"],
+                        summary=t.get("summary") or {},
+                        files=t.get("files") or {}
+                    )
+                except Exception:
+                    pass
+        return tasks
 
     def get_task_result(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取指定任务的详细结果数据"""
@@ -164,6 +177,18 @@ class AnnotationManager:
                     features = json.load(f)
             except Exception as e:
                 logger.error(f"Failed to read features.json for {task_id}: {e}")
+
+        # 若已具备 features 或 progress>=100，自动确保状态为 completed
+        if task.get("status") == "running" and (task.get("progress", 0) >= 100 or len(features) > 0):
+            task["status"] = "completed"
+            try:
+                annotation_db.mark_completed(
+                    task_id=task_id,
+                    summary=task.get("summary") or {},
+                    files=task.get("files") or {}
+                )
+            except Exception:
+                pass
 
         # 读取 GBK 文本摘要或完整内容
         gbk_file = task_work_dir / f"{task_id}.gbk"

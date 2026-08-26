@@ -66,7 +66,9 @@ class AnnotationDB:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
                 UPDATE annotation_tasks 
-                SET progress = ?, current_step = ?, status = ?, updated_at = ?
+                SET progress = ?, current_step = ?, 
+                    status = CASE WHEN status IN ('completed', 'failed', 'cancelled') THEN status ELSE ? END, 
+                    updated_at = ?
                 WHERE task_id = ?
             ''', (progress, current_step, status, now_str, task_id))
             conn.commit()
