@@ -344,6 +344,11 @@ class AnnotationPipeline:
                     with open(audit_file, "w", encoding="utf-8") as f:
                         json.dump(safety_audit_res, f, ensure_ascii=False, indent=2)
                     files["safety_audit_json"] = str(audit_file.resolve())
+
+                    # 深度反向融合：将 Anti-CRISPR 与安全证据回写并增强至对应基因特征
+                    fused_acr_cnt = AnnotationFuser.integrate_safety_audit(features, safety_audit_res)
+                    if fused_acr_cnt > 0:
+                        logger.info(f"Successfully integrated {fused_acr_cnt} Anti-CRISPR/Safety annotations into features")
                 except Exception as audit_err:
                     logger.warning(f"生物安全审计阶段异常: {audit_err}")
 

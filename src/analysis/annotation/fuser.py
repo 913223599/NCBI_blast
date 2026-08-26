@@ -275,3 +275,121 @@ class AnnotationFuser:
             engine_contributions=engine_contrib,
             category_distribution=cat_dist
         )
+
+    @classmethod
+    def integrate_safety_audit(cls, features: List[Any], safety_audit: Dict[str, Any]) -> int:
+        """
+        将生物安全审计与 Anti-CRISPR 逃逸因子深度反向回写融合至各 FeatureItem (兼容对象与字典)，
+        把假定蛋白直接升级为明确的生物学功能描述 (如 anti-CRISPR protein)，并在注释记录中保留实验证据。
+        """
+        if not safety_audit or not features:
+            return 0
+
+        feat_map: Dict[str, Any] = {}
+        for f in features:
+            fid = f.id if isinstance(f, FeatureItem) else f.get("id")
+            lt = f.locus_tag if isinstance(f, FeatureItem) else f.get("locus_tag")
+            pid = f.protein_id if isinstance(f, FeatureItem) else f.get("protein_id")
+            if fid:
+                feat_map[fid] = f
+            if lt:
+                feat_map[lt] = f
+            if pid:
+                feat_map[pid] = f
+
+        updated_count = 0
+
+        def get_val(item: Any, key: str, default: Any = None) -> Any:
+            return getattr(item, key, default) if isinstance(item, FeatureItem) else item.get(key, default)
+
+        def set_val(item: Any, key: str, value: Any):
+            if isinstance(item, FeatureItem):
+                setattr(item, key, value)
+            elif isinstance(item, dict):
+                item[key] = value
+
+        # 1. 融合 Anti-CRISPR (Acr) 宿主防御逃逸因子
+        for acr in safety_audit.get("anti_crispr_genes", []):
+            cid = acr.get("cds_id")
+            target_feat = feat_map.get(cid)
+            if not target_feat:
+                continue
+
+            acr_source = acr.get("source") or "Acrank_er"
+            ident = acr.get("identity", 0)
+            e_val = acr.get("evalue", "1e-10")
+            evidence_note = f"Anti-CRISPR: {acr_source} (Identity: {ident}%, E-value: {e_val})"
+
+            curr_prod = get_val(target_feat, "product", "")
+            # 若原本未注释或为假定蛋白，直接赋予明确的生物学功能名称！
+            if cls.is_unannotated(curr_prod):
+                clean_acr_name = f"anti-CRISPR protein ({acr_source})" if acr_source != "Acr Protein" else "anti-CRISPR protein"
+                set_val(target_feat, "product", clean_acr_name)
+                set_val(target_feat, "category", "Defense & Host Interaction")
+                set_val(target_feat, "source_engine", "PhageScope")
+                set_val(target_feat, "evidence", evidence_note)
+                updated_count += 1
+            
+            # 在 notes 与 evidence_sources 中追加审计证据标记
+            curr_notes = get_val(target_feat, "notes")
+            if curr_notes:
+                if "Anti-CRISPR" not in curr_notes:
+                    set_val(target_feat, "notes", f"{curr_notes}; {evidence_note}")
+            else:
+                set_val(target_feat, "notes", evidence_note)
+
+            curr_ev_list = list(get_val(target_feat, "evidence_sources") or [])
+            ev_tag = f"[Anti-CRISPR] {acr_source} (Identity: {ident}%, E-value: {e_val})"
+            if not any("Anti-CRISPR" in ev for ev in curr_ev_list):
+                curr_ev_list.append(ev_tag)
+                set_val(target_feat, "evidence_sources", curr_ev_list)
+
+        # 2. 融合 AMR 耐药基因
+        for amr in safety_audit.get("amr_genes", []):
+            cid = amr.get("cds_id")
+            target_feat = feat_map.get(cid)
+            if not target_feat:
+                continue
+            desc = amr.get("description") or "AMR gene"
+            ident = amr.get("identity", 0)
+            note_str = f"CARD AMR: {desc} (Identity: {ident}%)"
+            
+            curr_prod = get_val(target_feat, "product", "")
+            if cls.is_unannotated(curr_prod):
+                set_val(target_feat, "product", f"antibiotic resistance protein ({desc})")
+                set_val(target_feat, "category", "Defense & Host Interaction")
+                set_val(target_feat, "source_engine", "CARD")
+                updated_count += 1
+
+            curr_notes = get_val(target_feat, "notes")
+            if curr_notes:
+                if "CARD AMR" not in curr_notes:
+                    set_val(target_feat, "notes", f"{curr_notes}; {note_str}")
+            else:
+                set_val(target_feat, "notes", note_str)
+
+        # 3. 融合 VFDB 毒力因子
+        for vf in safety_audit.get("virulent_factors", []):
+            cid = vf.get("cds_id")
+            target_feat = feat_map.get(cid)
+            if not target_feat:
+                continue
+            desc = vf.get("description") or "Virulence Factor"
+            ident = vf.get("identity", 0)
+            note_str = f"VFDB: {desc} (Identity: {ident}%)"
+
+            curr_prod = get_val(target_feat, "product", "")
+            if cls.is_unannotated(curr_prod):
+                set_val(target_feat, "product", f"virulence factor ({desc})")
+                set_val(target_feat, "category", "Defense & Host Interaction")
+                set_val(target_feat, "source_engine", "VFDB")
+                updated_count += 1
+
+            curr_notes = get_val(target_feat, "notes")
+            if curr_notes:
+                if "VFDB" not in curr_notes:
+                    set_val(target_feat, "notes", f"{curr_notes}; {note_str}")
+            else:
+                set_val(target_feat, "notes", note_str)
+
+        return updated_count

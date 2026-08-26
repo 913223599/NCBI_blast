@@ -13,6 +13,7 @@ from typing import Dict, Any, List, Optional
 from .types import AnnotationRunRequest
 from .db import annotation_db
 from .pipeline import AnnotationPipeline
+from .fuser import AnnotationFuser
 
 logger = logging.getLogger("analysis.annotation.manager")
 
@@ -178,14 +179,42 @@ class AnnotationManager:
             except Exception as e:
                 logger.error(f"Failed to read features.json for {task_id}: {e}")
 
-        # 若已具备 features 或 progress>=100，自动确保状态为 completed
-        if task.get("status") == "running" and (task.get("progress", 0) >= 100 or len(features) > 0):
-            task["status"] = "completed"
+        # 深度融合生物安全审计证据与 Anti-CRISPR 功能赋名
+        safety_audit = task.get("safety_audit")
+        if not safety_audit:
+            audit_json_file = task_work_dir / "safety_audit.json"
+            if audit_json_file.exists():
+                try:
+                    with open(audit_json_file, "r", encoding="utf-8") as f:
+                        safety_audit = json.load(f)
+                        task["safety_audit"] = safety_audit
+                except Exception:
+                    pass
+
+        if features and "summary" in task and isinstance(task["summary"], dict):
+            ann_cnt = sum(1 for f in features if f.get("feature_type") == "CDS" and not AnnotationFuser.is_unannotated(f.get("product")))
+            hypo_cnt = sum(1 for f in features if f.get("feature_type") == "CDS" and AnnotationFuser.is_unannotated(f.get("product")))
+            task["summary"]["annotated_count"] = ann_cnt
+            task["summary"]["hypothetical_count"] = hypo_cnt
+            
+            cat_dist = {}
+            engine_contrib = {}
+            for f in features:
+                if f.get("feature_type") == "CDS":
+                    c = f.get("category") or "Other Functional"
+                    cat_dist[c] = cat_dist.get(c, 0) + 1
+                    eng = f.get("source_engine") or "Pharokka"
+                    engine_contrib[eng] = engine_contrib.get(eng, 0) + 1
+            task["summary"]["category_distribution"] = cat_dist
+            task["summary"]["engine_contributions"] = engine_contrib
+
+            # 同步持久化回写数据库
             try:
                 annotation_db.mark_completed(
                     task_id=task_id,
-                    summary=task.get("summary") or {},
-                    files=task.get("files") or {}
+                    summary=task["summary"],
+                    files=task.get("files") or {},
+                    safety_audit=safety_audit
                 )
             except Exception:
                 pass
