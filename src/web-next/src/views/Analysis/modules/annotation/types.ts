@@ -30,11 +30,16 @@ export interface AnnotationRunParams {
   min_contig_len: number;
   threads?: number;
   selected_contigs?: string[];
+  enable_waterfall?: boolean;
+  enable_homology?: boolean;
+  enable_phold?: boolean;
+  enable_safety_audit?: boolean;
 }
 
 export interface FeatureItem {
   id: string;
   locus_tag: string;
+  contig_id?: string | null;
   feature_type: string; // CDS, tRNA, rRNA, tmRNA, CRISPR, misc_feature
   start: number;
   end: number;
@@ -49,6 +54,9 @@ export interface FeatureItem {
   nucleotide_seq?: string | null;
   ec_number?: string | null;
   cog?: string | null;
+  category?: string | null;
+  source_engine?: string | null;
+  evidence_sources?: string[];
   notes?: string | null;
 }
 
@@ -63,8 +71,12 @@ export interface AnnotationSummary {
   crispr_count: number;
   other_count: number;
   total_features: number;
+  annotated_count?: number;
+  hypothetical_count?: number;
   coding_density_pct: number;
   avg_gene_length: number;
+  engine_contributions?: Record<string, number>;
+  category_distribution?: Record<string, number>;
 }
 
 export interface SafetyHitItem {

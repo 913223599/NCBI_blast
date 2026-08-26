@@ -34,7 +34,7 @@ class AnnotationRunRequest(BaseModel):
     """注释任务运行请求参数"""
     task_name: Optional[str] = Field(default="Annotation_Task", description="任务名称")
     sample_type: str = Field(default="BACTERIA", description="样本类型: BACTERIA, PHAGE, VIRUS, GENERAL")
-    engine: str = Field(default="auto", description="注释引擎: auto, prokka, pharokka, prodigal, builtin")
+    engine: str = Field(default="auto", description="主注释引擎: auto, prokka, pharokka, prodigal, builtin, phold")
     fasta_path: Optional[str] = Field(default=None, description="服务器本地 FASTA 文件路径")
     fasta_content: Optional[str] = Field(default=None, description="直接提交的 FASTA 序列文本")
     prefix: Optional[str] = Field(default="ANNO", description="基因位点前缀 (Locus Tag Prefix)")
@@ -42,6 +42,10 @@ class AnnotationRunRequest(BaseModel):
     min_contig_len: int = Field(default=200, description="过滤序列的最小长度阈值 (bp)")
     threads: Optional[int] = Field(default=None, description="并行线程数 (默认自适应保留核心)")
     selected_contigs: Optional[List[str]] = Field(default=None, description="选定需要分析的 Contig ID 列表，留空表示全部分析")
+    enable_waterfall: bool = Field(default=True, description="是否启用多引擎流式级联互补")
+    enable_homology: bool = Field(default=True, description="是否启用权威同源打捞")
+    enable_phold: bool = Field(default=True, description="是否启用 3D 空间结构感知增强")
+    enable_safety_audit: bool = Field(default=True, description="是否启用生物安全性审计")
 
 
 class FeatureItem(BaseModel):
@@ -49,6 +53,7 @@ class FeatureItem(BaseModel):
     id: str
     locus_tag: str
     feature_type: str  # CDS, tRNA, rRNA, tmRNA, CRISPR, misc_feature
+    contig_id: Optional[str] = None  # 所属 Contig/Scaffold 序列标识
     start: int
     end: int
     strand: str  # "+" or "-"
@@ -62,6 +67,9 @@ class FeatureItem(BaseModel):
     nucleotide_seq: Optional[str] = None
     ec_number: Optional[str] = None
     cog: Optional[str] = None
+    category: Optional[str] = None  # 功能分类大类: 结构蛋白, 复制与修饰, 包装, 裂解, 代谢, 假定蛋白等
+    source_engine: Optional[str] = None  # 首次提供/更新该特征的引擎
+    evidence_sources: List[str] = Field(default_factory=list)  # 证据链来源列表
     notes: Optional[str] = None
 
 
@@ -77,8 +85,12 @@ class AnnotationSummary(BaseModel):
     crispr_count: int = 0
     other_count: int = 0
     total_features: int = 0
+    annotated_count: int = 0
+    hypothetical_count: int = 0
     coding_density_pct: float = 0.0
     avg_gene_length: float = 0.0
+    engine_contributions: Dict[str, int] = Field(default_factory=dict)
+    category_distribution: Dict[str, int] = Field(default_factory=dict)
 
 
 class SafetyHitItem(BaseModel):

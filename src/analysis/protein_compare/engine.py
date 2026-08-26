@@ -19,31 +19,118 @@ from Bio.Align import PairwiseAligner
 
 logger = logging.getLogger("ProteinCompareEngine")
 
-# 预设生物学功能分类关键词映射
+# 预设生物学功能分类配置 (包含前端 Tab 标签元数据)
 PROTEIN_CATEGORIES = {
     "tail_fiber": {
         "label": "尾丝与宿主识别系统 (Tail Fiber & Host Specificity)",
-        "keywords": ["tail fiber", "tail", "fiber", "hinge connector", "distal connector", "proximal connector", "collar", "whisker"]
+        "patterns": [
+            r"\btail\s*(?:fiber|spike|tube|sheath|shaft|tip|assembly|tubular|component|protein|hydrolase)?\b",
+            r"\btailspike\b",
+            r"\bbaseplate\b",
+            r"\btape\s*measure\b",
+            r"\btpm\b",
+            r"\breceptor[- ]binding\b",
+            r"\brbp\b",
+            r"\bcollar\s+protein\b",
+            r"\bwhisker\s+protein\b",
+            r"\b(?:distal|proximal|hinge)\s+connector\b",
+            r"\bneck\s+protein\b",
+            r"\bwedge\s+subunit\b",
+            r"\bcentral\s+hub\b",
+            r"\bspike\s+protein\b",
+        ],
+        "exclude": []
     },
     "lysis": {
         "label": "裂解系统与溶菌酶 (Lysis / Endolysin / Spanin / Holin)",
-        "keywords": ["lysin", "lysozyme", "spanin", "holin", "lysis", "peptidase", "endopeptidase", "rz-like", "antiholin"]
+        "patterns": [
+            r"\bendolysin\b",
+            r"\blysin\b",
+            r"\blysozyme\b",
+            r"\bholin\b",
+            r"\bantiholin\b",
+            r"\b(?:i-|o-|u-)?spanin\b",
+            r"\bpeptidoglycan\s+(?:hydrolase|recognition)\b",
+            r"\bmuramidase\b",
+            r"\btransglycosylase\b",
+            r"\bcell\s+wall\s+hydrolase\b",
+            r"\bn-acetylmuramoyl\b",
+            r"\bamidase\b",
+            r"\bmurein\s+hydrolase\b",
+            r"\brz(?:-like|1)?\b",
+            r"\blysis\s+protein\b",
+        ],
+        "exclude": [r"\btail-associated\s+lysozyme\b", r"\btailspike\b"]
     },
     "capsid_head": {
         "label": "衣壳与头部形态发生 (Capsid & Head Morphogenesis)",
-        "keywords": ["capsid", "head", "portal", "scaffold", "coat", "vertex", "capsomer", "maturation protease", "prohead"]
+        "patterns": [
+            r"\b(?:major|minor)\s+capsid\b",
+            r"\bcapsid\s+(?:protein|assembly|scaffolding|subunit)?\b",
+            r"\bportal\s+protein\b",
+            r"\bhead\s+(?:protein|completion|assembly|structural|maturation)\b",
+            r"\bhead-tail\s+(?:adaptor|joining|connector)\b",
+            r"\bmaturation\s+protease\b",
+            r"\bprohead\s+protease\b",
+            r"\bcoat\s+protein\b",
+            r"\bvertex\s+protein\b",
+            r"\bcapsomer\b",
+            r"\bdecoration\s+protein\b",
+            r"\bscaffold(?:ing)?\s+protein\b",
+            r"\bvirion\s+structural\s+protein\b",
+        ],
+        "exclude": []
     },
     "replication": {
         "label": "DNA 复制与修饰酶 (Replication & Modification)",
-        "keywords": ["polymerase", "helicase", "primase", "ligase", "nuclease", "endonuclease", "exonuclease", "rnase", "ssb", "methyltransferase", "topoisomerase", "integrase", "recombinase"]
+        "patterns": [
+            r"\b(?:dna|rna)\s+polymerase\b",
+            r"\bpolymerase\b",
+            r"\bhelicase\b",
+            r"\bprimase\b",
+            r"\bprimase-helicase\b",
+            r"\bligase\b",
+            r"\bdna\s+ligase\b",
+            r"\b(?:endo|exo)nuclease\b",
+            r"\bhnh\s+endonuclease\b",
+            r"\bhoming\s+endonuclease\b",
+            r"\b(?:rnase|dnase)\b",
+            r"\bssb\b",
+            r"\bsingle-stranded\s+dna-binding\b",
+            r"\bdna[- ]binding\s+protein\b",
+            r"\bmethyltransferase\b",
+            r"\bmethylase\b",
+            r"\btopoisomerase\b",
+            r"\bgyrase\b",
+            r"\bintegrase\b",
+            r"\brecombinase\b",
+            r"\bresolvase\b",
+            r"\brepressor\b",
+            r"\banti-repressor\b",
+            r"\bactivator\s+protein\b",
+            r"\btranscriptio(?:n|nal)?(?:\s+(?:factor|regulator|activator|coactivator))?\b",
+            r"\bsigma\s+factor\b",
+            r"\bantitermination\b",
+            r"\b(?:cro|ci)\s+protein\b",
+        ],
+        "exclude": []
     },
     "packaging": {
         "label": "基因组包装与末端酶 (Packaging & Terminase)",
-        "keywords": ["terminase", "packaging", "large subunit", "small subunit", "pac", "cos"]
+        "patterns": [
+            r"\bterminase(?:\s+(?:large|small|subunit|\d+))*\b",
+            r"\b(?:large|small)\s+subunit\s+terminase\b",
+            r"\bpackaging\s+(?:protein|enzyme|machinery)\b",
+            r"\bmaturase\b",
+            r"\bcos-cleaving\b",
+            r"\bpac\s+protein\b",
+        ],
+        "exclude": []
     },
     "all": {
         "label": "全部匹配蛋白质 (All Matched CDS)",
-        "keywords": []
+        "patterns": [],
+        "exclude": []
     }
 }
 
@@ -160,15 +247,65 @@ class ProteinComparer:
         self.aligner.open_gap_score = -1.0
         self.aligner.extend_gap_score = -0.5
 
-    @staticmethod
-    def classify_protein(product: str) -> str:
-        """依据产品名称自动归入功能大类"""
-        p_lower = product.lower()
-        for cat_key, cat_info in PROTEIN_CATEGORIES.items():
-            if cat_key == "all":
+    @classmethod
+    def is_hypothetical(cls, text: str) -> bool:
+        """快速判断是否为未知/假定蛋白"""
+        t = text.strip().lower()
+        if not t or t == "hypothetical protein" or t == "unknown" or t == "uncharacterized protein" or t == "putative protein":
+            return True
+        return False
+
+    @classmethod
+    def classify_protein(cls, product: str, direct_cat: Optional[str] = None, notes: Optional[str] = None) -> str:
+        """
+        依据产品名称、已知分类及证据备注自动归入功能大类
+        采用严格带 \\b 词边界正则与排除项消歧机制，杜绝子串误碰撞
+        """
+        import re
+
+        clean_prod = (product or "").strip()
+        
+        # 1. 假定蛋白优先排除
+        if cls.is_hypothetical(clean_prod) and not direct_cat and not notes:
+            return "other"
+
+        # 2. 优先检查高置信度已知分类标签 (如 PHROGs / AnnotationFuser 标注)
+        if direct_cat:
+            dc_lower = direct_cat.lower()
+            if "tail" in dc_lower or "fiber" in dc_lower:
+                return "tail_fiber"
+            if "lysis" in dc_lower:
+                return "lysis"
+            if "packaging" in dc_lower or "terminase" in dc_lower:
+                return "packaging"
+            if "head" in dc_lower or "capsid" in dc_lower:
+                return "capsid_head"
+            if "replication" in dc_lower or "repair" in dc_lower or "transcription" in dc_lower:
+                return "replication"
+
+        # 3. 严格正则词边界与优先级语义匹配
+        full_text = f"{clean_prod} {notes or ''}".lower()
+        
+        # 优先级判断序列 (特异性高的优先判定)
+        priority_order = ["packaging", "tail_fiber", "capsid_head", "lysis", "replication"]
+
+        for cat_key in priority_order:
+            cat_info = PROTEIN_CATEGORIES[cat_key]
+            
+            # 检查是否有排除项
+            excluded = False
+            for exc_pat in cat_info.get("exclude", []):
+                if re.search(exc_pat, full_text):
+                    excluded = True
+                    break
+            if excluded:
                 continue
-            if any(k in p_lower for k in cat_info["keywords"]):
-                return cat_key
+
+            # 正向模式匹配 (严格词边界)
+            for pat in cat_info["patterns"]:
+                if re.search(pat, full_text):
+                    return cat_key
+
         return "other"
 
     @classmethod
@@ -177,7 +314,6 @@ class ProteinComparer:
         proteins: List[ProteinItem] = []
 
         if isinstance(task_dir_or_features, list):
-            # 直接传入的字典列表
             raw_list = task_dir_or_features
         elif isinstance(task_dir_or_features, (str, Path)):
             p = Path(task_dir_or_features)
@@ -186,24 +322,26 @@ class ProteinComparer:
                 with open(feat_json, "r", encoding="utf-8") as f:
                     raw_list = json.load(f)
             else:
-                # 尝试解析 GBK
                 gbk_files = list(p.glob("*.gbk"))
                 if not gbk_files:
                     raise FileNotFoundError(f"目录中未检测到 features.json 或 .gbk 文件: {p}")
                 raw_list = []
-                for rec in SeqIO.parse(str(gbk_files[0]), "genbank"):
-                    for feat in rec.features:
-                        if feat.type == "CDS":
-                            q = feat.qualifiers
-                            raw_list.append({
-                                "id": q.get("locus_tag", ["unknown"])[0],
-                                "locus_tag": q.get("locus_tag", ["unknown"])[0],
-                                "product": q.get("product", ["hypothetical protein"])[0],
-                                "translation": q.get("translation", [""])[0],
-                                "start": int(feat.location.start) + 1,
-                                "end": int(feat.location.end),
-                                "strand": "+" if feat.location.strand >= 0 else "-"
-                            })
+                with open(gbk_files[0], "r", encoding="utf-8", errors="ignore") as f:
+                    for rec in SeqIO.parse(f, "genbank"):
+                        for feat in rec.features:
+                            if feat.type == "CDS":
+                                q = feat.qualifiers
+                                raw_list.append({
+                                    "id": q.get("locus_tag", ["unknown"])[0],
+                                    "locus_tag": q.get("locus_tag", ["unknown"])[0],
+                                    "product": q.get("product", ["hypothetical protein"])[0],
+                                    "translation": q.get("translation", [""])[0],
+                                    "start": int(feat.location.start) + 1,
+                                    "end": int(feat.location.end),
+                                    "strand": "+" if feat.location.strand >= 0 else "-",
+                                    "category": q.get("function", q.get("category", [None]))[0],
+                                    "notes": q.get("note", [None])[0]
+                                })
         else:
             raise ValueError(f"不支持的数据源格式: {type(task_dir_or_features)}")
 
@@ -212,7 +350,9 @@ class ProteinComparer:
             if not seq:
                 continue
             prod = item.get("product") or "hypothetical protein"
-            cat = cls.classify_protein(prod)
+            direct_cat = item.get("category")
+            notes = item.get("notes")
+            cat = cls.classify_protein(prod, direct_cat=direct_cat, notes=notes)
             proteins.append(ProteinItem(
                 id=item.get("id") or item.get("locus_tag") or "unknown",
                 locus_tag=item.get("locus_tag") or item.get("id") or "unknown",

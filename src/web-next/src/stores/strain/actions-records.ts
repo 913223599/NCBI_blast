@@ -103,13 +103,13 @@ export function useRecordsActions(state: any, autoSave: () => void) {
           if (selectedEntry.level === 3) {
             // 选择了物种级别：通过名称匹配
             // 提取物种名称（去掉括号中的拉丁名）
-            const speciesName = selectedEntry.name.split('(')[0].trim()
-            matches = record.name.includes(speciesName) || 
-                      record.species?.includes(speciesName) ||
+            const speciesName = (selectedEntry.name || '').split('(')[0]?.trim() || ''
+            matches = (!!speciesName && record.name.includes(speciesName)) || 
+                      (!!speciesName && !!record.species && record.species.includes(speciesName)) ||
                       `${record.codeCategory}${record.codeGenus}${record.codeSpecies}` === species
           } else if (selectedEntry.level === 2) {
             // 选择了属级别：获取该属下所有物种的名称，然后匹配记录
-            const genusName = selectedEntry.name.split('(')[0].trim()
+            const genusName = (selectedEntry.name || '').split('(')[0]?.trim() || ''
             
             // 获取该属下的所有物种
             const entries = getEntries()
@@ -119,9 +119,9 @@ export function useRecordsActions(state: any, autoSave: () => void) {
             
             if (speciesInGenus.length > 0) {
               // 有预定义的物种列表，通过名称匹配
-              const speciesNames = speciesInGenus.map(sp => sp.name.split('(')[0].trim())
+              const speciesNames = speciesInGenus.map(sp => (sp.name || '').split('(')[0]?.trim() || '').filter(Boolean)
               matches = speciesNames.some(name => 
-                record.name.includes(name) || record.species?.includes(name)
+                record.name.includes(name) || (record.species ? record.species.includes(name) : false)
               )
             } else {
               // 没有预定义物种，尝试通过属名匹配

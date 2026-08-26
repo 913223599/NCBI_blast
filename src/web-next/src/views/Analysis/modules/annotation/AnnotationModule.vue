@@ -36,8 +36,9 @@ const showSetupForm = ref<boolean>(false);
 
 onMounted(async () => {
   await fetchHistory();
-  if (historyTasks.value.length > 0 && !activeTaskId.value) {
-    await loadTaskResult(historyTasks.value[0].task_id);
+  const firstTask = historyTasks.value[0];
+  if (firstTask && !activeTaskId.value) {
+    await loadTaskResult(firstTask.task_id);
   } else if (historyTasks.value.length === 0) {
     showSetupForm.value = true;
   }

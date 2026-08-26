@@ -236,7 +236,8 @@ class BuiltinAnnotator:
         if on_progress:
             on_progress(10, "正在读取并解析输入 FASTA 序列...")
 
-        records = list(SeqIO.parse(str(fasta_file_path), "fasta"))
+        with open(fasta_file_path, "r", encoding="utf-8", errors="ignore") as f:
+            records = list(SeqIO.parse(f, "fasta"))
         if not records:
             raise ValueError("输入 FASTA 文件为空或格式不合法")
 
@@ -289,6 +290,7 @@ class BuiltinAnnotator:
                 feat_item = FeatureItem(
                     id=locus_tag,
                     locus_tag=locus_tag,
+                    contig_id=contig_id,
                     feature_type="CDS",
                     start=orf["start"],
                     end=orf["end"],
@@ -300,27 +302,11 @@ class BuiltinAnnotator:
                     protein_length_aa=len(orf["translation"]),
                     molecular_weight_kda=mw,
                     translation=orf["translation"],
-                    nucleotide_seq=orf["nucleotide_seq"]
+                    nucleotide_seq=orf["nucleotide_seq"],
+                    source_engine="Builtin"
                 )
                 all_features.append(feat_item)
 
-                # 添加到 GBK 特征
-                strand_val = 1 if orf["strand"] == "+" else -1
-                cds_feat = SeqFeature(
-                    FeatureLocation(ExactPosition(orf["start"] - 1), ExactPosition(orf["end"]), strand=strand_val),
-                    type="CDS",
-                    qualifiers={
-                        "locus_tag": [locus_tag],
-                        "protein_id": [prot_id],
-                        "product": [prod_desc],
-                        "translation": [orf["translation"]]
-                    }
-                )
-                gbk_rec.features.append(cds_feat)
-
-            gbk_records.append(gbk_rec)
-            
-            prog_val = 25 + int(50 * (c_idx + 1) / num_contigs)
         return self.export_features_to_files(
             records=records,
             all_features=all_features,
@@ -340,19 +326,25 @@ class BuiltinAnnotator:
         """
         output_dir.mkdir(parents=True, exist_ok=True)
         if on_progress:
-            on_progress(88, "正在打包并导出标准 GenBank / GFF3 / TSV 产物...")
+            on_progress(90, "正在导出并刷新标准 GenBank / GFF3 / TSV 产物...")
 
         total_length = sum(len(r.seq) for r in records if r.seq is not None)
         num_contigs = len(records)
 
-        # 1. 组装 GenBank SeqRecord 结构
-        feature_map: Dict[str, List[FeatureItem]] = {}
+        # 1. 组装按 Contig 分组的 GenBank SeqRecord 结构
+        first_contig_id = records[0].id if (records and records[0].id) else "Contig"
+
+        # 分组映射
+        features_by_contig: Dict[str, List[FeatureItem]] = {
+            (r.id if r.id else f"Contig_{idx}"): [] for idx, r in enumerate(records)
+        }
         for feat in all_features:
-            # 兼容：通过 locus_tag 对应
-            pass
+            c_id = feat.contig_id if feat.contig_id else first_contig_id
+            if c_id not in features_by_contig:
+                features_by_contig[c_id] = []
+            features_by_contig[c_id].append(feat)
 
         gbk_records: List[SeqRecord] = []
-        feat_idx = 0
 
         for record in records:
             contig_id = record.id or "Contig"
@@ -374,9 +366,8 @@ class BuiltinAnnotator:
             )
             gbk_rec.features.append(source_feat)
 
-            # 提取属于该 contig 的 features (按位置区间)
-            while feat_idx < len(all_features):
-                feat = all_features[feat_idx]
+            contig_feats = features_by_contig.get(contig_id, [])
+            for feat in contig_feats:
                 strand_val = 1 if feat.strand == "+" else -1
                 cds_feat = SeqFeature(
                     FeatureLocation(ExactPosition(feat.start - 1), ExactPosition(feat.end), strand=strand_val),
@@ -390,11 +381,12 @@ class BuiltinAnnotator:
                 )
                 if feat.gene_name:
                     cds_feat.qualifiers["gene"] = [feat.gene_name]
+                if feat.ec_number:
+                    cds_feat.qualifiers["EC_number"] = [feat.ec_number]
                 if feat.notes:
                     cds_feat.qualifiers["note"] = [feat.notes]
 
                 gbk_rec.features.append(cds_feat)
-                feat_idx += 1
 
             gbk_records.append(gbk_rec)
 
@@ -414,13 +406,29 @@ class BuiltinAnnotator:
         with open(gff_file, "w", encoding="utf-8") as f:
             f.write("##gff-version 3\n")
             for feat in all_features:
-                f.write(f"{feat.locus_tag}\tBuiltinAnnotator\t{feat.feature_type}\t{feat.start}\t{feat.end}\t.\t{feat.strand}\t0\tID={feat.id};locus_tag={feat.locus_tag};product={feat.product}\n")
+                c_name = feat.contig_id or first_contig_id
+                src = feat.source_engine or "Workbench"
+                attrs = [
+                    f"ID={feat.id}",
+                    f"locus_tag={feat.locus_tag}",
+                    f"product={feat.product}"
+                ]
+                if feat.gene_name:
+                    attrs.append(f"gene={feat.gene_name}")
+                if feat.ec_number:
+                    attrs.append(f"EC_number={feat.ec_number}")
+                if feat.category:
+                    attrs.append(f"category={feat.category}")
+                if feat.notes:
+                    attrs.append(f"note={feat.notes}")
+                attr_str = ";".join(attrs)
+                f.write(f"{c_name}\t{src}\t{feat.feature_type}\t{feat.start}\t{feat.end}\t.\t{feat.strand}\t0\t{attr_str}\n")
 
         # 3. 保存蛋白质 FASTA (.faa)
         with open(faa_file, "w", encoding="utf-8") as f:
             for feat in all_features:
                 if feat.translation:
-                    f.write(f">{feat.locus_tag} {feat.product} [len={feat.protein_length_aa}aa, MW={feat.molecular_weight_kda}kDa]\n{feat.translation}\n")
+                    f.write(f">{feat.locus_tag} {feat.product} [len={feat.protein_length_aa}aa, MW={feat.molecular_weight_kda}kDa, engine={feat.source_engine or 'Auto'}]\n{feat.translation}\n")
 
         # 4. 保存核酸基因 FASTA (.ffn)
         with open(ffn_file, "w", encoding="utf-8") as f:
@@ -428,31 +436,37 @@ class BuiltinAnnotator:
                 if feat.nucleotide_seq:
                     f.write(f">{feat.locus_tag} {feat.product} [location={feat.start}..{feat.end}({feat.strand})]\n{feat.nucleotide_seq}\n")
 
-        # 5. 保存 TSV 表格
+        # 5. 保存详细 TSV 表格
         with open(tsv_file, "w", encoding="utf-8") as f:
-            f.write("Locus_Tag\tType\tStart\tEnd\tStrand\tLength_bp\tLength_aa\tMW_kDa\tProduct\n")
+            f.write("Locus_Tag\tContig\tType\tStart\tEnd\tStrand\tLength_bp\tLength_aa\tMW_kDa\tGene\tProduct\tCategory\tEngine\tEC_Number\tEvidence\n")
             for feat in all_features:
-                f.write(f"{feat.locus_tag}\t{feat.feature_type}\t{feat.start}\t{feat.end}\t{feat.strand}\t{feat.length_bp}\t{feat.protein_length_aa or 0}\t{feat.molecular_weight_kda or 0.0}\t{feat.product}\n")
+                c_name = feat.contig_id or first_contig_id
+                gene = feat.gene_name or ""
+                cat = feat.category or ""
+                eng = feat.source_engine or ""
+                ec = feat.ec_number or ""
+                ev = feat.notes or ""
+                f.write(f"{feat.locus_tag}\t{c_name}\t{feat.feature_type}\t{feat.start}\t{feat.end}\t{feat.strand}\t{feat.length_bp}\t{feat.protein_length_aa or 0}\t{feat.molecular_weight_kda or 0.0}\t{gene}\t{feat.product}\t{cat}\t{eng}\t{ec}\t{ev}\n")
 
         # 统计指标
         full_all_seq = "".join(str(r.seq) for r in records if r.seq is not None)
         gc_val = self.calculate_gc(full_all_seq)
-        cds_cnt = len(all_features)
-        total_coding_bp = sum(f.length_bp for f in all_features)
-        density = round((total_coding_bp / total_length) * 100.0, 2) if total_length > 0 else 0.0
-        avg_len = round(total_coding_bp / cds_cnt, 1) if cds_cnt > 0 else 0.0
+        cds_cnt = sum(1 for f in all_features if f.feature_type == "CDS")
+        total_coding_bp = sum(f.length_bp for f in all_features if f.feature_type == "CDS")
+        density = round((total_coding_bp / max(1, total_length)) * 100.0, 2) if total_length > 0 else 0.0
+        avg_len = round(total_coding_bp / max(1, cds_cnt), 1) if cds_cnt > 0 else 0.0
 
         summary = AnnotationSummary(
             total_length=total_length,
             num_contigs=num_contigs,
             gc_content=gc_val,
             cds_count=cds_cnt,
-            trna_count=0,
-            rrna_count=0,
-            tmrna_count=0,
-            crispr_count=0,
-            other_count=0,
-            total_features=cds_cnt,
+            trna_count=sum(1 for f in all_features if f.feature_type == "tRNA"),
+            rrna_count=sum(1 for f in all_features if f.feature_type == "rRNA"),
+            tmrna_count=sum(1 for f in all_features if f.feature_type == "tmRNA"),
+            crispr_count=sum(1 for f in all_features if f.feature_type == "CRISPR"),
+            other_count=len(all_features) - cds_cnt,
+            total_features=len(all_features),
             coding_density_pct=density,
             avg_gene_length=avg_len
         )
@@ -468,8 +482,5 @@ class BuiltinAnnotator:
             "tsv": str(tsv_file.resolve()),
             "summary": str(summary_file.resolve())
         }
-
-        if on_progress:
-            on_progress(100, "功能注释已成功完成")
 
         return summary, all_features, output_files

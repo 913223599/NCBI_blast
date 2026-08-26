@@ -28,7 +28,11 @@ const form = reactive<AnnotationRunParams>({
   prefix: 'ANNO',
   genetic_code: 11,
   min_contig_len: 200,
-  threads: undefined
+  threads: undefined,
+  enable_waterfall: true,
+  enable_homology: true,
+  enable_phold: true,
+  enable_safety_audit: true
 });
 
 // 文件上传状态
@@ -470,6 +474,28 @@ onMounted(() => {
             <input type="number" v-model.number="form.min_contig_len" min="30" step="50" class="text-input" />
           </div>
         </div>
+
+        <div class="waterfall-options-box">
+          <div class="opt-box-title">多引擎流式级联互补配置</div>
+          <div class="opt-checkbox-grid">
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="form.enable_waterfall" />
+              <span>启用多引擎级联互补 (推荐)</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="form.enable_homology" />
+              <span>PhageScope 105万参考蛋白同源打捞</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="form.enable_phold" />
+              <span>Phold AI 3D 空间结构感知 (Foldseek)</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="form.enable_safety_audit" />
+              <span>CARD/VFDB/Anti-CRISPR 生物安全审计</span>
+            </label>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -820,6 +846,39 @@ onMounted(() => {
   padding: 12px;
   background: #f8fafc;
   border-radius: 8px;
+}
+
+.waterfall-options-box {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.opt-box-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.opt-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #2563eb;
 }
 
 .setup-actions {

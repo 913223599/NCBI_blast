@@ -29,6 +29,8 @@ function openResultsFolder() {
 const searchQuery = ref<string>('');
 const selectedTypeFilter = ref<string>('ALL');
 const selectedStrandFilter = ref<string>('ALL');
+const selectedCategoryFilter = ref<string>('ALL');
+const selectedEngineFilter = ref<string>('ALL');
 
 // 分页状态
 const currentPage = ref<number>(1);
@@ -36,6 +38,23 @@ const pageSize = ref<number>(20);
 
 // 展开详情的行 ID
 const expandedRowId = ref<string | null>(null);
+
+// 所有分类与引擎列表
+const availableCategories = computed(() => {
+  const cats = new Set<string>();
+  (props.task.features || []).forEach(f => {
+    if (f.category) cats.add(f.category);
+  });
+  return Array.from(cats);
+});
+
+const availableEngines = computed(() => {
+  const engs = new Set<string>();
+  (props.task.features || []).forEach(f => {
+    if (f.source_engine) engs.add(f.source_engine);
+  });
+  return Array.from(engs);
+});
 
 // 特征过滤计算属性
 const filteredFeatures = computed(() => {
@@ -51,12 +70,22 @@ const filteredFeatures = computed(() => {
     if (selectedStrandFilter.value !== 'ALL' && item.strand !== selectedStrandFilter.value) {
       return false;
     }
+    // 分类过滤
+    if (selectedCategoryFilter.value !== 'ALL' && item.category !== selectedCategoryFilter.value) {
+      return false;
+    }
+    // 引擎过滤
+    if (selectedEngineFilter.value !== 'ALL' && item.source_engine !== selectedEngineFilter.value) {
+      return false;
+    }
     // 关键字搜索
     if (q) {
       const matchTag = item.locus_tag?.toLowerCase().includes(q);
       const matchProd = item.product?.toLowerCase().includes(q);
       const matchGene = item.gene_name?.toLowerCase().includes(q);
-      return matchTag || matchProd || matchGene;
+      const matchCat = item.category?.toLowerCase().includes(q);
+      const matchEng = item.source_engine?.toLowerCase().includes(q);
+      return matchTag || matchProd || matchGene || matchCat || matchEng;
     }
     return true;
   });
@@ -166,12 +195,21 @@ const totalSafetyHits = computed(() => {
       </div>
 
       <div class="kpi-card primary">
-        <div class="kpi-label">预测 CDS 蛋白编码基因</div>
+        <div class="kpi-label">预测 CDS 编码基因</div>
         <div class="kpi-value">{{ formatNumber(task.summary.cds_count) }} <span class="unit">个</span></div>
         <div class="kpi-sub">编码密度: {{ task.summary.coding_density_pct }}%</div>
       </div>
 
-      <div class="kpi-card">
+      <div class="kpi-card success" v-if="task.summary.annotated_count !== undefined">
+        <div class="kpi-label">功能注释覆盖度</div>
+        <div class="kpi-value">
+          <span class="anno-stat-val">{{ task.summary.annotated_count }}</span>
+          <span class="unit">/ {{ task.summary.cds_count }} ({{ Math.round(((task.summary.annotated_count || 0) / Math.max(1, task.summary.cds_count)) * 100) }}%)</span>
+        </div>
+        <div class="kpi-sub">假定/未知蛋白: {{ task.summary.hypothetical_count || 0 }} 个</div>
+      </div>
+
+      <div class="kpi-card" v-else>
         <div class="kpi-label">RNA / 结构特征</div>
         <div class="kpi-value">
           <span class="rna-stat">tRNA: {{ task.summary.trna_count }}</span>
@@ -184,6 +222,17 @@ const totalSafetyHits = computed(() => {
         <div class="kpi-label">平均基因长度</div>
         <div class="kpi-value">{{ task.summary.avg_gene_length }} <span class="unit">bp</span></div>
         <div class="kpi-sub">约 {{ Math.round(task.summary.avg_gene_length / 3) }} aa</div>
+      </div>
+    </div>
+
+    <!-- 2.3 多引擎流式级联互补贡献概览 -->
+    <div class="engine-contrib-banner" v-if="task.summary?.engine_contributions && Object.keys(task.summary.engine_contributions).length > 1">
+      <div class="contrib-title">多引擎级联互补贡献:</div>
+      <div class="contrib-chips">
+        <span class="contrib-chip" v-for="(cnt, eng) in task.summary.engine_contributions" :key="eng">
+          <span class="eng-name">{{ eng }}</span>
+          <span class="eng-cnt">{{ cnt }} 个</span>
+        </span>
       </div>
     </div>
 
@@ -288,6 +337,24 @@ const totalSafetyHits = computed(() => {
             </select>
           </div>
 
+          <!-- 功能分类过滤 -->
+          <div class="filter-group" v-if="availableCategories.length > 0">
+            <label>功能分类:</label>
+            <select v-model="selectedCategoryFilter" class="filter-select">
+              <option value="ALL">全部分类</option>
+              <option v-for="cat in availableCategories" :key="cat" :value="cat">{{ cat }}</option>
+            </select>
+          </div>
+
+          <!-- 来源引擎过滤 -->
+          <div class="filter-group" v-if="availableEngines.length > 1">
+            <label>补充引擎:</label>
+            <select v-model="selectedEngineFilter" class="filter-select">
+              <option value="ALL">全部引擎</option>
+              <option v-for="eng in availableEngines" :key="eng" :value="eng">{{ eng }}</option>
+            </select>
+          </div>
+
           <!-- 链过滤 -->
           <div class="filter-group">
             <label>链向:</label>
@@ -310,14 +377,16 @@ const totalSafetyHits = computed(() => {
           <thead>
             <tr>
               <th width="40">#</th>
-              <th width="140">Locus Tag</th>
-              <th width="80">类型</th>
-              <th width="140">位置区间</th>
-              <th width="60">链</th>
-              <th width="90">长度(bp)</th>
-              <th width="90">蛋白大小</th>
+              <th width="130">Locus Tag</th>
+              <th width="70">类型</th>
+              <th width="120">功能分类</th>
+              <th width="130">位置区间</th>
+              <th width="50">链</th>
+              <th width="80">长度(bp)</th>
+              <th width="80">蛋白大小</th>
               <th>产物功能描述 (Product)</th>
-              <th width="70">操作</th>
+              <th width="90">补充引擎</th>
+              <th width="65">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -330,6 +399,10 @@ const totalSafetyHits = computed(() => {
                 </td>
                 <td>
                   <span :class="['type-pill', feat.feature_type.toLowerCase()]">{{ feat.feature_type }}</span>
+                </td>
+                <td>
+                  <span class="cat-pill" v-if="feat.category">{{ feat.category }}</span>
+                  <span v-else class="text-muted">-</span>
                 </td>
                 <td class="cell-pos">{{ formatNumber(feat.start) }} - {{ formatNumber(feat.end) }}</td>
                 <td>
@@ -347,16 +420,45 @@ const totalSafetyHits = computed(() => {
                 </td>
                 <td class="cell-product" :title="feat.product">{{ feat.product }}</td>
                 <td>
+                  <span class="engine-badge" v-if="feat.source_engine">{{ feat.source_engine }}</span>
+                  <span v-else class="text-muted">-</span>
+                </td>
+                <td>
                   <button class="expand-btn" @click="toggleExpand(feat.id || String(idx))">
                     {{ expandedRowId === (feat.id || String(idx)) ? '收起' : '详情' }}
                   </button>
                 </td>
               </tr>
 
-              <!-- 展开抽屉：显示序列 -->
+              <!-- 展开抽屉：显示序列与多引擎证据链 -->
               <tr v-if="expandedRowId === (feat.id || String(idx))" class="expand-detail-row">
-                <td colspan="9">
+                <td colspan="11">
                   <div class="expand-content">
+                    <!-- 证据链与高级属性 -->
+                    <div class="evidence-box" v-if="feat.notes || feat.evidence_sources?.length || feat.ec_number">
+                      <div class="ev-header">注释特征属性与证据链:</div>
+                      <div class="ev-items">
+                        <div class="ev-row" v-if="feat.ec_number">
+                          <span class="ev-label">EC 酶学编号:</span>
+                          <span class="ev-val">{{ feat.ec_number }}</span>
+                        </div>
+                        <div class="ev-row" v-if="feat.cog">
+                          <span class="ev-label">COG 功能分类:</span>
+                          <span class="ev-val">{{ feat.cog }}</span>
+                        </div>
+                        <div class="ev-row" v-if="feat.evidence_sources?.length">
+                          <span class="ev-label">各引擎溯源证据:</span>
+                          <div class="ev-source-list">
+                            <span class="ev-src-tag" v-for="(ev, eIdx) in feat.evidence_sources" :key="eIdx">{{ ev }}</span>
+                          </div>
+                        </div>
+                        <div class="ev-row" v-else-if="feat.notes">
+                          <span class="ev-label">证据信息:</span>
+                          <span class="ev-val">{{ feat.notes }}</span>
+                        </div>
+                      </div>
+                    </div>
+
                     <div class="seq-block" v-if="feat.translation">
                       <div class="seq-header">
                         <span>蛋白质翻译序列 ({{ feat.protein_length_aa }} aa)</span>
@@ -545,6 +647,63 @@ const totalSafetyHits = computed(() => {
   background: #f8faff;
 }
 
+.kpi-card.success {
+  border-color: #a7f3d0;
+  background: #f0fdf4;
+}
+
+.anno-stat-val {
+  color: #059669;
+  font-weight: 800;
+}
+
+.engine-contrib-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+
+.contrib-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.contrib-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.contrib-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.contrib-chip .eng-name {
+  color: #1e293b;
+}
+
+.contrib-chip .eng-cnt {
+  background: #eff6ff;
+  color: #2563eb;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
 .kpi-label {
   font-size: 11px;
   font-weight: 700;
@@ -706,6 +865,28 @@ const totalSafetyHits = computed(() => {
 .type-pill.rrna { background: #fef3c7; color: #92400e; }
 .type-pill.crispr { background: #f3e8ff; color: #6b21a8; }
 
+.cat-pill {
+  display: inline-block;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+.engine-badge {
+  display: inline-block;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 .strand-pill {
   font-weight: 800;
   padding: 1px 6px;
@@ -759,6 +940,58 @@ const totalSafetyHits = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.evidence-box {
+  background: #f8faff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+.ev-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1e40af;
+  margin-bottom: 6px;
+}
+
+.ev-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ev-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.ev-label {
+  font-weight: 700;
+  color: #64748b;
+  min-width: 100px;
+}
+
+.ev-val {
+  color: #1e293b;
+}
+
+.ev-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ev-src-tag {
+  background: white;
+  border: 1px solid #cbd5e1;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #334155;
 }
 
 .seq-block {
