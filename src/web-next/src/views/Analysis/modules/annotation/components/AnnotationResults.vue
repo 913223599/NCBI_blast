@@ -122,18 +122,25 @@ function handleOpenInViewer() {
 
 // 格式化数字
 function formatNumber(num?: number | null): string {
-  if (num === undefined || num === null) return '0';
-  return num.toLocaleString();
+  if (num === undefined || num === null || isNaN(Number(num))) return '0';
+  return Number(num).toLocaleString();
 }
-// 安全审计详情展开状态
+
+// 安全审计计算与容错
 const showSafetyDetails = ref<boolean>(false);
 
+const amrList = computed(() => props.task?.safety_audit?.amr_genes || []);
+const vfList = computed(() => props.task?.safety_audit?.virulent_factors || []);
+const acrList = computed(() => props.task?.safety_audit?.anti_crispr_genes || []);
+
+const hasSafetyAudit = computed(() => {
+  const sa = props.task?.safety_audit;
+  if (!sa || typeof sa !== 'object') return false;
+  return !!(sa.safety_passed !== undefined || sa.anti_crispr_status || amrList.value.length || vfList.value.length || acrList.value.length);
+});
+
 const totalSafetyHits = computed(() => {
-  if (!props.task.safety_audit) return 0;
-  const amr = props.task.safety_audit.amr_genes?.length || 0;
-  const vf = props.task.safety_audit.virulent_factors?.length || 0;
-  const acr = props.task.safety_audit.anti_crispr_genes?.length || 0;
-  return amr + vf + acr;
+  return amrList.value.length + vfList.value.length + acrList.value.length;
 });
 </script>
 
@@ -185,26 +192,26 @@ const totalSafetyHits = computed(() => {
       <div class="kpi-card">
         <div class="kpi-label">基因组全长</div>
         <div class="kpi-value">{{ formatNumber(task.summary.total_length) }} <span class="unit">bp</span></div>
-        <div class="kpi-sub">包含 {{ task.summary.num_contigs }} 条 Contig</div>
+        <div class="kpi-sub">包含 {{ task.summary.num_contigs || 1 }} 条 Contig</div>
       </div>
 
       <div class="kpi-card">
         <div class="kpi-label">GC 含量</div>
-        <div class="kpi-value">{{ task.summary.gc_content }} <span class="unit">%</span></div>
+        <div class="kpi-value">{{ task.summary.gc_content || 0 }} <span class="unit">%</span></div>
         <div class="kpi-sub">全序列加权均值</div>
       </div>
 
       <div class="kpi-card primary">
         <div class="kpi-label">预测 CDS 编码基因</div>
         <div class="kpi-value">{{ formatNumber(task.summary.cds_count) }} <span class="unit">个</span></div>
-        <div class="kpi-sub">编码密度: {{ task.summary.coding_density_pct }}%</div>
+        <div class="kpi-sub">编码密度: {{ task.summary.coding_density_pct || 0 }}%</div>
       </div>
 
       <div class="kpi-card success" v-if="task.summary.annotated_count !== undefined">
         <div class="kpi-label">功能注释覆盖度</div>
         <div class="kpi-value">
-          <span class="anno-stat-val">{{ task.summary.annotated_count }}</span>
-          <span class="unit">/ {{ task.summary.cds_count }} ({{ Math.round(((task.summary.annotated_count || 0) / Math.max(1, task.summary.cds_count)) * 100) }}%)</span>
+          <span class="anno-stat-val">{{ task.summary.annotated_count || 0 }}</span>
+          <span class="unit">/ {{ task.summary.cds_count || 0 }} ({{ Math.round(((task.summary.annotated_count || 0) / Math.max(1, task.summary.cds_count || 1)) * 100) }}%)</span>
         </div>
         <div class="kpi-sub">假定/未知蛋白: {{ task.summary.hypothetical_count || 0 }} 个</div>
       </div>
@@ -212,16 +219,16 @@ const totalSafetyHits = computed(() => {
       <div class="kpi-card" v-else>
         <div class="kpi-label">RNA / 结构特征</div>
         <div class="kpi-value">
-          <span class="rna-stat">tRNA: {{ task.summary.trna_count }}</span>
-          <span class="rna-stat">rRNA: {{ task.summary.rrna_count }}</span>
+          <span class="rna-stat">tRNA: {{ task.summary.trna_count || 0 }}</span>
+          <span class="rna-stat">rRNA: {{ task.summary.rrna_count || 0 }}</span>
         </div>
-        <div class="kpi-sub">CRISPR: {{ task.summary.crispr_count }}</div>
+        <div class="kpi-sub">CRISPR: {{ task.summary.crispr_count || 0 }}</div>
       </div>
 
       <div class="kpi-card">
         <div class="kpi-label">平均基因长度</div>
-        <div class="kpi-value">{{ task.summary.avg_gene_length }} <span class="unit">bp</span></div>
-        <div class="kpi-sub">约 {{ Math.round(task.summary.avg_gene_length / 3) }} aa</div>
+        <div class="kpi-value">{{ task.summary.avg_gene_length || 0 }} <span class="unit">bp</span></div>
+        <div class="kpi-sub">约 {{ Math.round((task.summary.avg_gene_length || 0) / 3) }} aa</div>
       </div>
     </div>
 
@@ -237,7 +244,7 @@ const totalSafetyHits = computed(() => {
     </div>
 
     <!-- 2.5 深度生物安全审计与防御系统扫描卡片 -->
-    <div class="safety-audit-card" v-if="task.safety_audit">
+    <div class="safety-audit-card" v-if="hasSafetyAudit && task.safety_audit">
       <div class="safety-header">
         <div class="safety-title">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" :stroke="task.safety_audit.safety_passed ? '#10b981' : '#f59e0b'" stroke-width="2">
@@ -249,13 +256,13 @@ const totalSafetyHits = computed(() => {
           </span>
         </div>
         <div class="safety-summary-badges">
-          <span class="audit-chip" :class="task.safety_audit.amr_genes.length ? 'chip-alert' : 'chip-ok'">
-            CARD 耐药基因: {{ task.safety_audit.amr_genes.length }}
+          <span class="audit-chip" :class="amrList.length ? 'chip-alert' : 'chip-ok'">
+            CARD 耐药基因: {{ amrList.length }}
           </span>
-          <span class="audit-chip" :class="task.safety_audit.virulent_factors.length ? 'chip-alert' : 'chip-ok'">
-            VFDB 毒力因子: {{ task.safety_audit.virulent_factors.length }}
+          <span class="audit-chip" :class="vfList.length ? 'chip-alert' : 'chip-ok'">
+            VFDB 毒力因子: {{ vfList.length }}
           </span>
-          <span class="audit-chip chip-info">
+          <span class="audit-chip chip-info" v-if="task.safety_audit.anti_crispr_status">
             Anti-CRISPR: {{ task.safety_audit.anti_crispr_status }}
           </span>
           <button 
@@ -271,10 +278,10 @@ const totalSafetyHits = computed(() => {
       <!-- 详细命中列表展示 (折叠展开) -->
       <transition name="slide-fade">
         <div class="safety-details-grid" v-if="showSafetyDetails && totalSafetyHits > 0">
-          <div class="safety-box" v-if="task.safety_audit.amr_genes.length">
+          <div class="safety-box" v-if="amrList.length">
             <div class="box-title amr">耐药基因 (CARD)</div>
             <div class="box-list">
-              <div class="box-item" v-for="(item, idx) in task.safety_audit.amr_genes" :key="idx">
+              <div class="box-item" v-for="(item, idx) in amrList" :key="idx">
                 <span class="tag-cds">{{ item.cds_id }}</span>
                 <span class="tag-desc">{{ item.description }}</span>
                 <span class="tag-meta">相似度: {{ item.identity }}% | E={{ item.evalue }}</span>
@@ -282,10 +289,10 @@ const totalSafetyHits = computed(() => {
             </div>
           </div>
 
-          <div class="safety-box" v-if="task.safety_audit.virulent_factors.length">
+          <div class="safety-box" v-if="vfList.length">
             <div class="box-title vf">毒力因子 (VFDB)</div>
             <div class="box-list">
-              <div class="box-item" v-for="(item, idx) in task.safety_audit.virulent_factors" :key="idx">
+              <div class="box-item" v-for="(item, idx) in vfList" :key="idx">
                 <span class="tag-cds">{{ item.cds_id }}</span>
                 <span class="tag-desc">{{ item.description }}</span>
                 <span class="tag-meta">相似度: {{ item.identity }}% | E={{ item.evalue }}</span>
@@ -293,10 +300,10 @@ const totalSafetyHits = computed(() => {
             </div>
           </div>
 
-          <div class="safety-box" v-if="task.safety_audit.anti_crispr_genes.length">
+          <div class="safety-box" v-if="acrList.length">
             <div class="box-title acr">Anti-CRISPR (Acr) 逃逸因子 (前 20 条)</div>
             <div class="box-list">
-              <div class="box-item" v-for="(item, idx) in task.safety_audit.anti_crispr_genes.slice(0, 20)" :key="idx">
+              <div class="box-item" v-for="(item, idx) in acrList.slice(0, 20)" :key="idx">
                 <span class="tag-cds">{{ item.cds_id }}</span>
                 <span class="tag-desc">{{ item.source || item.description || 'Acr Protein' }}</span>
                 <span class="tag-meta">相似度: {{ item.identity }}%</span>

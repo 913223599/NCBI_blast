@@ -20,19 +20,23 @@ function getStatusBadgeClass(status: string) {
   switch (status) {
     case 'completed': return 'badge-success';
     case 'running': return 'badge-running';
+    case 'queued':
+    case 'pending': return 'badge-queued';
     case 'failed': return 'badge-failed';
     case 'cancelled': return 'badge-cancelled';
     default: return 'badge-pending';
   }
 }
 
-function getStatusText(status: string) {
-  switch (status) {
+function getStatusText(item: AnnotationTaskItem) {
+  switch (item.status) {
     case 'completed': return '已完成';
     case 'running': return '分析中';
+    case 'queued':
+    case 'pending': return `排队中 #${item.position || 1}`;
     case 'failed': return '失败';
     case 'cancelled': return '已取消';
-    default: return '排队中';
+    default: return '等待中';
   }
 }
 </script>
@@ -74,7 +78,7 @@ function getStatusText(status: string) {
         <div class="task-header">
           <span class="task-name" :title="item.task_name">{{ item.task_name }}</span>
           <span :class="['status-badge', getStatusBadgeClass(item.status)]">
-            {{ getStatusText(item.status) }}
+            {{ getStatusText(item) }}
           </span>
         </div>
 
@@ -85,6 +89,10 @@ function getStatusText(status: string) {
 
         <div v-if="item.status === 'running'" class="task-progress-mini">
           <div class="progress-bar-fill" :style="{ width: `${item.progress}%` }"></div>
+        </div>
+
+        <div v-else-if="item.status === 'queued' || item.status === 'pending'" class="task-queued-mini">
+          <div class="queued-indicator">排队等待执行...</div>
         </div>
 
         <div v-if="item.summary && item.status === 'completed'" class="task-summary-mini">
@@ -231,6 +239,7 @@ function getStatusText(status: string) {
 
 .badge-success { background: #dcfce7; color: #166534; }
 .badge-running { background: #dbeafe; color: #1e40af; }
+.badge-queued { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
 .badge-failed { background: #fee2e2; color: #991b1b; }
 .badge-cancelled { background: #f1f5f9; color: #64748b; }
 .badge-pending { background: #fef3c7; color: #92400e; }
@@ -263,6 +272,19 @@ function getStatusText(status: string) {
   height: 100%;
   background: #3b82f6;
   transition: width 0.3s ease;
+}
+
+.task-queued-mini {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.queued-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .task-summary-mini {

@@ -977,6 +977,14 @@ const electronBridge = {
         return await apiGet(`/api/analysis/annotation/${taskId}/result`);
     },
 
+    async get_annotation_queue_status(): Promise<any> {
+        return await apiGet('/api/analysis/annotation/queue/status');
+    },
+
+    async reorder_annotation_queue(taskIds: string[]): Promise<any> {
+        return await apiPost('/api/analysis/annotation/queue/reorder', { task_ids: taskIds });
+    },
+
     async delete_annotation_task(taskId: string): Promise<any> {
         return await apiDelete(`/api/analysis/annotation/${taskId}`);
     },

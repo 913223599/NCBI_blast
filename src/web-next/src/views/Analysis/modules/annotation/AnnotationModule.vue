@@ -9,6 +9,7 @@ import AnnotationHistory from './components/AnnotationHistory.vue';
 import AnnotationSetup from './components/AnnotationSetup.vue';
 import AnnotationProgress from './components/AnnotationProgress.vue';
 import AnnotationResults from './components/AnnotationResults.vue';
+import AnnotationQueueCard from './components/AnnotationQueueCard.vue';
 import type { AnnotationTaskItem, AnnotationRunParams } from './types';
 
 const emit = defineEmits<{
@@ -17,9 +18,11 @@ const emit = defineEmits<{
 
 const {
   isRunning,
+  isEngineBusy,
   currentTask,
   historyTasks,
   activeTaskId,
+  queueStatus,
   error,
   consoleLogs,
   isHistoryLoading,
@@ -45,8 +48,12 @@ onMounted(async () => {
 });
 
 async function onRunTask(params: AnnotationRunParams) {
-  showSetupForm.value = false;
-  await submitTask(params);
+  try {
+    await submitTask(params);
+    showSetupForm.value = false;
+  } catch (e) {
+    // 错误已在 useAnnotation 中捕获
+  }
 }
 
 async function onSelectHistory(item: AnnotationTaskItem) {
@@ -61,6 +68,18 @@ async function onViewResults(taskId: string) {
     currentTask.value.status = 'completed';
   }
   await loadTaskResult(taskId);
+}
+
+async function handleDeleteTask(taskId: string) {
+  await deleteTask(taskId);
+  if (!activeTaskId.value || !currentTask.value) {
+    const nextTask = historyTasks.value[0];
+    if (nextTask) {
+      await loadTaskResult(nextTask.task_id);
+    } else {
+      showSetupForm.value = true;
+    }
+  }
 }
 
 function onOpenViewer(gbkText: string, taskName: string) {
@@ -85,6 +104,9 @@ function onStartNew() {
               <path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
             </svg>
             <span>注释历史记录</span>
+            <span v-if="queueStatus && queueStatus.waiting_count > 0" class="queue-counter-tag" :title="`当前有 ${queueStatus.waiting_count} 个任务在排队`">
+              排队中 {{ queueStatus.waiting_count }}
+            </span>
           </div>
           <button class="new-task-btn" @click="onStartNew" title="新建注释任务">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -101,7 +123,7 @@ function onStartNew() {
             :active-id="activeTaskId" 
             :is-loading="isHistoryLoading"
             @select="onSelectHistory"
-            @delete="deleteTask"
+            @delete="handleDeleteTask"
             @refresh="fetchHistory"
           />
         </div>
@@ -124,12 +146,22 @@ function onStartNew() {
         </transition>
 
         <!-- 2.1 新建配置面板 (新建模式独占) -->
-        <section v-if="showSetupForm || (!isRunning && !currentTask)" class="section-setup">
-          <AnnotationSetup :is-running="isRunning" @run="onRunTask" />
+        <section v-if="showSetupForm || !currentTask" key="setup-panel" class="section-setup">
+          <AnnotationSetup :is-running="isRunning" :is-busy="isEngineBusy" @run="onRunTask" />
         </section>
 
-        <!-- 2.2 运行进度与终端面板 -->
-        <section v-else-if="isRunning && currentTask" class="section-progress">
+        <!-- 2.2 排队等待卡片 -->
+        <section v-else-if="currentTask && (currentTask.status === 'queued' || currentTask.status === 'pending')" :key="`queued-${currentTask.task_id}`" class="section-queued">
+          <AnnotationQueueCard 
+            :task="currentTask"
+            :queue-status="queueStatus"
+            @cancel="cancelTask(currentTask.task_id)"
+            @start-new="onStartNew"
+          />
+        </section>
+
+        <!-- 2.3 运行进度与终端面板 -->
+        <section v-else-if="currentTask && (currentTask.status === 'running' || (isRunning && currentTask.progress < 100))" :key="`progress-${currentTask.task_id}`" class="section-progress">
           <AnnotationProgress 
             :progress="currentTask.progress" 
             :current-step="currentTask.current_step"
@@ -140,17 +172,18 @@ function onStartNew() {
           />
         </section>
 
-        <!-- 2.3 结果展示面板 -->
-        <section v-else-if="currentTask && currentTask.status === 'completed'" class="section-results">
+        <!-- 2.4 结果展示面板 -->
+        <section v-else-if="currentTask && currentTask.status === 'completed'" :key="`results-${currentTask.task_id}`" class="section-results">
           <AnnotationResults 
+            :key="currentTask.task_id"
             :task="currentTask"
             @open-in-viewer="(gbk, name) => onOpenViewer(gbk, name)"
             @download="(type) => downloadFile(currentTask!.task_id, type)"
           />
         </section>
 
-        <!-- 2.4 任务失败或取消占位 -->
-        <section v-else-if="currentTask" class="status-box">
+        <!-- 2.5 任务失败或取消占位 -->
+        <section v-else-if="currentTask" :key="`status-${currentTask.task_id}`" class="status-box">
           <div class="status-box-content">
             <div class="status-icon" :class="currentTask.status">
               <svg v-if="currentTask.status === 'failed'" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -212,6 +245,16 @@ function onStartNew() {
   font-weight: 700;
   color: #1e293b;
   font-size: 14px;
+}
+
+.queue-counter-tag {
+  font-size: 11px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid #bfdbfe;
 }
 
 .new-task-btn {

@@ -17,7 +17,7 @@ if sys.platform.startswith("win"):
     platform.release = lambda: "10"
     platform.version = lambda: "10.0.19041"
     uname_result = collections.namedtuple("uname_result", ["system", "node", "release", "version", "machine", "processor"])
-    platform.uname = lambda: uname_result("Windows", "Node", "10", "10.0.19041", "AMD64", "AMD64")
+    platform.uname = lambda: uname_result("Windows", "Node", "10", "10.0.19041", "AMD64", "AMD64")  # type: ignore
 
 import asyncio
 import json
@@ -155,7 +155,15 @@ async def lifespan(app: FastAPI):
     from .routes.assembly import execute_assembly_pipeline
     from .utils.persistent_queue import persistent_queue
     asyncio.create_task(persistent_queue.start_workers(execute_assembly_pipeline))
-    logger.info("🚀 Assembly 持久化串行队列引擎已启动 (max_workers=1)")
+    logger.info("Assembly 持久化串行队列引擎已启动 (max_workers=1)")
+
+    # B3. 初始化功能注释任务队列调度工作者
+    try:
+        from src.analysis.annotation.manager import get_annotation_manager
+        asyncio.create_task(get_annotation_manager().initialize_queue_worker())
+        logger.info("[INIT] Annotation 持久化任务队列引擎已启动 (max_workers=1)")
+    except Exception as ea:
+        logger.error(f"Annotation 队列引擎启动失败: {ea}")
 
     # D. 打印局域网共享地址与初始化 WSL 环境
     try:

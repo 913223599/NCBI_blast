@@ -98,14 +98,39 @@ export interface SafetyAuditResult {
   anti_crispr_genes: SafetyHitItem[];
 }
 
+export interface QueuedTaskItem {
+  task_id: string;
+  task_name: string;
+  sample_type: string;
+  engine: string;
+  status: 'queued' | 'running';
+  position: number;
+  created_at: string;
+}
+
+export interface AnnotationQueueStatus {
+  is_busy: boolean;
+  is_paused: boolean;
+  current_task: {
+    task_id: string;
+    task_name: string;
+    status: string;
+    progress: number;
+    current_step: string;
+  } | null;
+  waiting_count: number;
+  waiting_tasks: QueuedTaskItem[];
+}
+
 export interface AnnotationTaskItem {
   task_id: string;
   task_name: string;
   sample_type: string;
   engine: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   current_step: string;
+  position?: number;
   error_msg?: string | null;
   created_at: string;
   updated_at: string;
@@ -124,3 +149,4 @@ export interface ProgressEventPayload {
   current_step: string;
   log?: string;
 }
+

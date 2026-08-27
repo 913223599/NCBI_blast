@@ -9,6 +9,7 @@ import ContigSelector from './ContigSelector.vue';
 
 const props = defineProps<{
   isRunning: boolean;
+  isBusy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -222,8 +223,10 @@ function onAssemblyTaskSelected() {
   }
 }
 
-function onSubmit() {
-  if (props.isRunning) return;
+const isSubmitting = ref<boolean>(false);
+
+async function onSubmit() {
+  if (isSubmitting.value || isUploading.value || isInspecting.value) return;
 
   if (inputMode.value === 'upload' && !form.fasta_path) {
     alert('请先上传或选择 FASTA 文件');
@@ -244,10 +247,32 @@ function onSubmit() {
     return;
   }
 
-  emit('run', {
-    ...form,
-    selected_contigs: inspectedContigs.value.length > 1 ? selectedContigIds.value : undefined
-  });
+  isSubmitting.value = true;
+  try {
+    emit('run', {
+      ...form,
+      selected_contigs: inspectedContigs.value.length > 1 ? selectedContigIds.value : undefined
+    });
+
+    // 提交后重置当前文件与内容，更新默认任务名，便于用户立即提交下一个任务
+    resetFormAfterSubmit();
+  } finally {
+    setTimeout(() => {
+      isSubmitting.value = false;
+    }, 500);
+  }
+}
+
+function resetFormAfterSubmit() {
+  uploadedFileName.value = '';
+  form.fasta_path = '';
+  form.fasta_content = '';
+  inspectedContigs.value = [];
+  selectedContigIds.value = [];
+  const now = new Date();
+  const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+  form.task_name = `Annotation_${dateStr}_${timeStr}`;
 }
 
 onMounted(() => {
@@ -504,13 +529,15 @@ onMounted(() => {
       <button 
         type="button" 
         class="submit-btn" 
-        :disabled="isRunning || isUploading"
+        :disabled="isUploading || isInspecting || isSubmitting"
         @click="onSubmit"
       >
-        <svg v-if="!isRunning" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <polygon points="5 3 19 12 5 21 5 3" />
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon v-if="!isBusy && !isRunning" points="5 3 19 12 5 21 5 3" />
+          <path v-else d="M12 5v14M5 12h14" />
         </svg>
-        <span v-if="isRunning">正在执行功能注释...</span>
+        <span v-if="isSubmitting">正在提交...</span>
+        <span v-else-if="isBusy || isRunning">加入注释分析队列</span>
         <span v-else>启动功能注释分析</span>
       </button>
     </div>

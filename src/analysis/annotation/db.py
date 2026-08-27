@@ -50,14 +50,14 @@ class AnnotationDB:
             conn.execute('CREATE INDEX IF NOT EXISTS idx_anno_created ON annotation_tasks(created_at)')
             conn.commit()
 
-    def create_task(self, task_id: str, task_name: str, sample_type: str, engine: str) -> bool:
+    def create_task(self, task_id: str, task_name: str, sample_type: str, engine: str, status: str = "queued") -> bool:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
                 INSERT INTO annotation_tasks 
                 (task_id, task_name, sample_type, engine, status, progress, current_step, created_at, updated_at, summary_json, files_json, safety_audit_json, checkv_json)
-                VALUES (?, ?, ?, ?, 'pending', 0, '任务初始化中...', ?, ?, '{}', '{}', '{}', '{}')
-            ''', (task_id, task_name, sample_type, engine, now_str, now_str))
+                VALUES (?, ?, ?, ?, ?, 0, '已加入排队队列...', ?, ?, '{}', '{}', '{}', '{}')
+            ''', (task_id, task_name, sample_type, engine, status, now_str, now_str))
             conn.commit()
         return True
 
@@ -143,6 +143,38 @@ class AnnotationDB:
                 data["checkv"] = json.loads(data.get("checkv_json") or "{}")
                 results.append(data)
             return results
+
+    def get_incomplete_tasks(self) -> List[Dict[str, Any]]:
+        """获取所有未完成的任务（用于队列快照与自愈恢复）"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('''
+                SELECT task_id, task_name, sample_type, engine, status, progress, current_step, created_at, updated_at
+                FROM annotation_tasks 
+                WHERE status IN ('running', 'queued', 'pending')
+                ORDER BY created_at ASC
+            ''')
+            return [dict(r) for r in cursor.fetchall()]
+
+    def reset_interrupted_tasks(self, exclude_task_ids: Optional[List[str]] = None):
+        """服务重启安全自愈：将此前处于 running 状态的遗留任务标记为 cancelled（排除当前正在运行的任务）"""
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        exclude = [tid for tid in (exclude_task_ids or []) if tid]
+        with sqlite3.connect(self.db_path) as conn:
+            if exclude:
+                placeholders = ','.join('?' for _ in exclude)
+                conn.execute(f'''
+                    UPDATE annotation_tasks 
+                    SET status = 'cancelled', current_step = '服务重启导致中断，已重置', updated_at = ?
+                    WHERE status = 'running' AND task_id NOT IN ({placeholders})
+                ''', [now_str] + exclude)
+            else:
+                conn.execute('''
+                    UPDATE annotation_tasks 
+                    SET status = 'cancelled', current_step = '服务重启导致中断，已重置', updated_at = ?
+                    WHERE status = 'running'
+                ''', (now_str,))
+            conn.commit()
 
     def delete_task(self, task_id: str) -> bool:
         with sqlite3.connect(self.db_path) as conn:

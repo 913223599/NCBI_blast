@@ -14,6 +14,7 @@ from .types import AnnotationRunRequest
 from .db import annotation_db
 from .pipeline import AnnotationPipeline
 from .fuser import AnnotationFuser
+from .queue import annotation_queue
 
 logger = logging.getLogger("analysis.annotation.manager")
 
@@ -35,6 +36,10 @@ class AnnotationManager:
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self._active_pipelines: Dict[str, AnnotationPipeline] = {}
         self._initialized = True
+
+    async def initialize_queue_worker(self):
+        """初始化启动队列消费工作者"""
+        await annotation_queue.start_workers(self.execute_pipeline_task)
 
     def inspect_fasta(self, fasta_path: Optional[str] = None, fasta_content: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -101,57 +106,95 @@ class AnnotationManager:
         }
 
     async def submit_task(self, req: AnnotationRunRequest) -> Dict[str, Any]:
-        """提交并启动异步注释任务"""
+        """提交注释任务至持久化调度队列"""
         task_id = f"ANNO_{os.urandom(4).hex().upper()}"
         task_name = req.task_name or f"Annotation_{task_id}"
         
-        # 1. 注册到数据库
+        # 1. 注册到数据库，标记为 queued 状态
         annotation_db.create_task(
             task_id=task_id,
             task_name=task_name,
             sample_type=req.sample_type,
-            engine=req.engine
+            engine=req.engine,
+            status="queued"
         )
 
-        task_work_dir = self.results_dir / task_id
-        pipeline = AnnotationPipeline(task_id=task_id, work_dir=task_work_dir)
-        self._active_pipelines[task_id] = pipeline
-
-        # 2. 启动后台异步协程
-        asyncio.create_task(self._run_task_wrapper(pipeline, req, task_id))
+        # 2. 推送至调度队列
+        payload = {
+            "task_id": task_id,
+            "task_name": task_name,
+            "sample_type": req.sample_type,
+            "engine": req.engine,
+            "req": req
+        }
+        enqueue_res = await annotation_queue.add_task(payload)
 
         return {
             "success": True,
             "task_id": task_id,
             "task_name": task_name,
-            "status": "pending",
-            "message": "注释任务已成功创建并启动"
+            "position": enqueue_res.get("position", 1),
+            "status": "queued",
+            "message": "注释任务已成功加入等待队列"
         }
 
-    async def _run_task_wrapper(self, pipeline: AnnotationPipeline, req: AnnotationRunRequest, task_id: str):
+    async def execute_pipeline_task(self, payload: Dict[str, Any]):
+        """执行具体的流水线任务（由 AnnotationQueue 串行/受控派发）"""
+        task_id = payload.get("task_id")
+        if not task_id or not isinstance(task_id, str):
+            logger.error(f"[MANAGER] Invalid task payload, missing task_id: {payload}")
+            return
+
+        raw_req = payload.get("req")
+        if isinstance(raw_req, dict):
+            req = AnnotationRunRequest(**raw_req)
+        elif isinstance(raw_req, AnnotationRunRequest):
+            req = raw_req
+        else:
+            logger.error(f"[MANAGER] Invalid task request for {task_id}: {type(raw_req)}")
+            return
+
+        task_work_dir = self.results_dir / task_id
+        pipeline = AnnotationPipeline(task_id=task_id, work_dir=task_work_dir)
+        self._active_pipelines[task_id] = pipeline
+
         try:
             await pipeline.execute(req)
-        except Exception as e:
-            logger.error(f"Task {task_id} execution failed in background: {e}")
         finally:
             if task_id in self._active_pipelines:
                 del self._active_pipelines[task_id]
 
     def cancel_task(self, task_id: str) -> bool:
-        """取消正在运行的任务"""
+        """取消排队中或正在运行的任务"""
+        # 1. 尝试从等待队列中移出
+        if annotation_queue.remove_task_from_queue(task_id):
+            return True
+
+        # 2. 若正在执行，发送取消指令
         if task_id in self._active_pipelines:
             self._active_pipelines[task_id].cancel()
             annotation_db.mark_cancelled(task_id)
             return True
+
         return False
+
+    async def get_queue_status(self) -> Dict[str, Any]:
+        """获取当前排队与运行状态快照"""
+        return await annotation_queue.get_queue_status()
+
+    def reorder_queue(self, task_ids: List[str]):
+        """调整等待队列排队顺序"""
+        annotation_queue.reorder_queue(task_ids)
 
     def list_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         """获取注释历史列表并自动纠正完成态任务"""
         tasks = annotation_db.list_tasks(limit=limit)
+        incomplete = annotation_db.get_incomplete_tasks()
+        waiting_ids = [t["task_id"] for t in incomplete if t["status"] == "queued"]
+        
         for t in tasks:
             if t.get("status") == "running" and t.get("progress", 0) >= 100:
                 t["status"] = "completed"
-                # 异步或同步更新数据库
                 try:
                     annotation_db.mark_completed(
                         task_id=t["task_id"],
@@ -160,6 +203,12 @@ class AnnotationManager:
                     )
                 except Exception:
                     pass
+            elif t.get("status") == "queued":
+                # 计算排队位置
+                if t["task_id"] in waiting_ids:
+                    t["position"] = waiting_ids.index(t["task_id"]) + 1
+                else:
+                    t["position"] = 1
         return tasks
 
     def get_task_result(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -167,6 +216,19 @@ class AnnotationManager:
         task = annotation_db.get_task(task_id)
         if not task:
             return None
+
+        # 性能极速优化：如果任务处于排队或等待中，无需进行任何磁盘扫描，直接秒级返回
+        if task.get("status") in ("queued", "pending"):
+            waiting_ids = [p.get("task_id") for p in annotation_queue._queue]
+            if task_id in waiting_ids:
+                task["position"] = waiting_ids.index(task_id) + 1
+            else:
+                task["position"] = 1
+            task["features"] = []
+            task["feature_count"] = 0
+            task["gbk_content"] = ""
+            task["work_dir"] = str((self.results_dir / task_id).resolve())
+            return task
 
         task_work_dir = self.results_dir / task_id
         features_json_file = task_work_dir / "features.json"
@@ -239,6 +301,15 @@ class AnnotationManager:
         task["feature_count"] = len(features)
         task["gbk_content"] = gbk_content
         task["work_dir"] = str(task_work_dir.resolve())
+
+        # 计算排队位置
+        if task.get("status") in ("queued", "pending"):
+            waiting_ids = [p.get("task_id") for p in annotation_queue._queue]
+            if task_id in waiting_ids:
+                task["position"] = waiting_ids.index(task_id) + 1
+            else:
+                task["position"] = 1
+
         return task
 
     def get_task_file_path(self, task_id: str, file_type: str) -> Optional[Path]:

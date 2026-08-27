@@ -43,6 +43,23 @@ async def run_annotation(req: AnnotationRunRequest):
     return result
 
 
+@router.get("/queue/status")
+async def get_annotation_queue_status():
+    """获取当前功能注释排队与计算引擎状态快照"""
+    manager = get_annotation_manager()
+    status = await manager.get_queue_status()
+    return {"success": True, "data": status}
+
+
+@router.post("/queue/reorder")
+async def reorder_annotation_queue(req: Dict[str, Any]):
+    """对等待中的注释任务重排优先级"""
+    task_ids = req.get("task_ids", [])
+    manager = get_annotation_manager()
+    manager.reorder_queue(task_ids)
+    return {"success": True, "message": "队列排队顺序已更新"}
+
+
 @router.get("/history")
 async def get_annotation_history(limit: int = 50):
     """获取所有注释历史任务列表"""
