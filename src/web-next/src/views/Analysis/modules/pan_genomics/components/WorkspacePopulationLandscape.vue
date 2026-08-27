@@ -42,9 +42,8 @@ const isMetadataTrackVisible = ref(true)
 const isAniTrackVisible = ref(true)
 const isGeneMatrixTrackVisible = ref(true)
 
-// 密度模式 (Comfortable / Compact / Ultra-Scale 50+) 与视口自适应
+// 密度模式 (Comfortable / Compact / Ultra-Scale 50+)
 const displayDensity = ref<'comfortable' | 'compact' | 'ultra'>('comfortable')
-const viewportMaxHeight = ref<'620px' | '860px' | 'none'>('620px')
 
 function openClusterDrawer(c: any) {
   selectedGeneCluster.value = c
@@ -640,15 +639,6 @@ const isCurrentPair = (s1: string, s2: string) => {
             </div>
           </div>
 
-          <!-- 视口限高 -->
-          <div class="viewport-select-wrap">
-            <select v-model="viewportMaxHeight" class="modern-select">
-              <option value="620px">限高 620px</option>
-              <option value="860px">高画板 860px</option>
-              <option value="none">完全平铺</option>
-            </select>
-          </div>
-
           <!-- 图注收折按钮 -->
           <button 
             class="btn-legend-toggle"
@@ -662,7 +652,7 @@ const isCurrentPair = (s1: string, s2: string) => {
               <rect x="14" y="14" width="7" height="7" rx="1"/>
               <rect x="3" y="14" width="7" height="7" rx="1"/>
             </svg>
-            {{ isLegendCollapsed ? '图注' : '收起图注' }}
+            {{ isLegendCollapsed ? '展开图注' : '收起图注' }}
           </button>
         </div>
       </div>
@@ -802,11 +792,8 @@ const isCurrentPair = (s1: string, s2: string) => {
         </div>
       </div>
 
-      <!-- 共享样本排序的一体化矩阵画板 (支持粘性冻结表头与冻结样本列，自适应纵向限高) -->
-      <div 
-        class="phylogenomic-composite-canvas" 
-        :style="{ maxHeight: viewportMaxHeight === 'none' ? 'none' : viewportMaxHeight }"
-      >
+      <!-- 共享样本排序的一体化矩阵画板 (支持粘性冻结表头与冻结样本列) -->
+      <div class="phylogenomic-composite-canvas">
         <table class="composite-evidence-table">
           <thead>
             <tr>
@@ -1555,8 +1542,9 @@ const isCurrentPair = (s1: string, s2: string) => {
   border-radius: 50%;
 }
 
-/* 一体化画板表格与吸顶/冻结列 */
+/* 一体化画板表格与吸顶/冻结列 (内容超长时自然内部滚动) */
 .phylogenomic-composite-canvas {
+  max-height: 70vh;
   overflow-x: auto;
   overflow-y: auto;
   border: 1px solid #f1f5f9;
