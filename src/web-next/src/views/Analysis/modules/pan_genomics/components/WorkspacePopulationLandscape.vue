@@ -596,186 +596,208 @@ const isCurrentPair = (s1: string, s2: string) => {
 
     <!-- 顶刊旗舰组合图: Phylogenomic Evidence Matrix -->
     <div class="academic-panel flagship-matrix-panel">
-      <div class="panel-header flex-header-wrap">
-        <div class="title-with-tag">
-          <span class="panel-tag">Figure 1 Flagship</span>
-          <h3>系统发育 × 元数据 × 全基因组 ANI × 基因内容全序矩阵 (Phylogenomic Evidence Matrix)</h3>
+      <!-- 1. 顶层主标题与全局视图控制带 -->
+      <div class="panel-header-deck">
+        <div class="deck-title-area">
+          <div class="title-main-row">
+            <span class="panel-tag-pill">Figure 1</span>
+            <h3 class="panel-heading-text">系统发育与泛基因组多维证据矩阵</h3>
+            <span class="matrix-scope-badge">
+              {{ populationStats.n }} 株系 · {{ sortedGeneClusters.length }} 基因家族
+            </span>
+          </div>
         </div>
 
-        <!-- 组合图交互工具栏 (轨道开关 + 密度模式 + 视口限高 + 分区过滤) -->
-        <div class="matrix-comprehensive-toolbar">
-          <!-- 1. 轨道显隐切换开关组 (Track Toggles) -->
-          <div class="track-toggle-capsule-group">
-            <span class="toolbar-sublabel">轨道显隐:</span>
+        <div class="deck-actions-area">
+          <!-- 密度分段控制器 (Segmented Control) -->
+          <div class="segmented-density-control">
+            <span class="control-label">密度:</span>
+            <div class="seg-pills">
+              <button 
+                class="seg-btn" 
+                :class="{ active: displayDensity === 'comfortable' }" 
+                @click="displayDensity = 'comfortable'"
+                title="舒适模式 (行高 24px，适合 2~15 株)"
+              >
+                舒适
+              </button>
+              <button 
+                class="seg-btn" 
+                :class="{ active: displayDensity === 'compact' }" 
+                @click="displayDensity = 'compact'"
+                title="紧凑模式 (行高 17px，适合 15~35 株)"
+              >
+                紧凑
+              </button>
+              <button 
+                class="seg-btn btn-ultra" 
+                :class="{ active: displayDensity === 'ultra' }" 
+                @click="displayDensity = 'ultra'"
+                title="全景微缩模式 (行高 11px，适合 35~100+ 株)"
+              >
+                50+全景
+              </button>
+            </div>
+          </div>
+
+          <!-- 视口限高 -->
+          <div class="viewport-select-wrap">
+            <select v-model="viewportMaxHeight" class="modern-select">
+              <option value="620px">限高 620px</option>
+              <option value="860px">高画板 860px</option>
+              <option value="none">完全平铺</option>
+            </select>
+          </div>
+
+          <!-- 图注收折按钮 -->
+          <button 
+            class="btn-legend-toggle"
+            :class="{ active: !isLegendCollapsed }"
+            @click="isLegendCollapsed = !isLegendCollapsed"
+            :title="isLegendCollapsed ? '展开图注' : '收起图注'"
+          >
+            <svg class="legend-icon" viewBox="0 0 24 24" width="12" height="12" stroke="currentColor" stroke-width="2" fill="none">
+              <rect x="3" y="3" width="7" height="7" rx="1"/>
+              <rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="14" y="14" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/>
+            </svg>
+            {{ isLegendCollapsed ? '图注' : '收起图注' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. 统一操作带 (Unified Tool Ribbon: 数据切片 + 轨道显隐) -->
+      <div class="matrix-ribbon-bar">
+        <!-- 左侧：CDS 分区与功能分类过滤 -->
+        <div class="ribbon-left-filters">
+          <div class="filter-group">
+            <span class="ribbon-group-label">CDS 分区:</span>
+            <div class="ribbon-pills">
+              <button 
+                class="r-pill" 
+                :class="{ active: genePartitionFilter === 'ALL' }"
+                @click="genePartitionFilter = 'ALL'"
+              >
+                全部 ({{ clusters?.length || 0 }})
+              </button>
+              <button 
+                class="r-pill r-pill-amber" 
+                :class="{ active: genePartitionFilter === 'VARIABLE' }"
+                @click="genePartitionFilter = 'VARIABLE'"
+                title="仅显示存在样本缺失或分化的差异 CDS 家族"
+              >
+                差异 ({{ (clusters?.length || 0) - Number(pangenomePartition.core) }})
+              </button>
+              <button 
+                class="r-pill r-pill-blue" 
+                :class="{ active: genePartitionFilter === 'CORE' }"
+                @click="genePartitionFilter = 'CORE'"
+                title="仅显示全群体 100% 共享的核心 CDS 家族"
+              >
+                核心 Core ({{ pangenomePartition.core }})
+              </button>
+              <button 
+                class="r-pill" 
+                :class="{ active: genePartitionFilter === 'UNIQUE' }"
+                @click="genePartitionFilter = 'UNIQUE'"
+                title="仅显示仅在单一株系中出现的特有 CDS"
+              >
+                单株特有
+              </button>
+            </div>
+          </div>
+
+          <div class="filter-divider"></div>
+
+          <div class="filter-group">
+            <span class="ribbon-group-label">功能:</span>
+            <select v-model="geneCategoryFilter" class="modern-select select-cat">
+              <option value="ALL">全部模块 (All Modules)</option>
+              <option value="Tail">尾丝与受体 (Tail)</option>
+              <option value="Lysis">裂解系统 (Lysis)</option>
+              <option value="Defense & Host Interaction">免疫防御 (Defense/Acr)</option>
+              <option value="Replication & Repair">复制修饰 (Replication)</option>
+              <option value="Structural">结构形态 (Structural)</option>
+              <option value="Packaging">DNA包装 (Packaging)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 右侧：多维轨道显隐开关 -->
+        <div class="ribbon-right-tracks">
+          <span class="ribbon-group-label">显示轨道:</span>
+          <div class="track-check-pills">
             <button 
-              class="btn-track-pill" 
+              class="trk-pill" 
               :class="{ active: isPhylogenyTrackVisible }" 
               @click="isPhylogenyTrackVisible = !isPhylogenyTrackVisible"
               title="显示/隐藏系统发育树轨道"
             >
-              进化树
+              <span class="trk-dot"></span> 进化树
             </button>
             <button 
-              class="btn-track-pill" 
+              class="trk-pill" 
               :class="{ active: isMetadataTrackVisible }" 
               @click="isMetadataTrackVisible = !isMetadataTrackVisible"
-              title="显示/隐藏元数据 (Lifestyle / Safety / Acr) 轨道"
+              title="显示/隐藏元数据轨道"
             >
-              元数据
+              <span class="trk-dot"></span> 元数据
             </button>
             <button 
-              class="btn-track-pill" 
+              class="trk-pill" 
               :class="{ active: isAniTrackVisible }" 
               @click="isAniTrackVisible = !isAniTrackVisible"
               title="显示/隐藏全基因组 ANI 相似度矩阵"
             >
-              ANI 矩阵
+              <span class="trk-dot"></span> ANI 矩阵
             </button>
             <button 
-              class="btn-track-pill" 
+              class="trk-pill" 
               :class="{ active: isGeneMatrixTrackVisible }" 
               @click="isGeneMatrixTrackVisible = !isGeneMatrixTrackVisible"
               title="显示/隐藏泛基因组正交家族矩阵"
             >
-              基因全序
+              <span class="trk-dot"></span> 基因全序
             </button>
           </div>
-
-          <!-- 2. 超大规模自适应密度切换 (Comfort / Compact / Ultra-Scale 50+) -->
-          <div class="density-switch-group">
-            <span class="toolbar-sublabel">显示密度:</span>
-            <button 
-              class="btn-density-opt" 
-              :class="{ active: displayDensity === 'comfortable' }" 
-              @click="displayDensity = 'comfortable'"
-              title="标准舒适模式 (行高 24px，适合 2~15 株)"
-            >
-              舒适
-            </button>
-            <button 
-              class="btn-density-opt" 
-              :class="{ active: displayDensity === 'compact' }" 
-              @click="displayDensity = 'compact'"
-              title="紧凑模式 (行高 17px，适合 15~35 株)"
-            >
-              紧凑
-            </button>
-            <button 
-              class="btn-density-opt btn-density-ultra" 
-              :class="{ active: displayDensity === 'ultra' }" 
-              @click="displayDensity = 'ultra'"
-              title="超大规模全景微缩模式 (行高 11px，适合 35~100+ 株大规模比对)"
-            >
-              50+ 全景
-            </button>
-          </div>
-
-          <!-- 3. 视口自适应限高选择器 -->
-          <div class="viewport-height-group">
-            <span class="toolbar-sublabel">视口限高:</span>
-            <select v-model="viewportMaxHeight" class="compact-select">
-              <option value="620px">标准限高 (620px 内部滚动)</option>
-              <option value="860px">高画板 (860px)</option>
-              <option value="none">完全平铺 (无滚动限制)</option>
-            </select>
-          </div>
-
-          <!-- 4. 图注展开/折叠按钮 -->
-          <button 
-            class="btn-legend-collapse-opt"
-            :class="{ active: !isLegendCollapsed }"
-            @click="isLegendCollapsed = !isLegendCollapsed"
-            :title="isLegendCollapsed ? '展开上方常驻图注栏' : '收起图注栏以腾出更多矩阵画板空间'"
-          >
-            {{ isLegendCollapsed ? '展开图注' : '收起图注' }}
-          </button>
         </div>
       </div>
 
-      <!-- 差异/分区模式与功能分类过滤条 -->
-      <div class="matrix-filter-controls-bar">
-        <div class="partition-filter-pills">
-          <button 
-            class="btn-pill-opt" 
-            :class="{ active: genePartitionFilter === 'ALL' }"
-            @click="genePartitionFilter = 'ALL'"
-          >
-            全部 CDS ({{ clusters?.length || 0 }})
-          </button>
-          <button 
-            class="btn-pill-opt text-amber-pill" 
-            :class="{ active: genePartitionFilter === 'VARIABLE' }"
-            @click="genePartitionFilter = 'VARIABLE'"
-            title="仅显示存在样本缺失或分化的差异 CDS 家族"
-          >
-            仅看差异 CDS ({{ (clusters?.length || 0) - Number(pangenomePartition.core) }})
-          </button>
-          <button 
-            class="btn-pill-opt text-blue-pill" 
-            :class="{ active: genePartitionFilter === 'CORE' }"
-            @click="genePartitionFilter = 'CORE'"
-            title="仅显示全群体 100% 共享的核心 CDS 家族"
-          >
-            核心 CDS ({{ pangenomePartition.core }})
-          </button>
-          <button 
-            class="btn-pill-opt" 
-            :class="{ active: genePartitionFilter === 'UNIQUE' }"
-            @click="genePartitionFilter = 'UNIQUE'"
-            title="仅显示仅在单一株系中出现的特有 CDS"
-          >
-            单株特有
-          </button>
+      <!-- 3. 精炼学术图注条 (可一键收起/展开) -->
+      <div class="academic-legend-deck" v-show="!isLegendCollapsed">
+        <div class="leg-col leg-col-function">
+          <span class="leg-col-title">CDS 功能分类:</span>
+          <div class="leg-items-wrap">
+            <span class="leg-chip"><i style="background: #f59e0b;"></i>尾丝受体 (Tail)</span>
+            <span class="leg-chip"><i style="background: #059669;"></i>裂解系统 (Lysis)</span>
+            <span class="leg-chip"><i style="background: #dc2626;"></i>免疫防御 (Defense)</span>
+            <span class="leg-chip"><i style="background: #7c3aed;"></i>DNA包装 (Packaging)</span>
+            <span class="leg-chip"><i style="background: #2563eb;"></i>结构形态 (Structural)</span>
+            <span class="leg-chip"><i style="background: #d97706;"></i>复制修饰 (Replication)</span>
+            <span class="leg-chip"><i style="background: #0891b2;"></i>代谢辅助 (Metabolism)</span>
+            <span class="leg-chip"><i style="background: #94a3b8;"></i>假定蛋白 (Hypothetical)</span>
+          </div>
         </div>
 
-        <div class="cat-filter-wrap">
-          <span class="filter-lbl">功能分类:</span>
-          <select v-model="geneCategoryFilter" class="compact-cat-select">
-            <option value="ALL">全部模块 (All Modules)</option>
-            <option value="Tail">尾丝与受体 (Tail)</option>
-            <option value="Lysis">裂解系统 (Lysis)</option>
-            <option value="Defense & Host Interaction">免疫防御 (Defense/Acr)</option>
-            <option value="Replication & Repair">复制修饰 (Replication)</option>
-            <option value="Structural">结构形态 (Structural)</option>
-            <option value="Packaging">DNA包装 (Packaging)</option>
-          </select>
+        <div class="leg-col leg-col-variation">
+          <span class="leg-col-title">变异形态:</span>
+          <div class="leg-items-wrap">
+            <span class="leg-chip"><span class="swatch-sq sq-legend-conserved"></span>等长保守 (纯色)</span>
+            <span class="leg-chip"><span class="swatch-sq sq-legend-truncated"></span>缺失截短 (斜纹)</span>
+            <span class="leg-chip"><span class="swatch-sq sq-legend-extended"></span>插入延长 (端标)</span>
+            <span class="leg-chip"><span class="swatch-dot" style="background-color: #cbd5e1;"></span>基因缺失</span>
+          </div>
         </div>
-      </div>
 
-      <!-- 全局常驻图注卡片栏 (可一键收起/展开) -->
-      <div class="global-matrix-legend-card" v-show="!isLegendCollapsed">
-        <div class="legend-section-row">
-          <div class="legend-subgroup">
-            <span class="legend-subgroup-title">CDS 功能模块分类:</span>
-            <div class="legend-pills-list">
-              <span class="leg-pill"><span class="swatch-sq" style="background-color: #f59e0b;"></span> 尾丝受体 (Tail)</span>
-              <span class="leg-pill"><span class="swatch-sq" style="background-color: #059669;"></span> 裂解系统 (Lysis)</span>
-              <span class="leg-pill"><span class="swatch-sq" style="background-color: #dc2626;"></span> 免疫防御 (Defense)</span>
-              <span class="leg-pill"><span class="swatch-sq" style="background-color: #7c3aed;"></span> DNA包装 (Packaging)</span>
-              <span class="leg-pill"><span class="swatch-sq" style="background-color: #2563eb;"></span> 结构形态 (Structural)</span>
-              <span class="leg-pill"><span class="swatch-sq" style="background-color: #d97706;"></span> 复制修饰 (Replication)</span>
-              <span class="leg-pill"><span class="swatch-sq" style="background-color: #0891b2;"></span> 代谢辅助 (Metabolism)</span>
-              <span class="leg-pill"><span class="swatch-sq" style="background-color: #94a3b8;"></span> 假定蛋白 (Hypothetical)</span>
-            </div>
-          </div>
-          <div class="legend-subgroup">
-            <span class="legend-subgroup-title">CDS 变异形态:</span>
-            <div class="legend-pills-list">
-              <span class="leg-pill"><span class="swatch-sq sq-legend-conserved"></span> 等长保守 (纯色实心)</span>
-              <span class="leg-pill"><span class="swatch-sq sq-legend-truncated"></span> 缺失截短 (斜斑纹理)</span>
-              <span class="leg-pill"><span class="swatch-sq sq-legend-extended"></span> 插入延长 (上下端标)</span>
-              <span class="leg-pill"><span class="swatch-dot" style="background-color: #cbd5e1;"></span> 基因缺失</span>
-            </div>
-          </div>
-          <div class="legend-subgroup" v-if="isAniTrackVisible">
-            <span class="legend-subgroup-title">全基因组 ANI (%):</span>
-            <div class="ani-heat-swatch-list">
-              <span class="heat-chip" style="background-color: #eff6ff; color: #1e3a8a;">70</span>
-              <span class="heat-chip" style="background-color: #bfdbfe; color: #1e3a8a;">80</span>
-              <span class="heat-chip" style="background-color: #60a5fa; color: #ffffff;">90</span>
-              <span class="heat-chip" style="background-color: #2563eb; color: #ffffff;">95</span>
-              <span class="heat-chip" style="background-color: #1e3a8a; color: #ffffff;">100</span>
-            </div>
+        <div class="leg-col leg-col-ani" v-if="isAniTrackVisible">
+          <span class="leg-col-title">全基因组 ANI (%):</span>
+          <div class="ani-heat-swatch-list">
+            <span class="heat-chip" style="background-color: #eff6ff; color: #1e3a8a;">70</span>
+            <span class="heat-chip" style="background-color: #bfdbfe; color: #1e3a8a;">80</span>
+            <span class="heat-chip" style="background-color: #60a5fa; color: #ffffff;">90</span>
+            <span class="heat-chip" style="background-color: #2563eb; color: #ffffff;">95</span>
+            <span class="heat-chip" style="background-color: #1e3a8a; color: #ffffff;">100</span>
           </div>
         </div>
       </div>
@@ -1191,117 +1213,146 @@ const isCurrentPair = (s1: string, s2: string) => {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 16px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
-.panel-header {
+/* 1. 顶层主标题与全局视图控制带 */
+.panel-header-deck {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #f1f5f9;
-  padding-bottom: 10px;
-}
-
-.flex-header-wrap {
-  flex-wrap: wrap;
   gap: 12px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 8px;
 }
 
-.title-with-tag {
+.deck-title-area {
+  display: flex;
+  align-items: center;
+}
+
+.title-main-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-.panel-tag {
+.panel-tag-pill {
   background: #0f172a;
   color: #ffffff;
   font-size: 10px;
   font-weight: 800;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
+  letter-spacing: 0.5px;
 }
 
-.panel-header h3 {
+.panel-heading-text {
   margin: 0;
   font-size: 13px;
   font-weight: 700;
   color: #0f172a;
 }
 
-/* 综合视图工具栏 (轨道开关、密度模式、视口限高) */
-.matrix-comprehensive-toolbar {
+.matrix-scope-badge {
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid #dbeafe;
+}
+
+.deck-actions-area {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.toolbar-sublabel {
-  font-size: 10px;
-  font-weight: 700;
+.control-label {
+  font-size: 11px;
+  font-weight: 600;
   color: #64748b;
   margin-right: 4px;
 }
 
-.track-toggle-capsule-group,
-.density-switch-group {
+/* 分段选择器 (Segmented Control) */
+.segmented-density-control {
   display: flex;
   align-items: center;
-  gap: 2px;
-  background: #f1f5f9;
-  padding: 2px 4px;
-  border-radius: 6px;
 }
 
-.btn-track-pill,
-.btn-density-opt {
+.seg-pills {
+  display: flex;
+  background: #f1f5f9;
+  padding: 2px;
+  border-radius: 6px;
+  gap: 2px;
+}
+
+.seg-btn {
   background: transparent;
   border: none;
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 600;
   color: #64748b;
-  padding: 2px 6px;
+  padding: 2px 8px;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.btn-track-pill:hover,
-.btn-density-opt:hover {
+.seg-btn:hover {
   color: #0f172a;
 }
 
-.btn-track-pill.active,
-.btn-density-opt.active {
+.seg-btn.active {
   background: #ffffff;
   color: #0f172a;
   font-weight: 700;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-.btn-track-pill.active {
-  color: #2563eb;
-}
-
-.btn-density-ultra.active {
+.seg-btn.btn-ultra.active {
   color: #d97706;
 }
 
-.viewport-height-group {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.btn-legend-collapse-opt {
+.modern-select {
   background: #f8fafc;
   border: 1px solid #cbd5e1;
-  border-radius: 4px;
-  font-size: 10px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modern-select:hover {
+  border-color: #94a3b8;
+  background: #ffffff;
+}
+
+.modern-select.select-cat {
+  max-width: 170px;
+}
+
+.btn-legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  font-size: 10.5px;
   font-weight: 600;
   color: #475569;
   padding: 3px 8px;
@@ -1309,84 +1360,217 @@ const isCurrentPair = (s1: string, s2: string) => {
   transition: all 0.15s ease;
 }
 
-.btn-legend-collapse-opt:hover {
+.btn-legend-toggle:hover {
   background: #e2e8f0;
   color: #0f172a;
 }
 
-.btn-legend-collapse-opt.active {
-  background: #f1f5f9;
-  border-color: #94a3b8;
+.btn-legend-toggle.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
 }
 
-/* 过滤控制栏 */
-.matrix-filter-controls-bar {
+/* 2. 统一操作带 (Unified Tool Ribbon) */
+.matrix-ribbon-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 10px;
   flex-wrap: wrap;
 }
 
-.cat-filter-wrap {
+.ribbon-left-filters,
+.ribbon-right-tracks {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-group {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.partition-filter-pills {
-  display: flex;
-  gap: 4px;
-  background: #f1f5f9;
-  padding: 2px;
-  border-radius: 6px;
+.ribbon-group-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #475569;
+  white-space: nowrap;
 }
 
-.btn-pill-opt {
+.ribbon-pills {
+  display: flex;
+  gap: 3px;
+  background: #e2e8f0;
+  padding: 2px;
+  border-radius: 5px;
+}
+
+.r-pill {
   background: transparent;
   border: none;
   font-size: 10px;
   font-weight: 600;
   color: #64748b;
-  padding: 3px 8px;
+  padding: 2px 7px;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
-.btn-pill-opt:hover {
+.r-pill:hover {
   color: #0f172a;
 }
 
-.btn-pill-opt.active {
+.r-pill.active {
   background: #ffffff;
   color: #0f172a;
+  font-weight: 700;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
-.btn-pill-opt.text-amber-pill.active {
+.r-pill-amber.active {
   color: #d97706;
-  font-weight: 700;
 }
 
-.btn-pill-opt.text-blue-pill.active {
+.r-pill-blue.active {
   color: #2563eb;
-  font-weight: 700;
 }
 
-.filter-lbl {
-  font-size: 11px;
-  color: #64748b;
+.filter-divider {
+  width: 1px;
+  height: 14px;
+  background: #cbd5e1;
 }
 
-.compact-cat-select,
-.compact-select {
+/* 轨道开关 */
+.track-check-pills {
+  display: flex;
+  gap: 4px;
+}
+
+.trk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: #ffffff;
   border: 1px solid #cbd5e1;
-  border-radius: 4px;
   font-size: 10px;
-  padding: 3px 8px;
+  font-weight: 600;
+  color: #64748b;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.trk-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.trk-pill:hover {
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.trk-pill.active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.trk-pill.active .trk-dot {
+  background: #2563eb;
+}
+
+/* 3. 精炼学术图注条 (Academic Legend Deck) */
+.academic-legend-deck {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  flex-wrap: wrap;
+}
+
+.leg-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.leg-col-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.leg-items-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.leg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
   color: #334155;
+  white-space: nowrap;
+}
+
+.leg-chip i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  font-style: normal;
+}
+
+.ani-heat-swatch-list {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.heat-chip {
+  font-size: 8.5px;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.swatch-sq {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+}
+
+.swatch-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
 }
 
 /* 一体化画板表格与吸顶/冻结列 */
@@ -1462,8 +1646,8 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .th-sample-name {
-  width: 130px;
-  min-width: 130px;
+  width: 160px;
+  min-width: 160px;
   text-align: left;
 }
 
@@ -1503,81 +1687,6 @@ const isCurrentPair = (s1: string, s2: string) => {
   padding-left: 10px;
 }
 
-/* 全局常驻图注卡片栏 */
-.global-matrix-legend-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 8px 14px;
-}
-
-.legend-section-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.legend-subgroup {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.legend-subgroup-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: #334155;
-  white-space: nowrap;
-}
-
-.legend-pills-list {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.ani-heat-swatch-list {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.heat-chip {
-  font-size: 9px;
-  font-weight: 800;
-  padding: 2px 5px;
-  border-radius: 2px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-.leg-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #334155;
-  white-space: nowrap;
-}
-
-.swatch-sq {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-}
-
-.swatch-dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-}
-
 .gene-matrix-header-bar {
   display: flex;
   justify-content: space-between;
@@ -1589,28 +1698,6 @@ const isCurrentPair = (s1: string, s2: string) => {
 
 .gene-matrix-title-txt {
   white-space: nowrap;
-  font-weight: 700;
-}
-
-.figure-comprehensive-legend-strip {
-  display: flex;
-  gap: 16px;
-  background: #f8fafc;
-  border: 1px dashed #cbd5e1;
-  border-radius: 4px;
-  padding: 5px 12px;
-  font-size: 10px;
-  color: #64748b;
-  flex-wrap: wrap;
-}
-
-.legend-track-item {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.trk-name {
-  color: #1e293b;
   font-weight: 700;
 }
 
@@ -1662,8 +1749,9 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .td-sample-name-col {
-  width: 130px;
-  font-size: 10px;
+  width: 160px;
+  min-width: 160px;
+  font-size: 10.5px;
   color: #334155;
   padding: 0 6px;
   height: 24px;
@@ -2076,7 +2164,11 @@ const isCurrentPair = (s1: string, s2: string) => {
   max-height: 17px;
 }
 
+.density-compact .th-sample-name,
 .density-compact .td-sample-name-col {
+  width: 125px;
+  min-width: 125px;
+  max-width: 125px;
   font-size: 9.5px;
   height: 17px;
   line-height: 17px;
@@ -2116,17 +2208,14 @@ const isCurrentPair = (s1: string, s2: string) => {
   max-height: 11px;
 }
 
+.density-ultra .th-sample-name,
 .density-ultra .td-sample-name-col {
+  width: 95px;
+  min-width: 95px;
+  max-width: 95px;
   font-size: 8px;
   height: 11px;
   line-height: 11px;
-  width: 100px;
-  min-width: 100px;
-}
-
-.density-ultra .th-sample-name {
-  width: 100px;
-  min-width: 100px;
 }
 
 .density-ultra .th-sticky-left-2 {
