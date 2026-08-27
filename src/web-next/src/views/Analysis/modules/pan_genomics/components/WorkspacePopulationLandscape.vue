@@ -811,19 +811,20 @@ const isCurrentPair = (s1: string, s2: string) => {
           <thead>
             <tr>
               <!-- 1. 进化树列头 (可收起) -->
-              <th v-if="isPhylogenyTrackVisible" class="th-tree th-sticky-left-1">Phylogeny</th>
+              <th v-if="isPhylogenyTrackVisible" class="th-tree th-sticky-left-1" title="系统发育拓扑树 (基于全基因组 ANI 矩阵进行 UPGMA 聚类构建)">Phylogeny</th>
               <!-- 2. 样本名称列头 (冻结吸附在左侧) -->
               <th 
                 class="th-sample-name" 
                 :class="isPhylogenyTrackVisible ? 'th-sticky-left-2' : 'th-sticky-left-1'"
+                title="样本标识名称"
               >
                 Sample ID
               </th>
               <!-- 3. 元数据轨道列头 (可收起) -->
               <template v-if="isMetadataTrackVisible">
-                <th class="th-meta">Lifestyle</th>
-                <th class="th-meta">Safety</th>
-                <th class="th-meta">Acr</th>
+                <th class="th-meta" title="噬菌体生活周期 (Lytic 专性烈性 / Lysogenic 温和溶原)">Lifestyle</th>
+                <th class="th-meta" title="治疗安全性审计 (Safe 毒力因子与耐药基因阴性)">Safety</th>
+                <th class="th-meta" title="抗 CRISPR 攻防系统 (携带的 Anti-CRISPR 基因数)">Acr</th>
               </template>
               <!-- 4. ANI 矩阵列头 (与行样本完全一致的顺序，可收起) -->
               <template v-if="isAniTrackVisible">
@@ -964,7 +965,7 @@ const isCurrentPair = (s1: string, s2: string) => {
         </table>
       </div>
 
-      <!-- 悬停基因家族信息提示条 -->
+      <!-- 悬停基因家族信息提示条 (仅在鼠标悬停在具体 CDS 方块时浮现) -->
       <div class="cluster-hover-info-strip" v-if="hoveredGeneCluster">
         <span class="chip-cat" :style="{ backgroundColor: getCatColor(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category) }">
           {{ hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category }}
@@ -972,26 +973,7 @@ const isCurrentPair = (s1: string, s2: string) => {
         <strong>{{ hoveredGeneCluster.cluster?.group_id }}</strong>:
         <span>{{ hoveredGeneCluster.cluster?.representative_product }}</span>
         <span class="hover-sample-tag">【{{ sampleNames[hoveredGeneCluster.rowId] || hoveredGeneCluster.rowId }}】: <strong>{{ hoveredGeneCluster.variant?.variantLabel }}</strong></span>
-        <span class="text-slate"> (共享率: {{ hoveredGeneCluster.cluster?.sample_count }}/{{ orderedSampleIds.length }} 样本 · 点击可锁定展开全株比对表)</span>
-      </div>
-      <div class="cluster-hover-info-strip ph-strip" v-else>
-        <span class="text-slate">提示：当前已展示全部 {{ sortedGeneClusters.length }} 个 CDS 基因家族。支持通过顶部工具栏自由收起/展开进化树、元数据或 ANI 矩阵，切换 50+ 全景微缩模式。</span>
-      </div>
-
-      <!-- 全轨道图谱综合学术图注 -->
-      <div class="figure-comprehensive-legend-strip">
-        <div class="legend-track-item">
-          <strong class="trk-name">Phylogeny</strong>: <span>UPGMA 聚类系统发育拓扑树 (基于全基因组 ANI 矩阵)</span>
-        </div>
-        <div class="legend-track-item">
-          <strong class="trk-name">Lifestyle / Safety</strong>: <span>生活周期 (Lytic 专性烈性) 及安全性 (Safe 毒力/耐药阴性)</span>
-        </div>
-        <div class="legend-track-item">
-          <strong class="trk-name">Acr</strong>: <span>携带的抗 CRISPR (Anti-CRISPR) 基因数</span>
-        </div>
-        <div class="legend-track-item">
-          <strong class="trk-name">ANI (%)</strong>: <span>全基因组平均核酸一致性热阶 (蓝色深浅编码 70%~100%)</span>
-        </div>
+        <span class="text-slate"> (共享率: {{ hoveredGeneCluster.cluster?.sample_count }}/{{ orderedSampleIds.length }} 样本 · 点击展开全株比对)</span>
       </div>
 
       <!-- CDS 详细属性卡片模态 (点击查看各样本具体 CDS 基因座、起止坐标、氨基酸变异类型标注) -->
@@ -1914,16 +1896,11 @@ const isCurrentPair = (s1: string, s2: string) => {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   font-size: 11px;
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.cluster-hover-info-strip.ph-strip {
-  border-style: dashed;
-  background: #fdfdfe;
 }
 
 .chip-cat {
