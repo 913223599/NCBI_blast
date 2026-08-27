@@ -8,14 +8,18 @@
 4. 导出结构化比对结果与 CSV 报告。
 """
 import io
+import os
 import csv
 import json
 import logging
+import concurrent.futures
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from pydantic import BaseModel, Field
 from Bio import SeqIO
 from Bio.Align import PairwiseAligner
+
+from ..pan_genomics.fast_matcher import get_kmers
 
 logger = logging.getLogger("ProteinCompareEngine")
 
@@ -476,7 +480,7 @@ class ProteinComparer:
         sample_b_proteins: List[ProteinItem],
         target_category: str = "all"
     ) -> ProteinComparisonResult:
-        """执行两个样本间的全量或指定类别蛋白质比对"""
+        """执行两个样本间的全量或指定类别蛋白质比对 (多线程并发 + K-mer 预剪枝加速)"""
         rows: List[ProteinComparisonRow] = []
         matched_b_ids = set()
 
@@ -489,14 +493,21 @@ class ProteinComparer:
             filtered_b = sample_b_proteins
 
         # 建立样本 B 的快速检索索引 (按序列哈希与按产品名)
-        seq_to_b = {}
+        seq_to_b: Dict[str, List[ProteinItem]] = {}
         for b in filtered_b:
             if b.translation not in seq_to_b:
                 seq_to_b[b.translation] = []
             seq_to_b[b.translation].append(b)
 
-        # 逐个比对样本 A
-        for pa in filtered_a:
+        # 预先提取样本 B 所有蛋白的整型 K-mer 集合与长度
+        b_kmers: Dict[str, Set[int]] = {b.id: get_kmers(b.translation, 3) for b in filtered_b}
+
+        # 动态计算安全并发线程数 (保留 2 个核心)
+        cpu_cnt = os.cpu_count() or 4
+        max_workers = max(1, min(cpu_cnt - 2, 30))
+
+        # 内部对单条 pa 的最佳匹配对齐函数
+        def align_single_pa(pa: ProteinItem) -> Tuple[ProteinItem, Optional[ProteinItem], float, List[MutationSite], int, str, str, str, int, int, int, List[RegionDomainItem], str]:
             best_match: Optional[ProteinItem] = None
             best_identity = 0.0
             best_mutations: List[MutationSite] = []
@@ -509,18 +520,10 @@ class ProteinComparer:
             best_in_cnt: int = 0
             best_doms: List[RegionDomainItem] = []
             best_concl: str = ""
-            
+
             # 1. 优先检查 100% 序列完全相同的候选
             if pa.translation in seq_to_b and seq_to_b[pa.translation]:
-                # 寻找未使用的或同名匹配
-                exact_cand = None
-                for b_cand in seq_to_b[pa.translation]:
-                    if b_cand.id not in matched_b_ids:
-                        exact_cand = b_cand
-                        break
-                if not exact_cand:
-                    exact_cand = seq_to_b[pa.translation][0]
-                
+                exact_cand = seq_to_b[pa.translation][0]
                 best_match = exact_cand
                 best_identity = 100.0
                 best_mutations = []
@@ -533,96 +536,125 @@ class ProteinComparer:
                 best_in_cnt = 0
                 best_doms = self._calculate_domains(len(pa.translation), [], 100.0, category=pa.category, product=pa.product)
                 best_concl = "双样本全长氨基酸序列 100% 逐位一致，核心催化与组装结构高度锁定。"
-            else:
-                # 2. 同名优先检索与高相似度序列对齐
-                pa_prod_lower = pa.product.lower()
-                candidates = [b for b in filtered_b if b.id not in matched_b_ids]
-                
-                # 优先比对同名或相同分类的蛋白
-                same_prod_cands = [b for b in candidates if b.product.lower() == pa_prod_lower]
-                search_cands = same_prod_cands if same_prod_cands else candidates
+                return pa, best_match, best_identity, best_mutations, best_diff_cnt, best_aln_a, best_markup, best_aln_b, best_c_cnt, best_r_cnt, best_in_cnt, best_doms, best_concl
 
-                for pb in search_cands:
-                    ident, muts, diffs, aln_a, markup, aln_b, c_cnt, r_cnt, in_cnt, doms, concl = self._align_and_diff(
-                        pa.translation, pb.translation, category=pa.category, product=pa.product
-                    )
-                    if ident > best_identity:
-                        best_identity = ident
-                        best_match = pb
-                        best_mutations = muts
-                        best_diff_cnt = diffs
-                        best_aln_a = aln_a
-                        best_markup = markup
-                        best_aln_b = aln_b
-                        best_c_cnt = c_cnt
-                        best_r_cnt = r_cnt
-                        best_in_cnt = in_cnt
-                        best_doms = doms
-                        best_concl = concl
+            # 2. 同名优先检索与高相似度序列对齐
+            pa_prod_lower = pa.product.lower()
+            pa_kmers = get_kmers(pa.translation, 3)
+            len_a = len(pa.translation)
 
-            # 判定匹配状态
-            if best_match and best_identity >= 40.0:
-                matched_b_ids.add(best_match.id)
-                if best_identity >= 99.99:
-                    match_status = "identical"
-                elif best_identity >= 95.0:
-                    match_status = "highly_conserved"
+            # 候选过滤 (同名优先，非同名则使用长度与 K-mer 粗筛)
+            same_prod_cands = [b for b in filtered_b if b.product.lower() == pa_prod_lower]
+            other_cands = [b for b in filtered_b if b.product.lower() != pa_prod_lower]
+
+            search_cands = same_prod_cands + other_cands
+
+            for pb in search_cands:
+                len_b = len(pb.translation)
+                if len_a == 0 or len_b == 0:
+                    continue
+                # 长度覆盖度初筛
+                if min(len_a, len_b) / max(len_a, len_b) < 0.4:
+                    continue
+
+                # K-mer 理论下限快速剪枝
+                pb_kset = b_kmers.get(pb.id, set())
+                if pa_kmers and pb_kset:
+                    inter_cnt = len(pa_kmers & pb_kset)
+                    min_k = min(len(pa_kmers), len(pb_kset))
+                    if min_k > 0 and (inter_cnt / min_k) < (max(0.35, best_identity / 100.0) * 0.3):
+                        continue
+
+                ident, muts, diffs, aln_a, markup, aln_b, c_cnt, r_cnt, in_cnt, doms, concl = self._align_and_diff(
+                    pa.translation, pb.translation, category=pa.category, product=pa.product
+                )
+                if ident > best_identity:
+                    best_identity = ident
+                    best_match = pb
+                    best_mutations = muts
+                    best_diff_cnt = diffs
+                    best_aln_a = aln_a
+                    best_markup = markup
+                    best_aln_b = aln_b
+                    best_c_cnt = c_cnt
+                    best_r_cnt = r_cnt
+                    best_in_cnt = in_cnt
+                    best_doms = doms
+                    best_concl = concl
+                if best_identity >= 99.9:
+                    break
+
+            return pa, best_match, best_identity, best_mutations, best_diff_cnt, best_aln_a, best_markup, best_aln_b, best_c_cnt, best_r_cnt, best_in_cnt, best_doms, best_concl
+
+        # 并发对所有 pa 执行对齐
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [pool.submit(align_single_pa, pa) for pa in filtered_a]
+            for fut in concurrent.futures.as_completed(futures):
+                pa, best_match, best_identity, best_mutations, best_diff_cnt, best_aln_a, best_markup, best_aln_b, best_c_cnt, best_r_cnt, best_in_cnt, best_doms, best_concl = fut.result()
+
+                # 判定匹配状态
+                if best_match and best_identity >= 40.0 and (best_match.id not in matched_b_ids or best_identity >= 99.0):
+                    matched_b_ids.add(best_match.id)
+                    if best_identity >= 99.99:
+                        match_status = "identical"
+                    elif best_identity >= 95.0:
+                        match_status = "highly_conserved"
+                    else:
+                        match_status = "divergent"
+
+                    cat_info = PROTEIN_CATEGORIES.get(pa.category, {"label": "其他功能蛋白"})
+                    label_str = str(cat_info.get("label", pa.category))
+                    rows.append(ProteinComparisonRow(
+                        category=pa.category,
+                        category_label=label_str,
+                        sample_a_id=pa.id,
+                        sample_a_tag=pa.locus_tag,
+                        sample_a_product=pa.product,
+                        sample_a_len=pa.length_aa,
+                        sample_a_range=f"{pa.start}-{pa.end}",
+                        sample_a_strand=pa.strand,
+                        sample_a_seq=pa.translation,
+                        sample_b_id=best_match.id,
+                        sample_b_tag=best_match.locus_tag,
+                        sample_b_product=best_match.product,
+                        sample_b_len=best_match.length_aa,
+                        sample_b_range=f"{best_match.start}-{best_match.end}",
+                        sample_b_strand=best_match.strand,
+                        sample_b_seq=best_match.translation,
+                        match_status=match_status,
+                        identity_pct=round(best_identity, 2),
+                        diff_count=best_diff_cnt,
+                        mutations=best_mutations,
+                        length_diff=abs(pa.length_aa - best_match.length_aa),
+                        aligned_seq_a=best_aln_a,
+                        aligned_markup=best_markup,
+                        aligned_seq_b=best_aln_b if best_aln_b else best_match.translation,
+                        conservative_mutation_cnt=best_c_cnt,
+                        radical_mutation_cnt=best_r_cnt,
+                        indel_cnt=best_in_cnt,
+                        hotspot_conclusion=best_concl,
+                        region_domains=best_doms
+                    ))
                 else:
-                    match_status = "divergent"
-
-                cat_info = PROTEIN_CATEGORIES.get(pa.category, {"label": "其他功能蛋白"})
-                label_str = str(cat_info.get("label", pa.category))
-                rows.append(ProteinComparisonRow(
-                    category=pa.category,
-                    category_label=label_str,
-                    sample_a_id=pa.id,
-                    sample_a_tag=pa.locus_tag,
-                    sample_a_product=pa.product,
-                    sample_a_len=pa.length_aa,
-                    sample_a_range=f"{pa.start}-{pa.end}",
-                    sample_a_strand=pa.strand,
-                    sample_a_seq=pa.translation,
-                    sample_b_id=best_match.id,
-                    sample_b_tag=best_match.locus_tag,
-                    sample_b_product=best_match.product,
-                    sample_b_len=best_match.length_aa,
-                    sample_b_range=f"{best_match.start}-{best_match.end}",
-                    sample_b_strand=best_match.strand,
-                    sample_b_seq=best_match.translation,
-                    match_status=match_status,
-                    identity_pct=round(best_identity, 2),
-                    diff_count=best_diff_cnt,
-                    mutations=best_mutations,
-                    length_diff=abs(pa.length_aa - best_match.length_aa),
-                    aligned_seq_a=best_aln_a,
-                    aligned_markup=best_markup,
-                    aligned_seq_b=best_aln_b if best_aln_b else best_match.translation,
-                    conservative_mutation_cnt=best_c_cnt,
-                    radical_mutation_cnt=best_r_cnt,
-                    indel_cnt=best_in_cnt,
-                    hotspot_conclusion=best_concl,
-                    region_domains=best_doms
-                ))
-            else:
-                # 样本 A 独有
-                cat_info = PROTEIN_CATEGORIES.get(pa.category, {"label": "其他功能蛋白"})
-                label_str = str(cat_info.get("label", pa.category))
-                rows.append(ProteinComparisonRow(
-                    category=pa.category,
-                    category_label=label_str,
-                    sample_a_id=pa.id,
-                    sample_a_tag=pa.locus_tag,
-                    sample_a_product=pa.product,
-                    sample_a_len=pa.length_aa,
-                    sample_a_range=f"{pa.start}-{pa.end}",
-                    sample_a_strand=pa.strand,
-                    sample_a_seq=pa.translation,
-                    match_status="unique_a",
-                    identity_pct=0.0,
-                    diff_count=pa.length_aa,
-                    mutations=[],
-                    hotspot_conclusion="该基因在目标样本中未检出对应同源序列，属于样本 A 特异性基因。"
-                ))
+                    # 样本 A 独有
+                    cat_info = PROTEIN_CATEGORIES.get(pa.category, {"label": "其他功能蛋白"})
+                    label_str = str(cat_info.get("label", pa.category))
+                    rows.append(ProteinComparisonRow(
+                        category=pa.category,
+                        category_label=label_str,
+                        sample_a_id=pa.id,
+                        sample_a_tag=pa.locus_tag,
+                        sample_a_product=pa.product,
+                        sample_a_len=pa.length_aa,
+                        sample_a_range=f"{pa.start}-{pa.end}",
+                        sample_a_strand=pa.strand,
+                        sample_a_seq=pa.translation,
+                        match_status="unique_a",
+                        identity_pct=0.0,
+                        diff_count=pa.length_aa,
+                        mutations=[],
+                        hotspot_conclusion="该基因在目标样本中未检出对应同源序列，属于样本 A 特异性基因。"
+                    ))
 
         # 检查样本 B 中独有的未配对蛋白
         for pb in filtered_b:

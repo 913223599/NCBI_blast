@@ -5,6 +5,7 @@
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getBridge } from '../../../../bridge';
+import SearchableSampleSelect, { type SampleOption } from '../../../../components/common/SearchableSampleSelect.vue';
 import type { 
   ComparableTaskItem, 
   ProteinComparisonResultPayload, 
@@ -17,9 +18,29 @@ const isTasksLoading = ref<boolean>(false);
 const isComparing = ref<boolean>(false);
 const errorMessage = ref<string | null>(null);
 
+// 格式化为通用的 SampleOption 列表
+const formattedTaskOptions = computed<SampleOption[]>(() => {
+  return availableTasks.value.map(t => ({
+    id: t.task_id,
+    name: t.task_name,
+    type: t.sample_type || 'PHAGE',
+    cdsCount: t.cds_count,
+    length: t.total_length,
+    createdAt: t.created_at,
+    isExternal: t.task_id.startsWith('EXT_')
+  }));
+});
+
 // 选择的样本
 const sampleAId = ref<string>('');
 const sampleBId = ref<string>('');
+
+// 一键对调 A/B 样本
+function swapSamples() {
+  const temp = sampleAId.value;
+  sampleAId.value = sampleBId.value;
+  sampleBId.value = temp;
+}
 
 // 选中的分类筛选
 const selectedCategory = ref<string>('all');
@@ -500,21 +521,28 @@ function copyText(text: string) {
               <span>{{ isImporting && importTarget === 'A' ? '导入中...' : '导入外部文件' }}</span>
             </button>
           </div>
-          <select 
-            v-model="sampleAId" 
-            class="sample-select"
-            @change="(e: any) => { if (e.target.value === '__IMPORT__') { sampleAId = ''; triggerFileImport('A'); } }"
-          >
-            <option value="" disabled>-- 请选择基准注释任务或导入外部文件 --</option>
-            <option value="__IMPORT__" class="opt-import">➕ 选择并导入本地外部文件 (.gbk / .gb / .faa)...</option>
-            <option v-for="t in availableTasks" :key="t.task_id" :value="t.task_id">
-              {{ t.task_name }} ({{ t.sample_type }}, {{ t.cds_count }} CDS) - {{ t.task_id }}
-            </option>
-          </select>
+          <SearchableSampleSelect 
+            v-model="sampleAId"
+            :options="formattedTaskOptions"
+            tag-variant="a"
+            placeholder="请搜索或选择基准注释任务..."
+            @import="triggerFileImport('A')"
+          />
         </div>
 
-        <div class="vs-divider">
-          <span>VS</span>
+        <div class="vs-divider-box">
+          <button 
+            type="button" 
+            class="btn-swap-samples" 
+            @click="swapSamples" 
+            title="一键对调 A/B 样本位置"
+            :disabled="!sampleAId && !sampleBId"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+              <path d="M7 16V4M7 4L3 8M7 4L11 8M17 8v12M17 20l4-4M17 20l-4-4"/>
+            </svg>
+          </button>
+          <span class="vs-text">VS</span>
         </div>
 
         <div class="sample-box">
@@ -540,17 +568,13 @@ function copyText(text: string) {
               <span>{{ isImporting && importTarget === 'B' ? '导入中...' : '导入外部文件' }}</span>
             </button>
           </div>
-          <select 
-            v-model="sampleBId" 
-            class="sample-select"
-            @change="(e: any) => { if (e.target.value === '__IMPORT__') { sampleBId = ''; triggerFileImport('B'); } }"
-          >
-            <option value="" disabled>-- 请选择比对目标注释任务或导入外部文件 --</option>
-            <option value="__IMPORT__" class="opt-import">➕ 选择并导入本地外部文件 (.gbk / .gb / .faa)...</option>
-            <option v-for="t in availableTasks" :key="t.task_id" :value="t.task_id">
-              {{ t.task_name }} ({{ t.sample_type }}, {{ t.cds_count }} CDS) - {{ t.task_id }}
-            </option>
-          </select>
+          <SearchableSampleSelect 
+            v-model="sampleBId"
+            :options="formattedTaskOptions"
+            tag-variant="b"
+            placeholder="请搜索或选择对比目标注释任务..."
+            @import="triggerFileImport('B')"
+          />
         </div>
       </div>
 
@@ -1047,28 +1071,46 @@ function copyText(text: string) {
   font-weight: 600;
 }
 
-.sample-select {
-  width: 100%;
-  padding: 8px 12px;
-  background: white;
+.vs-divider-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.btn-swap-samples {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: #ffffff;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #1e293b;
-  outline: none;
+  border-radius: 50%;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
-.opt-import {
+.btn-swap-samples:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #3b82f6;
   color: #2563eb;
-  font-weight: 600;
-  background: #f8fafc;
+  transform: rotate(180deg);
 }
 
-.vs-divider {
-  font-size: 12px;
+.btn-swap-samples:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.vs-text {
+  font-size: 11px;
   font-weight: 800;
   color: #94a3b8;
-  padding: 0 4px;
+  letter-spacing: 0.5px;
 }
 
 .error-banner {

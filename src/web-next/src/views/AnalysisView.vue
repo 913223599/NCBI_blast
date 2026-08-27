@@ -9,12 +9,13 @@ import ComparisonModule from './Analysis/modules/comparison/ComparisonModule.vue
 import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue'
 import AnnotationModule from './Analysis/modules/annotation/AnnotationModule.vue'
 import ProteinCompareModule from './Analysis/modules/protein_compare/ProteinCompareModule.vue'
+import PanGenomicsModule from './Analysis/modules/pan_genomics/PanGenomicsModule.vue'
 
 interface AnalysisTool {
   id: string;
   title: string;
   description: string;
-  iconType: 'chart' | 'dna' | 'book' | 'compare';
+  iconType: 'chart' | 'dna' | 'book' | 'compare' | 'pangenome';
   status: 'ready' | 'beta' | 'coming_soon';
 }
 
@@ -38,6 +39,13 @@ const tools = ref<AnalysisTool[]>([
     title: '核心蛋白跨样本比对分析', 
     description: '对比两个噬菌体/细菌样本中尾丝、裂解酶、衣壳与复制酶等关键基因的同源性、一致性、氨基酸点突变与变异图谱。', 
     iconType: 'compare',
+    status: 'ready'
+  },
+  { 
+    id: 'pan_genomics', 
+    title: '多样本泛基因组与深度交叉对比', 
+    description: '多样本正交同源聚类(Core/Unique)、宿主识别尾丝受体结构域对比、生活史烈性/温和安全评级与代谢攻防全景图。', 
+    iconType: 'pangenome',
     status: 'ready'
   },
   { 
@@ -113,6 +121,17 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
               <path d="M15 15l6 6" />
               <path d="M4 4l5 5" />
             </svg>
+            <svg v-else-if="tool.iconType === 'pangenome'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.2">
+              <circle cx="12" cy="12" r="3" />
+              <circle cx="4" cy="12" r="2" />
+              <circle cx="20" cy="12" r="2" />
+              <circle cx="12" cy="4" r="2" />
+              <circle cx="12" cy="20" r="2" />
+              <line x1="6" y1="12" x2="9" y2="12" />
+              <line x1="15" y1="12" x2="18" y2="12" />
+              <line x1="12" y1="6" x2="12" y2="9" />
+              <line x1="12" y1="15" x2="12" y2="18" />
+            </svg>
             <svg v-else-if="tool.iconType === 'dna'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.2">
               <path d="M2 15c6.667-6 13.333 0 20-6" />
               <path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993" />
@@ -142,6 +161,7 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
           @open-viewer="handleOpenViewerFromAnnotation" 
         />
         <ProteinCompareModule v-else-if="activeTool === 'protein_compare'" />
+        <PanGenomicsModule v-else-if="activeTool === 'pan_genomics'" />
         <GenomeViewerModule 
           v-else-if="activeTool === 'viewer'" 
           :initial-gbk="viewerInitialGbk"

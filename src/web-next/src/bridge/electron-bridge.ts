@@ -1003,6 +1003,18 @@ const electronBridge = {
             file_path: filePath,
             task_name: taskName
         });
+    },
+
+    async get_pan_genomics_samples(): Promise<any> {
+        return await apiGet('/api/analysis/pan_genomics/samples');
+    },
+
+    async run_pan_genomics(params: any): Promise<any> {
+        return await apiPost('/api/analysis/pan_genomics/run', params);
+    },
+
+    async get_pan_genomics_result(taskId: string): Promise<any> {
+        return await apiGet(`/api/analysis/pan_genomics/${taskId}/result`);
     }
 };
 

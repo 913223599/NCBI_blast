@@ -32,13 +32,16 @@ class AnnotationFuser:
     ]
 
     CATEGORY_RULES = [
+        ("Tail", [
+            r"tail", r"baseplate", r"spike", r"fiber", r"receptor\s+binding", r"adhesin",
+            r"sheath", r"tail\s+tube", r"tail\s+assembly", r"collar", r"central\s+spike", r"whisker"
+        ]),
         ("Packaging", [
             r"terminase", r"portal", r"scaffolding", r"maturase", r"head\s+maturation",
             r"packaging\s+protein", r"small\s+subunit\s+terminase", r"large\s+subunit\s+terminase"
         ]),
         ("Structural", [
-            r"capsid", r"tail", r"baseplate", r"collar", r"spike", r"fiber", r"sheath",
-            r"tube", r"head\s+protein", r"neck", r"structural\s+protein", r"virion", r"core\s+protein"
+            r"capsid", r"head\s+protein", r"neck", r"structural\s+protein", r"virion", r"core\s+protein", r"major\s+head"
         ]),
         ("Lysis", [
             r"endolysin", r"holin", r"spanin", r"lysin", r"lysozyme", r"amidase",
