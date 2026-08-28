@@ -156,7 +156,7 @@ const decisionEvaluation = computed(() => {
         acr_count: sampleMap[sid].acrCnt,
         unique_genes: sampleMap[sid].uniq,
         total_genes: sampleMap[sid].total,
-        evidence_chips: ['⚠ 检出关键溶源整合原件', '安全筛查: 未通过 (Temperate/Risk)'],
+        evidence_chips: ['[警示] 检出关键溶源整合原件', '安全筛查: 未通过 (Temperate/Risk)'],
         detailed_reasons: {
           genome_ani: '不适用 (安全性否决)',
           receptor_mechanism: `${receptorTag} 识别域存在`,
@@ -747,16 +747,16 @@ function handleExportPlanCsv() {
             全部样本 ({{ kpis.total }})
           </button>
           <button :class="['pill-tab', 'tab-keep', { active: statusFilter === 'KEEP' }]" @click="statusFilter = 'KEEP'">
-            🟢 核心保留 ({{ kpis.core }})
+            <span class="status-dot dot-emerald"></span> 核心保留 ({{ kpis.core }})
           </button>
           <button :class="['pill-tab', 'tab-review', { active: statusFilter === 'SYNERGISTIC' }]" @click="statusFilter = 'SYNERGISTIC'">
-            🔵 协同备选 ({{ kpis.syn }})
+            <span class="status-dot dot-sky"></span> 协同备选 ({{ kpis.syn }})
           </button>
           <button :class="['pill-tab', 'tab-red', { active: statusFilter === 'REDUNDANT' }]" @click="statusFilter = 'REDUNDANT'">
-            🟡 建议冗存 ({{ kpis.red }})
+            <span class="status-dot dot-amber"></span> 建议冗存 ({{ kpis.red }})
           </button>
           <button :class="['pill-tab', 'tab-reject', { active: statusFilter === 'REJECT' }]" @click="statusFilter = 'REJECT'" v-if="kpis.reject > 0">
-            🔴 安全剔除 ({{ kpis.reject }})
+            <span class="status-dot dot-rose"></span> 安全剔除 ({{ kpis.reject }})
           </button>
         </div>
 
@@ -837,7 +837,7 @@ function handleExportPlanCsv() {
                   <span 
                     v-for="(chip, cIdx) in item.evidence_chips" 
                     :key="cIdx"
-                    :class="['evidence-chip', { 'chip-warning': chip.includes('⚠') || chip.includes('未通过') }]"
+                    :class="['evidence-chip', { 'chip-warning': chip.includes('[警示]') || chip.includes('未通过') || chip.includes('风险') }]"
                   >
                     {{ chip }}
                   </span>
@@ -978,7 +978,7 @@ function handleExportPlanCsv() {
               <div class="safety-item">
                 <span class="s-label">整合酶 / 切除酶</span>
                 <span class="s-val" :class="selectedDrawerSample.is_safe ? 'c-emerald' : 'c-rose'">
-                  {{ selectedDrawerSample.is_safe ? '未检出 (安全)' : '检出整合元件 ⚠' }}
+                  {{ selectedDrawerSample.is_safe ? '未检出 (安全)' : '检出整合元件 (风险)' }}
                 </span>
               </div>
               <div class="safety-item">
@@ -1453,16 +1453,31 @@ function handleExportPlanCsv() {
 }
 
 .pill-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
   padding: 4px 10px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 4px;
   font-size: 11px;
   font-weight: 600;
   color: #64748b;
   cursor: pointer;
   transition: all 0.15s ease;
 }
+
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.dot-emerald { background: #10b981; }
+.dot-sky { background: #0284c7; }
+.dot-amber { background: #f59e0b; }
+.dot-rose { background: #f43f5e; }
 
 .pill-tab:hover {
   background: #f1f5f9;

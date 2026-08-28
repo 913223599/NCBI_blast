@@ -112,49 +112,51 @@ function matchCategoryRules(text: string): string {
   const t = text.toLowerCase();
 
   // A. 宿主裂解系统 (优先排查，防止被结构中的 tail/head 证据误伤)
-  if (/\b(lysin|endolysin|holin|antiholin|spanin|i-spanin|o-spanin|amidase|endopeptidase|peptidoglycan|murein|cell wall hydrolase|transglycosylase|lysozyme|lysis)\b/i.test(t)) {
+  if (/\b(lysin|endolysin|holin|antiholin|spanin|i-spanin|o-spanin|rz|rz1|amidase|endopeptidase|peptidoglycan|murein|cell\s*wall\s*hydrolase|transglycosylase|lysozyme|lysis)\b/i.test(t)) {
     return "Lysis";
   }
 
   // B. 尾部与尾丝吸附组件 (Tail & Host Recognition - 独立分类)
-  if (/\b(tail|baseplate|tape measure|tail fiber|tail spike|tail tube|tail sheath|tail assembly|tail needle|tail protein|neck1|head-tail adaptor|head-tail connector|receptor-binding|reticulocyte-binding|adhesin)\b/i.test(t) || t.includes("chaperone")) {
+  if (/\b(tail|baseplate|tape\s*measure|tail\s*fiber|tail\s*spike|tail\s*tube|tail\s*sheath|tail\s*assembly|tail\s*needle|tail\s*protein|major\s*tail|minor\s*tail|tail\s*terminator|tail\s*completion|head-tail|neck1|receptor-binding|reticulocyte-binding|adhesin|adsorption|host\s*range|tail\s*chaperone|tail\s*assembly\s*chaperone|tail\s*fiber\s*assembly|gp37|gp38|pectate\s*lyase|depolymerase|polysaccharide\s*lyase|ig\s*domain|ig-like|adaptator|connector)\b/i.test(t)) {
     return "Tail & Host Interaction";
   }
 
-  // C. 头部与衣壳包装 (Head & Capsid Packaging)
-  if (/\b(capsid|portal|terminase|head|scaffold|scaffolding|neck|collar|whisker|virion|structural|major coat|minor coat|prohead|large subunit|small subunit|head closure|head decoration|head maturation|head morphogenesis|maturation protease)\b/i.test(t)) {
+  // C. 头部与衣壳结构包装 (Head & Packaging) - 包含 virion/capsid/portal/terminase/internal virion 等
+  if (/\b(capsid|portal|terminase|terminase\s*large\s*subunit|terminase\s*small\s*subunit|head\s*protein|major\s*head|minor\s*head|scaffold|scaffolding|prohead|head\s*closure|head\s*decoration|head\s*maturation|head\s*morphogenesis|maturation\s*protease|head\s*assembly|major\s*capsid|minor\s*capsid|virion\s*structural|internal\s*virion|structural\s*protein)\b/i.test(t)) {
     return "Head & Packaging";
   }
 
-  // D. 溶源整合与位点特异性重组 (Integration & Excision)
-  if (/\b(integrase|excisionase|transposase|recombinase|site-specific recombinase|tyrosine recombinase|serine recombinase|resolvase|insertion sequence)\b/i.test(t)) {
-    // 排除复合修复酶 (如 exonuclease recombination-associated)
-    if (!/\b(exonuclease|endonuclease|ribonuclease|nuclease|junction)\b/i.test(t)) {
+  // D. 溶源整合与位点特异性切除 (Integration & Excision) - 严禁 Holliday junction 修复酶混入
+  if (/\b(integrase|excisionase|transposase|site-specific\s*recombinase|tyrosine\s*recombinase|serine\s*recombinase|prophage\s*integrase|prophage\s*excisionase)\b/i.test(t)) {
+    if (!/\b(exonuclease|holliday|rusa|ruvc|recu|recombination-associated|homologous)\b/i.test(t)) {
       return "Integration & Excision";
     }
   }
-
-  // E. 宿主防御与抗防御互作 (精准边界防误伤 helicase)
-  if (/\b(anti-crispr|acr[a-z0-9]*|crispr|cas[0-9]+|methyltransferase|methylase|restriction|modification|toxin|antitoxin|darb|dara|lar-like|immunity|defense|anti-restriction|tcib|colicin|tellurite resistance|abortive infection)\b/i.test(t)) {
-    return "Defense & Host Interaction";
+  if (/\b(resolvase)\b/i.test(t) && !/\b(holliday|rusa|ruvc|recu)\b/i.test(t)) {
+    return "Integration & Excision";
   }
 
-  // F. DNA 复制、重组与修复 (复合词支持：exoribonuclease, helicase)
-  if (/\b(polymerase|helicase|primase|ligase|endonuclease|exonuclease|ssb|single-stranded dna|single-stranded dna-binding|ssdna|topoisomerase|gyrase|nuclease|[a-z]*nuclease|rnase|dnase|dna repair|recombination|dna binding|dntp|primase-helicase|erf|rusa|ninb|ning|rap|ninx|holliday|dead\/deah|replication initiation|replication protein)\b/i.test(t) || t.includes("helicase")) {
+  // E. DNA 复制、重组与修复 (Replication & Repair) - 包含同源重组、复制起始、解旋聚合与核酸酶
+  if (/\b(polymerase|helicase|[a-z0-9'-]*helicase|primase|ligase|ssb|single-stranded\s*dna|ssdna|topoisomerase|gyrase|endonuclease|exonuclease|[a-z0-9'-]*nuclease|rnase|dnase|dna\s*repair|recombination|recombinase|holliday|rusa|ruvc|recu|rece|erf|ninb|ning|rap|ninx|dna\s*binding|dntp|primase-helicase|dead\/deah|dnac|dnab|dna\s*annealing|recombination\s*mediator|junction\s*specific|replication\s*initiation|gene\s*47)\b/i.test(t)) {
     return "Replication & Repair";
   }
 
-  // G. 转录调控与开关
-  if (/\b(repressor|activator|regulator|promoter|transcription|cro|c1|ci|cii|ciii|antitermination|anti-terminator|anti-sigma|sigma factor|modulator|transcriptional|helix-turn-helix|hth|csra|gntr|marr|anti-repressor|parb|partition)\b/i.test(t)) {
+  // F. 宿主防御与抗防御互作 (Defense & Host Interaction)
+  if (/\b(anti-crispr|acranker|acr[a-z0-9_-]+|crispr|cas[0-9]+|methyltransferase|[a-z0-9'-]*methyltransferase|methylase|restriction|modification|toxin|antitoxin|darb|dara|lar-like|immunity|defense|anti-restriction|tcib|colicin|tellurite\s*resistance|abortive\s*infection)\b/i.test(t)) {
+    return "Defense & Host Interaction";
+  }
+
+  // G. 转录调控与开关 (Transcription & Regulation)
+  if (/\b(repressor|activator|regulator|promoter|transcription|cro|c1|ci\s*repressor|cii|ciii|antitermination|anti-terminator|anti-sigma|sigma\s*factor|modulator|transcriptional|helix-turn-helix|hth|csra|gntr|marr|anti-repressor|parb|partition|ead|eaa)\b/i.test(t)) {
     return "Transcription & Regulation";
   }
 
-  // H. 辅助代谢与酶学 (AMG - 复合词支持：phosphofructokinase)
-  if (/\b(kinase|[a-z]*kinase|phosphatase|pyrophosphatase|mazg|synthase|synthetase|reductase|dehydrogenase|hydrolase|transferase|mutase|isomerase|acyltransferase|metabolism|amg|ribonucleotide|thioredoxin|glutaredoxin|nad|folate|nucleotidyltransferase)\b/i.test(t)) {
+  // H. 辅助代谢与酶学 (AMG)
+  if (/\b(kinase|[a-z0-9'-]*kinase|phosphatase|[a-z0-9'-]*phosphatase|phosphoesterase|pyrophosphatase|dutpase|mazg|synthase|synthetase|reductase|[a-z0-9'-]*reductase|dehydrogenase|hydrolase|transferase|mutase|isomerase|acyltransferase|n-acyltransferase|metabolism|amg|ribonucleotide|thioredoxin|glutaredoxin|nad|folate|nucleotidyltransferase)\b/i.test(t)) {
     return "Metabolism & AMG";
   }
 
-  if (t.includes("hypothetical") || t.includes("uncharacterized") || t.includes("unknown")) {
+  if (isHypotheticalName(t)) {
     return "Hypothetical";
   }
 

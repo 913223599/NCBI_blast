@@ -55,13 +55,7 @@ const isLysisInvariant = computed(() => {
   return allHigh
 })
 
-// 分类颜色映射 (统一使用全基因组色彩体系)
-function getCatColor(cat: string): string {
-  if (FUNCTIONAL_CATEGORIES[cat]) {
-    return FUNCTIONAL_CATEGORIES[cat].color
-  }
-  return '#64748b'
-}
+import { getCatColor, inferClusterCategory } from '../utils/pangenomeVariants'
 
 // 提取各样本的全基因组基因列表
 const sampleGeneTracks = computed(() => {
@@ -72,29 +66,31 @@ const sampleGeneTracks = computed(() => {
 
     // 整合 lysis 蛋白
     props.lysisProteins?.filter(lp => lp.sample_id === sid).forEach((lp, idx) => {
+      const cat = inferCategoryFromText(lp.product) || 'Lysis'
       genes.push({
         locus_tag: lp.locus_tag,
         product: lp.product,
         start: 12000 + (idx * 900),
         end: 12000 + (idx * 900) + (lp.length_aa || 160) * 3,
         strand: '+',
-        category: 'Lysis',
+        category: cat,
         role: lp.lysis_role,
-        color: '#059669'
+        color: getCatColor(cat)
       })
     })
 
     // 整合 tail 蛋白
     props.tailProteins?.filter(tp => tp.sample_id === sid).forEach((tp, idx) => {
+      const cat = inferCategoryFromText(tp.product) || 'Tail & Host Interaction'
       genes.push({
         locus_tag: tp.locus_tag,
         product: tp.product,
         start: 28000 + (idx * 1200),
         end: 28000 + (idx * 1200) + (tp.length_aa || 350) * 3,
         strand: '+',
-        category: 'Tail',
+        category: cat,
         role: tp.tail_type,
-        color: '#f59e0b'
+        color: getCatColor(cat)
       })
     })
 
@@ -103,15 +99,16 @@ const sampleGeneTracks = computed(() => {
       const g = c.presence_map?.[sid]
       if (g && !genes.some(exist => exist.locus_tag === g.locus_tag)) {
         const estStart = 2000 + (cIdx * 750)
+        const cat = inferCategoryFromText(g.product, g.notes) || inferClusterCategory(c)
         genes.push({
           locus_tag: g.locus_tag,
           product: g.product,
           start: g.start || estStart,
           end: g.end || (estStart + (g.length_aa || 200) * 3),
           strand: g.strand || '+',
-          category: g.category || c.category || 'Other',
+          category: cat,
           role: c.group_id,
-          color: getCatColor(g.category || c.category)
+          color: getCatColor(cat)
         })
       }
     })

@@ -237,8 +237,8 @@ class PanGenomicsEngine:
         for idx, f in enumerate(features):
             gene_id = f.get("id") or f.get("locus_tag") or f"GENE_{idx+1:04d}"
             locus = f.get("locus_tag") or gene_id
-            prod = f.get("product") or "hypothetical protein"
-            cat = f.get("category") or AnnotationFuser.infer_category(prod, f.get("notes"))
+            inferred_cat = AnnotationFuser.infer_category(prod, f.get("notes"))
+            cat = inferred_cat if inferred_cat != "Hypothetical" else (f.get("category") or "Hypothetical")
             seq = f.get("translation") or ""
             start = int(f.get("start", 0))
             end = int(f.get("end", 0))

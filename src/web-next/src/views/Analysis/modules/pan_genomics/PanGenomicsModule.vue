@@ -248,7 +248,11 @@ function handleCyclePair() {
 // 导出正交矩阵 CSV
 function handleExportCsv() {
   if (!analysisResult.value?.task_id) return
-  window.open(`http://127.0.0.1:8765/api/analysis/pan_genomics/${analysisResult.value.task_id}/export/csv`)
+  const apiBase =
+    typeof window !== 'undefined' && window.location.port !== '5173' && window.location.origin
+      ? window.location.origin
+      : 'http://127.0.0.1:8765'
+  window.open(`${apiBase}/api/analysis/pan_genomics/${analysisResult.value.task_id}/export/csv`)
 }
 
 onMounted(() => {

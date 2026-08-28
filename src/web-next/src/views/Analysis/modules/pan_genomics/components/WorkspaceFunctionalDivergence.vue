@@ -346,7 +346,11 @@ const tanglegramHeight = computed(() => Math.max(260, orderedSampleIds.value.len
         <!-- 无显著分化时自动压缩显示 (Low-Information Suppression) -->
         <div class="conserved-summary-card" v-else-if="selectedPair && !hasSignificantDivergence">
           <div class="conserved-head">
-            <span class="cons-icon">✓</span>
+            <span class="cons-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </span>
             <div>
               <strong>未发现显著的功能模块分化 (Functional Conservation Dominates)</strong>
               <p>在所有 7 个核心功能大类中，选中的两株样本均表现出高度保守的基因配额与策略一致性。</p>

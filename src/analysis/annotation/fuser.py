@@ -34,35 +34,35 @@ class AnnotationFuser:
     CATEGORY_RULES = [
         # A. 宿主裂解系统 (优先排查)
         ("Lysis", [
-            r"\b(?:lysin|endolysin|holin|antiholin|spanin|i-spanin|o-spanin|amidase|endopeptidase|peptidoglycan|murein|cell\s+wall\s+hydrolase|transglycosylase|lysozyme|lysis)\b"
+            r"\b(?:lysin|endolysin|holin|antiholin|spanin|i-spanin|o-spanin|rz|rz1|amidase|endopeptidase|peptidoglycan|murein|cell\s*wall\s*hydrolase|transglycosylase|lysozyme|lysis)\b"
         ]),
         # B. 尾部与尾丝吸附组件 (独立大类)
         ("Tail & Host Interaction", [
-            r"\b(?:tail|baseplate|tape\s+measure|tail\s+fiber|tail\s+spike|tail\s+tube|tail\s+sheath|tail\s+assembly|tail\s+needle|tail\s+protein|neck1|head-tail\s+adaptor|head-tail\s+connector|receptor-binding|reticulocyte-binding|adhesin|chaperone)\b"
+            r"\b(?:tail|baseplate|tape\s*measure|tail\s*fiber|tail\s*spike|tail\s*tube|tail\s*sheath|tail\s*assembly|tail\s*needle|tail\s*protein|major\s*tail|minor\s*tail|tail\s*terminator|tail\s*completion|head-tail|neck1|receptor-binding|reticulocyte-binding|adhesin|adsorption|host\s*range|tail\s*chaperone|tail\s*assembly\s*chaperone|tail\s*fiber\s*assembly|gp37|gp38|pectate\s*lyase|depolymerase|polysaccharide\s*lyase|ig\s*domain|ig-like|adaptator|connector)\b"
         ]),
-        # C. 头部与衣壳包装
+        # C. 头部与衣壳结构包装 (包含 virion/capsid/portal/terminase/internal virion 等)
         ("Head & Packaging", [
-            r"\b(?:capsid|portal|terminase|head|scaffold|scaffolding|neck|collar|whisker|virion|structural|major\s+coat|minor\s+coat|prohead|large\s+subunit|small\s+subunit|head\s+closure|head\s+decoration|head\s+maturation|head\s+morphogenesis|maturation\s+protease)\b"
+            r"\b(?:capsid|portal|terminase|terminase\s*large\s*subunit|terminase\s*small\s*subunit|head\s*protein|major\s*head|minor\s*head|scaffold|scaffolding|prohead|head\s*closure|head\s*decoration|head\s*maturation|head\s*morphogenesis|maturation\s*protease|head\s*assembly|major\s*capsid|minor\s*capsid|virion\s*structural|internal\s*virion|structural\s*protein)\b"
         ]),
-        # D. 溶源整合与切除 (优先排查，防止被普通 regulator 截流)
+        # D. 溶源整合与位点特异性切除 (严禁 Holliday junction 修复酶混入)
         ("Integration & Excision", [
-            r"\b(?:integrase|excisionase|transposase|recombinase|site-specific\s+recombinase|tyrosine\s+recombinase|serine\s+recombinase|resolvase|insertion\s+sequence)\b"
+            r"\b(?:integrase|excisionase|transposase|site-specific\s*recombinase|tyrosine\s*recombinase|serine\s*recombinase|prophage\s*integrase|prophage\s*excisionase)\b"
         ]),
-        # E. 宿主防御与抗防御互作 (防误伤 helicase)
-        ("Defense & Host Interaction", [
-            r"\b(?:anti-crispr|acr[a-z0-9]*|crispr|cas[0-9]+|methyltransferase|methylase|restriction|modification|toxin|antitoxin|darb|dara|lar-like|immunity|defense|anti-restriction|tcib|colicin|tellurite\s+resistance|abortive\s+infection)\b"
-        ]),
-        # F. DNA 复制、重组与修复 (支持连写与复合酶，排除纯 recombinase)
+        # E. DNA 复制、重组与修复 (包含同源重组、复制起始、解旋聚合与核酸酶)
         ("Replication & Repair", [
-            r"\b(?:polymerase|helicase|primase|ligase|endonuclease|exonuclease|ssb|single-stranded\s+dna|single-stranded\s+dna-binding|ssdna|topoisomerase|gyrase|nuclease|[a-z]*nuclease|rnase|dnase|dna\s+repair|recombination|dna\s+binding|dntp|primase-helicase|erf|rusa|ninb|ning|rap|ninx|holliday|dead\/deah|replication\s+initiation|replication\s+protein)\b"
+            r"\b(?:polymerase|helicase|[a-z0-9'-]*helicase|primase|ligase|ssb|single-stranded\s*dna|ssdna|topoisomerase|gyrase|endonuclease|exonuclease|[a-z0-9'-]*nuclease|rnase|dnase|dna\s*repair|recombination|recombinase|holliday|rusa|ruvc|recu|rece|erf|ninb|ning|rap|ninx|dna\s*binding|dntp|primase-helicase|dead\/deah|dnac|dnab|dna\s*annealing|recombination\s*mediator|junction\s*specific|replication\s*initiation|gene\s*47)\b"
         ]),
-        # G. 转录调控与开关
+        # F. 宿主防御与抗防御互作
+        ("Defense & Host Interaction", [
+            r"\b(?:anti-crispr|acranker|acr[a-z0-9_-]+|crispr|cas[0-9]+|methyltransferase|[a-z0-9'-]*methyltransferase|methylase|restriction|modification|toxin|antitoxin|darb|dara|lar-like|immunity|defense|anti-restriction|tcib|colicin|tellurite\s*resistance|abortive\s*infection)\b"
+        ]),
+        # G. 转录调控与开关 (包含 ead/eaa 调控辅助元件)
         ("Transcription & Regulation", [
-            r"\b(?:repressor|activator|regulator|promoter|transcription|cro|c1|ci|cii|ciii|antitermination|anti-terminator|anti-sigma|sigma\s+factor|modulator|transcriptional|helix-turn-helix|hth|csra|gntr|marr|anti-repressor|parb|partition)\b"
+            r"\b(?:repressor|activator|regulator|promoter|transcription|cro|c1|ci\s*repressor|cii|ciii|antitermination|anti-terminator|anti-sigma|sigma\s*factor|modulator|transcriptional|helix-turn-helix|hth|csra|gntr|marr|anti-repressor|parb|partition|ead|eaa)\b"
         ]),
         # H. 辅助代谢与酶学 (AMG)
         ("Metabolism & AMG", [
-            r"\b(?:kinase|[a-z]*kinase|phosphatase|pyrophosphatase|mazg|synthase|synthetase|reductase|dehydrogenase|hydrolase|transferase|mutase|isomerase|acyltransferase|metabolism|amg|ribonucleotide|thioredoxin|glutaredoxin|nad|folate|nucleotidyltransferase)\b"
+            r"\b(?:kinase|[a-z0-9'-]*kinase|phosphatase|[a-z0-9'-]*phosphatase|phosphoesterase|pyrophosphatase|dutpase|mazg|synthase|synthetase|reductase|[a-z0-9'-]*reductase|dehydrogenase|hydrolase|transferase|mutase|isomerase|acyltransferase|n-acyltransferase|metabolism|amg|ribonucleotide|thioredoxin|glutaredoxin|nad|folate|nucleotidyltransferase)\b"
         ])
     ]
 

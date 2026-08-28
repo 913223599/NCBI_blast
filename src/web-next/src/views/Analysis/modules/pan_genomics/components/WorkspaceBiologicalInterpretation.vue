@@ -80,7 +80,7 @@ const pairwiseComparison = computed(() => {
 
   if (ani >= 85 && tailIdent < 50) {
     verdict = '近缘骨架 / 受体正交互补组合 (Genome-conserved / Receptor-divergent)'
-    verdictTag = '⭐ 理想协同候选'
+    verdictTag = '理想协同候选'
     verdictClass = 'verdict-emerald'
     interpretation = `两株噬菌体共享高达 ${ani.toFixed(1)}% 的主基因组骨架与复制系统，但宿主识别结构域分化程度高达 ${(100 - tailIdent).toFixed(1)}%，预测识别完全不同的宿主表面抗原，极具扩大杀菌谱的联合制剂价值。`
   } else if (ani >= 95 && tailIdent >= 90) {
@@ -90,31 +90,31 @@ const pairwiseComparison = computed(() => {
     interpretation = `全基因组与宿主受体结合区一致性均 ≥ 90%，在宿主范围与生物学表型上高度重叠，无需重复进行耗时体外实验。`
   } else if (!bothSafe) {
     verdict = '含温和型/毒力风险组合 (Safety Concern)'
-    verdictTag = '⚠️ 安全风险'
+    verdictTag = '安全风险'
     verdictClass = 'verdict-amber'
     interpretation = `检测到样本中存在整合酶/阻遏蛋白，临床治疗应用前需进行基因工程修饰以敲除溶源化风险元件。`
   }
 
   // 7. 推荐科研下一步行动 (Recommended Next Action)
-  let actions: Array<{ icon: string; text: string; type: 'green' | 'yellow' | 'blue' }> = []
+  let actions: Array<{ categoryLabel: string; text: string; type: 'green' | 'yellow' | 'blue' }> = []
   let confidence = 'High (高置信度)'
 
   if (ani >= 95 && tailIdent >= 90) {
     actions = [
-      { icon: '🟢', text: `建议优先挑选代表株 [${name1}] 进行后续噬斑表型实验与深层电镜表征`, type: 'green' },
-      { icon: '🟡', text: `次要株 [${name2}] 作为同源变体库保留监控，无需在初期投入重复的体外耗时实验`, type: 'yellow' },
-      { icon: '🔵', text: '若两株在宿主谱裂解范围上存在微弱差异，应重点排查 Tail fibre 局部点突变而非宏观差异', type: 'blue' }
+      { categoryLabel: '优先建议', text: `建议优先挑选代表株 [${name1}] 进行后续噬斑表型实验与深层电镜表征`, type: 'green' },
+      { categoryLabel: '归档监控', text: `次要株 [${name2}] 作为同源变体库保留监控，无需在初期投入重复的体外耗时实验`, type: 'yellow' },
+      { categoryLabel: '精细排查', text: '若两株在宿主谱裂解范围上存在微弱差异，应重点排查 Tail fibre 局部点突变而非宏观差异', type: 'blue' }
     ]
   } else if (ani >= 80 && tailIdent < 60) {
     actions = [
-      { icon: '⭐', text: `强烈建议将 [${name1}] 与 [${name2}] 共同纳入多价噬菌体生物制剂配对候选库`, type: 'green' },
-      { icon: '🔬', text: '建议针对两株样本开展体外交叉裂解谱实验 (Cross-infection Matrix Assay)', type: 'blue' },
-      { icon: '🧬', text: '对 Tail/RBP 区域进行多重序列比对，定位受体结合结构域 (RBD) 的关键突变位点', type: 'yellow' }
+      { categoryLabel: '联合制剂', text: `强烈建议将 [${name1}] 与 [${name2}] 共同纳入多价噬菌体生物制剂配对候选库`, type: 'green' },
+      { categoryLabel: '表型验证', text: '建议针对两株样本开展体外交叉裂解谱实验 (Cross-infection Matrix Assay)', type: 'blue' },
+      { categoryLabel: '序列比对', text: '对 Tail/RBP 区域进行多重序列比对，定位受体结合结构域 (RBD) 的关键突变位点', type: 'yellow' }
     ]
   } else {
     actions = [
-      { icon: '🟢', text: '两株噬菌体分属不同亚群，建议作为独立系统发育分支进行全套表型表征', type: 'green' },
-      { icon: '🔬', text: '分别测定两株噬菌体的一步生长曲线（潜伏期与裂解量指标）', type: 'blue' }
+      { categoryLabel: '独立表征', text: '两株噬菌体分属不同亚群，建议作为独立系统发育分支进行全套表型表征', type: 'green' },
+      { categoryLabel: '动力学测定', text: '分别测定两株噬菌体的一步生长曲线（潜伏期与裂解量指标）', type: 'blue' }
     ]
   }
 
@@ -180,7 +180,7 @@ const pairwiseComparison = computed(() => {
               </td>
               <td>
                 <span :class="['safe-pill', l.is_safe_for_therapy ? 'pill-safe' : 'pill-risk']">
-                  {{ l.is_safe_for_therapy ? '✓ 安全合规' : '⚠ 需剔除整合酶' }}
+                  {{ l.is_safe_for_therapy ? '安全合规' : '需剔除整合酶 (风险)' }}
                 </span>
               </td>
               <td>
@@ -307,14 +307,20 @@ const pairwiseComparison = computed(() => {
               class="action-item"
               :class="'action-' + act.type"
             >
-              <span class="act-icon">{{ act.icon }}</span>
+              <span class="act-type-tag" :class="'tag-' + act.type">{{ act.categoryLabel }}</span>
               <span class="act-text">{{ act.text }}</span>
             </div>
           </div>
 
           <!-- 代谢基因自适应推断 -->
           <div class="amg-suppression-box" v-if="totalAmgCount === 0">
-            <div class="supp-icon">🧬</div>
+            <div class="supp-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M2 15c6.667-6 13.333 0 20-6" />
+                <path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993" />
+                <path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993" />
+              </svg>
+            </div>
             <div class="supp-content">
               <h4>辅助代谢基因 (AMG) 自适应结论</h4>
               <p>群体中未检测到宿主辅助代谢基因簇（AMG=0），提示该群噬菌体采取标准专性快速裂解模式，未演化出重塑宿主碳氮代谢的额外代谢负担。</p>
@@ -613,7 +619,7 @@ const pairwiseComparison = computed(() => {
 
 .action-item {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   padding: 8px 10px;
   border-radius: 6px;
@@ -639,9 +645,28 @@ const pairwiseComparison = computed(() => {
   color: #1e40af;
 }
 
-.act-icon {
+.act-type-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1.5px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
   flex-shrink: 0;
-  font-size: 12px;
+}
+
+.tag-green {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.tag-yellow {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.tag-blue {
+  background: #dbeafe;
+  color: #1d4ed8;
 }
 
 .amg-suppression-box {
