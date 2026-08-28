@@ -81,13 +81,15 @@ class HomologyEngine(BaseAnnotationEngine):
             if not hit:
                 continue
 
+            source_name = hit.get("source_db") or "PhageScope"
+            method_desc = "RPS-BLAST" if "CDD" in source_name or "Pfam" in source_name else "BLASTP"
             cand_data = {
                 "product": hit.get("product"),
                 "gene_name": hit.get("gene_name"),
-                "evidence": f"BLASTP to {hit.get('target_id', 'RefSeq')} (Identity: {hit.get('identity', 100)}%, E-value: {hit.get('evalue', '1e-5')})"
+                "evidence": f"{method_desc} to {hit.get('target_id', 'Reference')} (Identity: {hit.get('identity', 100)}%, E-value: {hit.get('evalue', '1e-5')})"
             }
 
-            if AnnotationFuser.complement_single_feature(feat, cand_data, engine_name="PhageScope"):
+            if AnnotationFuser.complement_single_feature(feat, cand_data, engine_name=source_name):
                 updated_count += 1
 
         if on_progress:

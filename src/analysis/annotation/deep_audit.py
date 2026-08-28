@@ -5,6 +5,7 @@
 """
 import os
 import csv
+import shutil
 import logging
 import subprocess
 from pathlib import Path
@@ -82,52 +83,110 @@ class DeepSafetyAuditor:
         vf_hits: Dict[str, dict] = {}
         acr_hits: Dict[str, dict] = {}
 
-        try:
-            res = subprocess.run(["wsl", "bash", "-c", bash_cmd], capture_output=True, timeout=300)
-            if res.returncode == 0 and out_tsv.exists() and out_tsv.stat().st_size > 0:
-                with open(out_tsv, "r", encoding="utf-8", errors="ignore") as f:
+        # 通用本地 BLASTP 执行器
+        def run_local_blastp(db_dir: Path, db_name: str, out_file: Path, max_targets: int = 1, evalue: str = "1e-5"):
+            blastp_bin = shutil.which("blastp") or "blastp"
+            try:
+                cmd = [
+                    blastp_bin,
+                    "-query", str(query_faa.resolve()),
+                    "-db", db_name,
+                    "-out", str(out_file.resolve()),
+                    "-outfmt", "6 qseqid sseqid pident length evalue bitscore stitle",
+                    "-evalue", evalue,
+                    "-max_target_seqs", str(max_targets),
+                    "-num_threads", str(threads)
+                ]
+                res = subprocess.run(cmd, cwd=str(db_dir), capture_output=True, encoding="utf-8", errors="ignore", timeout=180)
+                if res.returncode == 0 and out_file.exists():
+                    return True
+            except Exception:
+                pass
+            return False
+
+        # A. 扫描 PhageScope 安全元数据 (Acr, AMR, VF)
+        if self.phagescope_dir.exists() and any(self.phagescope_dir.glob("phagescope_proteins.p*")):
+            ps_out = work_dir / "safety_phagescope_hits.tsv"
+            if run_local_blastp(self.phagescope_dir, "phagescope_proteins", ps_out, max_targets=5, evalue="1e-10"):
+                with open(ps_out, "r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
                         cols = line.strip().split("\t")
-                        if len(cols) < 6:
-                            continue
-                        cds_id, target_id, identity, align_len, evalue, bitscore = cols[:6]
-                        try:
-                            ident_val = float(identity)
-                            score_val = float(bitscore)
-                        except ValueError:
-                            continue
+                        if len(cols) >= 6:
+                            cds_id, target_id, identity, align_len, evalue, bitscore = cols[:6]
+                            try:
+                                ident_val = float(identity)
+                                score_val = float(bitscore)
+                            except ValueError:
+                                continue
 
-                        hit_item = {
-                            "cds_id": cds_id,
-                            "target_id": target_id,
-                            "identity": ident_val,
-                            "align_len": int(align_len),
-                            "evalue": evalue,
-                            "bitscore": score_val
-                        }
-
-                        # 耐药基因匹配 (取该 CDS 的最高分)
-                        if target_id in amr_index:
-                            if cds_id not in amr_hits or score_val > amr_hits[cds_id]["bitscore"]:
+                            hit_item = {
+                                "cds_id": cds_id,
+                                "target_id": target_id,
+                                "identity": ident_val,
+                                "align_len": int(align_len),
+                                "evalue": evalue,
+                                "bitscore": score_val
+                            }
+                            if target_id in amr_index and (cds_id not in amr_hits or score_val > amr_hits[cds_id]["bitscore"]):
                                 h = dict(hit_item)
                                 h["description"] = amr_index[target_id]
                                 amr_hits[cds_id] = h
-
-                        # 毒力因子匹配 (取最高分)
-                        if target_id in vf_index:
-                            if cds_id not in vf_hits or score_val > vf_hits[cds_id]["bitscore"]:
+                            if target_id in vf_index and (cds_id not in vf_hits or score_val > vf_hits[cds_id]["bitscore"]):
                                 h = dict(hit_item)
                                 h["description"] = vf_index[target_id]
                                 vf_hits[cds_id] = h
-
-                        # Anti-CRISPR 匹配 (取最高分)
-                        if target_id in acr_index:
-                            if cds_id not in acr_hits or score_val > acr_hits[cds_id]["bitscore"]:
+                            if target_id in acr_index and (cds_id not in acr_hits or score_val > acr_hits[cds_id]["bitscore"]):
                                 h = dict(hit_item)
                                 h["source"] = acr_index[target_id]
                                 acr_hits[cds_id] = h
-        except Exception as e:
-            logger.warning(f"Safety audit BLASTP failed: {e}")
+
+        # B. 直接扫描 CARD 原生耐药基因库
+        card_dir = self.db_dir / "card"
+        if card_dir.exists() and any(card_dir.glob("card_protein.p*")):
+            card_out = work_dir / "safety_card_direct_hits.tsv"
+            if run_local_blastp(card_dir, "card_protein", card_out, max_targets=1, evalue="1e-10"):
+                with open(card_out, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        cols = line.strip().split("\t")
+                        if len(cols) >= 7:
+                            cds_id, target_id, identity, align_len, evalue, bitscore, stitle = cols[:7]
+                            try:
+                                if float(identity) >= 40.0:
+                                    amr_hits[cds_id] = {
+                                        "cds_id": cds_id,
+                                        "target_id": target_id,
+                                        "identity": float(identity),
+                                        "align_len": int(align_len),
+                                        "evalue": evalue,
+                                        "bitscore": float(bitscore),
+                                        "description": stitle
+                                    }
+                            except ValueError:
+                                pass
+
+        # C. 直接扫描 VFDB 原生毒力因子库
+        vfdb_dir = self.db_dir / "vfdb"
+        if vfdb_dir.exists() and any(vfdb_dir.glob("vfdb.p*")):
+            vf_out = work_dir / "safety_vfdb_direct_hits.tsv"
+            if run_local_blastp(vfdb_dir, "vfdb", vf_out, max_targets=1, evalue="1e-10"):
+                with open(vf_out, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        cols = line.strip().split("\t")
+                        if len(cols) >= 7:
+                            cds_id, target_id, identity, align_len, evalue, bitscore, stitle = cols[:7]
+                            try:
+                                if float(identity) >= 40.0:
+                                    vf_hits[cds_id] = {
+                                        "cds_id": cds_id,
+                                        "target_id": target_id,
+                                        "identity": float(identity),
+                                        "align_len": int(align_len),
+                                        "evalue": evalue,
+                                        "bitscore": float(bitscore),
+                                        "description": stitle
+                                    }
+                            except ValueError:
+                                pass
 
         audit_result["amr_genes"] = list(amr_hits.values())
         audit_result["virulent_factors"] = list(vf_hits.values())
@@ -139,7 +198,7 @@ class DeepSafetyAuditor:
 
         if audit_result["amr_genes"]:
             audit_result["safety_passed"] = False
-            audit_result["risk_warnings"].append(f"检测到 {len(audit_result['amr_genes'])} 个潜在耐药基因 (AMR)")
+            audit_result["risk_warnings"].append(f"检测到 {len(audit_result['amr_genes'])} 个潜在耐药基因 (CARD)")
 
         if audit_result["virulent_factors"]:
             audit_result["safety_passed"] = False

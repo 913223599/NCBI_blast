@@ -122,10 +122,29 @@ const groupedDatabases = computed(() => {
     })
   }
 
-  return Object.keys(groups).map(cat => ({
-    category: cat,
-    dbs: groups[cat]
-  }))
+  // 分类排序权重
+  const categoryOrder = [
+    '噬菌体注释与分析',
+    '功能注释与 AI 预测库',
+    '结构域与特征家族库',
+    '病原毒力与安全性数据库',
+    '16S/18S 参考数据库',
+    'NCBI 物种分类数据库'
+  ]
+
+  return Object.keys(groups)
+    .sort((a, b) => {
+      const idxA = categoryOrder.indexOf(a)
+      const idxB = categoryOrder.indexOf(b)
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB
+      if (idxA !== -1) return -1
+      if (idxB !== -1) return 1
+      return a.localeCompare(b, 'zh-CN')
+    })
+    .map(cat => ({
+      category: cat,
+      dbs: groups[cat]
+    }))
 })
 
 function triggerUpdate(db: any) {

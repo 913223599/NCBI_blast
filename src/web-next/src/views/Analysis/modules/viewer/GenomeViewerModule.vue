@@ -1,353 +1,465 @@
 <template>
   <div class="genome-viewer-module">
-    <!-- 全局加载遮罩 -->
+    <!-- 全局高阶运算加载遮罩 -->
     <div v-if="isComputing" class="loading-overlay">
       <div class="spinner-xl"></div>
-      <div class="loading-text">正在进行高强度基因组运算...</div>
+      <div class="loading-text">正在解析序列与构建多维特征轨迹...</div>
     </div>
 
-    <!-- 顶部工具栏 -->
+    <!-- 顶部轻量 Toast 提示 -->
+    <div v-if="toastMessage" class="floating-toast">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.5">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      <span>{{ toastMessage }}</span>
+    </div>
+
+    <!-- 1. 顶部操作栏 -->
     <header class="viewer-toolbar">
       <div class="toolbar-left">
         <div class="file-upload-mini">
           <input type="file" id="seq-upload" hidden @change="handleFileUpload" accept=".fasta,.fa,.gbk,.gb,.gff" />
           <label for="seq-upload" class="upload-btn">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
             </svg>
             打开序列文件
           </label>
         </div>
-        <div v-if="fileName" class="current-file">
-          <span class="file-icon">🧬</span>
-          <span class="file-name">{{ fileName }}</span>
+        <div v-if="fileName" class="current-file-badge">
+          <span class="file-icon-dot"></span>
+          <span class="file-name" :title="fileName">{{ fileName }}</span>
           <span class="seq-len">{{ formatLength(sequenceLength) }}</span>
+          <span class="gc-badge" v-if="overallGC > 0">GC: {{ overallGC }}%</span>
         </div>
       </div>
 
       <div class="toolbar-center" v-if="sequenceLength > 0">
-        <div class="view-switcher">
-          <button :class="{ active: viewMode === 'circular' }" @click="viewMode = 'circular'">环形图谱</button>
-          <button :class="{ active: viewMode === 'linear' }" @click="viewMode = 'linear'">线性图谱</button>
+        <div class="view-mode-tabs">
+          <button :class="{ active: viewMode === 'circular' }" @click="viewMode = 'circular'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" /><path d="M12 2a10 10 0 0 1 10 10" />
+            </svg>
+            环形图谱 (Circular)
+          </button>
+          <button :class="{ active: viewMode === 'linear' }" @click="viewMode = 'linear'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+            线性图谱 (Linear)
+          </button>
         </div>
       </div>
 
       <div class="toolbar-right">
-        <button v-if="sequenceLength > 0" class="export-btn" @click="exportImage">
+        <!-- 轨道开关菜单组 -->
+        <div class="track-toggle-group" v-if="sequenceLength > 0">
+          <button class="track-btn" :class="{ active: showGC }" @click="showGC = !showGC" title="GC 含量与 GC 偏斜双环轨迹">
+            <span class="toggle-dot gc-dot"></span>
+            GC 曲线 (Content & Skew)
+          </button>
+          <button class="track-btn" :class="{ active: showEnzymes }" @click="showEnzymes = !showEnzymes" title="常用内切酶识别位点">
+            内切酶位点
+          </button>
+          <button class="track-btn" :class="{ active: showPositions }" @click="showPositions = !showPositions" title="刻度坐标数值">
+            坐标标尺
+          </button>
+        </div>
+
+        <button v-if="sequenceLength > 0" class="export-btn primary" @click="exportImage('png')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 10l-4 4m0 0l-4-4m4 4V4" />
           </svg>
           导出图片
         </button>
+        <button v-if="sequenceLength > 0" class="export-btn secondary" @click="exportImage('svg')" title="导出 Adobe Illustrator 可编辑矢量图">
+          SVG 矢量图
+        </button>
       </div>
     </header>
 
     <div class="viewer-main">
-      <!-- 侧边栏 -->
+      <!-- 2. 左侧特征浏览器 (Feature Explorer) -->
       <aside class="features-sidebar">
         <div class="sidebar-header">
-          <span>基因特征定位 (SnapGene 风格)</span>
-        </div>
-
-        <div class="viewer-controls">
-          <div class="control-group">
-            <label>搜索特征</label>
-            <input type="text" v-model="searchQuery" placeholder="输入基因名定位..." />
+          <div class="sidebar-title-wrap">
+            <span class="sidebar-title">基因特征定位</span>
+            <span class="feat-total-tag">{{ filteredFeatures.length }} / {{ features.length }} 个</span>
           </div>
         </div>
 
-        <div class="features-list">
-          <div v-for="(feat, idx) in filteredFeatures" :key="idx" class="feature-item"
-            :class="{ active: selectedFeature === feat }" :style="{ borderLeftColor: getFeatureColor(feat.type) }"
-            @click="selectFeature(feat)">
-            <div class="feat-top" style="align-items: center; margin-bottom: 4px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span class="feat-type">{{ feat.type }}</span>
-                <span class="feat-strand" :class="feat.strand === '+' ? 'plus' : 'minus'" style="padding: 2px 6px; border-radius: 4px; background: #f8fafc; border: 1px solid #f1f5f9; line-height: 1;">
-                  {{ feat.strand === '+' ? '▶ 正向' : '◀ 反向' }}
-                </span>
-              </div>
-              <span class="feat-range">{{ feat.start }}-{{ feat.end }}</span>
+        <!-- 多维检索与分类筛选过滤 -->
+        <div class="filter-box">
+          <div class="search-input-wrap">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input type="text" v-model="searchQuery" placeholder="搜索基因名 / 产物 / Locus..." />
+            <button v-if="searchQuery" class="clear-btn" @click="searchQuery = ''">×</button>
+          </div>
+
+          <div class="filter-selectors">
+            <select v-model="selectedCategoryFilter" class="filter-select">
+              <option value="ALL">全部生物学大类 (All Categories)</option>
+              <option v-for="(cat, key) in FUNCTIONAL_CATEGORIES" :key="key" :value="key">
+                {{ cat.label }}
+              </option>
+            </select>
+
+            <div class="strand-toggle">
+              <button :class="{ active: strandFilter === 'ALL' }" @click="strandFilter = 'ALL'">全</button>
+              <button :class="{ active: strandFilter === '+' }" @click="strandFilter = '+'">+ 正链</button>
+              <button :class="{ active: strandFilter === '-' }" @click="strandFilter = '-'">- 负链</button>
             </div>
-            <div class="feat-name" style="margin: 0; line-height: 1.4;">{{ feat.name || 'Unnamed' }}</div>
+          </div>
+        </div>
+
+        <!-- 特征卡片滚动列表 -->
+        <div class="features-list" ref="featuresListRef">
+          <div 
+            v-for="(feat, idx) in filteredFeatures" 
+            :key="idx" 
+            class="feature-card"
+            :class="{ active: selectedFeature === feat, dimmed: highlightedCategory && feat.category !== highlightedCategory }" 
+            :style="{ '--accent-color': getFeatureColor(feat.type, feat.category, feat.product) }"
+            @click="selectFeature(feat)"
+          >
+            <div class="card-top">
+              <span class="locus-badge">{{ feat.locus_tag || feat.name || `CDS_${idx+1}` }}</span>
+              <span class="strand-pill" :class="feat.strand === '+' ? 'plus' : 'minus'">
+                {{ feat.strand === '+' ? '▶ 正向 (+)' : '◀ 反向 (-)' }}
+              </span>
+              <span class="pos-range">{{ feat.start.toLocaleString() }} - {{ feat.end.toLocaleString() }}</span>
+            </div>
+
+            <div class="card-product" :title="feat.product || feat.name">
+              {{ feat.product || feat.name || 'hypothetical protein' }}
+            </div>
+
+            <div class="card-bottom">
+              <span class="category-chip" :style="{ backgroundColor: getFeatureColor(feat.type, feat.category, feat.product) + '20', color: getFeatureColor(feat.type, feat.category, feat.product) }">
+                {{ feat.category }}
+              </span>
+              <span class="length-chip">{{ (feat.end - feat.start + 1) }} bp ({{ Math.round((feat.end - feat.start + 1)/3) }} aa)</span>
+            </div>
+          </div>
+
+          <div v-if="filteredFeatures.length === 0" class="no-features-tip">
+            未找到符合筛选条件的基因特征
           </div>
         </div>
       </aside>
 
-      <!-- 画布区域 -->
+      <!-- 3. 画布核心区域 -->
       <section class="canvas-area" ref="canvasArea">
         <div v-if="!sequenceLength" class="empty-state">
-          <div class="empty-icon">🧬</div>
-          <h3>科研级序列查看器已就绪</h3>
-          <p>请点击左上角“打开序列文件”加载数据</p>
-          <p class="empty-sub">支持 GBK/GB/FASTA 格式，纯前端极速渲染</p>
+          <div class="empty-icon-pulse">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.8">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+              <path d="M2 12h20" />
+            </svg>
+          </div>
+          <h3>科研级序列与基因组可视化工作台</h3>
+          <p>请点击左上角“打开序列文件”加载数据，或从注释任务直接跳转</p>
+          <div class="supported-formats">
+            <span>支持格式:</span>
+            <span class="fmt-tag">GenBank (.gbk/.gb)</span>
+            <span class="fmt-tag">GFF3 (.gff)</span>
+            <span class="fmt-tag">FASTA (.fasta/.fa)</span>
+          </div>
         </div>
 
-        <div v-else class="svg-container" @wheel="handleZoom" @mousedown="startPan" @mousemove="doPan" @mouseup="endPan"
-          @mouseleave="endPan" @click="handleCanvasClick">
+        <div v-else class="svg-container" 
+          @wheel.prevent="handleZoom" 
+          @mousedown="startPan" 
+          @mousemove="doPan" 
+          @mouseup="endPan"
+          @mouseleave="endPan" 
+          @click="handleCanvasClick"
+        >
 
-          <!-- SnapGene toolbar -->
-          <div class="sg-toolbar" :style="{ left: toolbarX + 'px', top: toolbarY + 'px', transform: 'none' }" @mousedown.stop>
-            <div class="sg-drag-handle" @mousedown.stop.prevent="startDragToolbar" title="拖动">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                 <circle cx="8" cy="6" r="2"/><circle cx="16" cy="6" r="2"/>
-                 <circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/>
-                 <circle cx="8" cy="18" r="2"/><circle cx="16" cy="18" r="2"/>
-              </svg>
-            </div>
-            
-            <!-- Enzymes button -->
-            <div class="sg-btn-wrap" @mouseenter="activePanel = 'enzyme'" @mouseleave="activePanel = ''">
-              <button class="sg-btn" :class="{ active: showEnzymes }" title="内切酶位点">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-                <span class="sg-arrow">&#9656;</span>
-              </button>
-              <div class="sg-flyout" v-show="activePanel === 'enzyme'">
-                <div class="sg-flyout-inner">
-                  <label class="sg-menu-item" :class="{ checked: showEnzymes }">
-                    <input type="checkbox" v-model="showEnzymes" /> 常见内切酶位点
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <!-- Feature display button -->
-            <div class="sg-btn-wrap" @mouseenter="activePanel = 'feature'" @mouseleave="activePanel = ''">
-              <button class="sg-btn" :class="{ active: true }" title="特征显示">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span class="sg-arrow">&#9656;</span>
-              </button>
-              <div class="sg-flyout" v-show="activePanel === 'feature'">
-                <div class="sg-flyout-inner">
-                  <div class="sg-menu-item checked">显示特征图形</div>
-                  <div class="sg-menu-item checked">显示特征标签</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- GC content button -->
-            <div class="sg-btn-wrap" @mouseenter="activePanel = 'gc'" @mouseleave="activePanel = ''">
-              <button class="sg-btn" :class="{ active: showGC }" title="GC 含量">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                <span class="sg-arrow">&#9656;</span>
-              </button>
-              <div class="sg-flyout" v-show="activePanel === 'gc'">
-                <div class="sg-flyout-inner">
-                  <label class="sg-menu-item" :class="{ checked: showGC }">
-                    <input type="checkbox" v-model="showGC" /> GC 含量与偏斜
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <!-- ORF button -->
-            <div class="sg-btn-wrap" @mouseenter="activePanel = 'orf'" @mouseleave="activePanel = ''">
-              <button class="sg-btn" :class="{ active: selectedORFFrames.length > 0 }" title="ORF 阅读框架">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3l4 4-4 4M7 21l-4-4 4-4"/><path d="M21 7H9M3 17h12"/></svg>
-                <span class="sg-arrow">&#9656;</span>
-              </button>
-              <div class="sg-flyout" v-show="activePanel === 'orf'">
-                <div class="sg-flyout-inner">
-                  <div class="sg-menu-item" :class="{ checked: selectedORFFrames.length === 0 }" @click="selectedORFFrames = []">只有开放阅读框架</div>
-                  <div class="sg-divider"></div>
-                  <div class="sg-menu-item" :class="{ checked: selectedORFFrames.includes('+1') }" @click="toggleFrame('+1')">仅 框架 +1</div>
-                  <div class="sg-menu-item" :class="{ checked: selectedORFFrames.includes('+2') }" @click="toggleFrame('+2')">仅 框架 +2</div>
-                  <div class="sg-menu-item" :class="{ checked: selectedORFFrames.includes('+3') }" @click="toggleFrame('+3')">仅 框架 +3</div>
-                  <div class="sg-divider"></div>
-                  <div class="sg-menu-item" :class="{ checked: selectedORFFrames.includes('-1') }" @click="toggleFrame('-1')">仅 框架 -1</div>
-                  <div class="sg-menu-item" :class="{ checked: selectedORFFrames.includes('-2') }" @click="toggleFrame('-2')">仅 框架 -2</div>
-                  <div class="sg-menu-item" :class="{ checked: selectedORFFrames.includes('-3') }" @click="toggleFrame('-3')">仅 框架 -3</div>
-                  <div class="sg-divider"></div>
-                  <div class="sg-menu-item" @click="selectedORFFrames = ['+1','+2','+3']">顶部 3 个框架</div>
-                  <div class="sg-menu-item" @click="selectedORFFrames = ['-1','-2','-3']">底部 3 个框架</div>
-                  <div class="sg-menu-item" @click="selectedORFFrames = ['+1','+2','+3','-1','-2','-3']">所有 6 个框架</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Position numbers button -->
-            <div class="sg-btn-wrap">
-              <button class="sg-btn" :class="{ active: showPositions }" @click="showPositions = !showPositions" title="显示位置">
-                <span style="font-size: 10px; font-weight: 700; line-height: 1;">(123)</span>
-              </button>
-            </div>
-          </div>
-          <!-- 环形视图 -->
+          <!-- 环形视图 (Circular Genome Map) -->
           <svg v-if="viewMode === 'circular'" ref="svgRef" width="100%" height="100%" class="genome-svg">
             <svg x="50%" y="50%" overflow="visible">
               
-              <!-- 图形层 (逻辑原生缩放) -->
-              <g :transform="`translate(${panX}, ${panY})`">
-                <!-- 轨道基准线 -->
-                <circle cx="0" cy="0" :r="zoomedBaseRadius" class="backbone" vector-effect="non-scaling-stroke" />
+              <!-- 缩放与平移图元容器 -->
+              <g :transform="`translate(${panX}, ${panY}) scale(${zoomScale})`">
                 
-                <!-- 刻度线 -->
-                <g class="rulers">
+                <!-- 1. 背景同心主轴轨道 -->
+                <circle cx="0" cy="0" :r="outerRadius" class="track-backbone outer" vector-effect="non-scaling-stroke" />
+                <circle cx="0" cy="0" :r="innerRadius" class="track-backbone inner" vector-effect="non-scaling-stroke" />
+                <circle cx="0" cy="0" :r="midSplitRadius" class="track-split" vector-effect="non-scaling-stroke" />
+
+                <!-- 2. 刻度线与网格 -->
+                <g class="rulers" v-if="showPositions">
                   <line 
-                    v-for="(tick, i) in ticks" :key="'tick'+i"
+                    v-for="(tick, i) in circularTicks" :key="'tick'+i"
                     :x1="tick.x1" :y1="tick.y1" :x2="tick.x2" :y2="tick.y2"
-                    stroke="#94a3b8" :stroke-width="tick.major ? 2 : 1"
+                    :stroke="tick.major ? '#475569' : '#cbd5e1'" 
+                    :stroke-width="tick.major ? 1.5 : 1"
                     vector-effect="non-scaling-stroke"
                   />
+                  <!-- 刻度数值文本 -->
+                  <text 
+                    v-for="(tick, i) in majorCircularTicks" :key="'tick_txt'+i"
+                    :x="tick.tx" :y="tick.ty" 
+                    :text-anchor="tick.anchor" 
+                    dominant-baseline="middle"
+                    class="tick-text-circular"
+                  >{{ tick.label }}</text>
                 </g>
 
-                <!-- 附加轨道：GC 与 Skew -->
+                <!-- 3. GC 含量与 GC Skew 波动轨迹 (半径 95 ~ 170) -->
                 <g class="gc-layer" v-if="showGC">
-                  <path :d="gcPaths.gcPathData" fill="none" stroke="#3b82f6" stroke-width="1.5" opacity="0.8" vector-effect="non-scaling-stroke" />
-                  <path :d="gcPaths.gcSkewPathData" fill="none" stroke="#f59e0b" stroke-width="1.5" opacity="0.8" vector-effect="non-scaling-stroke" />
-                  <circle v-if="currentLayout.getLayer('main-gc')" cx="0" cy="0" :r="(currentLayout.getLayer('main-gc')!.bounds.innerR + currentLayout.getLayer('main-gc')!.bounds.outerR)/2" fill="none" stroke="#cbd5e1" stroke-dasharray="4" vector-effect="non-scaling-stroke" />
-                  <circle v-if="currentLayout.getLayer('main-gc-skew')" cx="0" cy="0" :r="(currentLayout.getLayer('main-gc-skew')!.bounds.innerR + currentLayout.getLayer('main-gc-skew')!.bounds.outerR)/2" fill="none" stroke="#cbd5e1" stroke-dasharray="4" vector-effect="non-scaling-stroke" />
+                  <!-- GC Content 波动轨道 -->
+                  <g class="gc-content-sublayer">
+                    <circle cx="0" cy="0" :r="gcBaselineR" fill="none" stroke="#cbd5e1" stroke-dasharray="3 3" stroke-width="1" vector-effect="non-scaling-stroke" />
+                    <!-- 高于平均 GC：翠绿色填充 -->
+                    <path :d="gcPaths.gcHighPathData" fill="#10b981" opacity="0.65" vector-effect="non-scaling-stroke" />
+                    <!-- 低于平均 GC：深灰色填充 -->
+                    <path :d="gcPaths.gcLowPathData" fill="#64748b" opacity="0.65" vector-effect="non-scaling-stroke" />
+                    <path :d="gcPaths.gcPathData" fill="none" stroke="#059669" stroke-width="1" vector-effect="non-scaling-stroke" />
+                  </g>
+
+                  <!-- GC Skew 偏斜波动轨道 -->
+                  <g class="gc-skew-sublayer">
+                    <circle cx="0" cy="0" :r="skewBaselineR" fill="none" stroke="#e2e8f0" stroke-dasharray="3 3" stroke-width="1" vector-effect="non-scaling-stroke" />
+                    <!-- G > C (Leading strand): 紫色填充 -->
+                    <path :d="gcPaths.gcSkewPosPathData" fill="#8b5cf6" opacity="0.65" vector-effect="non-scaling-stroke" />
+                    <!-- G < C (Lagging strand): 琥珀橙填充 -->
+                    <path :d="gcPaths.gcSkewNegPathData" fill="#f59e0b" opacity="0.65" vector-effect="non-scaling-stroke" />
+                  </g>
                 </g>
 
-                <!-- 附加轨道：Enzymes (线段置于底层) -->
+                <!-- 4. 限制性内切酶位点指示线 -->
                 <g class="enzyme-layer" v-if="showEnzymes">
-                   <template v-for="(f, i) in renderCircularEnzymes" :key="'enz_path'+i">
-                     <path v-if="getEnzymeCircularLabel(f, sequenceLength, zoomedBaseRadius, currentLayout.getOuterBoundary())"
-                       :d="getEnzymeCircularLabel(f, sequenceLength, zoomedBaseRadius, currentLayout.getOuterBoundary())?.line" 
-                       fill="none" :stroke="f.color" stroke-width="1.5"
-                       vector-effect="non-scaling-stroke"
-                     />
-                   </template>
-                </g>
-
-                <!-- 附加轨道：ORF -->
-                <g class="orf-layer" v-if="selectedORFFrames.length > 0">
-                  <template v-for="frame in selectedORFFrames" :key="'orf_layer_' + frame">
-                    <path 
-                      v-for="(f, i) in filteredOrfFeatures.filter(x => x.frame === frame)" :key="'orf'+frame+i"
-                      :d="getCircularPath(f, sequenceLength, currentLayout.getLayer('main-orf-'+frame)!.bounds)"
-                      :fill="f.color"
-                      :opacity="selectedFeature && selectedFeature === f ? 0.9 : 0.3"
-                      class="feature-path"
-                      @click.stop="selectFeature(f)"
-                    ><title>{{ f.name }} [{{ f.start }}..{{ f.end }}]</title></path>
-                  </template>
-                </g>
-
-                <!-- 特征图形 -->
-                <g class="features-layer">
-                  <path 
-                    v-for="(f, i) in renderFeatures" 
-                    :key="'f'+i"
-                    :d="getCircularPath(f, sequenceLength, currentLayout.getLayer('main-cds')!.rows[f.track] || currentLayout.getLayer('main-cds')!.bounds)"
-                    :fill="getFeatureColor(f.type)"
-                    :opacity="selectedFeature && selectedFeature !== f ? 0.3 : 0.85"
-                    class="feature-path"
-                    @click.stop="selectFeature(f)"
-                  >
-                    <title>{{ f.name }} [{{ f.start }}..{{ f.end }}]</title>
-                  </path>
-                </g>
-                
-                <!-- 选中特征的高亮描边 -->
-                <path 
-                  v-if="selectedFeature && selectedFeature.type === 'CDS'"
-                  :d="getCircularPath(selectedFeature, sequenceLength, currentLayout.getLayer('main-cds')!.rows[selectedFeature.track] || currentLayout.getLayer('main-cds')!.bounds)"
-                  fill="none" stroke="#0f172a" stroke-width="2"
-                  vector-effect="non-scaling-stroke"
-                  style="pointer-events: none;"
-                />
-              </g>
-
-              <!-- 文本层 (绝对14px，规避浏览器缩小限制) -->
-              <g :transform="`translate(${panX}, ${panY})`" v-if="showPositions">
-                <!-- 刻度文本 -->
-                <text 
-                  v-for="(tick, i) in majorTicks" :key="'text'+i"
-                  :x="tick.tx" :y="tick.ty" 
-                  :text-anchor="tick.anchor" 
-                  dominant-baseline="middle"
-                  :transform="`rotate(${tick.rot}, ${tick.tx}, ${tick.ty})`"
-                  class="tick-text"
-                  style="font-size: 14px;"
-                >{{ tick.label }}</text>
-
-                <g v-if="showEnzymes">
-                  <template v-for="(f, i) in renderCircularEnzymes" :key="'enz_text'+i">
-                    <text v-if="getEnzymeCircularLabel(f, sequenceLength, zoomedBaseRadius, currentLayout.getOuterBoundary())"
-                      :x="getEnzymeCircularLabel(f, sequenceLength, zoomedBaseRadius, currentLayout.getOuterBoundary())!.textX" 
-                      :y="getEnzymeCircularLabel(f, sequenceLength, zoomedBaseRadius, currentLayout.getOuterBoundary())!.textY"
-                      :text-anchor="getEnzymeCircularLabel(f, sequenceLength, zoomedBaseRadius, currentLayout.getOuterBoundary())!.anchor"
+                  <template v-for="(f, i) in renderCircularEnzymes" :key="'enz_path'+i">
+                    <path v-if="getEnzymeCircularLabel(f, sequenceLength, outerRadius + 28)"
+                      :d="getEnzymeCircularLabel(f, sequenceLength, outerRadius + 28)?.line" 
+                      fill="none" :stroke="f.color" stroke-width="1.2"
+                      vector-effect="non-scaling-stroke"
+                    />
+                    <text v-if="getEnzymeCircularLabel(f, sequenceLength, outerRadius + 28)"
+                      :x="getEnzymeCircularLabel(f, sequenceLength, outerRadius + 28)?.textX"
+                      :y="getEnzymeCircularLabel(f, sequenceLength, outerRadius + 28)?.textY"
+                      :text-anchor="getEnzymeCircularLabel(f, sequenceLength, outerRadius + 28)?.anchor"
                       dominant-baseline="middle"
-                      style="font-size: 14px; font-weight: 700;"
+                      class="enzyme-label"
                       :fill="f.color"
                     >{{ f.name }}</text>
                   </template>
                 </g>
-              </g>
-              
-            </svg>
-          </svg>
 
-          <!-- 线性视图 -->
-          <svg v-else ref="svgRef" width="100%" height="100%" class="genome-svg linear-svg">
-            <!-- 垂直居中 -->
-            <svg x="0" y="50%" overflow="visible">
-              <g :transform="`translate(${panX}, 0)`">
-                <line x1="0" y1="0" :x2="computedLinearWidth" y2="0" class="backbone" />
-                <!-- 线性刻度 -->
-                <g class="rulers">
-                  <line v-for="(tick, i) in ticks" :key="'ltick' + i" :x1="tick.lx" y1="-5" :x2="tick.lx"
-                    :y2="tick.major ? 5 : 2" stroke="#94a3b8" :stroke-width="tick.major ? 2 : 1" />
-                  <text v-for="(tick, i) in majorTicks" :key="'ltext' + i" :x="tick.lx" y="-15" text-anchor="middle"
-                    class="tick-text" style="font-size: 14px;">{{ tick.label }}</text>
+                <!-- 5. 核心基因特征图谱 (正链在外轨 R=215~245，负链在内轨 R=180~210) -->
+                <g class="features-layer">
+                  <path 
+                    v-for="(f, i) in features" 
+                    :key="'feat_'+i"
+                    :d="getCircularPath(f, sequenceLength, f.strand === '+' ? { innerR: 215, outerR: 245 } : { innerR: 180, outerR: 210 })"
+                    :fill="getFeatureColor(f.type, f.category, f.product)"
+                    :class="['feature-glyph', { 
+                      'is-selected': selectedFeature === f, 
+                      'is-dimmed': isFeatureDimmed(f)
+                    }]"
+                    @mouseenter="hoverFeature = f"
+                    @mouseleave="hoverFeature = null"
+                    @click.stop="selectFeature(f)"
+                  >
+                    <title>{{ f.locus_tag || f.name }}: {{ f.product || 'hypothetical protein' }} [{{ f.start }}..{{ f.end }} bp]</title>
+                  </path>
                 </g>
 
-              <!-- 附加图形：Enzymes 置于底层 -->
-              <g class="enzyme-layer" v-if="showEnzymes">
-                <template v-for="(f, i) in renderLinearEnzymes" :key="'lenz' + i">
-                  <path :d="getEnzymeLinearLabel(f, sequenceLength, computedLinearWidth)?.line" fill="none"
-                    :stroke="f.color" stroke-width="1.5" opacity="0.6" />
-                  <text :x="getEnzymeLinearLabel(f, sequenceLength, computedLinearWidth)?.textX"
-                    :y="getEnzymeLinearLabel(f, sequenceLength, computedLinearWidth)?.textY" text-anchor="middle"
-                    font-size="14" :fill="f.color" font-weight="700">{{ f.name }}</text>
-                </template>
-              </g>
+                <!-- 6. 选中基因高亮发光描边 -->
+                <path 
+                  v-if="selectedFeature"
+                  :d="getCircularPath(selectedFeature, sequenceLength, selectedFeature.strand === '+' ? { innerR: 215, outerR: 245 } : { innerR: 180, outerR: 210 })"
+                  fill="none" 
+                  stroke="#ffffff" 
+                  stroke-width="2.5"
+                  class="selected-highlight-stroke"
+                  vector-effect="non-scaling-stroke"
+                  style="pointer-events: none;"
+                />
 
-              <g class="orf-layer" v-if="selectedORFFrames.length > 0">
-                <template v-for="frame in selectedORFFrames" :key="'lorf_layer_' + frame">
-                  <path v-for="(f, i) in filteredOrfFeatures.filter(x => x.frame === frame)" :key="'lorf' + frame + i"
-                    :d="getLinearPath(f, sequenceLength, computedLinearWidth, { linearY: currentLayout.getLayer('main-orf-'+frame)!.bounds.linearY, rowHeight: trackWidth })" 
-                    :fill="f.color"
-                    :opacity="selectedFeature && selectedFeature === f ? 0.9 : 0.3"
-                    class="feature-path"
-                    @click.stop="selectFeature(f)"
-                  />
-                </template>
-              </g>
+                <!-- 7. 紧凑型环形中心数据看板 (半径 75，留出足量空间展示内部 GC 曲线) -->
+                <g class="center-infobox" style="pointer-events: none;">
+                  <circle cx="0" cy="0" :r="centerCardRadius" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" class="center-bg" />
+                  <text x="0" y="-24" text-anchor="middle" class="center-title">{{ fileName || 'Phage Genome' }}</text>
+                  <text x="0" y="-2" text-anchor="middle" class="center-length">{{ formatLength(sequenceLength) }}</text>
+                  <text x="0" y="18" text-anchor="middle" class="center-sub">GC 含量: {{ overallGC }}%</text>
+                  <text x="0" y="34" text-anchor="middle" class="center-cds-count">CDS: {{ features.length }} 个特征</text>
+                </g>
 
-              <!-- 特征图形 -->
-              <g class="features-layer">
-                <path v-for="(f, i) in renderFeatures" :key="'lf' + i"
-                  :d="getLinearPath(f, sequenceLength, computedLinearWidth, { linearY: currentLayout.getLayer('main-cds')!.rows[f.track]?.linearY ?? currentLayout.getLayer('main-cds')!.bounds.linearY, rowHeight: trackWidth })" :fill="getFeatureColor(f.type)"
-                  :opacity="selectedFeature && selectedFeature !== f ? 0.3 : 0.85" class="feature-path"
-                  @click.stop="selectFeature(f)">
-                  <title>{{ f.name }} [{{ f.start }}..{{ f.end }}]</title>
-                </path>
-              </g>
-                <!-- 选中高亮 -->
-                <path v-if="selectedFeature && selectedFeature.type === 'CDS'"
-                  :d="getLinearPath(selectedFeature, sequenceLength, computedLinearWidth, { linearY: currentLayout.getLayer('main-cds')!.rows[selectedFeature.track]?.linearY ?? currentLayout.getLayer('main-cds')!.bounds.linearY, rowHeight: trackWidth })" fill="none"
-                  stroke="#0f172a" stroke-width="2" style="pointer-events: none;" />
               </g>
             </svg>
           </svg>
-        </div>
 
-        <!-- 悬浮信息面板 -->
-        <div class="feature-tooltip" v-if="selectedFeature">
-          <h4>{{ selectedFeature.name || 'Unnamed Feature' }}</h4>
-          <div class="tt-row"><span>Type:</span> {{ selectedFeature.type }}</div>
-          <div class="tt-row"><span>Range:</span> {{ selectedFeature.start }} - {{ selectedFeature.end }}</div>
-          <div class="tt-row"><span>Strand:</span> {{ selectedFeature.strand === '+' ? 'Forward (+)' : 'Reverse (-)' }}
+          <!-- 线性视图 (Linear Genome View) -->
+          <svg v-else ref="svgRef" width="100%" height="100%" class="genome-svg linear-svg">
+            <svg x="0" y="50%" overflow="visible">
+              <g :transform="`translate(${panX}, 0) scale(${zoomScale}, 1)`">
+                <!-- 线性骨架主轴 -->
+                <line x1="0" y1="0" :x2="computedLinearWidth" y2="0" class="linear-backbone" />
+                
+                <!-- 线性刻度标尺 -->
+                <g class="linear-rulers" v-if="showPositions">
+                  <line 
+                    v-for="(tick, i) in linearTicks" :key="'ltick_' + i" 
+                    :x1="tick.x" y1="-8" :x2="tick.x" :y2="tick.major ? 8 : 4" 
+                    :stroke="tick.major ? '#475569' : '#94a3b8'" 
+                    :stroke-width="tick.major ? 1.5 : 1" 
+                  />
+                  <text 
+                    v-for="(tick, i) in majorLinearTicks" :key="'ltxt_' + i" 
+                    :x="tick.x" y="-18" 
+                    text-anchor="middle" 
+                    class="linear-tick-label"
+                  >{{ tick.label }}</text>
+                </g>
+
+                <!-- 特征图形渲染 (正链上方，负链下方) -->
+                <g class="linear-features">
+                  <path 
+                    v-for="(f, i) in features" 
+                    :key="'lfeat_' + i"
+                    :d="getLinearPath(f, sequenceLength, computedLinearWidth, { linearY: f.strand === '+' ? -28 : 8, rowHeight: 20 })" 
+                    :fill="getFeatureColor(f.type, f.category, f.product)"
+                    :class="['feature-glyph', { 
+                      'is-selected': selectedFeature === f, 
+                      'is-dimmed': isFeatureDimmed(f)
+                    }]"
+                    @mouseenter="hoverFeature = f"
+                    @mouseleave="hoverFeature = null"
+                    @click.stop="selectFeature(f)"
+                  >
+                    <title>{{ f.locus_tag || f.name }}: {{ f.product || 'hypothetical protein' }} [{{ f.start }}..{{ f.end }} bp]</title>
+                  </path>
+                </g>
+
+                <!-- 线性选中高亮 -->
+                <path 
+                  v-if="selectedFeature"
+                  :d="getLinearPath(selectedFeature, sequenceLength, computedLinearWidth, { linearY: selectedFeature.strand === '+' ? -28 : 8, rowHeight: 20 })" 
+                  fill="none" 
+                  stroke="#0f172a" 
+                  stroke-width="2.5" 
+                  style="pointer-events: none;" 
+                />
+              </g>
+            </svg>
+          </svg>
+
+          <!-- 4. 浮动功能大类图例徽章栏 (Interactive Legend) -->
+          <div class="floating-legend" v-if="sequenceLength > 0">
+            <div class="legend-header">
+              <span>功能大类图例 (点击高亮聚焦)</span>
+              <button v-if="highlightedCategory" class="reset-legend-btn" @click="highlightedCategory = ''">清除高亮</button>
+            </div>
+            <div class="legend-items">
+              <div 
+                v-for="(cat, key) in FUNCTIONAL_CATEGORIES" 
+                :key="key"
+                class="legend-item"
+                :class="{ active: highlightedCategory === key }"
+                @click="toggleHighlightCategory(key)"
+              >
+                <span class="color-dot" :style="{ backgroundColor: cat.color }"></span>
+                <span class="legend-label">{{ cat.label.split(' ')[0] }}</span>
+                <span class="legend-count">{{ categoryCounts[key] || 0 }}</span>
+              </div>
+            </div>
+
+            <!-- GC 轨迹说明 -->
+            <div class="gc-legend-sub" v-if="showGC">
+              <div class="gc-legend-title">GC 轨迹说明:</div>
+              <div class="gc-legend-row"><span class="gc-box green"></span> GC 含量高于均值</div>
+              <div class="gc-legend-row"><span class="gc-box gray"></span> GC 含量低于均值</div>
+              <div class="gc-legend-row"><span class="gc-box purple"></span> GC Skew (+) 前导链</div>
+              <div class="gc-legend-row"><span class="gc-box orange"></span> GC Skew (-) 滞后链</div>
+            </div>
           </div>
 
-          <div class="tt-actions" v-if="rawSequence">
-            <button @click="handleCopySequence" class="action-btn">复制 DNA 序列</button>
-            <button @click="handleCopyTranslation" class="action-btn"
-              v-if="selectedFeature.type === 'CDS'">复制氨基酸翻译</button>
+          <!-- 5. 悬浮微型卡片 Tooltip -->
+          <div 
+            class="floating-tooltip" 
+            v-if="hoverFeature && !selectedFeature"
+            :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
+          >
+            <div class="tt-header">
+              <span class="tt-locus">{{ hoverFeature.locus_tag || hoverFeature.name }}</span>
+              <span class="tt-cat-badge" :style="{ backgroundColor: getFeatureColor(hoverFeature.type, hoverFeature.category, hoverFeature.product) + '20', color: getFeatureColor(hoverFeature.type, hoverFeature.category, hoverFeature.product) }">
+                {{ hoverFeature.category }}
+              </span>
+            </div>
+            <div class="tt-product">{{ hoverFeature.product || 'hypothetical protein' }}</div>
+            <div class="tt-meta">
+              <span>坐标: {{ hoverFeature.start.toLocaleString() }} - {{ hoverFeature.end.toLocaleString() }} bp ({{ hoverFeature.strand === '+' ? '正链 +' : '负链 -' }})</span>
+              <span>长度: {{ hoverFeature.end - hoverFeature.start + 1 }} bp ({{ Math.round((hoverFeature.end - hoverFeature.start + 1)/3) }} aa)</span>
+            </div>
           </div>
-          <button class="close-tt" @click="selectedFeature = null">✖</button>
+
+          <!-- 6. 视口操控悬浮工具组 (Zoom & Reset) -->
+          <div class="viewport-controls">
+            <button @click="zoomIn" title="放大 (+)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+            <button @click="zoomOut" title="缩小 (-)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+            <button @click="resetView" title="重置视图与居中">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            </button>
+          </div>
+
+          <!-- 7. 选中基因深度详情抽屉 (Gene Inspector) -->
+          <div class="feature-inspector-drawer" v-if="selectedFeature">
+            <div class="drawer-header">
+              <div class="drawer-title-group">
+                <span class="drawer-icon-tag" :style="{ backgroundColor: getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product) }"></span>
+                <span class="drawer-locus">{{ selectedFeature.locus_tag || selectedFeature.name || 'CDS Feature' }}</span>
+                <span class="drawer-cat-chip" :style="{ color: getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product), backgroundColor: getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product) + '15' }">
+                  {{ selectedFeature.category }}
+                </span>
+              </div>
+              <button class="drawer-close" @click="selectedFeature = null">×</button>
+            </div>
+
+            <div class="drawer-body">
+              <div class="info-row">
+                <span class="info-k">产物功能:</span>
+                <span class="info-v highlight">{{ selectedFeature.product || 'hypothetical protein' }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-k">物理区间:</span>
+                <span class="info-v">{{ selectedFeature.start.toLocaleString() }} .. {{ selectedFeature.end.toLocaleString() }} bp ({{ selectedFeature.strand === '+' ? '正链 Forward +' : '反链 Reverse -' }})</span>
+              </div>
+              <div class="info-row">
+                <span class="info-k">蛋白规模:</span>
+                <span class="info-v">{{ Math.round((selectedFeature.end - selectedFeature.start + 1) / 3) }} aa (分子量约 {{ ((selectedFeature.end - selectedFeature.start + 1) / 3 * 0.11).toFixed(2) }} kDa)</span>
+              </div>
+              <div class="info-row" v-if="selectedFeature.gene">
+                <span class="info-k">基因代号:</span>
+                <span class="info-v">{{ selectedFeature.gene }}</span>
+              </div>
+              <div class="info-row" v-if="selectedFeature.note">
+                <span class="info-k">注释证据:</span>
+                <span class="info-v note-text">{{ selectedFeature.note }}</span>
+              </div>
+            </div>
+
+            <div class="drawer-actions">
+              <button @click="copySequence" class="act-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                复制核酸 CDS
+              </button>
+              <button @click="copyTranslation" class="act-btn" v-if="selectedFeature.translation || rawSequence">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                复制蛋白翻译序列
+              </button>
+            </div>
+          </div>
+
         </div>
       </section>
     </div>
@@ -355,738 +467,942 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, triggerRef, onMounted } from 'vue';
-import { parseGenBank, parseFasta } from './utils/parser';
-import { calculateGC, calculateORFs, calculateEnzymes } from './utils/calculations';
-import { getCircularPath, getLinearPath, getEnzymeCircularLabel, getEnzymeLinearLabel, getFeatureColor, formatLength } from './utils/render';
-import { extractFeatureSequence, translateDNA } from './utils/sequence';
-import { TrackLayoutEngine } from './core/TrackLayoutEngine';
+import { ref, computed, watch } from "vue";
+import { parseGenBank, parseFasta } from "./utils/parser";
+import { calculateGC, calculateEnzymes } from "./utils/calculations";
+import { 
+  getCircularPath, 
+  getLinearPath, 
+  getEnzymeCircularLabel, 
+  getFeatureColor, 
+  formatLength, 
+  formatTickLabel,
+  polarToCartesian,
+  FUNCTIONAL_CATEGORIES 
+} from "./utils/render";
+import { extractFeatureSequence, translateDNA } from "./utils/sequence";
 
 const props = defineProps<{
   initialGbk?: string;
   initialName?: string;
 }>();
 
-// --- State ---
-const fileName = ref('');
+// --- 核心状态 ---
+const fileName = ref("");
 const sequenceLength = ref(0);
-const rawSequence = ref('');
+const rawSequence = ref("");
 const features = ref<any[]>([]);
-const viewMode = ref<'circular' | 'linear'>('circular');
-const searchQuery = ref('');
-const selectedFeature = ref<any>(null);
+const viewMode = ref<"circular" | "linear">("circular");
 const isComputing = ref(false);
+const toastMessage = ref("");
 
-const showGC = ref(false);
-const selectedORFFrames = ref<string[]>([]);
-const showEnzymes = ref(true);
+// 过滤与交互
+const searchQuery = ref("");
+const selectedCategoryFilter = ref("ALL");
+const strandFilter = ref("ALL");
+const highlightedCategory = ref("");
+const selectedFeature = ref<any>(null);
+const hoverFeature = ref<any>(null);
+
+// 轨迹开关 (默认开启 GC 曲线与坐标标尺)
+const showGC = ref(true);
+const showEnzymes = ref(false);
 const showPositions = ref(true);
-const activePanel = ref('');
 
-// Toolbar drag state
-const toolbarX = ref(12);
-const toolbarY = ref(200);
-let isDraggingToolbar = false;
-let tbDragStartX = 0;
-let tbDragStartY = 0;
-let initialTbX = 0;
-let initialTbY = 0;
+// 几何半径系统
+const outerRadius = 245;
+const innerRadius = 180;
+const midSplitRadius = 212.5;
 
-function startDragToolbar(e: MouseEvent) {
-  isDraggingToolbar = true;
-  tbDragStartX = e.clientX;
-  tbDragStartY = e.clientY;
-  initialTbX = toolbarX.value;
-  initialTbY = toolbarY.value;
-  document.addEventListener('mousemove', onDragToolbar);
-  document.addEventListener('mouseup', stopDragToolbar);
-}
+const gcBaselineR = 150;
+const skewBaselineR = 110;
+const centerCardRadius = 75;
 
-function onDragToolbar(e: MouseEvent) {
-  if (!isDraggingToolbar) return;
-  toolbarX.value = initialTbX + (e.clientX - tbDragStartX);
-  toolbarY.value = initialTbY + (e.clientY - tbDragStartY);
-}
-
-function stopDragToolbar() {
-  isDraggingToolbar = false;
-  document.removeEventListener('mousemove', onDragToolbar);
-  document.removeEventListener('mouseup', stopDragToolbar);
-}
-
-function toggleFrame(frame: string) {
-  const idx = selectedORFFrames.value.indexOf(frame);
-  if (idx >= 0) {
-    selectedORFFrames.value.splice(idx, 1);
-  } else {
-    selectedORFFrames.value.push(frame);
-  }
-}
-
-const gcPathData = ref('');
-const gcSkewPathData = ref('');
-const orfFeatures = ref<any[]>([]);
-const enzymeFeatures = ref<any[]>([]);
-
-const layoutEngine = ref(new TrackLayoutEngine());
-const layoutTrigger = ref(0);
-
-// Dynamic base radius scaled with zoomLevel
-const zoomedBaseRadius = computed(() => baseRadius * zoomLevel.value);
-
-// Computed view layout
-const currentLayout = computed(() => {
-  layoutTrigger.value; // subscribe to trigger
-  return layoutEngine.value.resolveLayout(zoomedBaseRadius.value);
-});
-const baseRadius = 350;
-const trackWidth = 14;
-const linearWidth = 1200;
-
-// --- Canvas Interaction ---
-const zoomLevel = ref(1);
+const zoomScale = ref(1);
 const panX = ref(0);
 const panY = ref(0);
-let isDragging = false;
-let startX = 0;
-let startY = 0;
-let dragStartX = 0;
-let dragStartY = 0;
+let isPanning = false;
+let startMouseX = 0;
+let startMouseY = 0;
+let initialPanX = 0;
+let initialPanY = 0;
 
-// --- Computed ---
-const renderFeatures = computed(() => {
-  return features.value; // Here we could add logic for Hidden Legend Toggles
+const tooltipX = ref(0);
+const tooltipY = ref(0);
+const svgRef = ref<SVGElement | null>(null);
+
+const computedLinearWidth = computed(() => Math.max(1200, sequenceLength.value * 0.08));
+
+// --- 统计与计算 ---
+const overallGC = computed(() => {
+  if (!rawSequence.value || rawSequence.value.length === 0) return 0;
+  const seq = rawSequence.value.toUpperCase();
+  let gcCount = 0;
+  for (let i = 0; i < seq.length; i++) {
+    if (seq[i] === "G" || seq[i] === "C") gcCount++;
+  }
+  return Number(((gcCount / seq.length) * 100).toFixed(2));
 });
 
-const computedLinearWidth = computed(() => linearWidth * zoomLevel.value);
-
-const filteredFeatures = computed(() => {
-  // 将勾选的 ORF 也无缝汇入左侧列表，支持搜索和点击
-  let activeList = features.value;
-  if (selectedORFFrames.value.length > 0) {
-    activeList = [...activeList, ...filteredOrfFeatures.value].sort((a, b) => a.start - b.start);
+const categoryCounts = computed(() => {
+  const counts: Record<string, number> = {};
+  for (const f of features.value) {
+    const cat = f.category || "Hypothetical";
+    counts[cat] = (counts[cat] || 0) + 1;
   }
-
-  if (!searchQuery.value) return activeList.slice(0, 200);
-  
-  const q = searchQuery.value.toLowerCase();
-  return activeList.filter(f =>
-    (f.name && f.name.toLowerCase().includes(q)) ||
-    f.type.toLowerCase().includes(q)
-  ).slice(0, 200);
+  return counts;
 });
 
-// 解析引擎
-// 解析引擎
-function loadFromText(text: string, name: string, isGbk: boolean) {
-  if (!text) return;
-  fileName.value = name || 'Annotated_Genome';
-
-  let parsed;
-  if (isGbk) {
-    parsed = parseGenBank(text);
-  } else {
-    parsed = parseFasta(text);
+function matchesSearchAndFilter(f: any): boolean {
+  if (searchQuery.value) {
+    const q = searchQuery.value.toLowerCase();
+    const matchName = (f.name || "").toLowerCase().includes(q);
+    const matchLocus = (f.locus_tag || "").toLowerCase().includes(q);
+    const matchProduct = (f.product || "").toLowerCase().includes(q);
+    const matchGene = (f.gene || "").toLowerCase().includes(q);
+    if (!matchName && !matchLocus && !matchProduct && !matchGene) return false;
   }
-
-  rawSequence.value = parsed.sequence;
-  sequenceLength.value = parsed.sequence.length;
-
-  // 清空旧缓存并重置视图
-  gcPathData.value = ''; gcSkewPathData.value = '';
-  orfFeatures.value = []; enzymeFeatures.value = [];
-  showGC.value = false; selectedORFFrames.value = []; showEnzymes.value = false;
-  
-  // Reset layout engine
-  layoutEngine.value = new TrackLayoutEngine();
-  layoutEngine.value.addGroup('main', 0);
-
-  const trackEnds = new Array(20).fill(0);
-  const sortedFeatures = parsed.features.sort((a: any, b: any) => a.start - b.start);
-
-  let maxTrack = 0;
-  sortedFeatures.forEach((f: any) => {
-    let assignedTrack = 0;
-    for (let i = 0; i < 20; i++) {
-      if (f.start > trackEnds[i] + 100) {
-        assignedTrack = i;
-        trackEnds[i] = f.end;
-        break;
-      }
-    }
-    f.track = assignedTrack;
-    if (assignedTrack > maxTrack) maxTrack = assignedTrack;
-  });
-  
-  layoutEngine.value.setLayer({
-    id: 'main-cds', groupId: 'main', type: 'feature', direction: 'outer',
-    rowHeight: trackWidth + 4, rowCount: maxTrack + 1, gap: 10, order: 0
-  });
-  layoutTrigger.value++;
-
-  features.value = sortedFeatures;
-  zoomLevel.value = 1; panX.value = 0; panY.value = 0;
-  selectedFeature.value = null;
+  if (selectedCategoryFilter.value !== "ALL" && f.category !== selectedCategoryFilter.value) {
+    return false;
+  }
+  if (strandFilter.value !== "ALL" && f.strand !== strandFilter.value) {
+    return false;
+  }
+  return true;
 }
 
-function handleFileUpload(e: any) {
-  const file = e.target.files[0];
+// 判断图谱上的特征是否需要半透明变暗 (多重联动)
+function isFeatureDimmed(f: any): boolean {
+  if (selectedFeature.value) {
+    return selectedFeature.value !== f;
+  }
+  if (highlightedCategory.value) {
+    return f.category !== highlightedCategory.value;
+  }
+  if (searchQuery.value || selectedCategoryFilter.value !== "ALL" || strandFilter.value !== "ALL") {
+    return !matchesSearchAndFilter(f);
+  }
+  return false;
+}
+
+// 过滤后的基因特征列表
+const filteredFeatures = computed(() => {
+  return features.value.filter(matchesSearchAndFilter);
+});
+
+// GC 轨迹路径
+const gcPaths = computed(() => {
+  if (!rawSequence.value || !showGC.value) {
+    return {
+      gcPathData: "",
+      gcHighPathData: "",
+      gcLowPathData: "",
+      gcSkewPosPathData: "",
+      gcSkewNegPathData: "",
+      gcBaselineRadius: gcBaselineR,
+      skewBaselineRadius: skewBaselineR
+    };
+  }
+  return calculateGC(
+    rawSequence.value,
+    { innerR: 132, outerR: 168 },
+    { innerR: 95, outerR: 125 }
+  );
+});
+
+// 限制性内切酶
+const enzymes = computed(() => {
+  if (!rawSequence.value || !showEnzymes.value) return [];
+  return calculateEnzymes(rawSequence.value);
+});
+
+const renderCircularEnzymes = computed(() => enzymes.value.slice(0, 36));
+
+// --- 刻度计算 ---
+const circularTicks = computed(() => {
+  if (!sequenceLength.value) return [];
+  const len = sequenceLength.value;
+  const step = calculateTickStep(len);
+  const ticks = [];
+  
+  for (let pos = 0; pos < len; pos += step) {
+    const angle = (pos / len) * 360;
+    const isMajor = pos % (step * 5) === 0 || pos === 0;
+    const r1 = outerRadius + 8;
+    const r2 = outerRadius + (isMajor ? 18 : 13);
+    
+    const p1 = polarToCartesian(0, 0, r1, angle);
+    const p2 = polarToCartesian(0, 0, r2, angle);
+    
+    ticks.push({
+      x1: p1.x, y1: p1.y,
+      x2: p2.x, y2: p2.y,
+      major: isMajor,
+      pos
+    });
+  }
+  return ticks;
+});
+
+const majorCircularTicks = computed(() => {
+  if (!sequenceLength.value) return [];
+  const len = sequenceLength.value;
+  const step = calculateTickStep(len) * 5;
+  const ticks = [];
+  
+  for (let pos = 0; pos < len; pos += step) {
+    const angle = (pos / len) * 360;
+    const r = outerRadius + 32;
+    const p = polarToCartesian(0, 0, r, angle);
+    
+    ticks.push({
+      tx: p.x,
+      ty: p.y,
+      label: formatTickLabel(pos),
+      anchor: angle > 10 && angle < 170 ? "start" : angle > 190 && angle < 350 ? "end" : "middle"
+    });
+  }
+  return ticks;
+});
+
+const linearTicks = computed(() => {
+  if (!sequenceLength.value) return [];
+  const len = sequenceLength.value;
+  const step = calculateTickStep(len);
+  const width = computedLinearWidth.value;
+  const ticks = [];
+  
+  for (let pos = 0; pos <= len; pos += step) {
+    ticks.push({
+      x: (pos / len) * width,
+      major: pos % (step * 5) === 0 || pos === 0,
+      pos
+    });
+  }
+  return ticks;
+});
+
+const majorLinearTicks = computed(() => {
+  if (!sequenceLength.value) return [];
+  const len = sequenceLength.value;
+  const step = calculateTickStep(len) * 5;
+  const width = computedLinearWidth.value;
+  const ticks = [];
+  
+  for (let pos = 0; pos <= len; pos += step) {
+    ticks.push({
+      x: (pos / len) * width,
+      label: formatTickLabel(pos)
+    });
+  }
+  return ticks;
+});
+
+function calculateTickStep(len: number): number {
+  if (len < 5000) return 200;
+  if (len < 20000) return 1000;
+  if (len < 100000) return 5000;
+  if (len < 500000) return 20000;
+  return 50000;
+}
+
+// --- 交互处理 ---
+function selectFeature(feat: any) {
+  selectedFeature.value = feat;
+}
+
+function toggleHighlightCategory(catKey: string) {
+  if (highlightedCategory.value === catKey) {
+    highlightedCategory.value = "";
+  } else {
+    highlightedCategory.value = catKey;
+  }
+}
+
+function handleCanvasClick(e: MouseEvent) {
+  if ((e.target as HTMLElement).tagName === "svg" || (e.target as HTMLElement).classList.contains("svg-container")) {
+    selectedFeature.value = null;
+  }
+}
+
+function showToast(msg: string) {
+  toastMessage.value = msg;
+  setTimeout(() => {
+    toastMessage.value = "";
+  }, 2000);
+}
+
+// 视口缩放与拖拽平移
+function handleZoom(e: WheelEvent) {
+  const delta = e.deltaY > 0 ? -0.1 : 0.1;
+  const nextZoom = Math.min(Math.max(0.4, zoomScale.value + delta), 4.5);
+  zoomScale.value = Number(nextZoom.toFixed(2));
+}
+
+function zoomIn() {
+  zoomScale.value = Math.min(4.5, Number((zoomScale.value + 0.2).toFixed(2)));
+}
+
+function zoomOut() {
+  zoomScale.value = Math.max(0.4, Number((zoomScale.value - 0.2).toFixed(2)));
+}
+
+function resetView() {
+  zoomScale.value = 1;
+  panX.value = 0;
+  panY.value = 0;
+}
+
+function startPan(e: MouseEvent) {
+  if (e.button !== 0) return;
+  isPanning = true;
+  startMouseX = e.clientX;
+  startMouseY = e.clientY;
+  initialPanX = panX.value;
+  initialPanY = panY.value;
+}
+
+function doPan(e: MouseEvent) {
+  if (!isPanning) {
+    tooltipX.value = e.clientX + 16;
+    tooltipY.value = e.clientY + 16;
+    return;
+  }
+  panX.value = initialPanX + (e.clientX - startMouseX);
+  panY.value = initialPanY + (e.clientY - startMouseY);
+}
+
+function endPan() {
+  isPanning = false;
+}
+
+// 文件解析加载
+function handleFileUpload(e: Event) {
+  const input = e.target as HTMLInputElement;
+  if (!input.files || input.files.length === 0) return;
+  const file = input.files[0];
   if (!file) return;
+  fileName.value = file.name;
+  
   const reader = new FileReader();
   reader.onload = (event) => {
     const text = event.target?.result as string;
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    const isGbk = !!(ext && ['gbk', 'gb', 'genbank'].includes(ext));
-    loadFromText(text, file.name, isGbk);
+    loadSequenceData(text, file.name);
   };
   reader.readAsText(file);
 }
 
-onMounted(() => {
-  if (props.initialGbk) {
-    loadFromText(props.initialGbk, props.initialName || 'Annotated_Genome.gbk', true);
-  }
-});
-
-watch(() => props.initialGbk, (newVal) => {
-  if (newVal) {
-    loadFromText(newVal, props.initialName || 'Annotated_Genome.gbk', true);
-  }
-});
-
-// 附加计算监听
-watch(showGC, (val) => {
-  if (val) {
-    layoutEngine.value.setLayer({ id: 'main-gc', groupId: 'main', type: 'graph', direction: 'inner', rowHeight: 40, rowCount: 1, gap: 5, order: Date.now() });
-    layoutEngine.value.setLayer({ id: 'main-gc-skew', groupId: 'main', type: 'graph', direction: 'inner', rowHeight: 40, rowCount: 1, gap: 10, order: Date.now() + 1 });
-    layoutTrigger.value++;
-    
-    layoutTrigger.value++;
-  } else {
-    layoutEngine.value.removeLayer('main-gc');
-    layoutEngine.value.removeLayer('main-gc-skew');
-    layoutTrigger.value++;
-  }
-});
-
-const gcPaths = computed(() => {
-  if (!showGC.value || !rawSequence.value) return { gcPathData: '', gcSkewPathData: '' };
-  const layoutMap = currentLayout.value;
-  return calculateGC(rawSequence.value, layoutMap.getLayer('main-gc')!.bounds, layoutMap.getLayer('main-gc-skew')!.bounds);
-});
-
-watch(() => [...selectedORFFrames.value], (val, oldVal) => {
-  // Diff to add or remove tracks in layout engine dynamically
-  const added = val.filter(x => !(oldVal || []).includes(x));
-  const removed = (oldVal || []).filter(x => !val.includes(x));
-  
-  for (const frame of added) {
-    layoutEngine.value.setLayer({
-      id: 'main-orf-' + frame, groupId: 'main', type: 'feature', direction: 'inner',
-      rowHeight: trackWidth + 4, rowCount: 1, gap: 2, order: Date.now()
-    });
-  }
-  for (const frame of removed) {
-    layoutEngine.value.removeLayer('main-orf-' + frame);
-  }
-  layoutTrigger.value++;
-
-  if (val.length > 0 && orfFeatures.value.length === 0 && rawSequence.value) {
-    orfFeatures.value = calculateORFs(rawSequence.value, features.value);
-  }
-}, { deep: true });
-
-const filteredOrfFeatures = computed(() => {
-  return orfFeatures.value.filter(f => selectedORFFrames.value.includes(f.frame));
-});
-
-watch(showEnzymes, (val) => {
-  if (val && enzymeFeatures.value.length === 0 && rawSequence.value) {
-    enzymeFeatures.value = calculateEnzymes(rawSequence.value);
-  }
-});
-
-// 动态比例尺步长计算
-function getNiceStep(target: number) {
-  if (target <= 0) return 100;
-  const exponent = Math.floor(Math.log10(target));
-  const fraction = target / Math.pow(10, exponent);
-  let niceFraction;
-  if (fraction < 1.5) niceFraction = 1;
-  else if (fraction < 3) niceFraction = 2;
-  else if (fraction < 7) niceFraction = 5;
-  else niceFraction = 10;
-  return Math.max(1, niceFraction * Math.pow(10, exponent));
+function loadSequenceData(content: string, name: string) {
+  isComputing.value = true;
+  setTimeout(() => {
+    try {
+      if (content.includes("LOCUS") || content.includes("FEATURES")) {
+        const parsed = parseGenBank(content);
+        rawSequence.value = parsed.sequence;
+        sequenceLength.value = parsed.sequence.length;
+        features.value = parsed.features;
+      } else {
+        const parsed = parseFasta(content);
+        rawSequence.value = parsed.sequence;
+        sequenceLength.value = parsed.sequence.length;
+        features.value = [];
+      }
+      fileName.value = name;
+      resetView();
+    } catch (err) {
+      console.error("解析序列失败:", err);
+    } finally {
+      isComputing.value = false;
+    }
+  }, 50);
 }
 
-// 刻度生成 (响应式缩放与美观整数)
-const ticks = computed(() => {
-  if (!sequenceLength.value) return [];
-  const res = [];
-
-  // 目标是每隔约 150 像素放置一个主刻度
-  const isCircular = viewMode.value === 'circular';
-  const widthPx = isCircular ? (2 * Math.PI * baseRadius) * zoomLevel.value : computedLinearWidth.value;
-
-  const targetBp = (150 / widthPx) * sequenceLength.value;
-  const majorStep = getNiceStep(targetBp) || 1000;
-  const minorStep = Math.max(1, Math.floor(majorStep / 5)); // 每主刻度包含 5 个小刻度
-
-  for (let val = 0; val <= sequenceLength.value; val += minorStep) {
-    const angle = (val / sequenceLength.value) * 360;
-    const isMajor = Math.abs(Math.round(val) % majorStep) < (minorStep * 0.1);
-    const rad = (angle - 90) * Math.PI / 180;
-
-    const r1 = zoomedBaseRadius.value;
-    const r2 = isMajor ? zoomedBaseRadius.value - 15 : zoomedBaseRadius.value - 8;
-    const lx = (val / sequenceLength.value) * computedLinearWidth.value;
-
-    res.push({
-      val: Math.round(val), angle, major: isMajor,
-      x1: Math.cos(rad) * r1, y1: Math.sin(rad) * r1,
-      x2: Math.cos(rad) * r2, y2: Math.sin(rad) * r2, lx
-    });
-  }
-  return res;
-});
-
-const majorTicks = computed(() => {
-  return ticks.value.filter(t => t.major).map(t => {
-    const rad = (t.angle - 90) * Math.PI / 180;
-    const r3 = zoomedBaseRadius.value - 22; // 将文字放置在刻度线内侧
-
-    // 计算文字方向，使其始终呈现放射状，并且不倒字
-    const rot = t.angle > 180 ? t.angle + 90 : t.angle - 90;
-    const anchor = t.angle > 180 ? 'start' : 'end';
-
-    return {
-      ...t,
-      tx: Math.cos(rad) * r3,
-      ty: Math.sin(rad) * r3,
-      rot,
-      anchor,
-      label: formatLength(t.val)
-    };
-  });
-});
-
-// 内切酶动态避让计算 (基于真实物理坐标与2D包围盒探测)
-const renderCircularEnzymes = computed(() => {
-  if (!sequenceLength.value || !enzymeFeatures.value.length) return [];
-  const sorted = [...enzymeFeatures.value].sort((a, b) => a.start - b.start);
-  
-  const placedBoxes: { x: number, y: number, w: number, h: number }[] = [];
-  
-  return sorted.map(enz => {
-     const angle = ((enz.start + enz.end) / 2 / sequenceLength.value) * 360;
-     const rad = (angle - 90) * Math.PI / 180;
-     const isRightHalf = angle <= 180;
-     
-     // 近似文字尺寸
-     const textW = enz.name.length * 8 + 10;
-     const textH = 16;
-     
-     let level = 0;
-     while (level < 20) {
-         // 完全基于 TrackLayoutEngine 外边界进行排布
-         const r2 = currentLayout.value.getOuterBoundary() + 20 + level * 15;
-         const p2y = Math.sin(rad) * r2;
-         const p2x = Math.cos(rad) * r2;
-         
-         const hLength = 15;
-         const p3x = p2x + (isRightHalf ? hLength : -hLength);
-         
-         const textX = p3x + (isRightHalf ? 4 : -4);
-         const textY = p2y;
-         
-         // 映射回屏幕绝对像素
-         const screenX = textX;
-         const screenY = textY;
-         
-         const boxX = isRightHalf ? screenX : screenX - textW;
-         const boxY = screenY - textH / 2;
-         
-         let collision = false;
-         for (const box of placedBoxes) {
-             // 2D 碰撞检测 (2px 物理安全间距)
-             if (boxX < box.x + box.w + 2 &&
-                 boxX + textW + 2 > box.x &&
-                 boxY < box.y + box.h + 2 &&
-                 boxY + textH + 2 > box.y) {
-                 collision = true;
-                 break;
-             }
-         }
-         
-         if (!collision) {
-             placedBoxes.push({ x: boxX, y: boxY, w: textW, h: textH });
-             break;
-         }
-         level++;
-     }
-     return { ...enz, labelLevel: level };
-  });
-});
-
-const renderLinearEnzymes = computed(() => {
-  if (!sequenceLength.value || !enzymeFeatures.value.length) return [];
-  const sorted = [...enzymeFeatures.value].sort((a, b) => a.start - b.start);
-  const placedBoxes: { x: number, y: number, w: number, h: number }[] = [];
-  
-  return sorted.map(enz => {
-      const x = ((enz.start + enz.end) / 2 / sequenceLength.value) * computedLinearWidth.value;
-      const textW = enz.name.length * 8 + 10;
-      const textH = 16;
-      
-      let level = 0;
-      while (level < 20) {
-          const textY = -40 - level * 15 - 5;
-          const boxX = x - textW / 2;
-          const boxY = textY - textH / 2;
-          
-          let collision = false;
-          for (const box of placedBoxes) {
-              if (boxX < box.x + box.w + 4 &&
-                  boxX + textW + 4 > box.x &&
-                  boxY < box.y + box.h + 2 &&
-                  boxY + textH + 2 > box.y) {
-                  collision = true;
-                  break;
-              }
-          }
-          
-          if (!collision) {
-              placedBoxes.push({ x: boxX, y: boxY, w: textW, h: textH });
-              break;
-          }
-          level++;
-      }
-      return { ...enz, labelLevel: level };
-  });
-});
-
-function selectFeature(feat: any) { selectedFeature.value = feat; }
-
-function handleCopySequence() {
+// 复制与导出
+function copySequence() {
   if (!selectedFeature.value) return;
   const seq = extractFeatureSequence(rawSequence.value, selectedFeature.value.start, selectedFeature.value.end, selectedFeature.value.strand);
   navigator.clipboard.writeText(seq);
-  alert('DNA 序列已复制到剪贴板！');
+  showToast("核酸 CDS 序列已成功复制到剪贴板");
 }
 
-function handleCopyTranslation() {
+function copyTranslation() {
   if (!selectedFeature.value) return;
-  const seq = extractFeatureSequence(rawSequence.value, selectedFeature.value.start, selectedFeature.value.end, selectedFeature.value.strand);
-  navigator.clipboard.writeText(translateDNA(seq));
-  alert('翻译结果 (AA) 已复制到剪贴板！');
+  let trans = selectedFeature.value.translation;
+  if (!trans && rawSequence.value) {
+    const dna = extractFeatureSequence(rawSequence.value, selectedFeature.value.start, selectedFeature.value.end, selectedFeature.value.strand);
+    trans = translateDNA(dna);
+  }
+  navigator.clipboard.writeText(trans || "");
+  showToast("蛋白质多肽翻译序列已成功复制到剪贴板");
 }
 
-function handleZoom(e: WheelEvent) {
-  e.preventDefault();
-  const zoomDirection = e.deltaY > 0 ? -0.1 : 0.1;
-  zoomLevel.value = Math.max(0.5, Math.min(10, zoomLevel.value + zoomDirection));
+function exportImage(format: "png" | "svg") {
+  if (!svgRef.value) return;
+  const svgEl = svgRef.value;
+  const serializer = new XMLSerializer();
+  let svgString = serializer.serializeToString(svgEl);
+
+  if (format === "svg") {
+    // 注入基础字体与背景定义
+    const svgHeader = `<?xml version="1.0" standalone="no"?>\r\n`;
+    const blob = new Blob([svgHeader + svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${fileName.value || "genome_map"}.svg`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast("SVG 矢量图已成功导出");
+  } else {
+    const canvas = document.createElement("canvas");
+    const bbox = svgEl.getBoundingClientRect();
+    const scale = 2;
+    canvas.width = (bbox.width || 1200) * scale;
+    canvas.height = (bbox.height || 900) * scale;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const img = new Image();
+    const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+    
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, bbox.width, bbox.height);
+      URL.revokeObjectURL(url);
+      const pngUrl = canvas.toDataURL("image/png");
+      const link = document.createElement("a");
+      link.href = pngUrl;
+      link.download = `${fileName.value || "genome_map"}.png`;
+      link.click();
+      showToast("PNG 高清图片已成功导出");
+    };
+    img.src = url;
+  }
 }
 
-function startPan(e: MouseEvent) {
-  isDragging = true;
-  startX = e.clientX - panX.value; startY = e.clientY - panY.value;
-  dragStartX = e.clientX; dragStartY = e.clientY;
-}
-
-function doPan(e: MouseEvent) {
-  if (!isDragging) return;
-  panX.value = e.clientX - startX; panY.value = e.clientY - startY;
-}
-
-function endPan() { isDragging = false; }
-
-function handleCanvasClick(e: MouseEvent) {
-  const dist = Math.abs(e.clientX - dragStartX) + Math.abs(e.clientY - dragStartY);
-  if (dist < 5) selectedFeature.value = null;
-}
-
-function exportImage() { alert('高清导出功能已准备就绪。'); }
+// 监听跨模块初始数据加载
+watch(
+  () => props.initialGbk,
+  (newGbk) => {
+    if (newGbk) {
+      loadSequenceData(newGbk, props.initialName || "Annotated_Phage.gbk");
+    }
+  },
+  { immediate: true }
+);
 </script>
 
 <style scoped>
 .genome-viewer-module {
-  height: 100%;
   display: flex;
   flex-direction: column;
-  background: white;
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-  position: relative;
-}
-
-.viewer-toolbar {
-  height: 56px;
-  padding: 0 20px;
+  height: 100%;
   background: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1e293b;
+  position: relative;
+  overflow: hidden;
 }
 
-.toolbar-left,
-.toolbar-right {
+/* 顶部轻量 Toast */
+.floating-toast {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0f172a;
+  color: #ffffff;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  animation: fade-in-down 0.2s ease-out;
+}
+
+@keyframes fade-in-down {
+  from { opacity: 0; transform: translate(-50%, -10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* 顶部工具栏 */
+.viewer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  z-index: 20;
+}
+
+.toolbar-left, .toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .upload-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  color: white;
-  border-radius: 8px;
+  gap: 6px;
+  padding: 6px 14px;
+  background: #2563eb;
+  color: #ffffff;
+  border-radius: 6px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+  transition: all 0.15s ease;
 }
 
 .upload-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 6px rgba(59, 130, 246, 0.4);
+  background: #1d4ed8;
 }
 
-.current-file {
+.current-file-badge {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  background: white;
+  padding: 4px 10px;
+  background: #f1f5f9;
   border-radius: 6px;
   border: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+
+.file-icon-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
 }
 
 .file-name {
-  font-size: 13px;
   font-weight: 600;
-  color: #1e293b;
+  color: #0f172a;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.seq-len {
+.seq-len, .gc-badge {
   font-size: 11px;
-  color: #64748b;
-  background: #f1f5f9;
   padding: 2px 6px;
   border-radius: 4px;
+  background: #e2e8f0;
+  color: #475569;
 }
 
-.view-switcher {
+.view-mode-tabs {
   display: flex;
   background: #e2e8f0;
-  padding: 4px;
+  padding: 2px;
   border-radius: 8px;
+  gap: 2px;
 }
 
-.view-switcher button {
-  padding: 6px 20px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #64748b;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.view-switcher button.active {
-  background: white;
-  color: #0f172a;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-.export-btn {
+.view-mode-tabs button {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid #cbd5e1;
-  background: white;
-  border-radius: 6px;
+  padding: 6px 16px;
+  border: none;
+  background: transparent;
+  color: #64748b;
   font-size: 13px;
-  font-weight: 600;
-  color: #475569;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.view-mode-tabs button.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.track-toggle-group {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.track-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
   cursor: pointer;
 }
 
-.export-btn:hover {
+.track-btn.active {
+  background: #ffffff;
+  color: #2563eb;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.toggle-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.gc-dot {
+  background: #10b981;
+}
+
+.export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.export-btn.primary {
+  background: #0f172a;
+  color: #ffffff;
+  border: 1px solid #0f172a;
+}
+
+.export-btn.primary:hover {
+  background: #334155;
+}
+
+.export-btn.secondary {
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.export-btn.secondary:hover {
   background: #f8fafc;
 }
 
+/* 主工作区 */
 .viewer-main {
-  flex: 1;
   display: flex;
+  flex: 1;
   overflow: hidden;
+  position: relative;
 }
 
+/* 左侧侧边栏 */
 .features-sidebar {
-  width: 300px;
-  background: #f8fafc;
+  width: 340px;
+  background: #ffffff;
   border-right: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   z-index: 10;
 }
 
 .sidebar-header {
-  padding: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.sidebar-title-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-title {
   font-size: 14px;
-  font-weight: 800;
-  color: #0f172a;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.viewer-controls {
-  padding: 16px;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.control-group label {
-  display: block;
-  font-size: 12px;
-  color: #64748b;
-  margin-bottom: 8px;
   font-weight: 700;
+  color: #0f172a;
 }
 
-.control-group input[type="text"] {
+.feat-total-tag {
+  font-size: 11px;
+  background: #f1f5f9;
+  color: #64748b;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.filter-box {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #fcfdfe;
+}
+
+.search-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-input-wrap svg {
+  position: absolute;
+  left: 10px;
+}
+
+.search-input-wrap input {
   width: 100%;
-  padding: 8px 12px;
+  padding: 7px 28px 7px 30px;
+  font-size: 12px;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: 6px;
+  background: #ffffff;
   outline: none;
-  transition: border-color 0.2s;
 }
 
-.control-group input[type="text"]:focus {
+.search-input-wrap input:focus {
   border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.clear-btn {
+  position: absolute;
+  right: 8px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.filter-selectors {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-select {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  outline: none;
+}
+
+.strand-toggle {
+  display: flex;
+  background: #f1f5f9;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.strand-toggle button {
+  flex: 1;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.strand-toggle button.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .features-list {
   flex: 1;
   overflow-y: auto;
-  padding: 12px;
-}
-
-.feature-item {
-  padding: 12px;
-  border-left: 4px solid #cbd5e1;
-  background: white;
-  border-radius: 6px;
-  margin-bottom: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
-  border-right: 1px solid #f1f5f9;
-  border-top: 1px solid #f1f5f9;
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.feature-item:hover {
-  transform: translateX(2px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-}
-
-.feature-item.active {
-  background: #eff6ff;
-  border-color: #3b82f6 !important;
-}
-
-.feat-top {
+  padding: 10px 12px;
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feature-card {
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid var(--accent-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.feature-card:hover {
+  border-color: #cbd5e1;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.feature-card.active {
+  background: #f0f9ff;
+  border-color: #38bdf8;
+  border-left-width: 5px;
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.12);
+}
+
+.feature-card.dimmed {
+  opacity: 0.35;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.locus-badge {
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
+  color: #0f172a;
 }
 
-.feat-type {
+.strand-pill {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.strand-pill.plus {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.strand-pill.minus {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.pos-range {
+  font-size: 11px;
   color: #64748b;
-}
-
-.feat-range {
-  color: #94a3b8;
   font-family: monospace;
 }
 
-.feat-name {
-  font-size: 13px;
-  color: #0f172a;
-  font-weight: 700;
-  margin: 4px 0;
-  word-break: break-all;
+.card-product {
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+  line-height: 1.35;
+  margin-bottom: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.feat-strand {
+.card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.category-chip {
   font-size: 10px;
-  font-weight: 800;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 
-.feat-strand.plus {
-  color: #10b981;
+.length-chip {
+  font-size: 10px;
+  color: #94a3b8;
 }
 
-.feat-strand.minus {
-  color: #f59e0b;
+.no-features-tip {
+  text-align: center;
+  padding: 30px 10px;
+  color: #94a3b8;
+  font-size: 12px;
 }
 
+/* 画布区域 */
 .canvas-area {
   flex: 1;
   background: #ffffff;
   position: relative;
   overflow: hidden;
-  background-image: radial-gradient(#f1f5f9 1px, transparent 1px);
-  background-size: 20px 20px;
 }
 
 .empty-state {
-  position: absolute;
-  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  height: 100%;
   text-align: center;
-  color: #0f172a;
+  color: #64748b;
 }
 
-.empty-icon {
-  font-size: 64px;
+.empty-icon-pulse {
+  animation: float-pulse 3s infinite ease-in-out;
   margin-bottom: 16px;
-  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+}
+
+@keyframes float-pulse {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
 }
 
 .empty-state h3 {
-  font-size: 20px;
-  font-weight: 800;
-  margin-bottom: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 6px;
 }
 
-.empty-sub {
-  font-size: 13px;
-  color: #64748b;
+.supported-formats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 16px;
-  padding: 6px 12px;
-  background: #f8fafc;
-  border-radius: 20px;
+  font-size: 12px;
+}
+
+.fmt-tag {
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #f1f5f9;
   border: 1px solid #e2e8f0;
+  font-weight: 600;
+  color: #334155;
 }
 
 .svg-container {
   width: 100%;
   height: 100%;
   cursor: grab;
+  position: relative;
 }
 
 .svg-container:active {
@@ -1096,312 +1412,462 @@ function exportImage() { alert('高清导出功能已准备就绪。'); }
 .genome-svg {
   width: 100%;
   height: 100%;
-  display: block;
-}
-
-.backbone {
-  fill: none;
-  stroke: #cbd5e1;
-  stroke-width: 2;
-}
-
-.tick-text {
-  font-size: 10px;
-  fill: #64748b;
-  font-weight: 600;
-  font-family: 'Inter', sans-serif;
-}
-
-.feature-path {
-  transition: opacity 0.2s;
-  cursor: pointer;
-  stroke: rgba(0, 0, 0, 0.1);
-  stroke-width: 1;
-}
-
-.feature-path:hover {
-  opacity: 1 !important;
-  stroke: #0f172a;
-  stroke-width: 1.5;
-}
-
-.feature-tooltip {
-  position: absolute;
-  top: 24px;
-  right: 24px;
-  background: rgba(15, 23, 42, 0.65);
-  color: white;
-  padding: 16px 24px;
-  border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-  min-width: 300px;
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  animation: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  pointer-events: auto;
-}
-
-@keyframes slideInRight {
-  from {
-    opacity: 0;
-    transform: translateX(20px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.feature-tooltip h4 {
-  margin: 0 0 12px 0;
-  font-size: 15px;
-  font-weight: 800;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.tt-row {
-  font-size: 13px;
-  margin-bottom: 6px;
-  display: flex;
-  justify-content: space-between;
-  color: #cbd5e1;
-}
-
-.tt-row span {
-  font-weight: 700;
-  color: #94a3b8;
-}
-
-.close-tt {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  background: transparent;
-  border: none;
-  color: #94a3b8;
-  cursor: pointer;
-  font-size: 12px;
-  transition: color 0.2s;
-}
-
-.close-tt:hover {
-  color: white;
-}
-
-.loading-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(255, 255, 255, 0.8);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(4px);
-  border-radius: 16px;
-}
-
-.spinner-xl {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #e2e8f0;
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-bottom: 16px;
-}
-
-.loading-text {
-  font-size: 15px;
-  font-weight: 700;
-  color: #1e293b;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.toggles {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 16px;
-}
-
-.toggle-btn {
-  font-size: 12px;
-  color: #475569;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.toggle-btn input {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-}
-
-.tt-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.action-btn {
-  flex: 1;
-  padding: 6px;
-  background: rgba(59, 130, 246, 0.2);
-  border: 1px solid rgba(59, 130, 246, 0.5);
-  color: #60a5fa;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.action-btn:hover {
-  background: rgba(59, 130, 246, 0.4);
-  color: white;
-}
-
-/* SnapGene-style floating toolbar */
-.sg-toolbar {
-  position: absolute;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 2px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-}
-
-.sg-drag-handle {
-  width: 100%;
-  height: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: grab;
-  color: #94a3b8;
-  margin-bottom: 2px;
-}
-.sg-drag-handle:active {
-  cursor: grabbing;
-}
-.sg-drag-handle:hover {
-  color: #64748b;
-  background: #e2e8f0;
-  border-radius: 4px;
-}
-
-.sg-btn-wrap {
-  position: relative;
-}
-
-.sg-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  color: #64748b;
-  transition: all 0.15s;
-  position: relative;
-  gap: 2px;
-  padding: 0 4px;
-}
-
-.sg-btn:hover {
-  background: #eff6ff;
-  border-color: #93c5fd;
-  color: #2563eb;
-}
-
-.sg-btn.active {
-  background: #2563eb;
-  border-color: #1d4ed8;
-  color: white;
-}
-
-.sg-arrow {
-  font-size: 8px;
-  opacity: 0.6;
-  position: absolute;
-  right: 2px;
-  top: 2px;
-}
-
-.sg-btn.active .sg-arrow {
-  color: rgba(255,255,255,0.7);
-}
-
-.sg-flyout {
-  position: absolute;
-  left: 100%;
-  top: -4px;
-  padding-left: 6px;
-  z-index: 100;
-}
-
-.sg-flyout-inner {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-  padding: 6px 0;
-  min-width: 180px;
-  white-space: nowrap;
-}
-
-.sg-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px 6px 28px;
-  font-size: 13px;
-  color: #334155;
-  cursor: pointer;
-  position: relative;
-  transition: background 0.1s;
   user-select: none;
 }
 
-.sg-menu-item:hover {
-  background: #eff6ff;
+.track-backbone.outer {
+  fill: none;
+  stroke: #e2e8f0;
+  stroke-width: 1.5;
 }
 
-.sg-menu-item.checked::before {
-  content: '\2713';
-  position: absolute;
-  left: 10px;
+.track-backbone.inner {
+  fill: none;
+  stroke: #f1f5f9;
+  stroke-width: 1.5;
+}
+
+.track-split {
+  fill: none;
+  stroke: #e2e8f0;
+  stroke-dasharray: 2 2;
+  stroke-width: 1;
+}
+
+.tick-text-circular {
+  font-size: 11px;
+  fill: #475569;
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.linear-backbone {
+  stroke: #0f172a;
+  stroke-width: 2;
+}
+
+.linear-tick-label {
+  font-size: 11px;
+  fill: #64748b;
+  font-family: monospace;
+}
+
+.feature-glyph {
+  cursor: pointer;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+
+.feature-glyph:hover {
+  filter: brightness(1.15) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15));
+  opacity: 1 !important;
+}
+
+.feature-glyph.is-selected {
+  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.5));
+  opacity: 1 !important;
+}
+
+.feature-glyph.is-dimmed {
+  opacity: 0.18;
+}
+
+.selected-highlight-stroke {
+  animation: pulse-stroke 2s infinite ease-in-out;
+}
+
+@keyframes pulse-stroke {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.5; }
+}
+
+/* 环形中心数据看板 (紧凑型) */
+.center-bg {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.center-title {
+  font-size: 12px;
   font-weight: 700;
+  fill: #0f172a;
+}
+
+.center-length {
+  font-size: 14px;
+  font-weight: 800;
+  fill: #2563eb;
+  font-family: monospace;
+}
+
+.center-sub {
+  font-size: 10px;
+  fill: #64748b;
+  font-weight: 500;
+}
+
+.center-cds-count {
+  font-size: 10px;
+  fill: #10b981;
+  font-weight: 600;
+}
+
+/* 悬浮图例徽章栏 */
+.floating-legend {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  z-index: 10;
+  max-width: 240px;
+}
+
+.legend-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 4px;
+}
+
+.reset-legend-btn {
+  border: none;
+  background: transparent;
   color: #2563eb;
+  font-size: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.legend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.legend-item:hover {
+  background: #f1f5f9;
+}
+
+.legend-item.active {
+  background: #e0f2fe;
+  font-weight: 600;
+}
+
+.color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.legend-label {
+  flex: 1;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legend-count {
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: monospace;
+}
+
+.gc-legend-sub {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 10px;
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gc-legend-title {
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 2px;
+}
+
+.gc-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.gc-box {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.gc-box.green { background: #10b981; }
+.gc-box.gray { background: #64748b; }
+.gc-box.purple { background: #8b5cf6; }
+.gc-box.orange { background: #f59e0b; }
+
+/* 悬浮微型卡片 Tooltip */
+.floating-tooltip {
+  position: fixed;
+  pointer-events: none;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(6px);
+  color: #ffffff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  z-index: 50;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  max-width: 280px;
+}
+
+.tt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.tt-locus {
+  font-weight: 700;
+  font-size: 12px;
+  color: #38bdf8;
+}
+
+.tt-cat-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.tt-product {
+  font-weight: 500;
+  color: #f1f5f9;
+  line-height: 1.3;
+  margin-bottom: 6px;
+}
+
+.tt-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: #94a3b8;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 4px;
+}
+
+/* 视口操控悬浮工具组 */
+.viewport-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  z-index: 20;
+}
+
+.viewport-controls button {
+  padding: 8px;
+  border: none;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+}
+
+.viewport-controls button:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.viewport-controls button:not(:last-child) {
+  border-bottom: 1px solid #f1f5f9;
+}
+
+/* 选中基因深度详情抽屉 */
+.feature-inspector-drawer {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 20px;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(12px);
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 14px 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 220px;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.drawer-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawer-icon-tag {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.drawer-locus {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.drawer-cat-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.drawer-close {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  color: #94a3b8;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.drawer-close:hover {
+  color: #0f172a;
+}
+
+.drawer-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px 16px;
   font-size: 12px;
 }
 
-.sg-menu-item input[type="checkbox"] {
-  display: none;
+.info-row {
+  display: flex;
+  gap: 6px;
 }
 
-.sg-divider {
-  height: 1px;
+.info-k {
+  color: #64748b;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.info-v {
+  color: #334155;
+}
+
+.info-v.highlight {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.info-v.note-text {
+  font-family: monospace;
+  font-size: 11px;
+  color: #475569;
+}
+
+.drawer-actions {
+  display: flex;
+  gap: 10px;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 8px;
+}
+
+.act-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
   background: #f1f5f9;
-  margin: 4px 0;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.act-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+/* 全局高阶运算加载遮罩 */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  gap: 12px;
+}
+
+.spinner-xl {
+  width: 42px;
+  height: 42px;
+  border: 3px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

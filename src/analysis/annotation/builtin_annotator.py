@@ -381,6 +381,8 @@ class BuiltinAnnotator:
                 )
                 if feat.gene_name:
                     cds_feat.qualifiers["gene"] = [feat.gene_name]
+                if feat.category:
+                    cds_feat.qualifiers["category"] = [feat.category]
                 if feat.ec_number:
                     cds_feat.qualifiers["EC_number"] = [feat.ec_number]
                 if feat.notes:

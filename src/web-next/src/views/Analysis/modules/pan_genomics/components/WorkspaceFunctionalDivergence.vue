@@ -45,15 +45,16 @@ const orderedTailIds = computed(() => {
   return orderedSampleIds.value
 })
 
-// 功能大类列表
+// 统一功能大类模块与色彩定义
 const functionalModules = [
-  { id: 'Structural', name: '结构与形态 (Structural)', color: '#2563eb' },
-  { id: 'Tail/RBP', name: '尾丝与受体识别 (Tail & RBP)', color: '#f59e0b' },
-  { id: 'Lysis', name: '宿主裂解系统 (Lysis Cassette)', color: '#059669' },
-  { id: 'Defense & Host Interaction', name: '免疫防御与攻防 (Defense & Acr)', color: '#dc2626' },
-  { id: 'Replication & Repair', name: '复制与核酸修饰 (Replication)', color: '#d97706' },
-  { id: 'Packaging', name: 'DNA 包装终末酶 (Packaging)', color: '#7c3aed' },
-  { id: 'Metabolism & AMG', name: '辅助代谢重塑 (Metabolism & AMG)', color: '#0891b2' }
+  { id: 'Tail/RBP', name: '尾丝与受体识别 (Tail & RBP)', color: '#06b6d4' },
+  { id: 'Head/Packaging', name: '头部与衣壳包装 (Head & Packaging)', color: '#0284c7' },
+  { id: 'Lysis', name: '宿主裂解系统 (Lysis Cassette)', color: '#f43f5e' },
+  { id: 'Replication & Repair', name: '复制与核酸修复 (Replication)', color: '#f59e0b' },
+  { id: 'Transcription & Regulation', name: '转录调控与开关 (Regulation)', color: '#10b981' },
+  { id: 'Defense & Host Interaction', name: '免疫防御与攻防 (Defense & Acr)', color: '#8b5cf6' },
+  { id: 'Integration & Excision', name: '溶源整合与切除 (Integration)', color: '#6366f1' },
+  { id: 'Metabolism & AMG', name: '辅助代谢重塑 (Metabolism & AMG)', color: '#eab308' }
 ]
 
 // 计算矩阵单元格数值

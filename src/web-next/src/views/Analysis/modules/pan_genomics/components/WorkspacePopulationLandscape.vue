@@ -9,6 +9,7 @@
  * 3. 宏观系统发育 → 元数据属性 → 全基因组 ANI 相似度 → 核心/可变基因家族分布 一体化视觉推理闭环
  */
 import { ref, computed } from 'vue'
+import { FUNCTIONAL_CATEGORIES, inferCategoryFromText } from '../../viewer/utils/render'
 
 const props = defineProps<{
   aniMatrix: Record<string, Record<string, number>>
@@ -34,7 +35,6 @@ const geneCategoryFilter = ref<string>('ALL')
 const genePartitionFilter = ref<'ALL' | 'VARIABLE' | 'CORE' | 'UNIQUE'>('ALL')
 
 // 板块与轨道折叠/显隐控制
-const isSummaryCollapsed = ref(false)
 const isLegendCollapsed = ref(false)
 
 const isPhylogenyTrackVisible = ref(true)
@@ -42,8 +42,156 @@ const isMetadataTrackVisible = ref(true)
 const isAniTrackVisible = ref(true)
 const isGeneMatrixTrackVisible = ref(true)
 
-// 密度模式 (Comfortable / Compact / Ultra-Scale 50+)
-const displayDensity = ref<'comfortable' | 'compact' | 'ultra'>('comfortable')
+// 密度模式 (Spacious 宽松 / Comfortable 舒适 / Compact 紧凑 / Ultra 全景 50+)
+const displayDensity = ref<'spacious' | 'comfortable' | 'compact' | 'ultra'>('spacious')
+
+// 1. 自然顺序递增排序算法 (Natural Sort: BC01 < BC02 < ... < BC18)
+function naturalSort(ids: string[]): string[] {
+  return [...ids].sort((a, b) => {
+    const nameA = props.sampleNames[a] || a
+    const nameB = props.sampleNames[b] || b
+    return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' })
+  })
+}
+
+// 排序模式: 'natural' 自然顺序递增 (默认) | 'cluster' 系统发育聚类
+const sampleSortOrder = ref<'natural' | 'cluster'>('natural')
+
+// 聚类排序后的原始列表
+const rawClusteredIds = computed<string[]>(() => {
+  if (props.aniClustering?.ordered_ids?.length) {
+    return props.aniClustering.ordered_ids
+  }
+  return Object.keys(props.sampleNames || {})
+})
+
+// 当前全局样本 ID 列表 (根据用户选择的排序模式响应式切换)
+const orderedSampleIds = computed<string[]>(() => {
+  const all = Object.keys(props.sampleNames || {})
+  if (sampleSortOrder.value === 'natural') {
+    return naturalSort(all)
+  }
+  return rawClusteredIds.value
+})
+
+// 1.1 样本显隐与聚焦控制状态
+const hiddenSampleIds = ref<Set<string>>(new Set())
+const isSampleFilterOpen = ref<boolean>(false)
+const sampleSearchKeyword = ref<string>('')
+
+// 当前活跃可见的样本列表
+const visibleSampleIds = computed<string[]>(() => {
+  return orderedSampleIds.value.filter(id => !hiddenSampleIds.value.has(id))
+})
+
+// 切换单株可见性
+function toggleSampleVisibility(sampleId: string) {
+  const newSet = new Set(hiddenSampleIds.value)
+  if (newSet.has(sampleId)) {
+    newSet.delete(sampleId)
+  } else {
+    // 至少保留 1 个样本可见
+    if (visibleSampleIds.value.length <= 1) return
+    newSet.add(sampleId)
+  }
+  hiddenSampleIds.value = newSet
+}
+
+// 显示全部样本 (支持搜索态联动)
+function showAllSamples() {
+  const kw = sampleSearchKeyword.value.trim().toLowerCase()
+  if (kw) {
+    const newSet = new Set(hiddenSampleIds.value)
+    searchableSamples.value.forEach(s => newSet.delete(s.id))
+    hiddenSampleIds.value = newSet
+  } else {
+    hiddenSampleIds.value = new Set()
+  }
+}
+
+// 全不选/清空样本 (保留第 1 株可见防止矩阵空白)
+function clearAllSamples() {
+  const kw = sampleSearchKeyword.value.trim().toLowerCase()
+  const newSet = new Set(hiddenSampleIds.value)
+  if (kw) {
+    searchableSamples.value.forEach(s => newSet.add(s.id))
+  } else {
+    orderedSampleIds.value.forEach(id => newSet.add(id))
+  }
+  // 至少保留 1 株可见
+  if (newSet.size >= orderedSampleIds.value.length) {
+    const keepId = props.selectedPair?.[0] || orderedSampleIds.value[0]
+    if (keepId) newSet.delete(keepId)
+  }
+  hiddenSampleIds.value = newSet
+}
+
+// 仅聚焦当前选中的对比对
+function focusOnlyPair() {
+  if (!props.selectedPair) return
+  const [s1, s2] = props.selectedPair
+  const newSet = new Set<string>()
+  orderedSampleIds.value.forEach(id => {
+    if (id !== s1 && id !== s2) {
+      newSet.add(id)
+    }
+  })
+  hiddenSampleIds.value = newSet
+}
+
+// 仅聚焦单个样本
+function focusOnlySingle(sampleId: string) {
+  const newSet = new Set<string>()
+  orderedSampleIds.value.forEach(id => {
+    if (id !== sampleId) {
+      newSet.add(id)
+    }
+  })
+  hiddenSampleIds.value = newSet
+}
+
+// 反选样本 (将当前可见变为隐藏，隐藏变为可见)
+function invertSampleSelection() {
+  const kw = sampleSearchKeyword.value.trim().toLowerCase()
+  const newSet = new Set(hiddenSampleIds.value)
+  
+  if (kw) {
+    searchableSamples.value.forEach(s => {
+      if (s.visible) newSet.add(s.id)
+      else newSet.delete(s.id)
+    })
+  } else {
+    orderedSampleIds.value.forEach(id => {
+      if (!hiddenSampleIds.value.has(id)) {
+        newSet.add(id)
+      } else {
+        newSet.delete(id)
+      }
+    })
+  }
+
+  // 防御：若反选后全被隐藏（如全选态反选），自动保留第 1 株可见
+  if (newSet.size >= orderedSampleIds.value.length) {
+    const keepId = props.selectedPair?.[0] || orderedSampleIds.value[0]
+    if (keepId) newSet.delete(keepId)
+  }
+
+  hiddenSampleIds.value = newSet
+}
+
+// 搜索样本列表 (始终按自然编号顺序递增排列)
+const searchableSamples = computed(() => {
+  const kw = sampleSearchKeyword.value.trim().toLowerCase()
+  const allIds = naturalSort(Object.keys(props.sampleNames || {}))
+  return allIds.map(id => ({
+    id,
+    name: props.sampleNames[id] || id,
+    visible: !hiddenSampleIds.value.has(id)
+  })).filter(item => {
+    if (!kw) return true
+    return item.name.toLowerCase().includes(kw) || item.id.toLowerCase().includes(kw)
+  })
+})
 
 function openClusterDrawer(c: any) {
   selectedGeneCluster.value = c
@@ -51,21 +199,14 @@ function openClusterDrawer(c: any) {
   if (props.selectedPair?.[0] && c.presence_map?.[props.selectedPair[0]]) {
     selectedBaselineSampleId.value = props.selectedPair[0]
   } else {
-    const firstPresent = orderedSampleIds.value.find((sid: string) => !!c.presence_map?.[sid])
-    selectedBaselineSampleId.value = firstPresent || orderedSampleIds.value[0] || ''
+    const firstPresent = visibleSampleIds.value.find((sid: string) => !!c.presence_map?.[sid])
+    selectedBaselineSampleId.value = firstPresent || visibleSampleIds.value[0] || ''
   }
 }
 
-// 1. 聚类排序后的样本 ID 列表 (基于系统发育树)
-const orderedSampleIds = computed<string[]>(() => {
-  if (props.aniClustering?.ordered_ids?.length) {
-    return props.aniClustering.ordered_ids
-  }
-  return Object.keys(props.sampleNames || {})
-})
-
-// 1.1 动态系统发育树几何拓扑 (归一化高精度坐标体系，与表格行高 100% 绝对物理对齐)
+// 1.2 动态系统发育树几何拓扑 (归一化高精度坐标体系，与表格行高 100% 绝对物理对齐)
 const rowHeight = computed(() => {
+  if (displayDensity.value === 'spacious') return 36
   if (displayDensity.value === 'ultra') return 11
   if (displayDensity.value === 'compact') return 17
   return 24
@@ -86,14 +227,14 @@ interface TreeTip {
 }
 
 const treeSvgLayout = computed(() => {
-  const ids = orderedSampleIds.value
+  const ids = visibleSampleIds.value
   const n = ids.length
-  const currentHeight = rowHeight.value // 24 / 17 / 11
+  const currentHeight = rowHeight.value // 36 / 24 / 17 / 11
 
   if (n === 0) return { width: 44, height: currentHeight, branches: [] as TreeBranch[], tips: [] as TreeTip[] }
 
   const totalHeight = n * currentHeight
-  const baseRadius = displayDensity.value === 'ultra' ? 1.5 : (displayDensity.value === 'compact' ? 2.0 : 2.5)
+  const baseRadius = displayDensity.value === 'spacious' ? 3.2 : (displayDensity.value === 'ultra' ? 1.5 : (displayDensity.value === 'compact' ? 2.0 : 2.5))
 
   const tips: TreeTip[] = ids.map((id, idx) => ({
     x: 36,
@@ -201,9 +342,9 @@ const treeSvgLayout = computed(() => {
   }
 })
 
-// 2. 宏观群体统计
+// 2. 宏观群体统计 (基于当前可见样本)
 const populationStats = computed(() => {
-  const ids = orderedSampleIds.value
+  const ids = visibleSampleIds.value
   const n = ids.length
   if (n < 2) return { n, minAni: '100', maxAni: '100', avgAni: '100' }
   
@@ -249,66 +390,36 @@ const sampleAnnotations = computed(() => {
 
 // 5. 排序与分类基因家族列表 (Gene Clusters sorted by Category & Occupancy)
 const categoryOrder: Record<string, number> = {
-  'Tail': 1,
+  'Tail & Host Interaction': 1,
   'Lysis': 2,
   'Defense & Host Interaction': 3,
-  'Packaging': 4,
-  'Structural': 5,
+  'Head & Packaging': 4,
+  'Integration & Excision': 5,
   'Replication & Repair': 6,
-  'Metabolism & AMG': 7,
-  'Hypothetical': 8
+  'Transcription & Regulation': 7,
+  'Metabolism & AMG': 8,
+  'Other Functional': 9,
+  'Hypothetical': 10
 }
 
-// 智能生物学分类推断器 (保证尾丝与受体结合蛋白 100% 归类)
+// 智能生物学分类推断器 (使用全基因组统一权威规则)
 function inferClusterCategory(c: any): string {
   if (!c) return 'Hypothetical'
-  const rawCat = c.category || ''
-  const prod = (c.representative_product || '').toLowerCase()
-  
-  if (rawCat === 'Tail' || /tail|baseplate|fiber|spike|receptor|adhesin|sheath|collar/i.test(prod)) {
-    return 'Tail'
-  }
-  if (rawCat === 'Lysis' || /lysin|endolysin|holin|spanin|lysozyme|amidase|murein/i.test(prod)) {
-    return 'Lysis'
-  }
-  if (rawCat === 'Defense & Host Interaction' || rawCat === 'Defense' || /anti-crispr|acr|cas\d+|restriction|modification|toxin|defense/i.test(prod)) {
-    return 'Defense & Host Interaction'
-  }
-  if (rawCat === 'Packaging' || /terminase|portal|packaging|maturase/i.test(prod)) {
-    return 'Packaging'
-  }
-  if (rawCat === 'Structural' || /capsid|head|neck|virion|structural/i.test(prod)) {
-    return 'Structural'
-  }
-  if (rawCat === 'Replication & Repair' || /polymerase|helicase|primase|ligase|recombinase|dnase|rnase|resolvase|gyrase/i.test(prod)) {
-    return 'Replication & Repair'
-  }
-  if (rawCat === 'Metabolism & AMG' || /synthase|reductase|kinase|transferase|dehydrogenase/i.test(prod)) {
-    return 'Metabolism & AMG'
-  }
-  if (rawCat && rawCat !== 'Hypothetical' && rawCat !== 'Other Functional') {
-    return rawCat
-  }
-  return 'Hypothetical'
+  const prod = c.representative_product || c.representative_annotation?.product || c.cluster_name || ''
+  const notes = c.notes || c.representative_annotation?.notes || ''
+  return inferCategoryFromText(prod, notes)
 }
 
 function getCatColor(cat: string): string {
-  const map: Record<string, string> = {
-    'Tail': '#f59e0b',
-    'Lysis': '#059669',
-    'Defense & Host Interaction': '#dc2626',
-    'Packaging': '#7c3aed',
-    'Structural': '#2563eb',
-    'Replication & Repair': '#d97706',
-    'Metabolism & AMG': '#0891b2',
-    'Hypothetical': '#94a3b8'
+  if (FUNCTIONAL_CATEGORIES[cat]) {
+    return FUNCTIONAL_CATEGORIES[cat].color
   }
-  return map[cat] || '#94a3b8'
+  return '#94a3b8'
 }
 
 const sortedGeneClusters = computed(() => {
   if (!props.clusters || props.clusters.length === 0) return []
-  const n = orderedSampleIds.value.length
+  const n = visibleSampleIds.value.length
   
   let list = props.clusters.map(c => ({
     ...c,
@@ -320,16 +431,25 @@ const sortedGeneClusters = computed(() => {
     list = list.filter(c => c._inferredCategory === geneCategoryFilter.value)
   }
 
-  // 2. 泛基因组分区/差异过滤
+  // 2. 泛基因组分区/差异过滤 (基于当前可见样本)
   if (genePartitionFilter.value === 'VARIABLE') {
-    // 仅显示在各样本间存在差异的 CDS (非 100% 共享)
-    list = list.filter(c => Number(c.sample_count || 0) < n)
+    // 仅显示在当前可见样本间存在差异的 CDS
+    list = list.filter(c => {
+      const cnt = visibleSampleIds.value.filter(sid => !!c.presence_map?.[sid]).length
+      return cnt < n && cnt > 0
+    })
   } else if (genePartitionFilter.value === 'CORE') {
-    // 仅显示全样本共有的核心 CDS
-    list = list.filter(c => Number(c.sample_count || 0) === n)
+    // 仅显示当前可见样本全部共有的核心 CDS
+    list = list.filter(c => {
+      const cnt = visibleSampleIds.value.filter(sid => !!c.presence_map?.[sid]).length
+      return cnt === n && n > 0
+    })
   } else if (genePartitionFilter.value === 'UNIQUE') {
-    // 仅显示单株特有的独有 CDS
-    list = list.filter(c => Number(c.sample_count || 0) === 1)
+    // 仅显示当前可见样本中单株特有的独有 CDS
+    list = list.filter(c => {
+      const cnt = visibleSampleIds.value.filter(sid => !!c.presence_map?.[sid]).length
+      return cnt === 1
+    })
   }
 
   return list.sort((a, b) => {
@@ -511,15 +631,19 @@ function getAminoAcidVariation(cluster: any, sid: string, baselineSid: string): 
   }
 }
 
-// 泛基因组宏观占比
+// 泛基因组宏观占比 (基于当前可见样本)
 const pangenomePartition = computed(() => {
   if (!props.clusters) return { core: 0, accessory: 0, total: 0 }
   const total = props.clusters.length
-  const n = orderedSampleIds.value.length
+  const n = visibleSampleIds.value.length
   let core = 0
   let accessory = 0
   props.clusters.forEach(c => {
-    if (Number(c.sample_count) === n) core++
+    let presentInVisible = 0
+    visibleSampleIds.value.forEach(sid => {
+      if (c.presence_map?.[sid]) presentInVisible++
+    })
+    if (presentInVisible === n && n > 0) core++
     else accessory++
   })
   return { core, accessory, total, corePct: total > 0 ? ((core / total) * 100).toFixed(0) : '0' }
@@ -558,42 +682,7 @@ const isCurrentPair = (s1: string, s2: string) => {
 
 <template>
   <div class="workspace-population-landscape" :class="['density-' + displayDensity]">
-    <!-- 顶部宏观统计横幅 (支持收起/展开) -->
-    <div class="population-summary-panel">
-      <div class="summary-toggle-bar">
-        <div class="st-left">
-          <span class="st-tag">Overview</span>
-          <span class="st-title">宏观群体组学概览指标</span>
-        </div>
-        <button 
-          class="btn-section-toggle" 
-          @click="isSummaryCollapsed = !isSummaryCollapsed"
-          :title="isSummaryCollapsed ? '展开统计指标卡' : '收起统计指标卡'"
-        >
-          {{ isSummaryCollapsed ? '展开指标' : '收起指标' }}
-        </button>
-      </div>
-
-      <div class="population-summary-bar" v-show="!isSummaryCollapsed">
-        <div class="summary-stat-box">
-          <span class="stat-label">群体规模 (Cohort Size)</span>
-          <span class="stat-val">{{ populationStats.n }} <small>株噬菌体</small></span>
-          <span class="stat-sub text-green">全部专性烈性 · 100% 治疗安全</span>
-        </div>
-        <div class="summary-stat-box">
-          <span class="stat-label">全基因组 ANI 相似度区间</span>
-          <span class="stat-val">{{ populationStats.minAni }}% ~ {{ populationStats.maxAni }}%</span>
-          <span class="stat-sub">群体平均 ANI: <strong>{{ populationStats.avgAni }}%</strong></span>
-        </div>
-        <div class="summary-stat-box">
-          <span class="stat-label">泛基因组核心保守率</span>
-          <span class="stat-val text-blue">{{ pangenomePartition.corePct }}% <small>Core</small></span>
-          <span class="stat-sub">Core: {{ pangenomePartition.core }} | Accessory: {{ pangenomePartition.accessory }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- 顶刊旗舰组合图: Phylogenomic Evidence Matrix -->
+    <!-- 顶刊旗舰组合图: Phylogenomic Evidence Matrix (Figure 1 直接置顶，去除冗余概览) -->
     <div class="academic-panel flagship-matrix-panel">
       <!-- 1. 顶层主标题与全局视图控制带 -->
       <div class="panel-header-deck">
@@ -602,21 +691,137 @@ const isCurrentPair = (s1: string, s2: string) => {
             <span class="panel-tag-pill">Figure 1</span>
             <h3 class="panel-heading-text">系统发育与泛基因组多维证据矩阵</h3>
             <span class="matrix-scope-badge">
-              {{ populationStats.n }} 株系 · {{ sortedGeneClusters.length }} 基因家族
+              {{ visibleSampleIds.length }} 株系 (共 {{ orderedSampleIds.length }}) · {{ sortedGeneClusters.length }} 基因家族
             </span>
+          </div>
+
+          <!-- 样本可见性与聚焦筛选工具条 -->
+          <div class="sample-visibility-toolbar">
+            <div class="sample-count-pill" :class="{ 'has-hidden': hiddenSampleIds.size > 0 }">
+              <span>显示 <strong>{{ visibleSampleIds.length }}</strong>/{{ orderedSampleIds.length }}</span>
+              <span v-if="hiddenSampleIds.size > 0" class="hidden-badge">已隐藏 {{ hiddenSampleIds.size }}</span>
+            </div>
+
+            <div class="sample-filter-btn-group">
+              <button 
+                v-if="hiddenSampleIds.size > 0" 
+                class="btn-sample-action btn-show-all" 
+                @click="showAllSamples"
+                title="恢复显示全部样本"
+              >
+                全部显示
+              </button>
+
+              <button 
+                v-if="selectedPair && visibleSampleIds.length > 2" 
+                class="btn-sample-action btn-focus-pair" 
+                @click="focusOnlyPair"
+                title="仅保留当前选中的 2 株对比样本"
+              >
+                仅看当前对
+              </button>
+
+              <!-- 下拉筛选器触发按钮 -->
+              <div class="sample-dropdown-wrapper">
+                <button 
+                  class="btn-sample-action btn-filter-dropdown" 
+                  :class="{ active: isSampleFilterOpen }"
+                  @click="isSampleFilterOpen = !isSampleFilterOpen"
+                  title="勾选或搜索样本"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                  </svg>
+                  筛选样本
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+
+                <!-- 弹出浮层 -->
+                <div class="sample-dropdown-panel" v-if="isSampleFilterOpen">
+                  <div class="sd-header">
+                    <input 
+                      type="text" 
+                      v-model="sampleSearchKeyword" 
+                      placeholder="搜索样本..." 
+                      class="sd-search-input"
+                      @click.stop
+                    />
+                    <div class="sd-quick-actions">
+                      <button class="btn-sd-quick" @click.stop="showAllSamples" title="勾选所有样本">全选</button>
+                      <button class="btn-sd-quick" @click.stop="invertSampleSelection" title="反转勾选状态">反选</button>
+                      <button class="btn-sd-quick" @click.stop="clearAllSamples" title="仅保留首株，取消其余勾选">全不选</button>
+                      <button class="btn-sd-close" @click.stop="isSampleFilterOpen = false">×</button>
+                    </div>
+                  </div>
+
+                  <div class="sd-sample-list">
+                    <div 
+                      v-for="s in searchableSamples" 
+                      :key="'sd-item-' + s.id" 
+                      class="sd-sample-item"
+                      :class="{ active: s.visible }"
+                      @click="toggleSampleVisibility(s.id)"
+                    >
+                      <input type="checkbox" :checked="s.visible" @click.stop="toggleSampleVisibility(s.id)" />
+                      <span class="sd-name" :title="s.name">{{ s.name }}</span>
+                      <button 
+                        class="btn-sd-only" 
+                        @click.stop="focusOnlySingle(s.id)" 
+                        title="仅看这一株"
+                      >
+                        仅看
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         <div class="deck-actions-area">
+          <!-- 排序分段控制器 (自然递增 / 系统发育) -->
+          <div class="segmented-density-control">
+            <span class="control-label">排序:</span>
+            <div class="seg-pills">
+              <button 
+                class="seg-btn" 
+                :class="{ active: sampleSortOrder === 'natural' }" 
+                @click="sampleSortOrder = 'natural'"
+                title="按样本名称与编号自然递增排列 (BC01, BC02...)"
+              >
+                自然顺序
+              </button>
+              <button 
+                class="seg-btn" 
+                :class="{ active: sampleSortOrder === 'cluster' }" 
+                @click="sampleSortOrder = 'cluster'"
+                title="按系统发育树与全基因组 ANI 相似度聚类排列"
+              >
+                进化聚类
+              </button>
+            </div>
+          </div>
+
           <!-- 密度分段控制器 (Segmented Control) -->
           <div class="segmented-density-control">
             <span class="control-label">密度:</span>
             <div class="seg-pills">
               <button 
+                class="seg-btn btn-spacious" 
+                :class="{ active: displayDensity === 'spacious' }" 
+                @click="displayDensity = 'spacious'"
+                title="宽松模式 (行高 36px，适合 2~12 株小样本精细观察)"
+              >
+                宽松
+              </button>
+              <button 
                 class="seg-btn" 
                 :class="{ active: displayDensity === 'comfortable' }" 
                 @click="displayDensity = 'comfortable'"
-                title="舒适模式 (行高 24px，适合 2~15 株)"
+                title="舒适模式 (行高 24px，适合 12~25 株)"
               >
                 舒适
               </button>
@@ -624,7 +829,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="seg-btn" 
                 :class="{ active: displayDensity === 'compact' }" 
                 @click="displayDensity = 'compact'"
-                title="紧凑模式 (行高 17px，适合 15~35 株)"
+                title="紧凑模式 (行高 17px，适合 25~45 株)"
               >
                 紧凑
               </button>
@@ -632,7 +837,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="seg-btn btn-ultra" 
                 :class="{ active: displayDensity === 'ultra' }" 
                 @click="displayDensity = 'ultra'"
-                title="全景微缩模式 (行高 11px，适合 35~100+ 株)"
+                title="全景微缩模式 (行高 11px，适合 45~100+ 株)"
               >
                 50+全景
               </button>
@@ -759,14 +964,9 @@ const isCurrentPair = (s1: string, s2: string) => {
         <div class="leg-col leg-col-function">
           <span class="leg-col-title">CDS 功能分类:</span>
           <div class="leg-items-wrap">
-            <span class="leg-chip"><i style="background: #f59e0b;"></i>尾丝受体 (Tail)</span>
-            <span class="leg-chip"><i style="background: #059669;"></i>裂解系统 (Lysis)</span>
-            <span class="leg-chip"><i style="background: #dc2626;"></i>免疫防御 (Defense)</span>
-            <span class="leg-chip"><i style="background: #7c3aed;"></i>DNA包装 (Packaging)</span>
-            <span class="leg-chip"><i style="background: #2563eb;"></i>结构形态 (Structural)</span>
-            <span class="leg-chip"><i style="background: #d97706;"></i>复制修饰 (Replication)</span>
-            <span class="leg-chip"><i style="background: #0891b2;"></i>代谢辅助 (Metabolism)</span>
-            <span class="leg-chip"><i style="background: #94a3b8;"></i>假定蛋白 (Hypothetical)</span>
+            <span v-for="(cat, key) in FUNCTIONAL_CATEGORIES" :key="key" class="leg-chip">
+              <i :style="{ background: cat.color }"></i>{{ cat.label.split(' ')[0] }}
+            </span>
           </div>
         </div>
 
@@ -816,7 +1016,7 @@ const isCurrentPair = (s1: string, s2: string) => {
               <!-- 4. ANI 矩阵列头 (与行样本完全一致的顺序，可收起) -->
               <template v-if="isAniTrackVisible">
                 <th 
-                  v-for="colId in orderedSampleIds" 
+                  v-for="colId in visibleSampleIds" 
                   :key="'ani-h-' + colId"
                   class="th-ani-col"
                   :class="{ 'th-active-pair': selectedPair?.includes(colId) }"
@@ -840,7 +1040,7 @@ const isCurrentPair = (s1: string, s2: string) => {
           </thead>
           <tbody>
             <tr 
-              v-for="(rowId, rIdx) in orderedSampleIds" 
+              v-for="(rowId, rIdx) in visibleSampleIds" 
               :key="'row-sample-' + rowId"
               class="composite-row"
               :class="{ 'row-pair-selected': selectedPair?.includes(rowId) }"
@@ -849,7 +1049,7 @@ const isCurrentPair = (s1: string, s2: string) => {
               <td 
                 v-if="isPhylogenyTrackVisible && rIdx === 0" 
                 class="td-tree-col th-sticky-left-1" 
-                :rowspan="orderedSampleIds.length"
+                :rowspan="visibleSampleIds.length"
               >
                 <div class="tree-absolute-wrapper">
                   <svg 
@@ -886,14 +1086,27 @@ const isCurrentPair = (s1: string, s2: string) => {
                 </div>
               </td>
 
-              <!-- 2. 样本名称 (点击可切换聚焦，冻结在左侧) -->
+              <!-- 2. 样本名称 (点击可切换聚焦，带显隐控制，冻结在左侧) -->
               <td 
                 class="td-sample-name-col" 
                 :class="isPhylogenyTrackVisible ? 'th-sticky-left-2' : 'th-sticky-left-1'"
-                @click="emit('select-sample', rowId)"
                 :title="sampleNames[rowId]"
               >
-                <strong>{{ sampleNames[rowId] || rowId }}</strong>
+                <div class="sample-name-cell-inner">
+                  <button 
+                    class="btn-sample-eye" 
+                    @click.stop="toggleSampleVisibility(rowId)" 
+                    title="暂时隐藏该样本"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </button>
+                  <span class="sample-title-txt" @click="emit('select-sample', rowId)">
+                    {{ sampleNames[rowId] || rowId }}
+                  </span>
+                </div>
               </td>
 
               <!-- 3. 样本多维元数据轨道 (Lifestyle | Safety | Acr) (可收起) -->
@@ -912,7 +1125,7 @@ const isCurrentPair = (s1: string, s2: string) => {
               <!-- 4. 全基因组 ANI 矩阵单元格 (可收起) -->
               <template v-if="isAniTrackVisible">
                 <td 
-                  v-for="colId in orderedSampleIds" 
+                  v-for="colId in visibleSampleIds" 
                   :key="'ani-cell-' + rowId + '-' + colId"
                   class="td-ani-val-cell"
                   :style="{ 
@@ -952,15 +1165,27 @@ const isCurrentPair = (s1: string, s2: string) => {
         </table>
       </div>
 
-      <!-- 悬停基因家族信息提示条 (仅在鼠标悬停在具体 CDS 方块时浮现) -->
-      <div class="cluster-hover-info-strip" v-if="hoveredGeneCluster">
-        <span class="chip-cat" :style="{ backgroundColor: getCatColor(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category) }">
-          {{ hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category }}
-        </span>
-        <strong>{{ hoveredGeneCluster.cluster?.group_id }}</strong>:
-        <span>{{ hoveredGeneCluster.cluster?.representative_product }}</span>
-        <span class="hover-sample-tag">【{{ sampleNames[hoveredGeneCluster.rowId] || hoveredGeneCluster.rowId }}】: <strong>{{ hoveredGeneCluster.variant?.variantLabel }}</strong></span>
-        <span class="text-slate"> (共享率: {{ hoveredGeneCluster.cluster?.sample_count }}/{{ orderedSampleIds.length }} 样本 · 点击展开全株比对)</span>
+      <!-- 悬停基因家族信息提示条 (固定高度状态栏，杜绝任何页面高度跳变抖动) -->
+      <div class="cluster-hover-info-strip" :class="{ active: !!hoveredGeneCluster }">
+        <template v-if="hoveredGeneCluster">
+          <span class="chip-cat" :style="{ backgroundColor: getCatColor(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category) }">
+            {{ hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category }}
+          </span>
+          <strong>{{ hoveredGeneCluster.cluster?.group_id }}</strong>:
+          <span class="strip-prod-txt">{{ hoveredGeneCluster.cluster?.representative_product }}</span>
+          <span class="hover-sample-tag">【{{ sampleNames[hoveredGeneCluster.rowId] || hoveredGeneCluster.rowId }}】: <strong>{{ hoveredGeneCluster.variant?.variantLabel }}</strong></span>
+          <span class="text-slate"> (共享率: {{ hoveredGeneCluster.cluster?.sample_count }}/{{ orderedSampleIds.length }} 样本 · 点击展开全株比对)</span>
+        </template>
+        <template v-else>
+          <span class="strip-placeholder-txt">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px; vertical-align: middle;">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="16" x2="12" y2="12" />
+              <line x1="12" y1="8" x2="12.01" y2="8" />
+            </svg>
+            将鼠标悬停在右侧任意同源基因方块上，可在此实时预览详细功能注释与微观变异类型；点击方块可展开跨株全景比对抽屉。
+          </span>
+        </template>
       </div>
 
       <!-- CDS 详细属性卡片模态 (点击查看各样本具体 CDS 基因座、起止坐标、氨基酸变异类型标注) -->
@@ -979,7 +1204,7 @@ const isCurrentPair = (s1: string, s2: string) => {
               <span class="bl-lbl">变异对照基准株:</span>
               <select v-model="selectedBaselineSampleId" class="baseline-select">
                 <option 
-                  v-for="sid in orderedSampleIds" 
+                  v-for="sid in visibleSampleIds" 
                   :key="'opt-bl-' + sid"
                   :value="sid"
                 >
@@ -1006,7 +1231,7 @@ const isCurrentPair = (s1: string, s2: string) => {
             </thead>
             <tbody>
               <tr 
-                v-for="sid in orderedSampleIds" 
+                v-for="sid in visibleSampleIds" 
                 :key="'drawer-s-' + sid"
                 :class="{ 
                   'row-baseline-highlight': sid === selectedBaselineSampleId,
@@ -1073,109 +1298,278 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 /* 顶部概览指标与折叠条 */
-.population-summary-panel {
+/* 样本可见性与聚焦控制工具条 */
+.sample-visibility-toolbar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
+  margin-left: 8px;
+  position: relative;
 }
 
-.summary-toggle-bar {
-  display: flex;
-  justify-content: space-between;
+.sample-count-pill {
+  display: inline-flex;
   align-items: center;
-  padding: 2px 4px;
-}
-
-.st-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.st-tag {
-  background: #2563eb;
-  color: #ffffff;
-  font-size: 9px;
-  font-weight: 800;
-  padding: 1px 5px;
-  border-radius: 3px;
-}
-
-.st-title {
-  font-size: 11px;
-  font-weight: 700;
+  gap: 5px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
   color: #475569;
 }
 
-.btn-section-toggle,
-.btn-panel-toggle {
+.sample-count-pill.has-hidden {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.hidden-badge {
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid #fde68a;
+}
+
+.sample-filter-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-sample-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   background: #f1f5f9;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #cbd5e1;
   border-radius: 4px;
   font-size: 10px;
   font-weight: 600;
   color: #475569;
-  padding: 2px 8px;
+  padding: 2px 7px;
   cursor: pointer;
   transition: all 0.15s ease;
+  line-height: 1.2;
 }
 
-.btn-section-toggle:hover,
-.btn-panel-toggle:hover {
+.btn-sample-action:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.btn-show-all {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.btn-show-all:hover {
+  background: #dbeafe;
+}
+
+.btn-focus-pair {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+
+.btn-focus-pair:hover {
+  background: #dcfce7;
+}
+
+.sample-dropdown-wrapper {
+  position: relative;
+}
+
+.btn-filter-dropdown.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #1d4ed8;
+}
+
+.sample-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  width: 260px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sd-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sd-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 11px;
+  outline: none;
+}
+
+.sd-search-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.sd-quick-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.btn-sd-quick {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #475569;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+.btn-sd-quick:hover {
   background: #e2e8f0;
   color: #0f172a;
 }
 
-/* 顶部统计条 */
-.population-summary-bar {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+.btn-sd-close {
+  background: transparent;
+  border: none;
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
 }
 
-.summary-stat-box {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px 14px;
+.btn-sd-close:hover {
+  color: #dc2626;
+}
+
+.sd-sample-list {
+  max-height: 220px;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
-.summary-stat-box.highlight-box {
-  border-color: #fde68a;
-  background: #fffbeb;
+.sd-sample-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: background 0.1s ease;
 }
 
-.stat-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #64748b;
-  text-transform: uppercase;
+.sd-sample-item:hover {
+  background: #f1f5f9;
 }
 
-.stat-val {
-  font-size: 18px;
-  font-weight: 800;
+.sd-sample-item input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.sd-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #334155;
+}
+
+.sd-sample-item.active .sd-name {
   color: #0f172a;
+  font-weight: 600;
 }
 
-.stat-val small {
-  font-size: 11px;
-  font-weight: 500;
+.btn-sd-only {
+  background: transparent;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+  font-size: 8.5px;
   color: #64748b;
+  padding: 0 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
 
-.stat-sub {
-  font-size: 10px;
-  color: #64748b;
+.sd-sample-item:hover .btn-sd-only {
+  opacity: 1;
 }
 
-.text-green { color: #16a34a; }
-.text-blue { color: #2563eb; }
-.text-amber { color: #d97706; }
-.text-slate { color: #64748b; }
+.btn-sd-only:hover {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+/* 样本单元格内小眼睛切换按钮 */
+.sample-name-cell-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.btn-sample-eye {
+  background: transparent;
+  border: none;
+  padding: 2px;
+  margin: 0;
+  cursor: pointer;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btn-sample-eye:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.sample-title-txt {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sample-title-txt:hover {
+  color: #2563eb;
+}
 
 /* 旗舰组合面板 */
 .academic-panel {
@@ -1671,7 +2065,7 @@ const isCurrentPair = (s1: string, s2: string) => {
   font-weight: 700;
 }
 
-/* 表体单元格与行高规范 */
+/* 表体单元格与行高规范 (默认 Comfortable 舒适 24px) */
 .composite-row {
   border-bottom: 1px solid #f1f5f9;
   height: 24px;
@@ -1773,17 +2167,19 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .td-ani-val-cell:hover {
-  transform: scale(1.1);
+  outline: 1.5px solid #1d4ed8;
+  outline-offset: -1px;
   z-index: 5;
-  outline: 1.5px solid #0f172a;
+  filter: brightness(1.08);
 }
 
 .cell-pair-highlight {
   outline: 2px solid #ef4444;
+  outline-offset: -1px;
   z-index: 4;
 }
 
-/* 基因方块 (超紧凑 4px 宽，高度绝对统一 16px，通过内部纹理与端标区分变异) */
+/* 基因方块 (默认舒适 16px 高) */
 .td-cluster-block {
   width: 4px;
   min-width: 4px;
@@ -1803,17 +2199,17 @@ const isCurrentPair = (s1: string, s2: string) => {
   margin: 0 auto;
   cursor: pointer;
   box-sizing: border-box;
-  transition: transform 0.12s ease;
+  transition: filter 0.1s ease, box-shadow 0.1s ease;
 }
 
-/* 1. 等长保守：饱满纯色实心色块 (高度完全一致 16px) */
+/* 1. 等长保守：饱满纯色实心色块 */
 .gene-present-square.sq-conserved {
   height: 16px;
   border-radius: 1px;
   opacity: 1.0;
 }
 
-/* 2. 缺失截短变异：高度同样为 16px，内部带明显斜向白纹遮罩，直观呈现残缺斑驳感 */
+/* 2. 缺失截短变异 */
 .gene-present-square.sq-truncated {
   height: 16px;
   border-radius: 1px;
@@ -1827,7 +2223,7 @@ const isCurrentPair = (s1: string, s2: string) => {
   box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.8);
 }
 
-/* 3. 插入延长变异：高度同样为 16px，上下两端带有深色端帽横线标 */
+/* 3. 插入延长变异 */
 .gene-present-square.sq-extended {
   height: 16px;
   border-radius: 1px;
@@ -1837,9 +2233,11 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .gene-present-square:hover {
-  transform: scaleX(2.8) scaleY(1.2);
+  outline: 1.5px solid #0f172a;
+  outline-offset: 0.5px;
+  filter: brightness(1.15);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.35);
   z-index: 10;
-  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
 }
 
 .gene-absent-dot {
@@ -1848,6 +2246,168 @@ const isCurrentPair = (s1: string, s2: string) => {
   border-radius: 50%;
   background: #cbd5e1;
   margin: 0 auto;
+}
+
+/* =========================================================
+   宽松模式专属规则 (.density-spacious: 行高 36px, 适合 2~12 株小样本)
+   ========================================================= */
+.density-spacious .composite-row {
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+}
+
+.density-spacious .td-sample-name-col {
+  height: 36px;
+  line-height: 36px;
+  font-size: 11.5px;
+  padding: 0 8px;
+}
+
+.density-spacious .td-meta-col {
+  height: 36px;
+  font-size: 9.5px;
+}
+
+.density-spacious .meta-badge {
+  font-size: 8.5px;
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.density-spacious .th-ani-col {
+  width: 38px;
+  min-width: 38px;
+  max-width: 38px;
+}
+
+.density-spacious .th-rot-label {
+  max-width: 38px;
+  font-size: 9px;
+}
+
+.density-spacious .td-ani-val-cell {
+  width: 38px;
+  min-width: 38px;
+  max-width: 38px;
+  height: 36px;
+  line-height: 36px;
+  font-size: 9.5px;
+}
+
+.density-spacious .td-cluster-block {
+  height: 36px;
+  width: 6px;
+  min-width: 6px;
+  max-width: 7px;
+}
+
+.density-spacious .gene-present-square {
+  width: 5px;
+  height: 24px;
+  border-radius: 2px;
+}
+
+.density-spacious .gene-present-square.sq-conserved,
+.density-spacious .gene-present-square.sq-truncated,
+.density-spacious .gene-present-square.sq-extended {
+  height: 24px;
+}
+
+.density-spacious .gene-present-square.sq-extended {
+  border-top-width: 2.5px !important;
+  border-bottom-width: 2.5px !important;
+}
+
+.density-spacious .gene-absent-dot {
+  width: 2px;
+  height: 2px;
+}
+
+/* =========================================================
+   紧凑模式专属规则 (.density-compact: 行高 17px)
+   ========================================================= */
+.density-compact .composite-row {
+  height: 17px;
+  min-height: 17px;
+  max-height: 17px;
+}
+
+.density-compact .td-sample-name-col {
+  height: 17px;
+  line-height: 17px;
+  font-size: 9px;
+}
+
+.density-compact .td-meta-col {
+  height: 17px;
+}
+
+.density-compact .td-ani-val-cell {
+  height: 17px;
+  line-height: 17px;
+  font-size: 7px;
+}
+
+.density-compact .td-cluster-block {
+  height: 17px;
+  width: 3px;
+  min-width: 3px;
+  max-width: 4px;
+}
+
+.density-compact .gene-present-square {
+  width: 2.5px;
+  height: 12px;
+}
+
+.density-compact .gene-present-square.sq-conserved,
+.density-compact .gene-present-square.sq-truncated,
+.density-compact .gene-present-square.sq-extended {
+  height: 12px;
+}
+
+/* =========================================================
+   全景模式专属规则 (.density-ultra: 行高 11px)
+   ========================================================= */
+.density-ultra .composite-row {
+  height: 11px;
+  min-height: 11px;
+  max-height: 11px;
+}
+
+.density-ultra .td-sample-name-col {
+  height: 11px;
+  line-height: 11px;
+  font-size: 7.5px;
+  padding: 0 2px;
+}
+
+.density-ultra .td-ani-val-cell {
+  width: 14px;
+  min-width: 14px;
+  max-width: 14px;
+  height: 11px;
+  line-height: 11px;
+}
+
+.density-ultra .th-ani-col {
+  width: 14px;
+  min-width: 14px;
+  max-width: 14px;
+}
+
+.density-ultra .td-cluster-block {
+  height: 11px;
+  width: 2px;
+  min-width: 2px;
+  max-width: 2px;
+}
+
+.density-ultra .gene-present-square {
+  width: 1.8px;
+  height: 8px;
+  border-radius: 0;
 }
 
 /* 图注栏中的变异形态样本方块 (高度统一 10px) */
@@ -1879,16 +2439,41 @@ const isCurrentPair = (s1: string, s2: string) => {
   color: #1e3a8a;
 }
 
-/* 悬停基因家族信息提示条 */
+/* 悬停基因家族信息提示条 (固定高度 32px，零布局位移) */
 .cluster-hover-info-strip {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
-  padding: 6px 12px;
+  padding: 0 12px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  box-sizing: border-box;
   font-size: 11px;
   display: flex;
   align-items: center;
   gap: 8px;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.cluster-hover-info-strip.active {
+  background: #ffffff;
+  border-color: #93c5fd;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
+}
+
+.strip-placeholder-txt {
+  color: #94a3b8;
+  font-size: 10.5px;
+}
+
+.strip-prod-txt {
+  color: #0f172a;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chip-cat {

@@ -870,7 +870,10 @@ function getCategoryColor(cat: string): string {
 }
 
 .gene-present-block:hover {
-  transform: scale(1.3);
+  outline: 1.5px solid #0f172a;
+  outline-offset: 0.5px;
+  filter: brightness(1.15);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.35);
 }
 
 .gene-absent-block {

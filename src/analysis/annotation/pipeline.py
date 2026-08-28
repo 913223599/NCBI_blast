@@ -370,6 +370,11 @@ class AnnotationPipeline:
                 full_seq=full_seq,
                 features=features
             )
+            summary_dict = comprehensive_summary.model_dump()
+            summary_file = self.work_dir / "summary.json"
+            with open(summary_file, "w", encoding="utf-8") as f:
+                json.dump(summary_dict, f, ensure_ascii=False, indent=2)
+            files["summary_json"] = str(summary_file.resolve())
 
             # 特征数据分片落盘与 JSON 存储 (断点保护)
             features_file = self.work_dir / "features.json"
@@ -382,7 +387,6 @@ class AnnotationPipeline:
             self._broadcast_progress(100, f"注释全部完成 (总特征数: {len(features)}, 已知功能: {comprehensive_summary.annotated_count}, 未知: {comprehensive_summary.hypothetical_count})")
 
             # 2. 持久化至数据库 (状态明确设置为 completed)
-            summary_dict = comprehensive_summary.model_dump()
             annotation_db.mark_completed(
                 task_id=self.task_id, 
                 summary=summary_dict, 

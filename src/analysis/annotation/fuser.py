@@ -330,7 +330,6 @@ class AnnotationFuser:
                 set_val(target_feat, "product", clean_acr_name)
                 set_val(target_feat, "category", "Defense & Host Interaction")
                 set_val(target_feat, "source_engine", "PhageScope")
-                set_val(target_feat, "evidence", evidence_note)
                 updated_count += 1
             
             # 在 notes 与 evidence_sources 中追加审计证据标记

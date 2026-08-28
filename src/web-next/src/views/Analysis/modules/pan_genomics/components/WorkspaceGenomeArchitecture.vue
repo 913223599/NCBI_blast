@@ -9,6 +9,7 @@
  * 3. Layer 3 (Hotspot Zoom): 尾部受体/裂解操纵子/攻防岛 局部高精 ORF 构型与序列同源梯形带
  */
 import { ref, computed } from 'vue'
+import { FUNCTIONAL_CATEGORIES, inferCategoryFromText } from '../../viewer/utils/render'
 
 const props = defineProps<{
   clusters: any[]
@@ -54,19 +55,12 @@ const isLysisInvariant = computed(() => {
   return allHigh
 })
 
-// 分类颜色映射
+// 分类颜色映射 (统一使用全基因组色彩体系)
 function getCatColor(cat: string): string {
-  const map: Record<string, string> = {
-    'Structural': '#2563eb',
-    'Tail': '#f59e0b',
-    'Lysis': '#059669',
-    'Defense & Host Interaction': '#dc2626',
-    'Replication & Repair': '#d97706',
-    'Packaging': '#7c3aed',
-    'Metabolism & AMG': '#0891b2',
-    'Hypothetical': '#94a3b8'
+  if (FUNCTIONAL_CATEGORIES[cat]) {
+    return FUNCTIONAL_CATEGORIES[cat].color
   }
-  return map[cat] || '#64748b'
+  return '#64748b'
 }
 
 // 提取各样本的全基因组基因列表

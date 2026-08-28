@@ -331,6 +331,168 @@ class PholdDatabase(BioDatabase):
             logger.error(f"Phold 同步失败: {e}")
             return False
 
+class FastaProtDatabase(BioDatabase):
+    """
+    通用蛋白 FASTA 数据库管理器 (SwissProt / VFDB 等)
+    自动执行: 下载 -> gzip解压 -> makeblastdb -dbtype prot
+    """
+    def get_status(self) -> Dict[str, Any]:
+        prefix = self.config.get("index_prefix", self.db_id)
+        is_indexed = (self.base_dir / f"{prefix}.psq").exists() or (self.base_dir / f"{prefix}.pin").exists()
+        status = super().get_status()
+        status.update({
+            "installed": is_indexed,
+            "path": str(self.base_dir) if is_indexed else None
+        })
+        return status
+
+    async def update_database(self):
+        download_url = self.config.get("url")
+        if not download_url or download_url.startswith("local_"):
+            return False
+
+        try:
+            target_gz = self.base_dir / "download.fasta.gz"
+            target_fasta = self.base_dir / "source.fasta"
+            prefix = self.config.get("index_prefix", self.db_id)
+
+            logger.info(f">>> [{self.name}] 开始下载: {download_url}")
+            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_gz)
+
+            # 解压
+            def _extract():
+                import gzip
+                with gzip.open(target_gz, 'rb') as f_in:
+                    with open(target_fasta, 'wb') as f_out:
+                        while True:
+                            chunk = f_in.read(1024 * 1024)
+                            if not chunk: break
+                            f_out.write(chunk)
+
+            await asyncio.to_thread(_extract)
+
+            # 构建 BLAST 蛋白索引
+            tool_path = get_short_path_name(str(ToolConfig.get_tool_path("makeblastdb")))
+            short_base_dir = get_short_path_name(str(self.base_dir))
+            cmd_str = f'"{tool_path}" -in "source.fasta" -dbtype prot -title "{self.name}" -out "{prefix}"'
+
+            logger.info(f"[{self.name}] 构建蛋白索引: {cmd_str}")
+            proc = await asyncio.create_subprocess_shell(
+                cmd_str, cwd=short_base_dir,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            await proc.communicate()
+
+            if proc.returncode == 0:
+                current_version = datetime.now().strftime("%Y-%m")
+                self._update_registry_version(current_version)
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"{self.name} 同步失败: {e}")
+            return False
+
+class DefenseFinderDatabase(BioDatabase):
+    """DefenseFinder & AcrDB 抗防御与原核免疫模型库"""
+    def get_status(self) -> Dict[str, Any]:
+        is_installed = (self.base_dir / "defense-finder-models").exists() or any(self.base_dir.rglob("*.hmm*"))
+        status = super().get_status()
+        status.update({
+            "installed": is_installed,
+            "path": str(self.base_dir) if is_installed else None
+        })
+        return status
+
+    async def update_database(self):
+        try:
+            download_url = self.config.get("url")
+            target_tar = self.base_dir / "defense_finder_models.tar.gz"
+            logger.info(f">>> [DefenseFinder] 开始同步模型库...")
+            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
+
+            def _extract():
+                with tarfile.open(target_tar) as t:
+                    t.extractall(path=self.base_dir)
+
+            await asyncio.to_thread(_extract)
+            current_version = f"v1.3-{datetime.now().strftime('%Y-%m')}"
+            self._update_registry_version(current_version)
+            return True
+        except Exception as e:
+            logger.error(f"DefenseFinder 同步失败: {e}")
+            return False
+
+class CardDatabase(BioDatabase):
+    """CARD 耐药基因数据库"""
+    def get_status(self) -> Dict[str, Any]:
+        is_installed = (self.base_dir / "card_protein.psq").exists() or (self.base_dir / "card_protein.pin").exists() or (self.base_dir / "card.json").exists()
+        status = super().get_status()
+        status.update({
+            "installed": is_installed,
+            "path": str(self.base_dir) if is_installed else None
+        })
+        return status
+
+    async def update_database(self):
+        try:
+            download_url = "https://card.mcmaster.ca/latest/data"
+            target_tar = self.base_dir / "card_data.tar.bz2"
+            logger.info(f">>> [CARD] 正在同步耐药数据库...")
+            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
+
+            def _extract_and_build():
+                import tarfile
+                with tarfile.open(target_tar, "r:bz2") as t:
+                    t.extractall(path=self.base_dir)
+                # 寻找 protein_fasta 蛋白序列
+                f_faa = self.base_dir / "protein_fasta.fasta"
+                if not f_faa.exists():
+                    f_cand = list(self.base_dir.glob("*protein*.fasta"))
+                    if f_cand: f_faa = f_cand[0]
+
+                if f_faa.exists():
+                    tool_path = get_short_path_name(str(ToolConfig.get_tool_path("makeblastdb")))
+                    short_base = get_short_path_name(str(self.base_dir))
+                    os.system(f'"{tool_path}" -in "{f_faa.name}" -dbtype prot -title "CARD Resistome" -out "card_protein"')
+
+            await asyncio.to_thread(_extract_and_build)
+            current_version = f"v3.2-{datetime.now().strftime('%Y-%m')}"
+            self._update_registry_version(current_version)
+            return True
+        except Exception as e:
+            logger.error(f"CARD 同步失败: {e}")
+            return False
+
+class CddPfamDatabase(BioDatabase):
+    """NCBI CDD / Pfam-A 结构域数据库"""
+    def get_status(self) -> Dict[str, Any]:
+        is_installed = any(self.base_dir.glob("*.smp")) or any(self.base_dir.glob("*.rps*")) or (self.base_dir / "Cdd.rps").exists()
+        status = super().get_status()
+        status.update({
+            "installed": is_installed,
+            "path": str(self.base_dir) if is_installed else None
+        })
+        return status
+
+    async def update_database(self):
+        try:
+            download_url = self.config.get("url")
+            target_tar = self.base_dir / "cdd.tar.gz"
+            logger.info(f">>> [CDD/Pfam] 正在同步保守结构域数据库...")
+            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
+
+            def _extract():
+                with tarfile.open(target_tar) as t:
+                    t.extractall(path=self.base_dir)
+
+            await asyncio.to_thread(_extract)
+            current_version = f"v3.21-{datetime.now().strftime('%Y-%m')}"
+            self._update_registry_version(current_version)
+            return True
+        except Exception as e:
+            logger.error(f"CDD/Pfam 同步失败: {e}")
+            return False
+
 class BioDbManager:
     """
     数据库管理门面 (Facade)
@@ -345,16 +507,25 @@ class BioDbManager:
 
         registry = ToolConfig.get_remote_registry()
         for db_id, config in registry.items():
-            if "silva" in db_id.lower():
+            db_id_lower = db_id.lower()
+            if "silva" in db_id_lower:
                 self.dbs[db_id] = SilvaDatabase(db_id, config)
-            elif "ncbi_16s" in db_id.lower() or "16s_ribosomal" in db_id.lower():
+            elif "ncbi_16s" in db_id_lower or "16s_ribosomal" in db_id_lower:
                 self.dbs[db_id] = Ncbi16SDatabase(db_id, config)
-            elif "phagescope" in db_id.lower():
+            elif "phagescope" in db_id_lower:
                 self.dbs[db_id] = PhageScopeDatabase(db_id, config)
-            elif "pharokka" in db_id.lower():
+            elif "pharokka" in db_id_lower:
                 self.dbs[db_id] = PharokkaDatabase(db_id, config)
-            elif "phold" in db_id.lower():
+            elif "phold" in db_id_lower:
                 self.dbs[db_id] = PholdDatabase(db_id, config)
+            elif "swissprot" in db_id_lower or "vfdb" in db_id_lower:
+                self.dbs[db_id] = FastaProtDatabase(db_id, config)
+            elif "defense_finder" in db_id_lower or "anti_crispr" in db_id_lower:
+                self.dbs[db_id] = DefenseFinderDatabase(db_id, config)
+            elif "card" in db_id_lower:
+                self.dbs[db_id] = CardDatabase(db_id, config)
+            elif "cdd" in db_id_lower or "pfam" in db_id_lower:
+                self.dbs[db_id] = CddPfamDatabase(db_id, config)
             else:
                 self.dbs[db_id] = BioDatabase(db_id, config)
 
@@ -368,12 +539,12 @@ class BioDbManager:
         # 识别散落的文件 (16S_ribosomal_RNA.*)
         scattered_files = list(source_dir.glob("16S_ribosomal_RNA*"))
         if scattered_files:
-            logger.info(f"🚚 发现散落的 NCBI 文件 ({len(scattered_files)}个)，正在迁移至: {target_dir}")
+            logger.info(f"发现散落的 NCBI 文件 ({len(scattered_files)}个)，正在迁移至: {target_dir}")
             target_dir.mkdir(parents=True, exist_ok=True)
             for f in scattered_files:
                 try:
                     dest = target_dir / f.name
-                    if dest.exists(): f.unlink() # 如果目标已存在，则删除旧的
+                    if dest.exists(): f.unlink()
                     else: f.rename(dest)
                 except Exception as e:
                     logger.error(f"迁移文件 {f.name} 失败: {e}")
