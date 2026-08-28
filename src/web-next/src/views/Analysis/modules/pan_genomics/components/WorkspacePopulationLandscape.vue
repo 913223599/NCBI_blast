@@ -1088,6 +1088,8 @@ const isCurrentPair = (s1: string, s2: string) => {
                   <span class="gene-matrix-title-txt">Pan-Genome Ortholog Content Matrix (共 {{ sortedGeneClusters.length }} 基因家族，按功能着色)</span>
                 </div>
               </th>
+              <!-- 6. 弹性吸纳列 (吸收屏幕右侧剩余空间，彻底防止基因方块在列数少时被原生表格拉伸畸变) -->
+              <th class="th-elastic-spacer"></th>
             </tr>
           </thead>
           <tbody>
@@ -1222,6 +1224,9 @@ const isCurrentPair = (s1: string, s2: string) => {
                   <div v-else class="gene-absent-dot" title="该样本缺失此 CDS"></div>
                 </td>
               </template>
+
+              <!-- 6. 弹性吸纳单元格 (吸收屏幕右侧剩余空间) -->
+              <td class="td-elastic-spacer"></td>
             </tr>
           </tbody>
         </table>
@@ -2245,15 +2250,27 @@ const isCurrentPair = (s1: string, s2: string) => {
 
 /* 基因方块 (默认舒适 16px 高) */
 .td-cluster-block {
-  width: 4px;
-  min-width: 4px;
-  max-width: 5px;
+  width: 5px !important;
+  min-width: 5px !important;
+  max-width: 5px !important;
   height: 24px;
-  padding: 0;
+  padding: 0 !important;
+  margin: 0 !important;
   box-sizing: border-box;
   text-align: center;
   vertical-align: middle;
   border-left: 0.5px solid #f8fafc;
+}
+
+/* 弹性吸纳列：吞纳屏幕右侧全部多余空白，保护所有前序列定宽 */
+.th-elastic-spacer,
+.td-elastic-spacer {
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
 }
 
 .gene-present-square {
@@ -2361,9 +2378,9 @@ const isCurrentPair = (s1: string, s2: string) => {
 
 .density-spacious .td-cluster-block {
   height: 36px;
-  width: 6px;
-  min-width: 6px;
-  max-width: 7px;
+  width: 6px !important;
+  min-width: 6px !important;
+  max-width: 6px !important;
 }
 
 .density-spacious .gene-present-square {
@@ -2415,9 +2432,9 @@ const isCurrentPair = (s1: string, s2: string) => {
 
 .density-compact .td-cluster-block {
   height: 17px;
-  width: 3px;
-  min-width: 3px;
-  max-width: 4px;
+  width: 3.5px !important;
+  min-width: 3.5px !important;
+  max-width: 3.5px !important;
 }
 
 .density-compact .gene-present-square {

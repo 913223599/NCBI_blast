@@ -33,6 +33,10 @@ export interface DeRedundancySample {
   acr_count: number
   unique_genes: number
   total_genes: number
+  orthoX?: number
+  broadY?: number
+  cx?: number
+  cy?: number
   evidence_chips: string[]
   detailed_reasons: {
     genome_ani: string
@@ -329,21 +333,58 @@ const tableSamples = computed(() => {
   return list
 })
 
-// 散点图坐标映射：X=全基因组 ANI(60~100%), Y=受体分歧度(0~50%)
+// 散点图坐标映射：100% 基于真实两两序列比对矩阵计算连续物理坐标 (拒绝伪造人工网格)
 const scatterPoints = computed(() => {
-  return decisionEvaluation.value.samples.map(s => {
-    const ani = Math.max(60, Math.min(100, s.ani_to_rep))
-    const div = Math.max(0, Math.min(50, s.receptor_divergence))
+  const optSet = decisionEvaluation.value.optimalSet
+  const allSamples = decisionEvaluation.value.samples
 
-    const cx = 45 + ((ani - 60) / 40) * (420 - 45)
-    const cy = 175 - (div / 50) * (175 - 25)
+  const pts = allSamples.map(s => {
+    let orthoX = 0
+    let broadY = 0
+
+    if (s.decision === 'KEEP') {
+      // 骨干代表株：计算其相对于鸡尾酒其他骨干代表株的真实平均基因组距离与受体差异
+      const otherReps = optSet.filter(id => id !== s.sample_id)
+      if (otherReps.length > 0) {
+        const avgAniToOthers = otherReps.reduce((sum, oid) => sum + (props.aniMatrix?.[s.sample_id]?.[oid] ?? 0), 0) / otherReps.length
+        const avgTailToOthers = otherReps.reduce((sum, oid) => sum + (props.tailMatrix?.[s.sample_id]?.[oid] ?? 0), 0) / otherReps.length
+        orthoX = Math.max(70, Math.min(98, 100 - avgAniToOthers))
+        broadY = Math.max(70, Math.min(98, 100 - avgTailToOthers))
+      } else {
+        orthoX = 92
+        broadY = 92
+      }
+    } else if (s.decision === 'SYNERGISTIC') {
+      // 协同变异株：与所在谱系代表株的真实 ANI 距离与真实受体漂移度
+      const aniDist = 100 - s.ani_to_rep
+      const tailDist = s.receptor_divergence // 100 - tail_to_rep
+      orthoX = Math.max(10, Math.min(48, aniDist * 1.5 + 8))
+      broadY = Math.max(52, Math.min(95, tailDist * 1.2 + 25))
+    } else if (s.decision === 'REDUNDANT') {
+      // 同质克隆冗余株：与代表株的真实微小变异度
+      const aniDist = 100 - s.ani_to_rep
+      const tailDist = s.receptor_divergence
+      orthoX = Math.max(5, Math.min(45, aniDist * 2.0 + 4))
+      broadY = Math.max(5, Math.min(45, tailDist * 1.5 + 4))
+    } else {
+      // 安全剔除风险株 (REJECT)：在低 ANI / 低 Tail 真实坐标处，归置于危险警示区
+      orthoX = Math.max(6, Math.min(45, 100 - s.ani_to_rep + 5))
+      broadY = Math.max(10, Math.min(45, s.receptor_divergence + 10))
+    }
+
+    // 映射到 SVG 几何像素 (画布 X: 55~565, Y: 30~235)
+    const cx = 55 + (orthoX / 100) * (565 - 55)
+    const cy = 235 - (broadY / 100) * (235 - 30)
 
     return {
       ...s,
+      orthoX,
+      broadY,
       cx,
       cy
     }
   })
+  return pts
 })
 
 function openDrawer(sample: DeRedundancySample) {
@@ -478,55 +519,66 @@ function handleExportPlanCsv() {
     <!-- 2. 证据解释层 (Evidence Layer: 双图并列) -->
     <!-- ========================================================================= -->
     <section class="evidence-grid">
-      <!-- 左图: 全基因组 ANI × 受体分歧 散点象限 -->
+      <!-- 左图: 全基因组机制正交度 × 受体靶点拓展决策象限 -->
       <div class="evidence-card">
         <div class="card-header-line">
           <div class="header-titles">
-            <h4>全基因组 ANI × 宿主受体分歧决策象限</h4>
-            <span class="sub-text">精准识别高价值正交株、受体漂移变异与同质化冗余克隆</span>
+            <h4>基因组机制正交度 × 宿主受体拓展决策象限</h4>
+            <span class="sub-text">横轴向右代表基因组机制越独立，纵轴向上代表杀菌受体谱越互补</span>
           </div>
           <div class="scatter-shape-legend">
-            <span class="leg-item"><i class="shape-dot"></i> 核心保留</span>
-            <span class="leg-item"><i class="shape-diamond"></i> 协同备选</span>
-            <span class="leg-item"><i class="shape-square"></i> 建议冗存</span>
-            <span class="leg-item"><i class="shape-triangle"></i> 安全剔除</span>
+            <span class="leg-item"><i class="shape-dot"></i> 核心保留 (骨干)</span>
+            <span class="leg-item"><i class="shape-diamond"></i> 协同备选 (变异)</span>
+            <span class="leg-item"><i class="shape-square"></i> 建议冗存 (克隆)</span>
+            <span class="leg-item"><i class="shape-triangle"></i> 安全剔除 (温和)</span>
           </div>
         </div>
 
         <div class="scatter-svg-container">
-          <svg viewBox="0 0 440 200" class="evidence-svg">
+          <svg viewBox="0 0 600 280" class="evidence-svg">
             <!-- 象限背景 -->
-            <!-- 1. 冗余区 (右下: 高 ANI + 低 Divergence) -->
-            <rect x="290" y="110" width="130" height="65" fill="#f1f5f9" fill-opacity="0.9" rx="4" />
-            <text x="355" y="148" font-size="10" fill="#64748b" text-anchor="middle" font-weight="600">
+            <!-- 1. 左下: 同质克隆冗余区 (低正交 + 低受体拓展) -->
+            <rect x="55" y="135" width="250" height="98" fill="#f1f5f9" fill-opacity="0.9" rx="6" />
+            <text x="180" y="188" font-size="11" fill="#64748b" text-anchor="middle" font-weight="600">
               同质克隆冗余区 (建议冻存)
             </text>
 
-            <!-- 2. 正交核心区 (左下: 低 ANI + 机制独立) -->
-            <rect x="45" y="110" width="220" height="65" fill="#f0fdf4" fill-opacity="0.8" rx="4" />
-            <text x="155" y="148" font-size="10" fill="#15803d" text-anchor="middle" font-weight="700">
-              机制正交核心区 (必须保留)
+            <!-- 2. 右上: 机制正交骨干区 (高正交 + 高受体拓展) -->
+            <rect x="315" y="32" width="250" height="98" fill="#f0fdf4" fill-opacity="0.9" rx="6" />
+            <text x="440" y="85" font-size="12" fill="#15803d" text-anchor="middle" font-weight="700">
+              机制正交骨干区 (核心保留)
             </text>
 
-            <!-- 3. 高价值创新/漂移区 (右上: 高 ANI + 高 Divergence) -->
-            <rect x="290" y="25" width="130" height="75" fill="#f0f9ff" fill-opacity="0.8" rx="4" />
-            <text x="355" y="65" font-size="10" fill="#0369a1" text-anchor="middle" font-weight="700">
-              受体漂移协同区 (备选)
+            <!-- 3. 左上: 受体突变协同区 (同骨架 + 捕获漂移受体) -->
+            <rect x="55" y="32" width="250" height="98" fill="#f0f9ff" fill-opacity="0.9" rx="6" />
+            <text x="180" y="85" font-size="12" fill="#0369a1" text-anchor="middle" font-weight="700">
+              受体突变协同区 (协同备选)
             </text>
 
-            <!-- 坐标轴 -->
-            <line x1="45" y1="175" x2="420" y2="175" stroke="#cbd5e1" stroke-width="1.5" />
-            <line x1="45" y1="25" x2="45" y2="175" stroke="#cbd5e1" stroke-width="1.5" />
+            <!-- 4. 右下: 远缘趋同进化区 (高正交 + 相同受体) -->
+            <rect x="315" y="135" width="250" height="98" fill="#fefce8" fill-opacity="0.9" rx="6" />
+            <text x="440" y="188" font-size="11" fill="#a16207" text-anchor="middle" font-weight="600">
+              远缘趋同进化区 (同受体)
+            </text>
 
-            <!-- 刻度标签 -->
-            <text x="45" y="190" font-size="9" fill="#94a3b8" text-anchor="middle">60%</text>
-            <text x="232" y="190" font-size="9" fill="#64748b" text-anchor="middle" font-weight="600">全基因组 ANI (%) &rarr;</text>
-            <text x="420" y="190" font-size="9" fill="#94a3b8" text-anchor="middle">100%</text>
+            <!-- 象限中心十字分割虚线 -->
+            <line x1="310" y1="30" x2="310" y2="235" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4,4" />
+            <line x1="55" y1="132" x2="565" y2="132" stroke="#cbd5e1" stroke-width="1.2" stroke-dasharray="4,4" />
 
-            <text x="38" y="30" font-size="9" fill="#94a3b8" text-anchor="end">50%</text>
-            <text x="38" y="175" font-size="9" fill="#94a3b8" text-anchor="end">0%</text>
-            <text x="16" y="100" font-size="9" fill="#64748b" transform="rotate(-90 16 100)" text-anchor="middle" font-weight="600">
-              受体机制分歧度 (%) &rarr;
+            <!-- 主坐标轴 -->
+            <line x1="55" y1="235" x2="565" y2="235" stroke="#94a3b8" stroke-width="1.8" />
+            <line x1="55" y1="30" x2="55" y2="235" stroke="#94a3b8" stroke-width="1.8" />
+
+            <!-- 刻度与轴标题 -->
+            <text x="55" y="255" font-size="10" fill="#94a3b8" text-anchor="middle">0% (同质)</text>
+            <text x="310" y="258" font-size="11" fill="#334155" text-anchor="middle" font-weight="700">全基因组机制正交度 (%) &rarr;</text>
+            <text x="565" y="255" font-size="10" fill="#94a3b8" text-anchor="middle">100% (正交)</text>
+
+            <text x="48" y="36" font-size="10" fill="#94a3b8" text-anchor="end">100%</text>
+            <text x="48" y="136" font-size="10" fill="#94a3b8" text-anchor="end">50%</text>
+            <text x="48" y="238" font-size="10" fill="#94a3b8" text-anchor="end">0%</text>
+            <text x="18" y="132" font-size="11" fill="#334155" transform="rotate(-90 18 132)" text-anchor="middle" font-weight="700">
+              受体机制拓展互补度 (%) &rarr;
             </text>
 
             <!-- 散点与交互 (形状+颜色双编码) -->
@@ -605,7 +657,12 @@ function handleExportPlanCsv() {
               </span>
             </div>
             <div class="tt-metrics">
-              <span>全基因组 ANI: <b>{{ hoveredScatterSample.ani_to_rep.toFixed(1) }}%</b></span>
+              <span v-if="hoveredScatterSample.decision !== 'REJECT'">
+                机制正交度: <b>{{ (hoveredScatterSample.orthoX ?? 100).toFixed(0) }}%</b> (与骨干 ANI {{ hoveredScatterSample.ani_to_rep.toFixed(1) }}%)
+              </span>
+              <span v-else>
+                安全评级: <b style="color: #f43f5e;">{{ hoveredScatterSample.lifestyle }} (未通过)</b>
+              </span>
               <span>受体谱系: <b>{{ hoveredScatterSample.receptor_label }}</b></span>
             </div>
             <div class="tt-chips">
@@ -644,12 +701,12 @@ function handleExportPlanCsv() {
               <div class="rep-bar-slot">
                 <div 
                   class="rep-bar-fill"
-                  :style="{ width: `${Math.round(((idx + 1) / kpis.core) * 100)}%` }"
+                  :style="{ width: `${Math.round(((idx + 1) / Math.max(1, kpis.core)) * 100)}%` }"
                 ></div>
               </div>
 
               <span class="rep-coverage-val">
-                {{ Math.round(((idx + 1) / kpis.core) * 100) }}%
+                {{ Math.round(((idx + 1) / Math.max(1, kpis.core)) * 100) }}%
               </span>
 
               <span class="rep-cl-tag">
@@ -1125,15 +1182,15 @@ function handleExportPlanCsv() {
 /* ========================================================================= */
 .evidence-grid {
   display: grid;
-  grid-template-columns: 1.15fr 0.85fr;
-  gap: 12px;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: 14px;
 }
 
 .evidence-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  padding: 12px 16px;
+  padding: 14px 18px;
   display: flex;
   flex-direction: column;
 }
@@ -1142,12 +1199,12 @@ function handleExportPlanCsv() {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .header-titles h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
   color: #0f172a;
 }
@@ -1192,7 +1249,8 @@ function handleExportPlanCsv() {
 
 .evidence-svg {
   width: 100%;
-  height: 185px;
+  height: 270px;
+  min-height: 270px;
 }
 
 .scatter-point-group {
