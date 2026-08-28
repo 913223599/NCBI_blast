@@ -45,10 +45,48 @@ const orderedTailIds = computed(() => {
   return orderedSampleIds.value
 })
 
+// 标准生物学分类别名映射字典
+const CATEGORY_ALIAS_MAP: Record<string, string> = {
+  'packaging': 'Head & Packaging',
+  'structural': 'Head & Packaging',
+  'capsid': 'Head & Packaging',
+  'head': 'Head & Packaging',
+  'head & packaging': 'Head & Packaging',
+  'tail': 'Tail & Host Interaction',
+  'tail & host interaction': 'Tail & Host Interaction',
+  'fiber': 'Tail & Host Interaction',
+  'lysis': 'Lysis',
+  'lysis system': 'Lysis',
+  'integration': 'Integration & Excision',
+  'integration & excision': 'Integration & Excision',
+  'excision': 'Integration & Excision',
+  'defense': 'Defense & Host Interaction',
+  'defense & host interaction': 'Defense & Host Interaction',
+  'acr': 'Defense & Host Interaction',
+  'replication': 'Replication & Repair',
+  'replication & repair': 'Replication & Repair',
+  'repair': 'Replication & Repair',
+  'regulation': 'Transcription & Regulation',
+  'transcription': 'Transcription & Regulation',
+  'transcription & regulation': 'Transcription & Regulation',
+  'metabolism': 'Metabolism & AMG',
+  'metabolism & amg': 'Metabolism & AMG',
+  'amg': 'Metabolism & AMG',
+  'other': 'Other Functional',
+  'other functional': 'Other Functional',
+  'hypothetical': 'Hypothetical'
+}
+
+function normalizeCategoryName(raw?: string): string {
+  if (!raw) return 'Hypothetical'
+  const key = raw.trim().toLowerCase()
+  return CATEGORY_ALIAS_MAP[key] || raw
+}
+
 // 统一功能大类模块与色彩定义
 const functionalModules = [
-  { id: 'Tail/RBP', name: '尾丝与受体识别 (Tail & RBP)', color: '#06b6d4' },
-  { id: 'Head/Packaging', name: '头部与衣壳包装 (Head & Packaging)', color: '#0284c7' },
+  { id: 'Tail & Host Interaction', name: '尾丝与受体吸附 (Tail & Fiber)', color: '#06b6d4' },
+  { id: 'Head & Packaging', name: '头部与衣壳包装 (Head & Packaging)', color: '#0284c7' },
   { id: 'Lysis', name: '宿主裂解系统 (Lysis Cassette)', color: '#f43f5e' },
   { id: 'Replication & Repair', name: '复制与核酸修复 (Replication)', color: '#f59e0b' },
   { id: 'Transcription & Regulation', name: '转录调控与开关 (Regulation)', color: '#10b981' },
@@ -62,9 +100,11 @@ function getMatrixValue(sid: string, modId: string): number {
   const dist = props.categoryDistributions?.[sid] || {}
   const total = Object.values(dist).reduce((a, b) => a + b, 0) || 1
 
-  let rawCount = dist[modId] || 0
-  if (modId === 'Tail/RBP') {
-    rawCount = (dist['Structural'] ? Math.round(dist['Structural'] * 0.35) : 0) || 2
+  let rawCount = 0
+  for (const [k, v] of Object.entries(dist)) {
+    if (normalizeCategoryName(k) === modId || k === modId) {
+      rawCount += v
+    }
   }
 
   if (matrixMetricMode.value === 'count') {
@@ -76,7 +116,11 @@ function getMatrixValue(sid: string, modId: string): number {
   // Divergence score
   const allCounts = orderedSampleIds.value.map((s: string) => {
     const d = props.categoryDistributions?.[s] || {}
-    return d[modId] || 0
+    let c = 0
+    for (const [k, v] of Object.entries(d)) {
+      if (normalizeCategoryName(k) === modId || k === modId) c += v
+    }
+    return c
   })
   const mean = allCounts.reduce((a: number, b: number) => a + b, 0) / (allCounts.length || 1)
   return Math.abs(rawCount - mean)

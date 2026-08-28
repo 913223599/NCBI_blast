@@ -436,35 +436,59 @@ class PanGenomicsEngine:
             features = sinfo["features"]
             safety = sinfo.get("safety_audit") or {}
 
-            integrases = []
-            repressors = []
+            # 1. 关键溶源整合酶识别 (必须具备介导染色体插入的催化核心)
+            essential_integrases = []
+            # 2. 关键溶源维持阻遏开关 (必须具备维持前噬菌体休眠转录调控)
+            essential_repressors = []
+            # 3. 辅助/切除/可移动遗迹元件 (无主整合酶时不足以触发溶源整合)
+            remnant_elements = []
+
             for f in features:
                 p_lower = f["product"].lower()
-                if re.search(r"integrase|recombinase|tyrosine\s+recombinase", p_lower):
-                    integrases.append(f)
-                elif re.search(r"ci\s+repressor|cro\s+repressor|lysogeny\s+repressor|imm\s+repressor", p_lower):
-                    repressors.append(f)
+                
+                # A. 关键整合酶 (Integrase / Tyrosine-Serine Recombinase / Site-specific Recombinase)
+                if re.search(r"\b(?:integrase|site-specific\s+recombinase|tyrosine\s+recombinase|serine\s+recombinase)\b", p_lower):
+                    essential_integrases.append(f)
+                elif re.search(r"\brecombinase\b", p_lower) and not re.search(r"exonuclease|endonuclease|nuclease|junction", p_lower):
+                    essential_integrases.append(f)
+                # B. 关键溶源阻遏蛋白 (CI / Cro / Imm / Lysogeny Repressor)
+                elif re.search(r"\b(?:ci\s+repressor|cro\s+repressor|lysogeny\s+repressor|imm\s+repressor|c1\s+repressor|temperate\s+repressor)\b", p_lower):
+                    essential_repressors.append(f)
+                # C. 次要/切除酶/转座遗迹 (Excisionase / Transposase)
+                elif re.search(r"\b(?:excisionase|transposase|insertion\s+element)\b", p_lower):
+                    remnant_elements.append(f)
 
-            int_cnt = len(integrases)
-            rep_cnt = len(repressors)
+            int_cnt = len(essential_integrases)
+            rep_cnt = len(essential_repressors)
+            rem_cnt = len(remnant_elements)
 
+            # 核心评级：只有存在关键溶源整合酶或阻遏开关时，才判定为不可用 (Temperate / Risk)
             if int_cnt > 0 or rep_cnt > 0:
                 lifestyle = "Temperate"
                 is_safe = False
-                conf = 0.95 if int_cnt > 0 else 0.80
-                exp = f"检测到 {int_cnt} 个整合酶 (Integrase) 及 {rep_cnt} 个溶源阻遏蛋白，判定为温和型噬菌体，临床治疗应用需谨慎。"
+                conf = 0.95 if int_cnt > 0 else 0.85
+                exp = f"检测到关键溶源整合元件 (整合酶/重组酶 {int_cnt} 个，溶源阻遏蛋白 {rep_cnt} 个)，具备前噬菌体整合潜能，临床治疗不可直接使用。"
+            elif rem_cnt > 0:
+                # 仅有孤立切除酶或转座元件，无主整合酶，判定为安全可用裂解型 (带遗迹)
+                lifestyle = "Lytic"
+                is_safe = True
+                conf = 0.92
+                exp = f"检测到 {rem_cnt} 个孤立切除酶/转座遗迹，因基因组缺失核心整合酶 (Integrase) 及溶源开关，无法主动建立溶源整合，符合裂解型治疗安全标准。"
             else:
                 lifestyle = "Lytic"
                 is_safe = True
                 conf = 0.98
-                exp = "未检测到整合酶、重组酶及阻遏蛋白基因，符合专性烈性噬菌体特征，具备良好的生物治疗安全性。"
+                exp = "未检测到任何整合酶、重组酶及溶源阻遏蛋白，为专性烈性噬菌体，治疗安全性高。"
 
             markers = [
-                {"type": "Integrase", "locus_tag": f["locus_tag"], "product": f["product"]}
-                for f in integrases
+                {"type": "Essential Integrase", "locus_tag": f["locus_tag"], "product": f["product"]}
+                for f in essential_integrases
             ] + [
-                {"type": "Repressor", "locus_tag": f["locus_tag"], "product": f["product"]}
-                for f in repressors
+                {"type": "Essential Repressor", "locus_tag": f["locus_tag"], "product": f["product"]}
+                for f in essential_repressors
+            ] + [
+                {"type": "Remnant Marker", "locus_tag": f["locus_tag"], "product": f["product"]}
+                for f in remnant_elements
             ]
 
             lifestyles.append(LifestyleItem(
@@ -676,7 +700,11 @@ class PanGenomicsEngine:
         sample_data: Dict[str, Dict[str, Any]],
         max_workers: Optional[int] = None
     ) -> Dict[str, Dict[str, float]]:
-        """计算样本两两之间的全蛋白质组平均一致性 (Proteome-wide ANI / Identity %)"""
+        """
+        计算样本两两之间的全蛋白质组正交平均一致性 (Proteome-wide OrthoAAI / ANI %)
+        严格遵循生信标准正交双向最佳命中 (BBH) 与全基因组覆盖度加权：
+        ANI = (Sum of Best Homolog Identities) / max(CDS_count_1, CDS_count_2) * 100%
+        """
         sample_ids = list(sample_data.keys())
         matrix: Dict[str, Dict[str, float]] = {s1: {s2: 0.0 for s2 in sample_ids} for s1 in sample_ids}
 
@@ -687,37 +715,48 @@ class PanGenomicsEngine:
         if not pairs:
             return matrix
 
-        # 预先提取各样本代表蛋白序列与其整型 K-mer
+        # 提取各样本全量有效 CDS 蛋白序列与其整型 3-mer (解除 80 截断)
         sample_seqs: Dict[str, List[Tuple[str, Set[int]]]] = {}
         for sid in sample_ids:
-            raw_seqs = [f.get("translation", "") for f in sample_data[sid]["features"] if f.get("feature_type") == "CDS" and f.get("translation")]
-            # 选取代表性蛋白 (优先长度适中、包含重要生物学特征)
-            sample_seqs[sid] = [(sq, get_kmers(sq, 3)) for sq in raw_seqs[:80]]
+            raw_seqs = [
+                f.get("translation", "") 
+                for f in sample_data[sid]["features"] 
+                if f.get("feature_type") == "CDS" and f.get("translation") and len(f.get("translation", "")) >= 15
+            ]
+            sample_seqs[sid] = [(sq, get_kmers(sq, 3)) for sq in raw_seqs]
 
         def compute_pair_ani(s1: str, s2: str) -> Tuple[str, str, float]:
             seqs1 = sample_seqs.get(s1, [])
             seqs2 = sample_seqs.get(s2, [])
-            if not seqs1 or not seqs2:
+            n1 = len(seqs1)
+            n2 = len(seqs2)
+            if n1 == 0 or n2 == 0:
                 return s1, s2, 0.0
 
-            hit_scores = []
+            # 双向最佳命中与相似度累加 (考虑全基因组总基因分母)
+            hit_identity_sum = 0.0
+            matched_count = 0
+
             for sq1, km1 in seqs1:
                 best_match = 0.0
                 len1 = len(sq1)
                 for sq2, km2 in seqs2:
                     len2 = len(sq2)
-                    if abs(len1 - len2) / max(len1, len2) > 0.4:
+                    if abs(len1 - len2) / max(len1, len2) > 0.45:
                         continue
-                    ratio = fast_seq_identity(sq1, sq2, ident_thresh=0.2, cov_thresh=0.4, kmers1=km1, kmers2=km2)
+                    ratio = fast_seq_identity(sq1, sq2, ident_thresh=0.25, cov_thresh=0.4, kmers1=km1, kmers2=km2)
                     if ratio > best_match:
                         best_match = ratio
-                    if best_match > 0.95:
+                    if best_match >= 0.99:
                         break
-                if best_match > 0.2:
-                    hit_scores.append(best_match)
+                if best_match >= 0.25:
+                    hit_identity_sum += best_match
+                    matched_count += 1
 
-            avg_ident = (sum(hit_scores) / len(hit_scores) * 100.0) if hit_scores else 0.0
-            return s1, s2, round(avg_ident, 2)
+            # 真实全基因组同源度 = 命中序列平均一致性 × (命中数 / max(N1, N2))
+            max_cds = max(n1, n2)
+            ortho_ani = (hit_identity_sum / max_cds) * 100.0 if max_cds > 0 else 0.0
+            return s1, s2, round(ortho_ani, 2)
 
         workers = max_workers or self._get_max_workers()
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:

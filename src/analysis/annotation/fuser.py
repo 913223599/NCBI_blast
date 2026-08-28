@@ -32,37 +32,37 @@ class AnnotationFuser:
     ]
 
     CATEGORY_RULES = [
-        ("Tail", [
-            r"tail", r"baseplate", r"spike", r"fiber", r"receptor\s+binding", r"adhesin",
-            r"sheath", r"tail\s+tube", r"tail\s+assembly", r"collar", r"central\s+spike", r"whisker"
-        ]),
-        ("Packaging", [
-            r"terminase", r"portal", r"scaffolding", r"maturase", r"head\s+maturation",
-            r"packaging\s+protein", r"small\s+subunit\s+terminase", r"large\s+subunit\s+terminase"
-        ]),
-        ("Structural", [
-            r"capsid", r"head\s+protein", r"neck", r"structural\s+protein", r"virion", r"core\s+protein", r"major\s+head"
-        ]),
+        # A. 宿主裂解系统 (优先排查)
         ("Lysis", [
-            r"endolysin", r"holin", r"spanin", r"lysin", r"lysozyme", r"amidase",
-            r"murein", r"peptidoglycan\s+hydrolase", r"lysis\s+protein", r"antiholin"
+            r"\b(?:lysin|endolysin|holin|antiholin|spanin|i-spanin|o-spanin|amidase|endopeptidase|peptidoglycan|murein|cell\s+wall\s+hydrolase|transglycosylase|lysozyme|lysis)\b"
         ]),
-        ("Replication & Repair", [
-            r"polymerase", r"helicase", r"primase", r"ligase", r"topoisomerase",
-            r"exonuclease", r"endonuclease", r"recombinase", r"integrase", r"single-stranded",
-            r"dna\s+binding", r"rnase", r"dnase", r"resolvase", r"gyrase"
+        # B. 尾部与尾丝吸附组件 (独立大类)
+        ("Tail & Host Interaction", [
+            r"\b(?:tail|baseplate|tape\s+measure|tail\s+fiber|tail\s+spike|tail\s+tube|tail\s+sheath|tail\s+assembly|tail\s+needle|tail\s+protein|neck1|head-tail\s+adaptor|head-tail\s+connector|receptor-binding|reticulocyte-binding|adhesin|chaperone)\b"
         ]),
-        ("Transcription & Regulation", [
-            r"transcription", r"repressor", r"activator", r"regulator", r"sigma\s+factor",
-            r"anti-repressor", r"cro\s+protein", r"ci\s+repressor", r"promoter"
+        # C. 头部与衣壳包装
+        ("Head & Packaging", [
+            r"\b(?:capsid|portal|terminase|head|scaffold|scaffolding|neck|collar|whisker|virion|structural|major\s+coat|minor\s+coat|prohead|large\s+subunit|small\s+subunit|head\s+closure|head\s+decoration|head\s+maturation|head\s+morphogenesis|maturation\s+protease)\b"
         ]),
+        # D. 溶源整合与切除 (优先排查，防止被普通 regulator 截流)
+        ("Integration & Excision", [
+            r"\b(?:integrase|excisionase|transposase|recombinase|site-specific\s+recombinase|tyrosine\s+recombinase|serine\s+recombinase|resolvase|insertion\s+sequence)\b"
+        ]),
+        # E. 宿主防御与抗防御互作 (防误伤 helicase)
         ("Defense & Host Interaction", [
-            r"anti-crispr", r"methyltransferase", r"restriction", r"modification",
-            r"toxin", r"antitoxin", r"cas\d+", r"abortive\s+infection", r"defense"
+            r"\b(?:anti-crispr|acr[a-z0-9]*|crispr|cas[0-9]+|methyltransferase|methylase|restriction|modification|toxin|antitoxin|darb|dara|lar-like|immunity|defense|anti-restriction|tcib|colicin|tellurite\s+resistance|abortive\s+infection)\b"
         ]),
+        # F. DNA 复制、重组与修复 (支持连写与复合酶，排除纯 recombinase)
+        ("Replication & Repair", [
+            r"\b(?:polymerase|helicase|primase|ligase|endonuclease|exonuclease|ssb|single-stranded\s+dna|single-stranded\s+dna-binding|ssdna|topoisomerase|gyrase|nuclease|[a-z]*nuclease|rnase|dnase|dna\s+repair|recombination|dna\s+binding|dntp|primase-helicase|erf|rusa|ninb|ning|rap|ninx|holliday|dead\/deah|replication\s+initiation|replication\s+protein)\b"
+        ]),
+        # G. 转录调控与开关
+        ("Transcription & Regulation", [
+            r"\b(?:repressor|activator|regulator|promoter|transcription|cro|c1|ci|cii|ciii|antitermination|anti-terminator|anti-sigma|sigma\s+factor|modulator|transcriptional|helix-turn-helix|hth|csra|gntr|marr|anti-repressor|parb|partition)\b"
+        ]),
+        # H. 辅助代谢与酶学 (AMG)
         ("Metabolism & AMG", [
-            r"synthase", r"reductase", r"kinase", r"transferase", r"dehydrogenase",
-            r"hydrolase", r"isomerase", r"dada", r"psba", r"psbd", r"thiosulfate"
+            r"\b(?:kinase|[a-z]*kinase|phosphatase|pyrophosphatase|mazg|synthase|synthetase|reductase|dehydrogenase|hydrolase|transferase|mutase|isomerase|acyltransferase|metabolism|amg|ribonucleotide|thioredoxin|glutaredoxin|nad|folate|nucleotidyltransferase)\b"
         ])
     ]
 

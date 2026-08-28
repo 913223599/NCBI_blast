@@ -101,7 +101,10 @@ class ParallelOrthologClusterer:
                 idx = future_to_idx[fut]
                 kmers_list[idx] = fut.result()
 
-        # 4. 同名明确产物快速合并（极速打通 Core 骨架）
+        # 4. 基于 3-mer 倒排索引与同名启发式快速构建候选比较对 (保证 100% 经过序列比对)
+        pair_shared_counts: Dict[Tuple[int, int], int] = defaultdict(int)
+
+        # 4.1 同名注释特征作为高优先级候选对引导
         prod_to_indices: Dict[str, List[int]] = defaultdict(list)
         for idx in range(total_genes):
             if is_annotated_list[idx] and prod_clean_list[idx]:
@@ -109,19 +112,20 @@ class ParallelOrthologClusterer:
 
         for prod_name, idx_list in prod_to_indices.items():
             if len(idx_list) > 1:
-                first_idx = idx_list[0]
-                for other_idx in idx_list[1:]:
-                    uf.union(first_idx, other_idx)
+                for i_pos in range(len(idx_list)):
+                    idx1 = idx_list[i_pos]
+                    for j_pos in range(i_pos + 1, len(idx_list)):
+                        idx2 = idx_list[j_pos]
+                        pair_key = (idx1, idx2) if idx1 < idx2 else (idx2, idx1)
+                        pair_shared_counts[pair_key] += 5
 
-        # 5. 基于 3-mer 倒排索引与长度分桶快速筛选候选比较对
-        # 构建倒排索引表: kmer -> list of gene indices
+        # 4.2 构建 3-mer 倒排索引表: kmer -> list of gene indices
         inverted_index: Dict[int, List[int]] = defaultdict(list)
         for idx, kset in enumerate(kmers_list):
             for k in kset:
                 inverted_index[k].append(idx)
 
         # 统计两两基因共享的 K-mer 数量 (稀疏矩阵候选生成)
-        pair_shared_counts: Dict[Tuple[int, int], int] = defaultdict(int)
         for k, gene_indices in inverted_index.items():
             # 过滤超高频 K-mer（如出现次数大于 50% 基因总量）降低无效碰撞
             if len(gene_indices) > max(20, total_genes // 2):

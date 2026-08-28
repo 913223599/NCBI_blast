@@ -319,6 +319,13 @@ const electronBridge = {
         return paths;
     },
 
+    async show_open_dialog(options?: { fileType?: string; multiple?: boolean }): Promise<{ filePaths: string[] } | null> {
+        const fileType = options?.fileType || 'annotation';
+        const multiple = options?.multiple ?? true;
+        const paths = await this.request_file_load(fileType, multiple);
+        return paths ? { filePaths: paths } : null;
+    },
+
     async save_file(content: string, filenameHint: string, callback?: (success: boolean) => void) {
         const electron = window.electronAPI;
         

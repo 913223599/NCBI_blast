@@ -102,52 +102,59 @@ export function inferCategoryFromText(product?: string, notes?: string): string 
 
 function isHypotheticalName(text: string): boolean {
   const t = text.trim().toLowerCase();
-  return /^(hypothetical protein|uncharacterized protein|unknown function|orf\d+|protein of unknown function|protein of unknown function \(duf\d+\))$/i.test(t) ||
-         t.startsWith("protein of unknown function");
+  return /^(hypothetical protein|uncharacterized protein|unknown function|orf\d+|protein of unknown function)$/i.test(t) ||
+         t.startsWith("protein of unknown function") ||
+         t.startsWith("duf") ||
+         t.startsWith("pha");
 }
 
 function matchCategoryRules(text: string): string {
+  const t = text.toLowerCase();
+
   // A. 宿主裂解系统 (优先排查，防止被结构中的 tail/head 证据误伤)
-  if (/\b(lysin|endolysin|holin|antiholin|spanin|i-spanin|o-spanin|amidase|endopeptidase|peptidoglycan|murein|cell wall hydrolase|transglycosylase|lysis)\b/i.test(text)) {
+  if (/\b(lysin|endolysin|holin|antiholin|spanin|i-spanin|o-spanin|amidase|endopeptidase|peptidoglycan|murein|cell wall hydrolase|transglycosylase|lysozyme|lysis)\b/i.test(t)) {
     return "Lysis";
   }
 
   // B. 尾部与尾丝吸附组件 (Tail & Host Recognition - 独立分类)
-  if (/\b(tail|baseplate|tape measure|tail fiber|tail spike|tail tube|tail sheath|tail assembly|tail needle|tail protein|chaperone|neck1|head-tail adaptor|head-tail connector)\b/i.test(text)) {
+  if (/\b(tail|baseplate|tape measure|tail fiber|tail spike|tail tube|tail sheath|tail assembly|tail needle|tail protein|neck1|head-tail adaptor|head-tail connector|receptor-binding|reticulocyte-binding|adhesin)\b/i.test(t) || t.includes("chaperone")) {
     return "Tail & Host Interaction";
   }
 
   // C. 头部与衣壳包装 (Head & Capsid Packaging)
-  if (/\b(capsid|portal|terminase|head|scaffold|scaffolding|neck|collar|whisker|virion|structural|major coat|minor coat|prohead|large subunit|small subunit|head closure|head decoration|head maturation|head morphogenesis)\b/i.test(text)) {
+  if (/\b(capsid|portal|terminase|head|scaffold|scaffolding|neck|collar|whisker|virion|structural|major coat|minor coat|prohead|large subunit|small subunit|head closure|head decoration|head maturation|head morphogenesis|maturation protease)\b/i.test(t)) {
     return "Head & Packaging";
   }
 
-  // D. 溶源整合与位点特异性重组
-  if (/\b(integrase|excisionase|transposase|site-specific recombinase)\b/i.test(text)) {
-    return "Integration & Excision";
+  // D. 溶源整合与位点特异性重组 (Integration & Excision)
+  if (/\b(integrase|excisionase|transposase|recombinase|site-specific recombinase|tyrosine recombinase|serine recombinase|resolvase|insertion sequence)\b/i.test(t)) {
+    // 排除复合修复酶 (如 exonuclease recombination-associated)
+    if (!/\b(exonuclease|endonuclease|ribonuclease|nuclease|junction)\b/i.test(t)) {
+      return "Integration & Excision";
+    }
   }
 
-  // E. DNA 复制、重组与修复
-  if (/\b(polymerase|helicase|primase|ligase|recombinase|endonuclease|exonuclease|ssb|single-stranded dna|single-stranded dna-binding|ssdna|topoisomerase|gyrase|resolvase|nuclease|rnase|dnase|dna repair|recombination|dna binding|dntp|primase-helicase|erf|rusa|ninb|ning|rap|holliday|dead\/deah)\b/i.test(text)) {
-    return "Replication & Repair";
-  }
-
-  // F. 转录调控与开关
-  if (/\b(repressor|activator|regulator|promoter|transcription|cro|c1|ci|cii|ciii|antitermination|anti-terminator|anti-sigma|sigma factor|modulator|transcriptional|helix-turn-helix|hth|csra|gntr|marr|anti-repressor|parb|partition)\b/i.test(text)) {
-    return "Transcription & Regulation";
-  }
-
-  // G. 宿主防御与抗防御互作
-  if (/\b(anti-crispr|acr|crispr|cas\d*|methyltransferase|methylase|restriction|modification|toxin|antitoxin|darb|dar|lar-like|immunity|defense|anti-restriction|tcib|colicin)\b/i.test(text)) {
+  // E. 宿主防御与抗防御互作 (精准边界防误伤 helicase)
+  if (/\b(anti-crispr|acr[a-z0-9]*|crispr|cas[0-9]+|methyltransferase|methylase|restriction|modification|toxin|antitoxin|darb|dara|lar-like|immunity|defense|anti-restriction|tcib|colicin|tellurite resistance|abortive infection)\b/i.test(t)) {
     return "Defense & Host Interaction";
   }
 
-  // H. 辅助代谢与酶学 (AMG)
-  if (/\b(kinase|phosphatase|pyrophosphatase|mazg|synthase|synthetase|reductase|dehydrogenase|hydrolase|transferase|mutase|isomerase|acyltransferase|metabolism|amg|ribonucleotide|thioredoxin|glutaredoxin|nad|folate)\b/i.test(text)) {
+  // F. DNA 复制、重组与修复 (复合词支持：exoribonuclease, helicase)
+  if (/\b(polymerase|helicase|primase|ligase|endonuclease|exonuclease|ssb|single-stranded dna|single-stranded dna-binding|ssdna|topoisomerase|gyrase|nuclease|[a-z]*nuclease|rnase|dnase|dna repair|recombination|dna binding|dntp|primase-helicase|erf|rusa|ninb|ning|rap|ninx|holliday|dead\/deah|replication initiation|replication protein)\b/i.test(t) || t.includes("helicase")) {
+    return "Replication & Repair";
+  }
+
+  // G. 转录调控与开关
+  if (/\b(repressor|activator|regulator|promoter|transcription|cro|c1|ci|cii|ciii|antitermination|anti-terminator|anti-sigma|sigma factor|modulator|transcriptional|helix-turn-helix|hth|csra|gntr|marr|anti-repressor|parb|partition)\b/i.test(t)) {
+    return "Transcription & Regulation";
+  }
+
+  // H. 辅助代谢与酶学 (AMG - 复合词支持：phosphofructokinase)
+  if (/\b(kinase|[a-z]*kinase|phosphatase|pyrophosphatase|mazg|synthase|synthetase|reductase|dehydrogenase|hydrolase|transferase|mutase|isomerase|acyltransferase|metabolism|amg|ribonucleotide|thioredoxin|glutaredoxin|nad|folate|nucleotidyltransferase)\b/i.test(t)) {
     return "Metabolism & AMG";
   }
 
-  if (text.includes("hypothetical") || text.includes("uncharacterized") || text.includes("unknown")) {
+  if (t.includes("hypothetical") || t.includes("uncharacterized") || t.includes("unknown")) {
     return "Hypothetical";
   }
 

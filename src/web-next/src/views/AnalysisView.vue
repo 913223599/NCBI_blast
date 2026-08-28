@@ -5,7 +5,6 @@
  * 遵循模块化设计，每个工具为一个独立的子组件。
  */
 import { ref } from 'vue'
-import ComparisonModule from './Analysis/modules/comparison/ComparisonModule.vue'
 import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue'
 import AnnotationModule from './Analysis/modules/annotation/AnnotationModule.vue'
 import ProteinCompareModule from './Analysis/modules/protein_compare/ProteinCompareModule.vue'
@@ -20,13 +19,6 @@ interface AnalysisTool {
 }
 
 const tools = ref<AnalysisTool[]>([
-  { 
-    id: 'comparison', 
-    title: '全场景共线性分析 4.0', 
-    description: '统一 MUMmer/Minimap2 引擎，极性自动校正、SNP/INDEL 变异检测与交互式点图。', 
-    iconType: 'chart',
-    status: 'ready'
-  },
   { 
     id: 'annotation', 
     title: '全基因组功能注释', 
@@ -80,7 +72,7 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
     <header class="analysis-header">
       <div class="header-content">
         <h1>组装分析工作台</h1>
-        <p>组装后的深度验证与特征挖掘，支持 QUAST、MUMmer 3.0、全基因组功能注释与 SnapGene 序列可视化。</p>
+        <p>组装后的深度特征挖掘与比较基因组学工作台，支持全基因组功能注释、核心蛋白对比、泛基因组分析与 SnapGene 序列可视化。</p>
       </div>
       <div class="header-stats" v-if="!activeTool">
          <div class="stat-badge">
@@ -104,11 +96,7 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
         >
           <div class="tool-icon-mini">
             <!-- 矢量 SVG 图标：严禁 Emoji -->
-            <svg v-if="tool.iconType === 'chart'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2">
-              <path d="M3 3v18h18" />
-              <path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'book'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.2">
+            <svg v-if="tool.iconType === 'book'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.2">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
               <line x1="9" y1="7" x2="15" y2="7" />
@@ -155,9 +143,8 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
 
       <!-- 具体工具工作区 -->
       <div v-else class="tool-workspace">
-        <ComparisonModule v-if="activeTool === 'comparison'" />
         <AnnotationModule 
-          v-else-if="activeTool === 'annotation'" 
+          v-if="activeTool === 'annotation'" 
           @open-viewer="handleOpenViewerFromAnnotation" 
         />
         <ProteinCompareModule v-else-if="activeTool === 'protein_compare'" />

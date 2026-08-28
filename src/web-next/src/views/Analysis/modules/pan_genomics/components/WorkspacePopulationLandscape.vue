@@ -402,17 +402,71 @@ const categoryOrder: Record<string, number> = {
   'Hypothetical': 10
 }
 
-// 智能生物学分类推断器 (使用全基因组统一权威规则)
+// 标准生物学分类别名映射字典 (彻底解决因命名差异导致的筛选 0 结果问题)
+const CATEGORY_ALIAS_MAP: Record<string, string> = {
+  'packaging': 'Head & Packaging',
+  'structural': 'Head & Packaging',
+  'capsid': 'Head & Packaging',
+  'head': 'Head & Packaging',
+  'head & packaging': 'Head & Packaging',
+  'tail': 'Tail & Host Interaction',
+  'tail & host interaction': 'Tail & Host Interaction',
+  'fiber': 'Tail & Host Interaction',
+  'lysis': 'Lysis',
+  'lysis system': 'Lysis',
+  'integration': 'Integration & Excision',
+  'integration & excision': 'Integration & Excision',
+  'excision': 'Integration & Excision',
+  'defense': 'Defense & Host Interaction',
+  'defense & host interaction': 'Defense & Host Interaction',
+  'acr': 'Defense & Host Interaction',
+  'replication': 'Replication & Repair',
+  'replication & repair': 'Replication & Repair',
+  'repair': 'Replication & Repair',
+  'regulation': 'Transcription & Regulation',
+  'transcription': 'Transcription & Regulation',
+  'transcription & regulation': 'Transcription & Regulation',
+  'metabolism': 'Metabolism & AMG',
+  'metabolism & amg': 'Metabolism & AMG',
+  'amg': 'Metabolism & AMG',
+  'other': 'Other Functional',
+  'other functional': 'Other Functional',
+  'hypothetical': 'Hypothetical'
+}
+
+function normalizeCategoryName(raw?: string): string {
+  if (!raw) return 'Hypothetical'
+  const key = raw.trim().toLowerCase()
+  return CATEGORY_ALIAS_MAP[key] || raw
+}
+
+// 智能生物学分类推断器 (使用全基因组统一权威规则 + 别名自动补全)
 function inferClusterCategory(c: any): string {
   if (!c) return 'Hypothetical'
+  
+  // 1. 优先依据代表性产物名称重新推断标准分类
   const prod = c.representative_product || c.representative_annotation?.product || c.cluster_name || ''
   const notes = c.notes || c.representative_annotation?.notes || ''
-  return inferCategoryFromText(prod, notes)
+  const inferred = inferCategoryFromText(prod, notes)
+  if (inferred && inferred !== 'Hypothetical' && inferred !== 'Other Functional') {
+    return inferred
+  }
+
+  // 2. 依据后端原始分类进行标准化别名转换
+  if (c.category) {
+    const norm = normalizeCategoryName(c.category)
+    if (norm && norm !== 'Hypothetical') {
+      return norm
+    }
+  }
+
+  return inferred || 'Hypothetical'
 }
 
 function getCatColor(cat: string): string {
-  if (FUNCTIONAL_CATEGORIES[cat]) {
-    return FUNCTIONAL_CATEGORIES[cat].color
+  const norm = normalizeCategoryName(cat)
+  if (FUNCTIONAL_CATEGORIES[norm]) {
+    return FUNCTIONAL_CATEGORIES[norm].color
   }
   return '#94a3b8'
 }
@@ -426,9 +480,10 @@ const sortedGeneClusters = computed(() => {
     _inferredCategory: inferClusterCategory(c)
   }))
 
-  // 1. 功能分类过滤
+  // 1. 功能分类过滤 (支持多别名与双向归一化匹配)
   if (geneCategoryFilter.value !== 'ALL') {
-    list = list.filter(c => c._inferredCategory === geneCategoryFilter.value)
+    const targetCat = normalizeCategoryName(geneCategoryFilter.value)
+    list = list.filter(c => normalizeCategoryName(c._inferredCategory) === targetCat)
   }
 
   // 2. 泛基因组分区/差异过滤 (基于当前可见样本)
@@ -909,12 +964,9 @@ const isCurrentPair = (s1: string, s2: string) => {
             <span class="ribbon-group-label">功能:</span>
             <select v-model="geneCategoryFilter" class="modern-select select-cat">
               <option value="ALL">全部模块 (All Modules)</option>
-              <option value="Tail">尾丝与受体 (Tail)</option>
-              <option value="Lysis">裂解系统 (Lysis)</option>
-              <option value="Defense & Host Interaction">免疫防御 (Defense/Acr)</option>
-              <option value="Replication & Repair">复制修饰 (Replication)</option>
-              <option value="Structural">结构形态 (Structural)</option>
-              <option value="Packaging">DNA包装 (Packaging)</option>
+              <option v-for="(cat, key) in FUNCTIONAL_CATEGORIES" :key="key" :value="key">
+                {{ cat.label }}
+              </option>
             </select>
           </div>
         </div>
@@ -1112,10 +1164,20 @@ const isCurrentPair = (s1: string, s2: string) => {
               <!-- 3. 样本多维元数据轨道 (Lifestyle | Safety | Acr) (可收起) -->
               <template v-if="isMetadataTrackVisible">
                 <td class="td-meta-col">
-                  <span class="meta-badge bg-lytic">Lytic</span>
+                  <span 
+                    :class="['meta-badge', (sampleAnnotations[rowId]?.lifestyle === 'Lytic') ? 'bg-lytic' : 'bg-temperate']"
+                    :title="sampleAnnotations[rowId]?.lifestyle === 'Lytic' ? '专性烈性噬菌体' : '检出温和溶源整合元件'"
+                  >
+                    {{ sampleAnnotations[rowId]?.lifestyle || 'Lytic' }}
+                  </span>
                 </td>
                 <td class="td-meta-col">
-                  <span class="meta-badge bg-safe">Safe</span>
+                  <span 
+                    :class="['meta-badge', sampleAnnotations[rowId]?.safe ? 'bg-safe' : 'bg-risk']"
+                    :title="sampleAnnotations[rowId]?.safe ? '治疗应用安全' : '含有潜在毒力或整合风险元件'"
+                  >
+                    {{ sampleAnnotations[rowId]?.safe ? 'Safe' : 'Risk' }}
+                  </span>
                 </td>
                 <td class="td-meta-col">
                   <strong class="text-blue">{{ sampleAnnotations[rowId]?.acrCount || 0 }}</strong>
@@ -2148,6 +2210,8 @@ const isCurrentPair = (s1: string, s2: string) => {
 
 .bg-lytic { background: #10b981; }
 .bg-safe { background: #0284c7; }
+.bg-temperate { background: #f59e0b; }
+.bg-risk { background: #f43f5e; }
 
 .td-ani-val-cell {
   width: 32px;

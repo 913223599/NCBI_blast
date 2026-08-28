@@ -13,7 +13,7 @@ import { getBridge } from '../../../../bridge'
 import BatchSampleSelector, { type BatchSampleItem } from '../../../../components/common/BatchSampleSelector.vue'
 
 import WorkspacePopulationLandscape from './components/WorkspacePopulationLandscape.vue'
-import WorkspacePanGenomeArchitecture from './components/WorkspacePanGenomeArchitecture.vue'
+import WorkspaceCocktailDeRedundancy from './components/WorkspaceCocktailDeRedundancy.vue'
 import WorkspaceFunctionalDivergence from './components/WorkspaceFunctionalDivergence.vue'
 import WorkspaceGenomeArchitecture from './components/WorkspaceGenomeArchitecture.vue'
 import WorkspaceBiologicalInterpretation from './components/WorkspaceBiologicalInterpretation.vue'
@@ -127,12 +127,12 @@ async function loadAvailableSamples() {
 async function handleImportExternal() {
   try {
     const bridge = getBridge()
-    const res = await bridge.show_open_dialog({
-      fileType: 'annotation',
-      multiple: true
-    })
-    if (res?.filePaths && res.filePaths.length > 0) {
-      for (const fp of res.filePaths) {
+    const paths = bridge.request_file_load 
+      ? await bridge.request_file_load('annotation', true)
+      : (await bridge.show_open_dialog?.({ fileType: 'annotation', multiple: true }))?.filePaths
+
+    if (paths && paths.length > 0) {
+      for (const fp of paths) {
         const fname = fp.split(/[\\/]/).pop() || 'External_Sample'
         const ext = fname.split('.').pop()?.toLowerCase() || 'gbk'
         const newSample: BatchSampleItem = {
@@ -333,35 +333,35 @@ onMounted(() => {
             @click="activeWorkspace = 'population'"
           >
             <span class="step-num">Q1</span>
-            <span class="ws-name">Population Landscape (整体进化图谱)</span>
+            <span class="ws-name">进化全景图 (Population)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'pangenome' }]" 
             @click="activeWorkspace = 'pangenome'"
           >
             <span class="step-num">Q2</span>
-            <span class="ws-name">Pan-genome Architecture (泛基因组架构)</span>
+            <span class="ws-name">克隆去重与优选 (De-redundancy)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'functional' }]" 
             @click="activeWorkspace = 'functional'"
           >
             <span class="step-num">Q3</span>
-            <span class="ws-name">Functional Divergence (功能策略分化)</span>
+            <span class="ws-name">功能策略分化 (Divergence)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'genome' }]" 
             @click="activeWorkspace = 'genome'"
           >
             <span class="step-num">Q4</span>
-            <span class="ws-name">Genome Architecture (空间共线性构型)</span>
+            <span class="ws-name">空间共线性 (Synteny)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'biological' }]" 
             @click="activeWorkspace = 'biological'"
           >
             <span class="step-num">Q5</span>
-            <span class="ws-name">Biological Interpretation (生物学决策)</span>
+            <span class="ws-name">生物学决策 (Interpretation)</span>
           </button>
         </div>
 
@@ -393,15 +393,19 @@ onMounted(() => {
           @select-sample="handleSelectSample"
         />
 
-        <!-- Q2: Pan-genome Architecture -->
-        <WorkspacePanGenomeArchitecture 
+        <!-- Q2: Clonal De-redundancy & Cocktail Pruning -->
+        <WorkspaceCocktailDeRedundancy 
           v-else-if="activeWorkspace === 'pangenome'"
-          :summary="analysisResult.summary"
+          :ani-matrix="analysisResult.ani_matrix"
+          :tail-matrix="analysisResult.tail_identity_matrix"
+          :lysis-matrix="analysisResult.lysis_identity_matrix"
           :clusters="analysisResult.clusters"
-          :ani-clustering="analysisResult.ani_clustering"
+          :lifestyles="analysisResult.lifestyles"
+          :arms-race-matrix="analysisResult.arms_race_matrix"
           :sample-names="analysisResult.sample_names"
           :selected-pair="selectedPair"
           @select-sample="handleSelectSample"
+          @select-pair="handleSelectPair"
         />
 
         <!-- Q3: Functional Divergence -->

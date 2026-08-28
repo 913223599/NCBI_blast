@@ -15,9 +15,6 @@
   "exclude": [
     "src/**/__tests__/*", 
     "node_modules", 
-    "../../__pyrefly_virtual__",
-    "src/views/Analysis/modules/comparison/components/DotPlotCanvas.vue",
-    "src/views/Analysis/modules/comparison/components/InstantComparison.vue",
-    "src/views/Analysis/modules/comparison/components/SimilarityChart.vue"
+    "../../__pyrefly_virtual__"
   ]
 }
