@@ -204,3 +204,20 @@ async def audit_taxonomy_batch(req: BatchTranslateRequest):
     except Exception as exc:
         logger.error(f"Taxonomy audit error: {exc}")
         return {"success": False, "error": str(exc)}
+
+@router.post("/api/dictionary/maintain")
+async def trigger_dictionary_maintenance(dry_run: bool = False):
+    """
+    一键触发词库全面健康维护与智能纠偏
+    """
+    try:
+        from ...utils.translation.maintenance import DictionaryMaintenance
+        maintenance = DictionaryMaintenance()
+        report = maintenance.run_maintenance(dry_run=dry_run)
+        if not dry_run:
+            await broadcaster.broadcast("data_updated", {"module": "dictionary"})
+        return {"success": True, "report": report}
+    except Exception as exc:
+        logger.error(f"Dictionary maintenance error: {exc}")
+        return {"success": False, "error": str(exc)}
+

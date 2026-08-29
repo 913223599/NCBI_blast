@@ -1,0 +1,302 @@
+[
+  {
+    "eng": "Basaltiviridae",
+    "chi": "玄武岩病毒科",
+    "cat": "family",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Xigoviridae",
+    "chi": "西戈病毒科",
+    "cat": "family",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Yamazakiviridae",
+    "chi": "山崎病毒科",
+    "cat": "family",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Streptococcus pyogenes phage",
+    "chi": "化脓性链球菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Lactococcus phage",
+    "chi": "乳球菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Filamentous phage",
+    "chi": "丝状噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Colitis phage",
+    "chi": "结肠炎噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Bartonella henselae phage",
+    "chi": "汉赛巴尔通体噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Clostridium limosum phage",
+    "chi": "柠檬酸梭菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Bartonella quintana phage",
+    "chi": "五体巴尔通体噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Rhizidiomyces virus",
+    "chi": "根霉菌病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Escherichia coli phage",
+    "chi": "大肠杆菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Equine faecal phage",
+    "chi": "马粪便噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Pseudomonas phage",
+    "chi": "假单胞菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Erwinia phage",
+    "chi": "欧文氏菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Paenibacillus phage",
+    "chi": "类芽孢杆菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Salmonella phage",
+    "chi": "沙门氏菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Escherichia phage",
+    "chi": "大肠杆菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Acropora pruinosa phage",
+    "chi": "鹿角卫城噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Synechococcus cyanophage",
+    "chi": "噬藻体聚球藻",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Marinitoga virus",
+    "chi": "马里尼托加病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Klebsiella pneumoniae phage",
+    "chi": "肺炎克雷伯菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Enterobacter phage",
+    "chi": "肠杆菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Arthrobacter phage",
+    "chi": "节杆菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Acinetobacter baumanii phage",
+    "chi": "鲍曼不动杆菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Limnothrix phage",
+    "chi": "钩丝菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Sinorhizobium phage",
+    "chi": "中华根瘤菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Shewanella Phage",
+    "chi": "希瓦氏菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Vibrio diabolicus phage",
+    "chi": "恶魔弧菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Lake Hovsgol virophage",
+    "chi": "霍夫斯古尔湖噬病毒体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Vibrio parahaemolyticus phage",
+    "chi": "副溶血性弧菌噬菌体",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Nicotiana velutina mosaic virus",
+    "chi": "绒毛烟草花叶病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Non-A, non-B hepatitis virus",
+    "chi": "非甲非乙型肝炎病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Chorella virus",
+    "chi": "小球藻病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Frog erythrocytic virus",
+    "chi": "蛙红细胞病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Ecotropic provirus",
+    "chi": "亲嗜性原病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Japanese garlic virus",
+    "chi": "日本大蒜病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Hybrid virus",
+    "chi": "混合病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Haemorrhagic kidney syndrome virus",
+    "chi": "出血性肾综合征病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Cloudy wing virus",
+    "chi": "云翼病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Peanut chlorotic fan-spot virus",
+    "chi": "花生褪绿扇斑病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Ustilago maydis virus",
+    "chi": "玉米黑粉菌病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Banana mosaic virus",
+    "chi": "香蕉花叶病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Hepatitis X virus",
+    "chi": "X型肝炎病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Solanum violaefolium ringspot virus",
+    "chi": "紫叶茄环斑病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Narcissus mottling-associated virus",
+    "chi": "水仙斑驳相关病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Narcissus white stripe-associated virus",
+    "chi": "水仙白条相关病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Finch creek virus",
+    "chi": "芬奇溪病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Tegumental gland-associated virus",
+    "chi": "皮腺相关病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  },
+  {
+    "eng": "Monodon slow growth-associated virus",
+    "chi": "斑节对虾缓慢生长相关病毒",
+    "cat": "species",
+    "src": "auto_google_web"
+  }
+]

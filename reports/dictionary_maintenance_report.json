@@ -1,0 +1,1813 @@
+{
+  "timestamp": "2026-08-29 11:19:49",
+  "dry_run": false,
+  "backup_file": "F:\\NCBI blast\\translations_backup_20260829_111949.db",
+  "total_inspected": 69776,
+  "deleted_count": 0,
+  "updated_count": 1192,
+  "unmodified_count": 68584,
+  "deletions_list": [],
+  "sample_updates": [
+    {
+      "english": "Escherichia phage",
+      "action": "update",
+      "original_chinese": "大肠杆菌噬菌体",
+      "new_chinese": "埃希氏菌噬菌体",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "校准属名后缀: 大肠杆菌噬菌体 -> 埃希氏菌噬菌体"
+    },
+    {
+      "english": "Viruses sp.",
+      "action": "update",
+      "original_chinese": "病毒属。",
+      "new_chinese": "病毒属",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "uncultured marine virus",
+      "action": "update",
+      "original_chinese": "未培养的海洋病毒",
+      "new_chinese": "未培养海洋病毒",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "uncultured virus",
+      "action": "update",
+      "original_chinese": "未培养的病毒",
+      "new_chinese": "未培养病毒",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "uncultured algal virus",
+      "action": "update",
+      "original_chinese": "未培养的藻类病毒",
+      "new_chinese": "未培养藻类病毒",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "uncultured cyanophage",
+      "action": "update",
+      "original_chinese": "未培养的噬藻体",
+      "new_chinese": "未培养噬藻体",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "uncultured phage",
+      "action": "update",
+      "original_chinese": "未培养的噬菌体",
+      "new_chinese": "未培养噬菌体",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Wheat associated vipovirus",
+      "action": "update",
+      "original_chinese": "小麦相关病毒病毒",
+      "new_chinese": "小麦相关病毒",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Rhodovulugtaviriform kikuchii",
+      "action": "update",
+      "original_chinese": "菊池红病毒病毒",
+      "new_chinese": "菊池红病毒",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Virtovirus",
+      "action": "update",
+      "original_chinese": "病毒病毒",
+      "new_chinese": "病毒",
+      "category": "genus",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Papovaviricetes sp.",
+      "action": "update",
+      "original_chinese": "乳多病毒病毒属 sp.",
+      "new_chinese": "乳多病毒属 sp.",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Behevivirus",
+      "action": "update",
+      "original_chinese": "贝病毒病毒属",
+      "new_chinese": "贝病毒属",
+      "category": "genus",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Virophaviricetes sp.",
+      "action": "update",
+      "original_chinese": "病毒病毒菌属 sp.",
+      "new_chinese": "病毒菌属 sp.",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Shrew solinvivirus",
+      "action": "update",
+      "original_chinese": "鼩鼱病毒病毒",
+      "new_chinese": "鼩鼱病毒",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Pandanus badnavirus",
+      "action": "update",
+      "original_chinese": "露兜树坏病毒病毒",
+      "new_chinese": "露兜树坏病毒",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Escherichia Stx1 converting phage",
+      "action": "update",
+      "original_chinese": "大肠杆菌 Stx1 转化噬菌体",
+      "new_chinese": "埃希氏菌 Stx1 转化噬菌体",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "校准属名后缀: 大肠杆菌 Stx1 转化噬菌体 -> 埃希氏菌 Stx1 转化噬菌体"
+    },
+    {
+      "english": "Varidnaviria sp.",
+      "action": "update",
+      "original_chinese": "Varidnaviria sp.",
+      "new_chinese": "Varidnaviria 病毒界未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Orthornavirae sp.",
+      "action": "update",
+      "original_chinese": "Orthornavirae sp.",
+      "new_chinese": "Orthornavirae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Zilligvirae sp.",
+      "action": "update",
+      "original_chinese": "Zilligvirae sp.",
+      "new_chinese": "Zilligvirae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Tolecusatellitidae sp.",
+      "action": "update",
+      "original_chinese": "Tolecusatellitidae sp.",
+      "new_chinese": "Tolecusatellitidae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Halspiviridae sp.",
+      "action": "update",
+      "original_chinese": "Halspiviridae sp.",
+      "new_chinese": "Halspiviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Thaspiviridae sp.",
+      "action": "update",
+      "original_chinese": "Thaspiviridae sp.",
+      "new_chinese": "Thaspiviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Helvetiavirae sp.",
+      "action": "update",
+      "original_chinese": "Helvetiavirae sp.",
+      "new_chinese": "Helvetiavirae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Lenarviricota sp.",
+      "action": "update",
+      "original_chinese": "Lenarviricota sp.",
+      "new_chinese": "Lenarviricota 病毒门未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Pisuviricota sp.",
+      "action": "update",
+      "original_chinese": "Pisuviricota sp.",
+      "new_chinese": "Pisuviricota 病毒门未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Artverviricota sp.",
+      "action": "update",
+      "original_chinese": "Artverviricota sp.",
+      "new_chinese": "Artverviricota 病毒门未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Phixviricota sp.",
+      "action": "update",
+      "original_chinese": "Phixviricota sp.",
+      "new_chinese": "Phixviricota 病毒门未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Cressdnaviricota sp.",
+      "action": "update",
+      "original_chinese": "Cressdnaviricota sp.",
+      "new_chinese": "Cressdnaviricota 病毒门未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Cocadviroid sp.",
+      "action": "update",
+      "original_chinese": "Cocadviroid sp.",
+      "new_chinese": "Cocadviroid 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Apscaviroid sp.",
+      "action": "update",
+      "original_chinese": "Apscaviroid sp.",
+      "new_chinese": "Apscaviroid 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Avsunviroid sp.",
+      "action": "update",
+      "original_chinese": "Avsunviroid sp.",
+      "new_chinese": "Avsunviroid 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Haploviricotina sp.",
+      "action": "update",
+      "original_chinese": "Haploviricotina sp.",
+      "new_chinese": "Haploviricotina 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Resentoviricetes sp.",
+      "action": "update",
+      "original_chinese": "Resentoviricetes sp.",
+      "new_chinese": "Resentoviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Vidaverviricetes sp.",
+      "action": "update",
+      "original_chinese": "Vidaverviricetes sp.",
+      "new_chinese": "Vidaverviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Alsuviricetes sp.",
+      "action": "update",
+      "original_chinese": "Alsuviricetes sp.",
+      "new_chinese": "Alsuviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Flasuviricetes sp.",
+      "action": "update",
+      "original_chinese": "Flasuviricetes sp.",
+      "new_chinese": "Flasuviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Magsaviricetes sp.",
+      "action": "update",
+      "original_chinese": "Magsaviricetes sp.",
+      "new_chinese": "Magsaviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Howeltoviricetes sp.",
+      "action": "update",
+      "original_chinese": "Howeltoviricetes sp.",
+      "new_chinese": "Howeltoviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Leviviricetes sp.",
+      "action": "update",
+      "original_chinese": "Leviviricetes sp.",
+      "new_chinese": "Leviviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Duplopiviricetes sp.",
+      "action": "update",
+      "original_chinese": "Duplopiviricetes sp.",
+      "new_chinese": "Duplopiviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Pisoniviricetes sp.",
+      "action": "update",
+      "original_chinese": "Pisoniviricetes sp.",
+      "new_chinese": "Pisoniviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Revtraviricetes sp.",
+      "action": "update",
+      "original_chinese": "Revtraviricetes sp.",
+      "new_chinese": "Revtraviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Herviviricetes sp.",
+      "action": "update",
+      "original_chinese": "Herviviricetes sp.",
+      "new_chinese": "Herviviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Malgrandaviricetes sp.",
+      "action": "update",
+      "original_chinese": "Malgrandaviricetes sp.",
+      "new_chinese": "Malgrandaviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Mouviricetes sp.",
+      "action": "update",
+      "original_chinese": "Mouviricetes sp.",
+      "new_chinese": "Mouviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Arfiviricetes sp.",
+      "action": "update",
+      "original_chinese": "Arfiviricetes sp.",
+      "new_chinese": "Arfiviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Repensiviricetes sp.",
+      "action": "update",
+      "original_chinese": "Repensiviricetes sp.",
+      "new_chinese": "Repensiviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Pokkesviricetes sp.",
+      "action": "update",
+      "original_chinese": "Pokkesviricetes sp.",
+      "new_chinese": "Pokkesviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Tokiviricetes sp.",
+      "action": "update",
+      "original_chinese": "Tokiviricetes sp.",
+      "new_chinese": "Tokiviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Colecusatellite sp.",
+      "action": "update",
+      "original_chinese": "Colecusatellite sp.",
+      "new_chinese": "Colecusatellite 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Insthoviricetes sp.",
+      "action": "update",
+      "original_chinese": "Insthoviricetes sp.",
+      "new_chinese": "Insthoviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Norzivirales sp.",
+      "action": "update",
+      "original_chinese": "Norzivirales sp.",
+      "new_chinese": "Norzivirales 病毒目未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Nidovirales sp.",
+      "action": "update",
+      "original_chinese": "Nidovirales sp.",
+      "new_chinese": "Nidovirales 病毒目未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Gokushovirinae sp.",
+      "action": "update",
+      "original_chinese": "Gokushovirinae sp.",
+      "new_chinese": "Gokushovirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Sepolyvirales sp.",
+      "action": "update",
+      "original_chinese": "Sepolyvirales sp.",
+      "new_chinese": "Sepolyvirales 病毒目未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Zurhausenvirales sp.",
+      "action": "update",
+      "original_chinese": "Zurhausenvirales sp.",
+      "new_chinese": "Zurhausenvirales 病毒目未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Geplafuvirales sp.",
+      "action": "update",
+      "original_chinese": "Geplafuvirales sp.",
+      "new_chinese": "Geplafuvirales 病毒目未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Tectiliviricetes sp.",
+      "action": "update",
+      "original_chinese": "Tectiliviricetes sp.",
+      "new_chinese": "Tectiliviricetes 病毒纲未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Sedoreovirinae sp.",
+      "action": "update",
+      "original_chinese": "Sedoreovirinae sp.",
+      "new_chinese": "Sedoreovirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Sedoreoviridae sp.",
+      "action": "update",
+      "original_chinese": "Sedoreoviridae sp.",
+      "new_chinese": "Sedoreoviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Betaflexiviridae sp.",
+      "action": "update",
+      "original_chinese": "Betaflexiviridae sp.",
+      "new_chinese": "Betaflexiviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Virgaviridae sp.",
+      "action": "update",
+      "original_chinese": "Virgaviridae sp.",
+      "new_chinese": "Virgaviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Leviviridae sp.",
+      "action": "update",
+      "original_chinese": "Leviviridae sp.",
+      "new_chinese": "Leviviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Picobirnaviridae sp.",
+      "action": "update",
+      "original_chinese": "Picobirnaviridae sp.",
+      "new_chinese": "Picobirnaviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Arnidovirineae sp.",
+      "action": "update",
+      "original_chinese": "Arnidovirineae sp.",
+      "new_chinese": "Arnidovirineae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Solemoviridae sp.",
+      "action": "update",
+      "original_chinese": "Solemoviridae sp.",
+      "new_chinese": "Solemoviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Vequintavirinae sp.",
+      "action": "update",
+      "original_chinese": "Vequintavirinae sp.",
+      "new_chinese": "Vequintavirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Arquatrovirinae sp.",
+      "action": "update",
+      "original_chinese": "Arquatrovirinae sp.",
+      "new_chinese": "Arquatrovirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Chebruvirinae sp.",
+      "action": "update",
+      "original_chinese": "Chebruvirinae sp.",
+      "new_chinese": "Chebruvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Dclasvirinae sp.",
+      "action": "update",
+      "original_chinese": "Dclasvirinae sp.",
+      "new_chinese": "Dclasvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Nclasvirinae sp.",
+      "action": "update",
+      "original_chinese": "Nclasvirinae sp.",
+      "new_chinese": "Nclasvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Nymbaxtervirinae sp.",
+      "action": "update",
+      "original_chinese": "Nymbaxtervirinae sp.",
+      "new_chinese": "Nymbaxtervirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Chaseviridae sp.",
+      "action": "update",
+      "original_chinese": "Chaseviridae sp.",
+      "new_chinese": "Chaseviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Deejayvirinae sp.",
+      "action": "update",
+      "original_chinese": "Deejayvirinae sp.",
+      "new_chinese": "Deejayvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Trabyvirinae sp.",
+      "action": "update",
+      "original_chinese": "Trabyvirinae sp.",
+      "new_chinese": "Trabyvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Casjensviridae sp.",
+      "action": "update",
+      "original_chinese": "Casjensviridae sp.",
+      "new_chinese": "Casjensviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Zierdtviridae sp.",
+      "action": "update",
+      "original_chinese": "Zierdtviridae sp.",
+      "new_chinese": "Zierdtviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Fredfastierviridae sp.",
+      "action": "update",
+      "original_chinese": "Fredfastierviridae sp.",
+      "new_chinese": "Fredfastierviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Ara severa parvoviridae sp.",
+      "action": "update",
+      "original_chinese": "Ara severa parvoviridae sp.",
+      "new_chinese": "Ara 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Emberiza pusilla parvoviridae sp.",
+      "action": "update",
+      "original_chinese": "Emberiza pusilla parvoviridae sp.",
+      "new_chinese": "Emberiza 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Ficedula parva Circoviridae sp.",
+      "action": "update",
+      "original_chinese": "Ficedula parva Circoviridae sp.",
+      "new_chinese": "Ficedula 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Fringilla montifringilla Circoviridae sp.",
+      "action": "update",
+      "original_chinese": "Fringilla montifringilla Circoviridae sp.",
+      "new_chinese": "Fringilla 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Motacilla cinerea Circoviridae sp.",
+      "action": "update",
+      "original_chinese": "Motacilla cinerea Circoviridae sp.",
+      "new_chinese": "Motacilla 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Periparus ater Circoviridae sp.",
+      "action": "update",
+      "original_chinese": "Periparus ater Circoviridae sp.",
+      "new_chinese": "Periparus 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Poecile palustris Genomoviridae sp.",
+      "action": "update",
+      "original_chinese": "Poecile palustris Genomoviridae sp.",
+      "new_chinese": "Poecile 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Turdus hortulorum Genomoviridae sp.",
+      "action": "update",
+      "original_chinese": "Turdus hortulorum Genomoviridae sp.",
+      "new_chinese": "Turdus 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Turriviridae sp.",
+      "action": "update",
+      "original_chinese": "Turriviridae sp.",
+      "new_chinese": "Turriviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Rudiviridae sp.",
+      "action": "update",
+      "original_chinese": "Rudiviridae sp.",
+      "new_chinese": "Rudiviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Chuviridae sp.",
+      "action": "update",
+      "original_chinese": "Chuviridae sp.",
+      "new_chinese": "Chuviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Crepuscuviridae sp.",
+      "action": "update",
+      "original_chinese": "Crepuscuviridae sp.",
+      "new_chinese": "Crepuscuviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Botybirnaviridae sp.",
+      "action": "update",
+      "original_chinese": "Botybirnaviridae sp.",
+      "new_chinese": "Botybirnaviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Trivirinae sp.",
+      "action": "update",
+      "original_chinese": "Trivirinae sp.",
+      "new_chinese": "Trivirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Calvusvirinae sp.",
+      "action": "update",
+      "original_chinese": "Calvusvirinae sp.",
+      "new_chinese": "Calvusvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Procedovirinae sp.",
+      "action": "update",
+      "original_chinese": "Procedovirinae sp.",
+      "new_chinese": "Procedovirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Medioniviridae sp.",
+      "action": "update",
+      "original_chinese": "Medioniviridae sp.",
+      "new_chinese": "Medioniviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Caphthovirinae sp.",
+      "action": "update",
+      "original_chinese": "Caphthovirinae sp.",
+      "new_chinese": "Caphthovirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Molineuxvirinae sp.",
+      "action": "update",
+      "original_chinese": "Molineuxvirinae sp.",
+      "new_chinese": "Molineuxvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Aglimvirinae sp.",
+      "action": "update",
+      "original_chinese": "Aglimvirinae sp.",
+      "new_chinese": "Aglimvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Tevenvirinae sp.",
+      "action": "update",
+      "original_chinese": "Tevenvirinae sp.",
+      "new_chinese": "Tevenvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Jasinskavirinae sp.",
+      "action": "update",
+      "original_chinese": "Jasinskavirinae sp.",
+      "new_chinese": "Jasinskavirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Nefertitivirinae sp.",
+      "action": "update",
+      "original_chinese": "Nefertitivirinae sp.",
+      "new_chinese": "Nefertitivirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Ermolyevavirinae sp.",
+      "action": "update",
+      "original_chinese": "Ermolyevavirinae sp.",
+      "new_chinese": "Ermolyevavirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Rakietenvirinae sp.",
+      "action": "update",
+      "original_chinese": "Rakietenvirinae sp.",
+      "new_chinese": "Rakietenvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Enquatrovirinae sp.",
+      "action": "update",
+      "original_chinese": "Enquatrovirinae sp.",
+      "new_chinese": "Enquatrovirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Fuhrmanvirinae sp.",
+      "action": "update",
+      "original_chinese": "Fuhrmanvirinae sp.",
+      "new_chinese": "Fuhrmanvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Rothmandenesvirinae sp.",
+      "action": "update",
+      "original_chinese": "Rothmandenesvirinae sp.",
+      "new_chinese": "Rothmandenesvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Gorgonvirinae sp.",
+      "action": "update",
+      "original_chinese": "Gorgonvirinae sp.",
+      "new_chinese": "Gorgonvirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Pithoviridae sp.",
+      "action": "update",
+      "original_chinese": "Pithoviridae sp.",
+      "new_chinese": "Pithoviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Tectiviridae sp.",
+      "action": "update",
+      "original_chinese": "Tectiviridae sp.",
+      "new_chinese": "Tectiviridae 病毒科未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Betarhabdovirinae sp.",
+      "action": "update",
+      "original_chinese": "Betarhabdovirinae sp.",
+      "new_chinese": "Betarhabdovirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Actantavirinae sp.",
+      "action": "update",
+      "original_chinese": "Actantavirinae sp.",
+      "new_chinese": "Actantavirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Crocarterivirinae sp.",
+      "action": "update",
+      "original_chinese": "Crocarterivirinae sp.",
+      "new_chinese": "Crocarterivirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Simarterivirinae sp.",
+      "action": "update",
+      "original_chinese": "Simarterivirinae sp.",
+      "new_chinese": "Simarterivirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Medionivirinae sp.",
+      "action": "update",
+      "original_chinese": "Medionivirinae sp.",
+      "new_chinese": "Medionivirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Chimanivirinae sp.",
+      "action": "update",
+      "original_chinese": "Chimanivirinae sp.",
+      "new_chinese": "Chimanivirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Hyporhamsavirinae sp.",
+      "action": "update",
+      "original_chinese": "Hyporhamsavirinae sp.",
+      "new_chinese": "Hyporhamsavirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Betairidovirinae sp.",
+      "action": "update",
+      "original_chinese": "Betairidovirinae sp.",
+      "new_chinese": "Betairidovirinae 未定种",
+      "category": "species",
+      "source": "auto_google_web",
+      "reason": "文本清洗与术语标准化"
+    },
+    {
+      "english": "Tsukamurella sp.",
+      "action": "update",
+      "original_chinese": "冢村氏菌属",
+      "new_chinese": "冢村氏束村氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 冢村氏菌属 -> 冢村氏束村氏菌"
+    },
+    {
+      "english": "Variovorax flavidus",
+      "action": "update",
+      "original_chinese": "黄色贪噬菌",
+      "new_chinese": "黄色杂食菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 黄色贪噬菌 -> 黄色杂食菌"
+    },
+    {
+      "english": "Novosphingobium beihaiense",
+      "action": "update",
+      "original_chinese": "北海新鞘脂菌",
+      "new_chinese": "北海新鞘氨醇菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 北海新鞘脂菌 -> 北海新鞘氨醇菌"
+    },
+    {
+      "english": "Yersinia enterocolitica (type O:5)",
+      "action": "update",
+      "original_chinese": "小肠结肠炎耶尔森菌 (O:5型)",
+      "new_chinese": "小肠结肠炎耶尔森氏菌 (O:5型)",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 小肠结肠炎耶尔森菌 (O:5型) -> 小肠结肠炎耶尔森氏菌 (O:5型)"
+    },
+    {
+      "english": "Deinococcus altitudinis",
+      "action": "update",
+      "original_chinese": "高地异常球菌",
+      "new_chinese": "高地异常耐辐射球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 高地异常球菌 -> 高地异常耐辐射球菌"
+    },
+    {
+      "english": "Acidovorax aerodenitrificans",
+      "action": "update",
+      "original_chinese": "嗜酸菌气脱氮种",
+      "new_chinese": "噬酸菌气脱氮种",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 嗜酸菌气脱氮种 -> 噬酸菌气脱氮种"
+    },
+    {
+      "english": "Ferrimonas",
+      "action": "update",
+      "original_chinese": "铁单胞菌",
+      "new_chinese": "铁单胞菌属",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "规范属名: 铁单胞菌 -> 铁单胞菌属"
+    },
+    {
+      "english": "Nocardia aurantiaca",
+      "action": "update",
+      "original_chinese": "橙色诺卡菌",
+      "new_chinese": "橙色诺卡氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 橙色诺卡菌 -> 橙色诺卡氏菌"
+    },
+    {
+      "english": "Gordonia sedimidis",
+      "action": "update",
+      "original_chinese": "沉积物戈登菌",
+      "new_chinese": "沉积物戈登戈登氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 沉积物戈登菌 -> 沉积物戈登戈登氏菌"
+    },
+    {
+      "english": "Variovorax glacialis",
+      "action": "update",
+      "original_chinese": "冰川变栖菌",
+      "new_chinese": "冰川杂食菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 冰川变栖菌 -> 冰川杂食菌"
+    },
+    {
+      "english": "Deinococcus ruber",
+      "action": "update",
+      "original_chinese": "红色异常球菌",
+      "new_chinese": "红色异常耐辐射球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 红色异常球菌 -> 红色异常耐辐射球菌"
+    },
+    {
+      "english": "Neisseria yangbaofengii",
+      "action": "update",
+      "original_chinese": "杨宝峰奈瑟菌",
+      "new_chinese": "杨宝峰奈瑟氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 杨宝峰奈瑟菌 -> 杨宝峰奈瑟氏菌"
+    },
+    {
+      "english": "Bordetella petrii",
+      "action": "update",
+      "original_chinese": "彼得氏伯克霍尔德菌",
+      "new_chinese": "彼得氏伯克霍尔德博德特氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 彼得氏伯克霍尔德菌 -> 彼得氏伯克霍尔德博德特氏菌"
+    },
+    {
+      "english": "Novosphingobium profundi",
+      "action": "update",
+      "original_chinese": "深海新鞘脂菌",
+      "new_chinese": "深海新鞘氨醇菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 深海新鞘脂菌 -> 深海新鞘氨醇菌"
+    },
+    {
+      "english": "Campylobacter vicugnae",
+      "action": "update",
+      "original_chinese": "羊驼弯曲菌",
+      "new_chinese": "羊驼弯曲杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 羊驼弯曲菌 -> 羊驼弯曲杆菌"
+    },
+    {
+      "english": "Deinococcus hibisci",
+      "action": "update",
+      "original_chinese": "木槿异常球菌",
+      "new_chinese": "木槿异常耐辐射球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 木槿异常球菌 -> 木槿异常耐辐射球菌"
+    },
+    {
+      "english": "Deinococcus grandis",
+      "action": "update",
+      "original_chinese": "大异常球菌",
+      "new_chinese": "大异常耐辐射球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 大异常球菌 -> 大异常耐辐射球菌"
+    },
+    {
+      "english": "Oligella urethralis",
+      "action": "update",
+      "original_chinese": "尿道寡源菌",
+      "new_chinese": "尿道寡源寡源杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 尿道寡源菌 -> 尿道寡源寡源杆菌"
+    },
+    {
+      "english": "Campylobacter fetus subsp. venerealis",
+      "action": "update",
+      "original_chinese": "胎儿弯曲菌性病亚种",
+      "new_chinese": "胎儿弯曲杆菌性病亚种",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 胎儿弯曲菌性病亚种 -> 胎儿弯曲杆菌性病亚种"
+    },
+    {
+      "english": "Variovorax soli",
+      "action": "update",
+      "original_chinese": "土壤贪噬菌",
+      "new_chinese": "土壤杂食菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 土壤贪噬菌 -> 土壤杂食菌"
+    },
+    {
+      "english": "Acidovorax delafieldii",
+      "action": "update",
+      "original_chinese": "德拉菲尔德嗜酸菌",
+      "new_chinese": "德拉菲尔德噬酸菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 德拉菲尔德嗜酸菌 -> 德拉菲尔德噬酸菌"
+    },
+    {
+      "english": "Neisseria meningitidis serogroup B",
+      "action": "update",
+      "original_chinese": "B群脑膜炎奈瑟菌",
+      "new_chinese": "B群脑膜炎奈瑟氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: B群脑膜炎奈瑟菌 -> B群脑膜炎奈瑟氏菌"
+    },
+    {
+      "english": "Clavibacter rahimiani",
+      "action": "update",
+      "original_chinese": "拉希米亚尼棒状杆菌",
+      "new_chinese": "拉希米亚尼棒状棒形杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 拉希米亚尼棒状杆菌 -> 拉希米亚尼棒状棒形杆菌"
+    },
+    {
+      "english": "Variovorax davisae",
+      "action": "update",
+      "original_chinese": "戴维斯贪噬菌",
+      "new_chinese": "戴维斯杂食菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 戴维斯贪噬菌 -> 戴维斯杂食菌"
+    },
+    {
+      "english": "Salmonella enterica subsp. diarizonae",
+      "action": "update",
+      "original_chinese": "肠沙门菌亚利桑那亚种",
+      "new_chinese": "肠沙门氏菌亚利桑那亚种",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 肠沙门菌亚利桑那亚种 -> 肠沙门氏菌亚利桑那亚种"
+    },
+    {
+      "english": "Deinococcus xinjiangensis",
+      "action": "update",
+      "original_chinese": "新疆异常球菌",
+      "new_chinese": "新疆异常耐辐射球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 新疆异常球菌 -> 新疆异常耐辐射球菌"
+    },
+    {
+      "english": "Alcaligenes nematophilus",
+      "action": "update",
+      "original_chinese": "嗜线虫产碱菌",
+      "new_chinese": "嗜线虫产碱产碱杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 嗜线虫产碱菌 -> 嗜线虫产碱产碱杆菌"
+    },
+    {
+      "english": "Idiomarina seosinensis",
+      "action": "update",
+      "original_chinese": "西归浦海源杆菌",
+      "new_chinese": "西归浦海源特异海菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 西归浦海源杆菌 -> 西归浦海源特异海菌"
+    },
+    {
+      "english": "Deinococcus petrolearius",
+      "action": "update",
+      "original_chinese": "石油奇球菌",
+      "new_chinese": "石油奇耐辐射球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 石油奇球菌 -> 石油奇耐辐射球菌"
+    },
+    {
+      "english": "Sphingopyxis alaskensis",
+      "action": "update",
+      "original_chinese": "阿拉斯加鞘脂盒菌",
+      "new_chinese": "阿拉斯加鞘脂盒鞘氨醇盒菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 阿拉斯加鞘脂盒菌 -> 阿拉斯加鞘脂盒鞘氨醇盒菌"
+    },
+    {
+      "english": "Moraxella nasibovis",
+      "action": "update",
+      "original_chinese": "牛鼻莫拉菌",
+      "new_chinese": "牛鼻莫拉氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 牛鼻莫拉菌 -> 牛鼻莫拉氏菌"
+    },
+    {
+      "english": "Proteus appendicitidis",
+      "action": "update",
+      "original_chinese": "阑尾炎变形菌",
+      "new_chinese": "阑尾炎变形杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 阑尾炎变形菌 -> 阑尾炎变形杆菌"
+    },
+    {
+      "english": "Prevotella heparinolytica",
+      "action": "update",
+      "original_chinese": "肝素溶解普雷沃菌",
+      "new_chinese": "肝素溶解普雷沃氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 肝素溶解普雷沃菌 -> 肝素溶解普雷沃氏菌"
+    },
+    {
+      "english": "Prevotella intermedia",
+      "action": "update",
+      "original_chinese": "中间普雷沃菌",
+      "new_chinese": "中间普雷沃氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 中间普雷沃菌 -> 中间普雷沃氏菌"
+    },
+    {
+      "english": "Stenotrophomonas sp.",
+      "action": "update",
+      "original_chinese": "寡养单胞菌属",
+      "new_chinese": "寡养单胞窄食单胞菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 寡养单胞菌属 -> 寡养单胞窄食单胞菌"
+    },
+    {
+      "english": "Nocardia flavorosea",
+      "action": "update",
+      "original_chinese": "玫瑰黄诺卡菌",
+      "new_chinese": "玫瑰黄诺卡氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 玫瑰黄诺卡菌 -> 玫瑰黄诺卡氏菌"
+    },
+    {
+      "english": "Yersinia pseudotuberculosis complex",
+      "action": "update",
+      "original_chinese": "假结核耶尔森菌复合群",
+      "new_chinese": "假结核耶尔森氏菌复合群",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 假结核耶尔森菌复合群 -> 假结核耶尔森氏菌复合群"
+    },
+    {
+      "english": "Ralstonia pickettii",
+      "action": "update",
+      "original_chinese": "皮氏罗尔斯顿菌",
+      "new_chinese": "皮氏罗尔斯通氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 皮氏罗尔斯顿菌 -> 皮氏罗尔斯通氏菌"
+    },
+    {
+      "english": "Deinococcus humi",
+      "action": "update",
+      "original_chinese": "土壤异常球菌",
+      "new_chinese": "土壤异常耐辐射球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 土壤异常球菌 -> 土壤异常耐辐射球菌"
+    },
+    {
+      "english": "Bradyrhizobium aeschynomenes",
+      "action": "update",
+      "original_chinese": "合萌根瘤菌",
+      "new_chinese": "合萌根瘤慢生根瘤菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 合萌根瘤菌 -> 合萌根瘤慢生根瘤菌"
+    },
+    {
+      "english": "Sphingobium jiangsuense",
+      "action": "update",
+      "original_chinese": "江苏鞘脂菌",
+      "new_chinese": "江苏鞘氨醇菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 江苏鞘脂菌 -> 江苏鞘氨醇菌"
+    },
+    {
+      "english": "Salmonella enterica subsp. arizonae",
+      "action": "update",
+      "original_chinese": "肠道沙门菌亚利桑那亚种",
+      "new_chinese": "肠道沙门氏菌亚利桑那亚种",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 肠道沙门菌亚利桑那亚种 -> 肠道沙门氏菌亚利桑那亚种"
+    },
+    {
+      "english": "Erwinia pyri",
+      "action": "update",
+      "original_chinese": "梨火疫病菌",
+      "new_chinese": "梨火疫病欧文氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 梨火疫病菌 -> 梨火疫病欧文氏菌"
+    },
+    {
+      "english": "Ralstonia holmesii",
+      "action": "update",
+      "original_chinese": "霍姆斯氏罗尔斯顿菌",
+      "new_chinese": "霍姆斯氏罗尔斯通氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 霍姆斯氏罗尔斯顿菌 -> 霍姆斯氏罗尔斯通氏菌"
+    },
+    {
+      "english": "Veillonella montpellierensis",
+      "action": "update",
+      "original_chinese": "蒙彼利埃韦荣球菌",
+      "new_chinese": "蒙彼利埃韦荣韦荣氏球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 蒙彼利埃韦荣球菌 -> 蒙彼利埃韦荣韦荣氏球菌"
+    },
+    {
+      "english": "Moraxella aff. catarrhalis",
+      "action": "update",
+      "original_chinese": "莫拉菌属近缘卡他莫拉菌",
+      "new_chinese": "莫拉氏菌属近缘卡他莫拉氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 莫拉菌属近缘卡他莫拉菌 -> 莫拉氏菌属近缘卡他莫拉氏菌"
+    },
+    {
+      "english": "Neisseria lactamica",
+      "action": "update",
+      "original_chinese": "乳糖奈瑟菌",
+      "new_chinese": "乳糖奈瑟氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 乳糖奈瑟菌 -> 乳糖奈瑟氏菌"
+    },
+    {
+      "english": "Clavibacter zhangzhiyongii",
+      "action": "update",
+      "original_chinese": "张志勇棒形菌",
+      "new_chinese": "张志勇棒形棒形杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 张志勇棒形菌 -> 张志勇棒形棒形杆菌"
+    },
+    {
+      "english": "Ralstonia mojiangensis",
+      "action": "update",
+      "original_chinese": "墨江罗尔斯通菌",
+      "new_chinese": "墨江罗尔斯通罗尔斯通氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 墨江罗尔斯通菌 -> 墨江罗尔斯通罗尔斯通氏菌"
+    },
+    {
+      "english": "Burkholderia ubonensis",
+      "action": "update",
+      "original_chinese": "乌汶伯克霍尔德菌",
+      "new_chinese": "乌汶伯克霍尔德氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 乌汶伯克霍尔德菌 -> 乌汶伯克霍尔德氏菌"
+    },
+    {
+      "english": "Leifsonia naganoensis",
+      "action": "update",
+      "original_chinese": "长野利夫森氏菌",
+      "new_chinese": "长野利夫森氏雷夫松氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 长野利夫森氏菌 -> 长野利夫森氏雷夫松氏菌"
+    },
+    {
+      "english": "Yersinia enterocolitica (type O:21)",
+      "action": "update",
+      "original_chinese": "小肠结肠炎耶尔森菌 (O:21型)",
+      "new_chinese": "小肠结肠炎耶尔森氏菌 (O:21型)",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 小肠结肠炎耶尔森菌 (O:21型) -> 小肠结肠炎耶尔森氏菌 (O:21型)"
+    },
+    {
+      "english": "Variovorax ginsengisoli",
+      "action": "update",
+      "original_chinese": "人参土贪噬菌",
+      "new_chinese": "人参土杂食菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 人参土贪噬菌 -> 人参土杂食菌"
+    },
+    {
+      "english": "Williamsia sp.",
+      "action": "update",
+      "original_chinese": "威廉士氏菌属",
+      "new_chinese": "威廉士氏威廉姆斯氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 威廉士氏菌属 -> 威廉士氏威廉姆斯氏菌"
+    },
+    {
+      "english": "Campylobacter corcagiensis",
+      "action": "update",
+      "original_chinese": "科卡吉弯曲菌",
+      "new_chinese": "科卡吉弯曲杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 科卡吉弯曲菌 -> 科卡吉弯曲杆菌"
+    },
+    {
+      "english": "Nocardia goodfellowii",
+      "action": "update",
+      "original_chinese": "古德费洛氏诺卡菌",
+      "new_chinese": "古德费洛氏诺卡氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 古德费洛氏诺卡菌 -> 古德费洛氏诺卡氏菌"
+    },
+    {
+      "english": "Burkholderia cepacia complex sp.",
+      "action": "update",
+      "original_chinese": "洋葱伯克霍尔德菌复合体",
+      "new_chinese": "洋葱伯克霍尔德氏菌复合体",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 洋葱伯克霍尔德菌复合体 -> 洋葱伯克霍尔德氏菌复合体"
+    },
+    {
+      "english": "Burkholderia thailandensis USAMRU Malaysia",
+      "action": "update",
+      "original_chinese": "泰国伯克霍尔德菌 USAMRU 马来西亚",
+      "new_chinese": "泰国伯克霍尔德氏菌 USAMRU 马来西亚",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 泰国伯克霍尔德菌 USAMRU 马来西亚 -> 泰国伯克霍尔德氏菌 USAMRU 马来西亚"
+    },
+    {
+      "english": "Prevotella herbatica",
+      "action": "update",
+      "original_chinese": "草本普雷沃菌",
+      "new_chinese": "草本普雷沃氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 草本普雷沃菌 -> 草本普雷沃氏菌"
+    },
+    {
+      "english": "Marinobacter szutsaonensis",
+      "action": "update",
+      "original_chinese": "寿山海洋杆菌",
+      "new_chinese": "寿山海洋海杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 寿山海洋杆菌 -> 寿山海洋海杆菌"
+    },
+    {
+      "english": "Novosphingobium sp.",
+      "action": "update",
+      "original_chinese": "新鞘脂菌属",
+      "new_chinese": "新鞘氨醇菌属",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 新鞘脂菌属 -> 新鞘氨醇菌属"
+    },
+    {
+      "english": "Yersinia enterocolitica (type O:13)",
+      "action": "update",
+      "original_chinese": "小肠结肠炎耶尔森菌 (血清型 O:13)",
+      "new_chinese": "小肠结肠炎耶尔森氏菌 (血清型 O:13)",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 小肠结肠炎耶尔森菌 (血清型 O:13) -> 小肠结肠炎耶尔森氏菌 (血清型 O:13)"
+    },
+    {
+      "english": "Sphingobium estrogenivorans",
+      "action": "update",
+      "original_chinese": "食雌激素鞘脂菌",
+      "new_chinese": "食雌激素鞘氨醇菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 食雌激素鞘脂菌 -> 食雌激素鞘氨醇菌"
+    },
+    {
+      "english": "Macrococcus lamae",
+      "action": "update",
+      "original_chinese": "羊驼巨球菌",
+      "new_chinese": "羊驼大球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "纠正大球菌种名: 羊驼巨球菌 -> 羊驼大球菌"
+    },
+    {
+      "english": "Burkholderia cepacia",
+      "action": "update",
+      "original_chinese": "洋葱伯克霍尔德菌",
+      "new_chinese": "洋葱伯克霍尔德氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 洋葱伯克霍尔德菌 -> 洋葱伯克霍尔德氏菌"
+    },
+    {
+      "english": "Variovorax raffinosi",
+      "action": "update",
+      "original_chinese": "棉子糖贪噬菌",
+      "new_chinese": "棉子糖杂食菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 棉子糖贪噬菌 -> 棉子糖杂食菌"
+    },
+    {
+      "english": "Williamsia aurantiaca",
+      "action": "update",
+      "original_chinese": "橙色威廉氏菌",
+      "new_chinese": "橙色威廉氏威廉姆斯氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 橙色威廉氏菌 -> 橙色威廉氏威廉姆斯氏菌"
+    },
+    {
+      "english": "Proteus hauseri",
+      "action": "update",
+      "original_chinese": "豪泽变形菌",
+      "new_chinese": "豪泽变形杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 豪泽变形菌 -> 豪泽变形杆菌"
+    },
+    {
+      "english": "Klebsiella scottii",
+      "action": "update",
+      "original_chinese": "斯科特克雷伯氏菌",
+      "new_chinese": "斯科特克雷伯菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 斯科特克雷伯氏菌 -> 斯科特克雷伯菌"
+    },
+    {
+      "english": "Erythrobacter longus",
+      "action": "update",
+      "original_chinese": "长赤杆菌",
+      "new_chinese": "长赤红杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 长赤杆菌 -> 长赤红杆菌"
+    },
+    {
+      "english": "Erythrobacter aureus",
+      "action": "update",
+      "original_chinese": "金色赤杆菌",
+      "new_chinese": "金色赤红杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 金色赤杆菌 -> 金色赤红杆菌"
+    },
+    {
+      "english": "Sphingopyxis selenitireducens",
+      "action": "update",
+      "original_chinese": "硒还原鞘脂菌",
+      "new_chinese": "硒还原鞘脂鞘氨醇盒菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 硒还原鞘脂菌 -> 硒还原鞘脂鞘氨醇盒菌"
+    },
+    {
+      "english": "Neisseria meningitidis serogroup Z",
+      "action": "update",
+      "original_chinese": "脑膜炎奈瑟菌 Z血清群",
+      "new_chinese": "脑膜炎奈瑟氏菌 Z血清群",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 脑膜炎奈瑟菌 Z血清群 -> 脑膜炎奈瑟氏菌 Z血清群"
+    },
+    {
+      "english": "Prevotella communis",
+      "action": "update",
+      "original_chinese": "普通普雷沃菌",
+      "new_chinese": "普通普雷沃氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 普通普雷沃菌 -> 普通普雷沃氏菌"
+    },
+    {
+      "english": "Alcaligenes phenolicus",
+      "action": "update",
+      "original_chinese": "苯酚产碱菌",
+      "new_chinese": "苯酚产碱产碱杆菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 苯酚产碱菌 -> 苯酚产碱产碱杆菌"
+    },
+    {
+      "english": "Burkholderia mamillata",
+      "action": "update",
+      "original_chinese": "乳头伯克霍尔德菌",
+      "new_chinese": "乳头伯克霍尔德氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 乳头伯克霍尔德菌 -> 乳头伯克霍尔德氏菌"
+    },
+    {
+      "english": "Stenotrophomonas beteli",
+      "action": "update",
+      "original_chinese": "贝特利寡养单胞菌",
+      "new_chinese": "贝特利寡养单胞窄食单胞菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 贝特利寡养单胞菌 -> 贝特利寡养单胞窄食单胞菌"
+    },
+    {
+      "english": "Acidovorax facilis",
+      "action": "update",
+      "original_chinese": "敏捷食酸菌",
+      "new_chinese": "敏捷食酸噬酸菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 敏捷食酸菌 -> 敏捷食酸噬酸菌"
+    },
+    {
+      "english": "Francisella salimarina",
+      "action": "update",
+      "original_chinese": "海盐弗朗西斯菌",
+      "new_chinese": "海盐弗朗西斯弗朗西斯氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 海盐弗朗西斯菌 -> 海盐弗朗西斯弗朗西斯氏菌"
+    },
+    {
+      "english": "Variovorax endophyticus",
+      "action": "update",
+      "original_chinese": "内生贪铜菌",
+      "new_chinese": "内生贪铜杂食菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 内生贪铜菌 -> 内生贪铜杂食菌"
+    },
+    {
+      "english": "Yersinia mollaretii",
+      "action": "update",
+      "original_chinese": "莫拉雷特耶尔森菌",
+      "new_chinese": "莫拉雷特耶尔森氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 莫拉雷特耶尔森菌 -> 莫拉雷特耶尔森氏菌"
+    },
+    {
+      "english": "Yersinia aldovae",
+      "action": "update",
+      "original_chinese": "阿尔多瓦耶尔森菌",
+      "new_chinese": "阿尔多瓦耶尔森氏菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 阿尔多瓦耶尔森菌 -> 阿尔多瓦耶尔森氏菌"
+    },
+    {
+      "english": "Deinococcus terrestris",
+      "action": "update",
+      "original_chinese": "栖土异常球菌",
+      "new_chinese": "栖土异常耐辐射球菌",
+      "category": "species",
+      "source": "auto_llm",
+      "reason": "校准属名后缀: 栖土异常球菌 -> 栖土异常耐辐射球菌"
+    }
+  ],
+  "all_updates_count": 1192
+}

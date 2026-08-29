@@ -161,138 +161,110 @@ def is_unclassified_or_genus_only(species: str) -> bool:
 
 def select_consensus_hit(hits: list) -> Optional[dict]:
     """
-    共识投票选择最佳命中 (分层生物学算法重构版)
+    共识投票选择最佳命中 (前排优先与峰值相似度主导排名版)
     
-    核心特性：
-    1. 动态收紧候选池：根据最高分自适应确定近缘门槛。
-    2. 满分优先通道：100% 匹配时直接判定优势物种。
-    3. 属种分层判定：属级未定种 (如 Vibrio sp.) 不与具体种 (如 Vibrio owensii) 平级争抢百分比。
-    4. 分类学异名智能合并：自动合并已知同物异名条目。
-    5. 清晰简洁输出：优势显著 (>65%) 时直接输出单物种，势均力敌时才输出概率分布。
+    核心机制：
+    1. 前排深度聚焦：优先考虑 Top 25 条内的高质量比对，避免第 40~50 名冗余条目通过数量逆袭。
+    2. 位置衰减因子 (Rank Discount)：随命中排名自然衰减 (1 / (1 + 0.15 * rank))，强力保障前排高分条目的决定权。
+    3. 峰值相似度惩罚 (Peak Penalty)：若某物种最高一条也显著低于第一名，严厉惩罚其总分。
+    4. 属种分层判定：属级未定种不参与具体种争抢。
+    5. 异名纯动态合并：本地 taxa.sqlite 数据库支撑。
     """
     if not hits:
         return None
 
-    # 1. 获取最高相似度作为基准
+    # 1. 提取绝对最高相似度基准
     try:
         first_sim = float(str(hits[0].get('similarity', '0')).replace('%', ''))
     except:
         first_sim = 0.0
 
-    # 动态门槛设定：在极高相似度区（如 16S 全长）严格收紧门槛
-    if first_sim >= 99.0:
-        threshold = max(98.5, first_sim - 0.3)
-    elif first_sim >= 95.0:
-        threshold = max(94.0, first_sim - 0.5)
-    else:
-        threshold = max(80.0, first_sim - 1.0)
+    max_search_depth = min(len(hits), 25)
     
-    high_identity_hits = []
-    for hit in hits:
-        try:
-            sim = float(str(hit.get('similarity', '0')).replace('%', ''))
-            if sim >= threshold:
-                high_identity_hits.append(hit)
-        except:
-            continue
+    # 动态门槛设定
+    if first_sim >= 99.0:
+        sim_threshold = max(98.5, first_sim - 0.3)
+    elif first_sim >= 96.0:
+        sim_threshold = max(94.0, first_sim - 0.4)
+    else:
+        sim_threshold = max(80.0, first_sim - 0.8)
 
-    target_hits = high_identity_hits if high_identity_hits else [hits[0]]
-    if len(target_hits) == 1:
-        return target_hits[0]
-
-    max_sim = first_sim
-    concrete_species_counter: dict[str, float] = {}
-    unclassified_counter: dict[str, float] = {}
-    species_to_hit: dict[str, dict] = {}
-
-    for hit in target_hits:
+    species_peak_sim: dict[str, float] = {}
+    species_rank_score: dict[str, float] = {}
+    species_to_best_hit: dict[str, dict] = {}
+    
+    for rank_idx, hit in enumerate(hits[:max_search_depth]):
         raw_species = (hit.get('species') or '').strip()
         if not raw_species:
             continue
             
         canon_species = canonicalize_species_name(raw_species)
         
-        # 权重计算：最高分给予强加成，微小差异按梯度衰减
         try:
             curr_sim = float(str(hit.get('similarity', '0')).replace('%', ''))
-            diff = max_sim - curr_sim
-            if diff < 0.01:
-                weight = 3.0  # 绝对同分第一名强加成
-            elif diff <= 0.1:
-                weight = 1.5
-            else:
-                weight = max(0.2, 1.0 - diff * 2.0)
         except:
-            weight = 1.0
-
-        if is_unclassified_or_genus_only(canon_species):
-            unclassified_counter[canon_species] = unclassified_counter.get(canon_species, 0.0) + weight
-        else:
-            concrete_species_counter[canon_species] = concrete_species_counter.get(canon_species, 0.0) + weight
+            curr_sim = 0.0
             
-        if canon_species not in species_to_hit:
-            species_to_hit[canon_species] = hit
+        if curr_sim < sim_threshold:
+            continue
+            
+        # 排名位置衰减因子
+        rank_discount = 1.0 / (1.0 + 0.15 * rank_idx)
+        # 相似度差值衰减
+        diff = max(0.0, first_sim - curr_sim)
+        sim_weight = max(0.2, 1.0 - diff * 2.5)
+        
+        entry_score = rank_discount * sim_weight
+        
+        if canon_species not in species_peak_sim or curr_sim > species_peak_sim[canon_species]:
+            species_peak_sim[canon_species] = curr_sim
+            species_to_best_hit[canon_species] = hit
+            
+        species_rank_score[canon_species] = species_rank_score.get(canon_species, 0.0) + entry_score
 
-    # 决策阶段：分层评估
-    # 分支 A: 存在明确的具体种 -> 属级未定种不参与具体种的争抢
-    if concrete_species_counter:
-        total_weight = sum(concrete_species_counter.values())
-        top_entries = sorted(concrete_species_counter.items(), key=lambda x: x[1], reverse=True)[:5]
+    concrete_species_scores: dict[str, float] = {}
+    unclassified_scores: dict[str, float] = {}
+    
+    for sp, score in species_rank_score.items():
+        peak_sim = species_peak_sim.get(sp, 0.0)
+        peak_diff = max(0.0, first_sim - peak_sim)
+        # 峰值差距惩罚
+        peak_penalty = max(0.1, 1.0 - peak_diff * 3.0)
+        final_score = score * peak_penalty
         
-        top1_species, top1_weight = top_entries[0]
-        top1_pct = (top1_weight / total_weight) * 100
-        
-        # 检查是否具备绝对优势：第一名占比 >= 65% 或仅有 1 个具体种，或第一名是第二名的 2 倍以上
-        has_clear_winner = False
-        if len(top_entries) == 1:
-            has_clear_winner = True
-        elif top1_pct >= 65.0:
-            has_clear_winner = True
-        elif len(top_entries) >= 2 and top1_weight >= top_entries[1][1] * 2.0:
-            has_clear_winner = True
+        if is_unclassified_or_genus_only(sp):
+            unclassified_scores[sp] = final_score
+        else:
+            concrete_species_scores[sp] = final_score
 
-        best_hit = dict(species_to_hit[top1_species])
-        consensus_list = []
-        prob_parts = []
+    target_counter = concrete_species_scores if concrete_species_scores else unclassified_scores
+    if not target_counter:
+        return hits[0]
         
-        for name, weight in top_entries:
-            pct = (weight / total_weight) * 100
-            if pct < 5 and len(prob_parts) > 0:
+    total_score = sum(target_counter.values())
+    top_entries = sorted(target_counter.items(), key=lambda x: x[1], reverse=True)[:5]
+    
+    top1_species, top1_val = top_entries[0]
+    top1_pct = (top1_val / total_score) * 100
+    
+    best_hit = dict(species_to_best_hit[top1_species])
+    consensus_list = []
+    prob_parts = []
+    
+    if len(top_entries) == 1:
+        # 单一候选物种统一显示 100%
+        top_name = top_entries[0][0]
+        prob_parts.append(f"{top_name}(100%)")
+        consensus_list.append({"name": top_name, "pct": 100})
+    else:
+        for name, val in top_entries:
+            pct = (val / total_score) * 100
+            if pct < 3 and len(prob_parts) > 0:
                 continue
-            prob_parts.append(f"{name}({pct:.0f}%)")
-            consensus_list.append({"name": name, "pct": round(pct)})
-
-        if has_clear_winner:
-            best_hit['species'] = top1_species
-        else:
-            best_hit['species'] = ", ".join(prob_parts)
-            
-        best_hit['consensusList'] = consensus_list
-        return best_hit
-
-    # 分支 B: 只有未定种 (如均为 Vibrio sp.)
-    if unclassified_counter:
-        total_weight = sum(unclassified_counter.values())
-        top_entries = sorted(unclassified_counter.items(), key=lambda x: x[1], reverse=True)[:5]
+            pct_round = max(1, round(pct))
+            prob_parts.append(f"{name}({pct_round}%)")
+            consensus_list.append({"name": name, "pct": pct_round})
         
-        top1_species, top1_weight = top_entries[0]
-        best_hit = dict(species_to_hit[top1_species])
-        
-        consensus_list = []
-        prob_parts = []
-        for name, weight in top_entries:
-            pct = (weight / total_weight) * 100
-            if pct < 5 and len(prob_parts) > 0:
-                continue
-            prob_parts.append(f"{name}({pct:.0f}%)")
-            consensus_list.append({"name": name, "pct": round(pct)})
-            
-        if len(top_entries) == 1 or (top1_weight / total_weight) * 100 >= 70.0:
-            best_hit['species'] = top1_species
-        else:
-            best_hit['species'] = ", ".join(prob_parts)
-            
-        best_hit['consensusList'] = consensus_list
-        return best_hit
-
-    return target_hits[0]
+    best_hit['species'] = ", ".join(prob_parts) if prob_parts else f"{top1_species}(100%)"
+    best_hit['consensusList'] = consensus_list
+    return best_hit
