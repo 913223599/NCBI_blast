@@ -67,13 +67,8 @@ function handleRowTranslate(h: any) {
     getBridge().translate_text?.(h.speciesName, 'species', (translated: string) => {
       h.isTranslating = false
       if (translated && translated !== h.speciesName) {
-        // 使用 replace 替换掉原文中的这一项，保留百分比等格式
-        const base = h.speciesName
-        if (base.includes(h.speciesName)) { // 若是拼接结构则安全替换
-           h.translatedName = base.replace(h.speciesName, translated)
-        } else {
-           h.translatedName = translated
-        }
+        // 调用 store 的统一更新接口，实现当前行及全局同名项联动
+        blast.updateTranslation(h.speciesName, translated)
         h.showOriginal = false
       }
     })
@@ -139,10 +134,10 @@ function openNcbi(accession: string): void {
 <template>
   <div class="blast-results-container">
     <div class="results-header">
-      <div class="title">📊 {{ blast.resultTitle }}</div>
+      <div class="title">{{ blast.resultTitle }}</div>
       <div class="actions">
         <button class="btn-ai" @click="toggleTranslateAll" :disabled="isTranslating">
-          {{ hasActiveTranslation ? '↩️ ' + t('label_source_en') : t('blast.btn.trans') }}
+          {{ hasActiveTranslation ? t('label_source_en') : t('blast.btn.trans') }}
         </button>
         <button class="btn-export" @click="emit('exportResults')">{{ t('blast.btn.export') }}</button>
       </div>
@@ -174,7 +169,7 @@ function openNcbi(accession: string): void {
             </td>
             <td>
               <div v-if="h.status === 'pending'" class="pending-spinner">
-                <span class="spinner-icon">⏳</span>
+                <span class="spinner-text">计算中</span>
               </div>
               <div v-else class="id-val" :class="h.identity >= 97 ? 'high-id' : 'low-id'">
                 {{ h.identity.toFixed(1) }}%
@@ -187,18 +182,17 @@ function openNcbi(accession: string): void {
                 class="link-btn" 
                 @click="openNcbi(h.accession)"
                 title="NCBI"
-              >🔗</button>
+              >查看</button>
               <span v-else class="no-link">-</span>
             </td>
             <td>
-              <button class="btn-action-vis" @click="emit('showAlignmentMap', h)">📊 {{ t('blast.btn.vis') }}</button>
-              <button class="btn-action-save" @click="saveToStore(h)">📥 {{ t('blast.btn.save') }}</button>
+              <button class="btn-action-vis" @click="emit('showAlignmentMap', h)">{{ t('blast.btn.vis') }}</button>
+              <button class="btn-action-save" @click="saveToStore(h)">{{ t('blast.btn.save') }}</button>
             </td>
           </tr>
         </tbody>
       </table>
       <div v-else class="empty-hint">
-        <div class="icon">🧬</div>
         <p>{{ t('blast.hist.empty') }}</p>
       </div>
     </div>

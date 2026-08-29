@@ -45,8 +45,8 @@ class LocalBlastExecutor:
         print("方法二：从NCBI网站下载")
         print(f"  https://ftp.ncbi.nih.gov/blast/db/")
 
-    def execute_local_blast(self, sequence_file, output_file, max_hits=50, program=None):
-        """执行本地BLAST搜索，支持 blastn/blastp 等多种程序"""
+    def execute_local_blast(self, sequence_file, output_file, max_hits=50, program=None, num_threads=None):
+        """执行本地BLAST搜索，支持 blastn/blastp 等多种程序并开启多核并行加速"""
         # 允许每次调用时覆盖程序类型
         active_program = program or self.program
         try:
@@ -76,6 +76,12 @@ class LocalBlastExecutor:
         short_in = get_short_path_name(abs_in)
         short_out = get_short_path_name(abs_out)
 
+        # 动态计算多核并行线程数，适当保留CPU核心数防止卡死（规则7、规则8）
+        import os
+        if num_threads is None or num_threads <= 0:
+            cpu_cnt = os.cpu_count() or 4
+            num_threads = max(1, cpu_cnt - 2)
+
         # 构建BLAST命令行参数 (相对于 CWD)
         blast_cmd = [
             f'"{bin_path}"',
@@ -84,13 +90,14 @@ class LocalBlastExecutor:
             "-out", f'"{short_out}"',
             "-outfmt", "5",
             "-max_target_seqs", str(max_hits),
-            "-evalue", "10.0"
+            "-evalue", "10.0",
+            "-num_threads", str(num_threads)
         ]
 
         cmd_str = " ".join(blast_cmd)
 
         try:
-            print(f"🚀 [LocalBLAST] 执行比对 (CWD: {short_db_dir}): {cmd_str}")
+            print(f"[LocalBLAST] 执行本地多核比对 (线程: {num_threads}, CWD: {short_db_dir}): {cmd_str}")
             
             with _local_blast_semaphore:
                 # 关键：在 Windows 下必须在无空格的 CWD 中运行或使用 shell=True 配合引号
@@ -118,7 +125,7 @@ class LocalBlastExecutor:
         修复了使用 next() 可能导致的 StopIteration 错误
         """
         try:
-            with open(result_file, 'r') as result_handle:
+            with open(result_file, 'r', encoding='utf-8') as result_handle:
                 # NCBIXML.parse 返回的是迭代器，转换为列表以安全访问
                 blast_records = list(NCBIXML.parse(result_handle))
 
@@ -201,9 +208,9 @@ class LocalBatchProcessor:
 def main():
     executor = LocalBlastExecutor()
     if executor.check_blast_installation():
-         print("✓ BLAST+ 已正确安装")
+         print("[OK] BLAST+ 已正确安装")
     else:
-         print("✗ 未检测到 BLAST+")
+         print("[FAIL] 未检测到 BLAST+")
 
 if __name__ == "__main__":
     main()

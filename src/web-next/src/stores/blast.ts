@@ -187,40 +187,76 @@ export const useBlastStore = defineStore('blast', () => {
     function updateTranslation(original: string, translated: string): void {
         if (!original || !translated || original === translated) return
 
+        // 1. 如果传入的是复合共识字符串 (如 "Species A(80%), Species B(20%)")，自动拆解为原子项分别更新
+        const consensusRegex = /([^,()]+)\s*\(\s*(\d+)%\s*\)/g
+        if (original.includes('(') && original.includes('%)') && translated.includes('(') && translated.includes('%)')) {
+            const origMatches = Array.from(original.matchAll(consensusRegex))
+            const transMatches = Array.from(translated.matchAll(consensusRegex))
+            if (origMatches.length > 0 && origMatches.length === transMatches.length) {
+                origMatches.forEach((m, idx) => {
+                    const origSub = m[1].trim()
+                    const transSub = transMatches[idx][1].trim()
+                    if (origSub && transSub && origSub !== transSub) {
+                        updateSingleTerm(origSub, transSub)
+                    }
+                })
+            }
+        }
+
+        // 2. 执行单项/主词条更新
+        updateSingleTerm(original.trim(), translated.trim())
+    }
+
+    function updateSingleTerm(orig: string, trans: string): void {
+        if (!orig || !trans || orig === trans) return
+
         let changedAny = false
-        // 使用 forEach 进行原地更新，避免大规模 results.value.map 导致的性能问题和潜在的竞态
+        const norm = (s: string) => s.trim().toLowerCase().replace(/\.+$/, '')
+        const origNorm = norm(orig)
+
         results.value.forEach(hit => {
-            // 检查结构化列表 (共识算法路径)
+            // A. 完全精确匹配 / 忽略大小写及末尾点号匹配
+            if (hit.speciesName && norm(hit.speciesName) === origNorm) {
+                if (hit.translatedName !== trans) {
+                    hit.translatedName = trans
+                    hit.showOriginal = false
+                    changedAny = true
+                }
+            }
+
+            // B. 结构化共识列表驱动重组 (支持容错归一化比对)
             if (hit.consensusList && hit.consensusList.length > 0) {
-                const targetObj = hit.consensusList.find(c => c.name === original)
-                if (targetObj) {
-                    if (!hit.translatedName) hit.translatedName = hit.speciesName
+                let hitMatched = false
+                hit.consensusList.forEach((c: any) => {
+                    if (c.name && norm(c.name) === origNorm) {
+                        c.translated = trans
+                        hitMatched = true
+                    }
+                })
+
+                if (hitMatched) {
+                    // 基于所有已翻译/未翻译的 consensus 项重新组合出完整字符串
+                    const reassembled = hit.consensusList
+                        .map((c: any) => `${c.translated || c.name}(${c.pct}%)`)
+                        .join(', ')
                     
-                    // 使用正则全局替换，确保所有匹配项都被替换，且防止部分匹配导致的错误
-                    // 比如 original 是 "Bacillus", 不应该误替换 "Bacillus velezensis" 中的一部分（除非确实是按分量翻译）
-                    // 鉴于 consensusList 本身就是拆解后的词素，这里使用 replace 是安全的
-                    const prevTrans = hit.translatedName
-                    hit.translatedName = hit.translatedName.split(original).join(translated)
-                    
-                    if (prevTrans !== hit.translatedName) {
+                    if (hit.translatedName !== reassembled) {
+                        hit.translatedName = reassembled
                         hit.showOriginal = false
                         changedAny = true
                     }
                 }
             } 
             
-            // 兜底逻辑：如果 speciesName 直接包含原文 (非共识路径或作为补充)
-            if (hit.speciesName === original || hit.speciesName.includes(original)) {
+            // C. 兜底逻辑：对于包含该词条的自由复合文本进行精准词界替换
+            if (hit.speciesName && hit.speciesName.toLowerCase().includes(orig.toLowerCase())) {
                 if (!hit.translatedName) hit.translatedName = hit.speciesName
                 
-                // 防止重复拼接，如 "贝莱斯芽孢杆菌 (Bacillus velezensis)"
-                const alreadySplicedPattern = `${translated} (${original})`
-                if (hit.translatedName.includes(alreadySplicedPattern)) {
-                    return
-                }
-
+                const escaped = orig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                const regex = new RegExp(`(^|[,(;\\s])${escaped}(?=[,);\\s]|$)`, 'gi')
+                
                 const prevTrans = hit.translatedName
-                hit.translatedName = hit.translatedName.split(original).join(translated)
+                hit.translatedName = hit.translatedName.replace(regex, `$1${trans}`)
                 
                 if (prevTrans !== hit.translatedName) {
                     hit.showOriginal = false
@@ -229,11 +265,7 @@ export const useBlastStore = defineStore('blast', () => {
             }
         })
 
-        // 虽然内容已更新，但如果需要触发某些依赖 results 整体的响应式（如计算属性），
-        // 可以在此处执行一次浅拷贝赋值（如果使用了 shallowRef 的话）。
-        // 目前使用的是 ref，内部对象属性更新已足够触发组件更新。
         if (changedAny) {
-            // 强制触发一次响应式更新（针对某些不支持深度监听的 UI 组件）
             results.value = [...results.value]
         }
     }

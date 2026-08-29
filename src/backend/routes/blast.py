@@ -197,7 +197,7 @@ async def list_databases():
                 'name': db.get('db_id'),
                 'type': 'nucl',
                 'path': db.get('db_id'), # 逻辑路径
-                'display_name': f"🧬 {db.get('name')} ({db.get('version')})"
+                'display_name': f"[系统库] {db.get('name')} ({db.get('version')})"
             })
             
     return user_dbs + bio_dbs
@@ -249,8 +249,11 @@ async def batch_blast_from_tree(req: TreeBatchBlastRequest):
 async def get_visualization_data(req: VisDataRequest):
     if not os.path.exists(req.xml_path): return {"error": "XML not found"}
     try:
-        with open(req.xml_path, 'r') as f:
-            record = list(NCBIXML.parse(f))[0]
+        with open(req.xml_path, 'r', encoding='utf-8') as f:
+            records = list(NCBIXML.parse(f))
+        if not records:
+            return {"error": "未在比对结果中发现有效的记录"}
+        record = records[0]
         hits = []
         for alignment in record.alignments:
             hit = {'title': alignment.title, 'length': alignment.length, 'hsps': [{'query_start': h.query_start, 'query_end': h.query_end, 'score': h.score, 'evalue': h.expect, 'identity': h.identities / h.align_length if h.align_length > 0 else 0} for h in alignment.hsps]}

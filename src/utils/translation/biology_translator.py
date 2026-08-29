@@ -216,7 +216,7 @@ class BiologyTranslator:
             else:
                 pure_components.add(text)
                     
-        # 2. 差集计算：对收集到的基础词汇检查本地缓存，选出未命中的移交 AI
+        # 2. 差集计算：对收集到的基础词汇检查本地缓存，选出未命中的移交 AI，同时对已命中的纯词条即时通知
         to_ai_set = set()
         for pure_text in pure_components:
             clean_text = pure_text.strip()
@@ -224,6 +224,10 @@ class BiologyTranslator:
             part_res = self.translate_text(clean_text, category=category, use_ai_override=False)
             if part_res == clean_text:
                 to_ai_set.add(clean_text)
+            else:
+                # 本地命中的纯原子词条，直接触发即时通知
+                if on_result_ready:
+                    on_result_ready(clean_text, part_res)
 
         # 2.5 优化：立刻挑选出不需要 AI 即可完成翻译的文本，并尽早返回
         results = {}
@@ -258,7 +262,6 @@ class BiologyTranslator:
         to_ai_list = list(to_ai_set)
         if to_ai_list and self.use_ai and self.ai_translator:
             try:
-                # [FIX] 防止大批量请求超出 LLM max_tokens 导致尾部被原样截断 (Anti-Truncation Chunking)
                 CHUNK_SIZE = 30
                 ai_results = []
                 
@@ -274,8 +277,12 @@ class BiologyTranslator:
                         if ai_res and ai_res != pure_text:
                             with self._lock:
                                 self._translation_cache[pure_text] = ai_res
+                            
+                            # AI 翻译成功的纯词条，即刻触发通知
+                            if on_result_ready:
+                                on_result_ready(pure_text, ai_res)
+
                             if self.translation_data_manager:
-                                # [VALIDATION] 批量处理也增加校验逻辑
                                 is_valid = True
                                 if category in ('species', 'genus'):
                                     try:
@@ -298,7 +305,6 @@ class BiologyTranslator:
                 logging.getLogger(__name__).error(f"Biology Batch AI Error: {e}")
 
         # 4. 再一次完成全量组装
-        # 对 pending_texts 直接调用 translate_text 即可完成最终切割替换。
         for text in pending_texts:
             res = self.translate_text(text, category=category, use_ai_override=False)
             results[text] = res

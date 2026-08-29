@@ -466,7 +466,7 @@ class BlastManager:
                         "sequence_id": seq_id,
                         "status": "pending"
                     }
-                    # [CRITICAL FIX] 把占位符存入数据库，防止刷新页面或重选任务时列表变空
+                    # 把占位符存入数据库，防止刷新页面或重选任务时列表变空
                     self.store.save_result(task.task_id, seq_id, pending_data)
                     
                     # Emit to UI
@@ -474,9 +474,6 @@ class BlastManager:
                         for cb in self.result_listeners:
                             try: cb(task.task_id, pending_data)
                             except: pass
-                    # Optional: DB persistence for pending items can be skipped if UI generates list live,
-                    # but saving them guarantees history retention.
-                    self.store.save_result(task.task_id, seq_id, pending_data)
 
             def on_progress(comp, total, info):
                 new_prog = int(comp/total * 100)
@@ -512,11 +509,11 @@ class BlastManager:
             task.transition_to(TaskStatus.COMPLETED)
             self.store.save_task(task)
 
-            # ✨ [SILENT PIPELINE HOOK] 自动回填逻辑
+            # 自动回填逻辑 (GBK/PHAGE 注释回填)
             auto_task_id = task.params.get("auto_backfill_task_id")
             if auto_task_id:
                 try:
-                    self.logger.info(f"🚀 Triggering AUTO-BACKFILL for Assembly Task: {auto_task_id}")
+                    self.logger.info(f"[AutoBackfill] 触发自动回填任务: {auto_task_id}")
                     from src.backend.utils.assembly_storage import AssemblyStorage
                     from src.backend.utils.assembly_gbk_fixer import GBKAnnotationBackfiller
                     from src.backend.utils.blast_utils import parse_blast_csv
@@ -548,11 +545,11 @@ class BlastManager:
                         if base_gbk and base_gbk.exists():
                             fixer = GBKAnnotationBackfiller(base_gbk)
                             fixer.apply_blast_hits(hits_to_backfill)
-                            self.logger.info(f"✅ AUTO-BACKFILL COMPLETED for {len(hits_to_backfill)} proteins.")
+                            self.logger.info(f"[AutoBackfill] 自动回填完成，更新了 {len(hits_to_backfill)} 个蛋白注释。")
                         else:
-                            self.logger.warning(f"❌ AUTO-BACKFILL SKIPPED: Base GBK not found in {anno_dir}")
+                            self.logger.warning(f"[AutoBackfill] 跳过自动回填: 未找到基础 GBK 文件: {anno_dir}")
                 except Exception as eb:
-                    self.logger.error(f"💥 AUTO-BACKFILL FAILED inside manager: {eb}", exc_info=True)
+                    self.logger.error(f"[AutoBackfill] 自动回填异常: {eb}", exc_info=True)
 
         except Exception as e:
             self.logger.error(f"Task {task.task_id} failed: {e}", exc_info=True)

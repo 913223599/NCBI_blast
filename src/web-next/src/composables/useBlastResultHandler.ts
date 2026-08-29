@@ -287,10 +287,15 @@ export function useBlastResultHandler() {
       bridge.translate_batch(JSON.stringify(Array.from(wordsToTranslate)), 'species')
     } catch (e) {
       console.error('[ResultHandler] Batch translation error:', e)
+      isTranslating.value = false
+      return
     }
 
-    // 重置状态
-    setTimeout(() => { isTranslating.value = false }, 2000)
+    // 动态安全超时：按词条数量弹性控制 Loading 状态 (每个词条最少预估 50ms，上限 8 秒)
+    const timeoutMs = Math.min(8000, Math.max(800, wordsToTranslate.size * 60))
+    setTimeout(() => {
+      isTranslating.value = false
+    }, timeoutMs)
   }
 
   return {

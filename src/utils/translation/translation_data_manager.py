@@ -200,11 +200,15 @@ class TranslationDataManager:
         self._sync_files(self.db_path, self.backup_path)
 
     def _init_db(self):
-        """初始化 SQLite 数据库表结构"""
+        """初始化 SQLite 数据库表结构并启用 WAL 模式"""
         with self._lock:
             try:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
+                # 开启 WAL 模式与正常同步级别，提升并发读写性能与抗锁能力
+                cursor.execute('PRAGMA journal_mode=WAL;')
+                cursor.execute('PRAGMA synchronous=NORMAL;')
+                
                 # english 为规范化后的原文，作为主键
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS translations (
@@ -215,8 +219,9 @@ class TranslationDataManager:
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-                # 创建索引优化分类查询
+                # 创建索引优化分类查询与大小写检索
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_category ON translations(category)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_english_nocase ON translations(english COLLATE NOCASE)')
                 conn.commit()
                 conn.close()
             except Exception as e:
@@ -241,7 +246,6 @@ class TranslationDataManager:
     def _get_count(self) -> int:
         """获取总行数"""
         try:
-            # 迁移逻辑依然使用独立连接以确保原子性，或复用 _conn (需注意初始化顺序)
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) FROM translations')
@@ -254,7 +258,7 @@ class TranslationDataManager:
     def get_translation(self, english_text: str, category: Optional[str] = None) -> Optional[str]:
         """
         获取中文翻译
-        优先从内存缓存读取，缓存穿透则读库并回填
+        优先从内存缓存读取，缓存穿透则读库（支持大小写不敏感兜底）并回填
         """
         english_text = english_text.strip()
         if not english_text:
@@ -263,31 +267,36 @@ class TranslationDataManager:
         # 1. 尝试内存缓存
         if english_text in self._cache:
             data = self._cache[english_text]
-            # 优先返回分类匹配的
             if not category or data['category'] == category:
                 return data['chinese']
-            # 如果不匹配，继续走后面数据库逻辑尝试兜底
 
         # 2. 查询数据库
         try:
-            # 使用持久连接提高响应速度
             with self._lock:
                 cursor = self._conn.cursor()
-                
                 row = None
+                
                 # A. 尝试精确匹配（原文 + 分类）
                 if category:
                     cursor.execute('SELECT chinese, category FROM translations WHERE english = ? AND category = ?', (english_text, category))
                     row = cursor.fetchone()
                 
-                # B. 如果 A 没找到且指定了分类，尝试兜底匹配（仅原文）
+                # B. 尝试精确匹配（仅原文）
                 if not row:
                     cursor.execute('SELECT chinese, category FROM translations WHERE english = ?', (english_text,))
                     row = cursor.fetchone()
                 
+                # C. 兜底匹配：大小写不敏感检索 (LOWER)
+                if not row:
+                    if category:
+                        cursor.execute('SELECT chinese, category FROM translations WHERE LOWER(english) = LOWER(?) AND category = ?', (english_text, category))
+                        row = cursor.fetchone()
+                    if not row:
+                        cursor.execute('SELECT chinese, category FROM translations WHERE LOWER(english) = LOWER(?)', (english_text,))
+                        row = cursor.fetchone()
+                
                 if row:
                     chinese, db_cat = row['chinese'], row['category']
-                    # 回填缓存
                     self._cache[english_text] = {'chinese': chinese, 'category': db_cat}
                     return chinese
         except Exception as e:

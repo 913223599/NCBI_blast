@@ -59,8 +59,10 @@ class BlastExecutor:
         return sequence
 
     def execute_blast_search(self, sequence, program="blastn", database="nt", **kwargs):
+        import io
+        import tempfile
+        from pathlib import Path as _Path
         sequence = self._validate_sequence(sequence)
-        delay_before_request()
 
         blast_params = {
             'program': program,
@@ -96,26 +98,25 @@ class BlastExecutor:
                 if key == 'filter': continue
                 blast_params[ncbi_key] = kwargs[key]
 
+        threads = kwargs.get('threads')
+
         try:
             # === PhageScope 本地蛋白库快速通道 ===
             phagescope_aliases = {'phagescope_proteins', 'phagescope_rep'}
             if database in phagescope_aliases:
-                from pathlib import Path as _Path
-                # 动态解析数据库根目录 (相对于项目根)
                 project_root = _Path(__file__).resolve().parent.parent.parent
                 ps_index = project_root / "database" / "phagescope" / "phagescope_proteins"
                 
                 if ps_index.with_suffix(".psq").exists():
-                    import tempfile
                     if not self.local_executor:
                         self.local_executor = LocalBlastExecutor(
                             database_path=str(ps_index), program="blastp"
                         )
                     self.local_executor.database_path = str(ps_index)
                     
-                    logging.info(f"🧬 [PhageScope] 命中本地噬菌体蛋白库: {ps_index}")
+                    logging.info(f"[PhageScope] 命中本地噬菌体蛋白库: {ps_index}")
                     
-                    with tempfile.NamedTemporaryFile(suffix=".fasta", delete=False, mode='w') as tmp:
+                    with tempfile.NamedTemporaryFile(suffix=".fasta", delete=False, mode='w', encoding='utf-8') as tmp:
                         tmp.write(sequence)
                         tmp_in = tmp.name
                     
@@ -125,17 +126,22 @@ class BlastExecutor:
                         self.local_executor.execute_local_blast(
                             tmp_in, tmp_out,
                             max_hits=kwargs.get('hitlist_size', 50),
-                            program="blastp"
+                            program="blastp",
+                            num_threads=threads
                         )
                         if os.path.exists(tmp_out):
-                            return open(tmp_out, 'r')
+                            with open(tmp_out, 'r', encoding='utf-8') as f_out:
+                                xml_data = f_out.read()
+                            return io.StringIO(xml_data)
                         else:
                             raise RuntimeError("PhageScope local BLAST failed to generate output")
                     finally:
-                        try: os.unlink(tmp_in)
-                        except: pass
+                        for p in [tmp_in, tmp_out]:
+                            try:
+                                if os.path.exists(p): os.unlink(p)
+                            except Exception: pass
                 else:
-                    logging.warning(f"⚠️ [PhageScope] 本地库索引未就绪: {ps_index}")
+                    logging.warning(f"[PhageScope] 本地库索引未就绪: {ps_index}")
 
             # 优先检查是否为已部署的本地生物数据库 (16S/18S)
             from ..backend.utils.bio_db_manager import bio_db_manager
@@ -143,8 +149,6 @@ class BlastExecutor:
             if database in bio_db_manager.dbs:
                 db_obj = bio_db_manager.dbs[database]
                 if db_obj.get_status().get('installed'):
-                    # 发现已就绪的本地索引，执行本地比对
-                    # 获取索引的基础路径（不含后缀）
                     db_ver = db_obj.config.get("version", "latest")
                     if database == 'silva':
                         index_path = str(db_obj.base_dir / f"silva_{db_ver}")
@@ -153,36 +157,38 @@ class BlastExecutor:
                     else:
                         index_path = str(db_obj.base_dir / f"{database}_{db_ver}")
                     
-                    # 初始化本地执行器（如果尚未初始化）
                     if not self.local_executor:
                         self.local_executor = LocalBlastExecutor(database_path=index_path)
                     
                     self.local_executor.database_path = index_path
+                    logging.info(f"[LocalBLAST] 命中本地库: {database} -> {index_path}")
                     
-                    logging.info(f"🚀 [LocalBLAST] 命中本地库: {database} -> {index_path}")
-                    
-                    # 准备临时输入文件
-                    import tempfile
-                    from pathlib import Path
-                    with tempfile.NamedTemporaryFile(suffix=".fasta", delete=False, mode='w') as tmp:
+                    with tempfile.NamedTemporaryFile(suffix=".fasta", delete=False, mode='w', encoding='utf-8') as tmp:
                         tmp.write(sequence)
                         tmp_in = tmp.name
                     
                     tmp_out = tmp_in.replace(".fasta", ".xml")
                     
                     try:
-                        # 执行本地比对，返回 XML 文件的 Handle
-                        self.local_executor.execute_local_blast(tmp_in, tmp_out, max_hits=kwargs.get('hitlist_size', 50))
+                        self.local_executor.execute_local_blast(
+                            tmp_in, tmp_out, 
+                            max_hits=kwargs.get('hitlist_size', 50),
+                            num_threads=threads
+                        )
                         if os.path.exists(tmp_out):
-                            return open(tmp_out, 'r')
+                            with open(tmp_out, 'r', encoding='utf-8') as f_out:
+                                xml_data = f_out.read()
+                            return io.StringIO(xml_data)
                         else:
                             raise RuntimeError("Local BLAST failed to generate XML output")
                     finally:
-                        # 延迟清理输入文件
-                        try: os.unlink(tmp_in)
-                        except: pass
+                        for p in [tmp_in, tmp_out]:
+                            try:
+                                if os.path.exists(p): os.unlink(p)
+                            except Exception: pass
             
-            # 回退到原有的 NCBI 联机比对逻辑
+            # 回退到原有的 NCBI 联机比对逻辑 (仅在联机请求前进行限速等待)
+            delay_before_request()
             return NCBIWWW.qblast(**blast_params)
         except Exception as e:
             raise e
@@ -242,7 +248,8 @@ class BlastExecutor:
                 raise TimeoutError(f"BLAST failed (Retries {retries}): {error_reason}")
 
             wait_time = current_wait * (2 ** (retries - 1))
-            if "error code: -1" in str(error_reason).lower() or "error code: 1" in str(error_reason).lower():
+            err_lower = error_reason.lower()
+            if "error code: -1" in err_lower or "error code: 1" in err_lower:
                 wait_time = MAX_WAIT_TIME
 
             wait_time = min(wait_time, 60)
