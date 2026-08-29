@@ -44,13 +44,13 @@ class AnnotationFuser:
         ("Head & Packaging", [
             r"\b(?:capsid|portal|terminase|terminase\s*large\s*subunit|terminase\s*small\s*subunit|head\s*protein|major\s*head|minor\s*head|scaffold|scaffolding|prohead|head\s*closure|head\s*decoration|head\s*maturation|head\s*morphogenesis|maturation\s*protease|head\s*assembly|major\s*capsid|minor\s*capsid|virion\s*structural|internal\s*virion|structural\s*protein)\b"
         ]),
-        # D. 溶源整合与位点特异性切除 (严禁 Holliday junction 修复酶混入)
+        # D. 溶源整合与位点特异性切除 (优先捕获整合酶/重组酶/切除酶/转座酶)
         ("Integration & Excision", [
-            r"\b(?:integrase|excisionase|transposase|site-specific\s*recombinase|tyrosine\s*recombinase|serine\s*recombinase|prophage\s*integrase|prophage\s*excisionase)\b"
+            r"\b(?:integrase|excisionase|transposase|recombinase|site-specific\s*recombinase|tyrosine\s*recombinase|serine\s*recombinase|prophage\s*integrase|prophage\s*excisionase)\b"
         ]),
-        # E. DNA 复制、重组与修复 (包含同源重组、复制起始、解旋聚合与核酸酶)
+        # E. DNA 复制、重组与修复 (排除纯位点特异性重组酶)
         ("Replication & Repair", [
-            r"\b(?:polymerase|helicase|[a-z0-9'-]*helicase|primase|ligase|ssb|single-stranded\s*dna|ssdna|topoisomerase|gyrase|endonuclease|exonuclease|[a-z0-9'-]*nuclease|rnase|dnase|dna\s*repair|recombination|recombinase|holliday|rusa|ruvc|recu|rece|erf|ninb|ning|rap|ninx|dna\s*binding|dntp|primase-helicase|dead\/deah|dnac|dnab|dna\s*annealing|recombination\s*mediator|junction\s*specific|replication\s*initiation|gene\s*47)\b"
+            r"\b(?:polymerase|helicase|[a-z0-9'-]*helicase|primase|ligase|ssb|single-stranded\s*dna|ssdna|topoisomerase|gyrase|endonuclease|exonuclease|[a-z0-9'-]*nuclease|rnase|dnase|dna\s*repair|holliday|rusa|ruvc|recu|rece|erf|ninb|ning|rap|ninx|dna\s*binding|dntp|primase-helicase|dead\/deah|dnac|dnab|dna\s*annealing|recombination\s*mediator|junction\s*specific|replication\s*initiation|gene\s*47)\b"
         ]),
         # F. 宿主防御与抗防御互作
         ("Defense & Host Interaction", [

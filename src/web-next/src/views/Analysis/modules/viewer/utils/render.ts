@@ -126,9 +126,10 @@ function matchCategoryRules(text: string): string {
     return "Head & Packaging";
   }
 
-  // D. 溶源整合与位点特异性切除 (Integration & Excision) - 严禁 Holliday junction 修复酶混入
-  if (/\b(integrase|excisionase|transposase|site-specific\s*recombinase|tyrosine\s*recombinase|serine\s*recombinase|prophage\s*integrase|prophage\s*excisionase)\b/i.test(t)) {
-    if (!/\b(exonuclease|holliday|rusa|ruvc|recu|recombination-associated|homologous)\b/i.test(t)) {
+  // D. 溶源整合与位点特异性切除 (Integration & Excision) - 优先捕获整合酶/重组酶/切除酶/转座酶
+  if (/\b(integrase|excisionase|transposase|recombinase|site-specific\s*recombinase|tyrosine\s*recombinase|serine\s*recombinase|prophage\s*integrase|prophage\s*excisionase)\b/i.test(t)) {
+    // 排除明确的 DNA 损伤同源修复复合酶 (如 exonuclease recombination-associated, homologous recombination mediator)
+    if (!/\b(exonuclease|holliday|rusa|ruvc|recu|recombination-associated|homologous\s*recombination)\b/i.test(t)) {
       return "Integration & Excision";
     }
   }
@@ -137,7 +138,7 @@ function matchCategoryRules(text: string): string {
   }
 
   // E. DNA 复制、重组与修复 (Replication & Repair) - 包含同源重组、复制起始、解旋聚合与核酸酶
-  if (/\b(polymerase|helicase|[a-z0-9'-]*helicase|primase|ligase|ssb|single-stranded\s*dna|ssdna|topoisomerase|gyrase|endonuclease|exonuclease|[a-z0-9'-]*nuclease|rnase|dnase|dna\s*repair|recombination|recombinase|holliday|rusa|ruvc|recu|rece|erf|ninb|ning|rap|ninx|dna\s*binding|dntp|primase-helicase|dead\/deah|dnac|dnab|dna\s*annealing|recombination\s*mediator|junction\s*specific|replication\s*initiation|gene\s*47)\b/i.test(t)) {
+  if (/\b(polymerase|helicase|[a-z0-9'-]*helicase|primase|ligase|ssb|single-stranded\s*dna|ssdna|topoisomerase|gyrase|endonuclease|exonuclease|[a-z0-9'-]*nuclease|rnase|dnase|dna\s*repair|holliday|rusa|ruvc|recu|rece|erf|ninb|ning|rap|ninx|dna\s*binding|dntp|primase-helicase|dead\/deah|dnac|dnab|dna\s*annealing|recombination\s*mediator|junction\s*specific|replication\s*initiation|gene\s*47)\b/i.test(t)) {
     return "Replication & Repair";
   }
 

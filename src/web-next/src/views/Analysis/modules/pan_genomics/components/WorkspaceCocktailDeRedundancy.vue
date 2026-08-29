@@ -1323,14 +1323,36 @@ function handleExportPlanCsv() {
 .rep-coverage-deck {
   display: flex;
   flex-direction: column;
+  height: 270px;
+  max-height: 270px;
   justify-content: space-between;
-  height: 100%;
 }
 
 .rep-rows-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.rep-rows-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.rep-rows-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.rep-rows-list::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.rep-rows-list::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 .rep-step-row {
@@ -1338,10 +1360,11 @@ function handleExportPlanCsv() {
   grid-template-columns: 24px 140px 1fr 42px 40px;
   align-items: center;
   gap: 8px;
-  padding: 4px 6px;
+  padding: 3px 6px;
   border-radius: 4px;
   cursor: pointer;
   transition: background 0.15s ease;
+  flex-shrink: 0;
 }
 
 .rep-step-row:hover {
@@ -1408,9 +1431,10 @@ function handleExportPlanCsv() {
 }
 
 .minimal-set-footer {
-  margin-top: 10px;
-  padding-top: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid #f1f5f9;
+  flex-shrink: 0;
 }
 
 .footer-conclusion {

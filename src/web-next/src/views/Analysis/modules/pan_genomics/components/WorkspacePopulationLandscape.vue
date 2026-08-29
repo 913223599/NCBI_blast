@@ -42,10 +42,29 @@ const emit = defineEmits<{
 }>()
 
 const hoveredGeneCluster = ref<{ cluster: any; rowId: string; variant: ClusterVariantInfo } | null>(null)
-const hoveredClusterId = ref<string | null>(null)
 const selectedGeneCluster = ref<any | null>(null)
 const geneCategoryFilter = ref<string>('ALL')
 const genePartitionFilter = ref<'ALL' | 'VARIABLE' | 'CORE' | 'UNIQUE'>('ALL')
+
+// 零开销十字准星垂直导轨状态 (GPU 硬件加速，规避上万个 DOM 节点的响应式 Class Diff)
+const crosshairVisible = ref(false)
+const crosshairLeft = ref(0)
+const crosshairWidth = ref(5)
+
+function handleClusterMouseEnter(e: MouseEvent, c: any, rowId: string) {
+  const target = e.currentTarget as HTMLElement
+  if (target) {
+    crosshairLeft.value = target.offsetLeft
+    crosshairWidth.value = target.offsetWidth || 5
+    crosshairVisible.value = true
+  }
+  hoveredGeneCluster.value = { cluster: c, rowId, variant: c._variantMap[rowId] }
+}
+
+function handleClusterMouseLeave() {
+  crosshairVisible.value = false
+  hoveredGeneCluster.value = null
+}
 
 // 板块与轨道折叠/显隐控制
 const isLegendCollapsed = ref(false)
@@ -66,8 +85,8 @@ function naturalSort(ids: string[]): string[] {
   })
 }
 
-// 排序模式: 'natural' 自然顺序递增 (默认) | 'cluster' 系统发育聚类
-const sampleSortOrder = ref<'natural' | 'cluster'>('natural')
+// 排序模式: 'cluster' 系统发育聚类 (默认) | 'natural' 自然顺序递增
+const sampleSortOrder = ref<'natural' | 'cluster'>('cluster')
 
 const rawClusteredIds = computed<string[]>(() => {
   if (props.aniClustering?.ordered_ids?.length) {
@@ -543,7 +562,17 @@ const isCurrentPair = (s1: string, s2: string) => {
       </div>
 
       <!-- 共享样本排序的一体化矩阵画板 -->
-      <div class="phylogenomic-composite-canvas">
+      <div class="phylogenomic-composite-canvas" @mouseleave="handleClusterMouseLeave">
+        <!-- 零响应式开销的 GPU 硬件加速十字准星垂直导轨 (平滑悬浮于对应列，0 次 VNode Diff) -->
+        <div 
+          v-show="crosshairVisible" 
+          class="crosshair-vertical-guide"
+          :style="{
+            left: `${crosshairLeft}px`,
+            width: `${crosshairWidth}px`
+          }"
+        ></div>
+
         <table class="composite-evidence-table">
           <thead>
             <tr>
@@ -675,21 +704,13 @@ const isCurrentPair = (s1: string, s2: string) => {
                 </td>
               </template>
 
-              <!-- 5. 同源基因家族存在/缺失方块矩阵 (O(1) 读取预计算变异数据 + 列悬停十字准星高亮) -->
+              <!-- 5. 同源基因家族存在/缺失方块矩阵 (纯静态零 Diff 渲染 + 绝对定位导轨极速联动) -->
               <template v-if="isGeneMatrixTrackVisible">
                 <td
                   v-for="c in sortedGeneClusters"
                   :key="'cluster-' + rowId + '-' + c.group_id"
                   class="td-cluster-block"
-                  :class="{ 'col-guide-hover': hoveredClusterId === c.group_id }"
-                  @mouseenter="
-                    hoveredGeneCluster = { cluster: c, rowId, variant: c._variantMap[rowId] };
-                    hoveredClusterId = c.group_id
-                  "
-                  @mouseleave="
-                    hoveredGeneCluster = null;
-                    hoveredClusterId = null
-                  "
+                  @mouseenter="handleClusterMouseEnter($event, c, rowId)"
                   @click="openClusterDrawer(c)"
                 >
                   <div
@@ -1331,11 +1352,12 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .th-ani-col {
-  width: 32px;
-  min-width: 32px;
-  max-width: 32px;
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
   text-align: center;
-  padding: 4px 1px;
+  padding: 4px 0;
+  box-sizing: border-box;
 }
 
 .th-rot-label {
@@ -1345,7 +1367,7 @@ const isCurrentPair = (s1: string, s2: string) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 32px;
+  max-width: 24px;
 }
 
 .th-active-pair .th-rot-label {
@@ -1442,10 +1464,12 @@ const isCurrentPair = (s1: string, s2: string) => {
 .bg-risk { background: #f43f5e; }
 
 .td-ani-val-cell {
-  width: 32px;
-  min-width: 32px;
-  max-width: 32px;
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
   height: 24px;
+  min-height: 24px;
+  max-height: 24px;
   line-height: 24px;
   text-align: center;
   vertical-align: middle;
@@ -1455,6 +1479,7 @@ const isCurrentPair = (s1: string, s2: string) => {
   padding: 0;
   box-sizing: border-box;
   cursor: pointer;
+  aspect-ratio: 1 / 1;
   transition: transform 0.1s ease;
 }
 
@@ -1483,12 +1508,20 @@ const isCurrentPair = (s1: string, s2: string) => {
   text-align: center;
   vertical-align: middle;
   border-left: 0.5px solid #f8fafc;
-  transition: background-color 0.1s ease;
 }
 
-/* 十字准星列高亮 */
-.td-cluster-block.col-guide-hover {
-  background-color: rgba(37, 99, 235, 0.12) !important;
+/* 零响应式开销的 GPU 硬件加速十字准星垂直导轨 */
+.crosshair-vertical-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  height: 100%;
+  pointer-events: none;
+  background-color: rgba(37, 99, 235, 0.12);
+  z-index: 10;
+  border-left: 0.5px solid rgba(37, 99, 235, 0.4);
+  border-right: 0.5px solid rgba(37, 99, 235, 0.4);
+  box-sizing: border-box;
 }
 
 .th-elastic-spacer,
@@ -1634,10 +1667,23 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 .density-spacious .td-sample-name-col,
 .density-spacious .td-meta-col,
-.density-spacious .td-ani-val-cell,
 .density-spacious .td-cluster-block {
   height: 36px;
   line-height: 36px;
+}
+.density-spacious .th-ani-col,
+.density-spacious .td-ani-val-cell {
+  width: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  line-height: 36px !important;
+}
+.density-spacious .th-rot-label {
+  max-width: 36px;
+  font-size: 9px;
 }
 .density-spacious .gene-present-square {
   height: 24px;
@@ -1657,11 +1703,25 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 .density-compact .td-sample-name-col,
 .density-compact .td-meta-col,
-.density-compact .td-ani-val-cell,
 .density-compact .td-cluster-block {
   height: 17px;
   line-height: 17px;
   font-size: 9.5px;
+}
+.density-compact .th-ani-col,
+.density-compact .td-ani-val-cell {
+  width: 17px !important;
+  min-width: 17px !important;
+  max-width: 17px !important;
+  height: 17px !important;
+  min-height: 17px !important;
+  max-height: 17px !important;
+  line-height: 17px !important;
+  font-size: 7.5px;
+}
+.density-compact .th-rot-label {
+  max-width: 17px;
+  font-size: 7px;
 }
 .density-compact .gene-present-square {
   height: 12px;
@@ -1681,12 +1741,26 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 .density-ultra .td-sample-name-col,
 .density-ultra .td-meta-col,
-.density-ultra .td-ani-val-cell,
 .density-ultra .td-cluster-block {
   height: 11px;
   line-height: 11px;
   font-size: 8px;
   padding: 0 2px;
+}
+.density-ultra .th-ani-col,
+.density-ultra .td-ani-val-cell {
+  width: 11px !important;
+  min-width: 11px !important;
+  max-width: 11px !important;
+  height: 11px !important;
+  min-height: 11px !important;
+  max-height: 11px !important;
+  line-height: 11px !important;
+  font-size: 6.5px;
+  padding: 0;
+}
+.density-ultra .th-rot-label {
+  max-width: 11px;
 }
 .density-ultra .gene-present-square {
   height: 8px;

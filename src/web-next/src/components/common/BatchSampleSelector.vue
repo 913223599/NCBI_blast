@@ -86,7 +86,9 @@ const filteredSamples = computed(() => {
   let list = [...props.availableSamples]
 
   // 1. 分类筛选
-  if (selectedCategory.value === 'phage') {
+  if (selectedCategory.value === 'selected') {
+    list = list.filter(s => selectedIdSet.value.has(s.sample_id))
+  } else if (selectedCategory.value === 'phage') {
     list = list.filter(s => {
       const isExt = s.source_type === 'external_file' || s.sample_id.startsWith('EXT_')
       const t = (s.sample_type || '').toUpperCase()
@@ -253,44 +255,7 @@ function modalClearAll() {
       </div>
     </div>
 
-    <!-- 2. 已选样本托盘 (Selected Tray) -->
-    <div class="selected-tray-card" v-if="modelValue.length > 0">
-      <div class="tray-header">
-        <div class="tray-title-group">
-          <span class="tray-title">已选分析清单 ({{ modelValue.length }})</span>
-          <button 
-            v-if="modelValue.length > 8" 
-            type="button" 
-            class="btn-toggle-expand" 
-            @click="isSelectedExpanded = !isSelectedExpanded"
-          >
-            {{ isSelectedExpanded ? '收起列表 ▲' : '展开全部 ▼' }}
-          </button>
-        </div>
-        <button type="button" class="btn-clear-tray" @click="clearAllSelected">
-          清空已选
-        </button>
-      </div>
-
-      <div class="selected-chips-box" :class="{ 'is-collapsed': !isSelectedExpanded && modelValue.length > 8 }">
-        <div 
-          v-for="s in modelValue" 
-          :key="s.sample_id" 
-          class="selected-item-chip"
-          :title="`${s.sample_name} (${s.cds_count || 0} CDS)`"
-        >
-          <span class="chip-dot"></span>
-          <span class="chip-name">{{ s.sample_name }}</span>
-          <span class="chip-cds" v-if="s.cds_count !== undefined">{{ s.cds_count }} CDS</span>
-          <button type="button" class="btn-remove-chip" @click="removeSelected(s.sample_id)">&times;</button>
-        </div>
-      </div>
-    </div>
-    <div v-else class="empty-tray-tip">
-      <span>💡 暂未勾选样本，请在下方检索并挑选至少 {{ minSelection }} 个样本进行全景对比</span>
-    </div>
-
-    <!-- 3. 历史样本库挑选控制台 (Available Pool Workspace) -->
+    <!-- 2. 一体化高通量样本交互控制台 (去冗余一体化工作台) -->
     <div class="available-pool-workspace">
       <!-- 过滤与批量操作工具栏 -->
       <div class="pool-toolbar">
@@ -310,7 +275,7 @@ function modalClearAll() {
             <button v-if="searchQuery" class="btn-clear-search" @click="searchQuery = ''">&times;</button>
           </div>
 
-          <!-- 分类筛选器 -->
+          <!-- 分类与已选状态复合筛选器 -->
           <div class="category-filter-tabs">
             <button 
               type="button" 
@@ -347,6 +312,16 @@ function modalClearAll() {
             >
               外部导入 ({{ categoryStats.ext }})
             </button>
+            <button 
+              type="button" 
+              class="cat-tab tab-selected-focus" 
+              :class="{ active: selectedCategory === 'selected' }" 
+              @click="selectedCategory = 'selected'"
+              :title="`仅聚焦查看已选中的 ${modelValue.length} 个样本`"
+            >
+              <span class="tab-focus-dot"></span>
+              已选清单 ({{ modelValue.length }})
+            </button>
           </div>
         </div>
 
@@ -358,6 +333,15 @@ function modalClearAll() {
             </button>
             <button type="button" class="btn-batch" @click="invertFiltered" title="反选当前筛选列表">
               反选
+            </button>
+            <button 
+              v-if="modelValue.length > 0" 
+              type="button" 
+              class="btn-batch btn-clear-action" 
+              @click="clearAllSelected" 
+              title="清空当前所有已选样本"
+            >
+              清空已选
             </button>
             <button type="button" class="btn-batch modal-trigger" @click="openModalSelector" title="打开高级大表穿梭挑选器">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -378,23 +362,32 @@ function modalClearAll() {
         </div>
       </div>
 
-      <!-- 样本胶囊标签滚动池 (固定限高，优雅滚动) -->
+      <!-- 样本胶囊标签滚动池 (一体化交互池：单击即选，无重复冗余) -->
       <div class="samples-scroll-pool">
         <div 
           v-for="s in filteredSamples" 
           :key="s.sample_id" 
           :class="['pool-chip', { selected: selectedIdSet.has(s.sample_id) }]"
           @click="toggleSample(s)"
-          :title="`${s.sample_name}\nID: ${s.sample_id}\nCDS: ${s.cds_count || 0}`"
+          :title="`${s.sample_name}\nID: ${s.sample_id}\nCDS: ${s.cds_count || 0}\n状态: ${selectedIdSet.has(s.sample_id) ? '已选中 (点击取消)' : '未选择 (点击加入分析)'}`"
         >
-          <span class="chip-check">{{ selectedIdSet.has(s.sample_id) ? '✓' : '+' }}</span>
+          <span class="chip-check-icon">
+            <svg v-if="selectedIdSet.has(s.sample_id)" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </span>
           <span class="chip-name">{{ s.sample_name }}</span>
           <span class="chip-cds" v-if="s.cds_count !== undefined">{{ s.cds_count }} CDS</span>
         </div>
 
         <!-- 无匹配结果 -->
         <div v-if="filteredSamples.length === 0" class="empty-pool-state">
-          <p>未找到符合条件的样本</p>
+          <p v-if="selectedCategory === 'selected'">当前暂未勾选任何分析样本，请切换至“全部”或点击上方样本胶囊进行挑选</p>
+          <p v-else>未找到符合条件的样本</p>
           <button v-if="searchQuery" class="btn-reset-filter" @click="searchQuery = ''">清除搜索词</button>
         </div>
       </div>
@@ -609,137 +602,7 @@ function modalClearAll() {
   to { transform: rotate(360deg); }
 }
 
-/* 2. 已选托盘卡片 */
-.selected-tray-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.tray-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.tray-title-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.tray-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #475569;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.btn-toggle-expand {
-  border: none;
-  background: none;
-  color: #3b82f6;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.btn-toggle-expand:hover {
-  background: #eff6ff;
-}
-
-.btn-clear-tray {
-  border: none;
-  background: none;
-  color: #94a3b8;
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: color 0.15s ease;
-}
-
-.btn-clear-tray:hover {
-  color: #ef4444;
-}
-
-.selected-chips-box {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  transition: max-height 0.2s ease;
-}
-
-.selected-chips-box.is-collapsed {
-  max-height: 40px;
-  overflow: hidden;
-}
-
-.selected-item-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #1e40af;
-  animation: fadeIn 0.15s ease;
-}
-
-.chip-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #3b82f6;
-}
-
-.chip-name {
-  font-weight: 600;
-  max-width: 140px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chip-cds {
-  font-size: 10.5px;
-  color: #059669;
-  background: #d1fae5;
-  padding: 1px 4px;
-  border-radius: 4px;
-}
-
-.btn-remove-chip {
-  border: none;
-  background: none;
-  color: #93c5fd;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 2px;
-}
-
-.btn-remove-chip:hover {
-  color: #ef4444;
-}
-
-.empty-tray-tip {
-  padding: 8px 12px;
-  background: #fffbeb;
-  border: 1px dashed #fde68a;
-  border-radius: 6px;
-  font-size: 12px;
-  color: #b45309;
-}
-
-/* 3. 历史样本库工作台 */
+/* 2. 一体化样本库控制台 */
 .available-pool-workspace {
   background: #ffffff;
   border: 1px solid #e2e8f0;
@@ -791,6 +654,7 @@ function modalClearAll() {
   font-size: 12px;
   color: #0f172a;
   outline: none;
+  transition: border-color 0.15s ease;
 }
 
 .pool-search-input:focus {
@@ -817,9 +681,12 @@ function modalClearAll() {
   color: #64748b;
   font-size: 11.5px;
   font-weight: 600;
-  padding: 4px 8px;
+  padding: 4px 9px;
   border-radius: 4px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   transition: all 0.15s ease;
 }
 
@@ -829,8 +696,31 @@ function modalClearAll() {
 }
 
 .cat-tab.active {
-  background: #3b82f6;
+  background: #2563eb;
   color: #ffffff;
+}
+
+.cat-tab.tab-selected-focus {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.cat-tab.tab-selected-focus.active {
+  background: #1d4ed8;
+  color: #ffffff;
+  border-color: #1d4ed8;
+}
+
+.tab-focus-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+}
+
+.cat-tab.tab-selected-focus.active .tab-focus-dot {
+  background: #ffffff;
 }
 
 .batch-action-bar {
@@ -865,6 +755,16 @@ function modalClearAll() {
   color: #0f172a;
 }
 
+.btn-batch.btn-clear-action {
+  color: #64748b;
+}
+
+.btn-batch.btn-clear-action:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
 .btn-batch.modal-trigger {
   color: #2563eb;
   border-color: #bfdbfe;
@@ -884,11 +784,12 @@ function modalClearAll() {
   color: #475569;
   background: #ffffff;
   outline: none;
+  cursor: pointer;
 }
 
 /* 胶囊标签滚动池 */
 .samples-scroll-pool {
-  max-height: 180px;
+  max-height: 200px;
   overflow-y: auto;
   display: flex;
   flex-wrap: wrap;
@@ -897,11 +798,28 @@ function modalClearAll() {
   align-content: flex-start;
 }
 
+.samples-scroll-pool::-webkit-scrollbar {
+  width: 5px;
+}
+
+.samples-scroll-pool::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.samples-scroll-pool::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.samples-scroll-pool::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 .pool-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 4px 10px;
   background: #f8fafc;
   border: 1px solid #cbd5e1;
   border-radius: 16px;
@@ -922,17 +840,25 @@ function modalClearAll() {
   background: #0f172a;
   border-color: #0f172a;
   color: #ffffff;
-  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.15);
+  box-shadow: 0 2px 5px rgba(15, 23, 42, 0.2);
 }
 
-.chip-check {
-  font-weight: 700;
-  font-size: 11px;
+.chip-check-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: #64748b;
+}
+
+.pool-chip.selected .chip-check-icon {
+  color: #38bdf8;
 }
 
 .chip-name {
-  font-weight: 500;
-  max-width: 180px;
+  font-weight: 600;
+  max-width: 200px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
