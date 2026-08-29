@@ -247,7 +247,8 @@ async def batch_blast_from_tree(req: TreeBatchBlastRequest):
 
 @router.post("/api/blast/visualization/data")
 async def get_visualization_data(req: VisDataRequest):
-    if not os.path.exists(req.xml_path): return {"error": "XML not found"}
+    if not os.path.exists(req.xml_path):
+        return {"error": "XML not found"}
     try:
         with open(req.xml_path, 'r', encoding='utf-8') as f:
             records = list(NCBIXML.parse(f))
@@ -256,9 +257,74 @@ async def get_visualization_data(req: VisDataRequest):
         record = records[0]
         hits = []
         for alignment in record.alignments:
-            hit = {'title': alignment.title, 'length': alignment.length, 'hsps': [{'query_start': h.query_start, 'query_end': h.query_end, 'score': h.score, 'evalue': h.expect, 'identity': h.identities / h.align_length if h.align_length > 0 else 0} for h in alignment.hsps]}
-            hits.append(hit)
-        if req.sort_mode == "evalue": hits.sort(key=lambda x: min([float(h['evalue']) for h in x['hsps']] + [1.0]))
-        elif req.sort_mode == "score": hits.sort(key=lambda x: max([float(h['score']) for h in x['hsps']] + [0]), reverse=True)
-        return {"query_name": record.query, "query_length": record.query_length, "hits": hits[:100]}
-    except Exception as e: return {"error": str(e)}
+            parsed_hsps = []
+            for h in alignment.hsps:
+                mismatches = []
+                q_pos = h.query_start
+                s_pos = h.sbjct_start
+                q_seq = getattr(h, 'query', '') or ''
+                s_seq = getattr(h, 'sbjct', '') or ''
+                midline = getattr(h, 'match', '') or ''
+                
+                if q_seq and s_seq:
+                    for q_b, s_b, m_c in zip(q_seq, s_seq, midline if midline else q_seq):
+                        if q_b != s_b or m_c == ' ' or q_b == '-' or s_b == '-':
+                            m_type = 'snp'
+                            if q_b == '-':
+                                m_type = 'insertion'
+                            elif s_b == '-':
+                                m_type = 'deletion'
+                            mismatches.append({
+                                'q_pos': q_pos,
+                                's_pos': s_pos,
+                                'q_base': q_b,
+                                's_base': s_b,
+                                'type': m_type
+                            })
+                        if q_b != '-':
+                            q_pos += 1
+                        if s_b != '-':
+                            s_pos += 1
+
+                identity_ratio = (h.identities / h.align_length) if (h.align_length and h.align_length > 0) else 0
+                parsed_hsps.append({
+                    'query_start': h.query_start,
+                    'query_end': h.query_end,
+                    'sbjct_start': h.sbjct_start,
+                    'sbjct_end': h.sbjct_end,
+                    'score': float(h.score) if h.score is not None else 0,
+                    'evalue': float(h.expect) if h.expect is not None else 0,
+                    'identity': identity_ratio,
+                    'identity_pct': round(identity_ratio * 100, 2),
+                    'identities': getattr(h, 'identities', 0),
+                    'align_length': getattr(h, 'align_length', 0),
+                    'gaps': getattr(h, 'gaps', 0),
+                    'mismatch_count': len(mismatches),
+                    'mismatches': mismatches,
+                    'query_seq': q_seq,
+                    'sbjct_seq': s_seq,
+                    'midline': midline
+                })
+
+            hits.append({
+                'title': alignment.title,
+                'length': alignment.length,
+                'hsps': parsed_hsps
+            })
+
+        if req.sort_mode == "evalue":
+            hits.sort(key=lambda x: min([h['evalue'] for h in x['hsps']] + [1.0]))
+        elif req.sort_mode == "score":
+            hits.sort(key=lambda x: max([h['score'] for h in x['hsps']] + [0]), reverse=True)
+        elif req.sort_mode == "start":
+            hits.sort(key=lambda x: min([h['query_start'] for h in x['hsps']] + [0]))
+
+        return {
+            "query_name": record.query,
+            "query_length": record.query_length,
+            "hits": hits[:100]
+        }
+    except Exception as e:
+        logger.error(f"Visualization parse error: {e}", exc_info=True)
+        return {"error": str(e)}
+

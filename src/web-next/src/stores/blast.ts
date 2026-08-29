@@ -194,8 +194,8 @@ export const useBlastStore = defineStore('blast', () => {
             const transMatches = Array.from(translated.matchAll(consensusRegex))
             if (origMatches.length > 0 && origMatches.length === transMatches.length) {
                 origMatches.forEach((m, idx) => {
-                    const origSub = m[1].trim()
-                    const transSub = transMatches[idx][1].trim()
+                    const origSub = m[1]?.trim() ?? ''
+                    const transSub = transMatches[idx]?.[1]?.trim() ?? ''
                     if (origSub && transSub && origSub !== transSub) {
                         updateSingleTerm(origSub, transSub)
                     }
