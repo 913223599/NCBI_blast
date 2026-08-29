@@ -23,6 +23,7 @@ import {
 import PhylogenyTreeSvg from './subcomponents/PhylogenyTreeSvg.vue'
 import SampleFilterPopover from './subcomponents/SampleFilterPopover.vue'
 import GeneClusterDetailDrawer from './subcomponents/GeneClusterDetailDrawer.vue'
+import PanGenomicsChordDiagram from './subcomponents/PanGenomicsChordDiagram.vue'
 
 const props = defineProps<{
   aniMatrix: Record<string, Record<string, number>>
@@ -40,6 +41,16 @@ const emit = defineEmits<{
   (e: 'select-sample', sampleId: string): void
   (e: 'select-pair', pair: [string, string]): void
 }>()
+
+const viewMode = ref<'matrix' | 'chord'>('matrix')
+
+function handleSelectSample(sid: string) {
+  emit('select-sample', sid)
+}
+
+function handleSelectPair(pair: [string, string]) {
+  emit('select-pair', pair)
+}
 
 const hoveredGeneCluster = ref<{ cluster: any; rowId: string; variant: ClusterVariantInfo } | null>(null)
 const selectedGeneCluster = ref<any | null>(null)
@@ -354,6 +365,29 @@ const isCurrentPair = (s1: string, s2: string) => {
         </div>
 
         <div class="deck-actions-area">
+          <!-- 视图模式控制器 (矩阵条形码 vs 拓扑弦图) -->
+          <div class="segmented-density-control">
+            <span class="control-label">视图:</span>
+            <div class="seg-pills">
+              <button
+                class="seg-btn"
+                :class="{ active: viewMode === 'matrix' }"
+                @click="viewMode = 'matrix'"
+                title="矩阵条形码视图 (全基因组证据矩阵与变异探测)"
+              >
+                矩阵条形码
+              </button>
+              <button
+                class="seg-btn"
+                :class="{ active: viewMode === 'chord' }"
+                @click="viewMode = 'chord'"
+                title="群体拓扑弦图 (同源基因共享流与功能二分关联)"
+              >
+                拓扑弦图
+              </button>
+            </div>
+          </div>
+
           <!-- 排序分段控制器 -->
           <div class="segmented-density-control">
             <span class="control-label">排序:</span>
@@ -529,7 +563,7 @@ const isCurrentPair = (s1: string, s2: string) => {
       </div>
 
       <!-- 3. 精炼学术图注条 (可一键收起/展开) -->
-      <div class="academic-legend-deck" v-show="!isLegendCollapsed">
+      <div class="academic-legend-deck" v-show="!isLegendCollapsed && viewMode === 'matrix'">
         <div class="leg-col leg-col-function">
           <span class="leg-col-title">CDS 功能分类:</span>
           <div class="leg-items-wrap">
@@ -561,8 +595,8 @@ const isCurrentPair = (s1: string, s2: string) => {
         </div>
       </div>
 
-      <!-- 共享样本排序的一体化矩阵画板 -->
-      <div class="phylogenomic-composite-canvas" @mouseleave="handleClusterMouseLeave">
+      <!-- 视图 A: 共享样本排序的一体化矩阵画板 -->
+      <div v-if="viewMode === 'matrix'" class="phylogenomic-composite-canvas" @mouseleave="handleClusterMouseLeave">
         <!-- 零响应式开销的 GPU 硬件加速十字准星垂直导轨 (平滑悬浮于对应列，0 次 VNode Diff) -->
         <div 
           v-show="crosshairVisible" 
@@ -731,8 +765,24 @@ const isCurrentPair = (s1: string, s2: string) => {
         </table>
       </div>
 
+      <!-- 视图 B: 群体拓扑弦图画板 -->
+      <div v-else class="phylogenomic-chord-canvas">
+        <PanGenomicsChordDiagram
+          :clusters="clusters || []"
+          :sample-names="sampleNames"
+          :visible-sample-ids="visibleSampleIds"
+          :ani-matrix="aniMatrix"
+          :tail-matrix="tailMatrix"
+          :lifestyles="lifestyles"
+          :selected-pair="selectedPair"
+          @select-sample="handleSelectSample"
+          @select-pair="handleSelectPair"
+          @open-cluster-drawer="openClusterDrawer"
+        />
+      </div>
+
       <!-- 悬停基因家族信息提示条 (固定高度状态栏) -->
-      <div class="cluster-hover-info-strip" :class="{ active: !!hoveredGeneCluster }">
+      <div v-if="viewMode === 'matrix'" class="cluster-hover-info-strip" :class="{ active: !!hoveredGeneCluster }">
         <template v-if="hoveredGeneCluster">
           <span class="chip-cat" :style="{ backgroundColor: getCatColor(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category) }">
             {{ hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category }}
@@ -772,6 +822,14 @@ const isCurrentPair = (s1: string, s2: string) => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.phylogenomic-chord-canvas {
+  width: 100%;
+  min-height: 680px;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 /* 样本可见性工具条 */
