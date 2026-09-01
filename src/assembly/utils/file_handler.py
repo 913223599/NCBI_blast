@@ -73,11 +73,11 @@ class AssemblyFileHandler:
             
         try:
             with open(file_path, 'rb') as f:
-                # 🔍 校验头部
+                #  校验头部
                 if f.read(2) != b'\x1f\x8b':
                     return False
                 
-                # 🔍 探测尾部 (取最后 4KB 尝试解压)
+                #  探测尾部 (取最后 4KB 尝试解压)
                 # 这能有效检出 99% 的下载/拷贝截断，且耗时固定 (微秒级)
                 file_size = p.stat().st_size
                 probe_size = min(4096, file_size // 2)

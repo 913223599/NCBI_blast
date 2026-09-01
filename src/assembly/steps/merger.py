@@ -20,7 +20,7 @@ class ReadMergerStep(BaseAssemblyStep):
         unmerged_r2 = out_dir / "merged.notCombined_2.fastq.gz"
 
         if merged_file.exists() and merged_file.stat().st_size > 0:
-            # 🔗 断点续传核心修复：必须同步更新所有中间产物变量
+            #  断点续传核心修复：必须同步更新所有中间产物变量
             self.context.update("merged_reads", merged_file)
             if unmerged_r1.exists() and unmerged_r1.stat().st_size > 0: 
                 self.context.update("unmerged_r1", unmerged_r1)
@@ -38,10 +38,10 @@ class ReadMergerStep(BaseAssemblyStep):
             logger.warning("未发现双端测序数据，跳过读长合并")
             return True
 
-        # 🚨 架构修复：长读长数据（Nanopore/PacBio）禁止走合并
+        #  架构修复：长读长数据（Nanopore/PacBio）禁止走合并
         tech = (self.context.config.get("tech") or "ILLUMINA").upper()
         if tech in ["NANOPORE", "PACBIO_HIFI"]:
-            logger.info(f"🛡️ 检测到长读长平台 ({tech})，合并模块不适用，自动跳过")
+            logger.info(f"️ 检测到长读长平台 ({tech})，合并模块不适用，自动跳过")
             return True
 
         if not self.context.config.get("params", {}).get("merge_reads"):
@@ -53,10 +53,10 @@ class ReadMergerStep(BaseAssemblyStep):
         out_dir.mkdir(parents=True, exist_ok=True)
         wsl_out_dir = WSLManager.to_wsl_path(str(out_dir))
         
-        # 🔗 极速飞升：使用内存盘执行合并计算
+        #  极速飞升：使用内存盘执行合并计算
         wsl_tmp_outdir = await self.get_best_wsl_tmp_dir(required_gb=5.0)
         
-        # 💡 安全修复：is_shell=True 时必须传入完整的字符串，并对路径单引号保护
+        #  安全修复：is_shell=True 时必须传入完整的字符串，并对路径单引号保护
         await self.runner.run_command(f"rm -rf '{wsl_tmp_outdir}'", is_shell=True)
         await self.runner.run_command(f"mkdir -p '{wsl_tmp_outdir}'", is_shell=True)
 
@@ -92,7 +92,7 @@ class ReadMergerStep(BaseAssemblyStep):
             if ret_code == 0:
                 if self.on_progress: self.on_progress(80, "合并完成，正在持久化数据...")
                 
-                # 💡 逻辑与安全修复：使用通配符保证拷贝完整，单引号防止路径空格攻击，校验拷贝返回值
+                #  逻辑与安全修复：使用通配符保证拷贝完整，单引号防止路径空格攻击，校验拷贝返回值
                 cp_cmd = f"cp -f '{wsl_tmp_outdir}'/*.fastq.gz '{wsl_out_dir}/'"
                 cp_ret = await self.runner.run_command(cp_cmd, is_shell=True)
                 
@@ -124,8 +124,8 @@ class ReadMergerStep(BaseAssemblyStep):
             return False
             
         finally:
-            # ♻️ 资源回收：确保无论成功失败，内存盘资源一定被释放
-            self.logger.info("♻️ 清理合并阶段内存盘缓存...")
+            # ️ 资源回收：确保无论成功失败，内存盘资源一定被释放
+            self.logger.info("️ 清理合并阶段内存盘缓存...")
             if self.context.shm:
                 await self.context.shm.release(self.__class__.__name__.lower())
             else:

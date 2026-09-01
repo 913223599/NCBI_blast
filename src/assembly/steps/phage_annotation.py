@@ -72,7 +72,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
                 missing_mandatory.append("prodigal-gv")
             
             if missing_mandatory:
-                logger.info(f"🧬 发现关键依赖缺失: {missing_mandatory}, 正在执行增量环境自愈...")
+                logger.info(f" 发现关键依赖缺失: {missing_mandatory}, 正在执行增量环境自愈...")
                 setup_env_wsl = f"{safe_root}/scripts/setup_assembly_env.sh"
                 if (await self.runner.run_command(["test", "-f", setup_env_wsl])) == 0:
                     await self.runner.run_command(["bash", setup_env_wsl])
@@ -143,7 +143,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
                         self.status = "failed"
                         return False
                         
-                    logger.info(f"✅ 统一批处理模式: 将整体组装产物作为单实体发送进行并行注释...")
+                    logger.info(f" 统一批处理模式: 将整体组装产物作为单实体发送进行并行注释...")
                     
                     # 假名 p_id 用于统一命名输出画图与文件前缀
                     p_id = "Phage_Assembly" 
@@ -173,7 +173,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
                 return False
 
         except Exception as e:
-            logger.error(f"❌ [Annotation] 核心流程执行过程中发生严重异常: {e}", exc_info=True)
+            logger.error(f" [Annotation] 核心流程执行过程中发生严重异常: {e}", exc_info=True)
             self.status = "failed"
             return False
 
@@ -191,7 +191,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
         from typing import Any
         result_dict: dict[str, Any] = {"contig_id": p_id, "fasta": str(fasta)}
         
-        logger.info(f"🚀 开始处理噬菌体实体: {p_id}")
+        logger.info(f" 开始处理噬菌体实体: {p_id}")
         
         # 5. Pharokka 主干基因注释
         def pharokka_handler(line: str):
@@ -389,7 +389,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
                             translation = feat.qualifiers.get("translation", [""])[0]
                             
                             writer.writerow([rec.id, feat.type, cid, start, end, strand, func, prod, notes, translation])
-            logger.info(f"✅ 生成终极整合注释表: {output_tsv.name}")
+            logger.info(f" 生成终极整合注释表: {output_tsv.name}")
         except Exception as e:
             logger.warning(f"生成终极注释表失败: {e}")
 
@@ -462,7 +462,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
                             fout.write(line)
                     else:
                         fout.write(line)
-            logger.info(f"✅ 生成同步后用于绘图的 GFF 文件: {new_gff.name}")
+            logger.info(f" 生成同步后用于绘图的 GFF 文件: {new_gff.name}")
         except Exception as e:
             logger.warning(f"同步更新 GFF 文件失败: {e}")
             import shutil
@@ -704,7 +704,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
                 leaf = Clade(name=f"{hit.get('description', 'Unknown')[:37]}... ({hit.get('accession', 'N/A')})", branch_length=max(0.01, float(hit.get("distance", 0.3))))
                 get_or_create_clade(path).clades.append(leaf)
 
-            root.clades.insert(0, Clade(name="★ QUERY_PHAGE", branch_length=0.05))
+            root.clades.insert(0, Clade(name=" QUERY_PHAGE", branch_length=0.05))
             
             plt_height = max(8, len(hits) * 0.45)
             fig = plt.figure(figsize=(12, plt_height))
@@ -937,7 +937,7 @@ class PhageAnnotationStep(BaseAssemblyStep):
                     result["champion_id"] = best_row.get("contig_id")
                     
                     if int(best_row.get("host_genes") or 0) > 0: 
-                        result["warnings"].append(f"⚠️ 警告：冠军序列 {result['champion_id']} 检测到显著宿主污染。")
+                        result["warnings"].append(f"️ 警告：冠军序列 {result['champion_id']} 检测到显著宿主污染。")
         except Exception as e: 
             logger.warning(f"解析 CheckV 报告或选取冠军时发生错误: {e}")
         return result

@@ -12,8 +12,8 @@ export class PhageStrategy extends BaseAssemblyStrategy {
 
   getAssemblyPipeline(task: AssemblyTask): string[] {
     return [
-      '[TODO] SPAdes -phage mode',
-      '[TODO] Phage-specific circularity detection'
+      'NGCS (Eulerian Flow & Disjoint Circular Scaffolding)',
+      'Phage-specific circularity detection'
     ];
   }
 

@@ -18,7 +18,7 @@ class QualityControlStep(BaseAssemblyStep):
         
         r2 = self.context.get("r2")
         
-        # 🔗 物理校验：根据单/双端差异化验证文件存在且体积大于 10KB
+        #  物理校验：根据单/双端差异化验证文件存在且体积大于 10KB
         if r2:
             if clean_r1.exists() and clean_r2.exists():
                 if clean_r1.stat().st_size > 10240 and clean_r2.stat().st_size > 10240:
@@ -33,7 +33,7 @@ class QualityControlStep(BaseAssemblyStep):
         return False
 
     async def execute(self) -> bool:
-        # 🔗 0. 如果已完成，则直接跳过
+        #  0. 如果已完成，则直接跳过
         if self.is_completed():
             self.status = "completed"
             if self.on_progress: self.on_progress(100.0, "已跳过 (发现历史缓存)")
@@ -50,10 +50,10 @@ class QualityControlStep(BaseAssemblyStep):
             self.status = "failed"
             return False
 
-        # 🚨 架构与学术修复: 长读长兼容性 (Nanopore/PacBio 禁走 Fastp)
+        #  架构与学术修复: 长读长兼容性 (Nanopore/PacBio 禁走 Fastp)
         tech = (self.context.config.get("tech") or "ILLUMINA").upper()
         if tech in ["NANOPORE", "PACBIO_HIFI"]:
-            self.logger.info(f"🛡️ 检测到长读长平台 ({tech})，默认 Fastp 短读长质控不适用，自动放行原始数据")
+            self.logger.info(f"️ 检测到长读长平台 ({tech})，默认 Fastp 短读长质控不适用，自动放行原始数据")
             self.context.update("clean_r1", r1)
             if r2: self.context.update("clean_r2", r2)
             self.status = "completed"
@@ -70,7 +70,7 @@ class QualityControlStep(BaseAssemblyStep):
         
         fastp_bin = self.context.config.get("fastp_bin", "fastp")
         
-        # 🔗 进度解析 (fastp 实时反馈)
+        #  进度解析 (fastp 实时反馈)
         def output_handler(line: str):
             if "processed" in line and ":" in line:
                 try:
@@ -81,19 +81,19 @@ class QualityControlStep(BaseAssemblyStep):
                     if self.on_progress: self.on_progress(p, f"已处理: {m_reads}M 条序列")
                 except: pass
 
-        # 🔗 核心计算资源分配优化
+        #  核心计算资源分配优化
         cpu_count = os.cpu_count() or 8
         optimal_threads = max(1, cpu_count - 1)
         fastp_threads = str(min(optimal_threads, 16))
-        self.logger.info(f"🚀 自动资源调优: 物理核心数={cpu_count}, 分配 Fastp 线程={fastp_threads}")
+        self.logger.info(f" 自动资源调优: 物理核心数={cpu_count}, 分配 Fastp 线程={fastp_threads}")
 
-        # 💡 核心修复：WSL 跨系统路径兼容
+        #  核心修复：WSL 跨系统路径兼容
         wsl_r1 = WSLManager.to_wsl_path(str(r1))
         wsl_out_r1 = WSLManager.to_wsl_path(str(clean_r1))
         wsl_json = WSLManager.to_wsl_path(str(fastp_json))
         wsl_html = WSLManager.to_wsl_path(str(fastp_html))
 
-        # 💡 核心修复：动态适配单端/双端测序数据
+        #  核心修复：动态适配单端/双端测序数据
         cmd = [
             fastp_bin,
             "-i", wsl_r1,

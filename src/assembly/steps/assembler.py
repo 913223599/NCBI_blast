@@ -1,358 +1,306 @@
+# -*- coding: utf-8 -*-
+"""
+AssemblerStep - NGCS 基因组组装核心步骤封装
+全面采用 NGCS (Neural Genome Coordinate System) 作为核心拼接引擎。
+支持二代 (Native C++20 欧拉残差流) 与 三代 (连续谱流形与 SIMD-POA) 测序数据的高保真组装。
+"""
+
 import os
 import re
+import sys
+import json
+import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
+
 from ..core.base import BaseAssemblyStep
-from ..env.wsl_manager import WSLManager
+
+logger = logging.getLogger("Assembly.AssemblerStep")
+
 
 class AssemblerStep(BaseAssemblyStep):
     """
-    组装步骤封装: 支持二代 (Unicycler) 与 三代 (Flye) 平台
-    已完成架构级优化：安全的 Shell 拼接、长度加权深度统计、极致 WSL I/O 加速、异常防潮堤。
+    NGCS 基因组组装步骤封装
+    核心特性：
+    1. 全面基于 NGCS 架构：二代欧拉残差流 + 三代流形谱图拓扑与 SIMD-POA 分层打磨。
+    2. 多平台自适应路由：自动分流 Illumina/MGI 短读长双端与 Nanopore/PacBio 长读长单分子数据。
+    3. 流式进度遥测感知：实时捕获并解析底层多阶段日志，同步回传细粒度执行状态。
+    4. 学术级指标收割：计算加权平均深度、N50、环状拓扑结构、GC 含量与 Contigs 分布。
     """
+
     def is_completed(self) -> bool:
-        for dir_name in ["assembly_run", "unicycler_run"]:
-            out_dir = self.get_working_dir() / dir_name
-            assembly_fasta = out_dir / "assembly.fasta"
-            if assembly_fasta.exists() and assembly_fasta.stat().st_size > 0:
-                self.context.update("assembly_fasta", assembly_fasta)
-                stats = self._parse_assembly_stats(assembly_fasta)
-                self.context.update("assembly_stats", stats)
-                return True
+        """检查组装产物是否已存在且合法"""
+        out_dir = self.get_working_dir() / "assembly_run"
+        assembly_fasta = out_dir / "assembly.fasta"
+        if assembly_fasta.exists() and assembly_fasta.stat().st_size > 0:
+            self.context.update("assembly_fasta", assembly_fasta)
+            stats = self._parse_assembly_stats(assembly_fasta)
+            self.context.update("assembly_stats", stats)
+            return True
         return False
+
+    def _resolve_ngcs_cli(self) -> Path:
+        """动态解析 NGCS CLI 入口路径"""
+        # 1. 优先从全局配置获取
+        custom_path = self.context.config.get("params", {}).get("ngcs_cli_path") or self.context.config.get("ngcs_cli_path")
+        if custom_path and Path(custom_path).exists():
+            return Path(custom_path).resolve()
+
+        # 2. 检查环境变量
+        env_path = os.environ.get("NGCS_CLI_PATH")
+        if env_path and Path(env_path).exists():
+            return Path(env_path).resolve()
+
+        # 3. 检查标准绝对路径与常用相对路径
+        candidate_paths = [
+            Path(r"E:\NGCS\ngcs\cli.py"),
+            Path(__file__).resolve().parent.parent.parent.parent.parent / "NGCS" / "ngcs" / "cli.py",
+            Path(self.context.base_dir).resolve().parent.parent / "NGCS" / "ngcs" / "cli.py"
+        ]
+
+        for cand in candidate_paths:
+            if cand.exists():
+                return cand.resolve()
+
+        # 兜底返回默认路径
+        return Path(r"E:\NGCS\ngcs\cli.py")
 
     async def execute(self) -> bool:
         if self.is_completed():
             self.logger.info("检测到已存在的组装产物，跳过该步骤")
             self.status = "completed"
-            if self.on_progress: self.on_progress(100, "已跳过 (发现历史缓存)")
+            if self.on_progress:
+                self.on_progress(100, "已跳过 (发现历史缓存)")
             return True
 
         self.status = "running"
+        params = self.context.config.get("params", {})
         cpu_count = os.cpu_count() or 8
-        optimal_threads = self.context.config.get("params", {}).get("threads") or max(1, cpu_count - 1)
-        self.logger.info(f"🚀 自动资源调优: 物理核心数={cpu_count}, 自适应/手动分配线程={optimal_threads}")
+        optimal_threads = params.get("threads") or max(1, cpu_count - 2)
+        threads_str = str(optimal_threads)
 
         tech = (self.context.config.get("tech") or "ILLUMINA").upper()
         sample_type = (self.context.config.get("sample_type") or "PHAGE").upper()
-        total_gb = await self.get_total_memory_gb()
         
-        # 内存平衡: 通过 ShmManager 动态获取进程可用内存
-        if self.context.shm:
-            max_mem = self.context.config.get("max_memory") or self.context.shm.get_process_memory_limit()
-        else:
-            max_mem = self.context.config.get("max_memory") or max(4, int(total_gb) - 8)
-        
-        self.logger.info(f"内存平衡审计: 总量={total_gb:.1f}G, 分配给引擎={max_mem}G")
-        unicycler_bin = self.context.config.get("unicycler_bin", "unicycler")
-        threads = str(optimal_threads)
+        self.logger.info(f"启动 NGCS 组装调度: 平台={tech}, 样本类型={sample_type}, 分配线程={optimal_threads}")
 
-        r1_raw = self.context.get("clean_r1") or self.context.get("r1")
-        r2_raw = self.context.get("clean_r2") or self.context.get("r2")
-        r1 = str(r1_raw).replace('\\', '/') if r1_raw else None
-        r2 = str(r2_raw).replace('\\', '/') if r2_raw else None
-        
+        ngcs_cli = self._resolve_ngcs_cli()
+        if not ngcs_cli.exists():
+            err_msg = f"未找到 NGCS 引擎入口文件: {ngcs_cli}"
+            self.logger.error(err_msg)
+            self.status = "failed"
+            if self.on_progress:
+                self.on_progress(0, err_msg)
+            return False
+
+        # 准备输出目录
+        out_dir = self.get_working_dir() / "assembly_run"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        assembly_fasta = out_dir / "assembly.fasta"
+
+        # 获取输入测序数据
+        r1_raw = self.context.get("unmerged_r1") or self.context.get("clean_r1") or self.context.get("r1")
+        r2_raw = self.context.get("unmerged_r2") or self.context.get("clean_r2") or self.context.get("r2")
+        r1 = str(r1_raw) if r1_raw else None
+        r2 = str(r2_raw) if r2_raw else None
+
         if not r1:
             self.logger.error("未找到有效的输入数据路径")
             self.status = "failed"
             return False
 
-        out_dir = self.get_working_dir() / "assembly_run"
-        raw_tmp_dir = await self.get_best_wsl_tmp_dir(required_gb=10.0)
-        wsl_tmp_outdir = raw_tmp_dir.replace('\\', '/')
-        
-        await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir])
-        await self.runner.run_command(["mkdir", "-p", wsl_tmp_outdir])
+        # 模式配置
+        mode = params.get("mode")
+        if not mode:
+            mode = "metagenome" if sample_type in ["PHAGE", "VIRUS", "METAGENOME"] else "isolate"
 
-        cmd_str = ""
-        handler = None
-        returncode = -1
-        found_fasta = False
+        # 构建 NGCS CLI 指令
+        py_exec = sys.executable
+        cmd_list = [py_exec, str(ngcs_cli), "assemble"]
 
-        # 🔗 技术路线判定
-        if tech in ["NANOPORE", "PACBIO_HIFI"]:
-            platform_arg = "--nano-raw" if tech == "NANOPORE" else "--pacbio-hifi"
-            # 修复：保护路径空格
-            cmd_list = [
-                "flye", platform_arg, f"'{r1}'", "-o", f"'{wsl_tmp_outdir}'",
-                "--threads", threads
-            ]
-            if sample_type == "PHAGE":
-                cmd_list.append("--meta")
-            cmd_str = " ".join(cmd_list)
-            
-            def flye_handler(line: str):
-                line = line.strip()
-                if "Assembling" in line and self.on_progress: self.on_progress(30, "Flye: 正在计算重叠图谱...")
-                elif "Polishing" in line and self.on_progress: self.on_progress(85, "Flye: 正在执行最终打磨...")
-            handler = flye_handler
-
+        is_long_read = tech in ["NANOPORE", "PACBIO_HIFI"] or not r2
+        if is_long_read:
+            min_len = str(params.get("min_read_length", 500))
+            cmd_list.extend([
+                "-i", r1,
+                "-o", str(out_dir),
+                "-t", threads_str,
+                "--min-len", min_len,
+                "--mode", mode
+            ])
+            self.logger.info(f"NGCS 长读长单分子组装模式: 输入={r1}, mode={mode}, min_len={min_len}")
         else:
-            # --- 二代方案 (自适应路由) ---
-            params = self.context.config.get("params", {})
-            final_r1_orig = WSLManager.to_wsl_path(str(self.context.get("unmerged_r1") or r1))
-            final_r2_orig = WSLManager.to_wsl_path(str(self.context.get("unmerged_r2") or r2))
-            final_s_orig = None
-            merged = self.context.get("merged_reads")
-            if merged and Path(merged).exists():
-                final_s_orig = WSLManager.to_wsl_path(str(merged))
+            cmd_list.extend([
+                "-1", r1,
+                "-2", r2,
+                "-o", str(out_dir),
+                "-t", threads_str,
+                "--mode", mode,
+                "--no-qc"  # 上游步骤已执行完整质控，直接全速处理
+            ])
+            self.logger.info(f"NGCS 短读长双端欧拉流组装模式: R1={r1}, R2={r2}, mode={mode}")
 
-            # 🚀 极限 I/O 加速: 自动将 Windows 文件系统的输入拷入 WSL 内部
-            async def preload_to_ram(src_path: Optional[str], target_name: str) -> Optional[str]:
-                if src_path and "/mnt/c/" in src_path:
-                    try:
-                        win_p = src_path.replace("/mnt/c/", "c:/")
-                        size_gb = Path(win_p).stat().st_size / (1024 ** 3)
-                        if size_gb > 5.0:
-                            self.logger.warning(f"🛡️ 拒绝预热超大文件 ({size_gb:.1f}GB > 5.0GB): {src_path}，已降级为原地读取")
-                            return src_path
-                    except Exception:
-                        pass
-                        
-                    shm_path = f"{wsl_tmp_outdir}/{target_name}"
-                    self.logger.info(f"⚡ I/O 预热至高极速区: {src_path} → {shm_path}")
-                    if await self.runner.run_command(["cp", "-f", src_path, shm_path]) == 0:
-                        return shm_path
-                return src_path
+        # 实时日志捕获与进度遥测映射
+        def ngcs_progress_handler(line: str):
+            line_str = line.strip()
+            if not line_str:
+                return
 
-            base_cov = params.get("target_coverage") or self.context.config.get("target_coverage", 300)
-            target_coverages = [base_cov, 100, "FULL"]
-            e_size = params.get("estimated_genome_size") or self.context.config.get("estimated_genome_size", 100000)
+            if "[Phase 00a]" in line_str or "Quality Control" in line_str:
+                if self.on_progress:
+                    self.on_progress(10, "数据质控与接头修剪 (Fastp)...")
+            elif "[Phase 00b]" in line_str or "Native C++20" in line_str:
+                if self.on_progress:
+                    self.on_progress(25, "Native C++20 欧拉残差流引擎计算中...")
+            elif "[Phase 01]" in line_str or "Stream Ingestion" in line_str:
+                if self.on_progress:
+                    self.on_progress(20, "测序数据流流式加载中...")
+            elif "[Phase 02]" in line_str or "Multi-Tier" in line_str or "Resolving Flow Tier" in line_str:
+                if self.on_progress:
+                    self.on_progress(45, "多层级残差流 De Bruijn 图分解构建...")
+            elif "[Phase 03]" in line_str or "Dovetail Merging" in line_str or "Gap-Filling" in line_str:
+                if self.on_progress:
+                    self.on_progress(65, "全域 0-Indel Dovetail 拓扑合并与补洞...")
+            elif "[Phase 04]" in line_str or "Paired-End Jump Scaffolding" in line_str:
+                if self.on_progress:
+                    self.on_progress(80, "配对跳跃支架构建 (PE Scaffolding)...")
+            elif "Solving Graph Laplacian" in line_str or "Disentangling" in line_str:
+                if self.on_progress:
+                    self.on_progress(40, "连续谱流形相位规约与分子拓扑解缠...")
+            elif "SIMD-POA Consensus Engine" in line_str or "Polishing" in line_str:
+                if self.on_progress:
+                    self.on_progress(75, "SIMD-POA 分层打磨与一致性精修...")
+            elif "Scaffolding Complete" in line_str:
+                if self.on_progress:
+                    self.on_progress(85, "非相交环状支架构建完成...")
+            elif "Assembly complete" in line_str or "[SUCCESS]" in line_str or "SUCCESS]" in line_str:
+                if self.on_progress:
+                    self.on_progress(95, "组装完成，正在整理产物...")
 
-
-
-            for attempt, current_cov in enumerate(target_coverages):
-                self.logger.info(f"🔄 启动组装循环 (第 {attempt+1} 次尝试), 目标深度: {current_cov}x")
-                
-                await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir])
-                await self.runner.run_command(["mkdir", "-p", wsl_tmp_outdir])
-                
-                final_r1, final_r2, final_s = final_r1_orig, final_r2_orig, final_s_orig
-
-                if sample_type == "PHAGE" and final_r1 and final_r2 and current_cov != "FULL":
-                    target_reads = max(50000, int((e_size * current_cov) / (150 * 2)))
-                    self.logger.info(f"🧪 智能随机采样: 预估={e_size/1000:.0f}kb, 目标深度={current_cov}x")
-                    if self.on_progress: self.on_progress(2, f"阶段: 执行随机子集采样 ({current_cov}x)...")
-                    
-                    sampling_dir = f"{wsl_tmp_outdir}/sampling"
-                    await self.runner.run_command(["mkdir", "-p", sampling_dir])
-                    r1_s, r2_s = f"{sampling_dir}/S1.fq.gz", f"{sampling_dir}/S2.fq.gz"
-                    
-                    has_pigz = (await self.runner.run_command(["which", "pigz"], silence_errors=True)) == 0
-                    zip_tool = f"pigz -p {max(1, optimal_threads//2)}" if has_pigz else "gzip"
-                    
-                    sample_cmd = (
-                        f"seqtk sample -s100 '{final_r1}' {target_reads} | {zip_tool} > '{r1_s}' && "
-                        f"seqtk sample -s100 '{final_r2}' {target_reads} | {zip_tool} > '{r2_s}'"
-                    )
-                    ret_sample = await self.runner.run_command(sample_cmd, is_shell=True)
-                    
-                    if ret_sample == 0 and await self.runner.run_command(["test", "-s", r1_s]) == 0:
-                        final_r1, final_r2 = r1_s, r2_s
-                    else:
-                        self.logger.warning("降采样工具 seqtk 失败或未安装，已自动回退使用全部原始数据")
-
-                final_s = await preload_to_ram(final_s, "merged_cache.fq.gz")
-                if final_r1 != f"{wsl_tmp_outdir}/sampling/S1.fq.gz":
-                    final_r1 = await preload_to_ram(final_r1, "R1_cache.fq.gz")
-                    final_r2 = await preload_to_ram(final_r2, "R2_cache.fq.gz")
-
-                self.logger.info(f"🧪 [常规模式] 启动 Unicycler 引擎 (尝试 {attempt+1})")
-                mode = params.get("mode") or ("bold" if sample_type == "PHAGE" else "normal")
-                min_len = params.get("min_fasta_length") or 200
-
-                spades_tmp_dir = f"{wsl_tmp_outdir}/spades_tmp"
-                spades_opts = f"--memory {max_mem} --tmp-dir {spades_tmp_dir} -m {max_mem * 1024}".strip()
-
-                cmd_list = [
-                    unicycler_bin, "-1", f"'{final_r1}'", "-2", f"'{final_r2}'",
-                    "-o", f"'{wsl_tmp_outdir}'", "--threads", threads,
-                    "--mode", mode, "--min_fasta_length", str(min_len),
-                    "--spades_options", f"'{spades_opts}'"
-                ]
-                if final_s:
-                    cmd_list.extend(["-s", f"'{final_s}'"])
-                
-                cmd_str = " ".join(cmd_list)
-
-                def unicycler_detailed_handler(line: str):
-                    line = line.strip()
-                    if "K-mer size" in line:
-                        try:
-                            k = int(line.split("size")[-1].replace(":", "").strip())
-                            p = 10 + int(((k - 21) / (127 - 21)) * 40)
-                            if self.on_progress: self.on_progress(p, f"Unicycler: K-mer {k}...")
-                        except: pass
-                handler = unicycler_detailed_handler
-
-                try:
-                    returncode = await self.runner.run_command(cmd_str, on_output=handler, is_shell=True)
-                    if self.context.config.get("use_gpu") and returncode == 0:
-                        self.logger.info("🚀 GPU 加速模块已就绪")
-                except Exception as e:
-                    self.logger.error(f"引擎执行过程产生未捕获异常: {e}")
-                    returncode = -1
-                    
-                # 收割产物
-                await self.runner.run_command(["mkdir", "-p", WSLManager.to_wsl_path(str(out_dir))])
-                potential_fastas = ["assembly.fasta", "scaffolds.fasta"]
-                graph_names = ["assembly.gfa", "assembly_graph.gfa"]
-                log_names = ["unicycler.log", "flye.log", "assembly.log"]
-                
-                found_fasta = False
-                for f_name in potential_fastas:
-                    src = f"{wsl_tmp_outdir}/{f_name}"
-                    if await self.runner.run_command(["test", "-f", src]) == 0:
-                        await self.runner.run_command(["cp", "-f", src, WSLManager.to_wsl_path(str(out_dir / "assembly.fasta"))])
-                        if returncode == 0: self.logger.info(f"成功捕获序列产物: {f_name}")
-                        found_fasta = True
-                        break
-                
-                for names, dest in [(graph_names, "assembly.gfa"), (log_names, "assembly.log")]:
-                    for n in names:
-                        src = f"{wsl_tmp_outdir}/{n}"
-                        if await self.runner.run_command(["test", "-f", src]) == 0:
-                            await self.runner.run_command(["cp", "-f", src, WSLManager.to_wsl_path(str(out_dir / dest))])
-                            break
-                
-                spades_log = f"{wsl_tmp_outdir}/spades_assembly/spades.log"
-                if await self.runner.run_command(["test", "-f", spades_log]) == 0:
-                    await self.runner.run_command(["cp", "-f", spades_log, WSLManager.to_wsl_path(str(out_dir / "spades.log"))])
-
-                if returncode == 0 and found_fasta:
-                    break  # 成功，跳出重试循环
-                else:
-                    log_file = out_dir / "assembly.log"
-                    reason = self._diagnose_failure(log_file)
-                    self.logger.error(f"❌ 第 {attempt+1} 次组装尝试失败: {reason}")
-                    
-                    if "内存空间不足" in reason or "bad_alloc" in reason or "未知报错" in reason:
-                        if attempt + 1 < len(target_coverages):
-                            self.logger.info("⚠️ 触发内存过载防线，将降低深度重试...")
-                            continue
-                    elif "深度过低" in reason:
-                        if current_cov != "FULL":
-                            self.logger.info("⚠️ 测序深度不足，将提升数据量重试...")
-                            continue
-                    
-            # 🚀 双引擎打捞 (Dual-Engine Fallback): 如果 Unicycler 彻底失败或碎片化严重，启动 SPAdes Meta 模式
-            if not found_fasta or returncode != 0:
-                self.logger.warning("⚠️ Unicycler/默认组装失败，自动触发 SPAdes --meta 备用引擎...")
-                fallback_out = f"{wsl_tmp_outdir}/fallback_spades"
-                await self.runner.run_command(["rm", "-rf", fallback_out])
-                
-                final_r1, final_r2 = final_r1_orig, final_r2_orig
-                if sample_type == "PHAGE" and final_r1 and final_r2:
-                    self.logger.info("备用引擎启用前降采样保护机制...")
-                    target_reads = 1000000 # 预设固定 100W 条 reads
-                    sampling_dir = f"{wsl_tmp_outdir}/sampling_fallback"
-                    await self.runner.run_command(["mkdir", "-p", sampling_dir])
-                    r1_s, r2_s = f"{sampling_dir}/S1.fq.gz", f"{sampling_dir}/S2.fq.gz"
-                    has_pigz = (await self.runner.run_command(["which", "pigz"], silence_errors=True)) == 0
-                    zip_tool = f"pigz -p {max(1, optimal_threads//2)}" if has_pigz else "gzip"
-                    sample_cmd = f"seqtk sample -s100 '{final_r1}' {target_reads} | {zip_tool} > '{r1_s}' && seqtk sample -s100 '{final_r2}' {target_reads} | {zip_tool} > '{r2_s}'"
-                    if await self.runner.run_command(sample_cmd, is_shell=True) == 0 and await self.runner.run_command(["test", "-s", r1_s]) == 0:
-                        final_r1, final_r2 = r1_s, r2_s
-                        
-                spades_cmd = [
-                    "spades.py", "--meta", "-1", f"'{final_r1}'", "-2", f"'{final_r2}'",
-                    "-o", f"'{fallback_out}'", "-t", threads, "-m", str(max_mem)
-                ]
-                def fallback_handler(line: str):
-                    if "K-mer" in line and self.on_progress: self.on_progress(50, "SPAdes Meta: 迭代 K-mer 中...")
-                    elif "Assembling" in line and self.on_progress: self.on_progress(70, "SPAdes Meta: 正在构建支架...")
-                
-                fallback_ret = await self.runner.run_command(" ".join(spades_cmd), on_output=fallback_handler, is_shell=True)
-                if fallback_ret == 0:
-                    fallback_fasta = f"{fallback_out}/scaffolds.fasta"
-                    if await self.runner.run_command(["test", "-f", fallback_fasta]) == 0:
-                        await self.runner.run_command(["mkdir", "-p", WSLManager.to_wsl_path(str(out_dir))])
-                        await self.runner.run_command(["cp", "-f", fallback_fasta, WSLManager.to_wsl_path(str(out_dir / "assembly.fasta"))])
-                        self.logger.info("SPAdes Meta 备用引擎打捞成功！")
-                        found_fasta = True
-                        returncode = 0
-
-            # 循环结束后的清理逻辑
-            step_key = self.__class__.__name__.lower()
-            if self.context.shm:
-                await self.context.shm.release(step_key, retain_for_diagnostics=(returncode != 0))
-            elif returncode == 0:
-                self.logger.info(f"正在执行回收清理: {wsl_tmp_outdir}")
-                await self.runner.run_command(["rm", "-rf", wsl_tmp_outdir])
-            else:
-                self.logger.warning(f"组装彻底失败，已保留现场以供诊断: {wsl_tmp_outdir}")
-
-        if returncode == 0 and found_fasta:
-            assembly_fasta = out_dir / "assembly.fasta"
-            if assembly_fasta.exists() and assembly_fasta.stat().st_size > 0:
-                self.context.update("assembly_fasta", assembly_fasta)
-                stats = self._parse_assembly_stats(assembly_fasta)
-                self.context.update("assembly_stats", stats)
-                self.status = "completed"
-                return True
-        else:
-            log_file = out_dir / "assembly.log"
-            reason = self._diagnose_failure(log_file)
-            if self.on_progress: self.on_progress(0, f"Error: {reason}")
-        
-        self.status = "failed"
-        return False
-
-    def _parse_assembly_stats(self, fasta_path: Path) -> dict:
-        """解析 Fasta，并采用符合学术标准的加权平均深度计算"""
-        stats = {"total_length": 0, "is_circular": False, "avg_depth": 0.0, "contigs": 0}
-        total_depth_mass = 0.0  # 用于加权深度计算 (Depth * Length)
-        
         try:
-            with open(fasta_path, "r", encoding="utf-8") as f:
+            returncode = await self.runner.run_command(
+                cmd_list,
+                cwd=out_dir,
+                on_output=ngcs_progress_handler,
+                is_shell=False
+            )
+        except Exception as e:
+            self.logger.error(f"NGCS 引擎执行异常: {e}")
+            returncode = -1
+
+        # 校验产物
+        if returncode == 0 and assembly_fasta.exists() and assembly_fasta.stat().st_size > 0:
+            self.logger.info(f"NGCS 组装成功生成 FASTA 产物: {assembly_fasta}")
+            self.context.update("assembly_fasta", assembly_fasta)
+            stats = self._parse_assembly_stats(assembly_fasta)
+            self.context.update("assembly_stats", stats)
+
+            self.status = "completed"
+            if self.on_progress:
+                self.on_progress(100, "组装完成")
+            return True
+        else:
+            reason = self._diagnose_failure(out_dir)
+            self.logger.error(f"NGCS 组装未产生有效结果: {reason}")
+            if self.on_progress:
+                self.on_progress(0, f"Error: {reason}")
+            self.status = "failed"
+            return False
+
+    def _parse_assembly_stats(self, fasta_path: Path) -> Dict[str, Any]:
+        """
+        解析 FASTA 产物指标 (加权平均深度、总长度、Contig数、N50、环状标记)
+        """
+        stats = {
+            "total_length": 0,
+            "is_circular": False,
+            "avg_depth": 0.0,
+            "contigs": 0,
+            "gc_percent": 0.0,
+            "n50": 0
+        }
+        contig_lengths = []
+        total_depth_mass = 0.0
+        total_gc = 0
+        total_at = 0
+
+        try:
+            with open(fasta_path, "r", encoding="utf-8", errors="ignore") as f:
                 current_len = 0
                 current_depth = 0.0
-                
-                def process_previous_contig():
+
+                def finish_contig():
                     nonlocal total_depth_mass
                     if current_len > 0:
                         stats["total_length"] += current_len
-                        # 修复：采用加权均值深度 (Weighted Average Depth)
+                        contig_lengths.append(current_len)
                         total_depth_mass += current_depth * current_len
 
                 for line in f:
-                    line = line.strip()
-                    if line.startswith(">"):
-                        process_previous_contig() # 处理上一条序列的积攒数据
+                    line_str = line.strip()
+                    if line_str.startswith(">"):
+                        finish_contig()
                         current_len = 0
                         stats["contigs"] += 1
-                        header = line.lower()
-                        
-                        depth_match = re.search(r"(?:depth[=]|cov_)(\d+\.?\d*)", header)
-                        current_depth = float(depth_match.group(1)) if depth_match else 0.0
-                        
-                        if "circular=true" in header or "[circular" in header or "circular_detected" in header:
+                        header = line_str.lower()
+
+                        # 深度解析
+                        depth_match = re.search(r"(?:depth[=]|cov_|cov=)(\d+\.?\d*)", header)
+                        current_depth = float(depth_match.group(1)) if depth_match else 1.0
+
+                        # 环状判定
+                        if "circular=true" in header or "_circular" in header or "circular" in header:
                             stats["is_circular"] = True
                     else:
-                        current_len += len(line)
-                        
-                process_previous_contig() # 处理最后一条序列
-                            
+                        seq_upper = line_str.upper()
+                        current_len += len(seq_upper)
+                        total_gc += seq_upper.count("G") + seq_upper.count("C")
+                        total_at += seq_upper.count("A") + seq_upper.count("T")
+
+                finish_contig()
+
             if stats["total_length"] > 0:
                 stats["avg_depth"] = round(total_depth_mass / stats["total_length"], 2)
+                total_bases = total_gc + total_at
+                stats["gc_percent"] = round((total_gc / total_bases * 100.0), 2) if total_bases > 0 else 0.0
+
+                # N50 计算
+                contig_lengths.sort(reverse=True)
+                half_len = stats["total_length"] / 2.0
+                cum_len = 0
+                for l in contig_lengths:
+                    cum_len += l
+                    if cum_len >= half_len:
+                        stats["n50"] = l
+                        break
+
             return stats
         except Exception as e:
-            self.logger.error(f"无法解析组装指标: {e}")
+            self.logger.error(f"解析组装指标失败: {e}")
             return stats
 
-    def _diagnose_failure(self, log_path: Path) -> str:
-        if not log_path.exists():
-            return "原因未知 (未找到日志文件或发生致命崩溃终止)"
-        try:
-            content = log_path.read_text(encoding='utf-8', errors='ignore')
-            low_depth_keys = ["Insufficient read depth", "too few reads", "no disjointigs assembled", "No sequences to assemble"]
-            if any(k.lower() in content.lower() for k in low_depth_keys):
-                return "测序深度过低或数据清洗过度 (无法建立有效的重叠图谱)"
-            if "Out of memory" in content or "bad_alloc" in content:
-                return "硬件内存空间不足，请尝试调小可用线程数或加大 max_memory"
-            if "Segfault" in content or "Signal 11" in content:
-                return "底层引擎异常 (Segmentation Fault)"
-            lines = [l.strip() for l in content.splitlines() if l.strip()]
-            return "报错摘要: " + " | ".join(lines[-2:]) if len(lines) >= 2 else "未知报错"
-        except:
-            return "日志读取解析失败"
+    def _diagnose_failure(self, out_dir: Path) -> str:
+        """诊断失败原因"""
+        manifest_file = out_dir / "assembly_manifest.json"
+        if manifest_file.exists():
+            try:
+                with open(manifest_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("total_contigs", 0) == 0:
+                        return "测序深度过低或有效 Reads 不足，未能提取到有效 Contig"
+            except Exception:
+                pass
+
+        # 检查日志
+        log_candidates = list(out_dir.glob("*.log"))
+        for log_f in log_candidates:
+            try:
+                content = log_f.read_text(encoding="utf-8", errors="ignore")
+                if "Out of memory" in content or "bad_alloc" in content:
+                    return "硬件内存空间不足，请调小可用线程数"
+                if "Insufficient read depth" in content or "too few reads" in content:
+                    return "测序深度过低或数据清洗过度"
+            except Exception:
+                pass
+
+        return "组装过程未生成有效 FASTA 文件，请检查原始数据质量或测序深度"

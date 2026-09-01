@@ -10,7 +10,7 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger("api_server")
 
@@ -135,7 +135,7 @@ class AssemblyReportParser:
             "total_length": 0, "gc_content": 0.0,
         }
 
-        # 🚀 提升解析优先级：重排产物 > 精修组装 > 支架构建 > 纯化噬菌体 > 原始组装
+        #  提升解析优先级：重排产物 > 精修组装 > 支架构建 > 纯化噬菌体 > 原始组装
         # 优先解析最下游的 FASTA, 依次回退
         fasta_candidates = [
             self.task_dir / "phageannotationstep" / "champion_ordered.fasta",
@@ -143,8 +143,6 @@ class AssemblyReportParser:
             self.task_dir / "scaffoldingstep" / "scaffolds.clean.fasta",
             self.task_dir / "prophageseparatorstep" / "separated_phage.fasta",
             self.task_dir / "assemblerstep" / "assembly_run" / "assembly.fasta",
-            self.task_dir / "assemblerstep" / "unicycler_run" / "assembly.fasta",
-            # 💡 [新增] 兜底匹配：搜索任何 .fasta 或 .fna 文件 (按修改时间排序)
         ]
         
         fasta = None
@@ -154,7 +152,7 @@ class AssemblyReportParser:
                 break
         
         if not fasta:
-            # 🚀 [自动愈合] 如果已知路径均未命中，进行深度搜索
+            #  [自动愈合] 如果已知路径均未命中，进行深度搜索
             all_fastas = sorted(
                 list(self.task_dir.glob("**/*.fasta")) + list(self.task_dir.glob("**/*.fna")),
                 key=lambda x: x.stat().st_size, reverse=True
@@ -204,12 +202,12 @@ class AssemblyReportParser:
                         if "circular=true" in line.lower() or "_circular" in line.lower():
                             header_meta["circular"] = True
                             
-                        # 解析 depth (兼容 Unicycler 和 SPAdes)
-                        m_depth = re.search(r'depth=([\d\.]+)x?', line)
+                        # 解析 depth (兼容 NGCS 与通用格式)
+                        m_depth = re.search(r'(?:depth[=:]|cov[=_:]|cov=)([\d\.]+)', line, re.IGNORECASE)
                         if m_depth:
                             header_meta["depth"] = float(m_depth.group(1))
                         else:
-                            m_cov = re.search(r'cov_([\d\.]+)', line)
+                            m_cov = re.search(r'cov_([\d\.]+)', line, re.IGNORECASE)
                             if m_cov:
                                 header_meta["depth"] = float(m_cov.group(1))
 
@@ -308,7 +306,7 @@ class AssemblyReportParser:
 
     def _parse_annotation(self) -> dict:
         anno_dir = self.task_dir / "phageannotationstep"
-        result = {
+        result: Dict[str, Any] = {
             "status": "ok",
             "pharokka": {"genome": {}, "functions": []},
             "phold": {
@@ -318,6 +316,7 @@ class AssemblyReportParser:
             },
             "phagescope_backfill": None,
             "visual_map": None,
+            "phylogeny_map": None,
             "type_counts": {},
         }
 
@@ -439,7 +438,7 @@ class AssemblyReportParser:
             report["telemetry"] = results.get("telemetry")
             report["phagescope_audit"] = results.get("phagescope_audit", {})
             
-            # 🚀 深度暴露 V5 工业管道新增评估参数
+            #  深度暴露 V5 工业管道新增评估参数
             report["host_prediction"] = results.get("host_prediction", {})
             report["lifecycle_prediction"] = results.get("lifecycle_prediction", {})
             report["correction_metadata"] = results.get("correction_metadata", {})

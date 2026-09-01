@@ -18,7 +18,7 @@ class AnnotationStep(BaseAssemblyStep):
         prokka_bin = self.context.config.get("prokka_bin", "prokka")
         prefix = self.context.config.get("prefix", "ASSEMBLY")
         
-        # 🔗 0. 断点检查
+        #  0. 断点检查
         gbk_file = out_dir / f"{prefix}.gbk"
         if gbk_file.exists() and gbk_file.stat().st_size > 0:
             self.logger.info("检测到已存在的注释结果，跳过该步骤 (已恢复)")
@@ -30,7 +30,7 @@ class AnnotationStep(BaseAssemblyStep):
 
         sample_type = self.context.config.get("sample_type", "BACTERIA")
         
-        # 🔗 0.5. 预处理：简化 Fasta 头部 (Prokka 对带空格的 Header 兼容性较差)
+        #  0.5. 预处理：简化 Fasta 头部 (Prokka 对带空格的 Header 兼容性较差)
         out_dir.mkdir(parents=True, exist_ok=True)
         simple_fasta = out_dir / "simple_assembly.fasta"
         try:
@@ -56,7 +56,7 @@ class AnnotationStep(BaseAssemblyStep):
             "--force"
         ]
 
-        # 🔗 逻辑增强：针对噬菌体/病毒进行参数优化
+        #  逻辑增强：针对噬菌体/病毒进行参数优化
         if sample_type in ["PHAGE", "VIRUS"]:
             cmd.extend(["--kingdom", "Viruses"])
         
@@ -64,7 +64,7 @@ class AnnotationStep(BaseAssemblyStep):
         
         if self.on_progress: self.on_progress(10, "正在进行基因组特征预测 (Prokka)...")
 
-        # 🔗 细粒度进度解析
+        #  细粒度进度解析
         def prokka_handler(line: str):
             if "Running: " in line:
                 tool = line.split("Running: ")[-1].split()[0]
@@ -88,7 +88,7 @@ class AnnotationStep(BaseAssemblyStep):
             on_output=prokka_handler
         )
         
-        # 🔗 2. 策略：如果是 Code 2 (Prokka 常见启动失败)，尝试自愈并重试一次
+        #  2. 策略：如果是 Code 2 (Prokka 常见启动失败)，尝试自愈并重试一次
         if returncode == 2:
             self.logger.warning("检测到 Prokka 启动失败 (Code 2)，正在尝试执行环境自愈 (--setupdb)...")
             if self.on_progress: self.on_progress(15, "正在初始化数据库并自愈环境...")
@@ -107,7 +107,7 @@ class AnnotationStep(BaseAssemblyStep):
                 if self.on_progress: self.on_progress(100, "功能注释已完成")
                 return True
         else:
-            # 🔗 3. 深度诊断
+            #  3. 深度诊断
             reason = self._diagnose_failure(out_dir.parent / "annotation.log")
             self.logger.error(f"注释失败: {reason}")
             if self.on_progress: self.on_progress(0, f"失败提示: {reason}")
@@ -120,7 +120,7 @@ class AnnotationStep(BaseAssemblyStep):
         msg = "逻辑错误或依赖冲突 (Code 2)"
         
         try:
-            # 💡 增加常见错误检测
+            #  增加常见错误检测
             if "/mnt/" in str(log_path):
                 return "WSL 文件权限或 Perl 环境异常，建议切换到系统原生路径"
             return "可能是 tbl2asn 组件过期或输入序列格式不规范，请检查结果文件夹中的 err 文件"

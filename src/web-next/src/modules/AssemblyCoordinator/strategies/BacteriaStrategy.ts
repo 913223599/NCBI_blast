@@ -13,10 +13,7 @@ export class BacteriaStrategy extends BaseAssemblyStrategy {
   }
 
   getAssemblyPipeline(task: AssemblyTask): string[] {
-    if (task.tech === SequencingTech.ILLUMINA) {
-      return ['[TODO] Unicycler (Hybrid) or SPAdes (Isolate) for Bacteria'];
-    }
-    return ['[TODO] Hifiasm (Default for bacterial resolution)'];
+    return ['NGCS (Native C++20 Eulerian Residual Flow / Spectral Manifold Engine)'];
   }
 
   override getAnnotationPipeline(task: AssemblyTask): string[] {

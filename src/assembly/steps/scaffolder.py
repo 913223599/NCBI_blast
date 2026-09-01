@@ -38,7 +38,7 @@ class ScaffoldingStep(BaseAssemblyStep):
             return True
 
         if self._should_skip_scaffolding(assembly_path):
-            self.logger.info("🎉 序列已完美闭合且无 Gap，智能跳过。")
+            self.logger.info(" 序列已完美闭合且无 Gap，智能跳过。")
             self.context.update("scaffold_path", assembly_path)
             self.context.update("assembly_fasta", assembly_path)
             return True
@@ -98,7 +98,7 @@ class ScaffoldingStep(BaseAssemblyStep):
         wsl_ref = WSLManager.to_wsl_path(str(ref))
         wsl_split_fa = f"{tmp_dir}/ref_split.fasta"
         
-        # 🔗 终极无敌修复：采用 Base64 编码方式下发 Python 脚本，彻底隔绝任何路径替换或换行符问题
+        #  终极无敌修复：采用 Base64 编码方式下发 Python 脚本，彻底隔绝任何路径替换或换行符问题
         import base64
         py_script = (
             f"from Bio import SeqIO\n"
@@ -124,13 +124,13 @@ class ScaffoldingStep(BaseAssemblyStep):
 
         bam_file = f"{tmp_dir}/mapped.bam"
         bwa_cmd = f"bwa mem -t {bwa_t} '{bwa_idx}' '{WSLManager.to_wsl_path(str(r1))}' '{WSLManager.to_wsl_path(str(r2))}' | samtools view -@ {sam_t} -b - > '{bam_file}'"
-        self.logger.info("🎣 正在靶向比对跨 Gap 区域 Reads (第一阶段: bwa mem -> bam)...")
+        self.logger.info(" 正在靶向比对跨 Gap 区域 Reads (第一阶段: bwa mem -> bam)...")
         await self.runner.run_command(bwa_cmd, is_shell=True)
         
         extract_cmd = (
             f"samtools fastq -@ {sam_t} -F 2304 -G 12 -1 '{m_r1}' -2 '{m_r2}' -s /dev/null -0 /dev/null '{bam_file}'"
         )
-        self.logger.info("🎣 正在靶向钓取跨 Gap 区域 Reads (-F 2304)...")
+        self.logger.info(" 正在靶向钓取跨 Gap 区域 Reads (-F 2304)...")
         await self.runner.run_command(extract_cmd, is_shell=True)
         
         return m_r1, m_r2
@@ -182,7 +182,7 @@ class ScaffoldingStep(BaseAssemblyStep):
                 mad = statistics.median([abs(c - med_cov) for c in covs])
                 sigma = max(1.4826 * mad, 0.05 * med_cov) 
                 
-                # 🚨 修复：基准深度绝对不能取 max(covs)，否则会被高拷贝质粒或折叠重复序列带偏！
+                #  修复：基准深度绝对不能取 max(covs)，否则会被高拷贝质粒或折叠重复序列带偏！
                 # 必须使用中位数，它能稳健地代表主体基因组的真实深度。
                 main_cov = med_cov
             else:
@@ -208,12 +208,12 @@ class ScaffoldingStep(BaseAssemblyStep):
                 
                 # A. 低深度噪音拦截：使用严谨的统计相对阈值 (15% main_cov)
                 if c < noise_threshold and len(r.seq) < base_len_threshold:
-                    self.logger.warning(f"🚫 拦截低深度杂质: {r.id} ({c}x < {noise_threshold:.1f}x)")
+                    self.logger.warning(f" 拦截低深度杂质: {r.id} ({c}x < {noise_threshold:.1f}x)")
                     continue
                 
                 # B. 高深度短杂质拦截：放宽至 3.5 倍，防错杀噬菌体末端长反向重复序列等正常元件
                 if c > (main_cov * 3.5) and len(r.seq) < base_len_threshold:
-                    self.logger.warning(f"🚫 拦截高深度重复小片段: {r.id} ({c}x > {main_cov * 3.5:.1f}x)")
+                    self.logger.warning(f" 拦截高深度重复小片段: {r.id} ({c}x > {main_cov * 3.5:.1f}x)")
                     continue
 
                 if c < (noise_threshold * 0.5) and len(r.seq) < (0.5 * max_len): # 对于稍长一点的序列，阈值进一步放宽
@@ -236,7 +236,7 @@ class ScaffoldingStep(BaseAssemblyStep):
                         # 严格末端平齐比对：必须且只需头部 overlap 长度的前缀与序列最末尾的后缀完全一致
                         if overlap >= 50 and overlap < len(seq_str) and seq_str[:overlap] == seq_str[-overlap:]:
                             r.description += f" [circular_verified:DTR={overlap}bp]"
-                            self.logger.info(f"⭕ 已验证 DTR 环形拓扑: {r.id} (Overlap={overlap}bp)")
+                            self.logger.info(f" 已验证 DTR 环形拓扑: {r.id} (Overlap={overlap}bp)")
                 
                 # D. 线性末端反向重复序列验证与修剪 (ITR Check & Trim)
                 if len(r.seq) > 2000 and "circular_verified:DTR=" not in r.description:
@@ -256,15 +256,15 @@ class ScaffoldingStep(BaseAssemblyStep):
                                 # 物理修剪尾部冗余的反向重复序列，还原单拷贝物理图谱
                                 r.seq = r.seq[:-overlap]
                                 r.description += f" [circular_verified:ITR_trimmed={overlap}bp]"
-                                self.logger.info(f"⭕ 已验证并修剪 ITR 末端反向重复拓扑: {r.id} (Trimmed={overlap}bp)")
+                                self.logger.info(f" 已验证并修剪 ITR 末端反向重复拓扑: {r.id} (Trimmed={overlap}bp)")
                 
                 clean_records.append(r)
                 
             SeqIO.write(clean_records, output_fa, "fasta")
-            self.logger.info(f"✨ Scaffolding 清洗完成: 原始={len(records)}, 保留={len(clean_records)}, 基准深度={main_cov:.1f}x")
+            self.logger.info(f" Scaffolding 清洗完成: 原始={len(records)}, 保留={len(clean_records)}, 基准深度={main_cov:.1f}x")
             
         except Exception as e:
-            self.logger.error(f"❌ 产物清洗抛出异常: {e}")
+            self.logger.error(f" 产物清洗抛出异常: {e}")
             shutil.copy2(input_fa, output_fa)
 
     # --- 辅助工具函数 ---
@@ -283,7 +283,7 @@ class ScaffoldingStep(BaseAssemblyStep):
         """申请最佳流水线工作空间 (优先 SHM)"""
         target_dir = await self.get_best_wsl_tmp_dir(required_gb=12.0)
         
-        # 🔗 核心修复：确保目录清空
+        #  核心修复：确保目录清空
         await self.runner.run_command(["rm", "-rf", target_dir])
         await self.runner.run_command(["mkdir", "-p", target_dir])
         return target_dir

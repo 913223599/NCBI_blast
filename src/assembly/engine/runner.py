@@ -39,7 +39,7 @@ class CommandRunner:
         执行命令并持续监控输出 (支持 WSL 自动转换与智能路由)
         """
         if getattr(self, 'is_aborted', False):
-            self.logger.warning(f"🚫 任务已终止，拒绝执行后续命令")
+            self.logger.warning(f" 任务已终止，拒绝执行后续命令")
             return -99
 
         # ==========================================
@@ -147,7 +147,7 @@ class CommandRunner:
             try:
                 returncode = await asyncio.wait_for(_run(), timeout=timeout)
             except asyncio.TimeoutError:
-                self.logger.error(f"⏰ 命令执行超时 ({timeout_desc})，强制终止: {display_cmd[:120]}")
+                self.logger.error(f" 命令执行超时 ({timeout_desc})，强制终止: {display_cmd[:120]}")
                 try:
                     process.terminate()
                     await asyncio.sleep(1)

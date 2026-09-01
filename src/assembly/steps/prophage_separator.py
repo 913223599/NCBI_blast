@@ -43,19 +43,20 @@ class ProphageSeparatorStep(BaseAssemblyStep):
         self.status = "running"
 
         # ─── 0. 参数收集 ───
-        # 🔗 修复: 统一宿主路径读取逻辑，与 HostCleanerStep 保持一致
+        #  修复: 统一宿主路径读取逻辑，与 HostCleanerStep 保持一致
         # 前端提交的宿主路径存储在 host_filter_db 中，host_genome 仅为备选 key
         params = self.context.config.get("params", {})
         host_genome = params.get("host_filter_db") or params.get("host_genome")
         if host_genome:
             self.logger.info(f"已获取宿主参考基因组路径: {host_genome}")
-        assembly_fasta = self.context.get("assembly_fasta")
+        raw_assembly_fasta = self.context.get("assembly_fasta")
 
-        if not assembly_fasta or not Path(assembly_fasta).exists():
+        if not raw_assembly_fasta or not Path(raw_assembly_fasta).exists():
             self.logger.error("未找到组装产物 (assembly_fasta)，无法执行前噬菌体检测")
             self.status = "failed"
             return False
 
+        assembly_fasta: Path = Path(raw_assembly_fasta)
         out_dir = self.get_working_dir()
         cpu_count = os.cpu_count() or 8
         threads = max(1, cpu_count - 1)
@@ -69,13 +70,13 @@ class ProphageSeparatorStep(BaseAssemblyStep):
         # 定义并行的 PhiSpy 协程任务
         async def run_phispy_task():
             if host_genome and Path(host_genome).exists():
-                self.logger.info("✨ [并发引擎] 启动 PhiSpy 宿主基因组检测...")
+                self.logger.info(" [并发引擎] 启动 PhiSpy 宿主基因组检测...")
                 regions = await self._run_phispy(
                     host_genome_path=Path(host_genome),
                     work_dir=out_dir,
                     threads=max(1, threads // 2)
                 )
-                self.logger.info(f"📊 [并发引擎] PhiSpy 检测完成，识别到 {len(regions)} 个前噬菌体区域")
+                self.logger.info(f" [并发引擎] PhiSpy 检测完成，识别到 {len(regions)} 个前噬菌体区域")
                 return regions
             return []
 
@@ -84,25 +85,25 @@ class ProphageSeparatorStep(BaseAssemblyStep):
             nonlocal assembly_fasta
             is_lysogenic = self.context.config.get("params", {}).get("is_lysogenic", False)
             if is_lysogenic and host_genome and Path(host_genome).exists():
-                self.logger.info("✨ [并发引擎] 启动后置宿主 Contig 级大扫除 (Minimap2)...")
+                self.logger.info(" [并发引擎] 启动后置宿主 Contig 级大扫除 (Minimap2)...")
                 pre_filter_fasta = out_dir / "pre_vibrant_filtered.fasta"
                 host_removed = await self._bwa_subtract_host(
-                    assembly_fasta=Path(assembly_fasta),
+                    assembly_fasta=assembly_fasta,
                     host_fasta=Path(host_genome),
                     output_fasta=pre_filter_fasta,
                     threads=max(1, threads // 2)
                 )
                 if host_removed and pre_filter_fasta.exists() and pre_filter_fasta.stat().st_size > 0:
-                    self.logger.info(f"🧹 [并发引擎] 宿主 Contig 级过滤完成，仅保留候选序列用于 VIBRANT 分箱")
+                    self.logger.info(f" [并发引擎] 宿主 Contig 级过滤完成，仅保留候选序列用于 VIBRANT 分箱")
                     assembly_fasta = pre_filter_fasta
             
-            self.logger.info("✨ [并发引擎] 启动 VIBRANT 组装产物分箱...")
+            self.logger.info(" [并发引擎] 启动 VIBRANT 组装产物分箱...")
             results = await self._run_vibrant(
-                assembly_path=Path(assembly_fasta),
+                assembly_path=assembly_fasta,
                 work_dir=out_dir,
                 threads=max(1, threads // 2) if host_genome and Path(host_genome).exists() else threads
             )
-            self.logger.info(f"📊 [并发引擎] VIBRANT 识别完成，完整游离噬菌体: {len(results.get('complete_phages', []))} 条, 前噬菌体片段: {len(results.get('integrated_prophages', []))} 个")
+            self.logger.info(f" [并发引擎] VIBRANT 识别完成，完整游离噬菌体: {len(results.get('complete_phages', []))} 条, 前噬菌体片段: {len(results.get('integrated_prophages', []))} 个")
             return results
 
         if self.on_progress:
@@ -146,7 +147,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
             return True
 
         # 降级处理：如果分离失败，保留原始组装
-        self.logger.warning("⚠️ 前噬菌体分离未产生有效结果，保留原始组装产物")
+        self.logger.warning("️ 前噬菌体分离未产生有效结果，保留原始组装产物")
         self.status = "completed"
         if self.on_progress:
             self.on_progress(100, "跳过分离 (降级保留原始组装)")
@@ -405,10 +406,10 @@ class ProphageSeparatorStep(BaseAssemblyStep):
         ]
         if db_path:
             vibrant_cmd.extend(["-d", db_path])
-            self.logger.info(f"📂 VIBRANT 数据库路径: {db_path}")
+            self.logger.info(f" VIBRANT 数据库路径: {db_path}")
 
         try:
-            self.logger.info("🚀 正在内存盘中运行 VIBRANT...")
+            self.logger.info(" 正在内存盘中运行 VIBRANT...")
             ret = await self.runner.run_command(vibrant_cmd)
             
             # 运行结束后将结果拷回物理磁盘
@@ -420,7 +421,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
             else:
                 await self.runner.run_command(["rm", "-rf", shm_dir])
 
-        # 🔗 检测 VIBRANT 数据库缺失的静默失败
+        #  检测 VIBRANT 数据库缺失的静默失败
         vibrant_log = None
         for log_file in vibrant_dir.rglob("VIBRANT_log_*.log"):
             vibrant_log = log_file
@@ -429,7 +430,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
             log_text = vibrant_log.read_text(encoding='utf-8', errors='ignore')
             if "could not identify KEGG HMM" in log_text or "could not identify" in log_text:
                 self.logger.warning(
-                    "⚠️ VIBRANT 数据库路径不正确 (KEGG HMM 未找到)！"
+                    "️ VIBRANT 数据库路径不正确 (KEGG HMM 未找到)！"
                     "请确认 conda 环境中 VIBRANT 数据库已正确安装。"
                 )
                 return phage_results  # 返回空字典
@@ -469,10 +470,10 @@ class ProphageSeparatorStep(BaseAssemblyStep):
 
             if out_lines and out_lines[0]:
                 db_path = out_lines[0]
-                self.logger.info(f"✅ 自动探测到 VIBRANT 数据库: {db_path}")
+                self.logger.info(f" 自动探测到 VIBRANT 数据库: {db_path}")
                 return db_path
 
-        self.logger.warning("⚠️ 未能自动探测 VIBRANT 数据库路径，将使用 VIBRANT 默认值")
+        self.logger.warning("️ 未能自动探测 VIBRANT 数据库路径，将使用 VIBRANT 默认值")
         return None
 
     async def _run_virsorter2_fallback(self, assembly_path: Path,
@@ -637,7 +638,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
                             description=f"VIBRANT exact cut from host contig {contig_id} [{start}-{end}]"
                         )
                         extracted_seqs.append(prophage_seq)
-                        self.logger.info(f"  ✂️ VIBRANT 精确直切: {contig_id}[{start}-{end}] ({end - start} bp)")
+                        self.logger.info(f"  ️ VIBRANT 精确直切: {contig_id}[{start}-{end}] ({end - start} bp)")
 
             # ─── B. 提取完整的游离态噬菌体 (VIBRANT) ───
             if vibrant_results.get("complete_phages"):
@@ -649,7 +650,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
                         already_cut = any(r.id == f"prophage_{clean_rec_id}" for r in extracted_seqs)
                         if not already_cut:
                             extracted_seqs.append(rec)
-                            self.logger.info(f"  🧬 VIBRANT 游离提取: {rec.id} ({len(rec.seq)} bp)")
+                            self.logger.info(f"   VIBRANT 游离提取: {rec.id} ({len(rec.seq)} bp)")
 
             # ─── C. 降级策略: 当 VIBRANT 失败时，使用 PhiSpy ───
             if not has_vibrant_hits and phispy_regions and host_genome_path and host_genome_path.exists():
@@ -674,7 +675,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
                                 description=f"PhiSpy prophage region [{start}-{end}] from {contig_id}"
                             )
                             extracted_seqs.append(prophage_seq)
-                            self.logger.info(f"  ✅ PhiSpy 切割 (降级): {contig_id}[{start}-{end}] ({end - start} bp)")
+                            self.logger.info(f"   PhiSpy 切割 (降级): {contig_id}[{start}-{end}] ({end - start} bp)")
 
             # ─── D. 终极降级策略: 深度感知保留 ───
             if not extracted_seqs:
@@ -685,7 +686,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
                         depth = self._parse_depth_from_header(rec.description)
                         if depth >= 4.0 and len(rec.seq) >= 1500:
                             extracted_seqs.append(rec)
-                            self.logger.info(f"  📥 降级保留 (高深度条目): {rec.id} ({depth}x)")
+                            self.logger.info(f"   降级保留 (高深度条目): {rec.id} ({depth}x)")
                 elif host_genome_path and host_genome_path.exists():
                     self.logger.info("降级使用 BWA 比对去宿主")
                     return await self._bwa_subtract_host(
@@ -712,7 +713,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
 
                 SeqIO.write(unique_seqs, str(output_fasta), "fasta")
                 self.logger.info(
-                    f"📦 最终输出 {len(unique_seqs)} 条噬菌体序列 → "
+                    f" 最终输出 {len(unique_seqs)} 条噬菌体序列 → "
                     f"{output_fasta.name}"
                 )
                 return True
@@ -843,7 +844,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
         v_depths = [c["depth"] for c in vibrant_items if c["depth"] > 0]
         v_median = statistics.median(v_depths) if v_depths else 1.0
 
-        # 🚨 综合评分法选择锚点 (Length-Weighted Depth-Stability Score)
+        #  综合评分法选择锚点 (Length-Weighted Depth-Stability Score)
         # 单纯用长度：可能会误选由于错误组装拼接而成的长嵌合体（通常深度极度异常）。
         # 单纯用深度：极易误选高拷贝的重复小片段（如 rRNA区、末端重复序列）。
         # 更优策略：长度为主导，深度偏离度作为惩罚项。
@@ -894,7 +895,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
             if "circular=true" in info["rec"].description.lower():
                 tnf_threshold = 0.15
 
-            # 🚨 针对不同来源序列的分类过滤决策
+            #  针对不同来源序列的分类过滤决策
             is_kept = False
             if info["vibrant"]:
                 # VIBRANT 显式鉴定的序列：本身已经是高置信度的病毒序列。
@@ -910,13 +911,13 @@ class ProphageSeparatorStep(BaseAssemblyStep):
             if is_kept:
                 filtered.append(info["rec"])
                 self.logger.info(
-                    f"  ✅ TNF 保留: {info['rec'].id} "
+                    f"   TNF 保留: {info['rec'].id} "
                     f"({info['len']}bp, depth={info['depth']:.2f}x, "
                     f"TNF_dist={tnf_dist:.4f})"
                 )
             else:
                 self.logger.debug(
-                    f"  ❌ TNF 剔除: {info['rec'].id} "
+                    f"   TNF 剔除: {info['rec'].id} "
                     f"({info['len']}bp, depth={info['depth']:.2f}x, "
                     f"TNF_dist={tnf_dist:.4f}, depth_ok={depth_ok})"
                 )
@@ -1009,7 +1010,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
 
         if max_depth_id and max_depth_id in host_contigs:
             self.logger.warning(
-                f"  🛡 深度保护: '{max_depth_id}' (depth={max_depth:.2f}x) "
+                f"   深度保护: '{max_depth_id}' (depth={max_depth:.2f}x) "
                 f"虽比对到宿主但为最高深度序列，强制保留"
             )
             host_contigs.discard(max_depth_id)
@@ -1019,7 +1020,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
         for rec in candidates:
             if rec.id in host_contigs:
                 self.logger.info(
-                    f"  🚫 反向验证剔除宿主: {rec.id} ({len(rec.seq):,} bp, "
+                    f"   反向验证剔除宿主: {rec.id} ({len(rec.seq):,} bp, "
                     f"host_coverage={contig_align_len.get(rec.id, 0)/contig_total_len.get(rec.id, 1)*100:.1f}%)"
                 )
             else:
@@ -1038,7 +1039,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
         """
         最后手段：BWA 比对组装 contigs 到宿主基因组，
         提取不比对上的序列作为候选噬菌体
-        🔗 修复 3: 增加深度保护 — depth 最高的 contig 永不被剔除
+         修复 3: 增加深度保护 — depth 最高的 contig 永不被剔除
         """
         wsl_assembly = WSLManager.to_wsl_path(str(assembly_fasta))
         wsl_host = WSLManager.to_wsl_path(str(host_fasta))
@@ -1087,7 +1088,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
                     max_depth_id = rec.id
             if max_depth_id and max_depth_id in host_contigs:
                 self.logger.warning(
-                    f"🛡️ 深度保护: contig '{max_depth_id}' (depth={max_depth:.2f}x) "
+                    f"️ 深度保护: contig '{max_depth_id}' (depth={max_depth:.2f}x) "
                     f"虽比对到宿主但为最高深度序列，强制保留为噬菌体候选"
                 )
                 protected_contigs.add(max_depth_id)
@@ -1104,13 +1105,13 @@ class ProphageSeparatorStep(BaseAssemblyStep):
                     phage_seqs.append(rec)
                 else:
                     self.logger.info(
-                        f"  🗑️ 去除宿主 contig: {rec.id} ({len(rec.seq)} bp)"
+                        f"  ️ 去除宿主 contig: {rec.id} ({len(rec.seq)} bp)"
                     )
 
             if phage_seqs:
                 SeqIO.write(phage_seqs, str(output_fasta), "fasta")
                 self.logger.info(
-                    f"📦 BWA 去宿主后保留 {len(phage_seqs)} 条候选噬菌体序列"
+                    f" BWA 去宿主后保留 {len(phage_seqs)} 条候选噬菌体序列"
                 )
                 return True
         except Exception as e:
@@ -1144,7 +1145,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
             # 取 depth 最高的 contig
             top = contigs[0]
             self.logger.info(
-                f"🎯 深度感知: 最高深度 contig = {top['rec'].id} "
+                f" 深度感知: 最高深度 contig = {top['rec'].id} "
                 f"({top['len']}bp, depth={top['depth']:.2f}x)"
             )
 
@@ -1155,7 +1156,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
             second_depth = contigs[1]["depth"] if len(contigs) > 1 else 0.0
             if top["depth"] > 0 and (second_depth == 0 or top["depth"] / max(second_depth, 0.001) >= 10):
                 self.logger.info(
-                    f"  ✅ 深度差异显著 (top={top['depth']:.2f}x vs second={second_depth:.2f}x)，"
+                    f"   深度差异显著 (top={top['depth']:.2f}x vs second={second_depth:.2f}x)，"
                     f"确认 {top['rec'].id} 为噬菌体"
                 )
                 result.append(top["rec"])
@@ -1166,7 +1167,7 @@ class ProphageSeparatorStep(BaseAssemblyStep):
                     if c["depth"] > 0 and c["len"] >= 1000:
                         result.append(c["rec"])
                         self.logger.info(
-                            f"  📌 保留候选: {c['rec'].id} ({c['len']}bp, depth={c['depth']:.2f}x)"
+                            f"   保留候选: {c['rec'].id} ({c['len']}bp, depth={c['depth']:.2f}x)"
                         )
 
             # 策略 C: 如果 PhiSpy 有结果，也把那些区域切出来追加
@@ -1200,17 +1201,12 @@ class ProphageSeparatorStep(BaseAssemblyStep):
     @staticmethod
     def _parse_depth_from_header(header: str) -> float:
         """
-        从 Unicycler/SPAdes 风格的 FASTA header 中解析深度值
+        从 NGCS / FASTA header 中解析深度值
         支持格式:
-          - depth=1.00x  (Unicycler)
-          - cov_8.973700 (SPAdes)
+          - depth=1.00x / depth=1.00
+          - cov=8.97 / cov_8.97
         """
-        # Unicycler 格式
-        m = re.search(r'depth=([\d\.]+)x?', header)
-        if m:
-            return float(m.group(1))
-        # SPAdes 格式
-        m = re.search(r'cov_([\d\.]+)', header)
+        m = re.search(r'(?:depth[=:]|cov[=_:]|cov=)([\d\.]+)', header, re.IGNORECASE)
         if m:
             return float(m.group(1))
         return 0.0

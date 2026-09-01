@@ -34,7 +34,7 @@ class GPUConfigManager:
                     "driver": info[2]
                 }
                 self._has_cuda = True
-                self.logger.info(f"✨ 发现可用 GPU 加速设备: {self._gpu_info['name']}")
+                self.logger.info(f" 发现可用 GPU 加速设备: {self._gpu_info['name']}")
             else:
                 self._has_cuda = False
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -59,14 +59,13 @@ class GPUConfigManager:
     def apply_gpu_flags(self, tool_name: str, base_cmd: list) -> list:
         """
         针对特定工具注入 GPU 启动参数
-        :param tool_name: 工具名称 (如 spades)
+        :param tool_name: 工具名称
         :param base_cmd: 原始命令列表
         """
         if not self.is_cuda_available():
             return base_cmd
             
-        # 示例：某些拼接变体支持 GPU 
-        if tool_name == "spades" and "--gpu" not in base_cmd:
-            return base_cmd + ["--gpu"] # 假设使用的 SPAdes 版本支持此参数
+        if tool_name.lower() in ["ngcs", "ngcs_engine"] and "--gpu" not in base_cmd:
+            return base_cmd + ["--gpu"]
             
         return base_cmd

@@ -183,7 +183,7 @@ const setSampleType = (type: string) => {
       </div>
 
       <div class="hint">
-        <p>※ 系统将根据样本类型自动匹配最优流程 (如：细菌选用 Unicycler，Sanger 选用 Consensus 合并)</p>
+        <p>※ 系统采用 NGCS 欧拉残差流与流形组装核心，根据样本类型自动匹配最优路线与多层级拓扑推导</p>
       </div>
     </div>
   </div>

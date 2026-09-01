@@ -26,11 +26,11 @@ class PipelineContext:
         self.next_step_index: Optional[int] = None
         self.iteration_count: int = 0
         
-        # 🔗 运行时内部工具对象 (不参与 JSON 序列化)
+        #  运行时内部工具对象 (不参与 JSON 序列化)
         self.gpu_manager: Any = None
         self.gpu_env: Optional[Dict[str, str]] = None
         
-        # 🔗 内存盘统一资源管理器 (由 manager.py 注入)
+        #  内存盘统一资源管理器 (由 manager.py 注入)
         self.shm: Any = None
 
     def update(self, key: str, value: Any):
@@ -46,10 +46,10 @@ class BaseAssemblyStep(abc.ABC):
     def __init__(self, context: PipelineContext):
         self.context = context
         self.runner = CommandRunner(self.__class__.__name__, is_wsl=context.is_wsl)
-        self.logger = self.runner.logger   # 🔗 快捷访问日志对象
+        self.logger = self.runner.logger   #  快捷访问日志对象
         self.status = "pending"
         self.progress = 0.0
-        # 💡 回调签名支持进度百分比和子状态描述
+        #  回调签名支持进度百分比和子状态描述
         self.on_progress: Optional[Callable[[float, Optional[str]], None]] = None
 
     @abc.abstractmethod
@@ -101,8 +101,8 @@ class BaseAssemblyStep(abc.ABC):
 
     async def get_total_memory_gb(self) -> float:
         """
-        🚀 获取当前系统的实际物理内存容量 (GB)
-        ⚠️ WSL2 的 /proc/meminfo MemTotal 包含 Windows Pagefile，会严重虚高
+         获取当前系统的实际物理内存容量 (GB)
+        ️ WSL2 的 /proc/meminfo MemTotal 包含 Windows Pagefile，会严重虚高
         优先通过 Windows WMI 获取真实物理内存
         """
         global _CACHED_SYSTEM_TOTAL_MEMORY_GB
@@ -131,7 +131,7 @@ class BaseAssemblyStep(abc.ABC):
                     val = float(line.replace(',', '.'))
                     if 1 < val < 2048:  # 合理性校验
                         gb = val
-                        self.logger.info(f"📊 实际物理内存 (Windows WMI): {gb:.1f} GB")
+                        self.logger.info(f" 实际物理内存 (Windows WMI): {gb:.1f} GB")
                         break
                 except (ValueError, TypeError):
                     continue
@@ -149,13 +149,13 @@ class BaseAssemblyStep(abc.ABC):
                         kb = int(line.split(":")[1].strip().split()[0])
                         gb = kb / (1024 * 1024)
                         self.logger.warning(
-                            f"📊 内存来自 WSL MemTotal: {gb:.1f} GB (可能含虚拟内存，已打 8 折修正)"
+                            f" 内存来自 WSL MemTotal: {gb:.1f} GB (可能含虚拟内存，已打 8 折修正)"
                         )
                         gb = gb * 0.8  # 打折修正，防止超分配
                         break
 
             if gb and gb > 0:
-                # 🔗 物理穿透方案：如果探测值处于 WSL2 典型的 50%~80% 配额区，则尝试抓取宿主真实物理值
+                #  物理穿透方案：如果探测值处于 WSL2 典型的 50%~80% 配额区，则尝试抓取宿主真实物理值
                 if 8 <= gb <= 32:
                     out_sys = []
                     await self.runner.run_command(
@@ -169,7 +169,7 @@ class BaseAssemblyStep(abc.ABC):
                             raw_mb = int(match.group(1).replace(",", ""))
                             real_gb = round(raw_mb / 1024, 1)
                             if real_gb > gb:
-                                self.logger.info(f"✨ 物理穿透成功：识别到宿主真实内存 {real_gb} GB (WSL配额 {gb:.1f} GB)")
+                                self.logger.info(f" 物理穿透成功：识别到宿主真实内存 {real_gb} GB (WSL配额 {gb:.1f} GB)")
                                 gb = real_gb
                                 break
                                 

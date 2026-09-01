@@ -80,7 +80,7 @@ class NCBIDownloader:
         ret = await runner.run_command(download_cmd, is_shell=True)
         
         if ret != 0 or not zip_file.exists():
-            self.logger.error("❌ NCBI 所有下载尝试均已失败。")
+            self.logger.error(" NCBI 所有下载尝试均已失败。")
             return None
 
         # 3. 提取与合并
@@ -103,9 +103,9 @@ class NCBIDownloader:
             
             shutil.rmtree(extract_dir, ignore_errors=True)
             zip_file.unlink(missing_ok=True)
-            self.logger.info(f"✅ 联合库就绪: {len(fna_paths)} 序列已合并")
+            self.logger.info(f" 联合库就绪: {len(fna_paths)} 序列已合并")
             
-            # 🔗 4. 查询并持久化真实 TaxID
+            #  4. 查询并持久化真实 TaxID
             await self._resolve_and_save_taxid(species_query, target_dir, runner)
             
             return str(merged_fasta.resolve())
@@ -126,7 +126,7 @@ class NCBIDownloader:
             except Exception:
                 pass
         
-        self.logger.info(f"🔍 正在查询 {species_name} 的真实 NCBI TaxID...")
+        self.logger.info(f" 正在查询 {species_name} 的真实 NCBI TaxID...")
         
         raw_out = []
         def capture(line): raw_out.append(line)
@@ -166,9 +166,9 @@ class NCBIDownloader:
         metadata_file.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
         
         if taxid:
-            self.logger.info(f"✅ TaxID 解析成功: {species_official} → TaxID {taxid}")
+            self.logger.info(f" TaxID 解析成功: {species_official} → TaxID {taxid}")
         else:
-            self.logger.warning(f"⚠️ 未能解析 TaxID，将使用默认值。metadata 已保存至 {metadata_file}")
+            self.logger.warning(f"️ 未能解析 TaxID，将使用默认值。metadata 已保存至 {metadata_file}")
 
     async def _ensure_datasets_tool(self, runner: CommandRunner) -> bool:
         # 复用之前的自愈逻辑，但在下载镜像时使用更老的路径

@@ -40,18 +40,18 @@ class HostCleanerStep(BaseAssemblyStep):
         is_strict_parent = params.get("is_strict_parent_strain", True)
         host_fasta = params.get("host_filter_db")
         
-        # 🔗 尝试从 host_genome 继承参数以支持靶向噬菌体提取
+        #  尝试从 host_genome 继承参数以支持靶向噬菌体提取
         if not host_fasta or not Path(host_fasta).exists():
             host_fasta = params.get("host_genome")
             if host_fasta and Path(host_fasta).exists():
-                self.logger.info(f"🔄 未提供专项 host_filter_db，自动继承宿主基因组: {host_fasta}")
+                self.logger.info(f" 未提供专项 host_filter_db，自动继承宿主基因组: {host_fasta}")
                 
         if is_lysogenic:
             if host_fasta and Path(host_fasta).exists():
-                self.logger.info("🛡️ 触发防丢保护与交界区保留：存在宿主参考，进入架构级 Soft-Dehosting (差分下采样) 模式。")
+                self.logger.info("️ 触发防丢保护与交界区保留：存在宿主参考，进入架构级 Soft-Dehosting (差分下采样) 模式。")
                 return await self._run_soft_dehosting(host_fasta, is_strict_parent)
             else:
-                self.logger.warning("🛡️ 触发防丢路障：检测到溶源态保护开启，但无参考基因组。跳过全量过滤直接将数据送入组装器！")
+                self.logger.warning("️ 触发防丢路障：检测到溶源态保护开启，但无参考基因组。跳过全量过滤直接将数据送入组装器！")
                 self.context.update("clean_r1", self.context.get("r1"))
                 self.context.update("clean_r2", self.context.get("r2"))
                 return True
@@ -62,10 +62,10 @@ class HostCleanerStep(BaseAssemblyStep):
             self.context.update("clean_r2", self.context.get("r2"))
             return True
 
-        # 🚀 深度资源调优: 开启全部马力
+        #  深度资源调优: 开启全部马力
         cpu_count = os.cpu_count() or 8
         optimal_threads = max(1, cpu_count - 1)
-        self.logger.info(f"🚀 自动资源调优: 物理核心数={cpu_count}, 分配任务线程={optimal_threads}")
+        self.logger.info(f" 自动资源调优: 物理核心数={cpu_count}, 分配任务线程={optimal_threads}")
 
         r1 = self.context.get("clean_r1") or self.context.get("r1")
         r2 = self.context.get("clean_r2") or self.context.get("r2")
@@ -96,7 +96,7 @@ class HostCleanerStep(BaseAssemblyStep):
         shm_dir = await self.get_best_wsl_tmp_dir(required_gb=8.0)
         
         try:
-            msg = "🚀 激活内存高速通道 (Ramdisk)..."
+            msg = " 激活内存高速通道 (Ramdisk)..."
             if self.on_progress: self.on_progress(20, msg)
             await self.runner.run_command(["mkdir", "-p", shm_dir])
             
@@ -127,7 +127,7 @@ class HostCleanerStep(BaseAssemblyStep):
             # 解析报告 (统计污染率)
             contamination = await self._parse_kraken_report_raw(kraken_report, taxid, species_name)
             self.context.data["host_contamination_percent"] = contamination
-            self.logger.info(f"📊 宿主占比测量: {contamination:.2f}%")
+            self.logger.info(f" 宿主占比测量: {contamination:.2f}%")
 
             # 持久化宿主污染统计至 JSON (供前端报告解析器读取)
             try:
@@ -148,7 +148,7 @@ class HostCleanerStep(BaseAssemblyStep):
             # 检测是否安装了 pigz (多核并行压缩)
             has_pigz = (await self.runner.run_command(["which", "pigz"], silence_errors=True)) == 0
             if not has_pigz:
-                self.logger.warning("🚀 性能降级预警：监测到未安装 pigz，将回退至单线程 gzip。请在各节点运行 'sudo apt install pigz' 以极大提升封包速率。")
+                self.logger.warning(" 性能降级预警：监测到未安装 pigz，将回退至单线程 gzip。请在各节点运行 'sudo apt install pigz' 以极大提升封包速率。")
             
             # 由于是并发压缩两条 Reads，需将线程均分，防止超过物理核心数
             zip_threads = max(1, optimal_threads // 2)
@@ -159,7 +159,7 @@ class HostCleanerStep(BaseAssemblyStep):
             runner_r1 = CommandRunner(f"{self.__class__.__name__}.Zip1", is_wsl=True)
             runner_r2 = CommandRunner(f"{self.__class__.__name__}.Zip2", is_wsl=True)
 
-            # 🚀 I/O 优化：先在内存盘内完成压缩，再一次性搬运到 Windows 盘
+            #  I/O 优化：先在内存盘内完成压缩，再一次性搬运到 Windows 盘
             shm_clean_r1 = f"{shm_dir}/clean_1.fq"
             shm_clean_r2 = f"{shm_dir}/clean_2.fq"
             shm_gz_r1 = f"{shm_dir}/clean_1.fq.gz"
@@ -168,7 +168,7 @@ class HostCleanerStep(BaseAssemblyStep):
             cmd1 = f"{zip_tool} -c '{shm_clean_r1}' > '{shm_gz_r1}'"
             cmd2 = f"{zip_tool} -c '{shm_clean_r2}' > '{shm_gz_r2}'"
 
-            # 🔗 并发封包 (在极速内存盘中进行)
+            #  并发封包 (在极速内存盘中进行)
             retcodes = await asyncio.gather(
                 runner_r1.run_command(cmd1, is_shell=True),
                 runner_r2.run_command(cmd2, is_shell=True)
@@ -178,7 +178,7 @@ class HostCleanerStep(BaseAssemblyStep):
                 self.logger.error("并发封包过程中发生致命错误")
                 return False
 
-            # 🚀 原子搬运：将压缩好的文件从内存盘拷贝到 Windows 目标目录
+            #  原子搬运：将压缩好的文件从内存盘拷贝到 Windows 目标目录
             wsl_final_r1 = WSLManager.to_wsl_path(str(final_r1))
             wsl_final_r2 = WSLManager.to_wsl_path(str(final_r2))
             await self.runner.run_command(["cp", shm_gz_r1, wsl_final_r1])
@@ -186,11 +186,11 @@ class HostCleanerStep(BaseAssemblyStep):
             
             self.context.update("clean_r1", final_r1)
             self.context.update("clean_r2", final_r2)
-            self.logger.info(f"✅ 宿主清理与并发封包完成")
+            self.logger.info(f" 宿主清理与并发封包完成")
             return True
             
         finally:
-            self.logger.info("♻️ 释放内存资源...")
+            self.logger.info("️ 释放内存资源...")
             if self.context.shm:
                 await self.context.shm.release(self.__class__.__name__.lower())
             else:
@@ -240,7 +240,7 @@ class HostCleanerStep(BaseAssemblyStep):
             is_shell=True
         )
         
-        self.logger.info(f"🔨 正在构建 Kraken2 索引 ({species_name}, 线程={cpu})...")
+        self.logger.info(f" 正在构建 Kraken2 索引 ({species_name}, 线程={cpu})...")
         await self.runner.run_command(
             f"kraken2-build --build --db '{wsl_db}' --threads {cpu}",
             is_shell=True
@@ -282,7 +282,7 @@ class HostCleanerStep(BaseAssemblyStep):
         host_path = Path(host_fasta)
         
         try:
-            msg = "🚀 建立高速内存隔离区并启动 Minimap2 差分下采样..."
+            msg = " 建立高速内存隔离区并启动 Minimap2 差分下采样..."
             if self.on_progress: self.on_progress(20, msg)
             await self.runner.run_command(["mkdir", "-p", shm_dir])
             
@@ -295,9 +295,9 @@ class HostCleanerStep(BaseAssemblyStep):
             
             bg_fraction = "05" if is_strict_parent else "15"
             if is_strict_parent:
-                self.logger.info("🔪 严格亲本模式：提取不匹配和交界序列，附带 5% 正常背景数据...")
+                self.logger.info(" 严格亲本模式：提取不匹配和交界序列，附带 5% 正常背景数据...")
             else:
-                self.logger.info("⚖️ 近缘参考模式：相对宽松过滤，保留 15% 背景以保全突变区...")
+                self.logger.info("️ 近缘参考模式：相对宽松过滤，保留 15% 背景以保全突变区...")
                 
             # SAMTools 处理管线:
             # 1. Minimap2 sr 双端映射
@@ -316,10 +316,10 @@ class HostCleanerStep(BaseAssemblyStep):
             msg = "执行差异过滤与并拢处理..."
             if self.on_progress: self.on_progress(40, msg)
             
-            # 🔗 原子化执行 (将复杂的 shell 脚本作为一个整体传给底层 shell 引擎)
+            #  原子化执行 (将复杂的 shell 脚本作为一个整体传给底层 shell 引擎)
             ret = await self.runner.run_command("\n".join(bash_script), is_shell=True)
             if ret != 0:
-                self.logger.error("❌ Soft-Dehosting 执行管线异常中断")
+                self.logger.error(" Soft-Dehosting 执行管线异常中断")
                 return False
                 
             final_r1 = out_dir / "clean_filtered_R1.fq.gz"
@@ -337,7 +337,7 @@ class HostCleanerStep(BaseAssemblyStep):
             runner_r1 = CommandRunner(f"{self.__class__.__name__}.Zip1", is_wsl=True)
             runner_r2 = CommandRunner(f"{self.__class__.__name__}.Zip2", is_wsl=True)
 
-            # 🚀 I/O 优化：先在内存盘内完成压缩，再一次性搬运
+            #  I/O 优化：先在内存盘内完成压缩，再一次性搬运
             shm_gz_r1 = f"{shm_dir}/clean_R1.fq.gz"
             shm_gz_r2 = f"{shm_dir}/clean_R2.fq.gz"
             
@@ -353,7 +353,7 @@ class HostCleanerStep(BaseAssemblyStep):
                 self.logger.error("并发封包过程中发生致命错误")
                 return False
             
-            # 🚀 原子搬运
+            #  原子搬运
             wsl_final_r1 = WSLManager.to_wsl_path(str(final_r1))
             wsl_final_r2 = WSLManager.to_wsl_path(str(final_r2))
             await self.runner.run_command(["cp", shm_gz_r1, wsl_final_r1])
@@ -361,7 +361,7 @@ class HostCleanerStep(BaseAssemblyStep):
             
             self.context.update("clean_r1", final_r1)
             self.context.update("clean_r2", final_r2)
-            self.logger.info(f"✅ Soft-Dehosting 精准净化任务和封包完成")
+            self.logger.info(f" Soft-Dehosting 精准净化任务和封包完成")
             return True
             
         finally:
