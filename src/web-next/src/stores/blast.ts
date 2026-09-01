@@ -72,7 +72,7 @@ export const useBlastStore = defineStore('blast', () => {
     /* -------- 参数 -------- */
     const params = ref<BlastParams>({
         program: 'auto',
-        database: 'nt',
+        database: 'ncbi_16s',
         evalue: 0.05,
         maxHits: 50,
         matrix: 'BLOSUM62',

@@ -1044,6 +1044,37 @@ const electronBridge = {
 
     async get_pan_genomics_result(taskId: string): Promise<any> {
         return await apiGet(`/api/analysis/pan_genomics/${taskId}/result`);
+    },
+
+    // ═══ Sanger 峰图分析与智能解峰 ═══
+    async analyze_sanger_traces(filePaths: string[], trimThreshold: number = 20): Promise<any> {
+        return await apiPost('/api/sanger/trace/analyze_path', {
+            file_paths: filePaths,
+            trim_threshold: trimThreshold
+        });
+    },
+
+    async export_sanger_fasta(samples: any[], mode: string = 'alleles'): Promise<any> {
+        return await apiPost('/api/sanger/trace/export_fasta', {
+            samples: samples,
+            mode: mode
+        });
+    },
+
+    async create_blast_from_traces(payload: { 
+        task_name: string; 
+        sequences: { id: string; sequence: string }[]; 
+        program?: string; 
+        database?: string;
+        evalue?: number;
+        max_hits?: number;
+        threads?: number;
+        filter_low_complexity?: boolean;
+        matrix?: string;
+        gap_open?: number;
+        gap_extend?: number;
+    }): Promise<any> {
+        return await apiPost('/api/sanger/trace/send_to_blast', payload);
     }
 };
 

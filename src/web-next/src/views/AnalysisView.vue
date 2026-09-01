@@ -9,16 +9,24 @@ import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue
 import AnnotationModule from './Analysis/modules/annotation/AnnotationModule.vue'
 import ProteinCompareModule from './Analysis/modules/protein_compare/ProteinCompareModule.vue'
 import PanGenomicsModule from './Analysis/modules/pan_genomics/PanGenomicsModule.vue'
+import SangerTraceModule from './Analysis/modules/sanger_trace/SangerTraceModule.vue'
 
 interface AnalysisTool {
   id: string;
   title: string;
   description: string;
-  iconType: 'chart' | 'dna' | 'book' | 'compare' | 'pangenome';
+  iconType: 'chart' | 'dna' | 'book' | 'compare' | 'pangenome' | 'trace';
   status: 'ready' | 'beta' | 'coming_soon';
 }
 
 const tools = ref<AnalysisTool[]>([
+  { 
+    id: 'sanger_trace', 
+    title: 'Sanger 峰图分析与智能解峰', 
+    description: '深度解析 AB1 原始色谱荧光信号，智能诊断杂合 InDel 移码/复合模板双峰，执行位移解卷积拆分双单倍型与真·主优势菌提取。', 
+    iconType: 'trace',
+    status: 'ready'
+  },
   { 
     id: 'annotation', 
     title: '全基因组功能注释', 
@@ -96,7 +104,13 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
         >
           <div class="tool-icon-mini">
             <!-- 矢量 SVG 图标：严禁 Emoji -->
-            <svg v-if="tool.iconType === 'book'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.2">
+            <svg v-if="tool.iconType === 'trace'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2">
+              <path d="M2 20h20" />
+              <path d="M4 20l4-12 4 8 4-14 4 18" />
+              <circle cx="8" cy="8" r="1.5" fill="#10b981" />
+              <circle cx="16" cy="6" r="1.5" fill="#dc2626" />
+            </svg>
+            <svg v-else-if="tool.iconType === 'book'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.2">
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
               <line x1="9" y1="7" x2="15" y2="7" />
@@ -143,8 +157,9 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
 
       <!-- 具体工具工作区 -->
       <div v-else class="tool-workspace">
+        <SangerTraceModule v-if="activeTool === 'sanger_trace'" />
         <AnnotationModule 
-          v-if="activeTool === 'annotation'" 
+          v-else-if="activeTool === 'annotation'" 
           @open-viewer="handleOpenViewerFromAnnotation" 
         />
         <ProteinCompareModule v-else-if="activeTool === 'protein_compare'" />

@@ -3,7 +3,7 @@
  * BlastView - BLAST 分析视图
  * 采用组件化重构，遵循单一职责原则。
  */
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useBlastStore } from '../stores/blast'
 import { useAppStore } from '../stores/app'
 import { getBridge } from '../bridge'
@@ -185,6 +185,66 @@ function commitRename(task: any) {
   }
 }
 
+function refreshTaskList(autoSelectTargetId?: string) {
+  try {
+    getBridge().get_all_tasks((resStr: string) => {
+      try {
+        const tasks = JSON.parse(resStr)
+        if (Array.isArray(tasks)) {
+          blast.tasks = tasks.map(t => ({
+            taskId: t.task_id,
+            fileName: t.task_name || getFormattedTimestamp(t.start_time),
+            status: t.status,
+            progress: t.progress || 0,
+            startTime: t.start_time
+          }))
+
+          // 决定要激活的任务 ID
+          const firstTaskId = blast.tasks.length > 0 ? (blast.tasks[0]?.taskId || null) : null
+          const targetId = autoSelectTargetId || blast.activeTaskId || firstTaskId
+
+          if (targetId) {
+            const found = blast.tasks.find(t => t.taskId === targetId)
+            if (found) {
+              blast.setActiveTask(targetId)
+              activeSideTool.value = 'history'
+              isSidebarOpen.value = true
+              fetchTaskResults(targetId)
+
+              if (['running', 'pending'].includes(found.status)) {
+                taskManager.startPolling(targetId, (doneId) => {
+                  fetchTaskResults(doneId)
+                })
+              }
+            }
+          }
+
+          // 启动其它所有 running 任务的后台状态同步
+          blast.tasks.forEach(t => {
+            if (t.status === 'running' && t.taskId !== targetId) {
+              taskManager.startPolling(t.taskId, (doneId) => {
+                if (blast.activeTaskId === doneId) {
+                  fetchTaskResults(doneId)
+                }
+              })
+            }
+          })
+        }
+      } catch (e) {
+        console.error('Failed to parse tasks:', e)
+      }
+    })
+  } catch (e) {
+    console.error('Failed to get tasks:', e)
+  }
+}
+
+watch(() => blast.activeTaskId, (newId) => {
+  if (newId) {
+    refreshTaskList(newId)
+  }
+})
+
 onMounted(() => {
   // 防御性重置
   _isLocked.value = true
@@ -194,28 +254,10 @@ onMounted(() => {
   
   document.addEventListener('click', () => { openDropdown.value = null; })
   
-  setTimeout(() => {
-    try {
-      getBridge().get_all_tasks((resStr: string) => {
-        try {
-          const tasks = JSON.parse(resStr)
-          if (Array.isArray(tasks)) {
-            blast.tasks = tasks.map(t => ({
-              taskId: t.task_id, fileName: t.task_name || getFormattedTimestamp(t.start_time),
-              status: t.status, progress: t.progress || 0, startTime: t.start_time
-            }))
-            blast.tasks.forEach(t => { 
-              if (t.status === 'running') {
-                taskManager.startPolling(t.taskId, (taskId) => {
-                  fetchTaskResults(taskId)
-                })
-              }
-            })
-          }
-        } catch { }
-      })
-    } catch { }
-  }, 500)
+  // 挂载时立即刷新，并执行两次延时保底以确保跨模块新创建任务已落库
+  refreshTaskList()
+  setTimeout(() => { refreshTaskList(); }, 200)
+  setTimeout(() => { refreshTaskList(); }, 600)
 })
 
 onUnmounted(() => {

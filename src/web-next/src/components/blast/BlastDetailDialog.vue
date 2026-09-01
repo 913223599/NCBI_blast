@@ -61,17 +61,17 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2000; }
-.dialog-container { background: white; border-radius: 12px; width: 900px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); }
-.dialog-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; }
-.dialog-header h3 { font-size: 1rem; font-weight: 700; color: #1e293b; }
+.dialog-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2000; backdrop-filter: blur(2px); }
+.dialog-container { background: white; border-radius: 12px; width: 1250px; max-width: 96vw; height: 90vh; max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+.dialog-header { padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; background: #f8fafc; }
+.dialog-header h3 { font-size: 1.05rem; font-weight: 700; color: #1e293b; margin: 0; }
 .dialog-body { flex: 1; padding: 0; overflow: auto; }
-.dialog-footer { padding: 12px 24px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; }
+.dialog-footer { padding: 14px 24px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; background: #f8fafc; }
 
 .detail-table { width: 100%; border-collapse: collapse; }
-th { background: #f8fafc; padding: 12px 16px; font-size: 0.75rem; color: #64748b; text-align: left; position: sticky; top: 0; z-index: 5; }
-td { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; font-size: 0.82rem; }
-.title-cell { color: #64748b; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+th { background: #f8fafc; padding: 12px 18px; font-size: 0.78rem; font-weight: 700; color: #475569; text-align: left; position: sticky; top: 0; z-index: 5; border-bottom: 1px solid #e2e8f0; }
+td { padding: 12px 18px; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem; }
+.title-cell { color: #475569; max-width: 500px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .btn-primary { background: #2563eb; color: white; border: none; padding: 8px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; }
 .close-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: #94a3b8; }

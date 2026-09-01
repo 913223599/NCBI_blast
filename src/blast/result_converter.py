@@ -6,7 +6,7 @@ BLAST结果转换模块
 
 import csv
 from pathlib import Path
-from typing import Iterator, Dict, Any
+from typing import Iterator, Iterable, Dict, Any
 
 from src.blast.parser import BlastXmlParser
 
@@ -82,7 +82,7 @@ class BlastResultConverter:
             print(f"转换过程中出错: {e}")
             raise
 
-    def save_parsed_to_csv(self, parsed_rows: Iterator[Dict[str, Any]], output_file: str):
+    def save_parsed_to_csv(self, parsed_rows: Iterable[Dict[str, Any]], output_file: str):
         """
         将已解析的行序列直接保存为 CSV (用于批处理加速)
         """
