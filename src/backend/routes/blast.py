@@ -6,10 +6,11 @@ import json
 import time
 import zipfile
 import shutil
+import re
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from Bio.Blast import NCBIXML
 from Bio import SeqIO
 from ..utils.blast_utils import parse_blast_csv, select_consensus_hit
@@ -37,7 +38,8 @@ class RenameRequest(BaseModel):
 
 class VisDataRequest(BaseModel):
     xml_path: str
-    sort_mode: Optional[str] = "evalue" 
+    sort_mode: Optional[str] = "evalue"
+    query_id: Optional[str] = None
 
 class MakeDbRequest(BaseModel):
     input_file: str
@@ -245,16 +247,102 @@ async def batch_blast_from_tree(req: TreeBatchBlastRequest):
 
 # ─── 可视化 ───────────────────────────────────────────
 
+def _find_matching_record(records: List[Any], query_id: Optional[str]) -> Optional[Any]:
+    if not records:
+        return None
+    if not query_id or not query_id.strip():
+        return records[0]
+    
+    qid_clean = query_id.strip()
+    qid_safe = re.sub(r'[^a-zA-Z0-9_\-]', '_', qid_clean).lower()
+
+    # 1. 精确匹配
+    for r in records:
+        r_query = (getattr(r, 'query', '') or '').strip()
+        r_qid = (getattr(r, 'query_id', '') or '').strip()
+        if qid_clean == r_query or qid_clean == r_qid:
+            return r
+
+    # 2. 安全格式化名称精确匹配
+    for r in records:
+        r_query = (getattr(r, 'query', '') or '').strip()
+        r_safe = re.sub(r'[^a-zA-Z0-9_\-]', '_', r_query).lower()
+        if qid_safe and r_safe and qid_safe == r_safe:
+            return r
+
+    # 3. 包含/子串匹配
+    for r in records:
+        r_query = (getattr(r, 'query', '') or '').strip()
+        if qid_clean in r_query or r_query in qid_clean:
+            return r
+        r_safe = re.sub(r'[^a-zA-Z0-9_\-]', '_', r_query).lower()
+        if qid_safe in r_safe or r_safe in qid_safe:
+            return r
+
+    return None
+
 @router.post("/api/blast/visualization/data")
 async def get_visualization_data(req: VisDataRequest):
-    if not os.path.exists(req.xml_path):
-        return {"error": "XML not found"}
+    xml_path_obj = Path(req.xml_path) if req.xml_path else None
+    target_record = None
+
     try:
-        with open(req.xml_path, 'r', encoding='utf-8') as f:
-            records = list(NCBIXML.parse(f))
-        if not records:
+        # 1. 尝试直接从指定的 XML 文件中解析并精准匹配
+        if xml_path_obj and xml_path_obj.exists():
+            try:
+                with open(xml_path_obj, 'r', encoding='utf-8') as f:
+                    records = list(NCBIXML.parse(f))
+                target_record = _find_matching_record(records, req.query_id)
+            except Exception as parse_err:
+                logger.warning(f"Failed to parse initial xml {req.xml_path}: {parse_err}")
+
+        # 2. 若在指定的 XML 中未找到匹配项，且给定了 query_id，在同级 xml_raw 目录中检索
+        if not target_record and req.query_id and xml_path_obj:
+            xml_parent = xml_path_obj.parent
+            if xml_parent.exists() and xml_parent.is_dir():
+                # 2.1 优先查找单序列专属 XML: {safe_id}.xml
+                safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', req.query_id)
+                candidate_single = xml_parent / f"{safe_id}.xml"
+                if candidate_single.exists() and candidate_single != xml_path_obj:
+                    try:
+                        with open(candidate_single, 'r', encoding='utf-8') as f:
+                            recs = list(NCBIXML.parse(f))
+                        target_record = _find_matching_record(recs, req.query_id)
+                    except Exception:
+                        pass
+                
+                # 2.2 若仍未找到，遍历该任务 xml_raw 下全部 XML 检索
+                if not target_record:
+                    for alt_xml in xml_parent.glob("*.xml"):
+                        if alt_xml == xml_path_obj or alt_xml == candidate_single:
+                            continue
+                        try:
+                            with open(alt_xml, 'r', encoding='utf-8') as f:
+                                recs = list(NCBIXML.parse(f))
+                            match = _find_matching_record(recs, req.query_id)
+                            if match:
+                                target_record = match
+                                break
+                        except Exception:
+                            continue
+
+        # 3. 如果仍未找到
+        if not target_record:
+            if not req.query_id and xml_path_obj and xml_path_obj.exists():
+                try:
+                    with open(xml_path_obj, 'r', encoding='utf-8') as f:
+                        records = list(NCBIXML.parse(f))
+                    if records:
+                        target_record = records[0]
+                except Exception:
+                    pass
+
+        if not target_record:
+            if req.query_id:
+                return {"error": f"未在比对结果中找到序列 [{req.query_id}] 的原始比对记录"}
             return {"error": "未在比对结果中发现有效的记录"}
-        record = records[0]
+
+        record = target_record
         hits = []
         for alignment in record.alignments:
             parsed_hsps = []

@@ -53,6 +53,7 @@ const visualData = ref<any>(null)
 const visualLoading = ref(false)
 const visualSortMode = ref('evalue')
 const currentXmlPath = ref('')
+const currentVisQueryTitle = ref('')
 
 function showAlignmentMap(hit: any) {
   if (!hit.xmlFile) {
@@ -62,27 +63,33 @@ function showAlignmentMap(hit: any) {
   showVisualModal.value = true
   visualLoading.value = true
   currentXmlPath.value = hit.xmlFile
+  currentVisQueryTitle.value = hit.queryTitle || ''
   visualData.value = null 
   fetchVisualData()
 }
 
 function fetchVisualData() {
   visualLoading.value = true
-  getBridge().get_alignment_visualization_data(currentXmlPath.value, visualSortMode.value, (resStr: string) => {
-    visualLoading.value = false
-    try {
-      const data = JSON.parse(resStr)
-      if (data.error) {
-        appStore.showNotification(`可视化失败: ${data.error}`, 'error')
+  getBridge().get_alignment_visualization_data(
+    currentXmlPath.value, 
+    visualSortMode.value, 
+    currentVisQueryTitle.value, 
+    (resStr: string) => {
+      visualLoading.value = false
+      try {
+        const data = JSON.parse(resStr)
+        if (data.error) {
+          appStore.showNotification(`可视化提示: ${data.error}`, 'warning')
+          showVisualModal.value = false
+        } else {
+          visualData.value = data
+        }
+      } catch {
+        appStore.showNotification('解析可视化数据失败', 'error')
         showVisualModal.value = false
-      } else {
-        visualData.value = data
       }
-    } catch {
-      appStore.showNotification('解析可视化数据失败', 'error')
-      showVisualModal.value = false
     }
-  })
+  )
 }
 
 /* -------- BLAST 交互逻辑 -------- */

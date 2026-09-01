@@ -4,6 +4,7 @@ import re
 import threading
 import time
 import io
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -215,13 +216,25 @@ class BlastEngine:
             xml_content = handle.read()
             handle.close()
             
-            # ✨ [加速核心1] 每个 Batch 只写一次原始 XML，避免对同一个大文件进行 10 次冗余写入
-            batch_xml_path = self.results_dir / "xml_raw" / f"batch_{int(time.time())}.xml"
+            # 1. 保存 Batch 完整原始 XML (时间戳+UUID，彻底杜绝多线程并发同名覆盖)
+            unique_batch_id = f"batch_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+            batch_xml_path = self.results_dir / "xml_raw" / f"{unique_batch_id}.xml"
             try:
                 with open(batch_xml_path, 'w', encoding='utf-8') as f_xml:
                     f_xml.write(xml_content)
             except Exception as xml_err:
                 logger.warning(f"Failed to save batch XML: {xml_err}")
+
+            # 2. 提取 XML 头部与尾部，用于为各序列单独切分单序列专属 XML
+            iter_start_tag = "<BlastOutput_iterations>"
+            iter_end_tag = "</BlastOutput_iterations>"
+            header_part = ""
+            footer_part = ""
+            single_iterations = []
+            if iter_start_tag in xml_content and iter_end_tag in xml_content:
+                header_part = xml_content.split(iter_start_tag)[0] + iter_start_tag + "\n"
+                footer_part = "\n" + iter_end_tag + xml_content.split(iter_end_tag)[1]
+                single_iterations = re.findall(r"(<Iteration>.*?</Iteration>)", xml_content, flags=re.DOTALL)
 
             from Bio.Blast import NCBIXML
             records = NCBIXML.parse(io.StringIO(xml_content))
@@ -239,6 +252,18 @@ class BlastEngine:
                 
                 seq_hash = get_annotation_manager().generate_hash(query_str)
                 
+                # 保存单序列专属 XML，实现 100% 序列级物理隔离
+                seq_xml_path = self.results_dir / "xml_raw" / f"{safe_id}.xml"
+                if i < len(single_iterations) and header_part and footer_part:
+                    try:
+                        single_xml_str = header_part + single_iterations[i] + footer_part
+                        with open(seq_xml_path, 'w', encoding='utf-8') as f_single:
+                            f_single.write(single_xml_str)
+                    except Exception as s_err:
+                        logger.warning(f"Failed to write single XML for {sid}: {s_err}")
+
+                final_xml_path = str(seq_xml_path) if seq_xml_path.exists() else (str(batch_xml_path) if batch_xml_path.exists() else None)
+
                 # 保存结果
                 csv_path = self.results_dir / "reports" / f"{safe_id}.csv"
                 results_data = list(self.parser.parse_single_record(record))
@@ -251,7 +276,7 @@ class BlastEngine:
                     "status": "success",
                     "elapsed_time": avg_time,
                     "csv_file": str(csv_path),
-                    "xml_file": str(batch_xml_path) if batch_xml_path.exists() else None,
+                    "xml_file": final_xml_path,
                     "program": prog,
                     "database": db,
                     "raw_sequence": query_str 

@@ -459,12 +459,26 @@ const electronBridge = {
         callback?.(result.success);
     },
 
-    async get_alignment_visualization_data(xmlPath: string, sortMode: string = 'evalue', callback?: (res: string) => void) {
+    async get_alignment_visualization_data(
+        xmlPath: string, 
+        sortMode: string = 'evalue', 
+        queryIdOrCallback?: string | ((res: string) => void), 
+        callback?: (res: string) => void
+    ) {
+        let queryId: string | undefined = undefined;
+        let actualCallback = callback;
+        if (typeof queryIdOrCallback === 'function') {
+            actualCallback = queryIdOrCallback;
+        } else if (typeof queryIdOrCallback === 'string') {
+            queryId = queryIdOrCallback;
+        }
+
         const result = await apiPost('/api/blast/visualization/data', {
             xml_path: xmlPath,
-            sort_mode: sortMode
+            sort_mode: sortMode,
+            query_id: queryId
         });
-        callback?.(JSON.stringify(result));
+        actualCallback?.(JSON.stringify(result));
     },
 
     // ═══ 翻译（通过 HTTP + WS 推送）═══
