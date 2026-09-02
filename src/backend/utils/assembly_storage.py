@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import shutil
 import logging
@@ -18,7 +19,7 @@ class AssemblyStorage:
     @classmethod
     def get_task_dir(cls, task_id: str) -> Path:
         """获取并创建任务专属目录"""
-        task_dir = cls.BASE_DIR / str(task_id)
+        task_dir = cls.BASE_DIR / task_id
         task_dir.mkdir(parents=True, exist_ok=True)
         return task_dir
 
@@ -40,9 +41,9 @@ class AssemblyStorage:
                 if now - mtime > timedelta(days=days):
                     try:
                         shutil.rmtree(task_folder)
-                        logger.info(f"🧹 [Storage] 已自动清理过期任务: {task_folder.name}")
+                        logger.info(f"[Storage] 已自动清理过期任务: {task_folder.name}")
                     except Exception as e:
-                        logger.error(f"❌ [Storage] 清理失败 {task_folder.name}: {e}")
+                        logger.error(f"[Storage] 清理失败 {task_folder.name}: {e}")
 
     @classmethod
     def get_relative_path(cls, absolute_path: str) -> str:

@@ -315,12 +315,12 @@ async def get_assembly_result(task_id: str):
     contig_list = []
     if fasta_exists and asm_fasta:
         try:
-            cur_header = ""
-            cur_seq = []
+            cur_header: Optional[str] = None
+            cur_seq: List[str] = []
             avg_d = float(stats.get("avg_depth") or 0.0)
             has_explicit_depth_in_header = False
 
-            def finish_c(h: str, s_list: list):
+            def finish_c(h: Optional[str], s_list: List[str]):
                 nonlocal has_explicit_depth_in_header
                 if not h or not s_list: return
                 s_str = "".join(s_list)
@@ -358,12 +358,12 @@ async def get_assembly_result(task_id: str):
                 for line in f:
                     l_str = line.strip()
                     if l_str.startswith(">"):
-                        if cur_header: finish_c(cur_header, cur_seq)
+                        if cur_header is not None: finish_c(cur_header, cur_seq)
                         cur_header = l_str
                         cur_seq = []
                     else:
                         cur_seq.append(l_str)
-                if cur_header: finish_c(cur_header, cur_seq)
+                if cur_header is not None: finish_c(cur_header, cur_seq)
 
             # 若 header 中无单片段独立深度且有多条 contig，执行极速 K-mer 丰度真实测序深度估算
             if not has_explicit_depth_in_header and len(contig_list) > 1:

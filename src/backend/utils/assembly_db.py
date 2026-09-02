@@ -45,10 +45,10 @@ class AssemblyDB:
             cursor = conn.execute("PRAGMA table_info(assembly_tasks)")
             columns = [col[1] for col in cursor.fetchall()]
             if 'sample_type' not in columns:
-                logger.info("🛠️ 正在迁移数据库: 添加 sample_type 列...")
+                logger.info("[DB] 正在迁移数据库: 添加 sample_type 列...")
                 conn.execute('ALTER TABLE assembly_tasks ADD COLUMN sample_type TEXT')
             if 'duration_seconds' not in columns:
-                logger.info("🛠️ 正在迁移数据库: 添加 duration_seconds 列...")
+                logger.info("[DB] 正在迁移数据库: 添加 duration_seconds 列...")
                 conn.execute('ALTER TABLE assembly_tasks ADD COLUMN duration_seconds REAL')
             
             # 3. 开启 WAL 模式，防止多 Worker 并发写入时 "database is locked"
