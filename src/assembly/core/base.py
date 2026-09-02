@@ -49,7 +49,8 @@ class BaseAssemblyStep(abc.ABC):
         self.logger = self.runner.logger   #  快捷访问日志对象
         self.status = "pending"
         self.progress = 0.0
-        #  回调签名支持进度百分比和子状态描述
+        self.last_error: Optional[str] = None
+        # 回调签名支持进度百分比和子状态描述
         self.on_progress: Optional[Callable[[float, Optional[str]], None]] = None
 
     @abc.abstractmethod

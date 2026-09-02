@@ -1,332 +1,275 @@
-
-import { ref, reactive } from 'vue'
-import { SequencingTech, AssemblyStage, SampleType } from '../../../modules/AssemblyCoordinator/index'
-import { getBridge } from '../../../bridge'
-
 /**
- * 组装业务逻辑 Hook
+ * useAssembly - 基因组组装 Composable 状态与逻辑编排 (纯净重构版)
  */
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { onEvent, apiGet, apiPost, apiDelete, API_BASE } from '../../../bridge/electron-bridge';
+import type { 
+  AssemblyRunParams, 
+  AssemblyTaskItem, 
+  AssemblyResultData, 
+  AssemblyQueueStatus 
+} from '../types';
+
 export function useAssembly() {
-  const isRunning = ref(false)
-  const currentStep = ref(0)
-  const history = ref<any[]>([])
-  const selectedFiles = ref<string[]>([])
-  const showResults = ref(false)
+  const isRunning = ref<boolean>(false);
+  const currentTask = ref<AssemblyTaskItem | null>(null);
+  const resultData = ref<AssemblyResultData | null>(null);
+  const historyTasks = ref<AssemblyTaskItem[]>([]);
+  const activeTaskId = ref<string>('');
+  const error = ref<string | null>(null);
+  const consoleLogs = ref<string[]>([]);
+  const isHistoryLoading = ref<boolean>(false);
+  const queueStatus = ref<AssemblyQueueStatus | null>(null);
 
-  // 🔗 队列状态追踪
-  const queueStatus = ref<any[]>([])
-  const queuePaused = ref(false)
+  // 引擎是否正忙（有正在运行的任务）
+  const isEngineBusy = computed(() => {
+    return !!queueStatus.value?.is_busy || historyTasks.value.some(t => t.status === 'running');
+  });
 
-  const taskState = reactive({
-    id: '',
-    name: 'New_Assembly_Task',
-    tech: SequencingTech.ILLUMINA as SequencingTech,
-    sampleType: SampleType.BACTERIA as SampleType,
-    selectedDatabase: 'silva',
-    selectedHostDb: 'search_ncbi',
-    ncbiSearchTerm: '',
-    customHostPath: '',
-    estimatedGenomeSize: 100000,
-    targetCoverage: 300,
-    highResolutionKmer: false,
-    stopAfterAssembly: false,
-    mergeReads: false,
-    useGPU: true,
-    isLysogenic: false,
-    isStrictParentStrain: true,
-    doPolishing: false,
-    enableDeepAudit: false,
-    progress: 0,
-    stage: AssemblyStage.PREPROCESSING as AssemblyStage
-  })
-
-  // 1. 获取任务历史
-  const fetchHistory = async () => {
+  // 1. 获取任务历史记录与队列状态
+  async function fetchHistory() {
+    isHistoryLoading.value = true;
     try {
-      const bridge = getBridge();
-      const response = await bridge.get_assembly_history();
-      const rawList = response?.data || response || [];
-      
-      if (!Array.isArray(rawList)) {
-        history.value = [];
-        return;
-      }
+      const [histRes, qRes] = await Promise.all([
+        apiGet('/api/assembly/history'),
+        apiGet('/api/assembly/queue')
+      ]);
 
-      history.value = rawList.map((item: any) => {
-        let configData: any = {};
-        try { 
-          if(item.config) {
-            configData = typeof item.config === 'string' ? JSON.parse(item.config) : item.config;
-          }
-        } catch(e) {}
-        
-        return {
-          ...item,
-          sampleType: item.sample_type || configData.sample_type || 'BACTERIA',
-          tech: item.tech || configData.tech || 'ILLUMINA',
-          name: item.name || configData.name || '未命名任务',
-          created_at: item.created_at ? (item.created_at * 1000) : Date.now()
-        }
-      });
-    } catch (err) {
-      console.error('Fetch history failed:', err);
-      history.value = [];
+      if (histRes && histRes.code === 200) {
+        historyTasks.value = histRes.data || [];
+      }
+      if (qRes && qRes.code === 200) {
+        queueStatus.value = qRes.data;
+      }
+    } catch (e: any) {
+      console.warn('[useAssembly] 获取历史记录或队列失败:', e);
+    } finally {
+      isHistoryLoading.value = false;
     }
   }
 
-  const pickCustomHost = async () => {
+  // 2. 提交新拼接任务
+  async function submitTask(params: AssemblyRunParams) {
+    error.value = null;
+
     try {
-      const paths = await getBridge().request_file_load(['fasta', 'fa', 'fna'], false);
-      if (paths && paths.length > 0) {
-        taskState.customHostPath = paths[0];
-      }
-    } catch (err) {
-      console.error('Pick custom host failed:', err);
-    }
-  }
-
-  // 2. 启动任务
-  const startTask = async (options: { taskId?: string, reset?: boolean, forceSampleType?: string } = {}) => {
-    // 允许在运行时追加队列，移除 if (isRunning.value) return;
-    
-    // 如果是全新任务，必须选择文件
-    if (!options.taskId && selectedFiles.value.length === 0) {
-      alert('请先选择或上传 Fastq 测序文件');
-      return;
-    }
-    
-    // 如果当前空闲，则重置进度面板
-    if (!isRunning.value) {
-      currentStep.value = 0;
-      taskState.progress = 0;
-      taskState.stage = AssemblyStage.PREPROCESSING;
-    }
-    
-    isRunning.value = true;
-    
-    try {
-      let hostDb = taskState.selectedHostDb;
-      if (hostDb === 'search_ncbi') {
-        hostDb = `ncbi:${taskState.ncbiSearchTerm}`;
-      } else if (hostDb === 'custom') {
-        hostDb = taskState.customHostPath;
-      }
-
-      const taskId = options.taskId || `AS_${Date.now()}`;
-      taskState.id = taskId;
-      const finalSampleType = options.forceSampleType || taskState.sampleType;
-
-      const sortedFiles = [...selectedFiles.value].sort((a, b) => {
-        const isA1 = /[_.]R?1[_.]/.test(a);
-        const isB1 = /[_.]R?1[_.]/.test(b);
-        if (isA1 && !isB1) return -1;
-        if (!isA1 && isB1) return 1;
-        return 0;
-      });
-
+      const taskId = `Assembly_${Date.now()}`;
       const payload = {
         task_id: taskId,
-        name: taskState.name,
-        sample_id: sortedFiles[0] ? sortedFiles[0].split(/[\\/]/).pop()?.split('.')[0] : 'Sample',
-        sample_type: finalSampleType,
-        tech: taskState.tech,
-        use_gpu: taskState.useGPU,
-        algorithm: 'AUTO',
+        name: params.name || `Task_${taskId.slice(-6)}`,
+        sample_type: params.sample_type || 'BACTERIA',
+        tech: params.tech || 'ILLUMINA',
+        r1: params.r1_path,
+        r2: params.r2_path || null,
         config: {
-          reset: options.reset || false,
+          name: params.name,
+          sample_type: params.sample_type,
+          tech: params.tech,
+          r1: params.r1_path,
+          r2: params.r2_path || null,
+          r1_name: params.r1_name,
+          r2_name: params.r2_name,
           params: {
-            database: taskState.selectedDatabase,
-            host_filter_db: hostDb,
-            input_files: sortedFiles,
-            estimated_genome_size: taskState.estimatedGenomeSize || 100000,
-            target_coverage: taskState.targetCoverage || 300,
-            high_res_kmer: taskState.highResolutionKmer,
-            stop_after_assembly: taskState.stopAfterAssembly,
-            merge_reads: taskState.mergeReads,
-            host_genome: hostDb, // 支持从 host_filter_db 共享为 host_genome
-            is_lysogenic: taskState.isLysogenic,
-            is_strict_parent_strain: taskState.isStrictParentStrain,
-            do_polishing: taskState.doPolishing,
-            enable_deep_audit: taskState.enableDeepAudit
+            threads: params.threads || 8,
+            mode: params.mode || 'isolate',
+            min_read_length: params.min_read_length || 500
           }
         }
       };
-      await getBridge().start_assembly_pipeline(payload);
+
+      const res = await apiPost('/api/assembly/run', payload);
+
+      if (!res || res.code !== 200) {
+        throw new Error(res?.msg || res?.message || res?.error || '任务提交失败');
+      }
+
+      const queuePos = res.data?.queue_position || 1;
+
+      // 乐观添加任务快照到历史列表
+      const newTaskItem: AssemblyTaskItem = {
+        id: taskId,
+        name: payload.name,
+        sample_type: payload.sample_type,
+        tech: payload.tech,
+        status: queuePos > 1 ? 'queued' : 'running',
+        progress: 0,
+        last_step: queuePos > 1 ? `排队中 (#${queuePos})` : '正在启动 NGCS 引擎...',
+        created_at: Date.now() / 1000,
+        updated_at: Date.now() / 1000,
+        config: payload.config,
+        results: null,
+        queue_position: queuePos
+      };
+
+      historyTasks.value = [newTaskItem, ...historyTasks.value.filter(t => t.id !== taskId)];
+      activeTaskId.value = taskId;
+      currentTask.value = newTaskItem;
+      isRunning.value = true;
+      resultData.value = null;
+
+      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 拼接任务已提交: ${taskId} (排队位次: #${queuePos})`);
+      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 测序平台: ${params.tech} | 模式: ${params.mode} | R1: ${params.r1_path}`);
+      if (params.r2_path) {
+        consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 双端 R2: ${params.r2_path}`);
+      }
+
+      await fetchHistory();
+      return res;
+    } catch (e: any) {
+      error.value = `任务提交失败: ${e.message}`;
+      throw e;
+    }
+  }
+
+  // 3. 加载任务结果与详情
+  async function loadTaskResult(taskId: string) {
+    if (!taskId) return;
+    activeTaskId.value = taskId;
+    error.value = null;
+
+    const existing = historyTasks.value.find(t => t.id === taskId);
+    if (existing) {
+      currentTask.value = { ...existing };
+      isRunning.value = existing.status === 'running';
+    }
+
+    try {
+      const res = await apiGet(`/api/assembly/result/${taskId}`);
+      if (res && res.code === 200 && res.data) {
+        resultData.value = res.data;
+        if (currentTask.value) {
+          currentTask.value.status = res.data.status;
+          currentTask.value.results = res.data.stats;
+        }
+      }
+    } catch (e: any) {
+      console.warn(`[useAssembly] 加载任务结果失败 (${taskId}):`, e);
+    }
+  }
+
+  // 4. 取消/终止任务
+  async function cancelTask(taskId: string) {
+    if (!taskId) return;
+    try {
+      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 正在发送终止指令: ${taskId}...`);
+      await apiPost(`/api/assembly/stop/${taskId}`);
       
-      // 🔗 提交成功后清空文件列表，方便添加下一个任务到队列
-      selectedFiles.value = [];
+      if (currentTask.value && currentTask.value.id === taskId) {
+        currentTask.value.status = 'aborted';
+        isRunning.value = false;
+      }
+      await fetchHistory();
+    } catch (e: any) {
+      error.value = `终止任务失败: ${e.message}`;
+    }
+  }
+
+  // 5. 删除任务
+  async function deleteTask(taskId: string) {
+    if (!taskId) return;
+    try {
+      await apiDelete(`/api/assembly/tasks/${taskId}`);
+      historyTasks.value = historyTasks.value.filter(t => t.id !== taskId);
       
-      // 自动递增任务名称，防止重名
-      if (taskState.name) {
-          const match = taskState.name.match(/(.*)_(\d+)$/);
-          if (match && match[1] !== undefined && match[2] !== undefined) {
-              const base = match[1];
-              const num = parseInt(match[2]);
-              taskState.name = `${base}_${num + 1}`;
-          } else {
-              taskState.name = `${taskState.name}_1`;
+      if (activeTaskId.value === taskId) {
+        activeTaskId.value = '';
+        currentTask.value = null;
+        resultData.value = null;
+        isRunning.value = false;
+      }
+      await fetchHistory();
+    } catch (e: any) {
+      error.value = `删除任务失败: ${e.message}`;
+    }
+  }
+
+  // 6. 下载 FASTA 产物
+  function downloadFasta(taskId: string) {
+    if (!taskId) return;
+    const downloadUrl = `${API_BASE}/api/assembly/download/${taskId}`;
+    window.open(downloadUrl, '_blank');
+  }
+
+  // 7. WebSocket 实时遥测事件监听
+  let unsubscribeProgress: (() => void) | null = null;
+  let pollingTimer: any = null;
+
+  onMounted(async () => {
+    await fetchHistory();
+
+    // 监听 assembly_progress 广播
+    unsubscribeProgress = onEvent((type: string, data: any) => {
+      if (type === 'assembly_progress' && data) {
+        const { task_id, step, progress, status, stats } = data;
+        
+        // 更新历史任务列表中匹配的任务
+        const matched = historyTasks.value.find(t => t.id === task_id);
+        if (matched) {
+          matched.progress = progress;
+          matched.last_step = step;
+          matched.status = status;
+          if (stats) matched.results = stats;
+        }
+
+        // 如果是当前聚焦任务
+        if (activeTaskId.value === task_id || (!activeTaskId.value && currentTask.value?.id === task_id)) {
+          if (currentTask.value) {
+            currentTask.value.progress = progress;
+            currentTask.value.last_step = step;
+            currentTask.value.status = status;
+            if (stats) currentTask.value.results = stats;
           }
-      }
-
-      // 🔗 启动后立即刷新历史列表，确保 UI 状态一致
-      await fetchHistory();
-    } catch (err) {
-      isRunning.value = false;
-      console.error('Start failed:', err);
-    }
-  }
-
-  const restoreTaskToState = (task: any) => {
-    let configObj: any = {};
-    try {
-      configObj = typeof task.config === 'string' ? JSON.parse(task.config) : task.config || {};
-    } catch(e) {}
-    const params = configObj.params || {};
-
-    if (params.input_files) selectedFiles.value = params.input_files;
-    
-    taskState.name = task.name;
-    const rawType = task.sampleType || task.sample_type || configObj.sample_type || 'BACTERIA';
-    taskState.sampleType = rawType;
-    taskState.tech = task.tech || configObj.tech || 'ILLUMINA';
-    
-    if (params.host_filter_db) {
-      const db = String(params.host_filter_db);
-      if (db.startsWith('ncbi:')) {
-        taskState.selectedHostDb = 'search_ncbi';
-        taskState.ncbiSearchTerm = db.replace('ncbi:', '');
-      } else if (db && db !== 'default_ecoli') {
-        taskState.selectedHostDb = 'custom';
-        taskState.customHostPath = db;
-      }
-    }
-    
-    if (params.estimated_genome_size) {
-      taskState.estimatedGenomeSize = params.estimated_genome_size;
-    }
-    if (params.target_coverage) {
-      taskState.targetCoverage = params.target_coverage;
-    }
-    if (params.high_res_kmer !== undefined) {
-      taskState.highResolutionKmer = !!params.high_res_kmer;
-    }
-    if (params.stop_after_assembly !== undefined) {
-      taskState.stopAfterAssembly = !!params.stop_after_assembly;
-    }
-    if (params.merge_reads !== undefined) {
-      taskState.mergeReads = !!params.merge_reads;
-    }
-    if (params.is_lysogenic !== undefined) {
-      taskState.isLysogenic = !!params.is_lysogenic;
-    }
-    if (params.is_strict_parent_strain !== undefined) {
-      taskState.isStrictParentStrain = !!params.is_strict_parent_strain;
-    }
-    if (params.do_polishing !== undefined) {
-      taskState.doPolishing = !!params.do_polishing;
-    }
-    if (params.enable_deep_audit !== undefined) {
-      taskState.enableDeepAudit = !!params.enable_deep_audit;
-    }
-    return rawType;
-  }
-
-  const resumeTask = (task: any) => {
-    const rawType = restoreTaskToState(task);
-    startTask({ taskId: task.id, reset: false, forceSampleType: rawType });
-  };
-
-  const restartTask = (task: any) => {
-    if (!confirm('确定要清除所有进度并从头开始运行吗？')) return;
-    const rawType = restoreTaskToState(task);
-    startTask({ taskId: task.id, reset: true, forceSampleType: rawType });
-  };
-
-  const stopTask = async (taskId: string) => {
-    try {
-      await getBridge().stop_assembly_task(taskId);
-    } catch (err) {
-      console.error('Stop failed:', err);
-    }
-  }
-
-  const deleteTask = async (taskId: string) => {
-    try {
-      await getBridge().delete_assembly_task(taskId);
-      await fetchHistory();
-    } catch (err) {
-      console.error('Delete failed:', err);
-    }
-  }
-
-  // 🔗 队列状态更新 (由 WebSocket 事件驱动)
-  const updateQueueStatus = (data: any) => {
-    if (data.queue) queueStatus.value = data.queue
-    if (data.paused !== undefined) queuePaused.value = data.paused
-  }
-
-  // 🔗 将等待队列重排序请求发送到后端
-  const reorderQueue = async (taskIds: string[]) => {
-    try {
-      await getBridge().reorder_assembly_queue(taskIds)
-      // 请求重新获取一下队列状态（虽然广播也会推过来）
-    } catch (err) {
-      console.error('Reorder queue failed:', err)
-    }
-  }
-
-  // 🔗 批量提交：将多组 [R1, R2] 文件一次性提交到队列
-  const submitBatch = async (fileGroups: string[][], options: any = {}) => {
-    if (fileGroups.length === 0) return
-    try {
-      const payload = {
-        file_groups: fileGroups,
-        sample_type: options.sampleType || taskState.sampleType,
-        tech: options.tech || taskState.tech,
-        name_prefix: options.namePrefix || taskState.name,
-        config: {
-          params: {
-            database: taskState.selectedDatabase,
-            host_filter_db: taskState.selectedHostDb === 'search_ncbi'
-              ? `ncbi:${taskState.ncbiSearchTerm}`
-              : taskState.selectedHostDb === 'custom'
-                ? taskState.customHostPath
-                : taskState.selectedHostDb,
-            estimated_genome_size: taskState.estimatedGenomeSize,
-            target_coverage: taskState.targetCoverage,
-            high_res_kmer: taskState.highResolutionKmer,
-            stop_after_assembly: taskState.stopAfterAssembly,
-            host_genome: taskState.selectedHostDb === 'search_ncbi'
-              ? `ncbi:${taskState.ncbiSearchTerm}`
-              : taskState.selectedHostDb === 'custom'
-                ? taskState.customHostPath
-                : taskState.selectedHostDb,
-            is_lysogenic: taskState.isLysogenic,
-            is_strict_parent_strain: taskState.isStrictParentStrain,
-            do_polishing: taskState.doPolishing,
-            enable_deep_audit: taskState.enableDeepAudit
+          if (step) {
+            consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] ${step}`);
+          }
+          if (status === 'success' || status === 'completed') {
+            isRunning.value = false;
+            loadTaskResult(task_id);
+          } else if (status === 'failed' || status === 'aborted') {
+            isRunning.value = false;
+          } else if (status === 'running') {
+            isRunning.value = true;
           }
         }
       }
-      await getBridge().submit_assembly_batch(payload)
-      await fetchHistory()
-    } catch (err) {
-      console.error('Batch submit failed:', err)
-    }
-  }
+    });
+
+    // 智能轮询队列状态 (每 3 秒一次)
+    pollingTimer = setInterval(async () => {
+      if (isRunning.value || queueStatus.value?.is_busy || historyTasks.value.some(t => t.status === 'running' || t.status === 'queued')) {
+        await fetchHistory();
+        if (activeTaskId.value && isRunning.value) {
+          const matched = historyTasks.value.find(t => t.id === activeTaskId.value);
+          if (matched && (matched.status === 'completed' || matched.status === 'failed')) {
+            isRunning.value = false;
+            await loadTaskResult(activeTaskId.value);
+          }
+        }
+      }
+    }, 3000);
+  });
+
+  onUnmounted(() => {
+    if (unsubscribeProgress) unsubscribeProgress();
+    if (pollingTimer) clearInterval(pollingTimer);
+  });
 
   return {
-    taskState, isRunning, currentStep, history, selectedFiles, showResults,
-    queueStatus, queuePaused,
-    fetchHistory: fetchHistory as () => Promise<void>,
-    pickCustomHost: pickCustomHost as () => Promise<void>,
-    startTask: startTask as (opt?: any) => Promise<void>,
-    resumeTask: resumeTask as (task: any) => void,
-    restartTask: restartTask as (task: any) => void,
-    stopTask: stopTask as (id: string) => Promise<void>,
-    deleteTask: deleteTask as (id: string) => Promise<void>,
-    updateQueueStatus,
-    reorderQueue,
-    submitBatch
-  }
+    isRunning,
+    isEngineBusy,
+    currentTask,
+    resultData,
+    historyTasks,
+    activeTaskId,
+    queueStatus,
+    error,
+    consoleLogs,
+    isHistoryLoading,
+    fetchHistory,
+    submitTask,
+    loadTaskResult,
+    cancelTask,
+    deleteTask,
+    downloadFasta
+  };
 }

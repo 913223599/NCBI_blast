@@ -36,8 +36,8 @@ export function getClientId() {
 
 // ─── 配置常量 ─────────────────────────────────────
 // 默认地址 (Electron 环境)
-let API_BASE = 'http://127.0.0.1:8765';
-let WS_URL = `ws://127.0.0.1:8765/ws?client_id=${MY_CLIENT_ID}`;
+export let API_BASE = 'http://127.0.0.1:8765';
+export let WS_URL = `ws://127.0.0.1:8765/ws?client_id=${MY_CLIENT_ID}`;
 
 // 【自适应逻辑强化】
 if (typeof window !== 'undefined') {
@@ -54,7 +54,7 @@ if (typeof window !== 'undefined') {
 
 // ─── HTTP 辅助函数 ────────────────────────────────
 
-async function apiGet(endpoint: string): Promise<any> {
+export async function apiGet(endpoint: string): Promise<any> {
     try {
         const response = await fetch(`${API_BASE}${endpoint}`);
         if (!response.ok) return { success: false, error: `HTTP ${response.status}`, status: response.status };
@@ -70,7 +70,7 @@ async function apiGet(endpoint: string): Promise<any> {
     }
 }
 
-async function apiPost(endpoint: string, body?: any): Promise<any> {
+export async function apiPost(endpoint: string, body?: any): Promise<any> {
     try {
         const response = await fetch(`${API_BASE}${endpoint}`, {
             method: 'POST',
@@ -98,7 +98,7 @@ async function apiPost(endpoint: string, body?: any): Promise<any> {
     }
 }
 
-async function apiDelete(endpoint: string): Promise<any> {
+export async function apiDelete(endpoint: string): Promise<any> {
     try {
         const response = await fetch(`${API_BASE}${endpoint}`, { 
             method: 'DELETE',

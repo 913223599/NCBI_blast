@@ -201,6 +201,7 @@ class AssemblerStep(BaseAssemblyStep):
             return True
         else:
             reason = self._diagnose_failure(out_dir)
+            self.last_error = reason
             self.logger.error(f"NGCS 组装未产生有效结果: {reason}")
             if self.on_progress:
                 self.on_progress(0, f"Error: {reason}")

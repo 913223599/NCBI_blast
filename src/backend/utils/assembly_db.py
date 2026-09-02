@@ -70,21 +70,38 @@ class AssemblyDB:
             )
             conn.commit()
 
-    def update_task_progress(self, task_id: str, step: str, progress: float, status: str = "running"):
+    def update_task_progress(self, task_id: str, step: str, progress: float, status: str = "running", error: Optional[str] = None):
         """更新任务实时进度与步骤"""
         now = time.time()
+        recorded_step = f"{step}: {error}" if error and step != error else step
         with sqlite3.connect(self.DB_PATH) as conn:
             conn.execute(
                 "UPDATE assembly_tasks SET last_step = ?, progress = ?, status = ?, updated_at = ? WHERE id = ?",
-                (step, progress, status, now, task_id)
+                (recorded_step, progress, status, now, task_id)
             )
             conn.commit()
 
-    def finalize_task(self, task_id: str, status: str, results: Dict[str, Any] = None):
+    def update_task_metrics(self, task_id: str, total_length: int = 0, contig_count: int = 0, n50: int = 0, gc_content: float = 0.0, is_circular: bool = False):
+        """记录组装产物的统计指标"""
+        now = time.time()
+        results_obj = {
+            "total_length": total_length,
+            "contigs": contig_count,
+            "n50": n50,
+            "gc_percent": gc_content,
+            "is_circular": is_circular
+        }
+        results_str = json.dumps(results_obj, cls=BioJsonEncoder)
+        with sqlite3.connect(self.DB_PATH) as conn:
+            conn.execute(
+                "UPDATE assembly_tasks SET results = ?, updated_at = ? WHERE id = ?",
+                (results_str, now, task_id)
+            )
+            conn.commit()
+
+    def finalize_task(self, task_id: str, status: str, results: Optional[Dict[str, Any]] = None):
         """标记任务结束并存储结果摘要，补全耗时统计"""
         now = time.time()
-        
-        # 自动计算耗时
         duration = 0
         task = self.get_task(task_id)
         if task and task.get('created_at'):
@@ -103,7 +120,15 @@ class AssemblyDB:
         with sqlite3.connect(self.DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM assembly_tasks ORDER BY created_at DESC LIMIT ?", (limit,))
-            return [dict(row) for row in cursor.fetchall()]
+            rows = [dict(row) for row in cursor.fetchall()]
+            for r in rows:
+                if r.get('config') and isinstance(r['config'], str):
+                    try: r['config'] = json.loads(r['config'])
+                    except: pass
+                if r.get('results') and isinstance(r['results'], str):
+                    try: r['results'] = json.loads(r['results'])
+                    except: pass
+            return rows
 
     def delete_task(self, task_id: str):
         """物理清理数据库记录"""
