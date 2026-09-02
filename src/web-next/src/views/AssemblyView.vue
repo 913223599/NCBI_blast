@@ -28,7 +28,8 @@ const {
   loadTaskResult,
   cancelTask,
   deleteTask,
-  downloadFasta
+  downloadFasta,
+  openFolder
 } = useAssembly();
 
 // 是否显式处于“新建任务表单”模式
@@ -45,9 +46,9 @@ onMounted(async () => {
 });
 
 async function onRunTask(params: AssemblyRunParams) {
+  showSetupForm.value = false;
   try {
     await submitTask(params);
-    showSetupForm.value = false;
   } catch (e) {
     // 错误已在 composable 中处理
   }
@@ -164,6 +165,7 @@ async function handleDeleteTask(taskId: string) {
             :task="currentTask"
             :result="resultData"
             @download="downloadFasta(currentTask.id)"
+            @open-folder="openFolder(currentTask.id)"
           />
         </section>
       </main>

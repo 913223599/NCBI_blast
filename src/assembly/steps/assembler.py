@@ -276,7 +276,7 @@ class AssemblerStep(BaseAssemblyStep):
         if returncode == 0 and assembly_fasta.exists() and assembly_fasta.stat().st_size > 0:
             self.logger.info(f"NGCS 组装成功生成 FASTA 产物: {assembly_fasta}")
             self.context.update("assembly_fasta", assembly_fasta)
-            stats = self._parse_assembly_stats(assembly_fasta)
+            stats = self._parse_assembly_stats(assembly_fasta, safe_work_dir)
             self.context.update("assembly_stats", stats)
 
             self.status = "completed"
@@ -292,9 +292,9 @@ class AssemblerStep(BaseAssemblyStep):
             self.status = "failed"
             return False
 
-    def _parse_assembly_stats(self, fasta_path: Path) -> Dict[str, Any]:
+    def _parse_assembly_stats(self, fasta_path: Path, work_dir: Optional[Path] = None) -> Dict[str, Any]:
         """
-        解析 FASTA 产物指标 (加权平均深度、总长度、Contig数、N50、环状标记)
+        解析 FASTA 产物指标 (科学加权平均深度、总长度、Contig数、N50、环状标记)
         """
         stats = {
             "total_length": 0,
@@ -302,10 +302,12 @@ class AssemblerStep(BaseAssemblyStep):
             "avg_depth": 0.0,
             "contigs": 0,
             "gc_percent": 0.0,
-            "n50": 0
+            "n50": 0,
+            "max_contig_length": 0
         }
         contig_lengths = []
         total_depth_mass = 0.0
+        has_explicit_depth = False
         total_gc = 0
         total_at = 0
 
@@ -330,11 +332,15 @@ class AssemblerStep(BaseAssemblyStep):
                         header = line_str.lower()
 
                         # 深度解析
-                        depth_match = re.search(r"(?:depth[=]|cov_|cov=)(\d+\.?\d*)", header)
-                        current_depth = float(depth_match.group(1)) if depth_match else 1.0
+                        depth_match = re.search(r"(?:depth[=:]|cov[=_:]|coverage[=:])(\d+\.?\d*)", header)
+                        if depth_match:
+                            current_depth = float(depth_match.group(1))
+                            has_explicit_depth = True
+                        else:
+                            current_depth = 0.0
 
                         # 环状判定
-                        if "circular=true" in header or "_circular" in header or "circular" in header:
+                        if "circular=true" in header or "_circular" in header or "circular" in header or "topology=circular" in header:
                             stats["is_circular"] = True
                     else:
                         seq_upper = line_str.upper()
@@ -345,12 +351,12 @@ class AssemblerStep(BaseAssemblyStep):
                 finish_contig()
 
             if stats["total_length"] > 0:
-                stats["avg_depth"] = round(total_depth_mass / stats["total_length"], 2)
                 total_bases = total_gc + total_at
                 stats["gc_percent"] = round((total_gc / total_bases * 100.0), 2) if total_bases > 0 else 0.0
 
-                # N50 计算
+                # N50 与最长 Contig 计算
                 contig_lengths.sort(reverse=True)
+                stats["max_contig_length"] = contig_lengths[0] if contig_lengths else 0
                 half_len = stats["total_length"] / 2.0
                 cum_len = 0
                 for l in contig_lengths:
@@ -358,6 +364,33 @@ class AssemblerStep(BaseAssemblyStep):
                     if cum_len >= half_len:
                         stats["n50"] = l
                         break
+
+                # 深度计算：若 FASTA 头部有深度则用加权平均；否则结合 Fastp 质控总碱基数精准计算
+                if has_explicit_depth and total_depth_mass > 0:
+                    stats["avg_depth"] = round(total_depth_mass / stats["total_length"], 1)
+                else:
+                    # 尝试从 fastp.json 提取质控后的真实总碱基数
+                    calc_depth = 0.0
+                    search_dirs = [fasta_path.parent]
+                    if work_dir:
+                        search_dirs.append(work_dir)
+                    
+                    for s_dir in search_dirs:
+                        fastp_json = s_dir / "qc" / "fastp.json"
+                        if not fastp_json.exists():
+                            fastp_json = s_dir / "fastp.json"
+                        if fastp_json.exists():
+                            try:
+                                with open(fastp_json, "r", encoding="utf-8") as fj:
+                                    fj_data = json.load(fj)
+                                    clean_bases = fj_data.get("summary", {}).get("after_filtering", {}).get("total_bases", 0)
+                                    if clean_bases > 0:
+                                        calc_depth = round(clean_bases / stats["total_length"], 1)
+                                        break
+                            except Exception:
+                                pass
+
+                    stats["avg_depth"] = calc_depth if calc_depth > 0 else 1.0
 
             return stats
         except Exception as e:

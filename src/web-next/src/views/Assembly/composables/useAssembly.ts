@@ -57,39 +57,69 @@ export function useAssembly() {
     }
   }
 
-  // 2. 提交新拼接任务
+  // 2. 提交新拼接任务 (0 毫秒乐观即刻跳转)
   async function submitTask(params: AssemblyRunParams) {
     error.value = null;
 
-    try {
-      const taskId = `Assembly_${Date.now()}`;
-      const payload = {
-        task_id: taskId,
-        name: params.name || `Task_${taskId.slice(-6)}`,
-        sample_type: params.sample_type || 'BACTERIA',
-        tech: params.tech || 'ILLUMINA',
+    const taskId = `Assembly_${Date.now()}`;
+    const payload = {
+      task_id: taskId,
+      name: params.name || `Task_${taskId.slice(-6)}`,
+      sample_type: params.sample_type || 'BACTERIA',
+      tech: params.tech || 'ILLUMINA',
+      r1: params.r1_path,
+      r2: params.r2_path || null,
+      config: {
+        name: params.name,
+        sample_type: params.sample_type,
+        tech: params.tech,
         r1: params.r1_path,
         r2: params.r2_path || null,
-        config: {
-          name: params.name,
-          sample_type: params.sample_type,
-          tech: params.tech,
-          r1: params.r1_path,
-          r2: params.r2_path || null,
-          r1_name: params.r1_name,
-          r2_name: params.r2_name,
-          params: {
-            threads: params.threads || 8,
-            mode: params.mode || 'isolate',
-            min_read_length: params.min_read_length || 1000,
-            min_contig_length: params.min_contig_length || 500,
-            min_containment_identity: params.min_containment_identity ?? 0.92,
-            max_reads: params.max_reads || null,
-            enable_qc: params.enable_qc ?? true
-          }
+        r1_name: params.r1_name,
+        r2_name: params.r2_name,
+        params: {
+          threads: params.threads || 8,
+          mode: params.mode || 'isolate',
+          min_read_length: params.min_read_length || 1000,
+          min_contig_length: params.min_contig_length || 500,
+          min_containment_identity: params.min_containment_identity ?? 0.92,
+          max_reads: params.max_reads || null,
+          enable_qc: params.enable_qc ?? true
         }
-      };
+      }
+    };
 
+    const isQueued = isEngineBusy.value;
+    const newTaskItem: AssemblyTaskItem = {
+      id: taskId,
+      name: payload.name,
+      sample_type: payload.sample_type,
+      tech: payload.tech,
+      status: isQueued ? 'queued' : 'running',
+      progress: 0,
+      last_step: isQueued ? '等待排队调度中...' : '正在启动 NGCS 组装调度...',
+      created_at: Date.now() / 1000,
+      updated_at: Date.now() / 1000,
+      config: payload.config,
+      results: null,
+      queue_position: isQueued ? (queueStatus.value?.waiting_count || 0) + 1 : 1
+    };
+
+    // 0 毫秒立即更新响应式状态，驱动界面即刻跳转
+    historyTasks.value = [newTaskItem, ...historyTasks.value.filter(t => t.id !== taskId)];
+    activeTaskId.value = taskId;
+    currentTask.value = newTaskItem;
+    isRunning.value = !isQueued;
+    resultData.value = null;
+
+    consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 拼接任务已派发: ${taskId}`);
+    consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 测序平台: ${params.tech} | 模式: ${params.mode} | R1: ${params.r1_path}`);
+    if (params.r2_path) {
+      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 双端 R2: ${params.r2_path}`);
+    }
+
+    try {
+      // 异步后台派发
       const res = await apiPost('/api/assembly/run', payload);
 
       if (!res || (res.success === false && res.code !== 200)) {
@@ -99,38 +129,26 @@ export function useAssembly() {
       const assignedTaskId = res.task_id || res.data?.task_id || taskId;
       const queuePos = res.queue_position || res.data?.queue_position || 1;
 
-      // 乐观添加任务快照到历史列表
-      const newTaskItem: AssemblyTaskItem = {
-        id: assignedTaskId,
-        name: payload.name,
-        sample_type: payload.sample_type,
-        tech: payload.tech,
-        status: queuePos > 1 ? 'queued' : 'running',
-        progress: 0,
-        last_step: queuePos > 1 ? `排队中 (#${queuePos})` : '正在启动 NGCS 引擎...',
-        created_at: Date.now() / 1000,
-        updated_at: Date.now() / 1000,
-        config: payload.config,
-        results: null,
-        queue_position: queuePos
-      };
-
-      historyTasks.value = [newTaskItem, ...historyTasks.value.filter(t => t.id !== assignedTaskId)];
-      activeTaskId.value = assignedTaskId;
-      currentTask.value = newTaskItem;
-      isRunning.value = true;
-      resultData.value = null;
-
-      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 拼接任务已提交: ${assignedTaskId} (排队位次: #${queuePos})`);
-      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 测序平台: ${params.tech} | 模式: ${params.mode} | R1: ${params.r1_path}`);
-      if (params.r2_path) {
-        consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 双端 R2: ${params.r2_path}`);
+      if (currentTask.value && currentTask.value.id === taskId) {
+        currentTask.value.id = assignedTaskId;
+        currentTask.value.queue_position = queuePos;
+        currentTask.value.status = queuePos > 1 ? 'queued' : 'running';
+        if (queuePos > 1) {
+          currentTask.value.last_step = `排队中 (#${queuePos})`;
+        }
       }
+      activeTaskId.value = assignedTaskId;
 
-      await fetchHistory();
+      // 后台静默刷新历史
+      fetchHistory();
       return res;
     } catch (e: any) {
       error.value = `任务提交失败: ${e.message}`;
+      if (currentTask.value && currentTask.value.id === taskId) {
+        currentTask.value.status = 'failed';
+        currentTask.value.last_step = `提交失败: ${e.message}`;
+      }
+      isRunning.value = false;
       throw e;
     }
   }
@@ -149,12 +167,22 @@ export function useAssembly() {
 
     try {
       const res = await apiGet(`/api/assembly/result/${taskId}`);
-      const data = res?.data || (res && res.success !== false ? res : null);
+      // 兼容直接展开的 BioResponse.ok(dict) 或包含 data 的结构
+      const data = (res && (res.task_id || res.stats)) ? res : (res?.data || (res && res.success !== false ? res : null));
       if (data && (data.task_id || data.stats || data.status)) {
         resultData.value = data;
+        const finalStats = data.stats || currentTask.value?.results;
         if (currentTask.value) {
           currentTask.value.status = data.status || currentTask.value.status;
-          currentTask.value.results = data.stats || currentTask.value.results;
+          currentTask.value.results = finalStats;
+        }
+        // 关键点：同步更新历史任务列表中的快照与深度
+        const matched = historyTasks.value.find(t => t.id === taskId);
+        if (matched) {
+          matched.status = data.status || matched.status;
+          if (finalStats) {
+            matched.results = { ...(matched.results || {}), ...finalStats };
+          }
         }
       }
     } catch (e: any) {
@@ -205,7 +233,17 @@ export function useAssembly() {
     window.open(downloadUrl, '_blank');
   }
 
-  // 7. WebSocket 实时遥测事件监听
+  // 7. 在系统资源管理器中打开产物所在目录
+  async function openFolder(taskId: string) {
+    if (!taskId) return;
+    try {
+      await apiPost(`/api/assembly/open-folder/${taskId}`);
+    } catch (e: any) {
+      console.warn('[useAssembly] 打开产物目录失败:', e);
+    }
+  }
+
+  // 8. WebSocket 实时遥测事件监听
   let unsubscribeProgress: (() => void) | null = null;
   let pollingTimer: any = null;
 
@@ -285,6 +323,7 @@ export function useAssembly() {
     loadTaskResult,
     cancelTask,
     deleteTask,
-    downloadFasta
+    downloadFasta,
+    openFolder
   };
 }

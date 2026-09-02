@@ -81,15 +81,18 @@ class AssemblyDB:
             )
             conn.commit()
 
-    def update_task_metrics(self, task_id: str, total_length: int = 0, contig_count: int = 0, n50: int = 0, gc_content: float = 0.0, is_circular: bool = False):
+    def update_task_metrics(self, task_id: str, total_length: int = 0, contig_count: int = 0, n50: int = 0, gc_content: float = 0.0, is_circular: bool = False, avg_depth: float = 0.0, max_contig_length: int = 0):
         """记录组装产物的统计指标"""
         now = time.time()
+        effective_max = max_contig_length if max_contig_length > 0 else (n50 if n50 > 0 else total_length)
         results_obj = {
             "total_length": total_length,
             "contigs": contig_count,
             "n50": n50,
             "gc_percent": gc_content,
-            "is_circular": is_circular
+            "is_circular": is_circular,
+            "avg_depth": avg_depth,
+            "max_contig_length": effective_max
         }
         results_str = json.dumps(results_obj, cls=BioJsonEncoder)
         with sqlite3.connect(self.DB_PATH) as conn:

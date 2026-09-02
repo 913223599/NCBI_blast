@@ -94,6 +94,43 @@ async def run_assembly_job(payload: Dict[str, Any]):
 async def get_assembly_history():
     """获取拼接任务历史列表"""
     history = assembly_db.get_history(limit=100)
+    for t in history:
+        res = t.get('results')
+        if isinstance(res, dict) and res.get('total_length', 0) > 0:
+            task_id = t['id']
+            task_dir = AssemblyStorage.get_task_dir(task_id)
+            need_update = False
+            
+            if not res.get('max_contig_length'):
+                res['max_contig_length'] = res.get('n50') or res.get('total_length', 0)
+                need_update = True
+                
+            if not res.get('avg_depth'):
+                for s_dir in [task_dir / "assembly_run", task_dir, Path(f"E:/NGCS_Work/tasks/{task_id}")]:
+                    fj_path = s_dir / "qc" / "fastp.json"
+                    if not fj_path.exists():
+                        fj_path = s_dir / "fastp.json"
+                    if fj_path.exists():
+                        try:
+                            with open(fj_path, "r", encoding="utf-8") as fj:
+                                cb = json.load(fj).get("summary", {}).get("after_filtering", {}).get("total_bases", 0)
+                                if cb > 0:
+                                    res['avg_depth'] = round(cb / res['total_length'], 1)
+                                    need_update = True
+                                    break
+                        except Exception:
+                            pass
+            if need_update:
+                assembly_db.update_task_metrics(
+                    task_id,
+                    total_length=res['total_length'],
+                    contig_count=int(res.get('contigs') or 1),
+                    n50=int(res.get('n50') or res['total_length']),
+                    gc_content=float(res.get('gc_percent') or 0.0),
+                    is_circular=bool(res.get('is_circular', False)),
+                    avg_depth=float(res.get('avg_depth') or 0.0),
+                    max_contig_length=int(res.get('max_contig_length') or 0)
+                )
     return BioResponse.ok(history)
 
 
@@ -147,6 +184,36 @@ async def get_assembly_result(task_id: str):
         elif isinstance(task['results'], dict):
             stats = task['results']
 
+    # 深度精准兜底：若缺失或为 1.0，自动从 fastp.json 计算
+    tot_len = stats.get("total_length", 0)
+    if tot_len > 0 and (not stats.get("avg_depth") or stats.get("avg_depth") == 1.0):
+        search_dirs = [task_dir / "assembly_run", task_dir, Path(f"E:/NGCS_Work/tasks/{task_id}")]
+        for s_dir in search_dirs:
+            fj_path = s_dir / "qc" / "fastp.json"
+            if not fj_path.exists():
+                fj_path = s_dir / "fastp.json"
+            if fj_path.exists():
+                try:
+                    with open(fj_path, "r", encoding="utf-8") as fj:
+                        clean_bases = json.load(fj).get("summary", {}).get("after_filtering", {}).get("total_bases", 0)
+                        if clean_bases > 0:
+                            stats["avg_depth"] = round(clean_bases / tot_len, 1)
+                            stats["max_contig_length"] = stats.get("max_contig_length") or stats.get("n50") or tot_len
+                            # 异步持久化回写
+                            assembly_db.update_task_metrics(
+                                task_id,
+                                total_length=int(tot_len),
+                                contig_count=int(stats.get("contigs") or 1),
+                                n50=int(stats.get("n50") or tot_len),
+                                gc_content=float(stats.get("gc_percent") or 0.0),
+                                is_circular=bool(stats.get("is_circular", False)),
+                                avg_depth=float(stats["avg_depth"]),
+                                max_contig_length=int(stats["max_contig_length"])
+                            )
+                            break
+                except Exception:
+                    pass
+
     fasta_exists = asm_fasta.exists() and asm_fasta.stat().st_size > 0
     fasta_size_bytes = asm_fasta.stat().st_size if fasta_exists else 0
 
@@ -184,6 +251,35 @@ async def download_assembly_fasta(task_id: str):
         filename=download_filename,
         media_type="application/octet-stream"
     )
+
+
+@router.post("/open-folder/{task_id}")
+async def open_task_folder(task_id: str):
+    """在系统资源管理器中高亮定位组装产物所在目录"""
+    task_dir = AssemblyStorage.get_task_dir(task_id)
+    run_dir = task_dir / "assembly_run"
+    target_dir = run_dir if run_dir.exists() else task_dir
+    
+    # 兼容查找
+    if not target_dir.exists():
+        # 尝试查找 fallback 目录
+        alt_dirs = list(task_dir.glob("**/assembly.fasta"))
+        if alt_dirs:
+            target_dir = alt_dirs[0].parent
+
+    if not target_dir.exists():
+        return BioResponse.fail("产物目录不存在")
+
+    import subprocess
+    asm_fasta = target_dir / "assembly.fasta"
+    try:
+        if asm_fasta.exists():
+            subprocess.Popen(f'explorer /select,"{str(asm_fasta.resolve())}"', shell=True)
+        else:
+            subprocess.Popen(f'explorer "{str(target_dir.resolve())}"', shell=True)
+        return BioResponse.ok({"message": "已打开产物目录", "path": str(target_dir)})
+    except Exception as e:
+        return BioResponse.fail(f"打开目录失败: {e}")
 
 
 @router.post("/stop/{task_id}")

@@ -139,7 +139,9 @@ class AssemblyManager:
                     contig_count=stats.get("contigs", 0),
                     n50=stats.get("n50", 0),
                     gc_content=stats.get("gc_percent", 0.0),
-                    is_circular=stats.get("is_circular", False)
+                    is_circular=stats.get("is_circular", False),
+                    avg_depth=stats.get("avg_depth", 0.0),
+                    max_contig_length=stats.get("max_contig_length", 0)
                 )
 
                 # 广播成功事件

@@ -27,8 +27,11 @@ const showAdvanced = ref<boolean>(false);
 const minContigLength = ref<number>(500);
 const minReadLength = ref<number>(1000);
 const minContainmentIdentity = ref<number>(0.92);
-const maxReads = ref<number | null>(null);
+const maxReads = ref<number | null>(100000);
 const enableQC = ref<boolean>(true);
+
+// 提交防抖加锁状态
+const isSubmitting = ref<boolean>(false);
 
 // 测序文件状态
 const r1File = ref<{ name: string; path: string; size?: number } | null>(null);
@@ -38,7 +41,7 @@ const autoDetectedSummary = ref<string | null>(null);
 
 // 是否可以提交
 const canSubmit = computed(() => {
-  return !props.isRunning && !!r1File.value && !!taskName.value.trim();
+  return !isSubmitting.value && !!r1File.value && !!taskName.value.trim();
 });
 
 // 核心函数：深度剥离扩展名与读长修饰词，提取纯净样本名
@@ -261,8 +264,21 @@ function formatBytes(bytes?: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
 }
 
-function onStartAssembly() {
-  if (!canSubmit.value || !r1File.value) return;
+function resetForm() {
+  r1File.value = null;
+  r2File.value = null;
+  autoDetectedSummary.value = null;
+  taskName.value = `Assembly_${new Date().toISOString().slice(0,10).replace(/-/g,'')}`;
+  isSubmitting.value = false;
+}
+
+defineExpose({
+  resetForm
+});
+
+async function onStartAssembly() {
+  if (!canSubmit.value || !r1File.value || isSubmitting.value) return;
+  isSubmitting.value = true;
 
   const params: AssemblyRunParams = {
     name: taskName.value.trim(),
@@ -281,7 +297,13 @@ function onStartAssembly() {
     enable_qc: enableQC.value
   };
 
-  emit('run', params);
+  try {
+    emit('run', params);
+  } finally {
+    setTimeout(() => {
+      isSubmitting.value = false;
+    }, 1500);
+  }
 }
 </script>
 
@@ -495,7 +517,7 @@ function onStartAssembly() {
             min="10000" 
             step="50000" 
             class="form-input" 
-            placeholder="留空为全量 Reads"
+            placeholder="默认: 100000 (留空为全量 Reads)"
           />
           <span class="field-hint">限制导入数量以加速测试 (--max-reads)</span>
         </div>
@@ -522,16 +544,17 @@ function onStartAssembly() {
 
       <button 
         class="submit-btn" 
-        :disabled="!canSubmit || isRunning" 
+        :class="{ 'is-busy-mode': isBusy }"
+        :disabled="!canSubmit || isSubmitting" 
         @click="onStartAssembly"
       >
-        <svg v-if="isRunning" class="spin-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <svg v-if="isSubmitting" class="spin-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12" />
         </svg>
         <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
           <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
-        <span>{{ isRunning ? '正在启动...' : '启动基因组拼接' }}</span>
+        <span>{{ isSubmitting ? '正在启动...' : (isBusy ? '加入组装排队队列' : '启动基因组拼接') }}</span>
       </button>
     </div>
   </div>

@@ -8,6 +8,7 @@ export interface AssemblyStats {
   n50: number;
   gc_percent: number;
   avg_depth: number;
+  max_contig_length?: number;
   is_circular: boolean;
 }
 

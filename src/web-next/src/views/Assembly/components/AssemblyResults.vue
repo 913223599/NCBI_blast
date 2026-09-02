@@ -3,7 +3,6 @@
  * AssemblyResults - 基因组组装结果看板与产物导出面板
  */
 import { computed } from 'vue';
-import { useRouter } from 'vue-router';
 import type { AssemblyResultData, AssemblyTaskItem } from '../types';
 
 const props = defineProps<{
@@ -13,18 +12,25 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'download'): void;
+  (e: 'openFolder'): void;
 }>();
 
-const router = useRouter();
-
 const stats = computed(() => {
-  return props.result?.stats || props.task.results || {
-    total_length: 0,
-    contigs: 0,
-    n50: 0,
-    gc_percent: 0,
-    avg_depth: 0,
-    is_circular: false
+  const rStats = props.result?.stats;
+  const tResults = props.task?.results;
+  const raw = { ...(tResults || {}), ...(rStats || {}) };
+  const rawDepth = raw.avg_depth ?? rStats?.avg_depth ?? tResults?.avg_depth;
+  const parsedDepth = (rawDepth !== undefined && rawDepth !== null && !isNaN(Number(rawDepth))) ? Number(rawDepth) : 0;
+  const rawMax = raw.max_contig_length ?? rStats?.max_contig_length ?? tResults?.max_contig_length ?? (raw.contigs === 1 ? raw.total_length : raw.n50) ?? raw.total_length ?? 0;
+
+  return {
+    total_length: raw.total_length || 0,
+    contigs: raw.contigs || 1,
+    max_contig_length: Number(rawMax),
+    n50: raw.n50 || 0,
+    gc_percent: raw.gc_percent || 0,
+    avg_depth: parsedDepth,
+    is_circular: !!raw.is_circular
   };
 });
 
@@ -38,36 +44,6 @@ function formatKb(bp?: number): string {
   if (bp >= 1000000) return `${(bp / 1000000).toFixed(2)} Mb`;
   if (bp >= 1000) return `${(bp / 1000).toFixed(1)} kb`;
   return `${bp} bp`;
-}
-
-// 复制产物路径到剪贴板
-function copyFastaPath() {
-  const p = props.result?.fasta_path;
-  if (p) {
-    navigator.clipboard.writeText(p);
-    alert('FASTA 文件路径已复制到剪贴板');
-  }
-}
-
-// 一键跳转到功能注释模块
-function navigateToAnnotation() {
-  if (props.result?.fasta_path) {
-    router.push({
-      path: '/analysis',
-      query: { 
-        module: 'annotation',
-        fasta_path: props.result.fasta_path,
-        task_name: props.task.name
-      }
-    });
-  } else {
-    router.push('/analysis');
-  }
-}
-
-// 一键跳转到 BLAST 比对模块
-function navigateToBlast() {
-  router.push('/blast');
 }
 </script>
 
@@ -101,6 +77,12 @@ function navigateToBlast() {
       </div>
 
       <div class="hero-actions">
+        <button class="secondary-open-btn" @click="emit('openFolder')" title="在系统资源管理器中定位产物目录">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+          </svg>
+          <span>打开所在目录</span>
+        </button>
         <button class="primary-download-btn" @click="emit('download')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -112,7 +94,7 @@ function navigateToBlast() {
       </div>
     </div>
 
-    <!-- 核心统计指标卡片看板 -->
+    <!-- 核心统计指标卡片看板 (6 宫格对称布局) -->
     <div class="metrics-grid">
       <!-- 1. Contigs 数量 -->
       <div class="metric-card">
@@ -153,10 +135,27 @@ function navigateToBlast() {
         <span class="m-sub">约 {{ formatKb(stats.total_length) }}</span>
       </div>
 
-      <!-- 3. N50 指标 -->
+      <!-- 3. 最长 Contig 长度 -->
       <div class="metric-card">
         <div class="metric-top">
-          <span class="m-label">N50 指标</span>
+          <span class="m-label">最长 Contig 长度</span>
+          <div class="m-icon bg-cyan">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0891b2" stroke-width="2">
+              <path d="M21 6H3M21 12H3M21 18H7" />
+            </svg>
+          </div>
+        </div>
+        <div class="m-val-row">
+          <span class="m-value">{{ formatNumber(stats.max_contig_length) }}</span>
+          <span class="m-unit">bp</span>
+        </div>
+        <span class="m-sub">单片段峰值: {{ formatKb(stats.max_contig_length) }}</span>
+      </div>
+
+      <!-- 4. N50 指标 -->
+      <div class="metric-card">
+        <div class="metric-top">
+          <span class="m-label">N50 连续性指标</span>
           <div class="m-icon bg-purple">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2">
               <path d="M18 20V10M12 20V4M6 20v-6" />
@@ -170,7 +169,7 @@ function navigateToBlast() {
         <span class="m-sub">连续性评价: {{ formatKb(stats.n50) }}</span>
       </div>
 
-      <!-- 4. GC 含量 -->
+      <!-- 5. GC 含量 -->
       <div class="metric-card">
         <div class="metric-top">
           <span class="m-label">GC 含量</span>
@@ -188,7 +187,7 @@ function navigateToBlast() {
         <span class="m-sub">鸟嘌呤-胞嘧啶碱基占比</span>
       </div>
 
-      <!-- 5. 测序深度 -->
+      <!-- 6. 测序深度 -->
       <div class="metric-card">
         <div class="metric-top">
           <span class="m-label">加权平均覆盖深度</span>
@@ -199,56 +198,10 @@ function navigateToBlast() {
           </div>
         </div>
         <div class="m-val-row">
-          <span class="m-value">{{ stats.avg_depth || 1.0 }}</span>
+          <span class="m-value">{{ stats.avg_depth > 0 ? Number(stats.avg_depth).toLocaleString(undefined, { maximumFractionDigits: 1 }) : '-' }}</span>
           <span class="m-unit">x</span>
         </div>
         <span class="m-sub">全域有效测序深度支持</span>
-      </div>
-    </div>
-
-    <!-- 产物路径与下游操作卡片 -->
-    <div class="next-steps-card">
-      <div class="ns-header">
-        <h3 class="ns-title">产物文件与下游流水线直通</h3>
-        <p class="ns-desc">组装生成的 FASTA 文件可直接带入功能注释引擎或 BLAST 进行物种同源鉴定。</p>
-      </div>
-
-      <div class="path-bar" v-if="result?.fasta_path">
-        <span class="path-label">产物路径:</span>
-        <span class="path-text" :title="result.fasta_path">{{ result.fasta_path }}</span>
-        <button class="copy-path-btn" @click="copyFastaPath">复制路径</button>
-      </div>
-
-      <div class="pipeline-links-row">
-        <!-- 功能注释 -->
-        <div class="pipeline-card" @click="navigateToAnnotation">
-          <div class="pl-icon pl-anno">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-            </svg>
-          </div>
-          <div class="pl-content">
-            <span class="pl-title">一键发送至功能注释工作台</span>
-            <span class="pl-desc">执行 Prokka / Pharokka / PHOLD 多引擎级联注释与 SnapGene 序列可视化</span>
-          </div>
-          <span class="pl-arrow">→</span>
-        </div>
-
-        <!-- BLAST 比对 -->
-        <div class="pipeline-card" @click="navigateToBlast">
-          <div class="pl-icon pl-blast">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-          </div>
-          <div class="pl-content">
-            <span class="pl-title">一键发送至 BLAST 比对鉴定</span>
-            <span class="pl-desc">比对 NCBI / SILVA 核心数据库确定菌株物种归属与同源性</span>
-          </div>
-          <span class="pl-arrow">→</span>
-        </div>
       </div>
     </div>
   </div>
@@ -323,6 +276,31 @@ function navigateToBlast() {
 }
 .hero-meta b { color: #334155; }
 
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.secondary-open-btn {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+.secondary-open-btn:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
 .primary-download-btn {
   height: 40px;
   padding: 0 18px;
@@ -344,9 +322,20 @@ function navigateToBlast() {
 
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
+@media (max-width: 1100px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 650px) {
+  .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .metric-card {
   background: white;
   border: 1px solid #e2e8f0;
@@ -376,6 +365,7 @@ function navigateToBlast() {
 }
 .bg-blue { background: #eff6ff; }
 .bg-emerald { background: #ecfdf5; }
+.bg-cyan { background: #ecfeff; }
 .bg-purple { background: #f5f3ff; }
 .bg-amber { background: #fffbeb; }
 .bg-indigo { background: #eef2ff; }
@@ -399,125 +389,5 @@ function navigateToBlast() {
 .m-sub {
   font-size: 0.7rem;
   color: #94a3b8;
-}
-
-.next-steps-card {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.ns-title {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #1e293b;
-  margin: 0;
-}
-.ns-desc {
-  font-size: 0.78rem;
-  color: #64748b;
-  margin: 2px 0 0 0;
-}
-
-.path-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  padding: 8px 12px;
-}
-.path-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #475569;
-  white-space: nowrap;
-}
-.path-text {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.75rem;
-  color: #1e293b;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-.copy-path-btn {
-  background: white;
-  border: 1px solid #cbd5e1;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 0.72rem;
-  color: #334155;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.copy-path-btn:hover {
-  background: #f1f5f9;
-  color: #2563eb;
-  border-color: #93c5fd;
-}
-
-.pipeline-links-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 14px;
-}
-.pipeline-card {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 14px 16px;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.pipeline-card:hover {
-  border-color: #3b82f6;
-  background: #f0fdf4;
-  transform: translateY(-1px);
-}
-.pl-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.pl-anno { background: #dbeafe; color: #2563eb; }
-.pl-blast { background: #e0e7ff; color: #4f46e5; }
-
-.pl-content {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-}
-.pl-title {
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: #1e293b;
-}
-.pl-desc {
-  font-size: 0.72rem;
-  color: #64748b;
-  line-height: 1.4;
-}
-.pl-arrow {
-  font-size: 1.1rem;
-  color: #94a3b8;
-  transition: transform 0.2s;
-}
-.pipeline-card:hover .pl-arrow {
-  color: #2563eb;
-  transform: translateX(3px);
 }
 </style>
