@@ -35,11 +35,20 @@ export function useAssembly() {
         apiGet('/api/assembly/queue')
       ]);
 
-      if (histRes && histRes.code === 200) {
-        historyTasks.value = histRes.data || [];
+      // 兼容直接数组与 BioResponse.ok 结构
+      let tasks: AssemblyTaskItem[] = [];
+      if (Array.isArray(histRes)) {
+        tasks = histRes;
+      } else if (histRes && Array.isArray(histRes.data)) {
+        tasks = histRes.data;
+      } else if (histRes && Array.isArray(histRes.tasks)) {
+        tasks = histRes.tasks;
       }
-      if (qRes && qRes.code === 200) {
-        queueStatus.value = qRes.data;
+
+      historyTasks.value = tasks;
+
+      if (qRes) {
+        queueStatus.value = qRes.data || qRes;
       }
     } catch (e: any) {
       console.warn('[useAssembly] 获取历史记录或队列失败:', e);
@@ -83,15 +92,16 @@ export function useAssembly() {
 
       const res = await apiPost('/api/assembly/run', payload);
 
-      if (!res || res.code !== 200) {
-        throw new Error(res?.msg || res?.message || res?.error || '任务提交失败');
+      if (!res || (res.success === false && res.code !== 200)) {
+        throw new Error(res?.error || res?.msg || res?.message || '任务提交失败');
       }
 
-      const queuePos = res.data?.queue_position || 1;
+      const assignedTaskId = res.task_id || res.data?.task_id || taskId;
+      const queuePos = res.queue_position || res.data?.queue_position || 1;
 
       // 乐观添加任务快照到历史列表
       const newTaskItem: AssemblyTaskItem = {
-        id: taskId,
+        id: assignedTaskId,
         name: payload.name,
         sample_type: payload.sample_type,
         tech: payload.tech,
@@ -105,13 +115,13 @@ export function useAssembly() {
         queue_position: queuePos
       };
 
-      historyTasks.value = [newTaskItem, ...historyTasks.value.filter(t => t.id !== taskId)];
-      activeTaskId.value = taskId;
+      historyTasks.value = [newTaskItem, ...historyTasks.value.filter(t => t.id !== assignedTaskId)];
+      activeTaskId.value = assignedTaskId;
       currentTask.value = newTaskItem;
       isRunning.value = true;
       resultData.value = null;
 
-      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 拼接任务已提交: ${taskId} (排队位次: #${queuePos})`);
+      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 拼接任务已提交: ${assignedTaskId} (排队位次: #${queuePos})`);
       consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 测序平台: ${params.tech} | 模式: ${params.mode} | R1: ${params.r1_path}`);
       if (params.r2_path) {
         consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 双端 R2: ${params.r2_path}`);
@@ -139,11 +149,12 @@ export function useAssembly() {
 
     try {
       const res = await apiGet(`/api/assembly/result/${taskId}`);
-      if (res && res.code === 200 && res.data) {
-        resultData.value = res.data;
+      const data = res?.data || (res && res.success !== false ? res : null);
+      if (data && (data.task_id || data.stats || data.status)) {
+        resultData.value = data;
         if (currentTask.value) {
-          currentTask.value.status = res.data.status;
-          currentTask.value.results = res.data.stats;
+          currentTask.value.status = data.status || currentTask.value.status;
+          currentTask.value.results = data.stats || currentTask.value.results;
         }
       }
     } catch (e: any) {

@@ -109,6 +109,51 @@ class AssemblerStep(BaseAssemblyStep):
             self.status = "failed"
             return False
 
+        # =========================================================================
+        # 针对中文路径与空格的 ASCII 安全隔离工作区 (确保 WSL / C++20 引擎 100% 兼容)
+        # =========================================================================
+        safe_work_dir = Path("E:/NGCS_Work/tasks") / self.context.task_id
+        safe_work_dir.mkdir(parents=True, exist_ok=True)
+
+        def _prepare_safe_input(src_path_str: str, file_tag: str) -> str:
+            src_p = Path(src_path_str)
+            if not src_p.exists():
+                return src_path_str
+            # 检测是否含非 ASCII 字符或空格
+            needs_isolate = any(ord(c) > 127 for c in src_path_str) or (' ' in src_path_str)
+            if not needs_isolate:
+                return src_path_str
+
+            suffix = "".join(src_p.suffixes) if src_p.suffixes else ".fq.gz"
+            dst_p = safe_work_dir / f"input_{file_tag}{suffix}"
+            if dst_p.exists() and dst_p.stat().st_size == src_p.stat().st_size:
+                return str(dst_p)
+
+            if dst_p.exists():
+                try:
+                    dst_p.unlink()
+                except Exception:
+                    pass
+
+            # 优先尝试硬链接 (同盘符 0 内存 0 耗时)
+            try:
+                os.link(src_p, dst_p)
+                self.logger.info(f"建立安全硬链接: {src_p.name} -> {dst_p}")
+                return str(dst_p)
+            except Exception:
+                pass
+
+            # 跨盘符时流式快速复制
+            self.logger.info(f"跨盘符安全数据中转: {src_p.name} -> {dst_p}")
+            if self.on_progress:
+                self.on_progress(5, f"数据安全准备中 ({file_tag})...")
+            import shutil
+            shutil.copyfile(src_p, dst_p)
+            return str(dst_p)
+
+        active_r1 = _prepare_safe_input(r1, "r1")
+        active_r2 = _prepare_safe_input(r2, "r2") if r2 else None
+
         # 模式配置 (支持 isolate, metagenome, metagenome_deep, unconstrained)
         mode = params.get("mode")
         if not mode or mode not in ["isolate", "metagenome", "metagenome_deep", "unconstrained"]:
@@ -118,26 +163,26 @@ class AssemblerStep(BaseAssemblyStep):
         py_exec = sys.executable
         cmd_list = [py_exec, str(ngcs_cli), "assemble"]
 
-        is_long_read = tech in ["NANOPORE", "PACBIO_HIFI"] or not r2
+        is_long_read = tech in ["NANOPORE", "PACBIO_HIFI"] or not active_r2
         if is_long_read:
             min_len = str(params.get("min_read_length") or params.get("min_len") or 1000)
             cmd_list.extend([
-                "-i", r1,
-                "-o", str(out_dir),
+                "-i", active_r1,
+                "-o", str(safe_work_dir),
                 "-t", threads_str,
                 "--min-len", min_len,
                 "--mode", mode
             ])
-            self.logger.info(f"NGCS 长读长单分子组装模式: 输入={r1}, mode={mode}, min_len={min_len}")
+            self.logger.info(f"NGCS 长读长单分子组装模式: 输入={active_r1}, mode={mode}, min_len={min_len}")
         else:
             cmd_list.extend([
-                "-1", r1,
-                "-2", r2,
-                "-o", str(out_dir),
+                "-1", active_r1,
+                "-2", active_r2,
+                "-o", str(safe_work_dir),
                 "-t", threads_str,
                 "--mode", mode
             ])
-            self.logger.info(f"NGCS 短读长双端欧拉流组装模式: R1={r1}, R2={r2}, mode={mode}")
+            self.logger.info(f"NGCS 短读长双端欧拉流组装模式: R1={active_r1}, R2={active_r2}, mode={mode}")
 
         # 附加高级调优参数
         min_contig_len = params.get("min_contig_length") or params.get("min_contig_len")
@@ -193,16 +238,39 @@ class AssemblerStep(BaseAssemblyStep):
                 if self.on_progress:
                     self.on_progress(95, "组装完成，正在整理产物...")
 
+        # 注入 UTF-8 环境变量与 PYTHONPATH
+        run_env = dict(os.environ)
+        run_env["PYTHONIOENCODING"] = "utf-8"
+        run_env["PYTHONUTF8"] = "1"
+        project_ngcs = str(Path("E:/NGCS").resolve())
+        orig_pythonpath = os.environ.get("PYTHONPATH", "")
+        run_env["PYTHONPATH"] = f"{project_ngcs};{orig_pythonpath}" if orig_pythonpath else project_ngcs
+
         try:
             returncode = await self.runner.run_command(
                 cmd_list,
-                cwd=out_dir,
+                cwd=safe_work_dir,
+                env=run_env,
                 on_output=ngcs_progress_handler,
                 is_shell=False
             )
         except Exception as e:
             self.logger.error(f"NGCS 引擎执行异常: {e}")
             returncode = -1
+
+        # 产物同步回写：从 safe_work_dir 复制至 out_dir
+        safe_fasta = safe_work_dir / "assembly.fasta"
+        if safe_fasta.exists() and safe_fasta.stat().st_size > 0:
+            import shutil
+            out_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(safe_fasta, assembly_fasta)
+            for extra_name in ["assembly_manifest.json", "assembly_stats.json"]:
+                extra_src = safe_work_dir / extra_name
+                if extra_src.exists():
+                    shutil.copyfile(extra_src, out_dir / extra_name)
+            qc_dir = safe_work_dir / "qc"
+            if qc_dir.exists():
+                shutil.copytree(qc_dir, out_dir / "qc", dirs_exist_ok=True)
 
         # 校验产物
         if returncode == 0 and assembly_fasta.exists() and assembly_fasta.stat().st_size > 0:
@@ -216,7 +284,7 @@ class AssemblerStep(BaseAssemblyStep):
                 self.on_progress(100, "组装完成")
             return True
         else:
-            reason = self._diagnose_failure(out_dir)
+            reason = self._diagnose_failure(safe_work_dir)
             self.last_error = reason
             self.logger.error(f"NGCS 组装未产生有效结果: {reason}")
             if self.on_progress:

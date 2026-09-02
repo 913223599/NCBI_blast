@@ -3,6 +3,7 @@
  * AssemblySetup - 基因组拼接配置与数据上传面板 (纯净智能识别版)
  */
 import { ref, computed } from 'vue';
+import { getBridge } from '../../../bridge';
 import type { AssemblyRunParams } from '../types';
 
 const props = defineProps<{
@@ -91,40 +92,101 @@ function inferTechAndType(files: File[], r1Name: string, r2Name?: string) {
 }
 
 // 处理文件拖拽放置
-function handleFileDrop(e: DragEvent) {
+async function handleFileDrop(e: DragEvent) {
   isDragging.value = false;
   if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
   
   const files = Array.from(e.dataTransfer.files);
-  processIncomingFiles(files);
+  await processIncomingFiles(files);
+}
+
+// 通过点击上传区域
+async function handleDropzoneClick() {
+  const isElectron = !!(window as any).electronAPI;
+  if (isElectron) {
+    try {
+      const bridge = getBridge();
+      const paths = await bridge.request_file_load(['fastq', 'fq', 'gz', 'fasta', 'fa', 'fna'], true);
+      if (paths && paths.length > 0) {
+        processPathList(paths);
+        return;
+      }
+    } catch (e) {
+      console.warn('原生对话框调用失败，回退至 input 选择:', e);
+    }
+  }
+  document.getElementById('assembly-file-input')?.click();
 }
 
 // 通过 input 选择文件
-function handleFileSelect(e: Event) {
+async function handleFileSelect(e: Event) {
   const target = e.target as HTMLInputElement;
   if (!target || !target.files || target.files.length === 0) return;
   
   const files = Array.from(target.files);
-  processIncomingFiles(files);
+  await processIncomingFiles(files);
   target.value = '';
 }
 
-// 智能分析并分配 R1 / R2 文件
-function processIncomingFiles(files: File[]) {
+// 统一解析 File 对象的物理路径 (优先 Electron 真实路径，次选自动上传)
+async function resolveFileItem(file: File): Promise<{ name: string; path: string; size: number }> {
+  const name = file.name;
+  const size = file.size;
+
+  // 1. Electron 桌面端原生获取真实路径
+  const localPath = (window as any).electronAPI?.getPathForFile?.(file) || (file as any).path || '';
+  if (localPath && (localPath.includes('/') || localPath.includes('\\'))) {
+    return { name, path: localPath, size };
+  }
+
+  // 2. 纯 Web 环境或未能直接读取物理路径：自动上传至后端临时目录
+  try {
+    const bridge = getBridge();
+    const res = await bridge.upload_file(file);
+    if (res && res.success && res.path) {
+      return { name, path: res.path, size };
+    }
+  } catch (err) {
+    console.error('上传测序文件失败:', err);
+  }
+
+  return { name, path: localPath || name, size };
+}
+
+// 处理物理路径列表 (来自 Electron 原生文件选择对话框)
+function processPathList(paths: string[]) {
+  if (!paths || paths.length === 0) return;
+  const fileItems = paths.map(p => {
+    const name = p.split(/[/\\]/).pop() || p;
+    return { name, path: p, size: 0 };
+  });
+
+  assignFileSlots(fileItems);
+}
+
+// 智能分析并分配 R1 / R2 文件 (从 File[] 解析)
+async function processIncomingFiles(files: File[]) {
   if (!files || files.length === 0) return;
 
+  const resolvedItems = await Promise.all(files.map(f => resolveFileItem(f)));
+  assignFileSlots(resolvedItems);
+}
+
+// 分配槽位与推断
+function assignFileSlots(items: Array<{ name: string; path: string; size: number }>) {
+  if (!items || items.length === 0) return;
+
   // 1. 如果仅有 1 个文件
-  if (files.length === 1) {
-    const f = files[0];
+  if (items.length === 1) {
+    const f = items[0];
     if (!f) return;
-    const filePath = (f as any).path || f.name;
-    r1File.value = { name: f.name, path: filePath, size: f.size };
+    r1File.value = f;
     r2File.value = null;
 
     const cleanName = extractCleanSampleName(f.name);
     taskName.value = `${cleanName}_asm`;
 
-    const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType(files, f.name);
+    const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType([{ name: f.name } as any], f.name);
     tech.value = detectedTech;
     sampleType.value = detectedSampleType;
     mode.value = detectedMode;
@@ -137,38 +199,35 @@ function processIncomingFiles(files: File[]) {
   let foundR1: any = null;
   let foundR2: any = null;
 
-  for (const f of files) {
+  for (const f of items) {
     if (!f) continue;
     const name = f.name.toLowerCase();
-    const filePath = (f as any).path || f.name;
 
     if (
       name.includes('_r1') || name.includes('.r1.') || name.includes('_1.') || name.includes('.1.') ||
       name.endsWith('_1.fq.gz') || name.endsWith('_1.fastq.gz') || name.endsWith('_1.fq') || name.endsWith('_1.fastq') ||
       name.includes('read1') || name.includes('forward')
     ) {
-      foundR1 = { name: f.name, path: filePath, size: f.size };
+      foundR1 = f;
     } else if (
       name.includes('_r2') || name.includes('.r2.') || name.includes('_2.') || name.includes('.2.') ||
       name.endsWith('_2.fq.gz') || name.endsWith('_2.fastq.gz') || name.endsWith('_2.fq') || name.endsWith('_2.fastq') ||
       name.includes('read2') || name.includes('reverse')
     ) {
-      foundR2 = { name: f.name, path: filePath, size: f.size };
+      foundR2 = f;
     }
   }
 
   if (foundR1) {
     r1File.value = foundR1;
-  } else if (files[0]) {
-    const f0 = files[0];
-    r1File.value = { name: f0.name, path: (f0 as any).path || f0.name, size: f0.size };
+  } else if (items[0]) {
+    r1File.value = items[0];
   }
 
   if (foundR2) {
     r2File.value = foundR2;
-  } else if (files.length > 1 && !foundR1 && files[1]) {
-    const f1 = files[1];
-    r2File.value = { name: f1.name, path: (f1 as any).path || f1.name, size: f1.size };
+  } else if (items.length > 1 && !foundR1 && items[1]) {
+    r2File.value = items[1];
   }
 
   // 自动更新任务名与识别类型
@@ -176,7 +235,7 @@ function processIncomingFiles(files: File[]) {
     const cleanName = extractCleanSampleName(r1File.value.name);
     taskName.value = `${cleanName}_asm`;
 
-    const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType(files, r1File.value.name, r2File.value?.name);
+    const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType(items.map(f => ({ name: f.name } as any)), r1File.value.name, r2File.value?.name);
     tech.value = detectedTech;
     sampleType.value = detectedSampleType;
     mode.value = detectedMode;
@@ -257,7 +316,7 @@ function onStartAssembly() {
       />
 
       <!-- 未选择文件时的空状态 -->
-      <div v-if="!r1File" class="dropzone-empty" onclick="document.getElementById('assembly-file-input').click()">
+      <div v-if="!r1File" class="dropzone-empty" @click="handleDropzoneClick">
         <div class="icon-circle">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -279,7 +338,7 @@ function onStartAssembly() {
               <span class="file-name" :title="r1File.path">{{ r1File.name }}</span>
               <span class="file-size">{{ formatBytes(r1File.size) }}</span>
             </div>
-            <button class="remove-btn" @click="clearR1" title="移除该文件">×</button>
+            <button class="remove-btn" @click.stop="clearR1" title="移除该文件">×</button>
           </div>
 
           <!-- R2 卡片 -->
@@ -289,10 +348,10 @@ function onStartAssembly() {
               <span class="file-name" :title="r2File.path">{{ r2File.name }}</span>
               <span class="file-size">{{ formatBytes(r2File.size) }}</span>
             </div>
-            <div v-else class="slot-empty-hint" onclick="document.getElementById('assembly-file-input').click()">
+            <div v-else class="slot-empty-hint" @click.stop="handleDropzoneClick">
               <span>+ 选择或拖入 R2 双端文件</span>
             </div>
-            <button v-if="r2File" class="remove-btn" @click="clearR2" title="移除该文件">×</button>
+            <button v-if="r2File" class="remove-btn" @click.stop="clearR2" title="移除该文件">×</button>
           </div>
         </div>
 
@@ -305,7 +364,7 @@ function onStartAssembly() {
         </div>
 
         <div class="replace-actions">
-          <button class="text-btn" onclick="document.getElementById('assembly-file-input').click()">
+          <button class="text-btn" @click="handleDropzoneClick">
             重新选择或添加文件
           </button>
         </div>
