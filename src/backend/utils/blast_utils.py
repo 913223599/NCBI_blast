@@ -82,7 +82,7 @@ _canonical_species_cache: dict[str, str] = {}
 
 def canonicalize_species_name(species: str) -> str:
     """
-    规范化学名并通过本地 NCBI 分类学数据库 (taxa.sqlite) 动态映射异名到官方权威主学名
+    规范化学名并通过本地 NCBI 分类学数据库 (taxa.sqlite) 动态映射异名/亚种/菌株名到官方权威物种级主学名
     纯动态数据库驱动，零硬编码。
     """
     if not species:
@@ -93,30 +93,89 @@ def canonicalize_species_name(species: str) -> str:
         return _canonical_species_cache[s_clean]
         
     try:
-        from ...utils.taxonomy_provider import get_taxonomy_provider
+        try:
+            from src.utils.taxonomy_provider import get_taxonomy_provider
+        except ImportError:
+            from ...utils.taxonomy_provider import get_taxonomy_provider
+
         provider = get_taxonomy_provider()
         if provider.is_ready:
             import sqlite3
             with sqlite3.connect(provider.db_path) as conn:
                 cur = conn.cursor()
-                # 1. 优先查主学名表 (species)
-                cur.execute("SELECT spname FROM species WHERE spname = ? COLLATE NOCASE", (s_clean,))
+                
+                # 辅助函数：如果查到了一个 taxid，且其 rank 不是 'species'，向上寻找物种级主节点
+                def resolve_to_species_level(taxid: int, spname: str, rank: str) -> str:
+                    if rank == 'species':
+                        return spname
+                    cur_taxid = taxid
+                    for _ in range(5):
+                        cur.execute("SELECT taxid, parent, spname, rank FROM species WHERE taxid = ?", (cur_taxid,))
+                        r = cur.fetchone()
+                        if not r:
+                            break
+                        if r[3] == 'species':
+                            return r[2]
+                        if r[1] == cur_taxid or r[1] <= 1:
+                            break
+                        cur_taxid = r[1]
+                    return spname
+
+                # 1. 优先查主学名表 (species) 全名精确匹配
+                cur.execute("SELECT taxid, spname, rank FROM species WHERE spname = ? COLLATE NOCASE", (s_clean,))
                 row = cur.fetchone()
                 if row:
-                    _canonical_species_cache[s_clean] = row[0]
-                    return row[0]
+                    canon = resolve_to_species_level(row[0], row[1], row[2])
+                    _canonical_species_cache[s_clean] = canon
+                    return canon
                     
-                # 2. 查异名表 (synonym) 精确匹配或前缀匹配并关联回主学名
+                # 2. 查异名表 (synonym) 精确匹配并关联回主学名
                 cur.execute("""
-                    SELECT s.spname FROM synonym syn
+                    SELECT s.taxid, s.spname, s.rank FROM synonym syn
                     JOIN species s ON syn.taxid = s.taxid
-                    WHERE syn.spname = ? COLLATE NOCASE OR syn.spname LIKE ?
+                    WHERE syn.spname = ? COLLATE NOCASE
                     LIMIT 1
-                """, (s_clean, f"{s_clean} %"))
+                """, (s_clean,))
                 row = cur.fetchone()
                 if row:
-                    _canonical_species_cache[s_clean] = row[0]
-                    return row[0]
+                    canon = resolve_to_species_level(row[0], row[1], row[2])
+                    _canonical_species_cache[s_clean] = canon
+                    return canon
+
+                # 3. 双名法种级回溯：针对带有菌株号/亚种的名称（如 "Aeromonas veronii B565"）
+                words = s_clean.split()
+                if len(words) >= 3:
+                    # 3.1 针对 Candidatus 物种（如 "Candidatus Liberibacter asiaticus isolate 1"）
+                    if words[0].lower() == 'candidatus' and len(words) >= 3:
+                        cand_name = " ".join(words[:3])
+                        cur.execute("SELECT taxid, spname, rank FROM species WHERE spname = ? COLLATE NOCASE", (cand_name,))
+                        r_cand = cur.fetchone()
+                        if r_cand:
+                            canon = resolve_to_species_level(r_cand[0], r_cand[1], r_cand[2])
+                            _canonical_species_cache[s_clean] = canon
+                            return canon
+                    
+                    # 3.2 标准双名法回溯：提取前两词 (Genus species)
+                    two_words = f"{words[0]} {words[1]}"
+                    cur.execute("SELECT taxid, spname, rank FROM species WHERE spname = ? COLLATE NOCASE", (two_words,))
+                    r_two = cur.fetchone()
+                    if r_two:
+                        canon = resolve_to_species_level(r_two[0], r_two[1], r_two[2])
+                        _canonical_species_cache[s_clean] = canon
+                        return canon
+                    
+                    # 3.3 尝试前两词查异名表
+                    cur.execute("""
+                        SELECT s.taxid, s.spname, s.rank FROM synonym syn
+                        JOIN species s ON syn.taxid = s.taxid
+                        WHERE syn.spname = ? COLLATE NOCASE
+                        LIMIT 1
+                    """, (two_words,))
+                    r_two_syn = cur.fetchone()
+                    if r_two_syn:
+                        canon = resolve_to_species_level(r_two_syn[0], r_two_syn[1], r_two_syn[2])
+                        _canonical_species_cache[s_clean] = canon
+                        return canon
     except Exception:
         pass
         
@@ -168,7 +227,7 @@ def select_consensus_hit(hits: list) -> Optional[dict]:
     2. 位置衰减因子 (Rank Discount)：随命中排名自然衰减 (1 / (1 + 0.15 * rank))，强力保障前排高分条目的决定权。
     3. 峰值相似度惩罚 (Peak Penalty)：若某物种最高一条也显著低于第一名，严厉惩罚其总分。
     4. 属种分层判定：属级未定种不参与具体种争抢。
-    5. 异名纯动态合并：本地 taxa.sqlite 数据库支撑。
+    5. 异名与菌株纯动态合并：本地 taxa.sqlite 数据库支撑。
     """
     if not hits:
         return None
@@ -245,23 +304,28 @@ def select_consensus_hit(hits: list) -> Optional[dict]:
     top_entries = sorted(target_counter.items(), key=lambda x: x[1], reverse=True)[:5]
     
     top1_species, top1_val = top_entries[0]
-    top1_pct = (top1_val / total_score) * 100
     
     best_hit = dict(species_to_best_hit[top1_species])
     consensus_list = []
     prob_parts = []
     
-    if len(top_entries) == 1:
+    # 过滤掉低于 3% 的微弱候选项
+    valid_entries = []
+    for name, val in top_entries:
+        pct = (val / total_score) * 100
+        if pct >= 3.0 or len(valid_entries) == 0:
+            valid_entries.append((name, val))
+            
+    if len(valid_entries) <= 1:
         # 单一候选物种统一显示 100%
-        top_name = top_entries[0][0]
+        top_name = valid_entries[0][0]
         prob_parts.append(f"{top_name}(100%)")
         consensus_list.append({"name": top_name, "pct": 100})
     else:
-        for name, val in top_entries:
-            pct = (val / total_score) * 100
-            if pct < 3 and len(prob_parts) > 0:
-                continue
-            pct_round = max(1, round(pct))
+        # 重新对有效项归一化计算百分比
+        valid_total = sum(v for _, v in valid_entries)
+        for name, val in valid_entries:
+            pct_round = max(1, round((val / valid_total) * 100))
             prob_parts.append(f"{name}({pct_round}%)")
             consensus_list.append({"name": name, "pct": pct_round})
         

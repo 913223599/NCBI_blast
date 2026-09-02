@@ -67,35 +67,42 @@ class BiologyTranslator:
             if text in self._translation_cache:
                 return self._translation_cache[text]
         
-        # 1. [核心优化] 识别并处理共识概率字符串 (例如: "Species A(90%), Species B(10%)")
+        # 1. [核心优化] 识别并处理共识概率字符串 (例如: "Species A(90%), Species B(10%)" 或 "Species A(100%)")
         import re
         # 匹配模式: 文本(百分比%)
-        consensus_pattern = r'([^,()]+)\s*\(\s*\d+%\s*\)'
-        if ',' in text and '(' in text and '%' in text:
-            # 找到所有的匹配项及其对应的位置
+        consensus_pattern = r'([^,()]+)\s*\(\s*(\d+)%\s*\)'
+        if '(' in text and '%' in text:
             matches = list(re.finditer(consensus_pattern, text))
             if matches:
-                # 这是一个共识字符串，我们需要逐个拆解翻译
-                result_parts = []
-                last_end = 0
+                # 这是一个共识字符串，逐个拆解翻译并合并同名中文物种
+                translated_entries = []
                 fully_translated = True
                 for match in matches:
-                    full_match = match.group(0) 
                     pure_name = match.group(1).strip()
-                    start, end = match.span()
-                    result_parts.append(text[last_end:start])
+                    try:
+                        pct_val = int(match.group(2))
+                    except:
+                        pct_val = 100
                     
-                    # 翻译这个纯名称 (允许递归，但会被上面的全匹配缓存拦截)
+                    # 翻译纯名称 (允许递归，但会被全匹配缓存拦截)
                     translated_name = self.translate_text(pure_name, category=category, use_ai_override=use_ai_override)
                     if translated_name == pure_name:
                         fully_translated = False
                     
-                    reassembled = full_match.replace(pure_name, translated_name)
-                    result_parts.append(reassembled)
-                    last_end = end
+                    translated_entries.append((translated_name, pct_val))
                 
-                result_parts.append(text[last_end:])
-                final_text = "".join(result_parts)
+                # 合并同名项（例如不同拉丁菌株均翻译成了同一中文物种名）
+                merged_dict = {}
+                for name, pct in translated_entries:
+                    merged_dict[name] = merged_dict.get(name, 0) + pct
+                
+                # 重新按百分比降序排序
+                sorted_merged = sorted(merged_dict.items(), key=lambda x: x[1], reverse=True)
+                
+                if len(sorted_merged) == 1:
+                    final_text = f"{sorted_merged[0][0]}(100%)"
+                else:
+                    final_text = ", ".join([f"{name}({pct}%)" for name, pct in sorted_merged])
                 
                 if final_text != text:
                     if fully_translated:
