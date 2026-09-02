@@ -258,10 +258,8 @@ function navigateToBlast() {
 .assembly-results-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 24px;
-  overflow-y: auto;
   gap: 20px;
+  width: 100%;
 }
 
 .results-hero-card {

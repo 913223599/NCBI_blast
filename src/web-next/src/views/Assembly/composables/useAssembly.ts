@@ -72,7 +72,11 @@ export function useAssembly() {
           params: {
             threads: params.threads || 8,
             mode: params.mode || 'isolate',
-            min_read_length: params.min_read_length || 500
+            min_read_length: params.min_read_length || 1000,
+            min_contig_length: params.min_contig_length || 500,
+            min_containment_identity: params.min_containment_identity ?? 0.92,
+            max_reads: params.max_reads || null,
+            enable_qc: params.enable_qc ?? true
           }
         }
       };

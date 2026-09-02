@@ -109,9 +109,9 @@ class AssemblerStep(BaseAssemblyStep):
             self.status = "failed"
             return False
 
-        # 模式配置
+        # 模式配置 (支持 isolate, metagenome, metagenome_deep, unconstrained)
         mode = params.get("mode")
-        if not mode:
+        if not mode or mode not in ["isolate", "metagenome", "metagenome_deep", "unconstrained"]:
             mode = "metagenome" if sample_type in ["PHAGE", "VIRUS", "METAGENOME"] else "isolate"
 
         # 构建 NGCS CLI 指令
@@ -120,7 +120,7 @@ class AssemblerStep(BaseAssemblyStep):
 
         is_long_read = tech in ["NANOPORE", "PACBIO_HIFI"] or not r2
         if is_long_read:
-            min_len = str(params.get("min_read_length", 500))
+            min_len = str(params.get("min_read_length") or params.get("min_len") or 1000)
             cmd_list.extend([
                 "-i", r1,
                 "-o", str(out_dir),
@@ -135,10 +135,26 @@ class AssemblerStep(BaseAssemblyStep):
                 "-2", r2,
                 "-o", str(out_dir),
                 "-t", threads_str,
-                "--mode", mode,
-                "--no-qc"  # 上游步骤已执行完整质控，直接全速处理
+                "--mode", mode
             ])
             self.logger.info(f"NGCS 短读长双端欧拉流组装模式: R1={r1}, R2={r2}, mode={mode}")
+
+        # 附加高级调优参数
+        min_contig_len = params.get("min_contig_length") or params.get("min_contig_len")
+        if min_contig_len:
+            cmd_list.extend(["--min-contig-len", str(min_contig_len)])
+
+        min_containment = params.get("min_containment_identity")
+        if min_containment is not None:
+            cmd_list.extend(["--min-containment-identity", str(min_containment)])
+
+        max_reads = params.get("max_reads")
+        if max_reads:
+            cmd_list.extend(["--max-reads", str(max_reads)])
+
+        enable_qc = params.get("enable_qc", True)
+        if not enable_qc:
+            cmd_list.append("--no-qc")
 
         # 实时日志捕获与进度遥测映射
         def ngcs_progress_handler(line: str):

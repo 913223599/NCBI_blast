@@ -113,9 +113,7 @@ function getPhaseClass(threshold: number, progress: number) {
 .assembly-progress-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 24px;
-  overflow-y: auto;
+  width: 100%;
 }
 
 .progress-main-card {

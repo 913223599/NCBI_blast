@@ -32,13 +32,17 @@ export interface AssemblyRunParams {
   name: string;
   sample_type: 'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME';
   tech: 'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI';
-  mode: 'isolate' | 'metagenome';
+  mode: 'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained';
   r1_path: string;
   r2_path?: string;
   r1_name?: string;
   r2_name?: string;
   threads?: number;
   min_read_length?: number;
+  min_contig_length?: number;
+  min_containment_identity?: number;
+  max_reads?: number | null;
+  enable_qc?: boolean;
 }
 
 export interface AssemblyResultData {

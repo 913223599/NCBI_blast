@@ -14,11 +14,20 @@ const emit = defineEmits<{
   (e: 'run', params: AssemblyRunParams): void;
 }>();
 
+// 基础参数
 const taskName = ref<string>(`Assembly_${new Date().toISOString().slice(0,10).replace(/-/g,'')}`);
 const sampleType = ref<'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME'>('BACTERIA');
 const tech = ref<'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI'>('ILLUMINA');
-const mode = ref<'isolate' | 'metagenome'>('isolate');
+const mode = ref<'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained'>('isolate');
 const threads = ref<number>(Math.max(2, (navigator.hardwareConcurrency || 8) - 2));
+
+// 高级参数 (NGCS 官方支持可调参数)
+const showAdvanced = ref<boolean>(false);
+const minContigLength = ref<number>(500);
+const minReadLength = ref<number>(1000);
+const minContainmentIdentity = ref<number>(0.92);
+const maxReads = ref<number | null>(null);
+const enableQC = ref<boolean>(true);
 
 // 测序文件状态
 const r1File = ref<{ name: string; path: string; size?: number } | null>(null);
@@ -65,7 +74,7 @@ function inferTechAndType(files: File[], r1Name: string, r2Name?: string) {
 
   // 2. 样本生物类型推断
   let detectedSampleType: 'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME' = 'BACTERIA';
-  let detectedMode: 'isolate' | 'metagenome' = 'isolate';
+  let detectedMode: 'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained' = 'isolate';
 
   if (combinedNames.includes('phage') || combinedNames.includes('bacteriophage') || combinedNames.includes('噬菌体') || combinedNames.includes('phi')) {
     detectedSampleType = 'PHAGE';
@@ -120,7 +129,7 @@ function processIncomingFiles(files: File[]) {
     sampleType.value = detectedSampleType;
     mode.value = detectedMode;
 
-    autoDetectedSummary.value = `已识别: ${detectedTech === 'ILLUMINA' ? '二代单端/双端' : detectedTech} · 纯净样本名: ${cleanName}`;
+    autoDetectedSummary.value = `已智能识别为: ${detectedTech === 'ILLUMINA' ? '二代短读长 (Illumina/MGI)' : detectedTech} · 样本名: ${cleanName} · 类型: ${detectedSampleType}`;
     return;
   }
 
@@ -205,7 +214,12 @@ function onStartAssembly() {
     r2_path: r2File.value ? r2File.value.path : undefined,
     r1_name: r1File.value.name,
     r2_name: r2File.value ? r2File.value.name : undefined,
-    threads: threads.value
+    threads: threads.value,
+    min_contig_length: minContigLength.value,
+    min_read_length: minReadLength.value,
+    min_containment_identity: minContainmentIdentity.value,
+    max_reads: maxReads.value || undefined,
+    enable_qc: enableQC.value
   };
 
   emit('run', params);
@@ -298,7 +312,7 @@ function onStartAssembly() {
       </div>
     </div>
 
-    <!-- 参数配置表单 -->
+    <!-- 基础参数配置表单 -->
     <div class="form-grid">
       <!-- 任务名称 -->
       <div class="form-group">
@@ -332,12 +346,14 @@ function onStartAssembly() {
         </select>
       </div>
 
-      <!-- 组装模式 -->
+      <!-- NGCS 原生组装模式 -->
       <div class="form-group">
-        <label class="form-label">组装模式</label>
+        <label class="form-label">NGCS 组装模式</label>
         <select v-model="mode" class="form-select">
-          <option value="isolate">单菌分离株模式 (Isolate - 高深度精修)</option>
-          <option value="metagenome">宏基因组模式 (Metagenome - 复杂多丰度)</option>
+          <option value="isolate">单菌分离株模式 (Isolate - 高深度单菌精修)</option>
+          <option value="metagenome">宏基因组模式 (Metagenome - 复杂多丰度群落)</option>
+          <option value="metagenome_deep">宏基因组深度模式 (Metagenome Deep - 超低丰度深度挖掘)</option>
+          <option value="unconstrained">无约束模式 (Unconstrained - 极端复杂/微小环状结构)</option>
         </select>
       </div>
 
@@ -351,6 +367,88 @@ function onStartAssembly() {
           max="64" 
           class="form-input"
         />
+      </div>
+    </div>
+
+    <!-- 高级调优参数折叠面板 (NGCS 原生算法参数) -->
+    <div class="advanced-panel-wrapper">
+      <div class="advanced-toggle" @click="showAdvanced = !showAdvanced">
+        <div class="adv-left">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          <span class="adv-title">NGCS 高级算法与产物过滤参数</span>
+        </div>
+        <span class="adv-arrow" :class="{ 'is-open': showAdvanced }">▼</span>
+      </div>
+
+      <div v-show="showAdvanced" class="advanced-form-grid">
+        <!-- 最小 Contig 长度 -->
+        <div class="form-group">
+          <label class="form-label">最小 Contig 产物长度 (bp)</label>
+          <input 
+            v-model.number="minContigLength" 
+            type="number" 
+            min="100" 
+            step="100" 
+            class="form-input" 
+            placeholder="默认: 500"
+          />
+          <span class="field-hint">过滤短于此长度的碎片 (--min-contig-len)</span>
+        </div>
+
+        <!-- 气泡去重相似度阈值 -->
+        <div class="form-group">
+          <label class="form-label">气泡冗余去重相似度阈值</label>
+          <input 
+            v-model.number="minContainmentIdentity" 
+            type="number" 
+            min="0.5" 
+            max="1.0" 
+            step="0.01" 
+            class="form-input" 
+            placeholder="默认: 0.92"
+          />
+          <span class="field-hint">净化杂合气泡相似度 (--min-containment-identity)</span>
+        </div>
+
+        <!-- 长读长最小长度过滤 -->
+        <div v-if="tech !== 'ILLUMINA'" class="form-group">
+          <label class="form-label">长读长过滤最小长度 (bp)</label>
+          <input 
+            v-model.number="minReadLength" 
+            type="number" 
+            min="200" 
+            step="100" 
+            class="form-input" 
+            placeholder="默认: 1000"
+          />
+          <span class="field-hint">过滤超短读长 (--min-len)</span>
+        </div>
+
+        <!-- 最大读取 Reads 上限 -->
+        <div class="form-group">
+          <label class="form-label">最大读取 Reads 数量 (可选)</label>
+          <input 
+            v-model.number="maxReads" 
+            type="number" 
+            min="10000" 
+            step="50000" 
+            class="form-input" 
+            placeholder="留空为全量 Reads"
+          />
+          <span class="field-hint">限制导入数量以加速测试 (--max-reads)</span>
+        </div>
+
+        <!-- Fastp 质控开关 -->
+        <div class="form-group checkbox-group">
+          <label class="checkbox-label">
+            <input v-model="enableQC" type="checkbox" class="form-checkbox" />
+            <span>启用 Fastp 自动接头修剪与低质量过滤</span>
+          </label>
+          <span class="field-hint">如已在上游完成严格质控可取消勾选以提升速度</span>
+        </div>
       </div>
     </div>
 
@@ -384,10 +482,8 @@ function onStartAssembly() {
 .assembly-setup-container {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  padding: 24px;
-  overflow-y: auto;
   gap: 20px;
+  width: 100%;
 }
 
 .setup-header .title-row {
@@ -410,7 +506,7 @@ function onStartAssembly() {
   border: 2px dashed #cbd5e1;
   border-radius: 12px;
   background: #f8fafc;
-  padding: 30px 20px;
+  padding: 20px;
   text-align: center;
   transition: all 0.2s ease;
   cursor: pointer;
@@ -593,12 +689,82 @@ function onStartAssembly() {
   box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
 }
 
-.setup-footer {
-  margin-top: auto;
+.advanced-panel-wrapper {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.advanced-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 16px;
+  padding: 12px 18px;
+  cursor: pointer;
+  background: #f8fafc;
+  user-select: none;
+  transition: background 0.2s;
+}
+.advanced-toggle:hover {
+  background: #f1f5f9;
+}
+.adv-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #334155;
+}
+.adv-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.adv-arrow {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  transition: transform 0.2s;
+}
+.adv-arrow.is-open {
+  transform: rotate(180deg);
+}
+
+.advanced-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  padding: 18px;
+  border-top: 1px solid #f1f5f9;
+}
+.field-hint {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.checkbox-group {
+  justify-content: center;
+}
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+}
+.form-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.setup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  padding-bottom: 28px;
+  width: 100%;
 }
 
 .busy-pill {

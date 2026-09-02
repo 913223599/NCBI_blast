@@ -251,17 +251,34 @@ async function handleDeleteTask(taskId: string) {
 /* 主内容区 */
 .main-content {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
+  overflow-y: auto;
+  padding: 24px;
+  gap: 16px;
+  box-sizing: border-box;
   position: relative;
 }
 
+/* 美化全局滚动条 */
+.main-content::-webkit-scrollbar {
+  width: 6px;
+}
+.main-content::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+.main-content::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 .section-pane {
-  flex: 1;
-  height: 100%;
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
 }
 
 /* 错误横幅 */
