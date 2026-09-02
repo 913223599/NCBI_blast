@@ -99,7 +99,6 @@ function getStatusText(status: string) {
           <span class="stat-pill">Contigs: <b>{{ item.results.contigs }}</b></span>
           <span class="stat-pill">N50: <b>{{ (item.results.n50 / 1000).toFixed(1) }}k</b></span>
           <span class="stat-pill">GC: <b>{{ item.results.gc_percent }}%</b></span>
-          <span v-if="item.results.avg_depth" class="stat-pill">深度: <b>{{ item.results.avg_depth }}x</b></span>
         </div>
 
         <div class="card-actions" @click.stop>

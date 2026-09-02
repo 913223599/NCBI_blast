@@ -4,12 +4,15 @@ Assembly API Routes - 基因组拼接后端接口模块 (纯净重构版)
 提供任务提交、队列调度、实时进度遥测、指标查询与产物导出接口。
 """
 
+import re
 import json
 import os
+import gzip
 import time
 import logging
+from collections import Counter
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
@@ -161,6 +164,98 @@ async def get_assembly_status(task_id: str):
     return BioResponse.ok(task)
 
 
+def find_assembly_fasta(task_id: str, task_dir: Path) -> Optional[Path]:
+    """多级智能定位 assembly.fasta 产物路径 (兼容 assemblerstep/assembly_run/工作盘等各类结构)"""
+    candidates = [
+        task_dir / "assemblerstep" / "assembly_run" / "assembly.fasta",
+        task_dir / "assembly_run" / "assembly.fasta",
+        task_dir / "assembly.fasta",
+        task_dir / "assemblerstep" / "assembly.fasta",
+        Path(f"E:/NGCS_Work/tasks/{task_id}/assembly_run/assembly.fasta"),
+        Path(f"E:/NGCS_Work/tasks/{task_id}/assembly.fasta")
+    ]
+    for c in candidates:
+        if c.exists() and c.stat().st_size > 0:
+            return c
+
+    # 深度递归扫描兜底
+    if task_dir.exists():
+        found = list(task_dir.rglob("assembly.fasta"))
+        if found and found[0].stat().st_size > 0:
+            return found[0]
+    return None
+
+
+def estimate_per_contig_depths(contigs_raw: List[Dict[str, Any]], task_dir: Path, task_id: str, global_avg_depth: float) -> Dict[str, float]:
+    """
+    极速 K-mer 丰度估算多 Contig 各片段的真实独立测序深度 (单毫秒级采样，准确区分主染色体 vs 质粒/杂质)
+    """
+    if len(contigs_raw) <= 1:
+        return {c["name"]: global_avg_depth for c in contigs_raw}
+
+    # 优先定位 clean reads 文件
+    clean_candidates = [
+        task_dir / "assemblerstep" / "assembly_run" / "qc" / "clean_1.fq.gz",
+        task_dir / "assembly_run" / "qc" / "clean_1.fq.gz",
+        task_dir / "qc" / "clean_1.fq.gz",
+        task_dir / "assemblerstep" / "qc" / "clean_1.fq.gz",
+        Path(f"E:/NGCS_Work/tasks/{task_id}/qc/clean_1.fq.gz"),
+        Path(f"E:/NGCS_Work/tasks/{task_id}/clean_1.fq.gz")
+    ]
+    fq_path = None
+    for cand in clean_candidates:
+        if cand.exists() and cand.stat().st_size > 0:
+            fq_path = cand
+            break
+
+    if not fq_path:
+        return {c["name"]: global_avg_depth for c in contigs_raw}
+
+    k = 21
+    kmer_counts: Counter = Counter()
+    read_cnt = 0
+    try:
+        opener = gzip.open if fq_path.suffix == ".gz" else open
+        with opener(fq_path, "rt", encoding="utf-8", errors="ignore") as f:
+            for i, line in enumerate(f):
+                if i % 4 == 1:
+                    seq = line.strip().upper()
+                    read_cnt += 1
+                    for j in range(len(seq) - k + 1):
+                        kmer_counts[seq[j:j+k]] += 1
+                    if read_cnt >= 40000:
+                        break
+    except Exception:
+        return {c["name"]: global_avg_depth for c in contigs_raw}
+
+    if not kmer_counts or read_cnt == 0:
+        return {c["name"]: global_avg_depth for c in contigs_raw}
+
+    raw_depths = {}
+    for c in contigs_raw:
+        seq = c.get("sequence", "").upper()
+        if len(seq) < k:
+            raw_depths[c["name"]] = 0.0
+            continue
+        kmers = [seq[i:i+k] for i in range(len(seq) - k + 1)]
+        hits = [kmer_counts.get(km, 0) for km in kmers]
+        avg_hits = sum(hits) / max(1, len(kmers))
+        raw_depths[c["name"]] = avg_hits
+
+    tot_len = sum(c["length"] for c in contigs_raw)
+    weighted_raw = sum(raw_depths[c["name"]] * c["length"] for c in contigs_raw)
+
+    res = {}
+    if weighted_raw > 0 and global_avg_depth > 0:
+        scale = (global_avg_depth * tot_len) / weighted_raw
+        for c in contigs_raw:
+            d = raw_depths[c["name"]] * scale
+            res[c["name"]] = max(0.1, round(d, 1))
+    else:
+        res = {c["name"]: global_avg_depth for c in contigs_raw}
+    return res
+
+
 @router.get("/result/{task_id}")
 async def get_assembly_result(task_id: str):
     """获取组装结果指标与产物路径"""
@@ -170,24 +265,26 @@ async def get_assembly_result(task_id: str):
 
     task = assembly_db.get_task(task_id) or {}
     
-    # 定位 assembly.fasta 文件
-    asm_fasta = task_dir / "assembly_run" / "assembly.fasta"
-    if not asm_fasta.exists():
-        # 兼容备用位置
-        asm_fasta = task_dir / "assembly.fasta"
+    # 智能定位 assembly.fasta 文件
+    asm_fasta = find_assembly_fasta(task_id, task_dir)
+    fasta_exists = asm_fasta is not None and asm_fasta.exists() and asm_fasta.stat().st_size > 0
+    fasta_size_bytes = asm_fasta.stat().st_size if fasta_exists else 0
 
-    stats = {}
-    if task.get('results'):
-        if isinstance(task['results'], str):
-            try: stats = json.loads(task['results'])
-            except: pass
-        elif isinstance(task['results'], dict):
-            stats = task['results']
+    stats: Dict[str, Any] = {}
+    raw_results = task.get("results")
+    if raw_results:
+        if isinstance(raw_results, str):
+            try:
+                stats = json.loads(raw_results)
+            except Exception:
+                stats = {}
+        elif isinstance(raw_results, dict):
+            stats = raw_results
 
     # 深度精准兜底：若缺失或为 1.0，自动从 fastp.json 计算
     tot_len = stats.get("total_length", 0)
     if tot_len > 0 and (not stats.get("avg_depth") or stats.get("avg_depth") == 1.0):
-        search_dirs = [task_dir / "assembly_run", task_dir, Path(f"E:/NGCS_Work/tasks/{task_id}")]
+        search_dirs = [task_dir / "assemblerstep", task_dir / "assembly_run", task_dir, Path(f"E:/NGCS_Work/tasks/{task_id}")]
         for s_dir in search_dirs:
             fj_path = s_dir / "qc" / "fastp.json"
             if not fj_path.exists():
@@ -214,18 +311,17 @@ async def get_assembly_result(task_id: str):
                 except Exception:
                     pass
 
-    fasta_exists = asm_fasta.exists() and asm_fasta.stat().st_size > 0
-    fasta_size_bytes = asm_fasta.stat().st_size if fasta_exists else 0
-
     # 细分 Contig 列表解析
     contig_list = []
-    if fasta_exists:
+    if fasta_exists and asm_fasta:
         try:
             cur_header = ""
             cur_seq = []
             avg_d = float(stats.get("avg_depth") or 0.0)
+            has_explicit_depth_in_header = False
 
             def finish_c(h: str, s_list: list):
+                nonlocal has_explicit_depth_in_header
                 if not h or not s_list: return
                 s_str = "".join(s_list)
                 c_len = len(s_str)
@@ -233,8 +329,18 @@ async def get_assembly_result(task_id: str):
                 h_low = h.lower()
                 c_name = h.split()[0].lstrip(">")
                 d_m = re.search(r"(?:depth[=:]|cov[=_:]|coverage[=:])(\d+\.?\d*)", h_low)
-                c_depth = float(d_m.group(1)) if d_m else avg_d
-                is_c = any(k in h_low for k in ["circular=true", "_circular", "circular", "topology=circular"])
+                if d_m:
+                    c_depth = float(d_m.group(1))
+                    has_explicit_depth_in_header = True
+                else:
+                    c_depth = avg_d
+
+                # 环状拓扑精准判定 (严禁将 circular=false 误判为环状)
+                is_c = False
+                if "circular=true" in h_low or "circular=y" in h_low or "topology=circular" in h_low or "_circular" in h_low:
+                    if "circular=false" not in h_low and "circular=n" not in h_low and "linear" not in h_low:
+                        is_c = True
+
                 s_up = s_str.upper()
                 c_gc = s_up.count("G") + s_up.count("C")
                 c_gc_pct = round((c_gc / c_len * 100.0), 2) if c_len > 0 else 0.0
@@ -259,12 +365,34 @@ async def get_assembly_result(task_id: str):
                         cur_seq.append(l_str)
                 if cur_header: finish_c(cur_header, cur_seq)
 
+            # 若 header 中无单片段独立深度且有多条 contig，执行极速 K-mer 丰度真实测序深度估算
+            if not has_explicit_depth_in_header and len(contig_list) > 1:
+                depth_mapping = estimate_per_contig_depths(contig_list, task_dir, task_id, avg_d)
+                for c in contig_list:
+                    if c["name"] in depth_mapping:
+                        c["depth"] = depth_mapping[c["name"]]
+
             c_tot = sum(c["length"] for c in contig_list)
             contig_list.sort(key=lambda x: x["length"], reverse=True)
             for c in contig_list:
                 c["length_ratio"] = round((c["length"] / c_tot * 100.0), 1) if c_tot > 0 else 0.0
-        except Exception:
-            pass
+
+            # 动态校准全局拓扑状态与最长片段
+            actual_circular = any(c["is_circular"] for c in contig_list)
+            if stats.get("is_circular") != actual_circular:
+                stats["is_circular"] = actual_circular
+                assembly_db.update_task_metrics(
+                    task_id,
+                    total_length=int(tot_len or c_tot),
+                    contig_count=len(contig_list),
+                    n50=int(stats.get("n50") or (contig_list[0]["length"] if contig_list else 0)),
+                    gc_content=float(stats.get("gc_percent") or 0.0),
+                    is_circular=actual_circular,
+                    avg_depth=float(stats.get("avg_depth") or 0.0),
+                    max_contig_length=int(stats.get("max_contig_length") or (contig_list[0]["length"] if contig_list else 0))
+                )
+        except Exception as err:
+            logger.warning(f"解析 Contig 失败: {err}")
 
     return BioResponse.ok({
         "task_id": task_id,
@@ -273,7 +401,7 @@ async def get_assembly_result(task_id: str):
         "stats": stats,
         "contigs": contig_list,
         "fasta_exists": fasta_exists,
-        "fasta_path": str(asm_fasta.resolve()) if fasta_exists else None,
+        "fasta_path": str(asm_fasta.resolve()) if fasta_exists and asm_fasta else None,
         "fasta_size_bytes": fasta_size_bytes,
         "created_at": task.get("created_at"),
         "updated_at": task.get("updated_at"),
@@ -285,11 +413,9 @@ async def get_assembly_result(task_id: str):
 async def download_assembly_fasta(task_id: str):
     """一键下载组装产物 FASTA"""
     task_dir = AssemblyStorage.get_task_dir(task_id)
-    asm_fasta = task_dir / "assembly_run" / "assembly.fasta"
-    if not asm_fasta.exists():
-        asm_fasta = task_dir / "assembly.fasta"
+    asm_fasta = find_assembly_fasta(task_id, task_dir)
 
-    if not asm_fasta.exists():
+    if not asm_fasta or not asm_fasta.exists():
         raise HTTPException(status_code=404, detail="Assembly FASTA file not found")
 
     task = assembly_db.get_task(task_id) or {}

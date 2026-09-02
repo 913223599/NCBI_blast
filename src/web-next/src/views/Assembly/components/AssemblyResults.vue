@@ -155,7 +155,7 @@ function downloadContig(c: ContigDetailItem) {
       </div>
     </div>
 
-    <!-- 紧凑型 6 宫格核心指标网格 -->
+    <!-- 紧凑型 5 宫格核心指标网格 -->
     <div class="compact-metrics-grid">
       <!-- 1. Contigs 数量 -->
       <div class="c-metric-card border-blue">
@@ -205,16 +205,6 @@ function downloadContig(c: ContigDetailItem) {
           <span class="c-unit">%</span>
         </div>
         <span class="c-hint">G+C 碱基占比</span>
-      </div>
-
-      <!-- 6. 测序深度 -->
-      <div class="c-metric-card border-indigo">
-        <span class="c-label">加权平均覆盖深度</span>
-        <div class="c-val-box">
-          <span class="c-val">{{ stats.avg_depth > 0 ? Number(stats.avg_depth).toFixed(1) : '-' }}</span>
-          <span class="c-unit">x</span>
-        </div>
-        <span class="c-hint">全域有效测序支持</span>
       </div>
     </div>
 
@@ -266,7 +256,17 @@ function downloadContig(c: ContigDetailItem) {
                 <span class="gc-val">{{ c.gc_percent }}%</span>
               </td>
               <td class="col-depth">
-                <span class="depth-badge">{{ c.depth > 0 ? c.depth.toFixed(1) : '-' }}x</span>
+                <span 
+                  class="depth-badge"
+                  :class="{
+                    'depth-high': c.depth >= 100,
+                    'depth-mid': c.depth >= 30 && c.depth < 100,
+                    'depth-low': c.depth < 30
+                  }"
+                  :title="c.depth >= 100 ? '高测序深度 (主染色体/核心靶序列)' : (c.depth < 30 ? '低测序深度 (背景杂质/宿主残余)' : '中等测序深度')"
+                >
+                  {{ c.depth > 0 ? c.depth.toFixed(1) : '-' }}x
+                </span>
               </td>
               <td class="col-topo">
                 <span v-if="c.is_circular" class="topo-circ">环状 Circular</span>
@@ -453,21 +453,21 @@ function downloadContig(c: ContigDetailItem) {
   background: #1d4ed8;
 }
 
-/* 紧凑 6 宫格网格 */
+/* 紧凑 5 宫格网格 (一行自适应横排) */
 .compact-metrics-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 1100px) {
   .compact-metrics-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-@media (max-width: 600px) {
+@media (max-width: 700px) {
   .compact-metrics-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -661,10 +661,27 @@ function downloadContig(c: ContigDetailItem) {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.7rem;
   font-weight: 600;
-  color: #4f46e5;
-  background: #eef2ff;
   padding: 2px 6px;
   border-radius: 4px;
+  display: inline-block;
+}
+
+.depth-high {
+  color: #4f46e5;
+  background: #eef2ff;
+  border: 1px solid #e0e7ff;
+}
+
+.depth-mid {
+  color: #0284c7;
+  background: #f0f9ff;
+  border: 1px solid #e0f2fe;
+}
+
+.depth-low {
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
 }
 
 .topo-circ {

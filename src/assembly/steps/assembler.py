@@ -339,8 +339,10 @@ class AssemblerStep(BaseAssemblyStep):
                         else:
                             current_depth = 0.0
 
-                        # 环状判定
-                        if "circular=true" in header or "_circular" in header or "circular" in header or "topology=circular" in header:
+                        # 环状拓扑精准判定 (严禁将 circular=false / linear 误判为环状)
+                        if "circular=false" in header or "circular=n" in header or "linear" in header:
+                            pass
+                        elif "circular=true" in header or "circular=y" in header or "topology=circular" in header or "_circular" in header:
                             stats["is_circular"] = True
                     else:
                         seq_upper = line_str.upper()
