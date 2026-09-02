@@ -15,6 +15,7 @@ import {
   normalizeCategoryName,
   inferClusterCategory,
   getCatColor,
+  getCategoryChinese,
   getClusterConsensusLen,
   getClusterVariantInfo,
   type ClusterVariantInfo
@@ -496,7 +497,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                 @click="genePartitionFilter = 'CORE'"
                 title="仅显示全群体 100% 共享的核心 CDS 家族"
               >
-                核心 Core ({{ pangenomePartition.core }})
+                核心基因 ({{ pangenomePartition.core }})
               </button>
               <button
                 class="r-pill"
@@ -514,7 +515,7 @@ const isCurrentPair = (s1: string, s2: string) => {
           <div class="filter-group">
             <span class="ribbon-group-label">功能:</span>
             <select v-model="geneCategoryFilter" class="modern-select select-cat">
-              <option value="ALL">全部模块 (All Modules)</option>
+              <option value="ALL">全部功能模块</option>
               <option v-for="(cat, key) in FUNCTIONAL_CATEGORIES" :key="key" :value="key">
                 {{ cat.label }}
               </option>
@@ -611,20 +612,20 @@ const isCurrentPair = (s1: string, s2: string) => {
           <thead>
             <tr>
               <!-- 1. 进化树列头 (可收起) -->
-              <th v-if="isPhylogenyTrackVisible" class="th-tree th-sticky-left-1" title="系统发育拓扑树 (UPGMA 聚类构建)">Phylogeny</th>
+              <th v-if="isPhylogenyTrackVisible" class="th-tree th-sticky-left-1" title="系统发育拓扑树 (UPGMA 聚类构建)">系统发育</th>
               <!-- 2. 样本名称列头 -->
               <th
                 class="th-sample-name"
                 :class="isPhylogenyTrackVisible ? 'th-sticky-left-2' : 'th-sticky-left-1'"
                 title="样本标识名称"
               >
-                Sample ID
+                样本编号
               </th>
               <!-- 3. 元数据轨道列头 -->
               <template v-if="isMetadataTrackVisible">
-                <th class="th-meta" title="噬菌体生活周期 (Lytic 专性烈性 / Lysogenic 温和溶原)">Lifestyle</th>
-                <th class="th-meta" title="治疗安全性审计 (Safe 毒力因子与耐药基因阴性)">Safety</th>
-                <th class="th-meta" title="抗 CRISPR 攻防系统 (携带的 Anti-CRISPR 基因数)">Acr</th>
+                <th class="th-meta" title="噬菌体生活周期 (Lytic 专性烈性 / Lysogenic 温和溶原)">生活周期</th>
+                <th class="th-meta" title="治疗安全性审计 (Safe 毒力因子与耐药基因阴性)">生物安全</th>
+                <th class="th-meta" title="抗 CRISPR 攻防系统 (携带的 Anti-CRISPR 基因数)">抗 CRISPR</th>
               </template>
               <!-- 4. ANI 矩阵列头 -->
               <template v-if="isAniTrackVisible">
@@ -646,7 +647,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                 :colspan="Math.max(1, sortedGeneClusters.length)"
               >
                 <div class="gene-matrix-header-bar">
-                  <span class="gene-matrix-title-txt">Pan-Genome Ortholog Content Matrix (共 {{ sortedGeneClusters.length }} 基因家族，按功能着色)</span>
+                  <span class="gene-matrix-title-txt">泛基因组直系同源基因矩阵 (共 {{ sortedGeneClusters.length }} 基因家族，按功能着色)</span>
                 </div>
               </th>
               <!-- 6. 弹性吸纳列 -->
@@ -704,7 +705,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                     :class="['meta-badge', (sampleAnnotations[rowId]?.lifestyle === 'Lytic') ? 'bg-lytic' : 'bg-temperate']"
                     :title="sampleAnnotations[rowId]?.lifestyle === 'Lytic' ? '专性烈性噬菌体' : '检出温和溶源整合元件'"
                   >
-                    {{ sampleAnnotations[rowId]?.lifestyle || 'Lytic' }}
+                    {{ sampleAnnotations[rowId]?.lifestyle === 'Lytic' ? '烈性' : '温和' }}
                   </span>
                 </td>
                 <td class="td-meta-col">
@@ -712,7 +713,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                     :class="['meta-badge', sampleAnnotations[rowId]?.safe ? 'bg-safe' : 'bg-risk']"
                     :title="sampleAnnotations[rowId]?.safe ? '治疗应用安全' : '含有潜在毒力或整合风险元件'"
                   >
-                    {{ sampleAnnotations[rowId]?.safe ? 'Safe' : 'Risk' }}
+                    {{ sampleAnnotations[rowId]?.safe ? '安全' : '警示' }}
                   </span>
                 </td>
                 <td class="td-meta-col">
@@ -785,7 +786,7 @@ const isCurrentPair = (s1: string, s2: string) => {
       <div v-if="viewMode === 'matrix'" class="cluster-hover-info-strip" :class="{ active: !!hoveredGeneCluster }">
         <template v-if="hoveredGeneCluster">
           <span class="chip-cat" :style="{ backgroundColor: getCatColor(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category) }">
-            {{ hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category }}
+            {{ getCategoryChinese(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category) }}
           </span>
           <strong>{{ hoveredGeneCluster.cluster?.group_id }}</strong>:
           <span class="strip-prod-txt">{{ hoveredGeneCluster.cluster?.representative_product }}</span>

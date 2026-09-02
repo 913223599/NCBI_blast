@@ -65,6 +65,25 @@ export const CATEGORY_ORDER: Record<string, number> = {
   Hypothetical: 10
 }
 
+export const CATEGORY_CHINESE_MAP: Record<string, string> = {
+  'Head & Packaging': '头部与衣壳包装',
+  'Tail & Host Interaction': '尾部与宿主吸附',
+  Lysis: '宿主裂解系统',
+  'Defense & Host Interaction': '宿主防御与互作',
+  'Integration & Excision': '溶源整合与切除',
+  'Replication & Repair': 'DNA复制与重组修复',
+  'Transcription & Regulation': '转录调控与开关',
+  'Metabolism & AMG': '辅助代谢基因 (AMG)',
+  'Other Functional': '其他功能蛋白',
+  Hypothetical: '假定蛋白与未表征'
+}
+
+export function getCategoryChinese(cat?: string): string {
+  if (!cat) return '假定蛋白与未表征'
+  const norm = normalizeCategoryName(cat)
+  return CATEGORY_CHINESE_MAP[norm] || CATEGORY_CHINESE_MAP[cat] || cat
+}
+
 export function normalizeCategoryName(raw?: string): string {
   if (!raw) return 'Hypothetical'
   const key = raw.trim().toLowerCase()

@@ -45,12 +45,12 @@ const pairSummary = computed(() => {
   const tailDiff = 100 - tailSim
 
   // 1. 全基因组宏观分化
-  let genomeDivergence = 'Similar'
-  if (ani < 70) genomeDivergence = 'Divergent'
-  else if (ani < 90) genomeDivergence = 'Moderate'
+  let genomeDivergence = '高度相似'
+  if (ani < 70) genomeDivergence = '显著分化'
+  else if (ani < 90) genomeDivergence = '中度分化'
 
   // 2. 基因功能内容分化
-  let functionDivergence = 'Conserved'
+  let functionDivergence = '功能高度保守'
   if (analysisResult.value.clusters?.length) {
     let shared = 0
     let union = 0
@@ -61,25 +61,25 @@ const pairSummary = computed(() => {
       if (has1 || has2) union++
     })
     const jaccard = union > 0 ? (shared / union) * 100 : 100
-    if (jaccard < 70) functionDivergence = `Divergent (${jaccard.toFixed(0)}%)`
-    else functionDivergence = `Conserved (${jaccard.toFixed(0)}%)`
+    if (jaccard < 70) functionDivergence = `功能分化 (${jaccard.toFixed(0)}%)`
+    else functionDivergence = `功能保守 (${jaccard.toFixed(0)}%)`
   }
 
   // 3. 宿主受体识别分化
-  let receptorDivergence = 'Invariant'
+  let receptorDivergence = '完全一致'
   let receptorClass = ''
   if (tailDiff >= 50) {
-    receptorDivergence = 'Orthogonal / Highly Divergent'
+    receptorDivergence = '正交 / 显著分化'
     receptorClass = 'c-amber'
   } else if (tailDiff >= 20) {
-    receptorDivergence = 'Divergent Mutant'
+    receptorDivergence = '受体突变分化'
     receptorClass = 'c-amber'
   }
 
   const life1 = analysisResult.value.lifestyles?.find((l: any) => l.sample_id === s1)
   const life2 = analysisResult.value.lifestyles?.find((l: any) => l.sample_id === s2)
   const isSafe = (life1?.is_safe_for_therapy !== false) && (life2?.is_safe_for_therapy !== false)
-  const safetyStatus = isSafe ? 'Compatible (Lytic)' : 'Contains Risk Marker'
+  const safetyStatus = isSafe ? '安全兼容 (裂解型)' : '含潜在风险标记'
 
   return {
     s1, s2, name1, name2,
@@ -365,7 +365,7 @@ onMounted(() => {
             @click="activeWorkspace = 'biological'"
           >
             <span class="step-num">Q5</span>
-            <span class="ws-name">生物学决策 (Interpretation)</span>
+            <span class="ws-name">综合生物学决策 (Interpretation)</span>
           </button>
         </div>
 

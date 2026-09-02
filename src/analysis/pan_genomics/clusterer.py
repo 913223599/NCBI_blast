@@ -218,27 +218,48 @@ class ParallelOrthologClusterer:
             else:
                 cluster_type = "Accessory"
 
-            # 选取代表性名称
+            # 选取代表性名称与最具置信度功能分类
             known_prods = [item[2]["product"] for item in cl if not AnnotationFuser.is_unannotated(item[2]["product"])]
             rep_prod = known_prods[0] if known_prods else cl[0][2]["product"]
-            rep_cat = cl[0][2]["category"]
 
-            gene_items = [
-                OrthologGeneItem(
-                    sample_id=item[0],
-                    sample_name=item[1],
-                    gene_id=item[2].get("id") or item[2].get("locus_tag") or "GENE",
-                    locus_tag=item[2].get("locus_tag") or item[2].get("id") or "GENE",
-                    product=item[2].get("product", "hypothetical protein"),
-                    category=item[2].get("category", "Other Functional"),
-                    length_aa=item[2].get("length_aa") or len(item[2].get("translation", "")),
-                    strand=item[2].get("strand", "+"),
-                    start=int(item[2].get("start", 0)),
-                    end=int(item[2].get("end", 0)),
-                    source_engine=item[2].get("source_engine")
+            # 确定家族共识分类
+            known_cats = [item[2]["category"] for item in cl if item[2].get("category") and item[2]["category"] != "Hypothetical"]
+            rep_cat = known_cats[0] if known_cats else AnnotationFuser.infer_category(rep_prod)
+
+            gene_items = []
+            for item in cl:
+                orig_prod = item[2].get("product", "hypothetical protein")
+                orig_cat = item[2].get("category", "Hypothetical")
+                orig_engine = item[2].get("source_engine")
+
+                # 若单株原始为未注释/假定蛋白，而同源家族有确切功能，则自动继承家族共识
+                if AnnotationFuser.is_unannotated(orig_prod) and not AnnotationFuser.is_unannotated(rep_prod):
+                    final_prod = rep_prod
+                    final_cat = rep_cat
+                    final_engine = f"{orig_engine or 'Primary'} (同源共识)"
+                    # 同步回写原始 feature 内存对象，保证全流程下游感知
+                    item[2]["product"] = final_prod
+                    item[2]["category"] = final_cat
+                else:
+                    final_prod = orig_prod
+                    final_cat = orig_cat
+                    final_engine = orig_engine
+
+                gene_items.append(
+                    OrthologGeneItem(
+                        sample_id=item[0],
+                        sample_name=item[1],
+                        gene_id=item[2].get("id") or item[2].get("locus_tag") or "GENE",
+                        locus_tag=item[2].get("locus_tag") or item[2].get("id") or "GENE",
+                        product=final_prod,
+                        category=final_cat,
+                        length_aa=item[2].get("length_aa") or len(item[2].get("translation", "")),
+                        strand=item[2].get("strand", "+"),
+                        start=int(item[2].get("start", 0)),
+                        end=int(item[2].get("end", 0)),
+                        source_engine=final_engine
+                    )
                 )
-                for item in cl
-            ]
 
             # 构建 Presence/Absence 映射字典
             presence_map: Dict[str, Optional[Dict[str, Any]]] = {}

@@ -4,7 +4,7 @@
  * 支持指定对照基准样本、氨基酸长度增删截短差、基因组物理位置坐标及功能产物全景比对。
  */
 import { ref, watch } from 'vue'
-import { getCatColor, getAminoAcidVariation } from '../../utils/pangenomeVariants'
+import { getCatColor, getCategoryChinese, getAminoAcidVariation } from '../../utils/pangenomeVariants'
 
 const props = defineProps<{
   cluster: any | null
@@ -45,7 +45,7 @@ watch(
           class="chip-cat"
           :style="{ backgroundColor: getCatColor(cluster._inferredCategory || cluster.category) }"
         >
-          {{ cluster._inferredCategory || cluster.category }}
+          {{ getCategoryChinese(cluster._inferredCategory || cluster.category) }}
         </span>
         <strong>{{ cluster.group_id }}</strong>
         <span class="dh-prod">{{ cluster.representative_product }}</span>
@@ -72,11 +72,11 @@ watch(
             <th>样本名称</th>
             <th>存在状态</th>
             <th>氨基酸变异类型 (相较于基准株)</th>
-            <th>CDS Locus Tag</th>
-            <th>基因组起止位置 (物理坐标)</th>
+            <th>CDS 基因位点标签</th>
+            <th>基因组物理坐标 (bp)</th>
             <th>链方向</th>
             <th>氨基酸长度 (aa)</th>
-            <th>功能产物描述 (Product)</th>
+            <th>功能产物注释 (Product)</th>
           </tr>
         </thead>
         <tbody>
@@ -94,8 +94,8 @@ watch(
               <span v-if="sid === selectedBaselineSampleId" class="badge-ref-tag">基准</span>
             </td>
             <td>
-              <span class="status-pill status-present" v-if="cluster.presence_map?.[sid]">存在 (Present)</span>
-              <span class="status-pill status-absent" v-else>缺失 (Absent)</span>
+              <span class="status-pill status-present" v-if="cluster.presence_map?.[sid]">存在</span>
+              <span class="status-pill status-absent" v-else>缺失</span>
             </td>
             <td>
               <div class="variation-cell">

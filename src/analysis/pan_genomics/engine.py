@@ -102,18 +102,7 @@ class PanGenomicsEngine:
         # 分片落盘 Stage 0
         self._save_checkpoint(task_id, "samples_loaded", {"sample_count": total_sample_count})
 
-        # 2. Stage 1: 并发执行轻量特征扫描与统计任务 (毫秒级异步执行)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as stage1_pool:
-            fut_lifestyles = stage1_pool.submit(self._analyze_lifestyles_and_defense, sample_data)
-            fut_amg_trna = stage1_pool.submit(self._analyze_amg_and_trna, sample_data)
-            fut_cats = stage1_pool.submit(self._calculate_category_distributions, sample_data)
-
-            lifestyles, arms_race_matrix = fut_lifestyles.result()
-            amg_genes, trna_profiles, amg_pathway_dist = fut_amg_trna.result()
-            cat_distributions = fut_cats.result()
-
-        # 3. Stage 2: 统一多核调度执行 4 大重型序列比对流水线 (避免嵌套多层线程池争用)
-        # 3.1 正交同源基因家族聚类 (基于 3-mer 倒排索引与多核并发)
+        # 2. Stage 1: 优先执行正交同源聚类 (Ortholog Clustering) 并完成全群体同源共识赋权
         clusters = self._cluster_orthologs(
             sample_data=sample_data,
             ident_thresh=req.identity_threshold,
@@ -121,13 +110,23 @@ class PanGenomicsEngine:
             max_workers=max_workers
         )
 
-        # 3.2 全蛋白质组 ANI 相似度矩阵
+        # 3. Stage 2: 并发执行基于统一共识特征的生物学决策分析与矩阵流水线
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as stage2_pool:
+            fut_lifestyles = stage2_pool.submit(self._analyze_lifestyles_and_defense, sample_data)
+            fut_amg_trna = stage2_pool.submit(self._analyze_amg_and_trna, sample_data)
+            fut_cats = stage2_pool.submit(self._calculate_category_distributions, sample_data)
+
+            lifestyles, arms_race_matrix = fut_lifestyles.result()
+            amg_genes, trna_profiles, amg_pathway_dist = fut_amg_trna.result()
+            cat_distributions = fut_cats.result()
+
+        # 3.1 全蛋白质组 ANI 相似度矩阵
         ani_matrix = self._calculate_ani_matrix(sample_data, max_workers=max_workers)
 
-        # 3.3 尾部受体识别结构域 (Tail/Spike/RBP) 比对
+        # 3.2 尾部受体识别结构域 (Tail/Spike/RBP) 比对
         tail_proteins, tail_identity_matrix = self._analyze_tail_operons(sample_data, max_workers=max_workers)
 
-        # 3.4 裂解盒操纵子 (Endolysin/Holin/Spanin) 构型分析
+        # 3.3 裂解盒操纵子 (Endolysin/Holin/Spanin) 构型分析
         lysis_proteins, lysis_identity_matrix = self._analyze_lysis_cassette(sample_data, max_workers=max_workers)
 
         # 分片落盘 Stage 2 完成

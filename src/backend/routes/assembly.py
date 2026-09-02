@@ -217,11 +217,61 @@ async def get_assembly_result(task_id: str):
     fasta_exists = asm_fasta.exists() and asm_fasta.stat().st_size > 0
     fasta_size_bytes = asm_fasta.stat().st_size if fasta_exists else 0
 
+    # 细分 Contig 列表解析
+    contig_list = []
+    if fasta_exists:
+        try:
+            cur_header = ""
+            cur_seq = []
+            avg_d = float(stats.get("avg_depth") or 0.0)
+
+            def finish_c(h: str, s_list: list):
+                if not h or not s_list: return
+                s_str = "".join(s_list)
+                c_len = len(s_str)
+                if c_len == 0: return
+                h_low = h.lower()
+                c_name = h.split()[0].lstrip(">")
+                d_m = re.search(r"(?:depth[=:]|cov[=_:]|coverage[=:])(\d+\.?\d*)", h_low)
+                c_depth = float(d_m.group(1)) if d_m else avg_d
+                is_c = any(k in h_low for k in ["circular=true", "_circular", "circular", "topology=circular"])
+                s_up = s_str.upper()
+                c_gc = s_up.count("G") + s_up.count("C")
+                c_gc_pct = round((c_gc / c_len * 100.0), 2) if c_len > 0 else 0.0
+                contig_list.append({
+                    "name": c_name,
+                    "header": h.lstrip(">"),
+                    "length": c_len,
+                    "gc_percent": c_gc_pct,
+                    "depth": round(c_depth, 1),
+                    "is_circular": is_c,
+                    "sequence": s_str
+                })
+
+            with open(asm_fasta, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    l_str = line.strip()
+                    if l_str.startswith(">"):
+                        if cur_header: finish_c(cur_header, cur_seq)
+                        cur_header = l_str
+                        cur_seq = []
+                    else:
+                        cur_seq.append(l_str)
+                if cur_header: finish_c(cur_header, cur_seq)
+
+            c_tot = sum(c["length"] for c in contig_list)
+            contig_list.sort(key=lambda x: x["length"], reverse=True)
+            for c in contig_list:
+                c["length_ratio"] = round((c["length"] / c_tot * 100.0), 1) if c_tot > 0 else 0.0
+        except Exception:
+            pass
+
     return BioResponse.ok({
         "task_id": task_id,
         "name": task.get("name"),
         "status": task.get("status"),
         "stats": stats,
+        "contigs": contig_list,
         "fasta_exists": fasta_exists,
         "fasta_path": str(asm_fasta.resolve()) if fasta_exists else None,
         "fasta_size_bytes": fasta_size_bytes,

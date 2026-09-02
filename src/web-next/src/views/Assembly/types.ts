@@ -46,11 +46,23 @@ export interface AssemblyRunParams {
   enable_qc?: boolean;
 }
 
+export interface ContigDetailItem {
+  name: string;
+  header?: string;
+  length: number;
+  gc_percent: number;
+  depth: number;
+  is_circular: boolean;
+  length_ratio: number;
+  sequence?: string;
+}
+
 export interface AssemblyResultData {
   task_id: string;
   name: string;
   status: string;
   stats: AssemblyStats;
+  contigs?: ContigDetailItem[];
   fasta_exists: boolean;
   fasta_path?: string | null;
   fasta_size_bytes?: number;
