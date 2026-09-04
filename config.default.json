@@ -1,0 +1,61 @@
+{
+  "api_keys": {
+    "dashscope": ""
+  },
+  "supported_models": [
+    {
+      "key": "qwen-plus",
+      "name": "通义千问-Plus"
+    },
+    {
+      "key": "qwen-mt-plus",
+      "name": "通义千问-MT-Plus"
+    },
+    {
+      "key": "qwen-mt-turbo",
+      "name": "通义千问-MT-Turbo"
+    },
+    {
+      "key": "qwen-turbo",
+      "name": "通义千问-Turbo"
+    },
+    {
+      "key": "deepseek-r1",
+      "name": "DeepSeek"
+    },
+    {
+      "key": "deepseek-v4-flash",
+      "name": "deepseek-v4-flash"
+    }
+  ],
+  "advanced_settings": {
+    "hitlist_size": 20,
+    "use_ai_translation": true,
+    "ai_translation_model": "qwen-plus",
+    "word_size": null,
+    "evalue": null,
+    "matrix_name": null,
+    "filter": null,
+    "alignments": null,
+    "descriptions": null,
+    "local_num_threads": null,
+    "nucleotide_database": "nt",
+    "protein_database": "nr",
+    "prefer_local": true,
+    "fallback_to_remote": true,
+    "use_cache": true,
+    "thread_count": 1,
+    "request_timeout": 9,
+    "ai_model": "deepseek-v4-flash"
+  },
+  "setup_completed": true,
+  "blast_bin_path": "",
+  "tool_paths": {
+    "sra_tools": "tools/ncbi_dist/bin/sra-tools",
+    "tree_tools_bin": "tools/ncbi_dist/bin/tree-tools"
+  },
+  "sra_tools_bin_path": "./tools/ncbi_dist/bin/sra-tools",
+  "tree_tools_bin_path": "./tools/ncbi_dist/bin/tree-tools",
+  "language": "zh_CN",
+  "lan_share": true
+}

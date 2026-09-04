@@ -2,67 +2,78 @@
 chcp 65001 >nul
 SETLOCAL EnableDelayedExpansion
 
+REM ----------------------------------------------------
+REM  NCBI BLAST Pro - Dev Launcher and Self-Healing
+REM ----------------------------------------------------
+
 SET "PROJECT_ROOT=%~dp0"
 CD /D "%PROJECT_ROOT%"
 
 TITLE NCBI BLAST Pro Dev Launcher
 
-echo =======================================
-echo   NCBI BLAST Pro - Electron Dev Mode
-echo =======================================
+echo ===================================================
+echo   NCBI BLAST Pro - Dev Mode and Environment Self-Healing
+echo ===================================================
 echo [Status] Project Root: %PROJECT_ROOT%
-echo [0/4] Cleaning up zombie processes (Skipped global kill)...
-REM taskkill /F /IM python.exe /T >nul 2>&1
-REM taskkill /F /IM electron.exe /T >nul 2>&1
-ping 127.0.0.1 -n 2 >nul
 
-REM 0. Check and Install Node.js
-where npm >nul 2>&1
+REM 1. Check Node.js
+where node >nul 2>&1
 if errorlevel 1 (
     echo [WARN] Node.js not found in PATH.
-    echo [INFO] Attempting to auto-install Node.js via winget...
-    winget install OpenJS.NodeJS --silent --accept-package-agreements --accept-source-agreements
-    if errorlevel 1 (
-        echo [ERROR] Auto-install failed. Please install Node.js manually from https://nodejs.org/
+    where winget >nul 2>&1
+    if not errorlevel 1 (
+        echo [INFO] Attempting to auto-install Node.js via winget...
+        winget install OpenJS.NodeJS --silent --accept-package-agreements --accept-source-agreements
+        if errorlevel 1 (
+            echo [ERROR] Auto-install failed. Please install Node.js manually: https://nodejs.org/
+            pause
+            exit /b 1
+        )
+        echo [INFO] Node.js installed successfully. Please restart launcher to refresh PATH.
+        pause
+        exit /b 0
+    ) else (
+        echo [ERROR] Node.js is required. Please install it from https://nodejs.org/
         pause
         exit /b 1
     )
-    echo [INFO] Node.js installed successfully.
-    echo [INFO] Please close this window and run the script again to refresh environment variables.
-    pause
-    exit /b 0
 )
 
-REM 0.5. Check and Install Python
-where python >nul 2>&1
+REM 2. Check Python
+python --version >nul 2>&1
 if errorlevel 1 (
-    echo [WARN] Python not found in PATH.
-    echo [INFO] Attempting to auto-install Python 3 via winget...
-    winget install Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements
-    if errorlevel 1 (
-        echo [ERROR] Auto-install failed. Please install Python manually from https://www.python.org/
+    echo [WARN] Python not found or invalid.
+    where winget >nul 2>&1
+    if not errorlevel 1 (
+        echo [INFO] Attempting to auto-install Python 3.11 via winget...
+        winget install Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements
+        if errorlevel 1 (
+            echo [ERROR] Auto-install failed. Please install Python manually: https://www.python.org/downloads/
+            pause
+            exit /b 1
+        )
+        echo [INFO] Python installed successfully. Please restart launcher to refresh PATH.
+        pause
+        exit /b 0
+    ) else (
+        echo [ERROR] Python is required. Please install Python 3.10+ from https://www.python.org/downloads/
         pause
         exit /b 1
     )
-    echo [INFO] Python installed successfully.
-    echo [INFO] Please close this window and run the script again to refresh environment variables.
-    pause
-    exit /b 0
 )
 
-REM 1. Check Python VENV
-REM 验证现有的虚拟环境是否有效（防止直接复制带来的路径失效问题）
+REM 3. Check Python VENV
 if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" --version >nul 2>&1
+    ".venv\Scripts\python.exe" -c "import sys" >nul 2>&1
     if errorlevel 1 (
-        echo [WARN] Existing .venv is broken ^(likely copied from another device^).
+        echo [WARN] Existing .venv is broken - likely copied from another device.
         echo [INFO] Recreating virtual environment...
         rmdir /s /q .venv
     )
 )
 
 if not exist ".venv\Scripts\python.exe" (
-    echo [INFO] Auto-creating Python virtual environment...
+    echo [INFO] Creating Python virtual environment .venv...
     python -m venv .venv
     if errorlevel 1 (
         echo [ERROR] Failed to create virtual environment.
@@ -72,49 +83,69 @@ if not exist ".venv\Scripts\python.exe" (
     echo [INFO] Virtual environment created successfully.
 )
 
-REM 2. Check Electron deps
-if not exist "electron-shell\node_modules\electron" (
-    echo [1/4] Installing Electron deps...
-    pushd electron-shell
-    call npm install
-    popd
+REM 4. Self-healing environment, directories, binaries, and Python deps with China mirrors
+echo [1/3] Running Environment Self-Healing and Python Dependency Audit...
+if exist "src\utils\verify_and_install_deps.py" (
+    ".venv\Scripts\python.exe" "src\utils\verify_and_install_deps.py"
 ) else (
-    echo [1/4] Electron deps ready
+    ".venv\Scripts\python.exe" -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn --extra-index-url https://mirrors.aliyun.com/pypi/simple/
 )
-
-REM 3. Check Vite deps
-if not exist "src\web-next\node_modules" (
-    echo [2/4] Installing Vite deps...
-    pushd src\web-next
-    call npm install
-    popd
-) else (
-    echo [2/4] Vite deps ready
-)
-
-REM 4. Check Python API deps
-echo [3/4] Checking Python API deps...
-".venv\Scripts\python.exe" -c "import fastapi, uvicorn, websockets" >nul 2>&1
 if errorlevel 1 (
-    echo     Installing missing Python dependencies...
-    ".venv\Scripts\pip.exe" install fastapi uvicorn[standard] websockets
+    echo [ERROR] Environment self-healing or dependency installation failed.
+    pause
+    exit /b 1
 )
 
-REM 5. Start Vite Dev Server
-echo [4/4] Starting Vite Dev Server (New Window)...
-REM Using /D to set working directory directly to avoid complex quoting in cmd /c
+REM 5. Check Electron and Frontend deps with China npmmirror
+echo [2/3] Checking Electron and Frontend dependencies with npmmirror...
+SET "npm_config_registry=https://registry.npmmirror.com"
+SET "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/"
+
+if not exist "electron-shell\node_modules\electron" (
+    echo [INFO] Installing Electron shell dependencies via npmmirror...
+    pushd electron-shell
+    call npm install --registry=https://registry.npmmirror.com
+    if errorlevel 1 (
+        echo [ERROR] Failed to install Electron dependencies.
+        popd
+        pause
+        exit /b 1
+    )
+    popd
+) else (
+    echo [INFO] Electron shell dependencies ready.
+)
+
+if not exist "src\web-next\node_modules\vite" (
+    echo [INFO] Installing Frontend Vite dependencies via npmmirror...
+    pushd src\web-next
+    call npm install --registry=https://registry.npmmirror.com
+    if errorlevel 1 (
+        echo [ERROR] Failed to install Frontend dependencies.
+        popd
+        pause
+        exit /b 1
+    )
+    popd
+) else (
+    echo [INFO] Frontend Vite dependencies ready.
+)
+
+REM 6. Start Services
+echo [3/3] Starting Services...
+
+echo [INFO] Starting Vite Dev Server...
 start "Vite Dev Server" /D "src\web-next" cmd /c "npm run dev || pause"
 
-echo Waiting for Vite to start...
-ping 127.0.0.1 -n 6 >nul
+echo [INFO] Waiting for Vite Dev Server to initialize...
+ping 127.0.0.1 -n 5 >nul
 
-REM 6. Start Electron
-echo Starting Electron...
+echo [INFO] Starting Electron Desktop Application...
 pushd electron-shell
 call npm run dev
 if errorlevel 1 (
     echo.
-    echo [ERROR] Electron process exited with error code %errorlevel%.
+    echo [ERROR] Electron process exited with code %errorlevel%.
     popd
     pause
     exit /b %errorlevel%
@@ -122,8 +153,8 @@ if errorlevel 1 (
 popd
 
 echo.
-echo =======================================
+echo ===================================================
 echo   Application Closed Traditionally.
-echo =======================================
+echo ===================================================
 pause
 ENDLOCAL
