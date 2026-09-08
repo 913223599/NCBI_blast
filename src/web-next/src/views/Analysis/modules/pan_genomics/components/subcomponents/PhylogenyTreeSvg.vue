@@ -10,6 +10,8 @@ const props = defineProps<{
   aniMatrix?: Record<string, Record<string, number | null>>
   rowHeight: number
   displayDensity: 'spacious' | 'comfortable' | 'compact' | 'ultra'
+  treeRoot?: any
+  sortOrder?: 'natural' | 'cluster'
 }>()
 
 interface TreeBranch {
@@ -26,17 +28,29 @@ interface TreeTip {
   id: string
 }
 
+interface PrunedNode {
+  id: string
+  x: number
+  y: number
+  isLeaf: boolean
+  depth: number
+  left?: PrunedNode
+  right?: PrunedNode
+}
+
 const treeSvgLayout = computed(() => {
   const ids = props.visibleSampleIds
   const n = ids.length
   const currentHeight = props.rowHeight
 
-  if (n === 0) return { width: 44, height: currentHeight, branches: [] as TreeBranch[], tips: [] as TreeTip[] }
+  if (n === 0) {
+    return { width: 44, height: currentHeight, branches: [] as TreeBranch[], tips: [] as TreeTip[] }
+  }
 
   const totalHeight = n * currentHeight
   const baseRadius =
     props.displayDensity === 'spacious'
-      ? 3.2
+      ? 3.0
       : props.displayDensity === 'ultra'
       ? 1.5
       : props.displayDensity === 'compact'
@@ -60,87 +74,201 @@ const treeSvgLayout = computed(() => {
     }
   }
 
-  // 动态 UPGMA 聚类构建几何树 (精准物理 Y 坐标)
-  let clusters: Array<{
-    ids: string[]
-    leaves: number[]
-    y: number
-    x: number
-    height: number
-  }> = ids.map((id, idx) => ({
-    ids: [id],
-    leaves: [idx],
-    y: (idx + 0.5) * currentHeight,
-    x: 36,
-    height: 0
-  }))
-
   const branches: TreeBranch[] = []
-  let currentStep = 0
-  const maxSteps = n - 1
+  const yMap = new Map<string, number>()
+  ids.forEach((id, idx) => {
+    yMap.set(id, (idx + 0.5) * currentHeight)
+  })
 
-  while (clusters.length > 1) {
-    let bestI = 0
-    let bestJ = 1
-    let maxSimilarity = -1
+  // 检查是否可以使用后端预计算的 TreeRoot 进行剪枝与平面布局
+  let usedBackendTree = false
 
-    for (let i = 0; i < clusters.length; i++) {
-      const ci = clusters[i]
-      if (!ci) continue
-      for (let j = i + 1; j < clusters.length; j++) {
-        const cj = clusters[j]
-        if (!cj) continue
+  if (props.treeRoot && props.sortOrder !== 'natural') {
+    const visibleSet = new Set(ids)
+
+    // 1. 剪枝递归: 过滤掉已隐藏样本，折叠单子树节点
+    function prune(node: any): PrunedNode | null {
+      if (!node) return null
+      const isLeafNode = !node.left && !node.right
+      if (isLeafNode) {
+        if (visibleSet.has(node.id)) {
+          const yVal = yMap.get(node.id) ?? 0
+          return {
+            id: node.id,
+            x: 36,
+            y: yVal,
+            isLeaf: true,
+            depth: 0
+          }
+        }
+        return null
+      }
+
+      const l = prune(node.left)
+      const r = prune(node.right)
+
+      if (l && r) {
+        return {
+          id: node.id || 'internal',
+          x: 0,
+          y: (l.y + r.y) / 2,
+          isLeaf: false,
+          depth: 1 + Math.max(l.depth, r.depth),
+          left: l,
+          right: r
+        }
+      } else if (l) {
+        return l
+      } else if (r) {
+        return r
+      }
+      return null
+    }
+
+    const prunedRoot = prune(props.treeRoot)
+
+    if (prunedRoot) {
+      // 收集剪枝后的叶序，验证是否与当前表格 visibleSampleIds 一致 (确保平面无交叉)
+      const prunedLeafOrder: string[] = []
+      function collectLeaves(n: PrunedNode) {
+        if (n.isLeaf) {
+          prunedLeafOrder.push(n.id)
+        } else {
+          if (n.left) collectLeaves(n.left)
+          if (n.right) collectLeaves(n.right)
+        }
+      }
+      collectLeaves(prunedRoot)
+
+      // 验证顺序一致性: 若当前表格样本顺序与剪枝叶序完全一致，则天然严格平面
+      const isOrderConsistent =
+        prunedLeafOrder.length === ids.length &&
+        prunedLeafOrder.every((sid, i) => sid === ids[i])
+
+      if (isOrderConsistent) {
+        usedBackendTree = true
+        const maxDepth = prunedRoot.depth || 1
+
+        function layoutNode(n: PrunedNode, currentDepth: number): { x: number; y: number } {
+          if (n.isLeaf) {
+            return { x: n.x, y: n.y }
+          }
+          const leftRes = n.left ? layoutNode(n.left, currentDepth + 1) : null
+          const rightRes = n.right ? layoutNode(n.right, currentDepth + 1) : null
+
+          if (!leftRes || !rightRes) {
+            return leftRes || rightRes || { x: 36, y: 0 }
+          }
+
+          // 计算内部节点的横向深度 (根节点偏左至 6px，叶节点在 36px)
+          const depthFromLeaves = maxDepth - currentDepth
+          const nodeX = Math.max(6, 36 - (depthFromLeaves / maxDepth) * 28)
+          const nodeY = (leftRes.y + rightRes.y) / 2
+
+          // 绘制到左子节点的直角分支
+          branches.push({ x1: nodeX, y1: leftRes.y, x2: leftRes.x, y2: leftRes.y })
+          // 绘制到右子节点的直角分支
+          branches.push({ x1: nodeX, y1: rightRes.y, x2: rightRes.x, y2: rightRes.y })
+          // 绘制垂直主干连接线 (左右子节点垂直区间)
+          branches.push({
+            x1: nodeX,
+            y1: Math.min(leftRes.y, rightRes.y),
+            x2: nodeX,
+            y2: Math.max(leftRes.y, rightRes.y)
+          })
+
+          return { x: nodeX, y: nodeY }
+        }
+
+        const rootPos = layoutNode(prunedRoot, 0)
+        // 根节点向左主干线
+        branches.push({ x1: 2, y1: rootPos.y, x2: rootPos.x, y2: rootPos.y })
+      }
+    }
+  }
+
+  // 若未启用后端树或因重排序打乱叶序，平滑降级至自适应相邻约束平面层次聚类 (Adjacent-Constrained UPGMA)
+  if (!usedBackendTree) {
+    interface AdjCluster {
+      ids: string[]
+      y: number
+      x: number
+      depth: number
+    }
+
+    let clusters: AdjCluster[] = ids.map((id, idx) => ({
+      ids: [id],
+      y: (idx + 0.5) * currentHeight,
+      x: 36,
+      depth: 0
+    }))
+
+    const maxSteps = Math.max(1, n - 1)
+    let currentStep = 0
+
+    while (clusters.length > 1) {
+      let bestI = 0
+      let maxSim = -1
+
+      // 关键: 仅在当前物理相邻的簇 i 与 i + 1 之间搜寻最大相似度合并
+      // 该约束在拓扑学上保证了簇的 Y 轴区间始终连续，绝不产生跨行刺穿
+      for (let i = 0; i < clusters.length - 1; i++) {
+        const c1 = clusters[i]
+        const c2 = clusters[i + 1]
+        if (!c1 || !c2) continue
+
         let sumSim = 0
         let count = 0
-        for (const s1 of ci.ids) {
-          for (const s2 of cj.ids) {
-            const rawVal = props.aniMatrix?.[s1]?.[s2]
-            const sim = (rawVal !== null && rawVal !== undefined) ? rawVal : (s1 === s2 ? 100 : 0)
+        for (const s1 of c1.ids) {
+          for (const s2 of c2.ids) {
+            const raw = props.aniMatrix?.[s1]?.[s2]
+            const sim = raw !== null && raw !== undefined ? raw : s1 === s2 ? 100 : 0
             sumSim += sim
             count++
           }
         }
         const avgSim = count > 0 ? sumSim / count : 0
-        if (avgSim > maxSimilarity) {
-          maxSimilarity = avgSim
+        if (avgSim > maxSim) {
+          maxSim = avgSim
           bestI = i
-          bestJ = j
         }
       }
+
+      const cA = clusters[bestI]
+      const cB = clusters[bestI + 1]
+      if (!cA || !cB) break
+
+      currentStep++
+      const newDepth = 1 + Math.max(cA.depth, cB.depth)
+      const newX = Math.max(6, 36 - (currentStep / maxSteps) * 28)
+      const newY = (cA.y + cB.y) / 2
+
+      // 水平分支到 A
+      branches.push({ x1: newX, y1: cA.y, x2: cA.x, y2: cA.y })
+      // 水平分支到 B
+      branches.push({ x1: newX, y1: cB.y, x2: cB.x, y2: cB.y })
+      // 垂直线连接 A 和 B (由于 A 和 B 相邻，此垂直线内部无任何其他行经过)
+      branches.push({
+        x1: newX,
+        y1: Math.min(cA.y, cB.y),
+        x2: newX,
+        y2: Math.max(cA.y, cB.y)
+      })
+
+      const merged: AdjCluster = {
+        ids: [...cA.ids, ...cB.ids],
+        y: newY,
+        x: newX,
+        depth: newDepth
+      }
+
+      clusters.splice(bestI, 2, merged)
     }
 
-    const cA = clusters[bestI]
-    const cB = clusters[bestJ]
-    if (!cA || !cB) break
-    currentStep++
-
-    // 计算分叉节点的 x 坐标 (深度从 36 逐渐向左推移到 6)
-    const newX = Math.max(6, 36 - (currentStep / maxSteps) * 26)
-    const newY = (cA.y + cB.y) / 2
-
-    // 为子节点 A 画线: 水平线 (newX, cA.y) -> (cA.x, cA.y)
-    branches.push({ x1: newX, y1: cA.y, x2: cA.x, y2: cA.y })
-    // 为子节点 B 画线: 水平线 (newX, cB.y) -> (cB.x, cB.y)
-    branches.push({ x1: newX, y1: cB.y, x2: cB.x, y2: cB.y })
-    // 垂直连接线: (newX, min(cA.y, cB.y)) -> (newX, max(cA.y, cB.y))
-    branches.push({ x1: newX, y1: Math.min(cA.y, cB.y), x2: newX, y2: Math.max(cA.y, cB.y) })
-
-    const merged = {
-      ids: [...cA.ids, ...cB.ids],
-      leaves: [...cA.leaves, ...cB.leaves],
-      y: newY,
-      x: newX,
-      height: 100 - maxSimilarity
+    const finalRoot = clusters[0]
+    if (finalRoot) {
+      branches.push({ x1: 2, y1: finalRoot.y, x2: finalRoot.x, y2: finalRoot.y })
     }
-
-    clusters = clusters.filter((_, idx) => idx !== bestI && idx !== bestJ)
-    clusters.push(merged)
-  }
-
-  // 根节点向左引一条主干根茎
-  const root = clusters[0]
-  if (root) {
-    branches.push({ x1: 2, y1: root.y, x2: root.x, y2: root.y })
   }
 
   return {

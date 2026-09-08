@@ -11,6 +11,7 @@ ani_calculator.py - 国际标准全基因组平均核苷酸一致性 (OrthoANI) 
 """
 
 import os
+import glob
 import shutil
 import tempfile
 import subprocess
@@ -63,7 +64,50 @@ class OrthoANICalculator:
         self.min_coverage = min_coverage
         self.min_rbh_count = min_rbh_count
         self.min_af_threshold = min_af_threshold
-        self.blastn_path = shutil.which("blastn")
+        self.blastn_path = self._resolve_blastn_binary()
+        if self.blastn_path:
+            logger.info(f"OrthoANI 成功定位并加载 NCBI BLASTN 引擎: {self.blastn_path}")
+        else:
+            logger.warning("未探测到本地 NCBI BLASTN，OrthoANI 将自适应平滑启用纯 Python/C 备用对齐器")
+
+    @staticmethod
+    def _resolve_blastn_binary() -> Optional[str]:
+        """
+        多层级智能定位 NCBI BLASTN 可执行文件:
+        1. 系统环境变量 PATH
+        2. 项目内置打包发布目录 (dist/NCBI_BLAST_GUI/_internal/bin) 与 vendor 目录
+        3. 常见操作系统独立安装目录 (C/D/E 盘 Program Files/NCBI/blast-*)
+        """
+        # 1. 优先检查系统 PATH
+        p_path = shutil.which("blastn")
+        if p_path:
+            return p_path
+
+        # 2. 检查项目工程内置打包目录与工具箱
+        root = Path(__file__).resolve().parent.parent.parent.parent
+        internal_candidates = [
+            root / "dist" / "NCBI_BLAST_GUI" / "_internal" / "bin" / "blastn.exe",
+            root / "tools" / "ncbi_dist" / "bin" / "blastn.exe",
+            root / "vendor" / "blast" / "bin" / "blastn.exe",
+            root / "src" / "workbench" / "bin" / "blastn.exe",
+        ]
+        for candidate in internal_candidates:
+            if candidate.exists() and os.access(str(candidate), os.R_OK):
+                return str(candidate)
+
+        # 3. 扫描 Windows 常见独立安装目录
+        search_patterns = [
+            r"C:\Program Files\NCBI\blast-*\bin\blastn.exe",
+            r"D:\Program Files\NCBI\blast-*\bin\blastn.exe",
+            r"E:\Program Files\NCBI\blast-*\bin\blastn.exe",
+            r"C:\Program Files (x86)\NCBI\blast-*\bin\blastn.exe",
+        ]
+        for pat in search_patterns:
+            matches = glob.glob(pat)
+            if matches and os.path.exists(matches[0]):
+                return matches[0]
+
+        return None
 
     def _get_safe_workers(self, user_threads: Optional[int] = None) -> int:
         """动态计算安全并发线程数 (保留 2 核心防卡死，上限 30 核心)"""
@@ -200,61 +244,79 @@ class OrthoANICalculator:
         map1 = {sl.slice_id: sl for sl in slices1}
         map2 = {sl.slice_id: sl for sl in slices2}
 
-        # 记录 Forward 最佳命中 (按 bitscore 取最大)
-        # best_fwd[q1_id] = (s2_id, bitscore, pident, length)
-        best_fwd: Dict[str, Tuple[str, float, float, int]] = {}
-        for line in out_fwd.strip().splitlines():
-            if not line:
-                continue
-            parts = line.split("\t")
-            if len(parts) < 12:
-                continue
-            qid, sid = parts[0], parts[1]
-            pid = float(parts[2])
-            alen = int(parts[3])
-            bscore = float(parts[11])
+        # 辅助解析器：支持单个切片跨越反向互补/移位边界时的无重叠 HSP 区间贪婪累加
+        def parse_blast_with_merged_hsps(out_text: str, slice_map: Dict[str, SliceItem]):
+            hits_by_q: Dict[str, List[Dict[str, Any]]] = {}
+            for line in out_text.strip().splitlines():
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 12:
+                    continue
+                qid, sid = parts[0], parts[1]
+                pid = float(parts[2])
+                alen = int(parts[3])
+                qs, qe = int(parts[6]), int(parts[7])
+                bscore = float(parts[11])
 
-            sl_item = map1.get(qid)
-            if not sl_item or (alen / sl_item.length) < self.min_coverage:
-                continue
+                sl_item = slice_map.get(qid)
+                if not sl_item:
+                    continue
 
-            if qid not in best_fwd or bscore > best_fwd[qid][1]:
-                best_fwd[qid] = (sid, bscore, pid, alen)
+                if qid not in hits_by_q:
+                    hits_by_q[qid] = []
+                hits_by_q[qid].append({
+                    "sid": sid,
+                    "pid": pid,
+                    "alen": alen,
+                    "qs": min(qs, qe),
+                    "qe": max(qs, qe),
+                    "bscore": bscore
+                })
 
-        # 记录 Reverse 最佳命中
-        best_rev: Dict[str, Tuple[str, float, float, int]] = {}
-        for line in out_rev.strip().splitlines():
-            if not line:
-                continue
-            parts = line.split("\t")
-            if len(parts) < 12:
-                continue
-            qid, sid = parts[0], parts[1]
-            pid = float(parts[2])
-            alen = int(parts[3])
-            bscore = float(parts[11])
+            best_results: Dict[str, Tuple[str, float, float, int, List[str]]] = {}
+            for qid, hlist in hits_by_q.items():
+                sl_len = slice_map[qid].length
+                # 按 bitscore 降序排序
+                hlist.sort(key=lambda x: x["bscore"], reverse=True)
+                selected: List[Dict[str, Any]] = []
+                total_len = 0
+                weighted_pid = 0.0
+                for h in hlist:
+                    # 检查与已选中区间的重叠（允许跨切片窗口的相邻片段无缝拼接）
+                    overlap = any(max(h["qs"], s["qs"]) <= min(h["qe"], s["qe"]) for s in selected)
+                    if not overlap:
+                        selected.append(h)
+                        total_len += h["alen"]
+                        weighted_pid += h["pid"] * h["alen"]
 
-            sl_item = map2.get(qid)
-            if not sl_item or (alen / sl_item.length) < self.min_coverage:
-                continue
+                if total_len / sl_len >= self.min_coverage:
+                    avg_pid = (weighted_pid / total_len) if total_len > 0 else 0.0
+                    primary_sid = selected[0]["sid"]
+                    all_target_sids = [s["sid"] for s in selected]
+                    best_results[qid] = (primary_sid, selected[0]["bscore"], avg_pid, total_len, all_target_sids)
 
-            if qid not in best_rev or bscore > best_rev[qid][1]:
-                best_rev[qid] = (sid, bscore, pid, alen)
+            return best_results
+
+        best_fwd = parse_blast_with_merged_hsps(out_fwd, map1)
+        best_rev = parse_blast_with_merged_hsps(out_rev, map2)
 
         # 严格正交互为最佳 (Reciprocal Best Hit)
         rbh_hits: List[Tuple[float, int]] = []
         aligned_len1 = 0
         aligned_len2 = 0
 
-        for q1_id, (s2_id, _, pid1, l1) in best_fwd.items():
-            if s2_id in best_rev and best_rev[s2_id][0] == q1_id:
-                pid2 = best_rev[s2_id][2]
-                l2 = best_rev[s2_id][3]
-                avg_pid = (pid1 + pid2) / 2.0
-                avg_l = (l1 + l2) // 2
-                rbh_hits.append((avg_pid, avg_l))
-                aligned_len1 += l1
-                aligned_len2 += l2
+        for q1_id, (s2_id, _, pid1, l1, s2_targets) in best_fwd.items():
+            if s2_id in best_rev:
+                rev_targets = best_rev[s2_id][4]
+                if q1_id in rev_targets or best_rev[s2_id][0] == q1_id:
+                    pid2 = best_rev[s2_id][2]
+                    l2 = best_rev[s2_id][3]
+                    avg_pid = (pid1 + pid2) / 2.0
+                    avg_l = (l1 + l2) // 2
+                    rbh_hits.append((avg_pid, avg_l))
+                    aligned_len1 += l1
+                    aligned_len2 += l2
 
         # 清理临时切片文件
         for f_tmp in (q1_file, q2_file):
@@ -283,52 +345,121 @@ class OrthoANICalculator:
         slices1: List[SliceItem],
         slices2: List[SliceItem]
     ) -> Dict[str, Any]:
-        """纯 Python/C 扩展双向对齐器 (当环境缺失外部 BLAST+ 时的平滑备用)"""
-        best_fwd: Dict[int, Tuple[int, float, int]] = {}  # idx1 -> (idx2, pid, len)
-        for i, sl1 in enumerate(slices1):
-            km1 = get_kmers(sl1.seq, 3)
-            best_j = -1
-            best_pid = 0.0
-            for j, sl2 in enumerate(slices2):
-                km2 = get_kmers(sl2.seq, 3)
-                pid = fast_seq_identity(sl1.seq, sl2.seq, ident_thresh=0.65, cov_thresh=0.4, kmers1=km1, kmers2=km2)
-                if pid * 100.0 > best_pid:
-                    best_pid = pid * 100.0
-                    best_j = j
-            if best_j >= 0 and best_pid >= self.min_identity:
-                best_fwd[i] = (best_j, best_pid, sl1.length)
+        """
+        纯 Python 种子锚定双向切片对齐器 (无外部 BLAST+ 时的平滑高精度自备引擎):
+        1. 自动正反互补链极速判定与基准链对齐 (Auto Strand Orientation Correction)
+        2. 环状染色体倍增展开 (Circular Permutation Wrap-Around Support)
+        3. K-mer 种子索引快速锚定目标物理区间
+        4. 局部核酸严格比对与正交双向验证 (Bi-directional RBH)
+        """
+        from collections import Counter
 
-        best_rev: Dict[int, Tuple[int, float, int]] = {}
-        for j, sl2 in enumerate(slices2):
-            km2 = get_kmers(sl2.seq, 3)
-            best_i = -1
-            best_pid = 0.0
-            for i, sl1 in enumerate(slices1):
-                km1 = get_kmers(sl1.seq, 3)
-                pid = fast_seq_identity(sl2.seq, sl1.seq, ident_thresh=0.65, cov_thresh=0.4, kmers1=km2, kmers2=km1)
-                if pid * 100.0 > best_pid:
-                    best_pid = pid * 100.0
-                    best_i = i
-            if best_i >= 0 and best_pid >= self.min_identity:
-                best_rev[j] = (best_i, best_pid, sl2.length)
+        clean1 = seq1.strip().upper().replace("\r", "").replace("\n", "")
+        clean2 = seq2.strip().upper().replace("\r", "").replace("\n", "")
+        l1, l2 = len(clean1), len(clean2)
+        if l1 == 0 or l2 == 0:
+            return self._summarize_ani_metrics(s1, s2, [], l1, l2, 0, 0)
 
-        rbh_hits = []
+        # 1. 宏观相对朝向极速采样探测 (正链 vs 反向互补链)
+        k_seed = 15
+        sample_step = max(30, l1 // 100)
+        km_sample = {clean1[i:i + k_seed] for i in range(0, min(l1 - k_seed + 1, 10000), sample_step)}
+
+        # 统计正向与反向互补链的种子命中频次
+        fwd_hits = sum(1 for seed in km_sample if seed in clean2)
+
+        # 生成 clean2 的反向互补
+        comp_trans = str.maketrans("ACGTURYKMSWBDHVN", "TGCAAYRMKWSVHDBN")
+        clean2_rc = clean2.translate(comp_trans)[::-1]
+        rev_hits = sum(1 for seed in km_sample if seed in clean2_rc)
+
+        # 规范化对齐方向: 若反向匹配显著占优，则对 clean2 取反向互补进行同向拉齐
+        use_rc = rev_hits > fwd_hits and rev_hits >= 3
+        active_seq2 = clean2_rc if use_rc else clean2
+
+        # 环状染色体倍增展开以支持 pac 包装移位/末端断点跨越
+        doubled_seq2 = active_seq2 + active_seq2
+
+        # 2. 构建 target 的 15-mer 稀疏索引 (步长 3 bp)
+        s2_idx: Dict[str, int] = {}
+        for idx in range(0, len(active_seq2) - k_seed + 1, 3):
+            sub = active_seq2[idx:idx + k_seed]
+            if sub not in s2_idx:
+                s2_idx[sub] = idx
+
+        # 3. 对 slices1 遍历进行锚定与切片比对 (S1 -> S2)
+        best_fwd: Dict[int, Tuple[int, float, int]] = {}
+
+        for i, sl in enumerate(slices1):
+            chunk = sl.seq
+            c_len = sl.length
+            # 提取切片内的采样种子进行位置投票
+            cand_offsets = []
+            for p in range(0, c_len - k_seed + 1, 20):
+                seed = chunk[p:p + k_seed]
+                if seed in s2_idx:
+                    cand_offsets.append(s2_idx[seed] - p)
+
+            if not cand_offsets:
+                continue
+
+            target_offset, vote_count = Counter(cand_offsets).most_common(1)[0]
+            if vote_count < 2 and c_len > 300:
+                continue
+
+            # 处理环状取模偏移
+            target_offset = target_offset % len(active_seq2)
+            matched_chunk = doubled_seq2[target_offset:target_offset + c_len]
+            if len(matched_chunk) < c_len:
+                continue
+
+            # 快速计算核酸同一性
+            matches = sum(1 for a, b in zip(chunk, matched_chunk) if a == b)
+            pid = (matches / c_len) * 100.0
+            if pid >= self.min_identity:
+                best_fwd[i] = (target_offset, pid, c_len)
+
+        # 4. 反向验证 (S2 -> S1) 构建严格双向命中 RBH
+        s1_idx: Dict[str, int] = {}
+        doubled_seq1 = clean1 + clean1
+        for idx in range(0, l1 - k_seed + 1, 3):
+            sub = clean1[idx:idx + k_seed]
+            if sub not in s1_idx:
+                s1_idx[sub] = idx
+
+        rbh_hits: List[Tuple[float, int]] = []
         aligned_len1 = 0
         aligned_len2 = 0
-        for i, (j, pid1, l1) in best_fwd.items():
-            if j in best_rev and best_rev[j][0] == i:
-                pid2 = best_rev[j][1]
-                l2 = best_rev[j][2]
-                rbh_hits.append(((pid1 + pid2) / 2.0, (l1 + l2) // 2))
-                aligned_len1 += l1
-                aligned_len2 += l2
+
+        # 对 S1 中成功命中的切片，检验反向映射的对称性
+        for i, (target_offset, pid1, alen1) in best_fwd.items():
+            sl1_origin_pos = slices1[i].start - 1
+            chunk2 = doubled_seq2[target_offset:target_offset + alen1]
+            rev_offsets = []
+            for p in range(0, len(chunk2) - k_seed + 1, 20):
+                seed = chunk2[p:p + k_seed]
+                if seed in s1_idx:
+                    rev_offsets.append(s1_idx[seed] - p)
+
+            if rev_offsets:
+                rev_target_offset, _ = Counter(rev_offsets).most_common(1)[0]
+                rev_target_offset = rev_target_offset % l1
+                # 检验物理区间是否对称吻合 (容许 50 bp 微小断点偏差)
+                if abs(rev_target_offset - (sl1_origin_pos % l1)) <= 50:
+                    matched_s1 = doubled_seq1[rev_target_offset:rev_target_offset + alen1]
+                    matches2 = sum(1 for a, b in zip(chunk2, matched_s1) if a == b)
+                    pid2 = (matches2 / alen1) * 100.0 if alen1 > 0 else 0.0
+                    avg_pid = (pid1 + pid2) / 2.0
+                    rbh_hits.append((avg_pid, alen1))
+                    aligned_len1 += alen1
+                    aligned_len2 += alen1
 
         return self._summarize_ani_metrics(
             s1=s1,
             s2=s2,
             rbh_hits=rbh_hits,
-            total_len1=len(seq1),
-            total_len2=len(seq2),
+            total_len1=l1,
+            total_len2=l2,
             aligned_len1=aligned_len1,
             aligned_len2=aligned_len2
         )

@@ -25,6 +25,11 @@ import PhylogenyTreeSvg from './subcomponents/PhylogenyTreeSvg.vue'
 import SampleFilterPopover from './subcomponents/SampleFilterPopover.vue'
 import GeneClusterDetailDrawer from './subcomponents/GeneClusterDetailDrawer.vue'
 import PanGenomicsChordDiagram from './subcomponents/PanGenomicsChordDiagram.vue'
+import {
+  computeCdsJaccardMatrix,
+  computeUpgmaClustering,
+  type HierarchicalClusteringResult
+} from '../utils/clustering'
 
 const props = defineProps<{
   aniMatrix: Record<string, Record<string, number | null>>
@@ -91,6 +96,39 @@ const isGeneMatrixTrackVisible = ref(true)
 // 密度模式 (Spacious 宽松 / Comfortable 舒适 / Compact 紧凑 / Ultra 全景 50+)
 const displayDensity = ref<'spacious' | 'comfortable' | 'compact' | 'ultra'>('spacious')
 
+// 样本基础标识列表
+const allSampleIdList = computed<string[]>(() => Object.keys(props.sampleNames || {}))
+
+// 核心度量模式: 'ani' (全基因组 ANI 核酸一致性) | 'cds_jaccard' (CDS/蛋白功能谱一致性 Jaccard)
+type MetricMatrixMode = 'ani' | 'cds_jaccard'
+const currentMatrixMode = ref<MetricMatrixMode>('ani')
+
+// 预计算全量样本之间的 CDS 基因功能谱 Jaccard 相似度矩阵 (反映直系同源基因家族在两两样本间的共享率与得失)
+const cdsMatrixData = computed(() => {
+  return computeCdsJaccardMatrix(allSampleIdList.value, props.clusters || [])
+})
+
+// 基于 CDS 功能谱执行 UPGMA 层次聚类构建二叉树与叶序
+const cdsClustering = computed<HierarchicalClusteringResult>(() => {
+  return computeUpgmaClustering(allSampleIdList.value, cdsMatrixData.value.matrix)
+})
+
+// 方案A智能联动: 当前激活的聚类模型 (ANI 模式绑定全基因组核酸树，CDS 模式绑定基因功能谱树)
+const activeClustering = computed(() => {
+  if (currentMatrixMode.value === 'cds_jaccard') {
+    return cdsClustering.value
+  }
+  return props.aniClustering
+})
+
+// 当前激活的相似度矩阵
+const activeSimilarityMatrix = computed(() => {
+  if (currentMatrixMode.value === 'cds_jaccard') {
+    return cdsMatrixData.value.matrix
+  }
+  return props.aniMatrix
+})
+
 // 自然顺序排序算法
 function naturalSort(ids: string[]): string[] {
   return [...ids].sort((a, b) => {
@@ -100,14 +138,14 @@ function naturalSort(ids: string[]): string[] {
   })
 }
 
-// 排序模式: 'cluster' 系统发育聚类 (默认) | 'natural' 自然顺序递增
+// 排序模式: 'cluster' 智能进化聚类 (默认) | 'natural' 自然顺序递增
 const sampleSortOrder = ref<'natural' | 'cluster'>('cluster')
 
 const rawClusteredIds = computed<string[]>(() => {
-  if (props.aniClustering?.ordered_ids?.length) {
-    return props.aniClustering.ordered_ids
+  if (activeClustering.value?.ordered_ids?.length) {
+    return activeClustering.value.ordered_ids
   }
-  return Object.keys(props.sampleNames || {})
+  return allSampleIdList.value
 })
 
 const orderedSampleIds = computed<string[]>(() => {
@@ -278,8 +316,13 @@ const pangenomePartition = computed(() => {
   return { core, accessory, total, corePct: total > 0 ? ((core / total) * 100).toFixed(0) : '0' }
 })
 
+function getActiveCellValue(rowId: string, colId: string): number | null | undefined {
+  return activeSimilarityMatrix.value?.[rowId]?.[colId]
+}
+
 function getAniCellColor(val: number | null | undefined): string {
   if (val === null || val === undefined) return '#f8fafc' // 远缘/无显著同源区段
+  if (val === 0) return '#f8fafc'
   if (val >= 99.5) return '#1e3a8a'
   if (val >= 97.0) return '#2563eb'
   if (val >= 95.0) return '#3b82f6'
@@ -290,13 +333,14 @@ function getAniCellColor(val: number | null | undefined): string {
 }
 
 function getAniTextColor(val: number | null | undefined): string {
-  if (val === null || val === undefined) return '#94a3b8'
+  if (val === null || val === undefined || val === 0) return '#94a3b8'
   return val >= 95.0 ? '#ffffff' : '#1e3a8a'
 }
 
 function formatAniDisplay(val: number | null | undefined, s1: string, s2: string): string {
   if (s1 === s2) return '100'
   if (val === null || val === undefined) return '-'
+  if (val === 0) return currentMatrixMode.value === 'cds_jaccard' ? '0' : '-'
   if (val >= 99.95) return '100'
   return val.toFixed(1)
 }
@@ -307,6 +351,20 @@ function getAniCellTitle(rowId: string, colId: string): string {
   if (rowId === colId) {
     return `${name1}: 自身参照 100.0%`
   }
+
+  if (currentMatrixMode.value === 'cds_jaccard') {
+    const stat = cdsMatrixData.value.stats?.[rowId]?.[colId]
+    const val = cdsMatrixData.value.mat?.[rowId]?.[colId]
+    const valStr = val !== null && val !== undefined ? `${val.toFixed(1)}%` : '0.0%'
+    const sharedStr = stat
+      ? `\n共享同源 CDS: ${stat.shared} / ${stat.union} 家族 (${valStr})\n差异得失: ${name1} 独有 ${stat.s1Unique} 个, ${name2} 独有 ${stat.s2Unique} 个`
+      : ''
+    const aniVal = props.aniMatrix?.[rowId]?.[colId]
+    const aniRef = aniVal !== null && aniVal !== undefined ? `\n全基因组核酸 ANI: ${aniVal.toFixed(1)}%` : ''
+    return `${name1} ↔ ${name2}\n度量模式: CDS 基因功能谱一致性 (Jaccard 相似度)${sharedStr}${aniRef}\n[生物学意义: 衡量基因组蛋白质家族的获得与缺失，对应右侧条形码的断点与缺失]`
+  }
+
+  // 默认 ANI 模式
   const aniVal = props.aniMatrix?.[rowId]?.[colId]
   const afVal = props.afMatrix?.[rowId]?.[colId]
   const callVal = props.aniTaxonomyMatrix?.[rowId]?.[colId]
@@ -315,8 +373,10 @@ function getAniCellTitle(rowId: string, colId: string): string {
   const aniStr = aniVal !== null && aniVal !== undefined ? `${aniVal.toFixed(1)}%` : '未达显著同源阈值 (NA)'
   const afStr = afVal !== undefined ? `${afVal.toFixed(1)}%` : '-'
   const callStr = callVal ? `\n分类判定: ${callVal}` : ''
+  const cdsVal = cdsMatrixData.value.mat?.[rowId]?.[colId]
+  const cdsRef = cdsVal !== undefined && cdsVal !== null ? `\n参考 CDS 功能谱: ${cdsVal.toFixed(1)}%` : ''
 
-  return `${name1} ↔ ${name2}\n度量标准: ${metric}\n一致性 (ANI): ${aniStr}\n对齐覆盖度 (AF): ${afStr}${callStr}`
+  return `${name1} ↔ ${name2}\n度量标准: 全基因组 ${metric} (DNA 核酸)\n一致性 (ANI): ${aniStr}\n对齐覆盖度 (AF): ${afStr}${callStr}${cdsRef}\n[提示: 可切换为 'CDS功能谱' 查看基因得失]`
 }
 
 function handleCellClick(s1: string, s2: string) {
@@ -435,9 +495,9 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="seg-btn"
                 :class="{ active: sampleSortOrder === 'cluster' }"
                 @click="sampleSortOrder = 'cluster'"
-                title="按系统发育树与全基因组 ANI 相似度聚类排列"
+                :title="currentMatrixMode === 'cds_jaccard' ? '按 CDS 直系同源基因功能谱聚类树排列 (已根据基因家族得失智能重聚类)' : '按全基因组 ANI 核酸亲缘进化树聚类排列'"
               >
-                进化聚类
+                进化聚类{{ currentMatrixMode === 'cds_jaccard' ? ' (CDS)' : ' (ANI)' }}
               </button>
             </div>
           </div>
@@ -615,16 +675,33 @@ const isCurrentPair = (s1: string, s2: string) => {
         </div>
 
         <div class="leg-col leg-col-ani" v-if="isAniTrackVisible">
-          <span class="leg-col-title" :title="aniMetricType || '国际标准全基因组 OrthoANI (1020bp RBH)'">
-            {{ aniMetricType?.startsWith('OrthoAAI') ? '全蛋白质组 AAI (%):' : '全基因组 ANI (%):' }}
-          </span>
+          <!-- 矩阵度量维度切换控制器 (核酸 ANI vs CDS 基因功能谱) -->
+          <div class="matrix-metric-switcher">
+            <button
+              class="btn-metric-toggle"
+              :class="{ active: currentMatrixMode === 'ani' }"
+              @click="currentMatrixMode = 'ani'"
+              title="全基因组平均核苷酸一致性 (DNA 核酸水平 1020bp RBH) - 衡量碱基点突变保守性；在进化聚类模式下将联动核酸系统发育树"
+            >
+              全基因组 ANI (核酸)
+            </button>
+            <button
+              class="btn-metric-toggle"
+              :class="{ active: currentMatrixMode === 'cds_jaccard' }"
+              @click="currentMatrixMode = 'cds_jaccard'"
+              title="CDS 直系同源基因功能谱一致性 (Jaccard: 共享CDS / 并集CDS) - 衡量同源家族得失；在进化聚类模式下将自动重新聚类"
+            >
+              CDS 功能谱一致性
+            </button>
+          </div>
+
           <div class="ani-heat-swatch-list">
-            <span class="heat-chip" style="background-color: #f8fafc; color: #94a3b8; border: 1px solid #e2e8f0;" title="远缘 / 无显著同源对齐区段 (AF < 5%)">-</span>
-            <span class="heat-chip" style="background-color: #eff6ff; color: #1e3a8a;" title="ICTV 属界限下限 (<70%)">&lt;70</span>
-            <span class="heat-chip" style="background-color: #bfdbfe; color: #1e3a8a;" title="同属界限 (70% ~ 80%)">70</span>
+            <span class="heat-chip" style="background-color: #f8fafc; color: #94a3b8; border: 1px solid #e2e8f0;" title="0% 或远缘无显著同源区段">-</span>
+            <span class="heat-chip" style="background-color: #eff6ff; color: #1e3a8a;" title="低相似度 (<70%)">&lt;70</span>
+            <span class="heat-chip" style="background-color: #bfdbfe; color: #1e3a8a;" title="同属/中度界限 (70% ~ 80%)">70</span>
             <span class="heat-chip" style="background-color: #93c5fd; color: #1e3a8a;" title="中度同源 (80% ~ 90%)">80</span>
             <span class="heat-chip" style="background-color: #60a5fa; color: #ffffff;" title="高度同源 (90% ~ 95%)">90</span>
-            <span class="heat-chip" style="background-color: #2563eb; color: #ffffff;" title="ICTV 种界限 (≥95%)">95</span>
+            <span class="heat-chip" style="background-color: #2563eb; color: #ffffff;" title="同种同源界限 (≥95%)">95</span>
             <span class="heat-chip" style="background-color: #1e3a8a; color: #ffffff;" title="完全一致 (100%)">100</span>
           </div>
         </div>
@@ -703,9 +780,11 @@ const isCurrentPair = (s1: string, s2: string) => {
               >
                 <PhylogenyTreeSvg
                   :visible-sample-ids="visibleSampleIds"
-                  :ani-matrix="aniMatrix"
+                  :ani-matrix="activeSimilarityMatrix"
                   :row-height="rowHeight"
                   :display-density="displayDensity"
+                  :tree-root="activeClustering?.root"
+                  :sort-order="sampleSortOrder"
                 />
               </td>
 
@@ -755,25 +834,25 @@ const isCurrentPair = (s1: string, s2: string) => {
                 </td>
               </template>
 
-              <!-- 4. 全基因组 ANI 矩阵单元格 (国际标准 1 位小数 + AF 覆盖度卡片联动) -->
+              <!-- 4. 全基因组一致性矩阵单元格 (支持核酸 ANI 与 CDS 基因功能谱双模切换) -->
               <template v-if="isAniTrackVisible">
                 <td
                   v-for="colId in visibleSampleIds"
                   :key="'ani-cell-' + rowId + '-' + colId"
                   class="td-ani-val-cell"
                   :style="{
-                    backgroundColor: getAniCellColor(aniMatrix?.[rowId]?.[colId]),
-                    color: getAniTextColor(aniMatrix?.[rowId]?.[colId])
+                    backgroundColor: getAniCellColor(getActiveCellValue(rowId, colId)),
+                    color: getAniTextColor(getActiveCellValue(rowId, colId))
                   }"
                   :class="{ 
                     'cell-pair-highlight': isCurrentPair(rowId, colId),
-                    'cell-ani-na': aniMatrix?.[rowId]?.[colId] === null || aniMatrix?.[rowId]?.[colId] === undefined
+                    'cell-ani-na': getActiveCellValue(rowId, colId) === null || getActiveCellValue(rowId, colId) === undefined || getActiveCellValue(rowId, colId) === 0
                   }"
                   @click="handleCellClick(rowId, colId)"
                   :title="getAniCellTitle(rowId, colId)"
                 >
                   <span v-if="displayDensity !== 'ultra'">
-                    {{ formatAniDisplay(aniMatrix?.[rowId]?.[colId], rowId, colId) }}
+                    {{ formatAniDisplay(getActiveCellValue(rowId, colId), rowId, colId) }}
                   </span>
                 </td>
               </template>
@@ -1333,6 +1412,40 @@ const isCurrentPair = (s1: string, s2: string) => {
   height: 8px;
   border-radius: 2px;
   font-style: normal;
+}
+
+.matrix-metric-switcher {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid #e2e8f0;
+}
+
+.btn-metric-toggle {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-metric-toggle:hover {
+  color: #1e293b;
+}
+
+.btn-metric-toggle.active {
+  background: #ffffff;
+  color: #1d4ed8;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .ani-heat-swatch-list {
