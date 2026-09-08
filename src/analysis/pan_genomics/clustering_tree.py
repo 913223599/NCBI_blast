@@ -4,17 +4,17 @@ clustering_tree.py - 论文级生信层次聚类算法 (Hierarchical Clustering 
 1. 层次聚类: 采用生信标准 UPGMA (Average Linkage) 对相似度/亲缘矩阵重排序并生成树状图 (Dendrogram)
 2. 受体靶点分析: 评估尾丝受体结合区两两相似度与同源亚群归类
 """
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional, Union
 
 
 def upgma_hierarchical_clustering(
-    matrix: Dict[str, Dict[str, float]],
+    matrix: Union[Dict[str, Dict[str, float]], Dict[str, Dict[str, Optional[float]]]],
     sample_ids: List[str]
 ) -> Tuple[List[str], Dict[str, Any]]:
     """
     UPGMA (Unweighted Pair Group Method with Arithmetic Mean) 层次聚类算法
     输入:
-        matrix: 对称相似度矩阵 (0.0 ~ 100.0)
+        matrix: 对称相似度矩阵 (0.0 ~ 100.0，允许远缘无同源时为 None)
         sample_ids: 样本 ID 列表
     输出:
         ordered_ids: 聚类树最佳叶子节点排序
@@ -25,7 +25,7 @@ def upgma_hierarchical_clustering(
         return sample_ids, {"nodes": [], "ordered_ids": sample_ids}
 
     # 1. 初始化距离矩阵 (Distance = 100.0 - Identity; 若为 None/无同源则赋予最大距离 100.0)
-    dist_matrix = {}
+    dist_matrix: Dict[str, Dict[str, float]] = {}
     for s1 in sample_ids:
         dist_matrix[s1] = {}
         for s2 in sample_ids:
@@ -33,12 +33,12 @@ def upgma_hierarchical_clustering(
                 dist = 0.0
             else:
                 raw_val = matrix.get(s1, {}).get(s2)
-                ident = float(raw_val) if raw_val is not None else 0.0
+                ident = raw_val if raw_val is not None else 0.0
                 dist = max(0.0, 100.0 - ident)
             dist_matrix[s1][s2] = dist
 
-    # 2. 初始化聚类簇
-    clusters = {
+    # 2. 初始化聚类簇 (显式注解 Dict[str, Dict[str, Any]]，允许包含嵌套分支节点)
+    clusters: Dict[str, Dict[str, Any]] = {
         sid: {
             "id": sid,
             "leaves": [sid],
@@ -130,7 +130,7 @@ def upgma_hierarchical_clustering(
 
 def analyze_receptor_orthology(
     tail_matrix: Dict[str, Dict[str, float]],
-    ani_matrix: Dict[str, Dict[str, float]],
+    ani_matrix: Union[Dict[str, Dict[str, float]], Dict[str, Dict[str, Optional[float]]]],
     sample_names: Dict[str, str]
 ) -> Dict[str, Any]:
     """

@@ -69,6 +69,7 @@ Thumbs.db
 # 测试和临时目录
 # ================================
 test/
+tests/
 scratch/
 .lingma/rules/
 test/temp_test_tree/
