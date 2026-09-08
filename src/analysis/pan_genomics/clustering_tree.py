@@ -24,13 +24,17 @@ def upgma_hierarchical_clustering(
     if n <= 1:
         return sample_ids, {"nodes": [], "ordered_ids": sample_ids}
 
-    # 1. 初始化距离矩阵 (Distance = 100.0 - Identity)
+    # 1. 初始化距离矩阵 (Distance = 100.0 - Identity; 若为 None/无同源则赋予最大距离 100.0)
     dist_matrix = {}
     for s1 in sample_ids:
         dist_matrix[s1] = {}
         for s2 in sample_ids:
-            ident = matrix.get(s1, {}).get(s2, 0.0)
-            dist = max(0.0, 100.0 - ident)
+            if s1 == s2:
+                dist = 0.0
+            else:
+                raw_val = matrix.get(s1, {}).get(s2)
+                ident = float(raw_val) if raw_val is not None else 0.0
+                dist = max(0.0, 100.0 - ident)
             dist_matrix[s1][s2] = dist
 
     # 2. 初始化聚类簇

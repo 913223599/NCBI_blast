@@ -15,7 +15,7 @@ const props = defineProps<{
   armsRaceMatrix?: Record<string, any>
   tailMatrix?: Record<string, Record<string, number>>
   lysisMatrix?: Record<string, Record<string, number>>
-  aniMatrix?: Record<string, Record<string, number>>
+  aniMatrix?: Record<string, Record<string, number | null>>
   clusters?: any[]
   amgGenes?: any[]
   amgPathwayDistributions?: Record<string, Record<string, number>>

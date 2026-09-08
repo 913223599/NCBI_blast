@@ -7,7 +7,7 @@ import { computed } from 'vue'
 
 const props = defineProps<{
   visibleSampleIds: string[]
-  aniMatrix?: Record<string, Record<string, number>>
+  aniMatrix?: Record<string, Record<string, number | null>>
   rowHeight: number
   displayDensity: 'spacious' | 'comfortable' | 'compact' | 'ultra'
 }>()
@@ -94,11 +94,13 @@ const treeSvgLayout = computed(() => {
         let count = 0
         for (const s1 of ci.ids) {
           for (const s2 of cj.ids) {
-            sumSim += props.aniMatrix?.[s1]?.[s2] ?? (s1 === s2 ? 100 : 80)
+            const rawVal = props.aniMatrix?.[s1]?.[s2]
+            const sim = (rawVal !== null && rawVal !== undefined) ? rawVal : (s1 === s2 ? 100 : 0)
+            sumSim += sim
             count++
           }
         }
-        const avgSim = count > 0 ? sumSim / count : 80
+        const avgSim = count > 0 ? sumSim / count : 0
         if (avgSim > maxSimilarity) {
           maxSimilarity = avgSim
           bestI = i

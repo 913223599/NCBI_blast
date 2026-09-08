@@ -27,7 +27,10 @@ import GeneClusterDetailDrawer from './subcomponents/GeneClusterDetailDrawer.vue
 import PanGenomicsChordDiagram from './subcomponents/PanGenomicsChordDiagram.vue'
 
 const props = defineProps<{
-  aniMatrix: Record<string, Record<string, number>>
+  aniMatrix: Record<string, Record<string, number | null>>
+  afMatrix?: Record<string, Record<string, number>>
+  aniTaxonomyMatrix?: Record<string, Record<string, string>>
+  aniMetricType?: string
   aniClustering?: any
   sampleNames: Record<string, string>
   tailMatrix?: Record<string, Record<string, number>>
@@ -275,18 +278,45 @@ const pangenomePartition = computed(() => {
   return { core, accessory, total, corePct: total > 0 ? ((core / total) * 100).toFixed(0) : '0' }
 })
 
-function getAniCellColor(val: number): string {
-  if (val >= 99) return '#1e3a8a'
-  if (val >= 97) return '#2563eb'
-  if (val >= 95) return '#3b82f6'
-  if (val >= 90) return '#60a5fa'
-  if (val >= 80) return '#93c5fd'
-  if (val >= 70) return '#bfdbfe'
+function getAniCellColor(val: number | null | undefined): string {
+  if (val === null || val === undefined) return '#f8fafc' // 远缘/无显著同源区段
+  if (val >= 99.5) return '#1e3a8a'
+  if (val >= 97.0) return '#2563eb'
+  if (val >= 95.0) return '#3b82f6'
+  if (val >= 90.0) return '#60a5fa'
+  if (val >= 80.0) return '#93c5fd'
+  if (val >= 70.0) return '#bfdbfe'
   return '#eff6ff'
 }
 
-function getAniTextColor(val: number): string {
-  return val >= 95 ? '#ffffff' : '#1e3a8a'
+function getAniTextColor(val: number | null | undefined): string {
+  if (val === null || val === undefined) return '#94a3b8'
+  return val >= 95.0 ? '#ffffff' : '#1e3a8a'
+}
+
+function formatAniDisplay(val: number | null | undefined, s1: string, s2: string): string {
+  if (s1 === s2) return '100'
+  if (val === null || val === undefined) return '-'
+  if (val >= 99.95) return '100'
+  return val.toFixed(1)
+}
+
+function getAniCellTitle(rowId: string, colId: string): string {
+  const name1 = props.sampleNames[rowId] || rowId
+  const name2 = props.sampleNames[colId] || colId
+  if (rowId === colId) {
+    return `${name1}: 自身参照 100.0%`
+  }
+  const aniVal = props.aniMatrix?.[rowId]?.[colId]
+  const afVal = props.afMatrix?.[rowId]?.[colId]
+  const callVal = props.aniTaxonomyMatrix?.[rowId]?.[colId]
+
+  const metric = props.aniMetricType || 'OrthoANI'
+  const aniStr = aniVal !== null && aniVal !== undefined ? `${aniVal.toFixed(1)}%` : '未达显著同源阈值 (NA)'
+  const afStr = afVal !== undefined ? `${afVal.toFixed(1)}%` : '-'
+  const callStr = callVal ? `\n分类判定: ${callVal}` : ''
+
+  return `${name1} ↔ ${name2}\n度量标准: ${metric}\n一致性 (ANI): ${aniStr}\n对齐覆盖度 (AF): ${afStr}${callStr}`
 }
 
 function handleCellClick(s1: string, s2: string) {
@@ -585,13 +615,17 @@ const isCurrentPair = (s1: string, s2: string) => {
         </div>
 
         <div class="leg-col leg-col-ani" v-if="isAniTrackVisible">
-          <span class="leg-col-title">全基因组 ANI (%):</span>
+          <span class="leg-col-title" :title="aniMetricType || '国际标准全基因组 OrthoANI (1020bp RBH)'">
+            {{ aniMetricType?.startsWith('OrthoAAI') ? '全蛋白质组 AAI (%):' : '全基因组 ANI (%):' }}
+          </span>
           <div class="ani-heat-swatch-list">
-            <span class="heat-chip" style="background-color: #eff6ff; color: #1e3a8a;">70</span>
-            <span class="heat-chip" style="background-color: #bfdbfe; color: #1e3a8a;">80</span>
-            <span class="heat-chip" style="background-color: #60a5fa; color: #ffffff;">90</span>
-            <span class="heat-chip" style="background-color: #2563eb; color: #ffffff;">95</span>
-            <span class="heat-chip" style="background-color: #1e3a8a; color: #ffffff;">100</span>
+            <span class="heat-chip" style="background-color: #f8fafc; color: #94a3b8; border: 1px solid #e2e8f0;" title="远缘 / 无显著同源对齐区段 (AF < 5%)">-</span>
+            <span class="heat-chip" style="background-color: #eff6ff; color: #1e3a8a;" title="ICTV 属界限下限 (<70%)">&lt;70</span>
+            <span class="heat-chip" style="background-color: #bfdbfe; color: #1e3a8a;" title="同属界限 (70% ~ 80%)">70</span>
+            <span class="heat-chip" style="background-color: #93c5fd; color: #1e3a8a;" title="中度同源 (80% ~ 90%)">80</span>
+            <span class="heat-chip" style="background-color: #60a5fa; color: #ffffff;" title="高度同源 (90% ~ 95%)">90</span>
+            <span class="heat-chip" style="background-color: #2563eb; color: #ffffff;" title="ICTV 种界限 (≥95%)">95</span>
+            <span class="heat-chip" style="background-color: #1e3a8a; color: #ffffff;" title="完全一致 (100%)">100</span>
           </div>
         </div>
       </div>
@@ -721,21 +755,26 @@ const isCurrentPair = (s1: string, s2: string) => {
                 </td>
               </template>
 
-              <!-- 4. 全基因组 ANI 矩阵单元格 -->
+              <!-- 4. 全基因组 ANI 矩阵单元格 (国际标准 1 位小数 + AF 覆盖度卡片联动) -->
               <template v-if="isAniTrackVisible">
                 <td
                   v-for="colId in visibleSampleIds"
                   :key="'ani-cell-' + rowId + '-' + colId"
                   class="td-ani-val-cell"
                   :style="{
-                    backgroundColor: getAniCellColor(aniMatrix?.[rowId]?.[colId] ?? 0),
-                    color: getAniTextColor(aniMatrix?.[rowId]?.[colId] ?? 0)
+                    backgroundColor: getAniCellColor(aniMatrix?.[rowId]?.[colId]),
+                    color: getAniTextColor(aniMatrix?.[rowId]?.[colId])
                   }"
-                  :class="{ 'cell-pair-highlight': isCurrentPair(rowId, colId) }"
+                  :class="{ 
+                    'cell-pair-highlight': isCurrentPair(rowId, colId),
+                    'cell-ani-na': aniMatrix?.[rowId]?.[colId] === null || aniMatrix?.[rowId]?.[colId] === undefined
+                  }"
                   @click="handleCellClick(rowId, colId)"
-                  :title="`${sampleNames[rowId]} ↔ ${sampleNames[colId]}: ANI ${(aniMatrix?.[rowId]?.[colId] ?? 0).toFixed(1)}%`"
+                  :title="getAniCellTitle(rowId, colId)"
                 >
-                  <span v-if="displayDensity !== 'ultra'">{{ (aniMatrix?.[rowId]?.[colId] ?? 0).toFixed(0) }}</span>
+                  <span v-if="displayDensity !== 'ultra'">
+                    {{ formatAniDisplay(aniMatrix?.[rowId]?.[colId], rowId, colId) }}
+                  </span>
                 </td>
               </template>
 
@@ -1540,6 +1579,14 @@ const isCurrentPair = (s1: string, s2: string) => {
   cursor: pointer;
   aspect-ratio: 1 / 1;
   transition: transform 0.1s ease;
+  white-space: nowrap;
+  letter-spacing: -0.4px;
+}
+
+.td-ani-val-cell.cell-ani-na {
+  color: #94a3b8 !important;
+  font-weight: 600;
+  background-color: #f8fafc;
 }
 
 .td-ani-val-cell:hover {

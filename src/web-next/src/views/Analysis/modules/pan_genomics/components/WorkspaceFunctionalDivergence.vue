@@ -14,7 +14,7 @@ const props = defineProps<{
   categoryDistributions: Record<string, Record<string, number>>
   tailMatrix?: Record<string, Record<string, number>>
   tailClustering?: any
-  aniMatrix?: Record<string, Record<string, number>>
+  aniMatrix?: Record<string, Record<string, number | null>>
   aniClustering?: any
   hostRangePrediction?: any
   sampleNames: Record<string, string>

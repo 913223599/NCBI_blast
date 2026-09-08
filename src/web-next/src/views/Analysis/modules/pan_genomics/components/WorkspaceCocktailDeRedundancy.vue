@@ -47,7 +47,7 @@ export interface DeRedundancySample {
 }
 
 const props = defineProps<{
-  aniMatrix: Record<string, Record<string, number>>
+  aniMatrix: Record<string, Record<string, number | null>>
   tailMatrix?: Record<string, Record<string, number>>
   lysisMatrix?: Record<string, Record<string, number>>
   clusters?: any[]

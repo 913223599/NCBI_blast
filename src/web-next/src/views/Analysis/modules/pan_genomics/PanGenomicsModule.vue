@@ -383,18 +383,21 @@ onMounted(() => {
       <div class="workspace-viewport">
         <!-- Q1: Population Landscape -->
         <WorkspacePopulationLandscape 
-          v-if="activeWorkspace === 'population'"
-          :ani-matrix="analysisResult.ani_matrix"
-          :ani-clustering="analysisResult.ani_clustering"
-          :sample-names="analysisResult.sample_names"
-          :tail-matrix="analysisResult.tail_identity_matrix"
-          :lysis-matrix="analysisResult.lysis_identity_matrix"
-          :clusters="analysisResult.clusters"
-          :lifestyles="analysisResult.lifestyles"
-          :arms-race-matrix="analysisResult.arms_race_matrix"
-          :selected-pair="selectedPair"
-          @select-pair="handleSelectPair"
-          @select-sample="handleSelectSample"
+            v-if="activeWorkspace === 'population'"
+            :ani-matrix="analysisResult.ani_matrix"
+            :af-matrix="analysisResult.af_matrix"
+            :ani-taxonomy-matrix="analysisResult.ani_taxonomy_matrix"
+            :ani-metric-type="analysisResult.ani_metric_type"
+            :ani-clustering="analysisResult.ani_clustering"
+            :sample-names="analysisResult.sample_names"
+            :tail-matrix="analysisResult.tail_identity_matrix"
+            :lysis-matrix="analysisResult.lysis_identity_matrix"
+            :clusters="analysisResult.clusters"
+            :lifestyles="analysisResult.lifestyles"
+            :arms-race-matrix="analysisResult.arms_race_matrix"
+            :selected-pair="selectedPair"
+            @select-pair="handleSelectPair"
+            @select-sample="handleSelectSample"
         />
 
         <!-- Q2: Clonal De-redundancy & Cocktail Pruning -->

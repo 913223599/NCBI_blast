@@ -19,7 +19,7 @@ const props = defineProps<{
   clusters: any[]
   sampleNames: Record<string, string>
   visibleSampleIds: string[]
-  aniMatrix?: Record<string, Record<string, number>>
+  aniMatrix?: Record<string, Record<string, number | null>>
   tailMatrix?: Record<string, Record<string, number>>
   lifestyles?: any[]
   selectedPair?: [string, string] | null

@@ -113,8 +113,11 @@ class PanGenomicsResult(BaseModel):
     summary: PanGenomicsSummary
     sample_names: Dict[str, str]  # sample_id -> sample_name
     
-    # 0. 全基因组 ANI 亲缘矩阵与层次聚类树
-    ani_matrix: Dict[str, Dict[str, float]]
+    # 0. 全基因组 ANI 亲缘矩阵与层次聚类树 (国际标准 OrthoANI / OrthoAAI)
+    ani_matrix: Dict[str, Dict[str, Optional[float]]]
+    af_matrix: Optional[Dict[str, Dict[str, float]]] = None
+    ani_taxonomy_matrix: Optional[Dict[str, Dict[str, str]]] = None
+    ani_metric_type: Optional[str] = "OrthoANI (DNA 1020bp RBH)"
     ani_clustering: Optional[Dict[str, Any]] = None
     
     # 1. 泛基因组聚类与存在/缺失大表

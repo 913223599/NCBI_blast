@@ -33,6 +33,7 @@ from ..annotation.fuser import AnnotationFuser
 from .fast_matcher import fast_seq_identity, get_kmers
 from .clusterer import ParallelOrthologClusterer
 from .clustering_tree import upgma_hierarchical_clustering, analyze_receptor_orthology
+from .ani_calculator import OrthoANICalculator
 
 logger = logging.getLogger("analysis.pan_genomics.engine")
 
@@ -120,8 +121,12 @@ class PanGenomicsEngine:
             amg_genes, trna_profiles, amg_pathway_dist = fut_amg_trna.result()
             cat_distributions = fut_cats.result()
 
-        # 3.1 全蛋白质组 ANI 相似度矩阵
-        ani_matrix = self._calculate_ani_matrix(sample_data, max_workers=max_workers)
+        # 3.1 国际标准全基因组 OrthoANI / OrthoAAI 矩阵流水线
+        ani_calc_res = self._calculate_ani_matrix(sample_data, max_workers=max_workers)
+        ani_matrix = ani_calc_res.get("ani_matrix", {})
+        af_matrix = ani_calc_res.get("af_matrix", {})
+        ani_taxonomy_matrix = ani_calc_res.get("taxonomy_matrix", {})
+        ani_metric_type = ani_calc_res.get("metric_type", "OrthoANI (DNA 1020bp RBH)")
 
         # 3.2 尾部受体识别结构域 (Tail/Spike/RBP) 比对
         tail_proteins, tail_identity_matrix = self._analyze_tail_operons(sample_data, max_workers=max_workers)
@@ -186,6 +191,9 @@ class PanGenomicsEngine:
             summary=summary,
             sample_names=sample_names,
             ani_matrix=ani_matrix,
+            af_matrix=af_matrix,
+            ani_taxonomy_matrix=ani_taxonomy_matrix,
+            ani_metric_type=ani_metric_type,
             ani_clustering=ani_clustering,
             clusters=clusters,
             heaps_law=heaps_law_data,
@@ -216,19 +224,37 @@ class PanGenomicsEngine:
         return result
 
     def _load_sample_features(self, s: SampleInputItem) -> Dict[str, Any]:
-        """载入单个样本的特征列表、安全审计与 tRNA"""
+        """载入单个样本的特征列表、安全审计、tRNA 与全长 DNA 序列"""
         features: List[Dict[str, Any]] = []
         safety_audit: Optional[Dict[str, Any]] = None
+        dna_seq = ""
 
         if s.source_type == "task" and s.task_id:
             res = self.anno_manager.get_task_result(s.task_id)
             if res:
                 features = res.get("features", [])
                 safety_audit = res.get("safety_audit")
+                # 尝试从任务工作目录载入原始全长 DNA FASTA
+                task_dir = Path(res.get("work_dir", ""))
+                fasta_path = task_dir / "input_sequence.fasta"
+                if fasta_path.exists():
+                    try:
+                        with open(fasta_path, "r", encoding="utf-8", errors="ignore") as fa_f:
+                            dna_seq = "".join(str(rec.seq) for rec in SeqIO.parse(fa_f, "fasta"))
+                    except Exception:
+                        pass
+                if not dna_seq:
+                    gbk_files = list(task_dir.glob("*.gbk"))
+                    if gbk_files:
+                        try:
+                            with open(gbk_files[0], "r", encoding="utf-8", errors="ignore") as gb_f:
+                                dna_seq = "".join(str(rec.seq) for rec in SeqIO.parse(gb_f, "genbank") if rec.seq)
+                        except Exception:
+                            pass
         elif s.file_path and Path(s.file_path).exists():
             f_path = Path(s.file_path)
             if s.file_type == "gbk" or f_path.suffix.lower() in [".gbk", ".gb"]:
-                features = self._parse_gbk_file(f_path)
+                features, dna_seq = self._parse_gbk_file(f_path)
             elif s.file_type == "faa" or f_path.suffix.lower() in [".faa", ".fasta", ".fa"]:
                 features = self._parse_faa_file(f_path)
 
@@ -266,15 +292,19 @@ class PanGenomicsEngine:
             "sample_id": s.sample_id,
             "sample_name": s.sample_name,
             "features": standard_features,
+            "dna_sequence": dna_seq,
             "safety_audit": safety_audit
         }
 
-    def _parse_gbk_file(self, gbk_path: Path) -> List[Dict[str, Any]]:
-        """从外部 GenBank 文件解析特征"""
+    def _parse_gbk_file(self, gbk_path: Path) -> Tuple[List[Dict[str, Any]], str]:
+        """从外部 GenBank 文件解析特征与全长 DNA"""
         items = []
+        dna_parts = []
         try:
             with open(gbk_path, "r", encoding="utf-8", errors="ignore") as f:
                 for rec in SeqIO.parse(f, "genbank"):
+                    if rec.seq:
+                        dna_parts.append(str(rec.seq))
                     for feat in rec.features:
                         if feat.type in ["source", "gene"]:
                             continue
@@ -302,7 +332,7 @@ class PanGenomicsEngine:
                         })
         except Exception as e:
             logger.warning(f"Error parsing external GBK {gbk_path}: {e}")
-        return items
+        return items, "".join(dna_parts)
 
     def _parse_faa_file(self, faa_path: Path) -> List[Dict[str, Any]]:
         """从外部 FASTA 氨基酸文件解析特征"""
@@ -699,74 +729,34 @@ class PanGenomicsEngine:
         self,
         sample_data: Dict[str, Dict[str, Any]],
         max_workers: Optional[int] = None
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> Dict[str, Any]:
         """
-        计算样本两两之间的全蛋白质组正交平均一致性 (Proteome-wide OrthoAAI / ANI %)
-        严格遵循生信标准正交双向最佳命中 (BBH) 与全基因组覆盖度加权：
-        ANI = (Sum of Best Homolog Identities) / max(CDS_count_1, CDS_count_2) * 100%
+        计算样本两两之间的全基因组 OrthoANI (DNA 核酸水平) 或全蛋白质组 OrthoAAI
+        严格遵循 ICTV 噬菌体分类标准与 OrthoANIu 正交双向最佳切片比对体系：
+        1. 针对 DNA 序列执行 1020 bp 标准切片正交双向最佳对齐 (RBH)
+        2. 若缺失 DNA 全长序列则自适应平滑降级为全蛋白质组双向 BBH (OrthoAAI)
+        3. 序列一致性 (ANI) 与基因组覆盖度 (AF) 严格解耦，远缘无显著同源输出 None
         """
         sample_ids = list(sample_data.keys())
-        matrix: Dict[str, Dict[str, float]] = {s1: {s2: 0.0 for s2 in sample_ids} for s1 in sample_ids}
+        dna_dict = {sid: sample_data[sid].get("dna_sequence", "") for sid in sample_ids}
 
-        for s in sample_ids:
-            matrix[s][s] = 100.0
-
-        pairs = [(sample_ids[i], sample_ids[j]) for i in range(len(sample_ids)) for j in range(i + 1, len(sample_ids))]
-        if not pairs:
-            return matrix
-
-        # 提取各样本全量有效 CDS 蛋白序列与其整型 3-mer (解除 80 截断)
-        sample_seqs: Dict[str, List[Tuple[str, Set[int]]]] = {}
+        # 提取各样本全量有效 CDS 蛋白序列与其整型 3-mer (用于缺失 DNA 时的 OrthoAAI 降级)
+        sample_prot_seqs: Dict[str, List[Tuple[str, Any]]] = {}
         for sid in sample_ids:
             raw_seqs = [
                 f.get("translation", "") 
                 for f in sample_data[sid]["features"] 
                 if f.get("feature_type") == "CDS" and f.get("translation") and len(f.get("translation", "")) >= 15
             ]
-            sample_seqs[sid] = [(sq, get_kmers(sq, 3)) for sq in raw_seqs]
+            sample_prot_seqs[sid] = [(sq, get_kmers(sq, 3)) for sq in raw_seqs]
 
-        def compute_pair_ani(s1: str, s2: str) -> Tuple[str, str, float]:
-            seqs1 = sample_seqs.get(s1, [])
-            seqs2 = sample_seqs.get(s2, [])
-            n1 = len(seqs1)
-            n2 = len(seqs2)
-            if n1 == 0 or n2 == 0:
-                return s1, s2, 0.0
-
-            # 双向最佳命中与相似度累加 (考虑全基因组总基因分母)
-            hit_identity_sum = 0.0
-            matched_count = 0
-
-            for sq1, km1 in seqs1:
-                best_match = 0.0
-                len1 = len(sq1)
-                for sq2, km2 in seqs2:
-                    len2 = len(sq2)
-                    if abs(len1 - len2) / max(len1, len2) > 0.45:
-                        continue
-                    ratio = fast_seq_identity(sq1, sq2, ident_thresh=0.25, cov_thresh=0.4, kmers1=km1, kmers2=km2)
-                    if ratio > best_match:
-                        best_match = ratio
-                    if best_match >= 0.99:
-                        break
-                if best_match >= 0.25:
-                    hit_identity_sum += best_match
-                    matched_count += 1
-
-            # 真实全基因组同源度 = 命中序列平均一致性 × (命中数 / max(N1, N2))
-            max_cds = max(n1, n2)
-            ortho_ani = (hit_identity_sum / max_cds) * 100.0 if max_cds > 0 else 0.0
-            return s1, s2, round(ortho_ani, 2)
-
-        workers = max_workers or self._get_max_workers()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(compute_pair_ani, p[0], p[1]) for p in pairs]
-            for fut in concurrent.futures.as_completed(futures):
-                s1, s2, val = fut.result()
-                matrix[s1][s2] = val
-                matrix[s2][s1] = val
-
-        return matrix
+        calc = OrthoANICalculator()
+        return calc.compute_matrix(
+            sample_ids=sample_ids,
+            dna_sequences=dna_dict,
+            sample_prot_seqs=sample_prot_seqs,
+            max_workers=max_workers
+        )
 
     def _generate_scientific_synthesis_report(
         self,
