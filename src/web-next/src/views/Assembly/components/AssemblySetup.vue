@@ -74,6 +74,9 @@ function inferTechAndType(files: File[], r1Name: string, r2Name?: string) {
     detectedTech = 'NANOPORE';
   } else if (files.length >= 2 || r2Name || combinedNames.includes('_1.') || combinedNames.includes('_2.') || combinedNames.includes('_r1') || combinedNames.includes('_r2') || combinedNames.includes('illumina') || combinedNames.includes('mgi')) {
     detectedTech = 'ILLUMINA';
+  } else if (combinedNames.endsWith('.zip') || combinedNames.includes('.zip')) {
+    // 单个 zip 压缩包测序文件（如 fastq.zip）且未包含二代双端标记时，通常为 Nanopore 三代多分卷测序归档
+    detectedTech = 'NANOPORE';
   }
 
   // 2. 样本生物类型推断
@@ -109,7 +112,7 @@ async function handleDropzoneClick() {
   if (isElectron) {
     try {
       const bridge = getBridge();
-      const paths = await bridge.request_file_load(['fastq', 'fq', 'gz', 'fasta', 'fa', 'fna'], true);
+      const paths = await bridge.request_file_load(['fastq', 'fq', 'gz', 'fasta', 'fa', 'fna', 'zip'], true);
       if (paths && paths.length > 0) {
         processPathList(paths);
         return;
@@ -332,7 +335,7 @@ async function onStartAssembly() {
         id="assembly-file-input" 
         type="file" 
         multiple 
-        accept=".fastq,.fq,.gz,.fasta,.fa,.fna" 
+        accept=".fastq,.fq,.gz,.fasta,.fa,.fna,.zip" 
         class="hidden-file-input" 
         @change="handleFileSelect"
       />
@@ -347,7 +350,7 @@ async function onStartAssembly() {
           </svg>
         </div>
         <p class="primary-hint">拖拽测序数据文件至此处，或 <span class="click-link">点击选择文件</span></p>
-        <p class="secondary-hint">支持二代双端 FASTQ (R1/R2) 及三代单端 FASTQ/FASTA (.fq.gz, .fastq, .fasta)</p>
+        <p class="secondary-hint">支持二代双端 FASTQ (R1/R2)、三代单端 FASTQ (.fq.gz, .fastq) 及 ZIP 测序归档包 (.zip)</p>
       </div>
 
       <!-- 已选择文件时的卡片展示 -->

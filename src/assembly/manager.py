@@ -103,20 +103,36 @@ class AssemblyManager:
         assembler = AssemblerStep(ctx)
         self.active_steps[task_id] = assembler
 
-        # 进度与状态广播回调
+        # 单调递增保护锁：记录当前任务已报告的最大进度，防止回退
+        current_max_progress = 0.0
+
+        # 进度与状态广播回调 (线程安全派发，单调递增保护)
         def on_step_progress(progress_val: float, desc_text: Optional[str] = None):
+            nonlocal current_max_progress
             desc = desc_text or "计算中..."
-            self.logger.info(f"[{task_id}] 组装进度: {progress_val:.1f}% - {desc}")
-            assembly_db.update_task_progress(task_id, "NGCS组装", progress_val, "running")
-            # 广播到前端 WebSocket
-            asyncio.create_task(broadcaster.broadcast("assembly_progress", {
+            safe_progress = max(current_max_progress, float(progress_val))
+            current_max_progress = safe_progress
+
+            self.logger.info(f"[{task_id}] 组装进度: {safe_progress:.1f}% - {desc}")
+            assembly_db.update_task_progress(task_id, "NGCS组装", safe_progress, "running")
+            # 广播到前端 WebSocket (线程安全，支持从工作线程直接广播)
+            broadcaster.broadcast_sync("assembly_progress", {
                 "task_id": task_id,
                 "step": desc,
-                "progress": progress_val,
+                "progress": safe_progress,
                 "status": "running"
-            }))
+            })
+
+        # 实时底层输出日志广播回调
+        def on_step_log(log_line: str):
+            broadcaster.broadcast_sync("assembly_log", {
+                "task_id": task_id,
+                "line": log_line,
+                "timestamp": time.time()
+            })
 
         assembler.on_progress = on_step_progress
+        assembler.on_log = on_step_log
 
         try:
             assembly_db.update_task_progress(task_id, "NGCS组装", 5, "running")

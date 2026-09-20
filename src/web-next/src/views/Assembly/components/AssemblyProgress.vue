@@ -2,7 +2,7 @@
 /**
  * AssemblyProgress - 基因组组装实时运行进度与遥测日志控制台
  */
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, computed } from 'vue';
 import type { AssemblyTaskItem } from '../types';
 
 const props = defineProps<{
@@ -24,14 +24,26 @@ watch(() => props.logs.length, async () => {
   }
 });
 
-// 计算阶段状态
-const phases = [
-  { id: 1, name: '数据加载', threshold: 10 },
-  { id: 2, name: '欧拉残差流', threshold: 35 },
-  { id: 3, name: '拓扑合并', threshold: 65 },
-  { id: 4, name: 'SIMD-POA打磨', threshold: 85 },
-  { id: 5, name: '产物收割', threshold: 98 }
-];
+// 计算阶段状态 (区分三代长读长与二代短读长，使用生信标准规范名称)
+const phases = computed(() => {
+  const isLongRead = props.task.tech === 'NANOPORE' || props.task.tech === 'PACBIO_HIFI';
+  if (isLongRead) {
+    return [
+      { id: 1, name: '数据质控', threshold: 10 },
+      { id: 2, name: '重叠图构建', threshold: 35 },
+      { id: 3, name: '骨架延伸', threshold: 65 },
+      { id: 4, name: '支架环化', threshold: 80 },
+      { id: 5, name: '序列校正', threshold: 90 }
+    ];
+  }
+  return [
+    { id: 1, name: '数据质控', threshold: 10 },
+    { id: 2, name: 'K-mer建图', threshold: 35 },
+    { id: 3, name: '路径分解', threshold: 65 },
+    { id: 4, name: '支架构建', threshold: 80 },
+    { id: 5, name: '组装评估', threshold: 90 }
+  ];
+});
 
 function getPhaseClass(threshold: number, progress: number) {
   if (progress >= threshold) return 'is-done';

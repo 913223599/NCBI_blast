@@ -250,30 +250,56 @@ export function useAssembly() {
   onMounted(async () => {
     await fetchHistory();
 
-    // 监听 assembly_progress 广播
+    // 监听 assembly 广播事件 (包含实时日志与流式进度)
     unsubscribeProgress = onEvent((type: string, data: any) => {
+      // 1. 实时底层控制台输出流 (毫秒级滚屏)
+      if (type === 'assembly_log' && data) {
+        const { task_id, line } = data;
+        if (activeTaskId.value === task_id || (!activeTaskId.value && currentTask.value?.id === task_id)) {
+          if (line) {
+            consoleLogs.value.push(line);
+            // 内存与 DOM 保护：上限 2500 行，超出后批量切除最早 500 行
+            if (consoleLogs.value.length > 2500) {
+              consoleLogs.value.splice(0, 500);
+            }
+          }
+        }
+      }
+
+      // 2. 进度与步骤状态驱动 (单调递增防跳跃)
       if (type === 'assembly_progress' && data) {
         const { task_id, step, progress, status, stats } = data;
         
         // 更新历史任务列表中匹配的任务
         const matched = historyTasks.value.find(t => t.id === task_id);
         if (matched) {
-          matched.progress = progress;
-          matched.last_step = step;
-          matched.status = status;
+          const safeProg = progress !== undefined ? Math.max(matched.progress || 0, progress) : matched.progress;
+          matched.progress = safeProg;
+          matched.last_step = step || matched.last_step;
+          matched.status = status || matched.status;
           if (stats) matched.results = stats;
         }
 
         // 如果是当前聚焦任务
         if (activeTaskId.value === task_id || (!activeTaskId.value && currentTask.value?.id === task_id)) {
           if (currentTask.value) {
-            currentTask.value.progress = progress;
-            currentTask.value.last_step = step;
-            currentTask.value.status = status;
+            const safeProg = progress !== undefined ? Math.max(currentTask.value.progress || 0, progress) : currentTask.value.progress;
+            currentTask.value.progress = safeProg;
+            currentTask.value.last_step = step || currentTask.value.last_step;
+            currentTask.value.status = status || currentTask.value.status;
             if (stats) currentTask.value.results = stats;
           }
           if (step) {
-            consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] ${step}`);
+            const timeTag = new Date().toLocaleTimeString();
+            const logEntry = `> [${timeTag}] ${step}`;
+            // 避免连续重复输出同一步骤名
+            const lastLog = consoleLogs.value[consoleLogs.value.length - 1];
+            if (!lastLog || !lastLog.includes(step)) {
+              consoleLogs.value.push(logEntry);
+              if (consoleLogs.value.length > 2500) {
+                consoleLogs.value.splice(0, 500);
+              }
+            }
           }
           if (status === 'success' || status === 'completed') {
             isRunning.value = false;

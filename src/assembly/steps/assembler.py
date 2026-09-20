@@ -10,10 +10,12 @@ import re
 import sys
 import json
 import logging
+import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 from ..core.base import BaseAssemblyStep
+from ..utils.file_handler import AssemblyFileHandler
 
 logger = logging.getLogger("Assembly.AssemblerStep")
 
@@ -115,11 +117,41 @@ class AssemblerStep(BaseAssemblyStep):
         safe_work_dir = Path("E:/NGCS_Work/tasks") / self.context.task_id
         safe_work_dir.mkdir(parents=True, exist_ok=True)
 
-        def _prepare_safe_input(src_path_str: str, file_tag: str) -> str:
+        async def _prepare_safe_input(src_path_str: str, file_tag: str) -> str:
             src_p = Path(src_path_str)
             if not src_p.exists():
                 return src_path_str
-            # 检测是否含非 ASCII 字符或空格
+
+            # 1. 检测是否为 ZIP 测序归档包 (如内含多分卷 FASTQ 的压缩包)
+            if AssemblyFileHandler.is_zip_archive(src_p):
+                dst_p = safe_work_dir / f"input_{file_tag}.fastq"
+                # 断点保护与缓存复用: 若已生成完整聚合文件且时间晚于源压缩包，直接复用
+                if dst_p.exists() and dst_p.stat().st_size > 1024 and dst_p.stat().st_mtime >= src_p.stat().st_mtime:
+                    self.logger.info(f"复用已流式聚合的测序数据: {dst_p}")
+                    return str(dst_p)
+
+                self.logger.info(f"检测到 ZIP 归档测序数据，启动工作线程流式分片聚合: {src_p.name} -> {dst_p.name}")
+                if self.on_progress:
+                    self.on_progress(3, f"正在解析测序压缩包: {src_p.name}...")
+
+                def on_extract_progress(p_val: float, desc_txt: str):
+                    if self.on_progress:
+                        # 映射到准备阶段 (3% - 15%)
+                        mapped_val = 3.0 + (p_val / 100.0) * 12.0
+                        self.on_progress(round(mapped_val, 1), desc_txt)
+
+                # 关键修复：使用 asyncio.to_thread 放入子线程，绝不阻塞主事件循环与 WebSocket 广播
+                success = await asyncio.to_thread(
+                    AssemblyFileHandler.extract_and_merge_zip_fastq,
+                    src_p, dst_p, on_progress=on_extract_progress
+                )
+                if success and dst_p.exists() and dst_p.stat().st_size > 0:
+                    self.logger.info(f"ZIP 测序数据流式聚合完成，产物大小: {dst_p.stat().st_size / (1024*1024):.2f} MB")
+                    return str(dst_p)
+                else:
+                    self.logger.error(f"ZIP 归档测序数据流式聚合失败: {src_p}")
+
+            # 2. 检测是否含非 ASCII 字符或空格
             needs_isolate = any(ord(c) > 127 for c in src_path_str) or (' ' in src_path_str)
             if not needs_isolate:
                 return src_path_str
@@ -148,11 +180,11 @@ class AssemblerStep(BaseAssemblyStep):
             if self.on_progress:
                 self.on_progress(5, f"数据安全准备中 ({file_tag})...")
             import shutil
-            shutil.copyfile(src_p, dst_p)
+            await asyncio.to_thread(shutil.copyfile, src_p, dst_p)
             return str(dst_p)
 
-        active_r1 = _prepare_safe_input(r1, "r1")
-        active_r2 = _prepare_safe_input(r2, "r2") if r2 else None
+        active_r1 = await _prepare_safe_input(r1, "r1")
+        active_r2 = (await _prepare_safe_input(r2, "r2")) if r2 else None
 
         # 模式配置 (支持 isolate, metagenome, metagenome_deep, unconstrained)
         mode = params.get("mode")
@@ -201,42 +233,66 @@ class AssemblerStep(BaseAssemblyStep):
         if not enable_qc:
             cmd_list.append("--no-qc")
 
-        # 实时日志捕获与进度遥测映射
+        # 实时日志捕获与进度遥测映射 (区分二代与三代平台，严格单调递增)
+        step_local_max_progress = 15.0 if active_r1.endswith(".fastq") else 5.0
+
+        def emit_assembly_progress(target_progress: float, step_desc: str):
+            nonlocal step_local_max_progress
+            if target_progress > step_local_max_progress:
+                step_local_max_progress = target_progress
+            if self.on_progress:
+                self.on_progress(step_local_max_progress, step_desc)
+
         def ngcs_progress_handler(line: str):
             line_str = line.strip()
             if not line_str:
                 return
 
-            if "[Phase 00a]" in line_str or "Quality Control" in line_str:
-                if self.on_progress:
-                    self.on_progress(10, "数据质控与接头修剪 (Fastp)...")
-            elif "[Phase 00b]" in line_str or "Native C++20" in line_str:
-                if self.on_progress:
-                    self.on_progress(25, "Native C++20 欧拉残差流引擎计算中...")
-            elif "[Phase 01]" in line_str or "Stream Ingestion" in line_str:
-                if self.on_progress:
-                    self.on_progress(20, "测序数据流流式加载中...")
-            elif "[Phase 02]" in line_str or "Multi-Tier" in line_str or "Resolving Flow Tier" in line_str:
-                if self.on_progress:
-                    self.on_progress(45, "多层级残差流 De Bruijn 图分解构建...")
-            elif "[Phase 03]" in line_str or "Dovetail Merging" in line_str or "Gap-Filling" in line_str:
-                if self.on_progress:
-                    self.on_progress(65, "全域 0-Indel Dovetail 拓扑合并与补洞...")
-            elif "[Phase 04]" in line_str or "Paired-End Jump Scaffolding" in line_str:
-                if self.on_progress:
-                    self.on_progress(80, "配对跳跃支架构建 (PE Scaffolding)...")
-            elif "Solving Graph Laplacian" in line_str or "Disentangling" in line_str:
-                if self.on_progress:
-                    self.on_progress(40, "连续谱流形相位规约与分子拓扑解缠...")
-            elif "SIMD-POA Consensus Engine" in line_str or "Polishing" in line_str:
-                if self.on_progress:
-                    self.on_progress(75, "SIMD-POA 分层打磨与一致性精修...")
-            elif "Scaffolding Complete" in line_str:
-                if self.on_progress:
-                    self.on_progress(85, "非相交环状支架构建完成...")
-            elif "Assembly complete" in line_str or "[SUCCESS]" in line_str or "SUCCESS]" in line_str:
-                if self.on_progress:
-                    self.on_progress(95, "组装完成，正在整理产物...")
+            # 1. 每一行控制台原始输出，立即流式广播到前端日志终端 (秒级响应)
+            if self.on_log:
+                self.on_log(line_str)
+
+            # 2. 依据测序平台精准映射流水线阶段，防止二代/三代关键词冲突与进度跳跃
+            if is_long_read:
+                # ─── 三代长读长 (Nanopore ONT / PacBio HiFi) 阶梯进度 ───
+                if "[Phase 01]" in line_str or "Stream Ingestion" in line_str:
+                    emit_assembly_progress(20, "长读长数据质控与载入...")
+                elif "[Phase 02]" in line_str or "Overlap Graph" in line_str:
+                    emit_assembly_progress(35, "长读长重叠图构建中...")
+                elif "Graph Built" in line_str:
+                    emit_assembly_progress(45, "重叠图构建完成，开始拓扑聚类...")
+                elif "[Phase 03]" in line_str or "Disentangling" in line_str:
+                    emit_assembly_progress(55, "基因组子图聚类与流形分离...")
+                elif "Solving Graph Laplacian" in line_str or "Spectral Gap" in line_str:
+                    emit_assembly_progress(65, "重叠图谱分析与骨架排序...")
+                elif "Generated" in line_str and "contig backbone" in line_str:
+                    emit_assembly_progress(75, "骨架延伸完成，提取重叠群...")
+                elif "[Phase 04]" in line_str or "Scaffolding" in line_str or "Concatemer Truncation" in line_str:
+                    emit_assembly_progress(80, "重叠群支架连接与环化判断...")
+                elif "[Phase 05]" in line_str or "SIMD-POA Consensus Engine" in line_str or "Polishing" in line_str:
+                    emit_assembly_progress(88, "重叠群一致性序列打磨校正...")
+                elif "Restored" in line_str and "bp in" in line_str:
+                    emit_assembly_progress(92, "序列校正完成，整理最终产物...")
+                elif "Assembly complete" in line_str or "[SUCCESS]" in line_str or "[EMITTED]" in line_str:
+                    emit_assembly_progress(98, "组装完成，生成组装报告与指标...")
+            else:
+                # ─── 二代短读长双端 (Illumina / MGI) 阶梯进度 ───
+                if "[Phase 00a]" in line_str or "Quality Control" in line_str:
+                    emit_assembly_progress(10, "测序数据质控与接头修剪 (Fastp)...")
+                elif "[Phase 00b]" in line_str or "Native C++20" in line_str:
+                    emit_assembly_progress(25, "K-mer 频数统计与图分解...")
+                elif "[Phase 01]" in line_str or "Stream Ingestion" in line_str:
+                    emit_assembly_progress(35, "读长流式载入与构建...")
+                elif "[Phase 02]" in line_str or "Multi-Tier" in line_str or "Resolving Flow Tier" in line_str:
+                    emit_assembly_progress(50, "De Bruijn 图构建与欧拉路径求解...")
+                elif "[Phase 03]" in line_str or "Dovetail Merging" in line_str or "Gap-Filling" in line_str:
+                    emit_assembly_progress(65, "重叠群延伸与空隙填充...")
+                elif "[Phase 04]" in line_str or "Paired-End Jump Scaffolding" in line_str:
+                    emit_assembly_progress(80, "配对末端支架构建 (PE Scaffolding)...")
+                elif "Scaffolding Complete" in line_str:
+                    emit_assembly_progress(90, "支架构建完成，导出重叠群...")
+                elif "Assembly complete" in line_str or "[SUCCESS]" in line_str:
+                    emit_assembly_progress(98, "组装完成，生成组装报告与指标...")
 
         # 注入 UTF-8 环境变量与 PYTHONPATH
         run_env = dict(os.environ)

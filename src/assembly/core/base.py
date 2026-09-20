@@ -52,6 +52,8 @@ class BaseAssemblyStep(abc.ABC):
         self.last_error: Optional[str] = None
         # 回调签名支持进度百分比和子状态描述
         self.on_progress: Optional[Callable[[float, Optional[str]], None]] = None
+        # 实时底层输出日志回调 (每行实时流式推送)
+        self.on_log: Optional[Callable[[str], None]] = None
 
     @abc.abstractmethod
     async def execute(self) -> bool:
