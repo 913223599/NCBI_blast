@@ -8,6 +8,7 @@ AssemblerStep - NGCS 基因组组装核心步骤封装
 import os
 import re
 import sys
+import gzip
 import json
 import logging
 import asyncio
@@ -229,6 +230,14 @@ class AssemblerStep(BaseAssemblyStep):
         if max_reads:
             cmd_list.extend(["--max-reads", str(max_reads)])
 
+        # 长读长深度解耦：骨架构建保留适度黄金深度 (例如 200~300 条最长 reads)，全量 reads 留存打磨
+        if is_long_read:
+            max_bb = params.get("max_backbone_reads")
+            if max_bb:
+                cmd_list.extend(["--max-backbone-reads", str(max_bb)])
+            elif max_reads and int(max_reads) > 300:
+                cmd_list.extend(["--max-backbone-reads", "250"])
+
         enable_qc = params.get("enable_qc", True)
         if not enable_qc:
             cmd_list.append("--no-qc")
@@ -252,42 +261,47 @@ class AssemblerStep(BaseAssemblyStep):
             if self.on_log:
                 self.on_log(line_str)
 
-            # 2. 依据测序平台精准映射流水线阶段，防止二代/三代关键词冲突与进度跳跃
+            # 2. 依据测序平台精准映射流水线阶段，防止 Banner 配置键值误判与进度跳跃
             if is_long_read:
                 # ─── 三代长读长 (Nanopore ONT / PacBio HiFi) 阶梯进度 ───
-                if "[Phase 01]" in line_str or "Stream Ingestion" in line_str:
+                # 显式屏蔽启动配置 Banner 行 (如 "Scaffolding : Enabled", "Polish Mode : ...")，防止关键词误触
+                if ":" in line_str and any(banner_kw in line_str for banner_kw in ["Scaffolding :", "Polish Mode :", "Assembly Mode :", "Min Contig :"]):
+                    pass
+                elif "[Phase 01]" in line_str or ("Streamed" in line_str and "clean reads" in line_str):
                     emit_assembly_progress(20, "长读长数据质控与载入...")
-                elif "[Phase 02]" in line_str or "Overlap Graph" in line_str:
+                elif "[Phase 02]" in line_str or "Constructing Hardware-Accelerated Overlap Graph" in line_str:
                     emit_assembly_progress(35, "长读长重叠图构建中...")
-                elif "Graph Built" in line_str:
+                elif "Graph Built:" in line_str:
                     emit_assembly_progress(45, "重叠图构建完成，开始拓扑聚类...")
-                elif "[Phase 03]" in line_str or "Disentangling" in line_str:
+                elif "[Phase 03]" in line_str or "Disentangling Independent Molecular" in line_str:
                     emit_assembly_progress(55, "基因组子图聚类与流形分离...")
-                elif "Solving Graph Laplacian" in line_str or "Spectral Gap" in line_str:
+                elif "Solving Graph Laplacian" in line_str or "Solving contiguous genomic backbones" in line_str:
                     emit_assembly_progress(65, "重叠图谱分析与骨架排序...")
-                elif "Generated" in line_str and "contig backbone" in line_str:
+                elif "Generated" in line_str and "raw contig backbone" in line_str:
                     emit_assembly_progress(75, "骨架延伸完成，提取重叠群...")
-                elif "[Phase 04]" in line_str or "Scaffolding" in line_str or "Concatemer Truncation" in line_str:
+                elif "[Phase 04]" in line_str or "Executing Disjoint-Circular Scaffolding" in line_str or "Scaffolding Complete:" in line_str:
                     emit_assembly_progress(80, "重叠群支架连接与环化判断...")
-                elif "[Phase 05]" in line_str or "SIMD-POA Consensus Engine" in line_str or "Polishing" in line_str:
+                elif "[Phase 05]" in line_str or "SIMD-POA Consensus Engine" in line_str:
                     emit_assembly_progress(88, "重叠群一致性序列打磨校正...")
                 elif "Restored" in line_str and "bp in" in line_str:
                     emit_assembly_progress(92, "序列校正完成，整理最终产物...")
-                elif "Assembly complete" in line_str or "[SUCCESS]" in line_str or "[EMITTED]" in line_str:
+                elif "[Phase 06]" in line_str or "Unified Post-Processing" in line_str or "Post-Processing Complete" in line_str:
+                    emit_assembly_progress(95, "全基因组跨流形支架缝合与去冗余 (AssemblyPostProcessor)...")
+                elif "Assembly complete" in line_str or "[SUCCESS]" in line_str:
                     emit_assembly_progress(98, "组装完成，生成组装报告与指标...")
             else:
                 # ─── 二代短读长双端 (Illumina / MGI) 阶梯进度 ───
-                if "[Phase 00a]" in line_str or "Quality Control" in line_str:
+                if "[Phase 00a]" in line_str or "Fastp Quality Control" in line_str:
                     emit_assembly_progress(10, "测序数据质控与接头修剪 (Fastp)...")
-                elif "[Phase 00b]" in line_str or "Native C++20" in line_str:
+                elif "[Phase 00b]" in line_str or "Residual Eulerian" in line_str:
                     emit_assembly_progress(25, "K-mer 频数统计与图分解...")
-                elif "[Phase 01]" in line_str or "Stream Ingestion" in line_str:
+                elif "[Phase 01]" in line_str:
                     emit_assembly_progress(35, "读长流式载入与构建...")
-                elif "[Phase 02]" in line_str or "Multi-Tier" in line_str or "Resolving Flow Tier" in line_str:
+                elif "[Phase 02]" in line_str:
                     emit_assembly_progress(50, "De Bruijn 图构建与欧拉路径求解...")
-                elif "[Phase 03]" in line_str or "Dovetail Merging" in line_str or "Gap-Filling" in line_str:
+                elif "[Phase 03]" in line_str or "Dovetail Merging" in line_str:
                     emit_assembly_progress(65, "重叠群延伸与空隙填充...")
-                elif "[Phase 04]" in line_str or "Paired-End Jump Scaffolding" in line_str:
+                elif "[Phase 04]" in line_str:
                     emit_assembly_progress(80, "配对末端支架构建 (PE Scaffolding)...")
                 elif "Scaffolding Complete" in line_str:
                     emit_assembly_progress(90, "支架构建完成，导出重叠群...")
@@ -350,7 +364,8 @@ class AssemblerStep(BaseAssemblyStep):
 
     def _parse_assembly_stats(self, fasta_path: Path, work_dir: Optional[Path] = None) -> Dict[str, Any]:
         """
-        解析 FASTA 产物指标 (科学加权平均深度、总长度、Contig数、N50、环状标记)
+        统一权威对接 NGCS 引擎产出的 assembly_manifest.json 与 assembly.fasta 指标
+        优先直接复用 NGCS 底层计算的真实深度、N50、环状结构与片段指标，杜绝业务层重复造轮子。
         """
         stats = {
             "total_length": 0,
@@ -361,13 +376,39 @@ class AssemblerStep(BaseAssemblyStep):
             "n50": 0,
             "max_contig_length": 0
         }
-        contig_lengths = []
-        total_depth_mass = 0.0
-        has_explicit_depth = False
-        total_gc = 0
-        total_at = 0
+        search_dirs = [fasta_path.parent]
+        if work_dir and work_dir not in search_dirs:
+            search_dirs.append(work_dir)
 
+        # 1. 权威首选：直接读取 NGCS 拼接引擎生成的 assembly_manifest.json
+        for s_dir in search_dirs:
+            manifest_file = s_dir / "assembly_manifest.json"
+            if manifest_file.exists():
+                try:
+                    with open(manifest_file, "r", encoding="utf-8") as mf:
+                        m_data = json.load(mf)
+                        tot_len = m_data.get("total_length_bp") or m_data.get("total_bp", 0)
+                        if tot_len > 0:
+                            stats["total_length"] = tot_len
+                            stats["contigs"] = m_data.get("total_contigs", 0)
+                            stats["avg_depth"] = float(m_data.get("avg_depth") or 0.0)
+                            stats["n50"] = int(m_data.get("n50") or 0)
+                            stats["max_contig_length"] = int(m_data.get("max_contig_length") or 0)
+                            stats["gc_percent"] = float(m_data.get("gc_percent") or 0.0)
+                            stats["is_circular"] = bool(m_data.get("is_circular", False))
+                            if stats["avg_depth"] > 0.0:
+                                return stats
+                except Exception as e:
+                    self.logger.warning(f"读取 NGCS Manifest 失败: {e}")
+
+        # 2. 轻量容错兜底：单遍解析 FASTA Header 与基础序列指标
         try:
+            contig_lengths = []
+            total_depth_mass = 0.0
+            total_gc = 0
+            total_at = 0
+            has_explicit_depth = False
+
             with open(fasta_path, "r", encoding="utf-8", errors="ignore") as f:
                 current_len = 0
                 current_depth = 0.0
@@ -387,15 +428,13 @@ class AssemblerStep(BaseAssemblyStep):
                         stats["contigs"] += 1
                         header = line_str.lower()
 
-                        # 深度解析
-                        depth_match = re.search(r"(?:depth[=:]|cov[=_:]|coverage[=:])(\d+\.?\d*)", header)
-                        if depth_match:
-                            current_depth = float(depth_match.group(1))
+                        d_match = re.search(r"(?:depth[=:]|cov[=_:]|coverage[=:])(\d+\.?\d*)", header)
+                        if d_match:
+                            current_depth = float(d_match.group(1))
                             has_explicit_depth = True
                         else:
                             current_depth = 0.0
 
-                        # 环状拓扑精准判定 (严禁将 circular=false / linear 误判为环状)
                         if "circular=false" in header or "circular=n" in header or "linear" in header:
                             pass
                         elif "circular=true" in header or "circular=y" in header or "topology=circular" in header or "_circular" in header:
@@ -411,8 +450,6 @@ class AssemblerStep(BaseAssemblyStep):
             if stats["total_length"] > 0:
                 total_bases = total_gc + total_at
                 stats["gc_percent"] = round((total_gc / total_bases * 100.0), 2) if total_bases > 0 else 0.0
-
-                # N50 与最长 Contig 计算
                 contig_lengths.sort(reverse=True)
                 stats["max_contig_length"] = contig_lengths[0] if contig_lengths else 0
                 half_len = stats["total_length"] / 2.0
@@ -422,33 +459,39 @@ class AssemblerStep(BaseAssemblyStep):
                     if cum_len >= half_len:
                         stats["n50"] = l
                         break
-
-                # 深度计算：若 FASTA 头部有深度则用加权平均；否则结合 Fastp 质控总碱基数精准计算
                 if has_explicit_depth and total_depth_mass > 0:
                     stats["avg_depth"] = round(total_depth_mass / stats["total_length"], 1)
                 else:
-                    # 尝试从 fastp.json 提取质控后的真实总碱基数
-                    calc_depth = 0.0
-                    search_dirs = [fasta_path.parent]
-                    if work_dir:
-                        search_dirs.append(work_dir)
-                    
+                    # 极简容错兜底：若既无 Manifest 又无 Header 显式深度，尝试从工作区测序 FASTQ 采样估算深度
+                    candidate_fqs = []
+                    for k in ["clean_r1", "r1", "unmerged_r1"]:
+                        val = self.context.get(k)
+                        if val and Path(str(val)).exists():
+                            candidate_fqs.append(Path(str(val)))
                     for s_dir in search_dirs:
-                        fastp_json = s_dir / "qc" / "fastp.json"
-                        if not fastp_json.exists():
-                            fastp_json = s_dir / "fastp.json"
-                        if fastp_json.exists():
-                            try:
-                                with open(fastp_json, "r", encoding="utf-8") as fj:
-                                    fj_data = json.load(fj)
-                                    clean_bases = fj_data.get("summary", {}).get("after_filtering", {}).get("total_bases", 0)
-                                    if clean_bases > 0:
-                                        calc_depth = round(clean_bases / stats["total_length"], 1)
-                                        break
-                            except Exception:
-                                pass
+                        for p in s_dir.glob("*.fastq*"):
+                            if p.is_file() and "assembly" not in p.name.lower():
+                                candidate_fqs.append(p)
+                        for p in s_dir.glob("*.fq*"):
+                            if p.is_file() and "assembly" not in p.name.lower():
+                                candidate_fqs.append(p)
 
-                    stats["avg_depth"] = calc_depth if calc_depth > 0 else 1.0
+                    if candidate_fqs:
+                        try:
+                            tfq = candidate_fqs[0]
+                            is_gz = tfq.suffix == ".gz" or tfq.name.endswith(".fq.gz")
+                            opener = gzip.open if is_gz else open
+                            t_bases = 0
+                            with opener(tfq, "rt", encoding="utf-8", errors="ignore") as fq_f:
+                                for q_idx, q_l in enumerate(fq_f):
+                                    if q_idx % 4 == 1:
+                                        t_bases += len(q_l.strip())
+                                    if q_idx >= 40000:
+                                        break
+                            if t_bases > 0:
+                                stats["avg_depth"] = round(t_bases / stats["total_length"], 1)
+                        except Exception:
+                            pass
 
             return stats
         except Exception as e:

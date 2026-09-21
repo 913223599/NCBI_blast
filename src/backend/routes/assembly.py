@@ -186,213 +186,138 @@ def find_assembly_fasta(task_id: str, task_dir: Path) -> Optional[Path]:
     return None
 
 
-def estimate_per_contig_depths(contigs_raw: List[Dict[str, Any]], task_dir: Path, task_id: str, global_avg_depth: float) -> Dict[str, float]:
-    """
-    极速 K-mer 丰度估算多 Contig 各片段的真实独立测序深度 (单毫秒级采样，准确区分主染色体 vs 质粒/杂质)
-    """
-    if len(contigs_raw) <= 1:
-        return {c["name"]: global_avg_depth for c in contigs_raw}
-
-    # 优先定位 clean reads 文件
-    clean_candidates = [
-        task_dir / "assemblerstep" / "assembly_run" / "qc" / "clean_1.fq.gz",
-        task_dir / "assembly_run" / "qc" / "clean_1.fq.gz",
-        task_dir / "qc" / "clean_1.fq.gz",
-        task_dir / "assemblerstep" / "qc" / "clean_1.fq.gz",
-        Path(f"E:/NGCS_Work/tasks/{task_id}/qc/clean_1.fq.gz"),
-        Path(f"E:/NGCS_Work/tasks/{task_id}/clean_1.fq.gz")
-    ]
-    fq_path = None
-    for cand in clean_candidates:
-        if cand.exists() and cand.stat().st_size > 0:
-            fq_path = cand
-            break
-
-    if not fq_path:
-        return {c["name"]: global_avg_depth for c in contigs_raw}
-
-    k = 21
-    kmer_counts: Counter = Counter()
-    read_cnt = 0
-    try:
-        opener = gzip.open if fq_path.suffix == ".gz" else open
-        with opener(fq_path, "rt", encoding="utf-8", errors="ignore") as f:
-            for i, line in enumerate(f):
-                if i % 4 == 1:
-                    seq = line.strip().upper()
-                    read_cnt += 1
-                    for j in range(len(seq) - k + 1):
-                        kmer_counts[seq[j:j+k]] += 1
-                    if read_cnt >= 40000:
-                        break
-    except Exception:
-        return {c["name"]: global_avg_depth for c in contigs_raw}
-
-    if not kmer_counts or read_cnt == 0:
-        return {c["name"]: global_avg_depth for c in contigs_raw}
-
-    raw_depths = {}
-    for c in contigs_raw:
-        seq = c.get("sequence", "").upper()
-        if len(seq) < k:
-            raw_depths[c["name"]] = 0.0
-            continue
-        kmers = [seq[i:i+k] for i in range(len(seq) - k + 1)]
-        hits = [kmer_counts.get(km, 0) for km in kmers]
-        avg_hits = sum(hits) / max(1, len(kmers))
-        raw_depths[c["name"]] = avg_hits
-
-    tot_len = sum(c["length"] for c in contigs_raw)
-    weighted_raw = sum(raw_depths[c["name"]] * c["length"] for c in contigs_raw)
-
-    res = {}
-    if weighted_raw > 0 and global_avg_depth > 0:
-        scale = (global_avg_depth * tot_len) / weighted_raw
-        for c in contigs_raw:
-            d = raw_depths[c["name"]] * scale
-            res[c["name"]] = max(0.1, round(d, 1))
-    else:
-        res = {c["name"]: global_avg_depth for c in contigs_raw}
-    return res
-
-
 @router.get("/result/{task_id}")
 async def get_assembly_result(task_id: str):
-    """获取组装结果指标与产物路径"""
+    """获取组装结果指标与产物路径 (权威对接 NGCS 引擎产物，杜绝业务层重复分析与轮子)"""
     task_dir = AssemblyStorage.get_task_dir(task_id)
     if not task_dir.exists():
         return BioResponse.fail("Task directory not found")
 
     task = assembly_db.get_task(task_id) or {}
     
-    # 智能定位 assembly.fasta 文件
+    # 定位 assembly.fasta 文件
     asm_fasta = find_assembly_fasta(task_id, task_dir)
     fasta_exists = asm_fasta is not None and asm_fasta.exists() and asm_fasta.stat().st_size > 0
     fasta_size_bytes = asm_fasta.stat().st_size if fasta_exists else 0
 
     stats: Dict[str, Any] = {}
-    raw_results = task.get("results")
-    if raw_results:
-        if isinstance(raw_results, str):
+    contig_list: List[Dict[str, Any]] = []
+
+    # 1. 优先对接 NGCS 拼接引擎生成的权威 assembly_manifest.json
+    search_dirs = [
+        task_dir / "assemblerstep" / "assembly_run",
+        task_dir / "assemblerstep",
+        task_dir / "assembly_run",
+        task_dir,
+        Path(f"E:/NGCS_Work/tasks/{task_id}")
+    ]
+
+    manifest_data = None
+    for s_dir in search_dirs:
+        mf_path = s_dir / "assembly_manifest.json"
+        if mf_path.exists() and mf_path.stat().st_size > 0:
             try:
-                stats = json.loads(raw_results)
+                with open(mf_path, "r", encoding="utf-8") as mf:
+                    manifest_data = json.load(mf)
+                    break
             except Exception:
-                stats = {}
-        elif isinstance(raw_results, dict):
-            stats = raw_results
+                pass
 
-    # 深度精准兜底：若缺失或为 1.0，自动从 fastp.json 计算
-    tot_len = stats.get("total_length", 0)
-    if tot_len > 0 and (not stats.get("avg_depth") or stats.get("avg_depth") == 1.0):
-        search_dirs = [task_dir / "assemblerstep", task_dir / "assembly_run", task_dir, Path(f"E:/NGCS_Work/tasks/{task_id}")]
-        for s_dir in search_dirs:
-            fj_path = s_dir / "qc" / "fastp.json"
-            if not fj_path.exists():
-                fj_path = s_dir / "fastp.json"
-            if fj_path.exists():
-                try:
-                    with open(fj_path, "r", encoding="utf-8") as fj:
-                        clean_bases = json.load(fj).get("summary", {}).get("after_filtering", {}).get("total_bases", 0)
-                        if clean_bases > 0:
-                            stats["avg_depth"] = round(clean_bases / tot_len, 1)
-                            stats["max_contig_length"] = stats.get("max_contig_length") or stats.get("n50") or tot_len
-                            # 异步持久化回写
-                            assembly_db.update_task_metrics(
-                                task_id,
-                                total_length=int(tot_len),
-                                contig_count=int(stats.get("contigs") or 1),
-                                n50=int(stats.get("n50") or tot_len),
-                                gc_content=float(stats.get("gc_percent") or 0.0),
-                                is_circular=bool(stats.get("is_circular", False)),
-                                avg_depth=float(stats["avg_depth"]),
-                                max_contig_length=int(stats["max_contig_length"])
-                            )
-                            break
-                except Exception:
-                    pass
+    if manifest_data:
+        tot_bp = manifest_data.get("total_length_bp") or manifest_data.get("total_bp", 0)
+        stats = {
+            "total_length": tot_bp,
+            "contigs": manifest_data.get("total_contigs", 0),
+            "n50": manifest_data.get("n50", 0),
+            "gc_percent": manifest_data.get("gc_percent", 0.0),
+            "is_circular": bool(manifest_data.get("is_circular", False)),
+            "avg_depth": float(manifest_data.get("avg_depth") or 0.0),
+            "max_contig_length": manifest_data.get("max_contig_length", 0)
+        }
+        raw_c_list = manifest_data.get("contigs", [])
+        for c in raw_c_list:
+            c_len = c.get("length", 0)
+            ratio = round((c_len / float(tot_bp) * 100.0), 1) if tot_bp > 0 else 0.0
+            contig_list.append({
+                "name": c.get("name"),
+                "header": f"{c.get('name')} length={c_len} depth={c.get('depth', stats['avg_depth'])}x",
+                "length": c_len,
+                "gc_percent": c.get("gc", 0.0),
+                "depth": round(float(c.get("depth") or stats["avg_depth"]), 1),
+                "is_circular": bool(c.get("circular", False)),
+                "length_ratio": ratio,
+                "sequence": c.get("sequence", "")
+            })
 
-    # 细分 Contig 列表解析
-    contig_list = []
-    if fasta_exists and asm_fasta:
+    # 2. 容错兜底：若无 Manifest (例如旧任务)，单遍流式读取 FASTA
+    elif fasta_exists and asm_fasta:
         try:
-            cur_header: Optional[str] = None
-            cur_seq: List[str] = []
-            avg_d = float(stats.get("avg_depth") or 0.0)
-            has_explicit_depth_in_header = False
+            cur_h = None
+            cur_s = []
 
-            def finish_c(h: Optional[str], s_list: List[str]):
-                nonlocal has_explicit_depth_in_header
-                if not h or not s_list: return
-                s_str = "".join(s_list)
-                c_len = len(s_str)
-                if c_len == 0: return
-                h_low = h.lower()
-                c_name = h.split()[0].lstrip(">")
-                d_m = re.search(r"(?:depth[=:]|cov[=_:]|coverage[=:])(\d+\.?\d*)", h_low)
-                if d_m:
-                    c_depth = float(d_m.group(1))
-                    has_explicit_depth_in_header = True
-                else:
-                    c_depth = avg_d
-
-                # 环状拓扑精准判定 (严禁将 circular=false 误判为环状)
-                is_c = False
-                if "circular=true" in h_low or "circular=y" in h_low or "topology=circular" in h_low or "_circular" in h_low:
-                    if "circular=false" not in h_low and "circular=n" not in h_low and "linear" not in h_low:
-                        is_c = True
-
-                s_up = s_str.upper()
-                c_gc = s_up.count("G") + s_up.count("C")
-                c_gc_pct = round((c_gc / c_len * 100.0), 2) if c_len > 0 else 0.0
+            def flush_c(h_str, s_parts):
+                if not h_str or not s_parts: return
+                seq_str = "".join(s_parts)
+                s_len = len(seq_str)
+                if s_len == 0: return
+                h_l = h_str.lower()
+                c_n = h_str.split()[0].lstrip(">")
+                d_m = re.search(r"(?:depth[=:]|cov[=_:]|coverage[=:])(\d+\.?\d*)", h_l)
+                d_val = float(d_m.group(1)) if d_m else 0.0
+                is_c = "circular=true" in h_l or "circular=y" in h_l or "_circular" in h_l
+                s_up = seq_str.upper()
+                gc_c = s_up.count("G") + s_up.count("C")
+                gc_p = round((gc_c / s_len * 100.0), 2) if s_len > 0 else 0.0
                 contig_list.append({
-                    "name": c_name,
-                    "header": h.lstrip(">"),
-                    "length": c_len,
-                    "gc_percent": c_gc_pct,
-                    "depth": round(c_depth, 1),
+                    "name": c_n,
+                    "header": h_str.lstrip(">"),
+                    "length": s_len,
+                    "gc_percent": gc_p,
+                    "depth": d_val,
                     "is_circular": is_c,
-                    "sequence": s_str
+                    "sequence": seq_str
                 })
 
             with open(asm_fasta, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     l_str = line.strip()
                     if l_str.startswith(">"):
-                        if cur_header is not None: finish_c(cur_header, cur_seq)
-                        cur_header = l_str
-                        cur_seq = []
+                        if cur_h: flush_c(cur_h, cur_s)
+                        cur_h = l_str
+                        cur_s = []
                     else:
-                        cur_seq.append(l_str)
-                if cur_header is not None: finish_c(cur_header, cur_seq)
+                        cur_s.append(l_str)
+                if cur_h: flush_c(cur_h, cur_s)
 
-            # 若 header 中无单片段独立深度且有多条 contig，执行极速 K-mer 丰度真实测序深度估算
-            if not has_explicit_depth_in_header and len(contig_list) > 1:
-                depth_mapping = estimate_per_contig_depths(contig_list, task_dir, task_id, avg_d)
-                for c in contig_list:
-                    if c["name"] in depth_mapping:
-                        c["depth"] = depth_mapping[c["name"]]
-
-            c_tot = sum(c["length"] for c in contig_list)
-            contig_list.sort(key=lambda x: x["length"], reverse=True)
+            tot_bp = sum(c["length"] for c in contig_list)
             for c in contig_list:
-                c["length_ratio"] = round((c["length"] / c_tot * 100.0), 1) if c_tot > 0 else 0.0
-
-            # 动态校准全局拓扑状态与最长片段
-            actual_circular = any(c["is_circular"] for c in contig_list)
-            if stats.get("is_circular") != actual_circular:
-                stats["is_circular"] = actual_circular
-                assembly_db.update_task_metrics(
-                    task_id,
-                    total_length=int(tot_len or c_tot),
-                    contig_count=len(contig_list),
-                    n50=int(stats.get("n50") or (contig_list[0]["length"] if contig_list else 0)),
-                    gc_content=float(stats.get("gc_percent") or 0.0),
-                    is_circular=actual_circular,
-                    avg_depth=float(stats.get("avg_depth") or 0.0),
-                    max_contig_length=int(stats.get("max_contig_length") or (contig_list[0]["length"] if contig_list else 0))
-                )
+                c["length_ratio"] = round((c["length"] / float(tot_bp) * 100.0), 1) if tot_bp > 0 else 0.0
+            
+            stats = {
+                "total_length": tot_bp,
+                "contigs": len(contig_list),
+                "n50": contig_list[0]["length"] if contig_list else 0,
+                "gc_percent": round(sum(c["gc_percent"] * c["length"] for c in contig_list) / max(1, tot_bp), 2),
+                "is_circular": any(c["is_circular"] for c in contig_list),
+                "avg_depth": round(sum(c["depth"] * c["length"] for c in contig_list) / max(1, tot_bp), 1),
+                "max_contig_length": contig_list[0]["length"] if contig_list else 0
+            }
         except Exception as err:
-            logger.warning(f"解析 Contig 失败: {err}")
+            logger.warning(f"FASTA 兜底解析失败: {err}")
+
+    # 3. 排序与数据库状态同步
+    contig_list.sort(key=lambda x: x["length"], reverse=True)
+    if stats.get("total_length", 0) > 0:
+        assembly_db.update_task_metrics(
+            task_id,
+            total_length=int(stats["total_length"]),
+            contig_count=int(stats.get("contigs", len(contig_list))),
+            n50=int(stats.get("n50", 0)),
+            gc_content=float(stats.get("gc_percent", 0.0)),
+            is_circular=bool(stats.get("is_circular", False)),
+            avg_depth=float(stats.get("avg_depth", 0.0)),
+            max_contig_length=int(stats.get("max_contig_length", 0))
+        )
 
     return BioResponse.ok({
         "task_id": task_id,
