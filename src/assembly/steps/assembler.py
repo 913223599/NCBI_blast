@@ -278,13 +278,13 @@ class AssemblerStep(BaseAssemblyStep):
                 elif "Generated" in line_str and "raw contig backbone" in line_str:
                     emit_assembly_progress(75, "骨架延伸完成，提取重叠群...")
                 elif "[Phase 04]" in line_str or "Executing Disjoint-Circular Scaffolding" in line_str or "Scaffolding Complete:" in line_str:
-                    emit_assembly_progress(80, "重叠群支架连接与环化判断...")
-                elif "[Phase 05]" in line_str or "SIMD-POA Consensus Engine" in line_str:
-                    emit_assembly_progress(88, "重叠群一致性序列打磨校正...")
-                elif "Restored" in line_str and "bp in" in line_str:
-                    emit_assembly_progress(92, "序列校正完成，整理最终产物...")
-                elif "[Phase 06]" in line_str or "Unified Post-Processing" in line_str or "Post-Processing Complete" in line_str:
-                    emit_assembly_progress(95, "全基因组跨流形支架缝合与去冗余 (AssemblyPostProcessor)...")
+                    emit_assembly_progress(80, "重叠群支架连接与分相解离...")
+                elif "[Phase 05]" in line_str or "Unified Post-Processing" in line_str:
+                    emit_assembly_progress(88, "全局拓扑治理、发卡解离与闭环环化 (AssemblyPostProcessor)...")
+                elif "[Phase 06]" in line_str or "Consensus Polishing" in line_str or "SIMD-POA Consensus Engine" in line_str:
+                    emit_assembly_progress(94, "染色体全长一致性序列打磨校正...")
+                elif "Post-Polish Manifold Deduplication" in line_str or "Restored" in line_str:
+                    emit_assembly_progress(97, "打磨后双倍流形去冗余与产物整理...")
                 elif "Assembly complete" in line_str or "[SUCCESS]" in line_str:
                     emit_assembly_progress(98, "组装完成，生成组装报告与指标...")
             else:
