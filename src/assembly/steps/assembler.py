@@ -230,13 +230,11 @@ class AssemblerStep(BaseAssemblyStep):
         if max_reads:
             cmd_list.extend(["--max-reads", str(max_reads)])
 
-        # 长读长深度解耦：骨架构建保留适度黄金深度 (例如 200~300 条最长 reads)，全量 reads 留存打磨
+        # 长读长骨架读段控制：仅在显式指定时限制，其余情况交由 NGCS 引擎自适应流控
         if is_long_read:
             max_bb = params.get("max_backbone_reads")
             if max_bb:
                 cmd_list.extend(["--max-backbone-reads", str(max_bb)])
-            elif max_reads and int(max_reads) > 300:
-                cmd_list.extend(["--max-backbone-reads", "250"])
 
         enable_qc = params.get("enable_qc", True)
         if not enable_qc:

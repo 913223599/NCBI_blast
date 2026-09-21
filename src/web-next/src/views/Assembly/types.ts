@@ -41,7 +41,7 @@ export interface AssemblyRunParams {
   threads?: number;
   min_read_length?: number;
   min_contig_length?: number;
-  min_containment_identity?: number;
+  min_containment_identity?: number | null;
   max_reads?: number | null;
   enable_qc?: boolean;
 }

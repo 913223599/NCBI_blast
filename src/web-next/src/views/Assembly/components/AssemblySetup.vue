@@ -22,11 +22,10 @@ const tech = ref<'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI'>('ILLUMINA');
 const mode = ref<'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained'>('isolate');
 const threads = ref<number>(Math.max(2, (navigator.hardwareConcurrency || 8) - 2));
 
-// 高级参数 (NGCS 官方支持可调参数)
 const showAdvanced = ref<boolean>(false);
 const minContigLength = ref<number>(500);
 const minReadLength = ref<number>(1000);
-const minContainmentIdentity = ref<number>(0.92);
+const minContainmentIdentity = ref<number | null>(null);
 const maxReads = ref<number | null>(100000);
 const enableQC = ref<boolean>(true);
 
@@ -295,7 +294,7 @@ async function onStartAssembly() {
     threads: threads.value,
     min_contig_length: minContigLength.value,
     min_read_length: minReadLength.value,
-    min_containment_identity: minContainmentIdentity.value,
+    min_containment_identity: minContainmentIdentity.value ?? undefined,
     max_reads: maxReads.value || undefined,
     enable_qc: enableQC.value
   };
@@ -484,7 +483,7 @@ async function onStartAssembly() {
 
         <!-- 气泡去重相似度阈值 -->
         <div class="form-group">
-          <label class="form-label">气泡冗余去重相似度阈值</label>
+          <label class="form-label">气泡冗余去重相似度阈值 (可选)</label>
           <input 
             v-model.number="minContainmentIdentity" 
             type="number" 
@@ -492,9 +491,9 @@ async function onStartAssembly() {
             max="1.0" 
             step="0.01" 
             class="form-input" 
-            placeholder="默认: 0.92"
+            placeholder="默认留空: 自动适配 (ONT 0.85, 二代 0.92~0.98)"
           />
-          <span class="field-hint">净化杂合气泡相似度 (--min-containment-identity)</span>
+          <span class="field-hint">留空时由引擎根据测序平台自适应物理噪声 (--min-containment-identity)</span>
         </div>
 
         <!-- 长读长最小长度过滤 -->
