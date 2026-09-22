@@ -1,12 +1,11 @@
 <script setup lang="ts">
 /**
  * PanGenomicsModule.vue - 问题驱动的比较基因组学工作台 (Comparative Genomics Workspace)
- * 围绕 5 大核心科学问题展开的证据链系统：
+ * 围绕 4 大核心科学问题展开的证据链系统：
  * Q1: Population Landscape (整体进化如何分群？进化与功能是否解耦？)
- * Q2: Pan-genome Architecture (保守核心与可变基因如何构成？)
- * Q3: Functional Divergence (功能模块分化与宿主识别策略？)
- * Q4: Genome Architecture (差异发生在基因组什么空间位置与构型？)
- * Q5: Biological Interpretation (对宿主识别、裂解与安全性意味着什么？)
+ * Q2: Clonal De-redundancy (基因组去冗余与鸡尾酒代表株优选)
+ * Q3: Genome Architecture (差异发生在基因组什么空间位置与构型？)
+ * Q4: Biological Interpretation (对宿主识别、裂解与安全性意味着什么？)
  */
 import { ref, onMounted, computed } from 'vue'
 import { getBridge } from '../../../../bridge'
@@ -14,7 +13,6 @@ import BatchSampleSelector, { type BatchSampleItem } from '../../../../component
 
 import WorkspacePopulationLandscape from './components/WorkspacePopulationLandscape.vue'
 import WorkspaceCocktailDeRedundancy from './components/WorkspaceCocktailDeRedundancy.vue'
-import WorkspaceFunctionalDivergence from './components/WorkspaceFunctionalDivergence.vue'
 import WorkspaceGenomeArchitecture from './components/WorkspaceGenomeArchitecture.vue'
 import WorkspaceBiologicalInterpretation from './components/WorkspaceBiologicalInterpretation.vue'
 
@@ -329,7 +327,7 @@ onMounted(() => {
 
     <!-- 分析结果工作区 (5 大问题驱动 Workspace) -->
     <div class="results-workspace" v-if="analysisResult">
-      <!-- 5 大 Workspace 导航栏 -->
+      <!-- 4 大核心 Workspace 导航栏 -->
       <div class="workspaces-nav-bar">
         <div class="workspaces-list">
           <button 
@@ -347,24 +345,17 @@ onMounted(() => {
             <span class="ws-name">基因组去冗余与代表株优选 (De-redundancy)</span>
           </button>
           <button 
-            :class="['ws-tab-btn', { active: activeWorkspace === 'functional' }]" 
-            @click="activeWorkspace = 'functional'"
-          >
-            <span class="step-num">Q3</span>
-            <span class="ws-name">基因功能与适应性分化 (Divergence)</span>
-          </button>
-          <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'genome' }]" 
             @click="activeWorkspace = 'genome'"
           >
-            <span class="step-num">Q4</span>
+            <span class="step-num">Q3</span>
             <span class="ws-name">基因组空间共线性 (Synteny)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'biological' }]" 
             @click="activeWorkspace = 'biological'"
           >
-            <span class="step-num">Q5</span>
+            <span class="step-num">Q4</span>
             <span class="ws-name">生物学特性与综合评估 (Interpretation)</span>
           </button>
         </div>
@@ -415,22 +406,7 @@ onMounted(() => {
           @select-pair="handleSelectPair"
         />
 
-        <!-- Q3: Functional Divergence -->
-        <WorkspaceFunctionalDivergence 
-          v-else-if="activeWorkspace === 'functional'"
-          :category-distributions="analysisResult.category_distributions"
-          :tail-matrix="analysisResult.tail_identity_matrix"
-          :tail-clustering="analysisResult.tail_clustering"
-          :ani-matrix="analysisResult.ani_matrix"
-          :ani-clustering="analysisResult.ani_clustering"
-          :host-range-prediction="analysisResult.host_range_prediction"
-          :sample-names="analysisResult.sample_names"
-          :selected-pair="selectedPair"
-          @select-pair="handleSelectPair"
-          @select-sample="handleSelectSample"
-        />
-
-        <!-- Q4: Genome Architecture -->
+        <!-- Q3: Genome Architecture -->
         <WorkspaceGenomeArchitecture 
           v-else-if="activeWorkspace === 'genome'"
           :clusters="analysisResult.clusters"
