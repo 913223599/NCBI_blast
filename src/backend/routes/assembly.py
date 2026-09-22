@@ -462,6 +462,52 @@ async def download_assembly_fasta(task_id: str):
     )
 
 
+@router.get("/download/{task_id}/contig/{contig_name}")
+async def download_single_contig(task_id: str, contig_name: str):
+    """单独下载指定 Contig 的 FASTA 文件 (流式切片提取)"""
+    task_dir = AssemblyStorage.get_task_dir(task_id)
+    asm_fasta = find_assembly_fasta(task_id, task_dir)
+    if not asm_fasta or not asm_fasta.exists():
+        raise HTTPException(status_code=404, detail="Assembly FASTA file not found")
+
+    task = assembly_db.get_task(task_id) or {}
+    safe_task_name = (task.get("name") or task_id).replace(" ", "_")
+    clean_target = contig_name.strip().lstrip(">")
+
+    found_header = None
+    seq_lines = []
+    is_target = False
+
+    with open(asm_fasta, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            if line.startswith(">"):
+                if is_target:
+                    break
+                header_line = line.strip()
+                cur_name = header_line.split()[0].lstrip(">")
+                if cur_name == clean_target:
+                    is_target = True
+                    found_header = header_line
+            elif is_target:
+                seq_lines.append(line.strip())
+
+    if not found_header:
+        raise HTTPException(status_code=404, detail=f"Contig '{clean_target}' not found")
+
+    fasta_content = f"{found_header}\n" + "\n".join(seq_lines) + "\n"
+    safe_contig_name = clean_target.replace("/", "_").replace("\\", "_")
+    download_filename = f"{safe_task_name}_{safe_contig_name}.fasta"
+
+    from fastapi.responses import Response
+    return Response(
+        content=fasta_content.encode("utf-8"),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_filename}"'
+        }
+    )
+
+
 @router.post("/open-folder/{task_id}")
 async def open_task_folder(task_id: str):
     """在系统资源管理器中高亮定位组装产物所在目录"""
