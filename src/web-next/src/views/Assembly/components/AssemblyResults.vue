@@ -20,29 +20,54 @@ const copiedName = ref<string | null>(null);
 const stats = computed(() => {
   const rStats = props.result?.stats;
   const tResults = props.task?.results;
-  const raw = { ...(tResults || {}), ...(rStats || {}) };
-  const rawDepth = raw.avg_depth ?? rStats?.avg_depth ?? tResults?.avg_depth;
-  const parsedDepth = (rawDepth !== undefined && rawDepth !== null && !isNaN(Number(rawDepth))) ? Number(rawDepth) : 0;
-  const rawMax = raw.max_contig_length ?? rStats?.max_contig_length ?? tResults?.max_contig_length ?? (raw.contigs === 1 ? raw.total_length : raw.n50) ?? raw.total_length ?? 0;
+
+  // 优先选取有效数值 (>0)，防御某一方为 0 脏数据时的覆写
+  const getSafeNum = (k: string, defaultVal: number = 0): number => {
+    const rVal = rStats ? Number((rStats as any)[k]) : NaN;
+    const tVal = tResults ? Number((tResults as any)[k]) : NaN;
+    if (!isNaN(rVal) && rVal > 0) return rVal;
+    if (!isNaN(tVal) && tVal > 0) return tVal;
+    if (!isNaN(rVal)) return rVal;
+    if (!isNaN(tVal)) return tVal;
+    return defaultVal;
+  };
+
+  const total_length = getSafeNum('total_length', 0);
+  const contigs = getSafeNum('contigs', props.result?.contigs?.length || 1);
+  const n50 = getSafeNum('n50', 0);
+  const gc_percent = getSafeNum('gc_percent', 0.0);
+  const avg_depth = getSafeNum('avg_depth', 0.0);
+  const is_circular = Boolean(rStats?.is_circular ?? tResults?.is_circular ?? false);
+
+  let max_contig_length = getSafeNum('max_contig_length', 0);
+  if (max_contig_length <= 0) {
+    if (props.result?.contigs && props.result.contigs.length > 0) {
+      max_contig_length = Math.max(...props.result.contigs.map(c => c.length));
+    } else if (contigs === 1) {
+      max_contig_length = total_length;
+    } else if (n50 > 0) {
+      max_contig_length = n50;
+    }
+  }
 
   return {
-    total_length: raw.total_length || 0,
-    contigs: raw.contigs || 1,
-    max_contig_length: Number(rawMax),
-    n50: raw.n50 || 0,
-    gc_percent: raw.gc_percent || 0,
-    avg_depth: parsedDepth,
-    is_circular: !!raw.is_circular
+    total_length,
+    contigs,
+    max_contig_length,
+    n50,
+    gc_percent,
+    avg_depth,
+    is_circular
   };
 });
 
-// Contig 列表 (优先从 result.contigs 获取，兜底从 stats 构造)
+// Contig 列表 (优先从 result.contigs 获取)
 const contigList = computed<ContigDetailItem[]>(() => {
   if (props.result?.contigs && props.result.contigs.length > 0) {
     return props.result.contigs;
   }
-  // 兜底：若只有 1 条 contig 且未拉取到明细
-  if (stats.value.total_length > 0) {
+  // 兜底：仅在明确只有 1 条 contig 且总长度 > 0 时构造单片段
+  if (stats.value.total_length > 0 && stats.value.contigs === 1) {
     return [{
       name: 'contig_1',
       header: 'contig_1',

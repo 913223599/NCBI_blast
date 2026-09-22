@@ -208,6 +208,7 @@ class AssemblerStep(BaseAssemblyStep):
             ])
             self.logger.info(f"NGCS 长读长单分子组装模式: 输入={active_r1}, mode={mode}, min_len={min_len}")
         else:
+            assert active_r2 is not None
             cmd_list.extend([
                 "-1", active_r1,
                 "-2", active_r2,
@@ -379,6 +380,7 @@ class AssemblerStep(BaseAssemblyStep):
             search_dirs.append(work_dir)
 
         # 1. 权威首选：直接读取 NGCS 拼接引擎生成的 assembly_manifest.json
+        manifest_loaded = False
         for s_dir in search_dirs:
             manifest_file = s_dir / "assembly_manifest.json"
             if manifest_file.exists():
@@ -394,14 +396,18 @@ class AssemblerStep(BaseAssemblyStep):
                             stats["max_contig_length"] = int(m_data.get("max_contig_length") or 0)
                             stats["gc_percent"] = float(m_data.get("gc_percent") or 0.0)
                             stats["is_circular"] = bool(m_data.get("is_circular", False))
-                            if stats["avg_depth"] > 0.0:
+                            manifest_loaded = True
+                            # 只有当关键指标全部齐全且有效时才直接返回
+                            if stats["n50"] > 0 and stats["gc_percent"] > 0.0 and stats["avg_depth"] > 0.0:
                                 return stats
                 except Exception as e:
                     self.logger.warning(f"读取 NGCS Manifest 失败: {e}")
 
-        # 2. 轻量容错兜底：单遍解析 FASTA Header 与基础序列指标
+        # 2. 深度容错与补全：单遍解析 FASTA Header 与基础序列指标
         try:
             contig_lengths = []
+            fasta_total_len = 0
+            fasta_contigs = 0
             total_depth_mass = 0.0
             total_gc = 0
             total_at = 0
@@ -412,9 +418,9 @@ class AssemblerStep(BaseAssemblyStep):
                 current_depth = 0.0
 
                 def finish_contig():
-                    nonlocal total_depth_mass
+                    nonlocal total_depth_mass, fasta_total_len
                     if current_len > 0:
-                        stats["total_length"] += current_len
+                        fasta_total_len += current_len
                         contig_lengths.append(current_len)
                         total_depth_mass += current_depth * current_len
 
@@ -423,7 +429,7 @@ class AssemblerStep(BaseAssemblyStep):
                     if line_str.startswith(">"):
                         finish_contig()
                         current_len = 0
-                        stats["contigs"] += 1
+                        fasta_contigs += 1
                         header = line_str.lower()
 
                         d_match = re.search(r"(?:depth[=:]|cov[=_:]|coverage[=:])(\d+\.?\d*)", header)
@@ -445,20 +451,26 @@ class AssemblerStep(BaseAssemblyStep):
 
                 finish_contig()
 
-            if stats["total_length"] > 0:
+            if fasta_total_len > 0:
+                stats["total_length"] = fasta_total_len
+                stats["contigs"] = fasta_contigs
                 total_bases = total_gc + total_at
-                stats["gc_percent"] = round((total_gc / total_bases * 100.0), 2) if total_bases > 0 else 0.0
+                if total_bases > 0 and stats["gc_percent"] <= 0.0:
+                    stats["gc_percent"] = round((total_gc / total_bases * 100.0), 2)
                 contig_lengths.sort(reverse=True)
-                stats["max_contig_length"] = contig_lengths[0] if contig_lengths else 0
-                half_len = stats["total_length"] / 2.0
-                cum_len = 0
-                for l in contig_lengths:
-                    cum_len += l
-                    if cum_len >= half_len:
-                        stats["n50"] = l
-                        break
+                if stats["max_contig_length"] <= 0:
+                    stats["max_contig_length"] = contig_lengths[0] if contig_lengths else 0
+                if stats["n50"] <= 0:
+                    half_len = fasta_total_len / 2.0
+                    cum_len = 0
+                    for l in contig_lengths:
+                        cum_len += l
+                        if cum_len >= half_len:
+                            stats["n50"] = l
+                            break
+                safe_len = max(1, int(stats.get("total_length", 0) or fasta_total_len or 1))
                 if has_explicit_depth and total_depth_mass > 0:
-                    stats["avg_depth"] = round(total_depth_mass / stats["total_length"], 1)
+                    stats["avg_depth"] = round(total_depth_mass / safe_len, 1)
                 else:
                     # 极简容错兜底：若既无 Manifest 又无 Header 显式深度，尝试从工作区测序 FASTQ 采样估算深度
                     candidate_fqs = []
@@ -487,7 +499,7 @@ class AssemblerStep(BaseAssemblyStep):
                                     if q_idx >= 40000:
                                         break
                             if t_bases > 0:
-                                stats["avg_depth"] = round(t_bases / stats["total_length"], 1)
+                                stats["avg_depth"] = round(t_bases / safe_len, 1)
                         except Exception:
                             pass
 

@@ -95,10 +95,10 @@ function getStatusText(status: string) {
           <span class="time-text">{{ formatTime(item.created_at) }}</span>
         </div>
 
-        <div v-if="item.results && item.results.contigs" class="card-stats">
-          <span class="stat-pill">Contigs: <b>{{ item.results.contigs }}</b></span>
-          <span class="stat-pill">N50: <b>{{ (item.results.n50 / 1000).toFixed(1) }}k</b></span>
-          <span class="stat-pill">GC: <b>{{ item.results.gc_percent }}%</b></span>
+        <div v-if="item.results && (item.results.contigs !== undefined || item.results.total_length)" class="card-stats">
+          <span class="stat-pill">Contigs: <b>{{ item.results.contigs || 0 }}</b></span>
+          <span class="stat-pill">N50: <b>{{ item.results.n50 ? (item.results.n50 / 1000).toFixed(1) : '0.0' }}k</b></span>
+          <span class="stat-pill">GC: <b>{{ item.results.gc_percent !== undefined && item.results.gc_percent !== null ? item.results.gc_percent : '0' }}%</b></span>
         </div>
 
         <div class="card-actions" @click.stop>
