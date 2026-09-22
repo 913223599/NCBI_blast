@@ -22,36 +22,36 @@ interface AnalysisTool {
 const tools = ref<AnalysisTool[]>([
   { 
     id: 'sanger_trace', 
-    title: 'Sanger 峰图分析与智能解峰', 
-    description: '深度解析 AB1 原始色谱荧光信号，智能诊断杂合 InDel 移码/复合模板双峰，执行位移解卷积拆分双单倍型与真·主优势菌提取。', 
+    title: 'Sanger 测序峰图分析与突变检测', 
+    description: '解析 AB1 测序色谱荧光信号，检测单核苷酸变异 (SNV) 与 InDel 移码重叠峰，支持双单倍型位移解卷积分离与主序列提取。', 
     iconType: 'trace',
     status: 'ready'
   },
   { 
     id: 'annotation', 
-    title: '全基因组功能注释', 
-    description: '基于 Prokka / Pharokka / 内置高精度引擎进行 CDS、tRNA、rRNA 预测与蛋白功能注释，支持 FASTA 提交与三维圈图联动。', 
+    title: '全基因组结构与功能注释', 
+    description: '基于 Prokka 与 Pharokka 流程进行 CDS、tRNA 及 rRNA 基因预测与功能注释，生成标准注释文件并支持图谱可视化联动。', 
     iconType: 'book',
     status: 'ready'
   },
   { 
     id: 'protein_compare', 
-    title: '核心蛋白跨样本比对分析', 
-    description: '对比两个噬菌体/细菌样本中尾丝、裂解酶、衣壳与复制酶等关键基因的同源性、一致性、氨基酸点突变与变异图谱。', 
+    title: '核心功能蛋白同源性比对', 
+    description: '比对两个样本中结构蛋白、裂解酶及复制酶等核心功能基因的同源性、序列一致性、氨基酸点突变及变异图谱。', 
     iconType: 'compare',
     status: 'ready'
   },
   { 
     id: 'pan_genomics', 
-    title: '多样本泛基因组与深度交叉对比', 
-    description: '多样本正交同源聚类(Core/Unique)、宿主识别尾丝受体结构域对比、生活史烈性/温和安全评级与代谢攻防全景图。', 
+    title: '多样本泛基因组比较分析', 
+    description: '基于直系同源基因聚类构建核心基因组与特异基因组，解析同源家族得失、受体结合蛋白多态性及溶源/安全性特征。', 
     iconType: 'pangenome',
     status: 'ready'
   },
   { 
     id: 'viewer', 
-    title: '序列交互式可视化', 
-    description: '提供类似 SnapGene 的交互式序列与注释查看器，支持环形 (Circular) 与线性 (Linear) 模式，兼容 GenBank/GFF。', 
+    title: '基因组序列图谱可视化', 
+    description: '提供交互式序列与基因特征图谱查看器，支持环形 (Circular) 与线性 (Linear) 双模式，兼容 GenBank 及 GFF3 格式。', 
     iconType: 'dna',
     status: 'ready'
   }
@@ -80,7 +80,7 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
     <header class="analysis-header">
       <div class="header-content">
         <h1>组装分析工作台</h1>
-        <p>组装后的深度特征挖掘与比较基因组学工作台，支持全基因组功能注释、核心蛋白对比、泛基因组分析与 SnapGene 序列可视化。</p>
+        <p>基因组功能注释与比较基因组学分析工作台，支持结构与功能注释、同源蛋白比对、多样本泛基因组分析、Sanger 测序突变解析及序列图谱可视化。</p>
       </div>
       <div class="header-stats" v-if="!activeTool">
          <div class="stat-badge">

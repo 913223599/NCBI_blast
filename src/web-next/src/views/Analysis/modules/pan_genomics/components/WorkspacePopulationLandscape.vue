@@ -405,7 +405,7 @@ const isCurrentPair = (s1: string, s2: string) => {
         <div class="deck-title-area">
           <div class="title-main-row">
             <span class="panel-tag-pill">Figure 1</span>
-            <h3 class="panel-heading-text">系统发育与泛基因组多维证据矩阵</h3>
+            <h3 class="panel-heading-text">系统发育与泛基因组同源矩阵</h3>
             <span class="matrix-scope-badge">
               {{ visibleSampleIds.length }} 株系 (共 {{ orderedSampleIds.length }}) · {{ sortedGeneClusters.length }} 基因家族
             </span>
@@ -456,7 +456,7 @@ const isCurrentPair = (s1: string, s2: string) => {
         </div>
 
         <div class="deck-actions-area">
-          <!-- 视图模式控制器 (矩阵条形码 vs 拓扑弦图) -->
+          <!-- 视图模式控制器 (同源矩阵 vs 拓扑弦图) -->
           <div class="segmented-density-control">
             <span class="control-label">视图:</span>
             <div class="seg-pills">
@@ -464,15 +464,15 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="seg-btn"
                 :class="{ active: viewMode === 'matrix' }"
                 @click="viewMode = 'matrix'"
-                title="矩阵条形码视图 (全基因组证据矩阵与变异探测)"
+                title="同源矩阵视图 (全基因组同源基因家族分布与序列变异)"
               >
-                矩阵条形码
+                同源矩阵
               </button>
               <button
                 class="seg-btn"
                 :class="{ active: viewMode === 'chord' }"
                 @click="viewMode = 'chord'"
-                title="群体拓扑弦图 (同源基因共享流与功能二分关联)"
+                title="拓扑弦图 (展示样本间同源基因共享关联与分布)"
               >
                 拓扑弦图
               </button>
@@ -495,7 +495,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="seg-btn"
                 :class="{ active: sampleSortOrder === 'cluster' }"
                 @click="sampleSortOrder = 'cluster'"
-                :title="currentMatrixMode === 'cds_jaccard' ? '按 CDS 直系同源基因功能谱聚类树排列 (已根据基因家族得失智能重聚类)' : '按全基因组 ANI 核酸亲缘进化树聚类排列'"
+                :title="currentMatrixMode === 'cds_jaccard' ? '按 CDS 直系同源基因分布谱聚类排列 (依据基因家族存在/缺失聚类)' : '按全基因组 ANI 核酸亲缘进化树聚类排列'"
               >
                 进化聚类{{ currentMatrixMode === 'cds_jaccard' ? ' (CDS)' : ' (ANI)' }}
               </button>
@@ -534,9 +534,9 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="seg-btn btn-ultra"
                 :class="{ active: displayDensity === 'ultra' }"
                 @click="displayDensity = 'ultra'"
-                title="全景微缩模式 (行高 11px，适合 45~100+ 株)"
+                title="微缩模式 (行高 11px，适合 45~100+ 株)"
               >
-                50+全景
+                微缩 (50+)
               </button>
             </div>
           </div>
@@ -577,7 +577,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="r-pill r-pill-amber"
                 :class="{ active: genePartitionFilter === 'VARIABLE' }"
                 @click="genePartitionFilter = 'VARIABLE'"
-                title="仅显示存在样本缺失或分化的差异 CDS 家族"
+                title="仅显示存在样本分布差异的可变基因家族"
               >
                 差异 ({{ (clusters?.length || 0) - Number(pangenomePartition.core) }})
               </button>
@@ -585,7 +585,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="r-pill r-pill-blue"
                 :class="{ active: genePartitionFilter === 'CORE' }"
                 @click="genePartitionFilter = 'CORE'"
-                title="仅显示全群体 100% 共享的核心 CDS 家族"
+                title="仅显示全样本共有 (100%) 的核心基因家族"
               >
                 核心基因 ({{ pangenomePartition.core }})
               </button>
@@ -593,7 +593,7 @@ const isCurrentPair = (s1: string, s2: string) => {
                 class="r-pill"
                 :class="{ active: genePartitionFilter === 'UNIQUE' }"
                 @click="genePartitionFilter = 'UNIQUE'"
-                title="仅显示仅在单一株系中出现的特有 CDS"
+                title="仅显示仅存在于单一株系的特有基因家族"
               >
                 单株特有
               </button>
@@ -629,9 +629,9 @@ const isCurrentPair = (s1: string, s2: string) => {
               class="trk-pill"
               :class="{ active: isMetadataTrackVisible }"
               @click="isMetadataTrackVisible = !isMetadataTrackVisible"
-              title="显示/隐藏元数据轨道"
+              title="显示/隐藏样本特征轨道"
             >
-              <span class="trk-dot"></span> 元数据
+              <span class="trk-dot"></span> 样本特征
             </button>
             <button
               class="trk-pill"
@@ -645,9 +645,9 @@ const isCurrentPair = (s1: string, s2: string) => {
               class="trk-pill"
               :class="{ active: isGeneMatrixTrackVisible }"
               @click="isGeneMatrixTrackVisible = !isGeneMatrixTrackVisible"
-              title="显示/隐藏泛基因组正交家族矩阵"
+              title="显示/隐藏泛基因组同源基因家族矩阵"
             >
-              <span class="trk-dot"></span> 基因全序
+              <span class="trk-dot"></span> 基因矩阵
             </button>
           </div>
         </div>
@@ -668,8 +668,8 @@ const isCurrentPair = (s1: string, s2: string) => {
           <span class="leg-col-title">变异形态:</span>
           <div class="leg-items-wrap">
             <span class="leg-chip"><span class="swatch-sq sq-legend-conserved"></span>等长保守 (纯色)</span>
-            <span class="leg-chip"><span class="swatch-sq sq-legend-truncated"></span>缺失截短 (斜纹)</span>
-            <span class="leg-chip"><span class="swatch-sq sq-legend-extended"></span>插入延长 (端标)</span>
+            <span class="leg-chip"><span class="swatch-sq sq-legend-truncated"></span>序列截短 (斜纹)</span>
+            <span class="leg-chip"><span class="swatch-sq sq-legend-extended"></span>序列延伸 (端标)</span>
             <span class="leg-chip"><span class="swatch-dot" style="background-color: #cbd5e1;"></span>基因缺失</span>
           </div>
         </div>
@@ -689,9 +689,9 @@ const isCurrentPair = (s1: string, s2: string) => {
               class="btn-metric-toggle"
               :class="{ active: currentMatrixMode === 'cds_jaccard' }"
               @click="currentMatrixMode = 'cds_jaccard'"
-              title="CDS 直系同源基因功能谱一致性 (Jaccard: 共享CDS / 并集CDS) - 衡量同源家族得失；在进化聚类模式下将自动重新聚类"
+              title="CDS 直系同源基因分布谱一致性 (Jaccard: 共享CDS / 并集CDS) - 衡量同源家族得失；在进化聚类模式下将自动重新聚类"
             >
-              CDS 功能谱一致性
+              CDS 同源基因一致性
             </button>
           </div>
 
@@ -734,9 +734,9 @@ const isCurrentPair = (s1: string, s2: string) => {
               </th>
               <!-- 3. 元数据轨道列头 -->
               <template v-if="isMetadataTrackVisible">
-                <th class="th-meta" title="噬菌体生活周期 (Lytic 专性烈性 / Lysogenic 温和溶原)">生活周期</th>
-                <th class="th-meta" title="治疗安全性审计 (Safe 毒力因子与耐药基因阴性)">生物安全</th>
-                <th class="th-meta" title="抗 CRISPR 攻防系统 (携带的 Anti-CRISPR 基因数)">抗 CRISPR</th>
+                <th class="th-meta" title="生活周期类型 (Lytic 烈性 / Lysogenic 温和溶原)">生活周期</th>
+                <th class="th-meta" title="生物安全性评估 (毒力因子与耐药基因筛查)">生物安全</th>
+                <th class="th-meta" title="抗 CRISPR 系统 (Anti-CRISPR 蛋白基因数)">抗 CRISPR</th>
               </template>
               <!-- 4. ANI 矩阵列头 -->
               <template v-if="isAniTrackVisible">
@@ -909,7 +909,7 @@ const isCurrentPair = (s1: string, s2: string) => {
           <strong>{{ hoveredGeneCluster.cluster?.group_id }}</strong>:
           <span class="strip-prod-txt">{{ hoveredGeneCluster.cluster?.representative_product }}</span>
           <span class="hover-sample-tag">【{{ sampleNames[hoveredGeneCluster.rowId] || hoveredGeneCluster.rowId }}】: <strong>{{ hoveredGeneCluster.variant?.variantLabel }}</strong></span>
-          <span class="text-slate"> (共享率: {{ hoveredGeneCluster.cluster?.sample_count }}/{{ orderedSampleIds.length }} 样本 · 点击展开跨株比对)</span>
+          <span class="text-slate"> (共享率: {{ hoveredGeneCluster.cluster?.sample_count }}/{{ orderedSampleIds.length }} 样本 · 点击展开多样本比对)</span>
         </template>
         <template v-else>
           <span class="strip-placeholder-txt">
@@ -918,7 +918,7 @@ const isCurrentPair = (s1: string, s2: string) => {
               <line x1="12" y1="16" x2="12" y2="12" />
               <line x1="12" y1="8" x2="12.01" y2="8" />
             </svg>
-            将鼠标悬停在右侧任意同源基因方块上，可在此实时预览详细功能注释与微观变异类型；点击方块可展开跨株全景比对抽屉。
+            将鼠标悬停在同源基因方块上，可在此实时预览详细功能注释与序列变异情况；点击方块可展开多样本同源基因比对详情。
           </span>
         </template>
       </div>

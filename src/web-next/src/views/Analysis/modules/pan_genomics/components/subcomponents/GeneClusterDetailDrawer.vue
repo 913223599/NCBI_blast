@@ -53,7 +53,7 @@ watch(
       </div>
       <div class="dh-right">
         <div class="baseline-selector">
-          <span class="bl-lbl">变异对照基准株:</span>
+          <span class="bl-lbl">对照参考株:</span>
           <select v-model="selectedBaselineSampleId" class="baseline-select">
             <option v-for="sid in visibleSampleIds" :key="'opt-bl-' + sid" :value="sid">
               {{ sampleNames[sid] || sid }}
@@ -71,9 +71,9 @@ watch(
           <tr>
             <th>样本名称</th>
             <th>存在状态</th>
-            <th>氨基酸变异类型 (相较于基准株)</th>
-            <th>CDS 基因位点标签</th>
-            <th>基因组物理坐标 (bp)</th>
+            <th>序列变异类型 (相较参考株)</th>
+            <th>CDS 位点标签 (Locus Tag)</th>
+            <th>基因组位置 (bp)</th>
             <th>链方向</th>
             <th>氨基酸长度 (aa)</th>
             <th>功能产物注释 (Product)</th>
@@ -91,7 +91,7 @@ watch(
           >
             <td>
               <strong>{{ sampleNames[sid] || sid }}</strong>
-              <span v-if="sid === selectedBaselineSampleId" class="badge-ref-tag">基准</span>
+              <span v-if="sid === selectedBaselineSampleId" class="badge-ref-tag">参考株</span>
             </td>
             <td>
               <span class="status-pill status-present" v-if="cluster.presence_map?.[sid]">存在</span>

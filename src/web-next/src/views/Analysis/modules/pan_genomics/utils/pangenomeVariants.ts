@@ -167,7 +167,7 @@ export function getClusterVariantInfo(
     return {
       type: 'conserved',
       className: 'sq-conserved',
-      title: `${c.group_id} (${effectiveCat}): ${c.representative_product || item.product || ''} · [等长保守] ${len} aa (与群体众数一致)`,
+      title: `${c.group_id} (${effectiveCat}): ${c.representative_product || item.product || ''} · [等长保守] ${len} aa (与群体众数长度一致)`,
       style: {
         backgroundColor: catColor
       },
@@ -183,11 +183,11 @@ export function getClusterVariantInfo(
     return {
       type: 'truncated',
       className: 'sq-truncated',
-      title: `${c.group_id} (${effectiveCat}): ${c.representative_product || item.product || ''} · [缺失截短] -${absDelta} aa (${pct}% 截短，当前 ${len} aa vs 众数 ${consensusLen} aa)`,
+      title: `${c.group_id} (${effectiveCat}): ${c.representative_product || item.product || ''} · [序列截短] -${absDelta} aa (截短 ${pct}%，当前 ${len} aa / 众数 ${consensusLen} aa)`,
       style: {
         backgroundColor: catColor
       },
-      variantLabel: `缺失截短 (-${absDelta} aa)`
+      variantLabel: `序列截短 (-${absDelta} aa)`
     }
   }
 
@@ -196,11 +196,11 @@ export function getClusterVariantInfo(
   return {
     type: 'extended',
     className: 'sq-extended',
-    title: `${c.group_id} (${effectiveCat}): ${c.representative_product || item.product || ''} · [插入延长] +${delta} aa (+${pct}% 延长，当前 ${len} aa vs 众数 ${consensusLen} aa)`,
+    title: `${c.group_id} (${effectiveCat}): ${c.representative_product || item.product || ''} · [序列延伸] +${delta} aa (延伸 ${pct}%，当前 ${len} aa / 众数 ${consensusLen} aa)`,
     style: {
       backgroundColor: catColor
     },
-    variantLabel: `插入延长 (+${delta} aa)`
+    variantLabel: `序列延伸 (+${delta} aa)`
   }
 }
 
@@ -212,14 +212,14 @@ export function getAminoAcidVariation(cluster: any, sid: string, baselineSid: st
   const item = cluster.presence_map?.[sid]
   const baseItem = cluster.presence_map?.[baselineSid]
 
-  // 1. 基准样本自身
+  // 1. 参考样本自身
   if (sid === baselineSid) {
     const len = item?.length_aa || 0
     return {
       type: 'baseline',
-      badgeText: '[基准] 对照基准',
+      badgeText: '[参考] 参照基准',
       badgeClass: 'var-baseline',
-      diffDetail: `基准序列 (${len} aa)`,
+      diffDetail: `参考序列 (${len} aa)`,
       lengthDelta: 0
     }
   }
@@ -229,9 +229,9 @@ export function getAminoAcidVariation(cluster: any, sid: string, baselineSid: st
     const baseLen = Number(baseItem?.length_aa || 0)
     return {
       type: 'absent',
-      badgeText: '基因完全缺失',
+      badgeText: '基因缺失',
       badgeClass: 'var-absent',
-      diffDetail: baseLen ? `较基准全长缺失 -${baseLen} aa (-100%)` : '该样本未编码此 CDS',
+      diffDetail: baseLen ? `较参考株缺失该基因 (-${baseLen} aa)` : '该样本未检出此 CDS',
       lengthDelta: -baseLen
     }
   }
@@ -239,13 +239,13 @@ export function getAminoAcidVariation(cluster: any, sid: string, baselineSid: st
   const targetLen = Number(item.length_aa || 0)
   const baseLen = Number(baseItem?.length_aa || 0)
 
-  // 3. 基准株缺失但当前株存在
+  // 3. 参考株缺失但当前株存在
   if (!baseItem || baseLen === 0) {
     return {
       type: 'identical',
-      badgeText: '单方存在',
+      badgeText: '特有基因',
       badgeClass: 'var-present',
-      diffDetail: `${targetLen} aa (对照基准株缺失此基因)`,
+      diffDetail: `${targetLen} aa (参考株无对应同源基因)`,
       lengthDelta: targetLen
     }
   }
@@ -258,9 +258,9 @@ export function getAminoAcidVariation(cluster: any, sid: string, baselineSid: st
     const pct = ((absDelta / baseLen) * 100).toFixed(1)
     return {
       type: 'deletion',
-      badgeText: `缺失截短 (-${absDelta} aa)`,
+      badgeText: `序列截短 (-${absDelta} aa)`,
       badgeClass: 'var-deletion',
-      diffDetail: `较基准缺失 ${absDelta} 个氨基酸 (${pct}% 长度截短)`,
+      diffDetail: `较参考株截短 ${absDelta} aa (${pct}%)`,
       lengthDelta: delta
     }
   }
@@ -270,9 +270,9 @@ export function getAminoAcidVariation(cluster: any, sid: string, baselineSid: st
     const pct = ((delta / baseLen) * 100).toFixed(1)
     return {
       type: 'insertion',
-      badgeText: `插入延长 (+${delta} aa)`,
+      badgeText: `序列延伸 (+${delta} aa)`,
       badgeClass: 'var-insertion',
-      diffDetail: `较基准插入 +${delta} 个氨基酸 (+${pct}% 长度延长)`,
+      diffDetail: `较参考株延伸 +${delta} aa (+${pct}%)`,
       lengthDelta: delta
     }
   }
@@ -282,7 +282,7 @@ export function getAminoAcidVariation(cluster: any, sid: string, baselineSid: st
     type: 'identical',
     badgeText: '等长保守',
     badgeClass: 'var-identical',
-    diffDetail: `长度完全一致 (${targetLen} aa) · 同源结构域保守`,
+    diffDetail: `长度一致 (${targetLen} aa) · 同源序列保守`,
     lengthDelta: 0
   }
 }

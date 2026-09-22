@@ -290,10 +290,10 @@ async function handleSendToBlast(selectedSamples: SampleDeconvResult[]) {
     <div class="workbench-header">
       <div class="header-left">
         <div class="title-row">
-          <h2>Sanger 峰图质量分析与智能解峰</h2>
+          <h2>Sanger 测序峰图分析与突变检测</h2>
           <span class="version-tag">PRO</span>
         </div>
-        <p class="subtitle">针对 16S/目的基因测序中因 InDel 移码、多拷贝异质性或复合模板导致的“双峰”进行智能解卷积拆分与数据挽救。</p>
+        <p class="subtitle">针对目的基因测序中因 InDel 移码、多拷贝异质性或混合模板导致的重叠双峰，执行位移解卷积拆分与单倍型序列分离。</p>
       </div>
 
       <div class="header-actions">

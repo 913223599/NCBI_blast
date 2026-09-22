@@ -245,7 +245,7 @@ function handleCyclePair() {
   }
 }
 
-// 导出正交矩阵 CSV
+// 导出同源基因家族矩阵 CSV
 function handleExportCsv() {
   if (!analysisResult.value?.task_id) return
   const apiBase =
@@ -268,7 +268,7 @@ onMounted(() => {
         <div class="panel-title-area">
           <div class="main-title">比较基因组学分析工作区 (Comparative Genomics Workspace)</div>
           <div class="main-subtitle">
-            问题驱动的五步科研证据链：从宏观演化分群 → 泛基因组构成 → 宿主与裂解策略分化 → 空间共线性构型 → 生物学机制与决策。
+            比较基因组学多维度分析流程：群体系统发育分群 → 泛基因组构成分析 → 功能模块与受体分化 → 空间共线性构型 → 生物学特性与综合评估。
           </div>
         </div>
       </div>
@@ -279,7 +279,7 @@ onMounted(() => {
         :available-samples="availableSamples"
         v-model:identity-threshold="identityThreshold"
         :is-running="isRunning"
-        run-button-text="开始全景比较分析"
+        run-button-text="开始比较基因组学分析"
         :min-selection="2"
         @import="handleImportExternal"
         @run="handleRunPanGenomics"
@@ -297,7 +297,7 @@ onMounted(() => {
       <div class="context-left">
         <span class="context-tag tag-gray">未选定对比配对</span>
         <span class="context-tip-main">
-          未锁定对比样本对。在下方任意视图（Q1 树/热图/解耦散点、Q3 网络、Q5 看板）中点击任意样本，即可启动全工作区联动深度对比。
+          未选定对比样本。在下方视图（Q1 树/热图、Q3 分化网络、Q5 评估看板）中点击任意样本，即可在各工作区联动对比。
         </span>
       </div>
       <div class="context-right">
@@ -315,9 +315,9 @@ onMounted(() => {
           <strong>{{ pairSummary.name2 }}</strong>
         </div>
         <div class="context-metrics">
-          <span class="c-metric"><strong>基因组演化:</strong> {{ pairSummary.genomeDivergence }} (ANI {{ pairSummary.ani }}%)</span>
-          <span class="c-metric"><strong>功能谱:</strong> {{ pairSummary.functionDivergence }}</span>
-          <span class="c-metric" :class="pairSummary.receptorClass"><strong>受体识别区:</strong> {{ pairSummary.receptorDivergence }} (Tail {{ pairSummary.tailIdent }}%)</span>
+          <span class="c-metric"><strong>全基因组相似度:</strong> {{ pairSummary.genomeDivergence }} (ANI {{ pairSummary.ani }}%)</span>
+          <span class="c-metric"><strong>同源基因谱:</strong> {{ pairSummary.functionDivergence }}</span>
+          <span class="c-metric" :class="pairSummary.receptorClass"><strong>受体识别区:</strong> {{ pairSummary.receptorDivergence }} (尾丝相似度 {{ pairSummary.tailIdent }}%)</span>
           <span class="c-metric c-green"><strong>安全性:</strong> {{ pairSummary.safetyStatus }}</span>
         </div>
       </div>
@@ -337,35 +337,35 @@ onMounted(() => {
             @click="activeWorkspace = 'population'"
           >
             <span class="step-num">Q1</span>
-            <span class="ws-name">进化全景图 (Population)</span>
+            <span class="ws-name">群体演化与同源矩阵 (Population)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'pangenome' }]" 
             @click="activeWorkspace = 'pangenome'"
           >
             <span class="step-num">Q2</span>
-            <span class="ws-name">克隆去重与优选 (De-redundancy)</span>
+            <span class="ws-name">基因组去冗余与代表株优选 (De-redundancy)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'functional' }]" 
             @click="activeWorkspace = 'functional'"
           >
             <span class="step-num">Q3</span>
-            <span class="ws-name">功能策略分化 (Divergence)</span>
+            <span class="ws-name">基因功能与适应性分化 (Divergence)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'genome' }]" 
             @click="activeWorkspace = 'genome'"
           >
             <span class="step-num">Q4</span>
-            <span class="ws-name">空间共线性 (Synteny)</span>
+            <span class="ws-name">基因组空间共线性 (Synteny)</span>
           </button>
           <button 
             :class="['ws-tab-btn', { active: activeWorkspace === 'biological' }]" 
             @click="activeWorkspace = 'biological'"
           >
             <span class="step-num">Q5</span>
-            <span class="ws-name">综合生物学决策 (Interpretation)</span>
+            <span class="ws-name">生物学特性与综合评估 (Interpretation)</span>
           </button>
         </div>
 
@@ -375,7 +375,7 @@ onMounted(() => {
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          导出正交矩阵 CSV
+          导出同源基因矩阵 CSV
         </button>
       </div>
 
