@@ -1,5 +1,6 @@
 import socket
 import logging
+from typing import Optional
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -12,7 +13,7 @@ class LanShareManager:
     局域网共享管理模块
     单一职责：负责将前端静态资源挂载到 FastAPI，并在局域网暴露服务入口以支持其它设备访问。
     """
-    def __init__(self, app: FastAPI):
+    def __init__(self, app: Optional[FastAPI] = None):
         self.app = app
         # 解析项目根目录 (src/backend/lan_share.py -> src/backend -> src -> root)
         self.project_root = Path(__file__).resolve().parent.parent.parent
@@ -20,18 +21,23 @@ class LanShareManager:
 
     def setup(self):
         """挂载前端静态文件，实现局域网共享访问"""
+        if self.app is None:
+            logger.warning("未注入 FastAPI app 实例，无法挂载局域网静态服务")
+            return
+
         if not self.dist_path.exists():
             logger.warning(f"前端构建目录不存在，无法启用局域网共享服务: {self.dist_path}")
             return
             
         from ..utils.config_manager import get_config_manager
+        app = self.app
         
         # 1. 定义检查函数
         def is_shared():
             return get_config_manager().get_config_value("lan_share", False)
 
         # 2. 根请求下发 index.html 首页
-        @self.app.get("/")
+        @app.get("/")
         async def serve_root():
             if not is_shared():
                 raise HTTPException(status_code=403, detail="LAN Share is disabled")
@@ -45,7 +51,7 @@ class LanShareManager:
             return {"status": "lan_share_active_but_ui_missing"}
         
         # 3. 拦截 SPA 路由
-        @self.app.get("/{full_path:path}")
+        @app.get("/{full_path:path}")
         async def serve_spa(full_path: str):
             if not is_shared():
                 raise HTTPException(status_code=403, detail="LAN Share is disabled")
@@ -66,27 +72,30 @@ class LanShareManager:
         # 此处我们让主路由拦截掉大部分访问即可)
         assets_path = self.dist_path / "assets"
         if assets_path.exists():
-            self.app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+            app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
 
-    def get_local_ips(self) -> list[str]:
+    @staticmethod
+    def get_local_ips() -> list[str]:
         """动态探测并获取本机所有物理局域网 IP 地址"""
-        ips = []
+        ips: list[str] = []
         try:
             # 获取所有网络接口信息
             hostname = socket.gethostname()
             addr_infos = socket.getaddrinfo(hostname, None)
             for info in addr_infos:
-                ip = info[4][0]
-                # 过滤 IPv6 和 回环地址
-                if ":" not in ip and not ip.startswith("127."):
-                    # 过滤常见的虚拟网段 (如 Clash 的 198.18.x.x)
-                    if not ip.startswith("198.18."):
-                        ips.append(ip)
+                sockaddr = info[4]
+                if isinstance(sockaddr, tuple) and len(sockaddr) > 0:
+                    ip_str = str(sockaddr[0])
+                    # 过滤 IPv6 和 回环地址
+                    if ":" not in ip_str and not ip_str.startswith("127."):
+                        # 过滤常见的虚拟网段 (如 Clash 的 198.18.x.x)
+                        if not ip_str.startswith("198.18."):
+                            ips.append(ip_str)
             
             # 兜底方案：通过 UDP 连接尝试解析主要出口 IP
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
-                primary_ip = s.getsockname()[0]
+                primary_ip = str(s.getsockname()[0])
                 if primary_ip not in ips and not primary_ip.startswith("198.18."):
                     ips.insert(0, primary_ip)
         except Exception:

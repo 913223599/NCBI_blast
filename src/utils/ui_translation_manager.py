@@ -8,11 +8,15 @@ import json
 import logging
 from pathlib import Path
 
+from typing import Any, Dict
 from src.utils.config_manager import get_config_manager
 
 
 class UITranslationManager:
     _instance = None
+    config: Any
+    translations: Dict[str, Dict[str, Any]]
+    locales_path: Path
     
     def __new__(cls):
         if cls._instance is None:

@@ -21,6 +21,7 @@ declare global {
             getApiPort: () => Promise<number>
             getProjectRoot: () => Promise<string>
             getPathForFile: (file: File) => string
+            relaunchApp?: () => Promise<boolean>
         }
         [key: string]: any
     }

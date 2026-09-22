@@ -101,7 +101,8 @@ async def get_ui_language():
 async def get_ui_translations():
     from ...utils.ui_translation_manager import get_ui_translator
     translator = get_ui_translator()
-    logger.info(f"UI 翻译请求: 语种={translator.get_language()}, 路径={translator.locales_path}")
+    locales_path = getattr(translator, "locales_path", "")
+    logger.info(f"UI 翻译请求: 语种={translator.get_language()}, 路径={locales_path}")
     translator.load_all_translations()
     data = translator.get_all_translations_for_current_lang()
     return data
@@ -119,10 +120,7 @@ async def get_lan_info():
     from ...utils.config_manager import get_config_manager
     from ..lan_share import LanShareManager
     
-    # 临时创建一个 manager 实例来调用其获取 IP 的逻辑
-    # 这里的 app=None 因为我们只需要调用其工具方法
-    mgr = LanShareManager(None) 
-    ips = mgr.get_local_ips()
+    ips = LanShareManager.get_local_ips()
     primary_ip = ips[0] if ips else "127.0.0.1"
     
     return {
@@ -141,3 +139,29 @@ async def save_lan_share(req: LanShareRequest):
         return {"success": True}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+# ─── 软件更新管理 ────────────────────────────────────
+
+class PullUpdateRequest(BaseModel):
+    auto_stash: bool = True
+
+@router.get("/api/settings/update/status")
+async def get_update_status():
+    """获取本地 Git 版本与分支状态"""
+    from starlette.concurrency import run_in_threadpool
+    from ..utils.git_updater import get_git_info
+    return await run_in_threadpool(get_git_info)
+
+@router.get("/api/settings/update/check")
+async def check_update():
+    """从 GitHub 远程仓库检查更新"""
+    from starlette.concurrency import run_in_threadpool
+    from ..utils.git_updater import check_remote_update
+    return await run_in_threadpool(check_remote_update)
+
+@router.post("/api/settings/update/pull")
+async def pull_update(req: PullUpdateRequest):
+    """从 GitHub 拉取更新并合并到本地分支"""
+    from starlette.concurrency import run_in_threadpool
+    from ..utils.git_updater import pull_remote_update
+    return await run_in_threadpool(pull_remote_update, auto_stash=req.auto_stash)

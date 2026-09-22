@@ -48,4 +48,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     /** 获取项目根路径 */
     getProjectRoot: () => ipcRenderer.invoke('app:getProjectRoot'),
+
+    /** 安全重启应用 */
+    relaunchApp: () => ipcRenderer.invoke('app:relaunch'),
 });

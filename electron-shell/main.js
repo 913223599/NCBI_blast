@@ -233,6 +233,18 @@ ipcMain.handle('fs:writeFile', async (_event, filePath, content) => {
 ipcMain.handle('app:getApiPort', () => API_PORT);
 ipcMain.handle('app:getProjectRoot', () => PROJECT_ROOT);
 
+ipcMain.handle('app:relaunch', async () => {
+    console.log('[Electron] 收到应用重启请求，正在切断 Sidecar 并重启...');
+    try {
+        stopPythonSidecar();
+    } catch (err) {
+        console.error('[Electron] 停止 Python Sidecar 异常:', err);
+    }
+    app.relaunch();
+    app.exit(0);
+    return true;
+});
+
 // ─── 应用生命周期 ─────────────────────────────────
 
 app.whenReady().then(async () => {
