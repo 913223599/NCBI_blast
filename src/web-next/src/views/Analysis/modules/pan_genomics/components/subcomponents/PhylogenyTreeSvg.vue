@@ -44,7 +44,7 @@ const treeSvgLayout = computed(() => {
   const currentHeight = props.rowHeight
 
   if (n === 0) {
-    return { width: 44, height: currentHeight, branches: [] as TreeBranch[], tips: [] as TreeTip[] }
+    return { width: 60, height: currentHeight, branches: [] as TreeBranch[], tips: [] as TreeTip[] }
   }
 
   const totalHeight = n * currentHeight
@@ -58,7 +58,7 @@ const treeSvgLayout = computed(() => {
       : 2.5
 
   const tips: TreeTip[] = ids.map((id, idx) => ({
-    x: 36,
+    x: 50,
     y: (idx + 0.5) * currentHeight,
     r: baseRadius,
     id
@@ -67,9 +67,9 @@ const treeSvgLayout = computed(() => {
   if (n === 1) {
     const tip0 = tips[0]
     return {
-      width: 44,
+      width: 60,
       height: totalHeight,
-      branches: tip0 ? [{ x1: 6, y1: tip0.y, x2: 36, y2: tip0.y }] : [],
+      branches: tip0 ? [{ x1: 6, y1: tip0.y, x2: 50, y2: tip0.y }] : [],
       tips
     }
   }
@@ -95,7 +95,7 @@ const treeSvgLayout = computed(() => {
           const yVal = yMap.get(node.id) ?? 0
           return {
             id: node.id,
-            x: 36,
+            x: 50,
             y: yVal,
             isLeaf: true,
             depth: 0
@@ -157,12 +157,12 @@ const treeSvgLayout = computed(() => {
           const rightRes = n.right ? layoutNode(n.right, currentDepth + 1) : null
 
           if (!leftRes || !rightRes) {
-            return leftRes || rightRes || { x: 36, y: 0 }
+            return leftRes || rightRes || { x: 50, y: 0 }
           }
 
-          // 计算内部节点的横向深度 (根节点偏左至 6px，叶节点在 36px)
+          // 计算内部节点的横向深度 (根节点偏左至 6px，叶节点在 50px)
           const depthFromLeaves = maxDepth - currentDepth
-          const nodeX = Math.max(6, 36 - (depthFromLeaves / maxDepth) * 28)
+          const nodeX = Math.max(6, 50 - (depthFromLeaves / maxDepth) * 40)
           const nodeY = (leftRes.y + rightRes.y) / 2
 
           // 绘制到左子节点的直角分支
@@ -182,7 +182,7 @@ const treeSvgLayout = computed(() => {
 
         const rootPos = layoutNode(prunedRoot, 0)
         // 根节点向左主干线
-        branches.push({ x1: 2, y1: rootPos.y, x2: rootPos.x, y2: rootPos.y })
+        branches.push({ x1: 4, y1: rootPos.y, x2: rootPos.x, y2: rootPos.y })
       }
     }
   }
@@ -199,7 +199,7 @@ const treeSvgLayout = computed(() => {
     let clusters: AdjCluster[] = ids.map((id, idx) => ({
       ids: [id],
       y: (idx + 0.5) * currentHeight,
-      x: 36,
+      x: 50,
       depth: 0
     }))
 
@@ -240,7 +240,7 @@ const treeSvgLayout = computed(() => {
 
       currentStep++
       const newDepth = 1 + Math.max(cA.depth, cB.depth)
-      const newX = Math.max(6, 36 - (currentStep / maxSteps) * 28)
+      const newX = Math.max(6, 50 - (currentStep / maxSteps) * 40)
       const newY = (cA.y + cB.y) / 2
 
       // 水平分支到 A
@@ -267,12 +267,12 @@ const treeSvgLayout = computed(() => {
 
     const finalRoot = clusters[0]
     if (finalRoot) {
-      branches.push({ x1: 2, y1: finalRoot.y, x2: finalRoot.x, y2: finalRoot.y })
+      branches.push({ x1: 4, y1: finalRoot.y, x2: finalRoot.x, y2: finalRoot.y })
     }
   }
 
   return {
-    width: 44,
+    width: 60,
     height: totalHeight,
     branches,
     tips

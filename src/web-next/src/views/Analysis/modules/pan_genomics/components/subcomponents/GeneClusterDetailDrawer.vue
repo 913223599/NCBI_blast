@@ -269,6 +269,7 @@ watch(
   position: sticky;
   top: 0;
   z-index: 5;
+  white-space: nowrap;
 }
 
 .drawer-samples-table td {

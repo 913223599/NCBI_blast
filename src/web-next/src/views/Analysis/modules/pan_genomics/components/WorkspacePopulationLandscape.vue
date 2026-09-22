@@ -30,6 +30,7 @@ import {
   computeUpgmaClustering,
   type HierarchicalClusteringResult
 } from '../utils/clustering'
+import { exportCompleteFigure } from '../utils/exportLandscapeFigure'
 
 const props = defineProps<{
   aniMatrix: Record<string, Record<string, number | null>>
@@ -394,6 +395,98 @@ const isCurrentPair = (s1: string, s2: string) => {
     (props.selectedPair[0] === s2 && props.selectedPair[1] === s1)
   )
 }
+
+// 图表整体完整导出状态与方法
+const isExporting = ref(false)
+
+async function handleExportFigure(format: 'png' | 'svg' = 'png') {
+  if (isExporting.value) return
+  isExporting.value = true
+  try {
+    if (viewMode.value === 'chord') {
+      // 拓扑弦图模式导出
+      const svgEl = document.querySelector('.phylogenomic-chord-canvas svg') as SVGSVGElement | null
+      if (svgEl) {
+        const svgClone = svgEl.cloneNode(true) as SVGSVGElement
+        svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+        const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+        bgRect.setAttribute('width', '100%')
+        bgRect.setAttribute('height', '100%')
+        bgRect.setAttribute('fill', '#ffffff')
+        svgClone.insertBefore(bgRect, svgClone.firstChild)
+
+        const svgXml = new XMLSerializer().serializeToString(svgClone)
+        if (format === 'svg') {
+          const blob = new Blob([svgXml], { type: 'image/svg+xml;charset=utf-8' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `Figure1_Chord_Diagram_${Date.now()}.svg`
+          a.click()
+          URL.revokeObjectURL(url)
+        } else {
+          const bbox = svgEl.getBoundingClientRect()
+          const width = bbox.width || 800
+          const height = bbox.height || 680
+          const canvas = document.createElement('canvas')
+          const scale = 2.0
+          canvas.width = width * scale
+          canvas.height = height * scale
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            ctx.scale(scale, scale)
+            const img = new Image()
+            const blob = new Blob([svgXml], { type: 'image/svg+xml;charset=utf-8' })
+            const url = URL.createObjectURL(blob)
+            await new Promise<void>((resolve) => {
+              img.onload = () => {
+                ctx.drawImage(img, 0, 0, width, height)
+                URL.revokeObjectURL(url)
+                canvas.toBlob(pngBlob => {
+                  if (pngBlob) {
+                    const pngUrl = URL.createObjectURL(pngBlob)
+                    const a = document.createElement('a')
+                    a.href = pngUrl
+                    a.download = `Figure1_Chord_Diagram_${Date.now()}.png`
+                    a.click()
+                    URL.revokeObjectURL(pngUrl)
+                  }
+                  resolve()
+                }, 'image/png')
+              }
+              img.src = url
+            })
+          }
+        }
+      }
+      return
+    }
+
+    // 矩阵模式整体完整导出 (突破屏幕限制，完整包含全部 400+ 基因列)
+    await exportCompleteFigure({
+      title: '系统发育与泛基因组同源矩阵',
+      subtitle: `${visibleSampleIds.value.length} 株系 · ${sortedGeneClusters.value.length} 基因家族`,
+      visibleSampleIds: visibleSampleIds.value,
+      orderedSampleIds: orderedSampleIds.value,
+      sampleNames: props.sampleNames,
+      sortedGeneClusters: sortedGeneClusters.value,
+      aniMatrix: props.aniMatrix,
+      lifestyles: props.lifestyles,
+      treeRoot: activeClustering.value?.root,
+      sortOrder: sampleSortOrder.value,
+      isPhylogenyTrackVisible: isPhylogenyTrackVisible.value,
+      isMetadataTrackVisible: isMetadataTrackVisible.value,
+      isAniTrackVisible: isAniTrackVisible.value,
+      isGeneMatrixTrackVisible: isGeneMatrixTrackVisible.value,
+      activeSimilarityMatrix: activeSimilarityMatrix.value,
+      format
+    })
+  } catch (err) {
+    console.error('导出图表失败:', err)
+  } finally {
+    isExporting.value = false
+  }
+}
 </script>
 
 <template>
@@ -556,6 +649,31 @@ const isCurrentPair = (s1: string, s2: string) => {
             </svg>
             {{ isLegendCollapsed ? '展开图注' : '收起图注' }}
           </button>
+
+          <!-- 整体完整导出图表按钮组 -->
+          <div class="export-figure-group">
+            <button
+              class="btn-export-fig"
+              :disabled="isExporting"
+              @click="handleExportFigure('png')"
+              title="将当前图表（含系统发育树、全部样本与全量同源基因家族）完整导出为超清科研图 (PNG)"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              {{ isExporting ? '导出中...' : '导出图表 (PNG)' }}
+            </button>
+            <button
+              class="btn-export-fig btn-export-svg"
+              :disabled="isExporting"
+              @click="handleExportFigure('svg')"
+              title="完整导出为无限缩放矢量图 (SVG)"
+            >
+              SVG
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1239,6 +1357,51 @@ const isCurrentPair = (s1: string, s2: string) => {
   color: #1d4ed8;
 }
 
+.export-figure-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.btn-export-fig {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #1d4ed8;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-export-fig:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
+.btn-export-fig:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-export-svg {
+  padding: 3px 7px;
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+.btn-export-svg:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
 /* 2. 统一操作带 */
 .matrix-ribbon-bar {
   display: flex;
@@ -1519,7 +1682,7 @@ const isCurrentPair = (s1: string, s2: string) => {
 
 .th-sticky-left-2 {
   position: sticky;
-  left: 44px;
+  left: 60px;
   z-index: 25;
   background: #f8fafc !important;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
@@ -1527,7 +1690,7 @@ const isCurrentPair = (s1: string, s2: string) => {
 
 .td-sample-name-col.th-sticky-left-2 {
   position: sticky;
-  left: 44px;
+  left: 60px;
   z-index: 15;
   background: #ffffff !important;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
@@ -1542,24 +1705,28 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .th-tree {
-  width: 44px;
-  min-width: 44px;
-  max-width: 44px;
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
   text-align: center;
+  white-space: nowrap;
 }
 
 .th-sample-name {
-  width: 160px;
-  min-width: 160px;
+  width: 170px;
+  min-width: 170px;
   text-align: left;
+  white-space: nowrap;
 }
 
 .th-meta {
-  width: 46px;
-  min-width: 46px;
+  width: 64px;
+  min-width: 64px;
   text-align: center;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
+  white-space: nowrap;
+  padding: 5px 2px;
 }
 
 .th-ani-col {
@@ -1623,9 +1790,9 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .td-tree-col {
-  width: 44px;
-  min-width: 44px;
-  max-width: 44px;
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
   text-align: center;
   vertical-align: top;
   padding: 0;
@@ -1636,8 +1803,8 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .td-sample-name-col {
-  width: 160px;
-  min-width: 160px;
+  width: 170px;
+  min-width: 170px;
   font-size: 10.5px;
   color: #334155;
   padding: 0 6px;
@@ -1652,12 +1819,14 @@ const isCurrentPair = (s1: string, s2: string) => {
 }
 
 .td-meta-col {
-  width: 46px;
+  width: 64px;
+  min-width: 64px;
   text-align: center;
   padding: 0 2px;
   height: 24px;
   box-sizing: border-box;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .meta-badge {
