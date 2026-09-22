@@ -2,10 +2,11 @@
  * exportLandscapeFigure.ts - Figure 1 系统发育与泛基因组同源矩阵整体完整导出模块
  * 
  * 职责：
- * 1. 突破视口与滚动条截断限制，以纯内存 Canvas 2D / 矢量 SVG 引擎完整导出全景科研大图；
- * 2. 采用高密度柱状条（Vertical Barcode Strip）替代传统稀疏方块，压缩无意义空间，提升学术信息密度；
- * 3. 完美包含全部样本、全量直系同源基因家族列（400+ 柱状细条连续展开）、系统发育拓扑树、元数据轨道、ANI 热图及学术图注；
- * 4. 支持出版级超清 PNG（2x Retina 超采样）与无限缩放矢量 SVG 格式无损导出。
+ * 1. 突破视口与滚动条截断限制，以纯内存 Canvas 2D / 矢量 SVG 双引擎完整导出全景科研大图；
+ * 2. 严格与当前界面配置保持一致：若选择进化聚类模式，则按照 UPGMA 层次聚类拓扑树叶序及二叉分化分支导出；若选择自然顺序模式，则按照编号自然递增及保序相邻聚类导出；
+ * 3. 采用高密度柱状条（Vertical Barcode Strip）替代传统稀疏方块，压缩无意义空间，提升学术信息密度；
+ * 4. 完美包含全部样本、全量直系同源基因家族列（400+ 柱状细条连续展开）、系统发育拓扑树、元数据轨道、ANI 热图及学术图注；
+ * 5. 支持出版级超清 PNG（2x Retina 超采样）与无限缩放矢量 SVG 格式无损导出。
  */
 import { FUNCTIONAL_CATEGORIES } from '../../viewer/utils/render'
 
@@ -26,6 +27,257 @@ export interface ExportFigureOptions {
   isGeneMatrixTrackVisible: boolean
   activeSimilarityMatrix?: Record<string, Record<string, number | null>>
   format: 'png' | 'svg'
+}
+
+interface TreeBranch {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+}
+
+interface TreeTip {
+  x: number
+  y: number
+  id: string
+}
+
+interface TreeLayoutResult {
+  branches: TreeBranch[]
+  tips: TreeTip[]
+}
+
+interface PrunedNode {
+  id: string
+  x: number
+  y: number
+  isLeaf: boolean
+  depth: number
+  left?: PrunedNode
+  right?: PrunedNode
+}
+
+/**
+ * 严格按照当前界面的排序与聚类配置计算系统发育拓扑树几何连线
+ */
+function computeExportTreeLayout(params: {
+  visibleSampleIds: string[]
+  treeRoot?: any
+  sortOrder?: 'natural' | 'cluster'
+  similarityMatrix?: Record<string, Record<string, number | null>>
+  startX: number
+  startY: number
+  treeColWidth: number
+  rowHeight: number
+}): TreeLayoutResult {
+  const { visibleSampleIds: ids, treeRoot, sortOrder, similarityMatrix, startX, startY, treeColWidth, rowHeight } = params
+  const n = ids.length
+  if (n === 0) return { branches: [], tips: [] }
+
+  const tipX = startX + treeColWidth - 8
+  const tips: TreeTip[] = ids.map((id, idx) => ({
+    x: tipX,
+    y: startY + (idx + 0.5) * rowHeight,
+    id
+  }))
+
+  if (n === 1) {
+    const tip0 = tips[0]
+    return {
+      branches: tip0 ? [{ x1: startX + 4, y1: tip0.y, x2: tipX, y2: tip0.y }] : [],
+      tips
+    }
+  }
+
+  const branches: TreeBranch[] = []
+  const yMap = new Map<string, number>()
+  ids.forEach((id, idx) => {
+    yMap.set(id, startY + (idx + 0.5) * rowHeight)
+  })
+
+  let usedBackendTree = false
+
+  // 1. 优先使用真实的聚类二叉树 TreeRoot 进行剪枝与平面几何展开 (进化聚类模式)
+  if (treeRoot && sortOrder !== 'natural') {
+    const visibleSet = new Set(ids)
+
+    function prune(node: any): PrunedNode | null {
+      if (!node) return null
+      const isLeafNode = !node.left && !node.right
+      if (isLeafNode) {
+        if (visibleSet.has(node.id)) {
+          const yVal = yMap.get(node.id) ?? 0
+          return {
+            id: node.id,
+            x: tipX,
+            y: yVal,
+            isLeaf: true,
+            depth: 0
+          }
+        }
+        return null
+      }
+
+      const l = prune(node.left)
+      const r = prune(node.right)
+
+      if (l && r) {
+        return {
+          id: node.id || 'internal',
+          x: 0,
+          y: (l.y + r.y) / 2,
+          isLeaf: false,
+          depth: 1 + Math.max(l.depth, r.depth),
+          left: l,
+          right: r
+        }
+      } else if (l) {
+        return l
+      } else if (r) {
+        return r
+      }
+      return null
+    }
+
+    const prunedRoot = prune(treeRoot)
+
+    if (prunedRoot) {
+      const prunedLeafOrder: string[] = []
+      function collectLeaves(n: PrunedNode) {
+        if (n.isLeaf) {
+          prunedLeafOrder.push(n.id)
+        } else {
+          if (n.left) collectLeaves(n.left)
+          if (n.right) collectLeaves(n.right)
+        }
+      }
+      collectLeaves(prunedRoot)
+
+      // 验证顺序一致性: 若当前可见样本与剪枝叶序完全一致，则天然严格平面展开
+      const isOrderConsistent =
+        prunedLeafOrder.length === ids.length &&
+        prunedLeafOrder.every((sid, i) => sid === ids[i])
+
+      if (isOrderConsistent) {
+        usedBackendTree = true
+        const maxDepth = prunedRoot.depth || 1
+
+        function layoutNode(n: PrunedNode, currentDepth: number): { x: number; y: number } {
+          if (n.isLeaf) {
+            return { x: n.x, y: n.y }
+          }
+          const leftRes = n.left ? layoutNode(n.left, currentDepth + 1) : null
+          const rightRes = n.right ? layoutNode(n.right, currentDepth + 1) : null
+
+          if (!leftRes || !rightRes) {
+            return leftRes || rightRes || { x: tipX, y: 0 }
+          }
+
+          const depthFromLeaves = maxDepth - currentDepth
+          const nodeX = Math.max(startX + 4, tipX - (depthFromLeaves / maxDepth) * (treeColWidth - 14))
+          const nodeY = (leftRes.y + rightRes.y) / 2
+
+          // 绘制直角水平分支到左子节点
+          branches.push({ x1: nodeX, y1: leftRes.y, x2: leftRes.x, y2: leftRes.y })
+          // 绘制直角水平分支到右子节点
+          branches.push({ x1: nodeX, y1: rightRes.y, x2: rightRes.x, y2: rightRes.y })
+          // 绘制垂直主干连线
+          branches.push({
+            x1: nodeX,
+            y1: Math.min(leftRes.y, rightRes.y),
+            x2: nodeX,
+            y2: Math.max(leftRes.y, rightRes.y)
+          })
+
+          return { x: nodeX, y: nodeY }
+        }
+
+        const rootPos = layoutNode(prunedRoot, 0)
+        // 根节点向左主干线
+        branches.push({ x1: startX + 2, y1: rootPos.y, x2: rootPos.x, y2: rootPos.y })
+      }
+    }
+  }
+
+  // 2. 若为自然排序模式或顺序降级，采用自适应相邻约束平面层次聚类 (Adjacent-Constrained UPGMA)
+  if (!usedBackendTree) {
+    interface AdjCluster {
+      ids: string[]
+      y: number
+      x: number
+      depth: number
+    }
+
+    let clusters: AdjCluster[] = ids.map((id, idx) => ({
+      ids: [id],
+      y: startY + (idx + 0.5) * rowHeight,
+      x: tipX,
+      depth: 0
+    }))
+
+    const maxSteps = Math.max(1, n - 1)
+    let currentStep = 0
+
+    while (clusters.length > 1) {
+      let bestI = 0
+      let maxSim = -1
+
+      // 仅在当前物理相邻的簇 i 与 i + 1 之间搜寻最大相似度合并，严格保证不跨行刺穿
+      for (let i = 0; i < clusters.length - 1; i++) {
+        const c1 = clusters[i]
+        const c2 = clusters[i + 1]
+        if (!c1 || !c2) continue
+
+        let sumSim = 0
+        let count = 0
+        for (const s1 of c1.ids) {
+          for (const s2 of c2.ids) {
+            const raw = similarityMatrix?.[s1]?.[s2]
+            const sim = raw !== null && raw !== undefined ? raw : s1 === s2 ? 100 : 0
+            sumSim += sim
+            count++
+          }
+        }
+        const avgSim = count > 0 ? sumSim / count : 0
+        if (avgSim > maxSim) {
+          maxSim = avgSim
+          bestI = i
+        }
+      }
+
+      const cA = clusters[bestI]
+      const cB = clusters[bestI + 1]
+      if (!cA || !cB) break
+
+      currentStep++
+      const newDepth = 1 + Math.max(cA.depth, cB.depth)
+      const newX = Math.max(startX + 4, tipX - (currentStep / maxSteps) * (treeColWidth - 14))
+      const newY = (cA.y + cB.y) / 2
+
+      branches.push({ x1: newX, y1: cA.y, x2: cA.x, y2: cA.y })
+      branches.push({ x1: newX, y1: cB.y, x2: cB.x, y2: cB.y })
+      branches.push({
+        x1: newX,
+        y1: Math.min(cA.y, cB.y),
+        x2: newX,
+        y2: Math.max(cA.y, cB.y)
+      })
+
+      clusters.splice(bestI, 2, {
+        ids: [...cA.ids, ...cB.ids],
+        y: newY,
+        x: newX,
+        depth: newDepth
+      })
+    }
+
+    const finalRoot = clusters[0]
+    if (finalRoot) {
+      branches.push({ x1: startX + 2, y1: finalRoot.y, x2: finalRoot.x, y2: finalRoot.y })
+    }
+  }
+
+  return { branches, tips }
 }
 
 /**
@@ -51,6 +303,8 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
     sampleNames,
     sortedGeneClusters,
     lifestyles = [],
+    treeRoot,
+    sortOrder = 'cluster',
     isPhylogenyTrackVisible,
     isMetadataTrackVisible,
     isAniTrackVisible,
@@ -70,9 +324,9 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
   const tableHeaderHeight = 26
   const rowHeight = 22
 
-  const treeColWidth = isPhylogenyTrackVisible ? 52 : 0
-  const sampleNameColWidth = 135
-  const metaColWidth = isMetadataTrackVisible ? 48 : 0
+  const treeColWidth = isPhylogenyTrackVisible ? 60 : 0
+  const sampleNameColWidth = 140
+  const metaColWidth = isMetadataTrackVisible ? 52 : 0
   const totalMetaWidth = isMetadataTrackVisible ? metaColWidth * 3 : 0
   const aniColWidth = 22
   const totalAniWidth = isAniTrackVisible ? aniColWidth * sampleCount : 0
@@ -147,8 +401,9 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
   ctx.fillText(title, titleX, curY + 12)
   const titleWidth = ctx.measureText(title).width
 
-  // 统计副标徽章 (严格接在标题之后，预留 12px 间隙)
-  const badgeText = `${sampleCount} 株系 · ${sortedGeneClusters.length} 基因家族`
+  // 统计副标徽章 (根据当前排序配置动态标注)
+  const sortModeLabel = sortOrder === 'cluster' ? '进化聚类排序' : '自然编号排序'
+  const badgeText = `${sampleCount} 株系 · ${sortedGeneClusters.length} 基因家族 · ${sortModeLabel}`
   ctx.font = '500 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
   const badgeTextW = ctx.measureText(badgeText).width
   const badgeBoxX = titleX + titleWidth + 12
@@ -306,89 +561,21 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
 
   curY += tableHeaderHeight
 
-  // D. 表体各行绘制 (Rows)
-  // 首先计算系统发育树分支 (UPGMA)
-  const treeBranches: { x1: number; y1: number; x2: number; y2: number }[] = []
-  const treeTips: { x: number; y: number }[] = []
+  // D. 计算系统发育树分支与叶节点 (UPGMA 真实树/保序相邻聚类)
+  const treeLayout = isPhylogenyTrackVisible
+    ? computeExportTreeLayout({
+        visibleSampleIds,
+        treeRoot,
+        sortOrder,
+        similarityMatrix: activeSimilarityMatrix,
+        startX: paddingX,
+        startY: curY,
+        treeColWidth,
+        rowHeight
+      })
+    : { branches: [], tips: [] }
 
-  if (isPhylogenyTrackVisible) {
-    const ids = visibleSampleIds
-    const n = ids.length
-    const startY = curY
-    const tipX = paddingX + treeColWidth - 8
-    ids.forEach((_, idx) => {
-      treeTips.push({ x: tipX, y: startY + (idx + 0.5) * rowHeight })
-    })
-
-    if (n > 1) {
-      interface ClusterNode {
-        ids: string[]
-        x: number
-        y: number
-        depth: number
-      }
-
-      let nodes: ClusterNode[] = ids.map((id, idx) => ({
-        ids: [id],
-        x: tipX,
-        y: startY + (idx + 0.5) * rowHeight,
-        depth: 0
-      }))
-
-      const maxSteps = Math.max(1, n - 1)
-      let step = 0
-      while (nodes.length > 1) {
-        let bestI = 0
-        let maxSim = -1
-        for (let i = 0; i < nodes.length - 1; i++) {
-          const n1 = nodes[i]
-          const n2 = nodes[i + 1]
-          if (!n1 || !n2) continue
-          let sum = 0
-          let cnt = 0
-          for (const s1 of n1.ids) {
-            for (const s2 of n2.ids) {
-              const val = activeSimilarityMatrix?.[s1]?.[s2] ?? 0
-              sum += val
-              cnt++
-            }
-          }
-          const avg = cnt > 0 ? sum / cnt : 0
-          if (avg > maxSim) {
-            maxSim = avg
-            bestI = i
-          }
-        }
-
-        const nodeA = nodes[bestI]
-        const nodeB = nodes[bestI + 1]
-        if (!nodeA || !nodeB) break
-
-        step++
-        const newDepth = 1 + Math.max(nodeA.depth, nodeB.depth)
-        const newX = Math.max(paddingX + 4, tipX - (step / maxSteps) * 36)
-        const newY = (nodeA.y + nodeB.y) / 2
-
-        treeBranches.push({ x1: newX, y1: nodeA.y, x2: nodeA.x, y2: nodeA.y })
-        treeBranches.push({ x1: newX, y1: nodeB.y, x2: nodeB.x, y2: nodeB.y })
-        treeBranches.push({ x1: newX, y1: Math.min(nodeA.y, nodeB.y), x2: newX, y2: Math.max(nodeA.y, nodeB.y) })
-
-        nodes.splice(bestI, 2, {
-          ids: [...nodeA.ids, ...nodeB.ids],
-          x: newX,
-          y: newY,
-          depth: newDepth
-        })
-      }
-
-      const rootNode = nodes[0]
-      if (rootNode) {
-        treeBranches.push({ x1: paddingX + 2, y1: rootNode.y, x2: rootNode.x, y2: rootNode.y })
-      }
-    }
-  }
-
-  // 逐行绘制样本数据与柱状条形码
+  // E. 逐行绘制样本数据与柱状条形码
   for (let rIdx = 0; rIdx < sampleCount; rIdx++) {
     const rowId = visibleSampleIds[rIdx]
     if (!rowId) continue
@@ -514,7 +701,7 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
             roundRect(ctx, barX, barY, barWidth, barH, 0.5, true, false)
           }
         } else {
-          // 基因缺失：超微细浅灰圆点 (半径 0.7px)，不产生多余视觉噪音
+          // 基因缺失：超微细浅灰圆点 (半径 0.75px)，不产生多余视觉噪音
           ctx.fillStyle = '#e2e8f0'
           ctx.beginPath()
           ctx.arc(cellX + geneColWidth / 2, rowY + rowHeight / 2, 0.75, 0, Math.PI * 2)
@@ -526,21 +713,21 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
     }
   }
 
-  // E. 系统发育树线条与端点绘制
+  // F. 绘制系统发育拓扑树 (矢量直线与叶节点圆点)
   if (isPhylogenyTrackVisible) {
     ctx.save()
     ctx.strokeStyle = '#475569'
     ctx.lineWidth = 1.2
     ctx.lineCap = 'round'
-    for (const b of treeBranches) {
+    for (const b of treeLayout.branches) {
       ctx.beginPath()
       ctx.moveTo(b.x1, b.y1)
       ctx.lineTo(b.x2, b.y2)
       ctx.stroke()
     }
 
-    // 绘制叶子端点
-    for (const tip of treeTips) {
+    // 绘制叶子端点 (与当前行样本中线物理对齐)
+    for (const tip of treeLayout.tips) {
       ctx.fillStyle = '#2563eb'
       ctx.strokeStyle = '#ffffff'
       ctx.lineWidth = 0.8
@@ -564,8 +751,37 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
  * 辅助构建 SVG 矢量 XML 文本 (高密度柱状条矢量版)
  */
 function buildFigureSvg(options: ExportFigureOptions, dims: any): string {
-  const { title, visibleSampleIds, sampleNames, sortedGeneClusters, lifestyles = [], isPhylogenyTrackVisible, isMetadataTrackVisible, isAniTrackVisible, isGeneMatrixTrackVisible, activeSimilarityMatrix } = options
-  const { totalWidth, totalHeight, paddingX, paddingY, headerHeight, legendHeight, tableHeaderHeight, rowHeight, treeColWidth, sampleNameColWidth, metaColWidth, aniColWidth, geneColWidth, barWidth } = dims
+  const {
+    title,
+    visibleSampleIds,
+    sampleNames,
+    sortedGeneClusters,
+    lifestyles = [],
+    treeRoot,
+    sortOrder = 'cluster',
+    isPhylogenyTrackVisible,
+    isMetadataTrackVisible,
+    isAniTrackVisible,
+    isGeneMatrixTrackVisible,
+    activeSimilarityMatrix
+  } = options
+
+  const {
+    totalWidth,
+    totalHeight,
+    paddingX,
+    paddingY,
+    headerHeight,
+    legendHeight,
+    tableHeaderHeight,
+    rowHeight,
+    treeColWidth,
+    sampleNameColWidth,
+    metaColWidth,
+    aniColWidth,
+    geneColWidth,
+    barWidth
+  } = dims
 
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${totalHeight}" viewBox="0 0 ${totalWidth} ${totalHeight}">
   <rect width="100%" height="100%" fill="#ffffff" />
@@ -581,13 +797,17 @@ function buildFigureSvg(options: ExportFigureOptions, dims: any): string {
 `
 
   // 1. 标题与副标 (计算安全偏移，杜绝盖字)
+  const sortModeLabel = sortOrder === 'cluster' ? '进化聚类排序' : '自然编号排序'
+  const badgeText = `${visibleSampleIds.length} 株系 · ${sortedGeneClusters.length} 基因家族 · ${sortModeLabel}`
   const titleEstimateW = title.length * 15 + 16
+  const badgeWidth = badgeText.length * 8 + 20
+
   svg += `  <g transform="translate(${paddingX}, ${paddingY})">
     <rect x="0" y="2" width="52" height="20" rx="4" fill="#eff6ff" stroke="#bfdbfe" />
     <text x="26" y="16" text-anchor="middle" class="f-badge">Figure 1</text>
     <text x="60" y="17" class="f-title">${title}</text>
-    <rect x="${60 + titleEstimateW}" y="2" width="160" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0" />
-    <text x="${60 + titleEstimateW + 80}" y="16" text-anchor="middle" class="f-stat">${visibleSampleIds.length} 株系 · ${sortedGeneClusters.length} 基因家族</text>
+    <rect x="${60 + titleEstimateW}" y="2" width="${badgeWidth}" height="20" rx="10" fill="#f1f5f9" stroke="#e2e8f0" />
+    <text x="${60 + titleEstimateW + badgeWidth / 2}" y="16" text-anchor="middle" class="f-stat">${badgeText}</text>
   </g>\n`
 
   // 2. 表头与行
@@ -699,6 +919,30 @@ function buildFigureSvg(options: ExportFigureOptions, dims: any): string {
       })
     }
   })
+
+  // 4. 绘制系统发育拓扑树分支与叶节点 (SVG 矢量版)
+  if (isPhylogenyTrackVisible) {
+    const treeLayout = computeExportTreeLayout({
+      visibleSampleIds,
+      treeRoot,
+      sortOrder,
+      similarityMatrix: activeSimilarityMatrix,
+      startX: paddingX,
+      startY: curY,
+      treeColWidth,
+      rowHeight
+    })
+
+    // 分支直线
+    for (const b of treeLayout.branches) {
+      svg += `  <line x1="${b.x1.toFixed(1)}" y1="${b.y1.toFixed(1)}" x2="${b.x2.toFixed(1)}" y2="${b.y2.toFixed(1)}" stroke="#475569" stroke-width="1.2" stroke-linecap="round" />\n`
+    }
+
+    // 叶子端点圆点
+    for (const tip of treeLayout.tips) {
+      svg += `  <circle cx="${tip.x.toFixed(1)}" cy="${tip.y.toFixed(1)}" r="2.2" fill="#2563eb" stroke="#ffffff" stroke-width="0.8" />\n`
+    }
+  }
 
   svg += `</svg>`
   return svg

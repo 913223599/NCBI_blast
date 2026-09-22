@@ -462,10 +462,14 @@ async function handleExportFigure(format: 'png' | 'svg' = 'png') {
       return
     }
 
+    const sortLabel = sampleSortOrder.value === 'cluster'
+      ? `进化聚类 (${currentMatrixMode.value === 'cds_jaccard' ? 'CDS功能谱' : '全基因组ANI'})`
+      : '自然顺序'
+
     // 矩阵模式整体完整导出 (突破屏幕限制，完整包含全部 400+ 基因列)
     await exportCompleteFigure({
       title: '系统发育与泛基因组同源矩阵',
-      subtitle: `${visibleSampleIds.value.length} 株系 · ${sortedGeneClusters.value.length} 基因家族`,
+      subtitle: `${visibleSampleIds.value.length} 株系 · ${sortedGeneClusters.value.length} 基因家族 · ${sortLabel}`,
       visibleSampleIds: visibleSampleIds.value,
       orderedSampleIds: orderedSampleIds.value,
       sampleNames: props.sampleNames,
