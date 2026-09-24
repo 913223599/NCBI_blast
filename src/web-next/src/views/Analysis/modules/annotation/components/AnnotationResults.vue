@@ -4,6 +4,7 @@
  */
 import { ref, computed } from 'vue';
 import { getBridge } from '../../../../../bridge';
+import { apiPost } from '../../../../../bridge/electron-bridge';
 import type { AnnotationTaskItem, FeatureItem } from '../types';
 
 const props = defineProps<{
@@ -15,14 +16,32 @@ const emit = defineEmits<{
   (e: 'download', fileType: string): void;
 }>();
 
-function openResultsFolder() {
+async function openResultsFolder() {
   const workDir = (props.task as any).work_dir;
-  if (workDir) {
-    const bridge = getBridge();
-    bridge.open_results_dir?.(workDir);
-  } else {
-    alert(`结果保存在: results/annotations/${props.task.task_id}`);
+  const taskId = props.task.task_id;
+
+  // 1. 如果有工作目录路径且处于 Electron 环境，直接通过原生 openPath 打开
+  if (workDir && window.electronAPI?.openPath) {
+    try {
+      await window.electronAPI.openPath(workDir);
+      return;
+    } catch (e) {
+      console.warn('[AnnotationResults] 原生 openPath 失败，切换后端唤起:', e);
+    }
   }
+
+  // 2. 兜底保障：通过后端 API 唤起 Windows 资源管理器并高亮定位
+  if (taskId) {
+    try {
+      const res = await apiPost(`/api/analysis/annotation/${taskId}/open-folder`);
+      if (res && res.success) return;
+    } catch (e) {
+      console.warn('[AnnotationResults] 后端打开目录失败:', e);
+    }
+  }
+
+  // 3. 终极兜底提示
+  alert(`结果目录位于: results/annotations/${taskId}`);
 }
 
 // 筛选与搜索状态

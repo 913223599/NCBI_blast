@@ -8,6 +8,7 @@ import { useRouter } from 'vue-router';
 import { getBridge } from '../../../../bridge';
 import { useAppStore } from '../../../../stores/app';
 import { useBlastStore } from '../../../../stores/blast';
+import { resolveApiUrl } from '../../../../utils/fileDownloader';
 import type { SampleDeconvResult, BatchAnalysisResponse } from './types';
 import TraceChromatogramViewer from './components/TraceChromatogramViewer.vue';
 import DeconvResultsTable from './components/DeconvResultsTable.vue';
@@ -158,7 +159,7 @@ async function uploadFiles(files: File[]) {
       formData.append('file', file);
       formData.append('trim_threshold', String(trimThreshold.value));
 
-      const res = await fetch('/api/sanger/trace/upload', {
+      const res = await fetch(resolveApiUrl('/api/sanger/trace/upload'), {
         method: 'POST',
         body: formData
       });

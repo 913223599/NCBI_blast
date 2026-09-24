@@ -18,6 +18,7 @@ declare global {
             openPath: (dirPath: string) => Promise<void>
             readFile: (filePath: string) => Promise<string | null>
             writeFile: (filePath: string, content: string) => Promise<boolean>
+            writeBinaryFile?: (filePath: string, base64Data: string) => Promise<boolean>
             getApiPort: () => Promise<number>
             getProjectRoot: () => Promise<string>
             getPathForFile: (file: File) => string

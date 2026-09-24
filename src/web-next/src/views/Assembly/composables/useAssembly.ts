@@ -3,6 +3,7 @@
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { onEvent, apiGet, apiPost, apiDelete, API_BASE } from '../../../bridge/electron-bridge';
+import { downloadFileFromUrl } from '../../../utils/fileDownloader';
 import type { 
   AssemblyRunParams, 
   AssemblyTaskItem, 
@@ -227,10 +228,10 @@ export function useAssembly() {
   }
 
   // 6. 下载 FASTA 产物
-  function downloadFasta(taskId: string) {
+  async function downloadFasta(taskId: string) {
     if (!taskId) return;
-    const downloadUrl = `${API_BASE}/api/assembly/download/${taskId}`;
-    window.open(downloadUrl, '_blank');
+    const downloadUrl = `/api/assembly/download/${taskId}`;
+    await downloadFileFromUrl(downloadUrl, `assembly_${taskId}.fasta`);
   }
 
   // 7. 在系统资源管理器中打开产物所在目录

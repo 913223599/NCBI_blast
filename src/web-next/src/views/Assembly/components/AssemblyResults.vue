@@ -4,6 +4,7 @@
  */
 import { ref, computed } from 'vue';
 import { API_BASE } from '../../../bridge/electron-bridge';
+import { downloadFileFromUrl, downloadFileFromText } from '../../../utils/fileDownloader';
 import type { AssemblyResultData, AssemblyTaskItem, ContigDetailItem } from '../types';
 
 const props = defineProps<{
@@ -115,28 +116,22 @@ function copyContig(c: ContigDetailItem) {
   }, 2000);
 }
 
-// 单独下载某个 Contig 的 FASTA 文件 (优先走后端 HTTP 流式下载，彻底杜绝 Electron Blob 异步空文件问题)
-function downloadContig(c: ContigDetailItem) {
+// 单独下载某个 Contig 的 FASTA 文件
+async function downloadContig(c: ContigDetailItem) {
   if (!c || !c.name) return;
   const taskId = props.task?.id || props.result?.task_id;
+  const filename = `${props.task.name || 'assembly'}_${c.name}.fasta`;
+
   if (taskId) {
-    const downloadUrl = `${API_BASE}/api/assembly/download/${taskId}/contig/${encodeURIComponent(c.name)}`;
-    window.open(downloadUrl, '_blank');
+    const downloadUrl = `/api/assembly/download/${taskId}/contig/${encodeURIComponent(c.name)}`;
+    await downloadFileFromUrl(downloadUrl, filename);
     return;
   }
-  // 兜底：若无 taskId 则纯前端 Blob 导出 (注意：延迟 60 秒 revoke，防止异步下载空文件)
+  // 兜底：若无 taskId 则纯前端导出
   const fastaText = c.sequence 
     ? `>${c.header || c.name}\n${c.sequence}\n`
     : `>${c.name} length=${c.length} gc=${c.gc_percent}%\n`;
-  const blob = new Blob([fastaText], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${props.task.name || 'assembly'}_${c.name}.fasta`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  await downloadFileFromText(fastaText, filename);
 }
 </script>
 

@@ -9,6 +9,7 @@
  */
 import { ref, onMounted, computed } from 'vue'
 import { getBridge } from '../../../../bridge'
+import { downloadFileFromUrl } from '../../../../utils/fileDownloader'
 import BatchSampleSelector, { type BatchSampleItem } from '../../../../components/common/BatchSampleSelector.vue'
 
 import WorkspacePopulationLandscape from './components/WorkspacePopulationLandscape.vue'
@@ -244,13 +245,11 @@ function handleCyclePair() {
 }
 
 // 导出同源基因家族矩阵 CSV
-function handleExportCsv() {
+async function handleExportCsv() {
   if (!analysisResult.value?.task_id) return
-  const apiBase =
-    typeof window !== 'undefined' && window.location.port !== '5173' && window.location.origin
-      ? window.location.origin
-      : 'http://127.0.0.1:8765'
-  window.open(`${apiBase}/api/analysis/pan_genomics/${analysisResult.value.task_id}/export/csv`)
+  const taskId = analysisResult.value.task_id
+  const downloadUrl = `/api/analysis/pan_genomics/${taskId}/export/csv`
+  await downloadFileFromUrl(downloadUrl, `pan_genomics_matrix_${taskId}.csv`)
 }
 
 onMounted(() => {

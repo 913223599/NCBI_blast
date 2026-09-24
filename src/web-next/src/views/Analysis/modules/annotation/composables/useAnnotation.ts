@@ -4,6 +4,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getBridge } from '../../../../../bridge';
 import { onEvent } from '../../../../../bridge/electron-bridge';
+import { useAppStore } from '../../../../../stores/app';
+import { downloadFileFromUrl } from '../../../../../utils/fileDownloader';
 import type { 
   AnnotationRunParams, 
   AnnotationTaskItem, 
@@ -207,14 +209,36 @@ export function useAnnotation() {
   }
 
   // 6. 下载产物文件
-  function downloadFile(taskId: string, fileType: string) {
-    const url = `/api/analysis/annotation/${taskId}/download/${fileType}`;
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${taskId}.${fileType}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  async function downloadFile(taskId: string, fileType: string) {
+    if (!taskId) return;
+    const appStore = useAppStore();
+    const ext = fileType.toLowerCase();
+    const typeNames: Record<string, string> = {
+      gbk: 'GenBank 产物 (.gbk)',
+      gff: 'GFF3 注释 (.gff)',
+      faa: '蛋白质 FASTA (.faa)',
+      ffn: '核酸基因 FASTA (.ffn)',
+      tsv: 'TSV 功能注释表 (.tsv)',
+      json: 'Summary 统计 (.json)'
+    };
+    const defaultFilename = `${taskId}.${ext}`;
+    const url = `/api/analysis/annotation/${taskId}/download/${ext}`;
+    
+    appStore.showNotification(`正在准备下载 ${typeNames[ext] || ext}...`, 'info');
+    try {
+      const result = await downloadFileFromUrl(url, defaultFilename);
+      if (result.success) {
+        if (result.savedPath) {
+          appStore.showNotification(`文件已成功保存至: ${result.savedPath}`, 'success');
+        } else {
+          appStore.showNotification(`文件已成功下载: ${defaultFilename}`, 'success');
+        }
+      } else if (!result.cancelled) {
+        appStore.showNotification(`下载失败: ${result.error || '未知错误'}`, 'error');
+      }
+    } catch (err: any) {
+      appStore.showNotification(`下载异常: ${err?.message || String(err)}`, 'error');
+    }
   }
 
   // 7. 注册 WebSocket 进度与队列事件监听

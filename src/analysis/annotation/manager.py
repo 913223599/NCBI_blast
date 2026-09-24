@@ -312,8 +312,58 @@ class AnnotationManager:
 
         return task
 
+    def _rebuild_ffn_if_needed(self, task_work_dir: Path) -> Optional[Path]:
+        """当历史任务未生成核酸 FASTA 或为 0 字节时，自动提取原序列补全"""
+        try:
+            from Bio import SeqIO
+            from Bio.Seq import Seq
+            
+            input_fasta = task_work_dir / "input_sequence.fasta"
+            features_json = task_work_dir / "features.json"
+            if not input_fasta.exists() or not features_json.exists():
+                return None
+
+            records = list(SeqIO.parse(str(input_fasta), "fasta"))
+            if not records:
+                return None
+            record_seq_map = {r.id: str(r.seq) for r in records if r.seq is not None}
+            default_seq = str(records[0].seq) if records[0].seq is not None else ""
+
+            with open(features_json, "r", encoding="utf-8") as f:
+                features_data = json.load(f)
+
+            target_ffn = task_work_dir / "ANNO.ffn"
+            written_count = 0
+            with open(target_ffn, "w", encoding="utf-8") as f:
+                for feat in features_data:
+                    nuc_seq = feat.get("nucleotide_seq")
+                    start = feat.get("start", 0)
+                    end = feat.get("end", 0)
+                    strand = feat.get("strand", "+")
+                    c_id = feat.get("contig_id", "")
+                    
+                    if not nuc_seq:
+                        parent_seq = record_seq_map.get(c_id, default_seq)
+                        if parent_seq and start > 0 and end <= len(parent_seq) and start <= end:
+                            extracted = parent_seq[start - 1 : end]
+                            if strand == "-":
+                                nuc_seq = str(Seq(extracted).reverse_complement())
+                            else:
+                                nuc_seq = extracted
+
+                    if nuc_seq:
+                        lt = feat.get("locus_tag") or feat.get("id") or "gene"
+                        prod = feat.get("product") or "hypothetical protein"
+                        f.write(f">{lt} {prod} [location={start}..{end}({strand})]\n{nuc_seq}\n")
+                        written_count += 1
+
+            return target_ffn if written_count > 0 else None
+        except Exception as e:
+            logger.warning(f"自动修复核酸 ffn 失败: {e}")
+            return None
+
     def get_task_file_path(self, task_id: str, file_type: str) -> Optional[Path]:
-        """获取指定任务的产物物理文件路径"""
+        """获取指定任务的产物物理文件路径，支持多级非空智能优选与自动补全"""
         task_work_dir = self.results_dir / task_id
         if not task_work_dir.exists():
             return None
@@ -328,9 +378,30 @@ class AnnotationManager:
             "json": "summary.json"
         }
         pattern = ext_map.get(file_type.lower(), f"*.{file_type.lower()}")
-        matches = list(task_work_dir.glob(pattern)) + list(task_work_dir.glob(f"*/{pattern}"))
-        if matches:
-            return matches[0]
+        
+        # 1. 优先查找根目录下非空文件
+        root_matches = [p for p in task_work_dir.glob(pattern) if p.is_file()]
+        non_empty_root = [p for p in root_matches if p.stat().st_size > 0]
+        if non_empty_root:
+            return non_empty_root[0]
+
+        # 2. 若根目录下为空或不存在，在子目录查找非空文件
+        sub_matches = [p for p in task_work_dir.glob(f"*/{pattern}") if p.is_file() and p.stat().st_size > 0]
+        if sub_matches:
+            return sub_matches[0]
+
+        # 3. 特殊针对 ffn 检查点修复
+        if file_type.lower() == "ffn":
+            rebuilt = self._rebuild_ffn_if_needed(task_work_dir)
+            if rebuilt and rebuilt.exists() and rebuilt.stat().st_size > 0:
+                return rebuilt
+
+        # 4. 兜底回退
+        if root_matches:
+            return root_matches[0]
+        all_matches = list(task_work_dir.glob(pattern)) + list(task_work_dir.glob(f"*/{pattern}"))
+        if all_matches:
+            return all_matches[0]
         return None
 
     def delete_task(self, task_id: str) -> bool:

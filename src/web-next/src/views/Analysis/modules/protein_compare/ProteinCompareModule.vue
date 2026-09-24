@@ -5,6 +5,7 @@
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getBridge } from '../../../../bridge';
+import { downloadFileFromBlob, resolveApiUrl } from '../../../../utils/fileDownloader';
 import SearchableSampleSelect, { type SampleOption } from '../../../../components/common/SearchableSampleSelect.vue';
 import type { 
   ComparableTaskItem, 
@@ -267,8 +268,8 @@ const totalPages = computed(() => {
 async function exportCsvReport() {
   if (!comparisonResult.value || !sampleAId.value || !sampleBId.value) return;
   try {
-    const url = `/api/analysis/protein_compare/export_csv`;
-    const resp = await fetch(url, {
+    const fullUrl = resolveApiUrl('/api/analysis/protein_compare/export_csv');
+    const resp = await fetch(fullUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -280,17 +281,14 @@ async function exportCsvReport() {
       })
     });
 
-    if (!resp.ok) throw new Error('导出下载失败');
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      throw new Error(`导出失败 (HTTP ${resp.status}): ${errText}`);
+    }
 
     const blob = await resp.blob();
-    const blobUrl = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = blobUrl;
-    link.download = `Protein_Comparison_${sampleAId.value}_${sampleBId.value}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(blobUrl);
+    const filename = `Protein_Comparison_${sampleAId.value}_${sampleBId.value}.csv`;
+    await downloadFileFromBlob(blob, filename);
   } catch (err: any) {
     alert(`导出 CSV 失败: ${err.message}`);
   }

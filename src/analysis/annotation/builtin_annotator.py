@@ -433,10 +433,24 @@ class BuiltinAnnotator:
                     f.write(f">{feat.locus_tag} {feat.product} [len={feat.protein_length_aa}aa, MW={feat.molecular_weight_kda}kDa, engine={feat.source_engine or 'Auto'}]\n{feat.translation}\n")
 
         # 4. 保存核酸基因 FASTA (.ffn)
+        record_seq_map = {r.id: str(r.seq) for r in records if r.seq is not None}
+        default_seq = str(records[0].seq) if (records and records[0].seq is not None) else ""
+        
         with open(ffn_file, "w", encoding="utf-8") as f:
             for feat in all_features:
-                if feat.nucleotide_seq:
-                    f.write(f">{feat.locus_tag} {feat.product} [location={feat.start}..{feat.end}({feat.strand})]\n{feat.nucleotide_seq}\n")
+                nuc_seq = feat.nucleotide_seq
+                if not nuc_seq:
+                    parent_seq = record_seq_map.get(feat.contig_id or "", default_seq)
+                    if parent_seq and feat.start > 0 and feat.end <= len(parent_seq) and feat.start <= feat.end:
+                        extracted = parent_seq[feat.start - 1 : feat.end]
+                        if feat.strand == "-":
+                            nuc_seq = str(Seq(extracted).reverse_complement())
+                        else:
+                            nuc_seq = extracted
+                        feat.nucleotide_seq = nuc_seq
+
+                if nuc_seq:
+                    f.write(f">{feat.locus_tag} {feat.product} [location={feat.start}..{feat.end}({feat.strand})]\n{nuc_seq}\n")
 
         # 5. 保存详细 TSV 表格
         with open(tsv_file, "w", encoding="utf-8") as f:

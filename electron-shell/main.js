@@ -170,6 +170,26 @@ function createWindow() {
             console.error(`[Electron] 加载前端 URL 失败: ${err.message}`);
         });
 
+        // 拦截所有新窗口创建请求（例如 window.open），防止出现白屏空白子窗口
+        mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+            if (url.startsWith('http:') || url.startsWith('https:')) {
+                shell.openExternal(url);
+            }
+            return { action: 'deny' };
+        });
+
+        // 监听下载事件（兜底保障）
+        mainWindow.webContents.session.on('will-download', (_event, item, _webContents) => {
+            console.log(`[Electron] 触发原生下载: ${item.getFilename()} (${item.getURL()})`);
+            item.once('done', (_e, state) => {
+                if (state === 'completed') {
+                    console.log(`[Electron] 下载成功: ${item.getSavePath()}`);
+                } else {
+                    console.warn(`[Electron] 下载未完成状态: ${state}`);
+                }
+            });
+        });
+
         mainWindow.once('ready-to-show', () => {
             mainWindow.show();
             console.log('[Electron] 窗口已显示');
@@ -228,6 +248,18 @@ ipcMain.handle('fs:readFile', async (_event, filePath) => {
 ipcMain.handle('fs:writeFile', async (_event, filePath, content) => {
     const fs = require('fs');
     try { fs.writeFileSync(filePath, content, 'utf-8'); return true; } catch { return false; }
+});
+
+ipcMain.handle('fs:writeBinaryFile', async (_event, filePath, base64Data) => {
+    const fs = require('fs');
+    try {
+        const buffer = Buffer.from(base64Data, 'base64');
+        fs.writeFileSync(filePath, buffer);
+        return true;
+    } catch (err) {
+        console.error('[Electron] 写入二进制文件失败:', err);
+        return false;
+    }
 });
 
 ipcMain.handle('app:getApiPort', () => API_PORT);

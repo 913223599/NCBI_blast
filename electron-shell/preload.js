@@ -39,8 +39,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     /** 读取文件内容 */
     readFile: (filePath) => ipcRenderer.invoke('fs:readFile', filePath),
 
-    /** 写入文件 */
+    /** 写入文件 (文本) */
     writeFile: (filePath, content) => ipcRenderer.invoke('fs:writeFile', filePath, content),
+
+    /** 写入二进制文件 (Base64) */
+    writeBinaryFile: (filePath, base64Data) => ipcRenderer.invoke('fs:writeBinaryFile', filePath, base64Data),
 
     // ─── 应用信息 ────────────────────────────────
     /** 获取 Python API 端口号 */

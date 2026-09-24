@@ -116,3 +116,29 @@ async def delete_annotation_task(task_id: str):
     manager = get_annotation_manager()
     success = manager.delete_task(task_id)
     return {"success": success, "message": "任务已彻底删除" if success else "删除失败"}
+
+
+@router.post("/{task_id}/open-folder")
+async def open_annotation_folder(task_id: str):
+    """在系统资源管理器中打开并高亮定位注释结果目录"""
+    import subprocess
+    manager = get_annotation_manager()
+    task_dir = manager.results_dir / task_id
+    if not task_dir.exists():
+        raise HTTPException(status_code=404, detail=f"注释结果目录不存在: {task_id}")
+
+    try:
+        gbk_file = task_dir / f"{task_id}.gbk"
+        if not gbk_file.exists():
+            gbk_candidates = list(task_dir.glob("*.gbk"))
+            if gbk_candidates:
+                gbk_file = gbk_candidates[0]
+        
+        if gbk_file.exists():
+            subprocess.Popen(f'explorer /select,"{str(gbk_file.resolve())}"', shell=True)
+        else:
+            subprocess.Popen(f'explorer "{str(task_dir.resolve())}"', shell=True)
+        return {"success": True, "message": "已在系统资源管理器中定位产物", "path": str(task_dir.resolve())}
+    except Exception as e:
+        logger.warning(f"打开资源管理器失败: {e}")
+        return {"success": False, "error": str(e)}
