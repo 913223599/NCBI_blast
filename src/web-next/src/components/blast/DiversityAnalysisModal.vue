@@ -440,6 +440,11 @@ async function fetchResults() {
       results.value = res
       isRunning.value = false
       generateConsecutiveGroups(4)
+      if (res.taxa_translations && Object.keys(res.taxa_translations).length > 0) {
+        translations.value = { ...translations.value, ...res.taxa_translations }
+      } else {
+        translateAllTaxa()
+      }
     } else {
       const errMsg = res?.error || res?.detail || '未获取到样本数据'
       appStore.showNotification(`载入分析报告失败: ${errMsg}`, 'error')
@@ -787,12 +792,151 @@ function hideTooltip() {
   tooltip.value.visible = false
 }
 
-/** 导出 Excel 报告 */
-function exportExcel() {
-  if (!taskId.value) return
-  const url = `${API_BASE}/api/diversity/export_excel/${taskId.value}`
-  window.open(url, '_blank')
+/** 权威物种词条中文翻译管理 (与原版 BLAST 一致) */
+const translations = ref<Record<string, string>>({})
+const isTranslating = ref(false)
+
+async function translateAllTaxa() {
+  if (!results.value || !results.value.taxa_overview) return
+  const taxaList = results.value.taxa_overview.map((t: any) => t.taxon).filter(Boolean)
+  if (taxaList.length === 0) return
+  if (isTranslating.value) return
+
+  isTranslating.value = true
+  appStore.showNotification(`正在翻译 ${taxaList.length} 种物种拉丁名为规范中文译名...`, 'info')
+
+  try {
+    const res = await apiPost('/api/diversity/translate', { taxa: taxaList })
+    if (res && res.translations) {
+      translations.value = { ...translations.value, ...res.translations }
+      appStore.showNotification('物种词条翻译完成', 'success')
+    }
+  } catch (e: any) {
+    console.error('Batch translation error:', e)
+    appStore.showNotification('词条翻译请求异常', 'error')
+  } finally {
+    isTranslating.value = false
+  }
 }
+
+function getTaxonZh(taxon: string): string {
+  if (!taxon) return ''
+  const lower = taxon.toLowerCase()
+  if (lower.startsWith('other') || lower.includes('噪声') || lower.includes('低频')) {
+    return '低频测序噪声'
+  }
+  return translations.value[taxon] || ''
+}
+
+/** 导出全量科研级 Excel 报告 (100% 还原界面显示并丰富生信矩阵) */
+async function exportExcel() {
+  if (!taskId.value) return
+  try {
+    appStore.showNotification('正在生成多工作表科研级 Excel 报告（还原界面卡片、分组及丰度矩阵）...', 'info')
+    const payload = {
+      groups: activeGroups.value.map(g => ({
+        name: g.name,
+        pattern: g.pattern,
+        matchedSamples: g.matchedSamples
+      })),
+      translations: translations.value
+    }
+
+    const resp = await fetch(`${API_BASE}/api/diversity/export_excel/${taskId.value}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`)
+    }
+
+    const blob = await resp.blob()
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = downloadUrl
+    a.download = `16S_多样性综合分析报告_${taskId.value}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    window.URL.revokeObjectURL(downloadUrl)
+    appStore.showNotification('Excel 综合分析报告已成功导出', 'success')
+  } catch (e: any) {
+    console.warn('POST 导出失败，尝试 GET 回退下载:', e)
+    const fallbackUrl = `${API_BASE}/api/diversity/export_excel/${taskId.value}`
+    window.open(fallbackUrl, '_blank')
+  }
+}
+
+/** 明细大表增强控制 */
+const detailSearchQuery = ref('')
+const detailViewMode = ref<'cards' | 'table'>('cards')
+const collapsedSampleKeys = ref<Set<string>>(new Set())
+
+/** 格式化百分比数值，统一保留 2 位小数，彻底消除多位浮点视觉杂音 */
+function formatPct(val: any): string {
+  if (val === null || val === undefined || isNaN(Number(val))) return '0.00'
+  const num = Number(val)
+  if (num === 0) return '0.00'
+  if (num > 0 && num < 0.01) return '<0.01'
+  return num.toFixed(2)
+}
+
+/** 判断是否为低频测序噪声或 Other 行 */
+function isNoiseTaxon(taxon: string): boolean {
+  if (!taxon) return false
+  const lower = taxon.toLowerCase()
+  return lower.startsWith('other') || lower.includes('噪声') || lower.includes('低频')
+}
+
+/** 切换单个样本折叠状态 */
+function toggleSampleCollapse(sampleName: string) {
+  if (collapsedSampleKeys.value.has(sampleName)) {
+    collapsedSampleKeys.value.delete(sampleName)
+  } else {
+    collapsedSampleKeys.value.add(sampleName)
+  }
+}
+
+/** 一键展开全部样本 */
+function expandAllSamples() {
+  collapsedSampleKeys.value.clear()
+}
+
+/** 一键收起全部样本 */
+function collapseAllSamples() {
+  const allNames = activeSamples.value.map((s: any) => s.sample_name)
+  collapsedSampleKeys.value = new Set(allNames)
+}
+
+function isSampleCollapsed(sampleName: string): boolean {
+  return collapsedSampleKeys.value.has(sampleName)
+}
+
+/** 获取样本的主导优势菌 */
+function getDominantTaxon(s: any): { taxon: string; pct: number } | null {
+  const details = s.norm_result?.details || []
+  if (details.length === 0) return null
+  const valid = details.filter((d: any) => !isNoiseTaxon(d.taxon))
+  if (valid.length === 0) return null
+  const top = valid[0]
+  const pct = abundanceMode.value === 'norm' ? (top.norm_pct || 0) : (top.raw_pct || 0)
+  return { taxon: top.taxon, pct: Number(pct) }
+}
+
+/** 明细表多维搜索过滤：支持点位名称、合并组名称、成员点位或特定物种 */
+const filteredActiveSamples = computed(() => {
+  const q = detailSearchQuery.value.trim().toLowerCase()
+  if (!q) return activeSamples.value
+  return activeSamples.value.filter((s: any) => {
+    if (s.sample_name && s.sample_name.toLowerCase().includes(q)) return true
+    if (s.member_samples && s.member_samples.some((m: string) => m.toLowerCase().includes(q))) return true
+    const details = s.norm_result?.details || []
+    if (details.some((d: any) => d.taxon && d.taxon.toLowerCase().includes(q))) return true
+    return false
+  })
+})
 
 onUnmounted(() => {
   stopPolling()
@@ -837,6 +981,20 @@ onUnmounted(() => {
             <span>历史分析 ({{ historyTasks.length }})</span>
           </button>
 
+          <!-- 词条翻译按钮 (和原版 BLAST 一致) -->
+          <button 
+            v-if="results && !isRunning" 
+            class="btn-tool-neo" 
+            :class="{ 'is-loading': isTranslating }" 
+            @click="translateAllTaxa" 
+            title="一键将检出物种拉丁学名翻译为中文规范译名"
+          >
+            <svg class="btn-icon-svg" :class="{ 'spin-anim': isTranslating }" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/>
+            </svg>
+            <span>{{ isTranslating ? '正在翻译...' : '词条翻译' }}</span>
+          </button>
+
           <button v-if="results" class="btn-export-neo" @click="exportExcel">
             <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -844,14 +1002,8 @@ onUnmounted(() => {
             <span>导出 Excel 报告</span>
           </button>
 
-          <!-- 视图模式操作: 内嵌模式下提供切回单株结果按钮，浮窗模式下提供关闭✕按钮 -->
-          <button v-if="embedded" class="btn-switch-isolate" @click="emit('switchToIsolate')" title="切换到单株鉴定结果页面">
-            <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 15l-3-3m0 0l3-3m-3 3h8M3 12a9 9 0 1118 0 9 9 0 01-18 0z"/>
-            </svg>
-            <span>单株结果</span>
-          </button>
-          <button v-else class="btn-close-neo" @click="close">✕</button>
+          <!-- 浮窗模式下提供关闭✕按钮 -->
+          <button v-if="!embedded" class="btn-close-neo" @click="close">✕</button>
         </div>
       </div>
 
@@ -967,25 +1119,27 @@ onUnmounted(() => {
       <div v-if="results" class="results-dashboard-neo">
         <!-- 统计核心条目与样本合并控制栏 -->
         <div class="stats-overview-bar">
-          <div class="stat-pill">
-            <span class="label">{{ isGroupView ? '当前展示:' : '样本总数:' }}</span>
-            <span class="val">{{ activeSamples.length }} {{ isGroupView ? '个分组/独立样本' : '个采样点位' }}</span>
-          </div>
-          <div class="stat-pill" v-if="isGroupView">
-            <span class="label">覆盖点位:</span>
-            <span class="val">{{ results?.total_samples || 0 }} 个原始测序点</span>
-          </div>
-          <div class="stat-pill">
-            <span class="label">有效 Reads:</span>
-            <span class="val">{{ (results?.total_classified_reads ?? results?.total_reads ?? 0).toLocaleString() }} 条</span>
-          </div>
-          <div class="stat-pill">
-            <span class="label">检出物种:</span>
-            <span class="val">{{ results?.taxa_overview?.length || 0 }} 种</span>
-          </div>
-          <div class="stat-pill pill-rrndb">
-            <span class="label">校正状态:</span>
-            <span class="val">rrnDB v5.10 已归一化</span>
+          <div class="stat-pill-group">
+            <div class="stat-pill stat-pill-primary">
+              <span class="label">{{ isGroupView ? '当前展示分组:' : '测序点位数:' }}</span>
+              <span class="val">{{ activeSamples.length }} {{ isGroupView ? '个聚合组' : '个采样点' }}</span>
+              <span v-if="isGroupView" class="sub-label">(覆盖 {{ results?.total_samples || 0 }} 个测序点)</span>
+            </div>
+            <div class="stat-pill">
+              <span class="label">有效 Reads:</span>
+              <span class="val">{{ (results?.total_classified_reads ?? results?.total_reads ?? 0).toLocaleString() }} 条</span>
+            </div>
+            <div class="stat-pill">
+              <span class="label">确证菌种:</span>
+              <span class="val">{{ results?.taxa_overview?.length || 0 }} 种</span>
+            </div>
+            <div class="stat-pill pill-rrndb" title="基于 rrnDB v5.10 消除 16S 多拷贝菌株的丰度假阳性放大，还原真实细胞丰度">
+              <svg class="pill-shield-svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clip-rule="evenodd"/>
+              </svg>
+              <span class="label">校正状态:</span>
+              <span class="val">rrnDB v5.10 已归一化</span>
+            </div>
           </div>
 
           <!-- 样本合并与分组控制区 -->
@@ -999,7 +1153,8 @@ onUnmounted(() => {
               <svg class="group-svg" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
               </svg>
-              <span>{{ isGroupView ? '合并样本视图 (已启用)' : '合并样本点位' }}</span>
+              <span>{{ isGroupView ? '分组聚合模式 (已启用)' : '合并样本点位' }}</span>
+              <span v-if="isGroupView" class="btn-group-counter">{{ activeSamples.length }} 组</span>
             </button>
             <button 
               class="group-config-btn" 
@@ -1019,7 +1174,7 @@ onUnmounted(() => {
               class="toggle-btn" 
               :class="{ active: abundanceMode === 'norm' }"
               @click="abundanceMode = 'norm'"
-              title="消除 16S 基因拷贝数偏好，真实还原微生物细胞丰度"
+              title="消除 16S 基因拷贝数偏好，真实还原微生物细胞相对丰度"
             >
               rrnDB 拷贝数归一化丰度
             </button>
@@ -1027,7 +1182,7 @@ onUnmounted(() => {
               class="toggle-btn" 
               :class="{ active: abundanceMode === 'raw' }"
               @click="abundanceMode = 'raw'"
-              title="原始测序下机 Reads 计数比例"
+              title="原始测序下机 Reads 物理计数占比"
             >
               原始 Reads 占比
             </button>
@@ -1080,6 +1235,14 @@ onUnmounted(() => {
                 <span class="dot" style="background: #94a3b8"></span>
                 <span class="text">其他 (Others)</span>
               </div>
+            </div>
+
+            <!-- 图表解读辅助提示 -->
+            <div class="chart-guide-tip">
+              <span class="guide-tag">图表说明</span>
+              <span class="guide-txt">
+                每个柱状条代表独立测序点位或合并组的 100% 相对丰度构成。图例圆点颜色与明细表物种颜色严格联动。
+              </span>
             </div>
 
             <!-- SVG 堆叠柱状图 -->
@@ -1194,6 +1357,7 @@ onUnmounted(() => {
                   <td>
                     <div class="taxon-name-wrap">
                       <span class="taxon-latin-name">{{ t.taxon }}</span>
+                      <span v-if="getTaxonZh(t.taxon)" class="taxon-zh-badge">{{ getTaxonZh(t.taxon) }}</span>
                       <span class="top-tag" v-if="Number(idx) === 0">绝对优势种</span>
                       <span class="top-sub-tag" v-else-if="Number(idx) < 3">主要优势种</span>
                     </div>
@@ -1230,13 +1394,224 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- TAB 3: 样本 / 分组明细大表 (数据源切换为 activeSamples) -->
+        <!-- TAB 3: 样本 / 分组明细大表 (带防混分块卡片、微型丰度条、物种颜色关联与精准格式化) -->
         <div v-show="activeTab === 'matrix'" class="tab-content-neo scroll-y">
-          <div class="matrix-card">
-            <table class="neo-data-table">
+          <!-- 明细表专属多功能工具栏 -->
+          <div class="matrix-toolbar-card">
+            <div class="matrix-toolbar-left">
+              <!-- 样本/物种搜索框 -->
+              <div class="matrix-search-box">
+                <svg class="search-svg" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
+                </svg>
+                <input 
+                  type="text" 
+                  v-model="detailSearchQuery" 
+                  class="matrix-search-input"
+                  placeholder="快速定位点位 (如 -1)、分组名或特定菌种 (如 Vibrio)..."
+                />
+                <button v-if="detailSearchQuery" class="clear-search-btn" @click="detailSearchQuery = ''">✕</button>
+              </div>
+
+              <!-- 统计快照 -->
+              <div class="matrix-stat-hint">
+                <span>展示 <strong>{{ filteredActiveSamples.length }}</strong> / {{ activeSamples.length }} 个{{ isGroupView ? '样本组' : '采样点位' }}</span>
+                <span class="hint-sep">·</span>
+                <span class="hint-desc">{{ abundanceMode === 'norm' ? '当前指标: rrnDB 拷贝数校正后细胞相对丰度' : '当前指标: 原始测序 Reads 物理占比' }}</span>
+              </div>
+            </div>
+
+            <div class="matrix-toolbar-right">
+              <!-- 展开 / 折叠全部 (卡片模式下生效) -->
+              <div v-if="detailViewMode === 'cards'" class="card-expand-actions">
+                <button class="btn-ghost-action" @click="expandAllSamples" title="展开所有样本卡片">
+                  全部展开
+                </button>
+                <button class="btn-ghost-action" @click="collapseAllSamples" title="折叠所有样本卡片">
+                  全部折叠
+                </button>
+              </div>
+
+              <!-- 视图布局切换器 -->
+              <div class="detail-mode-segmented">
+                <button 
+                  class="segment-btn" 
+                  :class="{ active: detailViewMode === 'cards' }" 
+                  @click="detailViewMode = 'cards'"
+                  title="卡片分组视图：每个点位独立卡片容器，彻底防止串行看混（推荐）"
+                >
+                  <svg class="segment-svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
+                  </svg>
+                  <span>分组卡片 (推荐防混)</span>
+                </button>
+                <button 
+                  class="segment-btn" 
+                  :class="{ active: detailViewMode === 'table' }" 
+                  @click="detailViewMode = 'table'"
+                  title="连续大表视图：保留紧凑跨点位通览对比"
+                >
+                  <svg class="segment-svg" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/>
+                  </svg>
+                  <span>紧凑大表</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 模式 A: 卡片分组视图 (每个点位独立卡片，绝不会看混) -->
+          <div v-if="detailViewMode === 'cards'" class="sample-cards-list">
+            <div 
+              v-for="s in filteredActiveSamples" 
+              :key="s.sample_name" 
+              class="sample-card-item"
+              :class="{ 'is-collapsed': isSampleCollapsed(s.sample_name) }"
+            >
+              <!-- 卡片头部 (样本信息、统计胶囊、主要优势菌摘要、折叠箭头) -->
+              <div class="sample-card-header" @click="toggleSampleCollapse(s.sample_name)">
+                <div class="header-sample-identity">
+                  <div class="sample-badge-primary" :class="{ 'is-group': s.is_group }">
+                    <span class="badge-role">{{ s.is_group ? '合并组' : '采样点位' }}</span>
+                    <span class="badge-name mono">{{ s.sample_name }}</span>
+                  </div>
+                  <div v-if="s.is_group && s.member_samples" class="group-members-pill">
+                    <span class="pill-title">聚合点位 ({{ s.member_samples.length }}个):</span>
+                    <span v-for="m in s.member_samples.slice(0, 6)" :key="m" class="pill-chip">{{ m }}</span>
+                    <span v-if="s.member_samples.length > 6" class="pill-chip-more">...等 {{ s.member_samples.length }} 点</span>
+                  </div>
+                </div>
+
+                <!-- 样本指标胶囊 -->
+                <div class="header-meta-chips">
+                  <div class="meta-chip chip-reads">
+                    <span class="chip-k">有效 Reads:</span>
+                    <span class="chip-v mono">{{ (s.total_reads || 0).toLocaleString() }}</span>
+                  </div>
+                  <div class="meta-chip chip-taxa">
+                    <span class="chip-k">检出物种:</span>
+                    <span class="chip-v">{{ s.norm_result?.details?.length || 0 }} 种</span>
+                  </div>
+                  <div class="meta-chip chip-dominant" v-if="getDominantTaxon(s)">
+                    <span class="chip-k">主导优势菌:</span>
+                    <span class="dominant-dot" :style="{ background: getTaxonColor(getDominantTaxon(s)!.taxon) }"></span>
+                    <span class="chip-v italic">{{ getDominantTaxon(s)!.taxon }}</span>
+                    <span v-if="getTaxonZh(getDominantTaxon(s)!.taxon)" class="chip-zh-sub font-bold">({{ getTaxonZh(getDominantTaxon(s)!.taxon) }})</span>
+                    <span class="chip-pct">({{ formatPct(getDominantTaxon(s)!.pct) }}%)</span>
+                  </div>
+                </div>
+
+                <!-- 折叠/展开指示 -->
+                <div class="collapse-toggle-btn">
+                  <span class="toggle-txt">{{ isSampleCollapsed(s.sample_name) ? '展开明细' : '收起' }}</span>
+                  <svg 
+                    class="chevron-svg" 
+                    :class="{ 'rotated': isSampleCollapsed(s.sample_name) }" 
+                    viewBox="0 0 20 20" 
+                    fill="currentColor"
+                  >
+                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                  </svg>
+                </div>
+              </div>
+
+              <!-- 卡片表格明细 (可折叠) -->
+              <div v-show="!isSampleCollapsed(s.sample_name)" class="sample-card-body">
+                <table class="card-detail-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 34%;">检出物种名称</th>
+                      <th style="width: 13%;">Reads 计数</th>
+                      <th style="width: 13%;">原始占比 (%)</th>
+                      <th style="width: 15%;">16S 拷贝数 (GCN)</th>
+                      <th style="width: 25%;">rrnDB 校正后占比 (%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr 
+                      v-for="(d, idx) in s.norm_result?.details || []" 
+                      :key="d.taxon"
+                      :class="{ 'row-noise': isNoiseTaxon(d.taxon), 'row-dominant': idx === 0 && !isNoiseTaxon(d.taxon) && (d.norm_pct >= 30) }"
+                    >
+                      <!-- 物种名 -->
+                      <td>
+                        <div class="taxa-cell-flex">
+                          <span 
+                            class="taxa-color-dot" 
+                            :style="{ background: isNoiseTaxon(d.taxon) ? '#cbd5e1' : getTaxonColor(d.taxon) }"
+                          ></span>
+                          <span 
+                            class="taxa-name-txt" 
+                            :class="{ 'taxa-latin': !isNoiseTaxon(d.taxon), 'taxa-noise-txt': isNoiseTaxon(d.taxon) }"
+                          >
+                            {{ d.taxon }}
+                          </span>
+                          <span v-if="getTaxonZh(d.taxon)" class="taxa-zh-badge">
+                            {{ getTaxonZh(d.taxon) }}
+                          </span>
+                          <span 
+                            v-if="idx === 0 && !isNoiseTaxon(d.taxon) && (d.norm_pct >= 30)" 
+                            class="tag-dominant-star"
+                            title="该样本中丰度第一的主要优势菌群"
+                          >
+                            主要优势
+                          </span>
+                          <span 
+                            v-else-if="isNoiseTaxon(d.taxon)" 
+                            class="tag-noise-badge"
+                            title="丰度低于 1% 的极低频 Reads 过滤合并，排除测序假阳性"
+                          >
+                            噪声过滤合集
+                          </span>
+                        </div>
+                      </td>
+                      <!-- Reads 计数 -->
+                      <td class="mono font-semibold">{{ (d.raw_count || 0).toLocaleString() }}</td>
+                      <!-- 原始占比 -->
+                      <td class="mono text-muted">{{ formatPct(d.raw_pct) }}%</td>
+                      <!-- GCN 拷贝数 -->
+                      <td>
+                        <div class="gcn-cell-wrap">
+                          <span class="gcn-num mono"><strong>{{ d.gcn_mean }}</strong></span>
+                          <span class="badge-match-mini" :class="d.gcn_matched ? 'match-ok' : 'match-fallback'">
+                            {{ d.gcn_rank === 'species' ? '种级匹配' : (d.gcn_rank === 'genus' ? '属级回退' : '默认基准') }}
+                          </span>
+                        </div>
+                      </td>
+                      <!-- 校正后占比 (配备微型彩色丰度条与粗体数据) -->
+                      <td>
+                        <div class="norm-bar-cell">
+                          <div class="mini-bar-track">
+                            <div 
+                              class="mini-bar-fill" 
+                              :style="{ 
+                                width: `${Math.min(100, Math.max(Number(d.norm_pct || 0), 1.5))}%`, 
+                                background: isNoiseTaxon(d.taxon) ? '#94a3b8' : getTaxonColor(d.taxon) 
+                              }"
+                            ></div>
+                          </div>
+                          <span class="norm-pct-val mono">{{ formatPct(d.norm_pct) }}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- 空状态 -->
+            <div v-if="filteredActiveSamples.length === 0" class="empty-search-card">
+              <p>未找到匹配 "{{ detailSearchQuery }}" 的采样点位或物种</p>
+              <button class="btn-clear-filter" @click="detailSearchQuery = ''">清除搜索条件</button>
+            </div>
+          </div>
+
+          <!-- 模式 B: 紧凑全览大表 (加强分割线与斑马纹，百分比格式化与丰度条) -->
+          <div v-else class="matrix-card">
+            <table class="neo-data-table enhanced-matrix-table">
               <thead>
                 <tr>
-                  <th style="width: 220px;">样本 / 合并组名称</th>
+                  <th style="width: 220px;">样本 / 合并组</th>
                   <th>检出物种名称</th>
                   <th>Reads 计数</th>
                   <th>原始占比 (%)</th>
@@ -1246,36 +1621,90 @@ onUnmounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <template v-for="s in activeSamples" :key="s.sample_name">
-                  <tr v-for="(d, idx) in s.norm_result?.details || []" :key="d.taxon">
-                    <td v-if="idx === 0" :rowspan="s.norm_result?.details.length" class="align-top sample-col">
-                      <div class="sample-info-block">
-                        <div class="sample-title-row">
-                          <span class="mono font-bold">{{ s.sample_name }}</span>
-                          <span v-if="s.is_group" class="group-badge">合并组</span>
+                <template v-for="s in filteredActiveSamples" :key="s.sample_name">
+                  <tr 
+                    v-for="(d, idx) in s.norm_result?.details || []" 
+                    :key="d.taxon"
+                    :class="{ 
+                      'sample-start-row': idx === 0, 
+                      'row-noise': isNoiseTaxon(d.taxon),
+                      'row-dominant-subtle': idx === 0 && !isNoiseTaxon(d.taxon) && (d.norm_pct >= 30)
+                    }"
+                  >
+                    <!-- 样本合并跨行单元格 (卡片化背景) -->
+                    <td v-if="idx === 0" :rowspan="s.norm_result?.details.length" class="align-top sample-grouped-col">
+                      <div class="sample-info-block-neo">
+                        <div class="sample-title-badge" :class="{ 'is-group': s.is_group }">
+                          <span class="title-text mono">{{ s.sample_name }}</span>
+                          <span v-if="s.is_group" class="group-flag">合并组</span>
                         </div>
                         <div v-if="s.is_group && s.member_samples" class="member-samples-preview">
-                          <span class="preview-label">包含采样点位 ({{ s.member_samples.length }}个):</span>
+                          <span class="preview-label">包含点位 ({{ s.member_samples.length }}个):</span>
                           <div class="member-chips-inline">
-                            <span v-for="m in s.member_samples.slice(0, 8)" :key="m" class="sub-chip">{{ m }}</span>
-                            <span v-if="s.member_samples.length > 8" class="sub-chip-more">等 {{ s.member_samples.length }} 个</span>
+                            <span v-for="m in s.member_samples.slice(0, 6)" :key="m" class="sub-chip">{{ m }}</span>
+                            <span v-if="s.member_samples.length > 6" class="sub-chip-more">+{{ s.member_samples.length - 6 }}</span>
                           </div>
                         </div>
-                        <div class="sample-meta-row">
-                          <span>总 Reads: {{ (s.total_reads || 0).toLocaleString() }}</span>
+                        <div class="sample-meta-stat">
+                          <span class="stat-reads">总 Reads: <strong>{{ (s.total_reads || 0).toLocaleString() }}</strong></span>
+                          <span class="stat-taxa">检出物种: {{ s.norm_result?.details.length || 0 }} 种</span>
                         </div>
                       </div>
                     </td>
-                    <td class="italic font-medium">{{ d.taxon }}</td>
-                    <td class="mono">{{ d.raw_count }}</td>
-                    <td>{{ d.raw_pct }}%</td>
+
+                    <!-- 检出物种 -->
+                    <td>
+                      <div class="taxa-cell-flex">
+                        <span 
+                          class="taxa-color-dot" 
+                          :style="{ background: isNoiseTaxon(d.taxon) ? '#cbd5e1' : getTaxonColor(d.taxon) }"
+                        ></span>
+                        <span 
+                          class="taxa-name-txt" 
+                          :class="{ 'taxa-latin': !isNoiseTaxon(d.taxon), 'taxa-noise-txt': isNoiseTaxon(d.taxon) }"
+                        >
+                          {{ d.taxon }}
+                        </span>
+                        <span v-if="getTaxonZh(d.taxon)" class="taxa-zh-badge">
+                          {{ getTaxonZh(d.taxon) }}
+                        </span>
+                        <span 
+                          v-if="idx === 0 && !isNoiseTaxon(d.taxon) && (d.norm_pct >= 30)" 
+                          class="tag-dominant-star"
+                        >
+                          优势
+                        </span>
+                        <span 
+                          v-else-if="isNoiseTaxon(d.taxon)" 
+                          class="tag-noise-badge"
+                        >
+                          噪声
+                        </span>
+                      </div>
+                    </td>
+
+                    <td class="mono font-semibold">{{ (d.raw_count || 0).toLocaleString() }}</td>
+                    <td class="mono text-muted">{{ formatPct(d.raw_pct) }}%</td>
                     <td><strong>{{ d.gcn_mean }}</strong></td>
                     <td>
                       <span class="badge-match" :class="d.gcn_matched ? 'match-ok' : 'match-fallback'">
-                        {{ d.gcn_rank }}
+                        {{ d.gcn_rank === 'species' ? '种级' : (d.gcn_rank === 'genus' ? '属级' : '基准') }}
                       </span>
                     </td>
-                    <td><span class="norm-val">{{ d.norm_pct }}%</span></td>
+                    <td>
+                      <div class="norm-bar-cell">
+                        <div class="mini-bar-track">
+                          <div 
+                            class="mini-bar-fill" 
+                            :style="{ 
+                              width: `${Math.min(100, Math.max(Number(d.norm_pct || 0), 1.5))}%`, 
+                              background: isNoiseTaxon(d.taxon) ? '#94a3b8' : getTaxonColor(d.taxon) 
+                            }"
+                          ></div>
+                        </div>
+                        <span class="norm-pct-val mono font-bold">{{ formatPct(d.norm_pct) }}%</span>
+                      </div>
+                    </td>
                   </tr>
                 </template>
               </tbody>
@@ -1892,10 +2321,18 @@ onUnmounted(() => {
 .stats-overview-bar {
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: space-between;
+  gap: 16px;
   padding: 12px 24px;
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
+  flex-wrap: wrap;
+}
+.stat-pill-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .stat-pill {
   display: flex;
@@ -1906,11 +2343,69 @@ onUnmounted(() => {
   background: white;
   border: 1px solid #e2e8f0;
   font-size: 0.8rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
-.stat-pill .label { color: #64748b; }
-.stat-pill .val { font-weight: 700; color: #1e293b; }
-.pill-rrndb { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.stat-pill-primary {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+.stat-pill-primary .val {
+  color: #1d4ed8;
+}
+.stat-pill-primary .sub-label {
+  font-size: 0.72rem;
+  color: #3b82f6;
+  margin-left: 2px;
+}
+.stat-pill .label { color: #64748b; font-weight: 500; }
+.stat-pill .val { font-weight: 800; color: #1e293b; }
+.pill-rrndb { 
+  background: #f0fdf4; 
+  border-color: #bbf7d0; 
+  color: #166534; 
+}
 .pill-rrndb .val { color: #15803d; }
+.pill-shield-svg {
+  width: 14px;
+  height: 14px;
+  color: #16a34a;
+  flex-shrink: 0;
+}
+.btn-group-counter {
+  background: #2563eb;
+  color: white;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: 2px;
+}
+
+/* 图表解读辅助提示 */
+.chart-guide-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  font-size: 0.76rem;
+}
+.guide-tag {
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.guide-txt {
+  color: #64748b;
+  line-height: 1.4;
+}
 
 .abundance-mode-toggle {
   margin-left: auto;
@@ -2288,59 +2783,529 @@ onUnmounted(() => {
   color: #64748b;
 }
 
-/* 样本/分组明细大表强化 */
-.sample-col {
-  background: #fafafa;
-}
-.sample-info-block {
+/* 样本/分组明细大表全面强化 (防混卡片系统与微型丰度条) */
+.matrix-toolbar-card {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  flex-wrap: wrap;
 }
-.sample-title-row {
+.matrix-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.matrix-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 340px;
+}
+.matrix-search-input {
+  width: 100%;
+  padding: 7px 32px 7px 34px;
+  font-size: 0.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1e293b;
+  outline: none;
+  transition: all 0.2s;
+}
+.matrix-search-input:focus {
+  background: white;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+.matrix-stat-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  color: #64748b;
+}
+.matrix-stat-hint strong {
+  color: #0f172a;
+}
+.hint-sep {
+  color: #cbd5e1;
+}
+.hint-desc {
+  color: #059669;
+  font-weight: 500;
+}
+.matrix-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.card-expand-actions {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.group-badge {
-  background: #dbeafe;
-  color: #1e40af;
-  font-size: 0.68rem;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-weight: 700;
+.btn-ghost-action {
+  background: none;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 0.74rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
 }
-.member-samples-preview {
+.btn-ghost-action:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+.detail-mode-segmented {
+  display: flex;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 8px;
+  gap: 2px;
+}
+.segment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: none;
+  background: none;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.segment-btn.active {
+  background: white;
+  color: #2563eb;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.segment-svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+/* 模式 A: 样本分组独立卡片 (彻底防混) */
+.sample-cards-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  margin-top: 2px;
+  gap: 14px;
 }
-.preview-label {
-  font-size: 0.7rem;
-  color: #64748b;
-}
-.member-chips-inline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.sub-chip {
+.sample-card-item {
   background: white;
-  border: 1px solid #cbd5e1;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+}
+.sample-card-item:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.06);
+}
+.sample-card-header {
+  padding: 12px 18px;
+  background: #fafafa;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.sample-card-header:hover {
+  background: #f4f6f8;
+}
+.sample-card-item.is-collapsed .sample-card-header {
+  border-bottom: none;
+}
+.header-sample-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sample-badge-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #0f172a;
+  color: white;
+  padding: 4px 12px;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+.sample-badge-primary.is-group {
+  background: #1e40af;
+}
+.badge-role {
   font-size: 0.68rem;
+  opacity: 0.8;
+  font-weight: 500;
+}
+.badge-name {
+  font-size: 0.86rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+}
+.group-members-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+}
+.pill-title {
+  color: #3b82f6;
+  font-weight: 600;
+}
+.pill-chip {
+  background: white;
+  border: 1px solid #bfdbfe;
   padding: 1px 4px;
   border-radius: 3px;
-  color: #475569;
   font-family: monospace;
-}
-.sub-chip-more {
   font-size: 0.68rem;
-  color: #94a3b8;
+  color: #1e40af;
 }
-.sample-meta-row {
+.pill-chip-more {
+  color: #60a5fa;
+  font-size: 0.68rem;
+}
+.header-meta-chips {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.meta-chip .chip-k {
+  color: #64748b;
+}
+.meta-chip .chip-v {
+  font-weight: 700;
+  color: #0f172a;
+}
+.chip-dominant {
+  background: #fffbeb;
+  border-color: #fef3c7;
+}
+.chip-dominant .chip-k {
+  color: #b45309;
+}
+.dominant-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.chip-dominant .chip-v {
+  color: #92400e;
+}
+.chip-pct {
+  color: #b45309;
+  font-weight: 700;
+  font-family: monospace;
+  font-size: 0.72rem;
+}
+.collapse-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.74rem;
+  color: #64748b;
+  margin-left: auto;
+}
+.chevron-svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 0.2s ease;
+}
+.chevron-svg.rotated {
+  transform: rotate(-90deg);
+}
+
+/* 卡片内部明细表格 */
+.sample-card-body {
+  padding: 0;
+}
+.card-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.card-detail-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 8px 16px;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+}
+.card-detail-table td {
+  padding: 9px 16px;
+  font-size: 0.8rem;
+  color: #1e293b;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.card-detail-table tr:last-child td {
+  border-bottom: none;
+}
+.card-detail-table tr:hover td {
+  background: #f8fafc;
+}
+
+/* 物种与噪声视觉区分 */
+.taxa-cell-flex {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.taxa-color-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.taxa-name-txt {
+  font-size: 0.82rem;
+}
+.taxa-latin {
+  font-style: italic;
+  font-weight: 600;
+  color: #0f172a;
+}
+.taxa-noise-txt {
+  color: #64748b;
+  font-style: normal;
+}
+.taxon-zh-badge,
+.taxa-zh-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #1e40af;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-style: normal;
+  letter-spacing: 0.2px;
+}
+.chip-zh-sub {
+  color: #78350f;
+  font-size: 0.74rem;
+  margin-left: 2px;
+}
+.spin-anim {
+  animation: spin-kf 1s linear infinite;
+}
+@keyframes spin-kf {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.tag-dominant-star {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.tag-noise-badge {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+.row-noise td {
+  background: #fafafa !important;
+  color: #64748b !important;
+}
+.row-dominant td {
+  background: #fafcff;
+}
+
+/* 微型色彩丰度条 */
+.norm-bar-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mini-bar-track {
+  flex: 1;
+  max-width: 140px;
+  height: 7px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mini-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.norm-pct-val {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1d4ed8;
+  min-width: 52px;
+  text-align: right;
+}
+.gcn-cell-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gcn-num {
+  font-weight: 700;
+  color: #334155;
+  font-size: 0.82rem;
+}
+.badge-match-mini {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.badge-match-mini.match-ok {
+  background: #dcfce7;
+  color: #166534;
+}
+.badge-match-mini.match-fallback {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* 模式 B: 紧凑全览大表 (加强分割与斑马纹) */
+.enhanced-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.enhanced-matrix-table th {
+  background: #f8fafc;
+  padding: 10px 14px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #475569;
+  border-bottom: 2px solid #cbd5e1;
+  text-align: left;
+}
+.enhanced-matrix-table td {
+  padding: 9px 14px;
+  font-size: 0.8rem;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.sample-start-row td {
+  border-top: 2px solid #cbd5e1;
+}
+.sample-grouped-col {
+  background: #f8fafc !important;
+  border-right: 2px solid #e2e8f0 !important;
+}
+.sample-info-block-neo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sample-title-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #0f172a;
+  color: white;
+  padding: 3px 8px;
+  border-radius: 6px;
+  width: fit-content;
+}
+.sample-title-badge.is-group {
+  background: #1e40af;
+}
+.sample-title-badge .title-text {
+  font-weight: 800;
+  font-size: 0.8rem;
+}
+.sample-title-badge .group-flag {
+  font-size: 0.65rem;
+  background: #3b82f6;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.sample-meta-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   font-size: 0.72rem;
   color: #64748b;
+  margin-top: 2px;
+}
+.sample-meta-stat strong {
+  color: #0f172a;
+}
+.row-dominant-subtle td {
+  background: #fafcff;
+}
+
+/* 空状态卡片 */
+.empty-search-card {
+  padding: 40px;
+  text-align: center;
+  background: white;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+.btn-clear-filter {
+  margin-top: 10px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-clear-filter:hover {
+  background: #dbeafe;
 }
 
 /* 分组配置模态弹窗 */
