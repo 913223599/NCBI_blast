@@ -19,6 +19,7 @@ import BlastHistoryPanel from '../components/blast/BlastHistoryPanel.vue'
 import BlastResultsTable from '../components/blast/BlastResultsTable.vue'
 import BlastVisualModal from '../components/blast/BlastVisualModal.vue'
 import BlastDetailDialog from '../components/blast/BlastDetailDialog.vue'
+import DiversityAnalysisModal from '../components/blast/DiversityAnalysisModal.vue'
 
 const blast = useBlastStore()
 const appStore = useAppStore()
@@ -54,6 +55,15 @@ const visualLoading = ref(false)
 const visualSortMode = ref('evalue')
 const currentXmlPath = ref('')
 const currentVisQueryTitle = ref('')
+
+/* -------- 16S 扩增子混样多样性状态 -------- */
+const showDiversityModal = ref(false)
+const diversityInitialPath = ref<string>('')
+
+function openDiversityWithFile(path?: string) {
+  diversityInitialPath.value = path || (blast.files && blast.files.length > 0 ? (blast.files[0] || '') : '')
+  showDiversityModal.value = true
+}
 
 function showAlignmentMap(hit: any) {
   if (!hit.xmlFile) {
@@ -284,6 +294,11 @@ onUnmounted(() => {
           <span class="icon">🕐</span>
           <span class="label">{{ t('blast.nav.history') }}</span>
         </div>
+        <div class="tool-divider"></div>
+        <div class="tool-btn btn-diversity-nav" @click="openDiversityWithFile()">
+          <span class="icon">🧬</span>
+          <span class="label">16S 混样多样性与 rrnDB 归一化</span>
+        </div>
       </div>
       <div class="toolbar-actions">
         <button class="btn-primary-run" @click="launchBlast" :disabled="!blast.hasInput">
@@ -296,7 +311,10 @@ onUnmounted(() => {
       <!-- 动态侧边栏 -->
       <div class="blast-sidebar" :class="{ collapsed: !isSidebarOpen }">
         <div class="sidebar-content scroll-v">
-          <BlastInputPanel v-show="activeSideTool === 'input'" />
+          <BlastInputPanel 
+            v-show="activeSideTool === 'input'" 
+            @open-diversity-modal="openDiversityWithFile"
+          />
           
           <BlastParamsPanel 
             v-show="activeSideTool === 'params'" 
@@ -311,7 +329,7 @@ onUnmounted(() => {
           />
           
           <BlastHistoryPanel 
-            v-show="activeSideTool === 'history'"
+            v-show="activeSideTool === 'history'" 
             ref="historyPanelRef"
             :editing-task-id="editingTaskId"
             v-model:edit-name="editName"
@@ -356,6 +374,11 @@ onUnmounted(() => {
       :data="allHitsData"
       @close="detailViewer.closeDialog"
     />
+
+    <DiversityAnalysisModal 
+      v-model="showDiversityModal"
+      :initial-file-path="diversityInitialPath"
+    />
   </div>
 </template>
 
@@ -367,6 +390,17 @@ onUnmounted(() => {
 .tool-btn:hover { background: #f8fafc; color: #1e293b; }
 .tool-btn.active { color: #2563eb; background: #eff6ff; }
 .tool-btn .icon { font-size: 1.2rem; }
+.btn-diversity-nav {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  transition: all 0.2s;
+}
+.btn-diversity-nav:hover {
+  background: #dcfce7;
+  color: #15803d;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+}
 .tool-divider { width: 1px; height: 24px; background: #e2e8f0; margin: 0 10px; }
 .btn-primary-run { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; padding: 10px 24px; border-radius: 10px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; border: none; cursor: pointer; }
 .btn-primary-run:hover:not(:disabled) { transform: translateY(-1px); }
