@@ -57,12 +57,28 @@ const currentXmlPath = ref('')
 const currentVisQueryTitle = ref('')
 
 /* -------- 16S 扩增子混样多样性状态 -------- */
-const showDiversityModal = ref(false)
+const diversityPanelRef = ref<any>(null)
 const diversityInitialPath = ref<string>('')
+const activeDiversityTaskId = ref<string>('')
 
-function openDiversityWithFile(path?: string) {
+function openDiversityWithFile(path?: string, openHistory?: boolean) {
+  blast.setAnalysisTarget('diversity')
   diversityInitialPath.value = path || (blast.files && blast.files.length > 0 ? (blast.files[0] || '') : '')
-  showDiversityModal.value = true
+  if (openHistory) {
+    activeSideTool.value = 'history'
+    isSidebarOpen.value = true
+    historyPanelRef.value?.fetchDiversityTasks?.()
+  }
+}
+
+function handleSelectDiversityTask(task: any) {
+  activeDiversityTaskId.value = task.task_id
+  blast.setAnalysisTarget('diversity')
+  diversityPanelRef.value?.selectHistoryTask?.(task)
+}
+
+function handleDiversityTaskChanged(tid: string) {
+  activeDiversityTaskId.value = tid
 }
 
 function showAlignmentMap(hit: any) {
@@ -104,9 +120,13 @@ function fetchVisualData() {
 
 /* -------- BLAST 交互逻辑 -------- */
 function launchBlast(): void {
-  // 多样性鉴定模式下直接触发多样性看板与分析
+  // 多样性鉴定模式下直接触发右侧内嵌多样性分析
   if (blast.analysisTarget === 'diversity') {
-    openDiversityWithFile()
+    if (diversityPanelRef.value?.startAnalysis) {
+      diversityPanelRef.value.startAnalysis()
+    } else {
+      openDiversityWithFile()
+    }
     return
   }
 
@@ -345,6 +365,7 @@ onUnmounted(() => {
             v-show="activeSideTool === 'history'" 
             ref="historyPanelRef"
             :editing-task-id="editingTaskId"
+            :active-diversity-task-id="activeDiversityTaskId"
             v-model:edit-name="editName"
             @select-task="selectTask"
             @start-rename="startRename"
@@ -354,6 +375,9 @@ onUnmounted(() => {
             @stop-task="(id) => taskManager.stopTask(id)"
             @delete-task="(id) => taskManager.deleteTask(id)"
             @clear-history="() => taskManager.clearAllHistory()"
+            @select-diversity-task="handleSelectDiversityTask"
+            @delete-diversity-task="(id) => { if (activeDiversityTaskId === id) activeDiversityTaskId = '' }"
+            @clear-diversity-history="() => { activeDiversityTaskId = '' }"
           />
         </div>
         <div class="sidebar-collapse-toggle" @click="isSidebarOpen = !isSidebarOpen">
@@ -361,13 +385,23 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 结果主区域 -->
+      <!-- 结果主区域: 单株鉴定结果 vs 16S多样性分析结果 (内嵌无缝切换，不再单开浮窗) -->
       <BlastResultsTable 
+        v-if="blast.analysisTarget === 'isolate'"
         :is-translating="isTranslating"
         @view-all-hits="detailViewer.viewAllHits"
         @show-alignment-map="showAlignmentMap"
         @translate-all="translateAll"
         @export-results="exportResults"
+      />
+
+      <DiversityAnalysisModal 
+        v-else-if="blast.analysisTarget === 'diversity'"
+        ref="diversityPanelRef"
+        :embedded="true"
+        :initial-file-path="diversityInitialPath"
+        @switch-to-isolate="blast.setAnalysisTarget('isolate')"
+        @task-changed="handleDiversityTaskChanged"
       />
     </div>
 
@@ -386,11 +420,6 @@ onUnmounted(() => {
       :title="currentQueryTitle || ''"
       :data="allHitsData"
       @close="detailViewer.closeDialog"
-    />
-
-    <DiversityAnalysisModal 
-      v-model="showDiversityModal"
-      :initial-file-path="diversityInitialPath"
     />
   </div>
 </template>

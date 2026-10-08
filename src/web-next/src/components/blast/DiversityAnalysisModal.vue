@@ -9,13 +9,20 @@ import { useAppStore } from '../../stores/app'
 import { useStrainStore } from '../../stores/strain'
 import UniversalUpload from '../common/UniversalUpload.vue'
 
-const props = defineProps<{
-  modelValue: boolean
+const props = withDefaults(defineProps<{
+  modelValue?: boolean
   initialFilePath?: string
-}>()
+  embedded?: boolean
+}>(), {
+  modelValue: true,
+  embedded: false
+})
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void
+  (e: 'close'): void
+  (e: 'switchToIsolate'): void
+  (e: 'taskChanged', taskId: string): void
 }>()
 
 const appStore = useAppStore()
@@ -203,6 +210,7 @@ async function selectHistoryTask(task: any) {
   if (!task || !task.task_id) return
   taskId.value = task.task_id
   showHistoryDrawer.value = false
+  emit('taskChanged', task.task_id)
 
   if (task.status === 'completed') {
     isRunning.value = false
@@ -321,7 +329,18 @@ onUnmounted(() => {
 
 function close() {
   emit('update:modelValue', false)
+  emit('close')
 }
+
+defineExpose({
+  toggleHistoryDrawer,
+  startAnalysis,
+  resetToNewAnalysis,
+  selectHistoryTask,
+  fetchHistoryTasks,
+  taskId,
+  results
+})
 
 /** 智能检测压缩包 */
 async function detectPackage(filePath: string) {
@@ -781,8 +800,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="modelValue" class="modal-overlay" @click.self="close">
-    <div class="modal-container-neo">
+  <div 
+    v-if="embedded || modelValue" 
+    :class="[embedded ? 'diversity-embedded-container' : 'modal-overlay']" 
+    @click.self="!embedded && close()"
+  >
+    <div class="modal-container-neo" :class="{ 'is-embedded': embedded }">
       <!-- 头部 -->
       <div class="modal-header-neo">
         <div class="header-left">
@@ -820,7 +843,15 @@ onUnmounted(() => {
             </svg>
             <span>导出 Excel 报告</span>
           </button>
-          <button class="btn-close-neo" @click="close">✕</button>
+
+          <!-- 视图模式操作: 内嵌模式下提供切回单株结果按钮，浮窗模式下提供关闭✕按钮 -->
+          <button v-if="embedded" class="btn-switch-isolate" @click="emit('switchToIsolate')" title="切换到单株鉴定结果页面">
+            <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 15l-3-3m0 0l3-3m-3 3h8M3 12a9 9 0 1118 0 9 9 0 01-18 0z"/>
+            </svg>
+            <span>单株结果</span>
+          </button>
+          <button v-else class="btn-close-neo" @click="close">✕</button>
         </div>
       </div>
 
@@ -1513,6 +1544,45 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.diversity-embedded-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: white;
+  position: relative;
+}
+
+.modal-container-neo.is-embedded {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+  border: none;
+}
+
+.btn-switch-isolate {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: white;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-switch-isolate:hover {
+  background: #f1f5f9;
+  color: #1e293b;
+  border-color: #94a3b8;
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;

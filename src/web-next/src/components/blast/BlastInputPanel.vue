@@ -11,7 +11,7 @@ const appStore = useAppStore()
 const { t } = useI18n()
 
 const emit = defineEmits<{
-  (e: 'openDiversityModal', path?: string): void
+  (e: 'openDiversityModal', path?: string, openHistory?: boolean): void
 }>()
 
 const detectedZip = ref<string | null>(null)
@@ -174,7 +174,7 @@ function getDisplayName(fullPath: string) {
         </div>
 
         <button class="btn-open-diversity-board" @click="emit('openDiversityModal', detectedZip || undefined)">
-          <span>打开 16S 多样性还原看板</span>
+          <span>已载入，在右侧看板查看分析</span>
           <svg class="arrow-svg" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/>
           </svg>
@@ -182,8 +182,8 @@ function getDisplayName(fullPath: string) {
       </div>
 
       <div v-else class="empty-diversity-hint">
-        <button class="btn-open-diversity-board secondary" @click="emit('openDiversityModal')">
-          <span>查看历史多样性分析结果</span>
+        <button class="btn-open-diversity-board secondary" @click="emit('openDiversityModal', undefined, true)">
+          <span>在右侧看板查看历史多样性归档</span>
         </button>
       </div>
     </div>
