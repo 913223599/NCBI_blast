@@ -15,22 +15,24 @@ const emit = defineEmits<{
 }>()
 
 const detectedZip = ref<string | null>(null)
+const detectedPackageInfo = ref<any>(null)
 
 /**
- * 处理上传成功的路径
+ * 处理单株模式上传成功的路径
  */
 async function onUploadSuccess(filePaths: string[]) {
   const bridge = getBridge()
   appStore.showNotification(`正在处理 ${filePaths.length} 个导入项...`, 'info')
   
-  // 检查是否包含测序交付 ZIP 包
+  // 检查是否包含测序交付 ZIP 包，若是则自动提示可切换到多样性鉴定
   const zipFile = filePaths.find(p => p.toLowerCase().endsWith('.zip'))
   if (zipFile) {
     try {
       const detectRes = await apiPost('/api/diversity/detect_package', { file_path: zipFile })
       if (detectRes && detectRes.is_amplicon_package) {
         detectedZip.value = zipFile
-        appStore.showNotification(`检测到测序交付包 (包含 ${detectRes.fastq_count} 个样本)，可一键开启多样性还原与 rrnDB 归一化分析！`, 'info')
+        detectedPackageInfo.value = detectRes
+        appStore.showNotification(`检测到测序交付包 (包含 ${detectRes.fastq_count} 个样本)，可切换至“多样性鉴定”开启 rrnDB 校正！`, 'info')
       }
     } catch (e) {
       console.warn('Package detection error:', e)
@@ -43,6 +45,28 @@ async function onUploadSuccess(filePaths: string[]) {
     appStore.showNotification(`成功导入 ${res.paths.length} 个序列文件`, 'success')
   } else {
     blast.addFiles(filePaths)
+  }
+}
+
+/**
+ * 处理多样性模式上传成功的路径
+ */
+async function onDiversityUploadSuccess(filePaths: string[]) {
+  if (!filePaths || filePaths.length === 0) return
+  const path = filePaths[0]
+  if (!path) return
+  
+  detectedZip.value = path
+  try {
+    const detectRes = await apiPost('/api/diversity/detect_package', { file_path: path })
+    if (detectRes && detectRes.is_amplicon_package) {
+      detectedPackageInfo.value = detectRes
+      appStore.showNotification(`已识别测序交付包，包含 ${detectRes.fastq_count} 个样本`, 'success')
+    } else {
+      detectedPackageInfo.value = { file_name: path.split(/[/\\]/).pop(), fastq_count: '多' }
+    }
+  } catch (e) {
+    detectedPackageInfo.value = { file_name: path.split(/[/\\]/).pop(), fastq_count: '多' }
   }
 }
 
@@ -62,91 +86,152 @@ function getDisplayName(fullPath: string) {
 
 <template>
   <div class="panel-section">
-    <!-- 16S 扩增子混样多样性与 rrnDB 归一化入口 -->
-    <div class="diversity-banner-neo" @click="emit('openDiversityModal', detectedZip || undefined)">
-      <div class="banner-top">
-        <span class="banner-badge">生工 16S 专研</span>
-        <span class="banner-title">混样多样性与 rrnDB 校正</span>
-      </div>
-      <p class="banner-desc">直接解析测序压缩包底层 Reads，引入 rrnDB 消除多拷贝偏好，还原采样重复真实群落结构。</p>
-      <div class="banner-btn">
-        <span>{{ detectedZip ? '立即解析已识别的测序包 →' : '打开 16S 多样性还原看板 →' }}</span>
-      </div>
+    <!-- 单株鉴定 vs 多样性鉴定 模式切换开关 -->
+    <div class="analysis-mode-selector">
+      <button 
+        class="mode-switch-btn" 
+        :class="{ active: blast.analysisTarget === 'isolate' }" 
+        @click="blast.setAnalysisTarget('isolate')"
+      >
+        <svg class="mode-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <circle cx="12" cy="12" r="8" stroke-width="2"/>
+          <path d="M12 8v8M8 12h8" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>单株鉴定</span>
+      </button>
+      <button 
+        class="mode-switch-btn" 
+        :class="{ active: blast.analysisTarget === 'diversity' }" 
+        @click="blast.setAnalysisTarget('diversity')"
+      >
+        <svg class="mode-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d="M4 6c4 0 6 6 10 6s6-6 10-6M4 18c4 0 6-6 10-6s6 6 10 6" stroke-width="2" stroke-linecap="round"/>
+          <path d="M8 8.5v7M16 8.5v7" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>多样性鉴定</span>
+      </button>
     </div>
 
-    <h3 class="section-title">{{ t('blast.input.title') }}</h3>
-    <div class="mode-tabs-neo">
-      <button class="mode-tab" :class="{ active: blast.inputMode === 'file' }" @click="blast.switchInputMode('file')">{{ t('blast.input.file') }}</button>
-      <button class="mode-tab" :class="{ active: blast.inputMode === 'text' }" @click="blast.switchInputMode('text')">{{ t('blast.input.text') }}</button>
+    <!-- 模式 A: 单株菌株鉴定输入 -->
+    <div v-if="blast.analysisTarget === 'isolate'">
+      <h3 class="section-title">{{ t('blast.input.title') }}</h3>
+      <div class="mode-tabs-neo">
+        <button class="mode-tab" :class="{ active: blast.inputMode === 'file' }" @click="blast.switchInputMode('file')">{{ t('blast.input.file') }}</button>
+        <button class="mode-tab" :class="{ active: blast.inputMode === 'text' }" @click="blast.switchInputMode('text')">{{ t('blast.input.text') }}</button>
+      </div>
+      
+      <div v-if="blast.inputMode === 'file'" class="file-area">
+        <UniversalUpload 
+          type="fasta"
+          accept=".fasta,.fas,.fa,.fna,.seq,.ab1,.abi,.zip"
+          :label="t('blast.input.drop')"
+          @success="onUploadSuccess"
+        />
+        <div class="file-list-neo">
+           <div v-for="f in blast.files" :key="f" class="file-item-neo">
+             <span class="name" :title="f">{{ getDisplayName(f) }}</span>
+             <button class="del" @click="blast.removeFile(f)">✕</button>
+           </div>
+        </div>
+      </div>
+      <textarea v-else v-model="blast.queryText" class="neo-textarea" :placeholder="t('blast.input.text_placeholder')" />
     </div>
-    
-    <div v-if="blast.inputMode === 'file'" class="file-area">
-      <UniversalUpload 
-        type="fasta"
-        accept=".fasta,.fas,.fa,.fna,.seq,.ab1,.abi,.zip"
-        :label="t('blast.input.drop')"
-        @success="onUploadSuccess"
-      />
-      <div class="file-list-neo">
-         <div v-for="f in blast.files" :key="f" class="file-item-neo">
-           <span class="name" :title="f">{{ getDisplayName(f) }}</span>
-           <button class="del" @click="blast.removeFile(f)">✕</button>
-         </div>
+
+    <!-- 模式 B: 16S 混样多样性鉴定与 rrnDB 归一化输入 -->
+    <div v-else class="diversity-input-container">
+      <div class="diversity-header-box">
+        <div class="div-title-row">
+          <span class="div-badge">16S 混样专研</span>
+          <span class="div-rrndb-tag">rrnDB v5.10 拷贝数校正</span>
+        </div>
+        <p class="div-tip">专用于未分菌纯化样本、环境混样与多采样重复点位，直接分类单分子 Reads 并消除 16S 拷贝数偏差。</p>
+      </div>
+
+      <div class="diversity-upload-box">
+        <UniversalUpload 
+          type="fasta"
+          accept=".zip,.fastq,.fastq.gz,.fasta,.fa"
+          label="拖入生工测序交付压缩包 (ZIP) 或 FASTQ 读长"
+          @success="onDiversityUploadSuccess"
+        />
+      </div>
+
+      <!-- 已识别的测序包状态卡片 -->
+      <div v-if="detectedZip" class="package-status-card">
+        <div class="pkg-card-top">
+          <div class="pkg-status-badge">
+            <svg class="check-icon" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+            </svg>
+            <span>测序交付包已载入</span>
+          </div>
+        </div>
+        <div class="pkg-filename" :title="detectedZip">
+          {{ detectedPackageInfo?.file_name || getDisplayName(detectedZip) }}
+        </div>
+        <div class="pkg-meta-desc">
+          包含 <strong>{{ detectedPackageInfo?.fastq_count || '多' }} 个</strong> 独立采样点位的原始 Reads，采用多核并行与分片落盘保护。
+        </div>
+
+        <button class="btn-open-diversity-board" @click="emit('openDiversityModal', detectedZip || undefined)">
+          <span>打开 16S 多样性还原看板</span>
+          <svg class="arrow-svg" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+      </div>
+
+      <div v-else class="empty-diversity-hint">
+        <button class="btn-open-diversity-board secondary" @click="emit('openDiversityModal')">
+          <span>查看历史多样性分析结果</span>
+        </button>
       </div>
     </div>
-    <textarea v-else v-model="blast.queryText" class="neo-textarea" :placeholder="t('blast.input.text_placeholder')" />
   </div>
 </template>
 
 <style scoped>
-.diversity-banner-neo {
-  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
-  border: 1px solid #bfdbfe;
+.panel-section { margin-bottom: 24px; }
+
+/* 模式切换 Segmented Control */
+.analysis-mode-selector {
+  display: flex;
+  background: #f1f5f9;
+  padding: 4px;
   border-radius: 12px;
-  padding: 14px 16px;
-  margin-bottom: 18px;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.05);
+  margin-bottom: 20px;
+  border: 1px solid #e2e8f0;
 }
-.diversity-banner-neo:hover {
-  transform: translateY(-2px);
-  border-color: #3b82f6;
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.12);
-}
-.banner-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.banner-badge {
-  background: #2563eb;
-  color: white;
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 6px;
-}
-.banner-title {
-  font-size: 0.84rem;
-  font-weight: 700;
-  color: #1e3a8a;
-}
-.banner-desc {
-  font-size: 0.74rem;
-  color: #475569;
-  line-height: 1.4;
-  margin: 0 0 10px;
-}
-.banner-btn {
-  font-size: 0.76rem;
-  font-weight: 700;
-  color: #2563eb;
+.mode-switch-btn {
+  flex: 1;
   display: flex;
   align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 9px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.diversity-banner-neo:hover .banner-btn {
-  color: #1d4ed8;
-  text-decoration: underline;
+.mode-switch-btn:hover {
+  color: #1e293b;
+}
+.mode-switch-btn.active {
+  background: white;
+  color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+}
+.mode-icon-svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
-.panel-section { margin-bottom: 24px; }
 .section-title { font-size: 0.9rem; font-weight: 700; color: #1e293b; margin-bottom: 16px; }
 
 .mode-tabs-neo { display: flex; background: #f1f5f9; padding: 4px; border-radius: 10px; margin-bottom: 16px; }
@@ -154,11 +239,6 @@ function getDisplayName(fullPath: string) {
 .mode-tab.active { background: white; color: #2563eb; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
 
 .file-area { display: flex; flex-direction: column; gap: 12px; }
-
-.drop-zone-neo { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; background: #f8fafc; }
-.drop-zone-neo:hover { border-color: #2563eb; background: #f0f7ff; }
-.dz-icon { font-size: 1.5rem; color: #2563eb; }
-.dz-text { font-size: 0.75rem; color: #64748b; font-weight: 600; margin-top: 4px; display: block; }
 
 .file-list-neo { display: flex; flex-direction: column; gap: 6px; max-height: 600px; overflow-y: auto; padding-right: 4px; }
 .file-item-neo { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; flex-shrink: 0; min-height: 36px; }
@@ -168,4 +248,122 @@ function getDisplayName(fullPath: string) {
 
 .neo-textarea { width: 100%; height: 350px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 0.82rem; color: #334155; resize: none; outline: none; transition: all 0.2s; }
 .neo-textarea:focus { border-color: #2563eb; background: white; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+
+/* 多样性模式面板定制样式 */
+.diversity-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.diversity-header-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.div-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.div-badge {
+  background: #2563eb;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.div-rrndb-tag {
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.div-tip {
+  font-size: 0.74rem;
+  color: #64748b;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.diversity-upload-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.package-status-card {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pkg-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.check-icon {
+  width: 14px;
+  height: 14px;
+}
+.pkg-filename {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #1e3a8a;
+  word-break: break-all;
+}
+.pkg-meta-desc {
+  font-size: 0.74rem;
+  color: #475569;
+  line-height: 1.4;
+}
+
+.btn-open-diversity-board {
+  margin-top: 6px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 9px 14px;
+  border-radius: 9px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-open-diversity-board:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+.btn-open-diversity-board.secondary {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+.btn-open-diversity-board.secondary:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+.arrow-svg {
+  width: 14px;
+  height: 14px;
+}
 </style>

@@ -104,6 +104,12 @@ function fetchVisualData() {
 
 /* -------- BLAST 交互逻辑 -------- */
 function launchBlast(): void {
+  // 多样性鉴定模式下直接触发多样性看板与分析
+  if (blast.analysisTarget === 'diversity') {
+    openDiversityWithFile()
+    return
+  }
+
   if (!blast.hasInput) {
     appStore.showNotification('请先选择序列文件或粘贴序列', 'warning')
     return
@@ -281,28 +287,35 @@ onUnmounted(() => {
     <div class="blast-toolbar-top">
       <div class="tool-items">
         <div class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }" @click="toggleSideTool('input')">
-          <span class="icon">📁</span>
+          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+          </svg>
           <span class="label">{{ t('blast.nav.input') }}</span>
         </div>
         <div class="tool-divider"></div>
         <div class="tool-btn" :class="{ active: activeSideTool === 'params' && isSidebarOpen }" @click="toggleSideTool('params')">
-          <span class="icon">⚙️</span>
+          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="12" cy="12" r="3" stroke-width="2"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+          </svg>
           <span class="label">{{ t('blast.nav.params') }}</span>
         </div>
         <div class="tool-divider"></div>
         <div class="tool-btn" :class="{ active: activeSideTool === 'history' && isSidebarOpen }" @click="toggleSideTool('history')">
-          <span class="icon">🕐</span>
+          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle cx="12" cy="12" r="9" stroke-width="2"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 3"/>
+          </svg>
           <span class="label">{{ t('blast.nav.history') }}</span>
-        </div>
-        <div class="tool-divider"></div>
-        <div class="tool-btn btn-diversity-nav" @click="openDiversityWithFile()">
-          <span class="icon">🧬</span>
-          <span class="label">16S 混样多样性与 rrnDB 归一化</span>
         </div>
       </div>
       <div class="toolbar-actions">
-        <button class="btn-primary-run" @click="launchBlast" :disabled="!blast.hasInput">
-          {{ t('blast.btn.run') }}
+        <button 
+          class="btn-primary-run" 
+          @click="launchBlast" 
+          :disabled="blast.analysisTarget === 'isolate' && !blast.hasInput"
+        >
+          {{ blast.analysisTarget === 'diversity' ? '执行多样性比对' : t('blast.btn.run') }}
         </button>
       </div>
     </div>
@@ -386,21 +399,10 @@ onUnmounted(() => {
 .blast-workspace-container { display: flex; flex-direction: column; height: 100%; background: white; overflow: hidden; }
 .blast-toolbar-top { height: 60px; background: white; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 100; }
 .tool-items { display: flex; align-items: center; gap: 8px; }
-.tool-btn { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; border-radius: 10px; color: #64748b; font-weight: 600; font-size: 0.82rem; }
+.tool-btn { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; border-radius: 10px; color: #64748b; font-weight: 600; font-size: 0.82rem; transition: all 0.2s; }
 .tool-btn:hover { background: #f8fafc; color: #1e293b; }
 .tool-btn.active { color: #2563eb; background: #eff6ff; }
-.tool-btn .icon { font-size: 1.2rem; }
-.btn-diversity-nav {
-  background: #f0fdf4;
-  color: #166534;
-  border: 1px solid #bbf7d0;
-  transition: all 0.2s;
-}
-.btn-diversity-nav:hover {
-  background: #dcfce7;
-  color: #15803d;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
-}
+.tool-svg { width: 17px; height: 17px; stroke-width: 2; flex-shrink: 0; }
 .tool-divider { width: 1px; height: 24px; background: #e2e8f0; margin: 0 10px; }
 .btn-primary-run { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; padding: 10px 24px; border-radius: 10px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; border: none; cursor: pointer; }
 .btn-primary-run:hover:not(:disabled) { transform: translateY(-1px); }

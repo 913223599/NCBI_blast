@@ -173,6 +173,7 @@ class BlastExecutor:
                         self.local_executor.execute_local_blast(
                             tmp_in, tmp_out, 
                             max_hits=kwargs.get('hitlist_size', 50),
+                            program=program,
                             num_threads=threads
                         )
                         if os.path.exists(tmp_out):

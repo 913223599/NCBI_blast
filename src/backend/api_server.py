@@ -124,8 +124,8 @@ def log_resources(force=False):
         used_gb = vm.used / (1024 ** 3)
         total_gb = vm.total / (1024 ** 3)
         
-        # 按照用户截图格式输出
-        logger.info(f"📊 硬件监控 | CPU利用率: {sys_cpu:.1f}% | 内存利用率: {used_gb:.2f} GB / {total_gb:.2f} GB")
+        # 按照标准日志格式输出
+        logger.info(f"[Hardware] CPU利用率: {sys_cpu:.1f}% | 内存利用率: {used_gb:.2f} GB / {total_gb:.2f} GB")
     except Exception as e:
         logger.debug(f"资源监控失败: {e}")
 

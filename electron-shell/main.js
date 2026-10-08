@@ -31,7 +31,34 @@ let mainWindow = null;
 
 // ─── Python Sidecar 管理 ──────────────────────────
 
+function killPortProcess(port) {
+    if (process.platform === 'win32') {
+        try {
+            const { execSync } = require('child_process');
+            const cmd = `powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess"`;
+            const out = execSync(cmd).toString().trim();
+            if (out) {
+                const pids = [...new Set(out.split(/\r?\n/).map(p => p.trim()).filter(Boolean))];
+                for (const pid of pids) {
+                    if (pid && pid !== '0' && pid !== String(process.pid)) {
+                        console.log(`[Electron] 检测到残留孤儿进程 PID ${pid} 占用端口 ${port}，正在执行端口清理自愈...`);
+                        try {
+                            execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+                            console.log(`[Electron] 成功释放端口 ${port} (已终止进程 PID ${pid})`);
+                        } catch (e) {
+                            // 忽略单个杀进程失败
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[Electron] 检查端口占用提示:', e.message);
+        }
+    }
+}
+
 function startPythonSidecar() {
+    killPortProcess(API_PORT);
     console.log('[Electron] 启动 Python Sidecar...');
     console.log(`[Electron] Python: ${PYTHON_EXE}`);
     console.log(`[Electron] Script: ${API_SERVER_SCRIPT}`);

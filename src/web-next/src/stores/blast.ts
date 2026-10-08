@@ -64,6 +64,9 @@ export interface BlastHit {
 }
 
 export const useBlastStore = defineStore('blast', () => {
+    /* -------- 分析目标模式 (单株鉴定 vs 多样性鉴定) -------- */
+    const analysisTarget = ref<'isolate' | 'diversity'>('isolate')
+
     /* -------- 输入 -------- */
     const inputMode = ref<'file' | 'text'>('file')
     const files = ref<string[]>([])
@@ -78,7 +81,7 @@ export const useBlastStore = defineStore('blast', () => {
         matrix: 'BLOSUM62',
         gapOpen: 11,
         gapExtend: 1,
-        threads: 4,
+        threads: 12,
         filterLowComplexity: true
     })
 
@@ -102,6 +105,10 @@ export const useBlastStore = defineStore('blast', () => {
     })
 
     /* -------- 操作 -------- */
+    function setAnalysisTarget(target: 'isolate' | 'diversity'): void {
+        analysisTarget.value = target
+    }
+
     function switchInputMode(mode: 'file' | 'text'): void {
         inputMode.value = mode
     }
@@ -351,6 +358,7 @@ export const useBlastStore = defineStore('blast', () => {
     // 自动化同步已禁用
 
     return {
+        analysisTarget, setAnalysisTarget,
         inputMode, files, queryText,
         params,
         tasks, activeTaskId,

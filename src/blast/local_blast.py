@@ -78,9 +78,14 @@ class LocalBlastExecutor:
 
         # 动态计算多核并行线程数，适当保留CPU核心数防止卡死（规则7、规则8）
         import os
+        cpu_cnt = os.cpu_count() or 4
+        safe_available = max(2, cpu_cnt - 4)
         if num_threads is None or num_threads <= 0:
-            cpu_cnt = os.cpu_count() or 4
-            num_threads = max(1, cpu_cnt - 2)
+            # 单样本查询在 8~16 线程区间计算吞吐最高，规避单进程 OpenMP 锁自旋开销
+            num_threads = min(16, safe_available)
+        else:
+            # 若调用方传入了保守的旧默认值(如4)，在算力充裕时自适应提升至 12 核心加速区间
+            num_threads = min(safe_available, max(num_threads, min(12, safe_available)))
 
         # 构建BLAST命令行参数 (相对于 CWD)
         blast_cmd = [
@@ -94,7 +99,18 @@ class LocalBlastExecutor:
             "-num_threads", str(num_threads)
         ]
 
+        # 核酸单样本鉴定优先启用 megablast 超高速算法 (提速 5~10x)
+        prog_str = str(active_program).lower()
+        if "blastn" in prog_str or "megablast" in prog_str:
+            blast_cmd.extend(["-task", "megablast"])
+
         cmd_str = " ".join(blast_cmd)
+
+        # 优化调度优先级与 OpenMP 环境 (规则7、8)
+        env = os.environ.copy()
+        env["OMP_DYNAMIC"] = "FALSE"
+        env["OMP_WAIT_POLICY"] = "PASSIVE"
+        creationflags = 0x00008000 if os.name == "nt" else 0  # ABOVE_NORMAL_PRIORITY_CLASS
 
         try:
             print(f"[LocalBLAST] 执行本地多核比对 (线程: {num_threads}, CWD: {short_db_dir}): {cmd_str}")
@@ -107,7 +123,9 @@ class LocalBlastExecutor:
                     shell=True,
                     capture_output=True,
                     text=True,
-                    check=True
+                    check=True,
+                    env=env,
+                    creationflags=creationflags
                 )
             
             if not Path(output_file).exists():

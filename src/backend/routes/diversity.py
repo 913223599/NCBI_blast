@@ -67,6 +67,15 @@ async def run_diversity_task(req: DiversityRunRequest):
     return {"status": "started", "task_id": task_id}
 
 
+@router.get("/latest_task")
+async def get_latest_task():
+    """获取最近一次运行或已完成的多样性任务状态"""
+    task = get_diversity_engine().get_latest_task()
+    if not task:
+        return {"status": "none"}
+    return task
+
+
 @router.get("/status/{task_id}")
 async def get_task_status(task_id: str):
     """查询分析任务进度与 Checkpoint 状态"""
@@ -163,3 +172,27 @@ async def export_excel(task_id: str):
         filename=f"16S_Diversity_Report_{task_id}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+@router.get("/tasks")
+async def list_all_diversity_tasks():
+    """获取所有历史多样性分析任务列表"""
+    return get_diversity_engine().list_all_tasks()
+
+
+@router.delete("/task/{task_id}")
+async def delete_diversity_task(task_id: str):
+    """删除指定的多样性分析任务"""
+    success = get_diversity_engine().delete_task(task_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="删除任务失败")
+    return {"status": "deleted", "task_id": task_id}
+
+
+@router.delete("/tasks/clear")
+async def clear_all_diversity_tasks():
+    """清空所有历史多样性分析任务"""
+    success = get_diversity_engine().clear_all_tasks()
+    if not success:
+        raise HTTPException(status_code=500, detail="清空任务失败")
+    return {"status": "cleared"}
