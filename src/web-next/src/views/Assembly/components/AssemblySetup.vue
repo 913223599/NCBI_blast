@@ -26,7 +26,7 @@ const showAdvanced = ref<boolean>(false);
 const minContigLength = ref<number>(500);
 const minReadLength = ref<number>(1000);
 const minContainmentIdentity = ref<number | null>(null);
-const maxReads = ref<number | null>(100000);
+const maxReads = ref<number | null>(null);
 const enableQC = ref<boolean>(true);
 
 // 提交防抖加锁状态
@@ -642,9 +642,9 @@ async function onStartAssembly() {
             min="10000" 
             step="50000" 
             class="form-input" 
-            placeholder="默认: 100000 (留空为全量 Reads)"
+            placeholder="默认留空 (使用全量测序数据)"
           />
-          <span class="field-hint">限制导入数量以加速测试 (--max-reads)</span>
+          <span class="field-hint">留空为全量分析；填数值将截断 Reads 以供快速测试 (--max-reads)</span>
         </div>
 
         <!-- Fastp 质控开关 -->
