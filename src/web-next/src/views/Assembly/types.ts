@@ -17,7 +17,7 @@ export interface AssemblyTaskItem {
   name: string;
   sample_id?: string;
   sample_type?: string;
-  tech?: 'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' | 'MGI' | string;
+  tech?: 'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' | 'MGI' | 'HYBRID' | string;
   status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'aborted' | string;
   last_step?: string;
   progress: number;
@@ -32,12 +32,14 @@ export interface AssemblyTaskItem {
 export interface AssemblyRunParams {
   name: string;
   sample_type: 'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME';
-  tech: 'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI';
-  mode: 'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained';
+  tech: 'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' | 'HYBRID';
+  mode: 'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained' | 'hybrid';
   r1_path: string;
   r2_path?: string;
   r1_name?: string;
   r2_name?: string;
+  long_reads_path?: string;
+  long_reads_name?: string;
   threads?: number;
   min_read_length?: number;
   min_contig_length?: number;

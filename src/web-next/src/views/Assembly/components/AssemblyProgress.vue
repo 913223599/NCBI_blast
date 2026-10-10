@@ -24,8 +24,18 @@ watch(() => props.logs.length, async () => {
   }
 });
 
-// 计算阶段状态 (区分三代长读长与二代短读长，使用生信标准规范名称)
+// 计算阶段状态 (区分混合组装、三代长读长与二代短读长，使用生信标准规范名称)
 const phases = computed(() => {
+  const isHybrid = props.task.tech === 'HYBRID' || props.task.config?.params?.mode === 'hybrid';
+  if (isHybrid) {
+    return [
+      { id: 1, name: '双端质控', threshold: 15 },
+      { id: 2, name: 'Unitig拓扑', threshold: 40 },
+      { id: 3, name: '长读长桥接', threshold: 65 },
+      { id: 4, name: '染色体环化', threshold: 85 },
+      { id: 5, name: '产物评估', threshold: 95 }
+    ];
+  }
   const isLongRead = props.task.tech === 'NANOPORE' || props.task.tech === 'PACBIO_HIFI';
   if (isLongRead) {
     return [

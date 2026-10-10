@@ -70,14 +70,17 @@ export function useAssembly() {
       tech: params.tech || 'ILLUMINA',
       r1: params.r1_path,
       r2: params.r2_path || null,
+      long_reads: params.long_reads_path || null,
       config: {
         name: params.name,
         sample_type: params.sample_type,
         tech: params.tech,
         r1: params.r1_path,
         r2: params.r2_path || null,
+        long_reads: params.long_reads_path || null,
         r1_name: params.r1_name,
         r2_name: params.r2_name,
+        long_reads_name: params.long_reads_name,
         params: {
           threads: params.threads || 8,
           mode: params.mode || 'isolate',
@@ -117,6 +120,9 @@ export function useAssembly() {
     consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 测序平台: ${params.tech} | 模式: ${params.mode} | R1: ${params.r1_path}`);
     if (params.r2_path) {
       consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 双端 R2: ${params.r2_path}`);
+    }
+    if (params.long_reads_path) {
+      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 三代长读长: ${params.long_reads_path}`);
     }
 
     try {

@@ -18,8 +18,8 @@ const emit = defineEmits<{
 // 基础参数
 const taskName = ref<string>(`Assembly_${new Date().toISOString().slice(0,10).replace(/-/g,'')}`);
 const sampleType = ref<'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME'>('BACTERIA');
-const tech = ref<'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI'>('ILLUMINA');
-const mode = ref<'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained'>('isolate');
+const tech = ref<'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' | 'HYBRID'>('ILLUMINA');
+const mode = ref<'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained' | 'hybrid'>('isolate');
 const threads = ref<number>(Math.max(2, (navigator.hardwareConcurrency || 8) - 2));
 
 const showAdvanced = ref<boolean>(false);
@@ -32,15 +32,21 @@ const enableQC = ref<boolean>(true);
 // 提交防抖加锁状态
 const isSubmitting = ref<boolean>(false);
 
-// 测序文件状态
+// 测序文件状态 (支持二代短读长双端 R1/R2 与三代长读长 Long Reads)
 const r1File = ref<{ name: string; path: string; size?: number } | null>(null);
 const r2File = ref<{ name: string; path: string; size?: number } | null>(null);
+const longReadsFile = ref<{ name: string; path: string; size?: number } | null>(null);
+const activeSlotTarget = ref<'all' | 'r1' | 'r2' | 'lr'>('all');
 const isDragging = ref<boolean>(false);
 const autoDetectedSummary = ref<string | null>(null);
 
 // 是否可以提交
 const canSubmit = computed(() => {
-  return !isSubmitting.value && !!r1File.value && !!taskName.value.trim();
+  if (isSubmitting.value || !taskName.value.trim()) return false;
+  if (tech.value === 'HYBRID') {
+    return !!r1File.value && !!longReadsFile.value;
+  }
+  return !!r1File.value;
 });
 
 // 核心函数：深度剥离扩展名与读长修饰词，提取纯净样本名
@@ -62,35 +68,39 @@ function extractCleanSampleName(filename: string): string {
 }
 
 // 智能分析测序技术平台与生物类型
-function inferTechAndType(files: File[], r1Name: string, r2Name?: string) {
-  const combinedNames = [r1Name, r2Name || '', ...files.map(f => f.name)].join(' ').toLowerCase();
+function inferTechAndType(files: File[], r1Name: string, r2Name?: string, lrName?: string) {
+  const combinedNames = [r1Name, r2Name || '', lrName || '', ...files.map(f => f.name)].join(' ').toLowerCase();
 
   // 1. 测序技术平台推断
-  let detectedTech: 'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' = 'ILLUMINA';
-  if (combinedNames.includes('hifi') || combinedNames.includes('pacbio') || combinedNames.includes('ccs') || combinedNames.includes('sequel') || combinedNames.includes('revio')) {
+  let detectedTech: 'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' | 'HYBRID' = 'ILLUMINA';
+  const hasLongReads = combinedNames.includes('ont') || combinedNames.includes('nanopore') || combinedNames.includes('hifi') || combinedNames.includes('pacbio') || combinedNames.includes('minion') || combinedNames.includes('promethion') || combinedNames.includes('gridion') || combinedNames.includes('dorado') || combinedNames.includes('guppy') || combinedNames.includes('_lr') || combinedNames.includes('.lr.');
+  const hasShortReads = combinedNames.includes('illumina') || combinedNames.includes('mgi') || combinedNames.includes('_1.') || combinedNames.includes('_2.') || combinedNames.includes('_r1') || combinedNames.includes('_r2') || combinedNames.includes('read1') || combinedNames.includes('read2') || combinedNames.includes('forward') || combinedNames.includes('reverse');
+
+  if (lrName || (hasLongReads && hasShortReads) || (files.length >= 3 && hasLongReads)) {
+    detectedTech = 'HYBRID';
+  } else if (combinedNames.includes('hifi') || combinedNames.includes('pacbio') || combinedNames.includes('ccs') || combinedNames.includes('sequel') || combinedNames.includes('revio')) {
     detectedTech = 'PACBIO_HIFI';
-  } else if (combinedNames.includes('ont') || combinedNames.includes('nanopore') || combinedNames.includes('minion') || combinedNames.includes('promethion') || combinedNames.includes('gridion') || combinedNames.includes('dorado') || combinedNames.includes('guppy')) {
+  } else if (hasLongReads) {
     detectedTech = 'NANOPORE';
-  } else if (files.length >= 2 || r2Name || combinedNames.includes('_1.') || combinedNames.includes('_2.') || combinedNames.includes('_r1') || combinedNames.includes('_r2') || combinedNames.includes('illumina') || combinedNames.includes('mgi')) {
+  } else if (files.length >= 2 || r2Name || hasShortReads) {
     detectedTech = 'ILLUMINA';
   } else if (combinedNames.endsWith('.zip') || combinedNames.includes('.zip')) {
-    // 单个 zip 压缩包测序文件（如 fastq.zip）且未包含二代双端标记时，通常为 Nanopore 三代多分卷测序归档
     detectedTech = 'NANOPORE';
   }
 
   // 2. 样本生物类型推断
   let detectedSampleType: 'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME' = 'BACTERIA';
-  let detectedMode: 'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained' = 'isolate';
+  let detectedMode: 'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained' | 'hybrid' = detectedTech === 'HYBRID' ? 'hybrid' : 'isolate';
 
   if (combinedNames.includes('phage') || combinedNames.includes('bacteriophage') || combinedNames.includes('噬菌体') || combinedNames.includes('phi')) {
     detectedSampleType = 'PHAGE';
-    detectedMode = 'isolate';
+    detectedMode = detectedTech === 'HYBRID' ? 'hybrid' : 'isolate';
   } else if (combinedNames.includes('virus') || combinedNames.includes('viral') || combinedNames.includes('病毒')) {
     detectedSampleType = 'VIRUS';
-    detectedMode = 'isolate';
+    detectedMode = detectedTech === 'HYBRID' ? 'hybrid' : 'isolate';
   } else if (combinedNames.includes('meta') || combinedNames.includes('metagenome') || combinedNames.includes('宏基因组') || combinedNames.includes('microbiome') || combinedNames.includes('env')) {
     detectedSampleType = 'METAGENOME';
-    detectedMode = 'metagenome';
+    detectedMode = detectedTech === 'HYBRID' ? 'hybrid' : 'metagenome';
   }
 
   return { detectedTech, detectedSampleType, detectedMode };
@@ -103,6 +113,12 @@ async function handleFileDrop(e: DragEvent) {
   
   const files = Array.from(e.dataTransfer.files);
   await processIncomingFiles(files);
+}
+
+// 打开指定槽位的文件选择器
+function openSlotPicker(slot: 'all' | 'r1' | 'r2' | 'lr' = 'all') {
+  activeSlotTarget.value = slot;
+  handleDropzoneClick();
 }
 
 // 通过点击上传区域
@@ -169,7 +185,7 @@ function processPathList(paths: string[]) {
   assignFileSlots(fileItems);
 }
 
-// 智能分析并分配 R1 / R2 文件 (从 File[] 解析)
+// 智能分析并分配 R1 / R2 / LR 文件 (从 File[] 解析)
 async function processIncomingFiles(files: File[]) {
   if (!files || files.length === 0) return;
 
@@ -181,12 +197,44 @@ async function processIncomingFiles(files: File[]) {
 function assignFileSlots(items: Array<{ name: string; path: string; size: number }>) {
   if (!items || items.length === 0) return;
 
-  // 1. 如果仅有 1 个文件
+  // 1. 若为精确槽位选择触发
+  if (activeSlotTarget.value === 'r1' && items[0]) {
+    r1File.value = items[0];
+    activeSlotTarget.value = 'all';
+    return;
+  }
+  if (activeSlotTarget.value === 'r2' && items[0]) {
+    r2File.value = items[0];
+    activeSlotTarget.value = 'all';
+    return;
+  }
+  if (activeSlotTarget.value === 'lr' && items[0]) {
+    longReadsFile.value = items[0];
+    activeSlotTarget.value = 'all';
+    return;
+  }
+  activeSlotTarget.value = 'all';
+
+  // 2. 如果仅有 1 个文件
   if (items.length === 1) {
     const f = items[0];
     if (!f) return;
+
+    const nameLower = f.name.toLowerCase();
+    const isLR = nameLower.includes('ont') || nameLower.includes('nanopore') || nameLower.includes('pacbio') || nameLower.includes('hifi') || nameLower.includes('long') || nameLower.includes('_lr') || nameLower.includes('.lr.');
+
+    if (tech.value === 'HYBRID') {
+      if (isLR) {
+        longReadsFile.value = f;
+      } else {
+        r1File.value = f;
+      }
+      return;
+    }
+
     r1File.value = f;
     r2File.value = null;
+    longReadsFile.value = null;
 
     const cleanName = extractCleanSampleName(f.name);
     taskName.value = `${cleanName}_asm`;
@@ -196,66 +244,114 @@ function assignFileSlots(items: Array<{ name: string; path: string; size: number
     sampleType.value = detectedSampleType;
     mode.value = detectedMode;
 
-    autoDetectedSummary.value = `已智能识别为: ${detectedTech === 'ILLUMINA' ? '二代短读长 (Illumina/MGI)' : detectedTech} · 样本名: ${cleanName} · 类型: ${detectedSampleType}`;
+    const techLabel = detectedTech === 'HYBRID' 
+      ? '二代+三代混合组装 (Hybrid)' 
+      : (detectedTech === 'ILLUMINA' 
+          ? '二代短读长 (Illumina/MGI)' 
+          : (detectedTech === 'NANOPORE' ? '三代长读长 (Nanopore ONT)' : '三代 PacBio HiFi'));
+    autoDetectedSummary.value = `已智能识别为: ${techLabel} · 样本名: ${cleanName} · 类型: ${detectedSampleType}`;
     return;
   }
 
-  // 2. 如果有多个文件，尝试按 R1 / R2 或 1 / 2 自动配对
+  // 3. 多文件智能匹配: 尝试分类 R1 / R2 / Long Reads
   let foundR1: any = null;
   let foundR2: any = null;
+  let foundLR: any = null;
 
   for (const f of items) {
     if (!f) continue;
     const name = f.name.toLowerCase();
 
-    if (
-      name.includes('_r1') || name.includes('.r1.') || name.includes('_1.') || name.includes('.1.') ||
-      name.endsWith('_1.fq.gz') || name.endsWith('_1.fastq.gz') || name.endsWith('_1.fq') || name.endsWith('_1.fastq') ||
-      name.includes('read1') || name.includes('forward')
-    ) {
+    const isLR = name.includes('ont') || name.includes('nanopore') || name.includes('pacbio') || name.includes('hifi') || name.includes('long') || name.includes('.lr.') || name.includes('_lr');
+    const isR1 = name.includes('_r1') || name.includes('.r1.') || name.includes('_1.') || name.includes('.1.') ||
+                 name.endsWith('_1.fq.gz') || name.endsWith('_1.fastq.gz') || name.endsWith('_1.fq') || name.endsWith('_1.fastq') ||
+                 name.includes('read1') || name.includes('forward');
+    const isR2 = name.includes('_r2') || name.includes('.r2.') || name.includes('_2.') || name.includes('.2.') ||
+                 name.endsWith('_2.fq.gz') || name.endsWith('_2.fastq.gz') || name.endsWith('_2.fq') || name.endsWith('_2.fastq') ||
+                 name.includes('read2') || name.includes('reverse');
+
+    if (isLR && !foundLR) {
+      foundLR = f;
+    } else if (isR1 && !foundR1) {
       foundR1 = f;
-    } else if (
-      name.includes('_r2') || name.includes('.r2.') || name.includes('_2.') || name.includes('.2.') ||
-      name.endsWith('_2.fq.gz') || name.endsWith('_2.fastq.gz') || name.endsWith('_2.fq') || name.endsWith('_2.fastq') ||
-      name.includes('read2') || name.includes('reverse')
-    ) {
+    } else if (isR2 && !foundR2) {
       foundR2 = f;
     }
   }
 
-  if (foundR1) {
-    r1File.value = foundR1;
-  } else if (items[0]) {
-    r1File.value = items[0];
-  }
+  const unassigned = items.filter(it => it !== foundR1 && it !== foundR2 && it !== foundLR);
 
-  if (foundR2) {
-    r2File.value = foundR2;
-  } else if (items.length > 1 && !foundR1 && items[1]) {
-    r2File.value = items[1];
+  if (foundLR || tech.value === 'HYBRID' || items.length >= 3) {
+    // 激活混合组装模式
+    longReadsFile.value = foundLR || (unassigned.length > 0 && !foundR2 ? unassigned.pop() : null);
+    r1File.value = foundR1 || unassigned.shift() || null;
+    r2File.value = foundR2 || unassigned.shift() || null;
+
+    tech.value = 'HYBRID';
+    mode.value = 'hybrid';
+  } else {
+    // 常规双端分配
+    if (foundR1) {
+      r1File.value = foundR1;
+    } else if (items[0]) {
+      r1File.value = items[0];
+    }
+
+    if (foundR2) {
+      r2File.value = foundR2;
+    } else if (items.length > 1 && !foundR1 && items[1]) {
+      r2File.value = items[1];
+    }
   }
 
   // 自动更新任务名与识别类型
-  if (r1File.value) {
-    const cleanName = extractCleanSampleName(r1File.value.name);
+  const repFile = r1File.value || longReadsFile.value;
+  if (repFile) {
+    const cleanName = extractCleanSampleName(repFile.name);
     taskName.value = `${cleanName}_asm`;
 
-    const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType(items.map(f => ({ name: f.name } as any)), r1File.value.name, r2File.value?.name);
+    const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType(
+      items.map(f => ({ name: f.name } as any)),
+      r1File.value?.name || '',
+      r2File.value?.name,
+      longReadsFile.value?.name
+    );
     tech.value = detectedTech;
     sampleType.value = detectedSampleType;
     mode.value = detectedMode;
 
-    const techLabel = detectedTech === 'ILLUMINA' ? '二代短读长双端 (Illumina / MGI NGS)' : (detectedTech === 'NANOPORE' ? '三代长读长 (Nanopore ONT)' : '三代 PacBio HiFi');
+    const techLabel = detectedTech === 'HYBRID'
+      ? '二代+三代混合组装 (Hybrid Assembly)'
+      : (detectedTech === 'ILLUMINA' 
+          ? '二代短读长双端 (Illumina / MGI NGS)' 
+          : (detectedTech === 'NANOPORE' ? '三代长读长 (Nanopore ONT)' : '三代 PacBio HiFi'));
     autoDetectedSummary.value = `已智能识别为: ${techLabel} · 样本名: ${cleanName} · 类型: ${detectedSampleType}`;
   }
 }
 
 function clearR1() { 
   r1File.value = null; 
-  autoDetectedSummary.value = null;
+  if (!r2File.value && !longReadsFile.value) autoDetectedSummary.value = null;
 }
 function clearR2() { 
   r2File.value = null; 
+}
+function clearLongReads() {
+  longReadsFile.value = null;
+}
+
+function onTechChange() {
+  if (tech.value === 'HYBRID') {
+    mode.value = 'hybrid';
+  } else if (mode.value === 'hybrid') {
+    mode.value = 'isolate';
+  }
+}
+
+function onModeChange() {
+  if (mode.value === 'hybrid') {
+    tech.value = 'HYBRID';
+  }
 }
 
 function formatBytes(bytes?: number): string {
@@ -269,6 +365,7 @@ function formatBytes(bytes?: number): string {
 function resetForm() {
   r1File.value = null;
   r2File.value = null;
+  longReadsFile.value = null;
   autoDetectedSummary.value = null;
   taskName.value = `Assembly_${new Date().toISOString().slice(0,10).replace(/-/g,'')}`;
   isSubmitting.value = false;
@@ -279,7 +376,9 @@ defineExpose({
 });
 
 async function onStartAssembly() {
-  if (!canSubmit.value || !r1File.value || isSubmitting.value) return;
+  if (!canSubmit.value || isSubmitting.value) return;
+  // 短读长模式需 r1File，混合模式需 r1File 与 longReadsFile
+  if (!r1File.value && !longReadsFile.value) return;
   isSubmitting.value = true;
 
   const params: AssemblyRunParams = {
@@ -287,10 +386,12 @@ async function onStartAssembly() {
     sample_type: sampleType.value,
     tech: tech.value,
     mode: mode.value,
-    r1_path: r1File.value.path,
+    r1_path: r1File.value ? r1File.value.path : (longReadsFile.value?.path || ''),
     r2_path: r2File.value ? r2File.value.path : undefined,
-    r1_name: r1File.value.name,
+    r1_name: r1File.value ? r1File.value.name : (longReadsFile.value?.name || ''),
     r2_name: r2File.value ? r2File.value.name : undefined,
+    long_reads_path: longReadsFile.value ? longReadsFile.value.path : undefined,
+    long_reads_name: longReadsFile.value ? longReadsFile.value.name : undefined,
     threads: threads.value,
     min_contig_length: minContigLength.value,
     min_read_length: minReadLength.value,
@@ -325,7 +426,7 @@ async function onStartAssembly() {
     <!-- 上传区域 -->
     <div 
       class="upload-dropzone" 
-      :class="{ 'is-dragging': isDragging, 'has-files': r1File }"
+      :class="{ 'is-dragging': isDragging, 'has-files': r1File || longReadsFile }"
       @dragover.prevent="isDragging = true"
       @dragleave.prevent="isDragging = false"
       @drop.prevent="handleFileDrop"
@@ -340,7 +441,7 @@ async function onStartAssembly() {
       />
 
       <!-- 未选择文件时的空状态 -->
-      <div v-if="!r1File" class="dropzone-empty" @click="handleDropzoneClick">
+      <div v-if="!r1File && !longReadsFile" class="dropzone-empty" @click="handleDropzoneClick">
         <div class="icon-circle">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -349,33 +450,53 @@ async function onStartAssembly() {
           </svg>
         </div>
         <p class="primary-hint">拖拽测序数据文件至此处，或 <span class="click-link">点击选择文件</span></p>
-        <p class="secondary-hint">支持二代双端 FASTQ (R1/R2)、三代单端 FASTQ (.fq.gz, .fastq) 及 ZIP 测序归档包 (.zip)</p>
+        <p class="secondary-hint">支持二代双端 FASTQ (R1/R2)、三代长读长 FASTQ (.fq.gz, .fastq)、二代+三代混合测序及 ZIP 测序归档包 (.zip)</p>
       </div>
 
       <!-- 已选择文件时的卡片展示 -->
       <div v-else class="dropzone-filled">
         <div class="file-slots-row">
-          <!-- R1 卡片 -->
-          <div class="file-slot-card">
-            <div class="slot-badge r1-badge">{{ tech === 'ILLUMINA' ? 'Read 1 (正向端 / Forward)' : '长读长数据 (Long Reads)' }}</div>
-            <div class="slot-info">
+          <!-- 槽位 1: R1 卡片 -->
+          <div class="file-slot-card" :class="{ 'is-empty-slot': !r1File }">
+            <div class="slot-badge r1-badge">
+              {{ tech === 'HYBRID' ? '短读长 R1 (正向端)' : (tech === 'ILLUMINA' ? 'Read 1 (正向端 / Forward)' : '长读长数据 (Long Reads)') }}
+            </div>
+            <div v-if="r1File" class="slot-info">
               <span class="file-name" :title="r1File.path">{{ r1File.name }}</span>
               <span class="file-size">{{ formatBytes(r1File.size) }}</span>
             </div>
-            <button class="remove-btn" @click.stop="clearR1" title="移除该文件">×</button>
+            <div v-else class="slot-empty-hint" @click.stop="openSlotPicker('r1')">
+              <span>+ 选择或拖入 {{ tech === 'HYBRID' ? '短读长 R1 文件' : '测序文件' }}</span>
+            </div>
+            <button v-if="r1File" class="remove-btn" @click.stop="clearR1" title="移除该文件">×</button>
           </div>
 
-          <!-- R2 卡片 -->
-          <div v-if="tech === 'ILLUMINA'" class="file-slot-card" :class="{ 'is-empty-slot': !r2File }">
-            <div class="slot-badge r2-badge">Read 2 (反向端 / Reverse)</div>
+          <!-- 槽位 2: R2 卡片 (在 ILLUMINA 或 HYBRID 模式下显示) -->
+          <div v-if="tech === 'ILLUMINA' || tech === 'HYBRID'" class="file-slot-card" :class="{ 'is-empty-slot': !r2File }">
+            <div class="slot-badge r2-badge">
+              {{ tech === 'HYBRID' ? '短读长 R2 (反向端)' : 'Read 2 (反向端 / Reverse)' }}
+            </div>
             <div v-if="r2File" class="slot-info">
               <span class="file-name" :title="r2File.path">{{ r2File.name }}</span>
               <span class="file-size">{{ formatBytes(r2File.size) }}</span>
             </div>
-            <div v-else class="slot-empty-hint" @click.stop="handleDropzoneClick">
+            <div v-else class="slot-empty-hint" @click.stop="openSlotPicker('r2')">
               <span>+ 选择或拖入 R2 双端文件</span>
             </div>
             <button v-if="r2File" class="remove-btn" @click.stop="clearR2" title="移除该文件">×</button>
+          </div>
+
+          <!-- 槽位 3: 长读长卡片 (在 HYBRID 模式下显示) -->
+          <div v-if="tech === 'HYBRID'" class="file-slot-card" :class="{ 'is-empty-slot': !longReadsFile }">
+            <div class="slot-badge lr-badge">三代长读长 (Nanopore / PacBio)</div>
+            <div v-if="longReadsFile" class="slot-info">
+              <span class="file-name" :title="longReadsFile.path">{{ longReadsFile.name }}</span>
+              <span class="file-size">{{ formatBytes(longReadsFile.size) }}</span>
+            </div>
+            <div v-else class="slot-empty-hint" @click.stop="openSlotPicker('lr')">
+              <span>+ 选择或拖入三代长读长文件</span>
+            </div>
+            <button v-if="longReadsFile" class="remove-btn" @click.stop="clearLongReads" title="移除该文件">×</button>
           </div>
         </div>
 
@@ -411,10 +532,11 @@ async function onStartAssembly() {
       <!-- 测序平台 -->
       <div class="form-group">
         <label class="form-label">测序技术平台</label>
-        <select v-model="tech" class="form-select">
+        <select v-model="tech" class="form-select" @change="onTechChange">
           <option value="ILLUMINA">二代短读长双端 (Illumina / MGI NGS)</option>
           <option value="NANOPORE">三代长读长 (Oxford Nanopore ONT)</option>
           <option value="PACBIO_HIFI">三代高精度长读长 (PacBio HiFi)</option>
+          <option value="HYBRID">二代+三代混合组装 (Illumina + Nanopore/PacBio)</option>
         </select>
       </div>
 
@@ -432,11 +554,12 @@ async function onStartAssembly() {
       <!-- NGCS 原生组装模式 -->
       <div class="form-group">
         <label class="form-label">NGCS 组装模式</label>
-        <select v-model="mode" class="form-select">
+        <select v-model="mode" class="form-select" @change="onModeChange">
           <option value="isolate">单菌分离株模式 (Isolate - 高深度单菌精修)</option>
           <option value="metagenome">宏基因组模式 (Metagenome - 复杂多丰度群落)</option>
           <option value="metagenome_deep">宏基因组深度模式 (Metagenome Deep - 超低丰度深度挖掘)</option>
           <option value="unconstrained">无约束模式 (Unconstrained - 极端复杂/微小环状结构)</option>
+          <option value="hybrid">混合拼接模式 (Hybrid - 短读长Unitig + 长读长物理跨越)</option>
         </select>
       </div>
 
@@ -674,6 +797,7 @@ async function onStartAssembly() {
 }
 .r1-badge { background: #dbeafe; color: #1e40af; }
 .r2-badge { background: #e0e7ff; color: #3730a3; }
+.lr-badge { background: #f3e8ff; color: #7e22ce; }
 
 .slot-info {
   display: flex;

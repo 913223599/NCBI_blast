@@ -104,8 +104,10 @@ class AssemblerStep(BaseAssemblyStep):
         # 获取输入测序数据
         r1_raw = self.context.get("unmerged_r1") or self.context.get("clean_r1") or self.context.get("r1")
         r2_raw = self.context.get("unmerged_r2") or self.context.get("clean_r2") or self.context.get("r2")
+        lr_raw = self.context.get("long_reads") or self.context.config.get("long_reads") or self.context.config.get("params", {}).get("long_reads")
         r1 = str(r1_raw) if r1_raw else None
         r2 = str(r2_raw) if r2_raw else None
+        long_reads = str(lr_raw) if lr_raw else None
 
         if not r1:
             self.logger.error("未找到有效的输入数据路径")
@@ -186,18 +188,34 @@ class AssemblerStep(BaseAssemblyStep):
 
         active_r1 = await _prepare_safe_input(r1, "r1")
         active_r2 = (await _prepare_safe_input(r2, "r2")) if r2 else None
+        active_lr = (await _prepare_safe_input(long_reads, "lr")) if long_reads else None
 
-        # 模式配置 (支持 isolate, metagenome, metagenome_deep, unconstrained)
+        # 模式配置 (支持 isolate, metagenome, metagenome_deep, unconstrained, hybrid)
         mode = params.get("mode")
-        if not mode or mode not in ["isolate", "metagenome", "metagenome_deep", "unconstrained"]:
+        if not mode or mode not in ["isolate", "metagenome", "metagenome_deep", "unconstrained", "hybrid"]:
             mode = "metagenome" if sample_type in ["PHAGE", "VIRUS", "METAGENOME"] else "isolate"
+
+        # 判断是否为 Hybrid (二代短读长 + 三代长读长混合组装)
+        is_hybrid = (tech == "HYBRID") or (mode == "hybrid") or (bool(active_lr) and bool(active_r1))
+        is_long_read = (not is_hybrid) and (tech in ["NANOPORE", "PACBIO_HIFI"] or not active_r2)
 
         # 构建 NGCS CLI 指令
         py_exec = sys.executable
         cmd_list = [py_exec, str(ngcs_cli), "assemble"]
 
-        is_long_read = tech in ["NANOPORE", "PACBIO_HIFI"] or not active_r2
-        if is_long_read:
+        if is_hybrid:
+            min_len = str(params.get("min_read_length") or params.get("min_len") or 1000)
+            cmd_list.extend([
+                "-1", active_r1,
+                "-2", active_r2 or active_r1,
+                "-i", active_lr or active_r1,
+                "-o", str(safe_work_dir),
+                "-t", threads_str,
+                "--mode", "hybrid",
+                "--min-len", min_len
+            ])
+            self.logger.info(f"NGCS 二代+三代混合组装模式: R1={active_r1}, R2={active_r2}, LR={active_lr}, threads={threads_str}")
+        elif is_long_read:
             min_len = str(params.get("min_read_length") or params.get("min_len") or 1000)
             cmd_list.extend([
                 "-i", active_r1,
@@ -241,7 +259,11 @@ class AssemblerStep(BaseAssemblyStep):
         if not enable_qc:
             cmd_list.append("--no-qc")
 
-        # 实时日志捕获与进度遥测映射 (区分二代与三代平台，严格单调递增)
+        enable_ec = params.get("enable_error_correction", True)
+        if not enable_ec:
+            cmd_list.append("--no-error-correction")
+
+        # 实时日志捕获与进度遥测映射 (区分混合、三代、二代平台，严格单调递增)
         step_local_max_progress = 15.0 if active_r1.endswith(".fastq") else 5.0
 
         def emit_assembly_progress(target_progress: float, step_desc: str):
@@ -261,7 +283,21 @@ class AssemblerStep(BaseAssemblyStep):
                 self.on_log(line_str)
 
             # 2. 依据测序平台精准映射流水线阶段，防止 Banner 配置键值误判与进度跳跃
-            if is_long_read:
+            if is_hybrid:
+                # ─── 二代+三代混合组装 (Hybrid) 阶梯进度 ───
+                if "[NGCS PRODUCTION HYBRID ENGINE]" in line_str or "[Phase 00a]" in line_str or "Fastp Quality Control" in line_str:
+                    emit_assembly_progress(20, "二代短读长质控与接头过滤 (fastp)...")
+                elif "Short-Read High-Fidelity Unitig Assembly" in line_str or "[Phase 00b]" in line_str or "Residual Eulerian" in line_str:
+                    emit_assembly_progress(35, "二代短读长 0-Indel Unitig 图拓扑构建...")
+                elif "[Phase 01]" in line_str or "[Phase 02]" in line_str or "De Bruijn" in line_str:
+                    emit_assembly_progress(50, "欧拉残差流图化简与 Unitig 提取...")
+                elif "Long-Read Physical Bridging" in line_str or "[Phase 02] Ingested" in line_str or "minimap2" in line_str:
+                    emit_assembly_progress(70, "三代长读长物理跨越与重复区桥接...")
+                elif "Synthesizing Chromosome Scaffolds" in line_str or "[Phase 03]" in line_str or "Circular closure" in line_str:
+                    emit_assembly_progress(88, "染色体级骨架合成与环化闭环 (Loop Closure)...")
+                elif "Hybrid Assembly complete" in line_str or "[SUCCESS]" in line_str:
+                    emit_assembly_progress(98, "混合组装完成，生成组装报告与指标...")
+            elif is_long_read:
                 # ─── 三代长读长 (Nanopore ONT / PacBio HiFi) 阶梯进度 ───
                 # 显式屏蔽启动配置 Banner 行 (如 "Scaffolding : Enabled", "Polish Mode : ...")，防止关键词误触
                 if ":" in line_str and any(banner_kw in line_str for banner_kw in ["Scaffolding :", "Polish Mode :", "Assembly Mode :", "Min Contig :"]):

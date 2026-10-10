@@ -42,19 +42,26 @@ async def execute_assembly_pipeline(payload: Dict[str, Any]):
     
     r1_input = payload.get('r1') or config.get('r1') or config.get('params', {}).get('r1')
     r2_input = payload.get('r2') or config.get('r2') or config.get('params', {}).get('r2')
+    long_reads_input = payload.get('long_reads') or config.get('long_reads') or config.get('params', {}).get('long_reads')
     
     files = payload.get('files') or config.get('files') or []
     if not r1_input and files:
         r1_input = files[0]
         if len(files) > 1:
             r2_input = files[1]
+        if len(files) > 2 and not long_reads_input:
+            long_reads_input = files[2]
             
-    logger.info(f"队列调度执行任务: {task_id} | R1={r1_input} | R2={r2_input}")
+    if long_reads_input:
+        config['long_reads'] = str(long_reads_input)
+            
+    logger.info(f"队列调度执行任务: {task_id} | R1={r1_input} | R2={r2_input} | LR={long_reads_input}")
     await manager.run_pipeline(
         task_id=task_id,
         sample_type=sample_type,
         r1_input=r1_input,
         r2_input=r2_input,
+        long_reads_input=long_reads_input,
         config=config
     )
 

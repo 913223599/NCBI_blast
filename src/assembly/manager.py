@@ -66,6 +66,7 @@ class AssemblyManager:
                            sample_type: str,
                            r1_input: str, 
                            r2_input: Optional[str] = None, 
+                           long_reads_input: Optional[str] = None,
                            config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         NGCS 基因组拼接流水线主调度入口
@@ -86,6 +87,7 @@ class AssemblyManager:
         # 2. 检查输入数据完整性
         r1_path = Path(r1_input) if r1_input else None
         r2_path = Path(r2_input) if r2_input else None
+        long_reads_path = Path(long_reads_input) if long_reads_input else None
 
         if not r1_path or not r1_path.exists():
             err_msg = f"输入测序数据 R1 不存在: {r1_input}"
@@ -98,6 +100,8 @@ class AssemblyManager:
         ctx.update("r1", r1_path)
         if r2_path and r2_path.exists():
             ctx.update("r2", r2_path)
+        if long_reads_path and long_reads_path.exists():
+            ctx.update("long_reads", long_reads_path)
 
         # 3. 实例化核心组装器
         assembler = AssemblerStep(ctx)
