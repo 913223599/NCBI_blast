@@ -61,7 +61,7 @@ async def reorder_annotation_queue(req: Dict[str, Any]):
 
 
 @router.get("/history")
-async def get_annotation_history(limit: int = 50):
+async def get_annotation_history(limit: int = 200):
     """获取所有注释历史任务列表"""
     manager = get_annotation_manager()
     tasks = manager.list_history(limit=limit)

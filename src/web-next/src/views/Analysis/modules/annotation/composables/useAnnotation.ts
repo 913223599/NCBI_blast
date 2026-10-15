@@ -34,7 +34,7 @@ export function useAnnotation() {
     try {
       const bridge = getBridge();
       const [histRes, qRes] = await Promise.all([
-        bridge.get_annotation_history(50),
+        bridge.get_annotation_history(200),
         bridge.get_annotation_queue_status ? bridge.get_annotation_queue_status() : Promise.resolve(null)
       ]);
 
@@ -65,7 +65,11 @@ export function useAnnotation() {
       const newTaskId = res.task_id;
       const position = res.position || 1;
 
-      // 构造前端即时任务快照
+      // 构造前端即时任务快照 (使用与后端统一的 YYYY-MM-DD HH:mm:ss 本地时间格式)
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const now = new Date();
+      const nowStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
       const newTaskItem: AnnotationTaskItem = {
         task_id: newTaskId,
         task_name: res.task_name || params.task_name,
@@ -75,8 +79,8 @@ export function useAnnotation() {
         progress: 0,
         position: position,
         current_step: `已进入排队队列 #${position}`,
-        created_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
-        updated_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        created_at: nowStr,
+        updated_at: nowStr,
       };
 
       // 插入到历史列表顶部
@@ -257,6 +261,13 @@ export function useAnnotation() {
         // 自动校正 historyTasks 中任务的排队序号和运行状态
         if (data.waiting_tasks) {
           const waitingMap = new Map(data.waiting_tasks.map((t: any) => [t.task_id, t]));
+          
+          // 如果发现队列中存在本地尚未收录的任务，主动触发一次历史拉取
+          const hasMissing = data.waiting_tasks.some((w: any) => !historyTasks.value.some(t => t.task_id === w.task_id));
+          if (hasMissing) {
+            fetchHistory();
+          }
+
           historyTasks.value.forEach(t => {
             if (waitingMap.has(t.task_id)) {
               const qItem: any = waitingMap.get(t.task_id);

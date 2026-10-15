@@ -126,7 +126,7 @@ class AnnotationDB:
             data["checkv"] = json.loads(data.get("checkv_json") or "{}")
             return data
 
-    def list_tasks(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_tasks(self, limit: int = 200) -> List[Dict[str, Any]]:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute('''

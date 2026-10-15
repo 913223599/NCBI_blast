@@ -105,24 +105,78 @@ class RrnDBService:
             "match_type": "fallback"
         }
 
+    @staticmethod
+    def is_noise_or_other(taxon: str) -> bool:
+        """判断是否为低频测序噪声或 Other 合集"""
+        if not taxon:
+            return False
+        lower = taxon.lower().strip()
+        return (
+            lower.startswith("other")
+            or "噪声" in lower
+            or "noise" in lower
+            or "unclassified" in lower
+            or "unassigned" in lower
+        )
+
     def normalize_abundance(self, taxa_counts: Dict[str, int]) -> Dict[str, Any]:
         """
         输入分类单元原始 Reads 计数，输出 rrnDB 16S 拷贝数归一化后的丰度字典
         公式:
             Count_norm_i = Count_raw_i / GCN_mean_i
             Pct_norm_i = Count_norm_i / sum(Count_norm) * 100
+        注意：
+            对于 Other (低频测序噪声) 或未分类集合，赋予当前样本真实群落的加权平均 GCN，
+            严禁使用 1.0 导致该杂质合集在数学上虚假放大 7~10 倍。
         """
         total_raw = sum(taxa_counts.values())
         if total_raw == 0:
             return {"details": [], "total_raw": 0, "total_norm": 0.0}
 
+        # 1. 第一阶段：解析所有真实生物物种的 GCN
+        real_gcn_info = {}
+        real_norm_counts = {}
+        matched_raw_sum = 0
+        matched_norm_sum = 0.0
+
+        for taxon, count in taxa_counts.items():
+            if self.is_noise_or_other(taxon):
+                continue
+            meta = self.get_gcn(taxon)
+            gcn_val = max(0.1, meta.get("mean", 1.0))
+            real_gcn_info[taxon] = meta
+            norm_c = count / gcn_val
+            real_norm_counts[taxon] = norm_c
+
+            if meta.get("matched", False):
+                matched_raw_sum += count
+                matched_norm_sum += norm_c
+
+        # 计算当前样本真实优势群落的加权平均 GCN (若无匹配物种则回退到全库细菌基准平均值 4.0)
+        if matched_norm_sum > 0:
+            sample_weighted_gcn = max(1.0, matched_raw_sum / matched_norm_sum)
+        else:
+            sample_weighted_gcn = 4.0
+
+        # 2. 第二阶段：为噪声合集与未识别项赋予加权平均 GCN，计算全量归一化
         norm_counts = {}
         gcn_info = {}
         for taxon, count in taxa_counts.items():
-            gcn_meta = self.get_gcn(taxon)
-            gcn_val = max(0.1, gcn_meta.get("mean", 1.0))
-            gcn_info[taxon] = gcn_meta
-            norm_counts[taxon] = count / gcn_val
+            if self.is_noise_or_other(taxon):
+                gcn_val = round(sample_weighted_gcn, 2)
+                meta = {
+                    "name": taxon,
+                    "rank": "weighted_mean",
+                    "mean": gcn_val,
+                    "median": gcn_val,
+                    "matched": False,
+                    "match_type": "weighted_background"
+                }
+                gcn_info[taxon] = meta
+                norm_counts[taxon] = count / gcn_val
+            else:
+                gcn_info[taxon] = real_gcn_info[taxon]
+                norm_counts[taxon] = real_norm_counts[taxon]
 
         total_norm = sum(norm_counts.values())
 
@@ -141,15 +195,23 @@ class RrnDBService:
                 "gcn_rank": meta.get("rank", "default"),
                 "gcn_matched": meta.get("matched", False),
                 "norm_count": round(norm_c, 4),
-                "norm_pct": round(norm_pct, 4)
+                "norm_pct": round(norm_pct, 4),
+                "is_noise": self.is_noise_or_other(taxon)
             })
 
-        # 按归一化丰度降序排序
-        details.sort(key=lambda x: x["norm_pct"], reverse=True)
+        # 真实物种按归一化丰度降序排序，噪声/Other 合集置底
+        details.sort(
+            key=lambda x: (
+                -1 if x.get("is_noise") else 0,
+                x["norm_pct"]
+            ),
+            reverse=True
+        )
 
         return {
             "total_raw": total_raw,
             "total_norm": round(total_norm, 4),
+            "sample_weighted_gcn": round(sample_weighted_gcn, 2),
             "details": details
         }
 

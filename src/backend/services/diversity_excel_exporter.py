@@ -76,12 +76,12 @@ def build_rich_diversity_excel(
                 
         cov_pct = round((cov_cnt / total_samples_cnt * 100), 1) if total_samples_cnt > 0 else 0.0
 
-        if idx == 1 and norm_pct >= 30:
+        if t_name.lower().startswith("other") or "噪声" in t_name or t.get("is_noise"):
+            dom_status = "噪声过滤合集"
+        elif idx == 1 and norm_pct >= 25:
             dom_status = "绝对优势物种"
         elif norm_pct >= 15:
             dom_status = "主要优势物种"
-        elif t_name.lower().startswith("other") or "噪声" in t_name:
-            dom_status = "噪声过滤合集"
         else:
             dom_status = "共存背景物种"
 
@@ -200,8 +200,9 @@ def build_rich_diversity_excel(
     for s in samples:
         a = s.get("alpha_diversity", {})
         details = s.get("norm_result", {}).get("details", [])
-        dom_taxon = details[0]["taxon"] if details else "None"
-        dom_pct = details[0]["norm_pct"] if details else 0.0
+        valid_details = [d for d in details if not (d.get("taxon", "").lower().startswith("other") or "噪声" in d.get("taxon", "") or d.get("is_noise"))]
+        dom_taxon = valid_details[0]["taxon"] if valid_details else (details[0]["taxon"] if details else "None")
+        dom_pct = valid_details[0]["norm_pct"] if valid_details else (details[0]["norm_pct"] if details else 0.0)
         dom_zh = trans_map.get(dom_taxon, dom_taxon)
 
         alpha_rows.append({

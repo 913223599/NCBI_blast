@@ -2,9 +2,15 @@
 /**
  * AnnotationHistory - 注释任务历史列表侧边栏
  */
+import { ref, computed } from 'vue';
 import type { AnnotationTaskItem } from '../types';
+import { 
+  formatDisplayTime, 
+  sortAnnotationTasks, 
+  type SortOrder 
+} from '../utils/historySorting';
 
-defineProps<{
+const props = defineProps<{
   tasks: AnnotationTaskItem[];
   activeId: string;
   isLoading: boolean;
@@ -15,6 +21,32 @@ const emit = defineEmits<{
   (e: 'delete', taskId: string): void;
   (e: 'refresh'): void;
 }>();
+
+// 排序模式：默认按发生顺序排序 (asc: 发生先后，最早发生在前)
+const sortOrder = ref<SortOrder>('asc');
+
+try {
+  const saved = localStorage.getItem('annotation_history_sort_order');
+  if (saved === 'asc' || saved === 'desc') {
+    sortOrder.value = saved;
+  }
+} catch (e) {
+  // 本地存储不可用时忽略
+}
+
+function toggleSortOrder() {
+  sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
+  try {
+    localStorage.setItem('annotation_history_sort_order', sortOrder.value);
+  } catch (e) {
+    // 忽略
+  }
+}
+
+// 严格按照发生时间进行确定性计算属性排序
+const sortedTasks = computed(() => {
+  return sortAnnotationTasks(props.tasks, sortOrder.value);
+});
 
 function getStatusBadgeClass(status: string) {
   switch (status) {
@@ -45,11 +77,26 @@ function getStatusText(item: AnnotationTaskItem) {
   <div class="annotation-history-panel">
     <div class="history-toolbar">
       <span class="history-count">共 {{ tasks.length }} 条记录</span>
-      <button class="refresh-btn" @click="emit('refresh')" :title="'刷新列表'">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
-        </svg>
-      </button>
+      <div class="toolbar-actions">
+        <button 
+          class="sort-toggle-btn" 
+          :title="sortOrder === 'asc' ? '当前：发生顺序（最早在上），点击切换为最新优先' : '当前：最新优先（最新在上），点击切换为发生顺序'"
+          @click="toggleSortOrder"
+        >
+          <svg v-if="sortOrder === 'asc'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M3 4h13M3 8h9M3 12h5m8-4v12m0 0l-4-4m4 4l4-4" />
+          </svg>
+          <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M3 4h18M3 8h14M3 12h10m4 0v8m0 0l-4-4m4 4l4-4" />
+          </svg>
+          <span>{{ sortOrder === 'asc' ? '发生先后' : '最新优先' }}</span>
+        </button>
+        <button class="refresh-btn" @click="emit('refresh')" title="刷新列表">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <div v-if="isLoading" class="history-loading">
@@ -70,7 +117,7 @@ function getStatusText(item: AnnotationTaskItem) {
 
     <div v-else class="task-list">
       <div
-        v-for="item in tasks"
+        v-for="item in sortedTasks"
         :key="item.task_id"
         :class="['task-card', { active: activeId === item.task_id }]"
         @click="emit('select', item)"
@@ -84,7 +131,9 @@ function getStatusText(item: AnnotationTaskItem) {
 
         <div class="task-meta">
           <span class="meta-tag">{{ item.sample_type }}</span>
-          <span class="meta-time">{{ item.created_at?.split(' ')[1] || item.created_at }}</span>
+          <span class="meta-time" :title="item.created_at ? `发生时间: ${item.created_at}` : undefined">
+            {{ formatDisplayTime(item.created_at) }}
+          </span>
         </div>
 
         <div v-if="item.status === 'running'" class="task-progress-mini">
@@ -134,6 +183,37 @@ function getStatusText(item: AnnotationTaskItem) {
   font-size: 11px;
   color: #64748b;
   font-weight: 600;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sort-toggle-btn {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  cursor: pointer;
+  color: #475569;
+  padding: 3px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sort-toggle-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #1e293b;
+}
+
+.sort-toggle-btn:active {
+  transform: translateY(1px);
 }
 
 .refresh-btn {

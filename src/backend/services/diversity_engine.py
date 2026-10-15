@@ -24,7 +24,7 @@ import concurrent.futures
 
 import numpy as np
 
-from .rrndb_service import get_rrndb_service
+from .rrndb_service import get_rrndb_service, RrnDBService
 from .diversity_filter import DiversityNoiseFilter
 from .heterogeneity_detector import OperonHeterogeneityDetector
 
@@ -830,18 +830,20 @@ class DiversityEngine:
         }
 
     def _calc_global_taxa_overview(self, samples_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """全批次物种全局汇总"""
-        agg = defaultdict(lambda: {"raw_count": 0, "norm_count": 0.0, "sample_hits": 0, "gcn_mean": 1.0})
+        """全批次物种全局汇总 (真实物种优先排序，低频噪声与 Other 合集沉底)"""
+        agg = defaultdict(lambda: {"raw_count": 0, "norm_count": 0.0, "sample_hits": 0, "gcn_mean": 1.0, "is_noise": False})
         total_norm = 0.0
         total_raw = 0
 
         for s in samples_data:
             for d in s.get("norm_result", {}).get("details", []):
                 taxon = d["taxon"]
+                is_noise = bool(d.get("is_noise")) or RrnDBService.is_noise_or_other(taxon)
                 agg[taxon]["raw_count"] += d["raw_count"]
                 agg[taxon]["norm_count"] += d["norm_count"]
                 agg[taxon]["sample_hits"] += 1
                 agg[taxon]["gcn_mean"] = d.get("gcn_mean", 1.0)
+                agg[taxon]["is_noise"] = is_noise
                 total_norm += d["norm_count"]
                 total_raw += d["raw_count"]
 
@@ -853,10 +855,12 @@ class DiversityEngine:
                 "raw_pct": round(info["raw_count"] / total_raw * 100.0, 2) if total_raw > 0 else 0.0,
                 "norm_pct": round(info["norm_count"] / total_norm * 100.0, 2) if total_norm > 0 else 0.0,
                 "sample_frequency": f"{info['sample_hits']}/{len(samples_data)}",
-                "gcn_mean": info["gcn_mean"]
+                "gcn_mean": info["gcn_mean"],
+                "is_noise": info["is_noise"]
             })
 
-        res.sort(key=lambda x: x["norm_pct"], reverse=True)
+        # 真实生物物种优先按归一化相对丰度降序，Other/低频噪声沉底显示在末尾
+        res.sort(key=lambda x: (-1 if x.get("is_noise") else 0, x["norm_pct"]), reverse=True)
         return res
 
     def _get_blastn_path(self) -> Path:

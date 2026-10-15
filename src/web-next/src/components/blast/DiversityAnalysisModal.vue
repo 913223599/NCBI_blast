@@ -765,10 +765,42 @@ const stackedBarData = computed<StackedSample[]>(() => {
   })
 })
 
-/** 物种总览与排行榜检索过滤 (专为回答“有什么物种、各占多少”设计) */
+/** 确证物种数量（严格排除低频测序噪声与 Other 合集） */
+const confirmedSpeciesCount = computed(() => {
+  if (!results.value || !results.value.taxa_overview) return 0
+  return results.value.taxa_overview.filter((t: any) => !isNoiseTaxon(t.taxon)).length
+})
+
+/** 获取真实生物物种的排名映射 (1, 2, 3...)，排除噪声项占用有效名额 */
+const realTaxaRanks = computed(() => {
+  if (!results.value || !results.value.taxa_overview) return new Map<string, number>()
+  const map = new Map<string, number>()
+  let rank = 1
+  for (const t of results.value.taxa_overview) {
+    if (!isNoiseTaxon(t.taxon)) {
+      map.set(t.taxon, rank++)
+    }
+  }
+  return map
+})
+
+function getRealTaxonRank(taxon: string): number | null {
+  return realTaxaRanks.value.get(taxon) ?? null
+}
+
+/** 物种总览与排行榜检索过滤 (专为回答“有什么物种、各占多少”设计，确保真实物种在前、噪声合集沉底) */
 const filteredTaxaOverview = computed(() => {
   if (!results.value || !results.value.taxa_overview) return []
-  const list = results.value.taxa_overview
+  const list = [...results.value.taxa_overview]
+  // 智能保底排序：确保真实生物物种在前、低频噪声沉底
+  list.sort((a: any, b: any) => {
+    const aNoise = isNoiseTaxon(a.taxon) ? 1 : 0
+    const bNoise = isNoiseTaxon(b.taxon) ? 1 : 0
+    if (aNoise !== bNoise) return aNoise - bNoise
+    const aPct = Number(a.norm_pct ?? a.overall_norm_pct ?? 0)
+    const bPct = Number(b.norm_pct ?? b.overall_norm_pct ?? 0)
+    return bPct - aPct
+  })
   const q = taxaSearchQuery.value.trim().toLowerCase()
   if (!q) return list
   return list.filter((t: any) => t.taxon.toLowerCase().includes(q))
@@ -1131,7 +1163,7 @@ onUnmounted(() => {
             </div>
             <div class="stat-pill">
               <span class="label">确证菌种:</span>
-              <span class="val">{{ results?.taxa_overview?.length || 0 }} 种</span>
+              <span class="val">{{ confirmedSpeciesCount }} 种</span>
             </div>
             <div class="stat-pill pill-rrndb" title="基于 rrnDB v5.10 消除 16S 多拷贝菌株的丰度假阳性放大，还原真实细胞丰度">
               <svg class="pill-shield-svg" viewBox="0 0 20 20" fill="currentColor">
@@ -1323,7 +1355,8 @@ onUnmounted(() => {
 
               <div class="taxa-toolbar-right">
                 <span class="taxa-count-tag">
-                  共计检出 <strong>{{ filteredTaxaOverview.length }}</strong> 种微生物
+                  共计确证 <strong>{{ confirmedSpeciesCount }}</strong> 种有效微生物
+                  <span v-if="taxaSearchQuery"> (检索匹配 {{ filteredTaxaOverview.length }} 项)</span>
                 </span>
                 <button class="btn-export-excel" @click="exportExcel">
                   <svg viewBox="0 0 20 20" fill="currentColor">
@@ -1348,18 +1381,39 @@ onUnmounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(t, idx) in filteredTaxaOverview" :key="t.taxon" class="taxa-row">
+                <tr 
+                  v-for="(t, idx) in filteredTaxaOverview" 
+                  :key="t.taxon" 
+                  class="taxa-row"
+                  :class="{ 'taxa-row-noise': isNoiseTaxon(t.taxon) }"
+                >
                   <td class="text-center font-bold">
-                    <span class="rank-badge" :class="Number(idx) < 3 ? `rank-${Number(idx) + 1}` : 'rank-normal'">
-                      {{ Number(idx) + 1 }}
+                    <span 
+                      v-if="!isNoiseTaxon(t.taxon)" 
+                      class="rank-badge" 
+                      :class="Number(getRealTaxonRank(t.taxon)) <= 3 ? `rank-${getRealTaxonRank(t.taxon)}` : 'rank-normal'"
+                    >
+                      {{ getRealTaxonRank(t.taxon) }}
+                    </span>
+                    <span 
+                      v-else 
+                      class="rank-badge rank-noise" 
+                      title="低频测序噪声与孤儿读段本底合集，不占用有效物种排名"
+                    >
+                      -
                     </span>
                   </td>
                   <td>
                     <div class="taxon-name-wrap">
                       <span class="taxon-latin-name">{{ t.taxon }}</span>
                       <span v-if="getTaxonZh(t.taxon)" class="taxon-zh-badge">{{ getTaxonZh(t.taxon) }}</span>
-                      <span class="top-tag" v-if="Number(idx) === 0">绝对优势种</span>
-                      <span class="top-sub-tag" v-else-if="Number(idx) < 3">主要优势种</span>
+                      <template v-if="!isNoiseTaxon(t.taxon)">
+                        <span class="top-tag" v-if="getRealTaxonRank(t.taxon) === 1">绝对优势种</span>
+                        <span class="top-sub-tag" v-else-if="Number(getRealTaxonRank(t.taxon)) <= 3">主要优势种</span>
+                      </template>
+                      <template v-else>
+                        <span class="noise-tag">低频测序噪声</span>
+                      </template>
                     </div>
                   </td>
                   <td>
@@ -2705,6 +2759,18 @@ onUnmounted(() => {
 .rank-2 { background: #e2e8f0; color: #475569; }
 .rank-3 { background: #fed7aa; color: #9a3412; }
 .rank-normal { background: #f1f5f9; color: #64748b; }
+.rank-noise { background: #f1f5f9; color: #94a3b8; border: 1px dashed #cbd5e1; }
+.taxa-row-noise { background: #fcfcfd; opacity: 0.88; }
+.taxa-row-noise:hover { background: #f8fafc !important; }
+.noise-tag {
+  font-size: 0.7rem;
+  background: #f1f5f9;
+  color: #64748b;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  border: 1px solid #e2e8f0;
+}
 .taxon-name-wrap {
   display: flex;
   align-items: center;

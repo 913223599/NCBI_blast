@@ -186,7 +186,7 @@ class AnnotationManager:
         """调整等待队列排队顺序"""
         annotation_queue.reorder_queue(task_ids)
 
-    def list_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+    def list_history(self, limit: int = 200) -> List[Dict[str, Any]]:
         """获取注释历史列表并自动纠正完成态任务"""
         tasks = annotation_db.list_tasks(limit=limit)
         incomplete = annotation_db.get_incomplete_tasks()
