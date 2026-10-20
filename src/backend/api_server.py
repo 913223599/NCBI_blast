@@ -280,6 +280,14 @@ app.include_router(pan_genomics.router, prefix="/api")
 app.include_router(sanger_trace.router)
 app.include_router(diversity.router, prefix="/api")
 
+# 静默吸收外部第三方工具 (如 QingchiAI / 外部插件) 的轮询探测，消除控制台刷屏
+@app.api_route("/api/ai/bridge/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+@app.api_route("/api/ai/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+@app.api_route("/api/projects", methods=["GET", "POST", "OPTIONS"])
+@app.api_route("/api/prompt", methods=["GET", "POST", "OPTIONS"])
+async def _silent_external_sink(full_path: str = ""):
+    return {"status": "ok", "bridged": False}
+
 
 # 最后：启动局域网共享路由 (确保通配符路由 /{full_path} 不会屏蔽业务 API)
 try:

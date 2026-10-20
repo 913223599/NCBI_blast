@@ -46,7 +46,7 @@
     "use_cache": true,
     "thread_count": 1,
     "request_timeout": 9,
-    "ai_model": "deepseek-v4-flash"
+    "ai_model": "qwen-plus"
   },
   "setup_completed": true,
   "blast_bin_path": "C:\\Program Files\\NCBI\\blast-2.16.0+\\bin",

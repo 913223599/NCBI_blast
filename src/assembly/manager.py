@@ -129,6 +129,7 @@ class AssemblyManager:
 
         # 实时底层输出日志广播回调
         def on_step_log(log_line: str):
+            print(f"[NGCS] {log_line}", flush=True)
             broadcaster.broadcast_sync("assembly_log", {
                 "task_id": task_id,
                 "line": log_line,
