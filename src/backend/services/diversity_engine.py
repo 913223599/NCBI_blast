@@ -27,6 +27,7 @@ import numpy as np
 from .rrndb_service import get_rrndb_service, RrnDBService
 from .diversity_filter import DiversityNoiseFilter
 from .heterogeneity_detector import OperonHeterogeneityDetector
+from .fastq_qc_service import FastqQCFilter
 
 logger = logging.getLogger("api_server")
 
@@ -273,6 +274,14 @@ class DiversityEngine:
         staged_dir = task_dir / "staged"
         staged_dir.mkdir(parents=True, exist_ok=True)
 
+        # 提前初始化全局任务配置与质控参数 (宽容自适应标准，杜绝误杀局部可变区或短扩增子)
+        task_params = task_info.get("params") or {}
+        min_len = int(task_params.get("min_len", 200))
+        max_len = int(task_params.get("max_len", 2500))
+        min_qscore = float(task_params.get("min_qscore", 7.0))
+        min_identity = float(task_params.get("min_identity", 80.0))
+        min_coverage = float(task_params.get("min_coverage", 0.0))
+
         try:
             self._update_progress(task_id, 2.0, "正在扫描与解包测序数据...")
             
@@ -310,16 +319,32 @@ class DiversityEngine:
                 reserved_cores = 4 if cpu_total > 8 else 2
                 usable_cores = max(2, cpu_total - reserved_cores)
 
-                # 预读待处理样本的 Reads 总数
+                qc_filter = FastqQCFilter(
+                    min_len=min_len,
+                    max_len=max_len,
+                    min_avg_qscore=min_qscore,
+                    max_n_ratio=0.05,
+                    auto_adapt_length=True
+                )
+
+                # 预读并执行前置生信质控过滤 (Length QC + Q-Score QC + N-ratio QC)
                 read_counts = defaultdict(int)
                 sample_reads_dict = {}
+                sample_qc_map = {}
                 total_reads_to_blast = 0
                 for sname in pending_samples:
                     fq_path = sample_fastq_map[sname]
-                    reads = self._read_fastq_sequences(fq_path)
-                    sample_reads_dict[sname] = reads
-                    read_counts[sname] = len(reads)
-                    total_reads_to_blast += len(reads)
+                    clean_reads, qc_rep = qc_filter.filter_fastq_file(fq_path, sample_name=sname)
+                    sample_reads_dict[sname] = clean_reads
+                    sample_qc_map[sname] = qc_rep.to_dict()
+                    read_counts[sname] = len(clean_reads)
+                    total_reads_to_blast += len(clean_reads)
+                    logger.info(
+                        f"[FastqQC] 样本 {sname}: 原始 {qc_rep.total_raw_reads} 条, "
+                        f"质控剔除劣质/长短不合序列 {qc_rep.total_raw_reads - qc_rep.passed_clean_reads} 条, "
+                        f"留存 Clean Reads: {len(clean_reads)} 条 (通过率: {qc_rep.pass_rate_pct}%, "
+                        f"平均长度: {qc_rep.mean_len_clean} bp, 平均质量值: Q{qc_rep.mean_qscore_clean})"
+                    )
 
                 # 最优配比：多子进程分片运行，彻底规避单个 BLAST 进程的 OpenMP 互斥锁与异构核同步屏障瓶颈
                 if (len(pending_samples) >= 4 or total_reads_to_blast >= 16) and usable_cores >= 16:
@@ -480,7 +505,7 @@ class DiversityEngine:
                         "-query", str(c_fa),
                         "-db", "16S_ribosomal_RNA",
                         "-out", str(c_out),
-                        "-outfmt", "6 qseqid sseqid pident length mismatch gapopen evalue bitscore stitle",
+                        "-outfmt", "6 qseqid sseqid pident length mismatch gapopen evalue bitscore stitle qcovs",
                         "-max_target_seqs", "1",
                         "-num_threads", str(threads_per_worker)
                     ]
@@ -503,7 +528,7 @@ class DiversityEngine:
                     if proc.returncode != 0:
                         raise RuntimeError(f"Chunk {c_id} BLAST 执行失败: {proc.stderr}")
 
-                    # 立即解析本分片比对结果
+                    # 立即解析本分片比对结果 (同一性与覆盖度严格质控)
                     local_best_hits = defaultdict(dict)
                     if c_out.exists():
                         with open(c_out, "r", encoding="utf-8", errors="ignore") as f:
@@ -515,8 +540,15 @@ class DiversityEngine:
                                     sname, raw_rid = qid.split("__", 1)
                                     bitscore = float(parts[7])
                                     pident = float(parts[2])
-                                    if pident < 80.0:
+                                    aln_len = int(parts[3])
+                                    qcovs = float(parts[9]) if len(parts) >= 10 else 100.0
+
+                                    # 仅过滤明显异常比对 (同一性低于门槛或比对有效长度过短)
+                                    if pident < min_identity or aln_len < 40:
                                         continue
+                                    if min_coverage > 0 and qcovs < min_coverage:
+                                        continue
+
                                     stitle = parts[8]
                                     m = re.search(r"([A-Z][a-z]+ [a-z0-9\.\-]+(?: subsp\. [a-z0-9\.\-]+)?)", stitle)
                                     sp = m.group(1) if m else stitle
@@ -534,9 +566,12 @@ class DiversityEngine:
                             alpha_metrics = filter_res["alpha_clean"]
                             hetero_advisories = self.hetero_detector.diagnose_sample(raw_sp_cnt)
 
+                            s_qc = sample_qc_map.get(sname, {})
                             chk_obj = {
                                 "sample_name": sname,
+                                "total_raw_reads": s_qc.get("total_raw_reads", read_counts[sname]),
                                 "total_reads": read_counts[sname],
+                                "qc_stats": s_qc,
                                 "classified_reads": len(hits),
                                 "taxa_counts": clean_counts,
                                 "raw_taxa_counts": raw_sp_cnt,
@@ -599,9 +634,12 @@ class DiversityEngine:
                         alpha_metrics = filter_res["alpha_clean"]
                         hetero_advisories = self.hetero_detector.diagnose_sample(raw_sp_cnt)
 
+                        s_qc = sample_qc_map.get(sname, {})
                         chk_obj = {
                             "sample_name": sname,
+                            "total_raw_reads": s_qc.get("total_raw_reads", read_counts[sname]),
                             "total_reads": read_counts[sname],
+                            "qc_stats": s_qc,
                             "classified_reads": len(hits),
                             "taxa_counts": clean_counts,
                             "raw_taxa_counts": raw_sp_cnt,
@@ -644,12 +682,33 @@ class DiversityEngine:
             beta_result = self._calc_beta_diversity(all_samples_data)
             taxa_overview = self._calc_global_taxa_overview(all_samples_data)
 
+            # 汇总全批次质控统计
+            qc_list = [s.get("qc_stats") for s in all_samples_data if s.get("qc_stats")]
+            tot_raw = sum(q.get("total_raw_reads", 0) for q in qc_list) if qc_list else sum(s.get("total_reads", 0) for s in all_samples_data)
+            tot_clean = sum(q.get("passed_clean_reads", 0) for q in qc_list) if qc_list else sum(s.get("total_reads", 0) for s in all_samples_data)
+            tot_dropped = tot_raw - tot_clean
+
+            qc_summary = {
+                "total_raw_reads": tot_raw,
+                "total_clean_reads": tot_clean,
+                "total_dropped_reads": tot_dropped,
+                "overall_pass_rate_pct": round((tot_clean / max(1, tot_raw)) * 100.0, 2),
+                "filter_criteria": {
+                    "min_length": min_len,
+                    "max_length": max_len,
+                    "min_qscore": min_qscore,
+                    "min_identity": min_identity,
+                    "min_coverage": min_coverage
+                }
+            }
+
             final_report = {
                 "task_id": task_id,
                 "input_path": str(input_path),
                 "total_samples": len(all_samples_data),
                 "total_reads": sum(s.get("total_reads", 0) for s in all_samples_data),
                 "total_classified_reads": sum(s.get("classified_reads", 0) for s in all_samples_data),
+                "qc_summary": qc_summary,
                 "samples": all_samples_data,
                 "beta_diversity": beta_result,
                 "taxa_overview": taxa_overview,

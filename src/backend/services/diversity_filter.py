@@ -89,8 +89,23 @@ class DiversityNoiseFilter:
         if self.preserve_other and noise_reads > 0:
             filtered_counts["Other (低频测序噪声)"] = noise_reads
 
+        # 容错保护：若所有物种均被过滤为噪声导致真实菌种零检出，启动低深度容错保护
+        real_retained = [k for k in filtered_counts if not k.startswith("Other") and "噪声" not in k]
+        if not real_retained and taxa_counts:
+            # 保留该样本最高频候选菌株，避免整样本被全部打成 100% 噪声
+            sorted_candidates = sorted(taxa_counts.items(), key=lambda x: x[1], reverse=True)
+            for top_taxon, top_c in sorted_candidates[:3]:
+                filtered_counts[top_taxon] = top_c
+                removed_taxa = [r for r in removed_taxa if r["taxon"] != top_taxon]
+                noise_reads = max(0, noise_reads - top_c)
+            
+            if self.preserve_other and noise_reads > 0:
+                filtered_counts["Other (低频测序噪声)"] = noise_reads
+            elif "Other (低频测序噪声)" in filtered_counts and noise_reads <= 0:
+                del filtered_counts["Other (低频测序噪声)"]
+
         # 分别计算原始与过滤后的生态学指标 (计算 Alpha 时不应计入人工归类的 Other 分组)
-        clean_for_alpha = {k: v for k, v in filtered_counts.items() if not k.startswith("Other")}
+        clean_for_alpha = {k: v for k, v in filtered_counts.items() if not k.startswith("Other") and "噪声" not in k}
         alpha_raw = self._calc_alpha(taxa_counts)
         alpha_clean = self._calc_alpha(clean_for_alpha)
 

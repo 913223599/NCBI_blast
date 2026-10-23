@@ -68,12 +68,16 @@ const totalSamples = ref<number>(0)
 const results = ref<any>(null)
 let pollTimer: any = null
 
-// 颜色板定义 (支持多达 16 种优势物种区分)
+// 物种展示数量配置 (默认 Top 15，支持快捷切换 Top 10 / 15 / 20 / 全部)
+const topTaxaCount = ref<number>(15)
+
+// 科研级多样性对比色板 (扩充至 24 种高区分度色彩)
 const PALETTE = [
   '#2563eb', '#059669', '#d97706', '#dc2626', '#7c3aed',
   '#0891b2', '#db2777', '#4b5563', '#4f46e5', '#16a34a',
   '#ea580c', '#e11d48', '#9333ea', '#0284c7', '#65a30d',
-  '#94a3b8'
+  '#0d9488', '#b45309', '#be185d', '#6366f1', '#15803d',
+  '#c2410c', '#9d174d', '#7e22ce', '#0369a1'
 ]
 
 // 交互悬停 Tooltip 状态
@@ -455,19 +459,32 @@ async function fetchResults() {
   }
 }
 
-/** 全局 Top 10 物种列表 (其余归入 Other) */
+/** 全局 Top N 真实生物物种列表 (自动排除纯测序噪声) */
 const topTaxaList = computed(() => {
   if (!results.value || !results.value.taxa_overview) return []
-  const list = results.value.taxa_overview.slice(0, 10).map((t: any) => t.taxon)
-  return list
+  // 过滤剔除纯测序噪声与孤儿读段，确保彩色图例均为确证的真实微生物
+  const biologicalTaxa = results.value.taxa_overview.filter((t: any) => {
+    const name = (t.taxon || '').toLowerCase()
+    return !t.is_noise && !name.includes('噪声') && !name.includes('noise') && !name.startsWith('other')
+  })
+  const count = topTaxaCount.value >= 900 ? biologicalTaxa.length : topTaxaCount.value
+  return biologicalTaxa.slice(0, count).map((t: any) => t.taxon)
 })
 
 function getTaxonColor(taxon: string): string {
-  const idx = topTaxaList.value.indexOf(taxon)
-  if (idx >= 0 && idx < PALETTE.length) {
-    return PALETTE[idx] || '#94a3b8'
+  const lower = taxon.toLowerCase()
+  if (lower.includes('低频测序噪声') || lower.includes('sequencing noise')) {
+    return '#475569' // 深石墨冷灰 (纯测序低频孤儿噪声)
   }
-  return '#94a3b8' // Other
+  if (lower.includes('长尾微量物种') || lower.includes('minor taxa') || lower.includes('其他')) {
+    return '#94a3b8' // 柔灰蓝 (未排进前列的真实微量长尾菌群)
+  }
+
+  const idx = topTaxaList.value.indexOf(taxon)
+  if (idx >= 0) {
+    return PALETTE[idx % PALETTE.length] || '#0284c7'
+  }
+  return '#94a3b8'
 }
 
 /** 所有原始样本名称列表 (自然排序) */
@@ -706,14 +723,24 @@ const stackedBarData = computed<StackedSample[]>(() => {
     const segments: StackedSegment[] = []
     let cumulative = 0
 
-    // 分离 Top 物种与 Others
+    // 分离 Top 物种、真实长尾物种与测序低频噪声
     const topItems: any[] = []
-    let otherPct = 0
-    let otherRaw = 0
+    let minorTaxaPct = 0
+    let minorTaxaRaw = 0
+    let minorTaxaCount = 0
+
+    let noisePct = 0
+    let noiseRaw = 0
 
     details.forEach((d: any) => {
       const pct = Number(isNorm ? d.norm_pct : d.raw_pct) || 0
-      if (topTaxaList.value.includes(d.taxon)) {
+      const nameLower = (d.taxon || '').toLowerCase()
+      const isNoise = d.is_noise || nameLower.includes('噪声') || nameLower.includes('noise')
+
+      if (isNoise) {
+        noisePct += pct
+        noiseRaw += d.raw_count
+      } else if (topTaxaList.value.includes(d.taxon)) {
         topItems.push({
           taxon: d.taxon,
           pct: pct,
@@ -723,19 +750,36 @@ const stackedBarData = computed<StackedSample[]>(() => {
           gcn: d.gcn_mean
         })
       } else {
-        otherPct += pct
-        otherRaw += d.raw_count
+        // 未排进前 N 名但确证存在的真实长尾物种
+        minorTaxaPct += pct
+        minorTaxaRaw += d.raw_count
+        minorTaxaCount++
       }
     })
 
-    if (otherPct > 0) {
+    // 真实长尾低丰度微生物集合 (柔灰蓝)
+    if (minorTaxaPct > 0) {
       topItems.push({
-        taxon: '其他 (Others)',
-        pct: Math.round(otherPct * 100) / 100,
-        rawCount: otherRaw,
-        rawPct: Math.round(otherPct * 100) / 100,
-        normPct: Math.round(otherPct * 100) / 100,
-        gcn: 1.0
+        taxon: `长尾微量物种 (${minorTaxaCount} 种)`,
+        pct: Math.round(minorTaxaPct * 100) / 100,
+        rawCount: minorTaxaRaw,
+        rawPct: Math.round(minorTaxaPct * 100) / 100,
+        normPct: Math.round(minorTaxaPct * 100) / 100,
+        gcn: 1.0,
+        isMinor: true
+      })
+    }
+
+    // 纯低频测序孤儿噪声 (深石墨灰)
+    if (noisePct > 0) {
+      topItems.push({
+        taxon: '低频测序噪声 (已质控过滤)',
+        pct: Math.round(noisePct * 100) / 100,
+        rawCount: noiseRaw,
+        rawPct: Math.round(noisePct * 100) / 100,
+        normPct: Math.round(noisePct * 100) / 100,
+        gcn: 1.0,
+        isNoise: true
       })
     }
 
@@ -1172,6 +1216,13 @@ onUnmounted(() => {
               <span class="label">校正状态:</span>
               <span class="val">rrnDB v5.10 已归一化</span>
             </div>
+            <div v-if="results?.qc_summary" class="stat-pill pill-qc" :title="`前置质控过滤: 原始 ${results.qc_summary.total_raw_reads} 条，剔除 ${results.qc_summary.total_dropped_reads} 条异常读段 (读长/质量值未达标)`">
+              <svg class="pill-shield-svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+              </svg>
+              <span class="label">测序质控 (QC):</span>
+              <span class="val">{{ results.qc_summary.overall_pass_rate_pct }}% 通过</span>
+            </div>
           </div>
 
           <!-- 样本合并与分组控制区 -->
@@ -1254,6 +1305,19 @@ onUnmounted(() => {
               </span>
             </div>
 
+            <!-- 动态物种展示筛选条 -->
+            <div class="chart-top-bar">
+              <div class="top-taxa-selector">
+                <span class="selector-lbl">物种展示模式:</span>
+                <div class="selector-btn-group">
+                  <button class="selector-btn" :class="{ active: topTaxaCount === 10 }" @click="topTaxaCount = 10">Top 10</button>
+                  <button class="selector-btn" :class="{ active: topTaxaCount === 15 }" @click="topTaxaCount = 15">Top 15</button>
+                  <button class="selector-btn" :class="{ active: topTaxaCount === 20 }" @click="topTaxaCount = 20">Top 20</button>
+                  <button class="selector-btn" :class="{ active: topTaxaCount >= 900 }" @click="topTaxaCount = 999">全部物种 (All)</button>
+                </div>
+              </div>
+            </div>
+
             <div class="chart-legend-wrap">
               <div 
                 v-for="taxon in topTaxaList" 
@@ -1263,9 +1327,13 @@ onUnmounted(() => {
                 <span class="dot" :style="{ background: getTaxonColor(taxon) }"></span>
                 <span class="text">{{ taxon }}</span>
               </div>
-              <div class="legend-badge">
+              <div v-if="topTaxaCount < 900" class="legend-badge badge-minor" title="非前列的真实低丰度长尾微生物合集，可切换‘全部物种’展开">
                 <span class="dot" style="background: #94a3b8"></span>
-                <span class="text">其他 (Others)</span>
+                <span class="text">长尾微量物种 (Minor Taxa)</span>
+              </div>
+              <div class="legend-badge badge-noise" title="单/双 Reads 孤儿伪物种与随机测序噪声，经质控过滤器隔离">
+                <span class="dot" style="background: #475569"></span>
+                <span class="text">低频测序噪声 (已质控过滤)</span>
               </div>
             </div>
 
@@ -2419,10 +2487,17 @@ onUnmounted(() => {
   color: #166534; 
 }
 .pill-rrndb .val { color: #15803d; }
+.pill-qc {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1e40af;
+}
+.pill-qc .val { color: #2563eb; }
+.pill-qc .sub-label { color: #60a5fa; font-size: 0.72rem; }
 .pill-shield-svg {
   width: 14px;
   height: 14px;
-  color: #16a34a;
+  color: currentColor;
   flex-shrink: 0;
 }
 .btn-group-counter {
@@ -2433,6 +2508,69 @@ onUnmounted(() => {
   padding: 1px 6px;
   border-radius: 10px;
   margin-left: 2px;
+}
+
+/* 动态物种展示筛选条 */
+.chart-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.top-taxa-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.selector-lbl {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #64748b;
+}
+.selector-btn-group {
+  display: flex;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+.selector-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #64748b;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.selector-btn:hover {
+  color: #1e293b;
+}
+.selector-btn.active {
+  background: #ffffff;
+  color: #2563eb;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+.badge-minor {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+}
+.badge-minor .text {
+  color: #475569 !important;
+  font-weight: 600;
+}
+.badge-noise {
+  border-color: #94a3b8 !important;
+  background: #f1f5f9 !important;
+}
+.badge-noise .text {
+  color: #334155 !important;
+  font-weight: 600;
 }
 
 /* 图表解读辅助提示 */
