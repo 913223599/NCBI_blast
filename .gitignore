@@ -146,3 +146,5 @@ translations.db
 translations_backup.db
 src/nucmer.error
 src/test_shm.py
+translations.db-wal
+translations.db-shm

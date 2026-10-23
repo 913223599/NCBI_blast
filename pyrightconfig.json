@@ -20,7 +20,8 @@
         ".",
         "./src",
         "./vendor/ete4",
-        "./vendor/ete4/ete4"
+        "./vendor/ete4/ete4",
+        "E:/NGCS"
     ],
     "reportMissingImports": "warning",
     "reportMissingTypeStubs": "none",
