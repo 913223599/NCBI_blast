@@ -17,15 +17,17 @@ class AnnotationFuser:
     """注释特征融合与补全器"""
 
     UNANNOTATED_PATTERNS = [
-        r"^hypothetical(?:\s+protein)?$",
-        r"^unknown(?:\s+protein)?$",
-        r"^uncharacterized(?:\s+protein)?$",
-        r"^putative\s+uncharacterized(?:\s+protein)?$",
+        r"\bhypothetical\b",
+        r"\buncharacterized\b",
+        r"^unknown(?:\s+(?:protein|function))?$",
         r"^putative\s+protein$",
         r"^predicted\s+protein$",
         r"^protein\s+of\s+unknown\s+function$",
-        r"^conserved\s+hypothetical(?:\s+protein)?$",
-        r"^unnamed\s+protein\s+product$",
+        r"^phage\s+protein$",
+        r"^unnamed(?:\s+protein(?:\s+product)?)?$",
+        r"^protein\s+gp\d+(?:\.\d+)?$",
+        r"^gp\d+(?:\.\d+)?$",
+        r"^duf\d+(?:\s+family|\s+domain-containing)?(?:\s+protein)?$",
         r"^none$",
         r"^na$",
         r"^unassigned$"
@@ -146,6 +148,18 @@ class AnnotationFuser:
             base_feat.cog = str(new_cog).strip()
             is_updated = True
 
+        # 5. PHROG 与功能分类大类互补
+        if candidate_data.get("phrog") and not base_feat.phrog:
+            base_feat.phrog = str(candidate_data["phrog"]).strip()
+            is_updated = True
+        if candidate_data.get("function") and not base_feat.function:
+            base_feat.function = str(candidate_data["function"]).strip()
+            is_updated = True
+        if candidate_data.get("score") and not base_feat.score:
+            base_feat.score = str(candidate_data["score"]).strip()
+        if candidate_data.get("inference") and not base_feat.inference:
+            base_feat.inference = str(candidate_data["inference"]).strip()
+
         # 5. 证据链记录与 Notes 追加
         evidence_note = candidate_data.get("evidence") or candidate_data.get("note") or candidate_data.get("notes")
         evidence_tag = f"[{engine_name}]"
@@ -211,6 +225,10 @@ class AnnotationFuser:
                     "gene_name": in_feat.gene_name,
                     "ec_number": in_feat.ec_number,
                     "cog": in_feat.cog,
+                    "phrog": in_feat.phrog,
+                    "function": in_feat.function,
+                    "score": in_feat.score,
+                    "inference": in_feat.inference,
                     "evidence": in_feat.notes
                 }
                 if cls.complement_single_feature(best_match, cand_data, engine_name):
@@ -318,14 +336,16 @@ class AnnotationFuser:
             if not target_feat:
                 continue
 
-            acr_source = acr.get("source") or "Acrank_er"
+            acr_source = str(acr.get("source") or "Acrank_er").strip()
             ident = acr.get("identity", 0)
             e_val = acr.get("evalue", "1e-10")
             evidence_note = f"Anti-CRISPR: {acr_source} (Identity: {ident}%, E-value: {e_val})"
 
             curr_prod = get_val(target_feat, "product", "")
-            # 若原本未注释或为假定蛋白，直接赋予明确的生物学功能名称！
-            if cls.is_unannotated(curr_prod):
+            is_pure_prediction = "acranker" in acr_source.lower()
+
+            # 仅当来源具有明确实验/比对验证依据 (非纯 Acranker 机器学习预测) 且一致性 >= 80% 时，才改写假定蛋白为具体功能
+            if cls.is_unannotated(curr_prod) and not is_pure_prediction and ident >= 80.0:
                 clean_acr_name = f"anti-CRISPR protein ({acr_source})" if acr_source != "Acr Protein" else "anti-CRISPR protein"
                 set_val(target_feat, "product", clean_acr_name)
                 set_val(target_feat, "category", "Defense & Host Interaction")

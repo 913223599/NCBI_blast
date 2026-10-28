@@ -14,6 +14,8 @@ import ctypes
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Set, Callable, Tuple
 
+from .fuser import AnnotationFuser
+
 logger = logging.getLogger("analysis.annotation.functional_assigner")
 
 
@@ -70,7 +72,7 @@ class FunctionalAssigner:
                         pid = row.get("Protein_ID")
                         if pid and pid in target_ids and pid not in results:
                             prod = row.get("Product", "").strip()
-                            if prod and "hypothetical protein" not in prod.lower() and prod.lower() != "unknown":
+                            if prod and not AnnotationFuser.is_unannotated(prod):
                                 results[pid] = {
                                     "product": prod,
                                     "category": row.get("Protein_classification", "general").strip(),
@@ -180,16 +182,18 @@ class FunctionalAssigner:
                 }
             else:
                 stitle = hit.get("stitle", "")
-                if stitle and not stitle.startswith(tid) and "hypothetical" not in stitle.lower():
-                    functional_results[qid] = {
-                        "product": self._clean_product_name(stitle),
-                        "category": "general",
-                        "gene_name": None,
-                        "evalue": hit["evalue"],
-                        "identity": hit["identity"],
-                        "target_id": tid,
-                        "source_db": "PhageScope"
-                    }
+                if stitle and not stitle.startswith(tid):
+                    cleaned_prod = self._clean_product_name(stitle)
+                    if not AnnotationFuser.is_unannotated(cleaned_prod):
+                        functional_results[qid] = {
+                            "product": cleaned_prod,
+                            "category": "general",
+                            "gene_name": None,
+                            "evalue": hit["evalue"],
+                            "identity": hit["identity"],
+                            "target_id": tid,
+                            "source_db": "PhageScope"
+                        }
 
         # 4. Tier 2: Swiss-Prot 金标准蛋白库二次打捞 (对仍为假定蛋白或未命中的 CDS)
         swissprot_dir = self.db_dir / "swissprot"
@@ -207,7 +211,7 @@ class FunctionalAssigner:
                                 qid, tid, pident, length, evalue, bitscore, stitle = parts[:7]
                                 if qid not in functional_results and float(pident) >= identity_threshold:
                                     prod_name = self._clean_product_name(stitle)
-                                    if "hypothetical" not in prod_name.lower():
+                                    if not AnnotationFuser.is_unannotated(prod_name):
                                         functional_results[qid] = {
                                             "product": prod_name,
                                             "category": "general",
@@ -236,7 +240,7 @@ class FunctionalAssigner:
                                 qid, tid, pident, length, evalue, bitscore, stitle = parts[:7]
                                 if qid not in functional_results:
                                     prod_name, cat_name = self._parse_cdd_domain_product(stitle)
-                                    if prod_name and "hypothetical" not in prod_name.lower():
+                                    if prod_name and not AnnotationFuser.is_unannotated(prod_name):
                                         functional_results[qid] = {
                                             "product": prod_name,
                                             "category": cat_name,

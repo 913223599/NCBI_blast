@@ -121,6 +121,10 @@ class PharokkaEngine(BaseAnnotationEngine):
                     phrog_num = q.get("phrog", [None])[0]
                     phrog_cat = q.get("function", [None])[0]
 
+                    f_score = q.get("score", [None])[0]
+                    f_inference = q.get("inference", [None])[0]
+                    f_transl_table = q.get("transl_table", [None])[0]
+
                     f_start = int(feat.location.start) + 1
                     f_end = int(feat.location.end)
                     f_len = f_end - f_start + 1
@@ -132,6 +136,10 @@ class PharokkaEngine(BaseAnnotationEngine):
                         evidence.append(f"PHROG #{phrog_num}")
                     if phrog_cat:
                         evidence.append(f"Category: {phrog_cat}")
+
+                    # 收集其他需要保留的标准 qualifier
+                    known_keys = {"translation", "product", "locus_tag", "protein_id", "gene", "phrog", "function", "score", "inference", "transl_table"}
+                    extras = {k: v for k, v in q.items() if k not in known_keys}
 
                     features.append(FeatureItem(
                         id=lt,
@@ -149,6 +157,12 @@ class PharokkaEngine(BaseAnnotationEngine):
                         molecular_weight_kda=mw,
                         translation=trans if trans else None,
                         category=phrog_cat if phrog_cat else None,
+                        phrog=str(phrog_num) if phrog_num else None,
+                        function=str(phrog_cat) if phrog_cat else None,
+                        score=str(f_score) if f_score else None,
+                        inference=str(f_inference) if f_inference else None,
+                        transl_table=str(f_transl_table) if f_transl_table else None,
+                        extra_qualifiers=extras,
                         source_engine="Pharokka",
                         evidence_sources=[f"[Pharokka] {', '.join(evidence)}"] if evidence else ["[Pharokka] Model"]
                     ))

@@ -193,8 +193,17 @@ class DeepSafetyAuditor:
         audit_result["anti_crispr_genes"] = list(acr_hits.values())
 
         # 3. 结果汇总与合规评级
-        if audit_result["anti_crispr_genes"]:
-            audit_result["anti_crispr_status"] = f"Detected ({len(audit_result['anti_crispr_genes'])} unique Acr genes)"
+        verified_acrs = [
+            a for a in audit_result["anti_crispr_genes"]
+            if "acranker" not in str(a.get("source", "")).lower() or a.get("identity", 0) >= 80.0
+        ]
+        total_acrs = len(audit_result["anti_crispr_genes"])
+        if verified_acrs:
+            audit_result["anti_crispr_status"] = f"Detected ({len(verified_acrs)} high-confidence Acr genes)"
+        elif total_acrs > 0:
+            audit_result["anti_crispr_status"] = f"Candidate Predicted ({total_acrs} ML predictions, low confidence)"
+        else:
+            audit_result["anti_crispr_status"] = "Not Detected"
 
         if audit_result["amr_genes"]:
             audit_result["safety_passed"] = False

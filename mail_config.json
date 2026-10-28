@@ -1,0 +1,14 @@
+{
+  "imap_server": "imap.qq.com",
+  "imap_port": 993,
+  "account": "913223599@qq.com",
+  "auth_code_env": "YS_MAIL_AUTH_CODE",
+  "sender_whitelist": ["yssw_service@163.com"],
+  "subject_keywords": [],
+  "attachment_exts": [".fasta", ".fa", ".fna", ".fas", ".fsa", ".seq", ".txt"],
+  "max_attach_size_mb": 200,
+  "since_days": 7,
+  "download_dir": "results/email_downloads",
+  "mark_seen": false,
+  "on_download_cmd": null
+}

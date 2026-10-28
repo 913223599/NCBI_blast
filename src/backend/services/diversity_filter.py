@@ -23,8 +23,8 @@ class DiversityNoiseFilter:
         :param preserve_other: 是否将过滤掉的噪声 Reads 计入 Other 分组以维持总 Reads 数平衡
         """
         self.min_rel_abundance = float(min_rel_abundance)
-        self.min_reads_count = int(min_reads_count)
-        self.preserve_other = bool(preserve_other)
+        self.min_reads_count = min_reads_count
+        self.preserve_other = preserve_other
 
     def filter_taxa(
         self,

@@ -68,6 +68,12 @@ class FeatureItem(BaseModel):
     ec_number: Optional[str] = None
     cog: Optional[str] = None
     category: Optional[str] = None  # 功能分类大类: 结构蛋白, 复制与修饰, 包装, 裂解, 代谢, 假定蛋白等
+    phrog: Optional[str] = None  # PHROG 噬菌体同源群编号 (如 "19")
+    function: Optional[str] = None  # 原生标准功能分类 (如 "DNA, RNA and nucleotide metabolism")
+    score: Optional[str] = None  # 预测得分
+    inference: Optional[str] = None  # 推断依据/算法来源
+    transl_table: Optional[str] = None  # 翻译密码子代号
+    extra_qualifiers: Dict[str, List[str]] = Field(default_factory=dict)  # 其他保留的原生 GenBank qualifier
     source_engine: Optional[str] = None  # 首次提供/更新该特征的引擎
     evidence_sources: List[str] = Field(default_factory=list)  # 证据链来源列表
     notes: Optional[str] = None

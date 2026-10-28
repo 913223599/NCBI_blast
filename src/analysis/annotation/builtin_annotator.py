@@ -383,8 +383,22 @@ class BuiltinAnnotator:
                     cds_feat.qualifiers["gene"] = [feat.gene_name]
                 if feat.category:
                     cds_feat.qualifiers["category"] = [feat.category]
+                if feat.phrog:
+                    cds_feat.qualifiers["phrog"] = [str(feat.phrog)]
+                if feat.function:
+                    cds_feat.qualifiers["function"] = [str(feat.function)]
+                if feat.score:
+                    cds_feat.qualifiers["score"] = [str(feat.score)]
+                if feat.inference:
+                    cds_feat.qualifiers["inference"] = [str(feat.inference)]
+                if feat.transl_table:
+                    cds_feat.qualifiers["transl_table"] = [str(feat.transl_table)]
                 if feat.ec_number:
                     cds_feat.qualifiers["EC_number"] = [feat.ec_number]
+                if feat.extra_qualifiers:
+                    for eq_k, eq_v in feat.extra_qualifiers.items():
+                        if eq_k not in cds_feat.qualifiers and eq_k not in ["translation", "product", "locus_tag", "protein_id"]:
+                            cds_feat.qualifiers[eq_k] = [str(x) for x in eq_v] if isinstance(eq_v, list) else [str(eq_v)]
                 if feat.notes:
                     cds_feat.qualifiers["note"] = [feat.notes]
 
@@ -421,6 +435,10 @@ class BuiltinAnnotator:
                     attrs.append(f"EC_number={feat.ec_number}")
                 if feat.category:
                     attrs.append(f"category={feat.category}")
+                if feat.phrog:
+                    attrs.append(f"phrog={feat.phrog}")
+                if feat.function:
+                    attrs.append(f"function={feat.function}")
                 if feat.notes:
                     attrs.append(f"note={feat.notes}")
                 attr_str = ";".join(attrs)

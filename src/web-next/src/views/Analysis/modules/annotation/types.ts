@@ -55,6 +55,10 @@ export interface FeatureItem {
   ec_number?: string | null;
   cog?: string | null;
   category?: string | null;
+  phrog?: string | null;
+  function?: string | null;
+  score?: string | null;
+  inference?: string | null;
   source_engine?: string | null;
   evidence_sources?: string[];
   notes?: string | null;

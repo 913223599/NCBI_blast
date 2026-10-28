@@ -104,7 +104,9 @@ const filteredFeatures = computed(() => {
       const matchGene = item.gene_name?.toLowerCase().includes(q);
       const matchCat = item.category?.toLowerCase().includes(q);
       const matchEng = item.source_engine?.toLowerCase().includes(q);
-      return matchTag || matchProd || matchGene || matchCat || matchEng;
+      const matchPhrog = item.phrog ? `phrog ${item.phrog}`.toLowerCase().includes(q) || item.phrog.toLowerCase().includes(q) : false;
+      const matchFunc = item.function?.toLowerCase().includes(q);
+      return matchTag || matchProd || matchGene || matchCat || matchEng || matchPhrog || matchFunc;
     }
     return true;
   });
@@ -464,6 +466,10 @@ const totalSafetyHits = computed(() => {
                     <div class="evidence-box" v-if="feat.notes || feat.evidence_sources?.length || feat.ec_number">
                       <div class="ev-header">注释特征属性与证据链:</div>
                       <div class="ev-items">
+                        <div class="ev-row" v-if="feat.phrog">
+                          <span class="ev-label">PHROG 编号:</span>
+                          <span class="ev-val">PHROG #{{ feat.phrog }} <span v-if="feat.function" class="text-muted">({{ feat.function }})</span></span>
+                        </div>
                         <div class="ev-row" v-if="feat.ec_number">
                           <span class="ev-label">EC 酶学编号:</span>
                           <span class="ev-val">{{ feat.ec_number }}</span>
