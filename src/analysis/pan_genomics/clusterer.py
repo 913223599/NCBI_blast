@@ -220,11 +220,22 @@ class ParallelOrthologClusterer:
 
             # 选取代表性名称与最具置信度功能分类
             known_prods = [item[2]["product"] for item in cl if not AnnotationFuser.is_unannotated(item[2]["product"])]
-            rep_prod = known_prods[0] if known_prods else cl[0][2]["product"]
+            non_generic_prods = [item[2]["product"] for item in cl if not AnnotationFuser.is_generic_hypothetical(item[2]["product"])]
+            rep_prod = known_prods[0] if known_prods else (non_generic_prods[0] if non_generic_prods else cl[0][2]["product"])
 
-            # 确定家族共识分类
-            known_cats = [item[2]["category"] for item in cl if item[2].get("category") and item[2]["category"] != "Hypothetical"]
-            rep_cat = known_cats[0] if known_cats else AnnotationFuser.infer_category(rep_prod)
+            # 确定家族共识分类：若代表产物本身是未表征/未知功能结构域(DUF等)，严格归为 Hypothetical
+            if AnnotationFuser.is_unannotated(rep_prod):
+                rep_cat = "Hypothetical"
+            else:
+                prod_cat = AnnotationFuser.infer_category(rep_prod)
+                if prod_cat != "Other Functional":
+                    rep_cat = prod_cat
+                else:
+                    known_cats = [
+                        item[2]["category"] for item in cl
+                        if item[2].get("category") and item[2]["category"] not in ("Hypothetical", "Other Functional")
+                    ]
+                    rep_cat = known_cats[0] if known_cats else "Other Functional"
 
             gene_items = []
             for item in cl:

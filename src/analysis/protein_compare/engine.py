@@ -20,6 +20,7 @@ from Bio import SeqIO
 from Bio.Align import PairwiseAligner
 
 from ..pan_genomics.fast_matcher import get_kmers
+from ..annotation.fuser import AnnotationFuser
 
 logger = logging.getLogger("ProteinCompareEngine")
 
@@ -28,106 +29,156 @@ PROTEIN_CATEGORIES = {
     "tail_fiber": {
         "label": "尾丝与宿主识别系统 (Tail Fiber & Host Specificity)",
         "patterns": [
-            r"\btail\s*(?:fiber|spike|tube|sheath|shaft|tip|assembly|tubular|component|protein|hydrolase)?\b",
-            r"\btailspike\b",
-            r"\bbaseplate\b",
-            r"\btape\s*measure\b",
+            r"\btail\b",
+            r"\btail[- ]?(?:fibers?|fibres?|spikes?|tubes?|sheaths?|shafts?|tips?|assembly|proteins?|hydrolases?|chaperones?|lysozymes?|collar|completion)\b",
+            r"\btailspikes?\b",
+            r"\bbaseplates?\b",
+            r"\btape[- ]?measure\b",
+            r"\btmp\b",
             r"\btpm\b",
-            r"\breceptor[- ]binding\b",
+            r"\breceptor[- ]?(?:binding|recogni(?:tion|zing))\b",
             r"\brbp\b",
-            r"\bcollar\s+protein\b",
-            r"\bwhisker\s+protein\b",
-            r"\b(?:distal|proximal|hinge)\s+connector\b",
-            r"\bneck\s+protein\b",
-            r"\bwedge\s+subunit\b",
+            r"\bhost[- ]?(?:specificity|range|recognition)\b",
+            r"\badhesins?\b",
+            r"\bcollar\b",
+            r"\bwhiskers?\b",
+            r"\b(?:distal|proximal|hinge)\s+connectors?\b",
+            r"\bneck\s+(?:proteins?|passage|appendages?)\b",
+            r"\bhead[- ]to[- ]tail\b",
+            r"\badaptor\s+ad4\b",
+            r"\bwedge\b",
             r"\bcentral\s+hub\b",
-            r"\bspike\s+protein\b",
+            r"\bspike\s+(?:proteins?|tips?|g\b)\b",
+            r"\bdepolymerases?\b",
+            r"\b(?:endo[- ]?)?sialidases?\b",
+            r"\bneuraminidases?\b",
+            r"\bhyaluronidases?\b",
+            r"\bpectin\s+lyases?\b",
+            r"\bcolanic\s+acid\b",
         ],
-        "exclude": []
+        "exclude": [
+            r"\bhead[- ]?fibers?\b",
+        ]
     },
     "lysis": {
         "label": "裂解系统与溶菌酶 (Lysis / Endolysin / Spanin / Holin)",
         "patterns": [
-            r"\bendolysin\b",
-            r"\blysin\b",
-            r"\blysozyme\b",
-            r"\bholin\b",
-            r"\bantiholin\b",
-            r"\b(?:i-|o-|u-)?spanin\b",
-            r"\bpeptidoglycan\s+(?:hydrolase|recognition)\b",
-            r"\bmuramidase\b",
-            r"\btransglycosylase\b",
-            r"\bcell\s+wall\s+hydrolase\b",
-            r"\bn-acetylmuramoyl\b",
-            r"\bamidase\b",
-            r"\bmurein\s+hydrolase\b",
-            r"\brz(?:-like|1)?\b",
-            r"\blysis\s+protein\b",
+            r"\bendolysins?\b",
+            r"\b[a-z0-9'-]*lysins?\b",
+            r"\blysozymes?\b",
+            r"\b(?:anti[- ]?)?holins?\b",
+            r"\b(?:i-|o-|u-|peri(?:plasmic)?[- ]|outer[- ]membrane[- ]|inner[- ]membrane[- ]|unimolecular[- ])?spanins?\b",
+            r"\bpeptidoglycan\s+(?:hydrolases?|recognition|catabolic|binding|endopeptidases?|lytic)\b",
+            r"\b[a-z0-9'-]*muramidases?\b",
+            r"\b(?:soluble\s+)?lytic\s+(?:murein\s+)?transglycosylases?\b",
+            r"\btransglycosylases?\b",
+            r"\bcell\s+wall\s+hydrolases?\b",
+            r"\bn-acetylmuramoyl-l-alanine\s+amidases?\b",
+            r"\b[a-z0-9'-]*amidases?\b",
+            r"\bmurein\s+(?:hydrolases?|endopeptidases?|dd-endopeptidases?|transglycosylases?)\b",
+            r"\brz(?:-like|1|a|b)?\b",
+            r"\b(?:host\s+|cell\s+)?lysis\b",
+            r"\bnlp[- /]?p60\b",
+            r"\bchap\s+domain\b",
+            r"\bglycoside\s+hydrolase\s+family\s+(?:18|19|22|24|25|73|108)\b",
         ],
-        "exclude": [r"\btail-associated\s+lysozyme\b", r"\btailspike\b"]
+        "exclude": [
+            r"\btail[- ]?(?:associated\s+)?(?:lysozymes?|lysins?|muramidases?|hydrolases?)\b",
+            r"\btail\s+tip\s+lysins?\b",
+            r"\btailspikes?\b",
+            r"\bbaseplate[- ]?(?:lysozymes?|lysins?|hub)\b",
+            r"\bvirion[- ]associated\s+lysozymes?\b",
+            r"\binternal\s+virion\s+lysozymes?\b",
+            r"\bhemolysins?\b",
+            r"\bhaemolysins?\b",
+            r"\benterolysins?\b",
+            r"\bcytolysins?\b",
+            r"\bleukocidins?\b",
+            r"\bautolysins?\b",
+            r"\bdeamidases?\b",
+            r"\bamidotransferases?\b",
+        ]
     },
     "capsid_head": {
         "label": "衣壳与头部形态发生 (Capsid & Head Morphogenesis)",
         "patterns": [
-            r"\b(?:major|minor)\s+capsid\b",
-            r"\bcapsid\s+(?:protein|assembly|scaffolding|subunit)?\b",
-            r"\bportal\s+protein\b",
-            r"\bhead\s+(?:protein|completion|assembly|structural|maturation)\b",
-            r"\bhead-tail\s+(?:adaptor|joining|connector)\b",
-            r"\bmaturation\s+protease\b",
-            r"\bprohead\s+protease\b",
-            r"\bcoat\s+protein\b",
-            r"\bvertex\s+protein\b",
-            r"\bcapsomer\b",
-            r"\bdecoration\s+protein\b",
-            r"\bscaffold(?:ing)?\s+protein\b",
-            r"\bvirion\s+structural\s+protein\b",
+            r"\b(?:major|minor|prohead|procapsid|icosahedral|isometric)?\s*capsids?\b",
+            r"\bportal\s*(?:proteins?|vertex)?\b",
+            r"\bhead\s+(?:proteins?|completion|assembly|structural|maturation|morphogenesis|scaffolding|closure|decoration|stabilization|vertex|chaperones?|fibers?|fibres?)\b",
+            r"\bhead[- ]?tail\s+(?:adaptors?|joining|connectors?|neck)\b",
+            r"\b(?:head\s+|capsid\s+|prohead\s+)?maturation\s+proteases?\b",
+            r"\bprohead\s*(?:proteases?|scaffolding|core|proteins?)?\b",
+            r"\bprocapsids?\b",
+            r"\bcoat\s+proteins?\b",
+            r"\bvertex\s+proteins?\b",
+            r"\bcapsomers?\b",
+            r"\bdecoration\s+proteins?\b",
+            r"\bscaffold(?:ing)?\s+proteins?\b",
+            r"\b(?:major\s+|minor\s+)?virion\s+(?:structural|morphogenesis)\s+proteins?\b",
+            r"\bencapsulins?\b",
+            r"\bmu\s+protein\s+f\b",
+            r"\bsh3\s+beta-barrel\s+fold\b",
         ],
         "exclude": []
     },
     "replication": {
-        "label": "DNA 复制与修饰酶 (Replication & Modification)",
+        "label": "DNA 复制、重组与转录调控 (Replication, Recombination & Regulation)",
         "patterns": [
-            r"\b(?:dna|rna)\s+polymerase\b",
-            r"\bpolymerase\b",
-            r"\bhelicase\b",
-            r"\bprimase\b",
-            r"\bprimase-helicase\b",
-            r"\bligase\b",
-            r"\bdna\s+ligase\b",
-            r"\b(?:endo|exo)nuclease\b",
-            r"\bhnh\s+endonuclease\b",
-            r"\bhoming\s+endonuclease\b",
-            r"\b(?:rnase|dnase)\b",
+            r"\b(?:dna|rna)?\s*polymerases?\b",
+            r"\bhelicases?\b",
+            r"\bprimases?\b",
+            r"\bprimase-helicases?\b",
+            r"\bprimosomal\b",
+            r"\breplication\s+(?:initiation|proteins?|factors?|organizers?|origins?)\b",
+            r"\b(?:dna|rna)?\s*ligases?\b",
+            r"\b(?:endo|exo|ribo|deoxyribo)nucleases?\b",
+            r"\bhnh\b",
+            r"\bgjy-yig\b",
+            r"\bgiy-yig\b",
+            r"\bvrr-nuc\b",
+            r"\b(?:rnase|dnase)s?\b",
             r"\bssb\b",
-            r"\bsingle-stranded\s+dna-binding\b",
-            r"\bdna[- ]binding\s+protein\b",
-            r"\bmethyltransferase\b",
-            r"\bmethylase\b",
-            r"\btopoisomerase\b",
-            r"\bgyrase\b",
-            r"\bintegrase\b",
-            r"\brecombinase\b",
-            r"\bresolvase\b",
-            r"\brepressor\b",
-            r"\banti-repressor\b",
-            r"\bactivator\s+protein\b",
-            r"\btranscriptio(?:n|nal)?(?:\s+(?:factor|regulator|activator|coactivator))?\b",
-            r"\bsigma\s+factor\b",
-            r"\bantitermination\b",
-            r"\b(?:cro|ci)\s+protein\b",
+            r"\bsingle[- ]strand(?:ed)?\s+(?:dna[- ]?)?(?:binding|annealing)\b",
+            r"\bdna[- ]binding\b",
+            r"\bmethyltransferases?\b",
+            r"\bmethylases?\b",
+            r"\btopoisomerases?\b",
+            r"\bgyrases?\b",
+            r"\bintegrases?\b",
+            r"\bexcisionases?\b",
+            r"\bexcise\b",
+            r"\brecombinases?\b",
+            r"\brecombination\b",
+            r"\bresolvases?\b",
+            r"\binvertases?\b",
+            r"\btransposases?\b",
+            r"\buvs[xyw]\b",
+            r"\brec[abceft]\b",
+            r"\brad5[12]\b",
+            r"\b Nin[bcfg]\b",
+            r"\bnin[bcfg]\b",
+            r"\brdf\b",
+            r"\b(?:anti[- ]?)?repressors?\b",
+            r"\btranscriptio(?:n|nal)\b",
+            r"\bsigma(?:\s+factors?|-[a-z0-9]+)\b",
+            r"\banti[- ]?termination\b",
+            r"\b(?:cro|ci|cii|ciii)\s*(?:proteins?|repressors?|regulators?|like)?\b",
+            r"\bwhib\b",
+            r"\bpar[abm]\b",
         ],
         "exclude": []
     },
     "packaging": {
         "label": "基因组包装与末端酶 (Packaging & Terminase)",
         "patterns": [
-            r"\bterminase(?:\s+(?:large|small|subunit|\d+))*\b",
-            r"\b(?:large|small)\s+subunit\s+terminase\b",
-            r"\bpackaging\s+(?:protein|enzyme|machinery)\b",
-            r"\bmaturase\b",
-            r"\bcos-cleaving\b",
-            r"\bpac\s+protein\b",
+            r"\bterminases?\b",
+            r"\bter[ls]\b",
+            r"\b(?:dna|genome|headful|phage)\s+packaging\b",
+            r"\bpackaging\s+(?:proteins?|enzymes?|machinery|atpases?|motors?|subunits?)\b",
+            r"\bmaturases?\b",
+            r"\bcos[- ]cleaving\b",
+            r"\bpac\s+(?:proteins?|sites?|ases?)\b",
+            r"\bpacases?\b",
         ],
         "exclude": []
     },
@@ -253,62 +304,68 @@ class ProteinComparer:
 
     @classmethod
     def is_hypothetical(cls, text: str) -> bool:
-        """快速判断是否为未知/假定蛋白"""
-        t = text.strip().lower()
-        if not t or t == "hypothetical protein" or t == "unknown" or t == "uncharacterized protein" or t == "putative protein":
-            return True
-        return False
+        """快速判断是否为未知/假定蛋白 (统一委托给 AnnotationFuser 权威判定器)"""
+        return AnnotationFuser.is_unannotated(text)
 
     @classmethod
     def classify_protein(cls, product: str, direct_cat: Optional[str] = None, notes: Optional[str] = None) -> str:
         """
         依据产品名称、已知分类及证据备注自动归入功能大类
-        采用严格带 \\b 词边界正则与排除项消歧机制，杜绝子串误碰撞
+        采用严格带 \\b 词边界正则与排除项消歧机制，并与 AnnotationFuser 协同，杜绝子串误碰撞
         """
         import re
 
         clean_prod = (product or "").strip()
-        
-        # 1. 假定蛋白优先排除
-        if cls.is_hypothetical(clean_prod) and not direct_cat and not notes:
+
+        # 1. 假定蛋白优先排除，防止 notes 中的技术性说明触发误匹配
+        if cls.is_hypothetical(clean_prod):
             return "other"
 
-        # 2. 优先检查高置信度已知分类标签 (如 PHROGs / AnnotationFuser 标注)
+        # 2. 对 product 本身执行严格正则词边界与优先级语义匹配
+        #    注意：必须优先于 direct_cat 执行，因为 AnnotationFuser 的 "Head & Packaging" 合并了
+        #    头部衣壳与包装末端酶，需先通过 product 精确区分 "packaging" 与 "capsid_head"
+        prod_text = clean_prod.lower().replace("_", " ").replace("%3b", ";")
+        priority_order = ["packaging", "tail_fiber", "capsid_head", "lysis", "replication"]
+
+        for cat_key in priority_order:
+            cat_info = PROTEIN_CATEGORIES[cat_key]
+
+            excluded = False
+            for exc_pat in cat_info.get("exclude", []):
+                if re.search(exc_pat, prod_text):
+                    excluded = True
+                    break
+            if excluded:
+                continue
+
+            for pat in cat_info["patterns"]:
+                if re.search(pat, prod_text):
+                    return cat_key
+
+        # 3. 委托给 AnnotationFuser 权威推断器进行兜底映射 (覆盖 105 万条 PhageScope 词库规则)
+        fuser_cat = AnnotationFuser.infer_category(clean_prod, None)
+        if fuser_cat in ("Tail & Host Interaction", "Tail & Host Recognition"):
+            return "tail_fiber"
+        if fuser_cat == "Lysis":
+            return "lysis"
+        if fuser_cat == "Head & Packaging":
+            return "capsid_head"
+        if fuser_cat in ("Replication & Repair", "Transcription & Regulation", "Integration & Excision"):
+            return "replication"
+
+        # 4. 若提供了外部显式分类标签 (如 PHROGs 原始标签) 作为最终参考
         if direct_cat:
             dc_lower = direct_cat.lower()
             if "tail" in dc_lower or "fiber" in dc_lower:
                 return "tail_fiber"
             if "lysis" in dc_lower:
                 return "lysis"
-            if "packaging" in dc_lower or "terminase" in dc_lower:
+            if "terminase" in dc_lower:
                 return "packaging"
-            if "head" in dc_lower or "capsid" in dc_lower:
+            if "head" in dc_lower or "capsid" in dc_lower or "packaging" in dc_lower:
                 return "capsid_head"
-            if "replication" in dc_lower or "repair" in dc_lower or "transcription" in dc_lower:
+            if any(k in dc_lower for k in ("replication", "repair", "transcription", "integration", "excision", "recombination")):
                 return "replication"
-
-        # 3. 严格正则词边界与优先级语义匹配
-        full_text = f"{clean_prod} {notes or ''}".lower()
-        
-        # 优先级判断序列 (特异性高的优先判定)
-        priority_order = ["packaging", "tail_fiber", "capsid_head", "lysis", "replication"]
-
-        for cat_key in priority_order:
-            cat_info = PROTEIN_CATEGORIES[cat_key]
-            
-            # 检查是否有排除项
-            excluded = False
-            for exc_pat in cat_info.get("exclude", []):
-                if re.search(exc_pat, full_text):
-                    excluded = True
-                    break
-            if excluded:
-                continue
-
-            # 正向模式匹配 (严格词边界)
-            for pat in cat_info["patterns"]:
-                if re.search(pat, full_text):
-                    return cat_key
 
         return "other"
 

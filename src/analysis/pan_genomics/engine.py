@@ -263,8 +263,7 @@ class PanGenomicsEngine:
             gene_id = f.get("id") or f.get("locus_tag") or f"GENE_{idx+1:04d}"
             locus = f.get("locus_tag") or gene_id
             prod = f.get("product") or "hypothetical protein"
-            inferred_cat = AnnotationFuser.infer_category(prod, f.get("notes"))
-            cat = inferred_cat if inferred_cat != "Hypothetical" else (f.get("category") or "Hypothetical")
+            cat = AnnotationFuser.infer_category(prod, f.get("notes"))
             seq = f.get("translation") or ""
             start = int(f.get("start", 0))
             end = int(f.get("end", 0))
@@ -386,11 +385,11 @@ class PanGenomicsEngine:
         """提取并对比尾部受体识别模块 (Tail fiber / Tail spike / RBP)"""
         tail_list: List[TailProteinItem] = []
         tail_keywords = [
-            ("Tail Fiber", [r"tail\s+fiber", r"tailfiber", r"fiber\s+protein"]),
-            ("Tail Spike", [r"tail\s+spike", r"tailspike", r"spike\s+protein", r"endosialidase", r"pectate\s+lyase"]),
-            ("RBP", [r"receptor\s+binding", r"rbp", r"adsorption\s+protein"]),
-            ("Major Tail", [r"major\s+tail", r"tail\s+tube", r"tail\s+sheath"]),
-            ("Tape Measure", [r"tape\s+measure", r"tail\s+length"])
+            ("Tail Fiber", [r"\btail\s*fib(?:er|re)\b", r"\btailfiber\b", r"\bfib(?:er|re)\s+protein\b"]),
+            ("Tail Spike", [r"\btail\s*spike\b", r"\btailspike\b", r"\bspike\s+protein\b", r"\bbaseplate\s+spike\b", r"\bendosialidase\b", r"\bsialidase\b", r"\bpectate\s+lyase\b", r"\bdepolymerase\b"]),
+            ("RBP", [r"\breceptor[- ]binding\b", r"\brbp\b", r"\badsorption\s+protein\b", r"\bhost\s+range\b", r"\bhost\s+specificity\b", r"\badhesin\b"]),
+            ("Major Tail", [r"\b(?:major|minor|distal)\s+tail\b", r"\btail\s+tube\b", r"\btail\s+sheath\b", r"\btail\s+protein\b"]),
+            ("Tape Measure", [r"\btape\s+measure\b", r"\btail\s+length\b"])
         ]
 
         for sid, sinfo in sample_data.items():
@@ -477,38 +476,38 @@ class PanGenomicsEngine:
                 p_lower = f["product"].lower()
                 
                 # A. 关键整合酶 (Integrase / Tyrosine-Serine Recombinase / Site-specific Recombinase)
-                if re.search(r"\b(?:integrase|site-specific\s+recombinase|tyrosine\s+recombinase|serine\s+recombinase)\b", p_lower):
+                if re.search(r"\b(?:integrase|site-specific\s+recombinase|tyrosine(?:-type)?\s+recombinase|serine\s+recombinase)\b", p_lower):
                     essential_integrases.append(f)
-                elif re.search(r"\brecombinase\b", p_lower) and not re.search(r"exonuclease|endonuclease|nuclease|junction", p_lower):
+                elif re.search(r"\brecombinase\b", p_lower) and not re.search(r"\b(?:exonuclease|endonuclease|nuclease|junction|holliday|rusa|ruvc|recu|uvsx|reca|rad51|homologous)\b", p_lower):
                     essential_integrases.append(f)
-                # B. 关键溶源阻遏蛋白 (CI / Cro / Imm / Lysogeny Repressor)
-                elif re.search(r"\b(?:ci\s+repressor|cro\s+repressor|lysogeny\s+repressor|imm\s+repressor|c1\s+repressor|temperate\s+repressor)\b", p_lower):
+                # B. 关键溶原阻遏蛋白 (CI / CII / Cro / Imm / Lysogeny Repressor)
+                elif re.search(r"\b(?:ci\s+repressor|cro\s+repressor|cii(?:-like)?\s+regulator|lysogeny\s+repressor|imm\s+repressor|c1\s+repressor|temperate\s+repressor|prophage\s+repressor)\b", p_lower):
                     essential_repressors.append(f)
-                # C. 次要/切除酶/转座遗迹 (Excisionase / Transposase)
-                elif re.search(r"\b(?:excisionase|transposase|insertion\s+element)\b", p_lower):
+                # C. 次要/切除酶/转座遗迹 (Excisionase / RDF / Transposase)
+                elif re.search(r"\b(?:excisionase|recombination\s+directionality\s+factor|rdf|transposase|insertion\s+element)\b", p_lower):
                     remnant_elements.append(f)
 
             int_cnt = len(essential_integrases)
             rep_cnt = len(essential_repressors)
             rem_cnt = len(remnant_elements)
 
-            # 核心评级：只有存在关键溶源整合酶或阻遏开关时，才判定为不可用 (Temperate / Risk)
+            # 核心评级：只有存在关键溶原整合酶或阻遏开关时，才判定为不可用 (Temperate / Risk)
             if int_cnt > 0 or rep_cnt > 0:
                 lifestyle = "Temperate"
                 is_safe = False
                 conf = 0.95 if int_cnt > 0 else 0.85
-                exp = f"检测到关键溶源整合元件 (整合酶/重组酶 {int_cnt} 个，溶源阻遏蛋白 {rep_cnt} 个)，具备前噬菌体整合潜能，临床治疗不可直接使用。"
+                exp = f"检测到关键溶原整合元件 (整合酶/重组酶 {int_cnt} 个，溶原阻遏蛋白 {rep_cnt} 个)，具备前噬菌体整合潜能，临床治疗不可直接使用。"
             elif rem_cnt > 0:
                 # 仅有孤立切除酶或转座元件，无主整合酶，判定为安全可用裂解型 (带遗迹)
                 lifestyle = "Lytic"
                 is_safe = True
                 conf = 0.92
-                exp = f"检测到 {rem_cnt} 个孤立切除酶/转座遗迹，因基因组缺失核心整合酶 (Integrase) 及溶源开关，无法主动建立溶源整合，符合裂解型治疗安全标准。"
+                exp = f"检测到 {rem_cnt} 个孤立切除酶/转座遗迹，因基因组缺失核心整合酶 (Integrase) 及溶原开关，无法主动建立溶原整合，符合裂解型治疗安全标准。"
             else:
                 lifestyle = "Lytic"
                 is_safe = True
                 conf = 0.98
-                exp = "未检测到任何整合酶、重组酶及溶源阻遏蛋白，为专性烈性噬菌体，治疗安全性高。"
+                exp = "未检测到任何整合酶、重组酶及溶原阻遏蛋白，为专性烈性噬菌体，治疗安全性高。"
 
             markers = [
                 {"type": "Essential Integrase", "locus_tag": f["locus_tag"], "product": f["product"]}
@@ -566,16 +565,19 @@ class PanGenomicsEngine:
         """提取并对比裂解盒 (Endolysin / Holin / Spanin)"""
         lysis_list: List[LysisProteinItem] = []
         lysis_keywords = [
-            ("Endolysin", [r"endolysin", r"lysin", r"lysozyme", r"amidase", r"murein", r"peptidoglycan\s+hydrolase", r"n-acetylmuramoyl"]),
-            ("Holin", [r"holin", r"class\s+i\s+holin", r"class\s+ii\s+holin", r"pinholin"]),
-            ("Spanin", [r"spanin", r"outer\s+membrane\s+spanin", r"inner\s+membrane\s+spanin", r"rz", r"rz1"]),
-            ("Antiholin", [r"antiholin"])
+            ("Antiholin", [r"\banti-?holin\b"]),
+            ("Holin", [r"\bholin\b", r"\bclass\s+i+\s+holin\b", r"\bpinholin\b"]),
+            ("Spanin", [r"\b(?:[io]-)?spanin\b", r"\b(?:outer|inner)\s+membrane\s+spanin\b", r"\brz(?:-like|1)?\b"]),
+            ("Endolysin", [r"\bendolysin\b", r"\blysin\b", r"\blysozyme\b", r"\b[a-z0-9'-]*muramidase\b", r"\b[a-z0-9'-]*amidase\b", r"\bmurein\s+hydrolase\b", r"\bpeptidoglycan\s+hydrolase\b", r"\blytic\s+transglycosylase\b"])
         ]
 
         for sid, sinfo in sample_data.items():
             sname = sinfo["sample_name"]
             for f in sinfo["features"]:
-                prod = f["product"].lower()
+                prod = f["product"].lower().replace("_", " ")
+                cat = AnnotationFuser.infer_category(f["product"], f.get("notes"))
+                if cat != "Lysis":
+                    continue
                 matched_role = None
                 for role, pats in lysis_keywords:
                     if any(re.search(p, prod) for p in pats):
@@ -660,15 +662,14 @@ class PanGenomicsEngine:
             for f in sinfo["features"]:
                 ftype = f.get("feature_type", "")
                 prod = f["product"].lower()
-                cat = f.get("category", "")
+                cat = AnnotationFuser.infer_category(f["product"], f.get("notes"))
 
-                matched_pathway = None
-                for pname, pats in pathway_keywords:
-                    if any(re.search(p, prod) for p in pats):
-                        matched_pathway = pname
-                        break
-
-                if cat == "Metabolism & AMG" or matched_pathway or any(k in prod for k in ["reductase", "synthase", "kinase", "phoh", "psba"]):
+                if ftype == "CDS" and cat == "Metabolism & AMG":
+                    matched_pathway = None
+                    for pname, pats in pathway_keywords:
+                        if any(re.search(p, prod) for p in pats):
+                            matched_pathway = pname
+                            break
                     actual_pathway = matched_pathway or "其他代谢 (Other AMG)"
                     p_counts[actual_pathway] += 1
 
@@ -699,17 +700,18 @@ class PanGenomicsEngine:
         return amg_list, trna_profiles, amg_pathway_dist
 
     def _calculate_category_distributions(self, sample_data: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
-        """统计各样本在 6 大标准功能分类中的基因数量"""
+        """统计各样本在 10 大标准功能分类中的基因数量"""
         all_cats = [
-            "Structural",
-            "Lysis",
-            "Defense & Host Interaction",
+            "Head & Packaging",
+            "Tail & Host Interaction",
             "Replication & Repair",
-            "Packaging",
+            "Lysis",
             "Transcription & Regulation",
+            "Defense & Host Interaction",
             "Metabolism & AMG",
-            "Hypothetical",
-            "Other Functional"
+            "Integration & Excision",
+            "Other Functional",
+            "Hypothetical"
         ]
         distributions: Dict[str, Dict[str, int]] = {}
 
@@ -717,7 +719,7 @@ class PanGenomicsEngine:
             dist = {c: 0 for c in all_cats}
             for f in sinfo["features"]:
                 if f["feature_type"] == "CDS":
-                    cat = f.get("category") or "Other Functional"
+                    cat = AnnotationFuser.infer_category(f["product"], f.get("notes"))
                     if cat not in dist:
                         dist[cat] = 0
                     dist[cat] += 1

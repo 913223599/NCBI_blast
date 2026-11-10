@@ -436,7 +436,7 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
   legX += ctx.measureText('CDS 功能分类:').width + 6
 
   ctx.font = '500 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-  const catEntries = Object.entries(FUNCTIONAL_CATEGORIES).slice(0, 7)
+  const catEntries = Object.entries(FUNCTIONAL_CATEGORIES)
   for (const [, cat] of catEntries) {
     ctx.fillStyle = cat.color
     ctx.fillRect(legX, legY - 3.5, 7, 7)

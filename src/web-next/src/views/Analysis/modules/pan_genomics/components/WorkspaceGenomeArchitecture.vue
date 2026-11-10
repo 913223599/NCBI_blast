@@ -237,7 +237,7 @@ const hotspotZoomData = computed(() => {
             :class="['btn-hotspot', { active: activeHotspot === 'tail' }]"
             @click="activeHotspot = 'tail'"
           >
-            ★ 尾丝受体结合区 (Tail)
+            尾丝受体结合区 (Tail)
           </button>
           <button 
             :class="['btn-hotspot', { active: activeHotspot === 'lysis' }]"
@@ -255,7 +255,7 @@ const hotspotZoomData = computed(() => {
       </div>
     </div>
 
-    <!-- 🌟 Layer 1: 全局宏观共线性多基因组图 (Global Genome Synteny Overview) -->
+    <!-- Layer 1: 全局宏观共线性多基因组图 (Global Genome Synteny Overview) -->
     <div class="academic-panel layer-panel layer-1-synteny">
       <div class="layer-header">
         <span class="layer-badge">Layer 1</span>

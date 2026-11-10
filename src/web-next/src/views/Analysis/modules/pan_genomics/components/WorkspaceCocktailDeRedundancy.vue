@@ -156,12 +156,12 @@ const decisionEvaluation = computed(() => {
         acr_count: sampleMap[sid].acrCnt,
         unique_genes: sampleMap[sid].uniq,
         total_genes: sampleMap[sid].total,
-        evidence_chips: ['[警示] 检出关键溶源整合原件', '安全筛查: 未通过 (Temperate/Risk)'],
+        evidence_chips: ['[警示] 检出关键溶原整合元件', '安全筛查: 未通过 (Temperate/Risk)'],
         detailed_reasons: {
           genome_ani: '不适用 (安全性否决)',
           receptor_mechanism: `${receptorTag} 识别域存在`,
           coverage: '0% (严禁用于活性治疗)',
-          unique_signals: '检测到核心整合酶 (Integrase)、整合重组酶或溶源阻遏蛋白等关键温和标志物'
+          unique_signals: '检测到核心整合酶 (Integrase)、整合重组酶或溶原阻遏蛋白等关键温和标志物'
         }
       })
     })

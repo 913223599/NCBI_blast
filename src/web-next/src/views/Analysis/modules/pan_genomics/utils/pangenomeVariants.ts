@@ -2,7 +2,7 @@
  * pangenomeVariants.ts - 泛基因组学变异形态探测与功能分类计算引擎
  * 提供全基因组同源基因家族众数长度计算、微观变异类型判别、氨基酸差异分析及分类归一化。
  */
-import { FUNCTIONAL_CATEGORIES, inferCategoryFromText } from '../../viewer/utils/render'
+import { FUNCTIONAL_CATEGORIES, inferCategoryFromText, isHypotheticalName } from '../../viewer/utils/render'
 
 export interface ClusterVariantInfo {
   type: 'conserved' | 'truncated' | 'extended' | 'absent'
@@ -67,13 +67,13 @@ export const CATEGORY_ORDER: Record<string, number> = {
 
 export const CATEGORY_CHINESE_MAP: Record<string, string> = {
   'Head & Packaging': '头部与衣壳包装',
-  'Tail & Host Interaction': '尾部与宿主吸附',
+  'Tail & Host Interaction': '尾部与尾丝吸附',
   Lysis: '宿主裂解系统',
   'Defense & Host Interaction': '宿主防御与互作',
-  'Integration & Excision': '溶源整合与切除',
+  'Integration & Excision': '溶原整合与切除',
   'Replication & Repair': 'DNA复制与重组修复',
   'Transcription & Regulation': '转录调控与开关',
-  'Metabolism & AMG': '辅助代谢基因 (AMG)',
+  'Metabolism & AMG': '辅助代谢基因',
   'Other Functional': '其他功能蛋白',
   Hypothetical: '假定蛋白与未表征'
 }
@@ -93,15 +93,21 @@ export function normalizeCategoryName(raw?: string): string {
 export function inferClusterCategory(c: any): string {
   if (!c) return 'Hypothetical'
 
-  // 1. 优先依据代表性产物名称与注释细节重新推断标准分类
   const prod = c.representative_product || c.representative_annotation?.product || c.cluster_name || ''
   const notes = c.notes || c.representative_annotation?.notes || ''
+
+  // 0. 若代表产物本身明确为假定/未表征或未知功能结构域(DUF/UPF/PHA/ORF)，直接归为 Hypothetical
+  if (isHypotheticalName(prod)) {
+    return 'Hypothetical'
+  }
+
+  // 1. 优先依据代表性产物名称与结构化标签重新推断标准分类
   const inferred = inferCategoryFromText(prod, notes)
-  if (inferred && inferred !== 'Hypothetical') {
+  if (inferred && inferred !== 'Other Functional' && inferred !== 'Hypothetical') {
     return inferred
   }
 
-  // 2. 依据后端原始分类进行标准化别名转换
+  // 2. 若仅凭代表产物未匹配具体模块，参考后端已持久化的分类
   if (c.category) {
     const norm = normalizeCategoryName(c.category)
     if (norm && norm !== 'Hypothetical') {

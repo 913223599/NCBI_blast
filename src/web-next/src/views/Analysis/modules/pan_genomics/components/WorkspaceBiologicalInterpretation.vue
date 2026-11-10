@@ -211,7 +211,7 @@ const pairwiseComparison = computed(() => {
 
     <!-- 下层双看板: 四维分层证据堆栈 (左) + 决策引擎与代谢自适应区 (右) -->
     <div class="bio-bottom-grid">
-      <!-- 🌟 Panel B: 四维分层证据堆栈 (Four-Dimensional Evidence Stack) -->
+      <!-- Panel B: 四维分层证据堆栈 (Four-Dimensional Evidence Stack) -->
       <div class="academic-panel comparison-card-panel">
         <div class="panel-header">
           <div class="title-with-tag">
@@ -289,7 +289,7 @@ const pairwiseComparison = computed(() => {
         </div>
       </div>
 
-      <!-- 🌟 Panel C: 科研决策引擎与下一步行动指南 -->
+      <!-- Panel C: 科研决策引擎与下一步行动指南 -->
       <div class="academic-panel decision-engine-panel">
         <div class="panel-header">
           <div class="title-with-tag">

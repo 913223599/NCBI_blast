@@ -384,20 +384,8 @@ class FunctionalAssigner:
         else:
             product = domain_name
 
-        # 推断大类
-        category = "general"
-        if any(k in lower_name for k in ["endonuclease", "exonuclease", "helicase", "polymerase", "ligase", "primase", "recombinase", "dna", "rna"]):
-            category = "Replication & Repair"
-        elif any(k in lower_name for k in ["tail", "capsid", "portal", "baseplate", "head", "sheath", "fiber", "structural", "virion"]):
-            category = "Structural"
-        elif any(k in lower_name for k in ["lysin", "holin", "lysis", "spanin", "amidase"]):
-            category = "Lysis"
-        elif any(k in lower_name for k in ["transcription", "repressor", "activator", "regulator", "promoter"]):
-            category = "Transcription & Regulation"
-        elif any(k in lower_name for k in ["crispr", "restriction", "methyltransferase", "defense", "immunity"]):
-            category = "Defense & Host Interaction"
-        elif any(k in lower_name for k in ["kinase", "phosphatase", "synthase", "reductase", "dehydrogenase", "metabolism"]):
-            category = "Metabolism & AMG"
+        # 统一通过 AnnotationFuser 标准分类引擎推断大类
+        category = AnnotationFuser.infer_category(product)
 
         return product, category
 

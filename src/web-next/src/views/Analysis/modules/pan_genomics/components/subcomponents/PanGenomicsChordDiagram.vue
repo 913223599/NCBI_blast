@@ -42,16 +42,16 @@ const legendSearch = ref<string>('')
 
 // 功能分类中英文对照与说明
 const FUNCTION_DEFS: Record<string, { label: string; short: string; desc: string }> = {
-  'Tail & Host Interaction': { label: '尾部与宿主吸附系统', short: '尾丝/受体吸附', desc: '尾丝、刺突、受体结合蛋白 (RBP) 与吸附结构' },
+  'Tail & Host Interaction': { label: '尾部与尾丝吸附', short: '尾丝/受体吸附', desc: '尾丝、刺突、受体结合蛋白 (RBP) 与吸附结构' },
   'Lysis': { label: '宿主裂解系统', short: '宿主裂解', desc: '内溶素 (Endolysin)、穿孔素 (Holin) 与跨膜裂解酶' },
-  'Defense & Host Interaction': { label: '宿主防御与互作 (Acr)', short: '防御互作 (Acr)', desc: '抗 CRISPR (Acr)、抗限制修饰系统与宿主逃逸元件' },
-  'Head & Packaging': { label: '头部与衣壳包装系统', short: '头衣壳包装', desc: '主衣壳、末端酶 (Terminase) 与头尾连接器' },
-  'Integration & Excision': { label: '溶源整合与切除系统', short: '整合切除', desc: '整合酶 (Integrase)、切除酶 (Excisionase) 与重组元件' },
-  'Replication & Repair': { label: 'DNA 复制与重组修复', short: 'DNA复制修复', desc: 'DNA 聚合酶、解旋酶、引物酶、单链结合蛋白与连接酶' },
+  'Defense & Host Interaction': { label: '宿主防御与互作', short: '防御互作 (Acr)', desc: '抗 CRISPR (Acr)、抗限制修饰系统与宿主逃逸元件' },
+  'Head & Packaging': { label: '头部与衣壳包装', short: '头衣壳包装', desc: '主衣壳、末端酶 (Terminase) 与门户连接器' },
+  'Integration & Excision': { label: '溶原整合与切除', short: '整合切除', desc: '整合酶 (Integrase)、切除酶 (Excisionase) 与重组方向因子' },
+  'Replication & Repair': { label: 'DNA复制与重组修复', short: 'DNA复制修复', desc: 'DNA 聚合酶、解旋酶、引物酶、单链结合蛋白与连接酶' },
   'Transcription & Regulation': { label: '转录调控与开关', short: '转录调控', desc: '转录阻遏蛋白、转录激活因子与休眠开关' },
-  'Metabolism & AMG': { label: '辅助代谢基因 (AMG)', short: '代谢 (AMG)', desc: '核苷酸合成、碳代谢与能量辅助代谢基因' },
-  'Other Functional': { label: '其他功能蛋白', short: '其他功能', desc: '次要酶系、膜蛋白与特化代谢分子' },
-  'Hypothetical': { label: '假定蛋白与未表征', short: '假定蛋白', desc: '未命名的新颖噬菌体 ORF 与未表征功能基因' }
+  'Metabolism & AMG': { label: '辅助代谢基因', short: '辅助代谢 (AMG)', desc: '核苷酸合成、碳代谢与能量辅助代谢基因' },
+  'Other Functional': { label: '其他功能蛋白', short: '其他功能', desc: '转运通道、分子伴侣、膜蛋白与通用功能分子' },
+  'Hypothetical': { label: '假定蛋白与未表征', short: '假定蛋白', desc: '假定蛋白、未知功能结构域 (DUF) 与未表征基因' }
 }
 
 const FUNCTION_KEYS = Object.keys(FUNCTION_DEFS)

@@ -282,10 +282,8 @@ class BuiltinAnnotator:
 
                 mw = self.calculate_molecular_weight(orf["translation"])
                 
-                # 简单功能启发式推断
+                # 纯阅读框预测默认统一标记为假定蛋白，以便后续同源引擎与结构引擎正常打捞补全
                 prod_desc = "hypothetical protein"
-                if len(orf["translation"]) > 300:
-                    prod_desc = "putative structural/catalytic protein"
 
                 feat_item = FeatureItem(
                     id=locus_tag,

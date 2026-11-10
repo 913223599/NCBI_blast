@@ -16,64 +16,123 @@ logger = logging.getLogger("analysis.annotation.fuser")
 class AnnotationFuser:
     """注释特征融合与补全器"""
 
-    UNANNOTATED_PATTERNS = [
-        r"\bhypothetical\b",
-        r"\buncharacterized\b",
+    # 纯占位型假定蛋白描述 (在 clean_product_text 中统一规范化为 "hypothetical protein")
+    GENERIC_HYPOTHETICAL_PATTERNS = [
+        r"^(?:conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:hypothetical|hyphothetical)(?:\s+(?:phage\s+)?protein)?$",
+        r"^(?:conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:uncharacterized|uncharacterised)(?:\s+(?:phage\s+)?protein)?$",
         r"^unknown(?:\s+(?:protein|function))?$",
-        r"^putative\s+protein$",
-        r"^predicted\s+protein$",
+        r"^(?:putative|predicted|conserved)\s+(?:phage\s+|bacteriophage\s+)?protein$",
         r"^protein\s+of\s+unknown\s+function$",
         r"^phage\s+protein$",
         r"^unnamed(?:\s+protein(?:\s+product)?)?$",
-        r"^protein\s+gp\d+(?:\.\d+)?$",
-        r"^gp\d+(?:\.\d+)?$",
-        r"^duf\d+(?:\s+family|\s+domain-containing)?(?:\s+protein)?$",
-        r"^none$",
-        r"^na$",
-        r"^unassigned$"
+        r"^(?:none|na|unassigned|unsorted)$",
+    ]
+
+    # 广义未表征/未知功能蛋白模式 (含 DUF/UPF/PHA/ORF/gp 编号及未知功能家族，归类为 Hypothetical)
+    UNANNOTATED_PATTERNS = [
+        r"^(?:conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:hypothetical|hyphothetical)\b",
+        r"^(?:conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:uncharacterized|uncharacterised)\b",
+        r"\b(?:unknown|unkown|unknwon)\s+function\b",
+        r"^unknown(?:\s+(?:protein|function))?$",
+        r"^(?:putative|predicted|conserved)\s+(?:phage\s+|bacteriophage\s+)?protein$",
+        r"^protein\s+conserved\s+in\s+bacteria$",
+        r"^protein\s+of\s+(?:unknown|unkown|unknwon)\s+function\b",
+        r"\bdomain\s+of\s+(?:unknown|unkown|unknwon)\s+function\b",
+        r"\bfamily\s+of\s+(?:unknown|unkown|unknwon)\s+function\b",
+        r"^(?:putative\s+|conserved\s+)?phage\s+protein(?:\s+gp\d+(?:[./_]\d+)*)?$",
+        r"^bacteriophage\s+[a-z0-9_-]+\s+protein$",
+        r"^prophage\s+[a-z0-9_-]+\s+protein\b",
+        r"^unnamed(?:\s+protein(?:\s+product)?)?$",
+        r"^(?:pfam\s*:\s*)?(?:phage\s+)?(?:protein\s+)?gp\d+(?:[./_\s]\s*(?:gp)?\d+)*(?:\s+(?:domain-containing|family)\s+protein)?$",
+        r"^[a-z]+\d*\s+gp\d+(?:\s+family\s+protein)?$",
+        r"^[a-z]+\d*gp\d+$",
+        r"^orf\s*\d+$",
+        r"\bduf\s*\d+\b",
+        r"\bupf\s*\d+\b",
+        r"^pha\s*\d+(?:\s+domain-containing\s+protein)?$",
+        r"^\d+\.\d+\s+domain-containing\s+protein$",
+        r"^d\d+\s+protein$",
+        r"^protein\s+y[a-z]{2}[a-z0-9]?$",
+        r"^tigrfam\s+phage$",
+        r"^domain,\s*protein$",
+        r"^psort\s+location\b",
+        r"^(?:none|na|unassigned|unsorted)$",
     ]
 
     CATEGORY_RULES = [
-        # A. 宿主裂解系统 (优先排查)
-        ("Lysis", [
-            r"\b(?:lysin|endolysin|holin|antiholin|spanin|i-spanin|o-spanin|rz|rz1|amidase|endopeptidase|peptidoglycan|murein|cell\s*wall\s*hydrolase|transglycosylase|lysozyme|lysis)\b"
-        ]),
-        # B. 尾部与尾丝吸附组件 (独立大类)
+        # 1. 尾部与尾丝吸附 (Tail & Host Interaction)
+        # 优先捕获以 baseplate / tail 开头的尾部穿刺溶菌酶复合体 (如 baseplate hub subunit and tail lysozyme)，防止被 Lysis 误抓
         ("Tail & Host Interaction", [
-            r"\b(?:tail|baseplate|tape\s*measure|tail\s*fiber|tail\s*spike|tail\s*tube|tail\s*sheath|tail\s*assembly|tail\s*needle|tail\s*protein|major\s*tail|minor\s*tail|tail\s*terminator|tail\s*completion|head-tail|neck1|receptor-binding|reticulocyte-binding|adhesin|adsorption|host\s*range|tail\s*chaperone|tail\s*assembly\s*chaperone|tail\s*fiber\s*assembly|gp37|gp38|pectate\s*lyase|depolymerase|polysaccharide\s*lyase|ig\s*domain|ig-like|adaptator|connector)\b"
+            r"^(?:baseplate|tail)\b.*\blysozyme\b",
+            r"^(?!.*\bhead\s+fiber\b).*\b(?:tail|baseplate|base\s*plate|tape\s*measure|tail\s*fiber|tail\s*fibre|tailfiber|tail\s*spike|tailspike|tail\s*tube|tail\s*sheath|tail\s*assembly|tail\s*needle|tail\s*protein|major\s*tail|minor\s*tail|tail\s*terminator|tail\s*completion|head-tail|head\s+to\s+tail|adaptor\s*ad\d+|neck\s*protein|neck1|neck\s*whisker|fibritin|collar|receptor-binding|receptor\s*binding|reticulocyte-binding|adhesin|adsorption|host\s*range|host\s*specificity|tail\s*chaperone|tail\s*assembly\s*chaperone|tail\s*fiber\s*assembly|gp37|gp38|pectate\s*lyase|depolymerase|polysaccharide\s*lyase|endosialidase|sialidase|neuraminidase|hyaluronidase|ig\s*domain|ig-like|sh3\s*beta[- ]barrel|fibronectin\s*type|pkd\s*domain|lectin|adaptator|fimbria|fimbrial)\b"
         ]),
-        # C. 头部与衣壳结构包装 (包含 virion/capsid/portal/terminase/internal virion 等)
+        # 2. 头部与衣壳包装 (Head & Packaging)
+        # 优先捕获 internal virion protein (含 with endolysin domain)，因为其核心身份是注射通道内部病毒颗粒结构蛋白
         ("Head & Packaging", [
-            r"\b(?:capsid|portal|terminase|terminase\s*large\s*subunit|terminase\s*small\s*subunit|head\s*protein|major\s*head|minor\s*head|scaffold|scaffolding|prohead|head\s*closure|head\s*decoration|head\s*maturation|head\s*morphogenesis|maturation\s*protease|head\s*assembly|major\s*capsid|minor\s*capsid|virion\s*structural|internal\s*virion|structural\s*protein)\b"
+            r"^internal\s+virion\s+protein\b",
+            r"\b(?:capsid|capsomer|coat\s*protein|portal|terminase|terminase\s*large\s*subunit|terminase\s*small\s*subunit|head\s*protein|major\s*head|minor\s*head|head\s*fiber|head\s*completion|scaffold|scaffolding|prohead|head\s*closure|head\s*decoration|head\s*maturation|head\s*morphogenesis|head\s*vertex|head\s*portal|maturation\s*protease|head\s*assembly|major\s*capsid|minor\s*capsid|virion\s*structural|virion\s*morphogenesis|internal\s*virion|structural\s*protein|encapsulin|head-tail\s*connector|mu\s*protein\s*f|hoc-like|pmg[bg]-like)\b"
         ]),
-        # D. 溶源整合与位点特异性切除 (优先捕获整合酶/重组酶/切除酶/转座酶)
+        # 3. 宿主裂解系统 (Lysis)
+        # 排除脱酰胺酶 (deamidase) 与转酰胺酶 (amidotransferase)
+        ("Lysis", [
+            r"^(?!.*\b(?:deamidase|amidotransferase)\b).*\b(?:endolysin|lysin|holin|antiholin|anti-holin|pinholin|spanin|i-spanin|o-spanin|rz-like|rz1|[a-z0-9'-]*muramidase|[a-z0-9'-]*amidase|ami\s*2|ami\s*3|nlpc\s*p60|nlp\s*p60|endopeptidase|carboxypeptidase|peptidoglycan\s*hydrolase|peptidoglycan\s*catabolic|murein\s*hydrolase|cell\s*wall\s*hydrolase|lytic\s*transglycosylase|transglycosylase|chitinase|chitin\s*catabolic|lysozyme|lysis\s*inhibition|lysis\s*inhibitor|riia|riib|spackle|lysis)\b"
+        ]),
+        # 4. 溶原整合与切除 (Integration & Excision)
         ("Integration & Excision", [
-            r"\b(?:integrase|excisionase|transposase|recombinase|site-specific\s*recombinase|tyrosine\s*recombinase|serine\s*recombinase|prophage\s*integrase|prophage\s*excisionase)\b"
+            r"\b(?:integrase|dna\s*integration|excisionase|excise|transposase|transposase-like|site-specific\s*recombinase|tyrosine\s*recombinase|tyrosine-type\s*recombinase|serine\s*recombinase|prophage\s*integrase|prophage\s*excisionase|recombination\s*directionality\s*factor|rdf|xis|dna\s*invertase|invertase\s*pin|mobile\s*element|intein|ist[ab](?:-like)?)\b"
         ]),
-        # E. DNA 复制、重组与修复 (排除纯位点特异性重组酶)
-        ("Replication & Repair", [
-            r"\b(?:polymerase|helicase|[a-z0-9'-]*helicase|primase|ligase|ssb|single-stranded\s*dna|ssdna|topoisomerase|gyrase|endonuclease|exonuclease|[a-z0-9'-]*nuclease|rnase|dnase|dna\s*repair|holliday|rusa|ruvc|recu|rece|erf|ninb|ning|rap|ninx|dna\s*binding|dntp|primase-helicase|dead\/deah|dnac|dnab|dna\s*annealing|recombination\s*mediator|junction\s*specific|replication\s*initiation|gene\s*47)\b"
-        ]),
-        # F. 宿主防御与抗防御互作
-        ("Defense & Host Interaction", [
-            r"\b(?:anti-crispr|acranker|acr[a-z0-9_-]+|crispr|cas[0-9]+|methyltransferase|[a-z0-9'-]*methyltransferase|methylase|restriction|modification|toxin|antitoxin|darb|dara|lar-like|immunity|defense|anti-restriction|tcib|colicin|tellurite\s*resistance|abortive\s*infection)\b"
-        ]),
-        # G. 转录调控与开关 (包含 ead/eaa 调控辅助元件)
+        # 5. 转录调控与开关 (Transcription & Regulation)
+        # 必须在 Replication & Repair 之前捕获 RNA polymerase 及各类转录调控因子
         ("Transcription & Regulation", [
-            r"\b(?:repressor|activator|regulator|promoter|transcription|cro|c1|ci\s*repressor|cii|ciii|antitermination|anti-terminator|anti-sigma|sigma\s*factor|modulator|transcriptional|helix-turn-helix|hth|csra|gntr|marr|anti-repressor|parb|partition|ead|eaa)\b"
+            r"\b(?:rna\s*polymerase|repressor|anti-?repressor|antirepressor|activator|regulator|regulatory\s*protein|regulatory\s*subunit|response\s*regulator|promoter|transcription|transcriptional|transcrition\s*regulator|cro|c1\s*repressor|ci\s*repressor|cii(?:-like)?|ciii|anti-?termination|anti-?terminator|anti-?sigma|sigma\s*factor|sigma[- ]?[a-z0-9]+|modulator|helix[- ]turn[- ]helix|hth|hth-type|csra(?:-like)?|gntr|marr|lysr(?:-like|-type)?|arcr?|arsr\d*|fmdb(?:-like)?|mota(?:-like)?|motb(?:-like)?|dksa(?:-like)?|parb(?:-like)?|para\b|partition\s*protein|plasmid\s*stability|plasmid\s*maintenance|chromosome\s*segregation|whib(?:-like)?|lsr2(?:-like)?|ead|ea22(?:-like)?|eaa|translation\s*repressor|translation\s*inhibitor|translation\s*initiation\s*factor|ribosome[- ]associated\s*(?:translation\s*)?inhibitor|peptide\s*chain\s*release\s*factor|raia)\b"
         ]),
-        # H. 辅助代谢与酶学 (AMG)
+        # 6. DNA 复制与重组修复 (Replication & Repair)
+        # 注意排除 anti-restriction nuclease (归属防御互作) 以及代谢中的 CoA ligase / tRNA splicing ligase
+        ("Replication & Repair", [
+            r"^(?!.*\b(?:anti-?restriction|coenzyme\s*a\s*ligase|coa\s*ligase|trna\s*splicing\s*ligase)\b).*\b(?:dna\s*polymerases?|polymerases?|reverse\s*transcriptase|helicases?|[a-z0-9'-]*helicases?|primases?|primosom(?:al|e)|dna\s*ligases?|rna\s*ligases?|ligase\s*activity|ssb|single-stranded\s*dna|single\s*strand\s*dna|single[- ]strand\s*binding|single[- ]strand\s*annealing|ssdna|topoisomerases?|gyrases?|endonucleases?|exonucleases?|[a-z0-9'-]*nucleases?|giy-yig|vrr[- ]nuc|rnase|dnase|exoribonucleases?|endoribonucleases?|dna\s*repair|dna\s*replication|chromosome\s*replication|dna\s*metabolic\s*process|holliday|rusa(?:-like)?|ruvc(?:-like)?|recu|rece(?:-like)?|reca(?:-like)?|recb|recc|recd|rect(?:-like|\s*family)?|sbcc(?:-like)?|sbcd(?:-like)?|uvsy(?:-like)?|uvsx(?:-like)?|dpra(?:-like)?|dna\s*protecting\s*protein|erf(?:-like)?|sak4(?:-like)?|ninb|ning|rap|ninx|dna[- ]binding|sequence-specific\s*dna\s*binding|primase-helicase|dead\/deah|snf2|ftsk|spoiiie|dnac(?:-like)?|dnab(?:-like)?|dda(?:-like)?|denb(?:-like)?|dna\s*annealing|recombination[- ]mediator|junction\s*specific|replication\s*initiation|replication\s*protein|replication\s*origin|clamp\s*loader|processivity\s*factor|dna-dependent\s*atpase|umuc|umud(?:-like)?|gam(?:-like)?|dna\s*end\s*protector|end\s*protection|dna\s*transfer\s*protein|gene\s*47)\b"
+        ]),
+        # 7. 宿主防御与互作 (Defense & Host Interaction)
+        # 注意将 tRNA methyltransferase 留给 Metabolism & AMG，其余 DNA methyltransferase / methylase 留在此处作为限制修饰逃逸
+        ("Defense & Host Interaction", [
+            r"\b(?:anti-?crispr|acranker|acr(?:\b|(?:i{1,3}|iv|v|vi|[ef])\d*[a-z0-9]*)|crispr|cas[0-9]+|defensefinder|anti-?defense|anti-?cbass|anti-?dart|nadar|thoeris|darb(?:-like)?|dara|lar(?:-like)?|arda\b|mom-like\s*dna\s*modification|hns\s*inhibition|h-ns\s*inhibition|kil\s*protein|septation\s*inhibition|restriction\s*alleviation|anti-?restriction|antirestriction|restriction\s*enzyme|restriction-modification|mrcbc|superinfection\s*exclusion|superinfection|immunity|abortive\s*infection|abi(?:-like)?|toxin-antitoxin|antitoxin|toxin|leukocidin|leukocicin|hica|hicb(?:-like)?|rele(?:-like)?|colicin|tcib(?:-like)?|tellurite\s*resistance|acridine\s*resistance|arsenite\s*resistance|fosfomycin\s*resistance|beta-lactamase|penicillin\s*binding|oxa-\d+|virulence|pathogenesis|hemolysin|ndd(?:-like)?|nucleoid\s*disruption|dmd|inhibitor\s*of\s*host\s*lon)\b",
+            r"^(?!.*\btrna\b).*\b(?:dna\s*methyltransferase|cytosine\s*methyltransferase|cytosine-specific\s*dna\s*methylase|adenine\s*methylase|n-6\s*dna\s*methylase|dna\s*methylase|methylase|sam-dependent\s*methyltransferase)\b"
+        ]),
+        # 8. 辅助代谢基因 (Metabolism & AMG)
         ("Metabolism & AMG", [
-            r"\b(?:kinase|[a-z0-9'-]*kinase|phosphatase|[a-z0-9'-]*phosphatase|phosphoesterase|pyrophosphatase|dutpase|mazg|synthase|synthetase|reductase|[a-z0-9'-]*reductase|dehydrogenase|hydrolase|transferase|mutase|isomerase|acyltransferase|n-acyltransferase|metabolism|amg|ribonucleotide|thioredoxin|glutaredoxin|nad|folate|nucleotidyltransferase)\b"
+            r"\b(?:phoh(?:-like)?|phosphate\s*starvation|p-starvation\s*inducible|quec(?:-like)?|queuosine|dutpase|produces\s*dump|reductive\s*methylation\s*of\s*2'-deoxyuridine|mazg(?:-like)?|ribonucleotide\s*reductase|ribonucleoside[- ]diphosphate\s*reductase|ribonucleoside\s*reductase|nrdd(?:-like)?|nrd[abefh]|thioredoxin|glutaredoxin|ferredoxin|flavodoxin|plastocyanin\w*|photosystem\s*(?:i|ii)\b|psb[ad]\b|high\s*light\s*inducible|cp12\s*protein|antenna\s*protein|folate|dihydrofolate\s*reductase|thymidylate\s*synthase|thymidine\s*kinase|dcmp\s*deaminase|transketolase|transaldolase(?:-like)?|molybdopterin|porphyrin\s*biosynthe(?:sis|tic)|heme\s*oxygenase|ferrochelatase|chelatase|radical\s*sam|acyl\s*carrier\s*protein|glycyl\s*radical\s*cofactor|grca|sir2|deacetylase|coenzyme\s*a\s*ligase|coa\s*ligase|trna\s*splicing\s*ligase|trna\s*amidotransferase|trna\s*synthetase|trna\b.*methyltransferase|nad\(p\)h-hydrate|desulfurization\s*enzyme|amino\s*acid\s*synthesis|nucleotide\s*biosynthesis|nucleoside\s*metabolic\s*process|glycine\s*cleavage|phenylacetic\s*acid\s*degradation|paaz|paay|auxiliary\s*metabolic|amg)\b",
+            r"\b[a-z0-9'-]*(?:kinases?|phosphatases?|phosphoesterases?|phosphodiesterases?|pyrophosphatases?|pyrophosphohydrolases?|phosphohydrolases?|triphosphatases?|diphosphorylases?|phosphorylases?|synthases?|synthetases?|reductases?|dehydrogenases?|oxidoreductases?|hydrolases?|amidohydrolases?|transferases?|transaminases?|aminotransferases?|acyltransferases?|glucosyltransferases?|glycosyltransferases?|formyltransferases?|methyltransferases?|nucleotidyltransferases?|carboxyltransferases?|transacylases?|mutases?|isomerases?|epimerases?|racemases?|decarboxylases?|carboxylases?|dehydratases?|hydratases?|monooxygenases?|dioxygenases?|oxygenases?|oxidases?|peroxidases?|catalases?|desulfurases?|deaminases?|deamidases?|nucleotidases?|esterases?|lipases?|thioesterases?|thiolases?|epoxidases?|lyases?|hydroxylases?|tautomerases?|dextranases?|glutaminases?|asparaginases?)\b"
         ])
     ]
 
+    # 显式结构化分类标签映射 (仅针对 Pharokka/Phold 的结构化分类字段，避免宽泛的 moron / DNA metabolism 误导)
+    EXPLICIT_NOTE_CATEGORY_MAP = {
+        "head and packaging": "Head & Packaging",
+        "tail": "Tail & Host Interaction",
+        "connector": "Tail & Host Interaction",
+        "lysis": "Lysis",
+        "integration and excision": "Integration & Excision",
+        "transcription regulation": "Transcription & Regulation",
+    }
+
     @classmethod
-    def is_unannotated(cls, product: Optional[str]) -> bool:
-        """判断一个功能描述是否为未注释/假定蛋白/未知功能"""
+    def is_generic_hypothetical(cls, product: Optional[str]) -> bool:
+        """判断是否为纯占位型假定蛋白"""
         if not product:
             return True
         p_clean = product.strip().lower()
+        if not p_clean:
+            return True
+        for pat in cls.GENERIC_HYPOTHETICAL_PATTERNS:
+            if re.search(pat, p_clean):
+                return True
+        return False
+
+    @classmethod
+    def is_unannotated(cls, product: Optional[str]) -> bool:
+        """判断一个功能描述是否为未注释/假定蛋白/未知功能结构域(DUF/UPF/PHA/ORF)"""
+        if not product:
+            return True
+        p_clean = product.strip().lower().replace("_", " ")
         if not p_clean:
             return True
         for pat in cls.UNANNOTATED_PATTERNS:
@@ -83,10 +142,13 @@ class AnnotationFuser:
 
     @classmethod
     def _match_category_rules(cls, text: str) -> Optional[str]:
-        """按规则顺序匹配功能大类，未命中返回 None"""
+        """按规则顺序匹配功能大类，未命中返回 None (将下划线与 URL 分号转为空格以确保词边界 \\b 精确生效)"""
+        t_norm = text.lower().replace("_", " ").replace("%3b", ";")
+        if re.search(r"\brecombinase\b", t_norm) and not re.search(r"\b(?:exonuclease|endonuclease|holliday|rusa|ruvc|recu|uvsx|reca|rad51|homologous)\b", t_norm):
+            return "Integration & Excision"
         for cat_name, patterns in cls.CATEGORY_RULES:
             for pat in patterns:
-                if re.search(pat, text):
+                if re.search(pat, t_norm):
                     return cat_name
         return None
 
@@ -94,19 +156,22 @@ class AnnotationFuser:
     def infer_category(cls, product: Optional[str], notes: Optional[str] = None) -> str:
         """
         依据产品描述与结构域特征，自动归类到标准生物学功能模块
-        规则: 假定蛋白一律归 Hypothetical; 已知功能以 product 为准，notes 仅在 product 未命中任何规则时兜底
+        规则: 假定蛋白与未知功能结构域(DUF等)一律归 Hypothetical; 已知功能以 product 为准，
+        notes 仅在 product 未命中任何规则时提取显式结构化分类标签，绝不盲目全文匹配 notes
         """
         if cls.is_unannotated(product):
             return "Hypothetical"
 
-        cat = cls._match_category_rules((product or "").lower())
+        cat = cls._match_category_rules((product or "").strip().lower())
         if cat:
             return cat
 
         if notes:
-            cat = cls._match_category_rules(notes.lower())
-            if cat:
-                return cat
+            n_lower = notes.lower()
+            for m in re.finditer(r"(?:category|phold\s+structure):\s*([a-z\s,_-]+?)(?:;|$)", n_lower):
+                raw_tag = m.group(1).strip()
+                if raw_tag in cls.EXPLICIT_NOTE_CATEGORY_MAP:
+                    return cls.EXPLICIT_NOTE_CATEGORY_MAP[raw_tag]
 
         return "Other Functional"
 
@@ -120,7 +185,7 @@ class AnnotationFuser:
         if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
             cleaned = cleaned[1:-1].strip()
         cleaned = cleaned.replace("%20", " ").replace("%2C", ",").replace("%3B", ";")
-        if not cleaned or cls.is_unannotated(cleaned):
+        if not cleaned or cls.is_generic_hypothetical(cleaned):
             return "hypothetical protein"
         return cleaned
 
