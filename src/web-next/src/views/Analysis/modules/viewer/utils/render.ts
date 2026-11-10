@@ -68,16 +68,21 @@ export const FUNCTIONAL_CATEGORIES: Record<string, { label: string; color: strin
  */
 export function inferCategoryFromText(product?: string, notes?: string): string {
   const p = (product || "").trim().toLowerCase();
+
+  // 0. 假定/未表征蛋白直接归 Hypothetical，不允许被 notes 中其他引擎的证据文本改判
+  if (isHypotheticalName(p)) {
+    return "Hypothetical";
+  }
   
-  // 1. 如果有明确的 product 名称且非空，严格优先依据 product 判定
-  if (p && !isHypotheticalName(p)) {
+  // 1. 已知功能 product 优先判定
+  if (p) {
     const cat = matchCategoryRules(p);
-    if (cat !== "Hypothetical") {
+    if (cat !== "Hypothetical" && cat !== "Other Functional") {
       return cat;
     }
   }
 
-  // 2. 如果 product 为假定蛋白或未匹配到，再 fallback 考察 notes (证据链中的 category 声明)
+  // 2. product 未命中具体大类时，再 fallback 考察 notes (证据链中的 category 声明)
   if (notes) {
     const n = notes.toLowerCase();
     
@@ -85,27 +90,44 @@ export function inferCategoryFromText(product?: string, notes?: string): string 
     const catMatch = n.match(/category:\s*([a-z\s_-]+)/i);
     if (catMatch && catMatch[1]) {
       const explicitCat = matchCategoryRules(catMatch[1]);
-      if (explicitCat !== "Hypothetical") {
+      if (explicitCat !== "Hypothetical" && explicitCat !== "Other Functional") {
         return explicitCat;
       }
     }
     
     const catFromNotes = matchCategoryRules(n);
-    if (catFromNotes !== "Hypothetical") {
+    if (catFromNotes !== "Hypothetical" && catFromNotes !== "Other Functional") {
       return catFromNotes;
     }
   }
 
-  // 3. 兜底为假定蛋白
-  return "Hypothetical";
+  // 3. 兜底: 有已知 product 归 Other Functional，否则为假定蛋白
+  return p ? "Other Functional" : "Hypothetical";
 }
 
-function isHypotheticalName(text: string): boolean {
-  const t = text.trim().toLowerCase();
-  return /^(hypothetical protein|uncharacterized protein|unknown function|orf\d+|protein of unknown function)$/i.test(t) ||
-         t.startsWith("protein of unknown function") ||
-         t.startsWith("duf") ||
-         t.startsWith("pha");
+/**
+ * 假定/未表征蛋白判定 (与后端 AnnotationFuser.UNANNOTATED_PATTERNS 保持一致)
+ */
+const HYPOTHETICAL_PATTERNS: RegExp[] = [
+  /\bhypothetical\b/i,
+  /\buncharacterized\b/i,
+  /^unknown(?:\s+(?:protein|function))?$/i,
+  /^putative\s+protein$/i,
+  /^predicted\s+protein$/i,
+  /^protein\s+of\s+unknown\s+function/i,
+  /^phage\s+protein$/i,
+  /^unnamed(?:\s+protein(?:\s+product)?)?$/i,
+  /^protein\s+gp\d+(?:\.\d+)?$/i,
+  /^gp\d+(?:\.\d+)?$/i,
+  /^orf\d+$/i,
+  /^duf\d+(?:\s+family|\s+domain-containing)?(?:\s+protein)?$/i,
+  /^(?:none|na|unassigned)$/i,
+];
+
+export function isHypotheticalName(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return true;
+  return HYPOTHETICAL_PATTERNS.some(re => re.test(t));
 }
 
 function matchCategoryRules(text: string): string {

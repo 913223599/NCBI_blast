@@ -323,7 +323,8 @@ class AnnotationPipeline:
             # 阶段 5: 全量重新评估并补齐功能分类大类 (89%)
             self._broadcast_progress(89, "【阶段 5/5】正在重新梳理并归纳基因功能大类分类...")
             for f in features:
-                if not f.category:
+                # CDS 一律依据最终 product 重算，避免沿用前序引擎写入的过期/原始分类值
+                if f.feature_type == "CDS" or not f.category:
                     f.category = AnnotationFuser.infer_category(f.product, f.notes)
 
             # ==========================================

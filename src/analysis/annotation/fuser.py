@@ -82,17 +82,31 @@ class AnnotationFuser:
         return False
 
     @classmethod
+    def _match_category_rules(cls, text: str) -> Optional[str]:
+        """按规则顺序匹配功能大类，未命中返回 None"""
+        for cat_name, patterns in cls.CATEGORY_RULES:
+            for pat in patterns:
+                if re.search(pat, text):
+                    return cat_name
+        return None
+
+    @classmethod
     def infer_category(cls, product: Optional[str], notes: Optional[str] = None) -> str:
-        """依据产品描述与结构域特征，自动归类到标准生物学功能模块"""
+        """
+        依据产品描述与结构域特征，自动归类到标准生物学功能模块
+        规则: 假定蛋白一律归 Hypothetical; 已知功能以 product 为准，notes 仅在 product 未命中任何规则时兜底
+        """
         if cls.is_unannotated(product):
             return "Hypothetical"
 
-        text_to_check = f"{product or ''} {notes or ''}".lower()
+        cat = cls._match_category_rules((product or "").lower())
+        if cat:
+            return cat
 
-        for cat_name, patterns in cls.CATEGORY_RULES:
-            for pat in patterns:
-                if re.search(pat, text_to_check):
-                    return cat_name
+        if notes:
+            cat = cls._match_category_rules(notes.lower())
+            if cat:
+                return cat
 
         return "Other Functional"
 

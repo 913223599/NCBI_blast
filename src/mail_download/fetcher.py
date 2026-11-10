@@ -176,6 +176,11 @@ class MailFetcher:
 
             criteria = self._build_search_criteria(since_dt)
             typ, data = conn.search(None, criteria)
+            if typ != "OK" and criteria != "ALL":
+                # 部分服务器对 SINCE/FROM 等搜索条件支持不稳定：失败时降级全量
+                # 搜索，保证功能不丢（客户端过滤仍生效）。
+                logger.warning("服务端搜索 %r 失败(%s)，降级全量搜索", criteria, typ)
+                typ, data = conn.search(None, "ALL")
             if typ != "OK":
                 return FetchResult(connection_error=f"search 失败: {typ}")
 
@@ -211,9 +216,26 @@ class MailFetcher:
                     pass
 
     def _build_search_criteria(self, since_dt: datetime) -> str:
-        """服务端搜索：QQ 邮箱（XMail）对 DATE/SINCE/FROM 搜索支持不可靠，
-        统一用 ALL + 客户端过滤（时间窗/发件人/主题在头部阶段逐封判定）。"""
-        return "ALL"
+        """服务端搜索条件构造（通用化）：
+        - cfg.imap_search_mode == "all"（或旧配置未显式开启服务端搜索）→ "ALL"；
+        - 默认 "since_from"：SINCE 时间窗 + 白名单发件人 FROM，把服务端返回集合
+          从全量邮箱压缩到近期+白名单范围，大幅减少头部抓取耗时；
+        - 服务端不支持时由 fetch() 自动降级 ALL，客户端过滤始终兜底。"""
+        mode = getattr(self.cfg, "imap_search_mode", "since_from")
+        if mode == "all":
+            return "ALL"
+        since = _fmt_imap_date(since_dt)
+        senders = [s.strip() for s in self.cfg.sender_whitelist
+                   if s and s.strip() and not s.startswith("填写")]
+        if not senders:
+            return f"SINCE {since}"
+        if len(senders) == 1:
+            return f'SINCE {since} FROM "{senders[0]}"'
+        # 多白名单发件人：RFC3501 OR 两两嵌套
+        expr = f'FROM "{senders[0]}"'
+        for s in senders[1:]:
+            expr = f'(OR {expr} FROM "{s}")'
+        return f"SINCE {since} {expr}"
 
     def _scan_headers(self, conn, seq_ids: List[bytes], since_dt: datetime) -> List[int]:
         """分批抓取头部，返回通过发件人/主题/时间初筛的序号。
@@ -239,16 +261,29 @@ class MailFetcher:
 
     @staticmethod
     def _chunk_ranges(seq_ids: List[bytes], batch: int) -> List[bytes]:
-        """把序号列表折叠为范围批：[b'1:200', b'201:400', ...]。"""
+        """把序号折叠为紧凑 seqset 批：
+        - 连续的序号合并为范围（1:200）；
+        - 不连续的序号用逗号分隔（2147,3450），避免把稀疏目标之间的
+          大量无关邮件一起抓取（此前的范围折叠会拉取中间全部邮件头部）。
+        - 超过 batch 时按段分片，防止单条 seqset 过长。
+        示例：[2147, 3450] → [b'2147,3450']；1..205 → [b'1:200', b'201:205']。"""
         nums = sorted({int(s) for s in seq_ids if s.strip()})
         if not nums:
             return []
-        lo, hi = nums[0], nums[-1]
-        ranges = []
-        for start in range(lo, hi + 1, batch):
-            end = min(start + batch - 1, hi)
-            ranges.append(f"{start}:{end}".encode())
-        return ranges
+        chunks = []
+        for start in range(0, len(nums), batch):
+            chunk = nums[start:start + batch]
+            seg = []
+            seg_lo = prev = chunk[0]
+            for n in chunk[1:]:
+                if n == prev + 1:
+                    prev = n
+                    continue
+                seg.append(f"{seg_lo}:{prev}" if seg_lo != prev else str(seg_lo))
+                seg_lo = prev = n
+            seg.append(f"{seg_lo}:{prev}" if seg_lo != prev else str(seg_lo))
+            chunks.append(",".join(seg).encode())
+        return chunks
 
     def _fetch_full(self, conn, seq: int) -> Optional[Message]:
         """抓取单封全文。"""

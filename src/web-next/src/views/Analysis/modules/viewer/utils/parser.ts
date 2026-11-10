@@ -2,7 +2,7 @@
 /**
  * 序列与特征解析器 (支持 GenBank, GFF3, FASTA)
  */
-import { inferCategoryFromText } from "./render";
+import { inferCategoryFromText, isHypotheticalName, FUNCTIONAL_CATEGORIES } from "./render";
 
 export function parseGenBank(text: string) {
   const lines = text.split("\n");
@@ -128,11 +128,14 @@ function finalizeFeature(feat: any) {
     feat.name = `${feat.type}_${feat.start}_${feat.end}`;
   }
 
-  // 优先直接使用显式标注的 /category 或 /function，没有再智能推断
-  if (q.category) {
+  // 1. product 为假定/未表征蛋白时一律归 Hypothetical，不受文件中旧 /category 影响
+  // 2. /category 仅在属于标准功能大类时采信
+  // 3. 其余情况 (含原始 PHROG /function 文本) 依据 product 与 note 推断
+  const isCds = (feat.type || "").toUpperCase() === "CDS";
+  if (isCds && isHypotheticalName(feat.product || "")) {
+    feat.category = "Hypothetical";
+  } else if (q.category && FUNCTIONAL_CATEGORIES[q.category]) {
     feat.category = q.category;
-  } else if (q.function) {
-    feat.category = q.function;
   } else {
     feat.category = inferCategoryFromText(feat.product, feat.note);
   }

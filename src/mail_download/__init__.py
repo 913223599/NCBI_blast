@@ -3,10 +3,16 @@
 
 流程：IMAP 连接收件箱 → 按发件人白名单/主题/附件类型筛选 → 下载附件到
       results/email_downloads/up_<时间戳>/ 并写 manifest.json。
+回传：注释完成后用 ResultPacker 打包产物 → MailSender 经 SMTP 发回。
 授权码仅从环境变量读取，绝不落盘。
 """
 from .config import MailConfig, load_config
 from .fetcher import MailFetcher, MessageSummary
 from .downloader import AttachmentSaver
+from .packer import ResultPacker
+from .sender import MailSender, SendResult
 
-__all__ = ["MailConfig", "load_config", "MailFetcher", "MessageSummary", "AttachmentSaver"]
+__all__ = [
+    "MailConfig", "load_config", "MailFetcher", "MessageSummary", "AttachmentSaver",
+    "ResultPacker", "MailSender", "SendResult",
+]

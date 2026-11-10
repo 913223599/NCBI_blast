@@ -328,6 +328,8 @@ class AssemblerStep(BaseAssemblyStep):
                 # ─── 二代短读长双端 (Illumina / MGI) 阶梯进度 ───
                 if "[Phase 00a]" in line_str or "Fastp Quality Control" in line_str:
                     emit_assembly_progress(10, "测序数据质控与接头修剪 (Fastp)...")
+                elif "[Phase 00c]" in line_str or "BayesHammer" in line_str:
+                    emit_assembly_progress(18, "SPAdes BayesHammer 高保真读段纠错中...")
                 elif "[Phase 00b]" in line_str or "Residual Eulerian" in line_str:
                     emit_assembly_progress(25, "K-mer 频数统计与图分解...")
                 elif "[Phase 01]" in line_str:

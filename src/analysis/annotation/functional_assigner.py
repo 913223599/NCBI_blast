@@ -43,6 +43,21 @@ class FunctionalAssigner:
             pass
         return path_str
 
+    @staticmethod
+    def _wsl_executable() -> Optional[str]:
+        """定位 wsl 可执行文件。
+
+        注意：在部分 Windows 环境（如 venv 启动的 Python）中 shutil.which("wsl")
+        因 PATH 不含 System32 而返回 None，但 CreateProcess（subprocess 默认）会
+        直接搜索 System32，因此这里显式回退到 System32\\wsl.exe，保证 WSL 备用链路可用。
+        """
+        for cand in ("wsl.exe", "wsl"):
+            p = shutil.which(cand)
+            if p:
+                return p
+        sys32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "wsl.exe"
+        return str(sys32) if sys32.exists() else None
+
     def _get_wsl_path(self, win_path: Path) -> str:
         """将 Windows 绝对路径转换为 WSL 路径"""
         p = win_path.resolve()
@@ -285,13 +300,16 @@ class FunctionalAssigner:
             logger.warning(f"Native blastp query on {db_name} encountered error: {e}")
 
         # 2. 备用 WSL blastp 执行
-        if shutil.which("wsl") is not None:
+        wsl_bin = self._wsl_executable()
+        if wsl_bin is not None:
             try:
                 wsl_q = self._get_wsl_path(query_faa)
                 wsl_out = self._get_wsl_path(out_tsv)
                 wsl_db = self._get_wsl_path(db_dir)
                 bash_cmd = f"cd \"{wsl_db}\" && blastp -query \"{wsl_q}\" -db {db_name} -out \"{wsl_out}\" -outfmt \"6 qseqid sseqid pident length evalue bitscore stitle\" -evalue {evalue_threshold} -max_target_seqs 1 -num_threads {threads}"
-                subprocess.run(["wsl", "bash", "-c", bash_cmd], capture_output=True, timeout=180)
+                res = subprocess.run([wsl_bin, "bash", "-c", bash_cmd], capture_output=True, timeout=600)
+                if res.returncode == 0 and out_tsv.exists() and out_tsv.stat().st_size > 0:
+                    logger.info(f"WSL blastp query on {db_name} succeeded: {out_tsv.stat().st_size} bytes")
             except Exception as e:
                 logger.warning(f"WSL blastp query on {db_name} failed: {e}")
 
@@ -408,13 +426,16 @@ class FunctionalAssigner:
             logger.warning(f"Native rpsblast query on {db_name} encountered error: {e}")
 
         # 备用 WSL rpsblast 执行
-        if shutil.which("wsl") is not None:
+        wsl_bin = self._wsl_executable()
+        if wsl_bin is not None:
             try:
                 wsl_q = self._get_wsl_path(query_faa)
                 wsl_out = self._get_wsl_path(out_tsv)
                 wsl_db = self._get_wsl_path(db_dir)
                 bash_cmd = f"cd \"{wsl_db}\" && rpsblast -query \"{wsl_q}\" -db {db_name} -out \"{wsl_out}\" -outfmt \"6 qseqid sseqid pident length evalue bitscore stitle\" -evalue {evalue_threshold} -max_target_seqs 1 -num_threads {threads}"
-                subprocess.run(["wsl", "bash", "-c", bash_cmd], capture_output=True, timeout=240)
+                res = subprocess.run([wsl_bin, "bash", "-c", bash_cmd], capture_output=True, timeout=600)
+                if res.returncode == 0 and out_tsv.exists() and out_tsv.stat().st_size > 0:
+                    logger.info(f"WSL rpsblast query on {db_name} succeeded: {out_tsv.stat().st_size} bytes")
             except Exception as e:
                 logger.warning(f"WSL rpsblast query on {db_name} failed: {e}")
 

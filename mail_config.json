@@ -10,5 +10,12 @@
   "since_days": 7,
   "download_dir": "results/email_downloads",
   "mark_seen": false,
-  "on_download_cmd": null
+  "on_download_cmd": null,
+  "smtp_server": "smtp.qq.com",
+  "smtp_port": 465,
+  "smtp_account": "913223599@qq.com",
+  "smtp_auth_code_env": "YS_MAIL_AUTH_CODE",
+  "smtp_display_name": "元昇生物注释服务",
+  "reply_to": "yssw_service@163.com",
+  "send_dir": "results/email_sends"
 }

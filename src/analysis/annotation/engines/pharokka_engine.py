@@ -156,7 +156,7 @@ class PharokkaEngine(BaseAnnotationEngine):
                         protein_length_aa=len(trans) if trans else 0,
                         molecular_weight_kda=mw,
                         translation=trans if trans else None,
-                        category=phrog_cat if phrog_cat else None,
+                        category=None,
                         phrog=str(phrog_num) if phrog_num else None,
                         function=str(phrog_cat) if phrog_cat else None,
                         score=str(f_score) if f_score else None,
