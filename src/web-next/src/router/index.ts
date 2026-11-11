@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '组装分析', icon: 'analysis' }
     },
     {
+        path: '/other-tools',
+        name: 'other_tools',
+        component: () => import('../views/OtherToolsView.vue'),
+        meta: { title: '其他功能', icon: 'other_tools' }
+    },
+    {
         path: '/help',
         name: 'help',
         component: () => import('../views/HelpView.vue'),

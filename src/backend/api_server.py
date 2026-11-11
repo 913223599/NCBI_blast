@@ -270,7 +270,7 @@ app.include_router(taxonomy.router)
 app.include_router(core.router)
 
 # 注册基因组拼接与数据库管理路由
-from .routes import assembly, database, analysis, annotation, protein_compare, pan_genomics, sanger_trace, diversity
+from .routes import assembly, database, analysis, annotation, protein_compare, pan_genomics, sanger_trace, diversity, other_tools
 app.include_router(assembly.router, prefix="/api")
 app.include_router(database.router, prefix="/api")
 app.include_router(analysis.router, prefix="/api")
@@ -279,6 +279,7 @@ app.include_router(protein_compare.router)
 app.include_router(pan_genomics.router, prefix="/api")
 app.include_router(sanger_trace.router)
 app.include_router(diversity.router, prefix="/api")
+app.include_router(other_tools.router, prefix="/api")
 
 # 静默吸收外部第三方工具 (如 QingchiAI / 外部插件) 的轮询探测，消除控制台刷屏
 @app.api_route("/api/ai/bridge/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])

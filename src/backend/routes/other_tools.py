@@ -1,0 +1,873 @@
+# -*- coding: utf-8 -*-
+"""
+其他功能工作台路由模块 (Other Tools & Automation Pipelines)
+职责：
+1. 邮件自动收件 -> 注释 -> Word 报告 -> SMTP 回传 全链路状态监控、配置管理与手动/批次触发；
+2. 生工 16S 测序结果通知邮件扫描、订单目录管理、自动解压、16S BLAST 比对、物种中文翻译与 11 列 GUI 格式 CSV 导出及在线预览。
+"""
+import asyncio
+import csv
+import email
+import imaplib
+import json
+import logging
+import os
+import re
+import subprocess
+import sys
+import time
+import zipfile
+from datetime import datetime
+from email.header import decode_header
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from ..utils.blast_utils import parse_blast_csv, select_consensus_hit
+from ...blast.manager import get_blast_manager, TaskStatus
+from ...mail_download.config import load_config
+from ...mail_download.downloader import AttachmentSaver
+from ...mail_download.fetcher import MailFetcher
+from ...utils.translation.biology_translator import get_global_biology_translator
+
+logger = logging.getLogger("api.other_tools")
+router = APIRouter(prefix="/other_tools", tags=["other_tools"])
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+MAIL_CONFIG_PATH = PROJECT_ROOT / "mail_config.json"
+DEFAULT_SANGON_ROOT = Path(r"G:\测序数据\生工16s")
+
+# ─── 全局运行状态追踪 ─────────────────────────────────────────
+_mail_pipeline_state: Dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "finished_at": None,
+    "last_exit_code": None,
+    "last_command": "",
+    "last_output": "",
+    "current_stage": "idle",
+}
+
+_sangon_pipeline_state: Dict[str, Any] = {
+    "running": False,
+    "current_order": None,
+    "current_stage": "idle",
+    "progress": 0,
+    "started_at": None,
+    "finished_at": None,
+    "last_message": "",
+    "logs": [],
+}
+
+SANGON_CSV_HEADERS = [
+    "查询序列",
+    "鉴定物种(中文翻译)",
+    "鉴定概率分布(中文翻译)",
+    "原始鉴定物种(拉丁文)",
+    "原始鉴定概率分布(拉丁文)",
+    "分类/菌株信息",
+    "基因/序列库",
+    "相似度 (Identity)",
+    "E值",
+    "访问号",
+    "详细标题",
+]
+
+
+# ─── Pydantic 请求模型 ───────────────────────────────────────
+class MailConfigUpdateRequest(BaseModel):
+    imap_server: str = "imap.qq.com"
+    imap_port: int = 993
+    account: str = "913223599@qq.com"
+    sender_whitelist: List[str] = ["yssw_service@163.com"]
+    subject_keywords: List[str] = []
+    attachment_exts: List[str] = [".fasta", ".fa", ".fna", ".fas", ".fsa", ".seq", ".txt"]
+    max_attach_size_mb: int = 200
+    since_days: int = 7
+    download_dir: str = "results/email_downloads"
+    mark_seen: bool = False
+    smtp_server: str = "smtp.qq.com"
+    smtp_port: int = 465
+    smtp_account: str = "913223599@qq.com"
+    smtp_display_name: str = "元昇生物注释服务"
+    reply_to: str = "yssw_service@163.com"
+    send_dir: str = "results/email_sends"
+
+
+class MailFetchRequest(BaseModel):
+    since_days: Optional[int] = None
+
+
+class MailPipelineRunRequest(BaseModel):
+    since_days: Optional[int] = None
+    no_send: bool = False
+    annotate_only_batch: Optional[str] = None
+    test_input: Optional[str] = None
+    to: Optional[str] = None
+    subject_prefix: str = "【自动】"
+    extra_note: Optional[str] = None
+
+
+class SangonRunRequest(BaseModel):
+    sangon_root: str = r"G:\测序数据\生工16s"
+    order_names: List[str] = []
+    evalue: str = "0.05"
+    hitlist_size: str = "50"
+    force_reblast: bool = False
+
+
+class OpenPathRequest(BaseModel):
+    path: str
+
+
+# ==============================================================================
+# 1. 邮件自动收件 -> 注释 -> Word 报告 -> SMTP 回传 接口
+# ==============================================================================
+
+@router.get("/mail_pipeline/overview")
+async def get_mail_pipeline_overview():
+    """获取邮件自动注释回传流水线完整状态、批次列表、已发记录与日志"""
+    raw_cfg: Dict[str, Any] = {}
+    if MAIL_CONFIG_PATH.exists():
+        try:
+            raw_cfg = json.loads(MAIL_CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"读取 mail_config.json 失败: {e}")
+
+    auth_file = PROJECT_ROOT / ".mail_auth"
+    auth_ready = bool(
+        os.environ.get(raw_cfg.get("auth_code_env", "YS_MAIL_AUTH_CODE"))
+        or (auth_file.exists() and auth_file.read_text(encoding="utf-8", errors="ignore").strip())
+    )
+
+    dl_dir = PROJECT_ROOT / raw_cfg.get("download_dir", "results/email_downloads")
+    send_dir = PROJECT_ROOT / raw_cfg.get("send_dir", "results/email_sends")
+
+    # 1. 已处理指纹索引
+    processed_items: List[Dict[str, Any]] = []
+    idx_file = dl_dir / "processed_index.json"
+    if idx_file.exists():
+        try:
+            idx_data = json.loads(idx_file.read_text(encoding="utf-8"))
+            if isinstance(idx_data, dict):
+                for sha, meta in idx_data.items():
+                    if isinstance(meta, dict):
+                        processed_items.append(meta)
+                processed_items.sort(key=lambda x: x.get("first_seen", ""), reverse=True)
+        except Exception as e:
+            logger.warning(f"解析 processed_index.json 失败: {e}")
+
+    # 2. 已下载批次目录 (up_*)
+    batches: List[Dict[str, Any]] = []
+    if dl_dir.exists():
+        for bdir in sorted(dl_dir.glob("up_*"), key=lambda p: p.name, reverse=True):
+            if not bdir.is_dir():
+                continue
+            mf_path = bdir / "manifest.json"
+            mail_meta: Dict[str, Any] = {}
+            att_list: List[Dict[str, Any]] = []
+            dl_time = ""
+            if mf_path.exists():
+                try:
+                    mf = json.loads(mf_path.read_text(encoding="utf-8"))
+                    mail_meta = mf.get("mail", {})
+                    att_list = mf.get("attachments", [])
+                    dl_time = mf.get("download_time", "")
+                except Exception:
+                    pass
+            if not att_list:
+                for fp in bdir.glob("*"):
+                    if fp.is_file() and fp.name != "manifest.json":
+                        att_list.append({
+                            "filename": fp.name,
+                            "size_bytes": fp.stat().st_size,
+                            "path": str(fp),
+                        })
+            batches.append({
+                "batch_name": bdir.name,
+                "batch_path": str(bdir),
+                "download_time": dl_time or datetime.fromtimestamp(bdir.stat().st_mtime).isoformat(timespec="seconds"),
+                "sender": mail_meta.get("sender", "-"),
+                "subject": mail_meta.get("subject", "-"),
+                "mail_date": mail_meta.get("date", "-"),
+                "attachments": att_list,
+            })
+
+    # 3. 已打包与回传产物 (results/email_sends)
+    outbound_packages: List[Dict[str, Any]] = []
+    docx_reports: List[Dict[str, Any]] = []
+    if send_dir.exists():
+        for mf in sorted(send_dir.glob("*.manifest.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                mdata = json.loads(mf.read_text(encoding="utf-8"))
+                zip_name = mdata.get("zip", "")
+                zip_path = send_dir / zip_name if zip_name else None
+                size_bytes = zip_path.stat().st_size if (zip_path and zip_path.exists()) else 0
+                outbound_packages.append({
+                    "task_id": mdata.get("task_id", mf.stem),
+                    "pack_time": mdata.get("pack_time", ""),
+                    "zip_name": zip_name,
+                    "zip_path": str(zip_path) if zip_path else "",
+                    "size_kb": round(size_bytes / 1024, 1),
+                    "file_count": mdata.get("file_count", 0),
+                    "files": mdata.get("files", []),
+                })
+            except Exception:
+                pass
+
+        for docx in sorted(send_dir.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True):
+            docx_reports.append({
+                "name": docx.name,
+                "path": str(docx),
+                "size_kb": round(docx.stat().st_size / 1024, 1),
+                "mtime": datetime.fromtimestamp(docx.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+            })
+
+    # 4. 读取 pipeline.log 最后 120 行
+    log_lines: List[str] = []
+    log_file = dl_dir / "pipeline.log"
+    if log_file.exists():
+        try:
+            all_lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+            log_lines = all_lines[-120:]
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "config": raw_cfg,
+        "auth_ready": auth_ready,
+        "runtime": _mail_pipeline_state,
+        "processed_count": len(processed_items),
+        "processed_items": processed_items[:50],
+        "batches": batches,
+        "outbound_packages": outbound_packages,
+        "docx_reports": docx_reports,
+        "pipeline_logs": log_lines,
+    }
+
+
+@router.post("/mail_pipeline/config")
+async def update_mail_pipeline_config(req: MailConfigUpdateRequest):
+    """更新保存 mail_config.json"""
+    existing: Dict[str, Any] = {}
+    if MAIL_CONFIG_PATH.exists():
+        try:
+            existing = json.loads(MAIL_CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    updated = {
+        **existing,
+        "imap_server": req.imap_server.strip(),
+        "imap_port": req.imap_port,
+        "account": req.account.strip(),
+        "sender_whitelist": [s.strip() for s in req.sender_whitelist if s.strip()],
+        "subject_keywords": [s.strip() for s in req.subject_keywords if s.strip()],
+        "attachment_exts": [s.strip() for s in req.attachment_exts if s.strip()],
+        "max_attach_size_mb": req.max_attach_size_mb,
+        "since_days": req.since_days,
+        "download_dir": req.download_dir.strip(),
+        "mark_seen": req.mark_seen,
+        "smtp_server": req.smtp_server.strip(),
+        "smtp_port": req.smtp_port,
+        "smtp_account": req.smtp_account.strip(),
+        "smtp_display_name": req.smtp_display_name.strip(),
+        "reply_to": req.reply_to.strip(),
+        "send_dir": req.send_dir.strip(),
+    }
+    MAIL_CONFIG_PATH.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"status": "success", "config": updated}
+
+
+@router.post("/mail_pipeline/fetch")
+async def trigger_mail_fetch(req: MailFetchRequest):
+    """立即扫描 IMAP 收件箱并保存新附件"""
+    def _do_fetch():
+        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=True)
+        fetcher = MailFetcher(cfg)
+        f_res = fetcher.fetch(since_days=req.since_days)
+        if f_res.connection_error:
+            return {"ok": False, "error": f_res.connection_error}
+        saved_stats = {"count": 0, "skipped_duplicates": 0, "skipped_processed": 0, "saved_files": []}
+        if f_res.matched:
+            saver = AttachmentSaver(cfg.resolved_download_dir)
+            saved_stats = saver.save(f_res.matched)
+        return {
+            "ok": True,
+            "scanned": f_res.scanned,
+            "matched": len(f_res.matched),
+            "saved_count": saved_stats["count"],
+            "skipped_duplicates": saved_stats["skipped_duplicates"],
+            "skipped_processed": saved_stats["skipped_processed"],
+            "saved_files": saved_stats["saved_files"],
+        }
+
+    try:
+        res = await asyncio.to_thread(_do_fetch)
+        if not res.get("ok"):
+            raise HTTPException(status_code=400, detail=res.get("error", "邮箱连接失败"))
+        return {"status": "success", **res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/mail_pipeline/run")
+async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
+    """后台异步启动完整自动流水线 (收件 -> 注释 -> Word 报告 -> 打包 -> SMTP 回传)"""
+    if _mail_pipeline_state["running"]:
+        raise HTTPException(status_code=409, detail="邮件自动注释流水线正在运行中，请等待当前任务结束")
+
+    cmd = [sys.executable, "-X", "utf8", "-m", "src.mail_download.auto_pipeline", "--config", str(MAIL_CONFIG_PATH)]
+    if req.since_days is not None:
+        cmd += ["--since-days", str(req.since_days)]
+    if req.no_send:
+        cmd.append("--no-send")
+    if req.annotate_only_batch:
+        batch_path = req.annotate_only_batch
+        if not os.path.isabs(batch_path):
+            batch_path = str(PROJECT_ROOT / "results" / "email_downloads" / batch_path)
+        cmd += ["--annotate-only", batch_path]
+    if req.test_input:
+        cmd += ["--test-input", req.test_input]
+    if req.to:
+        cmd += ["--to", req.to]
+    if req.subject_prefix:
+        cmd += ["--subject-prefix", req.subject_prefix]
+    if req.extra_note:
+        cmd += ["--extra-note", req.extra_note]
+
+    _mail_pipeline_state["running"] = True
+    _mail_pipeline_state["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _mail_pipeline_state["finished_at"] = None
+    _mail_pipeline_state["last_exit_code"] = None
+    _mail_pipeline_state["last_command"] = " ".join(cmd)
+    _mail_pipeline_state["last_output"] = "流水线已启动，正在执行..."
+    _mail_pipeline_state["current_stage"] = "running"
+
+    def _run_bg():
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(PROJECT_ROOT),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=3600,
+            )
+            out_txt = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+            _mail_pipeline_state["last_exit_code"] = proc.returncode
+            _mail_pipeline_state["last_output"] = out_txt.strip()[-4000:]
+            _mail_pipeline_state["current_stage"] = "completed" if proc.returncode == 0 else "failed"
+        except Exception as exc:
+            _mail_pipeline_state["last_exit_code"] = -1
+            _mail_pipeline_state["last_output"] = f"执行异常: {exc}"
+            _mail_pipeline_state["current_stage"] = "failed"
+        finally:
+            _mail_pipeline_state["running"] = False
+            _mail_pipeline_state["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    asyncio.get_running_loop().run_in_executor(None, _run_bg)
+    return {"status": "started", "runtime": _mail_pipeline_state}
+
+
+# ==============================================================================
+# 2. 生工 16S 测序结果自动化 BLAST 与导出流程 接口
+# ==============================================================================
+
+def _inspect_sangon_order_dir(order_dir: Path) -> Dict[str, Any]:
+    """解析单个生工 16S 订单目录状态"""
+    zip_dir = order_dir / "原始压缩包"
+    raw_dir = order_dir / "原始数据"
+    res_dir = order_dir / "BLAST结果"
+
+    zips = sorted(zip_dir.glob("*.zip")) if zip_dir.exists() else []
+    consensus_fastas: List[Path] = []
+    ab1_count = 0
+    total_raw_files = 0
+
+    if raw_dir.exists():
+        for p in raw_dir.rglob("*"):
+            if p.is_file():
+                total_raw_files += 1
+                if p.name.endswith(".1.fasta") and "haplotype" not in p.name.lower():
+                    consensus_fastas.append(p)
+                elif p.suffix.lower() == ".ab1":
+                    ab1_count += 1
+
+    csv_file = res_dir / "16S鉴定结果.csv"
+    has_result_csv = csv_file.exists()
+    total_rows = 0
+    with_hits = 0
+    no_hits = 0
+    csv_mtime = ""
+
+    if has_result_csv:
+        csv_mtime = datetime.fromtimestamp(csv_file.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with open(csv_file, "r", encoding="utf-8-sig", errors="replace") as f:
+                reader = list(csv.reader(f))
+                if len(reader) > 1:
+                    for row in reader[1:]:
+                        if not row:
+                            continue
+                        total_rows += 1
+                        sp = row[3] if len(row) > 3 else ""
+                        if "No Hits" in sp or "未找到匹配项" in sp:
+                            no_hits += 1
+                        else:
+                            with_hits += 1
+        except Exception:
+            pass
+
+    # 检查 BLAST 任务目录
+    task_id = f"{order_dir.name}_16s"
+    blast_reports_dir = PROJECT_ROOT / "results" / "blast" / task_id / "reports"
+    blast_csv_count = len(list(blast_reports_dir.glob("*.csv"))) if blast_reports_dir.exists() else 0
+
+    parts = order_dir.name.split("_", 1)
+    order_date = parts[0] if len(parts) > 1 else ""
+    order_no = parts[1] if len(parts) > 1 else order_dir.name
+
+    status = "pending"
+    if has_result_csv and total_rows > 0:
+        status = "completed"
+    elif blast_csv_count > 0:
+        status = "blasted"
+    elif len(consensus_fastas) > 0:
+        status = "extracted"
+    elif len(zips) > 0:
+        status = "downloaded"
+
+    return {
+        "dir_name": order_dir.name,
+        "order_date": order_date,
+        "order_no": order_no,
+        "order_path": str(order_dir),
+        "status": status,
+        "zip_count": len(zips),
+        "zip_files": [{"name": z.name, "size_kb": round(z.stat().st_size / 1024, 1)} for z in zips],
+        "raw_file_count": total_raw_files,
+        "consensus_fasta_count": len(consensus_fastas),
+        "ab1_count": ab1_count,
+        "blast_task_id": task_id,
+        "blast_report_count": blast_csv_count,
+        "has_result_csv": has_result_csv,
+        "result_csv_path": str(csv_file) if has_result_csv else "",
+        "result_mtime": csv_mtime,
+        "total_samples": total_rows,
+        "with_hits": with_hits,
+        "no_hits": no_hits,
+    }
+
+
+@router.get("/sangon_16s/overview")
+async def get_sangon_16s_overview(sangon_root: str = str(DEFAULT_SANGON_ROOT)):
+    """获取生工 16S 自动化流程目录与所有订单状态概览"""
+    root_path = Path(sangon_root)
+    orders: List[Dict[str, Any]] = []
+
+    if root_path.exists() and root_path.is_dir():
+        for child in sorted(root_path.iterdir(), key=lambda p: p.name, reverse=True):
+            if child.is_dir() and re.match(r"^\d{8}_\d+", child.name):
+                orders.append(_inspect_sangon_order_dir(child))
+
+    db_16s = PROJECT_ROOT / "database" / "16S" / "ncbi" / "16S_ribosomal_RNA.nin"
+    return {
+        "status": "success",
+        "sangon_root": str(root_path),
+        "root_exists": root_path.exists(),
+        "db_16s_ready": db_16s.exists(),
+        "runtime": _sangon_pipeline_state,
+        "orders": orders,
+    }
+
+
+@router.get("/sangon_16s/order/{order_dir_name}/results")
+async def get_sangon_order_results(order_dir_name: str, sangon_root: str = str(DEFAULT_SANGON_ROOT)):
+    """读取指定生工 16S 订单的 11 列鉴定结果 CSV 供前端在线表格展示"""
+    csv_path = Path(sangon_root) / order_dir_name / "BLAST结果" / "16S鉴定结果.csv"
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail=f"未找到鉴定结果文件: {csv_path}")
+
+    rows: List[Dict[str, str]] = []
+    headers: List[str] = SANGON_CSV_HEADERS
+    try:
+        with open(csv_path, "r", encoding="utf-8-sig", errors="replace") as f:
+            reader = list(csv.reader(f))
+            if reader:
+                headers = reader[0]
+                for r in reader[1:]:
+                    if not r:
+                        continue
+                    item = {}
+                    for idx, h in enumerate(headers):
+                        item[h] = r[idx] if idx < len(r) else ""
+                    rows.append(item)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取 CSV 失败: {e}")
+
+    return {
+        "status": "success",
+        "order_dir_name": order_dir_name,
+        "csv_path": str(csv_path),
+        "headers": headers,
+        "rows": rows,
+    }
+
+
+@router.post("/sangon_16s/scan_mail")
+async def scan_sangon_notification_mails(sangon_root: str = str(DEFAULT_SANGON_ROOT)):
+    """连接 QQ 邮箱扫描生工生物 (info1@sangon.com) 的 16S 测序结果通知邮件并自动初始化订单目录"""
+    def _do_scan():
+        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=True)
+        conn = imaplib.IMAP4_SSL(cfg.imap_server, cfg.imap_port)
+        conn.login(cfg.account, cfg.imap_auth_code)
+        conn.select("INBOX")
+
+        typ, data = conn.search(None, "FROM", "info1@sangon.com")
+        ids = data[0].split() if (typ == "OK" and data and data[0]) else []
+        ids = ids[-15:]
+
+        def _dec(s: Optional[str]) -> str:
+            if not s:
+                return ""
+            out = []
+            for part_bytes, cs in decode_header(s):
+                if isinstance(part_bytes, bytes):
+                    out.append(part_bytes.decode(cs or "utf-8", errors="replace"))
+                else:
+                    out.append(part_bytes)
+            return "".join(out)
+
+        root_dir = Path(sangon_root)
+        existing_order_nos = set()
+        if root_dir.exists():
+            for d in root_dir.iterdir():
+                if d.is_dir() and "_" in d.name:
+                    existing_order_nos.add(d.name.split("_", 1)[1])
+
+        found_mails: List[Dict[str, Any]] = []
+        created_dirs: List[str] = []
+
+        for mid in reversed(ids):
+            t, msg_data = conn.fetch(mid, "(BODY.PEEK[])")
+            if t != "OK" or not msg_data or not msg_data[0]:
+                continue
+            raw_bytes = msg_data[0][1]
+            if not isinstance(raw_bytes, bytes):
+                continue
+            msg = email.message_from_bytes(raw_bytes)
+            subj = _dec(msg.get("Subject"))
+            date_str = msg.get("Date", "")
+
+            # 提取 10 位订单号
+            m_order = re.search(r"(\d{10})", subj)
+            order_no = m_order.group(1) if m_order else ""
+
+            # 提取邮件日期 YYYYMMDD
+            date_prefix = datetime.now().strftime("%Y%m%d")
+            try:
+                from email.utils import parsedate_to_datetime
+                dt = parsedate_to_datetime(date_str)
+                date_prefix = dt.strftime("%Y%m%d")
+            except Exception:
+                pass
+
+            body_html = ""
+            for part in msg.walk():
+                if part.get_content_type() in ("text/html", "text/plain") and not part.get_filename():
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        cs = part.get_content_charset() or "utf-8"
+                        body_html += payload.decode(cs, errors="replace")
+
+            cx_match = re.search(r"cxOrderID=([A-Za-z0-9_-]+)", body_html)
+            cx_order_id = cx_match.group(1) if cx_match else ""
+            download_url = f"http://store.sangon.com/cxOrderDetail?cxOrderDetail.cxOrderID={cx_order_id}" if cx_order_id else ""
+
+            dir_name = f"{date_prefix}_{order_no}" if order_no else ""
+            already_exists = order_no in existing_order_nos if order_no else False
+
+            if order_no and not already_exists and root_dir.exists():
+                order_path = root_dir / dir_name
+                (order_path / "原始压缩包").mkdir(parents=True, exist_ok=True)
+                (order_path / "原始数据").mkdir(parents=True, exist_ok=True)
+                (order_path / "BLAST结果").mkdir(parents=True, exist_ok=True)
+                existing_order_nos.add(order_no)
+                created_dirs.append(dir_name)
+                already_exists = True
+
+            found_mails.append({
+                "subject": subj,
+                "date": date_str,
+                "order_no": order_no,
+                "dir_name": dir_name,
+                "cx_order_id": cx_order_id,
+                "download_url": download_url,
+                "dir_ready": already_exists,
+            })
+
+        conn.logout()
+        return {
+            "scanned_count": len(ids),
+            "mails": found_mails,
+            "created_dirs": created_dirs,
+        }
+
+    try:
+        res = await asyncio.to_thread(_do_scan)
+        return {"status": "success", **res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"扫描生工邮件失败: {e}")
+
+
+def _export_sangon_order_csv(task_id: str, out_dir: Path) -> Dict[str, int]:
+    """解析 BLAST 报告并调用 BiologyTranslator 翻译导出 11 列 16S鉴定结果.csv"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir = PROJECT_ROOT / "results" / "blast" / task_id / "reports"
+    csv_files = sorted(reports_dir.glob("*.csv")) if reports_dir.exists() else []
+
+    all_species = set()
+    results = []
+
+    for csv_path in csv_files:
+        m = re.search(r"_-(\d+)_1\.csv$", csv_path.name)
+        query_title = f"-{m.group(1)}" if m else csv_path.stem
+
+        hits = parse_blast_csv(str(csv_path), limit=50)
+        best = select_consensus_hit(hits) if hits else None
+        if not best:
+            results.append({
+                "queryTitle": query_title,
+                "speciesName": "未找到匹配项 (No Hits)",
+                "genusStrain": "",
+                "geneSource": "",
+                "seqType": "",
+                "identity": 0.0,
+                "evalue": "-",
+                "accession": "-",
+                "hitTitle": "",
+            })
+            continue
+
+        species = best.get("species", "Unknown")
+        all_species.add(species)
+        if best.get("consensusList"):
+            for c in best["consensusList"]:
+                if c.get("name"):
+                    all_species.add(c["name"])
+
+        results.append({
+            "queryTitle": query_title,
+            "speciesName": species,
+            "genusStrain": f"{best.get('genus', '')} · {best.get('strain', '')}".strip(" ·"),
+            "geneSource": best.get("gene_type", best.get("gene_source", "")),
+            "seqType": best.get("seq_type", ""),
+            "identity": float(str(best.get("similarity", "0")).replace("%", "")) if best.get("similarity") else 0.0,
+            "evalue": str(best.get("evalue", "N/A")),
+            "accession": best.get("acc", "N/A"),
+            "hitTitle": best.get("title", ""),
+        })
+
+    translator = get_global_biology_translator()
+    translated_map = translator.translate_batch(list(all_species), category="species") if all_species else {}
+
+    def _format_row(hit: Dict[str, Any]) -> List[str]:
+        full_trans = hit.get("translatedName") or ""
+        main_trans = full_trans
+        prob_trans = "-"
+
+        full_orig = hit.get("speciesName") or ""
+        main_orig = full_orig
+        prob_orig = "-"
+
+        if "(" in full_trans and "%" in full_trans:
+            m_tr = re.match(r"^([^,(]+)\s*\(", full_trans)
+            if m_tr:
+                main_trans = m_tr.group(1).strip()
+                prob_trans = full_trans
+
+        if "(" in full_orig and "%" in full_orig:
+            m_or = re.match(r"^([^,(]+)\s*\(", full_orig)
+            if m_or:
+                main_orig = m_or.group(1).strip()
+                prob_orig = full_orig
+
+        gene_seq = hit.get("geneSource", "")
+        if hit.get("seqType"):
+            gene_seq = f"{hit.get('geneSource', '')} ({hit.get('seqType', '')})"
+
+        return [
+            hit["queryTitle"],
+            main_trans,
+            prob_trans,
+            main_orig,
+            prob_orig,
+            hit.get("genusStrain", ""),
+            gene_seq,
+            f"{hit.get('identity', 0.0):.1f}%",
+            hit.get("evalue", "-"),
+            hit.get("accession", "-"),
+            hit.get("hitTitle", ""),
+        ]
+
+    for r in results:
+        r["translatedName"] = translated_map.get(r["speciesName"])
+
+    out_path = out_dir / "16S鉴定结果.csv"
+    with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(SANGON_CSV_HEADERS)
+        for r in results:
+            writer.writerow(_format_row(r))
+
+    with_hits = sum(1 for r in results if "No Hits" not in r["speciesName"])
+    no_hits = sum(1 for r in results if "No Hits" in r["speciesName"])
+    return {"total": len(results), "with_hits": with_hits, "no_hits": no_hits}
+
+
+@router.post("/sangon_16s/run_pipeline")
+async def run_sangon_16s_pipeline(req: SangonRunRequest):
+    """对选定的生工 16S 订单执行自动解压 -> 16S BLAST 比对 -> 中文翻译与 11 列 CSV 导出"""
+    if _sangon_pipeline_state["running"]:
+        raise HTTPException(status_code=409, detail="生工 16S 自动化流水线正在运行中，请稍候")
+
+    root_path = Path(req.sangon_root)
+    if not root_path.exists():
+        raise HTTPException(status_code=400, detail=f"生工 16S 目录不存在: {root_path}")
+
+    target_dirs: List[Path] = []
+    if req.order_names:
+        for name in req.order_names:
+            p = root_path / name
+            if p.exists() and p.is_dir():
+                target_dirs.append(p)
+    else:
+        for child in sorted(root_path.iterdir()):
+            if child.is_dir() and re.match(r"^\d{8}_\d+", child.name):
+                info = _inspect_sangon_order_dir(child)
+                if info["status"] != "completed" or req.force_reblast:
+                    target_dirs.append(child)
+
+    if not target_dirs:
+        raise HTTPException(status_code=400, detail="没有需要处理的订单目录")
+
+    _sangon_pipeline_state["running"] = True
+    _sangon_pipeline_state["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _sangon_pipeline_state["finished_at"] = None
+    _sangon_pipeline_state["progress"] = 0
+    _sangon_pipeline_state["logs"] = [f"[{datetime.now().strftime('%H:%M:%S')}] 启动生工 16S 批处理，共 {len(target_dirs)} 个订单"]
+
+    def _append_log(msg: str):
+        ts = datetime.now().strftime("%H:%M:%S")
+        _sangon_pipeline_state["last_message"] = msg
+        _sangon_pipeline_state["logs"].append(f"[{ts}] {msg}")
+
+    def _run_sangon_bg():
+        try:
+            mgr = get_blast_manager()
+            total_orders = len(target_dirs)
+            for idx, order_dir in enumerate(target_dirs, start=1):
+                _sangon_pipeline_state["current_order"] = order_dir.name
+                _sangon_pipeline_state["current_stage"] = "extracting"
+                _append_log(f"({idx}/{total_orders}) 正在检查订单目录: {order_dir.name}")
+
+                zip_dir = order_dir / "原始压缩包"
+                raw_dir = order_dir / "原始数据"
+                res_dir = order_dir / "BLAST结果"
+                raw_dir.mkdir(parents=True, exist_ok=True)
+                res_dir.mkdir(parents=True, exist_ok=True)
+
+                # Step 1: 若原始数据无 .1.fasta 但原始压缩包有 zip，自动解压
+                fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
+                if not fastas and zip_dir.exists():
+                    for zf_path in sorted(zip_dir.glob("*.zip")):
+                        _append_log(f"正在解压原始压缩包: {zf_path.name} -> 原始数据/")
+                        with zipfile.ZipFile(zf_path, "r") as zf:
+                            zf.extractall(raw_dir)
+                    fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
+
+                if not fastas:
+                    _append_log(f"[跳过] {order_dir.name} 未找到 *.1.fasta 主序列文件")
+                    continue
+
+                task_name = f"{order_dir.name}_16s"
+                reports_dir = PROJECT_ROOT / "results" / "blast" / task_name / "reports"
+                existing_csvs = list(reports_dir.glob("*.csv")) if reports_dir.exists() else []
+
+                # Step 2: 运行 16S BLAST
+                if len(existing_csvs) < len(fastas) or req.force_reblast:
+                    _sangon_pipeline_state["current_stage"] = "blasting"
+                    _append_log(f"提交 16S BLAST 比对任务 ({len(fastas)} 条主序列): {task_name}")
+                    task_id = mgr.create_task({
+                        "task_name": task_name,
+                        "files": [str(p) for p in fastas],
+                        "program": "auto",
+                        "database": "ncbi_16s",
+                        "evalue": req.evalue,
+                        "hitlist_size": req.hitlist_size,
+                        "max_workers": 2,
+                        "request_timeout": 10,
+                    })
+                    while True:
+                        st_info = mgr.get_task_status(task_id)
+                        if not st_info:
+                            break
+                        st = st_info.get("status", "unknown")
+                        prog = st_info.get("progress", 0)
+                        _sangon_pipeline_state["progress"] = prog
+                        if st in (TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value):
+                            _append_log(f"BLAST 任务结束: {st} (进度 {prog}%)")
+                            break
+                        time.sleep(2)
+                else:
+                    _append_log(f"复用已有 BLAST 报告 ({len(existing_csvs)} 份 CSV)")
+
+                # Step 3: 翻译并导出 11 列 CSV
+                _sangon_pipeline_state["current_stage"] = "exporting"
+                _append_log(f"正在执行物种拉丁文批量翻译并导出 16S鉴定结果.csv ...")
+                stats = _export_sangon_order_csv(task_name, res_dir)
+                _append_log(
+                    f"订单 {order_dir.name} 导出完成: 共 {stats['total']} 样本, "
+                    f"命中 {stats['with_hits']}, 未命中 {stats['no_hits']}"
+                )
+                _sangon_pipeline_state["progress"] = int(idx * 100 / total_orders)
+
+            _sangon_pipeline_state["current_stage"] = "completed"
+            _append_log("全部生工 16S 订单处理完毕")
+        except Exception as exc:
+            _sangon_pipeline_state["current_stage"] = "failed"
+            _append_log(f"执行异常: {exc}")
+        finally:
+            _sangon_pipeline_state["running"] = False
+            _sangon_pipeline_state["current_order"] = None
+            _sangon_pipeline_state["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    asyncio.get_running_loop().run_in_executor(None, _run_sangon_bg)
+    return {"status": "started", "runtime": _sangon_pipeline_state}
+
+
+@router.post("/open_path")
+async def open_local_path(req: OpenPathRequest):
+    """在宿主机 Windows 资源管理器中打开指定目录或选中文件"""
+    target = Path(req.path)
+    if not target.is_absolute():
+        target = PROJECT_ROOT / target
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"路径不存在: {target}")
+
+    try:
+        if sys.platform.startswith("win"):
+            if target.is_file():
+                subprocess.Popen(["explorer.exe", f"/select,{target}"])
+            else:
+                os.startfile(str(target))
+        return {"status": "success", "path": str(target)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
