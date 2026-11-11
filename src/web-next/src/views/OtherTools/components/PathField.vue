@@ -10,6 +10,7 @@ const props = defineProps<{
   path: string
   busy?: boolean
   hint?: string
+  saveLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -55,7 +56,7 @@ function submit(): void {
     </div>
     <div v-else class="path-row">
       <input v-model="draft" class="path-input" type="text" @keyup.enter="submit" @keyup.esc="cancelEdit" />
-      <button class="pf-btn primary" :disabled="busy" @click="submit">保存并迁移</button>
+      <button class="pf-btn primary" :disabled="busy" @click="submit">{{ saveLabel || '保存并迁移' }}</button>
       <button class="pf-btn" @click="cancelEdit">取消</button>
     </div>
     <div v-if="editing" class="path-hint">{{ hint || '保存后旧目录中的数据将自动迁移到新目录，同名文件不覆盖。' }}</div>

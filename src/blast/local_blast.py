@@ -26,8 +26,9 @@ class LocalBlastExecutor:
         self.database_path = database_path
         self.program = program
         try:
-            self.blast_bin = str(ToolConfig.get_tool_path(program))
-        except:
+            resolved = ToolConfig.resolve_bio_tool(program)
+            self.blast_bin = str(resolved) if resolved else str(ToolConfig.get_tool_path(program))
+        except Exception:
             self.blast_bin = program
 
     def check_blast_installation(self):
@@ -49,8 +50,13 @@ class LocalBlastExecutor:
         """执行本地BLAST搜索，支持 blastn/blastp 等多种程序并开启多核并行加速"""
         # 允许每次调用时覆盖程序类型
         active_program = program or self.program
+        active_bin = active_program
         try:
-            active_bin = str(ToolConfig.get_tool_path(active_program))
+            resolved = ToolConfig.resolve_bio_tool(active_program)
+            if resolved:
+                active_bin = str(resolved)
+            else:
+                active_bin = str(ToolConfig.get_tool_path(active_program))
         except Exception:
             active_bin = active_program
 

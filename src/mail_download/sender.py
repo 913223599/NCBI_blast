@@ -17,7 +17,7 @@ from email.header import Header
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formataddr, formatdate
+from email.utils import formataddr, formatdate, make_msgid
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -76,10 +76,12 @@ class MailSender:
             return SendResult(ok=False, stage="missing_to",
                               error="缺少收件人：请传 --to 或配置 reply_to")
 
-        mail = self._build_mail(recipient, subject or DEFAULT_SUBJECT,
+        to_list = [addr.strip() for addr in recipient.replace(";", ",").split(",") if addr.strip()]
+        cc_list = [addr.strip() for addr in (cc or []) if addr and addr.strip()]
+        mail = self._build_mail(", ".join(to_list), subject or DEFAULT_SUBJECT,
                                 body or self._default_body(attach_path), attach_path,
-                                cc=cc or [])
-        result = SendResult(to=recipient, subject=subject or DEFAULT_SUBJECT,
+                                cc=cc_list)
+        result = SendResult(to=", ".join(to_list), subject=subject or DEFAULT_SUBJECT,
                             attachment=str(attach_path),
                             attachment_size=attach_path.stat().st_size)
         # 仅真实连接需要授权码；注入（测试）模式跳过
@@ -97,7 +99,8 @@ class MailSender:
             result.error = str(e)
             return result
         try:
-            conn.sendmail(self.cfg.smtp_account, [recipient], mail.as_string())
+            all_rcpts = to_list + cc_list
+            conn.sendmail(self.cfg.smtp_account, all_rcpts, mail.as_string())
             result.ok = True
             result.stage = "sent"
             return result
@@ -124,6 +127,7 @@ class MailSender:
             msg["Cc"] = ", ".join(cc)
         msg["Subject"] = Header(subject, "utf-8")
         msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid(domain=self.cfg.smtp_account.split("@")[-1] if "@" in self.cfg.smtp_account else None)
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
         with open(attach_path, "rb") as f:

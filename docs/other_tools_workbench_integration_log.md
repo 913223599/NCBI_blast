@@ -103,3 +103,49 @@
 - `python -m pytest tests/test_other_tools_api.py tests/test_mail_download.py -v`：新增离线 `FakeIMAP` 用例与路由校验后，35 项测试全部通过。
 - 前端执行 `npm run build` (`vue-tsc -b && vite build`) 与严格类型检查，零报错通过。
 
+---
+
+## 6. 第四阶段全链路实测核查、断点修复与发信闭环（2026-11-11）
+
+### 6.1 全链路核查目标与安全边界
+围绕「生工 16S 下载 -> 解压 -> BLAST -> 导出」以及「邮件收件 -> 注释 -> Word 报告 -> 打包 -> SMTP 回传」两大自动化流水线开展真实环境（QQ IMAP/SMTP `913223599@qq.com` + 本地 16S 数据库 + 注释与报告流水线）断点排查与端到端自发自收验证：
+- 所有 SMTP 发信实测均仅定向发送至配置账号本人邮箱 `913223599@qq.com`，不触碰外部 `reply_to`（`yssw_service@163.com`）。
+- 严格遵守平台访问边界，对生工登录鉴权页引入的阿里云人机验证机制（`AliyunCaptcha.js`）不作任何绕过或自动化破解尝试，改用浏览器合规登录后本地下载包自动认领架构衔接。
+
+### 6.2 排查发现并修复的系统断点
+1. **外部与下载衔接断点（人机验证 + 本地下载包断层）**：
+   - 实测 `notice.sangon.com` 预览地址返回 HTTP 502，`store.sangon.com/downloadAttachFile` 跳转至带 `AliyunCaptcha.js` 的 `passport.sangon.com`，无法无头直连下载；与此同时用户通过浏览器下载至本机 `Downloads` 的 `吴晨_*_测序结果.zip` 不会自动进入 `原始压缩包/`。
+   - **修复**：保留浏览器合规跳转「打开下载页」，新增 [sangon_zip_importer.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_zip_importer.py) 与 [sangon_settings.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_settings.py) 的 `downloads_dir` 配置，新增 `POST /api/other_tools/sangon_16s/import_downloads` 接口及 `run_pipeline` 自动兜底认领逻辑，并在 [Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue) 增加待认领提示与一键认领操作。
+2. **非测序物流邮件误建目录断点 (`sangon_mail_scanner.py`)**：
+   - `info1@sangon.com` 中的发货通知（如 `1011709710`「已发货」）此前被当作测序通知创建空目录。
+   - **修复**：新增 `_is_sequencing_notice_subject()` 过滤，将该类邮件标记为 `non_sequencing`，禁止建目录。
+3. **无系统 `PATH` 启动环境找不到 `blastn.exe` (`tool_config.py` / `local_blast.py`)**：
+   - `blastn.exe` 安装在 `D:\Program Files\NCBI\blast-2.16.0+\bin\blastn.exe` 时，Electron/子进程剥离 `PATH` 环境下仅扫描 `C:` 导致 `FileNotFoundError`。
+   - **修复**：[tool_config.py](file:///f:/NCBI%20blast/src/workbench/models/tool_config.py) 扩展 `ProgramW6432` 与 `C:`~`F:` 多盘符 `NCBI\blast-*` 扫描；[local_blast.py](file:///f:/NCBI%20blast/src/blast/local_blast.py) 统一优先调用 `ToolConfig.resolve_bio_tool()`。
+4. **`force_reblast=True` 静默命中缓存及 CSV 排序断点 (`other_tools.py`)**：
+   - `BlastEngine.run` 检查已有 `reports/*.csv` 时会直接 Cache Restored，导致勾选「强制重新比对」无效；样本 CSV 导出默认字典序会导致 `-10` 排在 `-2` 之前。
+   - **修复**：`force_reblast=True` 时先调用 `mgr.delete_task()` 并清理 `results/blast/{task_name}` 目录再重建任务；`_export_sangon_order_csv()` 增加样本编号自然数字排序 `_sangon_csv_sort_key`。
+5. **Word 报告在 `tRNA = 0` 与动态安全审计场景崩溃断点 (`build_annotation_report.py`)**：
+   - 真实标注产物 `ANNO_8CFE4CC4`（`cds=74, trna=0`）运行报告生成时在 `min(trna_starts)` 抛出 `ValueError`，且多处存在 `n_cds=0` 除零或安全审计静态文本问题。
+   - **修复**：在 [scripts/build_annotation_report.py](file:///f:/NCBI%20blast/scripts/build_annotation_report.py) 修复 `n_trna == 0` 保护、回退引擎表格与安全审计动态输出，并在 `ANNO_8CFE4CC4` 沙盒副本实测生成完整 `.docx`（带 `[1]-[8]` 引用域）及压缩包通过。
+6. **打包与 SMTP 多收件/抄送/测试发信断点 (`packer.py` / `sender.py` / `other_tools.py`)**：
+   - [sender.py](file:///f:/NCBI%20blast/src/mail_download/sender.py) 修复 `sendmail` 漏传 `cc` 收件人并支持分号/逗号多收件人与 `Message-ID` 自动生成。
+   - [packer.py](file:///f:/NCBI%20blast/src/mail_download/packer.py) 在 `DEFAULT_PRODUCT_GLOBS` 中纳入 `*.docx`。
+   - [other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py) 新增 `POST /api/other_tools/mail_pipeline/test_send`（含 `ANNOTATIONS_DIR` 最新 `.docx` 自动回退查找）与 `POST /api/other_tools/sangon_16s/send_result`，安全约定 `to` 留空或传 `self` 时仅发往自身账号。
+   - [MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue) 与 [Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue) 接入「测试发信」与「发送结果邮件 / 发给自己」交互弹窗，严守零 Emoji 与 UTF-8 规范。
+
+### 6.3 验证与实测结果
+1. **自动化单元测试**：
+   - `python -m pytest tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v`：57 项全部通过（覆盖两阶段收件、去重分页、Word 打包、CC/多收件人、`non_sequencing` 拦截、下载包归档、`force_reblast` 清理、`test_send` 与 `send_result` 安全默认发己、零 Emoji 与 UTF-8 合规检查）。
+   - 联动扩展回归 `python -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v`：74 项全部通过（3.95s）。
+2. **真实环境端到端联调与自发信回读**：
+   - 真实生工邮件扫描：`raw=17, unique=13, non_sequencing=1`，确认 `1011709710` 已发货邮件被准确拦截未建空目录。
+   - 沙盒全链路 16S 流程（剥离 `PATH` 中 BLAST 路径）：订单 `20261014_2140608938` 自动从 `Downloads` 认领 `吴晨_2140608938_测序结果.zip` -> 解压 22 条 `.1.fasta` -> 自动定位 `D:\Program Files\NCBI\blast-2.16.0+\bin\blastn.exe` 完成 16 线程 megablast -> 导出 22 行 11 列 CSV（命中 21 / 未命中 1）-> `force_reblast=True` 验证 22/22 CSV 重新生成。
+   - 真实 SMTP 自发信与 IMAP 回读：
+     - `POST /other_tools/mail_pipeline/test_send` 成功发送至 `913223599@qq.com`（IMAP `INBOX seq=3513`），压缩包完整包含 `smtp_self_test.txt` 与 `ANNO_NC_005859_注释报告.docx`。
+     - `POST /other_tools/sangon_16s/send_result` 成功发送至 `913223599@qq.com`（IMAP `INBOX seq=3514`），附件 `16S鉴定结果_20261014_2140608938.zip` 解压校验含 22 行完整 UTF-8 中文 CSV。
+     - 前置 `ANNO_8CFE4CC4` 全报告流水线复测（tRNA=0 修复后）成功生成 62.3 KB `.docx` 与 278.2 KB 归档包并已自收验证（`INBOX seq=3510`）。
+3. **前端编译验证**：
+   - `src/web-next` 下 `npm run build` (`vue-tsc -b && vite build`) 零报错通过（耗时 23.98s）。
+
+

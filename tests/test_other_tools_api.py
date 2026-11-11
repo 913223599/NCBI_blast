@@ -32,6 +32,10 @@ from src.backend.services.other_tools.sangon_mail_scanner import (
     init_sangon_order_dir,
     scan_sangon_mails,
 )
+from src.backend.services.other_tools.sangon_zip_importer import (
+    import_order_zips_from_downloads,
+    scan_downloads_for_sangon_zips,
+)
 from src.backend.services.other_tools.secret_store import (
     mask_secret,
     read_secret,
@@ -587,19 +591,386 @@ def test_other_tools_routes_pagination_and_init_order(monkeypatch):
         assert r_list.json()["dedup_removed"] == 2
 
 
+def test_sangon_scan_excludes_non_sequencing_shipping_mails():
+    """验证生工物流发货通知（如订单已发货）标记为 non_sequencing 且不自动建空目录"""
+    mails = [
+        _make_mime_mail(
+            "info1@sangon.com",
+            "您的生工订单（1011709710）已发货，欢迎点击查看",
+            body_html="已发出",
+            message_id="<ship@sangon.com>",
+        ),
+        _make_mime_mail(
+            "info1@sangon.com",
+            "生工生物测序结果通知 2140698888",
+            body_html="cxOrderID=CX98888",
+            message_id="<seq@sangon.com>",
+        ),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "sangon"
+        root.mkdir()
+        cfg = MailConfig(account="user@qq.com")
+        res = scan_sangon_mails(
+            root,
+            cfg,
+            page=1,
+            page_size=10,
+            dedup=True,
+            auto_create=True,
+            conn_factory=lambda: _FakeIMAPForOtherTools(mails),
+        )
+        by_order = {m["order_no"]: m for m in res["mails"]}
+        assert by_order["1011709710"]["dedup_status"] == "non_sequencing"
+        assert by_order["1011709710"]["dir_ready"] is False
+        assert not any("1011709710" in p.name for p in root.iterdir())
+        assert by_order["2140698888"]["dedup_status"] == "created"
+        assert by_order["2140698888"]["dir_ready"] is True
+
+
+def test_sangon_zip_importer_scan_and_archive():
+    """验证浏览器下载目录识别、完整性过滤、最新包优先及安全拷贝归档"""
+    import os
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "sangon"
+        dl = Path(tmp) / "downloads"
+        root.mkdir()
+        dl.mkdir()
+
+        order_dir = root / "20261111_2140608938"
+        (order_dir / "原始压缩包").mkdir(parents=True)
+
+        # 未完成下载 / 损坏包 / 非测序包应被忽略
+        (dl / "吴晨_2140608938_测序结果.zip.crdownload").write_bytes(b"partial")
+        (dl / "bad_2140608938_测序结果.zip").write_bytes(b"not-a-zip")
+        other_zip = dl / "other_1234567890_invoice.zip"
+        with zipfile.ZipFile(other_zip, "w") as zf:
+            zf.writestr("invoice.pdf", b"%PDF-1.4")
+
+        # 同订单旧包与新包：应优先选取更新的 zip
+        old_zip = dl / "吴晨_2140608938_测序结果.zip"
+        with zipfile.ZipFile(old_zip, "w") as zf:
+            zf.writestr("s1_-1.1.fasta", ">1\nATGC\n")
+        new_zip = dl / "吴晨_2140608938_测序结果(2).zip"
+        with zipfile.ZipFile(new_zip, "w") as zf:
+            zf.writestr("s1_-1.1.fasta", ">1\nATGC\n")
+            zf.writestr("s2_-2.1.fasta", ">2\nGGGG\n")
+        os.utime(old_zip, (1000, 1000))
+        os.utime(new_zip, (2000, 2000))
+
+        # 额外未建目录的测序包
+        uncreated_zip = dl / "张三_2140601771_测序结果.zip"
+        with zipfile.ZipFile(uncreated_zip, "w") as zf:
+            zf.writestr("x.ab1", b"ABIF")
+
+        scanned = scan_downloads_for_sangon_zips(dl)
+        assert len(scanned) == 3
+        assert scanned[0]["order_no"] in ("2140601771", "2140608938")
+
+        # 1. 仅匹配已有订单
+        imp1 = import_order_zips_from_downloads(root, dl, auto_create_order=False)
+        assert imp1["imported_count"] == 1
+        assert imp1["imported"][0]["zip_name"] == new_zip.name
+        assert (order_dir / "原始压缩包" / new_zip.name).exists()
+        # 保留 Downloads 原文件
+        assert new_zip.exists()
+
+        # 2. 再次导入跳过同大小重复包；开启 auto_create_order 时自动建 2140601771 目录
+        imp2 = import_order_zips_from_downloads(root, dl, auto_create_order=True)
+        assert imp2["skipped_existing"] == 1
+        assert imp2["imported_count"] == 1
+        assert len(imp2["created_dirs"]) == 1
+        assert any(p.name.endswith("_2140601771") and (p / "原始压缩包" / uncreated_zip.name).exists() for p in root.iterdir())
+
+
+def test_sangon_csv_natural_order_and_force_reblast(monkeypatch):
+    """验证 16S CSV 导出按样本号数字排序，以及 force_reblast 触发旧缓存与任务记录清理"""
+    import src.backend.routes.other_tools as ot_routes
+    from src.workbench.models.tool_config import ToolConfig
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fake_root = Path(tmp)
+        reports_dir = fake_root / "results" / "blast" / "T1_16s" / "reports"
+        reports_dir.mkdir(parents=True)
+        for idx in (1, 10, 2):
+            (reports_dir / f"3142611030000_-{idx}_1.csv").write_text(
+                "Query,Title,Accession,E-value,Identity,Align_Len,Mismatch,Gap,BitScore,Species,Genus,Strain,Gene_Source,Seq_Type\n",
+                encoding="utf-8-sig",
+            )
+        monkeypatch.setattr(ot_routes, "PROJECT_ROOT", fake_root)
+        monkeypatch.setattr(
+            ot_routes,
+            "get_global_biology_translator",
+            lambda: type("T", (), {"translate_batch": lambda self, sp, category="species": {s: s for s in sp}})(),
+        )
+        out_dir = fake_root / "out"
+        stats = ot_routes._export_sangon_order_csv("T1_16s", out_dir)
+        assert stats["total"] == 3
+        lines = (out_dir / "16S鉴定结果.csv").read_text(encoding="utf-8-sig").splitlines()
+        qids = [line.split(",")[0] for line in lines[1:]]
+        assert qids == ["-1", "-2", "-10"]
+
+        # 验证 run_pipeline 在 force_reblast=True 时确实清理旧缓存并重新创建任务
+        sangon_dir = fake_root / "sangon"
+        order_dir = sangon_dir / "20261111_2140691111"
+        (order_dir / "原始压缩包").mkdir(parents=True)
+        (order_dir / "原始数据").mkdir(parents=True)
+        (order_dir / "BLAST结果").mkdir(parents=True)
+        (order_dir / "原始数据" / "s_-1.1.fasta").write_text(">1\nATGC\n", encoding="utf-8")
+
+        task_name = f"{order_dir.name}_16s"
+        old_cache = fake_root / "results" / "blast" / task_name / "reports" / "s_-1_1.csv"
+        old_cache.parent.mkdir(parents=True)
+        old_cache.write_text("cached", encoding="utf-8")
+
+        events: list[tuple[str, str]] = []
+
+        class FakeBlastMgr:
+            def delete_task(self, tid):
+                events.append(("delete", tid))
+                return (True, None)
+
+            def create_task(self, params):
+                assert not old_cache.exists(), "force_reblast 未清除旧 CSV 缓存"
+                events.append(("create", params["task_name"]))
+                return params["task_name"]
+
+            def get_task_status(self, tid):
+                return {"status": ot_routes.TaskStatus.COMPLETED.value, "progress": 100}
+
+        monkeypatch.setattr(ot_routes, "get_blast_manager", lambda: FakeBlastMgr())
+        monkeypatch.setattr(
+            ot_routes,
+            "_export_sangon_order_csv",
+            lambda tid, out: {"total": 1, "with_hits": 1, "no_hits": 0},
+        )
+        ot_routes._sangon_pipeline_state["running"] = False
+
+        async def _run_sync():
+            await ot_routes.run_sangon_16s_pipeline(
+                ot_routes.SangonRunRequest(
+                    sangon_root=str(sangon_dir),
+                    order_names=[order_dir.name],
+                    force_reblast=True,
+                )
+            )
+            import time
+            for _ in range(50):
+                if not ot_routes._sangon_pipeline_state["running"]:
+                    break
+                time.sleep(0.05)
+
+        asyncio.run(_run_sync())
+        assert ("delete", task_name) in events
+        assert ("create", task_name) in events
+
+    # 验证 ToolConfig.resolve_bio_tool 在无 PATH 场景下的多盘符扫描容错
+    monkeypatch.setenv("PATH", "")
+    resolved = ToolConfig.resolve_bio_tool("blastn")
+    if resolved is not None:
+        assert resolved.exists()
+
+
+def test_routes_test_send_sangon_send_result_and_settings(monkeypatch):
+    """验证 test_send、sangon_16s/send_result 与 downloads_dir 配置更新路由（安全默认发往自身）"""
+    import zipfile
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.backend.routes.other_tools as ot_routes
+    import src.backend.services.other_tools.sangon_settings as ss_mod
+
+    app = FastAPI()
+    app.include_router(ot_routes.router)
+    client = TestClient(app)
+
+    sent_records: list[dict] = []
+
+    class FakeSender:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def send(self, attachment, to=None, subject=None, body=None, cc=None):
+            sent_records.append({
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "attach_name": Path(attachment).name,
+                "attach_names": zipfile.ZipFile(attachment).namelist(),
+                "attach_size": Path(attachment).stat().st_size,
+            })
+            return type(
+                "SendResult",
+                (),
+                {
+                    "ok": True,
+                    "to": to,
+                    "subject": subject,
+                    "stage": "sent",
+                    "attachment_size": Path(attachment).stat().st_size,
+                    "error": None,
+                },
+            )()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sangon_dir = root / "sangon"
+        dl_dir = root / "downloads"
+        send_dir = root / "sends"
+        sangon_dir.mkdir()
+        dl_dir.mkdir()
+        send_dir.mkdir()
+        (send_dir / "ANNO_X_注释报告.docx").write_bytes(b"PK\x03\x04dummy-docx")
+
+        cfg = MailConfig(
+            account="self@qq.com",
+            smtp_account="self@qq.com",
+            reply_to="external_client@163.com",
+            auth_code_env="TEST_ENV_VAR_NOT_USED",
+            smtp_auth_code_env="TEST_ENV_VAR_NOT_USED",
+            send_dir=str(send_dir),
+        )
+        monkeypatch.setenv("TEST_ENV_VAR_NOT_USED", "dummy-auth")
+        monkeypatch.setattr(ot_routes, "load_config", lambda *a, **kw: cfg)
+        monkeypatch.setattr(ot_routes, "MailSender", FakeSender)
+        monkeypatch.setattr(ss_mod, "SANGON_CONFIG_PATH", root / "sangon_16s_config.json")
+
+        # 1. test_send 默认留空不发给 reply_to(external_client)，只发给自己 self@qq.com
+        r_ts = client.post(
+            "/other_tools/mail_pipeline/test_send",
+            json={"note": "自检", "attach_latest_report": True},
+        )
+        assert r_ts.status_code == 200
+        assert sent_records[-1]["to"] == "self@qq.com"
+        assert "ANNO_X_注释报告.docx" in sent_records[-1]["attach_names"]
+        assert "smtp_self_test.txt" in sent_records[-1]["attach_names"]
+
+        # 2. 更新 downloads_dir（非法路径 400，合法路径 200）
+        bad_dl = client.post(
+            "/other_tools/sangon_16s/settings",
+            json={"downloads_dir": str(root / "not_exists"), "migrate": False},
+        )
+        assert bad_dl.status_code == 400
+        ok_dl = client.post(
+            "/other_tools/sangon_16s/settings",
+            json={"sangon_root": str(sangon_dir), "downloads_dir": str(dl_dir), "migrate": False},
+        )
+        assert ok_dl.status_code == 200
+
+        # 3. sangon_16s/send_result：非法路径 400 / 缺 CSV 404 / 成功发往自身
+        bad_name = client.post(
+            "/other_tools/sangon_16s/send_result",
+            json={"order_dir_name": "../bad", "sangon_root": str(sangon_dir)},
+        )
+        assert bad_name.status_code == 400
+
+        order_dir = sangon_dir / "20261111_2140688888"
+        (order_dir / "BLAST结果").mkdir(parents=True)
+        missing_csv = client.post(
+            "/other_tools/sangon_16s/send_result",
+            json={"order_dir_name": order_dir.name, "sangon_root": str(sangon_dir)},
+        )
+        assert missing_csv.status_code == 404
+
+        (order_dir / "BLAST结果" / "16S鉴定结果.csv").write_text(
+            "查询序列,鉴定物种(中文翻译),鉴定概率分布(中文翻译),原始鉴定物种(拉丁文),原始鉴定概率分布(拉丁文),分类/菌株信息,基因/序列库,相似度 (Identity),E值,访问号,详细标题\n"
+            "-1,枯草芽孢杆菌,枯草芽孢杆菌(100%),Bacillus subtilis,Bacillus subtilis(100%),Bacillus,16S,100.0%,0.00e+00,NR_027552.1,Bacillus subtilis\n",
+            encoding="utf-8-sig",
+        )
+        r_send_16s = client.post(
+            "/other_tools/sangon_16s/send_result",
+            json={"order_dir_name": order_dir.name, "sangon_root": str(sangon_dir), "extra_note": "自测"},
+        )
+        assert r_send_16s.status_code == 200
+        body = r_send_16s.json()
+        assert body["to"] == "self@qq.com"
+        assert body["total_samples"] == 1
+        assert body["with_hits"] == 1
+        assert "16S鉴定结果_2140688888.csv" in sent_records[-1]["attach_names"]
+
+
+def test_build_annotation_report_handles_zero_trna_and_safety():
+    """验证 build_annotation_report.py 在 tRNA=0 与无 ACR 场景下可顺利生成完整 .docx"""
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "build_annotation_report.py"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "ANNO_TEST"
+        data_dir.mkdir()
+        (data_dir / "summary.json").write_text(
+            json.dumps({
+                "sequence_id": "contig_1",
+                "genome_length_bp": 12000,
+                "gc_content_percent": 48.5,
+                "cds_count": 1,
+                "trna_count": 0,
+                "hypothetical_count": 0,
+                "hypothetical_percent": 0.0,
+                "coding_density_percent": 75.0,
+                "category_distribution": {"Replication & Repair": 1},
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (data_dir / "features.json").write_text(
+            json.dumps([{
+                "type": "CDS",
+                "locus_tag": "TEST_0001",
+                "start": 1,
+                "end": 900,
+                "strand": "+",
+                "length_bp": 900,
+                "product": "DNA polymerase",
+                "category": "Replication & Repair",
+                "source_engine": "Prodigal",
+                "evidence_sources": ["[2]"],
+            }], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (data_dir / "safety_audit.json").write_text(
+            json.dumps({
+                "safety_passed": True,
+                "amr_genes": [],
+                "virulent_factors": [],
+                "anti_crispr_genes": [],
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        out_docx = Path(tmp) / "out_report.docx"
+        proc = subprocess.run(
+            [sys.executable, "-X", "utf8", str(script), "--data", str(data_dir), "--out", str(out_docx)],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert out_docx.exists() and out_docx.stat().st_size > 10000
+
+
 def test_no_emoji_and_utf8_in_new_files():
     """验证新增与修改的前后端代码文件全部采用 UTF-8 且不含任何 Emoji 字符"""
     repo_root = Path(__file__).resolve().parents[1]
     target_files = [
+        repo_root / "scripts" / "build_annotation_report.py",
+        repo_root / "src" / "blast" / "local_blast.py",
+        repo_root / "src" / "workbench" / "models" / "tool_config.py",
         repo_root / "src" / "mail_download" / "config.py",
         repo_root / "src" / "mail_download" / "downloader.py",
         repo_root / "src" / "mail_download" / "fetcher.py",
+        repo_root / "src" / "mail_download" / "packer.py",
+        repo_root / "src" / "mail_download" / "sender.py",
         repo_root / "src" / "backend" / "routes" / "other_tools.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "dir_migrator.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "history_cleaner.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "mail_inbox_browser.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_mail_scanner.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_settings.py",
+        repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_zip_importer.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "secret_store.py",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherToolsView.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "api.ts",

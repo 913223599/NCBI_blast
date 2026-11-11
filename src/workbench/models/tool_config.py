@@ -113,15 +113,32 @@ class ToolConfig:
         ])
 
         if os.name == "nt":
-            ncbi_root = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "NCBI"
-            if ncbi_root.exists():
-                def _version_key(p: Path):
-                    import re
-                    m = re.search(r"blast-([0-9]+(?:\.[0-9]+)*)", p.name)
-                    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
+            def _version_key(p: Path):
+                import re
+                m = re.search(r"blast-([0-9]+(?:\.[0-9]+)*)", p.name)
+                return tuple(int(x) for x in m.group(1).split(".")) if m else ()
 
-                for ver_dir in sorted(ncbi_root.glob("blast-*"), key=_version_key, reverse=True):
-                    candidates.append(ver_dir / "bin" / exe)
+            ncbi_roots = []
+            for env_key in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"):
+                val = os.environ.get(env_key)
+                if val:
+                    ncbi_roots.append(Path(val) / "NCBI")
+            for drive in ("C:", "D:", "E:", "F:"):
+                ncbi_roots.append(Path(f"{drive}/Program Files/NCBI"))
+                ncbi_roots.append(Path(f"{drive}/NCBI"))
+
+            seen_roots = set()
+            for ncbi_root in ncbi_roots:
+                key = str(ncbi_root).lower()
+                if key in seen_roots:
+                    continue
+                seen_roots.add(key)
+                try:
+                    if ncbi_root.exists():
+                        for ver_dir in sorted(ncbi_root.glob("blast-*"), key=_version_key, reverse=True):
+                            candidates.append(ver_dir / "bin" / exe)
+                except OSError:
+                    continue
 
         for candidate in candidates:
             try:

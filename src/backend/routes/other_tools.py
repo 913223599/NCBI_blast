@@ -11,8 +11,10 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from datetime import datetime
@@ -27,12 +29,22 @@ from ..services.other_tools.dir_migrator import migrate_directory
 from ..services.other_tools.history_cleaner import cleanup_mail_history, cleanup_sangon_history
 from ..services.other_tools.mail_inbox_browser import list_whitelist_mails
 from ..services.other_tools.sangon_mail_scanner import init_sangon_order_dir, scan_sangon_mails
-from ..services.other_tools.sangon_settings import get_sangon_root, load_sangon_settings, save_sangon_settings
+from ..services.other_tools.sangon_settings import (
+    get_sangon_downloads_dir,
+    get_sangon_root,
+    load_sangon_settings,
+    save_sangon_settings,
+)
+from ..services.other_tools.sangon_zip_importer import (
+    import_order_zips_from_downloads,
+    scan_downloads_for_sangon_zips,
+)
 from ..services.other_tools.secret_store import mask_secret, read_secret, resolve_secret_path, write_secret
 from ...blast.manager import get_blast_manager, TaskStatus
 from ...mail_download.config import load_config
 from ...mail_download.downloader import AttachmentSaver
 from ...mail_download.fetcher import MailFetcher
+from ...mail_download.sender import MailSender
 from ...utils.translation.biology_translator import get_global_biology_translator
 
 logger = logging.getLogger("api.other_tools")
@@ -61,6 +73,18 @@ def _read_mail_cfg() -> Dict[str, Any]:
 
 def _sangon_root_or_default(value: Optional[str]) -> Path:
     return Path(value) if value else get_sangon_root()
+
+
+def _sangon_downloads_or_default(value: Optional[str]) -> Path:
+    return Path(value) if value else get_sangon_downloads_dir()
+
+
+def _resolve_send_target(cfg: Any, to_arg: Optional[str]) -> str:
+    """解析目标收件人：留空或传入 self 时安全回退到自身发件/收件账号，绝不误发外部邮箱。"""
+    val = (to_arg or "").strip()
+    if not val or val.lower() == "self":
+        return (getattr(cfg, "smtp_account", "") or getattr(cfg, "account", "") or "").strip()
+    return val
 
 # ─── 全局运行状态追踪 ─────────────────────────────────────────
 _mail_pipeline_state: Dict[str, Any] = {
@@ -142,8 +166,16 @@ class MailPipelineRunRequest(BaseModel):
     extra_note: Optional[str] = None
 
 
+class MailTestSendRequest(BaseModel):
+    to: Optional[str] = None
+    subject: Optional[str] = None
+    note: Optional[str] = None
+    attach_latest_report: bool = False
+
+
 class SangonRunRequest(BaseModel):
     sangon_root: Optional[str] = None
+    downloads_dir: Optional[str] = None
     order_names: List[str] = []
     evalue: str = "0.05"
     hitlist_size: str = "50"
@@ -167,8 +199,24 @@ class MailCleanupRequest(BaseModel):
 
 
 class SangonSettingsRequest(BaseModel):
-    sangon_root: str
+    sangon_root: Optional[str] = None
+    downloads_dir: Optional[str] = None
     migrate: bool = True
+
+
+class SangonImportDownloadsRequest(BaseModel):
+    sangon_root: Optional[str] = None
+    downloads_dir: Optional[str] = None
+    order_names: List[str] = []
+    auto_create_order: bool = False
+
+
+class SangonSendResultRequest(BaseModel):
+    order_dir_name: str
+    sangon_root: Optional[str] = None
+    to: Optional[str] = None
+    subject: Optional[str] = None
+    extra_note: Optional[str] = None
 
 
 class SangonCleanupRequest(BaseModel):
@@ -532,6 +580,93 @@ async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
     return {"status": "started", "runtime": _mail_pipeline_state}
 
 
+@router.post("/mail_pipeline/test_send")
+async def test_mail_pipeline_send(req: Optional[MailTestSendRequest] = Body(default=None)):
+    """轻量测试 SMTP 发信链路：打包验证文本（可选附带最新 Word 报告）发送到自身或指定邮箱。"""
+    params = req or MailTestSendRequest()
+
+    def _do_test_send():
+        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=False)
+        target_to = _resolve_send_target(cfg, params.to)
+        if not target_to:
+            raise ValueError("缺少目标收件人或未配置发件账号")
+        if not cfg.smtp_auth_code:
+            raise ValueError("缺少 SMTP 授权码，请先配置授权码后再测试发信")
+
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        subject = (params.subject or f"【自检验证】邮件自动回传 SMTP 测试 ({stamp})").strip()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            zip_path = tmp_dir / f"SMTP_自检验证包_{stamp}.zip"
+            attached_files = ["smtp_self_test.txt"]
+
+            txt_lines = [
+                "邮件自动回传工作台 SMTP 链路自检报告",
+                f"发送时间: {now_str}",
+                f"SMTP 服务器: {cfg.smtp_server}:{cfg.smtp_port}",
+                f"发件账号: {cfg.smtp_account}",
+                f"目标收件人: {target_to}",
+                f"主题: {subject}",
+                f"中文与 UTF-8 附件名编码验证: 正常 ({zip_path.name})",
+            ]
+            if params.note and params.note.strip():
+                txt_lines.append(f"附加备注: {params.note.strip()}")
+
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("smtp_self_test.txt", "\n".join(txt_lines).encode("utf-8"))
+                if params.attach_latest_report:
+                    send_dir = _resolve_dir(getattr(cfg, "send_dir", "results/email_sends"))
+                    docx_list: List[Path] = []
+                    if send_dir.exists():
+                        docx_list = sorted(send_dir.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if not docx_list and ANNOTATIONS_DIR.exists():
+                        docx_list = sorted(ANNOTATIONS_DIR.rglob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True)
+                    if docx_list:
+                        zf.writestr(docx_list[0].name, docx_list[0].read_bytes())
+                        attached_files.append(docx_list[0].name)
+
+            body_lines = [
+                "您好：",
+                "",
+                "本邮件为 NCBI Pro 邮件自动回传流水线的 SMTP 发信自检测试邮件。",
+                f"发件账号：{cfg.smtp_account}",
+                f"目标收件人：{target_to}",
+                f"验证时间：{now_str}",
+                f"测试附件：{zip_path.name}（包含 {', '.join(attached_files)}）",
+            ]
+            if params.note and params.note.strip():
+                body_lines.append(f"备注信息：{params.note.strip()}")
+            body_lines.append("")
+            body_lines.append("若您顺利收到本邮件且附件中文名称显示正常，即表示 SMTP 链路畅通。")
+
+            sender = MailSender(cfg)
+            res = sender.send(zip_path, to=target_to, subject=subject, body="\n".join(body_lines))
+            return res, zip_path.name, attached_files
+
+    try:
+        res, zip_name, attached_files = await asyncio.to_thread(_do_test_send)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"测试发信异常: {e}")
+
+    if not res.ok:
+        raise HTTPException(status_code=400, detail=f"发送失败 ({res.stage}): {res.error}")
+
+    return {
+        "status": "success",
+        "ok": True,
+        "to": res.to,
+        "subject": res.subject,
+        "stage": res.stage,
+        "attachment": zip_name,
+        "attachment_size": res.attachment_size,
+        "attached_files": attached_files,
+    }
+
+
 # ==============================================================================
 # 2. 生工 16S 测序结果自动化 BLAST 与导出流程 接口
 # ==============================================================================
@@ -623,20 +758,50 @@ def _inspect_sangon_order_dir(order_dir: Path) -> Dict[str, Any]:
 
 
 @router.get("/sangon_16s/overview")
-async def get_sangon_16s_overview(sangon_root: Optional[str] = None):
-    """获取生工 16S 自动化流程目录与所有订单状态概览"""
+async def get_sangon_16s_overview(sangon_root: Optional[str] = None, downloads_dir: Optional[str] = None):
+    """获取生工 16S 自动化流程目录、浏览器下载目录待认领压缩包与所有订单状态概览"""
     root_path = _sangon_root_or_default(sangon_root)
+    dl_dir = _sangon_downloads_or_default(downloads_dir)
     orders: List[Dict[str, Any]] = []
+    order_by_no: Dict[str, Dict[str, Any]] = {}
 
     if root_path.exists() and root_path.is_dir():
         for child in sorted(root_path.iterdir(), key=lambda p: p.name, reverse=True):
             if child.is_dir() and re.match(r"^\d{8}_\d+", child.name):
-                orders.append(_inspect_sangon_order_dir(child))
+                info = _inspect_sangon_order_dir(child)
+                orders.append(info)
+                ono = info.get("order_no", "")
+                if ono and ono not in order_by_no:
+                    order_by_no[ono] = info
+
+    # 扫描本地浏览器下载目录中的生工测序压缩包（每个订单保留最新一条）
+    raw_candidates = scan_downloads_for_sangon_zips(dl_dir)
+    download_candidates: List[Dict[str, Any]] = []
+    seen_dl_orders = set()
+    for item in raw_candidates:
+        ono = item["order_no"]
+        if ono in seen_dl_orders:
+            continue
+        seen_dl_orders.add(ono)
+        matched = order_by_no.get(ono)
+        archived = bool(matched and (matched.get("zip_count", 0) > 0 or matched.get("status") == "completed"))
+        download_candidates.append({
+            **item,
+            "matched_dir_name": matched["dir_name"] if matched else "",
+            "matched_status": matched["status"] if matched else "uncreated",
+            "archived": archived,
+        })
+
+    pending_download_count = sum(1 for c in download_candidates if not c["archived"])
 
     db_16s = PROJECT_ROOT / "database" / "16S" / "ncbi" / "16S_ribosomal_RNA.nin"
     return {
         "status": "success",
         "sangon_root": str(root_path),
+        "downloads_dir": str(dl_dir),
+        "downloads_exists": dl_dir.exists(),
+        "download_candidates": download_candidates,
+        "pending_download_count": pending_download_count,
         "settings": load_sangon_settings(),
         "root_exists": root_path.exists(),
         "db_16s_ready": db_16s.exists(),
@@ -731,17 +896,24 @@ async def init_sangon_order_directory(req: SangonInitOrderRequest):
         raise HTTPException(status_code=500, detail=f"初始化订单目录失败: {e}")
 
 
+def _sangon_csv_sort_key(p: Path):
+    m_num = re.search(r"_-(\d+)(?:_\d+)?\.csv$", p.name)
+    if m_num:
+        return (0, int(m_num.group(1)), p.name)
+    return (1, 0, p.name)
+
+
 def _export_sangon_order_csv(task_id: str, out_dir: Path) -> Dict[str, int]:
     """解析 BLAST 报告并调用 BiologyTranslator 翻译导出 11 列 16S鉴定结果.csv"""
     out_dir.mkdir(parents=True, exist_ok=True)
     reports_dir = PROJECT_ROOT / "results" / "blast" / task_id / "reports"
-    csv_files = sorted(reports_dir.glob("*.csv")) if reports_dir.exists() else []
+    csv_files = sorted(reports_dir.glob("*.csv"), key=_sangon_csv_sort_key) if reports_dir.exists() else []
 
     all_species = set()
     results = []
 
     for csv_path in csv_files:
-        m = re.search(r"_-(\d+)_1\.csv$", csv_path.name)
+        m = re.search(r"_-(\d+)(?:_\d+)?\.csv$", csv_path.name)
         query_title = f"-{m.group(1)}" if m else csv_path.stem
 
         hits = parse_blast_csv(str(csv_path), limit=50)
@@ -888,8 +1060,23 @@ async def run_sangon_16s_pipeline(req: SangonRunRequest):
                 raw_dir.mkdir(parents=True, exist_ok=True)
                 res_dir.mkdir(parents=True, exist_ok=True)
 
-                # Step 1: 若原始数据无 .1.fasta 但原始压缩包有 zip，自动解压
+                # Step 0: 若原始数据与原始压缩包均为空，自动尝试从浏览器下载目录认领匹配订单包
                 fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
+                has_zip = zip_dir.exists() and any(zip_dir.glob("*.zip"))
+                if not fastas and not has_zip:
+                    dl_dir = _sangon_downloads_or_default(req.downloads_dir)
+                    imp = import_order_zips_from_downloads(
+                        root_path,
+                        dl_dir,
+                        order_names=[order_dir.name],
+                        auto_create_order=False,
+                    )
+                    if imp["imported_count"] > 0:
+                        _append_log(
+                            f"已从下载目录自动认领压缩包: {imp['imported'][0]['zip_name']} -> 原始压缩包/"
+                        )
+
+                # Step 1: 若原始数据无 .1.fasta 但原始压缩包有 zip，自动解压
                 if not fastas and zip_dir.exists():
                     for zf_path in sorted(zip_dir.glob("*.zip")):
                         _append_log(f"正在解压原始压缩包: {zf_path.name} -> 原始数据/")
@@ -898,11 +1085,23 @@ async def run_sangon_16s_pipeline(req: SangonRunRequest):
                     fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
 
                 if not fastas:
-                    _append_log(f"[跳过] {order_dir.name} 未找到 *.1.fasta 主序列文件")
+                    _append_log(f"[跳过] {order_dir.name} 未找到 *.1.fasta 主序列文件（如刚下载请确认浏览器已完成保存）")
                     continue
 
                 task_name = f"{order_dir.name}_16s"
-                reports_dir = PROJECT_ROOT / "results" / "blast" / task_name / "reports"
+                task_cache_dir = PROJECT_ROOT / "results" / "blast" / task_name
+                reports_dir = task_cache_dir / "reports"
+
+                # 强制重跑时清理旧 BLAST 缓存与数据库记录，避免 BlastEngine 命中既有 reports/*.csv 静默跳过
+                if req.force_reblast:
+                    _append_log(f"强制重新比对：正在清理旧缓存与记录 ({task_name})")
+                    try:
+                        mgr.delete_task(task_name)
+                    except Exception as del_err:
+                        _append_log(f"清理任务数据库记录提示: {del_err}")
+                    if task_cache_dir.exists():
+                        shutil.rmtree(task_cache_dir, ignore_errors=True)
+
                 existing_csvs = list(reports_dir.glob("*.csv")) if reports_dir.exists() else []
 
                 # Step 2: 运行 16S BLAST
@@ -957,31 +1156,169 @@ async def run_sangon_16s_pipeline(req: SangonRunRequest):
     return {"status": "started", "runtime": _sangon_pipeline_state}
 
 
-@router.post("/sangon_16s/settings")
-async def update_sangon_settings(req: SangonSettingsRequest):
-    """修改生工 16S 根目录并持久化；migrate=True 时把旧目录下的订单整体迁移到新目录"""
-    if _sangon_pipeline_state["running"]:
-        raise HTTPException(status_code=409, detail="生工 16S 流水线运行中，暂不能修改目录")
-    new_root_str = req.sangon_root.strip()
-    if not new_root_str:
-        raise HTTPException(status_code=400, detail="目录不能为空")
-    new_root = Path(new_root_str)
-    if not new_root.is_absolute():
-        raise HTTPException(status_code=400, detail="生工 16S 根目录必须为绝对路径")
+@router.post("/sangon_16s/import_downloads")
+async def import_sangon_downloads(req: Optional[SangonImportDownloadsRequest] = Body(default=None)):
+    """扫描浏览器下载目录中的生工测序压缩包，安全复制归档到对应订单 原始压缩包/"""
+    params = req or SangonImportDownloadsRequest()
+    root_path = _sangon_root_or_default(params.sangon_root)
+    dl_dir = _sangon_downloads_or_default(params.downloads_dir)
+    if not dl_dir.exists() or not dl_dir.is_dir():
+        raise HTTPException(status_code=400, detail=f"浏览器下载目录不存在: {dl_dir}")
 
-    old_root = get_sangon_root()
-    migration: Optional[Dict[str, Any]] = None
+    res = await asyncio.to_thread(
+        import_order_zips_from_downloads,
+        root_path,
+        dl_dir,
+        order_names=params.order_names or None,
+        auto_create_order=params.auto_create_order,
+    )
+    return {"status": "success", **res}
+
+
+@router.post("/sangon_16s/send_result")
+async def send_sangon_order_result_mail(req: SangonSendResultRequest):
+    """将指定订单的 16S 鉴定结果 CSV 打包为 zip 并通过 SMTP 发送（默认发送至本人配置邮箱）"""
+    clean_name = (req.order_dir_name or "").strip()
+    if not clean_name or any(sep in clean_name for sep in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail=f"非法的订单目录名: {req.order_dir_name}")
+
+    root_path = _sangon_root_or_default(req.sangon_root)
+    order_dir = root_path / clean_name
+    if not order_dir.exists() or not order_dir.is_dir() or order_dir.parent.resolve() != root_path.resolve():
+        raise HTTPException(status_code=404, detail=f"未找到订单目录: {clean_name}")
+
+    csv_path = order_dir / "BLAST结果" / "16S鉴定结果.csv"
+    if not csv_path.exists() or not csv_path.is_file():
+        raise HTTPException(status_code=404, detail=f"该订单尚未生成 16S鉴定结果.csv，请先运行比对导出")
+
+    def _do_send_16s():
+        with open(csv_path, "r", encoding="utf-8-sig", errors="replace") as f:
+            rows = list(csv.reader(f))
+        data_rows = [r for r in rows[1:] if r] if len(rows) > 1 else []
+        total = len(data_rows)
+        no_hits = sum(
+            1 for r in data_rows
+            if ("No Hits" in (r[3] if len(r) > 3 else "") or "未找到匹配项" in (r[3] if len(r) > 3 else ""))
+        )
+        with_hits = total - no_hits
+
+        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=False)
+        target_to = _resolve_send_target(cfg, req.to)
+        if not target_to:
+            raise ValueError("缺少目标收件人或未配置发件账号")
+        if not cfg.smtp_auth_code:
+            raise ValueError("缺少 SMTP 授权码，请先配置授权码后再发送邮件")
+
+        order_no = clean_name.split("_", 1)[1] if "_" in clean_name else clean_name
+        subject = (req.subject or f"生工 16S 测序鉴定结果 - {clean_name}（共 {total} 样本）").strip()
+
+        preview_lines = []
+        for r in data_rows[:15]:
+            qid = r[0] if len(r) > 0 else "-"
+            sp_cn = r[1] if len(r) > 1 else ""
+            sp_la = r[3] if len(r) > 3 else ""
+            ident = r[7] if len(r) > 7 else ""
+            acc = r[9] if len(r) > 9 else ""
+            sp_disp = f"{sp_cn} ({sp_la})" if sp_cn and sp_la else (sp_cn or sp_la or "-")
+            preview_lines.append(f"  - {qid}: {sp_disp} | Identity={ident} | Acc={acc}")
+        if total > 15:
+            preview_lines.append(f"  ...（其余 {total - 15} 条结果详见附件 CSV 表格）")
+
+        body_lines = [
+            "您好：",
+            "",
+            f"生工 16S 测序订单 {clean_name}（订单号 {order_no}）的自动 BLAST 鉴定与物种翻译已完成：",
+            f"  样本总数：{total}",
+            f"  成功命中：{with_hits}",
+            f"  未命中：{no_hits}",
+        ]
+        if req.extra_note and req.extra_note.strip():
+            body_lines.append(f"  备注信息：{req.extra_note.strip()}")
+        if preview_lines:
+            body_lines.append("")
+            body_lines.append("鉴定结果预览（前 15 条）：")
+            body_lines.extend(preview_lines)
+        body_lines.extend(["", "完整 11 列鉴定结果请查收附件压缩包。", ""])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = Path(tmp) / f"16S鉴定结果_{clean_name}.zip"
+            inner_csv_name = f"16S鉴定结果_{order_no}.csv"
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.write(csv_path, arcname=inner_csv_name)
+                zf.writestr("结果说明.txt", "\n".join(body_lines).encode("utf-8"))
+
+            res = MailSender(cfg).send(zip_path, to=target_to, subject=subject, body="\n".join(body_lines))
+            return res, zip_path.name, total, with_hits, no_hits
+
     try:
-        if req.migrate:
-            migration = await asyncio.to_thread(migrate_directory, old_root, new_root)
-        else:
-            new_root.mkdir(parents=True, exist_ok=True)
+        res, zip_name, total, with_hits, no_hits = await asyncio.to_thread(_do_send_16s)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except OSError as e:
-        raise HTTPException(status_code=500, detail=f"目录迁移失败: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"发送 16S 结果邮件异常: {e}")
 
-    settings = save_sangon_settings({"sangon_root": str(new_root)})
+    if not res.ok:
+        raise HTTPException(status_code=400, detail=f"发送失败 ({res.stage}): {res.error}")
+
+    return {
+        "status": "success",
+        "ok": True,
+        "order_dir_name": clean_name,
+        "to": res.to,
+        "subject": res.subject,
+        "stage": res.stage,
+        "attachment": zip_name,
+        "attachment_size": res.attachment_size,
+        "total_samples": total,
+        "with_hits": with_hits,
+        "no_hits": no_hits,
+    }
+
+
+@router.post("/sangon_16s/settings")
+async def update_sangon_settings(req: SangonSettingsRequest):
+    """修改生工 16S 根目录（支持自动迁移）或本地浏览器下载目录（仅更新路径不迁移）"""
+    if _sangon_pipeline_state["running"]:
+        raise HTTPException(status_code=409, detail="生工 16S 流水线运行中，暂不能修改目录")
+
+    to_save: Dict[str, Any] = {}
+    migration: Optional[Dict[str, Any]] = None
+
+    if req.sangon_root is not None:
+        new_root_str = req.sangon_root.strip()
+        if not new_root_str:
+            raise HTTPException(status_code=400, detail="生工 16S 根目录不能为空")
+        new_root = Path(new_root_str)
+        if not new_root.is_absolute():
+            raise HTTPException(status_code=400, detail="生工 16S 根目录必须为绝对路径")
+
+        old_root = get_sangon_root()
+        try:
+            if req.migrate:
+                migration = await asyncio.to_thread(migrate_directory, old_root, new_root)
+            else:
+                new_root.mkdir(parents=True, exist_ok=True)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"目录迁移失败: {e}")
+        to_save["sangon_root"] = str(new_root)
+
+    if req.downloads_dir is not None:
+        new_dl_str = req.downloads_dir.strip()
+        if not new_dl_str:
+            raise HTTPException(status_code=400, detail="浏览器下载目录不能为空")
+        new_dl = Path(new_dl_str)
+        if not new_dl.is_absolute():
+            raise HTTPException(status_code=400, detail="浏览器下载目录必须为绝对路径")
+        if not new_dl.exists() or not new_dl.is_dir():
+            raise HTTPException(status_code=400, detail=f"浏览器下载目录不存在: {new_dl}")
+        to_save["downloads_dir"] = str(new_dl)
+
+    if not to_save:
+        raise HTTPException(status_code=400, detail="未提供需要更新的目录参数")
+
+    settings = save_sangon_settings(to_save)
     return {"status": "success", "settings": settings, "migration": migration}
 
 

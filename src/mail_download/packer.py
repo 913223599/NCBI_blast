@@ -19,11 +19,11 @@ logger = logging.getLogger("mail_download.packer")
 
 # 常见注释产物后缀白名单（zip 内按原文件名保留；目录结构拍平，避免嵌套混乱）
 DEFAULT_PRODUCT_GLOBS = [
-    "*.gbk", "*.gff", "*.gff3", "*.tsv", "*.faa", "*.ffn", "*.fasta",
+    "*.gbk", "*.gff", "*.gff3", "*.tsv", "*.faa", "*.ffn", "*.fasta", "*.docx",
     "features.json", "summary.json", "safety_audit.json", "manifest.json",
 ]
 
-DEFAULT_ZIP_SUFFIXES = {".gbk", ".gff", ".gff3", ".tsv", ".faa", ".ffn", ".fasta", ".json"}
+DEFAULT_ZIP_SUFFIXES = {".gbk", ".gff", ".gff3", ".tsv", ".faa", ".ffn", ".fasta", ".docx", ".json"}
 
 
 class ResultPacker:

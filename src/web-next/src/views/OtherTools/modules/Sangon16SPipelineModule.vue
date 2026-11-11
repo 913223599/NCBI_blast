@@ -38,20 +38,36 @@ interface ScannedMailItem {
   date: string
   order_no: string
   dir_name: string
+  is_sequencing?: boolean
   cx_order_id: string
   download_url: string
   dir_ready: boolean
-  dedup_status: 'created' | 'existing' | 'history_skipped' | 'new'
+  dedup_status: 'created' | 'existing' | 'history_skipped' | 'new' | 'non_sequencing'
   duplicate_count: number
+}
+
+interface DownloadCandidateItem {
+  order_no: string
+  zip_name: string
+  zip_path: string
+  size_kb: number
+  mtime_str: string
+  matched_dir_name: string
+  matched_status: string
+  archived: boolean
 }
 
 const API = '/api/other_tools/sangon_16s'
 const MAIL_API = '/api/other_tools/mail_pipeline'
 
 const sangonRoot = ref('')
+const downloadsDir = ref('')
 const rootExists = ref(false)
 const db16sReady = ref(false)
 const orders = ref<SangonOrderItem[]>([])
+const downloadCandidates = ref<DownloadCandidateItem[]>([])
+const pendingDownloadCount = ref(0)
+const mailAccount = ref('')
 const orderPage = ref(1)
 const orderPageSize = ref(6)
 
@@ -95,6 +111,15 @@ const imapMasked = ref('')
 const imapReady = ref(false)
 const imapFile = ref('')
 const imapKeyInput = ref('')
+
+const showSendModal = ref(false)
+const sendingMail = ref(false)
+const sendForm = ref({
+  orderDirName: '',
+  to: '',
+  subject: '',
+  extraNote: ''
+})
 
 const runtime = ref<any>({
   running: false,
@@ -164,7 +189,8 @@ function dedupStatusLabel(st: string): string {
     created: '新建目录',
     existing: '目录已存在',
     history_skipped: '已清理跳过',
-    new: '待新建'
+    new: '待新建',
+    non_sequencing: '非测序邮件'
   }
   return map[st] || st
 }
@@ -188,10 +214,22 @@ async function loadOverview(): Promise<void> {
   try {
     const data = await getJson(`${API}/overview`)
     sangonRoot.value = data.sangon_root || sangonRoot.value
+    downloadsDir.value = data.downloads_dir || downloadsDir.value
     rootExists.value = Boolean(data.root_exists)
     db16sReady.value = Boolean(data.db_16s_ready)
     orders.value = data.orders || []
+    downloadCandidates.value = data.download_candidates || []
+    pendingDownloadCount.value = data.pending_download_count || 0
     runtime.value = data.runtime || runtime.value
+
+    if (!mailAccount.value) {
+      try {
+        const mailMeta = await getJson(`${MAIL_API}/overview`)
+        mailAccount.value = mailMeta.config?.account || mailMeta.config?.smtp_account || ''
+      } catch {
+        // ignore
+      }
+    }
 
     checkedOrderNames.value = checkedOrderNames.value.filter(n => orders.value.some(o => o.dir_name === n))
 
@@ -238,6 +276,77 @@ async function handleSaveRoot(newRoot: string): Promise<void> {
     setError(err)
   } finally {
     busy.value = false
+  }
+}
+
+async function handleSaveDownloadsDir(newDl: string): Promise<void> {
+  busy.value = true
+  setInfo('正在更新浏览器下载目录...')
+  try {
+    const data = await postJson(`${API}/settings`, { downloads_dir: newDl, migrate: false })
+    downloadsDir.value = data.settings?.downloads_dir || newDl
+    setInfo('浏览器下载目录已更新')
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function handleImportDownloads(autoCreateOrder = false): Promise<void> {
+  busy.value = true
+  setInfo('正在从浏览器下载目录认领生工压缩包...')
+  try {
+    const data = await postJson(`${API}/import_downloads`, {
+      sangon_root: sangonRoot.value || null,
+      downloads_dir: downloadsDir.value || null,
+      order_names: checkedOrderNames.value,
+      auto_create_order: autoCreateOrder
+    })
+    const createdCnt = (data.created_dirs || []).length
+    const createdPart = createdCnt ? `，新建订单目录 ${createdCnt} 个` : ''
+    setInfo(
+      `下载包认领完成：扫描到 ${data.scanned_zips} 个压缩包，新导入 ${data.imported_count} 个${createdPart}，跳过已归档 ${data.skipped_existing} 个`
+    )
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+function openSendResultModal(order: SangonOrderItem): void {
+  sendForm.value = {
+    orderDirName: order.dir_name,
+    to: mailAccount.value || '',
+    subject: `生工 16S 测序鉴定结果 - ${order.dir_name}（共 ${order.total_samples} 样本）`,
+    extraNote: ''
+  }
+  showSendModal.value = true
+}
+
+async function confirmSendResultMail(toSelf = false): Promise<void> {
+  if (!sendForm.value.orderDirName) return
+  sendingMail.value = true
+  try {
+    const targetTo = toSelf ? 'self' : (sendForm.value.to.trim() || 'self')
+    const data = await postJson(`${API}/send_result`, {
+      order_dir_name: sendForm.value.orderDirName,
+      sangon_root: sangonRoot.value || null,
+      to: targetTo,
+      subject: sendForm.value.subject.trim() || null,
+      extra_note: sendForm.value.extraNote.trim() || null
+    })
+    showSendModal.value = false
+    setInfo(
+      `结果邮件已发送至 ${data.to}：附件 ${data.attachment} (${(data.attachment_size / 1024).toFixed(1)} KB)，样本 ${data.total_samples}（命中 ${data.with_hits}）`
+    )
+  } catch (err) {
+    setError(err)
+  } finally {
+    sendingMail.value = false
   }
 }
 
@@ -308,6 +417,7 @@ async function handleRunPipeline(orderNames: string[] = []): Promise<void> {
   try {
     const data = await postJson(`${API}/run_pipeline`, {
       sangon_root: sangonRoot.value,
+      downloads_dir: downloadsDir.value || null,
       order_names: targets,
       evalue: '0.05',
       hitlist_size: '50',
@@ -402,17 +512,17 @@ onUnmounted(() => {
     <div class="steps-strip">
       <div class="step-pill"><span>1</span> 扫描邮件</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>2</span> 创建订单目录</div>
+      <div class="step-pill"><span>2</span> 浏览器下载</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>3</span> 解压压缩包</div>
+      <div class="step-pill"><span>3</span> 认领下载包</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>4</span> 提取 *.1.fasta</div>
+      <div class="step-pill"><span>4</span> 解压提取</div>
       <div class="step-sep">&rarr;</div>
       <div class="step-pill"><span>5</span> 16S BLAST</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>6</span> 物种名翻译</div>
+      <div class="step-pill"><span>6</span> 翻译导出</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>7</span> 导出 CSV</div>
+      <div class="step-pill"><span>7</span> 邮件发送</div>
     </div>
 
     <!-- 指标 -->
@@ -451,6 +561,36 @@ onUnmounted(() => {
         @save="handleSaveRoot"
         @open="openLocalPath"
       />
+      <PathField
+        label="浏览器下载目录（扫描已下载的生工 *.zip 测序包，修改后不迁移原文件）"
+        :path="downloadsDir"
+        :busy="busy || runtime.running"
+        save-label="保存目录"
+        hint="仅切换浏览器下载目录用于识别生工测序压缩包，不会移动目录中的已有文件。"
+        @save="handleSaveDownloadsDir"
+        @open="openLocalPath"
+      />
+      <div v-if="pendingDownloadCount > 0" class="pending-dl-bar">
+        <div class="pending-dl-info">
+          <strong>发现 {{ pendingDownloadCount }} 个待认领测序压缩包：</strong>
+          <span
+            v-for="cand in downloadCandidates.filter(c => !c.archived)"
+            :key="cand.zip_path"
+            class="dl-chip"
+            :title="cand.zip_path"
+          >
+            {{ cand.zip_name }} ({{ cand.matched_dir_name ? `匹配 ${cand.matched_dir_name}` : '未建目录' }})
+          </span>
+        </div>
+        <div class="pending-dl-actions">
+          <button class="btn-mini primary" :disabled="busy || runtime.running" @click="handleImportDownloads(false)">
+            认领匹配订单
+          </button>
+          <button class="btn-mini" :disabled="busy || runtime.running" @click="handleImportDownloads(true)">
+            新建并全部认领
+          </button>
+        </div>
+      </div>
       <div v-if="selectedOrder" class="sub-paths">
         <div class="sub-path-item">
           <span class="sp-label">当前订单输入目录:</span>
@@ -489,6 +629,9 @@ onUnmounted(() => {
       <div class="control-right">
         <button class="btn-secondary" @click="handleScanSangonMails(1)" :disabled="scanningMail || runtime.running">
           {{ scanningMail ? '扫描中...' : '扫描邮件' }}
+        </button>
+        <button class="btn-outline" @click="handleImportDownloads(false)" :disabled="busy || runtime.running">
+          认领下载包{{ pendingDownloadCount > 0 ? ` (${pendingDownloadCount})` : '' }}
         </button>
         <button class="btn-primary" @click="handleRunPipeline([])" :disabled="runtime.running">
           {{ runtime.running ? '运行中...' : (checkedOrderNames.length ? '运行所选订单' : '运行待处理订单') }}
@@ -549,13 +692,13 @@ onUnmounted(() => {
             </td>
             <td>{{ m.date }}</td>
             <td>
-              <span :class="['status-pill', m.dir_ready ? 'completed' : 'pending']">
+              <span :class="['status-pill', m.dedup_status === 'non_sequencing' ? 'non_sequencing' : (m.dir_ready ? 'completed' : 'pending')]">
                 {{ dedupStatusLabel(m.dedup_status) }}
               </span>
             </td>
             <td class="actions-cell">
               <button
-                v-if="!m.dir_ready && m.dir_name"
+                v-if="!m.dir_ready && m.dir_name && m.dedup_status !== 'non_sequencing'"
                 class="btn-mini primary"
                 :disabled="busy"
                 @click="handleInitOrderFromMail(m)"
@@ -634,6 +777,7 @@ onUnmounted(() => {
             <td>{{ ord.result_mtime || '-' }}</td>
             <td class="actions-cell" @click.stop>
               <button v-if="ord.has_result_csv" class="btn-mini primary" @click="selectOrderAndLoadResults(ord)">预览</button>
+              <button v-if="ord.has_result_csv" class="btn-mini" @click="openSendResultModal(ord)">发信</button>
               <button class="btn-mini" @click="handleRunPipeline([ord.dir_name])" :disabled="runtime.running">运行</button>
               <button class="btn-mini" @click="openLocalPath(ord.order_path)">打开</button>
               <button class="btn-mini danger" @click="openCleanupModal([ord.dir_name])" :disabled="runtime.running">清理</button>
@@ -662,6 +806,9 @@ onUnmounted(() => {
         </h4>
         <div class="preview-tools">
           <input v-model="searchKeyword" type="text" placeholder="搜索序列号、物种名、访问号..." class="search-input" />
+          <button v-if="selectedOrder.has_result_csv" class="btn-outline" @click="openSendResultModal(selectedOrder)">
+            发送结果邮件
+          </button>
           <button v-if="selectedOrder.result_csv_path" class="btn-outline" @click="openLocalPath(selectedOrder.result_csv_path)">
             定位 CSV
           </button>
@@ -711,6 +858,40 @@ onUnmounted(() => {
         <div class="modal-footer">
           <button class="btn-outline" @click="showAuthModal = false">取消</button>
           <button class="btn-primary" :disabled="busy" @click="saveImapAuth">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 发送 16S 结果邮件弹窗 -->
+    <div v-if="showSendModal" class="modal-backdrop" @click.self="showSendModal = false">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>发送 16S 鉴定结果邮件</h3>
+          <button class="close-btn" @click="showSendModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="auth-row">目标订单: {{ sendForm.orderDirName }}</div>
+          <label class="modal-field">
+            <span>收件人邮箱（留空默认发送给自己 {{ mailAccount || '当前配置账号' }}）</span>
+            <input v-model="sendForm.to" type="text" :placeholder="mailAccount || '例如 913223599@qq.com'" class="key-input" />
+          </label>
+          <label class="modal-field">
+            <span>邮件主题</span>
+            <input v-model="sendForm.subject" type="text" class="key-input" />
+          </label>
+          <label class="modal-field">
+            <span>附加说明（可选）</span>
+            <input v-model="sendForm.extraNote" type="text" placeholder="例如：自测验证 / 补充说明" class="key-input" />
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-outline" @click="showSendModal = false">取消</button>
+          <button class="btn-secondary" :disabled="sendingMail" @click="confirmSendResultMail(true)">
+            {{ sendingMail ? '发送中...' : '发给自己测试' }}
+          </button>
+          <button class="btn-primary" :disabled="sendingMail" @click="confirmSendResultMail(false)">
+            {{ sendingMail ? '发送中...' : '发送邮件' }}
+          </button>
         </div>
       </div>
     </div>
@@ -1005,6 +1186,48 @@ onUnmounted(() => {
 .status-pill.completed { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
 .status-pill.blasted, .status-pill.extracted { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
 .status-pill.downloaded, .status-pill.pending { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+.status-pill.non_sequencing { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
+
+.pending-dl-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.pending-dl-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: #166534;
+}
+.dl-chip {
+  background: white;
+  border: 1px solid #86efac;
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: #15803d;
+}
+.pending-dl-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #475569;
+}
 
 .hit-ok { color: #059669; font-weight: 600; }
 .hit-none { color: #94a3b8; }

@@ -134,6 +134,16 @@ class TestResultPacker(unittest.TestCase):
             self.assertEqual(manifest["file_count"], 6)
             self.assertEqual(manifest["zip"], Path(info["zip"]).name)
 
+    def test_pack_includes_docx_report(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            prod = make_product_dir(base)
+            (prod / "ANNO_5A8C0B32_RE2_注释报告.docx").write_bytes(b"PK\x03\x04docx-dummy")
+            info = ResultPacker(base / "sends").pack(prod)
+            with zipfile.ZipFile(info["zip"]) as zf:
+                names = set(zf.namelist())
+            self.assertIn("ANNO_5A8C0B32_RE2_注释报告.docx", names)
+
 
 class TestMailSender(unittest.TestCase):
     """发送器：邮件构造、调用序列、异常路径"""
@@ -217,6 +227,27 @@ class TestMailSender(unittest.TestCase):
             result = sender.send(zip_path, to="a@b.com")
             self.assertFalse(result.ok)
             self.assertEqual(result.stage, "missing_auth")
+
+    def test_send_with_cc_multi_recipients_and_message_id(self):
+        """支持分号/逗号多收件人、CC 抄送列表投递，并自动生成 Message-ID"""
+        with tempfile.TemporaryDirectory() as td:
+            zip_path = self._attach(Path(td))
+            cfg, sender, fake = make_sender()
+            result = sender.send(
+                zip_path,
+                to="a@example.com; b@example.com",
+                cc=["cc1@example.com", "cc2@example.com"],
+                subject="抄送与多收件人测试",
+            )
+            self.assertTrue(result.ok)
+            self.assertEqual(
+                fake.sent_to,
+                ["a@example.com", "b@example.com", "cc1@example.com", "cc2@example.com"],
+            )
+            msg = email.message_from_string(fake.sent_msg)
+            self.assertEqual(msg["To"], "a@example.com, b@example.com")
+            self.assertEqual(msg["Cc"], "cc1@example.com, cc2@example.com")
+            self.assertTrue(msg.get("Message-ID"))
 
 
 class TestCliPackSend(unittest.TestCase):

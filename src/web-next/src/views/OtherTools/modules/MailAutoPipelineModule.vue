@@ -92,6 +92,14 @@ const busy = ref(false)
 const showConfigModal = ref(false)
 const showAuthModal = ref(false)
 const showCleanup = ref(false)
+const showTestSendModal = ref(false)
+const testingSend = ref(false)
+const testSendForm = ref({
+  to: '',
+  subject: '',
+  note: '',
+  attachLatestReport: false
+})
 const activeSubTab = ref<'batches' | 'inbox' | 'outbound' | 'processed' | 'logs'>('batches')
 
 const inboxMails = ref<InboxMailItem[]>([])
@@ -430,6 +438,37 @@ function deleteOne(target: string, name: string, label: string): void {
   runCleanup([target], null, [name])
 }
 
+function openTestSendModal(): void {
+  testSendForm.value = {
+    to: configForm.value.account || configForm.value.smtp_account || '',
+    subject: '',
+    note: '桌面工作台自检发信验证',
+    attachLatestReport: docxReports.value.length > 0
+  }
+  showTestSendModal.value = true
+}
+
+async function confirmTestSend(toSelf = true): Promise<void> {
+  testingSend.value = true
+  try {
+    const targetTo = toSelf ? 'self' : (testSendForm.value.to.trim() || 'self')
+    const data = await postJson(`${API}/test_send`, {
+      to: targetTo,
+      subject: testSendForm.value.subject.trim() || null,
+      note: testSendForm.value.note.trim() || null,
+      attach_latest_report: testSendForm.value.attachLatestReport
+    })
+    showTestSendModal.value = false
+    setInfo(
+      `测试邮件已发至 ${data.to}：附件 ${data.attachment} (${(data.attachment_size / 1024).toFixed(1)} KB)`
+    )
+  } catch (err) {
+    setError(err)
+  } finally {
+    testingSend.value = false
+  }
+}
+
 onMounted(() => {
   loadOverview()
   pollTimer = setInterval(() => {
@@ -537,6 +576,7 @@ onUnmounted(() => {
         <button class="btn-primary" @click="handleRunPipeline()" :disabled="runtime.running">
           {{ runtime.running ? '运行中...' : '运行流水线' }}
         </button>
+        <button class="btn-outline" @click="openTestSendModal" :disabled="runtime.running">测试发信</button>
         <button class="btn-outline" @click="showConfigModal = true">邮箱配置</button>
         <button class="btn-outline" @click="openAuthModal">授权码</button>
         <button class="btn-outline danger" @click="showCleanup = true" :disabled="runtime.running">清理历史</button>
@@ -894,6 +934,46 @@ onUnmounted(() => {
         <div class="modal-footer">
           <button class="btn-outline" @click="showAuthModal = false">取消</button>
           <button class="btn-primary" @click="handleSaveAuth">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SMTP 测试发信 -->
+    <div v-if="showTestSendModal" class="modal-backdrop" @click.self="showTestSendModal = false">
+      <div class="modal-card narrow">
+        <div class="modal-header">
+          <h3>SMTP 发信链路自检</h3>
+          <button class="close-btn" @click="showTestSendModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="auth-block">
+            <div class="auth-title">
+              目标收件人（留空或点发给自己测试则发送至 {{ configForm.account || configForm.smtp_account || '本人邮箱' }}）
+            </div>
+            <input v-model="testSendForm.to" type="text" :placeholder="configForm.account || '例如 913223599@qq.com'" class="key-input-plain" />
+          </div>
+          <div class="auth-block">
+            <div class="auth-title">自定义主题（可选，默认自动生成带时间戳的自检主题）</div>
+            <input v-model="testSendForm.subject" type="text" placeholder="留空自动生成" class="key-input-plain" />
+          </div>
+          <div class="auth-block">
+            <div class="auth-title">自检备注（可选）</div>
+            <input v-model="testSendForm.note" type="text" placeholder="例如：自测 SMTP 中文与附件编码" class="key-input-plain" />
+          </div>
+          <label v-if="docxReports.length > 0" class="auth-clear test-check">
+            <input v-model="testSendForm.attachLatestReport" type="checkbox" />
+            <span>同时打包附带最新 Word 报告（{{ docxReports[0]?.name }}）</span>
+          </label>
+          <p class="form-note">注：自检发信不会发送至默认回传客户邮箱 ({{ configForm.reply_to || '-' }})，除非您在上方显式指定。</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-outline" @click="showTestSendModal = false">取消</button>
+          <button class="btn-secondary" :disabled="testingSend" @click="confirmTestSend(true)">
+            {{ testingSend ? '发送中...' : '发给自己测试' }}
+          </button>
+          <button class="btn-primary" :disabled="testingSend" @click="confirmTestSend(false)">
+            {{ testingSend ? '发送中...' : '发送邮件' }}
+          </button>
         </div>
       </div>
     </div>
@@ -1368,11 +1448,16 @@ onUnmounted(() => {
 .auth-state.ok { color: #059669; }
 .auth-state.warn { color: #d97706; }
 
-.auth-block input[type="password"] {
+.auth-block input[type="password"],
+.key-input-plain {
   padding: 7px 10px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   font-size: 12px;
+}
+
+.auth-clear.test-check {
+  color: #334155;
 }
 
 .auth-clear {

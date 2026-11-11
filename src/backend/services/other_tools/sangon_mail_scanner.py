@@ -224,6 +224,19 @@ def _is_sangon_sender(sender: str) -> bool:
     return "sangon" in low
 
 
+def _is_sequencing_notice_subject(subject: str) -> bool:
+    """过滤非测序结果通知（如“订单已发货”“发票通知”等物流/商务邮件），避免误建空 16S 目录。"""
+    s = (subject or "").strip()
+    if not s:
+        return False
+    if "测序" in s:
+        return True
+    non_seq_keywords = ("已发货", "物流", "快递", "发票", "对账", "付款")
+    if any(kw in s for kw in non_seq_keywords):
+        return False
+    return True
+
+
 def create_sangon_subdirs(order_path: Path) -> None:
     (order_path / "原始压缩包").mkdir(parents=True, exist_ok=True)
     (order_path / "原始数据").mkdir(parents=True, exist_ok=True)
@@ -424,7 +437,8 @@ def scan_sangon_mails(
             order_no = item["order_no"]
             message_id = item["message_id"]
             date_prefix = item["date_prefix"]
-            dir_name = existing_map.get(order_no) or (f"{date_prefix}_{order_no}" if order_no else "")
+            is_seq_mail = _is_sequencing_notice_subject(item["subject"])
+            dir_name = existing_map.get(order_no) or (f"{date_prefix}_{order_no}" if (order_no and is_seq_mail) else "")
 
             in_disk = bool(order_no and order_no in existing_map)
             in_history = (not ignore_history) and index.is_known(order_no, message_id)
@@ -441,6 +455,9 @@ def scan_sangon_mails(
                         date_text=item["date"],
                         cleaned=False,
                     )
+            elif not is_seq_mail:
+                dir_ready = False
+                dedup_status = "non_sequencing"
             elif in_history:
                 dir_ready = False
                 dedup_status = "history_skipped"
@@ -471,6 +488,7 @@ def scan_sangon_mails(
                 "date": item["date"],
                 "order_no": order_no,
                 "dir_name": dir_name,
+                "is_sequencing": is_seq_mail,
                 "cx_order_id": "",
                 "download_url": "",
                 "dir_ready": dir_ready,
@@ -537,3 +555,4 @@ def scan_sangon_mails(
                 conn.logout()
             except Exception:
                 pass
+

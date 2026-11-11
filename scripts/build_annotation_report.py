@@ -356,6 +356,9 @@ eng_rows = []
 for e in eng_order:
     if e in eng_counter:
         eng_rows.append((e, str(eng_counter[e]), eng_desc.get(e, '')))
+extra_engs = [e for e in eng_counter if e not in eng_order]
+for e in extra_engs:
+    eng_rows.append((e, str(eng_counter[e]), eng_desc.get(e, '备选/扩展注释引擎')))
 eng_rows.append(('合计', str(n_cds), '—'))
 add_table(['注释引擎', '基因数（CDS）', '说明'], eng_rows,
           col_widths_cm=[5.0, 4.0, 7.0], align_cols=['l', 'c', 'l'])
@@ -363,9 +366,10 @@ data_note('features.json（source_engine 字段，与 summary.json 的 engine_co
 para('')
 para('功能类别与注释引擎的交叉分布如下表所示（行合计为该类别基因数，列合计为该引擎贡献数）：')
 cat_eng = Counter((f.get('category', '?'), f.get('source_engine', '?')) for f in cds)
-cats = sorted({k[0] for k in cat_eng}, key=lambda c: -sum(cat_eng.get((c, e), 0) for e in eng_order if e in eng_counter))
-header = ['功能类别'] + [e for e in eng_order if e in eng_counter] + ['合计']
-active_engs = [e for e in eng_order if e in eng_counter]
+all_engs = eng_order + extra_engs
+active_engs = [e for e in all_engs if e in eng_counter]
+cats = sorted({k[0] for k in cat_eng}, key=lambda c: -sum(cat_eng.get((c, e), 0) for e in active_engs))
+header = ['功能类别'] + active_engs + ['合计']
 rows = []
 for c in cats:
     vals = [str(cat_eng.get((c, e), 0)) for e in active_engs]
@@ -386,7 +390,8 @@ para('')
 heading(2, '2.3 功能类别分布')
 para(f'按噬菌体功能类别划分，各类别基因数量如下表所示（占比以 {n_cds} 个 CDS 计）：')
 cat = summary.get('category_distribution', {})
-cat_rows = [(k, v, f'{v / n_cds * 100:.1f}%') for k, v in cat.items()]
+cat_denom = n_cds if n_cds > 0 else 1
+cat_rows = [(k, v, f'{v / cat_denom * 100:.1f}%') for k, v in cat.items()]
 add_table(['功能类别', '基因数', '占比'], cat_rows, col_widths_cm=[8.0, 4.0, 4.0], align_cols=['l', 'c', 'c'])
 data_note('summary.json（category_distribution）。')
 para('')
@@ -395,12 +400,12 @@ n_tail = cat.get('Tail & Host Interaction', 0)
 n_rep = cat.get('Replication & Repair', 0)
 n_met = cat.get('Metabolism & AMG', 0)
 morph_n = n_head + n_tail
-if morph_n:
-    para(f'Head & Packaging（{n_head} 个，{n_head / n_cds * 100:.1f}%）与 Tail & Host Interaction（{n_tail} 个，'
-         f'{n_tail / n_cds * 100:.1f}%）合计 {morph_n} 个形态相关基因，占 CDS 总数的 {morph_n / n_cds * 100:.1f}%，'
+if morph_n and n_cds > 0:
+    para(f'Head & Packaging（{n_head} 个，{n_head / cat_denom * 100:.1f}%）与 Tail & Host Interaction（{n_tail} 个，'
+         f'{n_tail / cat_denom * 100:.1f}%）合计 {morph_n} 个形态相关基因，占 CDS 总数的 {morph_n / cat_denom * 100:.1f}%，'
          '说明该噬菌体具备完整的头部组装与尾部结构基因模块；'
-         f'Replication & Repair（{n_rep} 个，{n_rep / n_cds * 100:.1f}%）与 Metabolism & AMG（{n_met} 个，'
-         f'{n_met / n_cds * 100:.1f}%）体现了完整的复制与代谢重编程能力。')
+         f'Replication & Repair（{n_rep} 个，{n_rep / cat_denom * 100:.1f}%）与 Metabolism & AMG（{n_met} 个，'
+         f'{n_met / cat_denom * 100:.1f}%）体现了完整的复制与代谢重编程能力。')
 para('')
 
 # ---- 2.4 与近缘噬菌体的同源性分析 ----
@@ -522,54 +527,70 @@ para('')
 
 # ---- 2.7 tRNA 注释 ----
 heading(2, '2.7 tRNA 注释')
-trna_starts = [f.get('start') for f in trna if f.get('start')]
-trna_ends = [f.get('end') for f in trna if f.get('end')]
-trna_names = [f.get('product') or f.get('gene_name') for f in trna]
-para(f'共预测 {n_trna} 个 tRNA 基因，位于基因组 {fmt_len(min(trna_starts))}–{fmt_len(max(trna_ends))} bp 区间，'
-     f'包括 {", ".join(trna_names)}，均获得 Pharokka 模型与 Phold AI 双重证据支持。')
-para('')
-para(f'{n_trna} 个 tRNA 基因的明细如下表所示：')
-trna_rows = []
-for f in trna:
-    ac = (f.get('extra_qualifiers') or {}).get('anticodon') or []
-    ac_txt = '; '.join(ac) if ac else '—'
-    ev = '、'.join(e for e in f.get('evidence_sources', []) if e.startswith('['))
-    trna_rows.append([f.get('locus_tag'), f.get('product'), str(f.get('start')), str(f.get('end')),
-                      str(f.get('strand')), str(f.get('length_bp')), ac_txt, ev])
-add_table(['Locus_Tag', '类型', '起始', '终止', '链', '长度(bp)', '反密码子', '证据'],
-          trna_rows, col_widths_cm=[3.6, 2.8, 1.6, 1.6, 1.2, 1.6, 3.2, 3.4],
-          align_cols=['l', 'l', 'c', 'c', 'c', 'c', 'l', 'l'], font_size=9)
-data_note('features.json（feature_type=tRNA，共 8 条记录；反密码子取自 extra_qualifiers.anticodon）。')
+trna_starts = [f.get('start') for f in trna if f.get('start') is not None]
+trna_ends = [f.get('end') for f in trna if f.get('end') is not None]
+trna_names = [f.get('product') or f.get('gene_name') or 'tRNA' for f in trna]
+if n_trna > 0 and trna_starts and trna_ends:
+    para(f'共预测 {n_trna} 个 tRNA 基因，位于基因组 {fmt_len(min(trna_starts))}–{fmt_len(max(trna_ends))} bp 区间，'
+         f'包括 {", ".join(trna_names)}，均获得 Pharokka 模型与 Phold AI 双重证据支持。')
+    para('')
+    para(f'{n_trna} 个 tRNA 基因的明细如下表所示：')
+    trna_rows = []
+    for f in trna:
+        ac = (f.get('extra_qualifiers') or {}).get('anticodon') or []
+        ac_txt = '; '.join(ac) if ac else '—'
+        ev = '、'.join(e for e in f.get('evidence_sources', []) if e.startswith('['))
+        trna_rows.append([f.get('locus_tag'), f.get('product'), str(f.get('start')), str(f.get('end')),
+                          str(f.get('strand')), str(f.get('length_bp')), ac_txt, ev])
+    add_table(['Locus_Tag', '类型', '起始', '终止', '链', '长度(bp)', '反密码子', '证据'],
+              trna_rows, col_widths_cm=[3.6, 2.8, 1.6, 1.6, 1.2, 1.6, 3.2, 3.4],
+              align_cols=['l', 'l', 'c', 'c', 'c', 'c', 'l', 'l'], font_size=9)
+    data_note(f'features.json（feature_type=tRNA，共 {n_trna} 条记录；反密码子取自 extra_qualifiers.anticodon）。')
+else:
+    para('本次基因组中未预测到 tRNA 基因（tRNA = 0），表明该噬菌体主要依赖宿主翻译机器完成蛋白合成，此现象在小型及部分有尾噬菌体中常见。')
+    data_note('features.json（feature_type=tRNA，共 0 条记录）。')
 para('')
 
 # ---- 2.8 安全性筛查 ----
 heading(2, '2.8 安全性筛查')
+amr_genes = safety.get('amr_genes', [])
+vir_genes = safety.get('virulent_factors', [])
+n_amr = len(amr_genes)
+n_vir = len(vir_genes)
 n_acr = len(safety.get('anti_crispr_genes', []))
-para(f'安全审计结果：未检出抗生素耐药基因（CARD），未检出毒力因子（VFDB）；'
-     f'检出 {n_acr} 个高置信度 Anti-CRISPR 候选基因（Acranker）。'
-     '整体安全性判定为通过（safety_passed = true），无风险告警。')
-para('需要说明的是，原始比对结果中存在两条低于审计阈值的弱命中，按审计规则未计为耐药基因或毒力因子：')
+safety_passed = safety.get('safety_passed')
+if safety_passed is None:
+    safety_passed = (n_amr == 0 and n_vir == 0)
+passed_txt = '通过（safety_passed = true），无风险告警' if safety_passed else '未完全通过，存在高阈值候选风险基因'
+para(f'安全审计结果：高置信度抗生素耐药基因（CARD）检出 {n_amr} 个，毒力因子（VFDB）检出 {n_vir} 个，'
+     f'高置信度 Anti-CRISPR 候选基因（Acranker）检出 {n_acr} 个。'
+     f'整体安全性判定为{passed_txt}。')
 weak_rows = []
 for r in card_hits:
-    weak_rows.append(['CARD', r[0], acc_short(r[1]), r[2], r[4], r[5], '低于审计阈值，未计入'])
+    weak_rows.append(['CARD', r[0], acc_short(r[1]), r[2], r[4], r[5], '低于审计阈值，未计入' if n_amr == 0 else '需复核'])
 for r in vfdb_hits:
-    weak_rows.append(['VFDB', r[0], acc_short(r[1]), r[2], r[4], r[5], '低于审计阈值，未计入'])
+    weak_rows.append(['VFDB', r[0], acc_short(r[1]), r[2], r[4], r[5], '低于审计阈值，未计入' if n_vir == 0 else '需复核'])
 if weak_rows:
+    para('需要说明的是，原始比对结果中存在弱命中记录，明细及审计判定如下：')
     add_table(['数据库', 'Locus_Tag', '比对目标', 'Identity%', 'E-value', 'bit score', '判定'],
               weak_rows, col_widths_cm=[2.0, 3.2, 3.4, 2.0, 2.2, 1.8, 3.4],
               align_cols=['c', 'l', 'l', 'c', 'c', 'c', 'l'])
     data_note('card_hits.tsv（CARD 耐药基因比对结果）与 vfdb_hits.tsv（VFDB 毒力因子比对结果）。')
 para('')
-para(f'Anti-CRISPR 候选基因共 {n_acr} 条（高置信度，source=Acranker），代表性候选如下表所示（按 bit score 取前 10 条）：')
 acr_list = safety.get('anti_crispr_genes', [])
-acr_rows = []
-for a in sorted(acr_list, key=lambda x: float(x.get('bitscore', 0)), reverse=True)[:10]:
-    acr_rows.append([a.get('cds_id'), a.get('target_id'), a.get('identity'), a.get('align_len'),
-                     a.get('evalue'), a.get('bitscore')])
-add_table(['Locus_Tag', '比对目标', 'Identity%', '比对长度', 'E-value', 'bit score'],
-          acr_rows, col_widths_cm=[4.2, 3.6, 2.0, 2.0, 2.4, 2.0],
-          align_cols=['l', 'l', 'c', 'c', 'c', 'c'])
-data_note(f'safety_audit.json（anti_crispr_genes 共 {n_acr} 条，此处展示按 bit score 降序前 10 条）。')
+if n_acr > 0:
+    para(f'Anti-CRISPR 候选基因共 {n_acr} 条（高置信度，source=Acranker），代表性候选如下表所示（按 bit score 取前 10 条）：')
+    acr_rows = []
+    for a in sorted(acr_list, key=lambda x: float(x.get('bitscore', 0)), reverse=True)[:10]:
+        acr_rows.append([a.get('cds_id'), a.get('target_id'), a.get('identity'), a.get('align_len'),
+                         a.get('evalue'), a.get('bitscore')])
+    add_table(['Locus_Tag', '比对目标', 'Identity%', '比对长度', 'E-value', 'bit score'],
+              acr_rows, col_widths_cm=[4.2, 3.6, 2.0, 2.0, 2.4, 2.0],
+              align_cols=['l', 'l', 'c', 'c', 'c', 'c'])
+    data_note(f'safety_audit.json（anti_crispr_genes 共 {n_acr} 条，此处展示按 bit score 降序前 10 条）。')
+else:
+    para('本次未检出 Anti-CRISPR 候选基因（anti_crispr_genes = 0 条）。')
+    data_note('safety_audit.json（anti_crispr_genes 共 0 条）。')
 para('注：Anti-CRISPR 基因检出为噬菌体功能特征的一部分，具体含义需结合宿主背景与用途进一步评估。')
 doc.add_page_break()
 
