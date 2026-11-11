@@ -180,5 +180,41 @@
 4. **前端编译验证**：
    - `src/web-next` 下 `npm run build`（`vue-tsc -b && vite build`）零错误通过（`29.27s`）。
 
+---
 
+## 8. 「先仅收件后运行流水线不执行」断点定位与闭环修复（2026-11-11）
+
+### 8.1 现场问题定位
+1. **已收件批次未被自动接续**：用户先点击「仅收件」将邮件附件下载并写入 `processed_index.json`（如批次 `up_20261111_182735_003520` 内的 `12-A_asm_ngcs_scaffold_1.fasta`），随后点击「运行流水线」调用 [auto_pipeline.py](file:///f:/NCBI%20blast/src/mail_download/auto_pipeline.py)。因 `AttachmentSaver.save()` 指纹去重判定 0 个新附件，脚本直接以退出码 `0` 结束，导致已落地批次既未被注释也未打包回传。
+2. **老批次无状态字段导致新旧难分**：原有 `manifest.json` 仅记录收件元数据，未记录流水线执行状态，难以在不误重跑历史已完成批次或 `_TEST` 目录的前提下精确识别待处理批次。
+3. **运行状态与日志链路割裂**：[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py) `/mail_pipeline/run` 原先阻塞调用 `subprocess.run()`，运行期无法流式更新阶段文本；`/mail_pipeline/fetch` 与空跑退出信息也未落盘至 `pipeline.log`。
+4. **前端横幅与状态回显失步**：[MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue) 在 `runtime.running` 由 `true -> false` 结束时未同步覆盖「流水线已在后台运行」蓝色横幅，且每次轮询覆盖用户输入的 `since_days`。
+
+### 8.2 模块化修复与实现
+1. **独立批次状态机（[batch_state.py](file:///f:/NCBI%20blast/src/mail_download/batch_state.py)）**：
+   - 持久化维护 `manifest.json` 中的 `pipeline` 块（`downloaded` / `running` / `completed` / `failed`、关联 `task_ids` 与 `last_error`）。
+   - 对缺少 `pipeline` 字段的历史批次，通过正则 `ANNO_<clean_stem>_<YYYYMMDD_HHMMSS>` 联动检索 `ANNOTATIONS_DIR` 与 `send_dir` 实际产物反推完成态，并通过 `collect_pending_batches()` 收集所有待处理非 `_TEST` 批次。
+2. **下载初始化与流水线自动接续（[downloader.py](file:///f:/NCBI%20blast/src/mail_download/downloader.py) / [auto_pipeline.py](file:///f:/NCBI%20blast/src/mail_download/auto_pipeline.py)）**：
+   - `AttachmentSaver.save()` 新建批次 `manifest.json` 时写入初始状态 `downloaded`。
+   - `auto_pipeline.py` 完整模式（模式 B）在收件扫描后合并新下载批次与 `collect_pending_batches()` 待处理批次；抽取共享 `_run_batch_pipeline()` 在执行前后更新 `running` -> `completed` / `failed`，增加 `_emit()` 即时刷盘并向 `pipeline.log` 写入全流程扫描与执行审计日志。
+3. **流式子进程监控与概览透出（[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py)）**：
+   - `/mail_pipeline/overview` 为每个批次附加 `pipeline_status`、`pipeline_status_label`、`pending`、`task_ids` 及顶层 `pending_batches_count`。
+   - `/mail_pipeline/fetch` 执行后同步写入 `pipeline.log`。
+   - `/mail_pipeline/run` 升级为 `subprocess.Popen`（`-u` + `PYTHONUNBUFFERED=1`）逐行流式读取标准输出、推断并实时刷新运行 `stage` 与 `last_output`，并保留超时保护与终端 logger 输出。
+4. **前端状态同步与视图增强（[MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue)）**：
+   - 新增 `trackingRun` 监听任务起止，在运行结束或失败时立即把横幅与状态卡片切换为真实完成/失败反馈并重载列表。
+   - 新增 `initializedOverview` 避免轮询覆盖用户编辑的 `since_days`，运行期间轮询缩短为 `2500ms`，并在「收件批次」表中增加「处理状态」列。
+
+### 8.3 回归与隔离端到端验证记录
+1. **自动化单元测试**：
+   - `python -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v`：**81 项全部通过**（`3.96s`），新增 [test_mail_send.py](file:///f:/NCBI%20blast/tests/test_mail_send.py) 先收件后运行流水线自动接续与二次幂等跳过用例，[test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py) 升级为 `FakePopen` 流式监控测试并将 `batch_state.py` 纳入零 Emoji / UTF-8 静态门禁。
+2. **前端构建检查**：
+   - `src/web-next` 下 `npm run build`（`vue-tsc -b && vite build`）零错误通过（`13.28s`）。
+3. **真实生产目录状态核验**：
+   - 直接调用 `get_mail_pipeline_overview()` 核实 `pending_batches_count = 1`，真实批次 `up_20261111_182735_003520` 准确识别为 `downloaded`（`待注释处理`）。
+4. **隔离沙盒全链路实测**：
+   - 将 `12-A_asm_ngcs_scaffold_1.fasta`（`44,428 B`）置入「仅收件已完成、尚无注释产物」的沙盒环境后发起 `POST /api/other_tools/mail_pipeline/run`（`to="self"`，配置文件仍保留外部 `reply_to`）。
+   - 流水线自动发现并接续处理该批次，耗时 `273.2s` 完成注释、生成 `61.7 KB` Word 报告与 `270.2 KB` 压缩包（含 41 个产物文件），`exit_code = 0`，批次状态流转为 `completed`（`pending_batches_count = 0`）。
+   - 二次触发 `POST /api/other_tools/mail_pipeline/run` 耗时 `0.8s` 幂等跳过。
+   - 读取 QQ IMAP `Sent Messages` 第 `108` 封邮件核实仅向 `913223599@qq.com` 发送成功且附件完整（`276,697 B`）；测后已清理沙盒在 `results/annotations/` 下生成的临时注释目录，真实待处理批次 `up_20261111_182735_003520` 原封保留。
 

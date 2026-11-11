@@ -182,11 +182,16 @@ class AttachmentSaver:
                 self.index.record(summary, name, payload, batch_dir, path_str)
 
             if attachments_meta:
+                now_iso = datetime.now().isoformat(timespec="seconds")
                 manifest = {
                     "batch": batch_dir.name,
-                    "download_time": datetime.now().isoformat(timespec="seconds"),
+                    "download_time": now_iso,
                     "mail": mail_meta,
                     "attachments": attachments_meta,
+                    "pipeline": {
+                        "status": "downloaded",
+                        "updated_at": now_iso,
+                    },
                 }
                 (batch_dir / "manifest.json").write_text(
                     json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"

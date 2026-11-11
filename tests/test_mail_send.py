@@ -442,6 +442,127 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
         self.assertEqual(captured[1], ["--since-days", "7", "--config", "mail.json"])
         self.assertEqual(captured[2], ["--since-days", "3", "--config", "mail.json", "--verbose"])
 
+    def test_fetch_only_then_auto_pipeline_resumes_pending_and_skips_completed(self):
+        """复现场景：仅收件落盘并入去重索引后，点击运行流水线自动接续注释，完成后不再重复处理"""
+        import src.mail_download.auto_pipeline as ap_mod
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            dl_dir = base / "dl"
+            send_dir = base / "sends"
+            anno_dir = base / "annotations"
+            dl_dir.mkdir()
+            send_dir.mkdir()
+            anno_dir.mkdir()
+
+            # 1) 模拟“仅收件”刚落盘但未运行流水线的批次（含无 pipeline 字段的老结构，复现用户真实目录）
+            pending_batch = dl_dir / "up_20261111_182735_003520"
+            pending_batch.mkdir()
+            pending_fa = pending_batch / "12-A_asm_ngcs_scaffold_1.fasta"
+            pending_fa.write_text(">ngcs_scaffold_1\nATGCATGCATGC\n", encoding="utf-8")
+            (pending_batch / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "batch": pending_batch.name,
+                        "download_time": "2026-11-11T18:27:35",
+                        "mail": {"seq": 3520, "sender": "yssw_service@163.com", "subject": "12-A_asm_ngcs_scaffold_1"},
+                        "attachments": [{"filename": pending_fa.name, "sha256": "abc"}],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            # 2) 模拟一个无 pipeline 字段但 annotations/ 中已有产物的历史已完成批次（不能被误重跑）
+            legacy_done_batch = dl_dir / "up_20261028_134429_002147"
+            legacy_done_batch.mkdir()
+            (legacy_done_batch / "G2-1.fasta").write_text(">g2\nATGC\n", encoding="utf-8")
+            (legacy_done_batch / "manifest.json").write_text(
+                json.dumps(
+                    {"batch": legacy_done_batch.name, "mail": {"sender": "yssw_service@163.com", "subject": "G2-1"}},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            legacy_anno = anno_dir / "ANNO_G2-1_20261028_140000"
+            legacy_anno.mkdir()
+            (legacy_anno / "summary.json").write_text("{}", encoding="utf-8")
+
+            # 3) 模拟一个 _TEST 本地测试批次（不能被日常流程自动发送）
+            test_batch = dl_dir / "up_20261028_185036_TEST"
+            test_batch.mkdir()
+            (test_batch / "demo.fasta").write_text(">t1\nATGC\n", encoding="utf-8")
+
+            cfg_path = base / "mail_config.json"
+            cfg_path.write_text(
+                json.dumps(
+                    {
+                        "account": "self@qq.com",
+                        "smtp_account": "self@qq.com",
+                        "reply_to": "client@example.com",
+                        "download_dir": str(dl_dir),
+                        "send_dir": str(send_dir),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            annotated_batches: list[str] = []
+
+            async def fake_annotate(batch_dir, fasta_path):
+                annotated_batches.append(f"{batch_dir.name}/{fasta_path.name}")
+                prod = make_product_dir(anno_dir / f"run_{len(annotated_batches)}")
+                docx_out = prod / "ANNO_12A_注释报告.docx"
+                docx_out.write_bytes(b"PK\x03\x04report")
+                return {"task_id": "ANNO_12A", "out_dir": prod, "files": {}}
+
+            sent_count = 0
+            fake = FakeSMTP()
+            orig_init = ap_mod.MailSender.__init__
+            orig_send = ap_mod.MailSender.send
+
+            def wrapped_send(self_s, zip_path, to=None, subject=None, body=None, cc=None):
+                nonlocal sent_count
+                sent_count += 1
+                return orig_send(self_s, zip_path, to=to, subject=subject, body=body, cc=cc)
+
+            ap_mod.MailSender.__init__ = lambda self_s, c, smtp_factory=None: orig_init(self_s, c, smtp_factory=lambda: fake)
+            ap_mod.MailSender.send = wrapped_send
+            orig_anno_dir = ap_mod.ANNOTATIONS_DIR
+            ap_mod.ANNOTATIONS_DIR = anno_dir
+            try:
+                fake_fetch_cls = lambda _cfg: type(
+                    "Fetcher",
+                    (),
+                    {"fetch": lambda self, since_days=None: SimpleNamespace(connection_error=None, scanned=5, matched=[])},
+                )()
+                with patch.object(ap_mod, "MailFetcher", side_effect=fake_fetch_cls), \
+                     patch.object(ap_mod, "_annotate", side_effect=fake_annotate), \
+                     patch.object(ap_mod, "_build_report", side_effect=lambda out_dir, tid, *_: out_dir / "ANNO_12A_注释报告.docx"):
+                    # 第一次运行：邮箱无新附件，但自动发现并接续处理了 pending_batch
+                    rc1 = ap_mod.main(["--config", str(cfg_path), "--to", "self"])
+                    self.assertEqual(rc1, 0)
+                    self.assertEqual(annotated_batches, ["up_20261111_182735_003520/12-A_asm_ngcs_scaffold_1.fasta"])
+                    self.assertEqual(sent_count, 1)
+                    self.assertEqual(fake.sent_to, ["self@qq.com"])
+                    mf_after = json.loads((pending_batch / "manifest.json").read_text(encoding="utf-8"))
+                    self.assertEqual(mf_after["pipeline"]["status"], "completed")
+                    self.assertEqual(mf_after["pipeline"]["send_status"], "sent")
+                    self.assertIn("收件扫描", (dl_dir / "pipeline.log").read_text(encoding="utf-8"))
+
+                    # 第二次运行：已完成批次不会重复运行注释与发信
+                    rc2 = ap_mod.main(["--config", str(cfg_path), "--to", "self"])
+                    self.assertEqual(rc2, 0)
+                    self.assertEqual(len(annotated_batches), 1)
+                    self.assertEqual(sent_count, 1)
+                    self.assertIn("没有需要处理的新附件或待处理批次", (dl_dir / "pipeline.log").read_text(encoding="utf-8"))
+            finally:
+                ap_mod.ANNOTATIONS_DIR = orig_anno_dir
+                ap_mod.MailSender.__init__ = orig_init
+                ap_mod.MailSender.send = orig_send
+
 
 if __name__ == "__main__":
     unittest.main()

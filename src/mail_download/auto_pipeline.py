@@ -35,6 +35,12 @@ if str(PROJECT_ROOT) not in sys.path:
 # 注释引擎（AnnotationPipeline 等）延迟导入：仅在有新附件需要处理时才加载，
 # 避免“无新附件”的例行检查被引擎/WSL 探测拖慢（此前的瓶颈：顶层 import
 # 触发 WSL 探测约 30s+）。轻量模块保持顶层导入。
+from src.mail_download.batch_state import (
+    clean_task_stem,
+    collect_batch_fastas,
+    collect_pending_batches,
+    mark_batch_pipeline_state,
+)
 from src.mail_download.config import DEFAULT_ATTACHMENT_EXTS, load_config
 from src.mail_download.downloader import AttachmentSaver
 from src.mail_download.fetcher import MailFetcher
@@ -51,18 +57,22 @@ PIPELINE_LOG = PROJECT_ROOT / "results" / "email_downloads" / "pipeline.log"
 ZIP_GLOBS = list(DEFAULT_PRODUCT_GLOBS) + ["*.docx"]
 
 
+def _emit(msg: str) -> None:
+    """即时刷新输出到控制台（供后台 Popen 实时读取进展）。"""
+    print(msg, flush=True)
+
+
 def _log(level, msg: str) -> None:
     getattr(logger, level)(msg)
     PIPELINE_LOG.parent.mkdir(parents=True, exist_ok=True)
     with PIPELINE_LOG.open("a", encoding="utf-8") as f:
         f.write(f"{datetime.now().isoformat(timespec='seconds')} [{level.upper()}] {msg}\n")
+        f.flush()
 
 
 def _task_id_from_batch(batch_dir: Path, att_name: str) -> str:
-    """任务编号：ANNO_<附件名>_<HHMMSS>，附件名取主名并清理非法字符。"""
-    stem = Path(att_name).stem or "input"
-    for ch in (' ', '(', ')', '[', ']', '&', '='):
-        stem = stem.replace(ch, '_')
+    """任务编号：ANNO_<附件名>_<YYYYMMDD_HHMMSS>，附件名取主名并清理非法字符。"""
+    stem = clean_task_stem(att_name)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"ANNO_{stem}_{stamp}"
 
@@ -105,6 +115,7 @@ async def _annotate(batch_dir: Path, fasta: Path) -> dict:
     task_id = _task_id_from_batch(batch_dir, fasta.name)
     out_dir = ANNOTATIONS_DIR / task_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    _emit(f"[注释] 开始注释 {task_id}: {fasta.name}")
     _log("info", f"注释开始 {task_id}: {fasta}")
     req = AnnotationRunRequest(
         task_name=task_id,
@@ -122,6 +133,7 @@ async def _annotate(batch_dir: Path, fasta: Path) -> dict:
     pipe = AnnotationPipeline(task_id, out_dir)
     res = await pipe.execute(req)
     files = res.get("files", {})
+    _emit(f"[注释] 注释完成 {task_id}: {res.get('feature_count', 0)} 个特征")
     _log("info", f"注释完成 {task_id}: {res.get('feature_count', 0)} features, files={len(files)}")
     # 把 input fasta 也复制进产物目录，便于归档
     try:
@@ -136,6 +148,7 @@ def _build_report(out_dir: Path, task_id: str, sample_name: str, extra_notes: li
     if not REPORT_SCRIPT.exists():
         _log("warning", f"报告脚本不存在，跳过报告: {REPORT_SCRIPT}")
         return None
+    _emit(f"[报告] 开始构建 Word 报告: {task_id}")
     report_path = out_dir / f"{task_id}_注释报告.docx"
     cmd = [
         sys.executable, "-X", "utf8", str(REPORT_SCRIPT),
@@ -151,11 +164,14 @@ def _build_report(out_dir: Path, task_id: str, sample_name: str, extra_notes: li
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                           timeout=1800, cwd=str(PROJECT_ROOT))
     if proc.returncode != 0:
+        _emit(f"[错误] 报告生成失败: {task_id}")
         _log("error", f"报告生成失败: {proc.stderr[-800:]}")
         return None
     if not report_path.exists():
+        _emit(f"[错误] 报告脚本返回成功但产物缺失: {task_id}")
         _log("error", "报告脚本返回成功但产物缺失")
         return None
+    _emit(f"[报告] Word 报告生成完成: {report_path.name} ({report_path.stat().st_size} B)")
     _log("info", f"报告已生成: {report_path}（{report_path.stat().st_size} B）")
 
     # 注入参考文献编号（[1]–[8] REF 域），使终稿带引用
@@ -218,23 +234,7 @@ def _load_batch_mail_info(batch: Path) -> dict:
 
 def _collect_batch_fastas(batch: Path, cfg) -> list[Path]:
     """收集批次目录下所有匹配配置扩展名的序列文件。"""
-    if not batch.exists() or not batch.is_dir():
-        return []
-    raw_exts = getattr(cfg, "attachment_exts", None) or DEFAULT_ATTACHMENT_EXTS
-    allowed = {
-        (e.lower() if e.startswith(".") else f".{e.lower()}")
-        for e in raw_exts
-        if isinstance(e, str) and e.strip()
-    }
-    found: list[Path] = []
-    for p in sorted(batch.iterdir(), key=lambda x: x.name.lower()):
-        if not p.is_file():
-            continue
-        if p.name in ("manifest.json", "pipeline.log", "run_errors.log"):
-            continue
-        if p.suffix.lower() in allowed:
-            found.append(p)
-    return found
+    return collect_batch_fastas(batch, cfg)
 
 
 def _sync_docx_to_send_dir(out_dir: Path, send_dir: Path) -> None:
@@ -254,29 +254,114 @@ def _sync_docx_to_send_dir(out_dir: Path, send_dir: Path) -> None:
 
 def _pack_and_send(cfg, out_dir: Path, task_id: str, do_send: bool,
                    to: str | None, subject_prefix: str,
-                   mail_info: dict | None = None) -> bool:
+                   mail_info: dict | None = None,
+                   packed_out: dict | None = None) -> bool:
+    _emit(f"[打包] 开始归档注释产物: {task_id}")
     packer = ResultPacker(cfg.resolved_send_dir, product_globs=ZIP_GLOBS)
     packed = packer.pack(out_dir, task_id=task_id)
     _sync_docx_to_send_dir(out_dir, cfg.resolved_send_dir)
     zip_path = Path(str(packed["zip"]))
+    if isinstance(packed_out, dict):
+        packed_out["zip_name"] = zip_path.name
+        packed_out["zip_path"] = str(zip_path)
     size_kb = int(packed.get("size_bytes", 0)) / 1024
+    _emit(f"[打包] 完成归档 {packed['file_count']} 文件 -> {zip_path.name} ({size_kb:.1f} KB)")
     _log("info", f"已打包 {packed['file_count']} 文件 → {zip_path}（{size_kb:.1f} KB）")
     if not do_send:
+        _emit(f"[回传] 已跳过发信: {task_id}")
         _log("info", "已跳过回传（--no-send 或未开启回传）")
         return True
     resolved_to, self_err = _resolve_send_target(cfg, to)
     if self_err:
+        _emit("[错误] 回传失败：指定 --to self 但未配置 smtp_account 或 account")
         _log("error", "回传失败：指定 --to self 但未配置 smtp_account 或 account")
         return False
+    _emit(f"[回传] 正在通过 SMTP 发送 {zip_path.name} ...")
     sender = MailSender(cfg)
     subject = f"{subject_prefix}噬菌体注释结果回传 - {task_id}"
     body = _build_reply_body(task_id, zip_path, mail_info or {})
     result = sender.send(zip_path, to=resolved_to, subject=subject, body=body)
     if not result.ok:
+        _emit(f"[错误] 回传失败（{result.stage}）: {result.error}")
         _log("error", f"回传失败（{result.stage}）: {result.error}")
         return False
+    _emit(f"[回传] 发送成功 -> {result.to}")
     _log("info", f"回传成功 → {result.to}，主题：{result.subject}")
     return True
+
+
+def _run_batch_pipeline(
+    cfg,
+    batch: Path,
+    fastas: list[Path],
+    *,
+    do_send: bool,
+    to: str | None,
+    subject_prefix: str,
+    extra_note: list[str],
+) -> bool:
+    """对单个批次执行完整 注释 -> Word 报告 -> 打包 -> 回传 并回写批次状态。"""
+    mail_info = _load_batch_mail_info(batch)
+    task_ids: list[str] = []
+    zip_names: list[str] = []
+    batch_ok = True
+    errors: list[str] = []
+
+    mark_batch_pipeline_state(batch, "running")
+    _emit(f"[批次] 开始处理批次 {batch.name}（{len(fastas)} 个序列文件）")
+    _log("info", f"开始处理批次 {batch.name}（序列 {len(fastas)} 个）")
+
+    for f in fastas:
+        try:
+            info = asyncio.run(_annotate(batch, f))
+        except Exception as exc:
+            msg = f"{f.name} 注释异常: {exc}"
+            _emit(f"[错误] {msg}")
+            _log("error", msg)
+            errors.append(msg)
+            batch_ok = False
+            continue
+
+        task_id = str(info["task_id"])
+        task_ids.append(task_id)
+        report = _build_report(info["out_dir"], task_id, f.stem, extra_note)
+        if report is None:
+            errors.append(f"{task_id} Word 报告生成失败")
+            batch_ok = False
+
+        packed_out: dict = {}
+        try:
+            send_ok = _pack_and_send(
+                cfg,
+                info["out_dir"],
+                task_id,
+                do_send=do_send,
+                to=to,
+                subject_prefix=subject_prefix,
+                mail_info=mail_info,
+                packed_out=packed_out,
+            )
+        except Exception as exc:
+            send_ok = False
+            errors.append(f"{task_id} 打包/回传异常: {exc}")
+            _log("error", f"{task_id} 打包/回传异常: {exc}")
+        if packed_out.get("zip_name"):
+            zip_names.append(str(packed_out["zip_name"]))
+        if not send_ok:
+            if not errors:
+                errors.append(f"{task_id} 打包或回传失败")
+            batch_ok = False
+
+    send_status = "sent" if (batch_ok and do_send) else ("skipped_no_send" if batch_ok else "failed")
+    mark_batch_pipeline_state(
+        batch,
+        "completed" if batch_ok else "failed",
+        task_ids=task_ids,
+        zips=zip_names,
+        send_status=send_status,
+        last_error="; ".join(errors) if errors else None,
+    )
+    return batch_ok
 
 
 def _build_reply_body(task_id: str, zip_path: Path, mail_info: dict) -> str:
@@ -325,74 +410,115 @@ def main(argv=None) -> int:
     # 流水线日志跟随配置中的下载目录（目录迁移后日志同步落到新位置）
     global PIPELINE_LOG
     PIPELINE_LOG = cfg.resolved_download_dir / "pipeline.log"
+
     # ---- 模式 A：处理指定批次（annotate-only，支持可选回传） ----
     if args.annotate_only:
         batch = Path(args.annotate_only)
         fastas = _collect_batch_fastas(batch, cfg)
         if not fastas:
-            print(f"[错误] 批次目录中没有匹配序列文件: {batch}")
+            _emit(f"[错误] 批次目录中没有匹配序列文件: {batch}")
+            _log("error", f"批次重跑失败：目录中没有匹配序列文件: {batch}")
             return 1
-        mail_info = _load_batch_mail_info(batch)
         do_send = (not args.no_send) and (args.send or bool((args.to or "").strip()))
-        ok_all = True
-        for f in fastas:
-            info = asyncio.run(_annotate(batch, f))
-            report = _build_report(info["out_dir"], info["task_id"], f.stem, args.extra_note)
-            if report is None:
-                ok_all = False
-            if not _pack_and_send(cfg, info["out_dir"], info["task_id"],
-                                  do_send=do_send, to=args.to,
-                                  subject_prefix=args.subject_prefix, mail_info=mail_info):
-                ok_all = False
-        print("批次重跑结束：全部环节成功" if ok_all else "批次重跑结束：存在失败环节（见日志）")
+        ok_all = _run_batch_pipeline(
+            cfg,
+            batch,
+            fastas,
+            do_send=do_send,
+            to=args.to,
+            subject_prefix=args.subject_prefix,
+            extra_note=args.extra_note,
+        )
+        msg = "批次重跑结束：全部环节成功" if ok_all else "批次重跑结束：存在失败环节（见日志）"
+        _emit(msg)
+        _log("info" if ok_all else "error", msg)
         return 0 if ok_all else 1
 
-    # ---- 模式 B：完整链路（收件 → 处理） ----
+    # ---- 模式 B：完整链路（收件 + 接续待处理批次 → 注释 → 报告 → 打包 → 回传） ----
+    _emit("[收件] 正在连接邮箱并扫描匹配邮件...")
     fetcher = MailFetcher(cfg)
     result = fetcher.fetch(since_days=args.since_days)
     if result.connection_error:
-        print(f"[错误] 邮箱连接/读取失败: {result.connection_error}")
+        err_msg = f"邮箱连接/读取失败: {result.connection_error}"
+        _emit(f"[错误] {err_msg}")
+        _log("error", err_msg)
         return 1
-    print(f"扫描邮件 {result.scanned} 封，命中 {len(result.matched)} 封")
+    _emit(f"[收件] 扫描邮件 {result.scanned} 封，命中 {len(result.matched)} 封")
 
-    batches: list = []
+    batches_by_dir: dict[Path, list[Path]] = {}
+    new_att_count = 0
+    skipped_dup = 0
+    skipped_proc = 0
     if result.matched:
         saver = AttachmentSaver(cfg.resolved_download_dir)
         stats = saver.save(result.matched)
-        print(f"已保存 {stats['count']} 个附件（跳过重复 {stats['skipped_duplicates']}，"
-              f"已处理 {stats['skipped_processed']}）")
-        saved_list: list[dict] = stats.get("saved_files") or []
-        for sf in saved_list:
+        new_att_count = int(stats.get("count", 0))
+        skipped_dup = int(stats.get("skipped_duplicates", 0))
+        skipped_proc = int(stats.get("skipped_processed", 0))
+        _emit(
+            f"[收件] 新保存 {new_att_count} 个附件（同批重复 {skipped_dup}，已处理去重 {skipped_proc}）"
+        )
+        for sf in stats.get("saved_files") or []:
             sf_path = Path(str(sf["path"]))
-            batches.append((sf_path.parent, [sf_path]))
-        _log("info", f"收件下载完成: {stats['count']} 个新附件")
+            bdir = sf_path.parent.resolve()
+            batches_by_dir.setdefault(bdir, []).append(sf_path)
 
-    # 无新附件但有 --test-input：注册测试批次
+    _log(
+        "info",
+        f"收件扫描: 共 {result.scanned} 封, 命中 {len(result.matched)} 封, "
+        f"新下载 {new_att_count} 个附件 (同批跳过 {skipped_dup}, 去重跳过 {skipped_proc})",
+    )
+
+    batches: list[tuple[Path, list[Path]]] = [
+        (bdir, fastas) for bdir, fastas in batches_by_dir.items()
+    ]
+
+    # 补充扫描本地已下载但尚未走完流水线的待处理批次（如先点过“仅收件”或上次中途中断）
+    pending = collect_pending_batches(
+        cfg.resolved_download_dir,
+        cfg,
+        cfg.resolved_send_dir,
+        ANNOTATIONS_DIR,
+        exclude_batches=batches_by_dir.keys(),
+    )
+    if pending:
+        pending_names = [b.name for b, _ in pending]
+        _emit(f"[队列] 发现 {len(pending)} 个已下载待处理批次，将纳入流水线执行: {', '.join(pending_names)}")
+        _log("info", f"发现 {len(pending)} 个已下载待处理批次: {', '.join(pending_names)}")
+        batches.extend(pending)
+
+    # 无新附件且无待处理批次时，若传入 --test-input 则注册测试批次
     if not batches and args.test_input:
         tp = Path(args.test_input)
         if not tp.exists():
-            print(f"[错误] 测试输入不存在: {tp}")
+            _emit(f"[错误] 测试输入不存在: {tp}")
+            _log("error", f"测试输入不存在: {tp}")
             return 1
         batch = _register_test_batch(cfg.resolved_download_dir, tp)
         batches.append((batch, [batch / tp.name]))
 
     if not batches:
-        print("没有需要处理的新任务。")
+        msg = f"扫描邮件 {result.scanned} 封，命中 {len(result.matched)} 封，没有需要处理的新附件或待处理批次。"
+        _emit(msg)
+        _log("info", msg)
         return 0
 
     ok_all = True
     for batch, fastas in batches:
-        mail_info = _load_batch_mail_info(batch)
-        for f in fastas:
-            info = asyncio.run(_annotate(batch, f))
-            report = _build_report(info["out_dir"], info["task_id"], f.stem, args.extra_note)
-            if report is None:
-                ok_all = False
-            if not _pack_and_send(cfg, info["out_dir"], info["task_id"],
-                                  do_send=not args.no_send, to=args.to,
-                                  subject_prefix=args.subject_prefix, mail_info=mail_info):
-                ok_all = False
-    print("流水线结束：全部环节成功" if ok_all else "流水线结束：存在失败环节（见日志）")
+        if not _run_batch_pipeline(
+            cfg,
+            batch,
+            fastas,
+            do_send=not args.no_send,
+            to=args.to,
+            subject_prefix=args.subject_prefix,
+            extra_note=args.extra_note,
+        ):
+            ok_all = False
+
+    end_msg = f"流水线结束：共处理 {len(batches)} 个批次，" + ("全部环节成功" if ok_all else "存在失败环节（见日志）")
+    _emit(end_msg)
+    _log("info" if ok_all else "error", end_msg)
     return 0 if ok_all else 1
 
 

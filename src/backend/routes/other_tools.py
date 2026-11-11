@@ -41,6 +41,7 @@ from ..services.other_tools.sangon_zip_importer import (
 )
 from ..services.other_tools.secret_store import mask_secret, read_secret, resolve_secret_path, write_secret
 from ...blast.manager import get_blast_manager, TaskStatus
+from ...mail_download.batch_state import inspect_batch_pipeline_state, load_batch_manifest
 from ...mail_download.config import load_config
 from ...mail_download.downloader import AttachmentSaver
 from ...mail_download.fetcher import MailFetcher
@@ -280,24 +281,17 @@ async def get_mail_pipeline_overview():
         except Exception as e:
             logger.warning(f"解析 processed_index.json 失败: {e}")
 
-    # 2. 已下载批次目录 (up_*)
+    # 2. 已下载批次目录 (up_*) 并检测流水线状态
+    cfg_obj = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
     batches: List[Dict[str, Any]] = []
     if dl_dir.exists():
         for bdir in sorted(dl_dir.glob("up_*"), key=lambda p: p.name, reverse=True):
             if not bdir.is_dir():
                 continue
-            mf_path = bdir / "manifest.json"
-            mail_meta: Dict[str, Any] = {}
-            att_list: List[Dict[str, Any]] = []
-            dl_time = ""
-            if mf_path.exists():
-                try:
-                    mf = json.loads(mf_path.read_text(encoding="utf-8"))
-                    mail_meta = mf.get("mail", {})
-                    att_list = mf.get("attachments", [])
-                    dl_time = mf.get("download_time", "")
-                except Exception:
-                    pass
+            mf = load_batch_manifest(bdir)
+            mail_meta: Dict[str, Any] = mf.get("mail", {}) if isinstance(mf.get("mail"), dict) else {}
+            att_list: List[Dict[str, Any]] = mf.get("attachments", []) if isinstance(mf.get("attachments"), list) else []
+            dl_time = str(mf.get("download_time", "") or "")
             if not att_list:
                 for fp in bdir.glob("*"):
                     if fp.is_file() and fp.name != "manifest.json":
@@ -306,6 +300,7 @@ async def get_mail_pipeline_overview():
                             "size_bytes": fp.stat().st_size,
                             "path": str(fp),
                         })
+            state = inspect_batch_pipeline_state(bdir, cfg_obj, send_dir, ANNOTATIONS_DIR, manifest=mf)
             batches.append({
                 "batch_name": bdir.name,
                 "batch_path": str(bdir),
@@ -314,7 +309,14 @@ async def get_mail_pipeline_overview():
                 "subject": mail_meta.get("subject", "-"),
                 "mail_date": mail_meta.get("date", "-"),
                 "attachments": att_list,
+                "pipeline_status": state["status"],
+                "pipeline_status_label": state["status_label"],
+                "send_status": state["send_status"],
+                "task_ids": state["task_ids"],
+                "last_error": state["last_error"],
+                "pending": state["pending"],
             })
+    pending_batches_count = sum(1 for item in batches if item.get("pending"))
 
     # 3. 已打包与回传产物 (results/email_sends)
     outbound_packages: List[Dict[str, Any]] = []
@@ -392,6 +394,7 @@ async def get_mail_pipeline_overview():
         "processed_count": len(processed_items),
         "processed_items": processed_items,
         "batches": batches,
+        "pending_batches_count": pending_batches_count,
         "outbound_packages": outbound_packages,
         "docx_reports": docx_reports,
         "pipeline_logs": log_lines,
@@ -518,6 +521,34 @@ async def list_mail_inbox(req: MailListRequest):
         raise HTTPException(status_code=500, detail=f"拉取收件箱失败: {e}")
 
 
+def _append_mail_pipeline_log(dl_dir: Path, level: str, msg: str) -> None:
+    """向 pipeline.log 追加审计日志行。"""
+    try:
+        dl_dir.mkdir(parents=True, exist_ok=True)
+        log_file = dl_dir / "pipeline.log"
+        with log_file.open("a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now().isoformat(timespec='seconds')} [{level.upper()}] {msg}\n")
+    except OSError as exc:
+        logger.warning(f"写入 pipeline.log 失败: {exc}")
+
+
+def _infer_mail_stage(line: str, current: str) -> str:
+    """从流水线实时日志行推断当前阶段标识。"""
+    if "[收件]" in line:
+        return "fetching"
+    if "[队列]" in line or "[批次]" in line:
+        return "queued"
+    if "[注释]" in line:
+        return "annotating"
+    if "[报告]" in line:
+        return "reporting"
+    if "[打包]" in line:
+        return "packing"
+    if "[回传]" in line:
+        return "sending"
+    return current
+
+
 @router.post("/mail_pipeline/fetch")
 async def trigger_mail_fetch(req: MailFetchRequest):
     """立即扫描 IMAP 收件箱并保存新附件"""
@@ -526,11 +557,18 @@ async def trigger_mail_fetch(req: MailFetchRequest):
         fetcher = MailFetcher(cfg)
         f_res = fetcher.fetch(since_days=req.since_days)
         if f_res.connection_error:
+            _append_mail_pipeline_log(cfg.resolved_download_dir, "error", f"仅收件失败: {f_res.connection_error}")
             return {"ok": False, "error": f_res.connection_error}
         saved_stats = {"count": 0, "skipped_duplicates": 0, "skipped_processed": 0, "saved_files": []}
         if f_res.matched:
             saver = AttachmentSaver(cfg.resolved_download_dir)
             saved_stats = saver.save(f_res.matched)
+        _append_mail_pipeline_log(
+            cfg.resolved_download_dir,
+            "info",
+            f"仅收件扫描: 共 {f_res.scanned} 封, 命中 {len(f_res.matched)} 封, "
+            f"新保存 {saved_stats['count']} 个附件 (重复 {saved_stats['skipped_duplicates']}, 去重 {saved_stats['skipped_processed']})",
+        )
         return {
             "ok": True,
             "scanned": f_res.scanned,
@@ -555,7 +593,7 @@ async def trigger_mail_fetch(req: MailFetchRequest):
 
 @router.post("/mail_pipeline/run")
 async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
-    """后台异步启动完整自动流水线 (收件 -> 注释 -> Word 报告 -> 打包 -> SMTP 回传)"""
+    """后台异步启动完整自动流水线 (收件 + 待处理接续 -> 注释 -> Word 报告 -> 打包 -> SMTP 回传)"""
     if _mail_pipeline_state["running"]:
         raise HTTPException(status_code=409, detail="邮件自动注释流水线正在运行中，请等待当前任务结束")
 
@@ -569,7 +607,7 @@ async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
         if not resolved_to:
             raise HTTPException(status_code=400, detail="未配置发件或收件邮箱账号，无法解析目标收件人")
 
-    cmd = [sys.executable, "-X", "utf8", "-m", "src.mail_download.auto_pipeline", "--config", str(MAIL_CONFIG_PATH)]
+    cmd = [sys.executable, "-X", "utf8", "-u", "-m", "src.mail_download.auto_pipeline", "--config", str(MAIL_CONFIG_PATH)]
     if req.since_days is not None:
         cmd += ["--since-days", str(req.since_days)]
     if req.no_send:
@@ -603,29 +641,79 @@ async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
     _mail_pipeline_state["finished_at"] = None
     _mail_pipeline_state["last_exit_code"] = None
     _mail_pipeline_state["last_command"] = " ".join(cmd)
-    _mail_pipeline_state["last_output"] = "流水线已启动，正在执行..."
-    _mail_pipeline_state["current_stage"] = "running"
+    _mail_pipeline_state["last_output"] = "流水线已启动，正在连接收件/扫描待处理批次..."
+    _mail_pipeline_state["current_stage"] = "fetching"
+
+    logger.info(
+        f"[MailPipeline] 后台任务启动: batch={req.annotate_only_batch or 'ALL'}, "
+        f"since_days={req.since_days}, no_send={req.no_send}, to={resolved_to or 'config'}"
+    )
 
     def _run_bg():
+        import threading
+
+        lines_buf: List[str] = []
+        timer: Optional[threading.Timer] = None
+        proc = None
+        timed_out = False
         try:
-            proc = subprocess.run(
+            env = {
+                **os.environ,
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONIOENCODING": "utf-8",
+            }
+            proc = subprocess.Popen(
                 cmd,
                 cwd=str(PROJECT_ROOT),
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=3600,
+                bufsize=1,
+                env=env,
             )
-            out_txt = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
-            _mail_pipeline_state["last_exit_code"] = proc.returncode
-            _mail_pipeline_state["last_output"] = out_txt.strip()[-4000:]
-            _mail_pipeline_state["current_stage"] = "completed" if proc.returncode == 0 else "failed"
+
+            def _on_timeout():
+                nonlocal timed_out
+                timed_out = True
+                if proc is not None and proc.poll() is None:
+                    proc.kill()
+
+            timer = threading.Timer(3600, _on_timeout)
+            timer.daemon = True
+            timer.start()
+
+            if proc.stdout is not None:
+                for raw_line in proc.stdout:
+                    line = raw_line.rstrip("\r\n")
+                    if not line:
+                        continue
+                    lines_buf.append(line)
+                    if len(lines_buf) > 200:
+                        lines_buf = lines_buf[-200:]
+                    _mail_pipeline_state["last_output"] = "\n".join(lines_buf)[-4000:]
+                    _mail_pipeline_state["current_stage"] = _infer_mail_stage(
+                        line, _mail_pipeline_state.get("current_stage", "running")
+                    )
+
+            rc = proc.wait()
+            if timed_out:
+                rc = -1
+                lines_buf.append("[错误] 流水线执行超时（超过 3600 秒）")
+            _mail_pipeline_state["last_exit_code"] = rc
+            final_out = "\n".join(lines_buf).strip()[-4000:]
+            _mail_pipeline_state["last_output"] = final_out or ("执行完成" if rc == 0 else f"退出码 {rc}")
+            _mail_pipeline_state["current_stage"] = "completed" if rc == 0 else "failed"
+            logger.info(f"[MailPipeline] 后台任务结束: exit={rc}, stage={_mail_pipeline_state['current_stage']}")
         except Exception as exc:
             _mail_pipeline_state["last_exit_code"] = -1
             _mail_pipeline_state["last_output"] = f"执行异常: {exc}"
             _mail_pipeline_state["current_stage"] = "failed"
+            logger.error(f"[MailPipeline] 后台任务异常: {exc}")
         finally:
+            if timer is not None:
+                timer.cancel()
             _mail_pipeline_state["running"] = False
             _mail_pipeline_state["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

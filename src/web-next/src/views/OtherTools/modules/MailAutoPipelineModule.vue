@@ -45,6 +45,12 @@ interface BatchItem {
   subject: string
   mail_date: string
   attachments: AttachmentItem[]
+  pipeline_status?: string
+  pipeline_status_label?: string
+  send_status?: string
+  task_ids?: string[]
+  last_error?: string
+  pending?: boolean
 }
 
 interface OutboundPackage {
@@ -190,6 +196,9 @@ const runOptions = ref({
 })
 
 const batches = ref<BatchItem[]>([])
+const pendingBatchesCount = ref(0)
+const initializedOverview = ref(false)
+const trackingRun = ref(false)
 const outboundPackages = ref<OutboundPackage[]>([])
 const docxReports = ref<DocxReportItem[]>([])
 const processedItems = ref<ProcessedItem[]>([])
@@ -254,6 +263,30 @@ function inboxStatusLabel(status: string): string {
   return map[status] || status
 }
 
+function stageLabel(stage?: string): string {
+  const map: Record<string, string> = {
+    idle: '空闲',
+    running: '执行中',
+    fetching: '扫描收件箱',
+    queued: '准备处理批次',
+    annotating: '基因组注释中',
+    reporting: '构建 Word 报告中',
+    packing: '打包产物中',
+    sending: 'SMTP 回传中',
+    completed: '完成',
+    failed: '异常退出'
+  }
+  return map[stage || 'idle'] || (stage || '空闲')
+}
+
+function extractLastLine(text: string): string {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean)
+  return lines[lines.length - 1] ?? ''
+}
+
 function setInfo(msg: string): void {
   actionMessage.value = msg
   errorMessage.value = ''
@@ -268,8 +301,10 @@ async function loadOverview(): Promise<void> {
   try {
     const data = await getJson(`${API}/overview`)
     if (data.auth) auth.value = data.auth
-    runtime.value = data.runtime || runtime.value
+    const nextRuntime = data.runtime || runtime.value
+    runtime.value = nextRuntime
     batches.value = data.batches || []
+    pendingBatchesCount.value = data.pending_batches_count || 0
     outboundPackages.value = data.outbound_packages || []
     docxReports.value = data.docx_reports || []
     processedItems.value = data.processed_items || []
@@ -293,7 +328,28 @@ async function loadOverview(): Promise<void> {
       reply_to: c.reply_to || '',
       send_dir: data.resolved_send_dir || c.send_dir || 'results/email_sends'
     }
-    runOptions.value.since_days = c.since_days ?? 7
+    if (!initializedOverview.value) {
+      runOptions.value.since_days = c.since_days ?? 7
+      initializedOverview.value = true
+    }
+
+    if (nextRuntime?.running) {
+      trackingRun.value = true
+      const liveLine = extractLastLine(nextRuntime.last_output || '')
+      setInfo(
+        `流水线执行中（${stageLabel(nextRuntime.current_stage)}）${liveLine ? '：' + liveLine : '...'}`
+      )
+    } else if (trackingRun.value) {
+      trackingRun.value = false
+      const summary = extractLastLine(nextRuntime?.last_output || '')
+      if (nextRuntime?.last_exit_code === 0) {
+        setInfo(summary ? `流水线执行完成：${summary}` : '流水线执行完成')
+      } else {
+        setError(
+          `流水线执行失败（退出码 ${nextRuntime?.last_exit_code ?? -1}）${summary ? '：' + summary : '，请查看日志'}`
+        )
+      }
+    }
   } catch (err: any) {
     errorMessage.value = `加载失败: ${err.message || err}`
   }
@@ -365,7 +421,8 @@ async function handleRunPipeline(): Promise<void> {
     if (mode === 'self') payload.to = 'self'
     const data = await postJson(`${API}/run`, payload)
     runtime.value = data.runtime
-    setInfo(`流水线已在后台运行${modeTip}`)
+    trackingRun.value = true
+    setInfo(`流水线已在后台启动${modeTip}`)
   } catch (err) {
     setError(err)
   }
@@ -405,6 +462,7 @@ async function confirmBatchRun(overrideMode?: 'only_pack' | 'self' | 'custom'): 
   try {
     const data = await postJson(`${API}/run`, payload)
     runtime.value = data.runtime
+    trackingRun.value = true
     showBatchRunModal.value = false
     setInfo(
       mode === 'self'
@@ -439,6 +497,7 @@ async function handleSaveConfig(): Promise<void> {
 
     const data = await postJson(`${API}/config`, buildConfigPayload())
     const msgs = (data.migrations || []).map(describeMigration).filter(Boolean)
+    runOptions.value.since_days = configForm.value.since_days ?? 7
     showConfigModal.value = false
     setInfo(msgs.length ? `配置已保存。${msgs.join('；')}` : '配置已保存')
     await loadOverview()
@@ -577,8 +636,8 @@ async function confirmPkgSend(toSelf = true): Promise<void> {
 onMounted(() => {
   loadOverview()
   pollTimer = setInterval(() => {
-    if (runtime.value?.running) loadOverview()
-  }, 4000)
+    if (runtime.value?.running || trackingRun.value) loadOverview()
+  }, 2500)
 })
 
 onUnmounted(() => {
@@ -630,6 +689,7 @@ onUnmounted(() => {
       <div class="metric-card">
         <div class="metric-label">收件批次</div>
         <div class="metric-val">{{ batches.length }}</div>
+        <div class="metric-sub">{{ pendingBatchesCount > 0 ? `待注释处理: ${pendingBatchesCount}` : '无待处理批次' }}</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Word 报告 / 回传包</div>
@@ -637,8 +697,15 @@ onUnmounted(() => {
       </div>
       <div class="metric-card">
         <div class="metric-label">运行状态</div>
-        <div class="metric-val" :class="runtime.running ? 'running' : 'idle'">{{ runtime.running ? '运行中' : '空闲' }}</div>
-        <div class="metric-sub">{{ runtime.finished_at ? `上次完成: ${runtime.finished_at}` : '-' }}</div>
+        <div
+          class="metric-val"
+          :class="runtime.running ? 'running' : (runtime.current_stage === 'failed' ? 'warn' : 'idle')"
+        >
+          {{ runtime.running ? '运行中' : (runtime.current_stage === 'failed' ? '上次异常' : '空闲') }}
+        </div>
+        <div class="metric-sub">
+          {{ runtime.running ? stageLabel(runtime.current_stage) : (runtime.finished_at ? `上次完成: ${runtime.finished_at}` : '-') }}
+        </div>
       </div>
     </div>
 
@@ -698,7 +765,7 @@ onUnmounted(() => {
 
     <div class="sub-tabs-bar">
       <button :class="['sub-tab-btn', { active: activeSubTab === 'batches' }]" @click="activeSubTab = 'batches'">
-        收件批次 ({{ batches.length }})
+        收件批次 ({{ batches.length }}<template v-if="pendingBatchesCount > 0"> · 待处理 {{ pendingBatchesCount }}</template>)
       </button>
       <button :class="['sub-tab-btn', { active: activeSubTab === 'inbox' }]" @click="openInboxTab">
         收件箱邮件{{ inboxLoaded ? ` (${inboxStats.total})` : '' }}
@@ -720,6 +787,7 @@ onUnmounted(() => {
         <thead>
           <tr>
             <th>批次</th>
+            <th>处理状态</th>
             <th>邮件主题</th>
             <th>发件人</th>
             <th>下载时间</th>
@@ -730,6 +798,14 @@ onUnmounted(() => {
         <tbody>
           <tr v-for="b in pagedBatches" :key="b.batch_name">
             <td class="mono-cell">{{ b.batch_name }}</td>
+            <td>
+              <span
+                :class="['batch-status-pill', b.pipeline_status || 'downloaded']"
+                :title="b.last_error || (b.task_ids && b.task_ids.length ? b.task_ids.join(', ') : '')"
+              >
+                {{ b.pipeline_status_label || '待注释处理' }}
+              </span>
+            </td>
             <td class="bold-cell">{{ b.subject }}</td>
             <td>{{ b.sender }}</td>
             <td>{{ b.download_time }}</td>
@@ -745,7 +821,7 @@ onUnmounted(() => {
             </td>
           </tr>
           <tr v-if="batches.length === 0">
-            <td colspan="6" class="empty-cell">暂无数据</td>
+            <td colspan="7" class="empty-cell">暂无数据</td>
           </tr>
         </tbody>
       </table>
@@ -1770,4 +1846,18 @@ onUnmounted(() => {
   background: #f1f5f9;
   color: #64748b;
 }
+
+.batch-status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.batch-status-pill.downloaded { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+.batch-status-pill.running { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.batch-status-pill.completed { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.batch-status-pill.failed { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.batch-status-pill.empty { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
 </style>

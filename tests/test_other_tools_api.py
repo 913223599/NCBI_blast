@@ -1047,9 +1047,23 @@ def test_mail_pipeline_run_self_overview_fallback_and_send_package(monkeypatch):
                 },
             )()
 
-    def fake_subprocess_run(cmd, **kwargs):
-        run_cmds.append(list(cmd))
-        return type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+    class FakePopen:
+        def __init__(self, cmd, **kwargs):
+            run_cmds.append(list(cmd))
+            self.stdout = iter([
+                "[注释] 开始注释 ANNO_TASK_01\n",
+                "[打包] 完成归档\n",
+                "批次重跑结束：全部环节成功\n",
+            ])
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            pass
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -1107,13 +1121,16 @@ def test_mail_pipeline_run_self_overview_fallback_and_send_package(monkeypatch):
         monkeypatch.setattr(ot_routes, "ANNOTATIONS_DIR", anno_dir)
         monkeypatch.setattr(ot_routes, "load_config", lambda *a, **kw: cfg)
         monkeypatch.setattr(ot_routes, "MailSender", FakeSender)
-        monkeypatch.setattr(ot_routes.subprocess, "run", fake_subprocess_run)
+        monkeypatch.setattr(ot_routes.subprocess, "Popen", FakePopen)
 
-        # 1. overview 能回退列出 ANNOTATIONS_DIR 中的 .docx 报告
+        # 1. overview 能回退列出 ANNOTATIONS_DIR 中的 .docx 报告并识别未处理待注释批次
         r_ov = client.get("/other_tools/mail_pipeline/overview")
         assert r_ov.status_code == 200
-        docx_names = [d["name"] for d in r_ov.json()["docx_reports"]]
+        ov_data = r_ov.json()
+        docx_names = [d["name"] for d in ov_data["docx_reports"]]
         assert "ANNO_TASK_01_注释报告.docx" in docx_names
+        assert ov_data["pending_batches_count"] == 1
+        assert ov_data["batches"][0]["pipeline_status"] == "downloaded"
 
         # 2. cleanup 按名字可清理位于 annotations 回退目录的 .docx
         cl = cleanup_mail_history(dl_dir, send_dir, anno_dir, targets=["docx"], names=["ANNO_TASK_01_注释报告.docx"])
@@ -1151,6 +1168,9 @@ def test_mail_pipeline_run_self_overview_fallback_and_send_package(monkeypatch):
         assert "--annotate-only" in cmd and str(batch_dir) in cmd
         to_idx = cmd.index("--to")
         assert cmd[to_idx + 1] == "self@qq.com"
+        assert ot_routes._mail_pipeline_state["last_exit_code"] == 0
+        assert ot_routes._mail_pipeline_state["current_stage"] == "completed"
+        assert "批次重跑结束：全部环节成功" in ot_routes._mail_pipeline_state["last_output"]
 
 
 def test_no_emoji_and_utf8_in_new_files():
@@ -1161,6 +1181,7 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "blast" / "local_blast.py",
         repo_root / "src" / "workbench" / "models" / "tool_config.py",
         repo_root / "src" / "mail_download" / "auto_pipeline.py",
+        repo_root / "src" / "mail_download" / "batch_state.py",
         repo_root / "src" / "mail_download" / "config.py",
         repo_root / "src" / "mail_download" / "downloader.py",
         repo_root / "src" / "mail_download" / "fetcher.py",
