@@ -50,6 +50,8 @@
   },
   "setup_completed": true,
   "blast_bin_path": "",
+  "git_bin_path": "",
+  "git_proxy": "",
   "tool_paths": {
     "sra_tools": "tools/ncbi_dist/bin/sra-tools",
     "tree_tools_bin": "tools/ncbi_dist/bin/tree-tools"

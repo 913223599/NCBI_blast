@@ -11,6 +11,7 @@ git_updater.py - 软件更新服务模块
 
 import os
 import sys
+import json
 import shutil
 import subprocess
 import logging
@@ -19,21 +20,155 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("api_server.updater")
 
+# 项目内置便携版 Git 的候选相对路径（tools 目录下的便携部署）
+PROJECT_GIT_CANDIDATES = (
+    Path("tools") / "git" / "cmd" / "git.exe",
+    Path("tools") / "git" / "bin" / "git.exe",
+    Path("tools") / "MinGit" / "cmd" / "git.exe",
+    Path("tools") / "portable-git" / "cmd" / "git.exe",
+)
+
+# 系统常见安装位置：覆盖 winget / 官方安装包 / 32 位安装
+SYSTEM_GIT_CANDIDATES = (
+    Path(r"C:\Program Files\Git\cmd\git.exe"),
+    Path(r"C:\Program Files\Git\bin\git.exe"),
+    Path(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+)
+
+# 定位结果缓存，避免每次请求都做磁盘探测
+_git_executable_cache: Optional[str] = None
+_git_probe_done: bool = False
+
+
 def get_project_root() -> Path:
     """获取项目根目录绝对路径"""
     # 依据当前文件路径推算: src/backend/utils/git_updater.py -> 项目根目录
     return Path(__file__).resolve().parent.parent.parent.parent
 
+
+def reset_git_cache() -> None:
+    """清除 git 定位缓存（安装 Git 后无需重启应用即可重新探测）"""
+    global _git_executable_cache, _git_probe_done
+    _git_executable_cache = None
+    _git_probe_done = False
+
+
+def _from_config() -> Optional[str]:
+    """读取 config.json 中用户显式指定的 git 路径 (git_bin_path)"""
+    raw = _config_value("git_bin_path")
+    if not raw:
+        return None
+    target = Path(raw)
+    if target.is_file():
+        return str(target)
+    if target.is_dir():
+        candidate = target / ("git.exe" if os.name == "nt" else "git")
+        if candidate.is_file():
+            return str(candidate)
+    logger.warning("config.json 中 git_bin_path 无效: %s", raw)
+    return None
+
+
+def _config_value(key: str) -> str:
+    """读取 config.json 中指定的字符串配置项"""
+    try:
+        config_file = get_project_root() / "config.json"
+        if not config_file.exists():
+            return ""
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+        return str(data.get(key) or "").strip()
+    except Exception as exc:
+        logger.warning("读取配置 %s 失败: %s", key, exc)
+        return ""
+
+
+def find_git_executable(force: bool = False) -> Optional[str]:
+    """
+    定位 git 可执行文件，优先级：
+    1. config.json 的 git_bin_path（用户显式指定）
+    2. 项目内置便携版 (tools/git/...)
+    3. 系统 PATH
+    4. Git for Windows 常见安装目录（含 winget 默认位置）
+
+    说明：安装 Git 后当前进程的 PATH 不会自动刷新，因此 4 能保证"刚装完就能用"。
+    """
+    global _git_executable_cache, _git_probe_done
+    if _git_probe_done and not force:
+        return _git_executable_cache
+
+    candidates: List[Path] = []
+
+    configured = _from_config()
+    if configured:
+        candidates.append(Path(configured))
+
+    project_root = get_project_root()
+    candidates.extend(project_root / rel for rel in PROJECT_GIT_CANDIDATES)
+    candidates.extend(SYSTEM_GIT_CANDIDATES)
+
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        candidates.append(Path(local_appdata) / "Programs" / "Git" / "cmd" / "git.exe")
+
+    which_path = shutil.which("git")
+    if which_path:
+        candidates.append(Path(which_path))
+
+    resolved: Optional[str] = None
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                resolved = str(candidate)
+                break
+        except OSError:
+            continue
+
+    _git_executable_cache = resolved
+    # 仅在成功定位时缓存；未找到时保留待探测状态，
+    # 这样用户安装 Git 后点击“检查更新”即可立即生效，无需重启应用。
+    _git_probe_done = resolved is not None
+    if resolved:
+        logger.info("已定位 Git 可执行文件: %s", resolved)
+    else:
+        logger.warning("未能定位 Git 可执行文件，请安装 Git for Windows 或配置 git_bin_path")
+    return resolved
+
+
 def is_git_available() -> bool:
     """检测系统中 git 命令是否可用"""
-    return shutil.which("git") is not None
+    return find_git_executable() is not None
+
+
+def _git_base_args(project_root: Path) -> List[str]:
+    """构造通用 git 参数：规避 dubious ownership、中文路径转义与代理缺失问题"""
+    args = [
+        "-c", f"safe.directory={project_root}",
+        "-c", "core.quotepath=false",
+    ]
+    # config.json 可配置 git_proxy（例如 http://127.0.0.1:7897），
+    # 用于在 GitHub 直连受限的环境下走本地代理完成 fetch / pull
+    proxy = _config_value("git_proxy")
+    if proxy:
+        args += ["-c", f"http.proxy={proxy}", "-c", f"https.proxy={proxy}"]
+    return args
+
 
 def run_git_cmd(args: List[str], cwd: Optional[Path] = None, timeout: int = 30) -> subprocess.CompletedProcess:
     """安全执行 git 命令，强制使用 utf-8 解码与无阻塞超时设置"""
     if cwd is None:
         cwd = get_project_root()
-    
-    cmd = ["git"] + args
+
+    git_exe = find_git_executable()
+    if not git_exe:
+        raise FileNotFoundError("未检测到 Git 可执行文件")
+
+    cmd = [git_exe] + _git_base_args(Path(cwd)) + args
+
+    # 禁用交互式凭据提示，避免 fetch/pull 在无人值守时挂起
+    env = os.environ.copy()
+    env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    env.setdefault("GCM_INTERACTIVE", "never")
+
     return subprocess.run(
         cmd,
         cwd=str(cwd),
@@ -41,7 +176,8 @@ def run_git_cmd(args: List[str], cwd: Optional[Path] = None, timeout: int = 30) 
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=timeout
+        timeout=timeout,
+        env=env,
     )
 
 def get_git_info(project_root: Optional[Path] = None) -> Dict[str, Any]:
@@ -62,8 +198,14 @@ def get_git_info(project_root: Optional[Path] = None) -> Dict[str, Any]:
     }
 
     if not is_git_available():
-        result["error"] = "系统中未检测到 Git 命令行工具"
+        result["error"] = (
+            "系统中未检测到 Git 命令行工具。"
+            "请安装 Git for Windows (https://git-scm.com/download/win)，"
+            "也可将其解压到项目的 tools\\git 目录，或在 config.json 中配置 git_bin_path。"
+        )
         return result
+
+    result["git_exe"] = find_git_executable() or ""
 
     try:
         # 1. 验证是否为 git 仓库
@@ -111,6 +253,33 @@ def get_git_info(project_root: Optional[Path] = None) -> Dict[str, Any]:
 
     return result
 
+_NETWORK_ERROR_MARKERS = (
+    "could not connect",
+    "failed to connect",
+    "could not resolve",
+    "connection was reset",
+    "connection timed out",
+    "operation timed out",
+    "network is unreachable",
+    "unable to access",
+    "proxy",
+)
+
+
+def _network_error_hint(err_msg: str) -> str:
+    """把 git 的网络类错误包装成面向用户的可执行提示"""
+    text = (err_msg or "").strip()
+    lowered = text.lower()
+    if any(marker in lowered for marker in _NETWORK_ERROR_MARKERS):
+        return (
+            f"无法连接 GitHub 远程仓库: {text}\n"
+            "处理建议: 1) 开启本机代理后，在 config.json 中设置 "
+            "\"git_proxy\": \"http://127.0.0.1:7897\"；"
+            "2) 或改用可访问 GitHub 的网络环境后重新点击“检查最新版本”。"
+        )
+    return f"同步远程仓库失败: {text}"
+
+
 def check_remote_update(project_root: Optional[Path] = None, timeout: int = 35) -> Dict[str, Any]:
     """从 GitHub 远端拉取元数据并比对是否有新提交 (git fetch)"""
     if project_root is None:
@@ -135,7 +304,7 @@ def check_remote_update(project_root: Optional[Path] = None, timeout: int = 35) 
             logger.warning("git fetch 失败: %s", err_msg)
             return {
                 "has_update": False,
-                "error": f"同步远程仓库失败: {err_msg}",
+                "error": _network_error_hint(err_msg),
                 "current_info": info
             }
 
@@ -186,7 +355,11 @@ def check_remote_update(project_root: Optional[Path] = None, timeout: int = 35) 
         logger.error("git fetch 超时 (%ds)", timeout)
         return {
             "has_update": False,
-            "error": f"连接 GitHub 远端超时 ({timeout}秒)，请检查代理设置或网络状况",
+            "error": (
+                f"连接 GitHub 远端超时 ({timeout}秒)，请检查网络状况。"
+                "若本机代理已开启，可在 config.json 中设置 "
+                "\"git_proxy\": \"http://127.0.0.1:7897\" 后重试。"
+            ),
             "current_info": info
         }
     except Exception as exc:
