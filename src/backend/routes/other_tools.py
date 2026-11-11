@@ -241,6 +241,7 @@ class SangonScanMailRequest(BaseModel):
     only_new: bool = False
     auto_create: bool = True
     ignore_history: bool = False
+    preserve_created_orders: List[str] = []
 
 
 class SangonInitOrderRequest(BaseModel):
@@ -1106,6 +1107,7 @@ async def scan_sangon_notification_mails(
             only_new=params.only_new,
             auto_create=params.auto_create,
             ignore_history=params.ignore_history,
+            preserve_created_orders=params.preserve_created_orders or None,
         )
 
     try:

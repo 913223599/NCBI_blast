@@ -39,6 +39,7 @@ interface ScannedMailItem {
   order_no: string
   dir_name: string
   is_sequencing?: boolean
+  legacy_dir_exists?: boolean
   cx_order_id: string
   download_url: string
   dir_ready: boolean
@@ -83,6 +84,7 @@ const forceReblast = ref(false)
 const scannedMails = ref<ScannedMailItem[]>([])
 const showMailsPanel = ref(false)
 const scanningMail = ref(false)
+const sessionCreatedOrders = ref<string[]>([])
 const mailFilter = ref({
   dedup: true,
   onlyNew: false,
@@ -97,7 +99,11 @@ const mailScanStats = ref({
   rawTotal: 0,
   uniqueTotal: 0,
   dedupRemoved: 0,
-  skippedKnown: 0
+  skippedKnown: 0,
+  newCount: 0,
+  createdCount: 0,
+  existingCount: 0,
+  nonSequencingCount: 0
 })
 const busy = ref(false)
 const actionMessage = ref('')
@@ -186,10 +192,10 @@ function statusLabel(st: string): string {
 
 function dedupStatusLabel(st: string): string {
   const map: Record<string, string> = {
-    created: '新建目录',
+    created: '本次新建',
     existing: '目录已存在',
     history_skipped: '已清理跳过',
-    new: '待新建',
+    new: '待建目录',
     non_sequencing: '非测序邮件'
   }
   return map[st] || st
@@ -350,7 +356,14 @@ async function confirmSendResultMail(toSelf = false): Promise<void> {
   }
 }
 
-async function handleScanSangonMails(page = 1, pageSize = mailScanStats.value.pageSize): Promise<void> {
+async function handleScanSangonMails(
+  page = 1,
+  pageSize = mailScanStats.value.pageSize,
+  opts: { resetSession?: boolean } = {}
+): Promise<void> {
+  if (opts.resetSession) {
+    sessionCreatedOrders.value = []
+  }
   scanningMail.value = true
   setInfo(`正在扫描生工通知邮件（第 ${page} 页）...`)
   try {
@@ -361,8 +374,13 @@ async function handleScanSangonMails(page = 1, pageSize = mailScanStats.value.pa
       dedup: mailFilter.value.dedup,
       only_new: mailFilter.value.onlyNew,
       auto_create: mailFilter.value.autoCreate,
-      ignore_history: mailFilter.value.ignoreHistory
+      ignore_history: mailFilter.value.ignoreHistory,
+      preserve_created_orders: opts.resetSession ? [] : sessionCreatedOrders.value
     })
+    if (Array.isArray(data.created_order_nos) && data.created_order_nos.length > 0) {
+      const merged = new Set([...sessionCreatedOrders.value, ...data.created_order_nos])
+      sessionCreatedOrders.value = Array.from(merged)
+    }
     scannedMails.value = data.mails || []
     mailScanStats.value = {
       page: data.page || 1,
@@ -372,19 +390,45 @@ async function handleScanSangonMails(page = 1, pageSize = mailScanStats.value.pa
       rawTotal: data.raw_total || 0,
       uniqueTotal: data.unique_total || 0,
       dedupRemoved: data.dedup_removed || 0,
-      skippedKnown: data.skipped_known || 0
+      skippedKnown: data.skipped_known || 0,
+      newCount: data.new_count || 0,
+      createdCount: data.created_count || 0,
+      existingCount: data.existing_count || 0,
+      nonSequencingCount: data.non_sequencing_count || 0
     }
     showMailsPanel.value = true
     const createdCnt = (data.created_dirs || []).length
-    setInfo(
-      `扫描完成：原始 ${mailScanStats.value.rawTotal} 封，去重合并 ${mailScanStats.value.dedupRemoved} 封，历史跳过 ${mailScanStats.value.skippedKnown} 条，本次新建目录 ${createdCnt} 个`
-    )
+    const s = mailScanStats.value
+    const parts = [
+      `原始 ${s.rawTotal} 封`,
+      `去重合并 ${s.dedupRemoved} 封`,
+      `新邮件 ${s.newCount} 条` + (createdCnt ? `（本次新建目录 ${createdCnt} 个）` : ''),
+      `已有目录 ${s.existingCount} 条`
+    ]
+    if (s.nonSequencingCount > 0) parts.push(`非测序 ${s.nonSequencingCount} 条`)
+    if (s.skippedKnown > 0) parts.push(`历史跳过 ${s.skippedKnown} 条`)
+    setInfo(`扫描完成：${parts.join('，')}`)
     if (createdCnt > 0) await loadOverview()
   } catch (err) {
     setError(err)
   } finally {
     scanningMail.value = false
   }
+}
+
+function handleManualScanMails(): void {
+  handleScanSangonMails(1, mailScanStats.value.pageSize, { resetSession: true })
+}
+
+function handleMailFilterChange(): void {
+  if (showMailsPanel.value) {
+    handleScanSangonMails(1, mailScanStats.value.pageSize, { resetSession: false })
+  }
+}
+
+function showAllScannedMails(): void {
+  mailFilter.value.onlyNew = false
+  handleScanSangonMails(1, mailScanStats.value.pageSize, { resetSession: false })
 }
 
 async function handleInitOrderFromMail(mail: ScannedMailItem): Promise<void> {
@@ -401,7 +445,10 @@ async function handleInitOrderFromMail(mail: ScannedMailItem): Promise<void> {
       download_url: mail.download_url
     })
     mail.dir_ready = true
-    mail.dedup_status = 'existing'
+    mail.dedup_status = 'created'
+    if (mail.order_no && !sessionCreatedOrders.value.includes(mail.order_no)) {
+      sessionCreatedOrders.value = [...sessionCreatedOrders.value, mail.order_no]
+    }
     setInfo(`已创建订单目录: ${mail.dir_name}`)
     await loadOverview()
   } catch (err) {
@@ -448,6 +495,7 @@ async function confirmCleanup(targets: string[]): Promise<void> {
       targets
     })
     showCleanup.value = false
+    sessionCreatedOrders.value = []
     const clearedPart = data.scan_index_cleared ? `，清除扫描记忆 ${data.scan_index_cleared} 条` : ''
     setInfo(`已清理 ${data.removed_count} 项${clearedPart}，释放 ${data.freed_mb} MB`)
     await loadOverview()
@@ -612,22 +660,22 @@ onUnmounted(() => {
           <input type="checkbox" v-model="forceReblast" />
           <span>强制重新比对</span>
         </label>
-        <label class="ctrl-item">
-          <input type="checkbox" v-model="mailFilter.dedup" />
+        <label class="ctrl-item" title="按 10 位订单号和 Message-ID 合并重复通知邮件，优先保留最新一封">
+          <input type="checkbox" v-model="mailFilter.dedup" @change="handleMailFilterChange" />
           <span>扫描去重</span>
         </label>
-        <label class="ctrl-item">
+        <label class="ctrl-item" title="扫描到尚未建目录的新测序邮件时，自动创建三级订单目录">
           <input type="checkbox" v-model="mailFilter.autoCreate" />
           <span>自动建目录</span>
         </label>
-        <label class="ctrl-item">
-          <input type="checkbox" v-model="mailFilter.onlyNew" />
+        <label class="ctrl-item" title="仅显示未建目录或本轮新建的测序通知邮件（按本地目录与扫描索引判定，不看邮箱已读状态）">
+          <input type="checkbox" v-model="mailFilter.onlyNew" @change="handleMailFilterChange" />
           <span>仅显示新邮件</span>
         </label>
         <span v-if="checkedOrderNames.length" class="sel-hint">已勾选 {{ checkedOrderNames.length }} 个订单</span>
       </div>
       <div class="control-right">
-        <button class="btn-secondary" @click="handleScanSangonMails(1)" :disabled="scanningMail || runtime.running">
+        <button class="btn-secondary" @click="handleManualScanMails" :disabled="scanningMail || runtime.running">
           {{ scanningMail ? '扫描中...' : '扫描邮件' }}
         </button>
         <button class="btn-outline" @click="handleImportDownloads(false)" :disabled="busy || runtime.running">
@@ -651,21 +699,29 @@ onUnmounted(() => {
     <div v-if="showMailsPanel" class="mails-drawer">
       <div class="drawer-header">
         <div class="drawer-title-group">
-          <h4>生工通知邮件 ({{ mailScanStats.total }} / 去重前 {{ mailScanStats.rawTotal }})</h4>
+          <h4 v-if="mailFilter.onlyNew">
+            生工通知邮件（仅新邮件：{{ mailScanStats.total }} / 去重后 {{ mailScanStats.uniqueTotal }} / 原始 {{ mailScanStats.rawTotal }}）
+          </h4>
+          <h4 v-else>
+            生工通知邮件（{{ mailScanStats.total }} / 去重前 {{ mailScanStats.rawTotal }}）
+          </h4>
+          <span v-if="mailScanStats.newCount > 0" class="dedup-badge fresh">新邮件 {{ mailScanStats.newCount }} 条</span>
           <span v-if="mailScanStats.dedupRemoved > 0" class="dedup-badge">已合并重复 {{ mailScanStats.dedupRemoved }} 封</span>
+          <span v-if="mailScanStats.existingCount > 0" class="dedup-badge neutral">已有目录 {{ mailScanStats.existingCount }} 条</span>
+          <span v-if="mailScanStats.nonSequencingCount > 0" class="dedup-badge neutral">非测序 {{ mailScanStats.nonSequencingCount }} 条</span>
           <span v-if="mailScanStats.skippedKnown > 0" class="dedup-badge warn">历史跳过 {{ mailScanStats.skippedKnown }} 条</span>
         </div>
         <div class="drawer-tools">
-          <label class="ctrl-item">
-            <input type="checkbox" v-model="mailFilter.dedup" @change="handleScanSangonMails(1)" />
+          <label class="ctrl-item" title="按订单号和 Message-ID 合并重复通知邮件">
+            <input type="checkbox" v-model="mailFilter.dedup" @change="handleMailFilterChange" />
             <span>去重</span>
           </label>
-          <label class="ctrl-item">
-            <input type="checkbox" v-model="mailFilter.onlyNew" @change="handleScanSangonMails(1)" />
+          <label class="ctrl-item" title="仅显示尚未建目录或本轮新建的测序邮件（不看邮箱已读/未读状态）">
+            <input type="checkbox" v-model="mailFilter.onlyNew" @change="handleMailFilterChange" />
             <span>仅新邮件</span>
           </label>
-          <label class="ctrl-item">
-            <input type="checkbox" v-model="mailFilter.ignoreHistory" @change="handleScanSangonMails(1)" />
+          <label class="ctrl-item" title="忽略已清理跳过记忆，允许已删旧订单重新识别为待新建">
+            <input type="checkbox" v-model="mailFilter.ignoreHistory" @change="handleMailFilterChange" />
             <span>忽略清理记忆</span>
           </label>
           <button class="btn-mini" @click="showMailsPanel = false">收起</button>
@@ -692,7 +748,10 @@ onUnmounted(() => {
             </td>
             <td>{{ m.date }}</td>
             <td>
-              <span :class="['status-pill', m.dedup_status === 'non_sequencing' ? 'non_sequencing' : (m.dir_ready ? 'completed' : 'pending')]">
+              <span
+                :class="['status-pill', m.dedup_status]"
+                :title="m.dedup_status === 'non_sequencing' && m.legacy_dir_exists ? '非测序通知邮件；本地存在历史遗留同名目录，可按需在下方清理' : ''"
+              >
                 {{ dedupStatusLabel(m.dedup_status) }}
               </span>
             </td>
@@ -714,11 +773,19 @@ onUnmounted(() => {
               >
                 打开下载页
               </a>
-              <span v-else-if="m.dir_ready">-</span>
+              <span v-else-if="m.dir_ready || m.dedup_status === 'non_sequencing'">-</span>
             </td>
           </tr>
           <tr v-if="scannedMails.length === 0">
-            <td colspan="6" class="empty-cell">当前筛选条件下暂无匹配生工邮件</td>
+            <td colspan="6" class="empty-cell">
+              <template v-if="mailFilter.onlyNew">
+                <span>
+                  暂无待处理的新测序邮件（已隐藏：已有目录 {{ mailScanStats.existingCount }} 条、非测序 {{ mailScanStats.nonSequencingCount }} 条、历史跳过 {{ mailScanStats.skippedKnown }} 条）
+                </span>
+                <button class="btn-mini primary inline-action-btn" @click="showAllScannedMails">查看全部邮件</button>
+              </template>
+              <span v-else>当前筛选条件下暂无匹配生工邮件</span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -729,7 +796,7 @@ onUnmounted(() => {
         :page-size="mailScanStats.pageSize"
         :page-size-options="[5, 10, 20, 50]"
         :loading="scanningMail"
-        @change="p => handleScanSangonMails(p.page, p.pageSize)"
+        @change="p => handleScanSangonMails(p.page, p.pageSize, { resetSession: false })"
       />
     </div>
 
@@ -1132,10 +1199,23 @@ onUnmounted(() => {
   padding: 2px 8px;
   border-radius: 999px;
 }
+.dedup-badge.fresh {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #6ee7b7;
+}
+.dedup-badge.neutral {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #cbd5e1;
+}
 .dedup-badge.warn {
   background: #fffbeb;
   color: #b45309;
   border-color: #fde68a;
+}
+.inline-action-btn {
+  margin-left: 10px;
 }
 .dup-count-tag {
   margin-left: 6px;
@@ -1183,9 +1263,11 @@ onUnmounted(() => {
   font-size: 11px;
   font-weight: 600;
 }
-.status-pill.completed { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.status-pill.completed, .status-pill.created { background: #ecfdf5; color: #047857; border: 1px solid #6ee7b7; }
 .status-pill.blasted, .status-pill.extracted { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
-.status-pill.downloaded, .status-pill.pending { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+.status-pill.downloaded, .status-pill.pending, .status-pill.new { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+.status-pill.existing { background: #f8fafc; color: #475569; border: 1px solid #cbd5e1; }
+.status-pill.history_skipped { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
 .status-pill.non_sequencing { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
 
 .pending-dl-bar {

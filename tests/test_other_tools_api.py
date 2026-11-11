@@ -330,6 +330,9 @@ def test_sangon_scan_dedup_history_and_pagination():
         assert res_p1["dedup_removed"] == 1
         assert res_p1["total"] == 3
         assert res_p1["total_pages"] == 2
+        assert res_p1["new_count"] == 3
+        assert res_p1["created_count"] == 3
+        assert res_p1["created_order_nos"] == ["2140610003", "2140610002", "2140610001"]
         assert len(res_p1["mails"]) == 2
         # 第 1 条应为最新的 2140610003（合并了 2 封）
         assert res_p1["mails"][0]["order_no"] == "2140610003"
@@ -393,7 +396,25 @@ def test_sangon_scan_dedup_history_and_pagination():
         assert res_recreate["mails"][0]["dedup_status"] == "created"
         assert (root / "20261102_2140610001").exists()
 
-        # only_new=True 在已全部存在时返回 0 条
+        # 同一次会话内切换 only_new 并传入 preserve_created_orders，可保留刚新建的订单供用户继续核对/打开下载页
+        res_preserve = scan_sangon_mails(
+            root,
+            cfg,
+            page=1,
+            page_size=10,
+            dedup=True,
+            only_new=True,
+            auto_create=False,
+            preserve_created_orders=["2140610003"],
+            conn_factory=lambda: _FakeIMAPForOtherTools(mails),
+        )
+        assert res_preserve["total"] == 1
+        assert res_preserve["existing_count"] == 2
+        assert res_preserve["mails"][0]["order_no"] == "2140610003"
+        assert res_preserve["mails"][0]["dedup_status"] == "created"
+        assert res_preserve["mails"][0]["cx_order_id"] == "CX003_NEW"
+
+        # only_new=True 在已全部存在且未保留本轮新建时返回 0 条
         res_only_new = scan_sangon_mails(
             root,
             cfg,
@@ -405,6 +426,8 @@ def test_sangon_scan_dedup_history_and_pagination():
             conn_factory=lambda: _FakeIMAPForOtherTools(mails),
         )
         assert res_only_new["total"] == 0
+        assert res_only_new["existing_count"] == 3
+        assert res_only_new["new_count"] == 0
 
         # 关闭去重时展示全部 4 封生工邮件
         res_no_dedup = scan_sangon_mails(
@@ -558,7 +581,14 @@ def test_other_tools_routes_pagination_and_init_order(monkeypatch):
 
         r_paged = client.post(
             "/other_tools/sangon_16s/scan_mail",
-            json={"page": 2, "page_size": 5, "dedup": False, "only_new": True, "auto_create": False},
+            json={
+                "page": 2,
+                "page_size": 5,
+                "dedup": False,
+                "only_new": True,
+                "auto_create": False,
+                "preserve_created_orders": ["2140610003"],
+            },
         )
         assert r_paged.status_code == 200
         assert captured[-1]["page"] == 2
@@ -566,6 +596,7 @@ def test_other_tools_routes_pagination_and_init_order(monkeypatch):
         assert captured[-1]["dedup"] is False
         assert captured[-1]["only_new"] is True
         assert captured[-1]["auto_create"] is False
+        assert captured[-1]["preserve_created_orders"] == ["2140610003"]
 
         # 3. list_mails 分页去重路由
         def fake_list(cfg, **kwargs):
@@ -623,9 +654,28 @@ def test_sangon_scan_excludes_non_sequencing_shipping_mails():
         by_order = {m["order_no"]: m for m in res["mails"]}
         assert by_order["1011709710"]["dedup_status"] == "non_sequencing"
         assert by_order["1011709710"]["dir_ready"] is False
+        assert by_order["1011709710"]["legacy_dir_exists"] is False
         assert not any("1011709710" in p.name for p in root.iterdir())
         assert by_order["2140698888"]["dedup_status"] == "created"
         assert by_order["2140698888"]["dir_ready"] is True
+        assert res["non_sequencing_count"] == 1
+
+        # 即使历史遗留了同名物流目录，仍明确标识为 non_sequencing 而非误报 existing
+        (root / "20261102_1011709710").mkdir()
+        res_legacy = scan_sangon_mails(
+            root,
+            cfg,
+            page=1,
+            page_size=10,
+            dedup=True,
+            auto_create=False,
+            conn_factory=lambda: _FakeIMAPForOtherTools(mails),
+        )
+        by_legacy = {m["order_no"]: m for m in res_legacy["mails"]}
+        assert by_legacy["1011709710"]["dedup_status"] == "non_sequencing"
+        assert by_legacy["1011709710"]["legacy_dir_exists"] is True
+        assert res_legacy["non_sequencing_count"] == 1
+        assert res_legacy["existing_count"] == 1
 
 
 def test_sangon_zip_importer_scan_and_archive():

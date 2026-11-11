@@ -316,6 +316,7 @@ def scan_sangon_mails(
     only_new: bool = False,
     auto_create: bool = True,
     ignore_history: bool = False,
+    preserve_created_orders: Optional[Iterable[str]] = None,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
     """
@@ -324,6 +325,7 @@ def scan_sangon_mails(
     """
     page_size = max(1, min(int(page_size or 10), 50))
     page = max(1, int(page or 1))
+    preserved_orders = {str(o).strip() for o in (preserve_created_orders or []) if str(o).strip()}
 
     fetcher = MailFetcher(cfg, conn_factory=conn_factory)
     conn = None
@@ -350,8 +352,13 @@ def scan_sangon_mails(
                 "unique_total": 0,
                 "dedup_removed": 0,
                 "skipped_known": 0,
+                "new_count": 0,
+                "created_count": 0,
+                "existing_count": 0,
+                "non_sequencing_count": 0,
                 "scanned_count": 0,
                 "created_dirs": [],
+                "created_order_nos": [],
                 "mails": [],
             }
 
@@ -430,7 +437,12 @@ def scan_sangon_mails(
                 )
 
         created_dirs: List[str] = []
+        created_order_nos: List[str] = []
         skipped_known = 0
+        existing_count = 0
+        non_sequencing_count = 0
+        created_count = 0
+        new_count = 0
         processed_items: List[Dict[str, Any]] = []
 
         for item in ordered_items:
@@ -443,9 +455,15 @@ def scan_sangon_mails(
             in_disk = bool(order_no and order_no in existing_map)
             in_history = (not ignore_history) and index.is_known(order_no, message_id)
 
-            if in_disk:
+            if not is_seq_mail:
+                dir_ready = False
+                dedup_status = "non_sequencing"
+                non_sequencing_count += 1
+            elif in_disk and order_no in preserved_orders:
                 dir_ready = True
-                dedup_status = "existing"
+                dedup_status = "created"
+                created_count += 1
+                new_count += 1
                 if order_no:
                     index.record(
                         order_no=order_no,
@@ -455,9 +473,19 @@ def scan_sangon_mails(
                         date_text=item["date"],
                         cleaned=False,
                     )
-            elif not is_seq_mail:
-                dir_ready = False
-                dedup_status = "non_sequencing"
+            elif in_disk:
+                dir_ready = True
+                dedup_status = "existing"
+                existing_count += 1
+                if order_no:
+                    index.record(
+                        order_no=order_no,
+                        message_id=message_id,
+                        dir_name=dir_name,
+                        subject=item["subject"],
+                        date_text=item["date"],
+                        cleaned=False,
+                    )
             elif in_history:
                 dir_ready = False
                 dedup_status = "history_skipped"
@@ -467,8 +495,11 @@ def scan_sangon_mails(
                 create_sangon_subdirs(order_path)
                 existing_map[order_no] = dir_name
                 created_dirs.append(dir_name)
+                created_order_nos.append(order_no)
                 dir_ready = True
                 dedup_status = "created"
+                created_count += 1
+                new_count += 1
                 index.record(
                     order_no=order_no,
                     message_id=message_id,
@@ -480,6 +511,7 @@ def scan_sangon_mails(
             else:
                 dir_ready = False
                 dedup_status = "new"
+                new_count += 1
 
             item_view = {
                 "seq": item["seq"],
@@ -489,6 +521,7 @@ def scan_sangon_mails(
                 "order_no": order_no,
                 "dir_name": dir_name,
                 "is_sequencing": is_seq_mail,
+                "legacy_dir_exists": in_disk if not is_seq_mail else False,
                 "cx_order_id": "",
                 "download_url": "",
                 "dir_ready": dir_ready,
@@ -545,8 +578,13 @@ def scan_sangon_mails(
             "unique_total": len(ordered_items),
             "dedup_removed": dedup_removed,
             "skipped_known": skipped_known,
+            "new_count": new_count,
+            "created_count": created_count,
+            "existing_count": existing_count,
+            "non_sequencing_count": non_sequencing_count,
             "scanned_count": raw_total,
             "created_dirs": created_dirs,
+            "created_order_nos": created_order_nos,
             "mails": page_items,
         }
     finally:

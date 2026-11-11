@@ -218,3 +218,27 @@
    - 二次触发 `POST /api/other_tools/mail_pipeline/run` 耗时 `0.8s` 幂等跳过。
    - 读取 QQ IMAP `Sent Messages` 第 `108` 封邮件核实仅向 `913223599@qq.com` 发送成功且附件完整（`276,697 B`）；测后已清理沙盒在 `results/annotations/` 下生成的临时注释目录，真实待处理批次 `up_20261111_182735_003520` 原封保留。
 
+---
+
+## 9. 生工 16S「仅新邮件」与邮件列表显示逻辑优化（2026-11-11）
+
+### 9.1 问题排查
+1. **顶栏勾选不生效**：[Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue) 顶栏的「扫描去重」与「仅显示新邮件」未绑定 `@change` 处理，列表打开后切换顶栏复选框界面无反应。
+2. **当次新建切换过滤即丢失**：全量扫描自动新建目录后，紧接着在同一会话内勾「仅新邮件」若重新请求后端，刚建目录在磁盘已转为 `existing`，导致结果骤减为 0。
+3. **非测序邮件被历史目录掩盖**：若磁盘残留旧发货目录（如 `20261102_1011709710`），原先 `in_disk` 优先于 `not is_seq_mail` 会将发货通知误展示为绿色的 `目录已存在`。
+4. **统计与状态语义区分弱**：`created` 与 `existing` 共用绿色样式，`onlyNew` 下空结果仅提示「暂无匹配生工邮件」，未告知已过滤数量及回切入口。
+
+### 9.2 修改实施
+1. **后端扫描分类与会话新建保留（[sangon_mail_scanner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_mail_scanner.py) / [other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py)）**：
+   - 将 `if not is_seq_mail:` 调整到 `in_disk` 之前，确保非测序通知始终标记为 `non_sequencing` 并附带 `legacy_dir_exists` 标识。
+   - 新增 `preserve_created_orders` 参数与 `created_order_nos`、`new_count`、`created_count`、`existing_count`、`non_sequencing_count` 返回字段；仅在同一次面板筛选切换时保留本轮新建订单在「仅新邮件」下的可见性，主动点击「扫描邮件」时清空重置。
+2. **前端双模块展示升级（[Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue) / [MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue)）**：
+   - 顶栏复选框补全 `@change="handleMailFilterChange"` 即时联动，补充清晰规则悬停说明（明确按本地目录/索引判定，不看 IMAP 已读标记）。
+   - 为 `created`（本次新建）、`new`（待建目录）、`existing`（目录已存在）、`history_skipped`（已清理跳过）、`non_sequencing`（非测序邮件）拆分五态视觉徽章，并在标题/徽章区和空态中清晰展示各分类过滤数量及一键「查看全部邮件」按钮；收件箱预览面板同步补充 `processedSkipped` 计数与「显示全部邮件」引导。
+
+### 9.3 验证结果
+1. **单元测试**：`python -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v` **81 项全部通过**（`5.40s`），新增 `preserve_created_orders` 会话保留、`non_sequencing` 优先级覆盖历史目录、分类统计计数及路由透传断言（[test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py)）。
+2. **前端构建**：`src/web-next` 下 `npm run build`（`vue-tsc -b && vite build`）零错误通过（`13.23s`）。
+3. **沙盒隔离真实邮箱复测**：连接 `913223599@qq.com` 隔离只读扫描校验实得 `raw_total=17, unique_total=13, dedup_removed=4, existing_count=12, non_sequencing_count=1, new_count=0`，并确认 `1011709710` 已准确识别为 `non_sequencing (legacy_dir_exists=True)`。
+
+

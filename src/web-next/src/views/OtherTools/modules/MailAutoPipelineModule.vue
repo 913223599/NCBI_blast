@@ -400,6 +400,11 @@ async function loadInboxMails(page = 1, pageSize = inboxStats.value.pageSize): P
   }
 }
 
+function showAllInboxMails(): void {
+  inboxFilter.value.onlyNew = false
+  loadInboxMails(1)
+}
+
 function openInboxTab(): void {
   activeSubTab.value = 'inbox'
   if (!inboxLoaded.value && auth.value.imap_ready) {
@@ -838,16 +843,17 @@ onUnmounted(() => {
     <div v-else-if="activeSubTab === 'inbox'" class="table-panel">
       <div class="inbox-toolbar">
         <div class="inbox-toolbar-left">
-          <label class="ctrl-item checkbox-item">
+          <label class="ctrl-item checkbox-item" title="按 Message-ID 和发送时间合并同一封邮件的重复投递">
             <input type="checkbox" v-model="inboxFilter.dedup" @change="loadInboxMails(1)" />
             <span>邮件级去重（Message-ID / 主题）</span>
           </label>
-          <label class="ctrl-item checkbox-item">
+          <label class="ctrl-item checkbox-item" title="对比 processed_index.json 中的 Message-ID 与附件 SHA256，仅显示含新附件邮件">
             <input type="checkbox" v-model="inboxFilter.onlyNew" @change="loadInboxMails(1)" />
             <span>仅看含未处理附件邮件</span>
           </label>
           <span v-if="inboxLoaded" class="inbox-stats-hint">
             搜索 {{ inboxStats.rawTotal }} 封 · 去重合并 {{ inboxStats.dedupRemoved }} 封 · 当前筛选 {{ inboxStats.total }} 封
+            <template v-if="inboxStats.processedSkipped > 0"> · 已隐藏已处理/无新附件 {{ inboxStats.processedSkipped }} 封</template>
           </span>
         </div>
         <button class="btn-secondary" :disabled="inboxLoading" @click="loadInboxMails(1)">
@@ -894,7 +900,15 @@ onUnmounted(() => {
             <td colspan="5" class="empty-cell">点击右上角“拉取收件箱”加载近期白名单邮件</td>
           </tr>
           <tr v-else-if="inboxLoaded && inboxMails.length === 0">
-            <td colspan="5" class="empty-cell">当前时间窗与筛选条件下暂无邮件</td>
+            <td colspan="5" class="empty-cell">
+              <template v-if="inboxFilter.onlyNew">
+                <span>
+                  当前时间窗内暂无含未处理附件的新邮件（已过滤 {{ inboxStats.processedSkipped }} 封已处理或无匹配附件邮件）
+                </span>
+                <button class="btn-mini primary inline-action-btn" @click="showAllInboxMails">显示全部邮件</button>
+              </template>
+              <span v-else>当前时间窗与筛选条件下暂无邮件</span>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -1860,4 +1874,5 @@ onUnmounted(() => {
 .batch-status-pill.completed { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
 .batch-status-pill.failed { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 .batch-status-pill.empty { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
+.inline-action-btn { margin-left: 10px; }
 </style>
