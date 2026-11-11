@@ -160,6 +160,9 @@ sample_refinement.faa
 test_refinement.faa
 src/nucmer.error
 src/test_shm.py
+/1.bat
+# 用户私有配置（含 API Key、本机工具路径），由 config.default.json 模板生成
+/config.json
 /scripts/*
 !/scripts/build_annotation_report.py
 !/scripts/build_t5_comparative_report.py
@@ -181,6 +184,8 @@ src/test_shm.py
 !/scripts/heal_assembly_metrics.py
 !/scripts/refresh_task_results.py
 !/scripts/自动化流程文档.md
+!/scripts/ensure_electron.ps1
+!/scripts/repair_integrity.ps1
 .lingma/rules/
 
 # ------------------------------------------------------------------------------
