@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
+from ...workbench.models.tool_config import ToolConfig
+
 logger = logging.getLogger("analysis.annotation.deep_audit")
 
 
@@ -18,10 +20,12 @@ class DeepSafetyAuditor:
     """深度生物安全性与毒力/耐药性审计器"""
 
     def __init__(self, root_dir: Optional[Path] = None):
-        self.root_dir = Path(root_dir) if root_dir else Path(os.getcwd()).resolve()
-        self.db_dir = self.root_dir / "database"
-        self.phagescope_dir = self.db_dir / "phagescope"
+        # 与流水线其他环节保持一致：数据库根目录取自项目根，并兼容 database/database 历史布局
+        self.root_dir = Path(root_dir) if root_dir else ToolConfig.PROJECT_ROOT
+        self.db_dir = ToolConfig.DATABASE_ROOT
+        self.phagescope_dir = ToolConfig.get_db_dir("phagescope")
         self.meta_dir = self.phagescope_dir / "metadata"
+        self.diagnostics: Dict[str, Any] = {}
 
     def _get_wsl_path(self, win_path: Path) -> str:
         p = win_path.resolve()
@@ -71,22 +75,21 @@ class DeepSafetyAuditor:
         logger.info(f"Loaded Safety Metadata: {len(amr_index)} AMR entries, {len(vf_index)} VF entries, {len(acr_index)} Acr entries")
 
         # 2. 运行严格 BLASTP 比对 (E-value <= 1e-10)
-        out_tsv = work_dir / "safety_audit_blast_hits.tsv"
-        wsl_query = self._get_wsl_path(query_faa)
-        wsl_out = self._get_wsl_path(out_tsv)
-        wsl_db_dir = self._get_wsl_path(self.phagescope_dir)
-
-        bash_cmd = f"cd \"{wsl_db_dir}\" && blastp -query \"{wsl_query}\" -db phagescope_proteins -out \"{wsl_out}\" -outfmt \"6 qseqid sseqid pident length evalue bitscore\" -evalue 1e-10 -max_target_seqs 5 -num_threads {threads}"
-
-        # 临时存储最优 hit
         amr_hits: Dict[str, dict] = {}
         vf_hits: Dict[str, dict] = {}
         acr_hits: Dict[str, dict] = {}
 
+        blastp_bin = ToolConfig.resolve_bio_tool("blastp")
+        if blastp_bin is None:
+            logger.error("未找到 blastp，可执行生物安全性审计被跳过；请安装 NCBI BLAST+ 或配置 blast_bin_path")
+            self.diagnostics["blastp"] = "missing"
+            return audit_result
+
         # 通用本地 BLASTP 执行器
         def run_local_blastp(db_dir: Path, db_name: str, out_file: Path, max_targets: int = 1, evalue: str = "1e-5"):
-            blastp_bin = shutil.which("blastp") or "blastp"
             try:
+                out_file.parent.mkdir(parents=True, exist_ok=True)
+                out_file.touch(exist_ok=True)
                 cmd = [
                     blastp_bin,
                     "-query", str(query_faa.resolve()),
@@ -141,7 +144,7 @@ class DeepSafetyAuditor:
                                 acr_hits[cds_id] = h
 
         # B. 直接扫描 CARD 原生耐药基因库
-        card_dir = self.db_dir / "card"
+        card_dir = ToolConfig.get_db_dir("card")
         if card_dir.exists() and any(card_dir.glob("card_protein.p*")):
             card_out = work_dir / "safety_card_direct_hits.tsv"
             if run_local_blastp(card_dir, "card_protein", card_out, max_targets=1, evalue="1e-10"):
@@ -165,7 +168,7 @@ class DeepSafetyAuditor:
                                 pass
 
         # C. 直接扫描 VFDB 原生毒力因子库
-        vfdb_dir = self.db_dir / "vfdb"
+        vfdb_dir = ToolConfig.get_db_dir("vfdb")
         if vfdb_dir.exists() and any(vfdb_dir.glob("vfdb.p*")):
             vf_out = work_dir / "safety_vfdb_direct_hits.tsv"
             if run_local_blastp(vfdb_dir, "vfdb", vf_out, max_targets=1, evalue="1e-10"):

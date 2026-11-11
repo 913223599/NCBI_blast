@@ -20,10 +20,15 @@ class HomologyEngine(BaseAnnotationEngine):
 
     def __init__(self):
         super().__init__(name="PhageScope Homology")
+        self.diagnostics: Dict[str, Any] = {}
+        self.unavailable_reason: Optional[str] = None
 
     async def is_available(self) -> bool:
         assigner = FunctionalAssigner()
-        return assigner.phagescope_dir.exists()
+        ready = assigner.phagescope_dir.exists() and any(assigner.phagescope_dir.glob("phagescope_proteins.p*"))
+        if not ready:
+            self.unavailable_reason = f"PhageScope 索引不可用: {assigner.phagescope_dir}"
+        return ready
 
     async def run(
         self,
@@ -68,6 +73,10 @@ class HomologyEngine(BaseAnnotationEngine):
             threads=threads,
             on_progress=on_progress
         )
+
+        # 保存各数据库连接/命中诊断，便于在流水线摘要与界面中定位"库未连接"问题
+        self.diagnostics = dict(assigner.diagnostics)
+        self.diagnostics["hits_map"] = len(hits_map)
 
         if not hits_map:
             return 0

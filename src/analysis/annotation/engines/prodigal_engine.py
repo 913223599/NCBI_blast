@@ -22,11 +22,23 @@ class ProdigalEngine(BaseAnnotationEngine):
 
     def __init__(self):
         super().__init__(name="Prodigal")
+        self.unavailable_reason: Optional[str] = None
 
     async def is_available(self) -> bool:
         from ....assembly.engine.runner import CommandRunner
+        from ....assembly.env.wsl_manager import WSLManager
+
+        if not WSLManager.is_available():
+            self.unavailable_reason = "未检测到可用的 WSL 发行版，无法调用 prodigal"
+            logger.warning(self.unavailable_reason)
+            return False
+
         runner = CommandRunner(step_name="ProdigalCheck", logger=logger, is_wsl=True)
-        return (await runner.run_command(["which", "prodigal"], silence_errors=True)) == 0
+        available = (await runner.run_command(["which", "prodigal"], silence_errors=True)) == 0
+        if not available:
+            self.unavailable_reason = "WSL 中未安装 prodigal，请先运行 scripts/setup_assembly_env.sh"
+            logger.warning(self.unavailable_reason)
+        return available
 
     async def run(
         self,

@@ -31,7 +31,8 @@ class AnnotationManager:
     def __init__(self, root_dir: Optional[Path] = None):
         if self._initialized:
             return
-        self.root_dir = Path(root_dir) if root_dir else Path(os.getcwd())
+        from ...workbench.models.tool_config import ToolConfig
+        self.root_dir = Path(root_dir) if root_dir else ToolConfig.PROJECT_ROOT
         self.results_dir = self.root_dir / "results" / "annotations"
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self._active_pipelines: Dict[str, AnnotationPipeline] = {}

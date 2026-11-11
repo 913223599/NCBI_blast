@@ -21,11 +21,30 @@ class PharokkaEngine(BaseAnnotationEngine):
 
     def __init__(self):
         super().__init__(name="Pharokka")
+        self.unavailable_reason: Optional[str] = None
 
     async def is_available(self) -> bool:
         from ....assembly.engine.runner import CommandRunner
+        from ....assembly.env.wsl_manager import WSLManager
+        from ....workbench.models.tool_config import ToolConfig
+
+        db_dir = ToolConfig.get_db_dir("pharokka_db")
+        if not (db_dir.exists() and any(db_dir.iterdir())):
+            self.unavailable_reason = f"Pharokka 数据库未就绪: {db_dir}"
+            logger.warning(self.unavailable_reason)
+            return False
+
+        if not WSLManager.is_available():
+            self.unavailable_reason = "未检测到可用的 WSL 发行版，无法调用 pharokka.py（数据库文件已存在）"
+            logger.warning(self.unavailable_reason)
+            return False
+
         runner = CommandRunner(step_name="PharokkaCheck", logger=logger, is_wsl=True)
-        return (await runner.run_command(["which", "pharokka.py"], silence_errors=True)) == 0
+        available = (await runner.run_command(["which", "pharokka.py"], silence_errors=True)) == 0
+        if not available:
+            self.unavailable_reason = "WSL 中未安装 pharokka.py，请先运行 scripts/setup_pharokka.sh"
+            logger.warning(self.unavailable_reason)
+        return available
 
     async def run(
         self,
@@ -38,11 +57,15 @@ class PharokkaEngine(BaseAnnotationEngine):
     ) -> Tuple[List[FeatureItem], Dict[str, str]]:
         from ....assembly.env.wsl_manager import WSLManager
         from ....assembly.engine.runner import CommandRunner
+        from ....workbench.models.tool_config import ToolConfig
 
         runner = CommandRunner(step_name="Pharokka", logger=logger, is_wsl=True)
         out_dir = work_dir / "pharokka_out"
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        # 直接使用磁盘上真实的 Pharokka 数据库目录，不再依赖 /opt/pharokka_db 软链
+        db_dir = ToolConfig.get_db_dir("pharokka_db")
+        wsl_db = WSLManager.to_wsl_path(str(db_dir))
         wsl_out = WSLManager.to_wsl_path(str(out_dir))
         wsl_fasta = WSLManager.to_wsl_path(str(input_fasta))
 
@@ -50,7 +73,7 @@ class PharokkaEngine(BaseAnnotationEngine):
             "pharokka.py",
             "-i", wsl_fasta,
             "-o", wsl_out,
-            "-d", "/opt/pharokka_db",
+            "-d", wsl_db,
             "-t", str(threads),
             "-p", prefix,
             "-f"

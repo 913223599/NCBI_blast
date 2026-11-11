@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional, Set, Callable, Tuple
 
 from .fuser import AnnotationFuser
+from ...workbench.models.tool_config import ToolConfig
 
 logger = logging.getLogger("analysis.annotation.functional_assigner")
 
@@ -23,11 +24,24 @@ class FunctionalAssigner:
     """功能注释推断与打捞器"""
 
     def __init__(self, root_dir: Optional[Path] = None):
-        self.root_dir = Path(root_dir) if root_dir else Path(os.getcwd()).resolve()
-        self.db_dir = self.root_dir / "database"
-        self.phagescope_dir = self.db_dir / "phagescope"
+        # 数据库根目录必须来自项目根（而非运行时 CWD），否则从不同工作目录启动时
+        # 会指向 database/database 之类的错误位置，出现"库存在但连不上"。
+        self.root_dir = Path(root_dir) if root_dir else ToolConfig.PROJECT_ROOT
+        self.db_dir = ToolConfig.DATABASE_ROOT
+        self.phagescope_dir = ToolConfig.get_db_dir("phagescope")
         self.meta_protein_dir = self.phagescope_dir / "metadata" / "annotated_protein"
         self._protein_meta_cache: Optional[Dict[str, Dict[str, str]]] = None
+        # 本轮运行的诊断信息（供流水线/界面显示"哪个库连上了、命中多少"）
+        self.diagnostics: Dict[str, Any] = {}
+
+    def _resolve_bin(self, tool_name: str) -> Optional[str]:
+        """解析 BLAST+/RPS-BLAST 可执行文件（配置 -> 内置 -> NCBI 安装目录 -> PATH）"""
+        path = ToolConfig.resolve_bio_tool(tool_name)
+        if path:
+            return str(path)
+        logger.error(f"未找到可执行程序 {tool_name}：请安装 NCBI BLAST+ 或在 config.json 中配置 blast_bin_path")
+        return None
+
 
     def _get_short_path(self, path_obj: Path) -> str:
         """获取 Windows 8.3 短路径，彻底规避包含空格与特殊字符的路径截断问题"""
@@ -140,11 +154,22 @@ class FunctionalAssigner:
             on_progress(10, "正在构建 BLASTP 同源检索任务 (多核并行)...", None)
 
         out_tsv = work_dir / "blastp_functional_hits.tsv"
-        
-        if self.phagescope_dir.exists() and any(self.phagescope_dir.glob("phagescope_proteins.p*")):
+
+        phagescope_ready = self.phagescope_dir.exists() and any(self.phagescope_dir.glob("phagescope_proteins.p*"))
+        self.diagnostics["phagescope"] = {
+            "path": str(self.phagescope_dir),
+            "ready": phagescope_ready,
+        }
+        if not phagescope_ready:
+            logger.error(
+                f"PhageScope 数据库索引不可用 (期望目录: {self.phagescope_dir}，"
+                f"需要 phagescope_proteins.p* 索引文件)，跳过同源打捞"
+            )
+        if phagescope_ready:
             if on_progress:
                 on_progress(35, "正在比对 105 万条 PhageScope 权威噬菌体蛋白库...", None)
-            self._run_blastp_query(query_faa, self.phagescope_dir, "phagescope_proteins", out_tsv, threads, evalue_threshold)
+            ok = self._run_blastp_query(query_faa, self.phagescope_dir, "phagescope_proteins", out_tsv, threads, evalue_threshold)
+            self.diagnostics["phagescope"]["blastp_ok"] = ok
 
         if on_progress:
             on_progress(85, "BLASTP 检索完成，正在解析同源注释与可信度评分...", None)
@@ -175,9 +200,14 @@ class FunctionalAssigner:
                             target_ids.add(tid)
 
         logger.info(f"BLASTP produced {len(hits_map)} hits exceeding identity threshold ({identity_threshold}%)")
+        self.diagnostics["phagescope"].update({
+            "hits": len(hits_map),
+            "unique_targets": len(target_ids),
+        })
 
         # 2. 匹配真实功能描述元数据 (Tier 1: PhageScope)
         metadata_map = self._load_metadata_for_ids(target_ids)
+        self.diagnostics["phagescope"]["metadata_matched"] = len(metadata_map)
 
         # 3. 组装最终注释映射
         functional_results: Dict[str, Dict[str, Any]] = {}
@@ -211,8 +241,12 @@ class FunctionalAssigner:
                         }
 
         # 4. Tier 2: Swiss-Prot 金标准蛋白库二次打捞 (对仍为假定蛋白或未命中的 CDS)
-        swissprot_dir = self.db_dir / "swissprot"
-        if swissprot_dir.exists() and any(swissprot_dir.glob("swissprot.p*")):
+        self.diagnostics.setdefault("phagescope", {})["assigned"] = len(functional_results)
+        swissprot_dir = ToolConfig.get_db_dir("swissprot")
+        swissprot_ready = swissprot_dir.exists() and any(swissprot_dir.glob("swissprot.p*"))
+        self.diagnostics["swissprot"] = {"path": str(swissprot_dir), "ready": swissprot_ready}
+        sp_before = len(functional_results)
+        if swissprot_ready:
             try:
                 if on_progress:
                     on_progress(60, "正在通过 UniProt/Swiss-Prot 金标准库二次深度打捞...", None)
@@ -238,10 +272,17 @@ class FunctionalAssigner:
                                         }
             except Exception as e:
                 logger.warning(f"Swiss-Prot cascade annotation failed: {e}")
+                self.diagnostics["swissprot"]["error"] = str(e)
+            self.diagnostics["swissprot"]["added"] = len(functional_results) - sp_before
+        else:
+            logger.warning(f"Swiss-Prot 数据库未就绪 (期望目录: {swissprot_dir})，跳过二级打捞")
 
         # 5. Tier 4: NCBI CDD / Pfam-A 保守结构域与基序深度打捞 (RPS-BLAST)
-        cdd_dir = self.db_dir / "cdd_pfam"
-        if cdd_dir.exists() and (any(cdd_dir.glob("cdd_pfam.pal")) or any(cdd_dir.glob("cdd_pfam.*.rps"))):
+        cdd_dir = ToolConfig.get_db_dir("cdd_pfam")
+        cdd_ready = cdd_dir.exists() and (any(cdd_dir.glob("cdd_pfam.pal")) or any(cdd_dir.glob("cdd_pfam.*.rps")))
+        self.diagnostics["cdd_pfam"] = {"path": str(cdd_dir), "ready": cdd_ready}
+        cdd_before = len(functional_results)
+        if cdd_ready:
             try:
                 if on_progress:
                     on_progress(75, "正在通过 36GB NCBI CDD / Pfam-A 结构域模型库打捞基序特征...", None)
@@ -267,6 +308,10 @@ class FunctionalAssigner:
                                         }
             except Exception as e:
                 logger.warning(f"CDD/Pfam cascade annotation failed: {e}")
+                self.diagnostics["cdd_pfam"]["error"] = str(e)
+            self.diagnostics["cdd_pfam"]["added"] = len(functional_results) - cdd_before
+        else:
+            logger.warning(f"NCBI CDD/Pfam 数据库未就绪 (期望目录: {cdd_dir})，跳过结构域打捞")
 
         # 6. Tier 3: 毒力 (VFDB) 与耐药 (CARD) 安全性专项标记
         self._annotate_safety_flags(query_faa, work_dir, functional_results, threads, evalue_threshold)
@@ -274,10 +319,18 @@ class FunctionalAssigner:
         logger.info(f"Successfully assigned {len(functional_results)} real biological functions to CDS features across multi-tier databases")
         return functional_results
 
-    def _run_blastp_query(self, query_faa: Path, db_dir: Path, db_name: str, out_tsv: Path, threads: int, evalue_threshold: float):
-        """执行单次 BLASTP 比对通用方法 (自动短路径与跨平台回退)"""
-        blastp_cmd = shutil.which("blastp") or "blastp"
-        
+    def _run_blastp_query(self, query_faa: Path, db_dir: Path, db_name: str, out_tsv: Path, threads: int, evalue_threshold: float) -> bool:
+        """执行单次 BLASTP 比对通用方法 (自动短路径与跨平台回退)，返回是否产出有效结果"""
+        blastp_cmd = self._resolve_bin("blastp")
+        if blastp_cmd is None:
+            return False
+
+        try:
+            out_tsv.parent.mkdir(parents=True, exist_ok=True)
+            out_tsv.touch(exist_ok=True)
+        except Exception:
+            pass
+
         # 1. 优先使用 Windows 本地 BLASTP (通过 8.3 短路径规避包含空格引发的 BLAST+ 路径截断)
         try:
             short_query = self._get_short_path(query_faa)
@@ -293,9 +346,11 @@ class FunctionalAssigner:
                 "-max_target_seqs", "1",
                 "-num_threads", str(threads)
             ]
-            res = subprocess.run(cmd, cwd=short_db_dir, capture_output=True, encoding="utf-8", errors="ignore", timeout=180)
-            if res.returncode == 0 and out_tsv.exists() and out_tsv.stat().st_size > 0:
-                return
+            res = subprocess.run(cmd, cwd=short_db_dir, capture_output=True, encoding="utf-8", errors="ignore", timeout=600)
+            if res.returncode == 0 and out_tsv.exists():
+                return True
+            stderr_tail = (res.stderr or "").strip().splitlines()[-3:]
+            logger.warning(f"blastp 比对 {db_name} 未成功 (exit={res.returncode}): {' | '.join(stderr_tail)}")
         except Exception as e:
             logger.warning(f"Native blastp query on {db_name} encountered error: {e}")
 
@@ -308,16 +363,21 @@ class FunctionalAssigner:
                 wsl_db = self._get_wsl_path(db_dir)
                 bash_cmd = f"cd \"{wsl_db}\" && blastp -query \"{wsl_q}\" -db {db_name} -out \"{wsl_out}\" -outfmt \"6 qseqid sseqid pident length evalue bitscore stitle\" -evalue {evalue_threshold} -max_target_seqs 1 -num_threads {threads}"
                 res = subprocess.run([wsl_bin, "bash", "-c", bash_cmd], capture_output=True, timeout=600)
-                if res.returncode == 0 and out_tsv.exists() and out_tsv.stat().st_size > 0:
+                if res.returncode == 0 and out_tsv.exists():
                     logger.info(f"WSL blastp query on {db_name} succeeded: {out_tsv.stat().st_size} bytes")
+                    return True
             except Exception as e:
                 logger.warning(f"WSL blastp query on {db_name} failed: {e}")
+
+        return False
 
     def _annotate_safety_flags(self, query_faa: Path, work_dir: Path, functional_results: Dict[str, Dict[str, Any]], threads: int, evalue_threshold: float):
         """专项扫描 VFDB 与 CARD，并为 CDS 注入安全性标签"""
         # VFDB 毒力因子扫描
-        vfdb_dir = self.db_dir / "vfdb"
-        if vfdb_dir.exists() and any(vfdb_dir.glob("vfdb.p*")):
+        vfdb_dir = ToolConfig.get_db_dir("vfdb")
+        vfdb_ready = vfdb_dir.exists() and any(vfdb_dir.glob("vfdb.p*"))
+        self.diagnostics["vfdb"] = {"path": str(vfdb_dir), "ready": vfdb_ready}
+        if vfdb_ready:
             try:
                 vf_out = work_dir / "vfdb_hits.tsv"
                 self._run_blastp_query(query_faa, vfdb_dir, "vfdb", vf_out, threads, evalue_threshold)
@@ -332,10 +392,14 @@ class FunctionalAssigner:
                                     functional_results[qid]["virulence_desc"] = parts[6]
             except Exception as e:
                 logger.warning(f"VFDB scan notice: {e}")
+        else:
+            logger.warning(f"VFDB 数据库未就绪 (期望目录: {vfdb_dir})，跳过毒力因子扫描")
 
         # CARD 耐药基因扫描
-        card_dir = self.db_dir / "card"
-        if card_dir.exists() and any(card_dir.glob("card_protein.p*")):
+        card_dir = ToolConfig.get_db_dir("card")
+        card_ready = card_dir.exists() and any(card_dir.glob("card_protein.p*"))
+        self.diagnostics["card"] = {"path": str(card_dir), "ready": card_ready}
+        if card_ready:
             try:
                 card_out = work_dir / "card_hits.tsv"
                 self._run_blastp_query(query_faa, card_dir, "card_protein", card_out, threads, evalue_threshold)
@@ -389,10 +453,18 @@ class FunctionalAssigner:
 
         return product, category
 
-    def _run_rpsblast_query(self, query_faa: Path, db_dir: Path, db_name: str, out_tsv: Path, threads: int, evalue_threshold: float):
-        """执行 RPS-BLAST 结构域检索 (自动短路径与跨平台回退)"""
-        rpsblast_cmd = shutil.which("rpsblast") or "rpsblast"
-        
+    def _run_rpsblast_query(self, query_faa: Path, db_dir: Path, db_name: str, out_tsv: Path, threads: int, evalue_threshold: float) -> bool:
+        """执行 RPS-BLAST 结构域检索 (自动短路径与跨平台回退)，返回是否成功"""
+        rpsblast_cmd = self._resolve_bin("rpsblast")
+        if rpsblast_cmd is None:
+            return False
+
+        try:
+            out_tsv.parent.mkdir(parents=True, exist_ok=True)
+            out_tsv.touch(exist_ok=True)
+        except Exception:
+            pass
+
         try:
             short_query = self._get_short_path(query_faa)
             short_db_dir = self._get_short_path(db_dir)
@@ -407,9 +479,11 @@ class FunctionalAssigner:
                 "-max_target_seqs", "1",
                 "-num_threads", str(threads)
             ]
-            res = subprocess.run(cmd, cwd=short_db_dir, capture_output=True, encoding="utf-8", errors="ignore", timeout=240)
-            if res.returncode == 0 and out_tsv.exists() and out_tsv.stat().st_size > 0:
-                return
+            res = subprocess.run(cmd, cwd=short_db_dir, capture_output=True, encoding="utf-8", errors="ignore", timeout=900)
+            if res.returncode == 0 and out_tsv.exists():
+                return True
+            stderr_tail = (res.stderr or "").strip().splitlines()[-3:]
+            logger.warning(f"rpsblast 比对 {db_name} 未成功 (exit={res.returncode}): {' | '.join(stderr_tail)}")
         except Exception as e:
             logger.warning(f"Native rpsblast query on {db_name} encountered error: {e}")
 
@@ -421,9 +495,12 @@ class FunctionalAssigner:
                 wsl_out = self._get_wsl_path(out_tsv)
                 wsl_db = self._get_wsl_path(db_dir)
                 bash_cmd = f"cd \"{wsl_db}\" && rpsblast -query \"{wsl_q}\" -db {db_name} -out \"{wsl_out}\" -outfmt \"6 qseqid sseqid pident length evalue bitscore stitle\" -evalue {evalue_threshold} -max_target_seqs 1 -num_threads {threads}"
-                res = subprocess.run([wsl_bin, "bash", "-c", bash_cmd], capture_output=True, timeout=600)
-                if res.returncode == 0 and out_tsv.exists() and out_tsv.stat().st_size > 0:
+                res = subprocess.run([wsl_bin, "bash", "-c", bash_cmd], capture_output=True, timeout=900)
+                if res.returncode == 0 and out_tsv.exists():
                     logger.info(f"WSL rpsblast query on {db_name} succeeded: {out_tsv.stat().st_size} bytes")
+                    return True
             except Exception as e:
                 logger.warning(f"WSL rpsblast query on {db_name} failed: {e}")
+
+        return False
 

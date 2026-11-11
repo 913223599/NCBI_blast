@@ -23,11 +23,30 @@ class PholdEngine(BaseAnnotationEngine):
 
     def __init__(self):
         super().__init__(name="Phold AI")
+        self.unavailable_reason: Optional[str] = None
 
     async def is_available(self) -> bool:
         from ....assembly.engine.runner import CommandRunner
+        from ....assembly.env.wsl_manager import WSLManager
+        from ....workbench.models.tool_config import ToolConfig
+
+        db_dir = ToolConfig.get_db_dir("phold_db")
+        if not (db_dir.exists() and any(db_dir.iterdir())):
+            self.unavailable_reason = f"Phold 数据库未就绪: {db_dir}"
+            logger.warning(self.unavailable_reason)
+            return False
+
+        if not WSLManager.is_available():
+            self.unavailable_reason = "未检测到可用的 WSL 发行版，无法调用 phold（数据库文件已存在）"
+            logger.warning(self.unavailable_reason)
+            return False
+
         runner = CommandRunner(step_name="PholdCheck", logger=logger, is_wsl=True)
-        return (await runner.run_command(["which", "phold"], silence_errors=True)) == 0
+        available = (await runner.run_command(["which", "phold"], silence_errors=True)) == 0
+        if not available:
+            self.unavailable_reason = "WSL 中未安装 phold，请先运行 scripts/setup_phold.sh"
+            logger.warning(self.unavailable_reason)
+        return available
 
     def _cleanup_gpu_memory(self):
         """显存红线保护与垃圾回收"""
@@ -75,6 +94,7 @@ class PholdEngine(BaseAnnotationEngine):
 
         from ....assembly.engine.runner import CommandRunner
         from ....assembly.env.wsl_manager import WSLManager
+        from ....workbench.models.tool_config import ToolConfig
 
         runner = CommandRunner(step_name="Phold", logger=logger, is_wsl=True)
         out_dir = work_dir / "phold_out"
@@ -83,16 +103,17 @@ class PholdEngine(BaseAnnotationEngine):
         if on_progress:
             on_progress(70, f"正在调度 Phold AI 蛋白质三维结构折叠与空间感知增强 (针对 {unannotated_count} 个假定蛋白)...", None)
 
-        # 构建安全路径
-        await runner.run_command(["bash", "-c", "ln -sfT '/mnt/f/NCBI blast' /tmp/ncbi_blast_tmp"], silence_errors=True)
-        
-        # 将路径转换为 WSL 路径
+        # 建立项目根目录的无空格软链接（不再硬编码特定盘符，兼容项目迁移）
+        WSLManager.ensure_project_link()
+
+        # 将路径转换为 WSL 路径，并直接使用磁盘上真实的 Phold 数据库目录
         wsl_gbk = WSLManager.to_wsl_path(str(input_gbk))
         wsl_out = WSLManager.to_wsl_path(str(out_dir))
+        wsl_db = WSLManager.to_wsl_path(str(ToolConfig.get_db_dir("phold_db")))
 
         cmd = [
             "bash", "-c",
-            f"export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 && phold run -i \"{wsl_gbk}\" -o \"{wsl_out}\" -d /opt/phold_db -t {threads} -f"
+            f"export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 && phold run -i \"{wsl_gbk}\" -o \"{wsl_out}\" -d \"{wsl_db}\" -t {threads} -f"
         ]
 
         current_phold_pct = 5

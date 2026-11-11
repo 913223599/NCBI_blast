@@ -40,6 +40,8 @@ class AnnotationPipeline:
         self.work_dir.mkdir(parents=True, exist_ok=True)
         self._is_cancelled = False
         self._current_max_progress = 0
+        # 逐阶段诊断：记录每个引擎/数据库是"已执行 / 被跳过 / 执行异常"，避免静默降级
+        self.diagnostics: List[Dict[str, Any]] = []
 
     def cancel(self):
         self._is_cancelled = True
@@ -66,6 +68,20 @@ class AnnotationPipeline:
             full_msg = f"{stage_prefix} {msg}".strip() if stage_prefix else msg
             self._broadcast_progress(mapped, full_msg, log)
         return on_sub_progress
+
+    def _record_stage(self, stage: str, status: str, detail: str, **extra) -> Dict[str, Any]:
+        """记录阶段诊断，并把"跳过/失败"原因同步到控制台日志，便于用户定位连接问题"""
+        entry: Dict[str, Any] = {"stage": stage, "status": status, "detail": detail}
+        entry.update(extra)
+        self.diagnostics.append(entry)
+        icon = {"ok": "✅", "skipped": "⏭️", "no-hit": "ℹ️", "failed": "❌"}.get(status, "•")
+        message = f"{icon} {stage}: {detail}"
+        logger.info(f"[流程诊断] {message}")
+        try:
+            self._broadcast_progress(self._current_max_progress, message, message)
+        except Exception:
+            pass
+        return entry
 
     async def execute(self, req: AnnotationRunRequest) -> Dict[str, Any]:
         """执行全套多引擎流式级联互补注释流程"""
@@ -120,6 +136,9 @@ class AnnotationPipeline:
                         actual_primary_engine = "pharokka"
                     except Exception as e:
                         logger.warning(f"Pharokka 运行异常，准备自动降级: {e}")
+                        self._record_stage("阶段1 主引擎 Pharokka", "failed", f"运行异常，已降级: {e}")
+                else:
+                    self._record_stage("阶段1 主引擎 Pharokka", "skipped", pharokka_eng.unavailable_reason or "Pharokka 引擎不可用")
 
             elif primary_engine_choice == "prokka":
                 prokka_eng = ProkkaEngine()
@@ -137,6 +156,9 @@ class AnnotationPipeline:
                         actual_primary_engine = "prokka"
                     except Exception as e:
                         logger.warning(f"Prokka 运行异常，准备自动降级: {e}")
+                        self._record_stage("阶段1 主引擎 Prokka", "failed", f"运行异常，已降级: {e}")
+                else:
+                    self._record_stage("阶段1 主引擎 Prokka", "skipped", prokka_eng.unavailable_reason or "Prokka 引擎不可用")
 
             elif primary_engine_choice == "prodigal":
                 prodigal_eng = ProdigalEngine()
@@ -154,6 +176,9 @@ class AnnotationPipeline:
                         actual_primary_engine = "prodigal"
                     except Exception as e:
                         logger.warning(f"Prodigal 运行异常，准备自动降级: {e}")
+                        self._record_stage("阶段1 主引擎 Prodigal", "failed", f"运行异常，已降级: {e}")
+                else:
+                    self._record_stage("阶段1 主引擎 Prodigal", "skipped", prodigal_eng.unavailable_reason or "Prodigal 引擎不可用")
 
             elif primary_engine_choice == "auto":
                 # 自动调度策略: 噬菌体尝试 Pharokka，细菌尝试 Prokka/Prodigal
@@ -173,6 +198,9 @@ class AnnotationPipeline:
                             actual_primary_engine = "pharokka"
                         except Exception as e:
                             logger.info(f"Auto 调度 Pharokka 异常，切换备选: {e}")
+                            self._record_stage("阶段1 主引擎 Pharokka", "failed", f"运行异常，切换备选: {e}")
+                    else:
+                        self._record_stage("阶段1 主引擎 Pharokka", "skipped", pharokka_eng.unavailable_reason or "Pharokka 引擎不可用")
 
                 if not primary_success:
                     prodigal_eng = ProdigalEngine()
@@ -190,6 +218,9 @@ class AnnotationPipeline:
                             actual_primary_engine = "prodigal"
                         except Exception as e:
                             logger.info(f"Auto 调度 Prodigal 异常，切换内置引擎: {e}")
+                            self._record_stage("阶段1 主引擎 Prodigal", "failed", f"运行异常，切换内置引擎: {e}")
+                    else:
+                        self._record_stage("阶段1 主引擎 Prodigal", "skipped", prodigal_eng.unavailable_reason or "Prodigal 引擎不可用")
 
             # 若未成功或选内置，使用 BuiltinEngine
             if not primary_success or not features:
@@ -218,24 +249,51 @@ class AnnotationPipeline:
 
             total_cds = sum(1 for f in features if f.feature_type == "CDS")
             unanno_cds = sum(1 for f in features if f.feature_type == "CDS" and AnnotationFuser.is_unannotated(f.product))
+            self._record_stage(
+                "阶段1 基础特征预测",
+                "ok",
+                f"实际主引擎: {actual_primary_engine}；特征 {len(features)} 个，其中 CDS {total_cds} 个（待打捞 {unanno_cds} 个）",
+                engine=actual_primary_engine,
+            )
             self._broadcast_progress(38, f"【阶段 1 完成】已构建 {len(features)} 个基础特征 (CDS: {total_cds} 个，待打捞功能: {unanno_cds} 个)")
 
             # ==========================================
             # 阶段 2: 权威数据库多核同源打捞 (Homology Rescue: 40% ~ 58%)
             # ==========================================
-            if req.enable_homology and files.get("faa") and Path(files["faa"]).exists() and unanno_cds > 0:
+            faa_path = files.get("faa")
+            if not req.enable_homology:
+                self._record_stage("阶段2 同源打捞", "skipped", "参数 enable_homology=false，用户关闭了同源打捞")
+            elif not (faa_path and Path(faa_path).exists() and Path(faa_path).stat().st_size > 0):
+                self._record_stage("阶段2 同源打捞", "skipped", f"缺少有效的蛋白 FASTA 输入 (faa={faa_path})")
+            elif unanno_cds <= 0:
+                self._record_stage("阶段2 同源打捞", "skipped", "所有 CDS 均已有明确功能，无需同源打捞")
+            else:
                 stage2_progress = self._make_stage_progress(40, 58, "【阶段 2/5: 同源打捞】")
                 self._broadcast_progress(40, "【阶段 2/5】流经 PhageScope 105万条权威蛋白库进行同源打捞...")
+                homo_eng = HomologyEngine()
                 try:
-                    homo_eng = HomologyEngine()
                     updated_cnt = homo_eng.complement_features(
                         features=features,
-                        query_faa=Path(files["faa"]),
+                        query_faa=Path(faa_path),
                         work_dir=self.work_dir,
                         threads=allocated_threads,
                         on_progress=stage2_progress
                     )
-                    
+                    db_diag = homo_eng.diagnostics or {}
+                    summary_bits = []
+                    for db_key, label in (("phagescope", "PhageScope"), ("swissprot", "Swiss-Prot"), ("cdd_pfam", "CDD/Pfam"), ("vfdb", "VFDB"), ("card", "CARD")):
+                        info = db_diag.get(db_key) or {}
+                        if not info:
+                            continue
+                        if not info.get("ready"):
+                            summary_bits.append(f"{label} 未就绪({info.get('path')})")
+                        elif info.get("added") or info.get("assigned"):
+                            summary_bits.append(f"{label} +{info.get('added') or info.get('assigned')}")
+                        elif info.get("hits"):
+                            summary_bits.append(f"{label} 命中{info.get('hits')}")
+                        else:
+                            summary_bits.append(f"{label} 已连接")
+
                     if updated_cnt > 0:
                         # 刷新写盘 Checkpoint
                         _, features, files = annotator_helper.export_features_to_files(
@@ -243,8 +301,22 @@ class AnnotationPipeline:
                             all_features=features,
                             output_dir=self.work_dir
                         )
+                        self._record_stage(
+                            "阶段2 同源打捞",
+                            "ok",
+                            f"成功为 {updated_cnt} 个基因赋予真实功能（{'；'.join(summary_bits) or '数据库诊断缺失'}）",
+                            databases=db_diag,
+                        )
+                    else:
+                        self._record_stage(
+                            "阶段2 同源打捞",
+                            "no-hit",
+                            f"已连接数据库但未获得可用同源注释（{'；'.join(summary_bits) or '数据库诊断缺失'}）",
+                            databases=db_diag,
+                        )
                 except Exception as e:
                     logger.warning(f"同源打捞阶段异常: {e}")
+                    self._record_stage("阶段2 同源打捞", "failed", f"执行异常: {e}")
 
             if self._is_cancelled:
                 annotation_db.mark_cancelled(self.task_id)
@@ -257,7 +329,13 @@ class AnnotationPipeline:
             # 阶段 3: 专业领域特征流式互补 (Domain / Specific Engine: 60% ~ 72%)
             # ==========================================
             # 若主引擎实际使用的不是 Pharokka（例如使用了 Prodigal/Prokka/Builtin），且处于噬菌体模式并有未注释基因，才流经 Pharokka 补充 PHROGs 分类
-            if req.sample_type.upper() in ["PHAGE", "VIRUS"] and actual_primary_engine != "pharokka" and unanno_cds > 0:
+            if req.sample_type.upper() not in ["PHAGE", "VIRUS"]:
+                self._record_stage("阶段3 Pharokka 级联", "skipped", f"样本类型为 {req.sample_type}，Pharokka 级联仅用于噬菌体/病毒样本")
+            elif actual_primary_engine == "pharokka":
+                self._record_stage("阶段3 Pharokka 级联", "skipped", "主引擎已使用 Pharokka，无需重复级联")
+            elif unanno_cds <= 0:
+                self._record_stage("阶段3 Pharokka 级联", "skipped", "已无未注释基因")
+            else:
                 pharokka_eng = PharokkaEngine()
                 if await pharokka_eng.is_available():
                     stage3_progress = self._make_stage_progress(60, 72, "【阶段 3/5: 级联互补】")
@@ -285,8 +363,14 @@ class AnnotationPipeline:
                                     all_features=features,
                                     output_dir=self.work_dir
                                 )
+                            self._record_stage("阶段3 Pharokka 级联", "ok", f"Pharokka 补充/修正 {p_upd} 个特征")
+                        else:
+                            self._record_stage("阶段3 Pharokka 级联", "no-hit", "Pharokka 未返回可用特征")
                     except Exception as p_err:
                         logger.warning(f"Pharokka 级联补充异常: {p_err}")
+                        self._record_stage("阶段3 Pharokka 级联", "failed", f"执行异常: {p_err}")
+                else:
+                    self._record_stage("阶段3 Pharokka 级联", "skipped", pharokka_eng.unavailable_reason or "Pharokka 引擎不可用")
 
             if self._is_cancelled:
                 annotation_db.mark_cancelled(self.task_id)
@@ -298,7 +382,13 @@ class AnnotationPipeline:
             # 阶段 4: Phold AI 蛋白质三维结构感知增强 (3D AI Structure Rescue: 74% ~ 88%)
             # ==========================================
             should_run_phold = req.enable_phold or primary_engine_choice == "phold"
-            if should_run_phold and files.get("gbk") and Path(files["gbk"]).exists() and unanno_cds > 0:
+            if not should_run_phold:
+                self._record_stage("阶段4 Phold 3D", "skipped", "参数 enable_phold=false，用户关闭了 3D 结构增强")
+            elif not (files.get("gbk") and Path(files["gbk"]).exists()):
+                self._record_stage("阶段4 Phold 3D", "skipped", f"缺少 GenBank 中间文件 (gbk={files.get('gbk')})")
+            elif unanno_cds <= 0:
+                self._record_stage("阶段4 Phold 3D", "skipped", "已无未注释基因")
+            else:
                 phold_eng = PholdEngine()
                 if await phold_eng.is_available():
                     stage4_progress = self._make_stage_progress(74, 88, "【阶段 4/5: 3D构象感知】")
@@ -317,8 +407,12 @@ class AnnotationPipeline:
                                 all_features=features,
                                 output_dir=self.work_dir
                             )
+                        self._record_stage("阶段4 Phold 3D", "ok" if phold_upd > 0 else "no-hit", f"Phold 补全 {phold_upd} 个假定蛋白")
                     except Exception as phold_err:
                         logger.warning(f"Phold 3D 空间结构增强阶段异常: {phold_err}")
+                        self._record_stage("阶段4 Phold 3D", "failed", f"执行异常: {phold_err}")
+                else:
+                    self._record_stage("阶段4 Phold 3D", "skipped", phold_eng.unavailable_reason or "Phold 引擎不可用")
 
             # 阶段 5: 全量重新评估并补齐功能分类大类 (89%)
             self._broadcast_progress(89, "【阶段 5/5】正在重新梳理并归纳基因功能大类分类...")
@@ -331,7 +425,11 @@ class AnnotationPipeline:
             # 阶段 6: 深度生物安全性与防御系统审计 (CARD / VFDB / Anti-CRISPR: 90% ~ 95%)
             # ==========================================
             safety_audit_res: Optional[Dict[str, Any]] = None
-            if req.enable_safety_audit and files.get("faa") and Path(files["faa"]).exists():
+            if not req.enable_safety_audit:
+                self._record_stage("阶段6 生物安全审计", "skipped", "参数 enable_safety_audit=false，用户关闭了安全审计")
+            elif not (files.get("faa") and Path(files["faa"]).exists()):
+                self._record_stage("阶段6 生物安全审计", "skipped", "缺少蛋白 FASTA 输入")
+            else:
                 self._broadcast_progress(91, "正在执行生物安全性审计 (CARD耐药基因/VFDB毒力因子/Anti-CRISPR逃逸扫描)...")
                 try:
                     from .deep_audit import DeepSafetyAuditor
@@ -350,8 +448,16 @@ class AnnotationPipeline:
                     fused_acr_cnt = AnnotationFuser.integrate_safety_audit(features, safety_audit_res)
                     if fused_acr_cnt > 0:
                         logger.info(f"Successfully integrated {fused_acr_cnt} Anti-CRISPR/Safety annotations into features")
+                    self._record_stage(
+                        "阶段6 生物安全审计",
+                        "ok",
+                        f"CARD 耐药 {len(safety_audit_res.get('amr_genes', []))} 个，VFDB 毒力 {len(safety_audit_res.get('virulent_factors', []))} 个，"
+                        f"Anti-CRISPR: {safety_audit_res.get('anti_crispr_status')}",
+                        databases=getattr(auditor, "diagnostics", {}),
+                    )
                 except Exception as audit_err:
                     logger.warning(f"生物安全审计阶段异常: {audit_err}")
+                    self._record_stage("阶段6 生物安全审计", "failed", f"执行异常: {audit_err}")
 
             # ==========================================
             # 阶段 7: 生成最终标准成果与落盘 (96% ~ 99%)
@@ -372,6 +478,8 @@ class AnnotationPipeline:
                 features=features
             )
             summary_dict = comprehensive_summary.model_dump()
+            # 附带逐阶段连接诊断，便于前端/报告直接说明"哪个库没连上、为什么跳过"
+            summary_dict["pipeline_diagnostics"] = self.diagnostics
             summary_file = self.work_dir / "summary.json"
             with open(summary_file, "w", encoding="utf-8") as f:
                 json.dump(summary_dict, f, ensure_ascii=False, indent=2)
