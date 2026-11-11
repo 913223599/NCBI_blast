@@ -56,7 +56,15 @@ class ConfigManager:
             self._initialized = True
 
     def _load_config(self):
-        """从配置文件加载配置数据"""
+        """从配置文件加载配置数据
+
+        config.json 存放用户私有数据（API Key、本机工具路径等），不纳入版本库。
+        首次运行或文件被清理时，自动以 config.default.json 为模板生成一份，
+        保证即使不经过启动器的环境自愈，配置也有完整基线。
+        """
+        if not self.config_file.exists():
+            self._seed_from_template()
+
         if self.config_file.exists():
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
@@ -67,6 +75,22 @@ class ConfigManager:
         else:
             logging.warning(f"配置文件不存在: {self.config_file}")
             self.config_data = {}
+
+    def _seed_from_template(self):
+        """以 config.default.json 为模板生成用户配置（不含任何真实密钥）"""
+        template = self.config_file.parent / "config.default.json"
+        if not template.exists():
+            logging.warning(f"未找到配置模板: {template}")
+            return
+        try:
+            with open(template, 'r', encoding='utf-8') as f:
+                template_data = json.load(f)
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(template_data, f, indent=2, ensure_ascii=False)
+            logging.info(f"已从模板生成用户配置: {self.config_file}")
+        except Exception as e:
+            logging.error(f"从模板生成配置失败: {e}")
 
     def _save_config(self):
         """保存配置数据到文件 (线程安全)"""
