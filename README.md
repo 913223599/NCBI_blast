@@ -185,6 +185,7 @@ NCBI BLAST/
 ├── dev.bat                      # 纯前端 Vite 开发启动脚本
 ├── RUN_DEV_ELECTRON.bat         # 桌面端完整环境一键自愈与启动脚本
 ├── requirements.txt             # Python 后端核心依赖列表
+├── requirements-optional.txt    # Python 可选依赖列表 (缺失不影响程序启动)
 └── config.json                  # 系统核心全局配置文件
 ```
 

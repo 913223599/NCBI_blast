@@ -7,7 +7,9 @@ NCBI BLAST Pro - 环境自愈与依赖自动补齐模块
 3. 配置文件与翻译冷备数据库自愈
 4. 本地 BLAST+ 套件多路径智能探测
 5. pip 国内镜像源 (清华/阿里) 自动配置与全量 Python 依赖补齐
-6. 遵循无 Emoji 规范与 UTF-8 编码
+6. 核心依赖与可选依赖分级: 可选依赖 (edlib) 安装失败仅告警, 不再阻塞启动
+7. 优先使用 uv 解析依赖 (pip 回溯极慢且易卡死), 缺失时自动引导安装
+8. 遵循无 Emoji 规范与 UTF-8 编码
 """
 
 import os
@@ -44,8 +46,14 @@ MODULE_IMPORT_MAP = {
     "anyio": "anyio",
     "starlette": "starlette",
     "python-multipart": "multipart",
-    "edlib": "edlib",
     "openai": "openai",
+}
+
+# 可选依赖：缺失或安装失败时仅告警，不影响程序启动
+# edlib 在 Windows 上没有预编译 wheel，需 MSVC C++ 编译器现场编译；
+# 项目代码未直接调用该包，因此不做强制性要求。
+OPTIONAL_MODULE_IMPORT_MAP = {
+    "edlib": "edlib",
 }
 
 # 国内镜像源配置
@@ -53,6 +61,12 @@ PRIMARY_INDEX_URL = "https://pypi.tuna.tsinghua.edu.cn/simple"
 PRIMARY_TRUSTED_HOST = "pypi.tuna.tsinghua.edu.cn"
 FALLBACK_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
 FALLBACK_TRUSTED_HOST = "mirrors.aliyun.com"
+
+# 镜像源尝试顺序：主源优先，失败后自动降级到备用源
+MIRRORS = [
+    {"url": PRIMARY_INDEX_URL, "host": PRIMARY_TRUSTED_HOST, "extra": FALLBACK_INDEX_URL},
+    {"url": FALLBACK_INDEX_URL, "host": FALLBACK_TRUSTED_HOST, "extra": None},
+]
 
 
 def heal_directories(project_root: Path):
@@ -148,6 +162,39 @@ def detect_blast_installation():
         print("       如需使用本地离线比对加速，建议安装: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/")
 
 
+def detect_git_installation(project_root: Path):
+    """探测 Git 命令行工具，供“软件在线更新”功能使用"""
+    from shutil import which as _which
+
+    candidates = [
+        project_root / "tools" / "git" / "cmd" / "git.exe",
+        project_root / "tools" / "MinGit" / "cmd" / "git.exe",
+        Path(r"C:\Program Files\Git\cmd\git.exe"),
+        Path(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+    ]
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        candidates.append(Path(local_appdata) / "Programs" / "Git" / "cmd" / "git.exe")
+
+    found = next((c for c in candidates if c.is_file()), None)
+    if found:
+        git_dir = str(found.parent)
+        if git_dir not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = git_dir + os.pathsep + os.environ.get("PATH", "")
+        print(f"[信息] 已定位 Git 命令行工具: {found}")
+        return
+
+    if _which("git"):
+        print(f"[信息] Git 命令行工具已在 PATH 中就绪: {_which('git')}")
+        return
+
+    print("[提示] 未检测到 Git，软件在线更新功能将不可用。")
+    print("       安装方式任选其一:")
+    print("       1) winget install --id Git.Git -e --source winget")
+    print("       2) 下载 Git for Windows: https://git-scm.com/download/win")
+    print("       3) 解压便携版到项目的 tools\\git 目录，或在 config.json 中设置 git_bin_path")
+
+
 def configure_pip_mirror():
     """配置虚拟环境内部 pip 国内镜像源"""
     try:
@@ -179,10 +226,11 @@ def configure_pip_mirror():
         print(f"[警告] 配置 pip 镜像源时出错: {e}")
 
 
-def check_missing_modules():
+def check_missing_modules(module_map: dict = None) -> list:
     """快速检测缺失的依赖模块"""
+    module_map = MODULE_IMPORT_MAP if module_map is None else module_map
     missing = []
-    for pkg_name, import_name in MODULE_IMPORT_MAP.items():
+    for pkg_name, import_name in module_map.items():
         try:
             spec = importlib.util.find_spec(import_name)
             if spec is None:
@@ -192,53 +240,147 @@ def check_missing_modules():
     return missing
 
 
-def install_requirements(req_file: Path):
-    """使用国内镜像源加速下载并补齐缺失依赖"""
-    print(f"[信息] 正在通过清华镜像源 ({PRIMARY_INDEX_URL}) 下载并补齐 Python 依赖...")
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "-r",
-        str(req_file),
-        "-i",
-        PRIMARY_INDEX_URL,
-        "--trusted-host",
-        PRIMARY_TRUSTED_HOST,
-        "--extra-index-url",
-        FALLBACK_INDEX_URL,
-    ]
-
+def read_requirement_specs(req_file: Path) -> list:
+    """读取 requirements 清单中的依赖条目（忽略注释与空行）"""
+    specs = []
     try:
-        ret = subprocess.run(cmd, check=False)
-        if ret.returncode != 0:
-            print("[警告] 清华镜像源连接出现异常，尝试使用阿里云备用镜像源...")
-            cmd_fallback = [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "-r",
-                str(req_file),
-                "-i",
-                FALLBACK_INDEX_URL,
-                "--trusted-host",
-                FALLBACK_TRUSTED_HOST,
-            ]
-            ret_fallback = subprocess.run(cmd_fallback, check=False)
-            if ret_fallback.returncode != 0:
-                print(f"[错误] Python 依赖安装失败，退出码: {ret_fallback.returncode}")
-                return False
-        return True
+        for raw_line in req_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.split("#", 1)[0].strip()
+            if line and not line.startswith("-"):
+                specs.append(line)
     except Exception as e:
-        print(f"[错误] 执行 pip install 时发生异常: {e}")
+        print(f"[警告] 读取依赖清单失败 ({req_file.name}): {e}")
+    return specs
+
+
+def _req_name(spec: str) -> str:
+    """提取依赖条目中的规范化包名，用于与模块缺失清单比对"""
+    name = spec.split(";", 1)[0]
+    for sep in ("==", ">=", "<=", "~=", "!=", ">", "<", "[", " "):
+        name = name.split(sep, 1)[0]
+    return name.strip().replace("_", "-").lower()
+
+
+def specs_for(packages: list, specs: list) -> list:
+    """按缺失包名挑选需要安装的依赖条目（保留版本约束）"""
+    wanted = {p.replace("_", "-").lower() for p in packages}
+    declared = {_req_name(s) for s in specs}
+    picked = [s for s in specs if _req_name(s) in wanted]
+    # 清单中未声明的缺失包，直接按包名安装
+    picked += [p for p in packages if p.replace("_", "-").lower() not in declared]
+    return picked
+
+
+def _installer_path(name: str):
+    """在虚拟环境内查找可执行文件，找不到时回退到 PATH"""
+    candidate = Path(sys.executable).parent / name
+    if candidate.exists():
+        return candidate
+    found = shutil.which(name)
+    return Path(found) if found else None
+
+
+def _uv_path():
+    return _installer_path("uv.exe") or _installer_path("uv")
+
+
+def _build_install_command(uv_path, specs: list, mirror: dict, binary_only: bool = False) -> list:
+    """构造依赖安装命令；uv 缺失时回退到 pip"""
+    if uv_path:
+        cmd = [
+            str(uv_path), "pip", "install",
+            "--python", sys.executable,
+            "--index-url", mirror["url"],
+            "--index-strategy", "unsafe-best-match",
+        ]
+        if mirror["extra"]:
+            cmd += ["--extra-index-url", mirror["extra"]]
+        if binary_only:
+            # 禁止本地编译，避免无 C++ 编译环境时长时间报错重试
+            cmd += ["--no-build"]
+    else:
+        cmd = [
+            sys.executable, "-m", "pip", "install",
+            "-i", mirror["url"],
+            "--trusted-host", mirror["host"],
+            "--timeout", "120",
+            "--disable-pip-version-check",
+        ]
+        if mirror["extra"]:
+            cmd += ["--extra-index-url", mirror["extra"]]
+        if binary_only:
+            cmd += ["--only-binary", ":all:"]
+    return cmd + specs
+
+
+def _run_installer(cmd: list, project_root: Path, quiet: bool = False) -> bool:
+    """执行安装命令，屏蔽 uv 缓存目录的路径限制"""
+    env = os.environ.copy()
+    if Path(cmd[0]).name.lower().startswith("uv"):
+        env.setdefault("UV_CACHE_DIR", str(project_root / "scratch" / "uv-cache"))
+        env.setdefault("UV_LINK_MODE", "copy")
+    output = subprocess.DEVNULL if quiet else None
+    try:
+        return subprocess.run(cmd, check=False, env=env, stdout=output, stderr=output).returncode == 0
+    except Exception as e:
+        print(f"[警告] 执行依赖安装命令失败: {e}")
         return False
+
+
+def ensure_uv(project_root: Path):
+    """确保 uv 可用；缺失时通过 pip 引导安装（单包安装，速度快且无回溯）"""
+    uv_path = _uv_path()
+    if uv_path:
+        return uv_path
+
+    print("[信息] 未检测到 uv 依赖解析器，正在引导安装以加速依赖补齐...")
+    for mirror in MIRRORS:
+        if _run_installer(_build_install_command(None, ["uv"], mirror), project_root):
+            break
+    uv_path = _uv_path()
+    if not uv_path:
+        print("[警告] uv 引导安装失败，将回退使用 pip 安装依赖。")
+    return uv_path
+
+
+def install_packages(project_root: Path, specs: list, label: str, binary_only: bool = False,
+                     quiet: bool = False, retry_each: bool = True) -> list:
+    """安装指定依赖：优先批量安装，失败后逐包兜底；返回仍未安装成功的条目"""
+    if not specs:
+        return []
+
+    uv_path = ensure_uv(project_root)
+    engine = "uv" if uv_path else "pip"
+    print(f"[信息] 正在通过 {engine} 从国内镜像源补齐{label} ({len(specs)} 项)...")
+
+    for mirror in MIRRORS:
+        cmd = _build_install_command(uv_path, specs, mirror, binary_only)
+        if _run_installer(cmd, project_root, quiet=quiet):
+            return []
+        print(f"[警告] 镜像源 {mirror['url']} 安装{label}未成功，尝试下一个镜像源...")
+
+    if not retry_each:
+        return list(specs)
+
+    # 逐包兜底：避免单个依赖失败导致整批依赖回滚
+    print(f"[信息] 批量安装未成功，正在逐包重试{label}...")
+    failed = []
+    for spec in specs:
+        installed = False
+        for mirror in MIRRORS:
+            cmd = _build_install_command(uv_path, [spec], mirror, binary_only)
+            if _run_installer(cmd, project_root, quiet=quiet):
+                installed = True
+                break
+        if not installed:
+            failed.append(spec)
+    return failed
 
 
 def main():
     project_root = Path(__file__).resolve().parent.parent.parent
     req_file = project_root / "requirements.txt"
+    optional_req_file = project_root / "requirements-optional.txt"
 
     print("---------------------------------------------------")
     print("[1/3] 正在执行附属环境与目录自愈检查...")
@@ -246,28 +388,55 @@ def main():
     heal_auxiliary_binaries(project_root)
     heal_configurations(project_root)
     detect_blast_installation()
+    detect_git_installation(project_root)
 
     print("---------------------------------------------------")
     print("[2/3] 正在校验 Python 运行依赖与配置国内镜像源...")
     configure_pip_mirror()
 
-    missing = check_missing_modules()
+    if not req_file.exists():
+        print(f"[错误] 未找到核心依赖清单: {req_file}")
+        return 1
+
+    # 核心依赖：缺失且无法补齐时判定自愈失败
+    core_specs = read_requirement_specs(req_file)
+    missing = check_missing_modules(MODULE_IMPORT_MAP)
     if not missing:
-        print("[信息] Python 所有核心依赖已完整就绪。")
+        print("[信息] Python 核心依赖已完整就绪。")
     else:
-        print(f"[警告] 检测到缺失依赖包 ({len(missing)}项): {', '.join(missing)}")
-        if req_file.exists():
-            success = install_requirements(req_file)
-            if not success:
-                return 1
-            remaining = check_missing_modules()
-            if remaining:
-                print(f"[错误] 仍有未成功安装的依赖包: {', '.join(remaining)}")
-                return 1
-            print("[信息] Python 依赖包已全部补齐成功。")
-        else:
-            print(f"[错误] 未找到 requirements.txt 文件: {req_file}")
+        print(f"[警告] 检测到缺失核心依赖 ({len(missing)}项): {', '.join(missing)}")
+        failed = install_packages(project_root, specs_for(missing, core_specs), "核心依赖")
+        remaining = check_missing_modules(MODULE_IMPORT_MAP)
+        if remaining:
+            print(f"[错误] 核心依赖补齐失败: {', '.join(remaining)}")
+            if failed:
+                print(f"[提示] 安装失败条目: {', '.join(failed)}")
             return 1
+        print("[信息] Python 核心依赖已全部补齐成功。")
+
+    # 可选依赖：安装失败仅告警，不阻塞启动
+    optional_specs = read_requirement_specs(optional_req_file) if optional_req_file.exists() else []
+    optional_missing = check_missing_modules(OPTIONAL_MODULE_IMPORT_MAP)
+    if not optional_missing:
+        print("[信息] 可选依赖已就绪。")
+    else:
+        print(f"[信息] 检测到缺失可选依赖 ({len(optional_missing)}项): {', '.join(optional_missing)}")
+        install_packages(
+            project_root,
+            specs_for(optional_missing, optional_specs),
+            "可选依赖",
+            binary_only=True,
+            quiet=True,
+            retry_each=False,
+        )
+        still_missing = check_missing_modules(OPTIONAL_MODULE_IMPORT_MAP)
+        if still_missing:
+            print(f"[警告] 可选依赖未能安装: {', '.join(still_missing)}")
+            print("       原因: 该包在 Windows 上无预编译 wheel，需要 Microsoft C++ Build Tools 现场编译。")
+            print("       说明: 程序未直接调用该包，环境自愈继续执行，不影响启动。")
+            print("       如需启用: https://visualstudio.microsoft.com/visual-cpp-build-tools/")
+        else:
+            print("[信息] 可选依赖已全部补齐成功。")
 
     print("---------------------------------------------------")
     print("[3/3] Python 环境自愈与依赖审计全部通过。")
