@@ -44,7 +44,7 @@ class CondaResolver:
         # 3. 针对 Windows 进行深度搜索
         if os.name == 'nt':
             roots = [
-                Path(os.environ.get("USERPROFILE", "C:/Users/Administrator")),
+                Path(os.environ.get("USERPROFILE") or Path.home()),
                 Path("C:/ProgramData"),
                 Path("D:/"),
                 Path(os.environ.get("LOCALAPPDATA", ""))

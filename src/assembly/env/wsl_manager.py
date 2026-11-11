@@ -36,7 +36,9 @@ class WSLManager:
             if str(abs_path).startswith(str(root_path)):
                 relative = abs_path.relative_to(root_path)
                 # 使用预设的无空格软链接路径
-                return f"/ncbi_blast_link/{str(relative).replace('\\', '/')}"
+                # 注意: Python 3.11 的 f-string 表达式内不允许出现反斜杠，需先转换
+                relative_posix = str(relative).replace("\\", "/")
+                return f"/ncbi_blast_link/{relative_posix}"
         except:
             pass
 
