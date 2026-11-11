@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "op": "number",
+      "entries": [
+        {
+          "text": "Bouras G, Nepal R, Houtak G, et al. Pharokka: a fast scalable bacteriophage annotation tool. Bioinformatics. 2023. doi:10.1093/bioinformatics/btac776. PMID: 36453861.",
+          "bookmark": "Ref_Pharokka"
+        },
+        {
+          "text": "McNair K, Zhou C, Dinsdale EA, et al. PHANOTATE: a novel approach to gene identification in phage genomes. Bioinformatics. 2019. doi:10.1093/bioinformatics/btz265. PMID: 31329826.",
+          "bookmark": "Ref_Phanotate"
+        },
+        {
+          "text": "Bouras G, Grigson SR, Mirdita M, et al. Protein structure-informed bacteriophage genome annotation with Phold. Nucleic Acids Res. 2026. doi:10.1093/nar/gkaf1448. PMID: 41495893.",
+          "bookmark": "Ref_Phold"
+        },
+        {
+          "text": "Terzian P, Olo Ndela E, Galiez C, et al. PHROG: families of prokaryotic virus proteins clustered using remote homology. NAR Genom Bioinform. 2021. doi:10.1093/nargab/lqab067. PMID: 34377978.",
+          "bookmark": "Ref_PHROG"
+        },
+        {
+          "text": "Wang RH, Yang S, Liu Z, et al. PhageScope: a well-annotated bacteriophage database with automatic analyses and visualizations. Nucleic Acids Res. 2024. doi:10.1093/nar/gkad979. PMID: 37904614.",
+          "bookmark": "Ref_PhageScope"
+        },
+        {
+          "text": "Alcock BP, Huynh W, Chalil R, et al. CARD 2023: expanded curation, support for machine learning, and resistome prediction at the Comprehensive Antibiotic Resistance Database. Nucleic Acids Res. 2023. doi:10.1093/nar/gkac920. PMID: 36263822.",
+          "bookmark": "Ref_CARD"
+        },
+        {
+          "text": "Liu B, Zheng D, Zhou S, et al. VFDB 2022: a general classification scheme for bacterial virulence factors. Nucleic Acids Res. 2022. doi:10.1093/nar/gkab1107. PMID: 34850947.",
+          "bookmark": "Ref_VFDB"
+        },
+        {
+          "text": "Eitzinger S, Asif A, Watters KE, et al. Machine learning predicts new anti-CRISPR proteins. Nucleic Acids Res. 2020. doi:10.1093/nar/gkaa219. PMID: 32286628.",
+          "bookmark": "Ref_Acranker"
+        }
+      ]
+    },
+    {
+      "op": "cite",
+      "bookmark": "Ref_Pharokka",
+      "anchor": {
+        "text": "Pharokka（PHANOTATE 1.6.7 从头预测算法）完成编码基因与 tRNA 识别",
+        "position": "after"
+      },
+      "superscript": true
+    },
+    {
+      "op": "cite",
+      "bookmark": "Ref_Phanotate",
+      "anchor": {
+        "text": "遗传密码表 11；预测输出经坐标核验并与 gbk/features.json 双向一致",
+        "position": "after"
+      },
+      "superscript": true
+    },
+    {
+      "op": "cite",
+      "bookmark": "Ref_PhageScope",
+      "anchor": {
+        "text": "BLASTP 比对 Swiss-Prot、PhageScope 数据库及 CDD/Pfam 保守结构域库",
+        "position": "after"
+      },
+      "superscript": true
+    },
+    {
+      "op": "cite",
+      "bookmark": "Ref_PHROG",
+      "anchor": {
+        "text": "结合 PHROG 噬菌体直系同源蛋白家族数据库进行家族归属与功能类别划分",
+        "position": "after"
+      },
+      "superscript": true
+    },
+    {
+      "op": "cite",
+      "bookmark": "Ref_Phold",
+      "anchor": {
+        "text": "对同源注释未能覆盖的功能未知基因进行补充注释",
+        "position": "after"
+      },
+      "superscript": true
+    },
+    {
+      "op": "cite",
+      "bookmark": "Ref_CARD",
+      "anchor": {
+        "text": "针对抗生素耐药基因（CARD）",
+        "position": "after"
+      },
+      "superscript": true
+    },
+    {
+      "op": "cite",
+      "bookmark": "Ref_VFDB",
+      "anchor": {
+        "text": "与毒力因子（VFDB）分别进行数据库检索",
+        "position": "after"
+      },
+      "superscript": true
+    },
+    {
+      "op": "cite",
+      "bookmark": "Ref_Acranker",
+      "anchor": {
+        "text": "并检测 Anti-CRISPR 基因（Acranker）",
+        "position": "after"
+      },
+      "superscript": true
+    }
+  ]
+}

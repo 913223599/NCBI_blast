@@ -73,16 +73,18 @@ data/*
 # ------------------------------------------------------------------------------
 # 4. 分析运行结果、中间产物与生成报告
 # ------------------------------------------------------------------------------
-results/
-reports/
+/results/
+/reports/
 quast/quast_results/
-archive/
-test_data/
-test/
-tests/
+quast/test_data/
+quast/quast_libs/barrnap/build/*.aln
+/archive/
+/test_data/
+/test/
 validation_audit_res.json
 *_results*.csv
 *.csv
+!/predefined_terms.csv
 
 # ------------------------------------------------------------------------------
 # 5. Office 文档临时与锁定文件
@@ -100,10 +102,10 @@ __pycache__/
 *$py.class
 *.so
 .Python
-venv/
-env/
-ENV/
-.venv/
+/venv/
+/env/
+/ENV/
+/.venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -111,8 +113,8 @@ ENV/
 htmlcov/
 *.egg-info/
 .eggs/
-build/
-dist/
+/build/
+/dist/
 *.spec
 __pyrefly_virtual__/
 
@@ -120,21 +122,21 @@ __pyrefly_virtual__/
 # 7. Node.js 与前端编译构建产物
 # ------------------------------------------------------------------------------
 node_modules/
-dist/
+/src/web-next/dist/
 dist-ssr/
 .eslintcache
 .turbo/
-storage/
+/storage/
 
 # ------------------------------------------------------------------------------
 # 8. 日志、临时调试输出与抓取截图
 # ------------------------------------------------------------------------------
-logs/
+/logs/
 *.log
 debug_output.txt
 jumbo_log*.txt
 *_help.txt
-scripts/*.png
+/scripts/*.png
 order*.png
 login*.png
 store_*.png
@@ -142,9 +144,9 @@ stop
 1
 
 # ------------------------------------------------------------------------------
-# 9. 临时开发脚本与草稿目录
+# 9. 临时开发脚本与草稿目录 (保留 /scripts/ 下核心生产与运维脚本)
 # ------------------------------------------------------------------------------
-scratch/
+/scratch/
 tmp_*.py
 temp_*.py
 check_qc.py
@@ -158,7 +160,27 @@ sample_refinement.faa
 test_refinement.faa
 src/nucmer.error
 src/test_shm.py
-scripts/
+/scripts/*
+!/scripts/build_annotation_report.py
+!/scripts/build_t5_comparative_report.py
+!/scripts/citations_ops.json
+!/scripts/setup_assembly_env.sh
+!/scripts/setup_pharokka.sh
+!/scripts/setup_phold.sh
+!/scripts/install_phage_tools.sh
+!/scripts/fix_minced.sh
+!/scripts/vibrant_wrapper.sh
+!/scripts/virsorter_wrapper.sh
+!/scripts/install_mail_poll_task.ps1
+!/scripts/download_externals.ps1
+!/scripts/generate_project_tree.ps1
+!/scripts/build_cdd_rps_index.py
+!/scripts/build_downloaded_dbs.py
+!/scripts/verify_and_install_deps.py
+!/scripts/verify_consensus_algorithm.py
+!/scripts/heal_assembly_metrics.py
+!/scripts/refresh_task_results.py
+!/scripts/自动化流程文档.md
 .lingma/rules/
 
 # ------------------------------------------------------------------------------
