@@ -2,7 +2,8 @@
 """mail_download 配置加载
 
 配置独立存放在 <项目根>/mail_config.json（不写入主 config.json）。
-授权码不进入任何配置文件，仅从环境变量 YS_MAIL_AUTH_CODE 读取。
+授权码不进入 mail_config.json：优先读取独立密钥文件 .mail_auth / .mail_smtp_auth
+（已被 .gitignore 忽略，可在界面中编辑），其次读取环境变量 YS_MAIL_AUTH_CODE。
 """
 import json
 import os
@@ -44,13 +45,45 @@ class MailConfig:
     reply_to: str = "yssw_service@163.com"  # 结果回传默认收件人
     send_dir: str = "results/email_sends"
 
+    # 授权码密钥文件（相对路径基于配置文件所在目录；已加入 .gitignore，不入库）
+    auth_code_file: str = ".mail_auth"
+    smtp_auth_code_file: str = ".mail_smtp_auth"
+    # 配置文件所在目录（由 load_config 注入，用于解析密钥文件相对路径）
+    config_dir: str = ""
+
+    def _resolve_secret_path(self, name: str) -> Optional[Path]:
+        if not name:
+            return None
+        p = Path(name)
+        if p.is_absolute():
+            return p
+        base = Path(self.config_dir) if self.config_dir else PROJECT_ROOT
+        return base / p
+
+    def _read_secret_file(self, name: str) -> Optional[str]:
+        p = self._resolve_secret_path(name)
+        if p is None or not p.is_file():
+            return None
+        try:
+            value = p.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            return None
+        return value or None
+
     @property
     def auth_code(self) -> Optional[str]:
-        return os.environ.get(self.auth_code_env) or None
+        """IMAP 授权码：密钥文件优先（界面可编辑），其次环境变量。"""
+        return self._read_secret_file(self.auth_code_file) or os.environ.get(self.auth_code_env) or None
 
     @property
     def smtp_auth_code(self) -> Optional[str]:
-        return os.environ.get(self.smtp_auth_code_env) or None
+        """SMTP 授权码：独立密钥文件 > 环境变量 > 与收件账号相同时复用 IMAP 授权码。"""
+        code = self._read_secret_file(self.smtp_auth_code_file) or os.environ.get(self.smtp_auth_code_env)
+        if code:
+            return code
+        if self.smtp_account and self.smtp_account == self.account:
+            return self.auth_code
+        return None
 
     @property
     def resolved_download_dir(self) -> Path:
@@ -81,10 +114,11 @@ def load_config(config_path: Optional[str] = None, require_imap_auth: bool = Tru
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     cfg = MailConfig.from_dict(data)
+    cfg.config_dir = str(path.resolve().parent)
     if require_imap_auth and cfg.auth_code is None:
         raise RuntimeError(
-            f"未找到邮箱授权码：请设置环境变量 {cfg.auth_code_env}（QQ 邮箱 IMAP 授权码），"
-            f"或用 --auth-code-env 指定其他环境变量。"
+            f"未找到邮箱授权码：请在界面中填写授权码（写入 {cfg.auth_code_file}），"
+            f"或设置环境变量 {cfg.auth_code_env}（QQ 邮箱 IMAP 授权码）。"
         )
     return cfg
 

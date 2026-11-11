@@ -1,10 +1,13 @@
 <script setup lang="ts">
 /**
- * MailAutoPipelineModule - 邮件自动收件 -> 注释 -> Word 报告 -> SMTP 回传工作台
- * 职责：可视化监控与驱动噬菌体基因组邮件自动化注释、Word 交付报告构建与 SMTP 自动回传全流程
+ * MailAutoPipelineModule - 邮件收件 -> 注释 -> Word 报告 -> SMTP 回传
+ * 职责：流水线状态展示与触发、邮箱配置与授权码编辑、目录修改迁移、历史数据清理
  */
 import { ref, onMounted, onUnmounted } from 'vue'
-import { resolveApiUrl } from '../../../utils/fileDownloader'
+import PathField from '../components/PathField.vue'
+import CleanupDialog from '../components/CleanupDialog.vue'
+import type { CleanupOption } from '../components/CleanupDialog.vue'
+import { getJson, postJson, openLocalPath, describeMigration } from '../api'
 
 interface AttachmentItem {
   filename: string
@@ -49,13 +52,32 @@ interface ProcessedItem {
   mail_date: string
 }
 
-const loading = ref(false)
+interface AuthInfo {
+  imap_ready: boolean
+  imap_masked: string
+  imap_file: string
+  smtp_ready: boolean
+  smtp_masked: string
+  smtp_file: string
+  smtp_separate: boolean
+}
+
+const API = '/api/other_tools/mail_pipeline'
+
 const actionMessage = ref('')
 const errorMessage = ref('')
+const busy = ref(false)
 const showConfigModal = ref(false)
+const showAuthModal = ref(false)
+const showCleanup = ref(false)
 const activeSubTab = ref<'batches' | 'outbound' | 'processed' | 'logs'>('batches')
 
-const authReady = ref(false)
+const auth = ref<AuthInfo>({
+  imap_ready: false, imap_masked: '', imap_file: '',
+  smtp_ready: false, smtp_masked: '', smtp_file: '', smtp_separate: false
+})
+const authForm = ref({ imap: '', smtp: '', clearSmtp: false })
+
 const runtime = ref<any>({
   running: false,
   started_at: null,
@@ -69,17 +91,20 @@ const runtime = ref<any>({
 const configForm = ref({
   imap_server: 'imap.qq.com',
   imap_port: 993,
-  account: '913223599@qq.com',
-  sender_whitelist_str: 'yssw_service@163.com',
+  account: '',
+  sender_whitelist_str: '',
   since_days: 7,
   download_dir: 'results/email_downloads',
   smtp_server: 'smtp.qq.com',
   smtp_port: 465,
-  smtp_account: '913223599@qq.com',
-  smtp_display_name: '元昇生物注释服务',
-  reply_to: 'yssw_service@163.com',
+  smtp_account: '',
+  smtp_display_name: '',
+  reply_to: '',
   send_dir: 'results/email_sends'
 })
+
+const resolvedDownloadDir = ref('')
+const resolvedSendDir = ref('')
 
 const runOptions = ref({
   since_days: 7,
@@ -95,16 +120,31 @@ const processedItems = ref<ProcessedItem[]>([])
 const processedCount = ref(0)
 const pipelineLogs = ref<string[]>([])
 
+const cleanupOptions: CleanupOption[] = [
+  { key: 'batches', label: '收件批次 (up_*)', desc: '下载目录中的附件批次文件夹', checked: true },
+  { key: 'outbound', label: '回传压缩包', desc: '回传目录中的 *.zip 与 *.manifest.json', checked: true },
+  { key: 'docx', label: 'Word 报告', desc: '回传目录中的 *.docx' },
+  { key: 'annotations', label: '注释中间目录', desc: 'results/annotations 下与回传包对应的 ANNO_* 目录' },
+  { key: 'logs', label: '流水线日志', desc: '清空 pipeline.log 与 run_errors.log' },
+  { key: 'index', label: '去重记录', desc: '清除后已处理过的附件会被重新下载处理', danger: true }
+]
+
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-async function loadOverview() {
-  loading.value = true
+function setInfo(msg: string): void {
+  actionMessage.value = msg
   errorMessage.value = ''
+}
+
+function setError(err: any): void {
+  errorMessage.value = err?.message || String(err)
+  actionMessage.value = ''
+}
+
+async function loadOverview(): Promise<void> {
   try {
-    const resp = await fetch(resolveApiUrl('/api/other_tools/mail_pipeline/overview'))
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
-    authReady.value = Boolean(data.auth_ready)
+    const data = await getJson(`${API}/overview`)
+    if (data.auth) auth.value = data.auth
     runtime.value = data.runtime || runtime.value
     batches.value = data.batches || []
     outboundPackages.value = data.outbound_packages || []
@@ -112,56 +152,43 @@ async function loadOverview() {
     processedItems.value = data.processed_items || []
     processedCount.value = data.processed_count || 0
     pipelineLogs.value = data.pipeline_logs || []
+    resolvedDownloadDir.value = data.resolved_download_dir || ''
+    resolvedSendDir.value = data.resolved_send_dir || ''
 
-    if (data.config) {
-      const c = data.config
-      configForm.value = {
-        imap_server: c.imap_server || 'imap.qq.com',
-        imap_port: c.imap_port || 993,
-        account: c.account || '',
-        sender_whitelist_str: (c.sender_whitelist || []).join(', '),
-        since_days: c.since_days ?? 7,
-        download_dir: c.download_dir || 'results/email_downloads',
-        smtp_server: c.smtp_server || 'smtp.qq.com',
-        smtp_port: c.smtp_port || 465,
-        smtp_account: c.smtp_account || '',
-        smtp_display_name: c.smtp_display_name || '元昇生物注释服务',
-        reply_to: c.reply_to || '',
-        send_dir: c.send_dir || 'results/email_sends'
-      }
-      runOptions.value.since_days = c.since_days ?? 7
+    const c = data.config || {}
+    configForm.value = {
+      imap_server: c.imap_server || 'imap.qq.com',
+      imap_port: c.imap_port || 993,
+      account: c.account || '',
+      sender_whitelist_str: (c.sender_whitelist || []).join(', '),
+      since_days: c.since_days ?? 7,
+      download_dir: data.resolved_download_dir || c.download_dir || 'results/email_downloads',
+      smtp_server: c.smtp_server || 'smtp.qq.com',
+      smtp_port: c.smtp_port || 465,
+      smtp_account: c.smtp_account || '',
+      smtp_display_name: c.smtp_display_name || '',
+      reply_to: c.reply_to || '',
+      send_dir: data.resolved_send_dir || c.send_dir || 'results/email_sends'
     }
+    runOptions.value.since_days = c.since_days ?? 7
   } catch (err: any) {
-    errorMessage.value = `加载邮件流水线状态失败: ${err.message || err}`
-  } finally {
-    loading.value = false
+    errorMessage.value = `加载失败: ${err.message || err}`
   }
 }
 
-async function handleFetchOnly() {
-  actionMessage.value = '正在连接 IMAP 扫描收件箱...'
-  errorMessage.value = ''
+async function handleFetchOnly(): Promise<void> {
+  setInfo('正在收件...')
   try {
-    const resp = await fetch(resolveApiUrl('/api/other_tools/mail_pipeline/fetch'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ since_days: runOptions.value.since_days })
-    })
-    const data = await resp.json()
-    if (!resp.ok) throw new Error(data.detail || '收件扫描失败')
-    actionMessage.value = `收件扫描完成：共扫描 ${data.scanned} 封，命中 ${data.matched} 封，新保存 ${data.saved_count} 个附件（跨次去重跳过 ${data.skipped_processed} 个）`
+    const data = await postJson(`${API}/fetch`, { since_days: runOptions.value.since_days })
+    setInfo(`收件完成：扫描 ${data.scanned} 封，命中 ${data.matched} 封，新保存 ${data.saved_count} 个附件，跳过已处理 ${data.skipped_processed} 个`)
     await loadOverview()
-  } catch (err: any) {
-    errorMessage.value = err.message || String(err)
-    actionMessage.value = ''
+  } catch (err) {
+    setError(err)
   }
 }
 
-async function handleRunPipeline(annotateOnlyBatch?: string) {
-  actionMessage.value = annotateOnlyBatch
-    ? `正在启动单批次注释与报告流水线: ${annotateOnlyBatch}`
-    : '正在启动端到端邮件自动注释回传流水线...'
-  errorMessage.value = ''
+async function handleRunPipeline(annotateOnlyBatch?: string): Promise<void> {
+  setInfo(annotateOnlyBatch ? `启动批次重跑: ${annotateOnlyBatch}` : '启动流水线...')
   try {
     const payload: Record<string, any> = {
       since_days: runOptions.value.since_days,
@@ -169,67 +196,109 @@ async function handleRunPipeline(annotateOnlyBatch?: string) {
       subject_prefix: runOptions.value.subject_prefix,
       extra_note: runOptions.value.extra_note || null
     }
-    if (annotateOnlyBatch) {
-      payload.annotate_only_batch = annotateOnlyBatch
-    }
-    const resp = await fetch(resolveApiUrl('/api/other_tools/mail_pipeline/run'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    const data = await resp.json()
-    if (!resp.ok) throw new Error(data.detail || '启动流水线失败')
+    if (annotateOnlyBatch) payload.annotate_only_batch = annotateOnlyBatch
+    const data = await postJson(`${API}/run`, payload)
     runtime.value = data.runtime
-    actionMessage.value = '流水线已在后台启动，系统将自动刷新运行进度'
-  } catch (err: any) {
-    errorMessage.value = err.message || String(err)
-    actionMessage.value = ''
-  }
-}
-
-async function handleSaveConfig() {
-  errorMessage.value = ''
-  try {
-    const whitelist = configForm.value.sender_whitelist_str
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean)
-    const resp = await fetch(resolveApiUrl('/api/other_tools/mail_pipeline/config'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...configForm.value,
-        sender_whitelist: whitelist
-      })
-    })
-    const data = await resp.json()
-    if (!resp.ok) throw new Error(data.detail || '保存配置失败')
-    showConfigModal.value = false
-    actionMessage.value = '邮件流水线配置已保存至 mail_config.json'
-    await loadOverview()
-  } catch (err: any) {
-    errorMessage.value = err.message || String(err)
-  }
-}
-
-async function openLocalPath(pathStr: string) {
-  try {
-    await fetch(resolveApiUrl('/api/other_tools/open_path'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: pathStr })
-    })
+    setInfo('流水线已在后台运行')
   } catch (err) {
-    console.error(err)
+    setError(err)
   }
+}
+
+function buildConfigPayload(overrides: Record<string, any> = {}): Record<string, any> {
+  const whitelist = configForm.value.sender_whitelist_str.split(',').map(s => s.trim()).filter(Boolean)
+  return { ...configForm.value, sender_whitelist: whitelist, migrate: true, ...overrides }
+}
+
+async function handleSaveConfig(): Promise<void> {
+  busy.value = true
+  try {
+    const authPayload: Record<string, string | null> = { imap_auth_code: null, smtp_auth_code: null }
+    if (authForm.value.imap.trim()) authPayload.imap_auth_code = authForm.value.imap.trim()
+    if (authForm.value.clearSmtp) authPayload.smtp_auth_code = ''
+    else if (authForm.value.smtp.trim()) authPayload.smtp_auth_code = authForm.value.smtp.trim()
+
+    if (authPayload.imap_auth_code !== null || authPayload.smtp_auth_code !== null) {
+      const authRes = await postJson(`${API}/auth`, authPayload)
+      auth.value = authRes.auth
+      authForm.value = { imap: '', smtp: '', clearSmtp: false }
+    }
+
+    const data = await postJson(`${API}/config`, buildConfigPayload())
+    const msgs = (data.migrations || []).map(describeMigration).filter(Boolean)
+    showConfigModal.value = false
+    setInfo(msgs.length ? `配置已保存。${msgs.join('；')}` : '配置已保存')
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function handleSaveDir(field: 'download_dir' | 'send_dir', value: string): Promise<void> {
+  busy.value = true
+  setInfo('正在迁移目录...')
+  try {
+    const data = await postJson(`${API}/config`, buildConfigPayload({ [field]: value }))
+    const msgs = (data.migrations || []).map(describeMigration).filter(Boolean)
+    setInfo(msgs.length ? `目录已更新。${msgs.join('；')}` : '目录已更新')
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+function openAuthModal(): void {
+  authForm.value = { imap: '', smtp: '', clearSmtp: false }
+  showAuthModal.value = true
+}
+
+async function handleSaveAuth(): Promise<void> {
+  const payload: Record<string, string | null> = { imap_auth_code: null, smtp_auth_code: null }
+  if (authForm.value.imap.trim()) payload.imap_auth_code = authForm.value.imap.trim()
+  if (authForm.value.clearSmtp) payload.smtp_auth_code = ''
+  else if (authForm.value.smtp.trim()) payload.smtp_auth_code = authForm.value.smtp.trim()
+  if (payload.imap_auth_code === null && payload.smtp_auth_code === null) {
+    showAuthModal.value = false
+    return
+  }
+  try {
+    const data = await postJson(`${API}/auth`, payload)
+    auth.value = data.auth
+    showAuthModal.value = false
+    setInfo('授权码已更新')
+  } catch (err) {
+    setError(err)
+  }
+}
+
+async function runCleanup(targets: string[], olderThanDays: number | null, names: string[] = []): Promise<void> {
+  busy.value = true
+  try {
+    const data = await postJson(`${API}/cleanup`, { targets, older_than_days: olderThanDays, names })
+    showCleanup.value = false
+    const idxPart = data.index_removed ? `，去重记录 ${data.index_removed} 条` : ''
+    setInfo(`已清理 ${data.removed_count} 项${idxPart}，释放 ${data.freed_mb} MB`)
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+function deleteOne(target: string, name: string, label: string): void {
+  if (!window.confirm(`确认删除 ${label}？此操作不可恢复。`)) return
+  runCleanup([target], null, [name])
 }
 
 onMounted(() => {
   loadOverview()
   pollTimer = setInterval(() => {
-    if (runtime.value?.running) {
-      loadOverview()
-    }
+    if (runtime.value?.running) loadOverview()
   }, 4000)
 })
 
@@ -240,159 +309,134 @@ onUnmounted(() => {
 
 <template>
   <div class="mail-pipeline-module">
-    <!-- 顶部五阶段流程架构条 -->
+    <!-- 流程 -->
     <div class="pipeline-steps-banner">
       <div class="step-node">
-        <span class="step-idx">STEP 1</span>
-        <div class="step-info">
-          <strong>IMAP 自动收件与指纹去重</strong>
-          <span>{{ configForm.account }} | SHA256 跨次幂等</span>
-        </div>
+        <span class="step-idx">1</span>
+        <div class="step-info"><strong>收件</strong><span>IMAP 拉取附件，SHA256 去重</span></div>
       </div>
       <div class="step-arrow">&rarr;</div>
       <div class="step-node">
-        <span class="step-idx">STEP 2</span>
-        <div class="step-info">
-          <strong>噬菌体多引擎级联注释</strong>
-          <span>Pharokka / Prodigal / Phold / 安全审计</span>
-        </div>
+        <span class="step-idx">2</span>
+        <div class="step-info"><strong>注释</strong><span>Pharokka / Phold</span></div>
       </div>
       <div class="step-arrow">&rarr;</div>
       <div class="step-node">
-        <span class="step-idx">STEP 3</span>
-        <div class="step-info">
-          <strong>Word 交付报告构建</strong>
-          <span>数据驱动排版 + 参考文献 [1]-[8] 注入</span>
-        </div>
+        <span class="step-idx">3</span>
+        <div class="step-info"><strong>Word 报告</strong><span>生成 .docx</span></div>
       </div>
       <div class="step-arrow">&rarr;</div>
       <div class="step-node">
-        <span class="step-idx">STEP 4</span>
-        <div class="step-info">
-          <strong>标准产物归档打包</strong>
-          <span>GBK / TSV / FAA / DOCX 打包 + Manifest</span>
-        </div>
+        <span class="step-idx">4</span>
+        <div class="step-info"><strong>打包</strong><span>结果文件压缩为 .zip</span></div>
       </div>
       <div class="step-arrow">&rarr;</div>
       <div class="step-node">
-        <span class="step-idx">STEP 5</span>
-        <div class="step-info">
-          <strong>SMTP 自动回传邮件</strong>
-          <span>回传至 {{ configForm.reply_to }}</span>
-        </div>
+        <span class="step-idx">5</span>
+        <div class="step-info"><strong>回传</strong><span>SMTP 发送至 {{ configForm.reply_to || '-' }}</span></div>
       </div>
     </div>
 
-    <!-- 核心指标统计栏 -->
+    <!-- 指标 -->
     <div class="metrics-row">
       <div class="metric-card">
-        <div class="metric-label">邮箱授权凭证状态</div>
-        <div class="metric-val" :class="authReady ? 'ok' : 'warn'">
-          {{ authReady ? '已就绪 (.mail_auth)' : '未配置授权码' }}
-        </div>
-        <div class="metric-sub">白名单: {{ configForm.sender_whitelist_str }}</div>
+        <div class="metric-label">授权码</div>
+        <div class="metric-val" :class="auth.imap_ready ? 'ok' : 'warn'">{{ auth.imap_ready ? '已配置' : '未配置' }}</div>
+        <div class="metric-sub">{{ configForm.account || '-' }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">已去重附件指纹库</div>
+        <div class="metric-label">去重记录</div>
         <div class="metric-val">{{ processedCount }}</div>
-        <div class="metric-sub">processed_index.json 累计记录</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">已下载邮件批次</div>
+        <div class="metric-label">收件批次</div>
         <div class="metric-val">{{ batches.length }}</div>
-        <div class="metric-sub">{{ configForm.download_dir }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">已生成 Word 报告 / 回传包</div>
+        <div class="metric-label">Word 报告 / 回传包</div>
         <div class="metric-val">{{ docxReports.length }} / {{ outboundPackages.length }}</div>
-        <div class="metric-sub">{{ configForm.send_dir }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">流水线运行状态</div>
-        <div class="metric-val" :class="runtime.running ? 'running' : 'idle'">
-          {{ runtime.running ? '运行中 (Running)' : '空闲就绪 (Idle)' }}
-        </div>
-        <div class="metric-sub">{{ runtime.finished_at ? `上次完成: ${runtime.finished_at}` : '等待调度触发' }}</div>
+        <div class="metric-label">运行状态</div>
+        <div class="metric-val" :class="runtime.running ? 'running' : 'idle'">{{ runtime.running ? '运行中' : '空闲' }}</div>
+        <div class="metric-sub">{{ runtime.finished_at ? `上次完成: ${runtime.finished_at}` : '-' }}</div>
       </div>
     </div>
 
-    <!-- 控制与触发面板 -->
+    <!-- 目录 -->
+    <div class="paths-panel">
+      <PathField
+        label="附件下载目录（输入）"
+        :path="resolvedDownloadDir"
+        :busy="busy || runtime.running"
+        @save="v => handleSaveDir('download_dir', v)"
+        @open="openLocalPath"
+      />
+      <PathField
+        label="结果回传目录（输出）"
+        :path="resolvedSendDir"
+        :busy="busy || runtime.running"
+        @save="v => handleSaveDir('send_dir', v)"
+        @open="openLocalPath"
+      />
+    </div>
+
+    <!-- 操作 -->
     <div class="control-bar">
       <div class="control-left">
         <label class="ctrl-item">
-          <span>收件时间窗 (天):</span>
+          <span>收件天数</span>
           <input type="number" v-model.number="runOptions.since_days" min="1" max="90" class="num-input" />
         </label>
         <label class="ctrl-item checkbox-item">
           <input type="checkbox" v-model="runOptions.no_send" />
-          <span>仅注释+报告+打包 (跳过 SMTP 回传)</span>
+          <span>不发送邮件</span>
         </label>
         <label class="ctrl-item">
-          <span>报告附加备注:</span>
-          <input type="text" v-model="runOptions.extra_note" placeholder="可选，写入 Word 报告备注栏" class="text-input" />
+          <span>报告备注</span>
+          <input type="text" v-model="runOptions.extra_note" placeholder="可选" class="text-input" />
         </label>
       </div>
       <div class="control-right">
-        <button class="btn-secondary" @click="handleFetchOnly" :disabled="runtime.running">
-          仅扫描收件箱
-        </button>
+        <button class="btn-secondary" @click="handleFetchOnly" :disabled="runtime.running">仅收件</button>
         <button class="btn-primary" @click="handleRunPipeline()" :disabled="runtime.running">
-          {{ runtime.running ? '流水线执行中...' : '启动完整自动流水线' }}
+          {{ runtime.running ? '运行中...' : '运行流水线' }}
         </button>
-        <button class="btn-outline" @click="showConfigModal = true">
-          邮箱与回传配置
-        </button>
-        <button class="btn-outline" @click="openLocalPath(configForm.send_dir)">
-          打开产物目录
-        </button>
-        <button class="btn-outline" @click="loadOverview">
-          刷新
-        </button>
+        <button class="btn-outline" @click="showConfigModal = true">邮箱配置</button>
+        <button class="btn-outline" @click="openAuthModal">授权码</button>
+        <button class="btn-outline danger" @click="showCleanup = true" :disabled="runtime.running">清理历史</button>
+        <button class="btn-outline" @click="loadOverview">刷新</button>
       </div>
     </div>
 
-    <!-- 消息提示条 -->
     <div v-if="actionMessage" class="alert-banner info">{{ actionMessage }}</div>
     <div v-if="errorMessage" class="alert-banner error">{{ errorMessage }}</div>
 
-    <!-- 详情子标签切换 -->
     <div class="sub-tabs-bar">
-      <button
-        :class="['sub-tab-btn', { active: activeSubTab === 'batches' }]"
-        @click="activeSubTab = 'batches'"
-      >
-        已下载邮件批次 ({{ batches.length }})
+      <button :class="['sub-tab-btn', { active: activeSubTab === 'batches' }]" @click="activeSubTab = 'batches'">
+        收件批次 ({{ batches.length }})
       </button>
-      <button
-        :class="['sub-tab-btn', { active: activeSubTab === 'outbound' }]"
-        @click="activeSubTab = 'outbound'"
-      >
-        已生成报告与回传压缩包 ({{ outboundPackages.length }})
+      <button :class="['sub-tab-btn', { active: activeSubTab === 'outbound' }]" @click="activeSubTab = 'outbound'">
+        报告与回传包 ({{ outboundPackages.length }})
       </button>
-      <button
-        :class="['sub-tab-btn', { active: activeSubTab === 'processed' }]"
-        @click="activeSubTab = 'processed'"
-      >
-        SHA256 幂等去重索引 ({{ processedCount }})
+      <button :class="['sub-tab-btn', { active: activeSubTab === 'processed' }]" @click="activeSubTab = 'processed'">
+        去重记录 ({{ processedCount }})
       </button>
-      <button
-        :class="['sub-tab-btn', { active: activeSubTab === 'logs' }]"
-        @click="activeSubTab = 'logs'"
-      >
-        流水线执行日志 ({{ pipelineLogs.length }})
+      <button :class="['sub-tab-btn', { active: activeSubTab === 'logs' }]" @click="activeSubTab = 'logs'">
+        日志
       </button>
     </div>
 
-    <!-- 子面板 1：已下载邮件批次 -->
+    <!-- 收件批次 -->
     <div v-if="activeSubTab === 'batches'" class="table-panel">
       <table class="data-table">
         <thead>
           <tr>
-            <th>批次目录名</th>
-            <th>原邮件主题</th>
+            <th>批次</th>
+            <th>邮件主题</th>
             <th>发件人</th>
             <th>下载时间</th>
-            <th>包含 FASTA 附件</th>
+            <th>附件</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -408,33 +452,28 @@ onUnmounted(() => {
               </span>
             </td>
             <td class="actions-cell">
-              <button class="btn-mini primary" @click="handleRunPipeline(b.batch_name)" :disabled="runtime.running">
-                重跑注释与报告
-              </button>
-              <button class="btn-mini" @click="openLocalPath(b.batch_path)">
-                打开文件夹
-              </button>
+              <button class="btn-mini primary" @click="handleRunPipeline(b.batch_name)" :disabled="runtime.running">重跑</button>
+              <button class="btn-mini" @click="openLocalPath(b.batch_path)">打开</button>
+              <button class="btn-mini danger" @click="deleteOne('batches', b.batch_name, b.batch_name)" :disabled="runtime.running">删除</button>
             </td>
           </tr>
           <tr v-if="batches.length === 0">
-            <td colspan="6" class="empty-cell">暂无已下载的邮件批次记录</td>
+            <td colspan="6" class="empty-cell">暂无数据</td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <!-- 子面板 2：已生成 Word 报告与回传包 -->
+    <!-- 报告与回传包 -->
     <div v-else-if="activeSubTab === 'outbound'" class="split-panel">
       <div class="panel-box">
-        <div class="panel-box-header">
-          <h4>回传 ZIP 结果包 ({{ outboundPackages.length }})</h4>
-        </div>
+        <div class="panel-box-header"><h4>回传压缩包 ({{ outboundPackages.length }})</h4></div>
         <table class="data-table">
           <thead>
             <tr>
-              <th>任务编号 (Task ID)</th>
-              <th>ZIP 文件名</th>
-              <th>内含文件数</th>
+              <th>任务编号</th>
+              <th>文件名</th>
+              <th>文件数</th>
               <th>大小</th>
               <th>打包时间</th>
               <th>操作</th>
@@ -444,28 +483,27 @@ onUnmounted(() => {
             <tr v-for="pkg in outboundPackages" :key="pkg.zip_name">
               <td class="mono-cell">{{ pkg.task_id }}</td>
               <td class="bold-cell">{{ pkg.zip_name }}</td>
-              <td>{{ pkg.file_count }} 个产物</td>
+              <td>{{ pkg.file_count }}</td>
               <td>{{ pkg.size_kb }} KB</td>
               <td>{{ pkg.pack_time }}</td>
-              <td>
-                <button class="btn-mini" @click="openLocalPath(pkg.zip_path)">定位文件</button>
+              <td class="actions-cell">
+                <button class="btn-mini" @click="openLocalPath(pkg.zip_path)">定位</button>
+                <button class="btn-mini danger" @click="deleteOne('outbound', pkg.task_id, pkg.zip_name)" :disabled="runtime.running">删除</button>
               </td>
             </tr>
             <tr v-if="outboundPackages.length === 0">
-              <td colspan="6" class="empty-cell">暂无已打包回传记录</td>
+              <td colspan="6" class="empty-cell">暂无数据</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <div class="panel-box">
-        <div class="panel-box-header">
-          <h4>Word 交付注释报告 ({{ docxReports.length }})</h4>
-        </div>
+        <div class="panel-box-header"><h4>Word 报告 ({{ docxReports.length }})</h4></div>
         <table class="data-table">
           <thead>
             <tr>
-              <th>报告文件名 (.docx)</th>
+              <th>文件名</th>
               <th>大小</th>
               <th>生成时间</th>
               <th>操作</th>
@@ -476,29 +514,31 @@ onUnmounted(() => {
               <td class="bold-cell">{{ doc.name }}</td>
               <td>{{ doc.size_kb }} KB</td>
               <td>{{ doc.mtime }}</td>
-              <td>
-                <button class="btn-mini" @click="openLocalPath(doc.path)">定位报告</button>
+              <td class="actions-cell">
+                <button class="btn-mini" @click="openLocalPath(doc.path)">定位</button>
+                <button class="btn-mini danger" @click="deleteOne('docx', doc.name, doc.name)" :disabled="runtime.running">删除</button>
               </td>
             </tr>
             <tr v-if="docxReports.length === 0">
-              <td colspan="4" class="empty-cell">暂无 Word 报告文件</td>
+              <td colspan="4" class="empty-cell">暂无数据</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- 子面板 3：SHA256 幂等去重索引 -->
+    <!-- 去重记录 -->
     <div v-else-if="activeSubTab === 'processed'" class="table-panel">
       <table class="data-table">
         <thead>
           <tr>
-            <th>附件文件名</th>
-            <th>内容指纹 (SHA256 前16位)</th>
-            <th>所属批次</th>
+            <th>文件名</th>
+            <th>SHA256</th>
+            <th>批次</th>
             <th>发件人</th>
-            <th>原邮件主题</th>
-            <th>首次处理时间</th>
+            <th>邮件主题</th>
+            <th>首次处理</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -509,81 +549,121 @@ onUnmounted(() => {
             <td>{{ item.sender }}</td>
             <td>{{ item.subject }}</td>
             <td>{{ item.first_seen }}</td>
+            <td class="actions-cell">
+              <button class="btn-mini danger" @click="deleteOne('index', item.sha256, `${item.filename} 的去重记录`)" :disabled="runtime.running">移除</button>
+            </td>
           </tr>
           <tr v-if="processedItems.length === 0">
-            <td colspan="6" class="empty-cell">暂无去重索引记录</td>
+            <td colspan="7" class="empty-cell">暂无数据</td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <!-- 子面板 4：流水线执行日志 -->
+    <!-- 日志 -->
     <div v-else-if="activeSubTab === 'logs'" class="log-panel">
       <div v-if="runtime.last_output" class="last-run-box">
-        <div class="log-title">最近一次触发输出 (Exit Code: {{ runtime.last_exit_code ?? 'running' }})</div>
+        <div class="log-title">最近一次运行输出（退出码: {{ runtime.last_exit_code ?? '运行中' }}）</div>
         <pre>{{ runtime.last_output }}</pre>
       </div>
-      <div class="log-title">pipeline.log 历史流水线日志 (最新 {{ pipelineLogs.length }} 行)</div>
-      <pre class="log-console">{{ pipelineLogs.join('\n') || '暂无日志记录' }}</pre>
+      <div class="log-title">pipeline.log（最近 {{ pipelineLogs.length }} 行）</div>
+      <pre class="log-console">{{ pipelineLogs.join('\n') || '暂无日志' }}</pre>
     </div>
 
-    <!-- 邮箱配置弹窗 -->
+    <!-- 邮箱配置 -->
     <div v-if="showConfigModal" class="modal-backdrop" @click.self="showConfigModal = false">
       <div class="modal-card">
         <div class="modal-header">
-          <h3>邮件自动收发流水线配置 (mail_config.json)</h3>
+          <h3>邮箱配置</h3>
           <button class="close-btn" @click="showConfigModal = false">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-grid">
+            <label><span>IMAP 服务器</span><input v-model="configForm.imap_server" type="text" /></label>
+            <label><span>IMAP 端口</span><input v-model.number="configForm.imap_port" type="number" /></label>
+            <label><span>收件账号</span><input v-model="configForm.account" type="text" /></label>
             <label>
-              <span>IMAP 服务器</span>
-              <input v-model="configForm.imap_server" type="text" />
+              <span>收件邮箱 Key ({{ auth.imap_ready ? `当前: ${auth.imap_masked}` : '未配置' }})</span>
+              <input v-model="authForm.imap" type="password" autocomplete="new-password" placeholder="输入新授权码，留空不修改" />
             </label>
+            <label><span>SMTP 服务器</span><input v-model="configForm.smtp_server" type="text" /></label>
+            <label><span>SMTP 端口</span><input v-model.number="configForm.smtp_port" type="number" /></label>
+            <label><span>发件账号</span><input v-model="configForm.smtp_account" type="text" /></label>
             <label>
-              <span>IMAP 端口</span>
-              <input v-model.number="configForm.imap_port" type="number" />
+              <span>发件邮箱 Key ({{ auth.smtp_ready ? `当前: ${auth.smtp_masked}` : '复用收件 Key' }})</span>
+              <input v-model="authForm.smtp" type="password" autocomplete="new-password" placeholder="同账号可留空，留空不修改" />
             </label>
-            <label>
-              <span>收件邮箱账号</span>
-              <input v-model="configForm.account" type="text" />
+            <label><span>发件人白名单（逗号分隔）</span><input v-model="configForm.sender_whitelist_str" type="text" /></label>
+            <label><span>默认回传收件人</span><input v-model="configForm.reply_to" type="text" /></label>
+            <label><span>发件显示名称</span><input v-model="configForm.smtp_display_name" type="text" /></label>
+            <label><span>默认收件天数</span><input v-model.number="configForm.since_days" type="number" min="1" /></label>
+            <label class="full-span">
+              <span>附件下载目录（输入，修改后自动迁移）</span>
+              <input v-model="configForm.download_dir" type="text" class="mono-input" />
             </label>
-            <label>
-              <span>发件人白名单 (逗号分隔)</span>
-              <input v-model="configForm.sender_whitelist_str" type="text" />
-            </label>
-            <label>
-              <span>SMTP 服务器</span>
-              <input v-model="configForm.smtp_server" type="text" />
-            </label>
-            <label>
-              <span>SMTP 端口</span>
-              <input v-model.number="configForm.smtp_port" type="number" />
-            </label>
-            <label>
-              <span>默认回传收件人 (reply_to)</span>
-              <input v-model="configForm.reply_to" type="text" />
-            </label>
-            <label>
-              <span>发件显示名称</span>
-              <input v-model="configForm.smtp_display_name" type="text" />
-            </label>
-            <label>
-              <span>附件下载目录</span>
-              <input v-model="configForm.download_dir" type="text" />
-            </label>
-            <label>
-              <span>结果打包与回传目录</span>
-              <input v-model="configForm.send_dir" type="text" />
+            <label class="full-span">
+              <span>结果回传目录（输出，修改后自动迁移）</span>
+              <input v-model="configForm.send_dir" type="text" class="mono-input" />
             </label>
           </div>
+          <p class="form-note">邮箱 Key 独立保存在本机 .mail_auth 文件中，不写入配置文件；修改输入/输出目录后已有数据自动迁移至新目录。</p>
         </div>
         <div class="modal-footer">
           <button class="btn-outline" @click="showConfigModal = false">取消</button>
-          <button class="btn-primary" @click="handleSaveConfig">保存配置</button>
+          <button class="btn-primary" :disabled="busy" @click="handleSaveConfig">{{ busy ? '保存中...' : '保存' }}</button>
         </div>
       </div>
     </div>
+
+    <!-- 授权码 -->
+    <div v-if="showAuthModal" class="modal-backdrop" @click.self="showAuthModal = false">
+      <div class="modal-card narrow">
+        <div class="modal-header">
+          <h3>邮箱授权码</h3>
+          <button class="close-btn" @click="showAuthModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="auth-block">
+            <div class="auth-title">
+              收件授权码（IMAP，{{ configForm.account || '-' }}）
+              <span :class="['auth-state', auth.imap_ready ? 'ok' : 'warn']">{{ auth.imap_ready ? `当前: ${auth.imap_masked}` : '未配置' }}</span>
+            </div>
+            <input v-model="authForm.imap" type="password" autocomplete="new-password" placeholder="输入新授权码，留空不修改" />
+            <div class="auth-file">保存位置: {{ auth.imap_file }}</div>
+          </div>
+          <div class="auth-block">
+            <div class="auth-title">
+              发件授权码（SMTP，{{ configForm.smtp_account || '-' }}）
+              <span :class="['auth-state', auth.smtp_ready ? 'ok' : 'warn']">
+                {{ auth.smtp_ready ? `当前: ${auth.smtp_masked}${auth.smtp_separate ? '' : '（复用收件授权码）'}` : '未配置' }}
+              </span>
+            </div>
+            <input v-model="authForm.smtp" type="password" autocomplete="new-password" :disabled="authForm.clearSmtp" placeholder="发件账号与收件账号相同时可留空" />
+            <label v-if="auth.smtp_separate" class="auth-clear">
+              <input v-model="authForm.clearSmtp" type="checkbox" />
+              <span>删除独立发件授权码</span>
+            </label>
+            <div class="auth-file">保存位置: {{ auth.smtp_file }}</div>
+          </div>
+          <p class="form-note">授权码只保存在本机密钥文件中，不写入 mail_config.json，不提交到 Git。</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-outline" @click="showAuthModal = false">取消</button>
+          <button class="btn-primary" @click="handleSaveAuth">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <CleanupDialog
+      :visible="showCleanup"
+      title="清理历史数据"
+      subtitle="按类型删除邮件流水线产生的历史文件。"
+      :options="cleanupOptions"
+      :show-days="true"
+      :busy="busy"
+      @close="showCleanup = false"
+      @confirm="p => runCleanup(p.targets, p.older_than_days)"
+    />
   </div>
 </template>
 
@@ -983,5 +1063,86 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+.paths-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.btn-outline.danger, .btn-mini.danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.btn-outline.danger:hover:not(:disabled), .btn-mini.danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.btn-outline:disabled, .btn-mini:disabled, .btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal-card.narrow { width: 520px; }
+
+.form-grid label.full-span {
+  grid-column: 1 / -1;
+}
+
+.mono-input {
+  font-family: Consolas, monospace;
+}
+
+.form-note {
+  margin: 12px 0 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.auth-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.auth-title {
+  font-size: 12px;
+  color: #334155;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.auth-state { font-weight: 500; font-family: Consolas, monospace; }
+.auth-state.ok { color: #059669; }
+.auth-state.warn { color: #d97706; }
+
+.auth-block input[type="password"] {
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.auth-clear {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #b91c1c;
+}
+
+.auth-file {
+  font-size: 11px;
+  color: #94a3b8;
+  font-family: Consolas, monospace;
+  word-break: break-all;
 }
 </style>

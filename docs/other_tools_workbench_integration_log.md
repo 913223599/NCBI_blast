@@ -44,3 +44,30 @@
    - 执行 `python -m pytest tests/test_other_tools_api.py -v`，3 项测试全部通过（耗时 1.42s），验证了邮件流水线概览、生工 16S 订单概览与 11 列 CSV 解析接口，以及所有新增/修改文件的 UTF-8 编码与零 Emoji 合规性。
 2. **前端 TypeScript 类型检查与生产构建**：
    - 在 `src/web-next` 下执行 `npm run build` (`vue-tsc -b && vite build`)，零错误通过编译，成功生成 `OtherToolsView` 产物包。
+
+
+
+---
+
+## 4. 第二阶段迭代优化记录（精简描述 + 历史清理 + 邮箱 Key 编辑 + 完整路径与自动迁移）
+
+### 4.1 精简功能描述
+- 更新 [OtherToolsView.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherToolsView.vue)、[MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue)、[Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue) 中的标题、流程节点、指标卡片与按钮文案，去除修饰词，保留准确简洁的功能表述。
+
+### 4.2 邮箱 Key（授权码）在线编辑
+- 后端 [secret_store.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/secret_store.py) 与 [config.py](file:///f:/NCBI%20blast/src/mail_download/config.py)：支持从独立密钥文件 `.mail_auth` / `.mail_smtp_auth`（已加入 `.gitignore`，不入库）优先读取授权码，并提供掩码回显。
+- 路由 `POST /api/other_tools/mail_pipeline/auth`：支持在线写入或清除 IMAP / SMTP 授权码。
+- 前端：在邮件模块“邮箱配置”弹窗与“授权码”弹窗、生工 16S 模块“邮箱 Key”弹窗中均可查看掩码状态并直接编辑保存邮箱 Key。
+
+### 4.3 输入/输出目录显示完整路径并支持修改后自动迁移
+- 后端 [dir_migrator.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/dir_migrator.py)：实现 `migrate_directory()` 与 `rewrite_json_paths()`，当下载目录、回传目录或生工 16S 根目录变更时，自动将旧目录下的批次/订单迁移至新目录，同名文件保留不覆盖，并自动更新 `processed_index.json` / `manifest.json` 内的绝对路径。
+- 前端 [PathField.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/PathField.vue)：展示完整绝对路径（`word-break: break-all` 不截断），支持一键修改保存并触发后端自动迁移。
+
+### 4.4 历史数据清理功能
+- 后端 [history_cleaner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/history_cleaner.py)：
+  - `cleanup_mail_history()`：支持按类别（收件批次 `up_*`、回传压缩包、Word 报告、注释中间目录 `ANNO_*`、流水线日志、去重记录）及保留天数清理，或单条记录删除。
+  - `cleanup_sangon_history()`：支持按订单清理“解压数据 (`原始数据/`)”、“BLAST 中间缓存”、“鉴定结果 CSV”或“整个订单目录”。
+- 前端 [CleanupDialog.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/CleanupDialog.vue)：提供分类勾选与确认清理弹窗，同时在表格行提供单条删除/清理操作。
+
+### 4.5 测试验证
+- `python -m pytest tests/test_other_tools_api.py tests/test_mail_download.py -v`：32 项单元测试全部通过。

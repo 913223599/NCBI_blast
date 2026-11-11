@@ -246,6 +246,9 @@ def main(argv=None) -> int:
 
     cfg = load_config(args.config, require_imap_auth=False)
 
+    # 流水线日志跟随配置中的下载目录（目录迁移后日志同步落到新位置）
+    global PIPELINE_LOG
+    PIPELINE_LOG = cfg.resolved_download_dir / "pipeline.log"
     # ---- 模式 A：只处理指定批次（annotate-only） ----
     if args.annotate_only:
         batch = Path(args.annotate_only)

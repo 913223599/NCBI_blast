@@ -1,11 +1,13 @@
 <script setup lang="ts">
 /**
- * Sangon16SPipelineModule - 生工 16S 测序结果自动化 BLAST 与导出流程工作台
- * 职责：连接 QQ 邮箱扫描 info1@sangon.com 新订单通知、管理订单三层目录、自动解压测序包、
- *      筛选 *.1.fasta 主序列比对 NCBI 16S 库、调用 BiologyTranslator 翻译并导出 11 列 CSV 及在线预览
+ * Sangon16SPipelineModule - 生工 16S 测序结果自动化 BLAST 与导出
+ * 职责：邮件扫描建目录、根目录修改与自动迁移、解压与 16S BLAST 比对、CSV 导出预览、历史数据清理、邮箱 Key 编辑
  */
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { resolveApiUrl } from '../../../utils/fileDownloader'
+import PathField from '../components/PathField.vue'
+import CleanupDialog from '../components/CleanupDialog.vue'
+import type { CleanupOption } from '../components/CleanupDialog.vue'
+import { getJson, postJson, openLocalPath, describeMigration } from '../api'
 
 interface SangonOrderItem {
   dir_name: string
@@ -38,10 +40,14 @@ interface ScannedMailItem {
   dir_ready: boolean
 }
 
-const sangonRoot = ref('G:\\测序数据\\生工16s')
+const API = '/api/other_tools/sangon_16s'
+const MAIL_API = '/api/other_tools/mail_pipeline'
+
+const sangonRoot = ref('')
 const rootExists = ref(false)
 const db16sReady = ref(false)
 const orders = ref<SangonOrderItem[]>([])
+const checkedOrderNames = ref<string[]>([])
 const selectedOrder = ref<SangonOrderItem | null>(null)
 const resultHeaders = ref<string[]>([])
 const resultRows = ref<Array<Record<string, string>>>([])
@@ -51,8 +57,18 @@ const forceReblast = ref(false)
 const scannedMails = ref<ScannedMailItem[]>([])
 const showMailsPanel = ref(false)
 const scanningMail = ref(false)
+const busy = ref(false)
 const actionMessage = ref('')
 const errorMessage = ref('')
+
+const showCleanup = ref(false)
+const cleanupTargetOrders = ref<string[]>([])
+
+const showAuthModal = ref(false)
+const imapMasked = ref('')
+const imapReady = ref(false)
+const imapFile = ref('')
+const imapKeyInput = ref('')
 
 const runtime = ref<any>({
   running: false,
@@ -64,6 +80,13 @@ const runtime = ref<any>({
   last_message: '',
   logs: []
 })
+
+const cleanupOptions: CleanupOption[] = [
+  { key: 'raw_extracted', label: '解压数据 (原始数据/)', desc: '删除解压出的文件，保留原始压缩包', checked: true },
+  { key: 'blast_cache', label: 'BLAST 中间缓存', desc: '删除 results/blast/<订单>_16s 报告缓存', checked: true },
+  { key: 'result_csv', label: '鉴定结果 CSV', desc: '删除 BLAST结果/16S鉴定结果.csv' },
+  { key: 'order_dir', label: '整个订单目录', desc: '删除该订单全部文件夹与压缩包（不可恢复）', danger: true }
+]
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
@@ -77,128 +100,194 @@ const filteredResultRows = computed(() => {
 
 const completedOrdersCount = computed(() => orders.value.filter(o => o.status === 'completed').length)
 const totalIdentifiedSamples = computed(() => orders.value.reduce((acc, o) => acc + (o.total_samples || 0), 0))
+const allChecked = computed(() => orders.value.length > 0 && checkedOrderNames.value.length === orders.value.length)
 
 function statusLabel(st: string): string {
   const map: Record<string, string> = {
-    completed: '已完成鉴定导出',
-    blasted: '已 BLAST 待导出',
-    extracted: '已解压待比对',
-    downloaded: '已下载待解压',
-    pending: '目录已建待下载'
+    completed: '已完成',
+    blasted: '待导出',
+    extracted: '待比对',
+    downloaded: '待解压',
+    pending: '待下载'
   }
   return map[st] || st
 }
 
-async function loadOverview() {
+function setInfo(msg: string): void {
+  actionMessage.value = msg
   errorMessage.value = ''
+}
+
+function setError(err: any): void {
+  errorMessage.value = err?.message || String(err)
+  actionMessage.value = ''
+}
+
+function toggleCheckAll(ev: Event): void {
+  const checked = (ev.target as HTMLInputElement).checked
+  checkedOrderNames.value = checked ? orders.value.map(o => o.dir_name) : []
+}
+
+async function loadOverview(): Promise<void> {
   try {
-    const url = resolveApiUrl(`/api/other_tools/sangon_16s/overview?sangon_root=${encodeURIComponent(sangonRoot.value)}`)
-    const resp = await fetch(url)
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
+    const data = await getJson(`${API}/overview`)
+    sangonRoot.value = data.sangon_root || sangonRoot.value
     rootExists.value = Boolean(data.root_exists)
     db16sReady.value = Boolean(data.db_16s_ready)
     orders.value = data.orders || []
     runtime.value = data.runtime || runtime.value
 
+    checkedOrderNames.value = checkedOrderNames.value.filter(n => orders.value.some(o => o.dir_name === n))
+
+    if (selectedOrder.value) {
+      const updated = orders.value.find(o => o.dir_name === selectedOrder.value?.dir_name) || null
+      selectedOrder.value = updated
+    }
     if (!selectedOrder.value && orders.value.length > 0) {
       const firstCompleted = orders.value.find(o => o.has_result_csv) || orders.value[0]
-      if (firstCompleted) {
-        await selectOrderAndLoadResults(firstCompleted)
-      }
+      if (firstCompleted) await selectOrderAndLoadResults(firstCompleted)
     }
   } catch (err: any) {
-    errorMessage.value = `加载生工 16S 概览失败: ${err.message || err}`
+    errorMessage.value = `加载失败: ${err.message || err}`
   }
 }
 
-async function selectOrderAndLoadResults(order: SangonOrderItem) {
+async function selectOrderAndLoadResults(order: SangonOrderItem): Promise<void> {
   selectedOrder.value = order
   if (!order.has_result_csv) {
     resultRows.value = []
     return
   }
   try {
-    const url = resolveApiUrl(
-      `/api/other_tools/sangon_16s/order/${encodeURIComponent(order.dir_name)}/results?sangon_root=${encodeURIComponent(sangonRoot.value)}`
-    )
-    const resp = await fetch(url)
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
+    const data = await getJson(`${API}/order/${encodeURIComponent(order.dir_name)}/results`)
     resultHeaders.value = data.headers || []
     resultRows.value = data.rows || []
   } catch (err: any) {
-    errorMessage.value = `读取订单 ${order.dir_name} 鉴定结果失败: ${err.message || err}`
+    setError(err)
   }
 }
 
-async function handleScanSangonMails() {
-  scanningMail.value = true
-  actionMessage.value = '正在连接 QQ 邮箱扫描生工生物 (info1@sangon.com) 通知邮件...'
-  errorMessage.value = ''
+async function handleSaveRoot(newRoot: string): Promise<void> {
+  busy.value = true
+  setInfo('正在更新目录并迁移数据...')
   try {
-    const url = resolveApiUrl(`/api/other_tools/sangon_16s/scan_mail?sangon_root=${encodeURIComponent(sangonRoot.value)}`)
-    const resp = await fetch(url, { method: 'POST' })
-    const data = await resp.json()
-    if (!resp.ok) throw new Error(data.detail || '扫描邮件失败')
+    const data = await postJson(`${API}/settings`, { sangon_root: newRoot, migrate: true })
+    sangonRoot.value = data.settings?.sangon_root || newRoot
+    const migMsg = describeMigration(data.migration)
+    setInfo(migMsg ? `目录已更新。${migMsg}` : '目录已更新')
+    selectedOrder.value = null
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function handleScanSangonMails(): Promise<void> {
+  scanningMail.value = true
+  setInfo('正在扫描邮件...')
+  try {
+    const data = await postJson(`${API}/scan_mail`)
     scannedMails.value = data.mails || []
     showMailsPanel.value = true
     const createdCnt = (data.created_dirs || []).length
-    actionMessage.value = `邮件扫描完成：检出 ${scannedMails.value.length} 封生工通知邮件，新初始化 ${createdCnt} 个订单目录`
+    setInfo(`扫描完成：共 ${scannedMails.value.length} 封邮件，新建 ${createdCnt} 个订单目录`)
     await loadOverview()
-  } catch (err: any) {
-    errorMessage.value = err.message || String(err)
-    actionMessage.value = ''
+  } catch (err) {
+    setError(err)
   } finally {
     scanningMail.value = false
   }
 }
 
-async function handleRunPipeline(orderNames: string[] = []) {
-  actionMessage.value = orderNames.length
-    ? `正在启动订单 ${orderNames.join(', ')} 的 16S BLAST 比对与中文翻译导出...`
-    : '正在批量启动全部待处理生工 16S 订单的自动化比对与导出...'
-  errorMessage.value = ''
+async function handleRunPipeline(orderNames: string[] = []): Promise<void> {
+  const targets = orderNames.length ? orderNames : checkedOrderNames.value
+  setInfo(targets.length ? `启动订单处理: ${targets.join(', ')}` : '启动待处理订单...')
   try {
-    const resp = await fetch(resolveApiUrl('/api/other_tools/sangon_16s/run_pipeline'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sangon_root: sangonRoot.value,
-        order_names: orderNames,
-        evalue: '0.05',
-        hitlist_size: '50',
-        force_reblast: forceReblast.value
-      })
+    const data = await postJson(`${API}/run_pipeline`, {
+      sangon_root: sangonRoot.value,
+      order_names: targets,
+      evalue: '0.05',
+      hitlist_size: '50',
+      force_reblast: forceReblast.value
     })
-    const data = await resp.json()
-    if (!resp.ok) throw new Error(data.detail || '启动流水线失败')
     runtime.value = data.runtime
-    actionMessage.value = '生工 16S 自动化流水线已启动，正在后台执行'
-  } catch (err: any) {
-    errorMessage.value = err.message || String(err)
-    actionMessage.value = ''
+    setInfo('任务已在后台运行')
+  } catch (err) {
+    setError(err)
   }
 }
 
-async function openLocalPath(pathStr: string) {
+function openCleanupModal(orderNames?: string[]): void {
+  const targets = orderNames && orderNames.length
+    ? orderNames
+    : (checkedOrderNames.value.length ? checkedOrderNames.value : orders.value.map(o => o.dir_name))
+  if (!targets.length) {
+    setError('当前没有可清理的订单')
+    return
+  }
+  cleanupTargetOrders.value = targets
+  showCleanup.value = true
+}
+
+async function confirmCleanup(targets: string[]): Promise<void> {
+  busy.value = true
   try {
-    await fetch(resolveApiUrl('/api/other_tools/open_path'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: pathStr })
+    const data = await postJson(`${API}/cleanup`, {
+      order_names: cleanupTargetOrders.value,
+      targets
     })
+    showCleanup.value = false
+    setInfo(`已清理 ${data.removed_count} 项，释放 ${data.freed_mb} MB`)
+    await loadOverview()
+    if (selectedOrder.value) await selectOrderAndLoadResults(selectedOrder.value)
   } catch (err) {
-    console.error(err)
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function openAuthEditor(): Promise<void> {
+  imapKeyInput.value = ''
+  try {
+    const data = await getJson(`${MAIL_API}/overview`)
+    imapReady.value = Boolean(data.auth?.imap_ready)
+    imapMasked.value = data.auth?.imap_masked || ''
+    imapFile.value = data.auth?.imap_file || ''
+  } catch {
+    // ignore
+  }
+  showAuthModal.value = true
+}
+
+async function saveImapAuth(): Promise<void> {
+  if (!imapKeyInput.value.trim()) {
+    showAuthModal.value = false
+    return
+  }
+  busy.value = true
+  try {
+    const data = await postJson(`${MAIL_API}/auth`, {
+      imap_auth_code: imapKeyInput.value.trim(),
+      smtp_auth_code: null
+    })
+    imapReady.value = Boolean(data.auth?.imap_ready)
+    imapMasked.value = data.auth?.imap_masked || ''
+    showAuthModal.value = false
+    setInfo('邮箱 Key 已更新')
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
   }
 }
 
 onMounted(() => {
   loadOverview()
   pollTimer = setInterval(() => {
-    if (runtime.value?.running) {
-      loadOverview()
-    }
+    if (runtime.value?.running) loadOverview()
   }, 3500)
 })
 
@@ -209,104 +298,115 @@ onUnmounted(() => {
 
 <template>
   <div class="sangon-module">
-    <!-- 顶部七步标准流程条 -->
+    <!-- 流程步骤 -->
     <div class="steps-strip">
-      <div class="step-pill"><span>1</span> 邮箱扫描 (info1@sangon.com)</div>
+      <div class="step-pill"><span>1</span> 扫描邮件</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>2</span> 订单号与 cxOrderID 解析</div>
+      <div class="step-pill"><span>2</span> 创建订单目录</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>3</span> 三层标准目录创建</div>
+      <div class="step-pill"><span>3</span> 解压压缩包</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>4</span> 测序包解压至原始数据</div>
+      <div class="step-pill"><span>4</span> 提取 *.1.fasta</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>5</span> *.1.fasta 主序列 16S BLAST</div>
+      <div class="step-pill"><span>5</span> 16S BLAST</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>6</span> 物种拉丁文批量转中文</div>
+      <div class="step-pill"><span>6</span> 物种名翻译</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>7</span> 11 列 GUI 标准 CSV 导出</div>
+      <div class="step-pill"><span>7</span> 导出 CSV</div>
     </div>
 
-    <!-- 指标概览卡片 -->
+    <!-- 指标 -->
     <div class="metrics-row">
       <div class="metric-card">
-        <div class="metric-label">生工 16S 订单数据根目录</div>
-        <div class="metric-val" :class="rootExists ? 'ok' : 'warn'">
-          {{ rootExists ? '目录已挂载' : '目录未就绪' }}
-        </div>
-        <div class="metric-sub">{{ sangonRoot }}</div>
+        <div class="metric-label">数据根目录</div>
+        <div class="metric-val" :class="rootExists ? 'ok' : 'warn'">{{ rootExists ? '已就绪' : '不存在' }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">本地 NCBI 16S 数据库</div>
-        <div class="metric-val" :class="db16sReady ? 'ok' : 'warn'">
-          {{ db16sReady ? '16S_ribosomal_RNA 就绪' : '数据库缺失' }}
-        </div>
-        <div class="metric-sub">evalue=0.05 | hitlist_size=50</div>
+        <div class="metric-label">本地 16S 库</div>
+        <div class="metric-val" :class="db16sReady ? 'ok' : 'warn'">{{ db16sReady ? '已就绪' : '缺失' }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">已完成 / 总订单批次</div>
+        <div class="metric-label">已完成 / 总订单</div>
         <div class="metric-val">{{ completedOrdersCount }} / {{ orders.length }}</div>
-        <div class="metric-sub">自动过滤 haplotype 变体</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">累计已鉴定 16S 样本数</div>
+        <div class="metric-label">已鉴定样本</div>
         <div class="metric-val">{{ totalIdentifiedSamples }}</div>
-        <div class="metric-sub">11 列标准中文翻译 CSV</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">当前批处理引擎状态</div>
+        <div class="metric-label">运行状态</div>
         <div class="metric-val" :class="runtime.running ? 'running' : 'idle'">
-          {{ runtime.running ? `处理中 (${runtime.progress}%)` : '空闲就绪 (Idle)' }}
+          {{ runtime.running ? `运行中 (${runtime.progress}%)` : '空闲' }}
         </div>
-        <div class="metric-sub">{{ runtime.last_message || '等待触发任务' }}</div>
+        <div class="metric-sub">{{ runtime.last_message || '-' }}</div>
       </div>
     </div>
 
-    <!-- 控制操作栏 -->
+    <!-- 目录完整路径展示与修改迁移 -->
+    <div class="paths-panel">
+      <PathField
+        label="生工 16S 订单根目录（修改后自动迁移全部订单）"
+        :path="sangonRoot"
+        :busy="busy || runtime.running"
+        @save="handleSaveRoot"
+        @open="openLocalPath"
+      />
+      <div v-if="selectedOrder" class="sub-paths">
+        <div class="sub-path-item">
+          <span class="sp-label">当前订单输入目录:</span>
+          <code class="sp-code">{{ selectedOrder.order_path }}\原始压缩包</code>
+          <button class="btn-mini" @click="openLocalPath(selectedOrder.order_path + '\\原始压缩包')">打开</button>
+        </div>
+        <div class="sub-path-item">
+          <span class="sp-label">当前订单输出目录:</span>
+          <code class="sp-code">{{ selectedOrder.order_path }}\BLAST结果</code>
+          <button class="btn-mini" @click="openLocalPath(selectedOrder.order_path + '\\BLAST结果')">打开</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 操作栏 -->
     <div class="control-bar">
       <div class="control-left">
         <label class="ctrl-item">
-          <span>生工数据根目录:</span>
-          <input type="text" v-model="sangonRoot" class="root-input" />
-        </label>
-        <label class="ctrl-item">
           <input type="checkbox" v-model="forceReblast" />
-          <span>强制重新运行 BLAST 比对</span>
+          <span>强制重新比对</span>
         </label>
+        <span v-if="checkedOrderNames.length" class="sel-hint">已勾选 {{ checkedOrderNames.length }} 个订单</span>
       </div>
       <div class="control-right">
         <button class="btn-secondary" @click="handleScanSangonMails" :disabled="scanningMail || runtime.running">
-          {{ scanningMail ? '扫描邮件中...' : '扫描生工通知邮件并建目录' }}
+          {{ scanningMail ? '扫描中...' : '扫描邮件' }}
         </button>
         <button class="btn-primary" @click="handleRunPipeline([])" :disabled="runtime.running">
-          {{ runtime.running ? '批处理执行中...' : '一键运行待处理订单 BLAST 与导出' }}
+          {{ runtime.running ? '运行中...' : (checkedOrderNames.length ? '运行所选订单' : '运行待处理订单') }}
         </button>
-        <button class="btn-outline" @click="openLocalPath(sangonRoot)">
-          打开生工根目录
+        <button class="btn-outline" @click="openAuthEditor">邮箱 Key</button>
+        <button class="btn-outline danger" @click="openCleanupModal()" :disabled="runtime.running">
+          {{ checkedOrderNames.length ? `清理所选 (${checkedOrderNames.length})` : '清理历史' }}
         </button>
-        <button class="btn-outline" @click="loadOverview">
-          刷新列表
-        </button>
+        <button class="btn-outline" @click="loadOverview">刷新</button>
       </div>
     </div>
 
     <div v-if="actionMessage" class="alert-banner info">{{ actionMessage }}</div>
     <div v-if="errorMessage" class="alert-banner error">{{ errorMessage }}</div>
 
-    <!-- 扫描到的生工邮件折叠面板 -->
+    <!-- 邮件列表 -->
     <div v-if="showMailsPanel && scannedMails.length > 0" class="mails-drawer">
       <div class="drawer-header">
-        <h4>最近生工生物 (info1@sangon.com) 测序通知邮件 ({{ scannedMails.length }})</h4>
+        <h4>生工通知邮件 ({{ scannedMails.length }})</h4>
         <button class="btn-mini" @click="showMailsPanel = false">收起</button>
       </div>
       <table class="data-table">
         <thead>
           <tr>
-            <th>订单目录名</th>
-            <th>10位订单号</th>
+            <th>订单目录</th>
+            <th>订单号</th>
             <th>邮件主题</th>
-            <th>邮件时间</th>
-            <th>本地目录状态</th>
-            <th>生工订单页链接</th>
+            <th>时间</th>
+            <th>目录状态</th>
+            <th>下载页</th>
           </tr>
         </thead>
         <tbody>
@@ -317,13 +417,11 @@ onUnmounted(() => {
             <td>{{ m.date }}</td>
             <td>
               <span :class="['status-pill', m.dir_ready ? 'completed' : 'pending']">
-                {{ m.dir_ready ? '三层目录已就绪' : '未创建' }}
+                {{ m.dir_ready ? '已创建' : '未创建' }}
               </span>
             </td>
             <td>
-              <a v-if="m.download_url" :href="m.download_url" target="_blank" class="link-btn">
-                打开生工下载页 (cxOrderID={{ m.cx_order_id }})
-              </a>
+              <a v-if="m.download_url" :href="m.download_url" target="_blank" class="link-btn">打开下载页</a>
               <span v-else>-</span>
             </td>
           </tr>
@@ -331,21 +429,22 @@ onUnmounted(() => {
       </table>
     </div>
 
-    <!-- 订单列表表格 -->
+    <!-- 订单列表 -->
     <div class="panel-box">
       <div class="panel-box-header">
-        <h4>生工 16S 订单批次列表 ({{ orders.length }})</h4>
+        <h4>订单列表 ({{ orders.length }})</h4>
       </div>
       <table class="data-table">
         <thead>
           <tr>
-            <th>订单目录 (YYYYMMDD_订单号)</th>
+            <th style="width: 32px"><input type="checkbox" :checked="allChecked" @change="toggleCheckAll" /></th>
+            <th>订单目录</th>
             <th>状态</th>
-            <th>原始压缩包</th>
-            <th>主序列 (*.1.fasta) / AB1</th>
-            <th>BLAST 报告数</th>
-            <th>鉴定统计 (总计 / 命中 / 未命中)</th>
-            <th>结果更新时间</th>
+            <th>压缩包</th>
+            <th>*.1.fasta / AB1</th>
+            <th>BLAST 报告</th>
+            <th>样本数 (命中 / 未命中)</th>
+            <th>更新时间</th>
             <th>操作</th>
           </tr>
         </thead>
@@ -356,71 +455,47 @@ onUnmounted(() => {
             :class="{ 'selected-row': selectedOrder?.dir_name === ord.dir_name }"
             @click="selectOrderAndLoadResults(ord)"
           >
-            <td class="mono-cell bold-cell">{{ ord.dir_name }}</td>
-            <td>
-              <span :class="['status-pill', ord.status]">{{ statusLabel(ord.status) }}</span>
+            <td @click.stop>
+              <input type="checkbox" v-model="checkedOrderNames" :value="ord.dir_name" />
             </td>
-            <td>{{ ord.zip_count }} 个 ZIP</td>
-            <td>{{ ord.consensus_fasta_count }} 条主序列 / {{ ord.ab1_count }} 峰图</td>
-            <td>{{ ord.blast_report_count }} 份</td>
+            <td class="mono-cell bold-cell">{{ ord.dir_name }}</td>
+            <td><span :class="['status-pill', ord.status]">{{ statusLabel(ord.status) }}</span></td>
+            <td>{{ ord.zip_count }}</td>
+            <td>{{ ord.consensus_fasta_count }} / {{ ord.ab1_count }}</td>
+            <td>{{ ord.blast_report_count }}</td>
             <td>
               <template v-if="ord.has_result_csv">
-                <strong>{{ ord.total_samples }}</strong> 样本
-                (<span class="hit-ok">{{ ord.with_hits }} 命中</span> /
-                <span class="hit-none">{{ ord.no_hits }} 未命中</span>)
+                <strong>{{ ord.total_samples }}</strong>
+                (<span class="hit-ok">{{ ord.with_hits }}</span> / <span class="hit-none">{{ ord.no_hits }}</span>)
               </template>
-              <span v-else class="muted">-</span>
+              <span v-else>-</span>
             </td>
             <td>{{ ord.result_mtime || '-' }}</td>
             <td class="actions-cell" @click.stop>
-              <button
-                v-if="ord.has_result_csv"
-                class="btn-mini primary"
-                @click="selectOrderAndLoadResults(ord)"
-              >
-                预览鉴定表
-              </button>
-              <button
-                class="btn-mini"
-                @click="handleRunPipeline([ord.dir_name])"
-                :disabled="runtime.running"
-              >
-                {{ ord.has_result_csv ? '重新导出/比对' : '执行比对导出' }}
-              </button>
-              <button class="btn-mini" @click="openLocalPath(ord.result_csv_path || ord.order_path)">
-                打开目录
-              </button>
+              <button v-if="ord.has_result_csv" class="btn-mini primary" @click="selectOrderAndLoadResults(ord)">预览</button>
+              <button class="btn-mini" @click="handleRunPipeline([ord.dir_name])" :disabled="runtime.running">运行</button>
+              <button class="btn-mini" @click="openLocalPath(ord.order_path)">打开</button>
+              <button class="btn-mini danger" @click="openCleanupModal([ord.dir_name])" :disabled="runtime.running">清理</button>
             </td>
           </tr>
           <tr v-if="orders.length === 0">
-            <td colspan="8" class="empty-cell">当前目录下未检测到生工 16S 订单文件夹</td>
+            <td colspan="9" class="empty-cell">暂无订单目录</td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <!-- 选中订单的 11 列 16S鉴定结果.csv 在线预览面板 -->
+    <!-- 结果预览 -->
     <div v-if="selectedOrder" class="panel-box result-preview-box">
       <div class="panel-box-header preview-header">
-        <div>
-          <h4>
-            订单 [{{ selectedOrder.dir_name }}] 16S 鉴定结果在线预览
-            <span class="sub-count">（共 {{ filteredResultRows.length }} / {{ resultRows.length }} 条记录）</span>
-          </h4>
-        </div>
+        <h4>
+          {{ selectedOrder.dir_name }} 鉴定结果
+          <span class="sub-count">（{{ filteredResultRows.length }} / {{ resultRows.length }}）</span>
+        </h4>
         <div class="preview-tools">
-          <input
-            v-model="searchKeyword"
-            type="text"
-            placeholder="搜索菌株编号、中文物种名、拉丁学名或访问号..."
-            class="search-input"
-          />
-          <button
-            v-if="selectedOrder.result_csv_path"
-            class="btn-outline"
-            @click="openLocalPath(selectedOrder.result_csv_path)"
-          >
-            在资源管理器中定位 CSV
+          <input v-model="searchKeyword" type="text" placeholder="搜索序列号、物种名、访问号..." class="search-input" />
+          <button v-if="selectedOrder.result_csv_path" class="btn-outline" @click="openLocalPath(selectedOrder.result_csv_path)">
+            定位 CSV
           </button>
         </div>
       </div>
@@ -441,10 +516,40 @@ onUnmounted(() => {
           </tbody>
         </table>
       </div>
-      <div v-else class="empty-cell">
-        该订单尚未生成 16S鉴定结果.csv，请点击上方“执行比对导出”按钮运行自动化流程。
+      <div v-else class="empty-cell">尚未生成 16S鉴定结果.csv</div>
+    </div>
+
+    <!-- 邮箱 Key 弹窗 -->
+    <div v-if="showAuthModal" class="modal-backdrop" @click.self="showAuthModal = false">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>邮箱 Key（IMAP 授权码）</h3>
+          <button class="close-btn" @click="showAuthModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="auth-row">
+            <span>当前状态: {{ imapReady ? `已配置 (${imapMasked})` : '未配置' }}</span>
+          </div>
+          <input v-model="imapKeyInput" type="password" autocomplete="new-password" placeholder="输入新的邮箱授权码，留空不修改" class="key-input" />
+          <div v-if="imapFile" class="auth-file">保存位置: {{ imapFile }}</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-outline" @click="showAuthModal = false">取消</button>
+          <button class="btn-primary" :disabled="busy" @click="saveImapAuth">保存</button>
+        </div>
       </div>
     </div>
+
+    <CleanupDialog
+      :visible="showCleanup"
+      title="清理生工 16S 历史数据"
+      :subtitle="`目标订单（共 ${cleanupTargetOrders.length} 个）: ${cleanupTargetOrders.join(', ')}`"
+      :options="cleanupOptions"
+      :show-days="false"
+      :busy="busy"
+      @close="showCleanup = false"
+      @confirm="p => confirmCleanup(p.targets)"
+    />
   </div>
 </template>
 
@@ -492,10 +597,7 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
-.step-sep {
-  color: #94a3b8;
-  font-size: 14px;
-}
+.step-sep { color: #94a3b8; font-size: 14px; }
 
 .metrics-row {
   display: grid;
@@ -507,25 +609,14 @@ onUnmounted(() => {
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 12px 16px;
 }
 
-.metric-label {
-  font-size: 12px;
-  color: #64748b;
-  margin-bottom: 6px;
-}
-
-.metric-val {
-  font-size: 17px;
-  font-weight: 700;
-  color: #0f172a;
-}
-
+.metric-label { font-size: 12px; color: #64748b; margin-bottom: 4px; }
+.metric-val { font-size: 17px; font-weight: 700; color: #0f172a; }
 .metric-val.ok { color: #059669; }
 .metric-val.warn { color: #d97706; }
 .metric-val.running { color: #2563eb; }
-
 .metric-sub {
   font-size: 11px;
   color: #94a3b8;
@@ -533,6 +624,46 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.paths-panel {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sub-paths {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.sub-path-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.sp-label { color: #64748b; white-space: nowrap; }
+.sp-code {
+  flex: 1;
+  min-width: 0;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  color: #0f172a;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 4px 8px;
+  border-radius: 5px;
+  word-break: break-all;
 }
 
 .control-bar {
@@ -550,7 +681,7 @@ onUnmounted(() => {
 .control-left, .control-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -562,14 +693,7 @@ onUnmounted(() => {
   color: #334155;
 }
 
-.root-input {
-  width: 240px;
-  padding: 6px 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  font-size: 12px;
-  font-family: Consolas, monospace;
-}
+.sel-hint { font-size: 12px; color: #2563eb; font-weight: 600; }
 
 .btn-primary {
   background: #2563eb;
@@ -581,7 +705,6 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
 }
-
 .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
@@ -595,8 +718,8 @@ onUnmounted(() => {
   font-weight: 600;
   cursor: pointer;
 }
-
 .btn-secondary:hover:not(:disabled) { background: #047857; }
+.btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .btn-outline {
   background: #f8fafc;
@@ -608,6 +731,14 @@ onUnmounted(() => {
   font-weight: 500;
   cursor: pointer;
 }
+.btn-outline.danger, .btn-mini.danger {
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+.btn-outline.danger:hover:not(:disabled), .btn-mini.danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+.btn-outline:disabled, .btn-mini:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .alert-banner {
   padding: 10px 14px;
@@ -615,18 +746,8 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 500;
 }
-
-.alert-banner.info {
-  background: #eff6ff;
-  color: #1e40af;
-  border: 1px solid #bfdbfe;
-}
-
-.alert-banner.error {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
-}
+.alert-banner.info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+.alert-banner.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 
 .mails-drawer, .panel-box {
   background: white;
@@ -643,39 +764,19 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
 }
+.drawer-header h4, .panel-box-header h4 { margin: 0; font-size: 13px; color: #1e293b; }
+.sub-count { font-weight: 400; color: #64748b; font-size: 12px; }
 
-.drawer-header h4, .panel-box-header h4 {
-  margin: 0;
-  font-size: 13px;
-  color: #1e293b;
-}
-
-.sub-count {
-  font-weight: 400;
-  color: #64748b;
-  font-size: 12px;
-}
-
-.preview-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
+.preview-tools { display: flex; align-items: center; gap: 10px; }
 .search-input {
-  width: 280px;
+  width: 260px;
   padding: 6px 10px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   font-size: 12px;
 }
 
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .data-table th {
   text-align: left;
   padding: 10px 12px;
@@ -685,25 +786,14 @@ onUnmounted(() => {
   border-bottom: 1px solid #e2e8f0;
   white-space: nowrap;
 }
-
 .data-table td {
   padding: 9px 12px;
   border-bottom: 1px solid #f1f5f9;
   color: #334155;
 }
-
-.selected-row {
-  background: #f0f7ff;
-}
-
-.mono-cell {
-  font-family: Consolas, monospace;
-  color: #2563eb;
-}
-
-.bold-cell {
-  font-weight: 600;
-}
+.selected-row { background: #f0f7ff; }
+.mono-cell { font-family: Consolas, monospace; color: #2563eb; }
+.bold-cell { font-weight: 600; }
 
 .status-pill {
   display: inline-block;
@@ -712,33 +802,14 @@ onUnmounted(() => {
   font-size: 11px;
   font-weight: 600;
 }
-
-.status-pill.completed {
-  background: #ecfdf5;
-  color: #059669;
-  border: 1px solid #a7f3d0;
-}
-
-.status-pill.blasted, .status-pill.extracted {
-  background: #eff6ff;
-  color: #2563eb;
-  border: 1px solid #bfdbfe;
-}
-
-.status-pill.downloaded, .status-pill.pending {
-  background: #fffbeb;
-  color: #d97706;
-  border: 1px solid #fde68a;
-}
+.status-pill.completed { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.status-pill.blasted, .status-pill.extracted { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.status-pill.downloaded, .status-pill.pending { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
 
 .hit-ok { color: #059669; font-weight: 600; }
 .hit-none { color: #94a3b8; }
 
-.actions-cell {
-  display: flex;
-  gap: 6px;
-}
-
+.actions-cell { display: flex; gap: 6px; }
 .btn-mini {
   background: #f8fafc;
   border: 1px solid #cbd5e1;
@@ -747,39 +818,58 @@ onUnmounted(() => {
   font-size: 11px;
   cursor: pointer;
 }
+.btn-mini.primary { background: #eff6ff; color: #2563eb; border-color: #93c5fd; }
+.link-btn { color: #2563eb; text-decoration: none; font-weight: 500; }
 
-.btn-mini.primary {
-  background: #eff6ff;
-  color: #2563eb;
-  border-color: #93c5fd;
-}
-
-.link-btn {
-  color: #2563eb;
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.csv-table-scroll {
-  max-height: 460px;
-  overflow: auto;
-}
-
+.csv-table-scroll { max-height: 460px; overflow: auto; }
 .csv-table td {
   max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.highlight-species { color: #059669 !important; font-weight: 700; }
+.empty-cell { text-align: center; color: #94a3b8; padding: 24px !important; }
 
-.highlight-species {
-  color: #059669 !important;
-  font-weight: 700;
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
 }
-
-.empty-cell {
-  text-align: center;
-  color: #94a3b8;
-  padding: 24px !important;
+.modal-card {
+  background: white;
+  border-radius: 12px;
+  width: 480px;
+  max-width: 92vw;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
+}
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.modal-header h3 { margin: 0; font-size: 15px; }
+.close-btn { background: none; border: none; font-size: 20px; cursor: pointer; }
+.modal-body { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.auth-row { font-size: 12px; color: #334155; font-weight: 600; }
+.key-input {
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.auth-file { font-size: 11px; color: #94a3b8; font-family: Consolas, monospace; word-break: break-all; }
+.modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 </style>

@@ -26,6 +26,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..utils.blast_utils import parse_blast_csv, select_consensus_hit
+from ..services.other_tools.dir_migrator import migrate_directory
+from ..services.other_tools.history_cleaner import cleanup_mail_history, cleanup_sangon_history
+from ..services.other_tools.sangon_settings import get_sangon_root, load_sangon_settings, save_sangon_settings
+from ..services.other_tools.secret_store import mask_secret, read_secret, resolve_secret_path, write_secret
 from ...blast.manager import get_blast_manager, TaskStatus
 from ...mail_download.config import load_config
 from ...mail_download.downloader import AttachmentSaver
@@ -37,7 +41,27 @@ router = APIRouter(prefix="/other_tools", tags=["other_tools"])
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MAIL_CONFIG_PATH = PROJECT_ROOT / "mail_config.json"
-DEFAULT_SANGON_ROOT = Path(r"G:\测序数据\生工16s")
+ANNOTATIONS_DIR = PROJECT_ROOT / "results" / "annotations"
+BLAST_RESULTS_ROOT = PROJECT_ROOT / "results" / "blast"
+
+
+def _resolve_dir(value: str) -> Path:
+    """配置中的目录：绝对路径原样使用，相对路径基于项目根目录。"""
+    p = Path(value)
+    return (p if p.is_absolute() else PROJECT_ROOT / p).resolve()
+
+
+def _read_mail_cfg() -> Dict[str, Any]:
+    if MAIL_CONFIG_PATH.exists():
+        try:
+            return json.loads(MAIL_CONFIG_PATH.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"读取 mail_config.json 失败: {e}")
+    return {}
+
+
+def _sangon_root_or_default(value: Optional[str]) -> Path:
+    return Path(value) if value else get_sangon_root()
 
 # ─── 全局运行状态追踪 ─────────────────────────────────────────
 _mail_pipeline_state: Dict[str, Any] = {
@@ -94,6 +118,7 @@ class MailConfigUpdateRequest(BaseModel):
     smtp_display_name: str = "元昇生物注释服务"
     reply_to: str = "yssw_service@163.com"
     send_dir: str = "results/email_sends"
+    migrate: bool = True
 
 
 class MailFetchRequest(BaseModel):
@@ -111,7 +136,7 @@ class MailPipelineRunRequest(BaseModel):
 
 
 class SangonRunRequest(BaseModel):
-    sangon_root: str = r"G:\测序数据\生工16s"
+    sangon_root: Optional[str] = None
     order_names: List[str] = []
     evalue: str = "0.05"
     hitlist_size: str = "50"
@@ -122,6 +147,28 @@ class OpenPathRequest(BaseModel):
     path: str
 
 
+class MailAuthUpdateRequest(BaseModel):
+    """授权码更新：字段为 None 表示不修改，空字符串表示清除。"""
+    imap_auth_code: Optional[str] = None
+    smtp_auth_code: Optional[str] = None
+
+
+class MailCleanupRequest(BaseModel):
+    targets: List[str]
+    older_than_days: Optional[int] = None
+    names: List[str] = []
+
+
+class SangonSettingsRequest(BaseModel):
+    sangon_root: str
+    migrate: bool = True
+
+
+class SangonCleanupRequest(BaseModel):
+    order_names: List[str]
+    targets: List[str]
+
+
 # ==============================================================================
 # 1. 邮件自动收件 -> 注释 -> Word 报告 -> SMTP 回传 接口
 # ==============================================================================
@@ -129,21 +176,12 @@ class OpenPathRequest(BaseModel):
 @router.get("/mail_pipeline/overview")
 async def get_mail_pipeline_overview():
     """获取邮件自动注释回传流水线完整状态、批次列表、已发记录与日志"""
-    raw_cfg: Dict[str, Any] = {}
-    if MAIL_CONFIG_PATH.exists():
-        try:
-            raw_cfg = json.loads(MAIL_CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception as e:
-            logger.warning(f"读取 mail_config.json 失败: {e}")
+    raw_cfg = _read_mail_cfg()
+    auth_info = _mail_auth_info(raw_cfg)
+    auth_ready = auth_info["imap_ready"]
 
-    auth_file = PROJECT_ROOT / ".mail_auth"
-    auth_ready = bool(
-        os.environ.get(raw_cfg.get("auth_code_env", "YS_MAIL_AUTH_CODE"))
-        or (auth_file.exists() and auth_file.read_text(encoding="utf-8", errors="ignore").strip())
-    )
-
-    dl_dir = PROJECT_ROOT / raw_cfg.get("download_dir", "results/email_downloads")
-    send_dir = PROJECT_ROOT / raw_cfg.get("send_dir", "results/email_sends")
+    dl_dir = _resolve_dir(raw_cfg.get("download_dir", "results/email_downloads"))
+    send_dir = _resolve_dir(raw_cfg.get("send_dir", "results/email_sends"))
 
     # 1. 已处理指纹索引
     processed_items: List[Dict[str, Any]] = []
@@ -239,6 +277,9 @@ async def get_mail_pipeline_overview():
         "status": "success",
         "config": raw_cfg,
         "auth_ready": auth_ready,
+        "auth": auth_info,
+        "resolved_download_dir": str(dl_dir),
+        "resolved_send_dir": str(send_dir),
         "runtime": _mail_pipeline_state,
         "processed_count": len(processed_items),
         "processed_items": processed_items[:50],
@@ -251,13 +292,28 @@ async def get_mail_pipeline_overview():
 
 @router.post("/mail_pipeline/config")
 async def update_mail_pipeline_config(req: MailConfigUpdateRequest):
-    """更新保存 mail_config.json"""
-    existing: Dict[str, Any] = {}
-    if MAIL_CONFIG_PATH.exists():
+    """更新保存 mail_config.json；下载/回传目录变更时自动迁移已有数据"""
+    existing = _read_mail_cfg()
+
+    old_dl = _resolve_dir(existing.get("download_dir", "results/email_downloads"))
+    old_send = _resolve_dir(existing.get("send_dir", "results/email_sends"))
+    new_dl = _resolve_dir(req.download_dir.strip())
+    new_send = _resolve_dir(req.send_dir.strip())
+    dir_changed = (old_dl != new_dl) or (old_send != new_send)
+    if dir_changed and _mail_pipeline_state["running"]:
+        raise HTTPException(status_code=409, detail="流水线运行中，暂不能修改目录")
+
+    migrations: List[Dict[str, Any]] = []
+    if req.migrate:
         try:
-            existing = json.loads(MAIL_CONFIG_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+            if old_dl != new_dl:
+                migrations.append(await asyncio.to_thread(migrate_directory, old_dl, new_dl))
+            if old_send != new_send:
+                migrations.append(await asyncio.to_thread(migrate_directory, old_send, new_send))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"目录迁移失败: {e}")
 
     updated = {
         **existing,
@@ -279,7 +335,56 @@ async def update_mail_pipeline_config(req: MailConfigUpdateRequest):
         "send_dir": req.send_dir.strip(),
     }
     MAIL_CONFIG_PATH.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"status": "success", "config": updated}
+    return {"status": "success", "config": updated, "migrations": migrations}
+
+
+def _mail_auth_info(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """汇总 IMAP / SMTP 授权码状态（仅返回掩码）"""
+    cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
+    imap_file = resolve_secret_path(PROJECT_ROOT, raw_cfg.get("auth_code_file", ".mail_auth"))
+    smtp_file = resolve_secret_path(PROJECT_ROOT, raw_cfg.get("smtp_auth_code_file", ".mail_smtp_auth"))
+    imap_code = cfg.auth_code
+    smtp_code = cfg.smtp_auth_code
+    return {
+        "imap_ready": bool(imap_code),
+        "imap_masked": mask_secret(imap_code),
+        "imap_file": str(imap_file),
+        "smtp_ready": bool(smtp_code),
+        "smtp_masked": mask_secret(smtp_code),
+        "smtp_file": str(smtp_file),
+        "smtp_separate": bool(read_secret(smtp_file)),
+    }
+
+
+@router.post("/mail_pipeline/auth")
+async def update_mail_auth(req: MailAuthUpdateRequest):
+    """更新邮箱授权码：写入独立密钥文件（不入库），返回掩码"""
+    raw_cfg = _read_mail_cfg()
+    if req.imap_auth_code is not None:
+        write_secret(resolve_secret_path(PROJECT_ROOT, raw_cfg.get("auth_code_file", ".mail_auth")), req.imap_auth_code)
+    if req.smtp_auth_code is not None:
+        write_secret(resolve_secret_path(PROJECT_ROOT, raw_cfg.get("smtp_auth_code_file", ".mail_smtp_auth")), req.smtp_auth_code)
+    return {"status": "success", "auth": _mail_auth_info(raw_cfg)}
+
+
+@router.post("/mail_pipeline/cleanup")
+async def cleanup_mail_pipeline_history(req: MailCleanupRequest):
+    """清理邮件流水线历史数据（批次 / 回传包 / 报告 / 注释中间目录 / 去重索引 / 日志）"""
+    if _mail_pipeline_state["running"]:
+        raise HTTPException(status_code=409, detail="流水线运行中，暂不能清理")
+    if not req.targets:
+        raise HTTPException(status_code=400, detail="未选择清理项")
+    raw_cfg = _read_mail_cfg()
+    res = await asyncio.to_thread(
+        cleanup_mail_history,
+        _resolve_dir(raw_cfg.get("download_dir", "results/email_downloads")),
+        _resolve_dir(raw_cfg.get("send_dir", "results/email_sends")),
+        ANNOTATIONS_DIR,
+        req.targets,
+        req.older_than_days,
+        req.names,
+    )
+    return {"status": "success", **res}
 
 
 @router.post("/mail_pipeline/fetch")
@@ -330,7 +435,7 @@ async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
     if req.annotate_only_batch:
         batch_path = req.annotate_only_batch
         if not os.path.isabs(batch_path):
-            batch_path = str(PROJECT_ROOT / "results" / "email_downloads" / batch_path)
+            batch_path = str(_resolve_dir(_read_mail_cfg().get("download_dir", "results/email_downloads")) / batch_path)
         cmd += ["--annotate-only", batch_path]
     if req.test_input:
         cmd += ["--test-input", req.test_input]
@@ -467,9 +572,9 @@ def _inspect_sangon_order_dir(order_dir: Path) -> Dict[str, Any]:
 
 
 @router.get("/sangon_16s/overview")
-async def get_sangon_16s_overview(sangon_root: str = str(DEFAULT_SANGON_ROOT)):
+async def get_sangon_16s_overview(sangon_root: Optional[str] = None):
     """获取生工 16S 自动化流程目录与所有订单状态概览"""
-    root_path = Path(sangon_root)
+    root_path = _sangon_root_or_default(sangon_root)
     orders: List[Dict[str, Any]] = []
 
     if root_path.exists() and root_path.is_dir():
@@ -481,6 +586,7 @@ async def get_sangon_16s_overview(sangon_root: str = str(DEFAULT_SANGON_ROOT)):
     return {
         "status": "success",
         "sangon_root": str(root_path),
+        "settings": load_sangon_settings(),
         "root_exists": root_path.exists(),
         "db_16s_ready": db_16s.exists(),
         "runtime": _sangon_pipeline_state,
@@ -489,9 +595,9 @@ async def get_sangon_16s_overview(sangon_root: str = str(DEFAULT_SANGON_ROOT)):
 
 
 @router.get("/sangon_16s/order/{order_dir_name}/results")
-async def get_sangon_order_results(order_dir_name: str, sangon_root: str = str(DEFAULT_SANGON_ROOT)):
+async def get_sangon_order_results(order_dir_name: str, sangon_root: Optional[str] = None):
     """读取指定生工 16S 订单的 11 列鉴定结果 CSV 供前端在线表格展示"""
-    csv_path = Path(sangon_root) / order_dir_name / "BLAST结果" / "16S鉴定结果.csv"
+    csv_path = _sangon_root_or_default(sangon_root) / order_dir_name / "BLAST结果" / "16S鉴定结果.csv"
     if not csv_path.exists():
         raise HTTPException(status_code=404, detail=f"未找到鉴定结果文件: {csv_path}")
 
@@ -522,12 +628,14 @@ async def get_sangon_order_results(order_dir_name: str, sangon_root: str = str(D
 
 
 @router.post("/sangon_16s/scan_mail")
-async def scan_sangon_notification_mails(sangon_root: str = str(DEFAULT_SANGON_ROOT)):
+async def scan_sangon_notification_mails(sangon_root: Optional[str] = None):
     """连接 QQ 邮箱扫描生工生物 (info1@sangon.com) 的 16S 测序结果通知邮件并自动初始化订单目录"""
+    root_dir_path = _sangon_root_or_default(sangon_root)
+
     def _do_scan():
-        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=True)
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=True)
         conn = imaplib.IMAP4_SSL(cfg.imap_server, cfg.imap_port)
-        conn.login(cfg.account, cfg.imap_auth_code)
+        conn.login(cfg.account, cfg.auth_code or "")
         conn.select("INBOX")
 
         typ, data = conn.search(None, "FROM", "info1@sangon.com")
@@ -545,7 +653,7 @@ async def scan_sangon_notification_mails(sangon_root: str = str(DEFAULT_SANGON_R
                     out.append(part_bytes)
             return "".join(out)
 
-        root_dir = Path(sangon_root)
+        root_dir = root_dir_path
         existing_order_nos = set()
         if root_dir.exists():
             for d in root_dir.iterdir():
@@ -738,7 +846,7 @@ async def run_sangon_16s_pipeline(req: SangonRunRequest):
     if _sangon_pipeline_state["running"]:
         raise HTTPException(status_code=409, detail="生工 16S 自动化流水线正在运行中，请稍候")
 
-    root_path = Path(req.sangon_root)
+    root_path = _sangon_root_or_default(req.sangon_root)
     if not root_path.exists():
         raise HTTPException(status_code=400, detail=f"生工 16S 目录不存在: {root_path}")
 
@@ -853,6 +961,47 @@ async def run_sangon_16s_pipeline(req: SangonRunRequest):
     return {"status": "started", "runtime": _sangon_pipeline_state}
 
 
+@router.post("/sangon_16s/settings")
+async def update_sangon_settings(req: SangonSettingsRequest):
+    """修改生工 16S 根目录并持久化；migrate=True 时把旧目录下的订单整体迁移到新目录"""
+    if _sangon_pipeline_state["running"]:
+        raise HTTPException(status_code=409, detail="生工 16S 流水线运行中，暂不能修改目录")
+    new_root_str = req.sangon_root.strip()
+    if not new_root_str:
+        raise HTTPException(status_code=400, detail="目录不能为空")
+    new_root = Path(new_root_str)
+    if not new_root.is_absolute():
+        raise HTTPException(status_code=400, detail="生工 16S 根目录必须为绝对路径")
+
+    old_root = get_sangon_root()
+    migration: Optional[Dict[str, Any]] = None
+    try:
+        if req.migrate:
+            migration = await asyncio.to_thread(migrate_directory, old_root, new_root)
+        else:
+            new_root.mkdir(parents=True, exist_ok=True)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"目录迁移失败: {e}")
+
+    settings = save_sangon_settings({"sangon_root": str(new_root)})
+    return {"status": "success", "settings": settings, "migration": migration}
+
+
+@router.post("/sangon_16s/cleanup")
+async def cleanup_sangon_orders(req: SangonCleanupRequest):
+    """按订单清理生工 16S 历史数据（解压文件 / BLAST 缓存 / 结果 CSV / 整个订单目录）"""
+    if _sangon_pipeline_state["running"]:
+        raise HTTPException(status_code=409, detail="生工 16S 流水线运行中，暂不能清理")
+    if not req.order_names or not req.targets:
+        raise HTTPException(status_code=400, detail="未选择订单或清理项")
+    res = await asyncio.to_thread(
+        cleanup_sangon_history, get_sangon_root(), BLAST_RESULTS_ROOT, req.order_names, req.targets
+    )
+    return {"status": "success", **res}
+
+
 @router.post("/open_path")
 async def open_local_path(req: OpenPathRequest):
     """在宿主机 Windows 资源管理器中打开指定目录或选中文件"""
@@ -871,3 +1020,4 @@ async def open_local_path(req: OpenPathRequest):
         return {"status": "success", "path": str(target)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

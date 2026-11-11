@@ -23,18 +23,16 @@ const tools = ref<OtherToolItem[]>([
   {
     id: 'mail_pipeline',
     title: '邮件自动收件 → 注释 → Word 报告 → SMTP 回传',
-    description: '自动监听 IMAP 邮箱基因序列附件并执行 SHA256 幂等去重，联动 Pharokka + Phold 级联注释，生成含文献引用 [1]-[8] 的 Word 报告并经 SMTP 自动回传。',
+    description: '接收邮件中的 FASTA 附件，完成基因组注释与 Word 报告生成，打包后邮件回传。',
     iconType: 'mail_pipeline',
-    status: 'ready',
-    badgeText: '5 阶段全自动闭环'
+    status: 'ready'
   },
   {
     id: 'sangon_16s',
     title: '生工 16S 测序结果自动化 BLAST 与导出流程',
-    description: '自动扫描生工测序通知邮件 (info1@sangon.com) 初始化订单目录，一键解压提取 *.1.fasta 执行本地 16S rRNA 并发 BLAST 比对、物种汉化并导出 11 列标准 CSV。',
+    description: '扫描生工通知邮件建立订单目录，解压提取 *.1.fasta 执行 16S BLAST 比对并导出 CSV。',
     iconType: 'sangon_16s',
-    status: 'ready',
-    badgeText: '7 步自动化流水线'
+    status: 'ready'
   }
 ])
 
@@ -50,13 +48,13 @@ function selectTool(tool: OtherToolItem): void {
   <div class="other-tools-container">
     <header class="other-tools-header">
       <div class="header-content">
-        <h1>其他功能工作台</h1>
-        <p>自动化生物信息学流水线工作台，支持噬菌体邮件自动收件注释与 Word 报告 SMTP 回传、生工 16S 测序结果自动化 BLAST 鉴定与标准报表导出。</p>
+        <h1>其他功能</h1>
+        <p>邮件自动注释回传与生工 16S 测序自动比对导出。</p>
       </div>
 
       <div class="header-stats" v-if="!activeTool">
         <div class="stat-badge">
-          <span class="label">可用工具</span>
+          <span class="label">工具数</span>
           <span class="value">{{ tools.length }}</span>
         </div>
       </div>
@@ -70,7 +68,7 @@ function selectTool(tool: OtherToolItem): void {
             :class="{ active: activeTool === item.id }"
             @click="activeTool = item.id"
           >
-            {{ item.id === 'mail_pipeline' ? '邮件注释与回传流水线' : '生工 16S 自动 BLAST 流程' }}
+            {{ item.id === 'mail_pipeline' ? '邮件注释回传' : '生工 16S 比对' }}
           </button>
         </div>
         <button class="back-btn" @click="activeTool = null">
@@ -349,3 +347,4 @@ function selectTool(tool: OtherToolItem): void {
   overflow-y: auto;
 }
 </style>
+
