@@ -38,11 +38,17 @@ async def _run_update_task(db_id: str):
     })
 
     success = await db.update_database()
-    
-    # 广播结果
+
+    # 广播结果（失败时附带具体原因，避免只看到"更新失败"却无从排查）
+    reason = getattr(db, "last_error", None)
+    if success:
+        message = f"{db.name} 更新成功"
+    else:
+        message = f"{db.name} 更新失败" + (f": {reason}" if reason else "，请查看后端日志")
+
     await broadcaster.broadcast("db_update_event", {
         "db_id": db_id,
         "status": "success" if success else "error",
         "progress": 100,
-        "message": f"{db.name} 更新成功" if success else f"{db.name} 更新失败"
+        "message": message
     })

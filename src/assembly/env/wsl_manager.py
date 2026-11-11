@@ -36,7 +36,9 @@ class WSLManager:
             if str(abs_path).startswith(str(root_path)):
                 relative = abs_path.relative_to(root_path)
                 # 使用预设的无空格软链接路径
-                return f"/ncbi_blast_link/{str(relative).replace('\\', '/')}"
+                # 注意: Python 3.11 的 f-string 表达式内不允许出现反斜杠，需先转换
+                relative_posix = str(relative).replace("\\", "/")
+                return f"/ncbi_blast_link/{relative_posix}"
         except:
             pass
 
@@ -50,8 +52,12 @@ class WSLManager:
     def ensure_project_link(cls):
         """确保在 WSL 中存在指向项目根目录的无空格软链接"""
         try:
-            #  强制创建相对于 /mnt/d 的根链接
+            from ...workbench.models.tool_config import ToolConfig
+            project_root = str(ToolConfig.PROJECT_ROOT)
+        except Exception:
             project_root = os.getcwd()
+        try:
+            #  强制创建相对于 /mnt/<盘符> 的根链接
             path = Path(project_root).resolve()
             drive = path.drive.replace(":", "").lower()
             relative = str(path.relative_to(path.anchor)).replace("\\", "/")

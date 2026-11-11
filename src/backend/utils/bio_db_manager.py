@@ -15,6 +15,25 @@ logger = logging.getLogger("api_server")
 
 from .compat import get_short_path_name
 
+
+def build_wsl_script_command(script_name: str) -> Optional[str]:
+    """
+    构造在 WSL 中执行部署脚本的完整命令。
+
+    发行版名称从 WSLManager 动态探测（不再写死 "Ubuntu"）；项目路径带空格时保持引号，
+    避免 `wsl bash /mnt/d/NCBI blast/...` 被截断。
+    """
+    import re
+    from ...assembly.env.wsl_manager import WSLManager
+
+    project_root = str(ToolConfig.PROJECT_ROOT).replace('\\', '/')
+    m = re.match(r"^([A-Za-z]):/(.*)", project_root)
+    if not m:
+        return None
+    distro = WSLManager.get_best_distro()
+    mnt_path = f"/mnt/{m.group(1).lower()}/{m.group(2)}/scripts/{script_name}"
+    return f'wsl -d "{distro}" -u root bash "{mnt_path}"'
+
 class BioDatabase:
     """
     通用生物数据库管理基类
@@ -24,9 +43,10 @@ class BioDatabase:
         self.db_id = db_id
         self.config = config
         self.name = config.get("name", db_id)
+        self.last_error: Optional[str] = None
         
-        # 从中心配置计算物理路径
-        self.base_dir = ToolConfig.DATABASE_ROOT / config.get("local_folder", db_id)
+        # 从中心配置计算物理路径（自动兼容 database/ 与历史 database/database/ 布局）
+        self.base_dir = ToolConfig.get_db_dir(config.get("local_folder", db_id))
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _update_registry_version(self, new_version: str):
@@ -34,25 +54,32 @@ class BioDatabase:
         更新本地注册表中的版本号，写回 registry.json 并同步当前实例 config
         """
         registry_path = ToolConfig.DATABASE_ROOT / "registry.json"
-        if not registry_path.exists():
-            return
         try:
             import json
-            with open(registry_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
+            data = {"remotes": ToolConfig.get_remote_registry()}
             if "remotes" in data and self.db_id in data["remotes"]:
                 data["remotes"][self.db_id]["version"] = new_version
-                
+
+                registry_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(registry_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
-                
+
                 self.config["version"] = new_version
                 logger.info(f"已成功持久化更新 {self.db_id} 的版本号为: {new_version}")
         except Exception as e:
             logger.error(f"持久化更新版本号失败: {e}")
 
+    _DIR_INFO_TTL = 120.0
+    _dir_info_cache: Dict[str, tuple] = {}
+
     def _get_dir_info(self) -> tuple[float, str]:
+        """统计库目录体积与最近修改时间（带 2 分钟缓存，避免设置页反复扫描数十万文件）"""
+        cache_key = str(self.base_dir)
+        cached = BioDatabase._dir_info_cache.get(cache_key)
+        now = time.time()
+        if cached and (now - cached[2]) < BioDatabase._DIR_INFO_TTL:
+            return cached[0], cached[1]
+
         total_size = 0
         latest_mtime = 0
         try:
@@ -65,9 +92,10 @@ class BioDatabase:
                             latest_mtime = stat.st_mtime
         except Exception:
             pass
-        
+
         size_mb = round(total_size / (1024 * 1024), 2)
         mtime_str = datetime.fromtimestamp(latest_mtime).strftime('%Y-%m-%d %H:%M:%S') if latest_mtime > 0 else '未知'
+        BioDatabase._dir_info_cache[cache_key] = (size_mb, mtime_str, now)
         return size_mb, mtime_str
 
     def get_status(self) -> Dict[str, Any]:
@@ -280,20 +308,27 @@ class PharokkaDatabase(BioDatabase):
 
     async def update_database(self):
         try:
-            import re
-            project_root = str(ToolConfig.PROJECT_ROOT).replace('\\', '/')
-            m = re.match(r"^([A-Za-z]):/(.*)", project_root)
-            if not m: return False
-            mnt_path = f"/mnt/{m.group(1).lower()}/{m.group(2)}/scripts/setup_pharokka.sh"
-            
-            logger.info(f">>> [Pharokka] 启动底层部署脚本: {mnt_path}")
-            proc = await asyncio.create_subprocess_shell(f'wsl -d Ubuntu -u root bash "{mnt_path}"')
+            from ...assembly.env.wsl_manager import WSLManager
+            if not WSLManager.is_available():
+                self.last_error = "未检测到可用的 WSL(Ubuntu) 发行版，Pharokka 需要 WSL 才能运行与部署"
+                logger.error(self.last_error)
+                return False
+
+            cmd = build_wsl_script_command("setup_pharokka.sh")
+            if not cmd:
+                self.last_error = "无法解析项目在 WSL 中的挂载路径"
+                logger.error(self.last_error)
+                return False
+
+            logger.info(f">>> [Pharokka] 启动底层部署脚本: {cmd}")
+            proc = await asyncio.create_subprocess_shell(cmd)
             await proc.communicate()
             
             if proc.returncode == 0:
                 current_version = f"{datetime.now().strftime('%Y-%m')} (Latest)"
                 self._update_registry_version(current_version)
                 return True
+            logger.error(f"Pharokka 部署脚本退出码异常: {proc.returncode}")
             return False
         except Exception as e:
             logger.error(f"Pharokka 同步失败: {e}")
@@ -312,20 +347,27 @@ class PholdDatabase(BioDatabase):
 
     async def update_database(self):
         try:
-            import re
-            project_root = str(ToolConfig.PROJECT_ROOT).replace('\\', '/')
-            m = re.match(r"^([A-Za-z]):/(.*)", project_root)
-            if not m: return False
-            mnt_path = f"/mnt/{m.group(1).lower()}/{m.group(2)}/scripts/setup_phold.sh"
-            
-            logger.info(f">>> [Phold] 启动底层部署脚本: {mnt_path}")
-            proc = await asyncio.create_subprocess_shell(f'wsl -d Ubuntu -u root bash "{mnt_path}"')
+            from ...assembly.env.wsl_manager import WSLManager
+            if not WSLManager.is_available():
+                self.last_error = "未检测到可用的 WSL(Ubuntu) 发行版，Phold 需要 WSL + GPU 环境才能运行与部署"
+                logger.error(self.last_error)
+                return False
+
+            cmd = build_wsl_script_command("setup_phold.sh")
+            if not cmd:
+                self.last_error = "无法解析项目在 WSL 中的挂载路径"
+                logger.error(self.last_error)
+                return False
+
+            logger.info(f">>> [Phold] 启动底层部署脚本: {cmd}")
+            proc = await asyncio.create_subprocess_shell(cmd)
             await proc.communicate()
             
             if proc.returncode == 0:
                 current_version = f"{datetime.now().strftime('%Y-%m')} (Latest)"
                 self._update_registry_version(current_version)
                 return True
+            logger.error(f"Phold 部署脚本退出码异常: {proc.returncode}")
             return False
         except Exception as e:
             logger.error(f"Phold 同步失败: {e}")
@@ -505,6 +547,9 @@ class BioDbManager:
         # [Migration] 核心逻辑：将散落在 16S 目录下的 NCBI 文件归位到 16S/ncbi
         self._perform_migration()
 
+        # 合并主注册表与历史 legacy 注册表（补齐 Swiss-Prot/CDD/VFDB/CARD 等条目）
+        ToolConfig.sync_registry()
+
         registry = ToolConfig.get_remote_registry()
         for db_id, config in registry.items():
             db_id_lower = db_id.lower()
@@ -528,6 +573,21 @@ class BioDbManager:
                 self.dbs[db_id] = CddPfamDatabase(db_id, config)
             else:
                 self.dbs[db_id] = BioDatabase(db_id, config)
+
+        logger.info(
+            "生物数据库注册完成: %s 个条目 %s（database 根目录: %s）",
+            len(self.dbs), sorted(self.dbs.keys()), ToolConfig.DATABASE_ROOT
+        )
+        if ToolConfig.LEGACY_DATABASE_ROOT.exists():
+            legacy_used = sorted(
+                name for name, db in self.dbs.items()
+                if str(db.base_dir).startswith(str(ToolConfig.LEGACY_DATABASE_ROOT))
+            )
+            if legacy_used:
+                logger.warning(
+                    "检测到历史遗留的 database/database 布局，以下库已自动回退到该目录: %s",
+                    legacy_used
+                )
 
     def _perform_migration(self):
         """处理 NCBI 16S 目录不规范的历史遗留问题"""
