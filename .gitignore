@@ -167,6 +167,7 @@ src/test_shm.py
 !/scripts/build_annotation_report.py
 !/scripts/build_t5_comparative_report.py
 !/scripts/citations_ops.json
+!/scripts/docx_citations.py
 !/scripts/setup_assembly_env.sh
 !/scripts/setup_pharokka.sh
 !/scripts/setup_phold.sh
@@ -179,10 +180,18 @@ src/test_shm.py
 !/scripts/generate_project_tree.ps1
 !/scripts/build_cdd_rps_index.py
 !/scripts/build_downloaded_dbs.py
+!/scripts/process_user_downloads.py
 !/scripts/verify_and_install_deps.py
 !/scripts/verify_consensus_algorithm.py
 !/scripts/heal_assembly_metrics.py
 !/scripts/refresh_task_results.py
+!/scripts/refresh_persisted_categories.py
+!/scripts/audit_full_database_terms.py
+!/scripts/deep_classification_audit.py
+!/scripts/run_16s_blast.py
+!/scripts/run_16s_blast_new_orders.py
+!/scripts/translate_and_export.py
+!/scripts/export_gui_format_new_orders.py
 !/scripts/自动化流程文档.md
 !/scripts/ensure_electron.ps1
 !/scripts/repair_integrity.ps1

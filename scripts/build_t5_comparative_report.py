@@ -1065,10 +1065,7 @@ print("Theme eastAsia fixed")
 
 # 注入参考文献 [1]-[8] 引用编号
 CITATIONS_SPEC = PROJECT_ROOT / "scripts" / "citations_ops.json"
-DOCX_CITATIONS = Path(
-    r"C:\Users\Administrator\AppData\Local\Doubao\User Data\Default\.doubao\agent_mode\workspace\.skills\word"
-    r"\scripts\docx_citations.py"
-)
+DOCX_CITATIONS = PROJECT_ROOT / "scripts" / "docx_citations.py"
 if DOCX_CITATIONS.exists() and CITATIONS_SPEC.exists():
     apply_cmd = [
         sys.executable, "-X", "utf8", str(DOCX_CITATIONS), "apply",

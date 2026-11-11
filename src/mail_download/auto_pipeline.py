@@ -45,10 +45,7 @@ logger = logging.getLogger("mail_download.auto_pipeline")
 
 REPORT_SCRIPT = PROJECT_ROOT / "scripts" / "build_annotation_report.py"
 CITATIONS_SPEC = PROJECT_ROOT / "scripts" / "citations_ops.json"
-DOCX_CITATIONS = Path(
-    r"C:\Users\Administrator\AppData\Local\Doubao\User Data\Default\.doubao\agent_mode\workspace\.skills\word"
-    r"\scripts\docx_citations.py"
-)
+DOCX_CITATIONS = PROJECT_ROOT / "scripts" / "docx_citations.py"
 ANNOTATIONS_DIR = PROJECT_ROOT / "results" / "annotations"
 PIPELINE_LOG = PROJECT_ROOT / "results" / "email_downloads" / "pipeline.log"
 ZIP_GLOBS = list(DEFAULT_PRODUCT_GLOBS) + ["*.docx"]
