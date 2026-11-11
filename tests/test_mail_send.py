@@ -302,5 +302,146 @@ class TestCliPackSend(unittest.TestCase):
                 cli_mod.MailSender.__init__ = orig
 
 
+class TestAutoPipelineAndScheduler(unittest.TestCase):
+    """auto_pipeline 断点闭环（docx 同步、--to self、--annotate-only 发信）与 scheduler 修复验证"""
+
+    def test_pack_and_send_syncs_docx_and_resolves_self(self):
+        import src.mail_download.auto_pipeline as ap_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            prod = make_product_dir(base)
+            docx_file = prod / "ANNO_5A8C0B32_RE2_注释报告.docx"
+            docx_file.write_bytes(b"PK\x03\x04docx-sync")
+            send_dir = base / "sends"
+            dl_dir = base / "dl"
+            dl_dir.mkdir()
+            ap_mod.PIPELINE_LOG = dl_dir / "pipeline.log"
+
+            cfg = MailConfig(
+                account="self@qq.com",
+                smtp_account="self@qq.com",
+                reply_to="client@example.com",
+                download_dir=str(dl_dir),
+                send_dir=str(send_dir),
+            )
+            fake = FakeSMTP()
+            orig_init = ap_mod.MailSender.__init__
+            ap_mod.MailSender.__init__ = lambda self_s, c, smtp_factory=None: orig_init(self_s, c, smtp_factory=lambda: fake)
+            try:
+                ok = ap_mod._pack_and_send(
+                    cfg,
+                    prod,
+                    "ANNO_5A8C0B32_RE2",
+                    do_send=True,
+                    to="self",
+                    subject_prefix="【测试】",
+                    mail_info={"subject": "原邮件", "attachments": ["a.fasta"]},
+                )
+            finally:
+                ap_mod.MailSender.__init__ = orig_init
+
+            self.assertTrue(ok)
+            self.assertEqual(fake.sent_to, ["self@qq.com"])
+            self.assertTrue((send_dir / docx_file.name).is_file())
+            self.assertEqual(len(list(send_dir.glob("*.zip"))), 1)
+
+    def test_resolve_self_without_own_account_fails_safely(self):
+        import src.mail_download.auto_pipeline as ap_mod
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            prod = make_product_dir(base)
+            cfg = MailConfig(account="", smtp_account="", reply_to="client@example.com", send_dir=str(base / "sends"))
+            ap_mod.PIPELINE_LOG = base / "pipeline.log"
+            ok = ap_mod._pack_and_send(cfg, prod, "ANNO_X", do_send=True, to="self", subject_prefix="")
+            self.assertFalse(ok)
+
+    def test_annotate_only_supports_fas_manifest_and_to_self_and_exit_code(self):
+        import src.mail_download.auto_pipeline as ap_mod
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            dl_dir = base / "dl"
+            send_dir = base / "sends"
+            batch = dl_dir / "up_20261111_0001"
+            batch.mkdir(parents=True)
+            fas = batch / "sample_x.fas"
+            fas.write_text(">phage_x\nATGCATGC\n", encoding="utf-8")
+            (batch / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "mail": {"subject": "送测批次001", "date": "2026-11-11"},
+                        "attachments": [{"filename": "sample_x.fas"}],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            cfg_path = base / "mail_config.json"
+            cfg_path.write_text(
+                json.dumps(
+                    {
+                        "account": "self@qq.com",
+                        "smtp_account": "self@qq.com",
+                        "reply_to": "client@example.com",
+                        "download_dir": str(dl_dir),
+                        "send_dir": str(send_dir),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            out_prod = make_product_dir(base / "anno_out")
+            docx_out = out_prod / "ANNO_X_注释报告.docx"
+            docx_out.write_bytes(b"PK\x03\x04report")
+
+            async def fake_annotate(_batch, _fasta):
+                return {"task_id": "ANNO_X", "out_dir": out_prod, "files": {}}
+
+            fake = FakeSMTP()
+            orig_init = ap_mod.MailSender.__init__
+            ap_mod.MailSender.__init__ = lambda self_s, c, smtp_factory=None: orig_init(self_s, c, smtp_factory=lambda: fake)
+            try:
+                # 1. --annotate-only 传 --to self：触发注释、报告、打包并只发往 self@qq.com
+                with patch.object(ap_mod, "_annotate", side_effect=fake_annotate), \
+                     patch.object(ap_mod, "_build_report", return_value=docx_out):
+                    rc = ap_mod.main(["--config", str(cfg_path), "--annotate-only", str(batch), "--to", "self"])
+                self.assertEqual(rc, 0)
+                self.assertEqual(fake.sent_to, ["self@qq.com"])
+                msg = email.message_from_string(fake.sent_msg)
+                body_part = next(p for p in msg.walk() if p.get_content_type() == "text/plain")
+                body_txt = body_part.get_payload(decode=True).decode("utf-8")
+                self.assertIn("送测批次001", body_txt)
+                self.assertTrue((send_dir / docx_out.name).is_file())
+
+                # 2. 报告生成失败返回 None 时退出码必须非 0
+                fake.sent_to = None
+                with patch.object(ap_mod, "_annotate", side_effect=fake_annotate), \
+                     patch.object(ap_mod, "_build_report", return_value=None):
+                    rc_fail = ap_mod.main(["--config", str(cfg_path), "--annotate-only", str(batch)])
+                self.assertEqual(rc_fail, 1)
+                self.assertIsNone(fake.sent_to)
+            finally:
+                ap_mod.MailSender.__init__ = orig_init
+
+    def test_scheduler_run_poll_no_none_arg(self):
+        import src.mail_download.scheduler as sched_mod
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        captured = []
+        with patch.object(sched_mod, "cli_main", side_effect=lambda argv: captured.append(argv) or 0):
+            rc1 = sched_mod.run_poll(SimpleNamespace(since_days=5, config=None, verbose=False))
+            rc2 = sched_mod.run_poll(SimpleNamespace(since_days=7, config="mail.json", verbose=False))
+            rc3 = sched_mod.run_poll(SimpleNamespace(since_days=3, config="mail.json", verbose=True))
+
+        self.assertEqual((rc1, rc2, rc3), (0, 0, 0))
+        self.assertEqual(captured[0], ["--since-days", "5"])
+        self.assertEqual(captured[1], ["--since-days", "7", "--config", "mail.json"])
+        self.assertEqual(captured[2], ["--since-days", "3", "--config", "mail.json", "--verbose"])
+
+
 if __name__ == "__main__":
     unittest.main()

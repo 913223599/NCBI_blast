@@ -952,6 +952,207 @@ def test_build_annotation_report_handles_zero_trna_and_safety():
         assert out_docx.exists() and out_docx.stat().st_size > 10000
 
 
+def test_build_annotation_report_tolerates_missing_safety_and_bad_bitscore():
+    """验证 build_annotation_report.py 在缺失 safety_audit.json 与异常 bit score 下仍稳定生成 .docx"""
+    import subprocess
+    import sys
+
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "build_annotation_report.py"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = Path(tmp) / "ANNO_MISSING_SAFETY"
+        data_dir.mkdir()
+        (data_dir / "summary.json").write_text(
+            json.dumps({
+                "total_length": 12000,
+                "gc_content": 48.5,
+                "coding_density_pct": 75.0,
+                "avg_gene_length": 900.0,
+                "annotated_count": 1,
+                "hypothetical_count": 0,
+                "category_distribution": {"Replication & Repair": 1},
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (data_dir / "features.json").write_text(
+            json.dumps([{
+                "feature_type": "CDS",
+                "locus_tag": "TEST_0001",
+                "contig_id": "contig_1",
+                "start": 1,
+                "end": 900,
+                "strand": "+",
+                "length_bp": 900,
+                "product": "DNA polymerase",
+                "category": "Replication & Repair",
+                "source_engine": "Swiss-Prot",
+                "translation": "M" * 300,
+                "evidence_sources": ["[Swiss-Prot] P12345 (E-value: 1e-10)"],
+            }], ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (data_dir / "swissprot_hits.tsv").write_text(
+            "TEST_0001\tsp|P12345|DPOL\t98.0\t300\t1e-20\tN/A\tDNA polymerase OS=Test phage\n",
+            encoding="utf-8",
+        )
+        out_docx = Path(tmp) / "missing_safety.docx"
+        proc = subprocess.run(
+            [sys.executable, "-X", "utf8", str(script), "--data", str(data_dir), "--out", str(out_docx)],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert out_docx.exists() and out_docx.stat().st_size > 10000
+
+
+def test_mail_pipeline_run_self_overview_fallback_and_send_package(monkeypatch):
+    """验证 /mail_pipeline/overview 关联目录 Word 报告、/run 解析 to=self 与 /send_package 安全发己闭环"""
+    import zipfile
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import src.backend.routes.other_tools as ot_routes
+
+    app = FastAPI()
+    app.include_router(ot_routes.router)
+    client = TestClient(app)
+
+    sent_records = []
+    run_cmds = []
+
+    class FakeSender:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def send(self, attachment, to=None, subject=None, body=None, cc=None):
+            sent_records.append({
+                "to": to,
+                "subject": subject,
+                "body": body,
+                "attach_name": Path(attachment).name,
+                "attach_size": Path(attachment).stat().st_size,
+            })
+            return type(
+                "SendResult",
+                (),
+                {
+                    "ok": True,
+                    "to": to,
+                    "subject": subject,
+                    "stage": "sent",
+                    "attachment_size": Path(attachment).stat().st_size,
+                    "error": None,
+                },
+            )()
+
+    def fake_subprocess_run(cmd, **kwargs):
+        run_cmds.append(list(cmd))
+        return type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        dl_dir = root / "dl"
+        send_dir = root / "sends"
+        anno_dir = root / "annotations"
+        batch_dir = dl_dir / "up_20261111_0008"
+        batch_dir.mkdir(parents=True)
+        (batch_dir / "sample.fasta").write_text(">c1\nATGC\n", encoding="utf-8")
+        send_dir.mkdir(parents=True)
+        (anno_dir / "ANNO_TASK_01").mkdir(parents=True)
+        (anno_dir / "ANNO_TASK_01" / "ANNO_TASK_01_注释报告.docx").write_bytes(b"PK\x03\x04anno-docx")
+
+        zip_path = send_dir / "ANNO_TASK_01_20261111_120000.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("ANNO.gbk", "LOCUS test\n")
+            zf.writestr("ANNO_TASK_01_注释报告.docx", b"PK\x03\x04anno-docx")
+        (send_dir / "ANNO_TASK_01_20261111_120000.manifest.json").write_text(
+            json.dumps({
+                "task_id": "ANNO_TASK_01",
+                "pack_time": "2026-11-11T12:00:00",
+                "zip": zip_path.name,
+                "file_count": 2,
+                "files": [
+                    {"name": "ANNO.gbk", "size_bytes": 11},
+                    {"name": "ANNO_TASK_01_注释报告.docx", "size_bytes": 13},
+                ],
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        cfg = MailConfig(
+            account="self@qq.com",
+            smtp_account="self@qq.com",
+            reply_to="external_client@163.com",
+            auth_code_env="TEST_ENV_VAR_NOT_USED",
+            smtp_auth_code_env="TEST_ENV_VAR_NOT_USED",
+            download_dir=str(dl_dir),
+            send_dir=str(send_dir),
+        )
+        cfg_file = root / "mail_config.json"
+        cfg_file.write_text(
+            json.dumps({
+                "account": "self@qq.com",
+                "smtp_account": "self@qq.com",
+                "reply_to": "external_client@163.com",
+                "download_dir": str(dl_dir),
+                "send_dir": str(send_dir),
+            }),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setenv("TEST_ENV_VAR_NOT_USED", "dummy-auth")
+        monkeypatch.setattr(ot_routes, "MAIL_CONFIG_PATH", cfg_file)
+        monkeypatch.setattr(ot_routes, "ANNOTATIONS_DIR", anno_dir)
+        monkeypatch.setattr(ot_routes, "load_config", lambda *a, **kw: cfg)
+        monkeypatch.setattr(ot_routes, "MailSender", FakeSender)
+        monkeypatch.setattr(ot_routes.subprocess, "run", fake_subprocess_run)
+
+        # 1. overview 能回退列出 ANNOTATIONS_DIR 中的 .docx 报告
+        r_ov = client.get("/other_tools/mail_pipeline/overview")
+        assert r_ov.status_code == 200
+        docx_names = [d["name"] for d in r_ov.json()["docx_reports"]]
+        assert "ANNO_TASK_01_注释报告.docx" in docx_names
+
+        # 2. cleanup 按名字可清理位于 annotations 回退目录的 .docx
+        cl = cleanup_mail_history(dl_dir, send_dir, anno_dir, targets=["docx"], names=["ANNO_TASK_01_注释报告.docx"])
+        assert cl["removed_count"] == 1
+        assert not (anno_dir / "ANNO_TASK_01" / "ANNO_TASK_01_注释报告.docx").exists()
+
+        # 3. send_package：路径穿越返回 400 / 不存在返回 404 / to="self" 安全发往本人
+        r_bad = client.post("/other_tools/mail_pipeline/send_package", json={"zip_name": "../bad.zip"})
+        assert r_bad.status_code == 400
+        r_404 = client.post("/other_tools/mail_pipeline/send_package", json={"zip_name": "not_found.zip"})
+        assert r_404.status_code == 404
+        r_ok = client.post(
+            "/other_tools/mail_pipeline/send_package",
+            json={"zip_name": zip_path.name, "to": "self", "extra_note": "回归检查"},
+        )
+        assert r_ok.status_code == 200
+        assert sent_records[-1]["to"] == "self@qq.com"
+        assert "ANNO_TASK_01" in sent_records[-1]["subject"]
+        assert "ANNO_TASK_01_注释报告.docx" in sent_records[-1]["body"]
+
+        # 4. /run 支持批次重跑并发往 self，且解析 self 为真实邮箱再传给 auto_pipeline
+        ot_routes._mail_pipeline_state["running"] = False
+        r_run = client.post(
+            "/other_tools/mail_pipeline/run",
+            json={"annotate_only_batch": batch_dir.name, "no_send": False, "to": "self"},
+        )
+        assert r_run.status_code == 200
+        for _ in range(30):
+            if not ot_routes._mail_pipeline_state["running"]:
+                break
+            import time
+            time.sleep(0.05)
+        assert len(run_cmds) == 1
+        cmd = run_cmds[0]
+        assert "--annotate-only" in cmd and str(batch_dir) in cmd
+        to_idx = cmd.index("--to")
+        assert cmd[to_idx + 1] == "self@qq.com"
+
+
 def test_no_emoji_and_utf8_in_new_files():
     """验证新增与修改的前后端代码文件全部采用 UTF-8 且不含任何 Emoji 字符"""
     repo_root = Path(__file__).resolve().parents[1]
@@ -959,10 +1160,12 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "scripts" / "build_annotation_report.py",
         repo_root / "src" / "blast" / "local_blast.py",
         repo_root / "src" / "workbench" / "models" / "tool_config.py",
+        repo_root / "src" / "mail_download" / "auto_pipeline.py",
         repo_root / "src" / "mail_download" / "config.py",
         repo_root / "src" / "mail_download" / "downloader.py",
         repo_root / "src" / "mail_download" / "fetcher.py",
         repo_root / "src" / "mail_download" / "packer.py",
+        repo_root / "src" / "mail_download" / "scheduler.py",
         repo_root / "src" / "mail_download" / "sender.py",
         repo_root / "src" / "backend" / "routes" / "other_tools.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "dir_migrator.py",

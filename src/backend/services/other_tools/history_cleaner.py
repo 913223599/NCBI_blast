@@ -110,11 +110,20 @@ def cleanup_mail_history(
                 freed += _remove(mf)
                 removed.append(str(mf))
 
-    if "docx" in targets and send_dir.exists():
-        for d in send_dir.glob("*.docx"):
-            if _pick(d):
-                freed += _remove(d)
-                removed.append(str(d))
+    if "docx" in targets:
+        if send_dir.exists():
+            for d in send_dir.glob("*.docx"):
+                if _pick(d):
+                    freed += _remove(d)
+                    removed.append(str(d))
+        if name_set and annotations_dir.exists():
+            for sub in annotations_dir.iterdir():
+                if not sub.is_dir():
+                    continue
+                for d in sub.glob("*.docx"):
+                    if d.name in name_set and _older_than(d, cutoff):
+                        freed += _remove(d)
+                        removed.append(str(d))
 
     index_removed = 0
     idx_file = download_dir / "processed_index.json"

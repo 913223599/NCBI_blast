@@ -20,11 +20,12 @@ from src.mail_download.cli import main as cli_main
 
 def run_poll(args) -> int:
     """执行一次轮询（复用 CLI 逻辑）。"""
-    return cli_main([
-        "--config", args.config,
-        "--since-days", str(args.since_days),
-        "--verbose" if args.verbose else None,
-    ] if args.config else ["--since-days", str(args.since_days)])
+    argv = ["--since-days", str(args.since_days)]
+    if getattr(args, "config", None):
+        argv += ["--config", args.config]
+    if getattr(args, "verbose", False):
+        argv.append("--verbose")
+    return cli_main(argv)
 
 
 def main(argv=None) -> int:

@@ -159,10 +159,18 @@ class MailListRequest(BaseModel):
 class MailPipelineRunRequest(BaseModel):
     since_days: Optional[int] = None
     no_send: bool = False
+    force_send: bool = False
     annotate_only_batch: Optional[str] = None
     test_input: Optional[str] = None
     to: Optional[str] = None
     subject_prefix: str = "【自动】"
+    extra_note: Optional[str] = None
+
+
+class MailPackageSendRequest(BaseModel):
+    zip_name: str
+    to: Optional[str] = None
+    subject: Optional[str] = None
     extra_note: Optional[str] = None
 
 
@@ -311,6 +319,7 @@ async def get_mail_pipeline_overview():
     # 3. 已打包与回传产物 (results/email_sends)
     outbound_packages: List[Dict[str, Any]] = []
     docx_reports: List[Dict[str, Any]] = []
+    seen_docx_names = set()
     if send_dir.exists():
         for mf in sorted(send_dir.glob("*.manifest.json"), key=lambda p: p.stat().st_mtime, reverse=True):
             try:
@@ -331,12 +340,36 @@ async def get_mail_pipeline_overview():
                 pass
 
         for docx in sorted(send_dir.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True):
+            seen_docx_names.add(docx.name)
             docx_reports.append({
                 "name": docx.name,
                 "path": str(docx),
                 "size_kb": round(docx.stat().st_size / 1024, 1),
                 "mtime": datetime.fromtimestamp(docx.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "source": "send_dir",
             })
+
+    # 补充关联回传包对应注释产物目录中的 Word 报告（兼容未同步复制至 send_dir 的历史报告）
+    if ANNOTATIONS_DIR.exists():
+        for pkg in outbound_packages:
+            tid = str(pkg.get("task_id") or "").strip()
+            if not tid:
+                continue
+            anno_dir = ANNOTATIONS_DIR / tid
+            if not anno_dir.is_dir():
+                continue
+            for docx in sorted(anno_dir.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True):
+                if docx.name in seen_docx_names:
+                    continue
+                seen_docx_names.add(docx.name)
+                docx_reports.append({
+                    "name": docx.name,
+                    "path": str(docx),
+                    "size_kb": round(docx.stat().st_size / 1024, 1),
+                    "mtime": datetime.fromtimestamp(docx.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                    "source": "annotations",
+                })
+        docx_reports.sort(key=lambda item: item.get("mtime", ""), reverse=True)
 
     # 4. 读取 pipeline.log 最后 120 行
     log_lines: List[str] = []
@@ -526,20 +559,40 @@ async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
     if _mail_pipeline_state["running"]:
         raise HTTPException(status_code=409, detail="邮件自动注释流水线正在运行中，请等待当前任务结束")
 
+    raw_cfg = _read_mail_cfg()
+    cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=False)
+    dl_dir = _resolve_dir(raw_cfg.get("download_dir", "results/email_downloads"))
+
+    resolved_to: Optional[str] = None
+    if req.to is not None and str(req.to).strip():
+        resolved_to = _resolve_send_target(cfg, req.to)
+        if not resolved_to:
+            raise HTTPException(status_code=400, detail="未配置发件或收件邮箱账号，无法解析目标收件人")
+
     cmd = [sys.executable, "-X", "utf8", "-m", "src.mail_download.auto_pipeline", "--config", str(MAIL_CONFIG_PATH)]
     if req.since_days is not None:
         cmd += ["--since-days", str(req.since_days)]
     if req.no_send:
         cmd.append("--no-send")
     if req.annotate_only_batch:
-        batch_path = req.annotate_only_batch
-        if not os.path.isabs(batch_path):
-            batch_path = str(_resolve_dir(_read_mail_cfg().get("download_dir", "results/email_downloads")) / batch_path)
-        cmd += ["--annotate-only", batch_path]
+        raw_batch = req.annotate_only_batch.strip()
+        if not raw_batch or ".." in Path(raw_batch).parts:
+            raise HTTPException(status_code=400, detail=f"非法的批次目录: {req.annotate_only_batch}")
+        batch_path = Path(raw_batch) if os.path.isabs(raw_batch) else (dl_dir / raw_batch)
+        if not batch_path.exists() or not batch_path.is_dir():
+            raise HTTPException(status_code=404, detail=f"未找到批次目录: {raw_batch}")
+        cmd += ["--annotate-only", str(batch_path)]
+        if req.force_send and not req.no_send and not resolved_to:
+            cmd.append("--send")
     if req.test_input:
-        cmd += ["--test-input", req.test_input]
-    if req.to:
-        cmd += ["--to", req.to]
+        tp = Path(req.test_input.strip())
+        if not tp.is_absolute():
+            tp = PROJECT_ROOT / tp
+        if not tp.exists() or not tp.is_file():
+            raise HTTPException(status_code=404, detail=f"未找到测试输入文件: {req.test_input}")
+        cmd += ["--test-input", str(tp)]
+    if resolved_to:
+        cmd += ["--to", resolved_to]
     if req.subject_prefix:
         cmd += ["--subject-prefix", req.subject_prefix]
     if req.extra_note:
@@ -664,6 +717,108 @@ async def test_mail_pipeline_send(req: Optional[MailTestSendRequest] = Body(defa
         "attachment": zip_name,
         "attachment_size": res.attachment_size,
         "attached_files": attached_files,
+    }
+
+
+@router.post("/mail_pipeline/send_package")
+async def send_mail_pipeline_package(req: MailPackageSendRequest):
+    """将已打包的注释结果压缩包通过 SMTP 发送至本人或指定邮箱。"""
+    clean_zip = (req.zip_name or "").strip()
+    if (
+        not clean_zip
+        or any(sep in clean_zip for sep in ("/", "\\", ".."))
+        or not clean_zip.lower().endswith(".zip")
+    ):
+        raise HTTPException(status_code=400, detail=f"非法的压缩包文件名: {req.zip_name}")
+
+    def _do_send_package():
+        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=False)
+        send_dir = _resolve_dir(getattr(cfg, "send_dir", "results/email_sends"))
+        zip_path = send_dir / clean_zip
+        if not zip_path.exists() or not zip_path.is_file() or zip_path.parent.resolve() != send_dir.resolve():
+            raise FileNotFoundError(f"未找到回传压缩包: {clean_zip}")
+
+        target_to = _resolve_send_target(cfg, req.to)
+        if not target_to:
+            raise ValueError("缺少目标收件人或未配置发件账号")
+        if not cfg.smtp_auth_code:
+            raise ValueError("缺少 SMTP 授权码，请先配置授权码后再发送邮件")
+
+        task_id = zip_path.stem
+        pack_time = ""
+        file_names: List[str] = []
+        manifest_path = send_dir / f"{zip_path.stem}.manifest.json"
+        if manifest_path.is_file():
+            try:
+                mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
+                task_id = str(mdata.get("task_id") or task_id)
+                pack_time = str(mdata.get("pack_time") or "")
+                for entry in mdata.get("files") or []:
+                    if isinstance(entry, dict) and entry.get("name"):
+                        file_names.append(str(entry["name"]))
+                    elif isinstance(entry, str):
+                        file_names.append(entry)
+            except Exception:
+                pass
+        if not file_names:
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    file_names = list(zf.namelist())
+            except Exception:
+                pass
+
+        docx_names = [n for n in file_names if n.lower().endswith(".docx")]
+        subject = (req.subject or f"噬菌体注释结果回传 - {task_id}").strip()
+        preview = file_names[:20]
+        if len(file_names) > 20:
+            preview.append(f"...（其余 {len(file_names) - 20} 个文件）")
+
+        body_lines = [
+            "您好：",
+            "",
+            f"现发送噬菌体基因组注释任务 {task_id} 的结果压缩包：",
+            f"  附件文件名：{zip_path.name}",
+            f"  文件大小：{zip_path.stat().st_size / 1024:.1f} KB",
+            f"  内含产物数：{len(file_names)} 个",
+        ]
+        if pack_time:
+            body_lines.append(f"  打包时间：{pack_time}")
+        if docx_names:
+            body_lines.append(f"  包含 Word 报告：{', '.join(docx_names)}")
+        if req.extra_note and req.extra_note.strip():
+            body_lines.append(f"  附加备注：{req.extra_note.strip()}")
+        if preview:
+            body_lines.append("")
+            body_lines.append("压缩包内文件清单：")
+            body_lines.extend(f"  - {name}" for name in preview)
+        body_lines.extend(["", "如需进一步分析或调整，请回复本邮件。", ""])
+
+        res = MailSender(cfg).send(zip_path, to=target_to, subject=subject, body="\n".join(body_lines))
+        return res, task_id, len(file_names)
+
+    try:
+        res, task_id, file_count = await asyncio.to_thread(_do_send_package)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"发送结果压缩包异常: {e}")
+
+    if not res.ok:
+        raise HTTPException(status_code=400, detail=f"发送失败 ({res.stage}): {res.error}")
+
+    return {
+        "status": "success",
+        "ok": True,
+        "zip_name": clean_zip,
+        "task_id": task_id,
+        "to": res.to,
+        "subject": res.subject,
+        "stage": res.stage,
+        "attachment": clean_zip,
+        "attachment_size": res.attachment_size,
+        "file_count": file_count,
     }
 
 

@@ -100,6 +100,27 @@ const testSendForm = ref({
   note: '',
   attachLatestReport: false
 })
+const showBatchRunModal = ref(false)
+const batchRunForm = ref({
+  batchName: '',
+  subject: '',
+  attachmentsDesc: '',
+  sendMode: 'only_pack' as 'only_pack' | 'self' | 'custom',
+  customTo: '',
+  subjectPrefix: '【自动】',
+  extraNote: ''
+})
+const showPkgSendModal = ref(false)
+const sendingPkg = ref(false)
+const pkgSendForm = ref({
+  zipName: '',
+  taskId: '',
+  sizeKb: 0,
+  fileCount: 0,
+  to: '',
+  subject: '',
+  extraNote: ''
+})
 const activeSubTab = ref<'batches' | 'inbox' | 'outbound' | 'processed' | 'logs'>('batches')
 
 const inboxMails = ref<InboxMailItem[]>([])
@@ -163,7 +184,7 @@ const resolvedSendDir = ref('')
 
 const runOptions = ref({
   since_days: 7,
-  no_send: false,
+  send_mode: 'config' as 'config' | 'self' | 'none',
   subject_prefix: '【自动】',
   extra_note: ''
 })
@@ -330,19 +351,68 @@ function openInboxTab(): void {
   }
 }
 
-async function handleRunPipeline(annotateOnlyBatch?: string): Promise<void> {
-  setInfo(annotateOnlyBatch ? `启动批次重跑: ${annotateOnlyBatch}` : '启动流水线...')
+async function handleRunPipeline(): Promise<void> {
+  const mode = runOptions.value.send_mode
+  const modeTip = mode === 'self' ? '（完成后发给自己测试）' : mode === 'none' ? '（仅注释打包，不发信）' : ''
+  setInfo(`启动流水线${modeTip}...`)
   try {
     const payload: Record<string, any> = {
       since_days: runOptions.value.since_days,
-      no_send: annotateOnlyBatch ? true : runOptions.value.no_send,
+      no_send: mode === 'none',
       subject_prefix: runOptions.value.subject_prefix,
       extra_note: runOptions.value.extra_note || null
     }
-    if (annotateOnlyBatch) payload.annotate_only_batch = annotateOnlyBatch
+    if (mode === 'self') payload.to = 'self'
     const data = await postJson(`${API}/run`, payload)
     runtime.value = data.runtime
-    setInfo('流水线已在后台运行')
+    setInfo(`流水线已在后台运行${modeTip}`)
+  } catch (err) {
+    setError(err)
+  }
+}
+
+function openBatchRunModal(batch: BatchItem): void {
+  const files = (batch.attachments || []).map(a => a.filename).filter(Boolean).join('、')
+  batchRunForm.value = {
+    batchName: batch.batch_name,
+    subject: batch.subject || '-',
+    attachmentsDesc: files || '-',
+    sendMode: 'only_pack',
+    customTo: configForm.value.account || configForm.value.smtp_account || '',
+    subjectPrefix: runOptions.value.subject_prefix || '【自动】',
+    extraNote: runOptions.value.extra_note || ''
+  }
+  showBatchRunModal.value = true
+}
+
+async function confirmBatchRun(overrideMode?: 'only_pack' | 'self' | 'custom'): Promise<void> {
+  const mode = overrideMode || batchRunForm.value.sendMode
+  const batchName = batchRunForm.value.batchName
+  if (!batchName) return
+  const payload: Record<string, any> = {
+    annotate_only_batch: batchName,
+    no_send: mode === 'only_pack',
+    force_send: mode === 'custom',
+    subject_prefix: batchRunForm.value.subjectPrefix || '【自动】',
+    extra_note: batchRunForm.value.extraNote.trim() || null
+  }
+  if (mode === 'self') {
+    payload.to = 'self'
+  } else if (mode === 'custom' && batchRunForm.value.customTo.trim()) {
+    payload.to = batchRunForm.value.customTo.trim()
+  }
+  setInfo(`启动批次重跑: ${batchName}`)
+  try {
+    const data = await postJson(`${API}/run`, payload)
+    runtime.value = data.runtime
+    showBatchRunModal.value = false
+    setInfo(
+      mode === 'self'
+        ? `已启动批次 ${batchName} 重跑，完成后将发送至本人邮箱`
+        : mode === 'custom'
+          ? `已启动批次 ${batchName} 重跑并回传`
+          : `已启动批次 ${batchName} 重跑（仅注释与打包，不发邮件）`
+    )
   } catch (err) {
     setError(err)
   }
@@ -469,6 +539,41 @@ async function confirmTestSend(toSelf = true): Promise<void> {
   }
 }
 
+function openPkgSendModal(pkg: OutboundPackage): void {
+  pkgSendForm.value = {
+    zipName: pkg.zip_name,
+    taskId: pkg.task_id,
+    sizeKb: pkg.size_kb,
+    fileCount: pkg.file_count,
+    to: configForm.value.account || configForm.value.smtp_account || '',
+    subject: '',
+    extraNote: ''
+  }
+  showPkgSendModal.value = true
+}
+
+async function confirmPkgSend(toSelf = true): Promise<void> {
+  if (!pkgSendForm.value.zipName) return
+  sendingPkg.value = true
+  try {
+    const targetTo = toSelf ? 'self' : (pkgSendForm.value.to.trim() || 'self')
+    const data = await postJson(`${API}/send_package`, {
+      zip_name: pkgSendForm.value.zipName,
+      to: targetTo,
+      subject: pkgSendForm.value.subject.trim() || null,
+      extra_note: pkgSendForm.value.extraNote.trim() || null
+    })
+    showPkgSendModal.value = false
+    setInfo(
+      `结果包已发至 ${data.to}：${data.attachment} (${(data.attachment_size / 1024).toFixed(1)} KB)`
+    )
+  } catch (err) {
+    setError(err)
+  } finally {
+    sendingPkg.value = false
+  }
+}
+
 onMounted(() => {
   loadOverview()
   pollTimer = setInterval(() => {
@@ -562,9 +667,13 @@ onUnmounted(() => {
           <span>收件天数</span>
           <input type="number" v-model.number="runOptions.since_days" min="1" max="90" class="num-input" />
         </label>
-        <label class="ctrl-item checkbox-item">
-          <input type="checkbox" v-model="runOptions.no_send" />
-          <span>不发送邮件</span>
+        <label class="ctrl-item">
+          <span>回传目标</span>
+          <select v-model="runOptions.send_mode" class="select-input">
+            <option value="config">按配置回传 ({{ configForm.reply_to || '-' }})</option>
+            <option value="self">仅发给自己测试 ({{ configForm.account || configForm.smtp_account || '本人' }})</option>
+            <option value="none">仅注释打包（不发信）</option>
+          </select>
         </label>
         <label class="ctrl-item">
           <span>报告备注</span>
@@ -630,7 +739,7 @@ onUnmounted(() => {
               </span>
             </td>
             <td class="actions-cell">
-              <button class="btn-mini primary" @click="handleRunPipeline(b.batch_name)" :disabled="runtime.running">重跑</button>
+              <button class="btn-mini primary" @click="openBatchRunModal(b)" :disabled="runtime.running">重跑</button>
               <button class="btn-mini" @click="openLocalPath(b.batch_path)">打开</button>
               <button class="btn-mini danger" @click="deleteOne('batches', b.batch_name, b.batch_name)" :disabled="runtime.running">删除</button>
             </td>
@@ -747,6 +856,7 @@ onUnmounted(() => {
               <td>{{ pkg.size_kb }} KB</td>
               <td>{{ pkg.pack_time }}</td>
               <td class="actions-cell">
+                <button class="btn-mini primary" @click="openPkgSendModal(pkg)" :disabled="runtime.running">发信</button>
                 <button class="btn-mini" @click="openLocalPath(pkg.zip_path)">定位</button>
                 <button class="btn-mini danger" @click="deleteOne('outbound', pkg.task_id, pkg.zip_name)" :disabled="runtime.running">删除</button>
               </td>
@@ -978,6 +1088,101 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- 批次重跑注释与回传 -->
+    <div v-if="showBatchRunModal" class="modal-backdrop" @click.self="showBatchRunModal = false">
+      <div class="modal-card narrow">
+        <div class="modal-header">
+          <h3>批次重跑注释与回传</h3>
+          <button class="close-btn" @click="showBatchRunModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="auth-block">
+            <div class="auth-title">目标批次：{{ batchRunForm.batchName }}</div>
+            <div class="meta-sub">主题：{{ batchRunForm.subject }}</div>
+            <div class="meta-sub">序列附件：{{ batchRunForm.attachmentsDesc }}</div>
+          </div>
+          <div class="auth-block">
+            <div class="auth-title">重跑完成后的回传方式</div>
+            <div class="radio-group">
+              <label class="radio-item">
+                <input type="radio" v-model="batchRunForm.sendMode" value="only_pack" />
+                <span>仅注释与打包（不发送邮件）</span>
+              </label>
+              <label class="radio-item">
+                <input type="radio" v-model="batchRunForm.sendMode" value="self" />
+                <span>完成后发给自己测试（{{ configForm.account || configForm.smtp_account || '本人邮箱' }}）</span>
+              </label>
+              <label class="radio-item">
+                <input type="radio" v-model="batchRunForm.sendMode" value="custom" />
+                <span>完成后回传给指定收件人（留空则发往 {{ configForm.reply_to || '-' }}）</span>
+              </label>
+            </div>
+            <input
+              v-if="batchRunForm.sendMode === 'custom'"
+              v-model="batchRunForm.customTo"
+              type="text"
+              :placeholder="configForm.reply_to || '留空使用默认回传地址'"
+              class="key-input-plain"
+            />
+          </div>
+          <div class="auth-block">
+            <div class="auth-title">回传主题前缀与报告备注（可选）</div>
+            <input v-model="batchRunForm.subjectPrefix" type="text" placeholder="【自动】" class="key-input-plain" />
+            <input v-model="batchRunForm.extraNote" type="text" placeholder="追加写入 Word 报告备注" class="key-input-plain" />
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-outline" @click="showBatchRunModal = false">取消</button>
+          <button class="btn-secondary" :disabled="runtime.running" @click="confirmBatchRun('self')">
+            重跑并发给自己
+          </button>
+          <button class="btn-primary" :disabled="runtime.running" @click="confirmBatchRun()">
+            开始重跑
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 发送已打包注释结果压缩包 -->
+    <div v-if="showPkgSendModal" class="modal-backdrop" @click.self="showPkgSendModal = false">
+      <div class="modal-card narrow">
+        <div class="modal-header">
+          <h3>发送注释结果压缩包</h3>
+          <button class="close-btn" @click="showPkgSendModal = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="auth-block">
+            <div class="auth-title">目标结果包：{{ pkgSendForm.zipName }}</div>
+            <div class="meta-sub">任务编号：{{ pkgSendForm.taskId }} | 文件数：{{ pkgSendForm.fileCount }} | 大小：{{ pkgSendForm.sizeKb }} KB</div>
+          </div>
+          <div class="auth-block">
+            <div class="auth-title">
+              目标收件人（留空或点发给自己测试则发送至 {{ configForm.account || configForm.smtp_account || '本人邮箱' }}）
+            </div>
+            <input v-model="pkgSendForm.to" type="text" :placeholder="configForm.account || '例如 913223599@qq.com'" class="key-input-plain" />
+          </div>
+          <div class="auth-block">
+            <div class="auth-title">邮件主题（可选）</div>
+            <input v-model="pkgSendForm.subject" type="text" :placeholder="`噬菌体注释结果回传 - ${pkgSendForm.taskId}`" class="key-input-plain" />
+          </div>
+          <div class="auth-block">
+            <div class="auth-title">附加备注（可选）</div>
+            <input v-model="pkgSendForm.extraNote" type="text" placeholder="可选写入邮件正文" class="key-input-plain" />
+          </div>
+          <p class="form-note">注：仅在点击“发送邮件”且填写地址时发送至对应收件人；点“发给自己测试”始终仅发送至本人邮箱，不会触碰默认客户地址。</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-outline" @click="showPkgSendModal = false">取消</button>
+          <button class="btn-secondary" :disabled="sendingPkg" @click="confirmPkgSend(true)">
+            {{ sendingPkg ? '发送中...' : '发给自己测试' }}
+          </button>
+          <button class="btn-primary" :disabled="sendingPkg" @click="confirmPkgSend(false)">
+            {{ sendingPkg ? '发送中...' : '发送邮件' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <CleanupDialog
       :visible="showCleanup"
       title="清理历史数据"
@@ -1129,6 +1334,30 @@ onUnmounted(() => {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   font-size: 12px;
+}
+
+.select-input {
+  padding: 5px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+  background: white;
+  color: #1e293b;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radio-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+  cursor: pointer;
 }
 
 .btn-primary {

@@ -148,4 +148,37 @@
 3. **前端编译验证**：
    - `src/web-next` 下 `npm run build` (`vue-tsc -b && vite build`) 零报错通过（耗时 23.98s）。
 
+---
+
+## 7. 第五阶段注释回传全链路真机实测与工作台闭环（2026-11-11）
+
+### 7.1 实测范围与隔离策略
+围绕「IMAP 收件与去重 -> Pharokka + PhageScope + Phold AI + DeepSafetyAuditor 多引擎注释 -> Word 报告生成与 `[1]–[8]` 参考文献引用注入 -> ResultPacker 打包 -> SMTP 回传」开展基线真机实测，并排查修补前后端闭环断点，全程通过隔离配置与 `913223599@qq.com` 自发自收，测后清理临时目录。
+
+### 7.2 发现并修复的断点
+1. **Word 报告展示与回传目录脱节 (`auto_pipeline.py` / `other_tools.py` / `history_cleaner.py`)**：
+   - `auto_pipeline.py` 仅将 `.docx` 打包进 `.zip`，未向 `cfg.resolved_send_dir` 同步复制，导致工作台「Word 报告」子表长期为空、清理项与 `test_send` 默认附带找不到报告。
+   - **修复**：在 [auto_pipeline.py](file:///f:/NCBI%20blast/src/mail_download/auto_pipeline.py) `_pack_and_send()` 中新增 `_sync_docx_to_send_dir()` 同步复制 `.docx` 至回传目录；[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py) `/mail_pipeline/overview` 增加依据 `outbound_packages` 对应 `ANNOTATIONS_DIR/{task_id}/*.docx` 的回退检索与去重；[history_cleaner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/history_cleaner.py) 支持按文件名精确删除位于回退目录中的 `.docx`。
+2. **批次重跑模式不支持发信及扩展名/退出的边界缺陷 (`auto_pipeline.py`)**：
+   - `--annotate-only DIR` 原先硬编码 `do_send=False`、未读 `manifest.json` 填充原邮件信息、`*.fasta`/`*.fa`/`*.fna` 短路匹配缺失配置后缀、且构建/发送失败仍返回 `0`。
+   - **修复**：新增 `_collect_batch_fastas()` 按 `cfg.attachment_exts` 全量采集、新增 `_load_batch_mail_info()` 统一读取原邮件信息、新增 `--send` 标志及 `_resolve_send_target()`（显式传入 `--to self` 安全解析为自身账号且缺失本人账号时不回退至 `reply_to`）、正确传递失败退出码 `1`，并将 `_register_test_batch()` 测试发件人标记修正为 `local-test-input`。
+3. **`/mail_pipeline/run` `to="self"` 透传与结果压缩包直发缺失 (`other_tools.py` / `MailAutoPipelineModule.vue`)**：
+   - `/mail_pipeline/run` 此前未解析 `to="self"`；前端缺少从回传压缩包直接发信以及对批次重跑并发信的交互操作。
+   - **修复**：`/mail_pipeline/run` 前置调用 `_resolve_send_target()` 并校验批次与测试输入路径，对 `annotate_only_batch` 正确下发 `--to` / `--send`；新增 `POST /api/other_tools/mail_pipeline/send_package`（带文件名防穿越校验、`.manifest.json` 清单解析与默认发往自身安全约定）；[MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue) 主控制栏新增「回传目标」选择（含「仅发给自己测试」），收件批次接入「重跑」确认弹窗（支持仅打包 / 发给自己 / 自定义回传），回传压缩包接入「发信」弹窗。
+4. **辅助脚本与调度器健壮性 (`scheduler.py` / `build_annotation_report.py`)**：
+   - 修复 [scheduler.py](file:///f:/NCBI%20blast/src/mail_download/scheduler.py) `run_poll()` 非详细模式传入 `None` 导致参数解析异常的缺陷。
+   - 强化 [build_annotation_report.py](file:///f:/NCBI%20blast/scripts/build_annotation_report.py) 对缺失 `safety_audit.json` 与 `swissprot_hits.tsv` 异常 `bit score` 值的容错（`_safe_float`）。
+
+### 7.3 实测与回归验证记录
+1. **自动化单元测试**：
+   - `python -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v`：**80 项全部通过**（`5.94s`，覆盖 `.docx` 同步、`--annotate-only --to self`、`scheduler.run_poll`、`build_annotation_report.py` 缺失安全审计容错、`/overview` 回退列表、`/send_package` 安全路由、零 Emoji 与 UTF-8 合规检查）。
+2. **基线全链路真机实测（剥离 `PATH` 中 BLAST）**：
+   - `auto_pipeline` 从 QQ INBOX `seq=3515` 拉取待测 `e2e_phage_171216.fasta` -> Pharokka（66 CDS）+ PhageScope（7 CDS）+ Phold AI（1 CDS）+ 安全审计完成 74 个 CDS 注释 -> 构建 `61.6 KB` Word 报告并通过 `[1]–[8]` 引用校验 -> 打包 41 产物（`278.2 KB`）-> SMTP 发至 `913223599@qq.com` -> QQ INBOX `seq=3516` 回读校验全产物齐全 -> 二次运行 SHA256 指纹去重跳过（耗时 `335.2s`，`exit=0`）。
+3. **修复后全链路与路由联调真机复测**：
+   - 沙盒拉取批次 `up_20261111_172914_003515` 执行 `auto_pipeline --annotate-only --to self`（耗时 `294.5s`，`exit=0`）：确认 `send_dir` 同时落盘 `.zip` 与 `62,333 B` `.docx` 报告；QQ INBOX `seq=3517` 收到回传邮件且正文成功引用原邮件主题。
+   - 挂载 FastAPI 路由联调 `GET /mail_pipeline/overview`（正常检出 `1` 压缩包与 `1` Word 报告）与 `POST /mail_pipeline/send_package`（在沙盒保留外部 `reply_to` 情况下传 `to="self"` 严格只发往 `913223599@qq.com`，QQ INBOX `seq=3518` 实收）。
+4. **前端编译验证**：
+   - `src/web-next` 下 `npm run build`（`vue-tsc -b && vite build`）零错误通过（`29.27s`）。
+
+
 

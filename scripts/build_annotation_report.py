@@ -55,8 +55,13 @@ with open(os.path.join(DATA, 'features.json'), encoding='utf-8') as fh:
     feats = json.load(fh)
 with open(os.path.join(DATA, 'summary.json'), encoding='utf-8') as fh:
     summary = json.load(fh)
-with open(os.path.join(DATA, 'safety_audit.json'), encoding='utf-8') as fh:
-    safety = json.load(fh)
+safety_path = os.path.join(DATA, 'safety_audit.json')
+safety_missing = not os.path.isfile(safety_path)
+if not safety_missing:
+    with open(safety_path, encoding='utf-8') as fh:
+        safety = json.load(fh)
+else:
+    safety = {'safety_passed': None, 'amr_genes': [], 'virulent_factors': [], 'anti_crispr_genes': []}
 
 cds = [f for f in feats if f.get('feature_type') == 'CDS']
 trna = [f for f in feats if f.get('feature_type') == 'tRNA']
@@ -70,8 +75,15 @@ TOTAL_LEN = summary.get('total_length')
 GC = summary.get('gc_content')
 CODING_DENSITY = summary.get('coding_density_pct')
 AVG_GENE = summary.get('avg_gene_length')
-ANNOTATED = summary.get('annotated_count')
-HYPOTHETICAL_CAT = summary.get('hypothetical_count')
+ANNOTATED = summary.get('annotated_count') or 0
+HYPOTHETICAL_CAT = summary.get('hypothetical_count') or 0
+
+
+def _safe_float(val, default=0.0):
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
 HYPOTHETICAL_TXT = sum(1 for f in cds if 'hypothetical' in (f.get('product') or '').lower()
                        or 'unknown' in (f.get('product') or '').lower())
 LOCUS_PREFIX = (cds[0].get('locus_tag') or '') if cds else ''
@@ -434,7 +446,7 @@ else:
          '基因结构与功能模块组织与该类噬菌体基因组模式一致，可作为后续分类学分析与宿主预测的重要依据。')
     para('')
     para('按比对显著性（bit score）排序的代表性高同源基因如下表所示：')
-    best_swiss = sorted(swiss_hits, key=lambda r: float(r[5]), reverse=True)[:15]
+    best_swiss = sorted(swiss_hits, key=lambda r: _safe_float(r[5]), reverse=True)[:15]
     prod_map = {f.get('locus_tag'): f.get('product') for f in cds}
     sw_rows = []
     for r in best_swiss:
@@ -558,13 +570,16 @@ vir_genes = safety.get('virulent_factors', [])
 n_amr = len(amr_genes)
 n_vir = len(vir_genes)
 n_acr = len(safety.get('anti_crispr_genes', []))
-safety_passed = safety.get('safety_passed')
-if safety_passed is None:
-    safety_passed = (n_amr == 0 and n_vir == 0)
-passed_txt = '通过（safety_passed = true），无风险告警' if safety_passed else '未完全通过，存在高阈值候选风险基因'
-para(f'安全审计结果：高置信度抗生素耐药基因（CARD）检出 {n_amr} 个，毒力因子（VFDB）检出 {n_vir} 个，'
-     f'高置信度 Anti-CRISPR 候选基因（Acranker）检出 {n_acr} 个。'
-     f'整体安全性判定为{passed_txt}。')
+if safety_missing:
+    para('本次未检测到 safety_audit.json（未启用生物安全审计或审计文件缺失），以下仅基于现有比对文件汇报或略过。')
+else:
+    safety_passed = safety.get('safety_passed')
+    if safety_passed is None:
+        safety_passed = (n_amr == 0 and n_vir == 0)
+    passed_txt = '通过（safety_passed = true），无风险告警' if safety_passed else '未完全通过，存在高阈值候选风险基因'
+    para(f'安全审计结果：高置信度抗生素耐药基因（CARD）检出 {n_amr} 个，毒力因子（VFDB）检出 {n_vir} 个，'
+         f'高置信度 Anti-CRISPR 候选基因（Acranker）检出 {n_acr} 个。'
+         f'整体安全性判定为{passed_txt}。')
 weak_rows = []
 for r in card_hits:
     weak_rows.append(['CARD', r[0], acc_short(r[1]), r[2], r[4], r[5], '低于审计阈值，未计入' if n_amr == 0 else '需复核'])
@@ -581,7 +596,7 @@ acr_list = safety.get('anti_crispr_genes', [])
 if n_acr > 0:
     para(f'Anti-CRISPR 候选基因共 {n_acr} 条（高置信度，source=Acranker），代表性候选如下表所示（按 bit score 取前 10 条）：')
     acr_rows = []
-    for a in sorted(acr_list, key=lambda x: float(x.get('bitscore', 0)), reverse=True)[:10]:
+    for a in sorted(acr_list, key=lambda x: _safe_float(x.get('bitscore', 0)), reverse=True)[:10]:
         acr_rows.append([a.get('cds_id'), a.get('target_id'), a.get('identity'), a.get('align_len'),
                          a.get('evalue'), a.get('bitscore')])
     add_table(['Locus_Tag', '比对目标', 'Identity%', '比对长度', 'E-value', 'bit score'],
@@ -740,7 +755,7 @@ doc.add_page_break()
 heading(1, '附录 B  Swiss-Prot 同源命中明细')
 para(f'本附录列出 Swiss-Prot 数据库的全部 {len(swiss_hits)} 条 BLASTP 同源命中（按 Locus_Tag 与 bit score 排序）：')
 if swiss_hits:
-    swiss_sorted = sorted(swiss_hits, key=lambda r: (r[0], -float(r[5])))
+    swiss_sorted = sorted(swiss_hits, key=lambda r: (r[0], -_safe_float(r[5])))
     appB_rows = []
     for r in swiss_sorted:
         desc = re.sub(r'^[^\s]+\s+', '', r[6])

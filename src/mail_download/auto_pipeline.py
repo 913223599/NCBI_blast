@@ -35,7 +35,7 @@ if str(PROJECT_ROOT) not in sys.path:
 # 注释引擎（AnnotationPipeline 等）延迟导入：仅在有新附件需要处理时才加载，
 # 避免“无新附件”的例行检查被引擎/WSL 探测拖慢（此前的瓶颈：顶层 import
 # 触发 WSL 探测约 30s+）。轻量模块保持顶层导入。
-from src.mail_download.config import load_config
+from src.mail_download.config import DEFAULT_ATTACHMENT_EXTS, load_config
 from src.mail_download.downloader import AttachmentSaver
 from src.mail_download.fetcher import MailFetcher
 from src.mail_download.packer import ResultPacker, DEFAULT_PRODUCT_GLOBS
@@ -78,7 +78,7 @@ def _register_test_batch(download_dir: Path, fasta_path: Path) -> Path:
         "batch": batch.name,
         "download_time": datetime.now().isoformat(timespec="seconds"),
         "mail": {"seq": "TEST", "uid": "TEST", "date": datetime.now().strftime("%a, %d %b %Y %H:%M:%S %z"),
-                 "sender": "yssw_service@163.com", "subject": "[TEST] 自动回传链路验证"},
+                 "sender": "local-test-input", "subject": "[TEST] 自动回传链路验证"},
         "attachments": [{"filename": target.name, "size_bytes": target.stat().st_size,
                          "sha256": "test-input", "path": str(target)}],
     }
@@ -182,21 +182,96 @@ def _build_report(out_dir: Path, task_id: str, sample_name: str, extra_notes: li
     return report_path
 
 
+def _resolve_send_target(cfg, to_arg: str | None) -> tuple[str | None, bool]:
+    """解析目标收件人；支持 --to self 安全指向本人邮箱。返回 (target_or_none, explicit_self_error)。"""
+    if to_arg is None:
+        return None, False
+    val = str(to_arg).strip()
+    if not val:
+        return None, False
+    if val.lower() == "self":
+        self_addr = (getattr(cfg, "smtp_account", "") or getattr(cfg, "account", "") or "").strip()
+        if not self_addr:
+            return None, True
+        return self_addr, False
+    return val, False
+
+
+def _load_batch_mail_info(batch: Path) -> dict:
+    """读取批次目录 manifest.json 中的原邮件上下文信息。"""
+    manifest = batch / "manifest.json"
+    if not manifest.exists():
+        return {}
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        mail_info = dict(data.get("mail") or {})
+        atts = data.get("attachments") or []
+        mail_info["attachments"] = [
+            a.get("filename", a.get("path", "")) if isinstance(a, dict) else str(a)
+            for a in atts
+        ]
+        return mail_info
+    except Exception as e:
+        _log("warning", f"读取批次 manifest 失败（不影响处理）: {e}")
+        return {}
+
+
+def _collect_batch_fastas(batch: Path, cfg) -> list[Path]:
+    """收集批次目录下所有匹配配置扩展名的序列文件。"""
+    if not batch.exists() or not batch.is_dir():
+        return []
+    raw_exts = getattr(cfg, "attachment_exts", None) or DEFAULT_ATTACHMENT_EXTS
+    allowed = {
+        (e.lower() if e.startswith(".") else f".{e.lower()}")
+        for e in raw_exts
+        if isinstance(e, str) and e.strip()
+    }
+    found: list[Path] = []
+    for p in sorted(batch.iterdir(), key=lambda x: x.name.lower()):
+        if not p.is_file():
+            continue
+        if p.name in ("manifest.json", "pipeline.log", "run_errors.log"):
+            continue
+        if p.suffix.lower() in allowed:
+            found.append(p)
+    return found
+
+
+def _sync_docx_to_send_dir(out_dir: Path, send_dir: Path) -> None:
+    """把产物目录中的 Word 报告同步复制到回传目录，便于工作台展示与测试发信选择。"""
+    try:
+        send_dir.mkdir(parents=True, exist_ok=True)
+        resolved_send = send_dir.resolve()
+        for docx_file in sorted(out_dir.glob("*.docx")):
+            if not docx_file.is_file():
+                continue
+            target = send_dir / docx_file.name
+            if docx_file.resolve().parent != resolved_send:
+                shutil.copy2(docx_file, target)
+    except OSError as e:
+        _log("warning", f"同步 Word 报告至回传目录失败: {e}")
+
+
 def _pack_and_send(cfg, out_dir: Path, task_id: str, do_send: bool,
                    to: str | None, subject_prefix: str,
                    mail_info: dict | None = None) -> bool:
     packer = ResultPacker(cfg.resolved_send_dir, product_globs=ZIP_GLOBS)
     packed = packer.pack(out_dir, task_id=task_id)
+    _sync_docx_to_send_dir(out_dir, cfg.resolved_send_dir)
     zip_path = Path(str(packed["zip"]))
     size_kb = int(packed.get("size_bytes", 0)) / 1024
     _log("info", f"已打包 {packed['file_count']} 文件 → {zip_path}（{size_kb:.1f} KB）")
     if not do_send:
-        _log("info", "已跳过回传（--no-send）")
+        _log("info", "已跳过回传（--no-send 或未开启回传）")
         return True
+    resolved_to, self_err = _resolve_send_target(cfg, to)
+    if self_err:
+        _log("error", "回传失败：指定 --to self 但未配置 smtp_account 或 account")
+        return False
     sender = MailSender(cfg)
     subject = f"{subject_prefix}噬菌体注释结果回传 - {task_id}"
     body = _build_reply_body(task_id, zip_path, mail_info or {})
-    result = sender.send(zip_path, to=to, subject=subject, body=body)
+    result = sender.send(zip_path, to=resolved_to, subject=subject, body=body)
     if not result.ok:
         _log("error", f"回传失败（{result.stage}）: {result.error}")
         return False
@@ -232,9 +307,10 @@ def main(argv=None) -> int:
     parser.add_argument("--test-input", default=None, metavar="FASTA",
                         help="当收件无新附件时，用该 fasta 作为测试任务跑完整链路")
     parser.add_argument("--annotate-only", default=None, metavar="DIR",
-                        help="只对指定批次目录（含 fasta）执行 注释→报告→打包，不回传")
+                        help="对指定批次目录（含序列文件）执行 注释→报告→打包；传入 --to 或 --send 时可同时回传")
+    parser.add_argument("--send", action="store_true", help="配合 --annotate-only 使用，允许将重跑结果邮件回传")
     parser.add_argument("--no-send", action="store_true", help="跳过邮件回传（仅测试注释/报告/打包）")
-    parser.add_argument("--to", default=None, help="回传收件人（默认 reply_to）")
+    parser.add_argument("--to", default=None, help="回传收件人（默认 reply_to；传入 self 时发往自身账号）")
     parser.add_argument("--subject-prefix", default="【自动】", help="回传主题前缀")
     parser.add_argument("--extra-note", action="append", default=[], help="报告额外备注（可多次）")
     parser.add_argument("--verbose", action="store_true", help="详细日志")
@@ -249,20 +325,27 @@ def main(argv=None) -> int:
     # 流水线日志跟随配置中的下载目录（目录迁移后日志同步落到新位置）
     global PIPELINE_LOG
     PIPELINE_LOG = cfg.resolved_download_dir / "pipeline.log"
-    # ---- 模式 A：只处理指定批次（annotate-only） ----
+    # ---- 模式 A：处理指定批次（annotate-only，支持可选回传） ----
     if args.annotate_only:
         batch = Path(args.annotate_only)
-        fastas = sorted(p for p in batch.glob("*.fasta") if p.is_file()) or \
-                 sorted(p for p in batch.glob("*.fa") if p.is_file()) or \
-                 sorted(p for p in batch.glob("*.fna") if p.is_file())
+        fastas = _collect_batch_fastas(batch, cfg)
         if not fastas:
-            print(f"[错误] 批次目录中没有 fasta: {batch}")
+            print(f"[错误] 批次目录中没有匹配序列文件: {batch}")
             return 1
+        mail_info = _load_batch_mail_info(batch)
+        do_send = (not args.no_send) and (args.send or bool((args.to or "").strip()))
+        ok_all = True
         for f in fastas:
             info = asyncio.run(_annotate(batch, f))
-            _build_report(info["out_dir"], info["task_id"], f.stem, args.extra_note)
-            _pack_and_send(cfg, info["out_dir"], info["task_id"], do_send=False, to=None, subject_prefix="")
-        return 0
+            report = _build_report(info["out_dir"], info["task_id"], f.stem, args.extra_note)
+            if report is None:
+                ok_all = False
+            if not _pack_and_send(cfg, info["out_dir"], info["task_id"],
+                                  do_send=do_send, to=args.to,
+                                  subject_prefix=args.subject_prefix, mail_info=mail_info):
+                ok_all = False
+        print("批次重跑结束：全部环节成功" if ok_all else "批次重跑结束：存在失败环节（见日志）")
+        return 0 if ok_all else 1
 
     # ---- 模式 B：完整链路（收件 → 处理） ----
     fetcher = MailFetcher(cfg)
@@ -299,15 +382,7 @@ def main(argv=None) -> int:
 
     ok_all = True
     for batch, fastas in batches:
-        mail_info = {}
-        manifest = batch / "manifest.json"
-        if manifest.exists():
-            try:
-                mail_info = json.loads(manifest.read_text(encoding="utf-8")).get("mail", {})
-                atts = json.loads(manifest.read_text(encoding="utf-8")).get("attachments", [])
-                mail_info["attachments"] = [a.get("filename", a.get("path", "")) for a in atts]
-            except Exception as e:
-                _log("warning", f"读取批次 manifest 失败（不影响处理）: {e}")
+        mail_info = _load_batch_mail_info(batch)
         for f in fastas:
             info = asyncio.run(_annotate(batch, f))
             report = _build_report(info["out_dir"], info["task_id"], f.stem, args.extra_note)
