@@ -3,9 +3,10 @@
  * Sangon16SPipelineModule - 生工 16S 测序结果自动化 BLAST 与导出
  * 职责：邮件扫描建目录、根目录修改与自动迁移、解压与 16S BLAST 比对、CSV 导出预览、历史数据清理、邮箱 Key 编辑
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import PathField from '../components/PathField.vue'
 import CleanupDialog from '../components/CleanupDialog.vue'
+import PaginationBar from '../components/PaginationBar.vue'
 import type { CleanupOption } from '../components/CleanupDialog.vue'
 import { getJson, postJson, openLocalPath, describeMigration } from '../api'
 
@@ -31,6 +32,8 @@ interface SangonOrderItem {
 }
 
 interface ScannedMailItem {
+  seq: number
+  message_id: string
   subject: string
   date: string
   order_no: string
@@ -38,6 +41,8 @@ interface ScannedMailItem {
   cx_order_id: string
   download_url: string
   dir_ready: boolean
+  dedup_status: 'created' | 'existing' | 'history_skipped' | 'new'
+  duplicate_count: number
 }
 
 const API = '/api/other_tools/sangon_16s'
@@ -47,16 +52,37 @@ const sangonRoot = ref('')
 const rootExists = ref(false)
 const db16sReady = ref(false)
 const orders = ref<SangonOrderItem[]>([])
+const orderPage = ref(1)
+const orderPageSize = ref(6)
+
 const checkedOrderNames = ref<string[]>([])
 const selectedOrder = ref<SangonOrderItem | null>(null)
 const resultHeaders = ref<string[]>([])
 const resultRows = ref<Array<Record<string, string>>>([])
 const searchKeyword = ref('')
+const resultPage = ref(1)
+const resultPageSize = ref(20)
 const forceReblast = ref(false)
 
 const scannedMails = ref<ScannedMailItem[]>([])
 const showMailsPanel = ref(false)
 const scanningMail = ref(false)
+const mailFilter = ref({
+  dedup: true,
+  onlyNew: false,
+  autoCreate: true,
+  ignoreHistory: false
+})
+const mailScanStats = ref({
+  page: 1,
+  pageSize: 10,
+  total: 0,
+  totalPages: 1,
+  rawTotal: 0,
+  uniqueTotal: 0,
+  dedupRemoved: 0,
+  skippedKnown: 0
+})
 const busy = ref(false)
 const actionMessage = ref('')
 const errorMessage = ref('')
@@ -85,10 +111,16 @@ const cleanupOptions: CleanupOption[] = [
   { key: 'raw_extracted', label: '解压数据 (原始数据/)', desc: '删除解压出的文件，保留原始压缩包', checked: true },
   { key: 'blast_cache', label: 'BLAST 中间缓存', desc: '删除 results/blast/<订单>_16s 报告缓存', checked: true },
   { key: 'result_csv', label: '鉴定结果 CSV', desc: '删除 BLAST结果/16S鉴定结果.csv' },
-  { key: 'order_dir', label: '整个订单目录', desc: '删除该订单全部文件夹与压缩包（不可恢复）', danger: true }
+  { key: 'order_dir', label: '整个订单目录', desc: '删除该订单全部文件夹与压缩包（同时保留清理记忆防止扫描重建）', danger: true },
+  { key: 'scan_index', label: '清除扫描去重记忆', desc: '清空选中订单的已扫描/已清理记录，之后可被扫描邮件再次识别' }
 ]
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const pagedOrders = computed(() => {
+  const start = (orderPage.value - 1) * orderPageSize.value
+  return orders.value.slice(start, start + orderPageSize.value)
+})
 
 const filteredResultRows = computed(() => {
   const kw = searchKeyword.value.trim().toLowerCase()
@@ -96,6 +128,20 @@ const filteredResultRows = computed(() => {
   return resultRows.value.filter(row =>
     Object.values(row).some(v => String(v || '').toLowerCase().includes(kw))
   )
+})
+
+const pagedResultRows = computed(() => {
+  const start = (resultPage.value - 1) * resultPageSize.value
+  return filteredResultRows.value.slice(start, start + resultPageSize.value)
+})
+
+watch(searchKeyword, () => {
+  resultPage.value = 1
+})
+
+watch(() => orders.value.length, (len) => {
+  const maxPage = Math.max(1, Math.ceil(len / orderPageSize.value))
+  if (orderPage.value > maxPage) orderPage.value = maxPage
 })
 
 const completedOrdersCount = computed(() => orders.value.filter(o => o.status === 'completed').length)
@@ -109,6 +155,16 @@ function statusLabel(st: string): string {
     extracted: '待比对',
     downloaded: '待解压',
     pending: '待下载'
+  }
+  return map[st] || st
+}
+
+function dedupStatusLabel(st: string): string {
+  const map: Record<string, string> = {
+    created: '新建目录',
+    existing: '目录已存在',
+    history_skipped: '已清理跳过',
+    new: '待新建'
   }
   return map[st] || st
 }
@@ -154,6 +210,7 @@ async function loadOverview(): Promise<void> {
 
 async function selectOrderAndLoadResults(order: SangonOrderItem): Promise<void> {
   selectedOrder.value = order
+  resultPage.value = 1
   if (!order.has_result_csv) {
     resultRows.value = []
     return
@@ -184,20 +241,64 @@ async function handleSaveRoot(newRoot: string): Promise<void> {
   }
 }
 
-async function handleScanSangonMails(): Promise<void> {
+async function handleScanSangonMails(page = 1, pageSize = mailScanStats.value.pageSize): Promise<void> {
   scanningMail.value = true
-  setInfo('正在扫描邮件...')
+  setInfo(`正在扫描生工通知邮件（第 ${page} 页）...`)
   try {
-    const data = await postJson(`${API}/scan_mail`)
+    const data = await postJson(`${API}/scan_mail`, {
+      sangon_root: sangonRoot.value || null,
+      page,
+      page_size: pageSize,
+      dedup: mailFilter.value.dedup,
+      only_new: mailFilter.value.onlyNew,
+      auto_create: mailFilter.value.autoCreate,
+      ignore_history: mailFilter.value.ignoreHistory
+    })
     scannedMails.value = data.mails || []
+    mailScanStats.value = {
+      page: data.page || 1,
+      pageSize: data.page_size || pageSize,
+      total: data.total || 0,
+      totalPages: data.total_pages || 1,
+      rawTotal: data.raw_total || 0,
+      uniqueTotal: data.unique_total || 0,
+      dedupRemoved: data.dedup_removed || 0,
+      skippedKnown: data.skipped_known || 0
+    }
     showMailsPanel.value = true
     const createdCnt = (data.created_dirs || []).length
-    setInfo(`扫描完成：共 ${scannedMails.value.length} 封邮件，新建 ${createdCnt} 个订单目录`)
-    await loadOverview()
+    setInfo(
+      `扫描完成：原始 ${mailScanStats.value.rawTotal} 封，去重合并 ${mailScanStats.value.dedupRemoved} 封，历史跳过 ${mailScanStats.value.skippedKnown} 条，本次新建目录 ${createdCnt} 个`
+    )
+    if (createdCnt > 0) await loadOverview()
   } catch (err) {
     setError(err)
   } finally {
     scanningMail.value = false
+  }
+}
+
+async function handleInitOrderFromMail(mail: ScannedMailItem): Promise<void> {
+  if (!mail.dir_name) return
+  busy.value = true
+  try {
+    await postJson(`${API}/init_order`, {
+      sangon_root: sangonRoot.value || null,
+      dir_name: mail.dir_name,
+      order_no: mail.order_no,
+      subject: mail.subject,
+      date_text: mail.date,
+      cx_order_id: mail.cx_order_id,
+      download_url: mail.download_url
+    })
+    mail.dir_ready = true
+    mail.dedup_status = 'existing'
+    setInfo(`已创建订单目录: ${mail.dir_name}`)
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
   }
 }
 
@@ -222,11 +323,9 @@ async function handleRunPipeline(orderNames: string[] = []): Promise<void> {
 function openCleanupModal(orderNames?: string[]): void {
   const targets = orderNames && orderNames.length
     ? orderNames
-    : (checkedOrderNames.value.length ? checkedOrderNames.value : orders.value.map(o => o.dir_name))
-  if (!targets.length) {
-    setError('当前没有可清理的订单')
-    return
-  }
+    : (checkedOrderNames.value.length
+        ? checkedOrderNames.value
+        : (orders.value.length ? orders.value.map(o => o.dir_name) : ['__ALL__']))
   cleanupTargetOrders.value = targets
   showCleanup.value = true
 }
@@ -239,7 +338,8 @@ async function confirmCleanup(targets: string[]): Promise<void> {
       targets
     })
     showCleanup.value = false
-    setInfo(`已清理 ${data.removed_count} 项，释放 ${data.freed_mb} MB`)
+    const clearedPart = data.scan_index_cleared ? `，清除扫描记忆 ${data.scan_index_cleared} 条` : ''
+    setInfo(`已清理 ${data.removed_count} 项${clearedPart}，释放 ${data.freed_mb} MB`)
     await loadOverview()
     if (selectedOrder.value) await selectOrderAndLoadResults(selectedOrder.value)
   } catch (err) {
@@ -372,10 +472,22 @@ onUnmounted(() => {
           <input type="checkbox" v-model="forceReblast" />
           <span>强制重新比对</span>
         </label>
+        <label class="ctrl-item">
+          <input type="checkbox" v-model="mailFilter.dedup" />
+          <span>扫描去重</span>
+        </label>
+        <label class="ctrl-item">
+          <input type="checkbox" v-model="mailFilter.autoCreate" />
+          <span>自动建目录</span>
+        </label>
+        <label class="ctrl-item">
+          <input type="checkbox" v-model="mailFilter.onlyNew" />
+          <span>仅显示新邮件</span>
+        </label>
         <span v-if="checkedOrderNames.length" class="sel-hint">已勾选 {{ checkedOrderNames.length }} 个订单</span>
       </div>
       <div class="control-right">
-        <button class="btn-secondary" @click="handleScanSangonMails" :disabled="scanningMail || runtime.running">
+        <button class="btn-secondary" @click="handleScanSangonMails(1)" :disabled="scanningMail || runtime.running">
           {{ scanningMail ? '扫描中...' : '扫描邮件' }}
         </button>
         <button class="btn-primary" @click="handleRunPipeline([])" :disabled="runtime.running">
@@ -393,10 +505,28 @@ onUnmounted(() => {
     <div v-if="errorMessage" class="alert-banner error">{{ errorMessage }}</div>
 
     <!-- 邮件列表 -->
-    <div v-if="showMailsPanel && scannedMails.length > 0" class="mails-drawer">
+    <div v-if="showMailsPanel" class="mails-drawer">
       <div class="drawer-header">
-        <h4>生工通知邮件 ({{ scannedMails.length }})</h4>
-        <button class="btn-mini" @click="showMailsPanel = false">收起</button>
+        <div class="drawer-title-group">
+          <h4>生工通知邮件 ({{ mailScanStats.total }} / 去重前 {{ mailScanStats.rawTotal }})</h4>
+          <span v-if="mailScanStats.dedupRemoved > 0" class="dedup-badge">已合并重复 {{ mailScanStats.dedupRemoved }} 封</span>
+          <span v-if="mailScanStats.skippedKnown > 0" class="dedup-badge warn">历史跳过 {{ mailScanStats.skippedKnown }} 条</span>
+        </div>
+        <div class="drawer-tools">
+          <label class="ctrl-item">
+            <input type="checkbox" v-model="mailFilter.dedup" @change="handleScanSangonMails(1)" />
+            <span>去重</span>
+          </label>
+          <label class="ctrl-item">
+            <input type="checkbox" v-model="mailFilter.onlyNew" @change="handleScanSangonMails(1)" />
+            <span>仅新邮件</span>
+          </label>
+          <label class="ctrl-item">
+            <input type="checkbox" v-model="mailFilter.ignoreHistory" @change="handleScanSangonMails(1)" />
+            <span>忽略清理记忆</span>
+          </label>
+          <button class="btn-mini" @click="showMailsPanel = false">收起</button>
+        </div>
       </div>
       <table class="data-table">
         <thead>
@@ -405,28 +535,59 @@ onUnmounted(() => {
             <th>订单号</th>
             <th>邮件主题</th>
             <th>时间</th>
-            <th>目录状态</th>
-            <th>下载页</th>
+            <th>去重/目录状态</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="m in scannedMails" :key="m.subject + m.date">
+          <tr v-for="m in scannedMails" :key="`${m.seq}-${m.order_no}-${m.subject}`">
             <td class="mono-cell">{{ m.dir_name || '-' }}</td>
             <td class="bold-cell">{{ m.order_no || '-' }}</td>
-            <td>{{ m.subject }}</td>
+            <td>
+              <span>{{ m.subject }}</span>
+              <span v-if="m.duplicate_count > 1" class="dup-count-tag">合并 {{ m.duplicate_count }} 封</span>
+            </td>
             <td>{{ m.date }}</td>
             <td>
               <span :class="['status-pill', m.dir_ready ? 'completed' : 'pending']">
-                {{ m.dir_ready ? '已创建' : '未创建' }}
+                {{ dedupStatusLabel(m.dedup_status) }}
               </span>
             </td>
-            <td>
-              <a v-if="m.download_url" :href="m.download_url" target="_blank" class="link-btn">打开下载页</a>
-              <span v-else>-</span>
+            <td class="actions-cell">
+              <button
+                v-if="!m.dir_ready && m.dir_name"
+                class="btn-mini primary"
+                :disabled="busy"
+                @click="handleInitOrderFromMail(m)"
+              >
+                建目录
+              </button>
+              <a
+                v-if="m.download_url"
+                :href="m.download_url"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="link-btn"
+              >
+                打开下载页
+              </a>
+              <span v-else-if="m.dir_ready">-</span>
             </td>
+          </tr>
+          <tr v-if="scannedMails.length === 0">
+            <td colspan="6" class="empty-cell">当前筛选条件下暂无匹配生工邮件</td>
           </tr>
         </tbody>
       </table>
+      <PaginationBar
+        v-if="mailScanStats.total > 0"
+        :total="mailScanStats.total"
+        :page="mailScanStats.page"
+        :page-size="mailScanStats.pageSize"
+        :page-size-options="[5, 10, 20, 50]"
+        :loading="scanningMail"
+        @change="p => handleScanSangonMails(p.page, p.pageSize)"
+      />
     </div>
 
     <!-- 订单列表 -->
@@ -450,7 +611,7 @@ onUnmounted(() => {
         </thead>
         <tbody>
           <tr
-            v-for="ord in orders"
+            v-for="ord in pagedOrders"
             :key="ord.dir_name"
             :class="{ 'selected-row': selectedOrder?.dir_name === ord.dir_name }"
             @click="selectOrderAndLoadResults(ord)"
@@ -483,6 +644,13 @@ onUnmounted(() => {
           </tr>
         </tbody>
       </table>
+      <PaginationBar
+        v-if="orders.length > 0"
+        v-model:page="orderPage"
+        v-model:page-size="orderPageSize"
+        :total="orders.length"
+        :page-size-options="[6, 10, 20, 50]"
+      />
     </div>
 
     <!-- 结果预览 -->
@@ -508,7 +676,7 @@ onUnmounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, rIdx) in filteredResultRows" :key="rIdx">
+            <tr v-for="(row, rIdx) in pagedResultRows" :key="rIdx">
               <td v-for="h in resultHeaders" :key="h" :class="{ 'highlight-species': h === '鉴定物种(中文翻译)' }">
                 {{ row[h] }}
               </td>
@@ -517,6 +685,13 @@ onUnmounted(() => {
         </table>
       </div>
       <div v-else class="empty-cell">尚未生成 16S鉴定结果.csv</div>
+      <PaginationBar
+        v-if="filteredResultRows.length > 0"
+        v-model:page="resultPage"
+        v-model:page-size="resultPageSize"
+        :total="filteredResultRows.length"
+        :page-size-options="[10, 20, 50, 100]"
+      />
     </div>
 
     <!-- 邮箱 Key 弹窗 -->
@@ -543,7 +718,7 @@ onUnmounted(() => {
     <CleanupDialog
       :visible="showCleanup"
       title="清理生工 16S 历史数据"
-      :subtitle="`目标订单（共 ${cleanupTargetOrders.length} 个）: ${cleanupTargetOrders.join(', ')}`"
+      :subtitle="cleanupTargetOrders.includes('__ALL__') ? '目标范围：全局扫描去重记录' : `目标订单（共 ${cleanupTargetOrders.length} 个）: ${cleanupTargetOrders.join(', ')}`"
       :options="cleanupOptions"
       :show-days="false"
       :busy="busy"
@@ -765,6 +940,31 @@ onUnmounted(() => {
   align-items: center;
 }
 .drawer-header h4, .panel-box-header h4 { margin: 0; font-size: 13px; color: #1e293b; }
+.drawer-title-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.drawer-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.dedup-badge {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.dedup-badge.warn {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+}
+.dup-count-tag {
+  margin-left: 6px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
 .sub-count { font-weight: 400; color: #64748b; font-size: 12px; }
 
 .preview-tools { display: flex; align-items: center; gap: 10px; }

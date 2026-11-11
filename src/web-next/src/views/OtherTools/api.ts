@@ -11,11 +11,14 @@ export async function getJson<T = any>(path: string): Promise<T> {
 }
 
 export async function postJson<T = any>(path: string, body?: unknown): Promise<T> {
-  const resp = await fetch(resolveApiUrl(path), {
+  const init: RequestInit = {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  })
+    headers: { 'Content-Type': 'application/json' }
+  }
+  if (body !== undefined) {
+    init.body = JSON.stringify(body)
+  }
+  const resp = await fetch(resolveApiUrl(path), init)
   const data = await resp.json().catch(() => ({}))
   if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`)
   return data as T

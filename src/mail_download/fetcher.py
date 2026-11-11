@@ -20,7 +20,7 @@ from typing import Callable, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger("mail_download.fetcher")
 
-_HEADER_FIELDS = "(FROM SUBJECT DATE)"
+_HEADER_FIELDS = "(FROM SUBJECT DATE MESSAGE-ID)"
 
 
 @dataclass
@@ -43,6 +43,7 @@ class MessageSummary:
 class FetchResult:
     matched: List[MessageSummary] = field(default_factory=list)
     scanned: int = 0
+    skipped_dup_mails: int = 0
     connection_error: Optional[str] = None
 
 
@@ -189,8 +190,9 @@ class MailFetcher:
             if not seq_ids:
                 return result
 
-            # 阶段①：分批抓头部做初筛
-            candidates = self._scan_headers(conn, seq_ids, since_dt)
+            # 阶段①：分批抓头部做初筛（附带同批 Message-ID 去重，保留最新一封）
+            candidates, skipped_dup_mails = self._scan_headers(conn, seq_ids, since_dt)
+            result.skipped_dup_mails = skipped_dup_mails
             # 阶段②：命中者抓全文，附件级匹配
             for seq in candidates:
                 full = self._fetch_full(conn, seq)
@@ -237,11 +239,13 @@ class MailFetcher:
             expr = f'(OR {expr} FROM "{s}")'
         return f"SINCE {since} {expr}"
 
-    def _scan_headers(self, conn, seq_ids: List[bytes], since_dt: datetime) -> List[int]:
-        """分批抓取头部，返回通过发件人/主题/时间初筛的序号。
+    def _scan_headers(self, conn, seq_ids: List[bytes], since_dt: datetime) -> Tuple[List[int], int]:
+        """分批抓取头部，返回 (通过初筛的序号列表, 同批同 Message-ID 去重跳过数)。
         使用序号范围语法（如 1:200），避免长 UID/序号列表被服务器拒绝。"""
         batch = getattr(self.cfg, "batch_size", 200)
         candidates: List[int] = []
+        mid_latest: dict[str, int] = {}
+        skipped_dup = 0
         for rng in self._chunk_ranges(seq_ids, batch):
             typ, msg_data = conn.fetch(rng, f"(BODY.PEEK[HEADER.FIELDS {_HEADER_FIELDS}])")
             if typ != "OK":
@@ -256,8 +260,19 @@ class MailFetcher:
                     continue
                 if not _subject_matches(subject, self.cfg.subject_keywords):
                     continue
+                mid = _to_str(head.get("Message-ID")).strip()
+                if mid:
+                    if mid in mid_latest:
+                        skipped_dup += 1
+                        prev_seq = mid_latest[mid]
+                        if seq > prev_seq:
+                            candidates = [s for s in candidates if s != prev_seq]
+                            mid_latest[mid] = seq
+                            candidates.append(seq)
+                        continue
+                    mid_latest[mid] = seq
                 candidates.append(seq)
-        return candidates
+        return candidates, skipped_dup
 
     @staticmethod
     def _chunk_ranges(seq_ids: List[bytes], batch: int) -> List[bytes]:

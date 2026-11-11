@@ -7,8 +7,6 @@
 """
 import asyncio
 import csv
-import email
-import imaplib
 import json
 import logging
 import os
@@ -18,16 +16,17 @@ import sys
 import time
 import zipfile
 from datetime import datetime
-from email.header import decode_header
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
 from ..utils.blast_utils import parse_blast_csv, select_consensus_hit
 from ..services.other_tools.dir_migrator import migrate_directory
 from ..services.other_tools.history_cleaner import cleanup_mail_history, cleanup_sangon_history
+from ..services.other_tools.mail_inbox_browser import list_whitelist_mails
+from ..services.other_tools.sangon_mail_scanner import init_sangon_order_dir, scan_sangon_mails
 from ..services.other_tools.sangon_settings import get_sangon_root, load_sangon_settings, save_sangon_settings
 from ..services.other_tools.secret_store import mask_secret, read_secret, resolve_secret_path, write_secret
 from ...blast.manager import get_blast_manager, TaskStatus
@@ -125,6 +124,14 @@ class MailFetchRequest(BaseModel):
     since_days: Optional[int] = None
 
 
+class MailListRequest(BaseModel):
+    page: int = 1
+    page_size: int = 10
+    since_days: Optional[int] = None
+    dedup: bool = True
+    only_new: bool = False
+
+
 class MailPipelineRunRequest(BaseModel):
     since_days: Optional[int] = None
     no_send: bool = False
@@ -165,8 +172,28 @@ class SangonSettingsRequest(BaseModel):
 
 
 class SangonCleanupRequest(BaseModel):
-    order_names: List[str]
+    order_names: List[str] = []
     targets: List[str]
+
+
+class SangonScanMailRequest(BaseModel):
+    sangon_root: Optional[str] = None
+    page: int = 1
+    page_size: int = 10
+    dedup: bool = True
+    only_new: bool = False
+    auto_create: bool = True
+    ignore_history: bool = False
+
+
+class SangonInitOrderRequest(BaseModel):
+    dir_name: str
+    order_no: str = ""
+    subject: str = ""
+    date_text: str = ""
+    cx_order_id: str = ""
+    download_url: str = ""
+    sangon_root: Optional[str] = None
 
 
 # ==============================================================================
@@ -282,7 +309,7 @@ async def get_mail_pipeline_overview():
         "resolved_send_dir": str(send_dir),
         "runtime": _mail_pipeline_state,
         "processed_count": len(processed_items),
-        "processed_items": processed_items[:50],
+        "processed_items": processed_items,
         "batches": batches,
         "outbound_packages": outbound_packages,
         "docx_reports": docx_reports,
@@ -387,6 +414,29 @@ async def cleanup_mail_pipeline_history(req: MailCleanupRequest):
     return {"status": "success", **res}
 
 
+@router.post("/mail_pipeline/list_mails")
+async def list_mail_inbox(req: MailListRequest):
+    """分页浏览并去重展示发件人白名单内的收件箱邮件"""
+    def _do_list():
+        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=True)
+        return list_whitelist_mails(
+            cfg,
+            page=req.page,
+            page_size=req.page_size,
+            since_days=req.since_days,
+            dedup=req.dedup,
+            only_new=req.only_new,
+        )
+
+    try:
+        res = await asyncio.to_thread(_do_list)
+        return {"status": "success", **res}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"拉取收件箱失败: {e}")
+
+
 @router.post("/mail_pipeline/fetch")
 async def trigger_mail_fetch(req: MailFetchRequest):
     """立即扫描 IMAP 收件箱并保存新附件"""
@@ -404,6 +454,7 @@ async def trigger_mail_fetch(req: MailFetchRequest):
             "ok": True,
             "scanned": f_res.scanned,
             "matched": len(f_res.matched),
+            "skipped_dup_mails": getattr(f_res, "skipped_dup_mails", 0),
             "saved_count": saved_stats["count"],
             "skipped_duplicates": saved_stats["skipped_duplicates"],
             "skipped_processed": saved_stats["skipped_processed"],
@@ -628,111 +679,56 @@ async def get_sangon_order_results(order_dir_name: str, sangon_root: Optional[st
 
 
 @router.post("/sangon_16s/scan_mail")
-async def scan_sangon_notification_mails(sangon_root: Optional[str] = None):
-    """连接 QQ 邮箱扫描生工生物 (info1@sangon.com) 的 16S 测序结果通知邮件并自动初始化订单目录"""
-    root_dir_path = _sangon_root_or_default(sangon_root)
+async def scan_sangon_notification_mails(
+    sangon_root: Optional[str] = None,
+    req: Optional[SangonScanMailRequest] = Body(default=None),
+):
+    """连接邮箱扫描生工 (info1@sangon.com) 16S 通知邮件，支持批内/历史去重与服务端翻页"""
+    params = req or SangonScanMailRequest()
+    root_dir_path = _sangon_root_or_default(params.sangon_root or sangon_root)
 
     def _do_scan():
         cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=True)
-        conn = imaplib.IMAP4_SSL(cfg.imap_server, cfg.imap_port)
-        conn.login(cfg.account, cfg.auth_code or "")
-        conn.select("INBOX")
-
-        typ, data = conn.search(None, "FROM", "info1@sangon.com")
-        ids = data[0].split() if (typ == "OK" and data and data[0]) else []
-        ids = ids[-15:]
-
-        def _dec(s: Optional[str]) -> str:
-            if not s:
-                return ""
-            out = []
-            for part_bytes, cs in decode_header(s):
-                if isinstance(part_bytes, bytes):
-                    out.append(part_bytes.decode(cs or "utf-8", errors="replace"))
-                else:
-                    out.append(part_bytes)
-            return "".join(out)
-
-        root_dir = root_dir_path
-        existing_order_nos = set()
-        if root_dir.exists():
-            for d in root_dir.iterdir():
-                if d.is_dir() and "_" in d.name:
-                    existing_order_nos.add(d.name.split("_", 1)[1])
-
-        found_mails: List[Dict[str, Any]] = []
-        created_dirs: List[str] = []
-
-        for mid in reversed(ids):
-            t, msg_data = conn.fetch(mid, "(BODY.PEEK[])")
-            if t != "OK" or not msg_data or not msg_data[0]:
-                continue
-            raw_bytes = msg_data[0][1]
-            if not isinstance(raw_bytes, bytes):
-                continue
-            msg = email.message_from_bytes(raw_bytes)
-            subj = _dec(msg.get("Subject"))
-            date_str = msg.get("Date", "")
-
-            # 提取 10 位订单号
-            m_order = re.search(r"(\d{10})", subj)
-            order_no = m_order.group(1) if m_order else ""
-
-            # 提取邮件日期 YYYYMMDD
-            date_prefix = datetime.now().strftime("%Y%m%d")
-            try:
-                from email.utils import parsedate_to_datetime
-                dt = parsedate_to_datetime(date_str)
-                date_prefix = dt.strftime("%Y%m%d")
-            except Exception:
-                pass
-
-            body_html = ""
-            for part in msg.walk():
-                if part.get_content_type() in ("text/html", "text/plain") and not part.get_filename():
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        cs = part.get_content_charset() or "utf-8"
-                        body_html += payload.decode(cs, errors="replace")
-
-            cx_match = re.search(r"cxOrderID=([A-Za-z0-9_-]+)", body_html)
-            cx_order_id = cx_match.group(1) if cx_match else ""
-            download_url = f"http://store.sangon.com/cxOrderDetail?cxOrderDetail.cxOrderID={cx_order_id}" if cx_order_id else ""
-
-            dir_name = f"{date_prefix}_{order_no}" if order_no else ""
-            already_exists = order_no in existing_order_nos if order_no else False
-
-            if order_no and not already_exists and root_dir.exists():
-                order_path = root_dir / dir_name
-                (order_path / "原始压缩包").mkdir(parents=True, exist_ok=True)
-                (order_path / "原始数据").mkdir(parents=True, exist_ok=True)
-                (order_path / "BLAST结果").mkdir(parents=True, exist_ok=True)
-                existing_order_nos.add(order_no)
-                created_dirs.append(dir_name)
-                already_exists = True
-
-            found_mails.append({
-                "subject": subj,
-                "date": date_str,
-                "order_no": order_no,
-                "dir_name": dir_name,
-                "cx_order_id": cx_order_id,
-                "download_url": download_url,
-                "dir_ready": already_exists,
-            })
-
-        conn.logout()
-        return {
-            "scanned_count": len(ids),
-            "mails": found_mails,
-            "created_dirs": created_dirs,
-        }
+        return scan_sangon_mails(
+            root_dir_path,
+            cfg,
+            page=params.page,
+            page_size=params.page_size,
+            dedup=params.dedup,
+            only_new=params.only_new,
+            auto_create=params.auto_create,
+            ignore_history=params.ignore_history,
+        )
 
     try:
         res = await asyncio.to_thread(_do_scan)
         return {"status": "success", **res}
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"扫描生工邮件失败: {e}")
+
+
+@router.post("/sangon_16s/init_order")
+async def init_sangon_order_directory(req: SangonInitOrderRequest):
+    """手动为指定通知邮件初始化生工订单三级目录"""
+    root_path = _sangon_root_or_default(req.sangon_root)
+    try:
+        res = await asyncio.to_thread(
+            init_sangon_order_dir,
+            root_path,
+            req.dir_name,
+            order_no=req.order_no,
+            subject=req.subject,
+            date_text=req.date_text,
+            cx_order_id=req.cx_order_id,
+            download_url=req.download_url,
+        )
+        return {"status": "success", **res}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"初始化订单目录失败: {e}")
 
 
 def _export_sangon_order_csv(task_id: str, out_dir: Path) -> Dict[str, int]:
@@ -991,13 +987,19 @@ async def update_sangon_settings(req: SangonSettingsRequest):
 
 @router.post("/sangon_16s/cleanup")
 async def cleanup_sangon_orders(req: SangonCleanupRequest):
-    """按订单清理生工 16S 历史数据（解压文件 / BLAST 缓存 / 结果 CSV / 整个订单目录）"""
+    """按订单清理生工 16S 历史数据（解压文件 / BLAST 缓存 / 结果 CSV / 整个订单目录 / 扫描去重记录）"""
     if _sangon_pipeline_state["running"]:
         raise HTTPException(status_code=409, detail="生工 16S 流水线运行中，暂不能清理")
-    if not req.order_names or not req.targets:
-        raise HTTPException(status_code=400, detail="未选择订单或清理项")
+    if not req.targets:
+        raise HTTPException(status_code=400, detail="未选择清理项")
+    order_names = req.order_names
+    if not order_names:
+        if "scan_index" in req.targets:
+            order_names = ["__ALL__"]
+        else:
+            raise HTTPException(status_code=400, detail="未选择订单")
     res = await asyncio.to_thread(
-        cleanup_sangon_history, get_sangon_root(), BLAST_RESULTS_ROOT, req.order_names, req.targets
+        cleanup_sangon_history, get_sangon_root(), BLAST_RESULTS_ROOT, order_names, req.targets
     )
     return {"status": "success", **res}
 

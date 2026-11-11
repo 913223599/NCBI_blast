@@ -13,7 +13,8 @@
 - raw_extracted : 原始数据/ 下解压出的文件（原始压缩包仍保留，可重新解压）
 - blast_cache   : results/blast/<订单>_16s 比对缓存
 - result_csv    : BLAST结果/16S鉴定结果.csv
-- order_dir     : 整个订单目录（不可恢复）
+- order_dir     : 整个订单目录（不可恢复；同时保留已清理标记防止扫描重复建空目录）
+- scan_index    : .sangon_mail_index.json 扫描去重记录（清除后邮件扫描将重新识别该订单）
 """
 import json
 import shutil
@@ -21,8 +22,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from .sangon_mail_scanner import SangonMailIndex
+
 MAIL_TARGETS = {"batches", "outbound", "docx", "annotations", "index", "logs"}
-SANGON_TARGETS = {"raw_extracted", "blast_cache", "result_csv", "order_dir"}
+SANGON_TARGETS = {"raw_extracted", "blast_cache", "result_csv", "order_dir", "scan_index"}
 
 
 def _older_than(path: Path, cutoff: Optional[float]) -> bool:
@@ -170,7 +173,18 @@ def cleanup_sangon_history(
     targets = set(targets) & SANGON_TARGETS
     removed: List[str] = []
     freed = 0
+    cleaned_order_nos: List[str] = []
+    target_order_nos: List[str] = []
+    clear_all_index = "__ALL__" in order_names
+
     for name in order_names:
+        if name == "__ALL__":
+            continue
+        if "_" in name:
+            target_order_nos.append(name.split("_", 1)[1])
+        else:
+            target_order_nos.append(name)
+
         order_dir = sangon_root / name
         if not order_dir.is_dir() or order_dir.parent.resolve() != sangon_root.resolve():
             continue
@@ -182,6 +196,8 @@ def cleanup_sangon_history(
         if "order_dir" in targets:
             freed += _remove(order_dir)
             removed.append(str(order_dir))
+            if "_" in name:
+                cleaned_order_nos.append(name.split("_", 1)[1])
             continue
         if "raw_extracted" in targets:
             raw = order_dir / "原始数据"
@@ -194,8 +210,17 @@ def cleanup_sangon_history(
             if csv_file.exists():
                 freed += _remove(csv_file)
                 removed.append(str(csv_file))
+
+    scan_index_cleared = 0
+    idx = SangonMailIndex(sangon_root)
+    if "scan_index" in targets:
+        scan_index_cleared = idx.clear(None if clear_all_index else target_order_nos)
+    elif cleaned_order_nos:
+        idx.mark_cleaned(cleaned_order_nos)
+
     return {
         "removed": removed,
         "removed_count": len(removed),
+        "scan_index_cleared": scan_index_cleared,
         "freed_mb": round(freed / 1024 / 1024, 2),
     }

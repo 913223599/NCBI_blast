@@ -3,9 +3,10 @@
  * MailAutoPipelineModule - 邮件收件 -> 注释 -> Word 报告 -> SMTP 回传
  * 职责：流水线状态展示与触发、邮箱配置与授权码编辑、目录修改迁移、历史数据清理
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import PathField from '../components/PathField.vue'
 import CleanupDialog from '../components/CleanupDialog.vue'
+import PaginationBar from '../components/PaginationBar.vue'
 import type { CleanupOption } from '../components/CleanupDialog.vue'
 import { getJson, postJson, openLocalPath, describeMigration } from '../api'
 
@@ -14,6 +15,26 @@ interface AttachmentItem {
   size_bytes: number
   sha256?: string
   path: string
+}
+
+interface InboxAttachmentItem {
+  filename: string
+  size_bytes: number
+  sha256: string
+  already_processed: boolean
+}
+
+interface InboxMailItem {
+  seq: number
+  message_id: string
+  sender: string
+  subject: string
+  date: string
+  duplicate_count: number
+  status: 'new' | 'partial' | 'processed' | 'no_attachment'
+  new_attachment_count: number
+  processed_attachment_count: number
+  attachments: InboxAttachmentItem[]
 }
 
 interface BatchItem {
@@ -44,6 +65,7 @@ interface DocxReportItem {
 
 interface ProcessedItem {
   sha256: string
+  message_id?: string
   filename: string
   first_seen: string
   batch: string
@@ -70,7 +92,32 @@ const busy = ref(false)
 const showConfigModal = ref(false)
 const showAuthModal = ref(false)
 const showCleanup = ref(false)
-const activeSubTab = ref<'batches' | 'outbound' | 'processed' | 'logs'>('batches')
+const activeSubTab = ref<'batches' | 'inbox' | 'outbound' | 'processed' | 'logs'>('batches')
+
+const inboxMails = ref<InboxMailItem[]>([])
+const inboxLoaded = ref(false)
+const inboxLoading = ref(false)
+const inboxFilter = ref({ dedup: true, onlyNew: false })
+const inboxStats = ref({
+  scanned: 0,
+  rawTotal: 0,
+  uniqueTotal: 0,
+  dedupRemoved: 0,
+  processedSkipped: 0,
+  page: 1,
+  pageSize: 10,
+  total: 0,
+  totalPages: 1
+})
+
+const batchPage = ref(1)
+const batchPageSize = ref(8)
+const outboundPage = ref(1)
+const outboundPageSize = ref(5)
+const docxPage = ref(1)
+const docxPageSize = ref(5)
+const processedPage = ref(1)
+const processedPageSize = ref(10)
 
 const auth = ref<AuthInfo>({
   imap_ready: false, imap_masked: '', imap_file: '',
@@ -131,6 +178,53 @@ const cleanupOptions: CleanupOption[] = [
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
+const pagedBatches = computed(() => {
+  const start = (batchPage.value - 1) * batchPageSize.value
+  return batches.value.slice(start, start + batchPageSize.value)
+})
+
+const pagedOutboundPackages = computed(() => {
+  const start = (outboundPage.value - 1) * outboundPageSize.value
+  return outboundPackages.value.slice(start, start + outboundPageSize.value)
+})
+
+const pagedDocxReports = computed(() => {
+  const start = (docxPage.value - 1) * docxPageSize.value
+  return docxReports.value.slice(start, start + docxPageSize.value)
+})
+
+const pagedProcessedItems = computed(() => {
+  const start = (processedPage.value - 1) * processedPageSize.value
+  return processedItems.value.slice(start, start + processedPageSize.value)
+})
+
+watch(() => batches.value.length, (len) => {
+  const maxPage = Math.max(1, Math.ceil(len / batchPageSize.value))
+  if (batchPage.value > maxPage) batchPage.value = maxPage
+})
+watch(() => outboundPackages.value.length, (len) => {
+  const maxPage = Math.max(1, Math.ceil(len / outboundPageSize.value))
+  if (outboundPage.value > maxPage) outboundPage.value = maxPage
+})
+watch(() => docxReports.value.length, (len) => {
+  const maxPage = Math.max(1, Math.ceil(len / docxPageSize.value))
+  if (docxPage.value > maxPage) docxPage.value = maxPage
+})
+watch(() => processedItems.value.length, (len) => {
+  const maxPage = Math.max(1, Math.ceil(len / processedPageSize.value))
+  if (processedPage.value > maxPage) processedPage.value = maxPage
+})
+
+function inboxStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    new: '待收新邮件',
+    partial: '部分新附件',
+    processed: '已全部去重',
+    no_attachment: '无匹配附件'
+  }
+  return map[status] || status
+}
+
 function setInfo(msg: string): void {
   actionMessage.value = msg
   errorMessage.value = ''
@@ -180,10 +274,51 @@ async function handleFetchOnly(): Promise<void> {
   setInfo('正在收件...')
   try {
     const data = await postJson(`${API}/fetch`, { since_days: runOptions.value.since_days })
-    setInfo(`收件完成：扫描 ${data.scanned} 封，命中 ${data.matched} 封，新保存 ${data.saved_count} 个附件，跳过已处理 ${data.skipped_processed} 个`)
+    const dupMailsPart = data.skipped_dup_mails ? `，邮件级去重 ${data.skipped_dup_mails} 封` : ''
+    setInfo(
+      `收件完成：扫描 ${data.scanned} 封，命中 ${data.matched} 封${dupMailsPart}，新保存 ${data.saved_count} 个附件，跳过已处理 ${data.skipped_processed} 个`
+    )
     await loadOverview()
+    if (inboxLoaded.value) await loadInboxMails(inboxStats.value.page, inboxStats.value.pageSize)
   } catch (err) {
     setError(err)
+  }
+}
+
+async function loadInboxMails(page = 1, pageSize = inboxStats.value.pageSize): Promise<void> {
+  inboxLoading.value = true
+  try {
+    const data = await postJson(`${API}/list_mails`, {
+      page,
+      page_size: pageSize,
+      since_days: runOptions.value.since_days,
+      dedup: inboxFilter.value.dedup,
+      only_new: inboxFilter.value.onlyNew
+    })
+    inboxMails.value = data.items || []
+    inboxLoaded.value = true
+    inboxStats.value = {
+      scanned: data.scanned || 0,
+      rawTotal: data.raw_total || 0,
+      uniqueTotal: data.unique_total || 0,
+      dedupRemoved: data.dedup_removed || 0,
+      processedSkipped: data.processed_skipped || 0,
+      page: data.page || 1,
+      pageSize: data.page_size || pageSize,
+      total: data.total || 0,
+      totalPages: data.total_pages || 1
+    }
+  } catch (err) {
+    setError(err)
+  } finally {
+    inboxLoading.value = false
+  }
+}
+
+function openInboxTab(): void {
+  activeSubTab.value = 'inbox'
+  if (!inboxLoaded.value && auth.value.imap_ready) {
+    loadInboxMails(1)
   }
 }
 
@@ -416,6 +551,9 @@ onUnmounted(() => {
       <button :class="['sub-tab-btn', { active: activeSubTab === 'batches' }]" @click="activeSubTab = 'batches'">
         收件批次 ({{ batches.length }})
       </button>
+      <button :class="['sub-tab-btn', { active: activeSubTab === 'inbox' }]" @click="openInboxTab">
+        收件箱邮件{{ inboxLoaded ? ` (${inboxStats.total})` : '' }}
+      </button>
       <button :class="['sub-tab-btn', { active: activeSubTab === 'outbound' }]" @click="activeSubTab = 'outbound'">
         报告与回传包 ({{ outboundPackages.length }})
       </button>
@@ -441,7 +579,7 @@ onUnmounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="b in batches" :key="b.batch_name">
+          <tr v-for="b in pagedBatches" :key="b.batch_name">
             <td class="mono-cell">{{ b.batch_name }}</td>
             <td class="bold-cell">{{ b.subject }}</td>
             <td>{{ b.sender }}</td>
@@ -462,6 +600,88 @@ onUnmounted(() => {
           </tr>
         </tbody>
       </table>
+      <PaginationBar
+        v-if="batches.length > 0"
+        v-model:page="batchPage"
+        v-model:page-size="batchPageSize"
+        :total="batches.length"
+        :page-size-options="[5, 8, 20, 50]"
+      />
+    </div>
+
+    <!-- 收件箱邮件预览（支持去重与翻页） -->
+    <div v-else-if="activeSubTab === 'inbox'" class="table-panel">
+      <div class="inbox-toolbar">
+        <div class="inbox-toolbar-left">
+          <label class="ctrl-item checkbox-item">
+            <input type="checkbox" v-model="inboxFilter.dedup" @change="loadInboxMails(1)" />
+            <span>邮件级去重（Message-ID / 主题）</span>
+          </label>
+          <label class="ctrl-item checkbox-item">
+            <input type="checkbox" v-model="inboxFilter.onlyNew" @change="loadInboxMails(1)" />
+            <span>仅看含未处理附件邮件</span>
+          </label>
+          <span v-if="inboxLoaded" class="inbox-stats-hint">
+            搜索 {{ inboxStats.rawTotal }} 封 · 去重合并 {{ inboxStats.dedupRemoved }} 封 · 当前筛选 {{ inboxStats.total }} 封
+          </span>
+        </div>
+        <button class="btn-secondary" :disabled="inboxLoading" @click="loadInboxMails(1)">
+          {{ inboxLoading ? '拉取中...' : '拉取收件箱' }}
+        </button>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>去重状态</th>
+            <th>邮件主题</th>
+            <th>发件人</th>
+            <th>邮件时间</th>
+            <th>匹配附件（指纹判重）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="mail in inboxMails" :key="`${mail.seq}-${mail.message_id}-${mail.subject}`">
+            <td>
+              <span :class="['inbox-pill', mail.status]">{{ inboxStatusLabel(mail.status) }}</span>
+            </td>
+            <td class="bold-cell">
+              <div>
+                <span>{{ mail.subject || '(无主题)' }}</span>
+                <span v-if="mail.duplicate_count > 1" class="dup-tag">合并 {{ mail.duplicate_count }} 封</span>
+              </div>
+              <div v-if="mail.message_id" class="meta-sub">{{ mail.message_id }}</div>
+            </td>
+            <td>{{ mail.sender }}</td>
+            <td>{{ mail.date }}</td>
+            <td>
+              <span
+                v-for="att in mail.attachments"
+                :key="`${att.filename}-${att.sha256}`"
+                :class="['file-pill', att.already_processed ? 'processed' : 'fresh']"
+                :title="att.sha256"
+              >
+                {{ att.filename }} ({{ (att.size_bytes / 1024).toFixed(1) }} KB · {{ att.already_processed ? '已处理' : '新' }})
+              </span>
+              <span v-if="!mail.attachments.length" class="meta-sub">无符合后缀的附件</span>
+            </td>
+          </tr>
+          <tr v-if="!inboxLoaded && !inboxLoading">
+            <td colspan="5" class="empty-cell">点击右上角“拉取收件箱”加载近期白名单邮件</td>
+          </tr>
+          <tr v-else-if="inboxLoaded && inboxMails.length === 0">
+            <td colspan="5" class="empty-cell">当前时间窗与筛选条件下暂无邮件</td>
+          </tr>
+        </tbody>
+      </table>
+      <PaginationBar
+        v-if="inboxStats.total > 0"
+        :total="inboxStats.total"
+        :page="inboxStats.page"
+        :page-size="inboxStats.pageSize"
+        :page-size-options="[5, 10, 20, 50]"
+        :loading="inboxLoading"
+        @change="p => loadInboxMails(p.page, p.pageSize)"
+      />
     </div>
 
     <!-- 报告与回传包 -->
@@ -480,7 +700,7 @@ onUnmounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="pkg in outboundPackages" :key="pkg.zip_name">
+            <tr v-for="pkg in pagedOutboundPackages" :key="pkg.zip_name">
               <td class="mono-cell">{{ pkg.task_id }}</td>
               <td class="bold-cell">{{ pkg.zip_name }}</td>
               <td>{{ pkg.file_count }}</td>
@@ -496,6 +716,13 @@ onUnmounted(() => {
             </tr>
           </tbody>
         </table>
+        <PaginationBar
+          v-if="outboundPackages.length > 0"
+          v-model:page="outboundPage"
+          v-model:page-size="outboundPageSize"
+          :total="outboundPackages.length"
+          :page-size-options="[5, 10, 20, 50]"
+        />
       </div>
 
       <div class="panel-box">
@@ -510,7 +737,7 @@ onUnmounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="doc in docxReports" :key="doc.name">
+            <tr v-for="doc in pagedDocxReports" :key="doc.name">
               <td class="bold-cell">{{ doc.name }}</td>
               <td>{{ doc.size_kb }} KB</td>
               <td>{{ doc.mtime }}</td>
@@ -524,6 +751,13 @@ onUnmounted(() => {
             </tr>
           </tbody>
         </table>
+        <PaginationBar
+          v-if="docxReports.length > 0"
+          v-model:page="docxPage"
+          v-model:page-size="docxPageSize"
+          :total="docxReports.length"
+          :page-size-options="[5, 10, 20, 50]"
+        />
       </div>
     </div>
 
@@ -542,12 +776,15 @@ onUnmounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="item in processedItems" :key="item.sha256">
+          <tr v-for="item in pagedProcessedItems" :key="item.sha256">
             <td class="bold-cell">{{ item.filename }}</td>
             <td class="mono-cell" :title="item.sha256">{{ item.sha256 ? item.sha256.slice(0, 16) + '...' : '-' }}</td>
             <td class="mono-cell">{{ item.batch }}</td>
             <td>{{ item.sender }}</td>
-            <td>{{ item.subject }}</td>
+            <td>
+              <div>{{ item.subject }}</div>
+              <div v-if="item.message_id" class="meta-sub">{{ item.message_id }}</div>
+            </td>
             <td>{{ item.first_seen }}</td>
             <td class="actions-cell">
               <button class="btn-mini danger" @click="deleteOne('index', item.sha256, `${item.filename} 的去重记录`)" :disabled="runtime.running">移除</button>
@@ -558,6 +795,13 @@ onUnmounted(() => {
           </tr>
         </tbody>
       </table>
+      <PaginationBar
+        v-if="processedItems.length > 0"
+        v-model:page="processedPage"
+        v-model:page-size="processedPageSize"
+        :total="processedItems.length"
+        :page-size-options="[10, 20, 50, 100]"
+      />
     </div>
 
     <!-- 日志 -->
@@ -1144,5 +1388,72 @@ onUnmounted(() => {
   color: #94a3b8;
   font-family: Consolas, monospace;
   word-break: break-all;
+}
+
+.inbox-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.inbox-toolbar-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.inbox-stats-hint {
+  font-size: 12px;
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.inbox-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.inbox-pill.new { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+.inbox-pill.partial { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+.inbox-pill.processed { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
+.inbox-pill.no_attachment { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+
+.dup-tag {
+  margin-left: 6px;
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.meta-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: #94a3b8;
+  font-family: Consolas, monospace;
+  word-break: break-all;
+}
+
+.file-pill.fresh {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+.file-pill.processed {
+  background: #f1f5f9;
+  color: #64748b;
 }
 </style>

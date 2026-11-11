@@ -71,3 +71,35 @@
 
 ### 4.5 测试验证
 - `python -m pytest tests/test_other_tools_api.py tests/test_mail_download.py -v`：32 项单元测试全部通过。
+
+---
+
+## 5. 第三阶段迭代优化记录（邮件获取去重、服务端/前端翻页）
+
+### 5.1 邮件自动收件流去重与收件箱分页浏览
+- [fetcher.py](file:///f:/NCBI%20blast/src/mail_download/fetcher.py)：头部筛选阶段拉取 `MESSAGE-ID`，新增当次批内同 `Message-ID` 邮件级去重（保留最新一封，统计 `skipped_dup_mails`）。
+- [downloader.py](file:///f:/NCBI%20blast/src/mail_download/downloader.py)：在 `processed_index.json` 中同步记录邮件 `message_id`，新增 `has_message_id()` 与只读 `entries()` 查询接口。
+- [mail_inbox_browser.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/mail_inbox_browser.py)：新增邮件收件箱去重浏览服务 `list_whitelist_mails()`，支持发件人白名单内邮件批内去重（按 `Message-ID` 与主题+日期）、结合 SHA256/Message-ID 指纹库的 `only_new` 过滤与服务端分页切片（仅对当前页拉取全文解析附件指纹）。
+- 路由 `POST /api/other_tools/mail_pipeline/list_mails` 与 `GET /api/other_tools/mail_pipeline/overview`（移除 `processed_items[:50]` 截断以支撑前端分页）。
+
+### 5.2 生工 16S 邮件扫描两级去重、防误建记忆与服务端翻页
+- [sangon_mail_scanner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_mail_scanner.py)：
+  - 放弃原先 `ids[-15:]` 固定切片，改为两阶段拉取：全量头部 `(FROM SUBJECT DATE MESSAGE-ID)` 按 10 位订单号 / `Message-ID` 去重合并（累计 `duplicate_count`），再按服务端分页参数（`page`, `page_size`）仅对当前页邮件抓取正文解析 `cxOrderID` 与下载链接。
+  - 引入本地 `.sangon_mail_index.json`（已加入 `.gitignore`）持久记录已扫描与历史已清理订单，防止使用清理功能删除历史订单后下次扫描再次自动建出空目录。
+  - 新增手动单条目录初始化服务 `init_sangon_order_dir()`（路由 `POST /api/other_tools/sangon_16s/init_order`）。
+- [history_cleaner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/history_cleaner.py)：删除订单目录时自动向 `.sangon_mail_index.json` 写入 `cleaned=True` 保护标记，并新增 `scan_index` 清理选项按需重置扫描去重记忆。
+
+### 5.3 前端通用分页组件与界面适配
+- 新增 [PaginationBar.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/PaginationBar.vue)：通用分页底栏组件（支持首页/上一页/页码/下一页/末页及每页条数切换）。
+- 更新 [Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue)：
+  - 生工通知邮件面板接入去重开关、仅显示新邮件、自动建目录、忽略清理记忆开关，显示批内合并数与目录去重状态，提供行内「建目录」按钮与服务端分页。
+  - 为 `订单列表`（默认每页 6 条，避免结果预览被挤出首屏）与 `16S 鉴定结果`（默认每页 20 条）接入前端分页。
+- 更新 [MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue)：
+  - 新增 `收件箱邮件` 子标签页，支持邮件级去重开关、仅看含未处理附件邮件过滤与服务端真实翻页浏览。
+  - 为 `收件批次`、`回传压缩包`、`Word 报告` 与 `去重记录` 全部接入 `<PaginationBar>` 分页。
+- 修复 [api.ts](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/api.ts) 在 `--exactOptionalPropertyTypes` 下的 `RequestInit.body` 类型定义。
+
+### 5.4 本阶段测试与验证
+- `python -m pytest tests/test_other_tools_api.py tests/test_mail_download.py -v`：新增离线 `FakeIMAP` 用例与路由校验后，35 项测试全部通过。
+- 前端执行 `npm run build` (`vue-tsc -b && vite build`) 与严格类型检查，零报错通过。
+

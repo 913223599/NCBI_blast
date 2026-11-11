@@ -68,8 +68,12 @@ class ProcessedIndex:
                batch_dir: Path, path: str) -> None:
         self.load()
         fp = self.fingerprint(payload)
+        msg_id = ""
+        if getattr(summary, "raw", None) is not None:
+            msg_id = str(summary.raw.get("Message-ID", "") or "").strip()
         self._data[fp] = {
             "sha256": fp,
+            "message_id": msg_id,
             "filename": name,
             "first_seen": datetime.now().isoformat(timespec="seconds"),
             "batch": Path(batch_dir).name,
@@ -78,6 +82,17 @@ class ProcessedIndex:
             "subject": summary.subject,
             "mail_date": summary.date_text,
         }
+
+    def has_message_id(self, message_id: str) -> bool:
+        """判断邮件 Message-ID 是否已在处理索引中出现过。"""
+        mid = (message_id or "").strip()
+        if not mid:
+            return False
+        self.load()
+        return any(
+            isinstance(meta, dict) and meta.get("message_id") == mid
+            for meta in self._data.values()
+        )
 
     def save(self) -> None:
         self.load()
@@ -89,6 +104,15 @@ class ProcessedIndex:
     def count(self) -> int:
         self.load()
         return len(self._data)
+
+    def entries(self) -> Dict[str, Dict[str, Any]]:
+        """返回只读副本：sha256 -> 元信息。"""
+        self.load()
+        return {
+            sha: dict(meta)
+            for sha, meta in self._data.items()
+            if isinstance(meta, dict)
+        }
 
 
 class AttachmentSaver:
