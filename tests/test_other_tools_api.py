@@ -396,25 +396,42 @@ def test_sangon_scan_dedup_history_and_pagination():
         assert res_recreate["mails"][0]["dedup_status"] == "created"
         assert (root / "20261102_2140610001").exists()
 
-        # 同一次会话内切换 only_new 并传入 preserve_created_orders，可保留刚新建的订单供用户继续核对/打开下载页
-        res_preserve = scan_sangon_mails(
+        # 已缓存下载链接的待下载订单再次扫描时不重复拉取正文，并保留建目录时间
+        fake_cached = _FakeIMAPForOtherTools(mails)
+        res_cached = scan_sangon_mails(
             root,
             cfg,
             page=1,
-            page_size=10,
+            page_size=200,
             dedup=True,
-            only_new=True,
             auto_create=False,
-            preserve_created_orders=["2140610003"],
-            conn_factory=lambda: _FakeIMAPForOtherTools(mails),
+            conn_factory=lambda: fake_cached,
         )
-        assert res_preserve["total"] == 1
-        assert res_preserve["existing_count"] == 2
-        assert res_preserve["mails"][0]["order_no"] == "2140610003"
-        assert res_preserve["mails"][0]["dedup_status"] == "created"
-        assert res_preserve["mails"][0]["cx_order_id"] == "CX003_NEW"
+        assert res_cached["existing_count"] == 3
+        by_cached = {m["order_no"]: m for m in res_cached["mails"]}
+        assert by_cached["2140610003"]["download_url"].endswith("CX003_NEW")
+        assert by_cached["2140610001"]["cx_order_id"] == "CX001"
+        assert not [c for c in fake_cached.fetch_calls if "BODY.PEEK[]" in c]
+        idx_data = json.loads((root / ".sangon_mail_index.json").read_text(encoding="utf-8"))
+        assert idx_data["seen_orders"]["2140610003"]["created_at"]
 
-        # only_new=True 在已全部存在且未保留本轮新建时返回 0 条
+        # 已下载压缩包的订单不再需要下载链接：清掉缓存后也不应拉取其正文
+        (root / "20261103_2140610002" / "原始压缩包" / "x.zip").write_bytes(b"PK")
+        idx_data["seen_orders"]["2140610002"]["download_url"] = ""
+        (root / ".sangon_mail_index.json").write_text(json.dumps(idx_data, ensure_ascii=False), encoding="utf-8")
+        fake_skip = _FakeIMAPForOtherTools(mails)
+        scan_sangon_mails(
+            root,
+            cfg,
+            page=1,
+            page_size=200,
+            dedup=True,
+            auto_create=False,
+            conn_factory=lambda: fake_skip,
+        )
+        assert not [c for c in fake_skip.fetch_calls if "BODY.PEEK[]" in c]
+
+        # only_new=True 在已全部存在时返回 0 条
         res_only_new = scan_sangon_mails(
             root,
             cfg,
@@ -587,7 +604,6 @@ def test_other_tools_routes_pagination_and_init_order(monkeypatch):
                 "dedup": False,
                 "only_new": True,
                 "auto_create": False,
-                "preserve_created_orders": ["2140610003"],
             },
         )
         assert r_paged.status_code == 200
@@ -596,7 +612,7 @@ def test_other_tools_routes_pagination_and_init_order(monkeypatch):
         assert captured[-1]["dedup"] is False
         assert captured[-1]["only_new"] is True
         assert captured[-1]["auto_create"] is False
-        assert captured[-1]["preserve_created_orders"] == ["2140610003"]
+        assert "preserve_created_orders" not in captured[-1]
 
         # 3. list_mails 分页去重路由
         def fake_list(cfg, **kwargs):
@@ -1223,6 +1239,55 @@ def test_mail_pipeline_run_self_overview_fallback_and_send_package(monkeypatch):
         assert "批次重跑结束：全部环节成功" in ot_routes._mail_pipeline_state["last_output"]
 
 
+def test_sangon_order_annotator_new_flag_and_claimable_zip():
+    """验证订单补充信息：下载页链接、新订单标记（新建且待下载、7 天有效）与可认领下载包"""
+    from datetime import datetime, timedelta
+
+    from src.backend.services.other_tools.sangon_mail_scanner import SangonMailIndex
+    from src.backend.services.other_tools.sangon_order_annotator import annotate_sangon_orders
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        idx = SangonMailIndex(root)
+        idx.record(
+            order_no="2140600001", message_id="", dir_name="20261111_2140600001",
+            subject="测序结果通知 2140600001", date_text="", cx_order_id="CX1",
+            download_url="http://store.sangon.com/cxOrderDetail?cxOrderDetail.cxOrderID=CX1",
+            created=True,
+        )
+        idx.record(order_no="2140600002", message_id="", dir_name="20261111_2140600002",
+                   subject="", date_text="", created=True)
+        idx.record(order_no="2140600003", message_id="", dir_name="20261101_2140600003",
+                   subject="", date_text="")
+        idx.save()
+        # 人为把 0002 的建目录时间改为 10 天前，应不再显示“新”
+        data = json.loads((root / ".sangon_mail_index.json").read_text(encoding="utf-8"))
+        data["seen_orders"]["2140600002"]["created_at"] = (datetime.now() - timedelta(days=10)).isoformat(timespec="seconds")
+        (root / ".sangon_mail_index.json").write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+        orders = [
+            {"dir_name": "20261111_2140600001", "order_no": "2140600001", "status": "pending"},
+            {"dir_name": "20261111_2140600002", "order_no": "2140600002", "status": "pending"},
+            {"dir_name": "20261101_2140600003", "order_no": "2140600003", "status": "completed"},
+        ]
+        candidates = [
+            {"order_no": "2140600001", "zip_name": "a_2140600001_测序结果.zip",
+             "matched_dir_name": "20261111_2140600001", "archived": False},
+            {"order_no": "2140600003", "zip_name": "c_2140600003_测序结果.zip",
+             "matched_dir_name": "20261101_2140600003", "archived": True},
+        ]
+        annotate_sangon_orders(root, orders, candidates)
+        o1, o2, o3 = orders
+        assert o1["is_new"] is True
+        assert o1["download_url"].endswith("CX1")
+        assert o1["download_zip_ready"] is True
+        assert o1["download_zip_name"] == "a_2140600001_测序结果.zip"
+        assert o2["is_new"] is False
+        assert o2["download_zip_ready"] is False
+        assert o3["is_new"] is False
+        assert o3["download_zip_ready"] is False
+
+
 def test_no_emoji_and_utf8_in_new_files():
     """验证新增与修改的前后端代码文件全部采用 UTF-8 且不含任何 Emoji 字符"""
     repo_root = Path(__file__).resolve().parents[1]
@@ -1243,6 +1308,7 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "backend" / "services" / "other_tools" / "history_cleaner.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "mail_inbox_browser.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_mail_scanner.py",
+        repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_order_annotator.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_settings.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_zip_importer.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "secret_store.py",
@@ -1251,6 +1317,9 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PathField.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "CleanupDialog.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PaginationBar.vue",
+        repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PopoverMenu.vue",
+        repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "SangonMailRecords.vue",
+        repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "sangonTypes.ts",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "modules" / "MailAutoPipelineModule.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "modules" / "Sangon16SPipelineModule.vue",
     ]

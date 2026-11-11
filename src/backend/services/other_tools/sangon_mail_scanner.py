@@ -29,6 +29,7 @@ logger = logging.getLogger("api.other_tools.sangon_mail_scanner")
 
 SANGON_MAIL_INDEX_NAME = ".sangon_mail_index.json"
 SANGON_SENDER = "info1@sangon.com"
+MAX_SCAN_PAGE_SIZE = 200
 _ORDER_NO_RE = re.compile(r"(?<!\d)(\d{10})(?!\d)")
 _CX_ORDER_RE = re.compile(r"cxOrderID=([A-Za-z0-9_-]+)")
 _SAFE_DIR_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -94,6 +95,12 @@ class SangonMailIndex:
         entry = self._data["seen_orders"].get(order_no)
         return bool(isinstance(entry, dict) and entry.get("cleaned"))
 
+    def get_order(self, order_no: str) -> Dict[str, Any]:
+        """读取单个订单的索引记录（含下载页链接与建目录时间），不存在时返回空字典。"""
+        self.load()
+        entry = self._data["seen_orders"].get((order_no or "").strip())
+        return dict(entry) if isinstance(entry, dict) else {}
+
     def record(
         self,
         *,
@@ -105,12 +112,13 @@ class SangonMailIndex:
         cx_order_id: str = "",
         download_url: str = "",
         cleaned: bool = False,
+        created: bool = False,
     ) -> None:
         self.load()
         now_iso = datetime.now().isoformat(timespec="seconds")
         if order_no:
             prev = self._data["seen_orders"].get(order_no) or {}
-            self._data["seen_orders"][order_no] = {
+            entry = {
                 "order_no": order_no,
                 "dir_name": dir_name or prev.get("dir_name", ""),
                 "subject": subject or prev.get("subject", ""),
@@ -121,6 +129,13 @@ class SangonMailIndex:
                 "last_seen": now_iso,
                 "cleaned": cleaned,
             }
+            # 仅在本工具实际新建目录时记录建目录时间，用于订单表“新”标记
+            created_at = prev.get("created_at", "")
+            if created and (not created_at or prev.get("cleaned")):
+                created_at = now_iso
+            if created_at:
+                entry["created_at"] = created_at
+            self._data["seen_orders"][order_no] = entry
         if message_id:
             prev_mid = self._data["seen_message_ids"].get(message_id) or {}
             self._data["seen_message_ids"][message_id] = {
@@ -283,6 +298,7 @@ def init_sangon_order_dir(
             cx_order_id=cx_order_id,
             download_url=download_url,
             cleaned=False,
+            created=not existed,
         )
         idx.save()
 
@@ -306,6 +322,17 @@ def _scan_existing_orders(root_dir: Path) -> Dict[str, str]:
     return existing
 
 
+def _order_needs_download(order_path: Path) -> bool:
+    """订单目录尚无压缩包且无解压数据时视为待下载（需要下载页链接）。"""
+    if not order_path.exists():
+        return True
+    zip_dir = order_path / "原始压缩包"
+    raw_dir = order_path / "原始数据"
+    has_zip = zip_dir.exists() and any(zip_dir.glob("*.zip"))
+    has_raw = raw_dir.exists() and any(p.is_file() for p in raw_dir.rglob("*"))
+    return not (has_zip or has_raw)
+
+
 def scan_sangon_mails(
     root_dir: Path,
     cfg: Any,
@@ -316,16 +343,15 @@ def scan_sangon_mails(
     only_new: bool = False,
     auto_create: bool = True,
     ignore_history: bool = False,
-    preserve_created_orders: Optional[Iterable[str]] = None,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
     """
     连接邮箱扫描生工通知邮件（两阶段：全量头部去重分页 + 当前页正文链接提取）。
+    正文仅对缺少订单号、或待下载且索引中无下载链接缓存的邮件拉取，减少重复扫描耗时。
     支持 conn_factory 注入（FakeIMAP 离线测试）。
     """
-    page_size = max(1, min(int(page_size or 10), 50))
+    page_size = max(1, min(int(page_size or 10), MAX_SCAN_PAGE_SIZE))
     page = max(1, int(page or 1))
-    preserved_orders = {str(o).strip() for o in (preserve_created_orders or []) if str(o).strip()}
 
     fetcher = MailFetcher(cfg, conn_factory=conn_factory)
     conn = None
@@ -459,20 +485,6 @@ def scan_sangon_mails(
                 dir_ready = False
                 dedup_status = "non_sequencing"
                 non_sequencing_count += 1
-            elif in_disk and order_no in preserved_orders:
-                dir_ready = True
-                dedup_status = "created"
-                created_count += 1
-                new_count += 1
-                if order_no:
-                    index.record(
-                        order_no=order_no,
-                        message_id=message_id,
-                        dir_name=dir_name,
-                        subject=item["subject"],
-                        date_text=item["date"],
-                        cleaned=False,
-                    )
             elif in_disk:
                 dir_ready = True
                 dedup_status = "existing"
@@ -507,6 +519,7 @@ def scan_sangon_mails(
                     subject=item["subject"],
                     date_text=item["date"],
                     cleaned=False,
+                    created=True,
                 )
             else:
                 dir_ready = False
@@ -544,8 +557,20 @@ def scan_sangon_mails(
         start = (current_page - 1) * page_size
         page_items = filtered_items[start : start + page_size]
 
-        # 阶段 2：仅对当前页邮件拉取全文提取 cxOrderID 与下载链接
+        # 阶段 2：仅对当前页中需要下载链接的邮件拉取全文（优先复用索引缓存）
         for item in page_items:
+            if item["dedup_status"] == "non_sequencing":
+                continue
+            cached = index.get_order(item["order_no"]) if item["order_no"] else {}
+            if cached.get("download_url"):
+                item["cx_order_id"] = cached.get("cx_order_id", "")
+                item["download_url"] = cached.get("download_url", "")
+                continue
+            needs_body = (not item["order_no"]) or (
+                bool(item["dir_name"]) and _order_needs_download(root_dir / item["dir_name"])
+            )
+            if not needs_body:
+                continue
             full = fetcher._fetch_full(conn, item["seq"])
             if full is None:
                 continue

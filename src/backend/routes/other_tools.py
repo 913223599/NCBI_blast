@@ -29,6 +29,7 @@ from ..services.other_tools.dir_migrator import migrate_directory
 from ..services.other_tools.history_cleaner import cleanup_mail_history, cleanup_sangon_history
 from ..services.other_tools.mail_inbox_browser import list_whitelist_mails
 from ..services.other_tools.sangon_mail_scanner import init_sangon_order_dir, scan_sangon_mails
+from ..services.other_tools.sangon_order_annotator import annotate_sangon_orders
 from ..services.other_tools.sangon_settings import (
     get_sangon_downloads_dir,
     get_sangon_root,
@@ -241,7 +242,6 @@ class SangonScanMailRequest(BaseModel):
     only_new: bool = False
     auto_create: bool = True
     ignore_history: bool = False
-    preserve_created_orders: List[str] = []
 
 
 class SangonInitOrderRequest(BaseModel):
@@ -1037,6 +1037,7 @@ async def get_sangon_16s_overview(sangon_root: Optional[str] = None, downloads_d
         })
 
     pending_download_count = sum(1 for c in download_candidates if not c["archived"])
+    annotate_sangon_orders(root_path, orders, download_candidates)
 
     db_16s = PROJECT_ROOT / "database" / "16S" / "ncbi" / "16S_ribosomal_RNA.nin"
     return {
@@ -1107,7 +1108,6 @@ async def scan_sangon_notification_mails(
             only_new=params.only_new,
             auto_create=params.auto_create,
             ignore_history=params.ignore_history,
-            preserve_created_orders=params.preserve_created_orders or None,
         )
 
     try:

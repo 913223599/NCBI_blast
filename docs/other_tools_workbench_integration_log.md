@@ -241,4 +241,29 @@
 2. **前端构建**：`src/web-next` 下 `npm run build`（`vue-tsc -b && vite build`）零错误通过（`13.23s`）。
 3. **沙盒隔离真实邮箱复测**：连接 `913223599@qq.com` 隔离只读扫描校验实得 `raw_total=17, unique_total=13, dedup_removed=4, existing_count=12, non_sequencing_count=1, new_count=0`，并确认 `1011709710` 已准确识别为 `non_sequencing (legacy_dir_exists=True)`。
 
+---
+
+## 10. 生工 16S 模块交互重构：以订单阶段为核心、收敛低频开关与折叠邮件记录（2026-11-11）
+
+### 10.1 重构目标
+消除原界面中「两处重复复选框」「切换筛选触发 IMAP 重连与建目录副作用」「新邮件定义随自动建目录即失效」「邮件表与订单表职责重叠」等问题，将核心工作流简化为「检查新订单 -> 订单行内主操作（打开下载页 / 认领下载包 / 运行 / 预览与发信）」。
+
+### 10.2 模块化修改实施
+1. **订单补充标注服务（[sangon_order_annotator.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_order_annotator.py) / [other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py)）**：
+   - 新增独立模块 `annotate_sangon_orders()`，在 `GET /api/other_tools/sangon_16s/overview` 返回前为每个订单关联 `.sangon_mail_index.json` 中的 `download_url`、`created_at`、`is_new`（新建且待下载、7 天窗口有效）以及浏览器下载目录待认领包 `download_zip_ready` / `download_zip_name`。
+2. **邮件扫描索引缓存与正文按需拉取（[sangon_mail_scanner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_mail_scanner.py)）**：
+   - `SangonMailIndex.record()` 记录首次建目录时间 `created_at`，新增 `get_order()` 查询单订单缓存；
+   - `scan_sangon_mails()` 移除临时 `preserve_created_orders` 补丁，阶段 2 优先复用索引中已缓存的 `download_url`，且对已归档压缩包的订单不再重复拉取邮件正文。
+3. **前端组件拆分与主视图重构**：
+   - 新增类型定义 [sangonTypes.ts](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/sangonTypes.ts)、通用浮层菜单 [PopoverMenu.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/PopoverMenu.vue) 与可折叠邮件记录面板 [SangonMailRecords.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/SangonMailRecords.vue)（默认收起，基于单次扫描缓存执行纯前端分类过滤与分页，切换不重连邮箱）。
+   - 重构 [Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue)：
+     - 顶栏主按钮收敛为「检查新订单」「运行待处理 (N)」「刷新」「更多与设置」（内含邮箱 Key、清理历史及 4 项高级开关）；
+     - 订单表顶部新增纯前端阶段分段筛选（`全部` / `待下载` / `处理中` / `已完成`），新订单展示 `新` 与 `包已就绪` 标记；
+     - 订单行按状态展示唯一主操作（`认领下载包` / `打开下载页` / `运行` / `预览 + 发信`），打开文件夹与清理等次要操作收进行尾「更多」浮层。
+
+### 10.3 验证结果
+1. **自动化单元测试**：`python -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v` **82 项全部通过**（`5.05s`），新增 `test_sangon_order_annotator_new_flag_and_claimable_zip` 与正文缓存跳过断言，并将全部新建 TS/Vue/Py 文件纳入零 Emoji 与 UTF-8 门禁（[test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py)）。
+2. **前端类型与生产构建验证**：`npx vue-tsc -b` 与 `npx vite build` 零错误通过。
+
+
 
