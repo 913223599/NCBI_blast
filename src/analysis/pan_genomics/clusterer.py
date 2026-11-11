@@ -86,7 +86,7 @@ class ParallelOrthologClusterer:
         len_list: List[int] = []
 
         for _, _, g in all_cds_genes:
-            p_clean = g.get("product", "hypothetical protein").lower().strip()
+            p_clean = (g.get("product") or "hypothetical protein").lower().strip()
             prod_clean_list.append(p_clean)
             is_annotated_list.append(not AnnotationFuser.is_unannotated(p_clean))
             s = g.get("translation", "")

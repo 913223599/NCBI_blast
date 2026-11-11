@@ -282,8 +282,9 @@ class PanGenomicsEngine:
                 "end": end,
                 "strand": strand,
                 "source_engine": engine,
-                "notes": f.get("notes", ""),
-                "evidence": f.get("evidence", ""),
+                # 注释字段可能为 None，统一归一化为空串，避免下游 .lower() 崩溃
+                "notes": f.get("notes") or "",
+                "evidence": f.get("evidence") or "",
                 "evidence_sources": f.get("evidence_sources", [])
             })
 
@@ -538,7 +539,9 @@ class PanGenomicsEngine:
 
             if not acr_genes:
                 for f in features:
-                    if "anti-crispr" in f["product"].lower() or "anti-crispr" in f.get("notes", "").lower():
+                    product_text = (f.get("product") or "").lower()
+                    notes_text = (f.get("notes") or "").lower()
+                    if "anti-crispr" in product_text or "anti-crispr" in notes_text:
                         acr_genes.append({
                             "cds_id": f["locus_tag"],
                             "source": f["product"],
