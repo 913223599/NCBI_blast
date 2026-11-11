@@ -47,6 +47,9 @@ MODULE_IMPORT_MAP = {
     "starlette": "starlette",
     "python-multipart": "multipart",
     "openai": "openai",
+    # 组装引擎 NGCS (E:\NGCS) 运行时依赖
+    "scipy": "scipy",
+    "networkx": "networkx",
 }
 
 # 可选依赖：缺失或安装失败时仅告警，不影响程序启动
@@ -434,6 +437,7 @@ def main():
             print(f"[警告] 可选依赖未能安装: {', '.join(still_missing)}")
             print("       原因: 该包在 Windows 上无预编译 wheel，需要 Microsoft C++ Build Tools 现场编译。")
             print("       说明: 程序未直接调用该包，环境自愈继续执行，不影响启动。")
+            print("       影响: NGCS 组装引擎会退化为近似兜底比对, consensus/polishing 结果不可信。")
             print("       如需启用: https://visualstudio.microsoft.com/visual-cpp-build-tools/")
         else:
             print("[信息] 可选依赖已全部补齐成功。")
