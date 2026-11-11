@@ -181,6 +181,8 @@ src/test_shm.py
 !/scripts/heal_assembly_metrics.py
 !/scripts/refresh_task_results.py
 !/scripts/自动化流程文档.md
+!/scripts/ensure_electron.ps1
+!/scripts/repair_integrity.ps1
 .lingma/rules/
 
 # ------------------------------------------------------------------------------

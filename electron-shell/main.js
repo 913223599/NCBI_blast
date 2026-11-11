@@ -11,11 +11,65 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
+
+// ─── 启动日志落盘 (electron-shell/dev.log) ─────────────
+// Windows 下 electron.exe 是 GUI 子系统进程，快速退出或崩溃时控制台输出容易丢失，
+// 因此主进程日志同时写入文件，便于事后定位“闪一下就没了”的问题。
+const LOG_FILE = path.join(__dirname, 'dev.log');
+const LOG_MAX_BYTES = 2 * 1024 * 1024;
+
+function rotateLogIfNeeded() {
+    try {
+        if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > LOG_MAX_BYTES) {
+            fs.renameSync(LOG_FILE, `${LOG_FILE}.old`);
+        }
+    } catch (e) {
+        // 忽略日志轮转失败
+    }
+}
+
+function writeLogLine(level, args) {
+    const text = args.map((arg) => {
+        if (typeof arg === 'string') return arg;
+        if (arg instanceof Error) return arg.stack || arg.message;
+        try { return JSON.stringify(arg); } catch (e) { return String(arg); }
+    }).join(' ');
+    try {
+        fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] [${level}] ${text}\r\n`);
+    } catch (e) {
+        // 忽略日志写入失败
+    }
+}
+
+rotateLogIfNeeded();
+for (const [level, method] of [['INFO', 'log'], ['WARN', 'warn'], ['ERROR', 'error']]) {
+    const original = console[method].bind(console);
+    console[method] = (...args) => {
+        original(...args);
+        writeLogLine(level, args);
+    };
+}
+
+console.log('=======================================');
+console.log('  NCBI BLAST Pro — Electron Shell');
+console.log(`  启动于 ${new Date().toLocaleString()}`);
+console.log('=======================================');
+
+// ─── 环境自检：ELECTRON_RUN_AS_NODE 会让 electron.exe 退化为纯 Node ───
+// 该变量被上层宿主进程注入时，app 为 undefined，此处会立刻抛错并静默退出。
+if (!app || typeof app.whenReady !== 'function') {
+    console.error('[Electron] 当前进程不具备 Electron 主进程 API (app 未定义)。');
+    console.error('[Electron] 常见原因: 环境变量 ELECTRON_RUN_AS_NODE=1 使 electron.exe 以纯 Node 模式运行。');
+    console.error('[Electron] 处理办法: 清除该环境变量后重启 (RUN_DEV_ELECTRON.bat 会自动清理)。');
+    process.exit(1);
+}
 
 // ─── 屏蔽 Chromium 内部噪音 ──────────────────────────
 app.commandLine.appendSwitch('disable-features', 'AutofillServerCommunication,AutofillEnableAccountWalletStorage');
 app.commandLine.appendSwitch('log-level', '3');
-app.commandLine.appendSwitch('remote-debugging-pipe');
+// 注意: 不要启用 'remote-debugging-pipe'。该开关要求由外部控制端提供 fd3/fd4 管道，
+// 独立运行时会干扰调试端点初始化 (见 electron/electron#27287)，仅自动化测试时才需要。
 
 // ─── 配置常量 ─────────────────────────────────────
 const PROJECT_ROOT = path.resolve(__dirname, '..');
@@ -192,9 +246,30 @@ function createWindow() {
             ? `http://localhost:${VITE_PORT}`
             : `file://${path.join(PROJECT_ROOT, 'src', 'web-next', 'dist', 'index.html')}`;
 
+        // 开发模式下先自检 Vite 是否可达，避免窗口白屏却没有任何日志线索
+        if (IS_DEV) {
+            const probe = http.get(`http://localhost:${VITE_PORT}`, (res) => {
+                console.log(`[Electron] Vite 探测成功 (HTTP ${res.statusCode}) - ${frontendUrl}`);
+                res.resume();
+            });
+            probe.on('error', (err) => {
+                console.error(`[Electron] Vite 探测失败 (${frontendUrl}): ${err.message}`);
+                console.error('[Electron] 若前端端口不是 5173，说明 Vite 被旧进程占用后发生了端口漂移。');
+            });
+            probe.setTimeout(3000, () => {
+                probe.destroy();
+                console.error(`[Electron] Vite 探测超时 (${frontendUrl})`);
+            });
+        }
+
         console.log(`[Electron] 加载前端: ${frontendUrl}`);
         mainWindow.loadURL(frontendUrl).catch(err => {
             console.error(`[Electron] 加载前端 URL 失败: ${err.message}`);
+        });
+
+        // 前端加载失败时明确记录，避免只看到一片空白窗口而无任何线索
+        mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+            console.error(`[Electron] 前端加载失败 (${errorCode} ${errorDescription}): ${validatedURL}`);
         });
 
         // 拦截所有新窗口创建请求（例如 window.open），防止出现白屏空白子窗口
@@ -220,16 +295,16 @@ function createWindow() {
         mainWindow.once('ready-to-show', () => {
             mainWindow.show();
             console.log('[Electron] 窗口已显示');
-            
-            // 只有在窗口显示后，才监听全关事件，防止启动时的意外触发
-            app.on('window-all-closed', () => {
-                console.log('[Electron] window-all-closed 事件触发');
-                if (process.platform !== 'darwin') {
-                    stopPythonSidecar();
-                    app.quit();
-                }
-            });
         });
+
+        // 兜底：页面加载异常时 ready-to-show 可能永不触发，窗口将一直隐藏，
+        // 表现就是“双击后什么都没发生”。这里强制显示，让问题可见。
+        setTimeout(() => {
+            if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+                console.warn('[Electron] ready-to-show 未在 8 秒内触发，强制显示窗口。请检查上方前端加载日志。');
+                mainWindow.show();
+            }
+        }, 8000);
 
         if (IS_DEV) {
             mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -308,22 +383,40 @@ ipcMain.handle('app:relaunch', async () => {
 
 app.whenReady().then(async () => {
     try {
-        console.log('=======================================');
-        console.log('  NCBI BLAST Pro — Electron Shell');
-        console.log('=======================================');
+        console.log(`[Electron] 运行模式: ${IS_DEV ? '开发 (dev)' : '生产'}`);
 
         pythonProcess = startPythonSidecar();
 
         const pythonReady = await waitForPythonReady();
         if (!pythonReady) {
             console.error('[Electron] 无法启动 Python API 服务器，退出。');
-            app.quit();
+            try {
+                dialog.showErrorBox(
+                    '后端服务启动失败',
+                    `Python API 服务器未能在 30 秒内就绪。\n\n请检查 electron-shell\\dev.log 与终端输出中的 [Python:ERR] 行。`
+                );
+            } catch (e) {
+                // 忽略对话框失败
+            }
+            stopPythonSidecar();
+            app.exit(1);
             return;
         }
 
         createWindow();
     } catch (err) {
         console.error('[Electron] 启动过程发生未捕获异常:', err);
+        app.exit(1);
+    }
+});
+
+// 窗口全部关闭时的退出行为必须显式声明：
+// 若该事件未注册，Electron 会在“所有窗口关闭”后静默退出（退出码 0），
+// 看起来就像应用启动后立刻消失，且没有任何日志。
+app.on('window-all-closed', () => {
+    console.log('[Electron] window-all-closed 事件触发，窗口已全部关闭');
+    if (process.platform !== 'darwin') {
+        stopPythonSidecar();
         app.quit();
     }
 });

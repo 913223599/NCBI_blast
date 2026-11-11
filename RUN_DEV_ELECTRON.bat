@@ -131,26 +131,66 @@ if not exist "src\web-next\node_modules\vite" (
     echo [INFO] Frontend Vite dependencies ready.
 )
 
+REM 5b. Verify the Electron binary itself and the file integrity labels.
+REM     - npm postinstall can silently leave dist empty (extract-zip breaks on Node 22+),
+REM       so the binary is repaired from the official archive when needed.
+REM     - A Low integrity label on electron.exe makes Chromium abort at startup with
+REM       0x80000003 and no output, so the project tree is upgraded back to Medium.
+echo [INFO] Verifying Electron binary and file integrity labels...
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\ensure_electron.ps1"
+if errorlevel 1 (
+    echo [ERROR] Electron binary is missing and could not be repaired automatically.
+    pause
+    exit /b 1
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\repair_integrity.ps1"
+if errorlevel 1 (
+    echo [WARN] Integrity label repair failed. If Electron closes instantly with no output,
+    echo        run this once as Administrator then retry:
+    echo        powershell -NoProfile -ExecutionPolicy Bypass -File scripts\repair_integrity.ps1
+    pause
+)
+
 REM 6. Start Services
 echo [3/3] Starting Services...
+
+REM Kill stale Vite instances first: a leftover server keeps 5173 busy, so the new
+REM instance silently moves to 5174 while Electron still loads 5173 (blank window / stale app)
+echo [INFO] Cleaning up stale Vite dev server on port 5173...
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { if ($_ -and $_ -ne 0) { try { Stop-Process -Id $_ -Force -ErrorAction Stop; Write-Host ('[INFO] Killed stale Vite process PID ' + $_) } catch {} } }"
 
 echo [INFO] Starting Vite Dev Server...
 start "Vite Dev Server" /D "src\web-next" cmd /c "npm run dev || pause"
 
-echo [INFO] Waiting for Vite Dev Server to initialize...
-ping 127.0.0.1 -n 5 >nul
+REM Wait for the port to actually listen; a fixed ping delay is not enough on slow machines
+echo [INFO] Waiting for Vite Dev Server to listen on 5173...
+powershell -NoProfile -Command "$deadline = (Get-Date).AddSeconds(60); while ((Get-Date) -lt $deadline) { if (Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue) { Write-Host '[INFO] Vite is ready: http://localhost:5173'; exit 0 }; Start-Sleep -Milliseconds 500 }; Write-Host '[ERROR] Vite dev server did not listen on 5173 within 60s'; exit 1"
+if errorlevel 1 (
+    echo [ERROR] Frontend dev server failed to start. Please check the "Vite Dev Server" window.
+    pause
+    exit /b 1
+)
+
+REM Clear Node-mode variables possibly injected by a host process:
+REM with ELECTRON_RUN_AS_NODE=1 electron.exe degrades into plain Node, "app" is undefined and it exits silently
+set "ELECTRON_RUN_AS_NODE="
+set "ELECTRON_NO_ATTACH_CONSOLE="
 
 echo [INFO] Starting Electron Desktop Application...
 pushd electron-shell
 call npm run dev
-if errorlevel 1 (
-    echo.
-    echo [ERROR] Electron process exited with code %errorlevel%.
-    popd
-    pause
-    exit /b %errorlevel%
-)
+set "ELECTRON_EXIT=%errorlevel%"
 popd
+
+echo [INFO] Electron exit code: %ELECTRON_EXIT%
+if not "%ELECTRON_EXIT%"=="0" (
+    echo.
+    echo [ERROR] Electron process exited with code %ELECTRON_EXIT%.
+    echo [INFO] Diagnostics written to: %PROJECT_ROOT%electron-shell\dev.log
+    pause
+    exit /b %ELECTRON_EXIT%
+)
 
 echo.
 echo ===================================================
