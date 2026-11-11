@@ -13,7 +13,7 @@ import logging
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("mail_download.packer")
 
@@ -35,7 +35,7 @@ class ResultPacker:
 
     # ---- 主流程 ----
 
-    def pack(self, result_dir: Path, task_id: Optional[str] = None) -> Dict[str, object]:
+    def pack(self, result_dir: Path, task_id: Optional[str] = None) -> Dict[str, Any]:
         """打包产物目录。task_id 用于 zip 命名与清单；缺省用目录名。"""
         result_dir = Path(result_dir)
         if not result_dir.exists() or not result_dir.is_dir():
@@ -83,7 +83,7 @@ class ResultPacker:
             out.append(p)
         return out
 
-    def _write_zip(self, zip_path: Path, files: List[Path]) -> List[Dict[str, object]]:
+    def _write_zip(self, zip_path: Path, files: List[Path]) -> List[Dict[str, Any]]:
         entries = []
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
             for p in files:
@@ -97,7 +97,7 @@ class ResultPacker:
         return entries
 
     def _write_manifest(self, task_id: str, zip_path: Path,
-                        entries: List[Dict[str, object]]) -> Path:
+                        entries: List[Dict[str, Any]]) -> Path:
         manifest = {
             "task_id": task_id,
             "pack_time": datetime.now().isoformat(timespec="seconds"),

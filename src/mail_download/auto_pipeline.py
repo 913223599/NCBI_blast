@@ -187,14 +187,16 @@ def _pack_and_send(cfg, out_dir: Path, task_id: str, do_send: bool,
                    mail_info: dict | None = None) -> bool:
     packer = ResultPacker(cfg.resolved_send_dir, product_globs=ZIP_GLOBS)
     packed = packer.pack(out_dir, task_id=task_id)
-    _log("info", f"已打包 {packed['file_count']} 文件 → {packed['zip']}（{packed['size_bytes']/1024:.1f} KB）")
+    zip_path = Path(str(packed["zip"]))
+    size_kb = int(packed.get("size_bytes", 0)) / 1024
+    _log("info", f"已打包 {packed['file_count']} 文件 → {zip_path}（{size_kb:.1f} KB）")
     if not do_send:
         _log("info", "已跳过回传（--no-send）")
         return True
     sender = MailSender(cfg)
     subject = f"{subject_prefix}噬菌体注释结果回传 - {task_id}"
-    body = _build_reply_body(task_id, Path(packed["zip"]), mail_info or {})
-    result = sender.send(Path(packed["zip"]), to=to, subject=subject, body=body)
+    body = _build_reply_body(task_id, zip_path, mail_info or {})
+    result = sender.send(zip_path, to=to, subject=subject, body=body)
     if not result.ok:
         _log("error", f"回传失败（{result.stage}）: {result.error}")
         return False
@@ -273,8 +275,10 @@ def main(argv=None) -> int:
         stats = saver.save(result.matched)
         print(f"已保存 {stats['count']} 个附件（跳过重复 {stats['skipped_duplicates']}，"
               f"已处理 {stats['skipped_processed']}）")
-        for sf in stats["saved_files"]:
-            batches.append((Path(sf["path"]).parent, [Path(sf["path"])]))
+        saved_list: list[dict] = stats.get("saved_files") or []
+        for sf in saved_list:
+            sf_path = Path(str(sf["path"]))
+            batches.append((sf_path.parent, [sf_path]))
         _log("info", f"收件下载完成: {stats['count']} 个新附件")
 
     # 无新附件但有 --test-input：注册测试批次

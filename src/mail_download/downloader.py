@@ -12,7 +12,7 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .fetcher import MessageSummary
 
@@ -98,10 +98,10 @@ class AttachmentSaver:
         self.download_dir = download_dir
         self.index = ProcessedIndex(download_dir)
 
-    def save(self, summaries: List[MessageSummary]) -> Dict[str, object]:
+    def save(self, summaries: List[MessageSummary]) -> Dict[str, Any]:
         """保存全部命中邮件的附件。返回汇总统计（含跨次去重 skipped_processed）。"""
         self.index.load()
-        saved_files: List[Dict[str, object]] = []
+        saved_files: List[Dict[str, Any]] = []
         skipped_duplicates = 0
         skipped_processed = 0
         total_bytes = 0
