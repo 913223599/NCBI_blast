@@ -160,6 +160,7 @@ sample_refinement.faa
 test_refinement.faa
 src/nucmer.error
 src/test_shm.py
+/1.bat
 /scripts/*
 !/scripts/build_annotation_report.py
 !/scripts/build_t5_comparative_report.py
