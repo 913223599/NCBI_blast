@@ -3,27 +3,27 @@
     <!-- 头部 -->
     <div class="manager-header">
       <div class="header-title">
-        <span class="header-icon">📖</span>
+        <span class="header-icon"></span>
         <h3>编码对照表管理</h3>
       </div>
       <div class="header-actions">
         <button class="action-btn" :class="{ active: activeTab === 'lookup' }" @click="activeTab = 'lookup'">
-          🧬 分类
+          分类
         </button>
         <button class="action-btn" :class="{ active: activeTab === 'source' }" @click="activeTab = 'source'">
-          📍 来源
+          来源
         </button>
         <button class="action-btn" :class="{ active: activeTab === 'search' }" @click="activeTab = 'search'">
-          🔍 反查
+          反查
         </button>
         <button class="action-btn" :class="{ active: activeTab === 'maintenance' }" @click="activeTab = 'maintenance'">
-          🛠️ 维护
+          维护
         </button>
         <button class="action-btn secondary" @click="handleTranslateAll" :disabled="isTranslating">
-          🌐 {{ isTranslating ? '正在翻译...' : '全量翻译' }}
+          {{ isTranslating ? '正在翻译...' : '全量翻译' }}
         </button>
         <button class="action-btn secondary" @click="handleTaxonomyAudit" :disabled="isAuditing">
-          🛡️ {{ isAuditing ? '正在校核...' : 'NCBI校核' }}
+          {{ isAuditing ? '正在校核...' : 'NCBI校核' }}
         </button>
       </div>
     </div>
@@ -63,7 +63,7 @@
                   <span class="node-code">{{ genus.code }}</span>
                   <span class="row-name">
                     {{ genus.name }}
-                    <span v-if="genus.verified" class="verified-badge" title="NCBI 官方分类学认证">🛡️</span>
+                    <span v-if="genus.verified" class="verified-badge" title="NCBI 官方分类学认证"></span>
                   </span>
                   <span v-if="genus.latinName" class="node-latin">{{ genus.latinName }}</span>
                 </div>
@@ -74,8 +74,8 @@
                     class="node-action-btn translate"
                     @click.stop="handleTranslateEntry(genus.fullPath)"
                     title="AI 智能翻译"
-                  >🤖</button>
-                  <button class="node-action-btn edit" @click.stop="startEdit(genus)" title="手动修正名称">✏️</button>
+                  >译</button>
+                  <button class="node-action-btn edit" @click.stop="startEdit(genus)" title="手动修正名称">编辑</button>
                   <button 
                     v-if="!genus.isBuiltin"
                     class="node-action-btn delete" 
@@ -102,7 +102,7 @@
                       <span class="node-code">{{ species.code }}</span>
                       <span class="row-name">
                         {{ species.name }}
-                        <span v-if="species.verified" class="verified-badge" title="NCBI 官方分类学认证">🛡️</span>
+                        <span v-if="species.verified" class="verified-badge" title="NCBI 官方分类学认证"></span>
                       </span>
                       <span v-if="species.latinName" class="node-latin">{{ species.latinName }}</span>
                     </div>
@@ -112,8 +112,8 @@
                         class="node-action-btn translate"
                         title="自动翻译"
                         @click.stop="handleTranslateEntry(species.fullPath)"
-                      >🌐</button>
-                      <button class="node-action-btn edit" @click.stop="startEdit(species)" title="手动修正名称">✏️</button>
+                      >译</button>
+                      <button class="node-action-btn edit" @click.stop="startEdit(species)" title="手动修正名称">编辑</button>
                       <button
                         v-if="!species.isBuiltin"
                         class="node-action-btn delete"
@@ -189,7 +189,7 @@
                 class="node-action-btn edit"
                 title="编辑"
                 @click="startEditSource(source)"
-              >✎</button>
+              >编</button>
               <button
                 v-if="!source.isBuiltin"
                 class="node-action-btn delete"
@@ -282,7 +282,7 @@
     <div v-if="activeTab === 'maintenance'" class="tab-content">
       <div class="maintenance-card">
         <div class="card-header">
-          <span class="card-icon">📏</span>
+          <span class="card-icon"></span>
           <h4>流水号重校准</h4>
         </div>
         <p class="card-desc">
@@ -298,7 +298,7 @@
 
       <div class="maintenance-card warning">
         <div class="card-header">
-          <span class="card-icon">🧹</span>
+          <span class="card-icon"></span>
           <h4>清理冗余计数器</h4>
         </div>
         <p class="card-desc">
@@ -314,7 +314,7 @@
     <div v-if="isEditModalOpen" class="modal-overlay" @click.self="isEditModalOpen = false">
       <div class="edit-modal premium-card animate-slide-up">
         <div class="modal-header">
-          <span class="modal-icon">✏️</span>
+          <span class="modal-icon">编辑</span>
           <div class="header-text">
             <h3>手动修正分类名称</h3>
             <p>修正编码 {{ editingEntry?.code }} 对应的层级名称信息</p>

@@ -1,7 +1,7 @@
 <template>
   <aside class="freezer-sidebar">
     <div class="sidebar-header">
-      <h3 class="sidebar-title">🧊 保藏管理</h3>
+      <h3 class="sidebar-title">保藏管理</h3>
       <button class="btn-add-freezer" @click="emit('addFreezer')">
         <span class="icon">+</span>
         <span>添加冰箱</span>
@@ -10,7 +10,7 @@
 
     <div class="freezer-list">
       <div v-if="strain.freezers.length === 0" class="empty-state">
-        <div class="empty-icon">❄️</div>
+        <div class="empty-icon"></div>
         <p>暂无冰箱</p>
         <p class="empty-hint">点击"添加冰箱"开始管理</p>
       </div>
@@ -22,7 +22,7 @@
         :class="{ active: strain.activeFreezerId === freezer.id }"
         @click="selectFreezer(freezer.id)"
       >
-        <div class="freezer-icon">🧊</div>
+        <div class="freezer-icon"></div>
         <div class="freezer-info">
           <div class="freezer-name">{{ freezer.name }}</div>
           <div class="freezer-meta">
@@ -36,9 +36,7 @@
             {{ getTotalBoxes(freezer) }} 个存储位
           </div>
         </div>
-        <button class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱">
-          🗑️
-        </button>
+        <button class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱">✕</button>
       </div>
     </div>
   </aside>

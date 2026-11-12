@@ -3,8 +3,8 @@
  * 
  * 安全地将 Electron IPC 功能暴露给渲染进程（Vue 前端）。
  * 遵循 Context Isolation 最佳实践：
- * - ✅ 通过 contextBridge 暴露白名单 API
- * - ❌ 不暴露 Node.js 或 Electron 原始模块
+ * - 通过 contextBridge 暴露白名单 API
+ * - 不暴露 Node.js 或 Electron 原始模块
  */
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');

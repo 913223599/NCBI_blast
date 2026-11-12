@@ -19,7 +19,7 @@ const props = withDefaults(defineProps<Props>(), {
   accept: '*',
   multiple: true,
   label: '点击或拖拽文件至此处',
-  icon: '📤',
+  icon: '',
   type: 'all'
 })
 

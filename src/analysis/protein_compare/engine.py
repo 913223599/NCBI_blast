@@ -16,6 +16,7 @@ import threading
 import concurrent.futures
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Set
+import numpy as np
 from Bio import SeqIO
 from Bio.Align import PairwiseAligner
 
@@ -315,21 +316,28 @@ class ProteinComparer:
         # 预先提取样本 B 所有蛋白的整型 K-mer 集合与长度
         b_kmers: Dict[str, Set[int]] = {b.id: get_kmers(b.translation, 3) for b in filtered_b}
 
-        # 大规模候选集启用 GPU / 向量化张量预筛选，大幅削减无效两两比对
-        gpu_allowed_b_map: Optional[Dict[int, Set[int]]] = None
+        # 完全相同序列按出现次序一一配对：A 中第 k 条某序列对应 B 中第 k 条同序列，
+        # 避免多拷贝相同基因全部挤到 B 的第一条上而产生虚假的“独有基因”
+        exact_rank_a: Dict[str, int] = {}
+        seen_seq_cnt: Dict[str, int] = {}
+        for a in filtered_a:
+            k = seen_seq_cnt.get(a.translation, 0)
+            exact_rank_a[a.id] = k
+            seen_seq_cnt[a.translation] = k + 1
+
+        # 3-mer 余弦相似度仅用于候选排序（高相似度优先比对），不剔除任何候选。
+        # 实测哈希 3-mer 余弦随序列长度漂移，40% 一致度同源对与无关序列分布重叠，
+        # 无法作为硬阈值过滤，否则会丢失远缘同源蛋白。
+        rank_mat_a: Optional[np.ndarray] = None
+        rank_mat_b: Optional[np.ndarray] = None
+        b_index: Dict[str, int] = {b.id: i for i, b in enumerate(filtered_b)}
         if len(filtered_a) * len(filtered_b) >= 400:
             try:
-                matcher = GPUSequenceMatcher()
-                combined_seqs = [a.translation for a in filtered_a] + [b.translation for b in filtered_b]
-                n_a = len(filtered_a)
-                cand_pairs = matcher.compute_batch_candidate_pairs(combined_seqs, sim_threshold=0.22)
-                gpu_allowed_b_map = {i: set() for i in range(n_a)}
-                for gi, gj in cand_pairs:
-                    if gi < n_a <= gj:
-                        gpu_allowed_b_map[gi].add(gj - n_a)
+                rank_mat_a = GPUSequenceMatcher._build_normalized_3mer_matrix([a.translation for a in filtered_a])
+                rank_mat_b = GPUSequenceMatcher._build_normalized_3mer_matrix([b.translation for b in filtered_b])
             except Exception as e:
-                logger.debug(f"GPU 候选预筛回退常规模式: {e}")
-                gpu_allowed_b_map = None
+                logger.debug(f"3-mer 候选排序不可用，回退原始顺序: {e}")
+                rank_mat_a, rank_mat_b = None, None
 
         # 动态计算安全并发线程数 (保留 2 个核心防止卡死)
         cpu_cnt = os.cpu_count() or 4
@@ -352,7 +360,8 @@ class ProteinComparer:
 
             # 1. 优先检查 100% 序列完全相同的候选
             if pa.translation in seq_to_b and seq_to_b[pa.translation]:
-                exact_cand = seq_to_b[pa.translation][0]
+                same_seq_bs = seq_to_b[pa.translation]
+                exact_cand = same_seq_bs[exact_rank_a.get(pa.id, 0) % len(same_seq_bs)]
                 best_match = exact_cand
                 best_identity = 100.0
                 best_mutations = []
@@ -372,14 +381,18 @@ class ProteinComparer:
             pa_kmers = get_kmers(pa.translation, 3)
             len_a = len(pa.translation)
 
-            allowed_b_indices = gpu_allowed_b_map.get(idx_a) if gpu_allowed_b_map is not None else None
             same_prod_cands = []
             other_cands = []
-            for idx_b, b in enumerate(filtered_b):
+            for b in filtered_b:
                 if b.product.lower() == pa_prod_lower:
                     same_prod_cands.append(b)
-                elif allowed_b_indices is None or idx_b in allowed_b_indices:
+                else:
                     other_cands.append(b)
+
+            # 非同名候选按 3-mer 余弦降序排列，使最佳匹配尽早出现以收紧剪枝阈值
+            if rank_mat_a is not None and rank_mat_b is not None and len(other_cands) > 1:
+                scores = rank_mat_b @ rank_mat_a[idx_a]
+                other_cands.sort(key=lambda cand: -float(scores[b_index[cand.id]]))
 
             search_cands = same_prod_cands + other_cands
 
@@ -420,10 +433,10 @@ class ProteinComparer:
 
             return pa, best_match, best_identity, best_mutations, best_diff_cnt, best_aln_a, best_markup, best_aln_b, best_c_cnt, best_r_cnt, best_in_cnt, best_doms, best_concl
 
-        # 并发对所有 pa 执行对齐
+        # 并发对所有 pa 执行对齐，按输入顺序确定性收集结果
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
             futures = [pool.submit(align_single_pa, idx_a, pa) for idx_a, pa in enumerate(filtered_a)]
-            for fut in concurrent.futures.as_completed(futures):
+            for fut in futures:
                 pa, best_match, best_identity, best_mutations, best_diff_cnt, best_aln_a, best_markup, best_aln_b, best_c_cnt, best_r_cnt, best_in_cnt, best_doms, best_concl = fut.result()
 
                 # 判定匹配状态

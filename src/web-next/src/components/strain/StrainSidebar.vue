@@ -15,7 +15,7 @@
     </div>
 
     <div class="sidebar-header">
-      <h3 class="sidebar-title">🧊 保藏管理</h3>
+      <h3 class="sidebar-title">保藏管理</h3>
       <button class="btn-add-freezer" @click="emit('addFreezer')">
         <span class="icon">+</span>
         <span>添加冰箱</span>
@@ -29,21 +29,21 @@
         :class="{ active: viewMode === 'freezers' }"
         @click="viewMode = 'freezers'"
       >
-        🧊 冰箱
+        冰箱
       </button>
       <button
         class="toggle-btn"
         :class="{ active: viewMode === 'samples' }"
         @click="viewMode = 'samples'"
       >
-        🧬 样本
+        样本
       </button>
     </div>
 
     <!-- 冰箱列表 -->
     <div v-show="viewMode === 'freezers'" class="freezer-list">
       <div v-if="strain.freezers.length === 0" class="empty-state">
-        <div class="empty-icon">❄️</div>
+        <div class="empty-icon"></div>
         <p>暂无冰箱</p>
         <p class="empty-hint">点击"添加冰箱"开始管理</p>
       </div>
@@ -69,16 +69,14 @@
             {{ getTotalBoxes(freezer) }} 个存储位
           </div>
         </div>
-        <button class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱">
-          🗑️
-        </button>
+        <button class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱">✕</button>
       </div>
     </div>
 
     <!-- 样本搜索结果 -->
     <div v-show="viewMode === 'samples'" class="sample-results">
       <div v-if="strain.filteredRecords.length === 0" class="empty-state">
-        <div class="empty-icon">🔍</div>
+        <div class="empty-icon"></div>
         <p>没有找到匹配的样本</p>
         <p class="empty-hint">请输入关键词搜索</p>
       </div>
@@ -106,10 +104,10 @@
             v-if="group.count > 1"
             :title="`所有存放点:\n${group.positions.join('\n')}`"
           >
-            📍 [多处存放] (悬停查看 {{ group.count }} 处位置)
+            [多处存放] (悬停查看 {{ group.count }} 处位置)
           </div>
           <div class="sample-location" v-else>
-            📍 {{ group.positions[0] }}
+            {{ group.positions[0] }}
           </div>
         </div>
       </div>
@@ -276,7 +274,7 @@ function getTotalBoxes(freezer: any): number {
 }
 
 .search-icon::before {
-  content: '🔍';
+  content: '';
 }
 
 .search-input {
@@ -452,7 +450,7 @@ function getTotalBoxes(freezer: any): number {
 }
 
 .freezer-icon::before {
-  content: '🧊';
+  content: '';
 }
 
 .freezer-info {
@@ -537,7 +535,7 @@ function getTotalBoxes(freezer: any): number {
 }
 
 .sample-icon::before {
-  content: '🧬';
+  content: '';
 }
 
 .sample-info {

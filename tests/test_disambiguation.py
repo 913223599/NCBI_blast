@@ -28,8 +28,7 @@ class TestDisambiguationAndAntiCollision(unittest.TestCase):
 
         # capacity / compaction 中含有 "pac"，绝不能误判为 packaging
         self.assertEqual(self.comparer.classify_protein("DNA compaction protein"), "other")
-        self.assertNotEqual(self.comparer.classify_protein("heat capacity regulator"), "packaging")
-        self.assertEqual(self.comparer.classify_protein("heat capacity sensor"), "other")
+        self.assertEqual(self.comparer.classify_protein("heat capacity regulator"), "other")
 
         # coactivator 中含有 "coat"，绝不能误判为 capsid_head
         self.assertEqual(self.comparer.classify_protein("transcriptional coactivator"), "replication")

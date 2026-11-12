@@ -2,7 +2,7 @@
   <div class="freezer-detail">
     <!-- 空状态 -->
     <div v-if="!strain.activeFreezer" class="empty-state">
-      <div class="empty-icon">🧊</div>
+      <div class="empty-icon"></div>
       <h2>选择冰箱查看详情</h2>
       <p>从左侧列表选择一个冰箱，查看其内部结构和样本分布</p>
     </div>
@@ -12,12 +12,12 @@
       <!-- 冰箱信息头部 -->
       <div class="freezer-header">
         <div class="header-left">
-          <div class="freezer-icon-large">🧊</div>
+          <div class="freezer-icon-large"></div>
           <div class="freezer-info">
             <h2 class="freezer-name">{{ strain.activeFreezer?.name }}</h2>
             <div class="freezer-meta">
               <span class="meta-badge">{{ strain.activeFreezer?.model }}</span>
-              <span class="meta-text">📍 {{ strain.activeFreezer?.location }}</span>
+              <span class="meta-text">{{ strain.activeFreezer?.location }}</span>
             </div>
             <div class="freezer-stats">
               {{ strain.activeFreezer?.shelves.length }} 层 · 
@@ -29,7 +29,7 @@
         </div>
         <div class="header-actions">
           <button class="btn-edit" @click="editFreezer">
-            ✏️ 编辑
+            编辑
           </button>
           <button class="btn-add-shelf" @click="addShelf">
             + 添加层
@@ -46,7 +46,7 @@
             :class="{ active: currentLevel === 'shelf' }"
             @click="navigateToLevel('shelf')"
           >
-            📚 {{ selectedShelf ? selectedShelf.name : '层' }}
+            {{ selectedShelf ? selectedShelf.name : '层' }}
           </button>
           <button
             v-if="selectedShelf"
@@ -54,7 +54,7 @@
             :class="{ active: currentLevel === 'cabinet' }"
             @click="navigateToLevel('cabinet')"
           >
-            🗄️ {{ selectedCabinet ? selectedCabinet.name : '柜' }}
+            {{ selectedCabinet ? selectedCabinet.name : '柜' }}
           </button>
           <button
             v-if="selectedCabinet"
@@ -62,7 +62,7 @@
             :class="{ active: currentLevel === 'drawer' }"
             @click="navigateToLevel('drawer')"
           >
-            📥 {{ selectedDrawer ? selectedDrawer.name : '抽屉' }}
+            {{ selectedDrawer ? selectedDrawer.name : '抽屉' }}
           </button>
           <button
             v-if="selectedDrawer"
@@ -70,7 +70,7 @@
             :class="{ active: currentLevel === 'box' }"
             @click="navigateToLevel('box')"
           >
-            📦 冻存盒
+            冻存盒
           </button>
         </div>
 
@@ -312,7 +312,7 @@
                     <div class="preview-hint">点击单元格修改详情</div>
                   </div>
                   <div v-else class="preview-placeholder">
-                    <div class="ph-icon">🔬</div>
+                    <div class="ph-icon"></div>
                     <p>悬停在槽位上查看详情</p>
                   </div>
                 </div>

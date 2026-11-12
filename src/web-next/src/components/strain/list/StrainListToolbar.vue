@@ -22,7 +22,7 @@
           @click="emit('deleteSelected')" 
           :disabled="selectedCount === 0"
         >
-          <span class="icon">🗑️</span>
+          <span class="icon">删除</span>
           <span>批量删除</span>
         </button>
         <button 
@@ -30,7 +30,7 @@
           @click="emit('exportSelected')" 
           :disabled="selectedCount === 0"
         >
-          <span class="icon">📤</span>
+          <span class="icon"></span>
           <span>导出选中</span>
         </button>
       </div>
@@ -42,7 +42,7 @@
         :class="{ active: showAdvancedSearch }"
         @click="emit('toggleSearch')"
       >
-        <span class="icon">🏷️</span>
+        <span class="icon"></span>
         <span>高级筛选</span>
         <span v-if="activeFilterCount > 0" class="filter-count">{{ activeFilterCount }}</span>
       </button>

@@ -179,5 +179,5 @@ export function seedMockData(strainStore: any, codeGen: any) {
     }
   })
   
-  console.log('✅ v6 编码系统填充测试完成。')
+  console.log('v6 编码系统填充测试完成。')
 }

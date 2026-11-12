@@ -649,19 +649,19 @@ onMounted(() => {
       <div class="tool-items">
         <div class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }"
           @click="toggleSideTool('input')">
-          <span class="icon">📥</span>
+          <span class="icon"></span>
           <span class="label">数据采集</span>
         </div>
         <div class="tool-divider"></div>
         <div class="tool-btn" :class="{ active: activeSideTool === 'analysis' && isSidebarOpen }"
           @click="toggleSideTool('analysis')">
-          <span class="icon">🧬</span>
+          <span class="icon"></span>
           <span class="label">分析配置</span>
         </div>
         <div class="tool-divider"></div>
         <div class="tool-btn" :class="{ active: activeSideTool === 'display' && isSidebarOpen }"
           @click="toggleSideTool('display')">
-          <span class="icon">💡</span>
+          <span class="icon"></span>
           <span class="label">视图控制</span>
         </div>
       </div>
@@ -695,7 +695,7 @@ onMounted(() => {
               <div v-for="file in workspaceFiles" :key="'ws-' + file" class="workspace-item"
                 :class="{ 'selectable-result': file.toLowerCase().endsWith('.nwk') }"
                 @click="file.toLowerCase().endsWith('.nwk') ? loadPrecomputedTree(file) : null">
-                <span class="file-icon">{{ file.toLowerCase().endsWith('.nwk') ? '🌲' : '📄' }}</span>
+                <span class="file-icon">{{ file.toLowerCase().endsWith('.nwk') ? 'NWK' : 'FILE' }}</span>
                 <span class="file-name" :title="file">{{ file }}</span>
                 <span class="file-badge" :class="{ 'badge-result': file.toLowerCase().endsWith('.nwk') }">
                   {{ file.toLowerCase().endsWith('.nwk') ? 'Result' : 'Staged' }}
@@ -704,7 +704,7 @@ onMounted(() => {
               </div>
               <div v-for="(file, idx) in selectedFiles" :key="'sel-' + (file?.name || idx)"
                 class="workspace-item new-item">
-                <span class="file-icon">🆕</span>
+                <span class="file-icon"></span>
                 <span class="file-name">{{ file?.name || 'Unknown' }}</span>
               </div>
             </div>
@@ -720,7 +720,7 @@ onMounted(() => {
 
           <!-- 分析参数 -->
           <div v-if="activeSideTool === 'analysis'" class="panel-section">
-            <h3 class="section-title">🧬 分析配置</h3>
+            <h3 class="section-title">分析配置</h3>
 
             <div class="form-group">
               <label>多序列比对 (MSA)</label>
@@ -773,12 +773,12 @@ onMounted(() => {
 
           <!-- 视图控制 -->
           <div v-if="activeSideTool === 'display'" class="panel-section">
-            <h3 class="section-title">💡 视图控制</h3>
+            <h3 class="section-title">视图控制</h3>
 
             <!-- 语义化标注提示灯泡 -->
             <div v-if="hasTree && hasMissingAnnotations" class="annotation-promo-box">
               <div class="promo-content">
-                <span class="icon">💡</span>
+                <span class="icon"></span>
                 <div class="text">
                   <div class="title">身份识别辅助 (BETA)</div>
                   <div class="desc">发现 {{ missingIds.length }} 条序列尚未识别，点击一键自动关联比对。</div>
@@ -792,7 +792,7 @@ onMounted(() => {
               <div v-if="showConfirmModal" class="modal-overlay" @click.self="showConfirmModal = false">
                 <div class="modal-card">
                   <div class="modal-header">
-                    <span class="modal-icon">🧬</span>
+                    <span class="modal-icon"></span>
                     <div class="modal-title">启动序列身份自动识别</div>
                   </div>
                   <div class="modal-body">
@@ -860,28 +860,28 @@ onMounted(() => {
             </div>
 
             <div class="form-group" style="margin-top: 10px;">
-              <button v-if="!isRerooted" class="btn-block-primary" @click="midpointRooting">🎯 执行中点定根 (Midpoint
+              <button v-if="!isRerooted" class="btn-block-primary" @click="midpointRooting">执行中点定根 (Midpoint
                 Root)</button>
               <button v-else class="btn-block-primary" style="background: #ef4444; border-color: #ef4444;"
-                @click="resetTopology">🗑️ 还原原始定根 (Reset Root)</button>
+                @click="resetTopology">还原原始定根 (Reset Root)</button>
             </div>
 
             <div class="divider-line"></div>
 
             <div class="form-group">
               <label class="label-with-icon">
-                <span>🕒 分析历史记录 (History)</span>
+                <span>分析历史记录 (History)</span>
               </label>
               <div class="history-list" style="margin-top: 10px; max-height: 400px; overflow-y: auto;">
                 <div v-for="g in appStore.treeHistory" :key="g.id" class="history-group"
                   style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 10px; overflow: hidden;">
                   <div class="history-group-header"
                     style="padding: 10px; background: #f1f5f9; font-weight: 700; font-size: 11px; color: #475569; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0;">
-                    <span style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">📂
+                    <span style="max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                       {{ g.name }}</span>
                     <div style="display: flex; gap: 8px;">
                       <span @click.stop="reAnalyzeGroup(g)" title="以此组原始数据重算对比"
-                        style="color: #2563eb; cursor: pointer; font-size: 14px;">⚡</span>
+                        style="color: #2563eb; cursor: pointer; font-size: 14px;">加载</span>
                       <span @click.stop="confirmDeleteGroup(g)" title="清理此组"
                         style="color: #94a3b8; cursor: pointer; font-size: 14px;">✕</span>
                     </div>
@@ -968,7 +968,7 @@ onMounted(() => {
 
         <div v-if="!hasTree && !isLoading" class="empty-state">
           <div class="empty-content">
-            <span class="icon">🧬</span>
+            <span class="icon"></span>
             <h3>NCBI Tree Station 2.0</h3>
             <p>请上传序列文件或拖入数据，启动专业的系统发育分析管线。</p>
           </div>
@@ -986,8 +986,8 @@ onMounted(() => {
         <div v-if="menuVisible" class="node-context-menu" :style="{ left: menuPos.x + 'px', top: menuPos.y + 'px' }"
           v-click-outside="closeMenu">
           <div class="menu-title">{{ selectedNode?.name }}</div>
-          <div class="menu-action" @click="handleReroot">🎯 重定根 (Reroot)</div>
-          <div class="menu-action" @click="openNCBI">🌐 在 NCBI 查看</div>
+          <div class="menu-action" @click="handleReroot">重定根 (Reroot)</div>
+          <div class="menu-action" @click="openNCBI">在 NCBI 查看</div>
           <div class="menu-sep"></div>
           <div class="menu-action danger" @click="closeMenu">关闭菜单</div>
         </div>

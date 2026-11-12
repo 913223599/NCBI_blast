@@ -3,19 +3,19 @@
     <!-- 结果头部 -->
     <div class="results-header">
       <div class="header-left">
-        <h3 class="title">🧬 搜索结果</h3>
+        <h3 class="title">搜索结果</h3>
         <span class="result-count">{{ strain.filteredCount }} 条记录</span>
       </div>
       <div class="header-actions">
         <button class="btn-export" @click="handleExport" :disabled="strain.filteredCount === 0">
-          📥 导出
+          导出
         </button>
       </div>
     </div>
 
     <!-- 空状态 -->
     <div v-if="strain.filteredRecords.length === 0" class="empty-state">
-      <div class="empty-icon">🔍</div>
+      <div class="empty-icon"></div>
       <h3>没有找到匹配的样本</h3>
       <p>请尝试调整搜索条件或筛选器</p>
     </div>
@@ -68,12 +68,8 @@
 
         <!-- 操作按钮 -->
         <div class="card-actions" @click.stop>
-          <button class="action-btn" @click="handleView(record)" title="查看详情">
-            👁️
-          </button>
-          <button class="action-btn" @click="handleLocate(record)" title="定位位置">
-            📍
-          </button>
+          <button class="action-btn" @click="handleView(record)" title="查看详情">查看</button>
+          <button class="action-btn" @click="handleLocate(record)" title="定位位置">定位</button>
         </div>
       </div>
     </div>

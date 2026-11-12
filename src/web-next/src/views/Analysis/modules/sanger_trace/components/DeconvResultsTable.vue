@@ -189,7 +189,7 @@ async function copySeq(text: string) {
             @click="hideCleanSingle = false; selectByCategory('ONLY_DOUBLE')"
             title="过滤单峰正常样本，仅查看需解峰/双峰/杂合样本"
           >
-            🔥 过滤单峰 / 仅双峰 ({{ samples.filter(s => s.diagnosis?.category !== 'CLEAN_SINGLE').length }})
+            过滤单峰 / 仅双峰 ({{ samples.filter(s => s.diagnosis?.category !== 'CLEAN_SINGLE').length }})
           </button>
           <button 
             class="filter-pill pill-indel" 

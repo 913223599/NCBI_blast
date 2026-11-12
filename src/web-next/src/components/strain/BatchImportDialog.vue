@@ -3,7 +3,7 @@
     <div class="batch-import-panel">
       <!-- 头部 -->
       <div class="import-header">
-        <h3 class="title">📥 批量导入样本</h3>
+        <h3 class="title">批量导入样本</h3>
         <button class="close-btn" @click="emit('close')">✕</button>
       </div>
 
@@ -36,7 +36,7 @@
               :class="{ active: importMode === 'auto' }"
               @click="importMode = 'auto'"
             >
-              <span class="mode-icon">🤖</span>
+              <span class="mode-icon"></span>
               <div class="mode-info">
                 <div class="mode-name">自动分配位置</div>
                 <div class="mode-desc">系统自动查找空余位置</div>
@@ -47,7 +47,7 @@
               :class="{ active: importMode === 'manual' }"
               @click="importMode = 'manual'"
             >
-              <span class="mode-icon">📍</span>
+              <span class="mode-icon">定位</span>
               <div class="mode-info">
                 <div class="mode-name">指定位置</div>
                 <div class="mode-desc">手动选择具体位置</div>
@@ -107,7 +107,7 @@
           <div class="section-header-flex">
             <h4 class="section-label">输入样本数据</h4>
             <div class="template-selector">
-              <span class="template-label">📥 下载模板:</span>
+              <span class="template-label">下载模板:</span>
               <div class="template-btns">
                 <button class="t-btn" @click="downloadTemplate('Bacteria')">微生物/细菌</button>
                 <button class="t-btn" @click="downloadTemplate('Fungi')">真菌</button>
@@ -138,7 +138,7 @@
             <div v-if="selectedFiles.length > 0" class="file-status-bar-group">
               <div v-for="(file, idx) in selectedFiles" :key="idx" class="file-status-bar">
                 <div class="file-info">
-                  <span class="file-icon">📄</span>
+                  <span class="file-icon"></span>
                   <span class="file-name-label">待导入:</span>
                   <span class="file-name">{{ file.name }}</span>
                 </div>
@@ -997,7 +997,7 @@ onUnmounted(() => {
 }
 
 .upload-icon::before {
-  content: '📁';
+  content: '';
 }
 
 .upload-text {

@@ -6,7 +6,7 @@
         :class="{ active: activePanel === 'import' && isSidebarOpen }"
         @click="togglePanel('import')"
       >
-        <span class="icon">📥</span>
+        <span class="icon"></span>
         <span class="label">数据导入</span>
       </div>
       <div class="tool-divider"></div>
@@ -15,7 +15,7 @@
         :class="{ active: activePanel === 'filter' && isSidebarOpen }"
         @click="togglePanel('filter')"
       >
-        <span class="icon">🔍</span>
+        <span class="icon"></span>
         <span class="label">高级筛选</span>
       </div>
       <div class="tool-divider"></div>
@@ -40,10 +40,10 @@
       </div>
       <div class="toolbar-actions">
         <button class="btn-secondary" @click="handleExport" :disabled="strain.selectedCount === 0">
-          📤 导出
+          导出
         </button>
         <button class="btn-danger" @click="handleClear" :disabled="!strain.hasData">
-          🗑️ 清空
+          清空
         </button>
       </div>
     </div>

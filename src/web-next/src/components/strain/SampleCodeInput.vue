@@ -7,14 +7,14 @@
         :class="{ active: mode === 'auto' }"
         @click="mode = 'auto'"
       >
-        🤖 自动编号
+        自动编号
       </button>
       <button
         class="mode-btn"
         :class="{ active: mode === 'manual' }"
         @click="mode = 'manual'"
       >
-        ✏️ 手动输入
+        手动输入
       </button>
     </div>
 

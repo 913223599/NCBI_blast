@@ -4,7 +4,7 @@
       <!-- 1. 头部 -->
       <div class="dialog-header">
         <div class="header-left">
-          <div class="icon-wrapper">🧬</div>
+          <div class="icon-wrapper"></div>
           <div>
             <h3 class="dialog-title">{{ t('strain.dialog.entry_title') }}</h3>
             <p class="dialog-subtitle">{{ positionPath }}</p>
@@ -87,7 +87,7 @@
           <!-- 3. 右侧：动态业务表单 (策略模式) -->
           <div class="layout-right">
             <div v-if="!form.sampleType" class="empty-state-panel">
-              <div class="empty-icon">👈</div>
+              <div class="empty-icon"></div>
               <h3>暂无业务元数据</h3>
               <p>请先在左侧选择 <strong>大类 (A)</strong> 或样本类型</p>
             </div>

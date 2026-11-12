@@ -310,7 +310,7 @@ const hotspotZoomData = computed(() => {
       </div>
     </div>
 
-    <!-- 🌟 Layer 2: 变异信号密度与断点分布轨 (Divergence Signal Density Track) -->
+    <!-- Layer 2: 变异信号密度与断点分布轨 (Divergence Signal Density Track) -->
     <div class="academic-panel layer-panel layer-2-density">
       <div class="layer-header">
         <span class="layer-badge bg-amber">Layer 2</span>
@@ -337,7 +337,7 @@ const hotspotZoomData = computed(() => {
       </div>
     </div>
 
-    <!-- 🌟 Layer 3: 局部高精机制放大操纵子 (Hotspot Mechanism Zoom Operon) -->
+    <!-- Layer 3: 局部高精机制放大操纵子 (Hotspot Mechanism Zoom Operon) -->
     <div class="academic-panel layer-panel layer-3-zoom">
       <div class="layer-header">
         <div class="header-left">

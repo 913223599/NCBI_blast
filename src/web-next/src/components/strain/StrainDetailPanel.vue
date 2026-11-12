@@ -67,7 +67,7 @@
             <pre class="sequence-text">{{ record.sequence }}</pre>
             <div class="sequence-stats">
               <span>长度: {{ record.sequence.length }} bp</span>
-              <button class="btn-copy" @click="copySequence">📋 复制序列</button>
+              <button class="btn-copy" @click="copySequence">复制序列</button>
             </div>
           </div>
         </div>
@@ -76,10 +76,10 @@
       <!-- 底部操作 -->
       <div class="detail-footer">
         <button class="btn-secondary" @click="handleNCBI">
-          🌐 在NCBI查看
+          在NCBI查看
         </button>
         <button class="btn-danger" @click="handleDelete">
-          🗑️ 删除此记录
+          删除此记录
         </button>
       </div>
     </div>

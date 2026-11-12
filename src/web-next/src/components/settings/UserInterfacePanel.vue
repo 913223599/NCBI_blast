@@ -20,7 +20,7 @@ onMounted(() => {
 <template>
   <div class="panel">
     <header class="panel-header">
-      <h2>🖥️ 界面显示与语言</h2>
+      <h2>界面显示与语言</h2>
       <p class="desc">调整本分析工作台的交互语言与视觉呈现方式。</p>
     </header>
 
@@ -35,7 +35,7 @@ onMounted(() => {
       </div>
       
       <div style="text-align: right; margin-top: 32px;">
-        <button class="p-btn p-btn-primary" @click="saveLanguage">✅ 应用语言偏好</button>
+        <button class="p-btn p-btn-primary" @click="saveLanguage">应用语言偏好</button>
       </div>
     </div>
   </div>

@@ -69,7 +69,7 @@ onMounted(() => {
 <template>
   <div class="panel">
     <header class="panel-header">
-      <h2>🤖 AI 翻译配置</h2>
+      <h2>AI 翻译配置</h2>
       <p class="desc">配置 DashScope (通义千问) 接口以实现物种及基因功能的智能翻译与校验。</p>
     </header>
 
@@ -88,19 +88,19 @@ onMounted(() => {
 
       <div style="display: flex; justify-content: flex-end; align-items: center; gap: 16px;">
         <span v-if="saveStatus" :style="{ color: '#10b981', fontSize: '0.85rem' }">{{ saveStatus.message }}</span>
-        <button class="p-btn p-btn-primary" @click="saveApiSettings">💾 保存配置</button>
+        <button class="p-btn p-btn-primary" @click="saveApiSettings">保存配置</button>
       </div>
     </div>
 
     <!-- 模型库管理 -->
     <div class="p-card" style="margin-top: 32px;">
-      <h3>📦 本地 AI 模型库</h3>
+      <h3>本地 AI 模型库</h3>
       <p class="desc-sm">在此添加或删除业务所需的特定 AI 模型标识。</p>
       
       <div class="p-grid" style="margin-bottom: 24px;">
         <div v-for="m in aiModels" :key="m.key" class="model-item">
           <div class="model-info">
-             <div class="name">🤖 {{ m.name }}</div>
+             <div class="name">{{ m.name }}</div>
              <div class="key">{{ m.key }}</div>
           </div>
           <button class="btn-del" @click="deleteModel(m.key)">✕</button>
@@ -110,7 +110,7 @@ onMounted(() => {
       <div class="add-box">
         <input v-model="newModelKey" class="p-input" placeholder="模型标识 (Key)" style="flex: 1" />
         <input v-model="newModelName" class="p-input" placeholder="显示名称 (Name)" style="flex: 1" />
-        <button class="p-btn p-btn-outline" @click="addModel">➕ 添加模型</button>
+        <button class="p-btn p-btn-outline" @click="addModel">添加模型</button>
       </div>
     </div>
   </div>

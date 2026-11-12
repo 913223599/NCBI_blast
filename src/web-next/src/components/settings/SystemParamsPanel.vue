@@ -33,12 +33,12 @@ onMounted(() => loadLanShareInfo())
 <template>
   <div class="panel">
     <header class="panel-header">
-      <h2>⚙️ 系统参数 & 环境配置</h2>
+      <h2>系统参数 & 环境配置</h2>
       <p class="desc">控制应用的运行环境、存储路径以及局域网内的设备协同设置。</p>
     </header>
 
     <div class="p-card">
-      <h3>🌐 局域网服务共享</h3>
+      <h3>局域网服务共享</h3>
       <p class="desc-sm">开启后，同一网络下的其他终端可通过浏览器直接访问并参与当前的分析工作流。</p>
       
       <div class="lan-control-row">
@@ -62,7 +62,7 @@ onMounted(() => loadLanShareInfo())
       </div>
 
       <div class="footer-actions mt-24" style="text-align: right;">
-        <button class="p-btn p-btn-primary" @click="saveLanSettings">💾 应用系统更改</button>
+        <button class="p-btn p-btn-primary" @click="saveLanSettings">应用系统更改</button>
       </div>
     </div>
 

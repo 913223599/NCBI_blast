@@ -247,10 +247,10 @@ function handleCheckboxClick(event: MouseEvent, record: StrainRecord, allRecords
 }
 
 function getSortIcon(key: string) {
-  if (props.sortKey !== key) return '↕️'
-  if (props.sortOrder === 'asc') return '🔼'
-  if (props.sortOrder === 'desc') return '🔽'
-  return '↕️'
+  if (props.sortKey !== key) return ''
+  if (props.sortOrder === 'asc') return '▲'
+  if (props.sortOrder === 'desc') return '▼'
+  return ''
 }
 
 function getLocationString(record: StrainRecord) {

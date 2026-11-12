@@ -28,7 +28,7 @@ const props = withDefaults(defineProps<Props>(), {
   placeholder: '请选择样本或任务...',
   disabled: false,
   showImportOption: true,
-  importLabel: '➕ 选择并导入本地外部文件 (.gbk / .gb / .faa)...',
+  importLabel: '选择并导入本地外部文件 (.gbk / .gb / .faa)...',
   tagVariant: 'default'
 })
 

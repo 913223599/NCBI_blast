@@ -3,7 +3,7 @@
     <!-- 搜索栏 -->
     <div class="search-bar">
       <div class="search-input-wrapper">
-        <span class="search-icon">🔍</span>
+        <span class="search-icon"></span>
         <input
           v-model="localFilters.keyword"
           class="search-input"
@@ -13,7 +13,7 @@
         <button v-if="localFilters.keyword" class="clear-btn" @click="clearKeyword">✕</button>
       </div>
       <button class="filter-toggle-btn" @click="showAdvanced = !showAdvanced">
-        <span class="filter-icon">⚙️</span>
+        <span class="filter-icon"></span>
         <span>高级筛选</span>
         <span class="arrow" :class="{ open: showAdvanced }">▼</span>
       </button>
@@ -81,7 +81,7 @@
 
       <div class="filter-actions">
         <button class="btn-reset" @click="resetFilters">
-          🔄 重置筛选
+          重置筛选
         </button>
         <span class="result-count">
           找到 <strong>{{ strain.filteredCount }}</strong> 条结果

@@ -28,7 +28,7 @@ const actionCards = computed<ActionCard[]>(() => [
     titleKey: 'dash.blast.title',
     descKey: 'dash.blast.desc',
     route: '/blast',
-    icon: '🔍',
+    icon: '',
     gradient: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)'
   },
   {
@@ -36,7 +36,7 @@ const actionCards = computed<ActionCard[]>(() => [
     titleKey: 'dash.tree.title',
     descKey: 'dash.tree.desc',
     route: '/tree',
-    icon: '🌳',
+    icon: '',
     gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
   },
   {
@@ -44,7 +44,7 @@ const actionCards = computed<ActionCard[]>(() => [
     titleKey: 'dash.strain.title',
     descKey: 'dash.strain.desc',
     route: '/strain',
-    icon: '🦠',
+    icon: '',
     gradient: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)'
   }
 ])

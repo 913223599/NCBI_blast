@@ -46,7 +46,7 @@ defineProps<{
 }
 
 .drag-icon::before {
-  content: '📦';
+  content: '';
 }
 
 .drag-content h3 {

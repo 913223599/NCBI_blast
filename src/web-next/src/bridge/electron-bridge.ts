@@ -243,7 +243,7 @@ const electronBridge = {
             return null;
         }
 
-        // 🔗 智能标题与过滤器识别 (区分分析、注释、进化树与原始测序场景)
+        // 智能标题与过滤器识别 (区分分析、注释、进化树与原始测序场景)
         let dialogTitle = '批量导入: 文件';
         let filters: any[] = [];
 
@@ -331,7 +331,7 @@ const electronBridge = {
     async save_file(content: string, filenameHint: string, callback?: (success: boolean) => void) {
         const electron = window.electronAPI;
         
-        // 🔗 方案 A: Electron 原生保存对话框
+        // 方案 A: Electron 原生保存对话框
         if (electron) {
             const path = await electron.saveFileDialog({
                 defaultPath: filenameHint
@@ -345,7 +345,7 @@ const electronBridge = {
             return;
         }
 
-        // 🔗 方案 B: 浏览器通用下载回滚 (支持网页端/局域网模式)
+        // 方案 B: 浏览器通用下载回滚 (支持网页端/局域网模式)
         try {
             console.log('[Bridge] 正在通过浏览器 Blob 模式导出文件...');
             const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });

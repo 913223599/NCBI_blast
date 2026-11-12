@@ -20,6 +20,19 @@ def _is_ascii_no_space(p: Path) -> bool:
     return all(ord(c) < 128 for c in s) and (" " not in s)
 
 
+def _list_system_drives() -> List[str]:
+    """动态枚举系统当前挂载的根卷/盘符，避免硬编码盘符字面量"""
+    drives: List[str] = []
+    if PROJECT_ROOT.drive:
+        drives.append(PROJECT_ROOT.drive.rstrip("\\/"))
+    if hasattr(os, "listdrives"):
+        for d in os.listdrives():
+            clean = d.rstrip("\\/")
+            if clean and clean not in drives:
+                drives.append(clean)
+    return drives
+
+
 def resolve_ngcs_root(custom_path: Optional[str] = None) -> Path:
     """动态解析 NGCS 引擎根目录"""
     candidates: List[Path] = []
@@ -36,16 +49,14 @@ def resolve_ngcs_root(custom_path: Optional[str] = None) -> Path:
     if env_cli:
         candidates.append(Path(env_cli).resolve().parent.parent)
 
-    # 相对路径优先：项目内 vendor/NGCS、同级目录 ../NGCS、当前盘符根目录 /NGCS
+    # 相对路径优先：项目内 vendor/NGCS、同级目录 ../NGCS
     candidates.extend([
         PROJECT_ROOT / "vendor" / "NGCS",
         PROJECT_ROOT.parent / "NGCS",
     ])
-    if PROJECT_ROOT.drive:
-        candidates.append(Path(f"{PROJECT_ROOT.drive}/NGCS"))
 
-    # 兼容常见盘符根目录下的 NGCS
-    for drv in ("E:", "D:", "F:", "C:"):
+    # 动态探测系统已挂载盘符根目录下的 NGCS
+    for drv in _list_system_drives():
         cand = Path(f"{drv}/NGCS")
         if cand not in candidates:
             candidates.append(cand)
@@ -89,10 +100,8 @@ def resolve_safe_work_dir(task_id: str, create: bool = True) -> Path:
     if _is_ascii_no_space(scratch_dir):
         candidates.append(scratch_dir)
 
-    # 若历史工作目录所在盘符存在，优先复用以保持缓存连续性
-    for drv in (PROJECT_ROOT.drive, "E:", "D:", "F:", "C:"):
-        if not drv:
-            continue
+    # 动态枚举已挂载盘符下的工作目录以保持缓存连续性
+    for drv in _list_system_drives():
         drive_root = Path(f"{drv}/")
         if drive_root.exists():
             candidates.append(drive_root / "NGCS_Work" / "tasks" / task_id)
@@ -129,9 +138,7 @@ def get_candidate_safe_work_dirs(task_id: str) -> List[Path]:
     primary = resolve_safe_work_dir(task_id, create=False)
     dirs.append(primary)
 
-    for drv in (PROJECT_ROOT.drive, "E:", "D:", "F:", "C:"):
-        if not drv:
-            continue
+    for drv in _list_system_drives():
         p = Path(f"{drv}/NGCS_Work/tasks/{task_id}")
         if p not in dirs:
             dirs.append(p)

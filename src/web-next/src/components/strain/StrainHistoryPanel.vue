@@ -3,7 +3,7 @@
     <h3 class="panel-title">导入历史</h3>
 
     <div v-if="strain.importTasks.length === 0" class="empty-state">
-      <div class="empty-icon">📋</div>
+      <div class="empty-icon"></div>
       <p>暂无导入记录</p>
       <p class="empty-hint">导入数据后将在此显示历史记录</p>
     </div>

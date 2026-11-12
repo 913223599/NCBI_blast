@@ -17,7 +17,7 @@ const emit = defineEmits<{
     <div v-if="show" class="dialog-overlay" @click.self="emit('close')">
       <div class="dialog-container">
         <div class="dialog-header">
-          <h3>📋 {{ title }} - 全部比对结果 ({{ data.length }} 条)</h3>
+          <h3>{{ title }} - 全部比对结果 ({{ data.length }} 条)</h3>
           <button class="close-btn" @click="emit('close')">✕</button>
         </div>
         <div class="dialog-body scroll-v">

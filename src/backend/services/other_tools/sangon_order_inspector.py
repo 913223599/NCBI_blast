@@ -107,7 +107,12 @@ def sangon_csv_sort_key(p: Path):
     return (1, 0, p.name)
 
 
-def export_sangon_order_csv(task_id: str, out_dir: Path, project_root: Path = PROJECT_ROOT) -> Dict[str, int]:
+def export_sangon_order_csv(
+    task_id: str,
+    out_dir: Path,
+    project_root: Path = PROJECT_ROOT,
+    translator_factory=get_global_biology_translator,
+) -> Dict[str, int]:
     """解析 BLAST 报告并调用 BiologyTranslator 翻译导出 11 列 16S鉴定结果.csv"""
     out_dir.mkdir(parents=True, exist_ok=True)
     reports_dir = project_root / "results" / "blast" / task_id / "reports"
@@ -155,7 +160,7 @@ def export_sangon_order_csv(task_id: str, out_dir: Path, project_root: Path = PR
             "hitTitle": best.get("title", ""),
         })
 
-    translator = get_global_biology_translator()
+    translator = translator_factory()
     translated_map = translator.translate_batch(list(all_species), category="species") if all_species else {}
 
     def _format_row(hit: Dict[str, Any]) -> List[str]:

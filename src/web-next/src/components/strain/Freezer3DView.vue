@@ -26,7 +26,7 @@
         />
       </div>
       <div class="control-buttons">
-        <button class="ctrl-btn" @click="resetView">🔄 重置视图</button>
+        <button class="ctrl-btn" @click="resetView">重置视图</button>
         <button class="ctrl-btn" @click="toggleAutoRotate">
           {{ autoRotate ? '⏸ 停止旋转' : '▶ 自动旋转' }}
         </button>
@@ -36,7 +36,7 @@
     <!-- 选中位置信息 -->
     <div v-if="selectedPosition" class="position-info">
       <div class="info-header">
-        <h4>📍 选中位置</h4>
+        <h4>选中位置</h4>
         <button class="close-info-btn" @click="selectedPosition = null">✕</button>
       </div>
       <div class="info-content">
@@ -61,14 +61,14 @@
           class="action-btn primary"
           @click="handleAddSample"
         >
-          ➕ 录入样本
+          录入样本
         </button>
         <button
           v-else
           class="action-btn"
           @click="handleViewSample"
         >
-          👁️ 查看详情
+          查看详情
         </button>
       </div>
     </div>

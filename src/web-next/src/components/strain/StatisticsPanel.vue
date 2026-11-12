@@ -34,7 +34,7 @@
 
     <!-- 冰箱使用率 -->
     <div class="stats-section">
-      <h3 class="section-title">📊 冰箱使用率</h3>
+      <h3 class="section-title">冰箱使用率</h3>
       <div v-if="strain.freezers.length === 0" class="empty-hint">
         <p>暂无冰箱数据</p>
       </div>
@@ -64,7 +64,7 @@
 
     <!-- 样本类型分布 -->
     <div class="stats-section">
-      <h3 class="section-title">🧬 样本类型分布</h3>
+      <h3 class="section-title">样本类型分布</h3>
       <div class="type-distribution">
         <div class="type-item">
           <div class="type-header">
@@ -107,7 +107,7 @@
 
     <!-- 来源国家分布 -->
     <div v-if="strain.uniqueCountries.length > 0" class="stats-section">
-      <h3 class="section-title">🌍 来源国家分布</h3>
+      <h3 class="section-title">来源国家分布</h3>
       <div class="country-list">
         <div
           v-for="country in strain.uniqueCountries.slice(0, 10)"
@@ -123,10 +123,10 @@
     <!-- 导出按钮 -->
     <div class="export-section">
       <button class="btn-export" @click="handleExportStats">
-        📥 导出统计报告
+        导出统计报告
       </button>
       <button class="btn-export" @click="handleExportConfig">
-        📄 导出冰箱配置
+        导出冰箱配置
       </button>
     </div>
   </div>
@@ -289,10 +289,10 @@ function downloadFile(content: string, filename: string, type: string) {
   font-size: 2rem;
 }
 
-.stat-card.primary .stat-icon::before { content: '🧊'; }
-.stat-card.success .stat-icon::before { content: '🧬'; }
-.stat-card.warning .stat-icon::before { content: '📦'; }
-.stat-card.info .stat-icon::before { content: '📊'; }
+.stat-card.primary .stat-icon::before { content: ''; }
+.stat-card.success .stat-icon::before { content: ''; }
+.stat-card.warning .stat-icon::before { content: ''; }
+.stat-card.info .stat-icon::before { content: ''; }
 
 .stat-content {
   flex: 1;

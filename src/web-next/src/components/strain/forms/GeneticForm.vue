@@ -72,7 +72,7 @@
     <div class="form-group">
       <label>是表达载体吗？</label>
       <div class="select-box-neo" @click.stop="isOpen = !isOpen">
-        {{ modelValue.isExpression ? '✅ 是 (Yes)' : '❌ 否 (No)' }} <span class="arrow">▼</span>
+        {{ modelValue.isExpression ? '是 (Yes)' : '否 (No)' }} <span class="arrow">▼</span>
         <div v-if="isOpen" class="dropdown-list">
           <div 
             class="opt" 

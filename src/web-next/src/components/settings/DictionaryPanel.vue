@@ -283,7 +283,7 @@ onUnmounted(() => {
     <header class="panel-header">
       <div style="display: flex; justify-content: space-between; align-items: flex-start; width: 100%;">
         <div>
-          <h2>📖 词典 & 术语中心</h2>
+          <h2>词典 & 术语中心</h2>
           <p class="desc">管理多语言对照词库，支持物种分类等级自动补全与 NCBI 分类学在线校核。</p>
         </div>
         <div class="stats-badges">
@@ -300,14 +300,14 @@ onUnmounted(() => {
     <div class="p-card no-p">
        <!-- 快速添加区（已移动到顶部） -->
        <div class="add-term-box">
-         <div class="add-box-header">⚡ 快速录入/编辑</div>
+         <div class="add-box-header">快速录入/编辑</div>
          <div class="add-box-fields">
            <input v-model="newTermEn" class="p-input" placeholder="原词 (English)" />
            <input v-model="newTermZh" class="p-input" placeholder="翻译 (Chinese)" />
            <select v-model="newTermCat" class="p-input" style="width: 160px">
              <option v-for="c in dictCategories.slice(1)" :key="c.id" :value="c.id">{{ c.label }}</option>
            </select>
-           <button class="p-btn p-btn-primary" @click="saveTerm" style="min-width: 100px">💾 保存</button>
+           <button class="p-btn p-btn-primary" @click="saveTerm" style="min-width: 100px">保存</button>
          </div>
        </div>
 
@@ -325,16 +325,16 @@ onUnmounted(() => {
               :class="{ 'btn-active-proof': proofreadMode }"
               @click="toggleProofreadMode"
             >
-              {{ proofreadMode ? '🔍 全部数据' : '🧐 只看待校对' }}
+              {{ proofreadMode ? '全部数据' : '只看待校对' }}
             </button>
          </div>
 
          <div class="global-actions">
            <button class="p-btn p-btn-outline" @click="handleTaxonomyAudit" :disabled="isAuditing">
-             {{ isAuditing ? '🧬 校核中...' : '🧬 NCBI 校核' }}
+             {{ isAuditing ? '校核中...' : 'NCBI 校核' }}
            </button>
 
-           <button class="p-btn p-btn-outline" @click="exportDictionaryCSV">📤 导出</button>
+           <button class="p-btn p-btn-outline" @click="exportDictionaryCSV">导出</button>
          </div>
        </div>
 
@@ -353,7 +353,7 @@ onUnmounted(() => {
           </div>
           
           <div v-if="filteredResults.length === 0 && !loadingDict" class="empty-placeholder">
-             📭 没有找到相关词条
+             没有找到相关词条
           </div>
 
          <div v-bind="wrapperProps">
@@ -370,9 +370,9 @@ onUnmounted(() => {
                <span class="p-badge cat-badge" :class="'cat-' + item.data.category">{{ item.data.category }}</span>
              </div>
              <div class="col-act">
-               <button v-if="!item.data.source?.includes('verified')" class="btn-tool" @click="verifyTerm(item.data.english)" title="验证并标记">✅</button>
-               <button class="btn-tool" @click="editTerm(item.data)" title="编辑词条">✏️</button>
-               <button class="btn-tool del" @click="deleteTerm(item.data.english)" title="彻底删除">🗑️</button>
+               <button v-if="!item.data.source?.includes('verified')" class="btn-tool" @click="verifyTerm(item.data.english)" title="验证并标记">验证</button>
+               <button class="btn-tool" @click="editTerm(item.data)" title="编辑词条">编辑</button>
+               <button class="btn-tool del" @click="deleteTerm(item.data.english)" title="彻底删除">删除</button>
              </div>
            </div>
           </div>

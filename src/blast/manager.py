@@ -141,6 +141,7 @@ class BlastTask:
         self.status = TaskStatus.PENDING
         self.progress = 0
         self.results = []
+        self.result_count = 0
         self.error = None
         self.start_time: Optional[datetime] = datetime.now()
         self.end_time: Optional[datetime] = None
@@ -182,7 +183,7 @@ class BlastTask:
             "task_id": self.task_id,
             "status": self.status.value if isinstance(self.status, TaskStatus) else self.status,
             "progress": self.progress,
-            "result_count": len(self.results),
+            "result_count": max(self.result_count, len(self.results)),
             "error": self.error,
             "start_time": self.start_time.isoformat() if self.start_time else None,
             "end_time": self.end_time.isoformat() if self.end_time else None,
@@ -508,7 +509,11 @@ class BlastManager:
                             except Exception:
                                 pass
 
-            seq_lookup = {s.get('id'): s.get('sequence') for s in sequences if s.get('id')}
+            seq_lookup: Dict[str, str] = {}
+            for s in sequences:
+                sid = s.get('id')
+                if sid and sid not in seq_lookup:
+                    seq_lookup[sid] = s.get('sequence')
             max_in_memory_results = 500
 
             def on_progress(comp, total, info):
@@ -519,20 +524,18 @@ class BlastManager:
                     self.store.save_task(task)
 
             def on_result(data):
-                # 为了支持一键入库，将原始序列内容回填到结果对象中并落盘 (O(1) 哈希查找)
+                # 为了支持一键入库，将原始序列内容回填到结果对象中并落盘 (O(1) 哈希查找，同名 ID 首条优先)
                 seq_id = data.get('sequence_id')
                 if seq_id:
                     original_seq = seq_lookup.get(seq_id)
                     if original_seq:
                         data['raw_sequence'] = original_seq
 
-                # 分片落盘至 SQLite；内存列表仅保留轻量引用以防大批量任务 OOM
+                # 分片落盘至 SQLite；内存列表严格封顶在 500 条以内以防大批量任务 OOM
                 self.store.save_result(task.task_id, data.get('sequence_id', '?'), data)
+                task.result_count += 1
                 if len(task.results) < max_in_memory_results:
                     task.results.append(data)
-                else:
-                    light_copy = {k: v for k, v in data.items() if k != 'raw_sequence'}
-                    task.results.append(light_copy)
 
                 # Notify active listeners (for real-time UI streaming)
                 for callback in self.result_listeners:
@@ -804,7 +807,8 @@ class BlastManager:
             task.end_time = None
             # We clear memory results so the Engine can refill them (skipped items + new items)
             # This ensures the progress calculation and UI lists are reconstructed correctly.
-            task.results = [] 
+            task.results = []
+            task.result_count = 0
             
             # Update status and submit
             task.transition_to(TaskStatus.PENDING)

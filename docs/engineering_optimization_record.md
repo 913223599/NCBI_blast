@@ -46,10 +46,24 @@
 - **其他功能工作台拆分**：
   - [schemas.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/schemas.py)：承载 23 个 Pydantic 请求参数模型与 CSV 表头常量。
   - [sangon_order_inspector.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_order_inspector.py)：承载生工 16S 订单目录状态巡检与 11 列鉴定结果 CSV 翻译导出逻辑。
-  - [other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py)：收敛为纯粹的 FastAPI 路由编排层（由 2189 行精简至 1785 行）。
+  - [other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py)：收敛为纯粹的 FastAPI 路由编排层（由 2189 行精简至 1823 行），清理冗余导入并保持测试 `monkeypatch` 钩子兼容。
+
+### 步骤六：核验复盘与深度修正
+- **远缘同源蛋白召回修复**（[engine.py](file:///f:/NCBI%20blast/src/analysis/protein_compare/engine.py)）：
+  - 经实测分布评估，3-mer 哈希余弦相似度随序列长度漂移且在 40% 一致度同源蛋白对与随机无关序列之间存在分布重叠，硬阈值（0.22）预筛会丢弃约 94% 的 40% 一致度异名同源蛋白。
+  - 改为将 3-mer 余弦矩阵仅用于非同名候选序列降序排列（使高相似度候选优先对齐以收紧动态剪枝下限），不剔除任何候选；同时使用按序 `futures` 收集保证多线程结果完全确定性。
+- **多拷贝完全相同序列 1:1 配对修复**（[engine.py](file:///f:/NCBI%20blast/src/analysis/protein_compare/engine.py)）：
+  - 引入 `exact_rank_a` 计数映射，使样本 A 中第 $k$ 条相同序列优先配对样本 B 中第 $k$ 条同序列，消除多拷贝相同基因全部碰撞到 `seq_to_b[seq][0]` 产生虚假 `unique_b` 的历史缺陷。
+- **分类器消歧与硬编码盘符彻底清零**：
+  - 在 [fuser.py](file:///f:/NCBI%20blast/src/analysis/annotation/fuser.py) 的 `Transcription & Regulation` 规则中排除物理量伪词 `heat capacity`，使 [test_disambiguation.py](file:///f:/NCBI%20blast/tests/test_disambiguation.py) 恢复原始严格断言（`== "other"`）。
+  - 在 [path_resolver.py](file:///f:/NCBI%20blast/src/assembly/utils/path_resolver.py) 中改用 `os.listdrives()` 动态枚举系统挂载卷，彻底移除代码中的硬编码盘符字符串。
+- **BLAST 任务内存封顶加固**（[manager.py](file:///f:/NCBI%20blast/src/blast/manager.py)）：
+  - `seq_lookup` 改为同名 ID 首条优先，与原线性查找语义严格对齐；`BlastTask` 新增 `result_count` 独立计数，超过 500 条后不再向内存 `task.results` 追加字典，真正实现长批次 $O(1)$ 内存封顶。
+- **前端与 Electron 源码 Emoji 全面清理**：
+  - 清理 `src/web-next/src` 与 `electron-shell` 共 40 个文件中的 157 处彩色 Emoji，并将独立图标按钮替换为明确文字或几何箭头。
 
 ---
 
 ## 3. 验证测试结果
-新增专项验证测试 [test_engineering_optimizations.py](file:///f:/NCBI%20blast/tests/test_engineering_optimizations.py)，连同既有单元测试套件全部通过。
+新增并强化专项验证测试 [test_engineering_optimizations.py](file:///f:/NCBI%20blast/tests/test_engineering_optimizations.py)（覆盖前后端零 Emoji、零硬编码盘符、多拷贝相同序列 1:1 配对及 `>=400` 候选集远缘同源蛋白召回），连同全量单元测试套件（164 passed, 3 skipped, 0 failed）全部验证通过。
 

@@ -16,21 +16,21 @@
             :class="{ active: currentView === 'freezer' }"
             @click="currentView = 'freezer'"
           >
-            📋 平铺视图
+            平铺视图
           </button>
           <button
             class="toolbar-btn"
             :class="{ active: currentView === 'stats' }"
             @click="currentView = 'stats'"
           >
-            📊 统计分析
+            统计分析
           </button>
           <button
             class="toolbar-btn"
             :class="{ active: currentView === 'list' }"
             @click="currentView = 'list'"
           >
-            📑 列表视图
+            列表视图
           </button>
 
           <div class="toolbar-divider"></div>
@@ -39,14 +39,14 @@
             class="toolbar-btn action-btn"
             @click="showBatchImport = true"
           >
-            📥 批量导入
+            批量导入
           </button>
 
           <button
             class="toolbar-btn action-btn"
             @click="showCodeManager = true"
           >
-            📖 编码管理
+            编码管理
           </button>
         </div>
         <div class="toolbar-right">

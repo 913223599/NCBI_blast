@@ -1,6 +1,6 @@
 <template>
   <div class="position-banner">
-    <div class="position-icon">📍</div>
+    <div class="position-icon">定位</div>
     <div class="position-details">
       <div class="position-path">{{ path }}</div>
       <div class="position-label">{{ label }}</div>

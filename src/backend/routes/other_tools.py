@@ -23,9 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Body, HTTPException
-from pydantic import BaseModel
 
-from ..utils.blast_utils import parse_blast_csv, select_consensus_hit
 from ..services.other_tools.dir_migrator import migrate_directory
 from ..services.other_tools.history_cleaner import cleanup_mail_history, cleanup_sangon_history
 from ..services.other_tools.mail_composer import (
@@ -1062,7 +1060,12 @@ async def init_sangon_order_directory(req: SangonInitOrderRequest):
 
 def _export_sangon_order_csv(task_id: str, out_dir: Path) -> Dict[str, int]:
     """解析 BLAST 报告并调用 BiologyTranslator 翻译导出 11 列 16S鉴定结果.csv（委派至 sangon_order_inspector）"""
-    return export_sangon_order_csv(task_id, out_dir, project_root=PROJECT_ROOT)
+    return export_sangon_order_csv(
+        task_id,
+        out_dir,
+        project_root=PROJECT_ROOT,
+        translator_factory=get_global_biology_translator,
+    )
 
 
 def _append_sangon_log(msg: str, level: str = "info") -> None:

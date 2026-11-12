@@ -12,13 +12,13 @@
         </div>
         <div class="header-actions">
           <button class="btn-edit" @click="toggleEditMode" v-if="!isEditing">
-            ✏️ 编辑
+            编辑
           </button>
           <button class="btn-save" @click="handleSave" v-if="isEditing">
-            💾 保存
+            保存
           </button>
           <button class="btn-delete" @click="handleDelete">
-            🗑️ 删除
+            删除
           </button>
           <button class="close-btn" @click="emit('close')">✕</button>
         </div>
@@ -27,7 +27,7 @@
       <div class="dialog-body">
         <!-- 位置信息横幅 -->
         <div class="position-banner">
-          <div class="position-icon">📍</div>
+          <div class="position-icon">定位</div>
           <div class="position-details">
             <div class="position-path">{{ positionPath }}</div>
             <div class="position-label">位置：{{ record.position }}</div>
@@ -90,7 +90,7 @@
                   </div>
                   <!-- 布尔类型展示为图标 -->
                   <span v-else-if="typeof record.metadata?.[key] === 'boolean'">
-                    {{ record.metadata[key] ? '✅ 是' : '❌ 否' }}
+                    {{ record.metadata[key] ? '是' : '否' }}
                   </span>
                   <!-- 普通文本 -->
                   <span v-else>{{ formatMetadataValue(key, record.metadata?.[key]) }}</span>

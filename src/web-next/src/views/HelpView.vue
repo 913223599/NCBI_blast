@@ -64,7 +64,7 @@ function getCategories(): string[] {
     <!-- 左侧主题列表 -->
     <aside class="help-sidebar">
       <div class="sidebar-header">
-        <h3>📖 帮助中心</h3>
+        <h3>帮助中心</h3>
         <p class="subtitle">NCBI Bio-Station 指南</p>
       </div>
       <div class="topic-list">
@@ -89,7 +89,7 @@ function getCategories(): string[] {
     <!-- 右侧内容区 -->
     <div class="help-content">
       <div v-if="!activeTopic" class="empty-state">
-        <div class="empty-icon">📄</div>
+        <div class="empty-icon"></div>
         <h2>请从左侧选择一个主题开始阅读</h2>
         <p>您可以找到关于 BLAST 配置、数据库管理和系统设置的详细说明。</p>
       </div>

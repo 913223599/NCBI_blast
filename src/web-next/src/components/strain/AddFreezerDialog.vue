@@ -42,7 +42,7 @@
             </div>
 
             <div class="config-summary">
-              <div class="summary-label">📊 结构概览</div>
+              <div class="summary-label">结构概览</div>
               <div class="summary-stats">
                 <div class="stat-item">
                   <span class="stat-value">{{ shelvesCount }}</span>
@@ -154,7 +154,7 @@
                 </div>
 
                 <div class="config-hint-box">
-                  <span class="hint-icon">💡</span>
+                  <span class="hint-icon"></span>
                   <p>系统将自动根据上述配置生成层级化的存储空间模型。您可以稍后手动调整细节。</p>
                 </div>
               </div>

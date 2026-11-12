@@ -201,10 +201,10 @@ onUnmounted(() => {
     <header class="panel-header">
       <div style="display: flex; justify-content: space-between; align-items: flex-end; width: 100%;">
         <div>
-          <h2>🧬 生物分析数据库管理</h2>
+          <h2>生物分析数据库管理</h2>
           <p class="desc">集中管理各个分析流水线所需的数据库版本与状态。</p>
         </div>
-        <button class="p-btn p-btn-outline" @click="refreshAll" style="font-size: 0.8rem; padding: 6px 12px;">🔄
+        <button class="p-btn p-btn-outline" @click="refreshAll" style="font-size: 0.8rem; padding: 6px 12px;">
           全局刷新</button>
       </div>
     </header>
@@ -216,7 +216,7 @@ onUnmounted(() => {
 
     <!-- 动态渲染数据库分类 -->
     <div v-for="group in groupedDatabases" :key="group.category" class="p-card">
-      <h3 style="margin-bottom: 20px;">📚 {{ group.category }}</h3>
+      <h3 style="margin-bottom: 20px;">{{ group.category }}</h3>
 
       <div class="db-unified-list">
         <div v-for="db in group.dbs" :key="db.id" class="db-item-row">
@@ -229,7 +229,7 @@ onUnmounted(() => {
                 <span class="name">{{ db.name }}</span>
                 <span class="p-badge" style="margin-left: 8px;">{{ db.version }}</span>
               </div>
-              <div class="db-meta-path" v-if="db.installed && db.path">📁 {{ db.path }}</div>
+              <div class="db-meta-path" v-if="db.installed && db.path">{{ db.path }}</div>
             </div>
 
             <!-- Middle: Stats -->
@@ -238,7 +238,7 @@ onUnmounted(() => {
               <div class="meta-item"><label>更新时间</label><span>{{ db.last_modified }}</span></div>
               <div class="meta-item"><label>当前状态</label>
                 <span :class="db.installed ? 'status-ok' : 'status-err'" style="font-weight: 700; font-size: 0.9rem;">
-                  {{ db.building ? '🔄 构建中...' : db.installed ? '✅ 完整就绪' : '❌ 尚未部署' }}
+                  {{ db.building ? '构建中...' : db.installed ? '完整就绪' : '尚未部署' }}
                 </span>
               </div>
             </div>

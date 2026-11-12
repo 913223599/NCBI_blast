@@ -3,7 +3,7 @@
     <div class="dialog-content">
       <div class="dialog-header">
         <div class="header-left">
-          <div class="icon-wrapper">✏️</div>
+          <div class="icon-wrapper">编辑</div>
           <div>
             <h3 class="dialog-title">编辑冰箱信息</h3>
             <p class="dialog-subtitle">修改冰箱名称、型号和存取位置</p>
@@ -52,7 +52,7 @@
           <h4 class="section-label">内部结构（只读）</h4>
           <div class="structure-info">
             <p>该冰箱包含：<strong>{{ freezer.shelves.length }} 层</strong> 基准结构。</p>
-            <p class="info-hint">💡 内部层级结构（层/柜/抽屉）目前不支持直接在此修改，如需调整请在管理面板操作或重新添加。</p>
+            <p class="info-hint">内部层级结构（层/柜/抽屉）目前不支持直接在此修改，如需调整请在管理面板操作或重新添加。</p>
           </div>
         </div>
       </div>

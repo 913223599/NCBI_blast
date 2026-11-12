@@ -2,22 +2,22 @@
   <div class="position-actions-menu" :style="{ top: `${position.y}px`, left: `${position.x}px` }" @click.stop>
     <div v-if="isOccupied" class="menu-section">
       <div class="menu-item" @click="emit('view')">
-        <span class="menu-icon">👁️</span>
+        <span class="menu-icon">查看</span>
         <span class="menu-text">查看样本</span>
       </div>
       <div class="menu-item" @click="emit('edit')">
-        <span class="menu-icon">✏️</span>
+        <span class="menu-icon">编辑</span>
         <span class="menu-text">编辑样本</span>
       </div>
       <div class="menu-item" @click="emit('unbind')">
-        <span class="menu-icon">🔓</span>
+        <span class="menu-icon"></span>
         <span class="menu-text">解除绑定</span>
       </div>
     </div>
     
     <div v-else class="menu-section">
       <div class="menu-item primary" @click="emit('add')">
-        <span class="menu-icon">➕</span>
+        <span class="menu-icon"></span>
         <span class="menu-text">录入样本</span>
       </div>
     </div>
