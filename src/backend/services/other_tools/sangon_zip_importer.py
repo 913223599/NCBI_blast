@@ -55,7 +55,7 @@ def scan_downloads_for_sangon_zips(
     if not d_dir.exists() or not d_dir.is_dir():
         return []
 
-    target_set = {str(o).strip() for o in order_nos if str(o).strip()} if order_nos is not None else None
+    target_set = {(o or "").strip() for o in order_nos if o and o.strip()} if order_nos is not None else None
     found: List[Dict[str, Any]] = []
 
     for zp in d_dir.glob("*.zip"):

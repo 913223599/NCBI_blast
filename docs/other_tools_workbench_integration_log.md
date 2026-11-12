@@ -392,3 +392,16 @@
    - 访问运行中前端验证步骤条、准确显示 `下载并比对 (8)`、待下载行主按钮 `自动下载` 及行尾菜单；验证未配置账号密码点击「自动下载」自动弹出 `SangonAccountModal` 引导框，录入保存模拟账号密码后无感接续发起 `POST /api/other_tools/sangon_16s/download_orders`（`auto_run_blast=true, auto_confirm_fee=true`），横幅更新并自动展开运行日志，控制台 `0` 报错（`[]`）。
 5. **生效提醒**：
    - 前端 `.vue` 改动已同步至 `src/web-next/dist/` 与 Vite 热更新，但新增的后端路由（`/sangon_16s/auth`、`/sangon_16s/download_orders`）及后端模块需重启桌面端 Electron 应用后在 `8765` 端口完全生效。
+
+---
+
+## 14. 后端 Pyrefly 静态类型与冗余转换全面清零修复（2026-11-12）
+
+1. **检查范围与定位**：使用工作区 IDE 同源类型检查器 `pyrefly check --min-severity warn` 对 [sangon_settings.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_settings.py)、[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py) 及关联模块 `src/backend/services/other_tools/`、[batch_state.py](file:///f:/NCBI%20blast/src/mail_download/batch_state.py)、[engine.py](file:///f:/NCBI%20blast/src/blast/engine.py)、[local_blast.py](file:///f:/NCBI%20blast/src/blast/local_blast.py) 执行全量扫描，定位如下诊断：
+   - 类型错误（`9` 处）：[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py) 6 处向 `load_config(Optional[str])` 传入 `Path` 型 `MAIL_CONFIG_PATH`；[sangon_mail_scanner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_mail_scanner.py) `payload.decode` 缺少 `isinstance(payload, bytes)` 收窄及两处 `conn.fetch(rng, ...)`（含 [mail_inbox_browser.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/mail_inbox_browser.py)）传入 `bytes` 切片集而非 `str`；
+   - 冗余类型转换警告（`32` 处）：分散于 `other_tools.py`、`sangon_settings.py`、`mail_inbox_browser.py`、[sangon_ignore_rules.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_ignore_rules.py)、[sangon_mail_scanner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_mail_scanner.py)、[sangon_order_annotator.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_order_annotator.py)、[sangon_zip_importer.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_zip_importer.py)、[local_blast.py](file:///f:/NCBI%20blast/src/blast/local_blast.py) 与 [batch_state.py](file:///f:/NCBI%20blast/src/mail_download/batch_state.py) 对已定型 `str` / `int` / `bool` 的多余 `str()`/`int()`/`bool()` 包装。
+2. **修复实施**：
+   - 将 6 处 `load_config(...)` 统一传入 `str(MAIL_CONFIG_PATH)`；
+   - `mail_inbox_browser.py` 与 `sangon_mail_scanner.py` 中 `conn.fetch(rng.decode("ascii"), ...)` 对齐 `imaplib` `message_set: str` 签名，`_extract_body_details()` 补齐 `isinstance(payload, bytes)` 收窄及 `str` 分支；
+   - 全量清理上述 9 个后端文件中的冗余 `str()`、`int()`、`bool()` 转换。
+3. **验证结论**：复跑 `pyrefly check --min-severity warn` 返回 `INFO 0 diagnostics`，`ruff check` 全部通过（`All checks passed!`），`pytest` 90 项全量回归通过（`5.72s`）。

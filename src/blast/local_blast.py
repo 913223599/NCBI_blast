@@ -22,7 +22,7 @@ def compute_local_blast_resource_plan(
     计算本地 BLAST 的 (最大并发子进程数, 单进程线程数)。
     严格遵守系统核心保留规则（Rule 8），确保 max_concurrent * threads <= cpu_cnt - reserved。
     """
-    cpu_cnt = max(1, int(cpu_count if cpu_count is not None else (os.cpu_count() or 4)))
+    cpu_cnt = max(1, cpu_count if cpu_count is not None else (os.cpu_count() or 4))
     if cpu_cnt >= 12:
         reserved = 4
     elif cpu_cnt >= 4:
@@ -35,7 +35,7 @@ def compute_local_blast_resource_plan(
     per_proc_max = max(1, budget // max_concurrent)
 
     if requested_threads is not None and requested_threads > 0:
-        threads_per_proc = max(1, min(int(requested_threads), per_proc_max))
+        threads_per_proc = max(1, min(requested_threads, per_proc_max))
     else:
         threads_per_proc = min(12, per_proc_max)
 

@@ -270,7 +270,7 @@ def mark_batch_ignored(
         if cur_status and cur_status != "ignored" and not prev.get("prev_status"):
             prev["prev_status"] = cur_status
         prev["status"] = "ignored"
-        prev["ignore_reason"] = str(reason or "").strip()
+        prev["ignore_reason"] = (reason or "").strip()
         prev["ignored_at"] = prev.get("ignored_at") or now_iso
         prev["updated_at"] = now_iso
         data["pipeline"] = prev

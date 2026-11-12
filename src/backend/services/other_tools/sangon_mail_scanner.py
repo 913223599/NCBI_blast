@@ -217,9 +217,11 @@ def _extract_body_details(msg: Message) -> Dict[str, str]:
     for part in msg.walk():
         if part.get_content_type() in ("text/html", "text/plain") and not part.get_filename():
             payload = part.get_payload(decode=True)
-            if payload:
+            if isinstance(payload, bytes):
                 cs = part.get_content_charset() or "utf-8"
                 body_html += payload.decode(cs, errors="replace")
+            elif isinstance(payload, str):
+                body_html += payload
     cx_match = _CX_ORDER_RE.search(body_html)
     cx_order_id = cx_match.group(1) if cx_match else ""
     download_url = (
@@ -351,8 +353,8 @@ def scan_sangon_mails(
     正文仅对缺少订单号、或待下载且索引中无下载链接缓存的邮件拉取，减少重复扫描耗时。
     支持 conn_factory 注入（FakeIMAP 离线测试）。
     """
-    page_size = max(1, min(int(page_size or 10), MAX_SCAN_PAGE_SIZE))
-    page = max(1, int(page or 1))
+    page_size = max(1, min(page_size or 10, MAX_SCAN_PAGE_SIZE))
+    page = max(1, page or 1)
     resolved_ignored = (
         {normalize_order_key(k) for k in ignored_orders if normalize_order_key(k)}
         if ignored_orders is not None
@@ -400,7 +402,7 @@ def scan_sangon_mails(
         batch = getattr(cfg, "batch_size", 200)
         for rng in MailFetcher._chunk_ranges(seq_ids, batch):
             htyp, msg_data = conn.fetch(
-                rng, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"
+                rng.decode("ascii"), "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"
             )
             if htyp != "OK" or not msg_data:
                 continue

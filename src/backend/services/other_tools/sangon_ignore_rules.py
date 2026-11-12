@@ -17,7 +17,7 @@ _ORDER_NO_RE = re.compile(r"(?<!\d)(\d{10})(?!\d)")
 
 def normalize_order_key(raw: str) -> str:
     """将订单目录名或订单号提取为统一的全局忽略键（优先 10 位订单号）。"""
-    text = str(raw or "").strip()
+    text = (raw or "").strip()
     if not text:
         return ""
     m = _ORDER_NO_RE.search(text)
@@ -37,7 +37,7 @@ def parse_ignore_keywords(keywords: Optional[Iterable[str]]) -> List[str]:
     cleaned: List[str] = []
     seen = set()
     for item in keywords:
-        kw = str(item or "").strip()
+        kw = (item or "").strip()
         if kw and kw not in seen:
             seen.add(kw)
             cleaned.append(kw)
@@ -74,14 +74,14 @@ def list_ignored_orders() -> Dict[str, Dict[str, str]]:
         ono = normalize_order_key(k)
         if not ono:
             continue
-        dir_name = str((meta or {}).get("dir_name") or "").strip()
-        if not dir_name and "_" in str(k):
-            dir_name = str(k).strip()
+        dir_name = ((meta or {}).get("dir_name") or "").strip()
+        if not dir_name and "_" in k:
+            dir_name = k.strip()
         out[ono] = {
             "order_no": ono,
             "dir_name": dir_name,
-            "reason": str((meta or {}).get("reason") or "").strip(),
-            "ignored_at": str((meta or {}).get("ignored_at") or "").strip(),
+            "reason": ((meta or {}).get("reason") or "").strip(),
+            "ignored_at": ((meta or {}).get("ignored_at") or "").strip(),
         }
     return out
 
@@ -95,13 +95,13 @@ def ignore_orders(
     """将指定订单加入全局忽略名单。"""
     current = list_ignored_orders()
     now_iso = datetime.now().isoformat(timespec="seconds")
-    clean_reason = str(reason or "").strip()
-    dir_lookup = {normalize_order_key(k): str(v).strip() for k, v in (dir_names or {}).items() if str(v).strip()}
+    clean_reason = (reason or "").strip()
+    dir_lookup = {normalize_order_key(k): v.strip() for k, v in (dir_names or {}).items() if v.strip()}
     updated = 0
     affected_keys: List[str] = []
 
     for raw in order_keys:
-        raw_str = str(raw or "").strip()
+        raw_str = (raw or "").strip()
         ono = normalize_order_key(raw_str)
         if not ono:
             continue
@@ -133,7 +133,7 @@ def unignore_orders(order_keys: Iterable[str]) -> Dict[str, Any]:
     affected_keys: List[str] = []
 
     for raw in order_keys:
-        ono = normalize_order_key(str(raw or ""))
+        ono = normalize_order_key(raw or "")
         if not ono:
             continue
         if ono in current:
@@ -163,7 +163,7 @@ def replace_ignore_rules(
         prev_map = list_ignored_orders()
         now_iso = datetime.now().isoformat(timespec="seconds")
         next_map: Dict[str, Dict[str, str]] = {}
-        clean_default_reason = str(default_reason or "").strip()
+        clean_default_reason = (default_reason or "").strip()
 
         for entry in ignored_orders:
             if isinstance(entry, dict):

@@ -98,8 +98,8 @@ def list_whitelist_mails(
     """
     浏览收件箱内符合白名单条件的邮件，支持批内邮件级去重、仅看新邮件与服务端翻页。
     """
-    page_size = max(1, min(int(page_size or 10), 50))
-    page = max(1, int(page or 1))
+    page_size = max(1, min(page_size or 10, 50))
+    page = max(1, page or 1)
     effective_days = since_days if since_days is not None else getattr(cfg, "since_days", 7)
     since_dt = datetime.now().astimezone() - timedelta(days=effective_days)
 
@@ -147,7 +147,7 @@ def list_whitelist_mails(
         matched_headers: List[Dict[str, Any]] = []
         batch = getattr(cfg, "batch_size", 200)
         for rng in MailFetcher._chunk_ranges(seq_ids, batch):
-            htyp, msg_data = conn.fetch(rng, f"(BODY.PEEK[HEADER.FIELDS {_HEADER_FIELDS}])")
+            htyp, msg_data = conn.fetch(rng.decode("ascii"), f"(BODY.PEEK[HEADER.FIELDS {_HEADER_FIELDS}])")
             if htyp != "OK" or not msg_data:
                 continue
             for seq, head in fetcher._iter_messages(msg_data):

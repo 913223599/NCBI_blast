@@ -188,9 +188,9 @@ def save_sangon_credentials(
     """分别保存生工账号配置与独立密码密钥文件；password=None 表示保留原密钥，空串表示删除。"""
     patch: Dict[str, Any] = {}
     if account is not None:
-        patch["sangon_account"] = str(account).strip()
+        patch["sangon_account"] = account.strip()
     if auto_confirm_fee is not None:
-        patch["auto_confirm_fee"] = bool(auto_confirm_fee)
+        patch["auto_confirm_fee"] = auto_confirm_fee
     if patch:
         save_sangon_settings(patch)
 

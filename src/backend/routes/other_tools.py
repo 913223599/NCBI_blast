@@ -598,7 +598,7 @@ async def toggle_mail_pipeline_batch_ignore(req: MailBatchIgnoreRequest):
 async def list_mail_inbox(req: MailListRequest):
     """分页浏览并去重展示发件人白名单内的收件箱邮件"""
     def _do_list():
-        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=True)
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=True)
         return list_whitelist_mails(
             cfg,
             page=req.page,
@@ -649,7 +649,7 @@ def _infer_mail_stage(line: str, current: str) -> str:
 async def trigger_mail_fetch(req: MailFetchRequest):
     """立即扫描 IMAP 收件箱并保存新附件"""
     def _do_fetch():
-        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=True)
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=True)
         fetcher = MailFetcher(cfg)
         f_res = fetcher.fetch(since_days=req.since_days)
         if f_res.connection_error:
@@ -694,11 +694,11 @@ async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
         raise HTTPException(status_code=409, detail="邮件自动注释流水线正在运行中，请等待当前任务结束")
 
     raw_cfg = _read_mail_cfg()
-    cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=False)
+    cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
     dl_dir = _resolve_dir(raw_cfg.get("download_dir", "results/email_downloads"))
 
     resolved_to: Optional[str] = None
-    if req.to is not None and str(req.to).strip():
+    if req.to is not None and req.to.strip():
         resolved_to = _resolve_send_target(cfg, req.to)
         if not resolved_to:
             raise HTTPException(status_code=400, detail="未配置发件或收件邮箱账号，无法解析目标收件人")
@@ -823,7 +823,7 @@ async def test_mail_pipeline_send(req: Optional[MailTestSendRequest] = Body(defa
     params = req or MailTestSendRequest()
 
     def _do_test_send():
-        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=False)
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
         target_to = _resolve_send_target(cfg, params.to)
         if not target_to:
             raise ValueError("缺少目标收件人或未配置发件账号")
@@ -916,7 +916,7 @@ async def send_mail_pipeline_package(req: MailPackageSendRequest):
         raise HTTPException(status_code=400, detail=f"非法的压缩包文件名: {req.zip_name}")
 
     def _do_send_package():
-        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=False)
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
         send_dir = _resolve_dir(getattr(cfg, "send_dir", "results/email_sends"))
         zip_path = send_dir / clean_zip
         if not zip_path.exists() or not zip_path.is_file() or zip_path.parent.resolve() != send_dir.resolve():
@@ -1710,11 +1710,11 @@ async def download_sangon_orders_endpoint(req: Optional[SangonDownloadRequest] =
 
     settings = load_sangon_settings()
     confirm_fee = (
-        bool(params.auto_confirm_fee)
+        params.auto_confirm_fee
         if params.auto_confirm_fee is not None
         else bool(settings.get("auto_confirm_fee", True))
     )
-    auto_run = bool(params.auto_run_blast)
+    auto_run = params.auto_run_blast
 
     with _sangon_pipeline_lock:
         if _sangon_pipeline_state["running"]:
@@ -1871,7 +1871,7 @@ async def send_sangon_order_result_mail(req: SangonSendResultRequest):
         )
         with_hits = total - no_hits
 
-        cfg = load_config(MAIL_CONFIG_PATH, require_imap_auth=False)
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
         target_to = _resolve_send_target(cfg, req.to)
         if not target_to:
             raise ValueError("缺少目标收件人或未配置发件账号")
@@ -1985,7 +1985,7 @@ async def update_sangon_settings(req: SangonSettingsRequest):
         to_save["downloads_dir"] = str(new_dl)
 
     if req.auto_confirm_fee is not None:
-        to_save["auto_confirm_fee"] = bool(req.auto_confirm_fee)
+        to_save["auto_confirm_fee"] = req.auto_confirm_fee
 
     has_rules_update = req.ignored_orders is not None or req.ignore_subject_keywords is not None
     if not to_save and not has_rules_update:

@@ -52,8 +52,8 @@ def annotate_sangon_orders(
         ono_key = normalize_order_key(str(cand.get("order_no") or ""))
         ig_meta = ignored_map.get(ono_key)
         cand["ignored"] = bool(ig_meta)
-        cand["ignore_reason"] = str((ig_meta or {}).get("reason") or "")
-        cand["ignored_at"] = str((ig_meta or {}).get("ignored_at") or "")
+        cand["ignore_reason"] = (ig_meta or {}).get("reason") or ""
+        cand["ignored_at"] = (ig_meta or {}).get("ignored_at") or ""
 
         dir_name = cand.get("matched_dir_name") or ""
         if dir_name and not cand.get("archived") and not cand["ignored"] and dir_name not in zip_by_dir:
@@ -72,8 +72,8 @@ def annotate_sangon_orders(
         order["download_url"] = str(meta.get("download_url") or "")
         order["created_at"] = created_at
         order["ignored"] = is_ignored
-        order["ignore_reason"] = str((ig_meta or {}).get("reason") or "")
-        order["ignored_at"] = str((ig_meta or {}).get("ignored_at") or "")
+        order["ignore_reason"] = (ig_meta or {}).get("reason") or ""
+        order["ignored_at"] = (ig_meta or {}).get("ignored_at") or ""
         order["is_new"] = (not is_ignored) and order.get("status") == "pending" and _is_recent(created_at, now)
 
         cand = zip_by_dir.get(str(order.get("dir_name") or ""))
