@@ -107,6 +107,29 @@ class EnvironmentChecker:
         else:
             self.warnings.append(f"未找到 Electron 入口: {electron_main}")
             return True  # 不是致命错误
+
+    def check_headless_browser(self) -> bool:
+        """检查无头浏览器配置与 Chromium/系统浏览器可用性"""
+        try:
+            from .headless_browser_manager import inspect_headless_browser
+
+            rep = inspect_headless_browser(probe_launch=False)
+            if not rep.get("enabled", True):
+                self.checks.append("无头浏览器检查已按配置跳过 (enabled=false)")
+                return True
+            if rep.get("ready"):
+                mode = rep.get("mode", "playwright_chromium")
+                ver = rep.get("expected_version") or rep.get("playwright_version") or ""
+                suffix = f" ({ver})" if ver else ""
+                self.checks.append(f"无头浏览器已就绪: {mode}{suffix}")
+                return True
+            issue_msgs = [str(item.get("message") or "") for item in rep.get("issues", []) if item.get("message")]
+            detail = "; ".join(issue_msgs) if issue_msgs else "未检测到可用 Playwright Chromium 内核"
+            self.warnings.append(f"无头浏览器未完全就绪（可通过自修复自动补齐）: {detail}")
+            return True
+        except Exception as exc:
+            self.warnings.append(f"无头浏览器检查异常: {exc}")
+            return True
     
     def check_all(self) -> Tuple[bool, List[str], List[str]]:
         """执行所有检查"""
@@ -121,6 +144,7 @@ class EnvironmentChecker:
             self.check_system_dependencies(),
             self.check_disk_space(),
             self.check_electron_shell(),
+            self.check_headless_browser(),
         ]
         
         overall_success = all(results) and len(self.errors) == 0

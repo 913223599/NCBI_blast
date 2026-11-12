@@ -19,6 +19,7 @@ import MailComposeModal from '../components/MailComposeModal.vue'
 import type { MailDraftPayload, MailComposeSubmitPayload } from '../components/MailComposeModal.vue'
 import type { CleanupOption } from '../components/CleanupDialog.vue'
 import type {
+  BrowserEnvStatus,
   SangonAuthMeta,
   SangonOrderItem,
   ScannedMailItem,
@@ -32,6 +33,7 @@ import { getJson, postJson, openLocalPath, describeMigration } from '../api'
 
 const API = '/api/other_tools/sangon_16s'
 const MAIL_API = '/api/other_tools/mail_pipeline'
+const BROWSER_ENV_API = '/api/other_tools/browser_env'
 
 const sangonRoot = ref('')
 const downloadsDir = ref('')
@@ -104,6 +106,8 @@ const sangonAuth = ref<SangonAuthMeta>({
   password_file: '',
   auto_confirm_fee: true
 })
+const browserEnv = ref<BrowserEnvStatus | null>(null)
+const repairingBrowser = ref(false)
 const showSangonAuthModal = ref(false)
 const sangonAuthHint = ref('')
 const autoConfirmFee = ref(true)
@@ -253,6 +257,31 @@ const awaitingDownloadCount = computed(() =>
   activeOrders.value.filter(o => o.status === 'pending' && !hasOrderSourceData(o)).length
 )
 
+const needsWebLoginCount = computed(() =>
+  downloadableOrders.value.filter(o => !o.download_zip_ready && Boolean(o.download_url || o.cx_order_id)).length
+)
+
+const browserEnvShortLabel = computed(() => {
+  if (!browserEnv.value) return '未检测'
+  if (!browserEnv.value.enabled) return '已禁用'
+  return browserEnv.value.ready ? '已就绪' : '需修复'
+})
+
+const showBrowserWarningBar = computed(() => {
+  if (!browserEnv.value) return false
+  if (!browserEnv.value.enabled) return needsWebLoginCount.value > 0
+  return !browserEnv.value.ready
+})
+
+const browserFirstIssueText = computed(() => {
+  const first = browserEnv.value?.issues?.[0]?.message
+  if (first) return first
+  if (browserEnv.value && !browserEnv.value.enabled) {
+    return 'config.json 已配置 headless_browser.enabled=false，生工官网自动下载功能当前不可用'
+  }
+  return '无头浏览器 (Playwright Chromium) 尚未就绪，建议先执行自修复检查'
+})
+
 const runtimeLogsList = computed(() => runtime.value?.logs || [])
 
 const activeAdvancedTags = computed(() => {
@@ -351,6 +380,9 @@ async function loadOverview(): Promise<void> {
         autoConfirmFee.value = data.sangon_auth.auto_confirm_fee ?? true
         initializedSangonSettings.value = true
       }
+    }
+    if (data.browser_env) {
+      browserEnv.value = data.browser_env
     }
     const nextRuntime: SangonRuntimeState = data.runtime || runtime.value
     runtime.value = nextRuntime
@@ -920,6 +952,38 @@ async function handleToggleAutoConfirmFee(): Promise<void> {
   }
 }
 
+async function handleRepairBrowser(payload?: {
+  enabled?: boolean
+  headless?: boolean
+  use_system_browser_fallback?: boolean
+  auto_install?: boolean
+  probe_launch?: boolean
+}): Promise<void> {
+  repairingBrowser.value = true
+  try {
+    const data = await postJson(`${BROWSER_ENV_API}/repair`, {
+      auto_install: true,
+      probe_launch: true,
+      ...(payload || {})
+    })
+    browserEnv.value = data as BrowserEnvStatus
+    const acts = (data.actions || []).filter(Boolean)
+    if (data.ready) {
+      const modeName = data.mode || 'playwright_chromium'
+      setInfo(acts.length ? `无头浏览器已自修复并就绪 (${modeName})：${acts.join('；')}` : `无头浏览器检查通过 (${modeName})`)
+    } else if (!data.enabled) {
+      setInfo('已保存无头浏览器配置：当前状态为已禁用 (enabled=false)')
+    } else {
+      const detail = (data.warnings || []).join('；') || data.issues?.[0]?.message || '仍未就绪，请检查网络或配置'
+      setError(`无头浏览器自修复未完全就绪：${detail}`)
+    }
+  } catch (err) {
+    setError(err)
+  } finally {
+    repairingBrowser.value = false
+  }
+}
+
 async function handleAutoDownloadOrders(
   orderNames: string[] = [],
   autoRunBlast = autoBlastAfterDownload.value
@@ -945,6 +1009,10 @@ async function handleAutoDownloadOrders(
   if (needsWebLogin && (!sangonAuth.value.account || !sangonAuth.value.password_ready)) {
     pendingDownloadTask.value = { orderNames: targets, autoRunBlast }
     openSangonAuthEditor('检测到需登录生工官网下载压缩包，请先保存一次生工账号与登录密码（保存后将自动继续下载）。')
+    return
+  }
+  if (needsWebLogin && browserEnv.value && !browserEnv.value.enabled) {
+    openSangonAuthEditor('检测到当前无头浏览器已被禁用 (enabled=false)，请先在下方勾选启用无头浏览器并点击「应用浏览器配置并检查自修复」。')
     return
   }
 
@@ -1215,6 +1283,9 @@ onUnmounted(() => {
               <button class="menu-item" @click="close(); openSangonAuthEditor()">
                 {{ sangonAuth.password_ready ? `生工账号配置 (${sangonAuth.account || '已配置'})` : '生工账号配置 (未配置)...' }}
               </button>
+              <button class="menu-item" @click="close(); openSangonAuthEditor()">
+                无头浏览器自检与修复 ({{ browserEnvShortLabel }})...
+              </button>
               <button class="menu-item" @click="close(); openAuthEditor()">邮箱 Key 配置</button>
               <button class="menu-item" @click="close(); showIgnoreModal = true">
                 跳过与忽略规则{{ ignoredOrdersCount > 0 ? ` (${ignoredOrdersCount})` : '...' }}
@@ -1264,6 +1335,22 @@ onUnmounted(() => {
             </div>
           </template>
         </PopoverMenu>
+      </div>
+    </div>
+
+    <div v-if="showBrowserWarningBar" class="alert-banner warn browser-warn-bar">
+      <div class="browser-warn-text">
+        <strong>无头浏览器状态异常：</strong>{{ browserFirstIssueText }}
+      </div>
+      <div class="browser-warn-actions">
+        <button
+          class="btn-mini primary"
+          :disabled="repairingBrowser || runtime.running"
+          @click="handleRepairBrowser()"
+        >
+          {{ repairingBrowser ? '自修复中...' : '一键自修复浏览器' }}
+        </button>
+        <button class="btn-mini" @click="openSangonAuthEditor()">环境设置</button>
       </div>
     </div>
 
@@ -1660,11 +1747,14 @@ onUnmounted(() => {
     <SangonAccountModal
       :visible="showSangonAuthModal"
       :auth-meta="sangonAuth"
+      :browser-env="browserEnv"
       :busy="busy"
+      :repairing-browser="repairingBrowser"
       :hint-text="sangonAuthHint"
       @close="closeSangonAuthEditor"
       @save="handleSaveSangonAuth"
       @clear-password="handleClearSangonPassword"
+      @repair-browser="handleRepairBrowser"
     />
   </div>
 </template>
@@ -1953,6 +2043,24 @@ onUnmounted(() => {
 }
 .alert-banner.info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
 .alert-banner.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.alert-banner.warn { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+
+.browser-warn-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.browser-warn-text {
+  flex: 1;
+  min-width: 240px;
+}
+.browser-warn-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 
 .awaiting-dl-hint {
   font-size: 11px;

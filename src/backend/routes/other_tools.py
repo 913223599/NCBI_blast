@@ -71,12 +71,17 @@ from ...mail_download.config import load_config
 from ...mail_download.downloader import AttachmentSaver
 from ...mail_download.fetcher import MailFetcher
 from ...mail_download.sender import MailSender
+from ...utils.headless_browser_manager import (
+    inspect_headless_browser,
+    repair_headless_browser,
+)
 from ...utils.translation.biology_translator import get_global_biology_translator
 
 logger = logging.getLogger("api.other_tools")
 router = APIRouter(prefix="/other_tools", tags=["other_tools"])
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+CONFIG_JSON_PATH = PROJECT_ROOT / "config.json"
 MAIL_CONFIG_PATH = PROJECT_ROOT / "mail_config.json"
 ANNOTATIONS_DIR = PROJECT_ROOT / "results" / "annotations"
 BLAST_RESULTS_ROOT = PROJECT_ROOT / "results" / "blast"
@@ -1208,6 +1213,11 @@ async def get_sangon_16s_overview(sangon_root: Optional[str] = None, downloads_d
         "ignored_download_count": ignored_download_count,
         "settings": load_sangon_settings(),
         "sangon_auth": get_sangon_auth_status(),
+        "browser_env": inspect_headless_browser(
+            project_root=PROJECT_ROOT,
+            config_path=CONFIG_JSON_PATH,
+            probe_launch=False,
+        ),
         "root_exists": root_path.exists(),
         "db_16s_ready": db_16s.exists(),
         "runtime": _snapshot_sangon_runtime(),
@@ -1807,6 +1817,26 @@ async def download_sangon_orders_endpoint(req: Optional[SangonDownloadRequest] =
                 _sangon_pipeline_state["current_stage"] = "downloading"
                 _sangon_pipeline_state["progress"] = int(((idx - 1) / max(1, total_web)) * dl_end_pct)
 
+            if needs_web_login:
+                env_snap = inspect_headless_browser(
+                    project_root=PROJECT_ROOT,
+                    config_path=CONFIG_JSON_PATH,
+                    probe_launch=False,
+                )
+                if not env_snap.get("ready"):
+                    _append_sangon_log("检测到无头浏览器尚未就绪，正在执行启动前环境自修复...")
+                    repaired_env = repair_headless_browser(
+                        project_root=PROJECT_ROOT,
+                        config_path=CONFIG_JSON_PATH,
+                        auto_install=True,
+                        probe_launch=False,
+                        progress_cb=lambda m: _append_sangon_log(m),
+                    )
+                    for act in repaired_env.get("actions") or []:
+                        _append_sangon_log(f"[浏览器自修复] {act}")
+                    if not repaired_env.get("ready"):
+                        _append_sangon_log("无头浏览器未能完全就绪，将继续尝试可用兜底或认领已有本地包。")
+
             dl_res = download_sangon_orders(
                 root_path,
                 dl_dir,
@@ -1814,7 +1844,7 @@ async def download_sangon_orders_endpoint(req: Optional[SangonDownloadRequest] =
                 account=account,
                 password=password,
                 auto_confirm_fee=confirm_fee,
-                headless=True,
+                headless=None,
                 progress_cb=_on_dl_prog,
                 log_cb=lambda m: _append_sangon_log(m),
             )
@@ -2085,6 +2115,57 @@ async def cleanup_sangon_orders(req: SangonCleanupRequest):
         cleanup_sangon_history, get_sangon_root(), BLAST_RESULTS_ROOT, order_names, req.targets
     )
     return {"status": "success", **res}
+
+
+class BrowserEnvRepairRequest(BaseModel):
+    enabled: Optional[bool] = None
+    headless: Optional[bool] = None
+    auto_install: bool = True
+    use_system_browser_fallback: Optional[bool] = None
+    executable_path: Optional[str] = None
+    browsers_path: Optional[str] = None
+    probe_launch: bool = True
+
+
+@router.get("/browser_env")
+async def get_browser_env_status(probe: bool = False):
+    """查询无头浏览器（Playwright Chromium / 系统浏览器兜底）健康状态与配置"""
+    report = await asyncio.to_thread(
+        inspect_headless_browser,
+        PROJECT_ROOT,
+        CONFIG_JSON_PATH,
+        probe,
+    )
+    return {"status": "success", **report}
+
+
+@router.post("/browser_env/repair")
+async def repair_browser_env(req: Optional[BrowserEnvRepairRequest] = Body(default=None)):
+    """更新无头浏览器配置并执行完整检查与自动自修复（补齐配置、清理残缺内核、国内源重装与标签修复）"""
+    params = req or BrowserEnvRepairRequest()
+    patch_cfg: Dict[str, Any] = {}
+    if params.enabled is not None:
+        patch_cfg["enabled"] = params.enabled
+    if params.headless is not None:
+        patch_cfg["headless"] = params.headless
+    if params.use_system_browser_fallback is not None:
+        patch_cfg["use_system_browser_fallback"] = params.use_system_browser_fallback
+    if params.executable_path is not None:
+        patch_cfg["executable_path"] = params.executable_path
+    if params.browsers_path is not None:
+        patch_cfg["browsers_path"] = params.browsers_path
+
+    def _do_repair() -> Dict[str, Any]:
+        return repair_headless_browser(
+            project_root=PROJECT_ROOT,
+            config_path=CONFIG_JSON_PATH,
+            auto_install=params.auto_install,
+            probe_launch=params.probe_launch,
+            patch_config=patch_cfg or None,
+        )
+
+    report = await asyncio.to_thread(_do_repair)
+    return {"status": "success", **report}
 
 
 @router.post("/open_path")

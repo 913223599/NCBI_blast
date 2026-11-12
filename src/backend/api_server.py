@@ -181,6 +181,64 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"WSL/局域网共享初始化失败: {e}")
 
+    # E. 无头浏览器配置启动检查与非阻塞自修复
+    try:
+        from starlette.concurrency import run_in_threadpool
+        from src.utils.headless_browser_manager import (
+            heal_headless_browser_config,
+            inspect_headless_browser,
+            repair_headless_browser,
+        )
+
+        hb_cfg_res = heal_headless_browser_config(project_root=PROJECT_ROOT)
+        for act in hb_cfg_res.get("actions", []):
+            logger.info(f"[HeadlessBrowser] 配置自愈: {act}")
+        for warn in hb_cfg_res.get("warnings", []):
+            logger.warning(f"[HeadlessBrowser] 配置警告: {warn}")
+
+        hb_state = inspect_headless_browser(project_root=PROJECT_ROOT, probe_launch=False)
+        eff_dir = str(hb_state.get("effective_browsers_path") or "")
+        if eff_dir and Path(eff_dir).is_dir():
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = eff_dir
+
+        if hb_state.get("ready"):
+            logger.info(
+                "[HeadlessBrowser] 无头浏览器启动检查通过 (模式: %s, 版本: %s)",
+                hb_state.get("mode"),
+                hb_state.get("expected_version") or hb_state.get("playwright_version") or "-",
+            )
+        elif hb_state.get("enabled", True):
+            logger.warning(
+                "[HeadlessBrowser] 检测到无头浏览器未就绪，已调度后台非阻塞自修复..."
+            )
+
+            async def _bg_heal_browser():
+                try:
+                    rep = await run_in_threadpool(
+                        repair_headless_browser,
+                        PROJECT_ROOT,
+                        None,
+                        auto_install=None,
+                        probe_launch=True,
+                    )
+                    if rep.get("ready"):
+                        logger.info(
+                            "[HeadlessBrowser] 后台自修复完成 (模式: %s)",
+                            rep.get("mode"),
+                        )
+                    else:
+                        logger.warning(
+                            "[HeadlessBrowser] 后台自修复未完全就绪: %s",
+                            rep.get("warnings") or rep.get("issues"),
+                        )
+                    await broadcaster.broadcast("data_updated", {"module": "browser_env"})
+                except Exception as exc_bg:
+                    logger.error(f"[HeadlessBrowser] 后台自修复异常: {exc_bg}")
+
+            asyncio.create_task(_bg_heal_browser())
+    except Exception as hb_exc:
+        logger.warning(f"[HeadlessBrowser] 启动检查异常（不影响主服务启动）: {hb_exc}")
+
     yield
 
     # C. 退出清理
@@ -258,7 +316,7 @@ app.add_middleware(
 )
 
 # 动态载入分散在各路由模块的接口
-from .routes import blast, strains, dictionary, tree, settings, core, common, taxonomy, assembly
+from .routes import blast, strains, dictionary, tree, settings, core, common, taxonomy
 
 app.include_router(common.router)
 app.include_router(blast.router)

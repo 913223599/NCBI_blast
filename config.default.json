@@ -59,5 +59,22 @@
   "sra_tools_bin_path": "./tools/ncbi_dist/bin/sra-tools",
   "tree_tools_bin_path": "./tools/ncbi_dist/bin/tree-tools",
   "language": "zh_CN",
-  "lan_share": true
+  "lan_share": true,
+  "headless_browser": {
+    "enabled": true,
+    "engine": "chromium",
+    "headless": true,
+    "browsers_path": "",
+    "executable_path": "",
+    "download_host": "https://npmmirror.com/mirrors/playwright",
+    "fallback_download_host": "https://playwright.azureedge.net",
+    "auto_install": true,
+    "use_system_browser_fallback": true,
+    "launch_timeout_ms": 90000,
+    "extra_args": [
+      "--disable-gpu",
+      "--no-sandbox",
+      "--disable-dev-shm-usage"
+    ]
+  }
 }

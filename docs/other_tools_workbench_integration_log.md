@@ -450,3 +450,54 @@
    - 使用隔离临时数据目录启动 FastAPI + 已编译 `dist/`，严格拦截全部真实发送路由保证零对外 SMTP 发信，实测「生工 16S 行内发信 -> 填回传地址 -> 恢复默认内容 -> 自定义全部字段发送 -> 选中结果预览发信点发给自己测试禁 CC -> 邮件注释回传测试发信切换最新 Word 报告勾选项 -> 报告与回传包自定义发信标题/正文/附件名发送」全链路，捕获请求 `3` 次校验全部传参无误，Console 与 Page 报错数均为 `0`。
 4. **生效提醒**：
    - 前端 `.vue` 已同步输出到 `src/web-next/dist/`，新增后端预览路由与扩展参数需重启桌面端应用后在本机 `8765` 端口后端完全生效。
+
+---
+
+## 16. 无头浏览器全局配置、启动检查与多级自修复体系建设（2026-11-12）
+
+### 16.1 目标与设计原则
+针对用户需求「无头浏览器相关配置加入启动检查和自修复」，围绕桌面端 Electron / FastAPI / Playwright 运行链路建立跨启动脚本、服务生命周期、业务运行时与前后端界面的统一自愈体系：
+1. **配置集中化与老配置自愈**：在 [config.default.json](file:///f:/NCBI%20blast/config.default.json) 与工作区 `config.json` 维护 `headless_browser` 全局配置段，支持老版本配置缺失项增量补缺与非法脏值回滚默认，全程相对路径优先（未指定自定义目录时默认自适应解析 `vendor/ms-playwright` 或系统默认缓存路径）。
+2. **多阶段非阻塞自检自修复**：启动脚本安装缺失包并完成残缺目录清理；FastAPI `lifespan` 启动时校验配置并激活 `PLAYWRIGHT_BROWSERS_PATH`，在内核异常时后台线程非阻塞自修复（确保不阻塞 Electron `30s` 健康探活）；业务下载启动失败时自动自修复重连一次并支持本机 Edge/Chrome 兜底。
+3. **单一职责与安全合规**：全量采用 UTF-8 编码、零 Emoji、零硬编码；严禁跳过或破解任何防机器人/人机验证。
+
+### 16.2 后端与启动器实施
+1. **全局配置模板与依赖声明**：
+   - 在 [config.default.json](file:///f:/NCBI%20blast/config.default.json)（并同步自愈工作区 `config.json`）新增 `headless_browser` 配置段（含 `enabled`、`engine`、`headless`、`browsers_path`、`executable_path`、`download_host`、`fallback_download_host`、`auto_install`、`use_system_browser_fallback`、`launch_timeout_ms`、`extra_args`）。
+   - 在 [requirements.txt](file:///f:/NCBI%20blast/requirements.txt) 显式纳入 `playwright>=1.50.0`。
+2. **核心管理与自修复引擎（新建 [headless_browser_manager.py](file:///f:/NCBI%20blast/src/utils/headless_browser_manager.py)）**：
+   - `heal_headless_browser_config()`：对缺失 `headless_browser` 或字段类型非法的 `config.json` 执行安全增量补全与纠正，原子写回 UTF-8 JSON。
+   - `inspect_headless_browser()`：检查 `playwright` Python 包、内置 Driver、预期修订号（`1208` / `145.0.7632.6`）、`chromium` 与 `chromium_headless_shell` 完整性（严格要求 `INSTALLATION_COMPLETE` 标记存在，且优先选取完整版本目录避免被残缺高版本目录遮蔽）、Windows 低完整性级别权限（Low Integrity Level）异常、本机 Edge/Chrome 兜底路径及可选真实无头启动探针；当 `headless_browser.enabled=false` 时显式返回 `mode="disabled"` 与 `code="browser_disabled"` 提示。
+   - `repair_headless_browser()`：按顺序执行配置自愈 -> 清理不完整浏览器残缺目录 -> Windows 权限自愈（必要时调用 `icacls` 修复 `vendor/ms-playwright` 等受影响目录） -> 通过国内镜像优先、官方源回退自动安装缺失或残缺的 Playwright Chromium -> 复检与可选真实启动探针。
+   - `get_launch_options()`：汇总配置、代理/下载主机环境与本机兜底浏览器，生成统一 Playwright 启动选项。
+3. **多级启动脚本与生命周期整合**：
+   - [verify_and_install_deps.py](file:///f:/NCBI%20blast/src/utils/verify_and_install_deps.py)（及备用脚本 [scripts/verify_and_install_deps.py](file:///f:/NCBI%20blast/scripts/verify_and_install_deps.py)）：显式将项目根目录加入 `sys.path` 解决由 `RUN_DEV_ELECTRON.bat` 直接脚本拉起时的 `No module named 'src'` 问题；把 `playwright` 纳入核心依赖自愈清单，并在 `[1/4]` 配置校验与 `[3/4]` 无头浏览器自修复中联动调用引擎（含跳过标记解析）。
+   - [environment_checker.py](file:///f:/NCBI%20blast/src/utils/environment_checker.py)：新增 `check_headless_browser()` 检查项纳入启动前环境总览。
+   - [repair_integrity.ps1](file:///f:/NCBI%20blast/scripts/repair_integrity.ps1)：补齐对 `playwright`、`ms-playwright` 等关键目录的完整性级别扫描与自愈。
+   - [api_server.py](file:///f:/NCBI%20blast/src/backend/api_server.py)：`lifespan` 启动执行 `heal_headless_browser_config()` 与非探针快检 `inspect_headless_browser(probe_launch=False)`，未就绪时在守护线程后台执行 `repair_headless_browser(..., probe_launch=True)`（避免阻塞端口探活）。
+4. **运行时自修复与 REST API（[sangon_downloader.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_downloader.py) / [other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py) / [settings.py](file:///f:/NCBI%20blast/src/backend/routes/settings.py)）**：
+   - `SangonBrowserSession.start()` 按全局配置启动 Playwright；遇到可执行文件缺失/权限或拉起失败时自动执行 `repair_headless_browser()` 清理重装并重试一次，必要时切换本机 Edge/Chrome 兜底；显式尊重 `headless_browser.enabled=false`。
+   - 生工工作台：概览接口 `/api/other_tools/sangon_16s/overview` 透出 `browser_env` 快照；新增 `GET /api/other_tools/browser_env` 与 `POST /api/other_tools/browser_env/repair`（直接传递配置补丁执行修复，不提前吞掉变更记录），并在触发官网自动下载时拦截禁用意图及前置自修；
+   - 系统设置：`GET /api/settings/browser_env` 与 `POST /api/settings/browser_env/repair`，并顺带清理 `settings.py` 与 `api_server.py` 的冗余导入与重复语句。
+
+### 16.3 前端界面构建（工作台 + 系统设置双入口）
+1. **类型定义（[sangonTypes.ts](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/sangonTypes.ts)）**：新增 `BrowserEnvConfig`、`BrowserEnvIssue`、`BrowserEnvStatus` 接口。
+2. **系统设置独立面板（新建 [HeadlessBrowserPanel.vue](file:///f:/NCBI%20blast/src/web-next/src/components/settings/HeadlessBrowserPanel.vue)，挂载至 [SystemParamsPanel.vue](file:///f:/NCBI%20blast/src/web-next/src/components/settings/SystemParamsPanel.vue)）**：展示当前引擎模式、Playwright/Chromium 版本、内核存储路径、诊断问题与修复动作记录，支持切换开关并一键「应用配置并启动探针自修复」（带底部间距优化）。
+3. **生工账号与环境弹窗（[SangonAccountModal.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/SangonAccountModal.vue)）**：扩展为「生工官网账号与无头浏览器配置」，内置运行状态徽标、配置复选框及独立自修复触发按钮（优化 `.file-hint` 长路径换行防孤立断字）。
+4. **生工 16S 主面板联动（[Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue)）**：读取 `overview.browser_env`，顶部状态异常/禁用时展示黄色提示横幅与「一键自修复浏览器」「环境设置」快捷入口，「更多与设置」菜单新增「无头浏览器自检与修复」，禁用状态下点击官网自动下载时给出明确拦截引导。
+
+### 16.4 全量测试、静态门禁与真实端到端验证结果
+1. **自动化单元测试（新增 [test_headless_browser_manager.py](file:///f:/NCBI%20blast/tests/test_headless_browser_manager.py) 8 项 + 扩充 [test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py) `test_settings_browser_env_routes` 与零 Emoji 检查覆盖范围）**：
+   - 全量回归执行 `.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py tests/test_headless_browser_manager.py -v --tb=short`：**103 项全部通过（12.45s）**。
+2. **代码静态检查与前端生产构建**：
+   - `ruff check --select F,E9` 对全部新增与修改 Python 源码及测试文件检查：**All checks passed!**；
+   - `src/web-next` 执行 `npx vue-tsc -b --force && npx vue-tsc --noEmit --noUnusedLocals --noUnusedParameters && npm run build`：退出码 `0`（`built in 13.90s`，已生成最新 `src/web-next/dist/`）。
+3. **真机 CLI 启动检查与实机无头探针**：
+   - `.\.venv\Scripts\python.exe -X utf8 -m src.utils.environment_checker`：退出码 `0`，输出 `[OK] 无头浏览器已就绪: playwright_chromium (145.0.7632.6)`；
+   - `.\.venv\Scripts\python.exe -X utf8 src\utils\verify_and_install_deps.py`：退出码 `0`，四步全部通过；
+   - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\repair_integrity.ps1`：退出码 `0`；
+   - 真实调用 `inspect_headless_browser(probe_launch=True)` 成功无头拉起并关闭本机 Chromium `145.0.7632.6`。
+4. **Playwright 真实 UI E2E 交互验证**：
+   - 使用独立临时目录与挂载 `/ws`、`/api/settings/*`、`/api/other_tools/*` 的隔离测试服务及编译后 `dist/`，实测生工 16S 异常提示横幅展示 -> 一键自修复转绿 -> 「更多与设置」打开弹窗并取消静默无头运行执行「应用浏览器配置并检查自修复」 -> 「设置 -> 系统参数」面板触发「应用配置并启动探针自修复」全链路：**`CONSOLE_ERRORS: 0`、`PAGE_ERRORS: 0`、`HTTP_500: 0`、`REPAIR_CALLS_COUNT: 3`、`E2E_ALL_PASSED`**，截图复核所有页面布局、长路径换行与状态隔离展示正常。
+5. **生效提醒**：
+   - 前端构建已同步输出至 `src/web-next/dist/`；新增生命周期自检逻辑及 `/browser_env(|/repair)` 接口需重启桌面端 Electron 应用后在 `8765` 端口后端全面生效。

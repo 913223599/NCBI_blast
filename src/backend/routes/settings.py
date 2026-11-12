@@ -1,8 +1,8 @@
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 from ..broadcaster import broadcaster
 
 logger = logging.getLogger("api_server")
@@ -165,3 +165,53 @@ async def pull_update(req: PullUpdateRequest):
     from starlette.concurrency import run_in_threadpool
     from ..utils.git_updater import pull_remote_update
     return await run_in_threadpool(pull_remote_update, auto_stash=req.auto_stash)
+
+
+# ─── 无头浏览器环境检查与自修复 ─────────────────────────
+
+class BrowserEnvUpdateRequest(BaseModel):
+    enabled: Optional[bool] = None
+    headless: Optional[bool] = None
+    auto_install: bool = True
+    use_system_browser_fallback: Optional[bool] = None
+    executable_path: Optional[str] = None
+    browsers_path: Optional[str] = None
+    probe_launch: bool = True
+
+
+@router.get("/api/settings/browser_env")
+async def get_settings_browser_env(probe: bool = False):
+    """检查无头浏览器配置、Playwright 内核与可用状态"""
+    from starlette.concurrency import run_in_threadpool
+    from ...utils.headless_browser_manager import inspect_headless_browser
+
+    return await run_in_threadpool(inspect_headless_browser, None, None, probe)
+
+
+@router.post("/api/settings/browser_env/repair")
+async def repair_settings_browser_env(req: Optional[BrowserEnvUpdateRequest] = None):
+    """按需更新无头浏览器配置并触发自检自修复"""
+    from starlette.concurrency import run_in_threadpool
+    from ...utils.headless_browser_manager import repair_headless_browser
+
+    params = req or BrowserEnvUpdateRequest()
+    patch_cfg: Dict[str, object] = {}
+    if params.enabled is not None:
+        patch_cfg["enabled"] = params.enabled
+    if params.headless is not None:
+        patch_cfg["headless"] = params.headless
+    if params.use_system_browser_fallback is not None:
+        patch_cfg["use_system_browser_fallback"] = params.use_system_browser_fallback
+    if params.executable_path is not None:
+        patch_cfg["executable_path"] = params.executable_path
+    if params.browsers_path is not None:
+        patch_cfg["browsers_path"] = params.browsers_path
+
+    return await run_in_threadpool(
+        repair_headless_browser,
+        None,
+        None,
+        auto_install=params.auto_install,
+        probe_launch=params.probe_launch,
+        patch_config=patch_cfg or None,
+    )

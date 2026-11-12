@@ -29,6 +29,53 @@ export interface SangonAuthMeta {
   auto_confirm_fee: boolean
 }
 
+export interface BrowserEnvConfig {
+  enabled: boolean
+  engine: string
+  headless: boolean
+  browsers_path: string
+  executable_path: string
+  download_host: string
+  fallback_download_host: string
+  auto_install: boolean
+  use_system_browser_fallback: boolean
+  launch_timeout_ms: number
+  extra_args: string[]
+}
+
+export interface BrowserEnvIssue {
+  code: string
+  level: 'error' | 'warning' | 'info'
+  message: string
+  auto_fixable: boolean
+}
+
+export interface BrowserEnvStatus {
+  enabled: boolean
+  ready: boolean
+  mode: string
+  python_package_ready: boolean
+  playwright_version: string
+  playwright_driver_ready: boolean
+  expected_revision: string
+  expected_version: string
+  configured_browsers_path: string
+  effective_browsers_path: string
+  explicit_browsers_path: boolean
+  chromium_executable: string
+  chromium_exists: boolean
+  chromium_complete: boolean
+  headless_shell_executable: string
+  headless_shell_complete: boolean
+  integrity_issue_paths: string[]
+  system_fallback_browser: { name: string; path: string } | null
+  launch_probe_ok: boolean | null
+  issues: BrowserEnvIssue[]
+  config: BrowserEnvConfig
+  actions?: string[]
+  warnings?: string[]
+}
+
 export interface SangonOrderItem {
   dir_name: string
   order_date: string

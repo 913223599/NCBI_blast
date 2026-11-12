@@ -31,6 +31,9 @@ uv>=0.5.0
 # AI
 openai>=1.0.0
 
+# 无头浏览器自动化（用于生工 16S 测序结果官网自动下载与端到端页面操作）
+playwright>=1.48.0
+
 # 注意: edlib 在 Windows 上没有预编译 wheel，必须本地 C++ 编译器才能安装，
 # 无编译环境时会导致整份依赖安装回滚。该包为可选依赖，已移入 requirements-optional.txt。
 # 缺失时 NGCS 会退化为近似兜底实现（可跑通但 consensus/polishing 比对结果不可信）。

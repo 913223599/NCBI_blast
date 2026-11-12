@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { getBridge } from '../../bridge'
 import { useAppStore } from '../../stores/app'
+import HeadlessBrowserPanel from './HeadlessBrowserPanel.vue'
 
 const appStore = useAppStore()
 const lanEnabled = ref(false)
@@ -64,6 +65,8 @@ onMounted(() => loadLanShareInfo())
         <button class="p-btn p-btn-primary" @click="saveLanSettings">💾 应用系统更改</button>
       </div>
     </div>
+
+    <HeadlessBrowserPanel />
   </div>
 </template>
 

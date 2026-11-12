@@ -2198,6 +2198,176 @@ def test_mail_compose_preview_and_custom_send_fields(monkeypatch):
         assert sent_records[-1]["attach_name"] == "自检包_定制.zip"
 
 
+def test_browser_env_overview_and_repair_routes(monkeypatch):
+    """验证无头浏览器配置、检查与自修复路由及生工 16S overview 状态透出"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import src.backend.routes.other_tools as ot_routes
+    import src.backend.services.other_tools.sangon_settings as ss_mod
+
+    app = FastAPI()
+    app.include_router(ot_routes.router)
+    client = TestClient(app)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sangon_dir = root / "sangon"
+        dl_dir = root / "dl"
+        sangon_dir.mkdir()
+        dl_dir.mkdir()
+        monkeypatch.setattr(ss_mod, "SANGON_CONFIG_PATH", root / "sangon_cfg.json")
+        ss_mod.save_sangon_settings({"sangon_root": str(sangon_dir), "downloads_dir": str(dl_dir)})
+
+        cfg_file = root / "config.json"
+        cfg_file.write_text(
+            json.dumps({
+                "headless_browser": {
+                    "enabled": True,
+                    "headless": True,
+                    "use_system_browser_fallback": True,
+                    "executable_path": "",
+                }
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        called_repairs = []
+
+        def fake_inspect(project_root=None, config_path=None, probe_launch=False):
+            return {
+                "enabled": True,
+                "ready": True,
+                "mode": "playwright_chromium",
+                "python_package_ready": True,
+                "playwright_version": "1.58.0",
+                "chromium_complete": True,
+                "headless_shell_complete": True,
+                "integrity_issue_paths": [],
+                "issues": [],
+                "config": json.loads(cfg_file.read_text(encoding="utf-8")).get("headless_browser", {}),
+            }
+
+        def fake_repair(
+            project_root=None,
+            config_path=None,
+            auto_install=True,
+            probe_launch=True,
+            patch_config=None,
+        ):
+            if patch_config:
+                cur_full = json.loads(cfg_file.read_text(encoding="utf-8"))
+                cur_hb = cur_full.setdefault("headless_browser", {})
+                cur_hb.update(patch_config)
+                cfg_file.write_text(json.dumps(cur_full, ensure_ascii=False), encoding="utf-8")
+            called_repairs.append(
+                {
+                    "auto_install": auto_install,
+                    "probe_launch": probe_launch,
+                    "patch_config": patch_config,
+                }
+            )
+            rep = fake_inspect(project_root=project_root, config_path=config_path, probe_launch=probe_launch)
+            rep["actions"] = ["配置与浏览器内核自检通过"]
+            rep["launch_probe_ok"] = True
+            return rep
+
+        monkeypatch.setattr(ot_routes, "CONFIG_JSON_PATH", cfg_file)
+        monkeypatch.setattr(ot_routes, "inspect_headless_browser", fake_inspect)
+        monkeypatch.setattr(ot_routes, "repair_headless_browser", fake_repair)
+
+        r_ov = client.get("/other_tools/sangon_16s/overview")
+        assert r_ov.status_code == 200
+        assert "browser_env" in r_ov.json()
+        assert r_ov.json()["browser_env"]["ready"] is True
+
+        r_get = client.get("/other_tools/browser_env")
+        assert r_get.status_code == 200
+        assert r_get.json()["mode"] == "playwright_chromium"
+
+        r_rep = client.post(
+            "/other_tools/browser_env/repair",
+            json={
+                "headless": False,
+                "use_system_browser_fallback": False,
+                "auto_install": True,
+                "probe_launch": True,
+            },
+        )
+        assert r_rep.status_code == 200
+        data = r_rep.json()
+        assert data["ready"] is True
+        assert data["config"]["headless"] is False
+        assert data["config"]["use_system_browser_fallback"] is False
+        assert len(called_repairs) == 1
+        assert called_repairs[0]["patch_config"] == {
+            "headless": False,
+            "use_system_browser_fallback": False,
+        }
+
+
+def test_settings_browser_env_routes(monkeypatch):
+    """验证全局设置 /api/settings/browser_env 与 /api/settings/browser_env/repair 路由"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    import src.backend.routes.settings as settings_routes
+    import src.utils.headless_browser_manager as hb_mgr
+
+    app = FastAPI()
+    app.include_router(settings_routes.router)
+    client = TestClient(app)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cfg_file = root / "config.json"
+        cfg_file.write_text(
+            json.dumps({"headless_browser": dict(hb_mgr.DEFAULT_HEADLESS_BROWSER_CONFIG)}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        bdir = root / "vendor" / "ms-playwright"
+        chrome_dir = bdir / "chromium-1208" / "chrome-win64"
+        chrome_dir.mkdir(parents=True)
+        (chrome_dir / "chrome.exe").write_bytes(b"MZ")
+        (bdir / "chromium-1208" / "INSTALLATION_COMPLETE").write_text("", encoding="utf-8")
+        shell_dir = bdir / "chromium_headless_shell-1208" / "chrome-headless-shell-win64"
+        shell_dir.mkdir(parents=True)
+        (shell_dir / "chrome-headless-shell.exe").write_bytes(b"MZ")
+        (bdir / "chromium_headless_shell-1208" / "INSTALLATION_COMPLETE").write_text("", encoding="utf-8")
+
+        orig_project_root = hb_mgr.PROJECT_ROOT
+        monkeypatch.setattr(hb_mgr, "PROJECT_ROOT", root)
+        monkeypatch.setattr(
+            hb_mgr,
+            "_read_playwright_package_info",
+            lambda: {
+                "installed": True,
+                "version": "1.58.0",
+                "driver_ready": True,
+                "revision": "1208",
+                "version_browser": "145.0",
+            },
+        )
+        monkeypatch.setattr(hb_mgr, "_check_windows_integrity_issues", lambda paths: [])
+        monkeypatch.setattr(hb_mgr, "_probe_browser_launch", lambda opts: (True, "145.0", ""))
+        monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+
+        r_get = client.get("/api/settings/browser_env?probe=false")
+        assert r_get.status_code == 200
+        assert r_get.json()["ready"] is True
+        assert r_get.json()["mode"] == "playwright_chromium"
+
+        r_post = client.post(
+            "/api/settings/browser_env/repair",
+            json={"enabled": False, "probe_launch": False},
+        )
+        assert r_post.status_code == 200
+        d_post = r_post.json()
+        assert d_post["enabled"] is False
+        assert d_post["mode"] == "disabled"
+        assert d_post["ready"] is False
+        assert json.loads(cfg_file.read_text(encoding="utf-8"))["headless_browser"]["enabled"] is False
+        assert orig_project_root != root
+
+
 def test_no_emoji_and_utf8_in_new_files():
     """验证新增与修改的前后端代码文件全部采用 UTF-8 且不含任何 Emoji 字符"""
     repo_root = Path(__file__).resolve().parents[1]
@@ -2205,6 +2375,9 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "scripts" / "build_annotation_report.py",
         repo_root / "src" / "blast" / "engine.py",
         repo_root / "src" / "blast" / "local_blast.py",
+        repo_root / "src" / "utils" / "environment_checker.py",
+        repo_root / "src" / "utils" / "headless_browser_manager.py",
+        repo_root / "src" / "utils" / "verify_and_install_deps.py",
         repo_root / "src" / "workbench" / "models" / "tool_config.py",
         repo_root / "src" / "mail_download" / "auto_pipeline.py",
         repo_root / "src" / "mail_download" / "batch_state.py",
@@ -2215,6 +2388,7 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "mail_download" / "scheduler.py",
         repo_root / "src" / "mail_download" / "sender.py",
         repo_root / "src" / "backend" / "routes" / "other_tools.py",
+        repo_root / "src" / "backend" / "routes" / "settings.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "dir_migrator.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "history_cleaner.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "mail_composer.py",
@@ -2226,6 +2400,7 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_settings.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_zip_importer.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "secret_store.py",
+        repo_root / "src" / "web-next" / "src" / "components" / "settings" / "HeadlessBrowserPanel.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherToolsView.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "api.ts",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PathField.vue",

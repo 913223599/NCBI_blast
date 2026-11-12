@@ -40,6 +40,7 @@ MODULE_IMPORT_MAP = {
     "python-multipart": "multipart",
     "edlib": "edlib",
     "openai": "openai",
+    "playwright": "playwright",
 }
 
 # 国内镜像源配置
@@ -108,6 +109,8 @@ def install_requirements(req_file: Path):
 
 def main():
     project_root = Path(__file__).resolve().parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
     req_file = project_root / "requirements.txt"
 
     if not req_file.exists():
@@ -117,20 +120,30 @@ def main():
     missing = check_missing_modules()
     if not missing:
         print("[INFO] Python 所有核心依赖包已完整就绪。")
-        return 0
+    else:
+        print(f"[WARN] 检测到缺失的 Python 依赖包 ({len(missing)}项): {', '.join(missing)}")
+        success = install_requirements(req_file)
+        if not success:
+            return 1
 
-    print(f"[WARN] 检测到缺失的 Python 依赖包 ({len(missing)}项): {', '.join(missing)}")
-    success = install_requirements(req_file)
-    if not success:
-        return 1
+        # 安装完成后再次验证
+        remaining_missing = check_missing_modules()
+        if remaining_missing:
+            print(f"[ERROR] 仍有未安装成功的包: {', '.join(remaining_missing)}")
+            return 1
 
-    # 安装完成后再次验证
-    remaining_missing = check_missing_modules()
-    if remaining_missing:
-        print(f"[ERROR] 仍有未安装成功的包: {', '.join(remaining_missing)}")
-        return 1
+        print("[INFO] Python 依赖包已全部自动补齐成功。")
 
-    print("[INFO] Python 依赖包已全部自动补齐成功。")
+    try:
+        from src.utils.headless_browser_manager import repair_headless_browser
+
+        rep = repair_headless_browser(project_root=project_root, probe_launch=False, progress_cb=print)
+        if rep.get("ready"):
+            print(f"[INFO] 无头浏览器就绪 ({rep.get('mode')})。")
+        elif rep.get("enabled", True):
+            print("[WARN] 无头浏览器尚未完全就绪，可在界面「无头浏览器自检与修复」中重试。")
+    except Exception as exc:
+        print(f"[WARN] 无头浏览器检查异常（忽略继续启动）: {exc}")
     return 0
 
 

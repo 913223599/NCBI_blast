@@ -60,6 +60,14 @@ $CriticalImages = @(
     "tools\ncbi_dist\bin\tree-tools\muscle.exe"
 )
 
+# Also check any Playwright headless/Chromium binaries cached inside vendor\ms-playwright
+$PlaywrightVendorRoot = Join-Path $ProjectRoot "vendor\ms-playwright"
+if (Test-Path $PlaywrightVendorRoot) {
+    Get-ChildItem -Path $PlaywrightVendorRoot -Recurse -File -Include "chrome.exe","chrome-headless-shell.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+        $CriticalImages += $_.FullName.Substring($ProjectRoot.Length + 1)
+    }
+}
+
 $ElectronExe = Join-Path $ProjectRoot "electron-shell\node_modules\electron\dist\electron.exe"
 
 function Test-LowIntegrity([string]$Path) {

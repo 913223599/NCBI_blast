@@ -14,6 +14,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from src.utils.headless_browser_manager import get_launch_options, repair_headless_browser
+
 from .sangon_ignore_rules import list_ignored_orders, normalize_order_key
 from .sangon_mail_scanner import SangonMailIndex, create_sangon_subdirs
 from .sangon_zip_importer import import_order_zips_from_downloads
@@ -108,36 +110,105 @@ class SangonBrowserSession:
         account: str,
         password: str,
         *,
-        headless: bool = True,
-        timeout_ms: int = 90000,
+        headless: Optional[bool] = None,
+        timeout_ms: Optional[int] = None,
+        log_cb: Optional[Callable[[str], None]] = None,
     ):
         self.account = (account or "").strip()
         self.password = password or ""
         self.headless = headless
         self.timeout_ms = timeout_ms
+        self._log_cb = log_cb
         self._pw_cm: Any = None
         self._pw: Any = None
         self._browser: Any = None
         self._ctx: Any = None
         self._page: Any = None
+        self._resolved_timeout_ms: int = timeout_ms if timeout_ms is not None else 90000
+
+    def _safe_close_pw(self) -> None:
+        try:
+            if self._pw_cm is not None:
+                self._pw_cm.__exit__(None, None, None)
+        except Exception:
+            pass
+        self._pw_cm = None
+        self._pw = None
+
+    def _launch_chromium(self, opts: Dict[str, Any]) -> Any:
+        launch_kwargs: Dict[str, Any] = {
+            "headless": bool(opts.get("headless", True)),
+            "timeout": int(opts.get("timeout_ms", self._resolved_timeout_ms)),
+        }
+        if opts.get("args"):
+            launch_kwargs["args"] = list(opts["args"])
+        if opts.get("executable_path"):
+            launch_kwargs["executable_path"] = str(opts["executable_path"])
+        return self._pw.chromium.launch(**launch_kwargs)
 
     def __enter__(self) -> "SangonBrowserSession":
         if not self.account or not self.password:
             raise SangonLoginError("生工账号或登录密码未配置")
+
+        launch_opts = get_launch_options(headless_override=self.headless)
+        if not launch_opts.get("enabled", True):
+            raise SangonOrderDownloadError("config.json 已禁用无头浏览器 (headless_browser.enabled=false)")
+
+        effective_timeout = int(
+            self.timeout_ms if self.timeout_ms is not None else launch_opts.get("timeout_ms", 90000)
+        )
+        self._resolved_timeout_ms = effective_timeout
+        launch_opts["timeout_ms"] = effective_timeout
+
         try:
             from playwright.sync_api import sync_playwright
-        except ImportError as exc:
-            raise SangonOrderDownloadError(f"缺少 Playwright 运行环境，无法启动自动下载: {exc}") from exc
+        except ImportError:
+            repair_rep = repair_headless_browser(
+                auto_install=True,
+                probe_launch=False,
+                progress_cb=self._log_cb,
+            )
+            if not repair_rep.get("python_package_ready"):
+                raise SangonOrderDownloadError("缺少 Playwright 运行环境，且自动修复安装失败")
+            from playwright.sync_api import sync_playwright
+            launch_opts = get_launch_options(headless_override=self.headless)
+            launch_opts["timeout_ms"] = effective_timeout
 
-        self._pw_cm = sync_playwright()
-        self._pw = self._pw_cm.__enter__()
-        self._browser = self._pw.chromium.launch(headless=self.headless)
-        self._ctx = self._browser.new_context(
-            viewport={"width": 1366, "height": 900},
-            accept_downloads=True,
-        )
-        self._page = self._ctx.new_page()
-        return self
+        try:
+            self._pw_cm = sync_playwright()
+            self._pw = self._pw_cm.__enter__()
+            try:
+                self._browser = self._launch_chromium(launch_opts)
+            except Exception as launch_exc:
+                err_msg = str(launch_exc)
+                logger.warning(f"初次启动无头浏览器失败 ({err_msg})，尝试执行环境自修复后重连...")
+                if self._log_cb:
+                    self._log_cb(f"浏览器启动异常，正在尝试自动自修复: {err_msg}")
+                self._safe_close_pw()
+                repair_rep = repair_headless_browser(
+                    auto_install=True,
+                    probe_launch=False,
+                    progress_cb=self._log_cb,
+                )
+                if not repair_rep.get("ready"):
+                    raise SangonOrderDownloadError(
+                        f"无头浏览器启动失败且自动修复未能就绪: {err_msg}"
+                    ) from launch_exc
+                refreshed_opts = get_launch_options(headless_override=self.headless)
+                refreshed_opts["timeout_ms"] = effective_timeout
+                self._pw_cm = sync_playwright()
+                self._pw = self._pw_cm.__enter__()
+                self._browser = self._launch_chromium(refreshed_opts)
+
+            self._ctx = self._browser.new_context(
+                viewport={"width": 1366, "height": 900},
+                accept_downloads=True,
+            )
+            self._page = self._ctx.new_page()
+            return self
+        except Exception:
+            self.__exit__(None, None, None)
+            raise
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
         try:
@@ -379,7 +450,7 @@ class SangonBrowserSession:
                 page.wait_for_timeout(200)
 
             # 阶段 B：等待下载事件到达
-            dl_wait_deadline = time.monotonic() + max(15.0, self.timeout_ms / 1000.0)
+            dl_wait_deadline = time.monotonic() + max(15.0, self._resolved_timeout_ms / 1000.0)
             while time.monotonic() < dl_wait_deadline:
                 if captured_downloads or blocking_alerts:
                     break
@@ -396,7 +467,7 @@ class SangonBrowserSession:
 
             if not captured_downloads:
                 raise SangonOrderDownloadError(
-                    f"点击确认后 {int(self.timeout_ms / 1000)}s 内未收到浏览器下载流"
+                    f"点击确认后 {int(self._resolved_timeout_ms / 1000)}s 内未收到浏览器下载流"
                 )
 
             dl = captured_downloads[0]
@@ -516,8 +587,8 @@ def download_sangon_orders(
     account: str = "",
     password: str = "",
     auto_confirm_fee: bool = True,
-    headless: bool = True,
-    timeout_ms: int = 90000,
+    headless: Optional[bool] = None,
+    timeout_ms: Optional[int] = None,
     ignored_orders: Optional[Iterable[str]] = None,
     progress_cb: Optional[Callable[[int, int, str], None]] = None,
     log_cb: Optional[Callable[[str], None]] = None,
@@ -598,12 +669,15 @@ def download_sangon_orders(
             raise SangonLoginError("需要网页自动下载但尚未配置生工账号或密码")
 
         factory = session_factory or SangonBrowserSession
+        launch_cfg = get_launch_options(headless_override=headless)
+        eff_headless = bool(launch_cfg.get("headless", True)) if headless is None else headless
+        eff_timeout = int(launch_cfg.get("timeout_ms", 90000)) if timeout_ms is None else timeout_ms
         total_web = len(web_targets)
         with factory(
             account,
             password,
-            headless=headless,
-            timeout_ms=timeout_ms,
+            headless=eff_headless,
+            timeout_ms=eff_timeout,
         ) as session:
             for idx, target in enumerate(web_targets, start=1):
                 if progress_cb:

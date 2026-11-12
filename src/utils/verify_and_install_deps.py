@@ -26,6 +26,11 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
+# 直接以脚本方式执行 (python src/utils/verify_and_install_deps.py) 时确保项目根目录在 sys.path 中
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 # 核心依赖包名与 import 模块名映射
 MODULE_IMPORT_MAP = {
     "fastapi": "fastapi",
@@ -47,6 +52,8 @@ MODULE_IMPORT_MAP = {
     "starlette": "starlette",
     "python-multipart": "multipart",
     "openai": "openai",
+    # 无头浏览器自动化依赖 (生工 16S 官网自动下载等)
+    "playwright": "playwright",
     # 组装引擎 NGCS (E:\NGCS) 运行时依赖
     "scipy": "scipy",
     "networkx": "networkx",
@@ -126,6 +133,17 @@ def heal_configurations(project_root: Path):
     if not config_file.exists() and template_file.exists():
         shutil.copy2(template_file, config_file)
         print("[自愈] 未检测到 config.json，已从模板自动创建默认配置。")
+
+    try:
+        from src.utils.headless_browser_manager import heal_headless_browser_config
+
+        hb_res = heal_headless_browser_config(project_root=project_root, config_path=config_file)
+        for act in hb_res.get("actions", []):
+            print(f"[自愈] {act}")
+        for warn in hb_res.get("warnings", []):
+            print(f"[警告] {warn}")
+    except Exception as exc:
+        print(f"[警告] 增量补全无头浏览器配置失败: {exc}")
 
     db_file = project_root / "translations.db"
     backup_db = project_root / "translations_backup.db"
@@ -386,7 +404,7 @@ def main():
     optional_req_file = project_root / "requirements-optional.txt"
 
     print("---------------------------------------------------")
-    print("[1/3] 正在执行附属环境与目录自愈检查...")
+    print("[1/4] 正在执行附属环境与目录自愈检查...")
     heal_directories(project_root)
     heal_auxiliary_binaries(project_root)
     heal_configurations(project_root)
@@ -394,7 +412,7 @@ def main():
     detect_git_installation(project_root)
 
     print("---------------------------------------------------")
-    print("[2/3] 正在校验 Python 运行依赖与配置国内镜像源...")
+    print("[2/4] 正在校验 Python 运行依赖与配置国内镜像源...")
     configure_pip_mirror()
 
     if not req_file.exists():
@@ -443,7 +461,32 @@ def main():
             print("[信息] 可选依赖已全部补齐成功。")
 
     print("---------------------------------------------------")
-    print("[3/3] Python 环境自愈与依赖审计全部通过。")
+    print("[3/4] 正在执行无头浏览器 (Playwright Chromium) 启动检查与自修复...")
+    try:
+        from src.utils.headless_browser_manager import repair_headless_browser
+
+        browser_report = repair_headless_browser(
+            project_root=project_root,
+            probe_launch=False,
+            progress_cb=print,
+        )
+        for act in browser_report.get("actions", []):
+            print(f"[自愈] {act}")
+        for warn in browser_report.get("warnings", []):
+            print(f"[警告] {warn}")
+        if browser_report.get("ready"):
+            mode = browser_report.get("mode", "unknown")
+            bver = browser_report.get("expected_version") or browser_report.get("playwright_version") or ""
+            print(f"[信息] 无头浏览器就绪 (模式: {mode}{', 版本: ' + bver if bver else ''})。")
+        elif not browser_report.get("enabled", True):
+            print("[信息] 配置已禁用无头浏览器 (headless_browser.enabled=false)。")
+        else:
+            print("[警告] 无头浏览器内核尚未完全就绪，生工 16S 自动网页下载将受限（可在界面一键重试修复）。")
+    except Exception as exc:
+        print(f"[警告] 无头浏览器自检出现异常（不阻塞主程序启动）: {exc}")
+
+    print("---------------------------------------------------")
+    print("[4/4] Python 环境自愈与依赖审计全部通过。")
     return 0
 
 
