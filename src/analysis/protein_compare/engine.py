@@ -12,295 +12,51 @@ import os
 import csv
 import json
 import logging
+import threading
 import concurrent.futures
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Set
-from pydantic import BaseModel, Field
 from Bio import SeqIO
 from Bio.Align import PairwiseAligner
 
 from ..pan_genomics.fast_matcher import get_kmers
+from ..pan_genomics.gpu_accelerator import GPUSequenceMatcher
 from ..annotation.fuser import AnnotationFuser
+from .categories import PROTEIN_CATEGORIES, resolve_domain_names
+from .models import (
+    ProteinItem,
+    MutationSite,
+    RegionDomainItem,
+    ProteinComparisonRow,
+    ProteinComparisonResult,
+)
 
 logger = logging.getLogger("ProteinCompareEngine")
-
-# 预设生物学功能分类配置 (包含前端 Tab 标签元数据)
-PROTEIN_CATEGORIES = {
-    "tail_fiber": {
-        "label": "尾丝与宿主识别系统 (Tail Fiber & Host Specificity)",
-        "patterns": [
-            r"\btail\b",
-            r"\btail[- ]?(?:fibers?|fibres?|spikes?|tubes?|sheaths?|shafts?|tips?|assembly|proteins?|hydrolases?|chaperones?|lysozymes?|collar|completion)\b",
-            r"\btailspikes?\b",
-            r"\bbaseplates?\b",
-            r"\btape[- ]?measure\b",
-            r"\btmp\b",
-            r"\btpm\b",
-            r"\breceptor[- ]?(?:binding|recogni(?:tion|zing))\b",
-            r"\brbp\b",
-            r"\bhost[- ]?(?:specificity|range|recognition)\b",
-            r"\badhesins?\b",
-            r"\bcollar\b",
-            r"\bwhiskers?\b",
-            r"\b(?:distal|proximal|hinge)\s+connectors?\b",
-            r"\bneck\s+(?:proteins?|passage|appendages?)\b",
-            r"\bhead[- ]to[- ]tail\b",
-            r"\badaptor\s+ad4\b",
-            r"\bwedge\b",
-            r"\bcentral\s+hub\b",
-            r"\bspike\s+(?:proteins?|tips?|g\b)\b",
-            r"\bdepolymerases?\b",
-            r"\b(?:endo[- ]?)?sialidases?\b",
-            r"\bneuraminidases?\b",
-            r"\bhyaluronidases?\b",
-            r"\bpectin\s+lyases?\b",
-            r"\bcolanic\s+acid\b",
-        ],
-        "exclude": [
-            r"\bhead[- ]?fibers?\b",
-        ]
-    },
-    "lysis": {
-        "label": "裂解系统与溶菌酶 (Lysis / Endolysin / Spanin / Holin)",
-        "patterns": [
-            r"\bendolysins?\b",
-            r"\b[a-z0-9'-]*lysins?\b",
-            r"\blysozymes?\b",
-            r"\b(?:anti[- ]?)?holins?\b",
-            r"\b(?:i-|o-|u-|peri(?:plasmic)?[- ]|outer[- ]membrane[- ]|inner[- ]membrane[- ]|unimolecular[- ])?spanins?\b",
-            r"\bpeptidoglycan\s+(?:hydrolases?|recognition|catabolic|binding|endopeptidases?|lytic)\b",
-            r"\b[a-z0-9'-]*muramidases?\b",
-            r"\b(?:soluble\s+)?lytic\s+(?:murein\s+)?transglycosylases?\b",
-            r"\btransglycosylases?\b",
-            r"\bcell\s+wall\s+hydrolases?\b",
-            r"\bn-acetylmuramoyl-l-alanine\s+amidases?\b",
-            r"\b[a-z0-9'-]*amidases?\b",
-            r"\bmurein\s+(?:hydrolases?|endopeptidases?|dd-endopeptidases?|transglycosylases?)\b",
-            r"\brz(?:-like|1|a|b)?\b",
-            r"\b(?:host\s+|cell\s+)?lysis\b",
-            r"\bnlp[- /]?p60\b",
-            r"\bchap\s+domain\b",
-            r"\bglycoside\s+hydrolase\s+family\s+(?:18|19|22|24|25|73|108)\b",
-        ],
-        "exclude": [
-            r"\btail[- ]?(?:associated\s+)?(?:lysozymes?|lysins?|muramidases?|hydrolases?)\b",
-            r"\btail\s+tip\s+lysins?\b",
-            r"\btailspikes?\b",
-            r"\bbaseplate[- ]?(?:lysozymes?|lysins?|hub)\b",
-            r"\bvirion[- ]associated\s+lysozymes?\b",
-            r"\binternal\s+virion\s+lysozymes?\b",
-            r"\bhemolysins?\b",
-            r"\bhaemolysins?\b",
-            r"\benterolysins?\b",
-            r"\bcytolysins?\b",
-            r"\bleukocidins?\b",
-            r"\bautolysins?\b",
-            r"\bdeamidases?\b",
-            r"\bamidotransferases?\b",
-        ]
-    },
-    "capsid_head": {
-        "label": "衣壳与头部形态发生 (Capsid & Head Morphogenesis)",
-        "patterns": [
-            r"\b(?:major|minor|prohead|procapsid|icosahedral|isometric)?\s*capsids?\b",
-            r"\bportal\s*(?:proteins?|vertex)?\b",
-            r"\bhead\s+(?:proteins?|completion|assembly|structural|maturation|morphogenesis|scaffolding|closure|decoration|stabilization|vertex|chaperones?|fibers?|fibres?)\b",
-            r"\bhead[- ]?tail\s+(?:adaptors?|joining|connectors?|neck)\b",
-            r"\b(?:head\s+|capsid\s+|prohead\s+)?maturation\s+proteases?\b",
-            r"\bprohead\s*(?:proteases?|scaffolding|core|proteins?)?\b",
-            r"\bprocapsids?\b",
-            r"\bcoat\s+proteins?\b",
-            r"\bvertex\s+proteins?\b",
-            r"\bcapsomers?\b",
-            r"\bdecoration\s+proteins?\b",
-            r"\bscaffold(?:ing)?\s+proteins?\b",
-            r"\b(?:major\s+|minor\s+)?virion\s+(?:structural|morphogenesis)\s+proteins?\b",
-            r"\bencapsulins?\b",
-            r"\bmu\s+protein\s+f\b",
-            r"\bsh3\s+beta-barrel\s+fold\b",
-        ],
-        "exclude": []
-    },
-    "replication": {
-        "label": "DNA 复制、重组与转录调控 (Replication, Recombination & Regulation)",
-        "patterns": [
-            r"\b(?:dna|rna)?\s*polymerases?\b",
-            r"\bhelicases?\b",
-            r"\bprimases?\b",
-            r"\bprimase-helicases?\b",
-            r"\bprimosomal\b",
-            r"\breplication\s+(?:initiation|proteins?|factors?|organizers?|origins?)\b",
-            r"\b(?:dna|rna)?\s*ligases?\b",
-            r"\b(?:endo|exo|ribo|deoxyribo)nucleases?\b",
-            r"\bhnh\b",
-            r"\bgjy-yig\b",
-            r"\bgiy-yig\b",
-            r"\bvrr-nuc\b",
-            r"\b(?:rnase|dnase)s?\b",
-            r"\bssb\b",
-            r"\bsingle[- ]strand(?:ed)?\s+(?:dna[- ]?)?(?:binding|annealing)\b",
-            r"\bdna[- ]binding\b",
-            r"\bmethyltransferases?\b",
-            r"\bmethylases?\b",
-            r"\btopoisomerases?\b",
-            r"\bgyrases?\b",
-            r"\bintegrases?\b",
-            r"\bexcisionases?\b",
-            r"\bexcise\b",
-            r"\brecombinases?\b",
-            r"\brecombination\b",
-            r"\bresolvases?\b",
-            r"\binvertases?\b",
-            r"\btransposases?\b",
-            r"\buvs[xyw]\b",
-            r"\brec[abceft]\b",
-            r"\brad5[12]\b",
-            r"\b Nin[bcfg]\b",
-            r"\bnin[bcfg]\b",
-            r"\brdf\b",
-            r"\b(?:anti[- ]?)?repressors?\b",
-            r"\btranscriptio(?:n|nal)\b",
-            r"\bsigma(?:\s+factors?|-[a-z0-9]+)\b",
-            r"\banti[- ]?termination\b",
-            r"\b(?:cro|ci|cii|ciii)\s*(?:proteins?|repressors?|regulators?|like)?\b",
-            r"\bwhib\b",
-            r"\bpar[abm]\b",
-        ],
-        "exclude": []
-    },
-    "packaging": {
-        "label": "基因组包装与末端酶 (Packaging & Terminase)",
-        "patterns": [
-            r"\bterminases?\b",
-            r"\bter[ls]\b",
-            r"\b(?:dna|genome|headful|phage)\s+packaging\b",
-            r"\bpackaging\s+(?:proteins?|enzymes?|machinery|atpases?|motors?|subunits?)\b",
-            r"\bmaturases?\b",
-            r"\bcos[- ]cleaving\b",
-            r"\bpac\s+(?:proteins?|sites?|ases?)\b",
-            r"\bpacases?\b",
-        ],
-        "exclude": []
-    },
-    "all": {
-        "label": "全部匹配蛋白质 (All Matched CDS)",
-        "patterns": [],
-        "exclude": []
-    }
-}
-
-
-class ProteinItem(BaseModel):
-    """单个蛋白质条目"""
-    id: str
-    locus_tag: str
-    product: str
-    translation: str
-    length_aa: int
-    start: int
-    end: int
-    strand: str
-    category: str = "other"
-
-
-class MutationSite(BaseModel):
-    """单处点突变或变异位点"""
-    pos: int
-    ref_aa: str
-    alt_aa: str
-    impact_type: str = "conservative"  # 'conservative', 'charge_flip', 'charge_shift', 'polarity_shift', 'indel'
-    impact_label: str = "同类保守替换"
-    description: str
-
-
-class RegionDomainItem(BaseModel):
-    """蛋白质特定区段（N端、中段、C端）保守性与变异分布"""
-    name: str  # "N-端结构域", "中段骨架区", "C-端受体/功能区"
-    start: int
-    end: int
-    length: int
-    identity_pct: float
-    mutation_count: int
-    conservative_count: int
-    radical_count: int
-    status: str  # 'conserved' (>=95%), 'moderate' (80-95%), 'hypervariable' (<80%)
-
-
-class ProteinComparisonRow(BaseModel):
-    """单对蛋白质比对明细记录"""
-    category: str
-    category_label: str
-    
-    # 样本 A 信息
-    sample_a_id: str
-    sample_a_tag: str
-    sample_a_product: str
-    sample_a_len: int
-    sample_a_range: str
-    sample_a_strand: str
-    sample_a_seq: str
-    
-    # 样本 B 信息
-    sample_b_id: Optional[str] = None
-    sample_b_tag: Optional[str] = None
-    sample_b_product: Optional[str] = None
-    sample_b_len: Optional[int] = 0
-    sample_b_range: Optional[str] = None
-    sample_b_strand: Optional[str] = None
-    sample_b_seq: Optional[str] = None
-    
-    # 比对与变异判定
-    match_status: str  # 'identical' (100%), 'highly_conserved' (>=95%), 'divergent' (<95%), 'unique_a', 'unique_b'
-    identity_pct: float = 0.0
-    diff_count: int = 0
-    mutations: List[MutationSite] = []
-    length_diff: int = 0
-    notes: Optional[str] = None
-
-    # 高维生物学分析指标
-    aligned_seq_a: str = ""
-    aligned_markup: str = ""
-    aligned_seq_b: str = ""
-    conservative_mutation_cnt: int = 0
-    radical_mutation_cnt: int = 0
-    indel_cnt: int = 0
-    hotspot_conclusion: str = ""
-    region_domains: List[RegionDomainItem] = []
-
-
-class ProteinComparisonResult(BaseModel):
-    """跨样本比对汇总报告"""
-    sample_a_name: str
-    sample_b_name: str
-    sample_a_total_cds: int
-    sample_b_total_cds: int
-    
-    # 统计指标
-    total_compared_pairs: int = 0
-    identical_count: int = 0
-    conserved_count: int = 0
-    divergent_count: int = 0
-    unique_a_count: int = 0
-    unique_b_count: int = 0
-    average_identity_pct: float = 0.0
-    
-    # 分类汇总统计
-    category_summary: Dict[str, Dict[str, int]] = {}
-    
-    # 明细列表
-    rows: List[ProteinComparisonRow] = []
 
 
 class ProteinComparer:
     """蛋白质比对执行器"""
 
     def __init__(self):
-        self.aligner = PairwiseAligner()
-        self.aligner.mode = 'global'
-        self.aligner.match_score = 1.0
-        self.aligner.mismatch_score = 0.0
-        self.aligner.open_gap_score = -1.0
-        self.aligner.extend_gap_score = -0.5
+        self._thread_local = threading.local()
+        self.aligner = self._create_aligner()
+
+    @staticmethod
+    def _create_aligner() -> PairwiseAligner:
+        aligner = PairwiseAligner()
+        aligner.mode = 'global'
+        aligner.match_score = 1.0
+        aligner.mismatch_score = 0.0
+        aligner.open_gap_score = -1.0
+        aligner.extend_gap_score = -0.5
+        return aligner
+
+    def _get_thread_aligner(self) -> PairwiseAligner:
+        aligner = getattr(self._thread_local, "aligner", None)
+        if aligner is None:
+            aligner = self._create_aligner()
+            self._thread_local.aligner = aligner
+        return aligner
 
     @classmethod
     def is_hypothetical(cls, text: str) -> bool:
@@ -559,12 +315,28 @@ class ProteinComparer:
         # 预先提取样本 B 所有蛋白的整型 K-mer 集合与长度
         b_kmers: Dict[str, Set[int]] = {b.id: get_kmers(b.translation, 3) for b in filtered_b}
 
-        # 动态计算安全并发线程数 (保留 2 个核心)
+        # 大规模候选集启用 GPU / 向量化张量预筛选，大幅削减无效两两比对
+        gpu_allowed_b_map: Optional[Dict[int, Set[int]]] = None
+        if len(filtered_a) * len(filtered_b) >= 400:
+            try:
+                matcher = GPUSequenceMatcher()
+                combined_seqs = [a.translation for a in filtered_a] + [b.translation for b in filtered_b]
+                n_a = len(filtered_a)
+                cand_pairs = matcher.compute_batch_candidate_pairs(combined_seqs, sim_threshold=0.22)
+                gpu_allowed_b_map = {i: set() for i in range(n_a)}
+                for gi, gj in cand_pairs:
+                    if gi < n_a <= gj:
+                        gpu_allowed_b_map[gi].add(gj - n_a)
+            except Exception as e:
+                logger.debug(f"GPU 候选预筛回退常规模式: {e}")
+                gpu_allowed_b_map = None
+
+        # 动态计算安全并发线程数 (保留 2 个核心防止卡死)
         cpu_cnt = os.cpu_count() or 4
         max_workers = max(1, min(cpu_cnt - 2, 30))
 
         # 内部对单条 pa 的最佳匹配对齐函数
-        def align_single_pa(pa: ProteinItem) -> Tuple[ProteinItem, Optional[ProteinItem], float, List[MutationSite], int, str, str, str, int, int, int, List[RegionDomainItem], str]:
+        def align_single_pa(idx_a: int, pa: ProteinItem) -> Tuple[ProteinItem, Optional[ProteinItem], float, List[MutationSite], int, str, str, str, int, int, int, List[RegionDomainItem], str]:
             best_match: Optional[ProteinItem] = None
             best_identity = 0.0
             best_mutations: List[MutationSite] = []
@@ -600,9 +372,14 @@ class ProteinComparer:
             pa_kmers = get_kmers(pa.translation, 3)
             len_a = len(pa.translation)
 
-            # 候选过滤 (同名优先，非同名则使用长度与 K-mer 粗筛)
-            same_prod_cands = [b for b in filtered_b if b.product.lower() == pa_prod_lower]
-            other_cands = [b for b in filtered_b if b.product.lower() != pa_prod_lower]
+            allowed_b_indices = gpu_allowed_b_map.get(idx_a) if gpu_allowed_b_map is not None else None
+            same_prod_cands = []
+            other_cands = []
+            for idx_b, b in enumerate(filtered_b):
+                if b.product.lower() == pa_prod_lower:
+                    same_prod_cands.append(b)
+                elif allowed_b_indices is None or idx_b in allowed_b_indices:
+                    other_cands.append(b)
 
             search_cands = same_prod_cands + other_cands
 
@@ -645,7 +422,7 @@ class ProteinComparer:
 
         # 并发对所有 pa 执行对齐
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = [pool.submit(align_single_pa, pa) for pa in filtered_a]
+            futures = [pool.submit(align_single_pa, idx_a, pa) for idx_a, pa in enumerate(filtered_a)]
             for fut in concurrent.futures.as_completed(futures):
                 pa, best_match, best_identity, best_mutations, best_diff_cnt, best_aln_a, best_markup, best_aln_b, best_c_cnt, best_r_cnt, best_in_cnt, best_doms, best_concl = fut.result()
 
@@ -815,62 +592,7 @@ class ProteinComparer:
     @staticmethod
     def _get_domain_names(category: str, product: str) -> Tuple[str, str, str]:
         """依据蛋白质功能分类与产品名称动态推导 N端、中段、C端 结构域名称"""
-        p_lower = product.lower()
-        
-        # 1. 尾管 / 尾鞘 / 尾柱状骨架结构 (优先于一般 tail_fiber 判定，避免 tail tube 误判为尾丝)
-        if any(k in p_lower for k in ["tail tube", "tail sheath", "tube", "sheath", "major tail"]):
-            return (
-                "N-端环状聚合界面 (Ring Assembly N-term)",
-                "中段管壁/鞘层骨架区 (Conduit Core)",
-                "C-端末端对接区 (Distal Interface C-term)"
-            )
-        
-        # 2. 尾丝 / 纤突 / 受体结合系统
-        if category == "tail_fiber" or any(k in p_lower for k in ["tail fiber", "fiber", "spike", "receptor"]):
-            return (
-                "N-端基板锚定域 (Baseplate-binding N-term)",
-                "中段三聚体骨架区 (Shaft / Trimer Core)",
-                "C-端受体结合与纤突域 (Distal RBD / Spike)"
-            )
-            
-        # 3. 裂解系统与溶菌酶
-        if category == "lysis" or any(k in p_lower for k in ["lysin", "lysozyme", "holin", "spanin", "peptidase", "endopeptidase"]):
-            return (
-                "N-端跨膜/催化活性域 (Catalytic / TM Domain)",
-                "中段柔性连接区 (Flexible Linker)",
-                "C-端细胞壁结合域 (Cell-Wall Binding CBD)"
-            )
-            
-        # 4. 衣壳与头部形态发生
-        if category == "capsid_head" or any(k in p_lower for k in ["capsid", "head", "coat", "portal", "scaffold", "vertex", "capsomer"]):
-            return (
-                "N-端衣壳组装前导域 (Prohead Assembly N-term)",
-                "中段壳粒核心折叠区 (Capsomer Core)",
-                "C-端外表面与顶角加固区 (Vertex / Surface C-term)"
-            )
-            
-        # 5. DNA 复制与修饰酶
-        if category == "replication" or any(k in p_lower for k in ["polymerase", "helicase", "primase", "ligase", "nuclease"]):
-            return (
-                "N-端调节与核酸外切域 (Regulatory / Exonuclease)",
-                "中段核心催化活性中心 (Catalytic Polymerase Core)",
-                "C-端核酸结合与夹钳区 (DNA-Binding Clamp)"
-            )
-            
-        # 6. 基因组包装与末端酶
-        if category == "packaging" or any(k in p_lower for k in ["terminase", "packaging", "large subunit", "small subunit"]):
-            return (
-                "N-端 ATP 结合与驱动中心 (ATPase Engine N-term)",
-                "中段能量转换与传动区 (Translocation Transducer)",
-                "C-端 DNA 剪切与 Portal 结合区 (Endonuclease & Portal-binding)"
-            )
-            
-        # 7. 通用 / 未知功能蛋白
-        return (
-            "N-端近端区域 (N-terminal Region)",
-            "中央核心骨架区 (Central Core Region)",
-            "C-端远端区域 (C-terminal Region)"
-        )
+        return resolve_domain_names(category, product)
 
     def _align_and_diff(
         self,
@@ -934,9 +656,10 @@ class ProteinComparer:
 
             return ident, mutations, diff_count, aln_a, aligned_markup, aln_b, cons_cnt, rad_cnt, indel_cnt, domains, conclusion
 
-        # 长度不同时：调用 PairwiseAligner 全局比对
+        # 长度不同时：调用线程独立 PairwiseAligner 全局比对
         try:
-            alignments = self.aligner.align(seq_a, seq_b)
+            aligner = self._get_thread_aligner()
+            alignments = aligner.align(seq_a, seq_b)
             best_aln = next(iter(alignments), None)
             if best_aln is None:
                 max_len = max(len(seq_a), len(seq_b))

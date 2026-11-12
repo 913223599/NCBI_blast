@@ -15,6 +15,9 @@ from ...analysis.protein_compare.engine import ProteinComparer, PROTEIN_CATEGORI
 logger = logging.getLogger("ProteinCompareAPI")
 router = APIRouter(prefix="/api/analysis/protein_compare", tags=["ProteinCompare"])
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+ANNOTATIONS_DIR = PROJECT_ROOT / "results" / "annotations"
+
 
 class RunCompareRequest(BaseModel):
     """跨样本比对请求参数"""
@@ -57,7 +60,7 @@ def _load_sample_proteins(sample_id: str, custom_name: Optional[str] = None) -> 
         raise HTTPException(status_code=404, detail=f"未找到样本或该注释任务尚未完成: {sample_id}")
 
     name = custom_name or rec.get("task_name") or sample_id
-    work_dir = Path(r"f:\NCBI blast\results\annotations") / sample_id
+    work_dir = ANNOTATIONS_DIR / sample_id
     proteins = comparer.load_proteins_from_annotation(work_dir)
     return proteins, name
 
@@ -78,7 +81,7 @@ async def import_external_file(req: ImportExternalFileRequest):
             raise HTTPException(status_code=400, detail=f"未能从该文件中解析出任何有效 CDS 蛋白质特征: {p.name}")
 
         task_id = f"EXT_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-        work_dir = Path(r"f:\NCBI blast\results\annotations") / task_id
+        work_dir = ANNOTATIONS_DIR / task_id
         work_dir.mkdir(parents=True, exist_ok=True)
 
         task_name = req.task_name or p.stem or p.name

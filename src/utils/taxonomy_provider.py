@@ -99,7 +99,7 @@ class TaxonomyProvider:
 
         # 本地 MD5
         if self._local_md5_path.exists():
-            status["localMd5"] = self._local_md5_path.read_text().strip().split()[0]
+            status["localMd5"] = self._local_md5_path.read_text(encoding="utf-8").strip().split()[0]
 
         # taxdmp 原始文件信息
         if self._taxdmp_folder.exists():
@@ -159,7 +159,7 @@ class TaxonomyProvider:
         try:
             local_md5 = ""
             if self._local_md5_path.exists():
-                local_md5 = self._local_md5_path.read_text().strip().split()[0]
+                local_md5 = self._local_md5_path.read_text(encoding="utf-8").strip().split()[0]
             result["localMd5"] = local_md5
 
             remote_md5 = self._fetch_remote_md5()
@@ -200,7 +200,7 @@ class TaxonomyProvider:
                     remote_md5 = self._fetch_remote_md5()
                     local_md5 = ""
                     if self._local_md5_path.exists():
-                        local_md5 = self._local_md5_path.read_text().strip().split()[0]
+                        local_md5 = self._local_md5_path.read_text(encoding="utf-8").strip().split()[0]
 
                     if remote_md5 and remote_md5 == local_md5:
                         self._build_progress = "已是最新版本，无需更新。"
@@ -313,7 +313,7 @@ class TaxonomyProvider:
                     break
                 md5.update(chunk)
         md5_hex = md5.hexdigest()
-        self._local_md5_path.write_text(f"{md5_hex}  taxdump.tar.gz\n")
+        self._local_md5_path.write_text(f"{md5_hex}  taxdump.tar.gz\n", encoding="utf-8")
         logger.info(f"Saved local MD5: {md5_hex}")
 
     # ────────── 查询接口 ──────────

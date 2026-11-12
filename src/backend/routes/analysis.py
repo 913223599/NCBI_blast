@@ -29,7 +29,7 @@ async def start_alignment(req: AlignmentRequest):
     base_dir = os.path.join("results", "analysis", task_id)
     os.makedirs(base_dir, exist_ok=True)
     
-    logger.info(f"📥 [Analysis] 启动比对任务 (Mode: {req.mode}, Task: {task_id})")
+    logger.info(f"[Analysis] 启动比对任务 (Mode: {req.mode}, Task: {task_id})")
     
     try:
         results = []

@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import threading
 import time
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -32,8 +33,13 @@ class BlastStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
+    def _connect(self):
+        return closing(sqlite3.connect(self.db_path))
+
     def _init_db(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn, conn:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     task_id TEXT PRIMARY KEY,
@@ -54,9 +60,13 @@ class BlastStore:
                     FOREIGN KEY(task_id) REFERENCES tasks(task_id)
                 )
             """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_results_task_seq
+                ON results(task_id, sequence_id)
+            """)
 
     def save_task(self, task: 'BlastTask'):
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn, conn:
             conn.execute("""
                 INSERT OR REPLACE INTO tasks (task_id, params, status, progress, start_time, end_time, error)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -71,36 +81,55 @@ class BlastStore:
             ))
 
     def save_result(self, task_id: str, seq_id: str, data: Dict[str, Any]):
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn, conn:
             # Use REPLACE logic to avoid duplicates during Resumption
             conn.execute("DELETE FROM results WHERE task_id = ? AND sequence_id = ?", (task_id, seq_id))
             conn.execute("INSERT INTO results (task_id, sequence_id, data) VALUES (?, ?, ?)",
-                        (task_id, seq_id, json.dumps(data)))
+                        (task_id, seq_id, json.dumps(data, ensure_ascii=False)))
+
+    def save_results_batch(self, task_id: str, items: List[Any]):
+        """单事务批量落盘序列结果占位符或分片结果，避免逐条 fsync 阻塞"""
+        if not items:
+            return
+        normalized = []
+        for item in items:
+            if isinstance(item, dict):
+                normalized.append((str(item.get("sequence_id", "")), item))
+            else:
+                seq_id, payload = item
+                normalized.append((str(seq_id), payload))
+        with self._connect() as conn, conn:
+            conn.executemany(
+                "DELETE FROM results WHERE task_id = ? AND sequence_id = ?",
+                [(task_id, seq_id) for seq_id, _ in normalized]
+            )
+            conn.executemany(
+                "INSERT INTO results (task_id, sequence_id, data) VALUES (?, ?, ?)",
+                [(task_id, seq_id, json.dumps(payload, ensure_ascii=False)) for seq_id, payload in normalized]
+            )
 
     def load_all_tasks(self) -> List[Dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM tasks ORDER BY start_time DESC")
             return [dict(row) for row in cursor.fetchall()]
 
     def get_results(self, task_id: str) -> List[Dict[str, Any]]:
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("SELECT data FROM results WHERE task_id = ?", (task_id,))
+        with self._connect() as conn:
+            cursor = conn.execute("SELECT data FROM results WHERE task_id = ? ORDER BY id ASC", (task_id,))
             return [json.loads(row[0]) for row in cursor.fetchall()]
 
     def clear_all(self):
         """Wipe all history data."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn, conn:
             conn.execute("DELETE FROM results")
             conn.execute("DELETE FROM tasks")
-            conn.commit()
 
     def delete_task(self, task_id: str):
         """Delete a specific task and its results."""
-        with sqlite3.connect(self.db_path) as conn:
+        with self._connect() as conn, conn:
             conn.execute("DELETE FROM results WHERE task_id = ?", (task_id,))
             conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
-            conn.commit()
 
 
 class BlastTask:
@@ -457,8 +486,9 @@ class BlastManager:
             engine = BlastEngine(task.task_id, task.params)
             task.engine = engine # Track for cancellation
 
-            # Pre-populate placeholders so UI shows the entire list instantly
+            # Pre-populate placeholders so UI shows the entire list instantly (单事务批量落盘)
             existing_results = {r.get('sequence_id') for r in self.store.get_results(task.task_id)}
+            pending_batch = []
             for seq in sequences:
                 seq_id = seq.get('id', 'unknown')
                 if seq_id not in existing_results:
@@ -466,14 +496,20 @@ class BlastManager:
                         "sequence_id": seq_id,
                         "status": "pending"
                     }
-                    # 把占位符存入数据库，防止刷新页面或重选任务时列表变空
-                    self.store.save_result(task.task_id, seq_id, pending_data)
-                    
-                    # Emit to UI
-                    if self.result_listeners:
+                    pending_batch.append((seq_id, pending_data))
+
+            if pending_batch:
+                self.store.save_results_batch(task.task_id, pending_batch)
+                if self.result_listeners:
+                    for _, pending_data in pending_batch:
                         for cb in self.result_listeners:
-                            try: cb(task.task_id, pending_data)
-                            except: pass
+                            try:
+                                cb(task.task_id, pending_data)
+                            except Exception:
+                                pass
+
+            seq_lookup = {s.get('id'): s.get('sequence') for s in sequences if s.get('id')}
+            max_in_memory_results = 500
 
             def on_progress(comp, total, info):
                 new_prog = int(comp/total * 100)
@@ -483,15 +519,21 @@ class BlastManager:
                     self.store.save_task(task)
 
             def on_result(data):
-                # [核心增强] 为了支持一键入库，将原始序列内容回填到结果对象中
+                # 为了支持一键入库，将原始序列内容回填到结果对象中并落盘 (O(1) 哈希查找)
                 seq_id = data.get('sequence_id')
                 if seq_id:
-                    original_seq = next((s['sequence'] for s in sequences if s['id'] == seq_id), None)
+                    original_seq = seq_lookup.get(seq_id)
                     if original_seq:
                         data['raw_sequence'] = original_seq
 
-                task.results.append(data)
-                self.store.save_result(task.task_id, data.get('sequence_id','?'), data)
+                # 分片落盘至 SQLite；内存列表仅保留轻量引用以防大批量任务 OOM
+                self.store.save_result(task.task_id, data.get('sequence_id', '?'), data)
+                if len(task.results) < max_in_memory_results:
+                    task.results.append(data)
+                else:
+                    light_copy = {k: v for k, v in data.items() if k != 'raw_sequence'}
+                    task.results.append(light_copy)
+
                 # Notify active listeners (for real-time UI streaming)
                 for callback in self.result_listeners:
                     try:

@@ -88,7 +88,7 @@ class HashChecker:
         """
         try:
             hash_file = self.cache_dir / f"{Path(file_path).stem}.hash"
-            with open(hash_file, 'w') as f:
+            with open(hash_file, 'w', encoding='utf-8') as f:
                 f.write(file_hash)
         except Exception as e:
             print(f"警告: 保存哈希文件失败: {e}")
@@ -106,7 +106,7 @@ class HashChecker:
         try:
             hash_file = self.cache_dir / f"{Path(file_path).stem}.hash"
             if hash_file.exists():
-                with open(hash_file, 'r') as f:
+                with open(hash_file, 'r', encoding='utf-8') as f:
                     return f.read().strip()
             return None
         except Exception as e:

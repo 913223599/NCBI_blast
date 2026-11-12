@@ -21,7 +21,8 @@ from ..utils.response import BioResponse
 from ..utils.assembly_storage import AssemblyStorage
 from ..utils.persistent_queue import persistent_queue as assembly_queue
 from ..utils.assembly_db import assembly_db
-from src.assembly.manager import AssemblyManager
+from ...assembly.manager import AssemblyManager
+from ...assembly.utils.path_resolver import get_candidate_safe_work_dirs
 
 logger = logging.getLogger("Assembly.Routes")
 
@@ -146,7 +147,7 @@ async def get_assembly_history():
                 need_update = True
                 
             if not res.get('avg_depth') or float(res.get('avg_depth', 0.0)) <= 0.0:
-                for s_dir in [task_dir / "assemblerstep" / "assembly_run", task_dir / "assembly_run", task_dir, Path(f"E:/NGCS_Work/tasks/{task_id}")]:
+                for s_dir in [task_dir / "assemblerstep" / "assembly_run", task_dir / "assembly_run", task_dir, *get_candidate_safe_work_dirs(task_id)]:
                     fj_path = s_dir / "qc" / "fastp.json"
                     if not fj_path.exists():
                         fj_path = s_dir / "fastp.json"
@@ -208,9 +209,10 @@ def find_assembly_fasta(task_id: str, task_dir: Path) -> Optional[Path]:
         task_dir / "assembly_run" / "assembly.fasta",
         task_dir / "assembly.fasta",
         task_dir / "assemblerstep" / "assembly.fasta",
-        Path(f"E:/NGCS_Work/tasks/{task_id}/assembly_run/assembly.fasta"),
-        Path(f"E:/NGCS_Work/tasks/{task_id}/assembly.fasta")
     ]
+    for sw_dir in get_candidate_safe_work_dirs(task_id):
+        candidates.append(sw_dir / "assembly_run" / "assembly.fasta")
+        candidates.append(sw_dir / "assembly.fasta")
     for c in candidates:
         if c.exists() and c.stat().st_size > 0:
             return c
@@ -357,7 +359,7 @@ async def get_assembly_result(task_id: str):
         task_dir / "assemblerstep",
         task_dir / "assembly_run",
         task_dir,
-        Path(f"E:/NGCS_Work/tasks/{task_id}")
+        *get_candidate_safe_work_dirs(task_id)
     ]
 
     manifest_data = None

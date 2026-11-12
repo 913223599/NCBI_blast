@@ -55,7 +55,7 @@ class QwenTranslator:
         self.client = OpenAI(
             api_key=self.api_key,
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            max_retries=5  # 🚀 增加重试次数
+            max_retries=5  # 增加重试次数
         )
     
     def get_supported_models(self, return_keys_only=False) -> dict | list:
@@ -173,7 +173,7 @@ class QwenTranslator:
             completion = self.client.chat.completions.create(
                 model=self.model,  # 使用配置的模型
                 messages=messages,
-                timeout=60.0 # 🚀 提高超时到 60 秒，Qwen-Max 推理较慢
+                timeout=60.0 # 提高超时到 60 秒，Qwen-Max 推理较慢
             )
             
             # 输出API返回的完整内容用于调试
@@ -265,7 +265,7 @@ class QwenTranslator:
             completion = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                timeout=120.0  # 🚀 批量请求给 120 秒，确保长列表稳定返回
+                timeout=120.0  # 批量请求给 120 秒，确保长列表稳定返回
             )
             
             import re

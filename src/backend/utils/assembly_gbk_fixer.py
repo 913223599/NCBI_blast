@@ -19,7 +19,7 @@ class GBKAnnotationBackfiller:
 
     def _clean_functional_product(self, title: str) -> str:
         """
-        🚀 增强版清洗算法：适配 NCBI 与 PhageScope 两种模式
+        增强版清洗算法：适配 NCBI 与 PhageScope 两种模式
         """
         import re
         if not title or title == "N/A":
@@ -80,7 +80,7 @@ class GBKAnnotationBackfiller:
                     if cds_id and cds_id in flat_hits:
                         hit = flat_hits[cds_id]
                         raw_product = hit.get("product", "hypothetical protein")
-                        # ✨ 使用智能清洗引擎
+                        # 使用智能清洗引擎
                         new_product = self._clean_functional_product(raw_product)
                         
                         evalue = hit.get("evalue", "N/A")

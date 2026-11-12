@@ -387,7 +387,7 @@ footer{{ margin-top:60px; padding-top:16px; border-top:1px solid var(--bd); disp
 <table>
 <thead><tr><th>过滤类别</th><th>序列数</th><th>占比</th></tr></thead>
 <tbody>
-  <tr><td>✅ 通过质控</td><td><strong>{fmt_reads(passed)}</strong></td><td><span class="tag tag-ok">{passed_pct}%</span></td></tr>
+  <tr><td>[通过] 通过质控</td><td><strong>{fmt_reads(passed)}</strong></td><td><span class="tag tag-ok">{passed_pct}%</span></td></tr>
   <tr><td>低质量剔除</td><td>{low_quality:,}</td><td>{fmt_pct(low_quality / total_before)}</td></tr>
   <tr><td>N 碱基过多</td><td>{too_many_n:,}</td><td>{fmt_pct(too_many_n / total_before)}</td></tr>
   <tr><td>过短剔除</td><td>{too_short:,}</td><td>{fmt_pct(too_short / total_before)}</td></tr>
@@ -521,7 +521,7 @@ footer{{ margin-top:60px; padding-top:16px; border-top:1px solid var(--bd); disp
 <h3 style="margin-top:24px;">进化演化分析 (Top 30 Genomic Relationships)</h3>
 <div style="background:#fff; border:1px solid var(--bd); border-radius:12px; padding:20px; text-align:center;">
     <img src="data:image/png;base64,{tree_b64}" alt="Phylogenetic Tree" style="max-width:100%; height:auto; border-radius:4px;">
-    <p style="font-size:11px; color:#64748b; margin-top:12px;">注：红色加粗节点 (★) 为当前检测样本。分支长度代表 Mash 基因组距离 (1-ANI)。</p>
+    <p style="font-size:11px; color:#64748b; margin-top:12px;">注：红色加粗节点 (*) 为当前检测样本。分支长度代表 Mash 基因组距离 (1-ANI)。</p>
 </div>
 ''' if tree_b64 else ""}
 </section>

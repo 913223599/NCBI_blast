@@ -55,7 +55,7 @@ class PersistentAssemblyQueue:
             return
             
         self._is_running = True
-        logger.info("⚙️ 串行持久化队列引擎启动中...")
+        logger.info("[Queue] 串行持久化队列引擎启动中...")
         
         # 安全重置：将所有处于 running 的任务标记为 aborted
         with sqlite3.connect(assembly_db.DB_PATH) as conn:
@@ -64,7 +64,7 @@ class PersistentAssemblyQueue:
                 (time.time(),)
             )
             conn.commit()
-        logger.info("✨ 任务队列已重置：之前的运行中任务已设为'已中止'，请在历史记录中恢复。")
+        logger.info("[Queue] 任务队列已重置：之前的运行中任务已设为'已中止'，请在历史记录中恢复。")
         
         self._worker_task = asyncio.create_task(self._worker_loop())
         await self._broadcast_status()
@@ -74,13 +74,13 @@ class PersistentAssemblyQueue:
         self._ensure_queue()
         task_id = payload.get('task_id')
         if task_id in self._queued_ids:
-            logger.info(f"⚠️ 任务 {task_id} 已经在队列中，忽略重复请求。")
+            logger.info(f"[Queue] 任务 {task_id} 已经在队列中，忽略重复请求。")
             return
             
         self._queued_ids.add(task_id)
         self._queue.append(payload)
         self._new_task_event.set()
-        logger.info(f"📥 任务已追加至队列: {task_id}")
+        logger.info(f"[Queue] 任务已追加至队列: {task_id}")
         await self._broadcast_status()
 
     async def _worker_loop(self):
@@ -102,20 +102,20 @@ class PersistentAssemblyQueue:
             try:
                 current_task = assembly_db.get_task(task_id)
                 if not current_task or current_task.get('status') == 'aborted':
-                    logger.info(f"⏭️ 任务 {task_id} 已取消或不存在，跳过。")
+                    logger.info(f"[Queue] 任务 {task_id} 已取消或不存在，跳过。")
                     continue
 
-                logger.info(f"🚀 [Queue] 正在派发任务: {task_id}")
+                logger.info(f"[Queue] 正在派发任务: {task_id}")
                 assembly_db.update_task_progress(task_id, "QUEUED", 0, "running")
                 await self._broadcast_status()
                 
                 await self._processor(payload)
                 
             except Exception as e:
-                logger.error(f"❌ [Queue] 任务派发崩溃: {task_id}, 错误: {e}")
+                logger.error(f"[Queue] 任务派发崩溃: {task_id}, 错误: {e}")
             finally:
                 self._current_task_id = None
-                logger.info(f"🏁 [Queue] 任务生命周期结束: {task_id}")
+                logger.info(f"[Queue] 任务生命周期结束: {task_id}")
                 await self._broadcast_status()
 
     def remove_task_from_queue(self, task_id: str) -> bool:

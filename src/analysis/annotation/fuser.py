@@ -30,8 +30,8 @@ class AnnotationFuser:
 
     # 广义未表征/未知功能蛋白模式 (含 DUF/UPF/PHA/ORF/gp 编号及未知功能家族，归类为 Hypothetical)
     UNANNOTATED_PATTERNS = [
-        r"^(?:conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:hypothetical|hyphothetical)\b",
-        r"^(?:conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:uncharacterized|uncharacterised)\b",
+        r"^(?:gp\d+(?:[./_]\d+)?\s+|conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:hypothetical|hyphothetical)\b",
+        r"^(?:gp\d+(?:[./_]\d+)?\s+|conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:uncharacterized|uncharacterised)\b",
         r"\b(?:unknown|unkown|unknwon)\s+function\b",
         r"^unknown(?:\s+(?:protein|function))?$",
         r"^(?:putative|predicted|conserved)\s+(?:phage\s+|bacteriophage\s+)?protein$",

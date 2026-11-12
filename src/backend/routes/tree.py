@@ -301,7 +301,7 @@ async def add_to_workspace(req: TreeAddRequest):
                                 zip_ref.extract(member, ws_dir)
                 except: pass
 
-        logger.info(f"📂 [PhyloWS] 已同步进工作区: {counts['files']}个资源")
+        logger.info(f"[PhyloWS] 已同步进工作区: {counts['files']}个资源")
         return {"success": True, "count": counts["files"]}
     except Exception as e:
         logger.error(f"Tree workspace add error: {e}")
@@ -349,7 +349,7 @@ async def delete_tree_history(group_id: str, physical: bool = False):
             job_id_guess = group_id.replace("Tree_History_", "Tree_Job_")
             job_dir = (PROJECT_ROOT / "results" / "tree_workspace" / "jobs" / job_id_guess).resolve()
             if job_dir.exists() and job_dir.is_dir():
-                logger.info(f"🧹 清理过程垃圾文件夹: {job_dir}")
+                logger.info(f"[PhyloWS] 清理过程垃圾文件夹: {job_dir}")
                 shutil.rmtree(job_dir)
         return {"success": success}
     except Exception as exc:

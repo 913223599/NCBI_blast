@@ -74,7 +74,7 @@ class AnnotationPipeline:
         entry: Dict[str, Any] = {"stage": stage, "status": status, "detail": detail}
         entry.update(extra)
         self.diagnostics.append(entry)
-        icon = {"ok": "✅", "skipped": "⏭️", "no-hit": "ℹ️", "failed": "❌"}.get(status, "•")
+        icon = {"ok": "[OK]", "skipped": "[SKIP]", "no-hit": "[INFO]", "failed": "[FAIL]"}.get(status, "-")
         message = f"{icon} {stage}: {detail}"
         logger.info(f"[流程诊断] {message}")
         try:

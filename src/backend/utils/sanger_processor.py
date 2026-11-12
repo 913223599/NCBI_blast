@@ -46,7 +46,7 @@ class SangerProcessor:
             # 3. 导出 FASTA
             SeqIO.write(trimmed_record, fasta_out, "fasta")
             
-            logger.info(f"✅ [Sanger] 处理完成: {filename} -> {len(trimmed_record)} bp (裁掉 {start} bp 头, {len(qualities)-end} bp 尾)")
+            logger.info(f"[Sanger] 处理完成: {filename} -> {len(trimmed_record)} bp (裁掉 {start} bp 头, {len(qualities)-end} bp 尾)")
             
             return {
                 "success": True,
@@ -58,5 +58,5 @@ class SangerProcessor:
             }
             
         except Exception as e:
-            logger.error(f"❌ [Sanger] 处理失败 {filename}: {e}")
+            logger.error(f"[Sanger] 处理失败 {filename}: {e}")
             raise e

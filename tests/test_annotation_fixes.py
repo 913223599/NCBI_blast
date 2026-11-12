@@ -153,9 +153,11 @@ class TestAnnotationFixes(unittest.TestCase):
         """测试已知功能蛋白以 product 判定为准，notes 仅兜底"""
         # product 命中 Head，即使 notes 含 lysis 也不改判
         self.assertEqual(AnnotationFuser.infer_category("major capsid protein", "[Phold AI] Phold Structure: lysis"), "Head & Packaging")
+        # product 命中 Defense (Anti-DarT)，即使 notes 含 lysis 也以 product 优先
+        self.assertEqual(AnnotationFuser.infer_category("Anti-DarT factor A", "[Phold AI] Phold Structure: lysis"), "Defense & Host Interaction")
         # product 未命中任何规则，notes 兜底
-        self.assertEqual(AnnotationFuser.infer_category("Anti-DarT factor A", "[Phold AI] Phold Structure: lysis"), "Lysis")
-        self.assertEqual(AnnotationFuser.infer_category("Anti-DarT factor A", None), "Other Functional")
+        self.assertEqual(AnnotationFuser.infer_category("Custom factor X", "[Phold AI] Phold Structure: lysis"), "Lysis")
+        self.assertEqual(AnnotationFuser.infer_category("Custom factor X", None), "Other Functional")
 
 
 if __name__ == "__main__":

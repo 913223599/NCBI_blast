@@ -147,7 +147,7 @@ async def lifespan(app: FastAPI):
         from ..blast.manager import get_blast_manager
         mgr = get_blast_manager()
         mgr.result_listeners.append(_on_blast_result)
-        logger.info("🚀 BLAST 引擎与事件总线已全速激活")
+        logger.info("[INIT] BLAST 引擎与事件总线已全速激活")
     except Exception as eb:
         logger.error(f"BLAST 引擎启动失败: {eb}")
 
@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         if get_config_manager().get_config_value("lan_share", False):
             lan_mgr.print_share_info(port=8765)
             
-        # 🔗 核心增强：预热 WSL 软链接 (解决 Windows 目录带空格导致的分析失败)
+        # 核心增强：预热 WSL 软链接 (解决 Windows 目录带空格导致的分析失败)
         from src.assembly.env.wsl_manager import WSLManager
         if WSLManager.is_available():
             WSLManager.ensure_project_link()
@@ -356,7 +356,7 @@ try:
 except Exception as e:
     logger.error(f"局域网共享路由延迟加载失败: {e}")
 
-# 🎉 开放组装与报告产物的静态资源展示
+# 开放组装与报告产物的静态资源展示
 from fastapi.staticfiles import StaticFiles
 results_dir = PROJECT_ROOT / "results"
 results_dir.mkdir(parents=True, exist_ok=True)
@@ -382,7 +382,7 @@ def start_server(host="0.0.0.0", port=8765):
     """启动 FastAPI 后端服务"""
     import uvicorn
     # 监听 host 以支持局域网共享访问
-    logger.info(f"🚀 正在启动 API 服务器: http://{host}:{port}")
+    logger.info(f"[START] 正在启动 API 服务器: http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 if __name__ == "__main__":

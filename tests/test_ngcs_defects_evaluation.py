@@ -11,9 +11,17 @@ NGCS 组装引擎长读长缺陷基准评估测试套件 (Defects Baseline Evalu
 import unittest
 import sys
 import os
+from pathlib import Path
 
-if r"E:\NGCS" not in sys.path:
-    sys.path.insert(0, r"E:\NGCS")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from src.assembly.utils.path_resolver import resolve_ngcs_root
+
+_NGCS_ROOT = str(resolve_ngcs_root())
+if _NGCS_ROOT not in sys.path:
+    sys.path.append(_NGCS_ROOT)
 
 from ngcs.consensus.post_processor import AssemblyPostProcessor
 from ngcs.spectral.circular_trimmer import trim_circular_wrap

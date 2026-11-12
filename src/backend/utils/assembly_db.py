@@ -59,7 +59,7 @@ class AssemblyDB:
     def create_task(self, task_id: str, name: str, sample_id: str, sample_type: str, tech: str, config: Dict[str, Any]):
         """新建任务记录"""
         now = time.time()
-        # 🔗 确保 config 中也持久化存储 sample_type 方便前端解析
+        # 确保 config 中也持久化存储 sample_type 方便前端解析
         if isinstance(config, dict):
             config['sample_type'] = sample_type
 

@@ -18,7 +18,7 @@ class UniversalParser:
     """
     
     VALID_EXTENSIONS = {'.fasta', '.fas', '.fa', '.fna', '.seq', '.txt', '.ab1', '.abi'}
-    TEXT_ENCODINGS = ['utf-8', 'gbk', 'latin-1']
+    TEXT_ENCODINGS = ['utf-8', 'utf-8-sig', 'latin-1']
     
     @classmethod
     def parse_iter(cls, file_path: str) -> Generator[Dict[str, Any], None, None]:

@@ -40,7 +40,7 @@ async def upload_file_generic(file: UploadFile = File(...)):
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        logger.info(f"🟢 [Upload] 文件已暂存: {safe_filename} -> {file_path}")
+        logger.info(f"[Upload] 文件已暂存: {safe_filename} -> {file_path}")
         
         return {
             "success": True,
@@ -48,7 +48,7 @@ async def upload_file_generic(file: UploadFile = File(...)):
             "path": str(file_path.resolve())
         }
     except Exception as e:
-        logger.error(f"🔴 [Upload] 上传过程中发生异常: {e}")
+        logger.error(f"[Upload] 上传过程中发生异常: {e}")
         return {"success": False, "error": str(e)}
 
 @router.post("/api/common/upload_batch")

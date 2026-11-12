@@ -17,6 +17,7 @@ from typing import Optional, Dict, Any
 
 from ..core.base import BaseAssemblyStep
 from ..utils.file_handler import AssemblyFileHandler
+from ..utils.path_resolver import resolve_ngcs_cli, resolve_ngcs_root, resolve_safe_work_dir
 
 logger = logging.getLogger("Assembly.AssemblerStep")
 
@@ -44,29 +45,8 @@ class AssemblerStep(BaseAssemblyStep):
 
     def _resolve_ngcs_cli(self) -> Path:
         """动态解析 NGCS CLI 入口路径"""
-        # 1. 优先从全局配置获取
         custom_path = self.context.config.get("params", {}).get("ngcs_cli_path") or self.context.config.get("ngcs_cli_path")
-        if custom_path and Path(custom_path).exists():
-            return Path(custom_path).resolve()
-
-        # 2. 检查环境变量
-        env_path = os.environ.get("NGCS_CLI_PATH")
-        if env_path and Path(env_path).exists():
-            return Path(env_path).resolve()
-
-        # 3. 检查标准绝对路径与常用相对路径
-        candidate_paths = [
-            Path(r"E:\NGCS\ngcs\cli.py"),
-            Path(__file__).resolve().parent.parent.parent.parent.parent / "NGCS" / "ngcs" / "cli.py",
-            Path(self.context.base_dir).resolve().parent.parent / "NGCS" / "ngcs" / "cli.py"
-        ]
-
-        for cand in candidate_paths:
-            if cand.exists():
-                return cand.resolve()
-
-        # 兜底返回默认路径
-        return Path(r"E:\NGCS\ngcs\cli.py")
+        return resolve_ngcs_cli(custom_path)
 
     async def execute(self) -> bool:
         if self.is_completed():
@@ -117,8 +97,7 @@ class AssemblerStep(BaseAssemblyStep):
         # =========================================================================
         # 针对中文路径与空格的 ASCII 安全隔离工作区 (确保 WSL / C++20 引擎 100% 兼容)
         # =========================================================================
-        safe_work_dir = Path("E:/NGCS_Work/tasks") / self.context.task_id
-        safe_work_dir.mkdir(parents=True, exist_ok=True)
+        safe_work_dir = resolve_safe_work_dir(self.context.task_id, create=True)
 
         async def _prepare_safe_input(src_path_str: str, file_tag: str) -> str:
             src_p = Path(src_path_str)
@@ -349,7 +328,7 @@ class AssemblerStep(BaseAssemblyStep):
         run_env = dict(os.environ)
         run_env["PYTHONIOENCODING"] = "utf-8"
         run_env["PYTHONUTF8"] = "1"
-        project_ngcs = str(Path("E:/NGCS").resolve())
+        project_ngcs = str(resolve_ngcs_root(str(ngcs_cli)))
         orig_pythonpath = os.environ.get("PYTHONPATH", "")
         run_env["PYTHONPATH"] = f"{project_ngcs};{orig_pythonpath}" if orig_pythonpath else project_ngcs
 

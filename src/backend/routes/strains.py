@@ -33,7 +33,7 @@ def invalidate_cache():
     """彻底清除后端快照缓存，确保下一次请求命中磁盘最新值"""
     global _cached_data
     _cached_data = None
-    logger.info("🧹 [Cache] 数据已变更，后端快照已即时失效")
+    logger.info("[Cache] 数据已变更，后端快照已即时失效")
 
 # ─── 菌种数据 CRUD ────────────────────────────────────
 

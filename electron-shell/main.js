@@ -202,13 +202,16 @@ function stopPythonSidecar() {
         console.log('[Electron] 正在响应生命周期事件，停止 Python Sidecar...');
         pythonProcess.kill('SIGTERM');
         
-        // 🔗 强力物理关断：如果存在运行中的 WSL，物理切断它
+        // 强力物理关断：如果存在运行中的 WSL，动态检测并关闭运行中的发行版
         // 注意：这能解决 Python 未能安全退出导致 WSL 挂起的问题
         try {
             const { execSync } = require('child_process');
-            console.log('[Electron] 正在强制清理 WSL (Ubuntu) 分发版...');
-            execSync('wsl --terminate Ubuntu', { stdio: 'ignore' });
-            console.log('[Electron] WSL 已强制关闭');
+            const rawDistros = execSync('wsl --list --running --quiet', { stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf16le');
+            const runningDistros = rawDistros.split(/\r?\n/).map(s => s.replace(/\0/g, '').trim()).filter(Boolean);
+            for (const distro of runningDistros) {
+                console.log(`[Electron] 正在强制清理 WSL (${distro}) 分发版...`);
+                execSync(`wsl --terminate "${distro}"`, { stdio: 'ignore' });
+            }
         } catch (e) {
             // 忽略错误（说明可能已经关闭）
         }

@@ -38,7 +38,7 @@ class RotationChecker:
             wsl_seq2 = WSLManager.to_wsl_path(seq2_abs)
             
             # 使用 -d Ubuntu 并在 root 下运行确保权限
-            # 💡 增加 --cs 参数以获取碱基级别的差异详情
+            # 增加 --cs 参数以获取碱基级别的差异详情
             cmd = ["wsl", "-d", "Ubuntu", "-u", "root", "minimap2", "-x", "asm5", "--cs", wsl_doubled, wsl_seq2]
             
             with open(paf_out, 'w', encoding='utf-8') as out_f:

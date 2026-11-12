@@ -12,14 +12,24 @@ NGCS 组装引擎长读长缺陷解决方案沙盒原型与评估 (Defects Solut
 import unittest
 import sys
 import os
+from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 
-if r"E:\NGCS" not in sys.path:
-    sys.path.insert(0, r"E:\NGCS")
+_TESTS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _TESTS_DIR.parent
+for _p in (str(_TESTS_DIR), str(_PROJECT_ROOT)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+from src.assembly.utils.path_resolver import resolve_ngcs_root
+
+_NGCS_ROOT = str(resolve_ngcs_root())
+if _NGCS_ROOT not in sys.path:
+    sys.path.append(_NGCS_ROOT)
 
 from ngcs.utils.edlib_compat import edlib
 from ngcs.spectral.backbone import reverse_complement
-from tests.test_ngcs_defects_evaluation import generate_pseudo_random_dna
+from test_ngcs_defects_evaluation import generate_pseudo_random_dna
 
 
 class EnhancedPostProcessorPrototype:
