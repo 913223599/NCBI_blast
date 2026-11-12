@@ -52,18 +52,27 @@ EXTERNAL_BINARY_SOURCES: Dict[str, Dict[str, Any]] = {
 
 
 def _find_site_packages_dir() -> Optional[Path]:
-    """定位当前 Python 运行环境可写的 site-packages 目录。"""
+    """定位当前 Python 运行环境可写的 site-packages 目录（兼容 venv/uv 及各类链接模式）。"""
     candidates: List[Path] = []
-    exe_root = Path(sys.executable).resolve().parent.parent
-    candidates.append(exe_root / "Lib" / "site-packages")
+    # 1. sys.prefix 始终指向当前激活的虚拟环境根目录（不会被 exe 硬/软链接 .resolve() 穿透回基础 Python）
+    if sys.prefix:
+        candidates.append(Path(sys.prefix) / "Lib" / "site-packages")
+    # 2. site.getsitepackages() 返回当前环境标准包路径
     try:
         for sp in site.getsitepackages():
             candidates.append(Path(sp))
     except Exception:
         pass
+    # 3. 兜底使用未经 resolve() 的 sys.executable 上两级目录
+    exe_root = Path(sys.executable).parent.parent
+    candidates.append(exe_root / "Lib" / "site-packages")
+
     for c in candidates:
-        if c.is_dir() and "site-packages" in c.name.lower():
-            return c
+        try:
+            if c.is_dir() and "site-packages" in c.name.lower():
+                return c
+        except OSError:
+            continue
     return None
 
 
@@ -176,6 +185,16 @@ def heal_vendor_ete4_binding(
                 sys.path.insert(0, expected_line)
     except OSError as exc:
         warnings.append(f"写入 {pth_file} 失败: {exc}")
+
+    # 若 vendor/ete4 仅含特定 Python 版本预编译扩展 (*.cp313-win_amd64.pyd)，核验 ABI 匹配性
+    if os.name == "nt":
+        pyd_files = list((vendor_ete4 / "ete4").rglob("*.pyd"))
+        cur_tag = f"cp{sys.version_info.major}{sys.version_info.minor}"
+        if pyd_files and not any(cur_tag in p.name.lower() for p in pyd_files):
+            warnings.append(
+                f"检测到 vendor/ete4 预编译扩展面向 Python 3.13 ({pyd_files[0].name})，"
+                f"当前解释器为 Python {sys.version_info.major}.{sys.version_info.minor}（建议使用 Python 3.13 运行）"
+            )
 
     return {"ready": True, "path": expected_line, "pth_file": str(pth_file), "actions": actions, "warnings": warnings}
 

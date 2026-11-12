@@ -200,6 +200,7 @@ src/test_shm.py
 !/scripts/ensure_electron.ps1
 !/scripts/repair_integrity.ps1
 !/scripts/check_npm_deps.js
+!/scripts/bootstrap_runtime.ps1
 .lingma/rules/
 
 # ------------------------------------------------------------------------------
@@ -227,6 +228,7 @@ tools/ncbi_dist/
 tools/iqtree3_win/
 tools/iqtree_new/
 tools/miniconda/
+tools/runtime/
 src/resources/update_locales.py
 src/workbench/bin/
 src/web-next/src/core/tree/vendor_phylotree/

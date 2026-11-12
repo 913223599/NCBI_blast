@@ -9,6 +9,13 @@ REM ----------------------------------------------------
 SET "PROJECT_ROOT=%~dp0"
 CD /D "%PROJECT_ROOT%"
 
+SET "CHECK_ONLY=0"
+SET "BOOTSTRAP_EXTRA="
+for %%A in (%*) do (
+    if /I "%%~A"=="--check-only" SET "CHECK_ONLY=1"
+    if /I "%%~A"=="--simulate-clean-host" SET "BOOTSTRAP_EXTRA=-DisableSystemProbe -DisableBundledProbe -WingetMode Disabled"
+)
+
 TITLE NCBI BLAST Pro Dev Launcher
 
 echo ===================================================
@@ -16,57 +23,23 @@ echo   NCBI BLAST Pro - Dev Mode and Environment Self-Healing
 echo ===================================================
 echo [Status] Project Root: %PROJECT_ROOT%
 
-REM 1. Check Node.js
-where node >nul 2>&1
+REM 1. Check / Auto-Bootstrap Node.js, Python (3.13 preferred for vendor/ete4 ABI), and uv
+echo [0/3] Verifying or bootstrapping Node.js, Python, and uv runtimes...
+powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\bootstrap_runtime.ps1" -ProjectRoot "%PROJECT_ROOT%." -EnvBatPath "%PROJECT_ROOT%scratch\runtime_env.bat" %BOOTSTRAP_EXTRA%
 if errorlevel 1 (
-    echo [WARN] Node.js not found in PATH.
-    where winget >nul 2>&1
-    if not errorlevel 1 (
-        echo [INFO] Attempting to auto-install Node.js via winget...
-        winget install OpenJS.NodeJS --silent --accept-package-agreements --accept-source-agreements
-        if errorlevel 1 (
-            echo [ERROR] Auto-install failed. Please install Node.js manually: https://nodejs.org/
-            pause
-            exit /b 1
-        )
-        echo [INFO] Node.js installed successfully. Please restart launcher to refresh PATH.
-        pause
-        exit /b 0
-    ) else (
-        echo [ERROR] Node.js is required. Please install it from https://nodejs.org/
-        pause
-        exit /b 1
-    )
+    echo [ERROR] Base runtime bootstrap failed. Please ensure network access or install Node.js LTS and Python 3.13 manually.
+    if "%CHECK_ONLY%"=="0" pause
+    exit /b 1
+)
+if exist "scratch\runtime_env.bat" (
+    call "scratch\runtime_env.bat"
 )
 
-REM 2. Check Python
-python --version >nul 2>&1
-if errorlevel 1 (
-    echo [WARN] Python not found or invalid.
-    where winget >nul 2>&1
-    if not errorlevel 1 (
-        echo [INFO] Attempting to auto-install Python 3.11 via winget...
-        winget install Python.Python.3.11 --silent --accept-package-agreements --accept-source-agreements
-        if errorlevel 1 (
-            echo [ERROR] Auto-install failed. Please install Python manually: https://www.python.org/downloads/
-            pause
-            exit /b 1
-        )
-        echo [INFO] Python installed successfully. Please restart launcher to refresh PATH.
-        pause
-        exit /b 0
-    ) else (
-        echo [ERROR] Python is required. Please install Python 3.10+ from https://www.python.org/downloads/
-        pause
-        exit /b 1
-    )
-)
-
-REM 3. Check Python VENV
+REM 2. Check Python VENV
 if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" -c "import sys" >nul 2>&1
+    ".venv\Scripts\python.exe" -c "import sys; assert sys.version_info >= (3, 11)" >nul 2>&1
     if errorlevel 1 (
-        echo [WARN] Existing .venv is broken - likely copied from another device.
+        echo [WARN] Existing .venv is broken or uses unsupported Python version.
         echo [INFO] Recreating virtual environment...
         rmdir /s /q .venv
     )
@@ -74,11 +47,26 @@ if exist ".venv\Scripts\python.exe" (
 
 if not exist ".venv\Scripts\python.exe" (
     echo [INFO] Creating Python virtual environment .venv...
-    python -m venv .venv
+    if defined UV_EXE (
+        if exist "%UV_EXE%" (
+            "%UV_EXE%" venv .venv --python "%PYTHON_EXE%" --seed --index-url https://pypi.tuna.tsinghua.edu.cn/simple
+        ) else (
+            "%PYTHON_EXE%" -m venv .venv
+        )
+    ) else (
+        "%PYTHON_EXE%" -m venv .venv
+    )
     if errorlevel 1 (
         echo [ERROR] Failed to create virtual environment.
-        pause
+        if "%CHECK_ONLY%"=="0" pause
         exit /b 1
+    )
+    if defined UV_EXE (
+        if exist "%UV_EXE%" (
+            if not exist ".venv\Scripts\uv.exe" (
+                copy /y "%UV_EXE%" ".venv\Scripts\uv.exe" >nul 2>&1
+            )
+        )
     )
     echo [INFO] Virtual environment created successfully.
 )
@@ -92,7 +80,7 @@ if exist "src\utils\verify_and_install_deps.py" (
 )
 if errorlevel 1 (
     echo [ERROR] Environment self-healing or dependency installation failed.
-    pause
+    if "%CHECK_ONLY%"=="0" pause
     exit /b 1
 )
 
@@ -109,14 +97,14 @@ if errorlevel 1 (
     if errorlevel 1 (
         echo [ERROR] Failed to install Electron dependencies.
         popd
-        pause
+        if "%CHECK_ONLY%"=="0" pause
         exit /b 1
     )
     popd
     node "scripts\check_npm_deps.js" "electron-shell"
     if errorlevel 1 (
         echo [ERROR] Electron dependencies remain incomplete after npm install.
-        pause
+        if "%CHECK_ONLY%"=="0" pause
         exit /b 1
     )
 )
@@ -129,14 +117,14 @@ if errorlevel 1 (
     if errorlevel 1 (
         echo [ERROR] Failed to install Frontend dependencies.
         popd
-        pause
+        if "%CHECK_ONLY%"=="0" pause
         exit /b 1
     )
     popd
     node "scripts\check_npm_deps.js" "src\web-next"
     if errorlevel 1 (
         echo [ERROR] Frontend dependencies remain incomplete after npm install.
-        pause
+        if "%CHECK_ONLY%"=="0" pause
         exit /b 1
     )
 )
@@ -161,7 +149,7 @@ echo [INFO] Verifying Electron binary and file integrity labels...
 powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\ensure_electron.ps1"
 if errorlevel 1 (
     echo [ERROR] Electron binary is missing and could not be repaired automatically.
-    pause
+    if "%CHECK_ONLY%"=="0" pause
     exit /b 1
 )
 
@@ -170,7 +158,13 @@ if errorlevel 1 (
     echo [WARN] Integrity label repair failed. If Electron closes instantly with no output,
     echo        run this once as Administrator then retry:
     echo        powershell -NoProfile -ExecutionPolicy Bypass -File scripts\repair_integrity.ps1
-    pause
+    if "%CHECK_ONLY%"=="0" pause
+)
+
+if "%CHECK_ONLY%"=="1" (
+    echo [INFO] Check-only mode complete: runtime, dependencies, Electron, and integrity verified.
+    ENDLOCAL
+    exit /b 0
 )
 
 REM 6. Start Services

@@ -212,6 +212,7 @@ class TestStartupSelfHealing:
         emoji_re = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]")
         targets = [
             REPO_ROOT / "RUN_DEV_ELECTRON.bat",
+            REPO_ROOT / "scripts" / "bootstrap_runtime.ps1",
             REPO_ROOT / "scripts" / "check_npm_deps.js",
             REPO_ROOT / "scripts" / "ensure_electron.ps1",
             REPO_ROOT / "scripts" / "repair_integrity.ps1",
@@ -229,6 +230,8 @@ class TestStartupSelfHealing:
         bat_text = (REPO_ROOT / "RUN_DEV_ELECTRON.bat").read_text(encoding="utf-8")
         # 关键启动检查链路与错误退出门禁不可缺失
         for token in (
+            "bootstrap_runtime.ps1",
+            "runtime_env.bat",
             "verify_and_install_deps.py",
             'node "scripts\\check_npm_deps.js" "electron-shell"',
             'node "scripts\\check_npm_deps.js" "src\\web-next"',
@@ -253,3 +256,138 @@ class TestStartupSelfHealing:
             if line.endswith("("):
                 open_parens += 1
         assert open_parens == 0, f"批处理控制块括号未闭合 (余 {open_parens})"
+
+    def test_bootstrap_runtime_winget_flow_and_windowsapps_filter(self, tmp_path):
+        script = REPO_ROOT / "scripts" / "bootstrap_runtime.ps1"
+        assert script.is_file()
+
+        # 构造携带空格的项目沙盒目录与隔离 runtime_dir，验证 PATH/参数转义正确
+        sandbox = tmp_path / "space project"
+        runtime_dir = sandbox / "tools" / "runtime"
+        env_bat = sandbox / "scratch" / "runtime_env.bat"
+        stub_src = tmp_path / "stubs"
+        stub_src.mkdir(parents=True)
+
+        # 用 PowerShell 5.1 编译三个轻量原生测试桩 exe：node.exe、python.exe、mock_winget.exe
+        node_stub = stub_src / "node.exe"
+        py_stub = stub_src / "python.exe"
+        mock_winget = tmp_path / "mock_winget.exe"
+        call_log = tmp_path / "winget_calls.log"
+        winget_cs = (
+            "using System; using System.IO; "
+            "public class W { public static int Main(string[] args) { "
+            "var joined = string.Join(\" \", args); "
+            f"File.AppendAllText(@\"{call_log}\", joined + Environment.NewLine); "
+            "if (joined.Contains(\"OpenJS.NodeJS\")) { "
+            f"Directory.CreateDirectory(@\"{runtime_dir}\\node\"); "
+            f"File.Copy(@\"{node_stub}\", @\"{runtime_dir}\\node\\node.exe\", true); "
+            f"File.WriteAllText(@\"{runtime_dir}\\node\\npm.cmd\", \"@echo 11.0.0\"); "
+            "return 0; } "
+            "if (joined.Contains(\"Python.Python.3.13\")) { "
+            f"Directory.CreateDirectory(@\"{runtime_dir}\\python\"); "
+            f"File.Copy(@\"{py_stub}\", @\"{runtime_dir}\\python\\python.exe\", true); "
+            "return 0; } "
+            "return 1; } }"
+        )
+        compile_cmd = (
+            f"Add-Type -TypeDefinition 'public class N {{ public static void Main() {{ System.Console.WriteLine(\"22.14.0\"); }} }}' "
+            f"-OutputType ConsoleApplication -OutputAssembly '{node_stub}'; "
+            f"Add-Type -TypeDefinition 'public class P {{ public static void Main() {{ System.Console.WriteLine(\"3.13.9\"); }} }}' "
+            f"-OutputType ConsoleApplication -OutputAssembly '{py_stub}'; "
+            f"Add-Type -TypeDefinition '{winget_cs}' -OutputType ConsoleApplication -OutputAssembly '{mock_winget}'"
+        )
+        comp = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", compile_cmd],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        assert comp.returncode == 0, f"编译测试桩失败: {comp.stdout}\n{comp.stderr}"
+
+        # 同时测试 Microsoft\WindowsApps\python.exe 假别名被过滤（放入虚假 stub 也不被误采信）
+        fake_winapps = runtime_dir / "Microsoft" / "WindowsApps"
+        fake_winapps.mkdir(parents=True)
+        (fake_winapps / "python.exe").write_bytes(b"BAD_STORE_STUB")
+
+        res = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+                "-ProjectRoot",
+                str(sandbox),
+                "-RuntimeDir",
+                str(runtime_dir),
+                "-EnvBatPath",
+                str(env_bat),
+                "-WingetMode",
+                "Only",
+                "-WingetExe",
+                str(mock_winget),
+                "-DisableSystemProbe",
+                "-DisableBundledProbe",
+                "-SkipUvBootstrap",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        diag_log = call_log.read_text(encoding="utf-8", errors="replace") if call_log.is_file() else "NO_CALL_LOG"
+        diag_files = [str(p) for p in runtime_dir.rglob("*")] if runtime_dir.exists() else []
+        assert res.returncode == 0, f"winget bootstrap 失败 (log={diag_log!r}, files={diag_files}): {res.stdout}\n{res.stderr}"
+        assert env_bat.is_file(), "未生成 runtime_env.bat"
+
+        # 核查 winget 精确命令行参数（确认包含 LTS 与 Python.Python.3.13 + PrependPath=1）
+        log_text = call_log.read_text(encoding="utf-8")
+        assert "OpenJS.NodeJS.LTS" in log_text
+        assert "Python.Python.3.13" in log_text
+        assert "PrependPath=1" in log_text
+
+        # 验证生成的 runtime_env.bat 在 cmd.exe 中可执行且 PATH/变量正确处理含空格路径
+        runner_bat = tmp_path / "run_check.bat"
+        runner_bat.write_text(
+            f'@echo off\r\ncall "{env_bat}"\r\necho NODE=%NODE_EXE%\r\necho PY=%PYTHON_EXE%\r\n',
+            encoding="utf-8",
+        )
+        cmd_res = subprocess.run(
+            ["cmd.exe", "/c", str(runner_bat)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        assert cmd_res.returncode == 0, cmd_res.stderr
+        assert str(runtime_dir / "node" / "node.exe") in cmd_res.stdout
+        assert str(runtime_dir / "python" / "python.exe") in cmd_res.stdout
+
+        # 核查脚本无 BOM 且零 Emoji
+        raw_bytes = script.read_bytes()
+        assert not raw_bytes.startswith(b"\xef\xbb\xbf")
+        assert not (REPO_ROOT / "RUN_DEV_ELECTRON.bat").read_bytes().startswith(b"\xef\xbb\xbf")
+
+    def test_bootstrap_modules_import_without_site_packages(self):
+        # 严格 -I -S 隔离掉 site-packages，确保全新空 .venv 阶段导入自举与生信自愈模块绝不触发 No module named 'Bio' 等三方依赖
+        code = (
+            f"import sys; sys.path.insert(0, r'{REPO_ROOT}'); "
+            "import src.utils.bio_tools_healer, src.utils.verify_and_install_deps, "
+            "src.utils.environment_checker, src.utils.headless_browser_manager; "
+            "print('NO_SITE_OK')"
+        )
+        res = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", code],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        assert res.returncode == 0, f"纯标准库隔离导入失败: {res.stdout}\n{res.stderr}"
+        assert "NO_SITE_OK" in res.stdout

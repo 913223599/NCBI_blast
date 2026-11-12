@@ -555,3 +555,35 @@
    - `node scripts\check_npm_deps.js` 验证 `electron-shell`、`src\web-next`（24 个依赖）与根目录 `.` 均完整就绪；
    - 全套 `pytest` 回归测试（[test_startup_self_healing.py](file:///f:/NCBI%20blast/tests/test_startup_self_healing.py)、[test_auto_return_workflow.py](file:///f:/NCBI%20blast/tests/test_auto_return_workflow.py)、[test_mail_download.py](file:///f:/NCBI%20blast/tests/test_mail_download.py)、[test_mail_send.py](file:///f:/NCBI%20blast/tests/test_mail_send.py)、[test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py)、[test_headless_browser_manager.py](file:///f:/NCBI%20blast/tests/test_headless_browser_manager.py)）于 `9.11s` 内 **111 passed / 0 failed**。
 5. **宿主机固有前置边界**：若目标新机器尚未安装 Node.js 或 Python 且系统未预装 `winget`，`RUN_DEV_ELECTRON.bat` 无法自行安装基础运行时本身，将明确打印下载地址并阻止启动。
+
+---
+
+## 18. 全裸机零基础全自动安装部署链路重构与版本实测（2026-11-12）
+
+### 18.1 Python 版本兼容性实证调研（3.11 vs 3.12 vs 3.13）
+1. **科学计算包门槛核查**：当前项目依赖 `scipy 1.18.1` 的元数据约束为 `Requires-Python >= 3.12`，`numpy 2.4+` / `pandas 3.0+` 为 `>= 3.11`；若新建 Python 3.11 环境将无法使用最新 `scipy` 并触发生态维护尾声降级。
+2. **项目内置扩展 ABI 锁定检查**：实测盘点 `vendor/ete4/` 下三个核心 Cython 二进制扩展（`operations.cp313-win_amd64.pyd`、`tree.cp313-win_amd64.pyd`、`newick.cp313-win_amd64.pyd`）均按 **Python 3.13 (cp313 ABI)** 预编译；无本地 MSVC 编译器的新机若使用 Python 3.11 或 3.12，加载 `from ete4.core.tree import Tree` 会报 `ModuleNotFoundError`。
+3. **最终选型策略**：**首选锁定 Python 3.13（与开发机 3.13.5 及本地 `tools/miniconda` 3.13.12 完全一致）**；仅当无法在线获取 3.13 时向下兼容机器已装的 Python `>= 3.11` 并于 `bio_tools_healer` 明确给出 cp313 扩展告警；自动补全（`winget` 与镜像便携包）统一拉取 **Python 3.13 (`Python.Python.3.13` / `python-3.13.9-amd64.zip`)** 与 **Node.js LTS (`>= 20`，实装 `v24.22.3`)**。
+
+### 18.2 模块化实现与关键隐蔽缺陷修复
+1. **新建模块化基础运行时自举引擎** [bootstrap_runtime.ps1](file:///f:/NCBI%20blast/scripts/bootstrap_runtime.ps1)：
+   - 多级探测顺序：隔离便携目录 `tools\runtime\` -> 本地内置 `tools\miniconda\python.exe` -> `py.exe` 启动器与常见安装路径 / `PATH`（严格过滤微软商店伪占位 `Microsoft\WindowsApps\python.exe`）；
+   - **`winget` 链路打通与修复**：自动为 `Python.Python.3.13` 附加 `--override "/quiet PrependPath=1 InstallAllUsers=0 Include_pip=1 Include_test=0"`，执行后即时合并读取注册表 `HKLM` + `HKCU` `Path` 变量刷新当前进程并导出 `scratch\runtime_env.bat`，消除“装完必须手动重启批处理两轮”与不写 PATH 问题；
+   - **无 `winget` / 离线内网友好国内镜像降级通道**：通过 Windows 原生 `curl.exe` + PowerShell 从 `npmmirror` 下载最新 LTS `node-win-x64.zip`、`python-3.13.9-amd64.zip`（并复制修补 `Lib/venv/scripts/nt/venvlauncher.exe` 避免 NuGet 版 Python 缺失 launcher 报错），并从清华 PyPI 提取最新 `uv.exe` 放入 `tools/runtime/`；
+   - 同步修正 PowerShell 5.1 下外置进程管道早断（`& exe | Select-Object -First 1` 污染 `$LASTEXITCODE=-1`）问题，及 [`.gitignore`](file:///f:/NCBI%20blast/.gitignore) 加入 `!/scripts/bootstrap_runtime.ps1` 与 `tools/runtime/` 忽略规则。
+2. **修复全新裸机 `.venv` 首跑阶段被裸露出来的两个深层启动缺陷**：
+   - 修复 [src/utils/__init__.py](file:///f:/NCBI%20blast/src/utils/__init__.py)：原顶层 eager import `file_handler` 导致全新空 `.venv` 在安装依赖前导入 `bio_tools_healer`/`headless_browser_manager` 触发 `No module named 'Bio'`。现改为 PEP 562 `__getattr__` + `importlib.import_module` 延迟按需导出，确保 `python -I -S` 严苛无 `site-packages` 隔离自举通过且保持原有包外导出百分百兼容；
+   - 修复 [bio_tools_healer.py](file:///f:/NCBI%20blast/src/utils/bio_tools_healer.py) 中 `_find_site_packages_dir()`：改以 `sys.prefix` 为第一优先并配合 `heal_vendor_ete4_binding()` 的 `.pyd` ABI 核查，避免 `uv venv` 下 `Path(sys.executable).resolve()` 穿透虚拟环境把 `.pth` 写偏到宿主解释器目录。
+3. **升级主启动器 [RUN_DEV_ELECTRON.bat](file:///f:/NCBI%20blast/RUN_DEV_ELECTRON.bat) 与完整性校验 [repair_integrity.ps1](file:///f:/NCBI%20blast/scripts/repair_integrity.ps1)**：
+   - 接入 `[0/3]` 运行时自举加载 `runtime_env.bat`，优先使用 `uv venv` 极速建构 `.venv` 并预装 `uv.exe`；
+   - 支持 `--check-only` 与 `--simulate-clean-host` 非阻塞自动化验收参数；将 `tools\runtime\` 可执行文件纳入完整性提权守护。
+
+### 18.3 全场景回归与清理测试实证
+1. **`winget` 链路与标准库门禁单测**（[test_startup_self_healing.py](file:///f:/NCBI%20blast/tests/test_startup_self_healing.py)）：
+   - 通过原生 C# 测试桩验证 `mock_winget.exe` 全过程，实证精确传递 `OpenJS.NodeJS.LTS`、`Python.Python.3.13` 与 `PrependPath=1`，含空格目录与 `runtime_env.bat` 在 `cmd.exe` 内正确生效，并过滤 `Microsoft\WindowsApps\python.exe`；
+   - 新增 `python -I -S`（禁用所有 `site-packages`）强隔离导入校验门禁测试。
+2. **全裸机（无 Node / 无 Python / 无 `winget`）真联网 E2E 部署实测及资源清理**：
+   - 在完全剔除宿主 `PATH` 内 Node/Python 并清空 `.venv`/`node_modules`/`config.json`/`translations.db` 及删去 `sra-tools/libwinpthread-1.dll` 的 `$env:TEMP` 沙盒中实测 `RUN_DEV_ELECTRON.bat --check-only --simulate-clean-host`：于 `139.6s` 内全程全自动完成 **Node v24.22.3 + Python 3.13.9 + uv 0.9.9 拉取部署 -> `.venv` 构建与 81 个 Python 包全装 -> `sra-tools DLL` 与目录配置数据库全修复 -> Electron 35.7.5 + 前端 24 包全安装 -> `ete4.Tree` Cython 扩展原生加载与 `environment_checker` 全 11 项 `[OK]`、`prefetch.exe 3.3.0` 正常执行**；
+   - 测试结束后已删除全部沙盒临时文件并确认 `$env:TEMP\ncbi_*` 零残留（`leftovers count: 0`）。
+3. **全套回归与静态检查汇总**：
+   - `ruff check --select F,E9` 全绿通过；全量 6 套 `pytest` 回归全通过。
