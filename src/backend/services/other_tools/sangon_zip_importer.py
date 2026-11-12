@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from .sangon_ignore_rules import list_ignored_orders, normalize_order_key
 from .sangon_mail_scanner import SangonMailIndex, create_sangon_subdirs
 
 logger = logging.getLogger("api.other_tools.sangon_zip_importer")
@@ -89,15 +90,23 @@ def import_order_zips_from_downloads(
     *,
     order_names: Optional[List[str]] = None,
     auto_create_order: bool = False,
+    ignored_orders: Optional[Iterable[str]] = None,
+    respect_ignore: bool = True,
 ) -> Dict[str, Any]:
     """
     从本地下载目录识别并归档压缩包到生工订单的 原始压缩包/ 目录。
-    仅复制归档不删除下载目录原文件，同名同大小文件自动跳过防重复。
+    仅复制归档不删除下载目录原文件，同名同大小文件自动跳过防重复，已全局忽略订单自动跳过。
     """
     r_dir = Path(root_dir)
     d_dir = Path(downloads_dir)
     if not r_dir.exists():
         r_dir.mkdir(parents=True, exist_ok=True)
+
+    resolved_ignored = (
+        {normalize_order_key(k) for k in ignored_orders if normalize_order_key(k)}
+        if ignored_orders is not None
+        else (set(list_ignored_orders().keys()) if respect_ignore else set())
+    )
 
     # 构建已有订单映射：order_no -> order_dir Path
     disk_by_no: Dict[str, Path] = {}
@@ -142,9 +151,13 @@ def import_order_zips_from_downloads(
 
     imported: List[Dict[str, Any]] = []
     skipped_existing = 0
+    skipped_ignored = 0
     created_dirs: List[str] = []
 
     for ono, item in latest_by_order.items():
+        if respect_ignore and normalize_order_key(ono) in resolved_ignored:
+            skipped_ignored += 1
+            continue
         order_dir = existing_by_no.get(ono)
         if order_dir is None:
             if not auto_create_order:
@@ -189,6 +202,7 @@ def import_order_zips_from_downloads(
         "matched_orders": len(latest_by_order),
         "imported_count": len(imported),
         "skipped_existing": skipped_existing,
+        "skipped_ignored": skipped_ignored,
         "created_dirs": created_dirs,
         "imported": imported,
     }

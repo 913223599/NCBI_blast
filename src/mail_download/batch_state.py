@@ -22,6 +22,7 @@ STATUS_LABELS = {
     "running": "执行中",
     "completed": "已完成",
     "failed": "上次失败",
+    "ignored": "已忽略跳过",
     "empty": "无序列附件",
 }
 
@@ -128,6 +129,7 @@ def inspect_batch_pipeline_state(
         label = STATUS_LABELS.get(status, status)
         if status == "completed" and send_status == "skipped_no_send":
             label = "已完成（未发信）"
+        is_ignored = status == "ignored"
         return {
             "status": status,
             "status_label": label,
@@ -135,6 +137,9 @@ def inspect_batch_pipeline_state(
             "task_ids": task_ids,
             "last_error": str(pipeline_meta.get("last_error") or ""),
             "updated_at": str(pipeline_meta.get("updated_at") or ""),
+            "ignored": is_ignored,
+            "ignore_reason": str(pipeline_meta.get("ignore_reason") or "") if is_ignored else "",
+            "ignored_at": str(pipeline_meta.get("ignored_at") or "") if is_ignored else "",
             "is_test": is_test_batch(batch_dir, mf),
             "pending": status in ("downloaded", "failed") and bool(fastas) and not is_test_batch(batch_dir, mf),
         }
@@ -147,6 +152,9 @@ def inspect_batch_pipeline_state(
             "task_ids": [],
             "last_error": "",
             "updated_at": "",
+            "ignored": False,
+            "ignore_reason": "",
+            "ignored_at": "",
             "is_test": is_test_batch(batch_dir, mf),
             "pending": False,
         }
@@ -171,6 +179,9 @@ def inspect_batch_pipeline_state(
             "task_ids": legacy_ids,
             "last_error": "",
             "updated_at": "",
+            "ignored": False,
+            "ignore_reason": "",
+            "ignored_at": "",
             "is_test": test_flag,
             "pending": False,
         }
@@ -182,6 +193,9 @@ def inspect_batch_pipeline_state(
         "task_ids": legacy_ids,
         "last_error": "",
         "updated_at": "",
+        "ignored": False,
+        "ignore_reason": "",
+        "ignored_at": "",
         "is_test": test_flag,
         "pending": not test_flag,
     }
@@ -229,6 +243,51 @@ def mark_batch_pipeline_state(
     data["pipeline"] = merged
     batch_dir.mkdir(parents=True, exist_ok=True)
     mf_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def mark_batch_ignored(
+    batch_dir: Path,
+    *,
+    ignored: bool = True,
+    reason: str = "",
+) -> Dict[str, Any]:
+    """将指定邮件批次标记为已忽略跳过或恢复为待处理/原有状态（幂等持久化于 manifest.json）。"""
+    mf_path = batch_dir / "manifest.json"
+    data = load_batch_manifest(batch_dir)
+    if not data:
+        data = {
+            "batch": batch_dir.name,
+            "download_time": datetime.now().isoformat(timespec="seconds"),
+            "mail": {},
+            "attachments": [],
+        }
+
+    now_iso = datetime.now().isoformat(timespec="seconds")
+    prev = dict(data.get("pipeline")) if isinstance(data.get("pipeline"), dict) else {}
+
+    if ignored:
+        cur_status = str(prev.get("status") or "").strip()
+        if cur_status and cur_status != "ignored" and not prev.get("prev_status"):
+            prev["prev_status"] = cur_status
+        prev["status"] = "ignored"
+        prev["ignore_reason"] = str(reason or "").strip()
+        prev["ignored_at"] = prev.get("ignored_at") or now_iso
+        prev["updated_at"] = now_iso
+        data["pipeline"] = prev
+    else:
+        restored = str(prev.pop("prev_status", "") or "").strip()
+        prev.pop("ignore_reason", None)
+        prev.pop("ignored_at", None)
+        if restored and restored != "ignored":
+            prev["status"] = restored
+        else:
+            prev.pop("status", None)
+        prev["updated_at"] = now_iso
+        data["pipeline"] = prev
+
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    mf_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return data["pipeline"]
 
 
 def collect_pending_batches(

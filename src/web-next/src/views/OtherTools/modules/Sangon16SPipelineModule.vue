@@ -13,13 +13,18 @@ import CleanupDialog from '../components/CleanupDialog.vue'
 import PaginationBar from '../components/PaginationBar.vue'
 import PopoverMenu from '../components/PopoverMenu.vue'
 import SangonMailRecords from '../components/SangonMailRecords.vue'
+import SangonIgnoreModal from '../components/SangonIgnoreModal.vue'
+import SangonAccountModal from '../components/SangonAccountModal.vue'
 import type { CleanupOption } from '../components/CleanupDialog.vue'
 import type {
+  SangonAuthMeta,
   SangonOrderItem,
   ScannedMailItem,
   MailScanSummary,
   DownloadCandidateItem,
-  OrderFilterKey
+  IgnoredOrderRule,
+  OrderFilterKey,
+  SangonRuntimeState
 } from '../sangonTypes'
 import { getJson, postJson, openLocalPath, describeMigration } from '../api'
 
@@ -32,7 +37,10 @@ const rootExists = ref(false)
 const db16sReady = ref(false)
 const orders = ref<SangonOrderItem[]>([])
 const downloadCandidates = ref<DownloadCandidateItem[]>([])
-const pendingDownloadCount = ref(0)
+const ignoredDownloadCount = ref(0)
+const ignoredOrdersMap = ref<Record<string, IgnoredOrderRule>>({})
+const ignoreKeywords = ref<string[]>([])
+const showIgnoreModal = ref(false)
 const mailAccount = ref('')
 
 const orderFilter = ref<OrderFilterKey>('all')
@@ -65,6 +73,7 @@ const mailSummary = ref<MailScanSummary>({
   uniqueTotal: 0,
   dedupRemoved: 0,
   skippedKnown: 0,
+  ignoredCount: 0,
   newCount: 0,
   createdCount: 0,
   existingCount: 0,
@@ -84,6 +93,20 @@ const imapReady = ref(false)
 const imapFile = ref('')
 const imapKeyInput = ref('')
 
+const sangonAuth = ref<SangonAuthMeta>({
+  account: '',
+  password_ready: false,
+  password_masked: '',
+  password_file: '',
+  auto_confirm_fee: true
+})
+const showSangonAuthModal = ref(false)
+const sangonAuthHint = ref('')
+const autoConfirmFee = ref(true)
+const initializedSangonSettings = ref(false)
+const autoBlastAfterDownload = ref(true)
+const pendingDownloadTask = ref<{ orderNames: string[]; autoRunBlast: boolean } | null>(null)
+
 const showSendModal = ref(false)
 const sendingMail = ref(false)
 const sendForm = ref({
@@ -93,7 +116,7 @@ const sendForm = ref({
   extraNote: ''
 })
 
-const runtime = ref<any>({
+const runtime = ref<SangonRuntimeState>({
   running: false,
   current_order: null,
   current_stage: 'idle',
@@ -101,8 +124,11 @@ const runtime = ref<any>({
   started_at: null,
   finished_at: null,
   last_message: '',
+  summary: { total: 0, processed: 0, skipped_missing: 0, failed: 0 },
   logs: []
 })
+const trackingRun = ref(false)
+const showLogs = ref(false)
 
 const cleanupOptions: CleanupOption[] = [
   { key: 'raw_extracted', label: '解压数据 (原始数据/)', desc: '删除解压出的文件，保留原始压缩包', checked: true },
@@ -113,38 +139,56 @@ const cleanupOptions: CleanupOption[] = [
 ]
 
 let pollTimer: ReturnType<typeof setInterval> | null = null
+let followUpTimer: ReturnType<typeof setTimeout> | null = null
 
 function isProcessingStatus(status: SangonOrderItem['status']): boolean {
   return status === 'downloaded' || status === 'extracted' || status === 'blasted'
 }
 
 function isOrderMarkedNew(ord: SangonOrderItem): boolean {
-  return Boolean(ord.is_new || recentCreatedDirs.value.includes(ord.dir_name))
+  return !ord.ignored && Boolean(ord.is_new || recentCreatedDirs.value.includes(ord.dir_name))
 }
+
+function normalizeOrderKeyFrontend(raw: string): string {
+  const s = String(raw || '').trim()
+  const m = s.match(/(?<!\d)(\d{10})(?!\d)/)
+  if (m && m[1]) return m[1]
+  if (s.includes('_')) return s.split('_', 2)[1]?.trim() || s
+  return s
+}
+
+const activeOrders = computed(() => orders.value.filter(o => !o.ignored))
+const ignoredOrders = computed(() => orders.value.filter(o => Boolean(o.ignored)))
+const ignoredOrdersCount = computed(() => Object.keys(ignoredOrdersMap.value || {}).length)
+const claimableCandidates = computed(() =>
+  downloadCandidates.value.filter(c => !c.archived && !c.ignored)
+)
 
 const orderFilterTabs = computed(() => {
   let pending = 0
   let processing = 0
   let completed = 0
-  for (const o of orders.value) {
+  for (const o of activeOrders.value) {
     if (o.status === 'pending') pending += 1
     else if (o.status === 'completed') completed += 1
     else processing += 1
   }
   return [
-    { key: 'all' as OrderFilterKey, label: '全部', count: orders.value.length },
+    { key: 'all' as OrderFilterKey, label: '全部', count: activeOrders.value.length },
     { key: 'pending' as OrderFilterKey, label: '待下载', count: pending },
     { key: 'processing' as OrderFilterKey, label: '处理中', count: processing },
-    { key: 'completed' as OrderFilterKey, label: '已完成', count: completed }
+    { key: 'completed' as OrderFilterKey, label: '已完成', count: completed },
+    { key: 'ignored' as OrderFilterKey, label: '已忽略', count: ignoredOrders.value.length }
   ]
 })
 
 const filteredOrders = computed(() => {
   const f = orderFilter.value
-  if (f === 'all') return orders.value
-  if (f === 'pending') return orders.value.filter(o => o.status === 'pending')
-  if (f === 'completed') return orders.value.filter(o => o.status === 'completed')
-  return orders.value.filter(o => isProcessingStatus(o.status))
+  if (f === 'ignored') return ignoredOrders.value
+  if (f === 'all') return activeOrders.value
+  if (f === 'pending') return activeOrders.value.filter(o => o.status === 'pending')
+  if (f === 'completed') return activeOrders.value.filter(o => o.status === 'completed')
+  return activeOrders.value.filter(o => isProcessingStatus(o.status))
 })
 
 const pagedOrders = computed(() => {
@@ -152,13 +196,61 @@ const pagedOrders = computed(() => {
   return filteredOrders.value.slice(start, start + orderPageSize.value)
 })
 
-const pendingRunOrdersCount = computed(() =>
-  orders.value.filter(o => o.status !== 'completed' || forceReblast.value).length
+function hasOrderSourceData(ord: SangonOrderItem): boolean {
+  return Boolean(
+    ord.zip_count > 0 ||
+    ord.consensus_fasta_count > 0 ||
+    ord.blast_report_count > 0 ||
+    ord.download_zip_ready
+  )
+}
+
+function isOrderRunnable(ord: SangonOrderItem, reblast = forceReblast.value): boolean {
+  if (ord.ignored) return false
+  if (ord.status !== 'completed') return hasOrderSourceData(ord)
+  return reblast && (ord.zip_count > 0 || ord.consensus_fasta_count > 0 || ord.blast_report_count > 0)
+}
+
+const runnableOrdersCount = computed(() =>
+  activeOrders.value.filter(o => isOrderRunnable(o)).length
 )
+
+function hasOrderDownloadChannel(ord: SangonOrderItem): boolean {
+  return Boolean(ord.download_zip_ready || ord.download_url || ord.cx_order_id)
+}
+
+function isOrderDownloadable(ord: SangonOrderItem): boolean {
+  return !ord.ignored && ord.status === 'pending' && ord.zip_count === 0 && hasOrderDownloadChannel(ord)
+}
+
+const downloadableOrders = computed(() =>
+  activeOrders.value.filter(o => isOrderDownloadable(o))
+)
+
+const checkedDownloadableNames = computed(() =>
+  checkedOrderNames.value.filter(name => {
+    const ord = activeOrders.value.find(o => o.dir_name === name)
+    return ord ? isOrderDownloadable(ord) : false
+  })
+)
+
+const targetDownloadCount = computed(() =>
+  checkedDownloadableNames.value.length > 0
+    ? checkedDownloadableNames.value.length
+    : downloadableOrders.value.length
+)
+
+const awaitingDownloadCount = computed(() =>
+  activeOrders.value.filter(o => o.status === 'pending' && !hasOrderSourceData(o)).length
+)
+
+const runtimeLogsList = computed(() => runtime.value?.logs || [])
 
 const activeAdvancedTags = computed(() => {
   const tags: string[] = []
   if (forceReblast.value) tags.push('强制重新比对')
+  if (!autoBlastAfterDownload.value) tags.push('仅下载暂不比对')
+  if (!autoConfirmFee.value) tags.push('遇费用弹窗暂停')
   if (!mailFilter.value.dedup) tags.push('已关闭去重')
   if (!mailFilter.value.autoCreate) tags.push('仅识别不自动建目录')
   if (mailFilter.value.ignoreHistory) tags.push('忽略清理记忆')
@@ -182,13 +274,18 @@ watch(searchKeyword, () => {
   resultPage.value = 1
 })
 
+watch(orderFilter, () => {
+  const visible = new Set(filteredOrders.value.map(o => o.dir_name))
+  checkedOrderNames.value = checkedOrderNames.value.filter(n => visible.has(n))
+})
+
 watch([orderFilter, () => filteredOrders.value.length], () => {
   const maxPage = Math.max(1, Math.ceil(filteredOrders.value.length / orderPageSize.value))
   if (orderPage.value > maxPage) orderPage.value = maxPage
 })
 
-const completedOrdersCount = computed(() => orders.value.filter(o => o.status === 'completed').length)
-const totalIdentifiedSamples = computed(() => orders.value.reduce((acc, o) => acc + (o.total_samples || 0), 0))
+const completedOrdersCount = computed(() => activeOrders.value.filter(o => o.status === 'completed').length)
+const totalIdentifiedSamples = computed(() => activeOrders.value.reduce((acc, o) => acc + (o.total_samples || 0), 0))
 const allChecked = computed(
   () => filteredOrders.value.length > 0 && filteredOrders.value.every(o => checkedOrderNames.value.includes(o.dir_name))
 )
@@ -234,8 +331,45 @@ async function loadOverview(): Promise<void> {
     db16sReady.value = Boolean(data.db_16s_ready)
     orders.value = data.orders || []
     downloadCandidates.value = data.download_candidates || []
-    pendingDownloadCount.value = data.pending_download_count || 0
-    runtime.value = data.runtime || runtime.value
+    ignoredDownloadCount.value = data.ignored_download_count || 0
+    if (data.settings) {
+      ignoredOrdersMap.value = data.settings.ignored_orders || {}
+      ignoreKeywords.value = data.settings.ignore_subject_keywords || []
+    }
+    if (data.sangon_auth) {
+      sangonAuth.value = data.sangon_auth
+      if (!initializedSangonSettings.value) {
+        autoConfirmFee.value = data.sangon_auth.auto_confirm_fee ?? true
+        initializedSangonSettings.value = true
+      }
+    }
+    const nextRuntime: SangonRuntimeState = data.runtime || runtime.value
+    runtime.value = nextRuntime
+
+    if (nextRuntime?.running) {
+      trackingRun.value = true
+      const pct = Number(nextRuntime.progress ?? 0)
+      setInfo(`流水线运行中 (${pct}%)：${nextRuntime.last_message || '正在处理...'}`)
+    } else if (trackingRun.value) {
+      trackingRun.value = false
+      const summary = nextRuntime?.summary
+      const msg = nextRuntime?.last_message || '生工 16S 流水线处理结束'
+      if (nextRuntime?.current_stage === 'failed') {
+        setError(msg)
+        showLogs.value = true
+      } else {
+        setInfo(msg)
+        if (summary && ((summary.skipped_missing > 0 && summary.processed === 0) || summary.failed > 0)) {
+          showLogs.value = true
+        }
+      }
+      if (selectedOrder.value) {
+        const refreshed = orders.value.find(o => o.dir_name === selectedOrder.value?.dir_name)
+        if (refreshed?.has_result_csv) {
+          await selectOrderAndLoadResults(refreshed)
+        }
+      }
+    }
 
     if (!mailAccount.value) {
       try {
@@ -246,14 +380,20 @@ async function loadOverview(): Promise<void> {
       }
     }
 
-    checkedOrderNames.value = checkedOrderNames.value.filter(n => orders.value.some(o => o.dir_name === n))
+    const visibleSet = new Set(filteredOrders.value.map(o => o.dir_name))
+    checkedOrderNames.value = checkedOrderNames.value.filter(n => visibleSet.has(n))
 
     if (selectedOrder.value) {
       const updated = orders.value.find(o => o.dir_name === selectedOrder.value?.dir_name) || null
-      selectedOrder.value = updated
+      if (updated && updated.ignored && orderFilter.value !== 'ignored') {
+        selectedOrder.value = null
+        resultRows.value = []
+      } else {
+        selectedOrder.value = updated
+      }
     }
-    if (!selectedOrder.value && orders.value.length > 0) {
-      const firstCompleted = orders.value.find(o => o.has_result_csv) || orders.value[0]
+    if (!selectedOrder.value && activeOrders.value.length > 0) {
+      const firstCompleted = activeOrders.value.find(o => o.has_result_csv) || activeOrders.value[0]
       if (firstCompleted) await selectOrderAndLoadResults(firstCompleted)
     }
   } catch (err: any) {
@@ -337,6 +477,110 @@ async function handleClaimSingleOrder(order: SangonOrderItem): Promise<void> {
   await handleImportDownloads(false, [order.dir_name])
 }
 
+async function handleClaimSingleCandidate(cand: DownloadCandidateItem): Promise<void> {
+  if (cand.matched_dir_name) {
+    await handleImportDownloads(false, [cand.matched_dir_name])
+  } else {
+    await handleImportDownloads(true, [cand.order_no])
+  }
+}
+
+function _syncScannedMailsIgnoreState(targetKeys: Set<string>, ignored: boolean): void {
+  if (!scannedMails.value.length || !targetKeys.size) return
+  const existingOrderNos = new Set(
+    orders.value.map(o => normalizeOrderKeyFrontend(o.order_no || o.dir_name))
+  )
+  let changed = false
+  scannedMails.value = scannedMails.value.map(m => {
+    const key = normalizeOrderKeyFrontend(m.order_no || m.dir_name)
+    if (!key || !targetKeys.has(key) || m.dedup_status === 'non_sequencing') return m
+    changed = true
+    if (ignored) {
+      return { ...m, ignored: true, dedup_status: 'ignored' }
+    }
+    const hasDir = Boolean(m.dir_ready || existingOrderNos.has(key))
+    return {
+      ...m,
+      ignored: false,
+      dir_ready: hasDir,
+      dedup_status: hasDir ? 'existing' : 'new'
+    }
+  })
+  if (changed) {
+    mailSummary.value = {
+      ...mailSummary.value,
+      ignoredCount: scannedMails.value.filter(m => m.dedup_status === 'ignored').length,
+      existingCount: scannedMails.value.filter(m => m.dedup_status === 'existing' || m.dedup_status === 'created').length,
+      newCount: scannedMails.value.filter(m => m.dedup_status === 'new').length
+    }
+  }
+}
+
+async function handleIgnoreOrders(
+  orderKeys: string[],
+  ignore: boolean,
+  reason = '',
+  dirNames: Record<string, string> = {}
+): Promise<void> {
+  if (!orderKeys.length) return
+  busy.value = true
+  try {
+    const data = await postJson(`${API}/ignore`, {
+      order_keys: orderKeys,
+      ignore,
+      reason,
+      dir_names: dirNames
+    })
+    ignoredOrdersMap.value = data.ignored_orders || {}
+    const affected = new Set<string>((data.affected_orders || []).map((k: string) => normalizeOrderKeyFrontend(k)))
+    for (const k of orderKeys) {
+      const nk = normalizeOrderKeyFrontend(k)
+      if (nk) affected.add(nk)
+    }
+    checkedOrderNames.value = checkedOrderNames.value.filter(
+      name => !affected.has(normalizeOrderKeyFrontend(name))
+    )
+    _syncScannedMailsIgnoreState(affected, ignore)
+    setInfo(
+      ignore
+        ? `已将 ${data.updated_count} 个订单设为全局忽略（已移入「已忽略」标签隐藏，本地文件与压缩包安全保留）`
+        : `已取消忽略 ${data.updated_count} 个订单，已恢复至正常待办队列`
+    )
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function handleToggleMailIgnore(mail: ScannedMailItem): Promise<void> {
+  const key = mail.order_no || mail.dir_name
+  if (!key) return
+  const willIgnore = mail.dedup_status !== 'ignored'
+  const dirMap = mail.order_no && mail.dir_name ? { [mail.order_no]: mail.dir_name } : {}
+  await handleIgnoreOrders(
+    [key],
+    willIgnore,
+    willIgnore ? `从通知邮件忽略 (${mail.dir_name || mail.order_no})` : '',
+    dirMap
+  )
+}
+
+async function handleSaveIgnoreKeywords(keywords: string[]): Promise<void> {
+  busy.value = true
+  try {
+    const data = await postJson(`${API}/settings`, { ignore_subject_keywords: keywords })
+    ignoreKeywords.value = data.settings?.ignore_subject_keywords || []
+    setInfo(`非测序邮件主题过滤关键词已更新（共 ${ignoreKeywords.value.length} 项）`)
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
 function openSendResultModal(order: SangonOrderItem): void {
   sendForm.value = {
     orderDirName: order.dir_name,
@@ -393,6 +637,7 @@ async function handleCheckNewOrders(): Promise<void> {
       uniqueTotal: data.unique_total || 0,
       dedupRemoved: data.dedup_removed || 0,
       skippedKnown: data.skipped_known || 0,
+      ignoredCount: data.ignored_count || 0,
       newCount: data.new_count || 0,
       createdCount: data.created_count || 0,
       existingCount: data.existing_count || 0,
@@ -413,7 +658,8 @@ async function handleCheckNewOrders(): Promise<void> {
     } else {
       const extraParts: string[] = [`已有订单 ${s.existingCount} 个`]
       if (s.dedupRemoved > 0) extraParts.push(`合并重复 ${s.dedupRemoved} 封`)
-      if (s.nonSequencingCount > 0) extraParts.push(`忽略非测序通知 ${s.nonSequencingCount} 封`)
+      if (s.nonSequencingCount > 0) extraParts.push(`过滤非测序通知 ${s.nonSequencingCount} 封`)
+      if (s.ignoredCount > 0) extraParts.push(`跳过已全局忽略 ${s.ignoredCount} 条`)
       if (s.skippedKnown > 0) extraParts.push(`历史清理跳过 ${s.skippedKnown} 条`)
       setInfo(`检查完成：暂无新测序订单（${extraParts.join('，')}）`)
     }
@@ -452,8 +698,24 @@ async function handleInitOrderFromMail(mail: ScannedMailItem): Promise<void> {
 }
 
 async function handleRunPipeline(orderNames: string[] = []): Promise<void> {
-  const targets = orderNames.length ? orderNames : checkedOrderNames.value
-  setInfo(targets.length ? `启动订单处理: ${targets.join(', ')}` : '启动待处理订单...')
+  const targets = orderNames.length
+    ? orderNames
+    : (orderFilter.value !== 'ignored' ? checkedOrderNames.value : [])
+
+  if (!targets.length && runnableOrdersCount.value === 0) {
+    setInfo(
+      awaitingDownloadCount.value > 0
+        ? `当前没有可执行比对的订单：剩余 ${awaitingDownloadCount.value} 个订单尚未下载压缩包，可点击「自动下载」自动拉取，或手动「打开下载页」下载后认领（非测序通知单可忽略）`
+        : '当前没有需要处理的生工 16S 订单'
+    )
+    return
+  }
+
+  if (followUpTimer) {
+    clearTimeout(followUpTimer)
+    followUpTimer = null
+  }
+  setInfo(targets.length ? `正在启动订单处理: ${targets.join(', ')}...` : '正在启动生工 16S 待处理流水线...')
   try {
     const data = await postJson(`${API}/run_pipeline`, {
       sangon_root: sangonRoot.value,
@@ -463,9 +725,14 @@ async function handleRunPipeline(orderNames: string[] = []): Promise<void> {
       hitlist_size: '50',
       force_reblast: forceReblast.value
     })
-    runtime.value = data.runtime
-    setInfo('任务已在后台运行')
+    trackingRun.value = true
+    runtime.value = data.runtime || runtime.value
+    setInfo(runtime.value?.last_message || '任务已在后台运行')
+    followUpTimer = setTimeout(() => {
+      void loadOverview()
+    }, 450)
   } catch (err) {
+    trackingRun.value = false
     setError(err)
   }
 }
@@ -475,7 +742,7 @@ function openCleanupModal(orderNames?: string[]): void {
     ? orderNames
     : (checkedOrderNames.value.length
         ? checkedOrderNames.value
-        : (orders.value.length ? orders.value.map(o => o.dir_name) : ['__ALL__']))
+        : (activeOrders.value.length ? activeOrders.value.map(o => o.dir_name) : ['__ALL__']))
   cleanupTargetOrders.value = targets
   showCleanup.value = true
 }
@@ -535,15 +802,150 @@ async function saveImapAuth(): Promise<void> {
   }
 }
 
+function openSangonAuthEditor(hint = ''): void {
+  sangonAuthHint.value = hint
+  showSangonAuthModal.value = true
+}
+
+function closeSangonAuthEditor(): void {
+  showSangonAuthModal.value = false
+  pendingDownloadTask.value = null
+}
+
+async function handleSaveSangonAuth(payload: {
+  account: string
+  password: string | null
+  auto_confirm_fee: boolean
+}): Promise<void> {
+  busy.value = true
+  try {
+    const data = await postJson(`${API}/auth`, payload)
+    if (data.sangon_auth) {
+      sangonAuth.value = data.sangon_auth
+      autoConfirmFee.value = data.sangon_auth.auto_confirm_fee ?? payload.auto_confirm_fee
+    }
+    showSangonAuthModal.value = false
+    const nextTask = pendingDownloadTask.value
+    pendingDownloadTask.value = null
+    if (nextTask && sangonAuth.value.account && sangonAuth.value.password_ready) {
+      setInfo('生工账号配置已保存，正在自动接续下载流程...')
+      await handleAutoDownloadOrders(nextTask.orderNames, nextTask.autoRunBlast)
+      return
+    }
+    setInfo('生工官网账号配置已保存（密码已独立存放于本地 .sangon_auth）')
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function handleClearSangonPassword(): Promise<void> {
+  busy.value = true
+  try {
+    const data = await postJson(`${API}/auth`, { password: '' })
+    if (data.sangon_auth) {
+      sangonAuth.value = data.sangon_auth
+    }
+    setInfo('已清除本地保存的生工登录密码')
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function handleToggleAutoConfirmFee(): Promise<void> {
+  try {
+    const data = await postJson(`${API}/settings`, { auto_confirm_fee: autoConfirmFee.value })
+    if (data.sangon_auth) {
+      sangonAuth.value = data.sangon_auth
+    } else {
+      sangonAuth.value = { ...sangonAuth.value, auto_confirm_fee: autoConfirmFee.value }
+    }
+    setInfo(autoConfirmFee.value ? '已开启：遇到 KBSeq 费用确认弹窗将自动点击确定下载' : '已关闭：遇到费用确认弹窗将跳过并等待人工确认')
+  } catch (err) {
+    setError(err)
+  }
+}
+
+async function handleAutoDownloadOrders(
+  orderNames: string[] = [],
+  autoRunBlast = autoBlastAfterDownload.value
+): Promise<void> {
+  const targets = orderNames.length
+    ? orderNames
+    : (orderFilter.value !== 'ignored' && checkedDownloadableNames.value.length > 0
+        ? checkedDownloadableNames.value
+        : [])
+
+  const targetOrderObjs = targets.length
+    ? activeOrders.value.filter(o => targets.includes(o.dir_name) && isOrderDownloadable(o))
+    : downloadableOrders.value
+
+  if (!targetOrderObjs.length) {
+    setInfo('当前没有可自动下载的待处理订单（请确认已运行「检查新订单」获取下载链接，或直接点击待认领下载包）')
+    return
+  }
+
+  const needsWebLogin = targetOrderObjs.some(
+    o => !o.download_zip_ready && Boolean(o.download_url || o.cx_order_id)
+  )
+  if (needsWebLogin && (!sangonAuth.value.account || !sangonAuth.value.password_ready)) {
+    pendingDownloadTask.value = { orderNames: targets, autoRunBlast }
+    openSangonAuthEditor('检测到需登录生工官网下载压缩包，请先保存一次生工账号与登录密码（保存后将自动继续下载）。')
+    return
+  }
+
+  if (followUpTimer) {
+    clearTimeout(followUpTimer)
+    followUpTimer = null
+  }
+  setInfo(
+    autoRunBlast
+      ? `正在启动自动下载并接续 16S 比对（待处理 ${targetOrderObjs.length} 个）...`
+      : `正在启动自动认领/官网下载（待处理 ${targetOrderObjs.length} 个）...`
+  )
+  try {
+    const data = await postJson(`${API}/download_orders`, {
+      sangon_root: sangonRoot.value || null,
+      downloads_dir: downloadsDir.value || null,
+      order_names: targets,
+      auto_run_blast: autoRunBlast,
+      auto_confirm_fee: autoConfirmFee.value,
+      evalue: '0.05',
+      hitlist_size: '50',
+      force_reblast: forceReblast.value
+    })
+    trackingRun.value = true
+    showLogs.value = true
+    runtime.value = data.runtime || runtime.value
+    setInfo(runtime.value?.last_message || '自动下载任务已在后台启动')
+    followUpTimer = setTimeout(() => {
+      void loadOverview()
+    }, 450)
+  } catch (err: any) {
+    trackingRun.value = false
+    const detail = String(err?.message || err || '')
+    if (detail.includes('生工账号配置') || detail.includes('账号与登录密码')) {
+      pendingDownloadTask.value = { orderNames: targets, autoRunBlast }
+      openSangonAuthEditor(detail)
+    } else {
+      setError(err)
+    }
+  }
+}
+
 onMounted(() => {
   loadOverview()
   pollTimer = setInterval(() => {
-    if (runtime.value?.running) loadOverview()
-  }, 3500)
+    if (runtime.value?.running || trackingRun.value) loadOverview()
+  }, 1200)
 })
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  if (followUpTimer) clearTimeout(followUpTimer)
 })
 </script>
 
@@ -553,7 +955,7 @@ onUnmounted(() => {
     <div class="steps-strip">
       <div class="step-pill"><span>1</span> 检查新订单</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>2</span> 浏览器下载</div>
+      <div class="step-pill"><span>2</span> 自动 / 网页下载</div>
       <div class="step-sep">&rarr;</div>
       <div class="step-pill"><span>3</span> 认领下载包</div>
       <div class="step-sep">&rarr;</div>
@@ -577,8 +979,9 @@ onUnmounted(() => {
         <div class="metric-val" :class="db16sReady ? 'ok' : 'warn'">{{ db16sReady ? '已就绪' : '缺失' }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">已完成 / 总订单</div>
-        <div class="metric-val">{{ completedOrdersCount }} / {{ orders.length }}</div>
+        <div class="metric-label">已完成 / 有效订单</div>
+        <div class="metric-val">{{ completedOrdersCount }} / {{ activeOrders.length }}</div>
+        <div v-if="ignoredOrders.length > 0" class="metric-sub">已忽略 {{ ignoredOrders.length }} 个（移至已忽略标签）</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">已鉴定样本</div>
@@ -589,7 +992,7 @@ onUnmounted(() => {
         <div class="metric-val" :class="runtime.running ? 'running' : 'idle'">
           {{ runtime.running ? `运行中 (${runtime.progress}%)` : '空闲' }}
         </div>
-        <div class="metric-sub">{{ runtime.last_message || '-' }}</div>
+        <div class="metric-sub" :title="runtime.last_message || ''">{{ runtime.last_message || '-' }}</div>
       </div>
     </div>
 
@@ -611,25 +1014,54 @@ onUnmounted(() => {
         @save="handleSaveDownloadsDir"
         @open="openLocalPath"
       />
-      <div v-if="pendingDownloadCount > 0" class="pending-dl-bar">
-        <div class="pending-dl-info">
-          <strong>发现 {{ pendingDownloadCount }} 个待认领测序压缩包：</strong>
-          <span
-            v-for="cand in downloadCandidates.filter(c => !c.archived)"
+      <div v-if="claimableCandidates.length > 0" class="pending-dl-bar">
+        <div class="pending-dl-header">
+          <div class="pending-dl-title">
+            <strong>发现 {{ claimableCandidates.length }} 个未归档测序压缩包（位于浏览器下载目录）</strong>
+            <span class="pending-dl-desc">
+              “认领”是指将从生工网页手动下载的 .zip 复制归档到对应订单「原始压缩包/」目录以便自动解压比对（保留下载原文件）；已处理或无需比对可点单包右侧「忽略」。
+            </span>
+          </div>
+          <div class="pending-dl-actions">
+            <button
+              v-if="claimableCandidates.some(c => Boolean(c.matched_dir_name))"
+              class="btn-mini primary"
+              :disabled="busy || runtime.running"
+              @click="handleImportDownloads(false)"
+            >
+              认领已匹配订单
+            </button>
+            <button class="btn-mini" :disabled="busy || runtime.running" @click="handleImportDownloads(true)">
+              全部新建并认领
+            </button>
+          </div>
+        </div>
+        <div class="pending-dl-chips">
+          <div
+            v-for="cand in claimableCandidates"
             :key="cand.zip_path"
-            class="dl-chip"
+            class="dl-chip-card"
             :title="cand.zip_path"
           >
-            {{ cand.zip_name }} ({{ cand.matched_dir_name ? `匹配 ${cand.matched_dir_name}` : '未建目录' }})
-          </span>
-        </div>
-        <div class="pending-dl-actions">
-          <button class="btn-mini primary" :disabled="busy || runtime.running" @click="handleImportDownloads(false)">
-            认领匹配订单
-          </button>
-          <button class="btn-mini" :disabled="busy || runtime.running" @click="handleImportDownloads(true)">
-            新建并全部认领
-          </button>
+            <span class="dl-chip-name">{{ cand.zip_name }}</span>
+            <span class="dl-chip-match">
+              {{ cand.matched_dir_name ? `匹配 ${cand.matched_dir_name}` : '尚无订单目录' }}
+            </span>
+            <button
+              class="chip-btn primary"
+              :disabled="busy || runtime.running"
+              @click="handleClaimSingleCandidate(cand)"
+            >
+              {{ cand.matched_dir_name ? '归档' : '建目录并归档' }}
+            </button>
+            <button
+              class="chip-btn"
+              :disabled="busy || runtime.running"
+              @click="handleIgnoreOrders([cand.order_no], true, '从待认领下载包忽略')"
+            >
+              忽略
+            </button>
+          </div>
         </div>
       </div>
       <div v-if="selectedOrder" class="sub-paths">
@@ -653,41 +1085,89 @@ onUnmounted(() => {
           {{ scanningMail ? '正在检查...' : '检查新订单' }}
         </button>
         <button
-          class="btn-primary"
-          @click="handleRunPipeline([])"
-          :disabled="runtime.running || (checkedOrderNames.length === 0 && pendingRunOrdersCount === 0)"
+          class="btn-download"
+          @click="handleAutoDownloadOrders([])"
+          :disabled="runtime.running || targetDownloadCount === 0"
+          :title="
+            targetDownloadCount === 0
+              ? '当前没有具备生工下载链接或本地待认领包的待下载订单'
+              : (autoBlastAfterDownload
+                  ? '优先认领本地包并登录生工官网自动下载其余订单，完成后直接接续解压与 16S BLAST 比对导出'
+                  : '优先认领本地包并登录生工官网顺序下载压缩包')
+          "
         >
           {{
-            runtime.running
-              ? '运行中...'
-              : checkedOrderNames.length
-                ? `运行所选 (${checkedOrderNames.length})`
-                : `运行待处理 (${pendingRunOrdersCount})`
+            checkedDownloadableNames.length > 0
+              ? (autoBlastAfterDownload ? `下载并比对所选 (${checkedDownloadableNames.length})` : `自动下载所选 (${checkedDownloadableNames.length})`)
+              : (autoBlastAfterDownload ? `下载并比对 (${targetDownloadCount})` : `自动下载 (${targetDownloadCount})`)
           }}
         </button>
         <button
-          v-if="pendingDownloadCount > 0"
+          class="btn-primary"
+          @click="handleRunPipeline([])"
+          :disabled="runtime.running || (orderFilter !== 'ignored' && checkedOrderNames.length === 0 && runnableOrdersCount === 0) || (orderFilter === 'ignored' && runnableOrdersCount === 0)"
+          :title="runnableOrdersCount === 0 && checkedOrderNames.length === 0 && awaitingDownloadCount > 0 ? `剩余 ${awaitingDownloadCount} 个待处理订单尚无压缩包，可点击「自动下载」或手动「打开下载页」下载后认领` : ''"
+        >
+          {{
+            runtime.running
+              ? `运行中 (${runtime.progress ?? 0}%)...`
+              : orderFilter !== 'ignored' && checkedOrderNames.length
+                ? `运行所选 (${checkedOrderNames.length})`
+                : `运行待处理 (${runnableOrdersCount})`
+          }}
+        </button>
+        <span
+          v-if="awaitingDownloadCount > 0 && runnableOrdersCount === 0 && !runtime.running"
+          class="awaiting-dl-hint"
+          title="订单目录内尚无 .zip 压缩包或 .1.fasta 主序列，需先从生工网页下载后认领"
+        >
+          待下载压缩包 {{ awaitingDownloadCount }} 个
+        </span>
+        <button
+          v-if="checkedOrderNames.length > 0 && orderFilter !== 'ignored'"
+          class="btn-outline"
+          :disabled="busy || runtime.running"
+          @click="handleIgnoreOrders(checkedOrderNames, true, '从订单列表批量忽略')"
+        >
+          批量忽略 ({{ checkedOrderNames.length }})
+        </button>
+        <button
+          v-else-if="checkedOrderNames.length > 0 && orderFilter === 'ignored'"
           class="btn-outline highlight-claim"
           :disabled="busy || runtime.running"
-          @click="handleImportDownloads(false)"
+          @click="handleIgnoreOrders(checkedOrderNames, false)"
         >
-          认领下载包 ({{ pendingDownloadCount }})
+          批量取消忽略 ({{ checkedOrderNames.length }})
         </button>
         <span v-if="checkedOrderNames.length" class="sel-hint">已勾选 {{ checkedOrderNames.length }} 个订单</span>
         <span v-for="tag in activeAdvancedTags" :key="tag" class="adv-active-tag">{{ tag }}</span>
       </div>
 
       <div class="control-right">
+        <button
+          v-if="runtimeLogsList.length > 0"
+          class="btn-outline"
+          :class="{ 'active-trigger': showLogs }"
+          @click="showLogs = !showLogs"
+        >
+          {{ showLogs ? '收起日志' : `运行日志 (${runtimeLogsList.length})` }}
+        </button>
         <button class="btn-outline" @click="loadOverview" :disabled="scanningMail">刷新</button>
         <PopoverMenu align="right" :width="250">
           <template #trigger="{ open }">
-            <button class="btn-outline" :class="{ 'active-trigger': open || activeAdvancedTags.length > 0 }">
+            <button class="btn-outline" :class="{ 'active-trigger': open || activeAdvancedTags.length > 0 || ignoredOrdersCount > 0 }">
               更多与设置 ▾
             </button>
           </template>
           <template #default="{ close }">
             <div class="menu-section">
+              <button class="menu-item" @click="close(); openSangonAuthEditor()">
+                {{ sangonAuth.password_ready ? `生工账号配置 (${sangonAuth.account || '已配置'})` : '生工账号配置 (未配置)...' }}
+              </button>
               <button class="menu-item" @click="close(); openAuthEditor()">邮箱 Key 配置</button>
+              <button class="menu-item" @click="close(); showIgnoreModal = true">
+                跳过与忽略规则{{ ignoredOrdersCount > 0 ? ` (${ignoredOrdersCount})` : '...' }}
+              </button>
               <button
                 class="menu-item"
                 :disabled="busy || runtime.running"
@@ -706,6 +1186,14 @@ onUnmounted(() => {
             <div class="menu-divider"></div>
             <div class="menu-section">
               <div class="menu-title">高级扫描与比对设置</div>
+              <label class="menu-check">
+                <input type="checkbox" v-model="autoBlastAfterDownload" />
+                <span>自动下载后直接接续 16S 比对</span>
+              </label>
+              <label class="menu-check">
+                <input type="checkbox" v-model="autoConfirmFee" @change="handleToggleAutoConfirmFee" />
+                <span>自动确认 KBSeq 费用明细弹窗</span>
+              </label>
               <label class="menu-check">
                 <input type="checkbox" v-model="forceReblast" />
                 <span>强制重新比对（清理旧缓存）</span>
@@ -730,6 +1218,19 @@ onUnmounted(() => {
 
     <div v-if="actionMessage" class="alert-banner info">{{ actionMessage }}</div>
     <div v-if="errorMessage" class="alert-banner error">{{ errorMessage }}</div>
+
+    <div v-if="showLogs && runtimeLogsList.length > 0" class="panel-box sangon-log-panel">
+      <div class="panel-box-header">
+        <div class="order-header-left">
+          <h4>生工 16S 运行日志（{{ runtimeLogsList.length }} 条）</h4>
+          <span v-if="runtime.finished_at && !runtime.running" class="order-tip">
+            最近结束于 {{ runtime.finished_at }}
+          </span>
+        </div>
+        <button class="btn-mini" @click="showLogs = false">收起</button>
+      </div>
+      <pre class="sangon-log-console">{{ runtimeLogsList.join('\n') }}</pre>
+    </div>
 
     <!-- 订单列表（带纯前端阶段筛选与自适应主操作） -->
     <div class="panel-box">
@@ -771,7 +1272,7 @@ onUnmounted(() => {
           <tr
             v-for="ord in pagedOrders"
             :key="ord.dir_name"
-            :class="{ 'selected-row': selectedOrder?.dir_name === ord.dir_name }"
+            :class="{ 'selected-row': selectedOrder?.dir_name === ord.dir_name, 'ignored-row': ord.ignored }"
             @click="selectOrderAndLoadResults(ord)"
           >
             <td @click.stop>
@@ -781,14 +1282,28 @@ onUnmounted(() => {
               <span>{{ ord.dir_name }}</span>
               <span v-if="isOrderMarkedNew(ord)" class="new-order-badge" title="新发现且尚未下载测序包的订单">新</span>
               <span
-                v-if="ord.download_zip_ready"
+                v-if="ord.download_zip_ready && !ord.ignored"
                 class="zip-ready-badge"
                 :title="`浏览器下载目录已识别到压缩包: ${ord.download_zip_name}`"
               >
                 包已就绪
               </span>
+              <span
+                v-if="ord.ignored && ord.ignore_reason"
+                class="ignore-reason-tag"
+                :title="`忽略原因: ${ord.ignore_reason}`"
+              >
+                {{ ord.ignore_reason }}
+              </span>
             </td>
-            <td><span :class="['status-pill', ord.status]">{{ statusLabel(ord.status) }}</span></td>
+            <td>
+              <span
+                :class="['status-pill', ord.ignored ? 'ignored' : ord.status]"
+                :title="ord.ignored ? `原状态: ${statusLabel(ord.status)}${ord.ignored_at ? ' · 忽略于 ' + ord.ignored_at : ''}` : ''"
+              >
+                {{ ord.ignored ? '已忽略' : statusLabel(ord.status) }}
+              </span>
+            </td>
             <td>{{ ord.zip_count }}</td>
             <td>{{ ord.consensus_fasta_count }} / {{ ord.ab1_count }}</td>
             <td>{{ ord.blast_report_count }}</td>
@@ -801,8 +1316,17 @@ onUnmounted(() => {
             </td>
             <td>{{ ord.result_mtime || '-' }}</td>
             <td class="actions-cell" @click.stop>
-              <!-- 按订单所处阶段只给最关键的下一步主操作 -->
-              <template v-if="ord.status === 'pending'">
+              <!-- 已忽略订单展示恢复入口，其它订单按阶段提供唯一主操作 -->
+              <template v-if="ord.ignored">
+                <button
+                  class="btn-mini primary"
+                  :disabled="busy"
+                  @click="handleIgnoreOrders([ord.order_no || ord.dir_name], false)"
+                >
+                  取消忽略
+                </button>
+              </template>
+              <template v-else-if="ord.status === 'pending'">
                 <button
                   v-if="ord.download_zip_ready"
                   class="btn-mini primary"
@@ -812,23 +1336,26 @@ onUnmounted(() => {
                 >
                   认领下载包
                 </button>
-                <a
-                  v-else-if="ord.download_url"
-                  :href="ord.download_url"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="btn-mini primary link-as-btn"
-                >
-                  打开下载页
-                </a>
                 <button
-                  v-else
-                  class="btn-mini"
-                  :disabled="runtime.running"
-                  @click="handleRunPipeline([ord.dir_name])"
+                  v-else-if="ord.download_url || ord.cx_order_id"
+                  class="btn-mini primary"
+                  :disabled="busy || runtime.running"
+                  :title="autoBlastAfterDownload ? '自动登录生工官网下载压缩包并接续 16S BLAST 比对导出' : '自动登录生工官网下载压缩包至订单目录'"
+                  @click="handleAutoDownloadOrders([ord.dir_name], autoBlastAfterDownload)"
                 >
-                  运行
+                  自动下载
                 </button>
+                <template v-else>
+                  <span class="missing-zip-tip" title="目录内无原始压缩包且未识别到生工下载页链接">缺压缩包</span>
+                  <button
+                    class="btn-mini"
+                    :disabled="busy || runtime.running"
+                    title="若为已发货通知或无需比对订单，可点击全局忽略并移入已忽略标签"
+                    @click="handleIgnoreOrders([ord.order_no || ord.dir_name], true, '缺少压缩包/非测序通知', { [ord.order_no || ord.dir_name]: ord.dir_name })"
+                  >
+                    忽略
+                  </button>
+                </template>
               </template>
 
               <template v-else-if="ord.status === 'completed'">
@@ -847,39 +1374,73 @@ onUnmounted(() => {
               </template>
 
               <!-- 次要操作收敛至行尾“更多”浮层 -->
-              <PopoverMenu align="right" :width="165">
+              <PopoverMenu align="right" :width="190">
                 <template #trigger>
                   <button class="btn-mini">更多 ▾</button>
                 </template>
                 <template #default="{ close }">
                   <div class="menu-section">
-                    <button
-                      class="menu-item"
-                      :disabled="runtime.running"
-                      @click="close(); handleRunPipeline([ord.dir_name])"
-                    >
-                      {{ ord.status === 'completed' ? '重新运行比对' : '立即运行此订单' }}
-                    </button>
-                    <button
-                      v-if="ord.download_zip_ready"
-                      class="menu-item"
-                      :disabled="busy || runtime.running"
-                      @click="close(); handleClaimSingleOrder(ord)"
-                    >
-                      认领浏览器下载包
-                    </button>
-                    <a
-                      v-if="ord.download_url"
-                      :href="ord.download_url"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="menu-item link-menu-item"
-                      @click="close()"
-                    >
-                      打开生工下载页
-                    </a>
+                    <template v-if="!ord.ignored">
+                      <button
+                        v-if="ord.status === 'pending' && ord.zip_count === 0 && Boolean(ord.download_url || ord.cx_order_id)"
+                        class="menu-item"
+                        :disabled="busy || runtime.running"
+                        @click="close(); handleAutoDownloadOrders([ord.dir_name], false)"
+                      >
+                        仅自动下载此订单
+                      </button>
+                      <button
+                        v-if="ord.status === 'pending' && ord.zip_count === 0 && Boolean(ord.download_url || ord.cx_order_id)"
+                        class="menu-item"
+                        :disabled="busy || runtime.running"
+                        @click="close(); handleAutoDownloadOrders([ord.dir_name], true)"
+                      >
+                        自动下载并比对
+                      </button>
+                      <button
+                        class="menu-item"
+                        :disabled="runtime.running"
+                        @click="close(); handleRunPipeline([ord.dir_name])"
+                      >
+                        {{ ord.status === 'completed' ? '重新运行比对' : '立即运行此订单' }}
+                      </button>
+                      <button
+                        v-if="ord.download_zip_ready"
+                        class="menu-item"
+                        :disabled="busy || runtime.running"
+                        @click="close(); handleClaimSingleOrder(ord)"
+                      >
+                        认领浏览器下载包
+                      </button>
+                      <a
+                        v-if="ord.download_url"
+                        :href="ord.download_url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="menu-item link-menu-item"
+                        @click="close()"
+                      >
+                        打开生工下载页（手动）
+                      </a>
+                    </template>
                     <button class="menu-item" @click="close(); openLocalPath(ord.order_path)">
                       打开本地文件夹
+                    </button>
+                    <button
+                      v-if="!ord.ignored"
+                      class="menu-item"
+                      :disabled="busy || runtime.running"
+                      @click="close(); handleIgnoreOrders([ord.order_no || ord.dir_name], true, '从订单列表忽略', { [ord.order_no || ord.dir_name]: ord.dir_name })"
+                    >
+                      忽略此订单（全局跳过）
+                    </button>
+                    <button
+                      v-else
+                      class="menu-item"
+                      :disabled="busy"
+                      @click="close(); handleIgnoreOrders([ord.order_no || ord.dir_name], false)"
+                    >
+                      取消忽略并恢复显示
                     </button>
                     <button
                       class="menu-item danger"
@@ -895,10 +1456,22 @@ onUnmounted(() => {
           </tr>
           <tr v-if="filteredOrders.length === 0">
             <td colspan="9" class="empty-cell">
-              <template v-if="orders.length > 0 && orderFilter !== 'all'">
+              <template v-if="orderFilter === 'ignored'">
+                <span>暂无已忽略的订单条目</span>
+                <button v-if="activeOrders.length > 0" class="btn-mini primary inline-action-btn" @click="orderFilter = 'all'">
+                  返回有效订单 ({{ activeOrders.length }})
+                </button>
+              </template>
+              <template v-else-if="activeOrders.length > 0 && orderFilter !== 'all'">
                 <span>当前阶段下暂无订单</span>
                 <button class="btn-mini primary inline-action-btn" @click="orderFilter = 'all'">
-                  查看全部 ({{ orders.length }})
+                  查看全部 ({{ activeOrders.length }})
+                </button>
+              </template>
+              <template v-else-if="ignoredOrders.length > 0">
+                <span>当前有效订单为空（另有 {{ ignoredOrders.length }} 个订单已全局忽略）</span>
+                <button class="btn-mini primary inline-action-btn" @click="orderFilter = 'ignored'">
+                  查看已忽略 ({{ ignoredOrders.length }})
                 </button>
               </template>
               <span v-else>暂无订单目录，可点击上方“检查新订单”从邮箱同步</span>
@@ -925,6 +1498,7 @@ onUnmounted(() => {
       :has-scanned="hasScannedMails"
       @scan="handleCheckNewOrders"
       @init-order="handleInitOrderFromMail"
+      @toggle-ignore="handleToggleMailIgnore"
     />
 
     <!-- 结果预览 -->
@@ -1035,6 +1609,28 @@ onUnmounted(() => {
       :busy="busy"
       @close="showCleanup = false"
       @confirm="p => confirmCleanup(p.targets)"
+    />
+
+    <SangonIgnoreModal
+      :visible="showIgnoreModal"
+      :ignored-orders="ignoredOrdersMap"
+      :ignore-keywords="ignoreKeywords"
+      :ignored-download-count="ignoredDownloadCount"
+      :busy="busy"
+      @close="showIgnoreModal = false"
+      @add-ignore="p => handleIgnoreOrders(p.orderKeys, true, p.reason)"
+      @unignore="k => handleIgnoreOrders([k], false)"
+      @save-keywords="handleSaveIgnoreKeywords"
+    />
+
+    <SangonAccountModal
+      :visible="showSangonAuthModal"
+      :auth-meta="sangonAuth"
+      :busy="busy"
+      :hint-text="sangonAuthHint"
+      @close="closeSangonAuthEditor"
+      @save="handleSaveSangonAuth"
+      @clear-password="handleClearSangonPassword"
     />
   </div>
 </template>
@@ -1209,6 +1805,19 @@ onUnmounted(() => {
 .btn-secondary:hover:not(:disabled) { background: #047857; }
 .btn-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
 
+.btn-download {
+  background: #0284c7;
+  color: white;
+  border: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-download:hover:not(:disabled) { background: #0369a1; }
+.btn-download:disabled { opacity: 0.6; cursor: not-allowed; }
+
 .btn-outline {
   background: #f8fafc;
   color: #334155;
@@ -1310,6 +1919,37 @@ onUnmounted(() => {
 }
 .alert-banner.info { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
 .alert-banner.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+
+.awaiting-dl-hint {
+  font-size: 11px;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.missing-zip-tip {
+  font-size: 11px;
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.sangon-log-console {
+  margin: 0;
+  padding: 10px 14px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
 
 .panel-box {
   background: white;
@@ -1438,8 +2078,21 @@ onUnmounted(() => {
   color: #334155;
 }
 .selected-row { background: #f0f7ff; }
+.ignored-row td { opacity: 0.72; }
 .mono-cell { font-family: Consolas, monospace; color: #2563eb; }
 .bold-cell { font-weight: 600; }
+
+.ignore-reason-tag {
+  margin-left: 6px;
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: sans-serif;
+}
 
 .status-pill {
   display: inline-block;
@@ -1451,35 +2104,78 @@ onUnmounted(() => {
 .status-pill.completed { background: #ecfdf5; color: #047857; border: 1px solid #6ee7b7; }
 .status-pill.blasted, .status-pill.extracted { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
 .status-pill.downloaded, .status-pill.pending { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+.status-pill.ignored { background: #f1f5f9; color: #64748b; border: 1px dashed #94a3b8; }
 
 .pending-dl-bar {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 8px 12px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
   background: #f0fdf4;
   border: 1px solid #bbf7d0;
   border-radius: 8px;
   font-size: 12px;
 }
-.pending-dl-info {
+.pending-dl-header {
   display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.pending-dl-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #166534;
+  flex: 1;
+  min-width: 240px;
+}
+.pending-dl-desc {
+  font-size: 11px;
+  color: #15803d;
+  line-height: 1.4;
+}
+.pending-dl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dl-chip-card {
+  display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  color: #166534;
-}
-.dl-chip {
   background: white;
   border: 1px solid #86efac;
-  border-radius: 5px;
-  padding: 2px 8px;
-  font-family: Consolas, monospace;
+  border-radius: 6px;
+  padding: 4px 8px;
   font-size: 11px;
   color: #15803d;
 }
+.dl-chip-name {
+  font-family: Consolas, monospace;
+  font-weight: 600;
+}
+.dl-chip-match {
+  color: #64748b;
+}
+.chip-btn {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.chip-btn.primary {
+  background: #eff6ff;
+  color: #2563eb;
+  border-color: #93c5fd;
+  font-weight: 600;
+}
+.chip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .pending-dl-actions {
   display: flex;
   gap: 8px;

@@ -563,6 +563,75 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
                 ap_mod.MailSender.__init__ = orig_init
                 ap_mod.MailSender.send = orig_send
 
+    def test_ignored_batch_skipped_by_auto_pipeline_and_restorable(self):
+        """标记为 ignored 的批次不被 auto_pipeline 自动执行，取消忽略后可恢复处理"""
+        import src.mail_download.auto_pipeline as ap_mod
+        from src.mail_download.batch_state import mark_batch_ignored
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            dl_dir = base / "dl"
+            send_dir = base / "sends"
+            anno_dir = base / "annotations"
+            dl_dir.mkdir()
+            send_dir.mkdir()
+            anno_dir.mkdir()
+
+            b1 = dl_dir / "up_20261111_0001"
+            b1.mkdir()
+            (b1 / "skip_me.fasta").write_text(">s1\nATGC\n", encoding="utf-8")
+            (b1 / "manifest.json").write_text(
+                json.dumps({"batch": b1.name, "mail": {"sender": "a@163.com", "subject": "skip"}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            mark_batch_ignored(b1, ignored=True, reason="手动已处理")
+
+            cfg_path = base / "mail_config.json"
+            cfg_path.write_text(
+                json.dumps({"account": "self@qq.com", "smtp_account": "self@qq.com",
+                            "download_dir": str(dl_dir), "send_dir": str(send_dir)}),
+                encoding="utf-8",
+            )
+
+            called: list[str] = []
+
+            async def fake_annotate(batch_dir, fasta_path):
+                called.append(batch_dir.name)
+                prod = make_product_dir(anno_dir / "run1")
+                docx = prod / "ANNO_R_注释报告.docx"
+                docx.write_bytes(b"PK\x03\x04docx")
+                return {"task_id": "ANNO_R", "out_dir": prod, "files": {}}
+
+            fake = FakeSMTP()
+            orig_init = ap_mod.MailSender.__init__
+            orig_anno_dir = ap_mod.ANNOTATIONS_DIR
+            ap_mod.ANNOTATIONS_DIR = anno_dir
+            ap_mod.MailSender.__init__ = lambda self_s, c, smtp_factory=None: orig_init(self_s, c, smtp_factory=lambda: fake)
+            try:
+                fake_fetch_cls = lambda _cfg: type(
+                    "Fetcher",
+                    (),
+                    {"fetch": lambda self, since_days=None: SimpleNamespace(connection_error=None, scanned=1, matched=[])},
+                )()
+                with patch.object(ap_mod, "MailFetcher", side_effect=fake_fetch_cls), \
+                     patch.object(ap_mod, "_annotate", side_effect=fake_annotate), \
+                     patch.object(ap_mod, "_build_report", side_effect=lambda out_dir, *_: out_dir / "ANNO_R_注释报告.docx"):
+                    # 1. 已忽略状态下运行：不处理
+                    rc1 = ap_mod.main(["--config", str(cfg_path), "--to", "self"])
+                    self.assertEqual(rc1, 0)
+                    self.assertEqual(called, [])
+
+                    # 2. 取消忽略后再运行：正常恢复注释并完成
+                    mark_batch_ignored(b1, ignored=False)
+                    rc2 = ap_mod.main(["--config", str(cfg_path), "--to", "self"])
+                    self.assertEqual(rc2, 0)
+                    self.assertEqual(called, ["up_20261111_0001"])
+            finally:
+                ap_mod.ANNOTATIONS_DIR = orig_anno_dir
+                ap_mod.MailSender.__init__ = orig_init
+
 
 if __name__ == "__main__":
     unittest.main()

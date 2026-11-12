@@ -10,7 +10,7 @@ import { ref, computed, watch } from 'vue'
 import PaginationBar from './PaginationBar.vue'
 import type { ScannedMailItem, MailScanSummary, MailDedupStatus } from '../sangonTypes'
 
-type RecordFilterKey = 'all' | 'fresh' | 'existing' | 'non_sequencing' | 'history_skipped'
+type RecordFilterKey = 'all' | 'fresh' | 'existing' | 'non_sequencing' | 'history_skipped' | 'ignored'
 
 const props = withDefaults(
   defineProps<{
@@ -30,6 +30,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'scan'): void
   (e: 'initOrder', mail: ScannedMailItem): void
+  (e: 'toggleIgnore', mail: ScannedMailItem): void
 }>()
 
 const expanded = ref(false)
@@ -43,18 +44,21 @@ const filterTabs = computed(() => {
   let existing = 0
   let nonSeq = 0
   let skipped = 0
+  let ignored = 0
   for (const m of props.mails) {
     if (m.dedup_status === 'created' || m.dedup_status === 'new') fresh += 1
     else if (m.dedup_status === 'existing') existing += 1
     else if (m.dedup_status === 'non_sequencing') nonSeq += 1
     else if (m.dedup_status === 'history_skipped') skipped += 1
+    else if (m.dedup_status === 'ignored') ignored += 1
   }
   return [
     { key: 'all' as RecordFilterKey, label: '全部', count: all },
     { key: 'fresh' as RecordFilterKey, label: '新建 / 待建', count: fresh },
     { key: 'existing' as RecordFilterKey, label: '已有目录', count: existing },
     { key: 'non_sequencing' as RecordFilterKey, label: '非测序通知', count: nonSeq },
-    { key: 'history_skipped' as RecordFilterKey, label: '已清理跳过', count: skipped }
+    { key: 'history_skipped' as RecordFilterKey, label: '已清理跳过', count: skipped },
+    { key: 'ignored' as RecordFilterKey, label: '已忽略', count: ignored }
   ]
 })
 
@@ -81,6 +85,7 @@ function dedupStatusLabel(st: MailDedupStatus): string {
     created: '本次新建',
     existing: '目录已存在',
     history_skipped: '已清理跳过',
+    ignored: '已全局忽略',
     new: '待建目录',
     non_sequencing: '非测序邮件'
   }
@@ -116,6 +121,7 @@ defineExpose({
           <span v-if="summary.dedupRemoved > 0" class="meta-pill">合并重复 {{ summary.dedupRemoved }}</span>
           <span v-if="summary.nonSequencingCount > 0" class="meta-pill">非测序 {{ summary.nonSequencingCount }}</span>
           <span v-if="summary.skippedKnown > 0" class="meta-pill warn">清理跳过 {{ summary.skippedKnown }}</span>
+          <span v-if="summary.ignoredCount > 0" class="meta-pill">已忽略 {{ summary.ignoredCount }}</span>
         </template>
         <span v-else class="meta-hint">默认收起，展开可核对原始通知邮件、非测序邮件或手动补建目录</span>
       </div>
@@ -180,7 +186,7 @@ defineExpose({
             </td>
             <td class="actions-cell">
               <button
-                v-if="!m.dir_ready && m.dir_name && m.dedup_status !== 'non_sequencing'"
+                v-if="!m.dir_ready && m.dir_name && m.dedup_status !== 'non_sequencing' && m.dedup_status !== 'ignored'"
                 class="btn-mini primary"
                 :disabled="busy"
                 @click="emit('initOrder', m)"
@@ -196,8 +202,15 @@ defineExpose({
               >
                 打开下载页
               </a>
-              <span v-if="m.dir_ready && !m.download_url">-</span>
-              <span v-else-if="m.dedup_status === 'non_sequencing'">-</span>
+              <button
+                v-if="m.order_no && m.dedup_status !== 'non_sequencing'"
+                class="btn-mini"
+                :disabled="busy"
+                @click="emit('toggleIgnore', m)"
+              >
+                {{ m.dedup_status === 'ignored' ? '取消忽略' : '忽略' }}
+              </button>
+              <span v-if="m.dedup_status === 'non_sequencing' || (!m.order_no && !m.download_url && m.dir_ready)">-</span>
             </td>
           </tr>
           <tr v-if="pagedMails.length === 0">
@@ -415,6 +428,7 @@ defineExpose({
 .status-pill.new { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
 .status-pill.existing { background: #f8fafc; color: #475569; border: 1px solid #cbd5e1; }
 .status-pill.history_skipped { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+.status-pill.ignored { background: #f1f5f9; color: #64748b; border: 1px dashed #94a3b8; }
 .status-pill.non_sequencing { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
 
 .actions-cell {

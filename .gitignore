@@ -9,6 +9,7 @@
 # ------------------------------------------------------------------------------
 .mail_auth
 .mail_smtp_auth
+.sangon_auth
 sangon_16s_config.json
 .sangon_mail_index.json
 *.auth

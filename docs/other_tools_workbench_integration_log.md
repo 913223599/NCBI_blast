@@ -265,5 +265,130 @@
 1. **自动化单元测试**：`python -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v` **82 项全部通过**（`5.05s`），新增 `test_sangon_order_annotator_new_flag_and_claimable_zip` 与正文缓存跳过断言，并将全部新建 TS/Vue/Py 文件纳入零 Emoji 与 UTF-8 门禁（[test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py)）。
 2. **前端类型与生产构建验证**：`npx vue-tsc -b` 与 `npx vite build` 零错误通过。
 
+---
 
+## 11. 「认领下载包」说明完善、生工 16S 全局忽略机制与邮件回传批次跳过支持（2026-11-11）
 
+### 11.1 需求背景与边界设计
+1. **生工 16S 模块「认领包」与全局忽略**：
+   - 明确「认领下载包」交互含义（将用户从生工网页手动下载到浏览器下载目录的 `.zip` 复制归档到订单 `原始压缩包/` 目录），补齐单个下载包的就地 `归档` / `建目录并归档` 与 `忽略` 快捷操作，去除顶栏重复按钮。
+   - 实现按 **10 位订单号** 进行全局忽略的独立持久化机制（写入 `sangon_16s_config.json`，与 `.sangon_mail_index.json` 解耦），保证磁盘已有目录、已归档 `.zip` 与浏览器下载目录原压缩包安全保留不删除。
+   - 全局忽略覆盖 4 条全链路：订单概览/标签筛选、下载目录待认领列表与批量导入、IMAP 邮件扫描与建目录、全局「运行待处理」批量执行；并将已忽略订单归入独立「已忽略 (M)」标签隐藏展示。
+   - 将原本硬编码的非测序邮件过滤关键词（默认 `已发货, 物流, 快递, 发票, 对账, 付款`）升级为可视化持久化配置项。
+2. **邮件自动注释回传模块「跳过批次」支持**：
+   - 为已收件（`downloaded`）或失败（`failed`）但暂不处理或线下已手动处理的收件批次提供「跳过 / 恢复」状态控制（`ignored` / `已忽略跳过`），持久化记录在 `<batch>/manifest.json` 的 `pipeline` 块，保留 `.fasta` 原附件；`collect_pending_batches()` 与 `auto_pipeline` 自动跳过该批次，并支持随时恢复原本状态。
+
+### 11.2 模块化改动清单
+1. **配置与规则引擎（[sangon_settings.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_settings.py) / [sangon_ignore_rules.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_ignore_rules.py)）**：
+   - 扩展 `sangon_settings.py` 支持 `ignored_orders` 与 `ignore_subject_keywords`（修复空列表/空字典被过滤的边界），暴露 `get_sangon_ignored_orders()` 与 `get_sangon_ignore_keywords()`。
+   - 新增职责单一的 `sangon_ignore_rules.py`，提供 `normalize_order_key()`、`parse_ignore_keywords()`、`is_sequencing_notice_subject()`、`list_ignored_orders()`、`ignore_orders()`、`unignore_orders()` 与 `replace_ignore_rules()`。
+2. **生工 16S 全链路联动**：
+   - [sangon_mail_scanner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_mail_scanner.py)：判定优先级升级为 `non_sequencing` -> `ignored` -> `existing` -> `history_skipped` -> `created/new`，对 `ignored` 订单不新建目录、阶段 2 不拉取邮件正文，并统计返回 `ignored_count`。
+   - [sangon_zip_importer.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_zip_importer.py)：`import_order_zips_from_downloads()` 默认 `respect_ignore=True`，全局忽略订单即使开启 `auto_create_order=True` 也不新建目录，并统计 `skipped_ignored`。
+   - [sangon_order_annotator.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_order_annotator.py)：为 `orders` 与 `download_candidates` 透传 `ignored`、`ignore_reason`、`ignored_at`，并将已忽略订单 `is_new` 与 `download_zip_ready` 设为 `False`。
+3. **邮件注释回传批次跳过（[batch_state.py](file:///f:/NCBI%20blast/src/mail_download/batch_state.py)）**：
+   - `STATUS_LABELS` 增加 `"ignored": "已忽略跳过"`；`inspect_batch_pipeline_state()` 优先识别 `status == "ignored"` 并置 `pending = False`（自动令 `collect_pending_batches()` 与 `auto_pipeline.py` 跳过）；新增幂等函数 `mark_batch_ignored(batch_dir, ignored, reason)` 备份与还原 `prev_status`。
+4. **FastAPI 接口扩展（[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py)）**：
+   - `GET /api/other_tools/sangon_16s/overview` 扣除已忽略下载包计数并附带 `ignored_download_count` 与 `settings`。
+   - 新增 `POST /api/other_tools/sangon_16s/ignore`；扩展 `POST /api/other_tools/sangon_16s/settings` 支持更新规则与主题关键词；`POST /api/other_tools/sangon_16s/run_pipeline` 全局待处理跳过已忽略订单。
+   - `GET /api/other_tools/mail_pipeline/overview` 透出 `ignored_batches_count` 及批次 `ignored` 元数据；新增 `POST /api/other_tools/mail_pipeline/batch_ignore`（含目录安全校验与运行中 409 互斥保护）。
+5. **前端类型与组件重构**：
+   - 扩充 [sangonTypes.ts](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/sangonTypes.ts)；新建规则配置弹窗 [SangonIgnoreModal.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/SangonIgnoreModal.vue)。
+   - [SangonMailRecords.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/SangonMailRecords.vue) 新增 `已忽略` 分段标签、行内 `忽略 / 取消忽略` 按钮与徽章样式。
+   - [Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue) 移除顶栏重复认领按钮、优化绿条白话引导与单包 `归档 / 忽略` 按钮、订单指标与分段筛选将已忽略条目拆分入独立「已忽略」页签、支持批量忽略/恢复并联动同步内存邮件状态与规则弹窗。
+   - [MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue) 在「收件批次」表操作列增加 `跳过 / 恢复` 按钮及状态样式与跳过统计显示。
+
+### 11.3 验证结果
+1. **自动化单元测试**：
+   - 更新 [test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py) 与 [test_mail_send.py](file:///f:/NCBI%20blast/tests/test_mail_send.py)，新增 `test_sangon_global_ignore_full_pipeline`、`test_mail_pipeline_batch_ignore_route_and_state` 与 `test_ignored_batch_skipped_by_auto_pipeline_and_restorable`，并将 [sangon_ignore_rules.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_ignore_rules.py) 及 [SangonIgnoreModal.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/SangonIgnoreModal.vue) 纳入零 Emoji / UTF-8 门禁。
+   - 运行 `python -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v`：**85 项全部通过（5.62s）**。
+2. **前端类型与生产构建**：
+   - 执行 `npm --prefix "src/web-next" run build`（`vue-tsc -b && vite build`）：**零错误完成生产打包（12.97s）**，生成最新 `OtherToolsView-CpiInVs3.js`。
+3. **只读真实概览接口冒烟检查**：
+   - 执行只读校验确认生产目录与当前接口兼容（`sangon orders=13, pending_dl=2, ignored_dl=0`；`mail batches=1, pending=0, ignored=0`），未修改任何真实生产数据或对外发送邮件。
+
+---
+
+## 12. 生工 16S 「点运行卡住」根因排查与并发/状态观测升级（2026-11-11）
+
+### 12.1 日志溯源与根因定位
+对照用户桌面端截图、`electron-shell/dev.log` 与 `GET /api/other_tools/sangon_16s/overview` 实测运行态，还原完整时间线并锁定 4 项根因：
+1. **实际 13 秒已完成，但页面横幅与终端双端“失语”制造假卡死**：
+   - `23:24:19` 点击「运行待处理 (11)」后，第 1 与第 5 个有包订单（`20260919_2140601771`、`20261014_2140608938`）在 `23:24:31` 完成 BLAST，第 6–11 个无压缩包/无序列订单在 `23:24:32` 秒跳并结束整轮任务（`4/13` 已完成，`147` 样本）。
+   - 然而，[Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue) 的 `handleRunPipeline` 仅写死 `"任务已在后台运行"`，缺少 `trackingRun` 结束感知，既不更新完成横幅也不展示 `runtime.logs`；后端 `_append_log()` 也不输出至 `logger.info`，导致终端停在最后一条 `Task ... completed`、进度滞留在 `45%`（跳过订单未推进进度）。
+2. **本地 BLAST 线程超额抢占 32 核主机（违反 CPU 核心预留规范）**：
+   - [engine.py](file:///f:/NCBI%20blast/src/blast/engine.py) 强制 `max(max_threads, 4)` 忽略了调用方 `max_workers=2` 的限制；同时 [local_blast.py](file:///f:/NCBI%20blast/src/blast/local_blast.py) 使用 `Semaphore(4)` × `num_threads=16` 与 `ABOVE_NORMAL_PRIORITY_CLASS`，在 `23:24:22` 和 `23:24:28` 分别拉起 64 与 48 个高优先级线程（32 逻辑核主机达 200% 超配），导致系统与 Electron UI 明显卡顿。
+3. **无压缩包订单仍误显蓝色「运行待处理 (9)」与行内「运行」**：
+   - 剩余 9 个 `pending` 目录均为 `zip=0, fasta=0`（其中 `20261102_1011709710` 为“已发货”历史目录且无下载链接），原前端把全部未完成订单计入「运行待处理」，导致用户面对无包订单误触发或误判卡顿。
+4. **后端异常路径保护不足**：
+   - `run_sangon_16s_pipeline` 缺少运行态互斥锁与只读快照，且在 BLAST 状态为 `FAILED/CANCELLED` 时未拦截下游 `_export_sangon_order_csv`，`PAUSED` 状态无退出处理。
+
+### 12.2 修复实施清单
+1. **CPU 并发预算协调（[local_blast.py](file:///f:/NCBI%20blast/src/blast/local_blast.py) / [engine.py](file:///f:/NCBI%20blast/src/blast/engine.py)）**：
+   - 新增 `compute_local_blast_resource_plan(cpu_count, requested_threads)`：始终预留系统核心（32 核留 >=4 核），按 `预算 // 并发进程数` 约束单进程线程（32 核为 2 并发 × 12 线程 = 24 线程，留出 8 逻辑核给宿主与 UI），并将进程优先级恢复为常规无窗模式（`CREATE_NO_WINDOW`），移除 `engine.py` 中的 Emoji 并尊重显式传入的 `max_workers`。
+2. **后端流水线健壮性与可观测性（[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py) / [sangon_mail_scanner.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_mail_scanner.py)）**：
+   - 增加 `_sangon_pipeline_lock` 锁与 `_snapshot_sangon_runtime()` 并发安全快照；
+   - `_append_log` 同步写 `logger.info/warning/error("[Sangon16S] ...")` 到终端日志；
+   - 记录 `summary = {total, processed, skipped_missing, failed}`，跳过缺包订单与失败订单均推进多单连续进度至 `100%`，并输出区分“全缺包/部分跳过/失败/全完成”的明确结束提示；
+   - BLAST 轮询处理 `FAILED/CANCELLED/PAUSED` 与超时保护，任务失败时不误导出空 CSV；顺手清理 `sangon_mail_scanner.py` 未使用导入 `import imaplib`。
+3. **前端可执行状态区分、闭环追踪与可折叠运行日志（[sangonTypes.ts](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/sangonTypes.ts) / [Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue)）**：
+   - 区分 `runnableOrdersCount`（有 `.zip`/`.1.fasta`/报告/待认领包）与 `awaitingDownloadCount`（尚待网页下载），无包且无下载链接行（如发货通知目录）展示「缺压缩包 + 忽略」，主栏追加「待下载压缩包 M 个」提示；
+   - 补齐 `trackingRun` 与启动后 `450ms` 快检 + `1200ms` 轮询，任务结束后即时更新横幅、刷新结果预览并按需自动展开黑色终端风格「运行日志 (N)」面板。
+
+### 12.3 验证记录
+1. **自动化单元测试（先红后绿）**：
+   - [test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py) 新增 `test_local_blast_resource_plan_reserves_cores`、`test_blast_engine_respects_explicit_max_workers` 与 `test_sangon_run_pipeline_progress_summary_logging_and_failure_guard`，并将 `src/blast/engine.py` 纳入零 Emoji 与 UTF-8 门禁。
+   - 运行 `.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v --tb=short`：**88 项全部通过（6.33s）**。
+   - 使用 `python -m ruff check --select F,E9` 对本次新增及改动模块进行静态检查，零新增告警。
+2. **TypeScript 类型、Vite 生产构建与 Playwright 真实前端交互回归**：
+   - 执行 `npm --prefix "src/web-next" run build`（`vue-tsc -b && vite build`）：**零错误完成生产打包（12.87s）**，生成 `OtherToolsView-Dgrc2P29.js`。
+   - 启动无头 Chromium 访问运行中前端 `http://localhost:5173`，核验 `0` 可执行待运行状态下主按钮禁用显示 `运行待处理 (0)`、显示 `待下载压缩包 9 个`、`运行日志 (32)`、`20261102_1011709710` 发货无包行显示 `缺压缩包 | 忽略 | 更多`；勾选并点击 `运行所选 (1)` 后正常触发 `trackingRun` 与 `1200ms` 轮询，横幅即时更新为明确提示并自动展开 4 行运行日志，Console 零报错（`[]`）。
+3. **生效提醒**：
+   - 前端 `.vue` 模块已同步至 `src/web-next/dist/` 与 Vite 热更新，但 [local_blast.py](file:///f:/NCBI%20blast/src/blast/local_blast.py)、[engine.py](file:///f:/NCBI%20blast/src/blast/engine.py) 与 [other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py) 的后端修复需重启桌面端 Electron 应用后在 `8765` 端口完全生效。
+
+---
+
+## 13. 生工「人机认证」核查与官网自动登录下载闭环接入（2026-11-12）
+
+### 13.1 生工登录页「人机认证」机制与实测结论
+针对用户提问「人机认证指的是什么，生工只有一个账号密码登录，进行测试」，通过离线 Playwright 对 `passport.sangon.com` 与真实已完成历史订单页面展开实测与内联源码逆向：
+1. **「人机认证」为何物**：
+   - `https://passport.sangon.com/` 页面 `<head>` 预加载了阿里云人机验证码风控脚本 `AliyunCaptcha.js`，并在 DOM 挂载隐藏容器 `#aliyunCaptcha-window-popup` 与 `#aliyunCaptcha-mask`（防恶意高频撞库的滑块/点击验证弹窗）；平时仅作隐藏挂件存在，只有账号触发平台风控（如频繁错误试密或短时间高频异常访问）时才会弹窗拦截。
+2. **正常单账号直登实测通过（无验证码拦截）**：
+   - 在完全不绕过、严格检测可见验证码浮层的前提下，使用单一账号密码登录 `passport.sangon.com` 并顺序访问两个历史已完成订单验证：
+     - 订单 `2140612440` (`cxOrderID=11276119`)：自动直登、全选 `92` 条样品、勾选协议确认，完整下载 `吴晨_2140612440_测序结果.zip`（`100,583,328 bytes`，含 `780` 个文件条目）。
+     - 订单 `2140608938` (`cxOrderID=11214385`)：同浏览器上下文自动复用登录态 **免重复登录**，全选 `27` 条样品，完整下载 `吴晨_2140608938_测序结果.zip`（`16,416,525 bytes`，含 `299` 个文件条目）。两单累计耗时 `33.2s`。
+3. **关键 DOM 与业务分支发现**：
+   - **协议约束**：订单链接必须使用邮件原生的 `http://store.sangon.com/cxOrderDetail?cxOrderDetail.cxOrderID=...` 入口（由其自动 302 跳转至 `https://passport.sangon.com/`），直接强制 `https://store.sangon.com/` 会发生 TLS 连接超时。
+   - **回跳二次刷新竞态**：登录成功跳转回 `store.sangon.com` 时页面会连续重载，需等待无 `ticket=`/`code=` 查询参数、网络空闲且 `#cxSelectAll` 挂载稳定后再操作。
+   - **协议弹窗真实结构与 KBSeq 费用确认分支**：`#x_resultModel` 本身为隐藏模板，动态生成的确认按钮位于 `#x_resultModel_Box .shoppingModalFooter` 内；且部分首次下载的 KBSeq/三代测序订单点击确认后不会立即触发下载，而是会通过 `validateBatchPrice()` 打开二次费用明细确认框 `#Sequencing_results_batch_box`，只有再点击其确认按钮并放行可能出现的 `/isDownloadAttach` 原生 confirm 对话框后，才会提交 `/downloadAttachFile` 产生下载事件；若全单样本均被禁用导致 `#cxSelectAll` 不可勾选，则安全跳过不报错。
+
+### 13.2 模块化设计与实施
+1. **凭据分离持久化与开关配置（[sangon_settings.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_settings.py) / [.gitignore](file:///f:/NCBI%20blast/.gitignore)）**：
+   - `sangon_16s_config.json` 扩展 `sangon_account`、`sangon_password_file`（默认 `.sangon_auth`）与 `auto_confirm_fee`（默认 `True`）；密码单独写入受 `.gitignore` 保护的 `.sangon_auth` 文件（UTF-8 编码），接口与概览仅返回掩码与就绪状态，严禁硬编码或对外明文返回。
+2. **官网自动下载核心引擎（[sangon_downloader.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_downloader.py)）**：
+   - 实现 `SangonCaptchaError`、`SangonLoginError`、`SangonOrderDownloadError`、`detect_visible_captcha()`、`SangonBrowserSession` 与 `download_sangon_orders()`；
+   - **安全风控红线**：每步均检测真正可见的人机验证容器，一旦弹出立即安全中止并返回提示用户改用手动「打开生工下载页」，绝不做验证码破解或绕过；
+   - **优先认领与原子落盘断点保护**：批处理前先调用 `import_order_zips_from_downloads()` 优先认领本地浏览器下载目录既有压缩包；其余待下载订单使用同一会话顺序下载至 `.downloading_<ts>.tmp`，校验 `zipfile.ZipFile` 非空、未损坏且结构有效后原子替换写入 `<订单目录>/原始压缩包/`。
+3. **API 路由闭环（[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py)）**：
+   - 抽取共享流水线执行函数 `_execute_sangon_dirs_pipeline()`，减少路由重复代码；
+   - `GET /api/other_tools/sangon_16s/overview` 透出脱敏的 `sangon_auth`；
+   - 新增 `POST /api/other_tools/sangon_16s/auth`（保存/更新/清空 `.sangon_auth` 与 `auto_confirm_fee`）与 `POST /api/other_tools/sangon_16s/download_orders`（支持 `auto_run_blast=True` 无缝串联解压、16S BLAST 与 11 列中文翻译 CSV 导出）。
+4. **前端工作台整合（[sangonTypes.ts](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/sangonTypes.ts) / [SangonAccountModal.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/SangonAccountModal.vue) / [Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue)）**：
+   - 新增 `SangonAccountModal` 配置生工账号密码与 `auto_confirm_fee` 开关（含人机验证说明）；
+   - 主面板步骤 2 更新为「自动 / 网页下载」，操作栏增加「下载并比对 (N) / 自动下载 (N)」主按钮（支持自动引导未配密用户一次保存后无感接续触发）；
+   - 「待下载」有链接行主操作从外链升级为一键「自动下载」，并在行尾「更多」浮层保留「仅自动下载此订单」「自动下载并比对」及手动降级入口「打开生工下载页（手动）」；顶栏「更多与设置」集成生工账号入口及「自动下载后直接接续 16S 比对」「自动确认 KBSeq 费用明细弹窗」持久化开关。
+
+### 13.3 全面测试、静检与端到端验证记录
+1. **自动化单元测试（[test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py)）**：
+   - 新增 `test_sangon_credentials_storage_and_settings`（验证独立密钥文件存取与掩码隔离）与 `test_sangon_downloader_claim_first_atomic_zip_and_routes`（验证优先认领、损坏 zip 拦截、可见验证码中止保护、API 鉴权拦截及 `auto_run_blast` 联动），并将 [sangon_downloader.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/sangon_downloader.py) 与 [SangonAccountModal.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/SangonAccountModal.vue) 纳入零 Emoji / UTF-8 门禁。
+   - 全量回归执行 `.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -q --tb=short`：**90 项全部通过（4.55s）**。
+2. **代码静态检查与前端生产构建**：
+   - `python -m compileall` 与 `ruff check --select F,E9`：**All checks passed!**（顺手清理 `other_tools.py` 1 处冗余 `f` 字符串前缀）。
+   - `src/web-next` 执行 `vue-tsc -b --force`、严格未用参数检查（`OtherTools|sangon|MailAuto` 零告警）及 `npm run build`：零错误完成构建（生成 `OtherToolsView-B1-iC88a.js`，`13.36s`）。
+3. **沙盒隔离真实官网端到端实测**：
+   - 直接调用 `sangon_downloader.download_sangon_orders()` 对历史已完成订单 `20261021_2140612440` (`cxOrderID=11276119`) 在 `TemporaryDirectory` 沙盒执行完整流程，校验并原子落盘 `吴晨_2140612440_测序结果.zip`（`95.92 MB`，`780` 项，`captcha_blocked=False`）；未触碰 `G:\测序数据\生工16s` 中任何尚未下载的生产新订单，保护其官网首次确认状态。
+4. **Playwright 真实前端 UI 交互验证**：
+   - 访问运行中前端验证步骤条、准确显示 `下载并比对 (8)`、待下载行主按钮 `自动下载` 及行尾菜单；验证未配置账号密码点击「自动下载」自动弹出 `SangonAccountModal` 引导框，录入保存模拟账号密码后无感接续发起 `POST /api/other_tools/sangon_16s/download_orders`（`auto_run_blast=true, auto_confirm_fee=true`），横幅更新并自动展开运行日志，控制台 `0` 报错（`[]`）。
+5. **生效提醒**：
+   - 前端 `.vue` 改动已同步至 `src/web-next/dist/` 与 Vite 热更新，但新增的后端路由（`/sangon_16s/auth`、`/sangon_16s/download_orders`）及后端模块需重启桌面端 Electron 应用后在 `8765` 端口完全生效。

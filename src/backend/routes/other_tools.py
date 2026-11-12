@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zipfile
 from datetime import datetime
@@ -28,12 +29,27 @@ from ..utils.blast_utils import parse_blast_csv, select_consensus_hit
 from ..services.other_tools.dir_migrator import migrate_directory
 from ..services.other_tools.history_cleaner import cleanup_mail_history, cleanup_sangon_history
 from ..services.other_tools.mail_inbox_browser import list_whitelist_mails
+from ..services.other_tools.sangon_ignore_rules import (
+    ignore_orders,
+    list_ignored_orders,
+    normalize_order_key,
+    replace_ignore_rules,
+    unignore_orders,
+)
+from ..services.other_tools.sangon_downloader import (
+    _collect_pending_download_targets,
+    build_sangon_order_url,
+    download_sangon_orders,
+)
 from ..services.other_tools.sangon_mail_scanner import init_sangon_order_dir, scan_sangon_mails
 from ..services.other_tools.sangon_order_annotator import annotate_sangon_orders
 from ..services.other_tools.sangon_settings import (
+    get_sangon_auth_status,
     get_sangon_downloads_dir,
     get_sangon_root,
     load_sangon_settings,
+    resolve_sangon_credentials,
+    save_sangon_credentials,
     save_sangon_settings,
 )
 from ..services.other_tools.sangon_zip_importer import (
@@ -42,7 +58,7 @@ from ..services.other_tools.sangon_zip_importer import (
 )
 from ..services.other_tools.secret_store import mask_secret, read_secret, resolve_secret_path, write_secret
 from ...blast.manager import get_blast_manager, TaskStatus
-from ...mail_download.batch_state import inspect_batch_pipeline_state, load_batch_manifest
+from ...mail_download.batch_state import inspect_batch_pipeline_state, load_batch_manifest, mark_batch_ignored
 from ...mail_download.config import load_config
 from ...mail_download.downloader import AttachmentSaver
 from ...mail_download.fetcher import MailFetcher
@@ -99,6 +115,8 @@ _mail_pipeline_state: Dict[str, Any] = {
     "current_stage": "idle",
 }
 
+_sangon_pipeline_lock = threading.Lock()
+
 _sangon_pipeline_state: Dict[str, Any] = {
     "running": False,
     "current_order": None,
@@ -107,8 +125,19 @@ _sangon_pipeline_state: Dict[str, Any] = {
     "started_at": None,
     "finished_at": None,
     "last_message": "",
+    "summary": {"total": 0, "processed": 0, "skipped_missing": 0, "failed": 0},
     "logs": [],
 }
+
+
+def _snapshot_sangon_runtime() -> Dict[str, Any]:
+    """返回生工 16S 运行态浅拷贝快照，防止序列化期间日志或摘要被后台线程并发修改。"""
+    with _sangon_pipeline_lock:
+        return {
+            **_sangon_pipeline_state,
+            "summary": dict(_sangon_pipeline_state.get("summary") or {}),
+            "logs": list(_sangon_pipeline_state.get("logs") or []),
+        }
 
 SANGON_CSV_HEADERS = [
     "查询序列",
@@ -212,6 +241,40 @@ class SangonSettingsRequest(BaseModel):
     sangon_root: Optional[str] = None
     downloads_dir: Optional[str] = None
     migrate: bool = True
+    ignored_orders: Optional[List[Any]] = None
+    ignore_subject_keywords: Optional[List[str]] = None
+    auto_confirm_fee: Optional[bool] = None
+
+
+class SangonAuthUpdateRequest(BaseModel):
+    """生工官网账号与登录密码更新：password=None 表示不修改，空字符串表示清除。"""
+    account: Optional[str] = None
+    password: Optional[str] = None
+    auto_confirm_fee: Optional[bool] = None
+
+
+class SangonDownloadRequest(BaseModel):
+    sangon_root: Optional[str] = None
+    downloads_dir: Optional[str] = None
+    order_names: List[str] = []
+    auto_confirm_fee: Optional[bool] = None
+    auto_run_blast: bool = False
+    evalue: str = "0.05"
+    hitlist_size: str = "50"
+    force_reblast: bool = False
+
+
+class SangonIgnoreRequest(BaseModel):
+    order_keys: List[str] = []
+    ignore: bool = True
+    reason: str = ""
+    dir_names: Dict[str, str] = {}
+
+
+class MailBatchIgnoreRequest(BaseModel):
+    batch_name: str
+    ignore: bool = True
+    reason: str = ""
 
 
 class SangonImportDownloadsRequest(BaseModel):
@@ -316,8 +379,12 @@ async def get_mail_pipeline_overview():
                 "task_ids": state["task_ids"],
                 "last_error": state["last_error"],
                 "pending": state["pending"],
+                "ignored": state.get("ignored", False),
+                "ignore_reason": state.get("ignore_reason", ""),
+                "ignored_at": state.get("ignored_at", ""),
             })
     pending_batches_count = sum(1 for item in batches if item.get("pending"))
+    ignored_batches_count = sum(1 for item in batches if item.get("ignored"))
 
     # 3. 已打包与回传产物 (results/email_sends)
     outbound_packages: List[Dict[str, Any]] = []
@@ -396,6 +463,7 @@ async def get_mail_pipeline_overview():
         "processed_items": processed_items,
         "batches": batches,
         "pending_batches_count": pending_batches_count,
+        "ignored_batches_count": ignored_batches_count,
         "outbound_packages": outbound_packages,
         "docx_reports": docx_reports,
         "pipeline_logs": log_lines,
@@ -497,6 +565,33 @@ async def cleanup_mail_pipeline_history(req: MailCleanupRequest):
         req.names,
     )
     return {"status": "success", **res}
+
+
+@router.post("/mail_pipeline/batch_ignore")
+async def toggle_mail_pipeline_batch_ignore(req: MailBatchIgnoreRequest):
+    """将指定已收件批次标记为“已忽略跳过”（自动流水线跳过接续，保留原附件不删除）或恢复待处理状态"""
+    if _mail_pipeline_state["running"]:
+        raise HTTPException(status_code=409, detail="流水线运行中，暂不能修改批次跳过状态")
+    clean_batch = (req.batch_name or "").strip()
+    if not clean_batch or any(sep in clean_batch for sep in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail=f"非法的批次名: {req.batch_name}")
+
+    raw_cfg = _read_mail_cfg()
+    dl_dir = _resolve_dir(raw_cfg.get("download_dir", "results/email_downloads"))
+    send_dir = _resolve_dir(raw_cfg.get("send_dir", "results/email_sends"))
+    batch_path = dl_dir / clean_batch
+    if not batch_path.exists() or not batch_path.is_dir() or batch_path.parent.resolve() != dl_dir.resolve():
+        raise HTTPException(status_code=404, detail=f"未找到批次目录: {clean_batch}")
+
+    cfg_obj = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
+    await asyncio.to_thread(mark_batch_ignored, batch_path, ignored=req.ignore, reason=req.reason)
+    state = inspect_batch_pipeline_state(batch_path, cfg_obj, send_dir, ANNOTATIONS_DIR)
+    return {
+        "status": "success",
+        "batch_name": clean_batch,
+        "ignored": state.get("ignored", False),
+        "state": state,
+    }
 
 
 @router.post("/mail_pipeline/list_mails")
@@ -1036,8 +1131,13 @@ async def get_sangon_16s_overview(sangon_root: Optional[str] = None, downloads_d
             "archived": archived,
         })
 
-    pending_download_count = sum(1 for c in download_candidates if not c["archived"])
     annotate_sangon_orders(root_path, orders, download_candidates)
+    pending_download_count = sum(
+        1 for c in download_candidates if not c["archived"] and not c.get("ignored")
+    )
+    ignored_download_count = sum(
+        1 for c in download_candidates if not c["archived"] and c.get("ignored")
+    )
 
     db_16s = PROJECT_ROOT / "database" / "16S" / "ncbi" / "16S_ribosomal_RNA.nin"
     return {
@@ -1047,10 +1147,12 @@ async def get_sangon_16s_overview(sangon_root: Optional[str] = None, downloads_d
         "downloads_exists": dl_dir.exists(),
         "download_candidates": download_candidates,
         "pending_download_count": pending_download_count,
+        "ignored_download_count": ignored_download_count,
         "settings": load_sangon_settings(),
+        "sangon_auth": get_sangon_auth_status(),
         "root_exists": root_path.exists(),
         "db_16s_ready": db_16s.exists(),
-        "runtime": _sangon_pipeline_state,
+        "runtime": _snapshot_sangon_runtime(),
         "orders": orders,
     }
 
@@ -1253,152 +1355,474 @@ def _export_sangon_order_csv(task_id: str, out_dir: Path) -> Dict[str, int]:
     return {"total": len(results), "with_hits": with_hits, "no_hits": no_hits}
 
 
+def _append_sangon_log(msg: str, level: str = "info") -> None:
+    ts = datetime.now().strftime("%H:%M:%S")
+    with _sangon_pipeline_lock:
+        _sangon_pipeline_state["last_message"] = msg
+        logs = _sangon_pipeline_state["logs"]
+        logs.append(f"[{ts}] {msg}")
+        if len(logs) > 500:
+            del logs[:-500]
+    log_fn = getattr(logger, level, logger.info)
+    log_fn("[Sangon16S] %s", msg)
+
+
+def _execute_sangon_dirs_pipeline(
+    root_path: Path,
+    target_dirs: List[Path],
+    *,
+    downloads_dir: Optional[str] = None,
+    evalue: str = "0.05",
+    hitlist_size: str = "50",
+    force_reblast: bool = False,
+    progress_start: int = 0,
+    progress_end: int = 100,
+) -> Dict[str, Any]:
+    """依次对目标订单目录执行：认领 -> 解压 -> 16S BLAST -> 翻译导出 CSV。"""
+    processed = 0
+    skipped_missing = 0
+    failed = 0
+    total_orders = len(target_dirs)
+    span = max(1, progress_end - progress_start)
+    mgr = get_blast_manager()
+
+    for idx, order_dir in enumerate(target_dirs, start=1):
+        base_pct = progress_start + int((idx - 1) * span / total_orders)
+        done_pct = progress_start + int(idx * span / total_orders)
+        _sangon_pipeline_state["current_order"] = order_dir.name
+        _sangon_pipeline_state["current_stage"] = "extracting"
+        _append_sangon_log(f"({idx}/{total_orders}) 正在检查订单目录: {order_dir.name}")
+
+        zip_dir = order_dir / "原始压缩包"
+        raw_dir = order_dir / "原始数据"
+        res_dir = order_dir / "BLAST结果"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        res_dir.mkdir(parents=True, exist_ok=True)
+
+        # Step 0: 若原始数据与原始压缩包均为空，自动尝试从浏览器下载目录认领匹配订单包
+        fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
+        has_zip = zip_dir.exists() and any(zip_dir.glob("*.zip"))
+        if not fastas and not has_zip:
+            dl_dir = _sangon_downloads_or_default(downloads_dir)
+            imp = import_order_zips_from_downloads(
+                root_path,
+                dl_dir,
+                order_names=[order_dir.name],
+                auto_create_order=False,
+            )
+            if imp["imported_count"] > 0:
+                _append_sangon_log(
+                    f"已从下载目录自动认领压缩包: {imp['imported'][0]['zip_name']} -> 原始压缩包/"
+                )
+
+        # Step 1: 若原始数据无 .1.fasta 但原始压缩包有 zip，自动解压
+        if not fastas and zip_dir.exists():
+            for zf_path in sorted(zip_dir.glob("*.zip")):
+                _append_sangon_log(f"正在解压原始压缩包: {zf_path.name} -> 原始数据/")
+                with zipfile.ZipFile(zf_path, "r") as zf:
+                    zf.extractall(raw_dir)
+            fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
+
+        if not fastas:
+            skipped_missing += 1
+            _append_sangon_log(
+                f"[跳过] {order_dir.name} 未找到压缩包或 *.1.fasta 主序列（请先自动或手动下载压缩包）",
+                level="warning",
+            )
+            with _sangon_pipeline_lock:
+                _sangon_pipeline_state["progress"] = done_pct
+                _sangon_pipeline_state["summary"] = {
+                    "total": total_orders,
+                    "processed": processed,
+                    "skipped_missing": skipped_missing,
+                    "failed": failed,
+                }
+            continue
+
+        task_name = f"{order_dir.name}_16s"
+        task_cache_dir = PROJECT_ROOT / "results" / "blast" / task_name
+        reports_dir = task_cache_dir / "reports"
+
+        # 强制重跑时清理旧 BLAST 缓存与数据库记录，避免 BlastEngine 命中既有 reports/*.csv 静默跳过
+        if force_reblast:
+            _append_sangon_log(f"强制重新比对：正在清理旧缓存与记录 ({task_name})")
+            try:
+                mgr.delete_task(task_name)
+            except Exception as del_err:
+                _append_sangon_log(f"清理任务数据库记录提示: {del_err}", level="warning")
+            if task_cache_dir.exists():
+                shutil.rmtree(task_cache_dir, ignore_errors=True)
+
+        existing_csvs = list(reports_dir.glob("*.csv")) if reports_dir.exists() else []
+
+        # Step 2: 运行 16S BLAST
+        blast_ok = True
+        if len(existing_csvs) < len(fastas) or force_reblast:
+            _sangon_pipeline_state["current_stage"] = "blasting"
+            _append_sangon_log(f"提交 16S BLAST 比对任务 ({len(fastas)} 条主序列): {task_name}")
+            task_id = mgr.create_task({
+                "task_name": task_name,
+                "files": [str(p) for p in fastas],
+                "program": "auto",
+                "database": "ncbi_16s",
+                "evalue": evalue,
+                "hitlist_size": hitlist_size,
+                "max_workers": 2,
+                "request_timeout": 10,
+            })
+            wait_deadline = time.monotonic() + 3600.0
+            while True:
+                st_info = mgr.get_task_status(task_id)
+                if not st_info:
+                    blast_ok = False
+                    _append_log_msg = f"[失败] 未查询到 BLAST 任务状态: {task_id}"
+                    _append_sangon_log(_append_log_msg, level="error")
+                    break
+                st = st_info.get("status", "unknown")
+                prog = st_info.get("progress", 0)
+                _sangon_pipeline_state["progress"] = base_pct + int(
+                    (max(0, min(100, int(prog or 0))) / 100.0) * max(1, done_pct - base_pct)
+                )
+                if st == TaskStatus.COMPLETED.value:
+                    _append_sangon_log(f"BLAST 任务结束: {st} (进度 {prog}%)")
+                    break
+                if st in (TaskStatus.FAILED.value, TaskStatus.CANCELLED.value, TaskStatus.PAUSED.value):
+                    blast_ok = False
+                    err_detail = st_info.get("error") or st
+                    _append_sangon_log(f"[失败] BLAST 任务未完成 ({st}): {err_detail}", level="error")
+                    break
+                if time.monotonic() > wait_deadline:
+                    blast_ok = False
+                    _append_sangon_log(f"[超时] BLAST 任务等待超时 (>3600s): {task_id}", level="error")
+                    break
+                time.sleep(1.0)
+        else:
+            _append_sangon_log(f"复用已有 BLAST 报告 ({len(existing_csvs)} 份 CSV)")
+
+        if not blast_ok:
+            failed += 1
+            with _sangon_pipeline_lock:
+                _sangon_pipeline_state["progress"] = done_pct
+                _sangon_pipeline_state["summary"] = {
+                    "total": total_orders,
+                    "processed": processed,
+                    "skipped_missing": skipped_missing,
+                    "failed": failed,
+                }
+            continue
+
+        # Step 3: 翻译并导出 11 列 CSV
+        _sangon_pipeline_state["current_stage"] = "exporting"
+        _append_sangon_log("正在执行物种拉丁文批量翻译并导出 16S鉴定结果.csv ...")
+        stats = _export_sangon_order_csv(task_name, res_dir)
+        processed += 1
+        _append_sangon_log(
+            f"订单 {order_dir.name} 导出完成: 共 {stats['total']} 样本, "
+            f"命中 {stats['with_hits']}, 未命中 {stats['no_hits']}"
+        )
+        with _sangon_pipeline_lock:
+            _sangon_pipeline_state["progress"] = done_pct
+            _sangon_pipeline_state["summary"] = {
+                "total": total_orders,
+                "processed": processed,
+                "skipped_missing": skipped_missing,
+                "failed": failed,
+            }
+
+    return {
+        "total": total_orders,
+        "processed": processed,
+        "skipped_missing": skipped_missing,
+        "failed": failed,
+    }
+
+
 @router.post("/sangon_16s/run_pipeline")
 async def run_sangon_16s_pipeline(req: SangonRunRequest):
     """对选定的生工 16S 订单执行自动解压 -> 16S BLAST 比对 -> 中文翻译与 11 列 CSV 导出"""
-    if _sangon_pipeline_state["running"]:
-        raise HTTPException(status_code=409, detail="生工 16S 自动化流水线正在运行中，请稍候")
-
     root_path = _sangon_root_or_default(req.sangon_root)
     if not root_path.exists():
         raise HTTPException(status_code=400, detail=f"生工 16S 目录不存在: {root_path}")
 
     target_dirs: List[Path] = []
+    skipped_ignored = 0
     if req.order_names:
         for name in req.order_names:
             p = root_path / name
             if p.exists() and p.is_dir():
                 target_dirs.append(p)
     else:
+        ignored_keys = set(list_ignored_orders().keys())
         for child in sorted(root_path.iterdir()):
             if child.is_dir() and re.match(r"^\d{8}_\d+", child.name):
                 info = _inspect_sangon_order_dir(child)
+                order_key = normalize_order_key(str(info.get("order_no") or child.name))
+                if order_key in ignored_keys:
+                    skipped_ignored += 1
+                    continue
                 if info["status"] != "completed" or req.force_reblast:
                     target_dirs.append(child)
 
     if not target_dirs:
+        if skipped_ignored > 0:
+            raise HTTPException(status_code=400, detail=f"没有需要处理的订单目录（已自动跳过 {skipped_ignored} 个已忽略订单）")
         raise HTTPException(status_code=400, detail="没有需要处理的订单目录")
 
-    _sangon_pipeline_state["running"] = True
-    _sangon_pipeline_state["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _sangon_pipeline_state["finished_at"] = None
-    _sangon_pipeline_state["progress"] = 0
-    _sangon_pipeline_state["logs"] = [f"[{datetime.now().strftime('%H:%M:%S')}] 启动生工 16S 批处理，共 {len(target_dirs)} 个订单"]
-
-    def _append_log(msg: str):
-        ts = datetime.now().strftime("%H:%M:%S")
-        _sangon_pipeline_state["last_message"] = msg
-        _sangon_pipeline_state["logs"].append(f"[{ts}] {msg}")
+    with _sangon_pipeline_lock:
+        if _sangon_pipeline_state["running"]:
+            raise HTTPException(status_code=409, detail="生工 16S 自动化流水线正在运行中，请稍候")
+        start_msg = f"启动生工 16S 批处理，共 {len(target_dirs)} 个订单"
+        _sangon_pipeline_state["running"] = True
+        _sangon_pipeline_state["current_order"] = None
+        _sangon_pipeline_state["current_stage"] = "running"
+        _sangon_pipeline_state["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _sangon_pipeline_state["finished_at"] = None
+        _sangon_pipeline_state["progress"] = 0
+        _sangon_pipeline_state["last_message"] = start_msg
+        _sangon_pipeline_state["summary"] = {
+            "total": len(target_dirs),
+            "processed": 0,
+            "skipped_missing": 0,
+            "failed": 0,
+        }
+        _sangon_pipeline_state["logs"] = [f"[{datetime.now().strftime('%H:%M:%S')}] {start_msg}"]
+    logger.info("[Sangon16S] %s", start_msg)
 
     def _run_sangon_bg():
+        processed = 0
+        skipped_missing = 0
+        failed = 0
+        total_orders = len(target_dirs)
         try:
-            mgr = get_blast_manager()
-            total_orders = len(target_dirs)
-            for idx, order_dir in enumerate(target_dirs, start=1):
-                _sangon_pipeline_state["current_order"] = order_dir.name
-                _sangon_pipeline_state["current_stage"] = "extracting"
-                _append_log(f"({idx}/{total_orders}) 正在检查订单目录: {order_dir.name}")
+            res = _execute_sangon_dirs_pipeline(
+                root_path,
+                target_dirs,
+                downloads_dir=req.downloads_dir,
+                evalue=req.evalue,
+                hitlist_size=req.hitlist_size,
+                force_reblast=req.force_reblast,
+                progress_start=0,
+                progress_end=100,
+            )
+            processed = res["processed"]
+            skipped_missing = res["skipped_missing"]
+            failed = res["failed"]
 
-                zip_dir = order_dir / "原始压缩包"
-                raw_dir = order_dir / "原始数据"
-                res_dir = order_dir / "BLAST结果"
-                raw_dir.mkdir(parents=True, exist_ok=True)
-                res_dir.mkdir(parents=True, exist_ok=True)
-
-                # Step 0: 若原始数据与原始压缩包均为空，自动尝试从浏览器下载目录认领匹配订单包
-                fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
-                has_zip = zip_dir.exists() and any(zip_dir.glob("*.zip"))
-                if not fastas and not has_zip:
-                    dl_dir = _sangon_downloads_or_default(req.downloads_dir)
-                    imp = import_order_zips_from_downloads(
-                        root_path,
-                        dl_dir,
-                        order_names=[order_dir.name],
-                        auto_create_order=False,
-                    )
-                    if imp["imported_count"] > 0:
-                        _append_log(
-                            f"已从下载目录自动认领压缩包: {imp['imported'][0]['zip_name']} -> 原始压缩包/"
-                        )
-
-                # Step 1: 若原始数据无 .1.fasta 但原始压缩包有 zip，自动解压
-                if not fastas and zip_dir.exists():
-                    for zf_path in sorted(zip_dir.glob("*.zip")):
-                        _append_log(f"正在解压原始压缩包: {zf_path.name} -> 原始数据/")
-                        with zipfile.ZipFile(zf_path, "r") as zf:
-                            zf.extractall(raw_dir)
-                    fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
-
-                if not fastas:
-                    _append_log(f"[跳过] {order_dir.name} 未找到 *.1.fasta 主序列文件（如刚下载请确认浏览器已完成保存）")
-                    continue
-
-                task_name = f"{order_dir.name}_16s"
-                task_cache_dir = PROJECT_ROOT / "results" / "blast" / task_name
-                reports_dir = task_cache_dir / "reports"
-
-                # 强制重跑时清理旧 BLAST 缓存与数据库记录，避免 BlastEngine 命中既有 reports/*.csv 静默跳过
-                if req.force_reblast:
-                    _append_log(f"强制重新比对：正在清理旧缓存与记录 ({task_name})")
-                    try:
-                        mgr.delete_task(task_name)
-                    except Exception as del_err:
-                        _append_log(f"清理任务数据库记录提示: {del_err}")
-                    if task_cache_dir.exists():
-                        shutil.rmtree(task_cache_dir, ignore_errors=True)
-
-                existing_csvs = list(reports_dir.glob("*.csv")) if reports_dir.exists() else []
-
-                # Step 2: 运行 16S BLAST
-                if len(existing_csvs) < len(fastas) or req.force_reblast:
-                    _sangon_pipeline_state["current_stage"] = "blasting"
-                    _append_log(f"提交 16S BLAST 比对任务 ({len(fastas)} 条主序列): {task_name}")
-                    task_id = mgr.create_task({
-                        "task_name": task_name,
-                        "files": [str(p) for p in fastas],
-                        "program": "auto",
-                        "database": "ncbi_16s",
-                        "evalue": req.evalue,
-                        "hitlist_size": req.hitlist_size,
-                        "max_workers": 2,
-                        "request_timeout": 10,
-                    })
-                    while True:
-                        st_info = mgr.get_task_status(task_id)
-                        if not st_info:
-                            break
-                        st = st_info.get("status", "unknown")
-                        prog = st_info.get("progress", 0)
-                        _sangon_pipeline_state["progress"] = prog
-                        if st in (TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value):
-                            _append_log(f"BLAST 任务结束: {st} (进度 {prog}%)")
-                            break
-                        time.sleep(2)
-                else:
-                    _append_log(f"复用已有 BLAST 报告 ({len(existing_csvs)} 份 CSV)")
-
-                # Step 3: 翻译并导出 11 列 CSV
-                _sangon_pipeline_state["current_stage"] = "exporting"
-                _append_log(f"正在执行物种拉丁文批量翻译并导出 16S鉴定结果.csv ...")
-                stats = _export_sangon_order_csv(task_name, res_dir)
-                _append_log(
-                    f"订单 {order_dir.name} 导出完成: 共 {stats['total']} 样本, "
-                    f"命中 {stats['with_hits']}, 未命中 {stats['no_hits']}"
+            if failed > 0:
+                summary_msg = (
+                    f"生工 16S 批处理结束：成功 {processed} 个，跳过缺包 {skipped_missing} 个，失败 {failed} 个"
                 )
-                _sangon_pipeline_state["progress"] = int(idx * 100 / total_orders)
+                final_stage = "failed" if processed == 0 else "completed"
+                log_lvl = "warning"
+            elif processed == 0 and skipped_missing > 0:
+                summary_msg = (
+                    f"暂无可比对订单：所选 {skipped_missing} 个订单均缺少压缩包或 *.1.fasta"
+                    "（请先自动下载或认领下载包）"
+                )
+                final_stage = "completed"
+                log_lvl = "info"
+            elif skipped_missing > 0:
+                summary_msg = (
+                    f"处理完成：成功 {processed} 个订单，另有 {skipped_missing} 个待下载订单因缺少压缩包已跳过"
+                )
+                final_stage = "completed"
+                log_lvl = "info"
+            else:
+                summary_msg = f"全部生工 16S 订单处理完毕（共 {processed} 个）"
+                final_stage = "completed"
+                log_lvl = "info"
 
-            _sangon_pipeline_state["current_stage"] = "completed"
-            _append_log("全部生工 16S 订单处理完毕")
+            _sangon_pipeline_state["progress"] = 100
+            _sangon_pipeline_state["current_stage"] = final_stage
+            _append_sangon_log(summary_msg, level=log_lvl)
         except Exception as exc:
             _sangon_pipeline_state["current_stage"] = "failed"
-            _append_log(f"执行异常: {exc}")
+            _sangon_pipeline_state["progress"] = 100
+            _append_sangon_log(f"执行异常: {exc}", level="error")
         finally:
-            _sangon_pipeline_state["running"] = False
-            _sangon_pipeline_state["current_order"] = None
-            _sangon_pipeline_state["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with _sangon_pipeline_lock:
+                _sangon_pipeline_state["running"] = False
+                _sangon_pipeline_state["current_order"] = None
+                _sangon_pipeline_state["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                _sangon_pipeline_state["summary"] = {
+                    "total": total_orders,
+                    "processed": processed,
+                    "skipped_missing": skipped_missing,
+                    "failed": failed,
+                }
 
     asyncio.get_running_loop().run_in_executor(None, _run_sangon_bg)
-    return {"status": "started", "runtime": _sangon_pipeline_state}
+    return {"status": "started", "runtime": _snapshot_sangon_runtime()}
+
+
+@router.post("/sangon_16s/auth")
+async def update_sangon_auth_credentials(req: SangonAuthUpdateRequest):
+    """保存或更新生工官网登录账号与独立密钥文件 (.sangon_auth)，仅返脱敏掩码"""
+    if (
+        req.account is None
+        and req.password is None
+        and req.auto_confirm_fee is None
+    ):
+        raise HTTPException(status_code=400, detail="未提供需要更新的生工账号配置")
+    auth_info = save_sangon_credentials(
+        account=req.account,
+        password=req.password,
+        auto_confirm_fee=req.auto_confirm_fee,
+    )
+    return {"status": "success", "sangon_auth": auth_info, "settings": load_sangon_settings()}
+
+
+@router.post("/sangon_16s/download_orders")
+async def download_sangon_orders_endpoint(req: Optional[SangonDownloadRequest] = Body(default=None)):
+    """后台异步执行：优先从本地 Downloads 认领 -> 登录生工官网批量下载压缩包 -> 可选串联 16S BLAST 与导出"""
+    params = req or SangonDownloadRequest()
+    root_path = _sangon_root_or_default(params.sangon_root)
+    if not root_path.exists():
+        raise HTTPException(status_code=400, detail=f"生工 16S 目录不存在: {root_path}")
+    dl_dir = _sangon_downloads_or_default(params.downloads_dir)
+
+    collected = _collect_pending_download_targets(
+        root_path,
+        order_names=params.order_names or None,
+    )
+    targets: List[Dict[str, Any]] = collected["targets"]
+    if not targets:
+        if collected["skipped"]:
+            msg_list = ", ".join(f"{it['dir_name']}({it['message']})" for it in collected["skipped"][:3])
+            raise HTTPException(status_code=400, detail=f"当前没有需要下载的订单：{msg_list}")
+        raise HTTPException(status_code=400, detail="当前没有需要下载的待处理订单")
+
+    # 检查是否存在本地尚未下载且拥有生工链接、必须登录官网的订单
+    dl_cands = scan_downloads_for_sangon_zips(dl_dir, order_nos=[t["order_no"] for t in targets]) if dl_dir.exists() else []
+    dl_ready_nos = {c["order_no"] for c in dl_cands}
+    needs_web_login = any(
+        t["order_no"] not in dl_ready_nos
+        and bool(build_sangon_order_url(t.get("cx_order_id", ""), t.get("download_url", "")))
+        for t in targets
+    )
+
+    account, password = resolve_sangon_credentials()
+    if needs_web_login and (not account or not password):
+        raise HTTPException(
+            status_code=400,
+            detail="需要登录生工官网自动下载，请先在「生工账号配置」中填写生工账号与登录密码",
+        )
+
+    settings = load_sangon_settings()
+    confirm_fee = (
+        bool(params.auto_confirm_fee)
+        if params.auto_confirm_fee is not None
+        else bool(settings.get("auto_confirm_fee", True))
+    )
+    auto_run = bool(params.auto_run_blast)
+
+    with _sangon_pipeline_lock:
+        if _sangon_pipeline_state["running"]:
+            raise HTTPException(status_code=409, detail="生工 16S 自动化流水线正在运行中，请稍候")
+        mode_label = "自动下载并比对" if auto_run else "自动下载压缩包"
+        start_msg = f"启动生工 16S {mode_label}，待检查 {len(targets)} 个订单"
+        _sangon_pipeline_state["running"] = True
+        _sangon_pipeline_state["current_order"] = None
+        _sangon_pipeline_state["current_stage"] = "downloading"
+        _sangon_pipeline_state["started_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _sangon_pipeline_state["finished_at"] = None
+        _sangon_pipeline_state["progress"] = 0
+        _sangon_pipeline_state["last_message"] = start_msg
+        _sangon_pipeline_state["summary"] = {
+            "total": len(targets),
+            "processed": 0,
+            "skipped_missing": 0,
+            "failed": 0,
+        }
+        _sangon_pipeline_state["logs"] = [f"[{datetime.now().strftime('%H:%M:%S')}] {start_msg}"]
+    logger.info("[Sangon16S] %s", start_msg)
+
+    def _run_download_bg():
+        total_cnt = len(targets)
+        dl_end_pct = 45 if auto_run else 100
+        processed_cnt = 0
+        skipped_cnt = 0
+        failed_cnt = 0
+        try:
+            def _on_dl_prog(idx: int, total_web: int, dname: str) -> None:
+                _sangon_pipeline_state["current_order"] = dname
+                _sangon_pipeline_state["current_stage"] = "downloading"
+                _sangon_pipeline_state["progress"] = int(((idx - 1) / max(1, total_web)) * dl_end_pct)
+
+            dl_res = download_sangon_orders(
+                root_path,
+                dl_dir,
+                order_names=[t["dir_name"] for t in targets],
+                account=account,
+                password=password,
+                auto_confirm_fee=confirm_fee,
+                headless=True,
+                progress_cb=_on_dl_prog,
+                log_cb=lambda m: _append_sangon_log(m),
+            )
+            claimed_cnt = dl_res["claimed_count"]
+            downloaded_cnt = dl_res["downloaded_count"]
+            skipped_cnt = dl_res["skipped_count"]
+            failed_cnt = dl_res["failed_count"]
+            captcha_blocked = dl_res.get("captcha_blocked", False)
+            ready_dirs = [Path(root_path / name) for name in dl_res.get("processed_dir_names") or [] if (root_path / name).is_dir()]
+
+            _sangon_pipeline_state["progress"] = dl_end_pct
+
+            if auto_run and ready_dirs and not captcha_blocked:
+                _append_sangon_log(f"自动下载阶段结束（认领 {claimed_cnt}，官网下载 {downloaded_cnt}），开始衔接 16S BLAST 比对...")
+                blast_res = _execute_sangon_dirs_pipeline(
+                    root_path,
+                    ready_dirs,
+                    downloads_dir=str(dl_dir),
+                    evalue=params.evalue,
+                    hitlist_size=params.hitlist_size,
+                    force_reblast=params.force_reblast,
+                    progress_start=dl_end_pct,
+                    progress_end=100,
+                )
+                processed_cnt = blast_res["processed"]
+                skipped_cnt += blast_res["skipped_missing"]
+                failed_cnt += blast_res["failed"]
+                final_msg = (
+                    f"下载并比对完成：认领 {claimed_cnt}，官网下载 {downloaded_cnt}，"
+                    f"比对导出 {processed_cnt}，跳过 {skipped_cnt}，失败 {failed_cnt}"
+                )
+            else:
+                processed_cnt = claimed_cnt + downloaded_cnt
+                if captcha_blocked:
+                    final_msg = f"已停止：生工触发安全/人机验证（已完成 {processed_cnt} 个，失败 {failed_cnt} 个），请手动打开下载页验证"
+                elif failed_cnt > 0:
+                    final_msg = f"自动下载结束：认领 {claimed_cnt}，官网下载 {downloaded_cnt}，跳过 {skipped_cnt}，失败 {failed_cnt}"
+                elif processed_cnt == 0 and skipped_cnt > 0:
+                    final_msg = f"自动下载完成：暂无新入库包（跳过 {skipped_cnt} 个订单，详见运行日志）"
+                else:
+                    final_msg = f"自动下载完成：官网下载 {downloaded_cnt} 个，本地认领 {claimed_cnt} 个" + (
+                        f"，跳过 {skipped_cnt} 个" if skipped_cnt else ""
+                    )
+
+            _sangon_pipeline_state["progress"] = 100
+            _sangon_pipeline_state["current_stage"] = "failed" if (failed_cnt > 0 and processed_cnt == 0) or captcha_blocked else "completed"
+            _append_sangon_log(final_msg, level="warning" if failed_cnt > 0 or captcha_blocked else "info")
+        except Exception as exc:
+            failed_cnt += 1
+            _sangon_pipeline_state["current_stage"] = "failed"
+            _sangon_pipeline_state["progress"] = 100
+            _append_sangon_log(f"自动下载执行异常: {exc}", level="error")
+        finally:
+            with _sangon_pipeline_lock:
+                _sangon_pipeline_state["running"] = False
+                _sangon_pipeline_state["current_order"] = None
+                _sangon_pipeline_state["finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                _sangon_pipeline_state["summary"] = {
+                    "total": total_cnt,
+                    "processed": processed_cnt,
+                    "skipped_missing": skipped_cnt,
+                    "failed": failed_cnt,
+                }
+
+    asyncio.get_running_loop().run_in_executor(None, _run_download_bg)
+    return {"status": "started", "runtime": _snapshot_sangon_runtime()}
 
 
 @router.post("/sangon_16s/import_downloads")
@@ -1434,7 +1858,7 @@ async def send_sangon_order_result_mail(req: SangonSendResultRequest):
 
     csv_path = order_dir / "BLAST结果" / "16S鉴定结果.csv"
     if not csv_path.exists() or not csv_path.is_file():
-        raise HTTPException(status_code=404, detail=f"该订单尚未生成 16S鉴定结果.csv，请先运行比对导出")
+        raise HTTPException(status_code=404, detail="该订单尚未生成 16S鉴定结果.csv，请先运行比对导出")
 
     def _do_send_16s():
         with open(csv_path, "r", encoding="utf-8-sig", errors="replace") as f:
@@ -1522,8 +1946,8 @@ async def send_sangon_order_result_mail(req: SangonSendResultRequest):
 
 @router.post("/sangon_16s/settings")
 async def update_sangon_settings(req: SangonSettingsRequest):
-    """修改生工 16S 根目录（支持自动迁移）或本地浏览器下载目录（仅更新路径不迁移）"""
-    if _sangon_pipeline_state["running"]:
+    """修改生工 16S 根目录（支持自动迁移）、下载目录，以及全局忽略订单与邮件主题关键词配置"""
+    if _sangon_pipeline_state["running"] and (req.sangon_root is not None or req.downloads_dir is not None):
         raise HTTPException(status_code=409, detail="生工 16S 流水线运行中，暂不能修改目录")
 
     to_save: Dict[str, Any] = {}
@@ -1560,11 +1984,32 @@ async def update_sangon_settings(req: SangonSettingsRequest):
             raise HTTPException(status_code=400, detail=f"浏览器下载目录不存在: {new_dl}")
         to_save["downloads_dir"] = str(new_dl)
 
-    if not to_save:
-        raise HTTPException(status_code=400, detail="未提供需要更新的目录参数")
+    if req.auto_confirm_fee is not None:
+        to_save["auto_confirm_fee"] = bool(req.auto_confirm_fee)
 
-    settings = save_sangon_settings(to_save)
-    return {"status": "success", "settings": settings, "migration": migration}
+    has_rules_update = req.ignored_orders is not None or req.ignore_subject_keywords is not None
+    if not to_save and not has_rules_update:
+        raise HTTPException(status_code=400, detail="未提供需要更新的配置参数")
+
+    settings = save_sangon_settings(to_save) if to_save else load_sangon_settings()
+    if has_rules_update:
+        settings = replace_ignore_rules(
+            ignored_orders=req.ignored_orders,
+            ignore_subject_keywords=req.ignore_subject_keywords,
+        )
+    return {"status": "success", "settings": settings, "sangon_auth": get_sangon_auth_status(), "migration": migration}
+
+
+@router.post("/sangon_16s/ignore")
+async def update_sangon_ignored_orders(req: SangonIgnoreRequest):
+    """将指定订单号/目录名加入或移出生工 16S 全局忽略名单"""
+    if not req.order_keys:
+        raise HTTPException(status_code=400, detail="未提供需要处理的订单号或目录名")
+    if req.ignore:
+        res = ignore_orders(req.order_keys, reason=req.reason, dir_names=req.dir_names)
+    else:
+        res = unignore_orders(req.order_keys)
+    return {"status": "success", "ignore": req.ignore, **res}
 
 
 @router.post("/sangon_16s/cleanup")

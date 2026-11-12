@@ -7,7 +7,6 @@
 3. 按服务端分页切片，仅对当前页邮件拉取全文解析 cxOrderID 与下载链接；
 4. 按需自动或手动初始化 YYYYMMDD_订单号 三级工作目录。
 """
-import imaplib
 import json
 import logging
 import re
@@ -18,6 +17,11 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from .sangon_ignore_rules import (
+    is_sequencing_notice_subject,
+    list_ignored_orders,
+    normalize_order_key,
+)
 from ....mail_download.fetcher import (
     MailFetcher,
     _decode_header,
@@ -239,17 +243,12 @@ def _is_sangon_sender(sender: str) -> bool:
     return "sangon" in low
 
 
-def _is_sequencing_notice_subject(subject: str) -> bool:
+def _is_sequencing_notice_subject(
+    subject: str,
+    ignore_keywords: Optional[Iterable[str]] = None,
+) -> bool:
     """过滤非测序结果通知（如“订单已发货”“发票通知”等物流/商务邮件），避免误建空 16S 目录。"""
-    s = (subject or "").strip()
-    if not s:
-        return False
-    if "测序" in s:
-        return True
-    non_seq_keywords = ("已发货", "物流", "快递", "发票", "对账", "付款")
-    if any(kw in s for kw in non_seq_keywords):
-        return False
-    return True
+    return is_sequencing_notice_subject(subject, ignore_keywords=ignore_keywords)
 
 
 def create_sangon_subdirs(order_path: Path) -> None:
@@ -343,6 +342,8 @@ def scan_sangon_mails(
     only_new: bool = False,
     auto_create: bool = True,
     ignore_history: bool = False,
+    ignored_orders: Optional[Iterable[str]] = None,
+    ignore_keywords: Optional[Iterable[str]] = None,
     conn_factory: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
     """
@@ -352,6 +353,11 @@ def scan_sangon_mails(
     """
     page_size = max(1, min(int(page_size or 10), MAX_SCAN_PAGE_SIZE))
     page = max(1, int(page or 1))
+    resolved_ignored = (
+        {normalize_order_key(k) for k in ignored_orders if normalize_order_key(k)}
+        if ignored_orders is not None
+        else set(list_ignored_orders().keys())
+    )
 
     fetcher = MailFetcher(cfg, conn_factory=conn_factory)
     conn = None
@@ -382,6 +388,7 @@ def scan_sangon_mails(
                 "created_count": 0,
                 "existing_count": 0,
                 "non_sequencing_count": 0,
+                "ignored_count": 0,
                 "scanned_count": 0,
                 "created_dirs": [],
                 "created_order_nos": [],
@@ -467,6 +474,7 @@ def scan_sangon_mails(
         skipped_known = 0
         existing_count = 0
         non_sequencing_count = 0
+        ignored_count = 0
         created_count = 0
         new_count = 0
         processed_items: List[Dict[str, Any]] = []
@@ -475,16 +483,21 @@ def scan_sangon_mails(
             order_no = item["order_no"]
             message_id = item["message_id"]
             date_prefix = item["date_prefix"]
-            is_seq_mail = _is_sequencing_notice_subject(item["subject"])
+            is_seq_mail = _is_sequencing_notice_subject(item["subject"], ignore_keywords=ignore_keywords)
             dir_name = existing_map.get(order_no) or (f"{date_prefix}_{order_no}" if (order_no and is_seq_mail) else "")
 
             in_disk = bool(order_no and order_no in existing_map)
+            is_ignored = bool(order_no and normalize_order_key(order_no) in resolved_ignored)
             in_history = (not ignore_history) and index.is_known(order_no, message_id)
 
             if not is_seq_mail:
                 dir_ready = False
                 dedup_status = "non_sequencing"
                 non_sequencing_count += 1
+            elif is_ignored:
+                dir_ready = in_disk
+                dedup_status = "ignored"
+                ignored_count += 1
             elif in_disk:
                 dir_ready = True
                 dedup_status = "existing"
@@ -534,6 +547,7 @@ def scan_sangon_mails(
                 "order_no": order_no,
                 "dir_name": dir_name,
                 "is_sequencing": is_seq_mail,
+                "ignored": is_ignored,
                 "legacy_dir_exists": in_disk if not is_seq_mail else False,
                 "cx_order_id": "",
                 "download_url": "",
@@ -559,7 +573,7 @@ def scan_sangon_mails(
 
         # 阶段 2：仅对当前页中需要下载链接的邮件拉取全文（优先复用索引缓存）
         for item in page_items:
-            if item["dedup_status"] == "non_sequencing":
+            if item["dedup_status"] in ("non_sequencing", "ignored"):
                 continue
             cached = index.get_order(item["order_no"]) if item["order_no"] else {}
             if cached.get("download_url"):
@@ -607,6 +621,7 @@ def scan_sangon_mails(
             "created_count": created_count,
             "existing_count": existing_count,
             "non_sequencing_count": non_sequencing_count,
+            "ignored_count": ignored_count,
             "scanned_count": raw_total,
             "created_dirs": created_dirs,
             "created_order_nos": created_order_nos,

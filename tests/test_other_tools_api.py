@@ -1288,11 +1288,686 @@ def test_sangon_order_annotator_new_flag_and_claimable_zip():
         assert o3["download_zip_ready"] is False
 
 
+def test_sangon_global_ignore_full_pipeline(monkeypatch):
+    """验证生工 16S 全局忽略规则：概览剔除待认领、扫邮件不建目录、下载认领跳过、批量运行跳过、自定义关键词与取消忽略"""
+    import zipfile
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.backend.routes.other_tools as ot_routes
+    import src.backend.services.other_tools.sangon_settings as ss_mod
+
+    app = FastAPI()
+    app.include_router(ot_routes.router)
+    client = TestClient(app)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sangon_dir = root / "sangon"
+        dl_dir = root / "downloads"
+        sangon_dir.mkdir()
+        dl_dir.mkdir()
+
+        cfg_path = root / "sangon_16s_config.json"
+        monkeypatch.setattr(ss_mod, "SANGON_CONFIG_PATH", cfg_path)
+
+        # 两个已有待下载订单目录，其中一个将被全局忽略
+        ignored_dir = sangon_dir / "20261014_2140608938"
+        (ignored_dir / "原始压缩包").mkdir(parents=True)
+        (ignored_dir / "原始数据").mkdir(parents=True)
+        (ignored_dir / "BLAST结果").mkdir(parents=True)
+
+        active_dir = sangon_dir / "20261111_2140690001"
+        (active_dir / "原始压缩包").mkdir(parents=True)
+        (active_dir / "原始数据").mkdir(parents=True)
+        (active_dir / "BLAST结果").mkdir(parents=True)
+        (active_dir / "原始数据" / "s1_-1.1.fasta").write_text(">1\nATGC\n", encoding="utf-8")
+
+        # 浏览器下载目录中两个待认领测序压缩包（1 个匹配目录，1 个未建目录）
+        zip1 = dl_dir / "吴晨_2140608938_测序结果.zip"
+        with zipfile.ZipFile(zip1, "w") as zf:
+            zf.writestr("a_-1.1.fasta", ">1\nATGC\n")
+        zip2 = dl_dir / "李四_2140601771_测序结果.zip"
+        with zipfile.ZipFile(zip2, "w") as zf:
+            zf.writestr("b_-1.1.fasta", ">1\nGGGG\n")
+
+        assert (
+            client.post(
+                "/other_tools/sangon_16s/settings",
+                json={"sangon_root": str(sangon_dir), "downloads_dir": str(dl_dir), "migrate": False},
+            ).status_code
+            == 200
+        )
+
+        # 1. 全局忽略 2140608938 与 2140601771
+        r_ig = client.post(
+            "/other_tools/sangon_16s/ignore",
+            json={"order_keys": ["20261014_2140608938", "2140601771"], "ignore": True, "reason": "线下已手动比对"},
+        )
+        assert r_ig.status_code == 200
+        assert r_ig.json()["updated_count"] == 2
+        assert "2140608938" in r_ig.json()["ignored_orders"]
+        assert "2140601771" in r_ig.json()["ignored_orders"]
+
+        # 2. overview：待认领角标降为 0，已忽略下载计数为 2，20261014_2140608938 标为 ignored
+        ov = client.get("/other_tools/sangon_16s/overview").json()
+        assert ov["pending_download_count"] == 0
+        assert ov["ignored_download_count"] == 2
+        by_dir = {o["dir_name"]: o for o in ov["orders"]}
+        assert by_dir["20261014_2140608938"]["ignored"] is True
+        assert by_dir["20261014_2140608938"]["ignore_reason"] == "线下已手动比对"
+        assert by_dir["20261014_2140608938"]["download_zip_ready"] is False
+        assert by_dir["20261111_2140690001"]["ignored"] is False
+
+        # 3. 批量认领默认跳过全局忽略订单（即使开启 auto_create_order 也不得新建 2140601771）
+        imp = import_order_zips_from_downloads(sangon_dir, dl_dir, auto_create_order=True)
+        assert imp["imported_count"] == 0
+        assert imp["skipped_ignored"] == 2
+        assert not any("2140601771" in p.name for p in sangon_dir.iterdir())
+        assert not list((ignored_dir / "原始压缩包").glob("*.zip"))
+
+        # 4. 邮件扫描：命中全局忽略的不建目录不抓正文；自定义非测序主题关键词生效
+        r_kw = client.post(
+            "/other_tools/sangon_16s/settings",
+            json={"ignore_subject_keywords": ["已发货", "催款通知"]},
+        )
+        assert r_kw.status_code == 200
+        mails = [
+            _make_mime_mail("info1@sangon.com", "测序结果通知 2140601771", body_html="cxOrderID=CX1", message_id="<i1@s>"),
+            _make_mime_mail("info1@sangon.com", "生工月度催款通知 2140699001", body_html="催款", message_id="<i2@s>"),
+            _make_mime_mail("info1@sangon.com", "测序结果通知 2140699002", body_html="cxOrderID=CX2", message_id="<i3@s>"),
+        ]
+        fake_imap = _FakeIMAPForOtherTools(mails)
+        scan_res = scan_sangon_mails(
+            sangon_dir,
+            MailConfig(account="u@qq.com"),
+            page=1,
+            page_size=20,
+            dedup=True,
+            auto_create=True,
+            conn_factory=lambda: fake_imap,
+        )
+        by_ono = {m["order_no"]: m for m in scan_res["mails"]}
+        assert by_ono["2140601771"]["dedup_status"] == "ignored"
+        assert by_ono["2140699001"]["dedup_status"] == "non_sequencing"
+        assert by_ono["2140699002"]["dedup_status"] == "created"
+        assert scan_res["ignored_count"] == 1
+        assert not any("2140601771" in p.name for p in sangon_dir.iterdir())
+        assert not any("2140699001" in p.name for p in sangon_dir.iterdir())
+        # 仅 2140699002 拉取正文
+        assert len([c for c in fake_imap.fetch_calls if "BODY.PEEK[]" in c]) == 1
+
+        # 5. 全局运行待处理时自动跳过已忽略订单（只跑未忽略的 active_dir，新建目录也顺手删掉以聚焦测试）
+        for p in list(sangon_dir.iterdir()):
+            if "2140699002" in p.name:
+                import shutil
+                shutil.rmtree(p)
+        executed_tasks: list[str] = []
+
+        class FakeBlastMgr:
+            def create_task(self, params):
+                executed_tasks.append(params["task_name"])
+                return params["task_name"]
+
+            def get_task_status(self, tid):
+                return {"status": ot_routes.TaskStatus.COMPLETED.value, "progress": 100}
+
+        monkeypatch.setattr(ot_routes, "get_blast_manager", lambda: FakeBlastMgr())
+        monkeypatch.setattr(ot_routes, "_export_sangon_order_csv", lambda tid, out: {"total": 1, "with_hits": 1, "no_hits": 0})
+        ot_routes._sangon_pipeline_state["running"] = False
+
+        r_run = client.post(
+            "/other_tools/sangon_16s/run_pipeline",
+            json={"sangon_root": str(sangon_dir), "order_names": []},
+        )
+        assert r_run.status_code == 200
+        import time
+        for _ in range(40):
+            if not ot_routes._sangon_pipeline_state["running"]:
+                break
+            time.sleep(0.05)
+        assert executed_tasks == ["20261111_2140690001_16s"]
+
+        # 6. 取消忽略 2140601771 后恢复待认领计数
+        r_unig = client.post(
+            "/other_tools/sangon_16s/ignore",
+            json={"order_keys": ["2140601771"], "ignore": False},
+        )
+        assert r_unig.status_code == 200
+        assert r_unig.json()["updated_count"] == 1
+        ov_after = client.get("/other_tools/sangon_16s/overview").json()
+        assert ov_after["pending_download_count"] == 1
+        assert ov_after["ignored_download_count"] == 1
+
+
+def test_mail_pipeline_batch_ignore_route_and_state(monkeypatch):
+    """验证邮件注释回传模块对收件批次标记“已忽略跳过”与恢复接口、统计及防重入"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.backend.routes.other_tools as ot_routes
+    from src.mail_download.batch_state import collect_pending_batches
+
+    app = FastAPI()
+    app.include_router(ot_routes.router)
+    client = TestClient(app)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        dl_dir = root / "dl"
+        send_dir = root / "sends"
+        anno_dir = root / "annotations"
+        send_dir.mkdir()
+        anno_dir.mkdir()
+
+        for bname, fa_name in (("up_20261111_0001", "a.fasta"), ("up_20261111_0002", "b.fasta")):
+            bdir = dl_dir / bname
+            bdir.mkdir(parents=True)
+            (bdir / fa_name).write_text(">seq\nATGC\n", encoding="utf-8")
+            (bdir / "manifest.json").write_text(
+                json.dumps({"batch": bname, "mail": {"sender": "s@163.com", "subject": bname}}),
+                encoding="utf-8",
+            )
+
+        cfg_file = root / "mail_config.json"
+        cfg_file.write_text(
+            json.dumps({"download_dir": str(dl_dir), "send_dir": str(send_dir)}),
+            encoding="utf-8",
+        )
+        cfg_obj = MailConfig(download_dir=str(dl_dir), send_dir=str(send_dir))
+        monkeypatch.setattr(ot_routes, "MAIL_CONFIG_PATH", cfg_file)
+        monkeypatch.setattr(ot_routes, "ANNOTATIONS_DIR", anno_dir)
+        monkeypatch.setattr(ot_routes, "load_config", lambda *a, **kw: cfg_obj)
+        ot_routes._mail_pipeline_state["running"] = False
+
+        # 非法路径穿越返回 400
+        assert client.post("/other_tools/mail_pipeline/batch_ignore", json={"batch_name": "../bad"}).status_code == 400
+
+        # 跳过 0001
+        r_skip = client.post(
+            "/other_tools/mail_pipeline/batch_ignore",
+            json={"batch_name": "up_20261111_0001", "ignore": True, "reason": "线下已处理"},
+        )
+        assert r_skip.status_code == 200
+        assert r_skip.json()["ignored"] is True
+
+        ov = client.get("/other_tools/mail_pipeline/overview").json()
+        assert ov["pending_batches_count"] == 1
+        assert ov["ignored_batches_count"] == 1
+        by_name = {b["batch_name"]: b for b in ov["batches"]}
+        assert by_name["up_20261111_0001"]["pipeline_status"] == "ignored"
+        assert by_name["up_20261111_0001"]["pipeline_status_label"] == "已忽略跳过"
+        assert by_name["up_20261111_0001"]["pending"] is False
+        assert by_name["up_20261111_0001"]["ignore_reason"] == "线下已处理"
+
+        # 队列收集与原 fasta 文件保留验证
+        pending = collect_pending_batches(dl_dir, cfg_obj, send_dir, anno_dir)
+        assert [p[0].name for p in pending] == ["up_20261111_0002"]
+        assert (dl_dir / "up_20261111_0001" / "a.fasta").is_file()
+
+        # 恢复 0001
+        r_res = client.post(
+            "/other_tools/mail_pipeline/batch_ignore",
+            json={"batch_name": "up_20261111_0001", "ignore": False},
+        )
+        assert r_res.status_code == 200
+        assert r_res.json()["ignored"] is False
+        ov2 = client.get("/other_tools/mail_pipeline/overview").json()
+        assert ov2["pending_batches_count"] == 2
+        assert ov2["ignored_batches_count"] == 0
+
+
+def test_local_blast_resource_plan_reserves_cores():
+    """验证本地 BLAST 并发进程数与单进程线程数受总 CPU 预算约束，避免超配导致主机和 UI 卡死"""
+    from src.blast.local_blast import compute_local_blast_resource_plan
+
+    for cpu_cnt, min_reserved in ((32, 4), (16, 4), (12, 4), (8, 2), (4, 2), (2, 1)):
+        max_conc, threads = compute_local_blast_resource_plan(cpu_count=cpu_cnt)
+        assert max_conc >= 1
+        assert threads >= 1
+        assert max_conc * threads <= cpu_cnt - min_reserved
+
+    # 高配主机也必须受限于单进程预算，不得超出总预算
+    max_conc_32, threads_32 = compute_local_blast_resource_plan(cpu_count=32, requested_threads=64)
+    assert max_conc_32 == 2
+    assert max_conc_32 * threads_32 <= 28
+
+
+def test_blast_engine_respects_explicit_max_workers(monkeypatch):
+    """验证 BlastEngine 在调用方显式指定 max_workers=2 时遵循约束，不再强制放大到 4 并发"""
+    from concurrent.futures import Future
+    from src.blast import engine as engine_mod
+
+    observed_workers: list[int] = []
+
+    class DummyExecutor:
+        def __init__(self, max_workers):
+            observed_workers.append(max_workers)
+
+        def submit(self, fn, *args, **kwargs):
+            fut: Future = Future()
+            fut.set_result([])
+            return fut
+
+        def shutdown(self, wait=False):
+            return None
+
+    class DummyMgr:
+        def generate_hash(self, s):
+            return "h1"
+
+    monkeypatch.setattr(engine_mod, "ThreadPoolExecutor", DummyExecutor)
+    monkeypatch.setattr(engine_mod, "get_annotation_manager", lambda: DummyMgr())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        (tmp_dir / "reports").mkdir(parents=True, exist_ok=True)
+        (tmp_dir / "xml_raw").mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(engine_mod.BlastEngine, "_init_results_dir", lambda self: tmp_dir)
+        engine_mod.BlastEngine("test_explicit_workers_2", {"max_workers": 2}).run(
+            [{"id": "seq1", "sequence": "ATGCGTACGTAG"}]
+        )
+        engine_mod.BlastEngine("test_explicit_workers_cap", {"max_workers": 8}).run(
+            [{"id": "seq1", "sequence": "ATGCGTACGTAG"}]
+        )
+        engine_mod.BlastEngine("test_default_workers", {}).run(
+            [{"id": "seq1", "sequence": "ATGCGTACGTAG"}]
+        )
+
+    assert observed_workers == [2, 4, 4]
+
+
+def test_sangon_run_pipeline_progress_summary_logging_and_failure_guard(monkeypatch, caplog):
+    """验证生工 16S 流水线：跳过缺包仍推进进度至 100%、终端日志输出、全缺包明确提示、BLAST 失败不误覆盖空 CSV"""
+    import logging
+    import time
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.backend.routes.other_tools as ot_routes
+    import src.backend.services.other_tools.sangon_settings as ss_mod
+
+    app = FastAPI()
+    app.include_router(ot_routes.router)
+    client = TestClient(app)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sangon_dir = root / "sangon"
+        dl_dir = root / "downloads"
+        sangon_dir.mkdir()
+        dl_dir.mkdir()
+        monkeypatch.setattr(ss_mod, "SANGON_CONFIG_PATH", root / "sangon_cfg.json")
+        assert (
+            client.post(
+                "/other_tools/sangon_16s/settings",
+                json={"sangon_root": str(sangon_dir), "downloads_dir": str(dl_dir), "migrate": False},
+            ).status_code
+            == 200
+        )
+
+        # 准备 3 个目录：1 空、2 有序列、3 空
+        d_miss1 = sangon_dir / "20261101_2140610001"
+        d_ok = sangon_dir / "20261102_2140610002"
+        d_miss2 = sangon_dir / "20261103_2140610003"
+        for d in (d_miss1, d_ok, d_miss2):
+            (d / "原始压缩包").mkdir(parents=True)
+            (d / "原始数据").mkdir(parents=True)
+            (d / "BLAST结果").mkdir(parents=True)
+        (d_ok / "原始数据" / "sample_-1.1.fasta").write_text(">s1\nATGCATGC\n", encoding="utf-8")
+
+        executed_tasks: list[str] = []
+        exported_calls: list[str] = []
+        fake_status_mode = {"status": ot_routes.TaskStatus.COMPLETED.value}
+
+        class FakeBlastMgr:
+            def create_task(self, params):
+                executed_tasks.append(params["task_name"])
+                return params["task_name"]
+
+            def get_task_status(self, tid):
+                return {"status": fake_status_mode["status"], "progress": 100}
+
+        monkeypatch.setattr(ot_routes, "get_blast_manager", lambda: FakeBlastMgr())
+
+        def fake_export(tid, out_dir):
+            exported_calls.append(tid)
+            return {"total": 1, "with_hits": 1, "no_hits": 0}
+
+        monkeypatch.setattr(ot_routes, "_export_sangon_order_csv", fake_export)
+        ot_routes._sangon_pipeline_state["running"] = False
+
+        # 1. 全缺包运行时：进度应正常到 100%，summary 记录 skipped_missing=2，last_message 明确提示原因
+        with caplog.at_level(logging.INFO):
+            r_miss = client.post(
+                "/other_tools/sangon_16s/run_pipeline",
+                json={"sangon_root": str(sangon_dir), "order_names": [d_miss1.name, d_miss2.name]},
+            )
+        assert r_miss.status_code == 200
+        for _ in range(40):
+            if not ot_routes._sangon_pipeline_state["running"]:
+                break
+            time.sleep(0.05)
+
+        ov_miss = client.get("/other_tools/sangon_16s/overview").json()["runtime"]
+        assert ov_miss["running"] is False
+        assert ov_miss["progress"] == 100
+        assert ov_miss["current_stage"] == "completed"
+        assert ov_miss["summary"] == {"total": 2, "processed": 0, "skipped_missing": 2, "failed": 0}
+        assert "缺少压缩包或 *.1.fasta" in ov_miss["last_message"]
+        assert any("[Sangon16S]" in rec.message for rec in caplog.records)
+
+        # 2. 混合订单运行时：结束进度应达到 100%，而不是卡在 66%
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            r_mix = client.post(
+                "/other_tools/sangon_16s/run_pipeline",
+                json={"sangon_root": str(sangon_dir), "order_names": []},
+            )
+            assert r_mix.status_code == 200
+            for _ in range(40):
+                if not ot_routes._sangon_pipeline_state["running"]:
+                    break
+                time.sleep(0.05)
+
+        ov_mix = client.get("/other_tools/sangon_16s/overview").json()["runtime"]
+        assert ov_mix["progress"] == 100
+        assert ov_mix["summary"] == {"total": 3, "processed": 1, "skipped_missing": 2, "failed": 0}
+        assert executed_tasks == ["20261102_2140610002_16s"]
+        assert exported_calls == ["20261102_2140610002_16s"]
+        assert any("[Sangon16S] (3/3)" in rec.message for rec in caplog.records)
+
+        # 3. BLAST 失败时不调用 CSV 导出、记录 failed=1 且阶段置为 failed
+        exported_calls.clear()
+        fake_status_mode["status"] = ot_routes.TaskStatus.FAILED.value
+        r_fail = client.post(
+            "/other_tools/sangon_16s/run_pipeline",
+            json={"sangon_root": str(sangon_dir), "order_names": [d_ok.name], "force_reblast": True},
+        )
+        assert r_fail.status_code == 200
+        for _ in range(40):
+            if not ot_routes._sangon_pipeline_state["running"]:
+                break
+            time.sleep(0.05)
+
+        ov_fail = client.get("/other_tools/sangon_16s/overview").json()["runtime"]
+        assert ov_fail["progress"] == 100
+        assert ov_fail["current_stage"] == "failed"
+        assert ov_fail["summary"]["failed"] == 1
+        assert exported_calls == []
+
+
+def test_sangon_credentials_storage_and_settings(monkeypatch):
+    """验证生工官网账号与密钥分离存储（JSON 与 .sangon_auth 分离、仅回传掩码、清空保护）"""
+    import src.backend.services.other_tools.sangon_settings as ss_mod
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        cfg_file = root / "sangon_16s_config.json"
+        monkeypatch.setattr(ss_mod, "PROJECT_ROOT", root)
+        monkeypatch.setattr(ss_mod, "SANGON_CONFIG_PATH", cfg_file)
+
+        st0 = ss_mod.get_sangon_auth_status()
+        assert st0["account"] == ""
+        assert st0["password_ready"] is False
+        assert st0["password_masked"] == ""
+
+        saved = ss_mod.save_sangon_credentials(
+            account="15012345678",
+            password="SecretPass999",
+            auto_confirm_fee=False,
+        )
+        assert saved["account"] == "15012345678"
+        assert saved["password_ready"] is True
+        assert "SecretPass999" not in saved["password_masked"]
+        assert saved["password_masked"].startswith("Se") and saved["password_masked"].endswith("99")
+        assert saved["auto_confirm_fee"] is False
+
+        # 确认明文密码绝对不落地在 json 文件中
+        raw_json = cfg_file.read_text(encoding="utf-8")
+        assert "SecretPass999" not in raw_json
+        assert (root / ".sangon_auth").is_file()
+        assert ss_mod.resolve_sangon_credentials() == ("15012345678", "SecretPass999")
+
+        # 传 password=None 仅修改账号与开关，保留既有密钥文件
+        st_keep = ss_mod.save_sangon_credentials(account="15099990000", password=None, auto_confirm_fee=True)
+        assert st_keep["account"] == "15099990000"
+        assert st_keep["password_ready"] is True
+        assert st_keep["auto_confirm_fee"] is True
+        assert ss_mod.resolve_sangon_credentials() == ("15099990000", "SecretPass999")
+
+        # 传空字符串清除密钥文件
+        st_clear = ss_mod.save_sangon_credentials(account="15099990000", password="")
+        assert st_clear["password_ready"] is False
+        assert not (root / ".sangon_auth").exists()
+
+
+def test_sangon_downloader_claim_first_atomic_zip_and_routes(monkeypatch):
+    """验证自动下载器：优先认领 Downloads 既有包、单会话批量下载原子校验、费用弹窗开关、验证码中止与 API 联动"""
+    import io
+    import time
+    import zipfile
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.backend.routes.other_tools as ot_routes
+    import src.backend.services.other_tools.sangon_downloader as sd_mod
+    import src.backend.services.other_tools.sangon_settings as ss_mod
+    from src.backend.services.other_tools.sangon_mail_scanner import SangonMailIndex, create_sangon_subdirs
+
+    def _build_zip_bytes(fname: str = "s1_-1.1.fasta") -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(fname, ">s1\nATGCGTACGT\n")
+        return buf.getvalue()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sangon_dir = root / "sangon"
+        dl_dir = root / "downloads"
+        sangon_dir.mkdir()
+        dl_dir.mkdir()
+
+        monkeypatch.setattr(ss_mod, "PROJECT_ROOT", root)
+        monkeypatch.setattr(ss_mod, "SANGON_CONFIG_PATH", root / "sangon_16s_config.json")
+
+        # 准备 4 个订单：
+        # 1) 2140610001：浏览器 Downloads 已存在，优先就地认领无需走网页下载
+        # 2) 2140610002：待网页下载（直出包）
+        # 3) 2140610003：待网页下载（会弹 KBSeq 费用确认）
+        # 4) 2140610004：被全局忽略，应自动跳过
+        d1 = sangon_dir / "20261101_2140610001"
+        d2 = sangon_dir / "20261102_2140610002"
+        d3 = sangon_dir / "20261103_2140610003"
+        d4 = sangon_dir / "20261104_2140610004"
+        for d in (d1, d2, d3, d4):
+            create_sangon_subdirs(d)
+
+        (dl_dir / "测试_2140610001_测序结果.zip").write_bytes(_build_zip_bytes("c1_-1.1.fasta"))
+
+        idx = SangonMailIndex(sangon_dir)
+        for ono, d, cx in (
+            ("2140610001", d1, "CX101"),
+            ("2140610002", d2, "CX102"),
+            ("2140610003", d3, "CX103"),
+            ("2140610004", d4, "CX104"),
+        ):
+            idx.record(
+                order_no=ono,
+                message_id=f"<{ono}@sangon>",
+                dir_name=d.name,
+                subject=f"测序通知 {ono}",
+                date_text="Wed, 11 Nov 2026 10:00:00 +0800",
+                cx_order_id=cx,
+                download_url=f"http://store.sangon.com/cxOrderDetail?cxOrderDetail.cxOrderID={cx}",
+                created=True,
+            )
+        idx.save()
+
+        ss_mod.save_sangon_settings({
+            "sangon_root": str(sangon_dir),
+            "downloads_dir": str(dl_dir),
+            "ignored_orders": {"2140610004": {"order_no": "2140610004", "reason": "test"}},
+        })
+
+        app = FastAPI()
+        app.include_router(ot_routes.router)
+        client = TestClient(app)
+
+        # 未配置生工账号密码时，overview 应透出未就绪状态，直接触发纯网页单子下载返回 400
+        ov0 = client.get("/other_tools/sangon_16s/overview").json()
+        assert ov0["sangon_auth"]["password_ready"] is False
+        r_no_auth = client.post(
+            "/other_tools/sangon_16s/download_orders",
+            json={"order_names": [d2.name]},
+        )
+        assert r_no_auth.status_code == 400
+
+        # 通过路由配置生工账号密码
+        r_auth = client.post(
+            "/other_tools/sangon_16s/auth",
+            json={"account": "15000001111", "password": "TestPwd!123", "auto_confirm_fee": True},
+        )
+        assert r_auth.status_code == 200
+        assert r_auth.json()["sangon_auth"]["password_ready"] is True
+        assert r_auth.json()["sangon_auth"]["account"] == "15000001111"
+
+        visited_orders: list[str] = []
+
+        class FakeSession:
+            def __init__(self, account, password, headless=True, timeout_ms=90000):
+                assert account == "15000001111"
+                assert password == "TestPwd!123"
+                self.mode = "normal"
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def download_order(self, order_meta, *, auto_confirm_fee=True, log_cb=None):
+                ono = order_meta["order_no"]
+                visited_orders.append(ono)
+                dest_dir = Path(order_meta["order_path"]) / "原始压缩包"
+                if ono == "2140610003" and not auto_confirm_fee:
+                    return {
+                        "order_no": ono,
+                        "dir_name": order_meta["dir_name"],
+                        "status": "fee_confirm_required",
+                        "message": "检测到 KBSeq 费用确认弹窗，已按设置暂停下载",
+                    }
+                zip_name = f"测试_{ono}_测序结果.zip"
+                dest_zip = dest_dir / zip_name
+                dest_zip.write_bytes(_build_zip_bytes(f"{ono}_-1.1.fasta"))
+                return {
+                    "order_no": ono,
+                    "dir_name": order_meta["dir_name"],
+                    "status": "downloaded",
+                    "zip_name": zip_name,
+                    "dest_path": str(dest_zip),
+                    "size_bytes": dest_zip.stat().st_size,
+                    "fee_confirmed": (ono == "2140610003"),
+                    "message": "下载完成",
+                }
+
+        # 1. 验证 auto_confirm_fee=False 时费用确认单拦截、正常单与本地认领正常
+        res1 = sd_mod.download_sangon_orders(
+            sangon_dir,
+            dl_dir,
+            account="15000001111",
+            password="TestPwd!123",
+            auto_confirm_fee=False,
+            session_factory=FakeSession,
+        )
+        assert res1["claimed_count"] == 1
+        assert res1["downloaded_count"] == 1
+        assert res1["skipped_count"] >= 1
+        assert "2140610001" not in visited_orders  # Downloads 认领跳过网页
+        assert "2140610004" not in visited_orders  # 全局忽略跳过网页
+        assert (d1 / "原始压缩包" / "测试_2140610001_测序结果.zip").is_file()
+        assert (d2 / "原始压缩包" / "测试_2140610002_测序结果.zip").is_file()
+        assert not any((d3 / "原始压缩包").glob("*.zip"))
+
+        # 2. 通过路由触发剩余待下载单（2140610003），开启 auto_confirm_fee=True + auto_run_blast=True 串联全流程
+        executed_blast: list[str] = []
+
+        class FakeBlastMgr:
+            def create_task(self, params):
+                executed_blast.append(params["task_name"])
+                return params["task_name"]
+
+            def get_task_status(self, tid):
+                return {"status": ot_routes.TaskStatus.COMPLETED.value, "progress": 100}
+
+        monkeypatch.setattr(ot_routes, "get_blast_manager", lambda: FakeBlastMgr())
+        monkeypatch.setattr(
+            ot_routes,
+            "_export_sangon_order_csv",
+            lambda tid, out_dir: (
+                (out_dir / "16S鉴定结果.csv").write_text("col1,col2\n", encoding="utf-8-sig"),
+                {"total": 1, "with_hits": 1, "no_hits": 0},
+            )[1],
+        )
+        monkeypatch.setattr(sd_mod, "SangonBrowserSession", FakeSession)
+        ot_routes._sangon_pipeline_state["running"] = False
+
+        r_dl = client.post(
+            "/other_tools/sangon_16s/download_orders",
+            json={
+                "order_names": [d3.name],
+                "auto_confirm_fee": True,
+                "auto_run_blast": True,
+            },
+        )
+        assert r_dl.status_code == 200
+        for _ in range(60):
+            if not ot_routes._sangon_pipeline_state["running"]:
+                break
+            time.sleep(0.05)
+
+        ov_done = client.get("/other_tools/sangon_16s/overview").json()["runtime"]
+        assert ov_done["running"] is False
+        assert ov_done["progress"] == 100
+        assert (d3 / "原始压缩包" / "测试_2140610003_测序结果.zip").is_file()
+        assert f"{d3.name}_16s" in executed_blast
+
+        # 3. 验证遇到人机验证弹窗会立刻报错终止，绝不自动绕过
+        class CaptchaSession(FakeSession):
+            def download_order(self, order_meta, *, auto_confirm_fee=True, log_cb=None):
+                raise sd_mod.SangonCaptchaError("检测到生工安全验证弹窗，请手动下载")
+
+        d5 = sangon_dir / "20261105_2140610005"
+        create_sangon_subdirs(d5)
+        idx.record(
+            order_no="2140610005",
+            message_id="<2140610005@sangon>",
+            dir_name=d5.name,
+            subject="测序通知 2140610005",
+            date_text="Thu, 12 Nov 2026 09:00:00 +0800",
+            cx_order_id="CX105",
+            download_url="http://store.sangon.com/cxOrderDetail?cxOrderDetail.cxOrderID=CX105",
+            created=True,
+        )
+        idx.save()
+        res_cap = sd_mod.download_sangon_orders(
+            sangon_dir,
+            dl_dir,
+            order_names=[d5.name],
+            account="15000001111",
+            password="TestPwd!123",
+            session_factory=CaptchaSession,
+        )
+        assert res_cap["captcha_blocked"] is True
+        assert res_cap["failed_count"] == 1
+
+
 def test_no_emoji_and_utf8_in_new_files():
     """验证新增与修改的前后端代码文件全部采用 UTF-8 且不含任何 Emoji 字符"""
     repo_root = Path(__file__).resolve().parents[1]
     target_files = [
         repo_root / "scripts" / "build_annotation_report.py",
+        repo_root / "src" / "blast" / "engine.py",
         repo_root / "src" / "blast" / "local_blast.py",
         repo_root / "src" / "workbench" / "models" / "tool_config.py",
         repo_root / "src" / "mail_download" / "auto_pipeline.py",
@@ -1307,6 +1982,8 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "backend" / "services" / "other_tools" / "dir_migrator.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "history_cleaner.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "mail_inbox_browser.py",
+        repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_downloader.py",
+        repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_ignore_rules.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_mail_scanner.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_order_annotator.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_settings.py",
@@ -1318,6 +1995,8 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "CleanupDialog.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PaginationBar.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PopoverMenu.vue",
+        repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "SangonAccountModal.vue",
+        repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "SangonIgnoreModal.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "SangonMailRecords.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "sangonTypes.ts",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "modules" / "MailAutoPipelineModule.vue",

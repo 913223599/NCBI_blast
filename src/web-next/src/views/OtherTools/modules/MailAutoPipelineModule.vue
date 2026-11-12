@@ -51,6 +51,9 @@ interface BatchItem {
   task_ids?: string[]
   last_error?: string
   pending?: boolean
+  ignored?: boolean
+  ignore_reason?: string
+  ignored_at?: string
 }
 
 interface OutboundPackage {
@@ -197,6 +200,7 @@ const runOptions = ref({
 
 const batches = ref<BatchItem[]>([])
 const pendingBatchesCount = ref(0)
+const ignoredBatchesCount = ref(0)
 const initializedOverview = ref(false)
 const trackingRun = ref(false)
 const outboundPackages = ref<OutboundPackage[]>([])
@@ -305,6 +309,7 @@ async function loadOverview(): Promise<void> {
     runtime.value = nextRuntime
     batches.value = data.batches || []
     pendingBatchesCount.value = data.pending_batches_count || 0
+    ignoredBatchesCount.value = data.ignored_batches_count || 0
     outboundPackages.value = data.outbound_packages || []
     docxReports.value = data.docx_reports || []
     processedItems.value = data.processed_items || []
@@ -572,6 +577,28 @@ function deleteOne(target: string, name: string, label: string): void {
   runCleanup([target], null, [name])
 }
 
+async function handleToggleBatchIgnore(batch: BatchItem): Promise<void> {
+  const willIgnore = !batch.ignored && batch.pipeline_status !== 'ignored'
+  busy.value = true
+  try {
+    await postJson(`${API}/batch_ignore`, {
+      batch_name: batch.batch_name,
+      ignore: willIgnore,
+      reason: willIgnore ? '从收件批次列表手动跳过' : ''
+    })
+    setInfo(
+      willIgnore
+        ? `已将批次 ${batch.batch_name} 标记为跳过（运行流水线将自动略过，原序列附件保留）`
+        : `已恢复批次 ${batch.batch_name} 原始状态`
+    )
+    await loadOverview()
+  } catch (err) {
+    setError(err)
+  } finally {
+    busy.value = false
+  }
+}
+
 function openTestSendModal(): void {
   testSendForm.value = {
     to: configForm.value.account || configForm.value.smtp_account || '',
@@ -694,7 +721,11 @@ onUnmounted(() => {
       <div class="metric-card">
         <div class="metric-label">收件批次</div>
         <div class="metric-val">{{ batches.length }}</div>
-        <div class="metric-sub">{{ pendingBatchesCount > 0 ? `待注释处理: ${pendingBatchesCount}` : '无待处理批次' }}</div>
+        <div class="metric-sub">
+          <template v-if="pendingBatchesCount > 0">待注释处理: {{ pendingBatchesCount }}</template>
+          <template v-else>无待处理批次</template>
+          <template v-if="ignoredBatchesCount > 0"> · 已跳过 {{ ignoredBatchesCount }}</template>
+        </div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Word 报告 / 回传包</div>
@@ -770,7 +801,7 @@ onUnmounted(() => {
 
     <div class="sub-tabs-bar">
       <button :class="['sub-tab-btn', { active: activeSubTab === 'batches' }]" @click="activeSubTab = 'batches'">
-        收件批次 ({{ batches.length }}<template v-if="pendingBatchesCount > 0"> · 待处理 {{ pendingBatchesCount }}</template>)
+        收件批次 ({{ batches.length }}<template v-if="pendingBatchesCount > 0"> · 待处理 {{ pendingBatchesCount }}</template><template v-if="ignoredBatchesCount > 0"> · 已跳过 {{ ignoredBatchesCount }}</template>)
       </button>
       <button :class="['sub-tab-btn', { active: activeSubTab === 'inbox' }]" @click="openInboxTab">
         收件箱邮件{{ inboxLoaded ? ` (${inboxStats.total})` : '' }}
@@ -801,12 +832,16 @@ onUnmounted(() => {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="b in pagedBatches" :key="b.batch_name">
+          <tr
+            v-for="b in pagedBatches"
+            :key="b.batch_name"
+            :class="{ 'ignored-row': b.ignored || b.pipeline_status === 'ignored' }"
+          >
             <td class="mono-cell">{{ b.batch_name }}</td>
             <td>
               <span
                 :class="['batch-status-pill', b.pipeline_status || 'downloaded']"
-                :title="b.last_error || (b.task_ids && b.task_ids.length ? b.task_ids.join(', ') : '')"
+                :title="(b.ignored || b.pipeline_status === 'ignored') ? (b.ignore_reason ? `跳过原因: ${b.ignore_reason}${b.ignored_at ? ' (' + b.ignored_at + ')' : ''}` : '已设为忽略跳过，运行流水线将自动略过') : (b.last_error || (b.task_ids && b.task_ids.length ? b.task_ids.join(', ') : ''))"
               >
                 {{ b.pipeline_status_label || '待注释处理' }}
               </span>
@@ -820,7 +855,20 @@ onUnmounted(() => {
               </span>
             </td>
             <td class="actions-cell">
-              <button class="btn-mini primary" @click="openBatchRunModal(b)" :disabled="runtime.running">重跑</button>
+              <button
+                class="btn-mini primary"
+                @click="openBatchRunModal(b)"
+                :disabled="runtime.running || b.pipeline_status === 'running' || Boolean(b.ignored || b.pipeline_status === 'ignored')"
+              >
+                重跑
+              </button>
+              <button
+                class="btn-mini"
+                @click="handleToggleBatchIgnore(b)"
+                :disabled="busy || runtime.running || b.pipeline_status === 'running'"
+              >
+                {{ (b.ignored || b.pipeline_status === 'ignored') ? '恢复' : '跳过' }}
+              </button>
               <button class="btn-mini" @click="openLocalPath(b.batch_path)">打开</button>
               <button class="btn-mini danger" @click="deleteOne('batches', b.batch_name, b.batch_name)" :disabled="runtime.running">删除</button>
             </td>
@@ -1873,6 +1921,8 @@ onUnmounted(() => {
 .batch-status-pill.running { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
 .batch-status-pill.completed { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
 .batch-status-pill.failed { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.batch-status-pill.ignored { background: #f1f5f9; color: #64748b; border: 1px dashed #94a3b8; }
 .batch-status-pill.empty { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
+.ignored-row td { opacity: 0.72; }
 .inline-action-btn { margin-left: 10px; }
 </style>
