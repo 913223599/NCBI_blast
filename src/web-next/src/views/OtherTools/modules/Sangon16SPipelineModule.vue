@@ -15,6 +15,8 @@ import PopoverMenu from '../components/PopoverMenu.vue'
 import SangonMailRecords from '../components/SangonMailRecords.vue'
 import SangonIgnoreModal from '../components/SangonIgnoreModal.vue'
 import SangonAccountModal from '../components/SangonAccountModal.vue'
+import MailComposeModal from '../components/MailComposeModal.vue'
+import type { MailDraftPayload, MailComposeSubmitPayload } from '../components/MailComposeModal.vue'
 import type { CleanupOption } from '../components/CleanupDialog.vue'
 import type {
   SangonAuthMeta,
@@ -42,6 +44,8 @@ const ignoredOrdersMap = ref<Record<string, IgnoredOrderRule>>({})
 const ignoreKeywords = ref<string[]>([])
 const showIgnoreModal = ref(false)
 const mailAccount = ref('')
+const mailDisplayName = ref('元昇生物注释服务')
+const mailReplyTo = ref('')
 
 const orderFilter = ref<OrderFilterKey>('all')
 const orderPage = ref(1)
@@ -108,12 +112,17 @@ const autoBlastAfterDownload = ref(true)
 const pendingDownloadTask = ref<{ orderNames: string[]; autoRunBlast: boolean } | null>(null)
 
 const showSendModal = ref(false)
+const loadingSendDraft = ref(false)
 const sendingMail = ref(false)
-const sendForm = ref({
-  orderDirName: '',
+const sendOrderTarget = ref<SangonOrderItem | null>(null)
+const sendDraft = ref<MailDraftPayload>({
   to: '',
+  replyTo: '',
+  fromName: '元昇生物注释服务',
+  cc: '',
   subject: '',
-  extraNote: ''
+  body: '',
+  attachmentName: ''
 })
 
 const runtime = ref<SangonRuntimeState>({
@@ -375,6 +384,10 @@ async function loadOverview(): Promise<void> {
       try {
         const mailMeta = await getJson(`${MAIL_API}/overview`)
         mailAccount.value = mailMeta.config?.account || mailMeta.config?.smtp_account || ''
+        if (mailMeta.config?.smtp_display_name) {
+          mailDisplayName.value = mailMeta.config.smtp_display_name
+        }
+        mailReplyTo.value = mailMeta.config?.reply_to || ''
       } catch {
         // ignore
       }
@@ -581,27 +594,65 @@ async function handleSaveIgnoreKeywords(keywords: string[]): Promise<void> {
   }
 }
 
-function openSendResultModal(order: SangonOrderItem): void {
-  sendForm.value = {
-    orderDirName: order.dir_name,
-    to: mailAccount.value || '',
-    subject: `生工 16S 测序鉴定结果 - ${order.dir_name}（共 ${order.total_samples} 样本）`,
-    extraNote: ''
+async function loadSangonSendDraft(order: SangonOrderItem): Promise<void> {
+  loadingSendDraft.value = true
+  try {
+    const data = await postJson(`${API}/send_preview`, {
+      order_dir_name: order.dir_name,
+      sangon_root: sangonRoot.value || null
+    })
+    if (data.from_name) mailDisplayName.value = data.from_name
+    if (data.reply_to !== undefined) mailReplyTo.value = data.reply_to || ''
+    sendDraft.value = {
+      to: data.to || mailAccount.value || '',
+      replyTo: data.reply_to || mailReplyTo.value || '',
+      fromName: data.from_name || mailDisplayName.value || '元昇生物注释服务',
+      cc: data.cc || '',
+      subject: data.subject || `生工 16S 测序鉴定结果 - ${order.dir_name}（共 ${order.total_samples} 样本）`,
+      body: data.body || '',
+      attachmentName: data.attachment_name || `16S鉴定结果_${order.dir_name}.zip`
+    }
+  } catch (err) {
+    setError(err)
+  } finally {
+    loadingSendDraft.value = false
   }
-  showSendModal.value = true
 }
 
-async function confirmSendResultMail(toSelf = false): Promise<void> {
-  if (!sendForm.value.orderDirName) return
+async function openSendResultModal(order: SangonOrderItem): Promise<void> {
+  sendOrderTarget.value = order
+  sendDraft.value = {
+    to: mailAccount.value || '',
+    replyTo: mailReplyTo.value || '',
+    fromName: mailDisplayName.value || '元昇生物注释服务',
+    cc: '',
+    subject: `生工 16S 测序鉴定结果 - ${order.dir_name}（共 ${order.total_samples} 样本）`,
+    body: '',
+    attachmentName: `16S鉴定结果_${order.dir_name}.zip`
+  }
+  showSendModal.value = true
+  await loadSangonSendDraft(order)
+}
+
+async function resetSangonSendDraft(): Promise<void> {
+  if (!sendOrderTarget.value) return
+  await loadSangonSendDraft(sendOrderTarget.value)
+}
+
+async function confirmSendResultMail(payload: MailComposeSubmitPayload): Promise<void> {
+  if (!sendOrderTarget.value) return
   sendingMail.value = true
   try {
-    const targetTo = toSelf ? 'self' : (sendForm.value.to.trim() || 'self')
+    const targetTo = payload.toSelf ? 'self' : (payload.to.trim() || 'self')
     const data = await postJson(`${API}/send_result`, {
-      order_dir_name: sendForm.value.orderDirName,
+      order_dir_name: sendOrderTarget.value.dir_name,
       sangon_root: sangonRoot.value || null,
       to: targetTo,
-      subject: sendForm.value.subject.trim() || null,
-      extra_note: sendForm.value.extraNote.trim() || null
+      cc: payload.cc.trim() || null,
+      from_name: payload.fromName.trim() || null,
+      subject: payload.subject.trim() || null,
+      body: payload.body.trim() ? payload.body : null,
+      attachment_name: payload.attachmentName.trim() || null
     })
     showSendModal.value = false
     setInfo(
@@ -1567,38 +1618,21 @@ onUnmounted(() => {
     </div>
 
     <!-- 发送 16S 结果邮件弹窗 -->
-    <div v-if="showSendModal" class="modal-backdrop" @click.self="showSendModal = false">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3>发送 16S 鉴定结果邮件</h3>
-          <button class="close-btn" @click="showSendModal = false">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="auth-row">目标订单: {{ sendForm.orderDirName }}</div>
-          <label class="modal-field">
-            <span>收件人邮箱（留空默认发送给自己 {{ mailAccount || '当前配置账号' }}）</span>
-            <input v-model="sendForm.to" type="text" :placeholder="mailAccount || '例如 913223599@qq.com'" class="key-input" />
-          </label>
-          <label class="modal-field">
-            <span>邮件主题</span>
-            <input v-model="sendForm.subject" type="text" class="key-input" />
-          </label>
-          <label class="modal-field">
-            <span>附加说明（可选）</span>
-            <input v-model="sendForm.extraNote" type="text" placeholder="例如：自测验证 / 补充说明" class="key-input" />
-          </label>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-outline" @click="showSendModal = false">取消</button>
-          <button class="btn-secondary" :disabled="sendingMail" @click="confirmSendResultMail(true)">
-            {{ sendingMail ? '发送中...' : '发给自己测试' }}
-          </button>
-          <button class="btn-primary" :disabled="sendingMail" @click="confirmSendResultMail(false)">
-            {{ sendingMail ? '发送中...' : '发送邮件' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <MailComposeModal
+      :visible="showSendModal"
+      title="发送 16S 鉴定结果邮件"
+      :context-title="`目标订单：${sendOrderTarget?.dir_name || ''}（样本 ${sendOrderTarget?.total_samples || 0}，命中 ${sendOrderTarget?.with_hits || 0}，未命中 ${sendOrderTarget?.no_hits || 0}）`"
+      :attach-summary="`压缩包内含：16S鉴定结果_${sendOrderTarget?.order_no || sendOrderTarget?.dir_name || ''}.csv 与 结果说明.txt（与上方正文内容同步）`"
+      :draft="sendDraft"
+      :loading-draft="loadingSendDraft"
+      :sending="sendingMail"
+      :self-address="mailAccount"
+      :default-display-name="mailDisplayName"
+      safety-note="提示：所有字段（发信标题、主题、正文、抄送、附件文件名）均可自由编辑；点「发给自己测试」仅发送至本人配置邮箱。"
+      @close="showSendModal = false"
+      @reset-draft="resetSangonSendDraft"
+      @send="confirmSendResultMail"
+    />
 
     <CleanupDialog
       :visible="showCleanup"
@@ -2180,13 +2214,6 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
-}
-.modal-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: #475569;
 }
 
 .hit-ok { color: #059669; font-weight: 600; }

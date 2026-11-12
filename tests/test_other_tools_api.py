@@ -1962,6 +1962,242 @@ def test_sangon_downloader_claim_first_atomic_zip_and_routes(monkeypatch):
         assert res_cap["failed_count"] == 1
 
 
+def test_mail_compose_preview_and_custom_send_fields(monkeypatch):
+    """验证发信草稿预览与发送接口完整支持修改发信标题、主题、正文、抄送及附件文件名"""
+    import zipfile
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import src.backend.routes.other_tools as ot_routes
+
+    app = FastAPI()
+    app.include_router(ot_routes.router)
+    client = TestClient(app)
+
+    sent_records: list[dict] = []
+
+    class FakeSenderCustom:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def send(
+            self,
+            attachment,
+            to=None,
+            subject=None,
+            body=None,
+            cc=None,
+            from_name=None,
+            attachment_name=None,
+        ):
+            attach_path = Path(attachment)
+            final_attach_name = attachment_name or attach_path.name
+            with zipfile.ZipFile(attach_path, "r") as zf:
+                inner_names = zf.namelist()
+                note_txt = zf.read("结果说明.txt").decode("utf-8") if "结果说明.txt" in inner_names else ""
+            sent_records.append({
+                "to": to,
+                "cc": list(cc or []),
+                "from_name": from_name or self.cfg.smtp_display_name,
+                "subject": subject,
+                "body": body,
+                "attach_disk_name": attach_path.name,
+                "attach_name": final_attach_name,
+                "inner_names": inner_names,
+                "note_txt": note_txt,
+            })
+            return type(
+                "SendResult",
+                (),
+                {
+                    "ok": True,
+                    "to": to,
+                    "subject": subject,
+                    "from_name": from_name or self.cfg.smtp_display_name,
+                    "cc": ", ".join(cc or []),
+                    "attachment": str(attach_path),
+                    "attachment_name": final_attach_name,
+                    "stage": "sent",
+                    "attachment_size": attach_path.stat().st_size,
+                    "error": None,
+                },
+            )()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        sangon_dir = root / "sangon"
+        send_dir = root / "sends"
+        order_dir = sangon_dir / "20261112_2140619872"
+        (order_dir / "BLAST结果").mkdir(parents=True)
+        send_dir.mkdir()
+
+        csv_content = (
+            "查询序列,鉴定物种(中文翻译),鉴定概率分布(中文翻译),原始鉴定物种(拉丁文),原始鉴定概率分布(拉丁文),"
+            "分类/菌株信息,基因/序列库,相似度 (Identity),E值,访问号,详细标题\n"
+            "-1,枯草芽孢杆菌,枯草芽孢杆菌(80%),Bacillus subtilis,Bacillus subtilis(80%),"
+            "Bacillus,16S,99.5%,0.0,NR_027552.1,Bacillus subtilis\n"
+            "-2,未找到匹配项,,No Hits,,-,16S,-,-,-,-\n"
+        )
+        (order_dir / "BLAST结果" / "16S鉴定结果.csv").write_text(csv_content, encoding="utf-8-sig")
+
+        pkg_zip = send_dir / "ANNO_X_20261112_100000.zip"
+        with zipfile.ZipFile(pkg_zip, "w") as zf:
+            zf.writestr("ANNO.gbk", "LOCUS test\n")
+            zf.writestr("ANNO_X_注释报告.docx", b"PK\x03\x04docx")
+        (send_dir / "ANNO_X_20261112_100000.manifest.json").write_text(
+            json.dumps({
+                "task_id": "ANNO_X",
+                "pack_time": "2026-11-12T10:00:00",
+                "zip": pkg_zip.name,
+                "file_count": 2,
+                "files": [{"name": "ANNO.gbk"}, {"name": "ANNO_X_注释报告.docx"}],
+            }, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (send_dir / "ANNO_X_注释报告.docx").write_bytes(b"PK\x03\x04docx")
+
+        # 预览阶段即使没有设置 SMTP 授权码也应正常返回默认模板
+        cfg_no_auth = MailConfig(
+            account="self@qq.com",
+            smtp_account="self@qq.com",
+            smtp_display_name="元昇生物注释服务",
+            reply_to="client@example.com",
+            auth_code_env="MISSING_TEST_SMTP_ENV_999",
+            smtp_auth_code_env="MISSING_TEST_SMTP_ENV_999",
+            send_dir=str(send_dir),
+        )
+        monkeypatch.setattr(ot_routes, "load_config", lambda *a, **kw: cfg_no_auth)
+
+        r_prev_16s = client.post(
+            "/other_tools/sangon_16s/send_preview",
+            json={"order_dir_name": order_dir.name, "sangon_root": str(sangon_dir)},
+        )
+        assert r_prev_16s.status_code == 200
+        d16 = r_prev_16s.json()
+        assert d16["from_name"] == "元昇生物注释服务"
+        assert d16["to"] == "self@qq.com"
+        assert "20261112_2140619872" in d16["subject"]
+        assert "枯草芽孢杆菌" in d16["body"]
+        assert d16["attachment_name"] == "16S鉴定结果_20261112_2140619872.zip"
+        assert d16["total_samples"] == 2
+        assert d16["with_hits"] == 1
+        assert d16["no_hits"] == 1
+
+        r_prev_pkg = client.post(
+            "/other_tools/mail_pipeline/send_package_preview",
+            json={"zip_name": pkg_zip.name},
+        )
+        assert r_prev_pkg.status_code == 200
+        dpkg = r_prev_pkg.json()
+        assert dpkg["from_name"] == "元昇生物注释服务"
+        assert "ANNO_X" in dpkg["subject"]
+        assert "ANNO_X_注释报告.docx" in dpkg["body"]
+        assert dpkg["attachment_name"] == pkg_zip.name
+
+        r_prev_ts = client.post(
+            "/other_tools/mail_pipeline/test_send_preview",
+            json={"note": "自测草稿", "attach_latest_report": True},
+        )
+        assert r_prev_ts.status_code == 200
+        dts = r_prev_ts.json()
+        assert dts["from_name"] == "元昇生物注释服务"
+        assert "自测草稿" in dts["body"]
+        assert "ANNO_X_注释报告.docx" in dts["attached_files"]
+
+        # 实际发送阶段：注入授权码与 FakeSenderCustom，检验全部可编辑字段及安全边界
+        cfg_with_auth = MailConfig(
+            account="self@qq.com",
+            smtp_account="self@qq.com",
+            smtp_display_name="元昇生物注释服务",
+            reply_to="client@example.com",
+            auth_code_env="TEST_COMPOSE_SMTP_AUTH",
+            smtp_auth_code_env="TEST_COMPOSE_SMTP_AUTH",
+            send_dir=str(send_dir),
+        )
+        monkeypatch.setenv("TEST_COMPOSE_SMTP_AUTH", "dummy-smtp-auth")
+        monkeypatch.setattr(ot_routes, "load_config", lambda *a, **kw: cfg_with_auth)
+        monkeypatch.setattr(ot_routes, "MailSender", FakeSenderCustom)
+
+        # 非法自定义附件名返回 400
+        r_bad_att = client.post(
+            "/other_tools/sangon_16s/send_result",
+            json={
+                "order_dir_name": order_dir.name,
+                "sangon_root": str(sangon_dir),
+                "attachment_name": "../bad.zip",
+            },
+        )
+        assert r_bad_att.status_code == 400
+
+        # 生工 16S 自定义全套字段发送（不填 .zip 后缀自动补全）
+        r_send_16s = client.post(
+            "/other_tools/sangon_16s/send_result",
+            json={
+                "order_dir_name": order_dir.name,
+                "sangon_root": str(sangon_dir),
+                "to": "custom@client.com",
+                "cc": "boss@lab.com; helper@lab.com",
+                "from_name": "实验室测序复核组",
+                "subject": "自定义主题：16S 鉴定完成",
+                "body": "定制正文第一行\n请查收本次鉴定附件。",
+                "attachment_name": "客户版_16S鉴定结果_2140619872",
+            },
+        )
+        assert r_send_16s.status_code == 200
+        res16 = r_send_16s.json()
+        assert res16["attachment"] == "客户版_16S鉴定结果_2140619872.zip"
+        assert res16["from_name"] == "实验室测序复核组"
+        assert sent_records[-1]["to"] == "custom@client.com"
+        assert sent_records[-1]["cc"] == ["boss@lab.com", "helper@lab.com"]
+        assert sent_records[-1]["from_name"] == "实验室测序复核组"
+        assert sent_records[-1]["subject"] == "自定义主题：16S 鉴定完成"
+        assert sent_records[-1]["body"] == "定制正文第一行\n请查收本次鉴定附件。"
+        assert sent_records[-1]["attach_name"] == "客户版_16S鉴定结果_2140619872.zip"
+        assert sent_records[-1]["note_txt"] == "定制正文第一行\n请查收本次鉴定附件。"
+
+        # 回传压缩包自定义发送（磁盘原文件名不受影响）
+        r_send_pkg = client.post(
+            "/other_tools/mail_pipeline/send_package",
+            json={
+                "zip_name": pkg_zip.name,
+                "to": "custom@client.com",
+                "cc": "pi@lab.com",
+                "from_name": "基因组注释台",
+                "subject": "定制主题：噬菌体注释包",
+                "body": "正文已按要求修改。\n祝好！",
+                "attachment_name": "注释回传包_最终版.zip",
+            },
+        )
+        assert r_send_pkg.status_code == 200
+        assert pkg_zip.exists()
+        assert r_send_pkg.json()["attachment"] == "注释回传包_最终版.zip"
+        assert sent_records[-1]["from_name"] == "基因组注释台"
+        assert sent_records[-1]["cc"] == ["pi@lab.com"]
+        assert sent_records[-1]["body"] == "正文已按要求修改。\n祝好！"
+        assert sent_records[-1]["attach_name"] == "注释回传包_最终版.zip"
+
+        # 测试发信自定义字段
+        r_send_ts = client.post(
+            "/other_tools/mail_pipeline/test_send",
+            json={
+                "to": "self",
+                "cc": "qa@lab.com",
+                "from_name": "发信自检专用标题",
+                "subject": "自定义测试主题",
+                "body": "自定义测试正文内容",
+                "attachment_name": "自检包_定制.zip",
+                "attach_latest_report": True,
+            },
+        )
+        assert r_send_ts.status_code == 200
+        assert sent_records[-1]["to"] == "self@qq.com"
+        assert sent_records[-1]["cc"] == ["qa@lab.com"]
+        assert sent_records[-1]["from_name"] == "发信自检专用标题"
+        assert sent_records[-1]["subject"] == "自定义测试主题"
+        assert sent_records[-1]["body"] == "自定义测试正文内容"
+        assert sent_records[-1]["attach_name"] == "自检包_定制.zip"
+
+
 def test_no_emoji_and_utf8_in_new_files():
     """验证新增与修改的前后端代码文件全部采用 UTF-8 且不含任何 Emoji 字符"""
     repo_root = Path(__file__).resolve().parents[1]
@@ -1981,6 +2217,7 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "backend" / "routes" / "other_tools.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "dir_migrator.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "history_cleaner.py",
+        repo_root / "src" / "backend" / "services" / "other_tools" / "mail_composer.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "mail_inbox_browser.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_downloader.py",
         repo_root / "src" / "backend" / "services" / "other_tools" / "sangon_ignore_rules.py",
@@ -1993,6 +2230,7 @@ def test_no_emoji_and_utf8_in_new_files():
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "api.ts",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PathField.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "CleanupDialog.vue",
+        repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "MailComposeModal.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PaginationBar.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "PopoverMenu.vue",
         repo_root / "src" / "web-next" / "src" / "views" / "OtherTools" / "components" / "SangonAccountModal.vue",

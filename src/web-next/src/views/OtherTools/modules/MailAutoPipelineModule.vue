@@ -7,6 +7,8 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import PathField from '../components/PathField.vue'
 import CleanupDialog from '../components/CleanupDialog.vue'
 import PaginationBar from '../components/PaginationBar.vue'
+import MailComposeModal from '../components/MailComposeModal.vue'
+import type { MailDraftPayload, MailComposeSubmitPayload } from '../components/MailComposeModal.vue'
 import type { CleanupOption } from '../components/CleanupDialog.vue'
 import { getJson, postJson, openLocalPath, describeMigration } from '../api'
 
@@ -102,12 +104,18 @@ const showConfigModal = ref(false)
 const showAuthModal = ref(false)
 const showCleanup = ref(false)
 const showTestSendModal = ref(false)
+const loadingTestSendDraft = ref(false)
 const testingSend = ref(false)
-const testSendForm = ref({
+const testSendAttachReport = ref(false)
+const testSendAttachedFiles = ref<string[]>(['smtp_self_test.txt'])
+const testSendDraft = ref<MailDraftPayload>({
   to: '',
+  replyTo: '',
+  fromName: '元昇生物注释服务',
+  cc: '',
   subject: '',
-  note: '',
-  attachLatestReport: false
+  body: '',
+  attachmentName: ''
 })
 const showBatchRunModal = ref(false)
 const batchRunForm = ref({
@@ -120,15 +128,17 @@ const batchRunForm = ref({
   extraNote: ''
 })
 const showPkgSendModal = ref(false)
+const loadingPkgDraft = ref(false)
 const sendingPkg = ref(false)
-const pkgSendForm = ref({
-  zipName: '',
-  taskId: '',
-  sizeKb: 0,
-  fileCount: 0,
+const pkgSendTarget = ref<OutboundPackage | null>(null)
+const pkgSendDraft = ref<MailDraftPayload>({
   to: '',
+  replyTo: '',
+  fromName: '元昇生物注释服务',
+  cc: '',
   subject: '',
-  extraNote: ''
+  body: '',
+  attachmentName: ''
 })
 const activeSubTab = ref<'batches' | 'inbox' | 'outbound' | 'processed' | 'logs'>('batches')
 
@@ -599,25 +609,66 @@ async function handleToggleBatchIgnore(batch: BatchItem): Promise<void> {
   }
 }
 
-function openTestSendModal(): void {
-  testSendForm.value = {
-    to: configForm.value.account || configForm.value.smtp_account || '',
-    subject: '',
-    note: '桌面工作台自检发信验证',
-    attachLatestReport: docxReports.value.length > 0
+async function loadTestSendDraft(attachReport: boolean): Promise<void> {
+  loadingTestSendDraft.value = true
+  try {
+    const data = await postJson(`${API}/test_send_preview`, {
+      note: '桌面工作台自检发信验证',
+      attach_latest_report: attachReport
+    })
+    testSendAttachedFiles.value = data.attached_files || ['smtp_self_test.txt']
+    testSendDraft.value = {
+      to: data.to || configForm.value.account || configForm.value.smtp_account || '',
+      replyTo: data.reply_to || configForm.value.reply_to || '',
+      fromName: data.from_name || configForm.value.smtp_display_name || '元昇生物注释服务',
+      cc: data.cc || '',
+      subject: data.subject || '',
+      body: data.body || '',
+      attachmentName: data.attachment_name || ''
+    }
+  } catch (err) {
+    setError(err)
+  } finally {
+    loadingTestSendDraft.value = false
   }
-  showTestSendModal.value = true
 }
 
-async function confirmTestSend(toSelf = true): Promise<void> {
+async function openTestSendModal(): Promise<void> {
+  const withReport = docxReports.value.length > 0
+  testSendAttachReport.value = withReport
+  testSendAttachedFiles.value = withReport && docxReports.value[0]
+    ? ['smtp_self_test.txt', docxReports.value[0].name]
+    : ['smtp_self_test.txt']
+  testSendDraft.value = {
+    to: configForm.value.account || configForm.value.smtp_account || '',
+    replyTo: configForm.value.reply_to || '',
+    fromName: configForm.value.smtp_display_name || '元昇生物注释服务',
+    cc: '',
+    subject: '【自检验证】邮件自动回传 SMTP 测试',
+    body: '',
+    attachmentName: 'SMTP_自检验证包.zip'
+  }
+  showTestSendModal.value = true
+  await loadTestSendDraft(withReport)
+}
+
+async function handleToggleTestAttachReport(checked: boolean): Promise<void> {
+  testSendAttachReport.value = checked
+  await loadTestSendDraft(checked)
+}
+
+async function confirmTestSend(payload: MailComposeSubmitPayload): Promise<void> {
   testingSend.value = true
   try {
-    const targetTo = toSelf ? 'self' : (testSendForm.value.to.trim() || 'self')
+    const targetTo = payload.toSelf ? 'self' : (payload.to.trim() || 'self')
     const data = await postJson(`${API}/test_send`, {
       to: targetTo,
-      subject: testSendForm.value.subject.trim() || null,
-      note: testSendForm.value.note.trim() || null,
-      attach_latest_report: testSendForm.value.attachLatestReport
+      cc: payload.cc.trim() || null,
+      from_name: payload.fromName.trim() || null,
+      subject: payload.subject.trim() || null,
+      body: payload.body.trim() ? payload.body : null,
+      attachment_name: payload.attachmentName.trim() || null,
+      attach_latest_report: payload.attachLatestReport
     })
     showTestSendModal.value = false
     setInfo(
@@ -630,29 +681,61 @@ async function confirmTestSend(toSelf = true): Promise<void> {
   }
 }
 
-function openPkgSendModal(pkg: OutboundPackage): void {
-  pkgSendForm.value = {
-    zipName: pkg.zip_name,
-    taskId: pkg.task_id,
-    sizeKb: pkg.size_kb,
-    fileCount: pkg.file_count,
-    to: configForm.value.account || configForm.value.smtp_account || '',
-    subject: '',
-    extraNote: ''
+async function loadPkgSendDraft(pkg: OutboundPackage): Promise<void> {
+  loadingPkgDraft.value = true
+  try {
+    const data = await postJson(`${API}/send_package_preview`, {
+      zip_name: pkg.zip_name
+    })
+    pkgSendDraft.value = {
+      to: data.to || configForm.value.account || configForm.value.smtp_account || '',
+      replyTo: data.reply_to || configForm.value.reply_to || '',
+      fromName: data.from_name || configForm.value.smtp_display_name || '元昇生物注释服务',
+      cc: data.cc || '',
+      subject: data.subject || `噬菌体注释结果回传 - ${pkg.task_id}`,
+      body: data.body || '',
+      attachmentName: data.attachment_name || pkg.zip_name
+    }
+  } catch (err) {
+    setError(err)
+  } finally {
+    loadingPkgDraft.value = false
   }
-  showPkgSendModal.value = true
 }
 
-async function confirmPkgSend(toSelf = true): Promise<void> {
-  if (!pkgSendForm.value.zipName) return
+async function openPkgSendModal(pkg: OutboundPackage): Promise<void> {
+  pkgSendTarget.value = pkg
+  pkgSendDraft.value = {
+    to: configForm.value.account || configForm.value.smtp_account || '',
+    replyTo: configForm.value.reply_to || '',
+    fromName: configForm.value.smtp_display_name || '元昇生物注释服务',
+    cc: '',
+    subject: `噬菌体注释结果回传 - ${pkg.task_id}`,
+    body: '',
+    attachmentName: pkg.zip_name
+  }
+  showPkgSendModal.value = true
+  await loadPkgSendDraft(pkg)
+}
+
+async function resetPkgSendDraft(): Promise<void> {
+  if (!pkgSendTarget.value) return
+  await loadPkgSendDraft(pkgSendTarget.value)
+}
+
+async function confirmPkgSend(payload: MailComposeSubmitPayload): Promise<void> {
+  if (!pkgSendTarget.value) return
   sendingPkg.value = true
   try {
-    const targetTo = toSelf ? 'self' : (pkgSendForm.value.to.trim() || 'self')
+    const targetTo = payload.toSelf ? 'self' : (payload.to.trim() || 'self')
     const data = await postJson(`${API}/send_package`, {
-      zip_name: pkgSendForm.value.zipName,
+      zip_name: pkgSendTarget.value.zip_name,
       to: targetTo,
-      subject: pkgSendForm.value.subject.trim() || null,
-      extra_note: pkgSendForm.value.extraNote.trim() || null
+      cc: payload.cc.trim() || null,
+      from_name: payload.fromName.trim() || null,
+      subject: payload.subject.trim() || null,
+      body: payload.body.trim() ? payload.body : null,
+      attachment_name: payload.attachmentName.trim() || null
     })
     showPkgSendModal.value = false
     setInfo(
@@ -1187,44 +1270,25 @@ onUnmounted(() => {
     </div>
 
     <!-- SMTP 测试发信 -->
-    <div v-if="showTestSendModal" class="modal-backdrop" @click.self="showTestSendModal = false">
-      <div class="modal-card narrow">
-        <div class="modal-header">
-          <h3>SMTP 发信链路自检</h3>
-          <button class="close-btn" @click="showTestSendModal = false">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="auth-block">
-            <div class="auth-title">
-              目标收件人（留空或点发给自己测试则发送至 {{ configForm.account || configForm.smtp_account || '本人邮箱' }}）
-            </div>
-            <input v-model="testSendForm.to" type="text" :placeholder="configForm.account || '例如 913223599@qq.com'" class="key-input-plain" />
-          </div>
-          <div class="auth-block">
-            <div class="auth-title">自定义主题（可选，默认自动生成带时间戳的自检主题）</div>
-            <input v-model="testSendForm.subject" type="text" placeholder="留空自动生成" class="key-input-plain" />
-          </div>
-          <div class="auth-block">
-            <div class="auth-title">自检备注（可选）</div>
-            <input v-model="testSendForm.note" type="text" placeholder="例如：自测 SMTP 中文与附件编码" class="key-input-plain" />
-          </div>
-          <label v-if="docxReports.length > 0" class="auth-clear test-check">
-            <input v-model="testSendForm.attachLatestReport" type="checkbox" />
-            <span>同时打包附带最新 Word 报告（{{ docxReports[0]?.name }}）</span>
-          </label>
-          <p class="form-note">注：自检发信不会发送至默认回传客户邮箱 ({{ configForm.reply_to || '-' }})，除非您在上方显式指定。</p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-outline" @click="showTestSendModal = false">取消</button>
-          <button class="btn-secondary" :disabled="testingSend" @click="confirmTestSend(true)">
-            {{ testingSend ? '发送中...' : '发给自己测试' }}
-          </button>
-          <button class="btn-primary" :disabled="testingSend" @click="confirmTestSend(false)">
-            {{ testingSend ? '发送中...' : '发送邮件' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <MailComposeModal
+      :visible="showTestSendModal"
+      title="SMTP 发信链路自检"
+      :context-title="`测试账号：${configForm.smtp_account || configForm.account || '未配置'} -> 安全测试发信`"
+      :attach-summary="`压缩包内含：${testSendAttachedFiles.join('、')}`"
+      :draft="testSendDraft"
+      :loading-draft="loadingTestSendDraft"
+      :sending="testingSend"
+      :self-address="configForm.account || configForm.smtp_account || ''"
+      :default-display-name="configForm.smtp_display_name || '元昇生物注释服务'"
+      :show-attach-latest-report="docxReports.length > 0"
+      :latest-report-name="docxReports[0]?.name || ''"
+      :attach-latest-report="testSendAttachReport"
+      :safety-note="`注：所有字段均可直接修改；点「发给自己测试」绝不触碰默认回传地址 (${configForm.reply_to || '-'})。`"
+      @close="showTestSendModal = false"
+      @toggle-attach-report="handleToggleTestAttachReport"
+      @reset-draft="p => loadTestSendDraft(p.attachLatestReport)"
+      @send="confirmTestSend"
+    />
 
     <!-- 批次重跑注释与回传 -->
     <div v-if="showBatchRunModal" class="modal-backdrop" @click.self="showBatchRunModal = false">
@@ -1282,44 +1346,21 @@ onUnmounted(() => {
     </div>
 
     <!-- 发送已打包注释结果压缩包 -->
-    <div v-if="showPkgSendModal" class="modal-backdrop" @click.self="showPkgSendModal = false">
-      <div class="modal-card narrow">
-        <div class="modal-header">
-          <h3>发送注释结果压缩包</h3>
-          <button class="close-btn" @click="showPkgSendModal = false">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="auth-block">
-            <div class="auth-title">目标结果包：{{ pkgSendForm.zipName }}</div>
-            <div class="meta-sub">任务编号：{{ pkgSendForm.taskId }} | 文件数：{{ pkgSendForm.fileCount }} | 大小：{{ pkgSendForm.sizeKb }} KB</div>
-          </div>
-          <div class="auth-block">
-            <div class="auth-title">
-              目标收件人（留空或点发给自己测试则发送至 {{ configForm.account || configForm.smtp_account || '本人邮箱' }}）
-            </div>
-            <input v-model="pkgSendForm.to" type="text" :placeholder="configForm.account || '例如 913223599@qq.com'" class="key-input-plain" />
-          </div>
-          <div class="auth-block">
-            <div class="auth-title">邮件主题（可选）</div>
-            <input v-model="pkgSendForm.subject" type="text" :placeholder="`噬菌体注释结果回传 - ${pkgSendForm.taskId}`" class="key-input-plain" />
-          </div>
-          <div class="auth-block">
-            <div class="auth-title">附加备注（可选）</div>
-            <input v-model="pkgSendForm.extraNote" type="text" placeholder="可选写入邮件正文" class="key-input-plain" />
-          </div>
-          <p class="form-note">注：仅在点击“发送邮件”且填写地址时发送至对应收件人；点“发给自己测试”始终仅发送至本人邮箱，不会触碰默认客户地址。</p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-outline" @click="showPkgSendModal = false">取消</button>
-          <button class="btn-secondary" :disabled="sendingPkg" @click="confirmPkgSend(true)">
-            {{ sendingPkg ? '发送中...' : '发给自己测试' }}
-          </button>
-          <button class="btn-primary" :disabled="sendingPkg" @click="confirmPkgSend(false)">
-            {{ sendingPkg ? '发送中...' : '发送邮件' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <MailComposeModal
+      :visible="showPkgSendModal"
+      title="发送注释结果压缩包"
+      :context-title="`目标结果包：${pkgSendTarget?.zip_name || ''}`"
+      :attach-summary="`任务编号：${pkgSendTarget?.task_id || '-'} | 文件数：${pkgSendTarget?.file_count || 0} | 大小：${pkgSendTarget?.size_kb || 0} KB`"
+      :draft="pkgSendDraft"
+      :loading-draft="loadingPkgDraft"
+      :sending="sendingPkg"
+      :self-address="configForm.account || configForm.smtp_account || ''"
+      :default-display-name="configForm.smtp_display_name || '元昇生物注释服务'"
+      safety-note="注：支持修改发信标题、主题、正文、抄送与附件显示文件名；点「发给自己测试」始终仅发送至本人邮箱，不会触碰外部收件人。"
+      @close="showPkgSendModal = false"
+      @reset-draft="resetPkgSendDraft"
+      @send="confirmPkgSend"
+    />
 
     <CleanupDialog
       :visible="showCleanup"
@@ -1821,10 +1862,6 @@ onUnmounted(() => {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   font-size: 12px;
-}
-
-.auth-clear.test-check {
-  color: #334155;
 }
 
 .auth-clear {

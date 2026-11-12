@@ -28,6 +28,14 @@ from pydantic import BaseModel
 from ..utils.blast_utils import parse_blast_csv, select_consensus_hit
 from ..services.other_tools.dir_migrator import migrate_directory
 from ..services.other_tools.history_cleaner import cleanup_mail_history, cleanup_sangon_history
+from ..services.other_tools.mail_composer import (
+    build_package_send_draft,
+    build_sangon_result_draft,
+    build_test_send_draft,
+    resolve_final_mail_params,
+    resolve_safe_send_target,
+    send_mail_compat,
+)
 from ..services.other_tools.mail_inbox_browser import list_whitelist_mails
 from ..services.other_tools.sangon_ignore_rules import (
     ignore_orders,
@@ -96,13 +104,6 @@ def _sangon_root_or_default(value: Optional[str]) -> Path:
 def _sangon_downloads_or_default(value: Optional[str]) -> Path:
     return Path(value) if value else get_sangon_downloads_dir()
 
-
-def _resolve_send_target(cfg: Any, to_arg: Optional[str]) -> str:
-    """解析目标收件人：留空或传入 self 时安全回退到自身发件/收件账号，绝不误发外部邮箱。"""
-    val = (to_arg or "").strip()
-    if not val or val.lower() == "self":
-        return (getattr(cfg, "smtp_account", "") or getattr(cfg, "account", "") or "").strip()
-    return val
 
 # ─── 全局运行状态追踪 ─────────────────────────────────────────
 _mail_pipeline_state: Dict[str, Any] = {
@@ -201,13 +202,31 @@ class MailPipelineRunRequest(BaseModel):
 class MailPackageSendRequest(BaseModel):
     zip_name: str
     to: Optional[str] = None
+    cc: Optional[str] = None
+    from_name: Optional[str] = None
     subject: Optional[str] = None
+    body: Optional[str] = None
+    extra_note: Optional[str] = None
+    attachment_name: Optional[str] = None
+
+
+class MailPackagePreviewRequest(BaseModel):
+    zip_name: str
     extra_note: Optional[str] = None
 
 
 class MailTestSendRequest(BaseModel):
     to: Optional[str] = None
+    cc: Optional[str] = None
+    from_name: Optional[str] = None
     subject: Optional[str] = None
+    body: Optional[str] = None
+    note: Optional[str] = None
+    attachment_name: Optional[str] = None
+    attach_latest_report: bool = False
+
+
+class MailTestSendPreviewRequest(BaseModel):
     note: Optional[str] = None
     attach_latest_report: bool = False
 
@@ -288,7 +307,17 @@ class SangonSendResultRequest(BaseModel):
     order_dir_name: str
     sangon_root: Optional[str] = None
     to: Optional[str] = None
+    cc: Optional[str] = None
+    from_name: Optional[str] = None
     subject: Optional[str] = None
+    body: Optional[str] = None
+    extra_note: Optional[str] = None
+    attachment_name: Optional[str] = None
+
+
+class SangonSendPreviewRequest(BaseModel):
+    order_dir_name: str
+    sangon_root: Optional[str] = None
     extra_note: Optional[str] = None
 
 
@@ -699,7 +728,7 @@ async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
 
     resolved_to: Optional[str] = None
     if req.to is not None and req.to.strip():
-        resolved_to = _resolve_send_target(cfg, req.to)
+        resolved_to = resolve_safe_send_target(cfg, req.to)
         if not resolved_to:
             raise HTTPException(status_code=400, detail="未配置发件或收件邮箱账号，无法解析目标收件人")
 
@@ -817,6 +846,52 @@ async def trigger_mail_auto_pipeline(req: MailPipelineRunRequest):
     return {"status": "started", "runtime": _mail_pipeline_state}
 
 
+def _resolve_outbound_zip_path(zip_name: str, cfg: Any) -> tuple[str, Path, Path]:
+    clean_zip = (zip_name or "").strip()
+    if (
+        not clean_zip
+        or any(sep in clean_zip for sep in ("/", "\\", ".."))
+        or not clean_zip.lower().endswith(".zip")
+    ):
+        raise HTTPException(status_code=400, detail=f"非法的压缩包文件名: {zip_name}")
+
+    send_dir = _resolve_dir(getattr(cfg, "send_dir", "results/email_sends"))
+    zip_path = send_dir / clean_zip
+    if not zip_path.exists() or not zip_path.is_file() or zip_path.parent.resolve() != send_dir.resolve():
+        raise HTTPException(status_code=404, detail=f"未找到回传压缩包: {clean_zip}")
+    return clean_zip, zip_path, send_dir
+
+
+@router.post("/mail_pipeline/test_send_preview")
+async def preview_mail_pipeline_test_send(req: Optional[MailTestSendPreviewRequest] = Body(default=None)):
+    """生成 SMTP 自检测试邮件的默认草稿，供前端弹窗预填与自由编辑。"""
+    params = req or MailTestSendPreviewRequest()
+
+    def _do_preview():
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
+        send_dir = _resolve_dir(getattr(cfg, "send_dir", "results/email_sends"))
+        draft = build_test_send_draft(
+            cfg,
+            send_dir,
+            ANNOTATIONS_DIR,
+            note=params.note,
+            attach_latest_report=params.attach_latest_report,
+        )
+        return {
+            "to": draft["to"],
+            "reply_to": draft["reply_to"],
+            "from_name": draft["from_name"],
+            "cc": draft["cc"],
+            "subject": draft["subject"],
+            "body": draft["body"],
+            "attachment_name": draft["attachment_name"],
+            "attached_files": draft["attached_files"],
+        }
+
+    data = await asyncio.to_thread(_do_preview)
+    return {"status": "success", **data}
+
+
 @router.post("/mail_pipeline/test_send")
 async def test_mail_pipeline_send(req: Optional[MailTestSendRequest] = Body(default=None)):
     """轻量测试 SMTP 发信链路：打包验证文本（可选附带最新 Word 报告）发送到自身或指定邮箱。"""
@@ -824,66 +899,70 @@ async def test_mail_pipeline_send(req: Optional[MailTestSendRequest] = Body(defa
 
     def _do_test_send():
         cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
-        target_to = _resolve_send_target(cfg, params.to)
+        target_to = resolve_safe_send_target(cfg, params.to)
         if not target_to:
             raise ValueError("缺少目标收件人或未配置发件账号")
         if not cfg.smtp_auth_code:
             raise ValueError("缺少 SMTP 授权码，请先配置授权码后再测试发信")
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        subject = (params.subject or f"【自检验证】邮件自动回传 SMTP 测试 ({stamp})").strip()
+        send_dir = _resolve_dir(getattr(cfg, "send_dir", "results/email_sends"))
+        draft = build_test_send_draft(
+            cfg,
+            send_dir,
+            ANNOTATIONS_DIR,
+            note=params.note,
+            attach_latest_report=params.attach_latest_report,
+        )
+        final = resolve_final_mail_params(
+            cfg=cfg,
+            draft=draft,
+            req_from_name=params.from_name,
+            req_subject=params.subject,
+            req_body=params.body,
+            req_attachment_name=params.attachment_name,
+            req_cc=params.cc,
+        )
+        attached_files = list(draft["attached_files"])
+        latest_docx: Optional[Path] = draft["latest_docx_path"]
 
         with tempfile.TemporaryDirectory() as tmp:
             tmp_dir = Path(tmp)
-            zip_path = tmp_dir / f"SMTP_自检验证包_{stamp}.zip"
-            attached_files = ["smtp_self_test.txt"]
+            zip_path = tmp_dir / final["attachment_name"]
 
             txt_lines = [
                 "邮件自动回传工作台 SMTP 链路自检报告",
-                f"发送时间: {now_str}",
+                f"发送时间: {draft['now_str']}",
                 f"SMTP 服务器: {cfg.smtp_server}:{cfg.smtp_port}",
                 f"发件账号: {cfg.smtp_account}",
+                f"发信标题: {final['from_name'] or '-'}",
                 f"目标收件人: {target_to}",
-                f"主题: {subject}",
-                f"中文与 UTF-8 附件名编码验证: 正常 ({zip_path.name})",
+                f"抄送: {', '.join(final['cc_list']) or '-'}",
+                f"主题: {final['subject']}",
+                f"中文与 UTF-8 附件名编码验证: 正常 ({final['attachment_name']})",
             ]
             if params.note and params.note.strip():
                 txt_lines.append(f"附加备注: {params.note.strip()}")
 
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr("smtp_self_test.txt", "\n".join(txt_lines).encode("utf-8"))
-                if params.attach_latest_report:
-                    send_dir = _resolve_dir(getattr(cfg, "send_dir", "results/email_sends"))
-                    docx_list: List[Path] = []
-                    if send_dir.exists():
-                        docx_list = sorted(send_dir.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True)
-                    if not docx_list and ANNOTATIONS_DIR.exists():
-                        docx_list = sorted(ANNOTATIONS_DIR.rglob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True)
-                    if docx_list:
-                        zf.writestr(docx_list[0].name, docx_list[0].read_bytes())
-                        attached_files.append(docx_list[0].name)
-
-            body_lines = [
-                "您好：",
-                "",
-                "本邮件为 NCBI Pro 邮件自动回传流水线的 SMTP 发信自检测试邮件。",
-                f"发件账号：{cfg.smtp_account}",
-                f"目标收件人：{target_to}",
-                f"验证时间：{now_str}",
-                f"测试附件：{zip_path.name}（包含 {', '.join(attached_files)}）",
-            ]
-            if params.note and params.note.strip():
-                body_lines.append(f"备注信息：{params.note.strip()}")
-            body_lines.append("")
-            body_lines.append("若您顺利收到本邮件且附件中文名称显示正常，即表示 SMTP 链路畅通。")
+                if latest_docx is not None:
+                    zf.writestr(latest_docx.name, latest_docx.read_bytes())
 
             sender = MailSender(cfg)
-            res = sender.send(zip_path, to=target_to, subject=subject, body="\n".join(body_lines))
-            return res, zip_path.name, attached_files
+            res = send_mail_compat(
+                sender,
+                zip_path,
+                to=target_to,
+                subject=final["subject"],
+                body=final["body"],
+                cc=final["cc_list"],
+                from_name=final["from_name"],
+                attachment_name=final["attachment_name"],
+            )
+            return res, final, attached_files
 
     try:
-        res, zip_name, attached_files = await asyncio.to_thread(_do_test_send)
+        res, final, attached_files = await asyncio.to_thread(_do_test_send)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -896,92 +975,69 @@ async def test_mail_pipeline_send(req: Optional[MailTestSendRequest] = Body(defa
         "status": "success",
         "ok": True,
         "to": res.to,
+        "cc": getattr(res, "cc", "") or ", ".join(final["cc_list"]),
+        "from_name": getattr(res, "from_name", "") or final["from_name"],
         "subject": res.subject,
         "stage": res.stage,
-        "attachment": zip_name,
+        "attachment": getattr(res, "attachment_name", "") or final["attachment_name"],
         "attachment_size": res.attachment_size,
         "attached_files": attached_files,
     }
 
 
+@router.post("/mail_pipeline/send_package_preview")
+async def preview_mail_pipeline_package(req: MailPackagePreviewRequest):
+    """生成已打包注释结果压缩包的默认邮件草稿，供前端弹窗预填与自由编辑。"""
+    def _do_preview():
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
+        _, zip_path, send_dir = _resolve_outbound_zip_path(req.zip_name, cfg)
+        draft = build_package_send_draft(zip_path, send_dir, cfg, extra_note=req.extra_note)
+        return draft
+
+    data = await asyncio.to_thread(_do_preview)
+    return {"status": "success", **data}
+
+
 @router.post("/mail_pipeline/send_package")
 async def send_mail_pipeline_package(req: MailPackageSendRequest):
-    """将已打包的注释结果压缩包通过 SMTP 发送至本人或指定邮箱。"""
-    clean_zip = (req.zip_name or "").strip()
-    if (
-        not clean_zip
-        or any(sep in clean_zip for sep in ("/", "\\", ".."))
-        or not clean_zip.lower().endswith(".zip")
-    ):
-        raise HTTPException(status_code=400, detail=f"非法的压缩包文件名: {req.zip_name}")
-
+    """将已打包的注释结果压缩包通过 SMTP 发送至本人或指定邮箱（支持自定义发信标题、主题、正文、抄送与附件名）。"""
     def _do_send_package():
         cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
-        send_dir = _resolve_dir(getattr(cfg, "send_dir", "results/email_sends"))
-        zip_path = send_dir / clean_zip
-        if not zip_path.exists() or not zip_path.is_file() or zip_path.parent.resolve() != send_dir.resolve():
-            raise FileNotFoundError(f"未找到回传压缩包: {clean_zip}")
+        clean_zip, zip_path, send_dir = _resolve_outbound_zip_path(req.zip_name, cfg)
 
-        target_to = _resolve_send_target(cfg, req.to)
+        target_to = resolve_safe_send_target(cfg, req.to)
         if not target_to:
             raise ValueError("缺少目标收件人或未配置发件账号")
         if not cfg.smtp_auth_code:
             raise ValueError("缺少 SMTP 授权码，请先配置授权码后再发送邮件")
 
-        task_id = zip_path.stem
-        pack_time = ""
-        file_names: List[str] = []
-        manifest_path = send_dir / f"{zip_path.stem}.manifest.json"
-        if manifest_path.is_file():
-            try:
-                mdata = json.loads(manifest_path.read_text(encoding="utf-8"))
-                task_id = str(mdata.get("task_id") or task_id)
-                pack_time = str(mdata.get("pack_time") or "")
-                for entry in mdata.get("files") or []:
-                    if isinstance(entry, dict) and entry.get("name"):
-                        file_names.append(str(entry["name"]))
-                    elif isinstance(entry, str):
-                        file_names.append(entry)
-            except Exception:
-                pass
-        if not file_names:
-            try:
-                with zipfile.ZipFile(zip_path, "r") as zf:
-                    file_names = list(zf.namelist())
-            except Exception:
-                pass
+        draft = build_package_send_draft(zip_path, send_dir, cfg, extra_note=req.extra_note)
+        final = resolve_final_mail_params(
+            cfg=cfg,
+            draft=draft,
+            req_from_name=req.from_name,
+            req_subject=req.subject,
+            req_body=req.body,
+            req_attachment_name=req.attachment_name,
+            req_cc=req.cc,
+        )
 
-        docx_names = [n for n in file_names if n.lower().endswith(".docx")]
-        subject = (req.subject or f"噬菌体注释结果回传 - {task_id}").strip()
-        preview = file_names[:20]
-        if len(file_names) > 20:
-            preview.append(f"...（其余 {len(file_names) - 20} 个文件）")
-
-        body_lines = [
-            "您好：",
-            "",
-            f"现发送噬菌体基因组注释任务 {task_id} 的结果压缩包：",
-            f"  附件文件名：{zip_path.name}",
-            f"  文件大小：{zip_path.stat().st_size / 1024:.1f} KB",
-            f"  内含产物数：{len(file_names)} 个",
-        ]
-        if pack_time:
-            body_lines.append(f"  打包时间：{pack_time}")
-        if docx_names:
-            body_lines.append(f"  包含 Word 报告：{', '.join(docx_names)}")
-        if req.extra_note and req.extra_note.strip():
-            body_lines.append(f"  附加备注：{req.extra_note.strip()}")
-        if preview:
-            body_lines.append("")
-            body_lines.append("压缩包内文件清单：")
-            body_lines.extend(f"  - {name}" for name in preview)
-        body_lines.extend(["", "如需进一步分析或调整，请回复本邮件。", ""])
-
-        res = MailSender(cfg).send(zip_path, to=target_to, subject=subject, body="\n".join(body_lines))
-        return res, task_id, len(file_names)
+        res = send_mail_compat(
+            MailSender(cfg),
+            zip_path,
+            to=target_to,
+            subject=final["subject"],
+            body=final["body"],
+            cc=final["cc_list"],
+            from_name=final["from_name"],
+            attachment_name=final["attachment_name"],
+        )
+        return res, clean_zip, draft, final
 
     try:
-        res, task_id, file_count = await asyncio.to_thread(_do_send_package)
+        res, clean_zip, draft, final = await asyncio.to_thread(_do_send_package)
+    except HTTPException:
+        raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
@@ -996,13 +1052,15 @@ async def send_mail_pipeline_package(req: MailPackageSendRequest):
         "status": "success",
         "ok": True,
         "zip_name": clean_zip,
-        "task_id": task_id,
+        "task_id": draft["task_id"],
         "to": res.to,
+        "cc": getattr(res, "cc", "") or ", ".join(final["cc_list"]),
+        "from_name": getattr(res, "from_name", "") or final["from_name"],
         "subject": res.subject,
         "stage": res.stage,
-        "attachment": clean_zip,
+        "attachment": getattr(res, "attachment_name", "") or final["attachment_name"],
         "attachment_size": res.attachment_size,
-        "file_count": file_count,
+        "file_count": draft["file_count"],
     }
 
 
@@ -1844,14 +1902,12 @@ async def import_sangon_downloads(req: Optional[SangonImportDownloadsRequest] = 
     return {"status": "success", **res}
 
 
-@router.post("/sangon_16s/send_result")
-async def send_sangon_order_result_mail(req: SangonSendResultRequest):
-    """将指定订单的 16S 鉴定结果 CSV 打包为 zip 并通过 SMTP 发送（默认发送至本人配置邮箱）"""
-    clean_name = (req.order_dir_name or "").strip()
+def _resolve_sangon_order_csv_path(order_dir_name: str, sangon_root: Optional[str]) -> tuple[str, Path]:
+    clean_name = (order_dir_name or "").strip()
     if not clean_name or any(sep in clean_name for sep in ("/", "\\", "..")):
-        raise HTTPException(status_code=400, detail=f"非法的订单目录名: {req.order_dir_name}")
+        raise HTTPException(status_code=400, detail=f"非法的订单目录名: {order_dir_name}")
 
-    root_path = _sangon_root_or_default(req.sangon_root)
+    root_path = _sangon_root_or_default(sangon_root)
     order_dir = root_path / clean_name
     if not order_dir.exists() or not order_dir.is_dir() or order_dir.parent.resolve() != root_path.resolve():
         raise HTTPException(status_code=404, detail=f"未找到订单目录: {clean_name}")
@@ -1859,68 +1915,66 @@ async def send_sangon_order_result_mail(req: SangonSendResultRequest):
     csv_path = order_dir / "BLAST结果" / "16S鉴定结果.csv"
     if not csv_path.exists() or not csv_path.is_file():
         raise HTTPException(status_code=404, detail="该订单尚未生成 16S鉴定结果.csv，请先运行比对导出")
+    return clean_name, csv_path
+
+
+@router.post("/sangon_16s/send_preview")
+async def preview_sangon_order_result_mail(req: SangonSendPreviewRequest):
+    """生成指定生工 16S 订单结果邮件的默认草稿，供前端弹窗预填与逐项修改。"""
+    clean_name, csv_path = _resolve_sangon_order_csv_path(req.order_dir_name, req.sangon_root)
+
+    def _do_preview():
+        cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
+        return build_sangon_result_draft(clean_name, csv_path, cfg, extra_note=req.extra_note)
+
+    draft = await asyncio.to_thread(_do_preview)
+    return {"status": "success", **draft}
+
+
+@router.post("/sangon_16s/send_result")
+async def send_sangon_order_result_mail(req: SangonSendResultRequest):
+    """将指定订单的 16S 鉴定结果 CSV 打包为 zip 并通过 SMTP 发送（支持修改发信标题、主题、正文、抄送与附件名）"""
+    clean_name, csv_path = _resolve_sangon_order_csv_path(req.order_dir_name, req.sangon_root)
 
     def _do_send_16s():
-        with open(csv_path, "r", encoding="utf-8-sig", errors="replace") as f:
-            rows = list(csv.reader(f))
-        data_rows = [r for r in rows[1:] if r] if len(rows) > 1 else []
-        total = len(data_rows)
-        no_hits = sum(
-            1 for r in data_rows
-            if ("No Hits" in (r[3] if len(r) > 3 else "") or "未找到匹配项" in (r[3] if len(r) > 3 else ""))
-        )
-        with_hits = total - no_hits
-
         cfg = load_config(str(MAIL_CONFIG_PATH), require_imap_auth=False)
-        target_to = _resolve_send_target(cfg, req.to)
+        target_to = resolve_safe_send_target(cfg, req.to)
         if not target_to:
             raise ValueError("缺少目标收件人或未配置发件账号")
         if not cfg.smtp_auth_code:
             raise ValueError("缺少 SMTP 授权码，请先配置授权码后再发送邮件")
 
-        order_no = clean_name.split("_", 1)[1] if "_" in clean_name else clean_name
-        subject = (req.subject or f"生工 16S 测序鉴定结果 - {clean_name}（共 {total} 样本）").strip()
-
-        preview_lines = []
-        for r in data_rows[:15]:
-            qid = r[0] if len(r) > 0 else "-"
-            sp_cn = r[1] if len(r) > 1 else ""
-            sp_la = r[3] if len(r) > 3 else ""
-            ident = r[7] if len(r) > 7 else ""
-            acc = r[9] if len(r) > 9 else ""
-            sp_disp = f"{sp_cn} ({sp_la})" if sp_cn and sp_la else (sp_cn or sp_la or "-")
-            preview_lines.append(f"  - {qid}: {sp_disp} | Identity={ident} | Acc={acc}")
-        if total > 15:
-            preview_lines.append(f"  ...（其余 {total - 15} 条结果详见附件 CSV 表格）")
-
-        body_lines = [
-            "您好：",
-            "",
-            f"生工 16S 测序订单 {clean_name}（订单号 {order_no}）的自动 BLAST 鉴定与物种翻译已完成：",
-            f"  样本总数：{total}",
-            f"  成功命中：{with_hits}",
-            f"  未命中：{no_hits}",
-        ]
-        if req.extra_note and req.extra_note.strip():
-            body_lines.append(f"  备注信息：{req.extra_note.strip()}")
-        if preview_lines:
-            body_lines.append("")
-            body_lines.append("鉴定结果预览（前 15 条）：")
-            body_lines.extend(preview_lines)
-        body_lines.extend(["", "完整 11 列鉴定结果请查收附件压缩包。", ""])
+        draft = build_sangon_result_draft(clean_name, csv_path, cfg, extra_note=req.extra_note)
+        final = resolve_final_mail_params(
+            cfg=cfg,
+            draft=draft,
+            req_from_name=req.from_name,
+            req_subject=req.subject,
+            req_body=req.body,
+            req_attachment_name=req.attachment_name,
+            req_cc=req.cc,
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
-            zip_path = Path(tmp) / f"16S鉴定结果_{clean_name}.zip"
-            inner_csv_name = f"16S鉴定结果_{order_no}.csv"
+            zip_path = Path(tmp) / final["attachment_name"]
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.write(csv_path, arcname=inner_csv_name)
-                zf.writestr("结果说明.txt", "\n".join(body_lines).encode("utf-8"))
+                zf.write(csv_path, arcname=draft["inner_csv_name"])
+                zf.writestr("结果说明.txt", final["body"].encode("utf-8"))
 
-            res = MailSender(cfg).send(zip_path, to=target_to, subject=subject, body="\n".join(body_lines))
-            return res, zip_path.name, total, with_hits, no_hits
+            res = send_mail_compat(
+                MailSender(cfg),
+                zip_path,
+                to=target_to,
+                subject=final["subject"],
+                body=final["body"],
+                cc=final["cc_list"],
+                from_name=final["from_name"],
+                attachment_name=final["attachment_name"],
+            )
+            return res, draft, final
 
     try:
-        res, zip_name, total, with_hits, no_hits = await asyncio.to_thread(_do_send_16s)
+        res, draft, final = await asyncio.to_thread(_do_send_16s)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -1934,13 +1988,15 @@ async def send_sangon_order_result_mail(req: SangonSendResultRequest):
         "ok": True,
         "order_dir_name": clean_name,
         "to": res.to,
+        "cc": getattr(res, "cc", "") or ", ".join(final["cc_list"]),
+        "from_name": getattr(res, "from_name", "") or final["from_name"],
         "subject": res.subject,
         "stage": res.stage,
-        "attachment": zip_name,
+        "attachment": getattr(res, "attachment_name", "") or final["attachment_name"],
         "attachment_size": res.attachment_size,
-        "total_samples": total,
-        "with_hits": with_hits,
-        "no_hits": no_hits,
+        "total_samples": draft["total_samples"],
+        "with_hits": draft["with_hits"],
+        "no_hits": draft["no_hits"],
     }
 
 

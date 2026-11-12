@@ -157,6 +157,7 @@ class TestMailSender(unittest.TestCase):
             zip_path = self._attach(Path(td))
             cfg, sender, fake = make_sender()
             result = sender.send(zip_path, to="client@example.com", subject="注释结果")
+            self.assertIsInstance(result, SendResult)
             self.assertTrue(result.ok)
             self.assertEqual(result.stage, "sent")
             self.assertEqual(result.to, "client@example.com")
@@ -248,6 +249,58 @@ class TestMailSender(unittest.TestCase):
             self.assertEqual(msg["To"], "a@example.com, b@example.com")
             self.assertEqual(msg["Cc"], "cc1@example.com, cc2@example.com")
             self.assertTrue(msg.get("Message-ID"))
+
+    def test_send_allows_custom_from_name_attachment_name_and_split_cc(self):
+        """支持自定义发信标题(display name)、附件文件名(自动补.zip)以及带分号/逗号的CC字符串拆分"""
+        from email.header import decode_header
+        from email.utils import parseaddr
+
+        with tempfile.TemporaryDirectory() as td:
+            zip_path = self._attach(Path(td))
+            cfg, sender, fake = make_sender({"smtp_display_name": "默认注释服务"})
+            result = sender.send(
+                zip_path,
+                to="user@example.com",
+                cc=["c1@example.com; c2@example.com, c3@example.com"],
+                subject="自定义主题",
+                body="自定义邮件正文第一行\n自定义正文第二行",
+                from_name="测序生信助手",
+                attachment_name="生工16S鉴定结果_定制版",
+            )
+            self.assertTrue(result.ok)
+            self.assertEqual(result.from_name, "测序生信助手")
+            self.assertEqual(result.attachment_name, "生工16S鉴定结果_定制版.zip")
+            self.assertEqual(
+                fake.sent_to,
+                ["user@example.com", "c1@example.com", "c2@example.com", "c3@example.com"],
+            )
+
+            msg = email.message_from_string(fake.sent_msg)
+            raw_name, raw_addr = parseaddr(msg["From"])
+            self.assertEqual(raw_addr, cfg.smtp_account)
+            decoded_parts = decode_header(raw_name)
+            decoded_name = "".join(
+                p.decode(enc or "utf-8") if isinstance(p, bytes) else p for p, enc in decoded_parts
+            )
+            self.assertEqual(decoded_name, "测序生信助手")
+            self.assertEqual(msg["Cc"], "c1@example.com, c2@example.com, c3@example.com")
+
+            zip_part = next(p for p in msg.walk() if p.get_content_type() == "application/zip")
+            self.assertEqual(zip_part.get_filename(), "生工16S鉴定结果_定制版.zip")
+            text_part = next(p for p in msg.walk() if p.get_content_type() == "text/plain")
+            body_text = text_part.get_payload(decode=True).decode("utf-8")
+            self.assertEqual(body_text, "自定义邮件正文第一行\n自定义正文第二行")
+
+    def test_send_rejects_unsafe_custom_attachment_name(self):
+        """自定义附件文件名包含路径穿越或非法字符时必须安全拦截"""
+        with tempfile.TemporaryDirectory() as td:
+            zip_path = self._attach(Path(td))
+            _, sender, fake = make_sender()
+            for bad_name in ("../evil.zip", "sub/file.zip", "sub\\file.zip", ".zip"):
+                res = sender.send(zip_path, to="u@example.com", attachment_name=bad_name)
+                self.assertFalse(res.ok, f"应拦截非法附件名: {bad_name}")
+                self.assertEqual(res.stage, "invalid_attach_name")
+                self.assertIsNone(fake.sent_to)
 
 
 class TestCliPackSend(unittest.TestCase):

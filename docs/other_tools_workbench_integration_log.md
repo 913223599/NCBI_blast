@@ -405,3 +405,48 @@
    - `mail_inbox_browser.py` 与 `sangon_mail_scanner.py` 中 `conn.fetch(rng.decode("ascii"), ...)` 对齐 `imaplib` `message_set: str` 签名，`_extract_body_details()` 补齐 `isinstance(payload, bytes)` 收窄及 `str` 分支；
    - 全量清理上述 9 个后端文件中的冗余 `str()`、`int()`、`bool()` 转换。
 3. **验证结论**：复跑 `pyrefly check --min-severity warn` 返回 `INFO 0 diagnostics`，`ruff check` 全部通过（`All checks passed!`），`pytest` 90 项全量回归通过（`5.72s`）。
+
+---
+
+## 15. 工作台发信弹窗全面可编辑升级：标题、主题、正文、抄送与附件名定制（2026-11-12）
+
+### 15.1 需求背景与覆盖范围
+针对用户反馈工作台发信弹窗（原仅支持收件人邮箱、主题与附加说明 3 项，无法查看与编辑发信标题及正文）并提出「发信标题、内容、主题等等支持修改」的需求，统一升级工作台全部三处交互式发信场景：
+1. **生工 16S 比对 -> 发送 16S 鉴定结果邮件**（订单列表行内「发信」按钮与下方结果预览区「发送结果邮件」按钮）；
+2. **邮件注释回传 -> 发送注释结果压缩包**（「报告与回传包」子页行内「发信」按钮）；
+3. **邮件注释回传 -> SMTP 发信链路自检**（「测试发信」弹窗）。
+
+### 15.2 后端模块化设计（先测后改、单一职责）
+1. **底层发信器扩展（[sender.py](file:///f:/NCBI%20blast/src/mail_download/sender.py)）**：
+   - 新增 `sanitize_zip_filename()` 校验并自动补齐 `.zip` 后缀，显式拦截路径分隔符、控制字符、`.zip` 空干名及相对遍历段（`..`）；
+   - `SendResult` 新增 `cc`、`from_name`、`attachment_name` 字段；
+   - `MailSender.send()` 新增 `from_name`（自定义 MIME `From` 发件人显示名称，兼容 `Header(subject, "utf-8").encode()` 严格类型）与 `attachment_name` 参数，抄送解析支持逗号与分号混合分隔。
+2. **邮件草稿预览与发送适配服务（新建 [mail_composer.py](file:///f:/NCBI%20blast/src/backend/services/other_tools/mail_composer.py)）**：
+   - 集中维护 `parse_email_addresses()`、`resolve_safe_send_target()`、`build_sangon_result_draft()`、`build_package_send_draft()`、`build_test_send_draft()`、`resolve_final_mail_params()` 与向后兼容旧 mock 签名的 `send_mail_compat()`；
+   - 发信预览直接复用既有模板生成默认主题、发信标题（`smtp_display_name`）、完整正文内容与默认压缩包文件名。
+3. **API 路由升级（[other_tools.py](file:///f:/NCBI%20blast/src/backend/routes/other_tools.py)）**：
+   - 抽取路径校验共用函数 `_resolve_outbound_zip_path()` 与 `_resolve_sangon_order_csv_path()`；
+   - 新增草稿预览路由：`POST /api/other_tools/sangon_16s/send_preview`、`POST /api/other_tools/mail_pipeline/send_package_preview`、`POST /api/other_tools/mail_pipeline/test_send_preview`（无 SMTP 授权码时亦可加载模板预览）；
+   - 升级 `POST /sangon_16s/send_result`、`POST /mail_pipeline/send_package`、`POST /mail_pipeline/test_send` 请求模型，支持 `from_name` / `subject` / `body` / `cc` / `attachment_name` 自定义参数并向后兼容旧 `extra_note` / `note` 调用方式；生工 16S 结果包内 `结果说明.txt` 同步写入用户编辑后的最终正文。
+
+### 15.3 前端组件化构建
+1. **通用邮件撰写弹窗组件（新建 [MailComposeModal.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/components/MailComposeModal.vue)）**：
+   - 严格区分语义化 `<label :for="...">` 与快捷按钮，支持修改 **收件人邮箱 (To)**（带「设为自己 / 填回传地址」快捷填入，保留用户手填收件人不被重置覆盖）、**发信标题（`From` 显示名称）**、**邮件主题**、**完整多行正文（含实时行数/字数统计与「恢复默认内容」按钮）**；
+   - 新增可折叠「更多发信选项」，支持多邮箱 **抄送 (CC)** 与 **自定义附件压缩包文件名**（未写 `.zip` 自动补齐）；
+   - 测试发信支持「同时打包附带最新 Word 报告」开关切换时实时重新拉取预览正文；
+   - **安全隔离红线**：点击「发给自己测试」强制设置 `to='self'` 并清空 `cc=null`，确保自测绝不向外部收件人或抄送地址发信。
+2. **业务模块集成与样式清理（[Sangon16SPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/Sangon16SPipelineModule.vue) / [MailAutoPipelineModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/OtherTools/modules/MailAutoPipelineModule.vue)）**：
+   - 全面替换三处旧简易发信弹窗并清理孤立旧样式 `.modal-field` / `.test-check`。
+
+### 15.4 全面测试、静态检查与端到端回归结果
+1. **自动化单元测试（[test_mail_send.py](file:///f:/NCBI%20blast/tests/test_mail_send.py) / [test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py)）**：
+   - 新增 `test_send_allows_custom_from_name_attachment_name_and_split_cc`、`test_send_rejects_unsafe_custom_attachment_name` 与 `test_mail_compose_preview_and_custom_send_fields`，并将 `mail_composer.py` 与 `MailComposeModal.vue` 纳入零 Emoji / UTF-8 门禁。
+   - 执行全量 `.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_auto_return_workflow.py tests/test_mail_download.py tests/test_mail_send.py tests/test_other_tools_api.py -v --tb=short`：**93 项全部通过（5.93s）**。
+2. **静态与类型门禁**：
+   - `pyrefly check --min-severity warn` 对 `sender.py`、`src/backend/services/other_tools/`、`other_tools.py` 返回 **`INFO 0 diagnostics`**；
+   - `ruff check --select F,E9`：**All checks passed!**；
+   - `src/web-next` 执行 `vue-tsc -b --force` 与 `npm run build`：零错误完成生产打包（`13.83s`），产出已同步至 `src/web-next/dist/`。
+3. **Playwright 真实 UI 端到端交互验证**：
+   - 使用隔离临时数据目录启动 FastAPI + 已编译 `dist/`，严格拦截全部真实发送路由保证零对外 SMTP 发信，实测「生工 16S 行内发信 -> 填回传地址 -> 恢复默认内容 -> 自定义全部字段发送 -> 选中结果预览发信点发给自己测试禁 CC -> 邮件注释回传测试发信切换最新 Word 报告勾选项 -> 报告与回传包自定义发信标题/正文/附件名发送」全链路，捕获请求 `3` 次校验全部传参无误，Console 与 Page 报错数均为 `0`。
+4. **生效提醒**：
+   - 前端 `.vue` 已同步输出到 `src/web-next/dist/`，新增后端预览路由与扩展参数需重启桌面端应用后在本机 `8765` 端口后端完全生效。
