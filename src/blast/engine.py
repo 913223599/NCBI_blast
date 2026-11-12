@@ -150,8 +150,12 @@ class BlastEngine:
                 current_char_count += seq_len
         if current_batch: batches.append(current_batch)
 
-        # 🚀 提速：增加并发数到 4，减少由于串行等待 NCBI 响应造成的延迟
-        final_max_workers = max(max_threads, 4)
+        # 并发控制：调用方显式指定 max_workers 时优先尊重（限制上限 4），否则默认 4 路并发兼顾远程 NCBI 吞吐
+        configured_workers = self.settings.get('max_workers')
+        if configured_workers is not None and int(configured_workers) > 0:
+            final_max_workers = max(1, min(int(configured_workers), 4))
+        else:
+            final_max_workers = max(max_threads, 4)
         executor = ThreadPoolExecutor(max_workers=final_max_workers)
         try:
             futures = []

@@ -3,6 +3,7 @@
 使用本地数据库进行BLAST搜索，大幅提高查询速度
 """
 
+import os
 import shutil
 import subprocess
 import threading
@@ -12,9 +13,38 @@ from Bio.Blast import NCBIXML
 from ..workbench.models.tool_config import ToolConfig
 from ..backend.utils.compat import get_short_path_name
 
-# 全局并发控制：限制同时运行的 blastn 进程数，防止 CPU 过载
-# 默认为 4，可根据 CPU 核心数调整
-_local_blast_semaphore = threading.Semaphore(4)
+
+def compute_local_blast_resource_plan(
+    cpu_count: int | None = None,
+    requested_threads: int | None = None,
+) -> tuple[int, int]:
+    """
+    计算本地 BLAST 的 (最大并发子进程数, 单进程线程数)。
+    严格遵守系统核心保留规则（Rule 8），确保 max_concurrent * threads <= cpu_cnt - reserved。
+    """
+    cpu_cnt = max(1, int(cpu_count if cpu_count is not None else (os.cpu_count() or 4)))
+    if cpu_cnt >= 12:
+        reserved = 4
+    elif cpu_cnt >= 4:
+        reserved = 2
+    else:
+        reserved = max(0, cpu_cnt - 1)
+
+    budget = max(1, cpu_cnt - reserved)
+    max_concurrent = 2 if budget >= 6 else 1
+    per_proc_max = max(1, budget // max_concurrent)
+
+    if requested_threads is not None and requested_threads > 0:
+        threads_per_proc = max(1, min(int(requested_threads), per_proc_max))
+    else:
+        threads_per_proc = min(12, per_proc_max)
+
+    return max_concurrent, threads_per_proc
+
+
+# 全局并发控制：按当前主机核数限制并发 blastn/blastp 进程数，预留核心防止主机和桌面 UI 卡顿
+_LOCAL_BLAST_MAX_CONCURRENT, _ = compute_local_blast_resource_plan()
+_local_blast_semaphore = threading.Semaphore(_LOCAL_BLAST_MAX_CONCURRENT)
 
 class LocalBlastExecutor:
     """
@@ -82,16 +112,10 @@ class LocalBlastExecutor:
         short_in = get_short_path_name(abs_in)
         short_out = get_short_path_name(abs_out)
 
-        # 动态计算多核并行线程数，适当保留CPU核心数防止卡死（规则7、规则8）
-        import os
-        cpu_cnt = os.cpu_count() or 4
-        safe_available = max(2, cpu_cnt - 4)
-        if num_threads is None or num_threads <= 0:
-            # 单样本查询在 8~16 线程区间计算吞吐最高，规避单进程 OpenMP 锁自旋开销
-            num_threads = min(16, safe_available)
-        else:
-            # 若调用方传入了保守的旧默认值(如4)，在算力充裕时自适应提升至 12 核心加速区间
-            num_threads = min(safe_available, max(num_threads, min(12, safe_available)))
+        # 动态计算多核并行线程数与并发预算，始终保留核心防止主机和桌面 UI 卡死（规则7、规则8）
+        max_concurrent, num_threads = compute_local_blast_resource_plan(
+            requested_threads=num_threads
+        )
 
         # 构建BLAST命令行参数 (相对于 CWD)
         blast_cmd = [
@@ -112,14 +136,17 @@ class LocalBlastExecutor:
 
         cmd_str = " ".join(blast_cmd)
 
-        # 优化调度优先级与 OpenMP 环境 (规则7、8)
+        # 优化 OpenMP 调度策略并使用常规优先级 + 无弹窗标志，避免重负载下桌面交互掉帧
         env = os.environ.copy()
         env["OMP_DYNAMIC"] = "FALSE"
         env["OMP_WAIT_POLICY"] = "PASSIVE"
-        creationflags = 0x00008000 if os.name == "nt" else 0  # ABOVE_NORMAL_PRIORITY_CLASS
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
 
         try:
-            print(f"[LocalBLAST] 执行本地多核比对 (线程: {num_threads}, CWD: {short_db_dir}): {cmd_str}")
+            print(
+                f"[LocalBLAST] 执行本地多核比对 (并发上限: {max_concurrent}, "
+                f"线程: {num_threads}, CWD: {short_db_dir}): {cmd_str}"
+            )
             
             with _local_blast_semaphore:
                 # 关键：在 Windows 下必须在无空格的 CWD 中运行或使用 shell=True 配合引号
