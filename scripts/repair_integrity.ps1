@@ -54,10 +54,17 @@ $CriticalImages = @(
     ".venv\Scripts\pythonw.exe",
     "src\workbench\bin\FastTree.exe",
     "src\workbench\bin\muscle.exe",
+    "src\workbench\bin\mafft.exe",
+    "vendor\fasttree\FastTree.exe",
+    "vendor\iqtree3\iqtree.exe",
+    "vendor\MrBayes\mb.exe",
     "tools\miniconda\Scripts\conda.exe",
     "tools\miniconda\python.exe",
     "tools\ncbi_dist\bin\tree-tools\FastTree.exe",
-    "tools\ncbi_dist\bin\tree-tools\muscle.exe"
+    "tools\ncbi_dist\bin\tree-tools\muscle.exe",
+    "tools\ncbi_dist\bin\sra-tools\prefetch.exe",
+    "tools\ncbi_dist\bin\sra-tools\fasterq-dump.exe",
+    "tools\ncbi_dist\bin\sra-tools\libwinpthread-1.dll"
 )
 
 # Also check any Playwright headless/Chromium binaries cached inside vendor\ms-playwright

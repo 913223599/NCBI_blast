@@ -501,3 +501,57 @@
    - 使用独立临时目录与挂载 `/ws`、`/api/settings/*`、`/api/other_tools/*` 的隔离测试服务及编译后 `dist/`，实测生工 16S 异常提示横幅展示 -> 一键自修复转绿 -> 「更多与设置」打开弹窗并取消静默无头运行执行「应用浏览器配置并检查自修复」 -> 「设置 -> 系统参数」面板触发「应用配置并启动探针自修复」全链路：**`CONSOLE_ERRORS: 0`、`PAGE_ERRORS: 0`、`HTTP_500: 0`、`REPAIR_CALLS_COUNT: 3`、`E2E_ALL_PASSED`**，截图复核所有页面布局、长路径换行与状态隔离展示正常。
 5. **生效提醒**：
    - 前端构建已同步输出至 `src/web-next/dist/`；新增生命周期自检逻辑及 `/browser_env(|/repair)` 接口需重启桌面端 Electron 应用后在 `8765` 端口后端全面生效。
+
+---
+
+## 17. 全栈启动检查与自修复覆盖度实测审计（RUN_DEV_ELECTRON.bat，2026-11-12）
+
+### 17.1 审计范围与测试方式
+对 [RUN_DEV_ELECTRON.bat](file:///f:/NCBI%20blast/RUN_DEV_ELECTRON.bat) 全启动链路及项目全量 Python 模块、npm 依赖、Electron 二进制、无头浏览器、生信外部二进制工具、WSL 发行版、运行目录与配置数据库执行隔离沙盒模拟缺失测试与本机实机探针测试。
+
+### 17.2 实测结果摘要
+1. **已具备完整检查与可自愈项**：
+   - Python 空环境自举（`verify_and_install_deps.py` 与 `headless_browser_manager.py` 在 `-I` 仅标准库隔离模式下导入正常，`rc=0`）；
+   - Python `MODULE_IMPORT_MAP` 中的 22 项核心包 + 可选 `edlib` 告警分级 + `uv`/国内 PyPI 镜像回退；
+   - `9` 个运行目录、`config.json`（从 `config.default.json` 创建 + `headless_browser` 增量补缺）、`translations.db`（从 `translations_backup.db` 恢复）、`FastTree.exe` & `muscle.exe`（从 `tools/ncbi_dist/bin/tree-tools` 复制）；
+   - Playwright Chromium 与系统浏览器兜底（`environment_checker.py` 与 `verify_and_install_deps.py` 均 `rc=0`）；
+   - Windows 文件低完整性标签自愈（沙盒给 `.exe` 置为 `Low Mandatory Level` 后运行 `scripts/repair_integrity.ps1` 于 `166 ms` 内恢复 `Medium`，`rc=0`）。
+2. **实测暴露的 5 类核心检查/修复缺陷**：
+   - **Electron 二进制自修复脚本在本机失灵**：沙盒模拟 `electron.exe` 缺失执行 [ensure_electron.ps1](file:///f:/NCBI%20blast/scripts/ensure_electron.ps1) 返回 `rc=1`，报错 `The term 'Get-FileHash' is not recognized`（当前 PowerShell `-NoProfile` 环境未自动加载 `Get-FileHash` cmdlet，需改用 .NET `[System.Security.Cryptography.SHA256]` 回退）。
+   - **前端/Electron `node_modules` 浅检查漏洞**：[RUN_DEV_ELECTRON.bat](file:///f:/NCBI%20blast/RUN_DEV_ELECTRON.bat) 仅检测 `electron-shell\node_modules\electron` 与 `src\web-next\node_modules\vite` 存在性；沙盒实测在 `src\web-next` 缺少 `23/24` 个依赖包（仅保留 `vite` 目录）时判定为 `FALSE_PASS_READY` 跳过修复；根目录 [package.json](file:///f:/NCBI%20blast/package.json) 亦未检测。
+   - **Python 强依赖清单缺口与 `ete4` / 双脚本分叉**：`openpyxl`（[diversity_excel_exporter.py](file:///f:/NCBI%20blast/src/backend/services/diversity_excel_exporter.py)）、`python-docx`（[build_annotation_report.py](file:///f:/NCBI%20blast/scripts/build_annotation_report.py)）与 `dashscope` 未列入 [requirements.txt](file:///f:/NCBI%20blast/requirements.txt) 及 `MODULE_IMPORT_MAP`；[scripts/verify_and_install_deps.py](file:///f:/NCBI%20blast/scripts/verify_and_install_deps.py) 仍把 `edlib` 设为强依赖且缺少 `scipy`/`networkx`；直接 `import ete4` 在未执行 `ToolConfig.initialize_env()` 时报错 `ModuleNotFoundError`（`.venv` 可编辑安装指向已变更盘符的旧路径，且启动未检 `vendor/ete4`）。
+   - **外部生信工具与 WSL 检查/修复不全、`sra-tools` 缺 DLL**：启动脚本未检验与自修复 `mafft.exe`、`iqtree.exe`、`mb.exe`（且未接入 `download_externals.ps1` 与 `repair_integrity.ps1`），未检验 WSL Ubuntu 工具链（目前本机 Ubuntu 内除 `conda` 外主要工具均就绪）；`blastn`/`git` 缺失仅打印提示不自动修复，且探得路径注入子进程 `PATH` 后随脚本退出失效（`verify_and_install_deps.py` 搜索 BLAST 盘符未包含 `F:`）；`tools/ncbi_dist/bin/sra-tools/prefetch.exe` 与 `fasterq-dump.exe` 实测返回 `3221225781`（`0xC0000135`，缺少同在 `tree-tools/` 中的 `libwinpthread-1.dll`）。
+   - **系统级前置边界**：本机无 `winget`，若缺失 Node.js 或 Python 本身，批处理无法无感自动安装，只能提示手动安装退出。
+
+### 17.3 修复实施与模块化重构
+1. **新建模块化外部生信工具自愈引擎** [bio_tools_healer.py](file:///f:/NCBI%20blast/src/utils/bio_tools_healer.py)：
+   - 全文件采用纯标准库顶层导入（支持空虚拟环境自举）、UTF-8 编码、零 Emoji 与相对路径优先；
+   - `heal_sra_tools_dlls()`：自动从 `tools/ncbi_dist/bin/tree-tools`、`tools/_deprecated` 或 Git `mingw64/usr` 补齐 `libwinpthread-1.dll` 到 `tools/ncbi_dist/bin/sra-tools/`，并对 `prefetch.exe` 执行 `--version` 探针复核；
+   - `heal_vendor_ete4_binding()`：校验 `vendor/ete4/ete4/__init__.py` 并写入或修正 `.venv/Lib/site-packages/ncbi_blast_vendor.pth`，解决迁移盘符后直接 `import ete4` 失败的问题；
+   - `heal_phylogeny_and_alignment_binaries()` 与 `default_external_binary_downloader()`：镜像同步 `FastTree.exe`、`muscle.exe`，并精准下载补齐缺失的 `mafft.exe`、`iqtree.exe`、`mb.exe`（已存在工具自动跳过）；
+   - `detect_and_persist_blast_and_git()`：覆盖 `C:/D:/E:/F:` 常见安装目录与 `tools/git` 便携路径全盘定位 BLAST+ 与 Git，自动注入进程 `PATH` 并持久化写入 `config.json` 的 `blast_bin_path` / `git_bin_path`；
+   - `inspect_wsl_and_gpu_capabilities()`：非阻塞探测 WSL 生信工具链及 PyTorch/CUDA GPU 可用状态。
+2. **修复并统一 Python 依赖自愈链路**：
+   - 更新 [requirements.txt](file:///f:/NCBI%20blast/requirements.txt)、[verify_and_install_deps.py](file:///f:/NCBI%20blast/src/utils/verify_and_install_deps.py) 与 [scripts/verify_and_install_deps.py](file:///f:/NCBI%20blast/scripts/verify_and_install_deps.py)，纳入 `openpyxl`、`python-docx`、`dashscope`、`scipy`、`networkx`、`playwright` 必装检查，将 `edlib` 统一归类为可选依赖并清理未使用导入；
+   - 升级 [environment_checker.py](file:///f:/NCBI%20blast/src/utils/environment_checker.py)：支持读取 `config.json` 的 `blast_bin_path` 探测 BLAST 命令，扩充必需模块检查至 11 项并新增 `check_bio_tools()` 检查 SRA 运行库、`vendor/ete4`、5 项进化树/比对工具与 Git。
+3. **修复并升级 npm / Electron / Windows 完整性链路**：
+   - 新建 [check_npm_deps.js](file:///f:/NCBI%20blast/scripts/check_npm_deps.js)：使用纯 Node.js 解析 `package.json` 中的全部 `dependencies` 与 `devDependencies`（含 `@scope/pkg`），彻底取代“仅检 `vite` / `electron` 目录存在”的浅检查；
+   - 修复 [ensure_electron.ps1](file:///f:/NCBI%20blast/scripts/ensure_electron.ps1)：彻底移除本机 `-NoProfile` 下缺失的 `Get-FileHash`，改为 .NET 原生 `[System.Security.Cryptography.SHA256]` + `File.OpenRead`，并保留 `npmmirror` 与 GitHub Release 官方兜底下载；
+   - 升级 [repair_integrity.ps1](file:///f:/NCBI%20blast/scripts/repair_integrity.ps1)：将 `mafft.exe`、`vendor/fasttree/FastTree.exe`、`iqtree.exe`、`mb.exe`、`prefetch.exe`、`fasterq-dump.exe`、`libwinpthread-1.dll` 及 `vendor/ms-playwright` Chromium 二进制纳入 `Low Mandatory Level` 自动提权修复列表；
+   - 升级 [RUN_DEV_ELECTRON.bat](file:///f:/NCBI%20blast/RUN_DEV_ELECTRON.bat)：步骤 `[2/3]` 全面接入 `node scripts/check_npm_deps.js` 校验 `electron-shell`、`src/web-next` 与根目录 `.`，缺失即触发 `npmmirror` 自动安装并在安装后二次核验。
+
+### 17.4 最终实测与全量回归验证结果
+1. **标准库空白环境自举验证**：以宿主 Python `-I`（完全隔离第三方包）执行 `import src.utils.bio_tools_healer, src.utils.verify_and_install_deps, src.utils.environment_checker, src.utils.headless_browser_manager`，输出 `STDLIB_ALL_OK`（`rc=0`）。
+2. **本机实机启动自愈全链路运行**：执行 `.venv\Scripts\python.exe -X utf8 src\utils\verify_and_install_deps.py`（`rc=0`）：
+   - 自动将 `libwinpthread-1.dll` 从 `tree-tools` 复制补齐至 `sra-tools`，复测 `prefetch.exe --version` 与 `fasterq-dump.exe --version` 均正常返回 `3.3.0`（不再报 `0xC0000135` 缺少 DLL）；
+   - 自动更新 `.venv\Lib\site-packages\ncbi_blast_vendor.pth -> F:\NCBI blast\vendor\ete4`，直接执行 `import ete4` 成功加载内置模块；
+   - 自动定位并持久化 `blast_bin_path`（`D:\Program Files\NCBI\blast-2.16.0+\bin`）与 `git_bin_path`（`D:\Program Files\Git\cmd\git.exe`）到 `config.json`；
+   - 探测输出 WSL（`Ubuntu, docker-desktop`, 生信工具 `8/8` 可用）、GPU（`CUDA: NVIDIA GeForce RTX 4070 Laptop GPU`）与无头浏览器（`playwright_chromium 145.0.7632.6`）全部就绪。
+3. **沙盒故障注入与边界测试验证**：
+   - 新建回归测试文件 [test_startup_self_healing.py](file:///f:/NCBI%20blast/tests/test_startup_self_healing.py)，实测校验：`requirements.txt` 全部依赖受审、SRA-Tools 缺 DLL 与 `vendor/ete4` 失绑自愈、缺失 `mafft.exe` / `mb.exe` 精准下载补齐（不重复下载已有工具）、仅留 `vite` 的 `node_modules` 缺包拦截、删掉 `electron.exe` 后 `ensure_electron.ps1` 从本地缓存校验 SHA256 完整恢复、`repair_integrity.ps1` 覆盖核心清单、`RUN_DEV_ELECTRON.bat` 启动流程与括号匹配完整、全部相关源码零 Emoji 与 UTF-8 合规。
+4. **静态检查、全量检查与回归结果**：
+   - `ruff check --select F,E9` 检查全部修改与新增 Python 文件输出 `All checks passed!`；
+   - `.venv\Scripts\python.exe -X utf8 -m src.utils.environment_checker` 全部 `11` 项 `[OK]`、`0` 警告、`0` 错误；
+   - `node scripts\check_npm_deps.js` 验证 `electron-shell`、`src\web-next`（24 个依赖）与根目录 `.` 均完整就绪；
+   - 全套 `pytest` 回归测试（[test_startup_self_healing.py](file:///f:/NCBI%20blast/tests/test_startup_self_healing.py)、[test_auto_return_workflow.py](file:///f:/NCBI%20blast/tests/test_auto_return_workflow.py)、[test_mail_download.py](file:///f:/NCBI%20blast/tests/test_mail_download.py)、[test_mail_send.py](file:///f:/NCBI%20blast/tests/test_mail_send.py)、[test_other_tools_api.py](file:///f:/NCBI%20blast/tests/test_other_tools_api.py)、[test_headless_browser_manager.py](file:///f:/NCBI%20blast/tests/test_headless_browser_manager.py)）于 `9.11s` 内 **111 passed / 0 failed**。
+5. **宿主机固有前置边界**：若目标新机器尚未安装 Node.js 或 Python 且系统未预装 `winget`，`RUN_DEV_ELECTRON.bat` 无法自行安装基础运行时本身，将明确打印下载地址并阻止启动。

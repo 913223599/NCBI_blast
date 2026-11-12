@@ -18,7 +18,7 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-# 包名称与 import 导入名称映射表
+# 包名称与 import 导入名称映射表（与 src/utils/verify_and_install_deps.py 保持一致）
 MODULE_IMPORT_MAP = {
     "fastapi": "fastapi",
     "uvicorn": "uvicorn",
@@ -26,6 +26,8 @@ MODULE_IMPORT_MAP = {
     "biopython": "Bio",
     "numpy": "numpy",
     "pandas": "pandas",
+    "openpyxl": "openpyxl",
+    "python-docx": "docx",
     "requests": "requests",
     "beautifulsoup4": "bs4",
     "lxml": "lxml",
@@ -38,9 +40,11 @@ MODULE_IMPORT_MAP = {
     "anyio": "anyio",
     "starlette": "starlette",
     "python-multipart": "multipart",
-    "edlib": "edlib",
     "openai": "openai",
+    "dashscope": "dashscope",
     "playwright": "playwright",
+    "scipy": "scipy",
+    "networkx": "networkx",
 }
 
 # 国内镜像源配置
@@ -111,6 +115,14 @@ def main():
     project_root = Path(__file__).resolve().parent.parent
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
+
+    try:
+        from src.utils.verify_and_install_deps import main as primary_main
+
+        return int(primary_main())
+    except ImportError:
+        pass
+
     req_file = project_root / "requirements.txt"
 
     if not req_file.exists():

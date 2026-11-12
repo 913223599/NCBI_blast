@@ -41,6 +41,19 @@ $exePath = Join-Path $distDir "electron.exe"
 function Write-Info([string]$Message) { Write-Host "[electron] $Message" }
 function Write-Warn([string]$Message) { Write-Host "[electron][WARN] $Message" }
 
+function Get-FileSha256([string]$FilePath) {
+    if (-not (Test-Path $FilePath)) { return "" }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($FilePath)
+    try {
+        $hashBytes = $sha.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace("-", "").ToUpperInvariant()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
+}
+
 if (-not (Test-Path $pkgFile)) {
     Write-Warn "electron package not found, skip binary self-heal: $pkgFile"
     exit 0
@@ -85,7 +98,7 @@ function Find-CachedZip {
     $candidates = Get-ChildItem $cacheRoot -Recurse -File -Filter $zipName -ErrorAction SilentlyContinue
     foreach ($candidate in $candidates) {
         if (-not $expectedHash) { return $candidate.FullName }
-        $hash = (Get-FileHash $candidate.FullName -Algorithm SHA256).Hash
+        $hash = Get-FileSha256 $candidate.FullName
         if ($hash -eq $expectedHash.ToUpper()) { return $candidate.FullName }
         Write-Warn "Cached archive failed checksum, ignored: $($candidate.FullName)"
     }
@@ -97,24 +110,31 @@ if ($zipPath) {
     Write-Info "Using local cache: $zipPath"
 } else {
     $zipPath = Join-Path $env:TEMP $zipName
-    $url = "$($Mirror.TrimEnd('/'))/$version/$zipName"
-    Write-Info "Downloading from mirror: $url"
-    try {
-        & curl.exe -L --silent --show-error --fail -o $zipPath $url
-        if ($LASTEXITCODE -ne 0) { throw "curl exit code $LASTEXITCODE" }
-    } catch {
-        Write-Warn "Download failed: $($_.Exception.Message)"
-        Write-Warn "Check network access, or fetch the archive from https://github.com/electron/electron/releases"
-        exit 1
-    }
-    if ($expectedHash) {
-        $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash
-        if ($hash -ne $expectedHash.ToUpper()) {
-            Write-Warn "Downloaded archive checksum mismatch (expected $expectedHash, got $hash), aborted."
-            Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-            exit 1
+    $mirrorUrl = "$($Mirror.TrimEnd('/'))/$version/$zipName"
+    $officialUrl = "https://github.com/electron/electron/releases/download/v$version/$zipName"
+    $downloaded = $false
+    foreach ($url in @($mirrorUrl, $officialUrl)) {
+        Write-Info "Downloading Electron v$version from: $url"
+        try {
+            & curl.exe -L --silent --show-error --fail --connect-timeout 15 -o $zipPath $url
+            if ($LASTEXITCODE -ne 0) { throw "curl exit code $LASTEXITCODE" }
+            if ($expectedHash) {
+                $hash = Get-FileSha256 $zipPath
+                if ($hash -ne $expectedHash.ToUpper()) {
+                    Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+                    throw "checksum mismatch (expected $expectedHash, got $hash)"
+                }
+                Write-Info "Downloaded archive checksum verified."
+            }
+            $downloaded = $true
+            break
+        } catch {
+            Write-Warn "Download attempt failed ($url): $($_.Exception.Message)"
         }
-        Write-Info "Downloaded archive checksum verified."
+    }
+    if (-not $downloaded) {
+        Write-Warn "All download attempts failed. Check network access or place $zipName into $env:LOCALAPPDATA\electron\Cache."
+        exit 1
     }
 }
 

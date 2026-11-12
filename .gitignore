@@ -199,6 +199,7 @@ src/test_shm.py
 !/scripts/自动化流程文档.md
 !/scripts/ensure_electron.ps1
 !/scripts/repair_integrity.ps1
+!/scripts/check_npm_deps.js
 .lingma/rules/
 
 # ------------------------------------------------------------------------------

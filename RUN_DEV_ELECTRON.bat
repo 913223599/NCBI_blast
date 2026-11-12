@@ -96,13 +96,14 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM 5. Check Electron and Frontend deps with China npmmirror
+REM 5. Check Electron, Frontend and Root npm deps with China npmmirror (full manifest check)
 echo [2/3] Checking Electron and Frontend dependencies with npmmirror...
 SET "npm_config_registry=https://registry.npmmirror.com"
 SET "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/"
 
-if not exist "electron-shell\node_modules\electron" (
-    echo [INFO] Installing Electron shell dependencies via npmmirror...
+node "scripts\check_npm_deps.js" "electron-shell"
+if errorlevel 1 (
+    echo [INFO] Installing or repairing Electron shell dependencies via npmmirror...
     pushd electron-shell
     call npm install --registry=https://registry.npmmirror.com
     if errorlevel 1 (
@@ -112,12 +113,17 @@ if not exist "electron-shell\node_modules\electron" (
         exit /b 1
     )
     popd
-) else (
-    echo [INFO] Electron shell dependencies ready.
+    node "scripts\check_npm_deps.js" "electron-shell"
+    if errorlevel 1 (
+        echo [ERROR] Electron dependencies remain incomplete after npm install.
+        pause
+        exit /b 1
+    )
 )
 
-if not exist "src\web-next\node_modules\vite" (
-    echo [INFO] Installing Frontend Vite dependencies via npmmirror...
+node "scripts\check_npm_deps.js" "src\web-next"
+if errorlevel 1 (
+    echo [INFO] Installing or repairing Frontend Vite dependencies via npmmirror...
     pushd src\web-next
     call npm install --registry=https://registry.npmmirror.com
     if errorlevel 1 (
@@ -127,8 +133,23 @@ if not exist "src\web-next\node_modules\vite" (
         exit /b 1
     )
     popd
-) else (
-    echo [INFO] Frontend Vite dependencies ready.
+    node "scripts\check_npm_deps.js" "src\web-next"
+    if errorlevel 1 (
+        echo [ERROR] Frontend dependencies remain incomplete after npm install.
+        pause
+        exit /b 1
+    )
+)
+
+if exist "package.json" (
+    node "scripts\check_npm_deps.js" "."
+    if errorlevel 1 (
+        echo [INFO] Installing or repairing root helper npm dependencies via npmmirror...
+        call npm install --registry=https://registry.npmmirror.com
+        if errorlevel 1 (
+            echo [WARN] Failed to repair root npm dependencies, continuing...
+        )
+    )
 )
 
 REM 5b. Verify the Electron binary itself and the file integrity labels.

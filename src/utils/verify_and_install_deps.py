@@ -14,7 +14,6 @@ NCBI BLAST Pro - 环境自愈与依赖自动补齐模块
 
 import os
 import sys
-import glob
 import shutil
 import subprocess
 import importlib.util
@@ -39,6 +38,8 @@ MODULE_IMPORT_MAP = {
     "biopython": "Bio",
     "numpy": "numpy",
     "pandas": "pandas",
+    "openpyxl": "openpyxl",
+    "python-docx": "docx",
     "requests": "requests",
     "beautifulsoup4": "bs4",
     "lxml": "lxml",
@@ -52,9 +53,10 @@ MODULE_IMPORT_MAP = {
     "starlette": "starlette",
     "python-multipart": "multipart",
     "openai": "openai",
+    "dashscope": "dashscope",
     # 无头浏览器自动化依赖 (生工 16S 官网自动下载等)
     "playwright": "playwright",
-    # 组装引擎 NGCS (E:\NGCS) 运行时依赖
+    # 组装引擎 NGCS 运行时依赖
     "scipy": "scipy",
     "networkx": "networkx",
 }
@@ -102,28 +104,33 @@ def heal_directories(project_root: Path):
 
 
 def heal_auxiliary_binaries(project_root: Path):
-    """自愈附属二进制计算工具"""
-    tree_tools_dir = project_root / "tools" / "ncbi_dist" / "bin" / "tree-tools"
+    """自愈附属二进制计算工具（sra-tools DLL、FastTree、muscle、mafft、iqtree、mb、vendor/ete4）"""
+    try:
+        from src.utils.bio_tools_healer import (
+            heal_phylogeny_and_alignment_binaries,
+            heal_sra_tools_dlls,
+            heal_vendor_ete4_binding,
+        )
 
-    # 1. FastTree.exe
-    src_fasttree = tree_tools_dir / "FastTree.exe"
-    dst_wb_fasttree = project_root / "src" / "workbench" / "bin" / "FastTree.exe"
-    dst_vendor_fasttree = project_root / "vendor" / "fasttree" / "FastTree.exe"
+        sra_res = heal_sra_tools_dlls(project_root)
+        for act in sra_res.get("actions", []):
+            print(f"[自愈] {act}")
+        for warn in sra_res.get("warnings", []):
+            print(f"[警告] {warn}")
 
-    if src_fasttree.exists():
-        if not dst_wb_fasttree.exists():
-            shutil.copy2(src_fasttree, dst_wb_fasttree)
-            print("[自愈] 已自动补齐 src/workbench/bin/FastTree.exe")
-        if not dst_vendor_fasttree.exists():
-            shutil.copy2(src_fasttree, dst_vendor_fasttree)
-            print("[自愈] 已自动补齐 vendor/fasttree/FastTree.exe")
+        ete_res = heal_vendor_ete4_binding(project_root)
+        for act in ete_res.get("actions", []):
+            print(f"[自愈] {act}")
+        for warn in ete_res.get("warnings", []):
+            print(f"[警告] {warn}")
 
-    # 2. muscle.exe
-    src_muscle = tree_tools_dir / "muscle.exe"
-    dst_wb_muscle = project_root / "src" / "workbench" / "bin" / "muscle.exe"
-    if src_muscle.exists() and not dst_wb_muscle.exists():
-        shutil.copy2(src_muscle, dst_wb_muscle)
-        print("[自愈] 已自动补齐 src/workbench/bin/muscle.exe")
+        bio_res = heal_phylogeny_and_alignment_binaries(project_root, auto_download=True)
+        for act in bio_res.get("actions", []):
+            print(f"[自愈] {act}")
+        for warn in bio_res.get("warnings", []):
+            print(f"[警告] {warn}")
+    except Exception as exc:
+        print(f"[警告] 附属生信工具自愈检查异常: {exc}")
 
 
 def heal_configurations(project_root: Path):
@@ -152,68 +159,28 @@ def heal_configurations(project_root: Path):
         print("[自愈] 未检测到 translations.db，已从冷备库自动恢复。")
 
 
-def detect_blast_installation():
-    """探测本地 BLAST+ 套件安装状态"""
-    if shutil.which("blastn"):
-        print("[信息] 本地 BLAST+ 套件 (blastn) 已在 PATH 中就绪。")
-        return
+def detect_blast_installation(project_root: Path = None):
+    """探测本地 BLAST+ 与 Git 路径并写入 config.json 持久生效"""
+    root = project_root or _PROJECT_ROOT
+    try:
+        from src.utils.bio_tools_healer import detect_and_persist_blast_and_git
 
-    # 搜索 Windows 常见安装目录
-    search_patterns = [
-        r"C:\Program Files\NCBI\blast-*\bin",
-        r"D:\Program Files\NCBI\blast-*\bin",
-        r"E:\Program Files\NCBI\blast-*\bin",
-    ]
-    found_bin = None
-    for pattern in search_patterns:
-        matches = glob.glob(pattern)
-        for m in matches:
-            if os.path.exists(os.path.join(m, "blastn.exe")):
-                found_bin = m
-                break
-        if found_bin:
-            break
-
-    if found_bin:
-        print(f"[信息] 自动发现本地 BLAST+ 安装路径: {found_bin}")
-        # 注入当前运行环境 PATH
-        os.environ["PATH"] = found_bin + os.pathsep + os.environ.get("PATH", "")
-    else:
-        print("[提示] 未在系统 PATH 或常见安装目录检测到 BLAST+ 套件 (blastn/makeblastdb)。")
-        print("       如需使用本地离线比对加速，建议安装: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/")
+        res = detect_and_persist_blast_and_git(root, persist=True)
+        for act in res.get("actions", []):
+            print(f"[自愈] {act}")
+        if res.get("blast_ready"):
+            print(f"[信息] 本地 BLAST+ 套件就绪: {res.get('blast_bin_path')}")
+        if res.get("git_ready"):
+            print(f"[信息] Git 命令行工具就绪: {res.get('git_bin_path')}")
+        for warn in res.get("warnings", []):
+            print(f"[提示] {warn}")
+    except Exception as exc:
+        print(f"[警告] 探测 BLAST+/Git 工具异常: {exc}")
 
 
 def detect_git_installation(project_root: Path):
-    """探测 Git 命令行工具，供“软件在线更新”功能使用"""
-    from shutil import which as _which
-
-    candidates = [
-        project_root / "tools" / "git" / "cmd" / "git.exe",
-        project_root / "tools" / "MinGit" / "cmd" / "git.exe",
-        Path(r"C:\Program Files\Git\cmd\git.exe"),
-        Path(r"C:\Program Files (x86)\Git\cmd\git.exe"),
-    ]
-    local_appdata = os.environ.get("LOCALAPPDATA")
-    if local_appdata:
-        candidates.append(Path(local_appdata) / "Programs" / "Git" / "cmd" / "git.exe")
-
-    found = next((c for c in candidates if c.is_file()), None)
-    if found:
-        git_dir = str(found.parent)
-        if git_dir not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = git_dir + os.pathsep + os.environ.get("PATH", "")
-        print(f"[信息] 已定位 Git 命令行工具: {found}")
-        return
-
-    if _which("git"):
-        print(f"[信息] Git 命令行工具已在 PATH 中就绪: {_which('git')}")
-        return
-
-    print("[提示] 未检测到 Git，软件在线更新功能将不可用。")
-    print("       安装方式任选其一:")
-    print("       1) winget install --id Git.Git -e --source winget")
-    print("       2) 下载 Git for Windows: https://git-scm.com/download/win")
-    print("       3) 解压便携版到项目的 tools\\git 目录，或在 config.json 中设置 git_bin_path")
+    """兼容旧调用入口（已在 detect_blast_installation 合并持久化探测）"""
+    _ = project_root
 
 
 def configure_pip_mirror():
@@ -406,10 +373,25 @@ def main():
     print("---------------------------------------------------")
     print("[1/4] 正在执行附属环境与目录自愈检查...")
     heal_directories(project_root)
-    heal_auxiliary_binaries(project_root)
     heal_configurations(project_root)
-    detect_blast_installation()
-    detect_git_installation(project_root)
+    heal_auxiliary_binaries(project_root)
+    detect_blast_installation(project_root)
+    try:
+        from src.utils.bio_tools_healer import inspect_wsl_and_gpu_capabilities
+
+        cap = inspect_wsl_and_gpu_capabilities()
+        if cap.get("wsl_available"):
+            ready_cnt = sum(1 for v in cap.get("wsl_tools", {}).values() if v)
+            total_cnt = len(cap.get("wsl_tools", {}))
+            print(f"[信息] WSL 环境就绪 ({', '.join(cap.get('wsl_distros', []))}, 生信工具 {ready_cnt}/{total_cnt} 可用)。")
+        else:
+            print("[提示] 未检测到可用的 WSL 发行版（Pharokka/Phold/WSL 组装功能将使用内置降级模式）。")
+        if cap.get("cuda_available"):
+            print(f"[信息] GPU 加速就绪 (CUDA: {cap.get('gpu_name')})。")
+        elif cap.get("torch_installed"):
+            print("[信息] PyTorch 已就绪（CPU 计算模式）。")
+    except Exception:
+        pass
 
     print("---------------------------------------------------")
     print("[2/4] 正在校验 Python 运行依赖与配置国内镜像源...")
