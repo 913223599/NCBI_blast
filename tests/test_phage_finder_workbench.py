@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from src.analysis.phage_finder.db import PhageDiscoveryDB
 from src.analysis.phage_finder.exporter import (
+    _classify_completeness,
     build_contig_overlay_gbk,
     export_scan_artifacts,
     inspect_sequences,
@@ -28,6 +29,7 @@ from src.analysis.phage_finder.model_registry import (
     resolve_model_dir,
 )
 from src.analysis.phage_finder.queue import PhageDiscoveryQueue
+from src.phage_discovery.inference.protein_gate import RegionGateResult
 from src.phage_discovery.inference.scanner import (
     PredictedRegion,
     ScanResult,
@@ -439,4 +441,67 @@ def test_genbank_base_overlay_preservation_and_score_tracks(tmp_path: Path):
     assert "prophage_region" in gbk_overlay_text
     assert "HOST_0001" in gbk_overlay_text
     assert "tRNA-Arg" in gbk_overlay_text
+
+
+def test_completeness_classification_with_protein_gate_tiers():
+    dummy_region = PredictedRegion(
+        contig_id="NC_003197.2",
+        start_bp=962600,
+        end_bp=1005200,
+        peak_score=0.992,
+        mean_score=0.929,
+        window_count=12,
+    )
+
+    def _make_gate(decision: str, tier: str, hallmark: int = 0, non_amg: int = 0) -> RegionGateResult:
+        return RegionGateResult(
+            region=dummy_region,
+            decision=decision,
+            tier=tier,
+            gc_ratio=0.516,
+            region_len_bp=42600,
+            orf_count=56,
+            coding_density=0.91,
+            hallmark_hits=hallmark,
+            non_amg_hits=non_amg,
+            transposase_hits=0,
+            amg_hits=0,
+            total_hits=non_amg,
+        )
+
+    # 1. ProteinGate hallmark_confirmed 长区间与高 Hallmark 必须评定为 high（绝不能降级为 low）
+    k_hallmark_high, lbl_hallmark_high = _classify_completeness(
+        42600, 0.992, _make_gate("keep", "hallmark_confirmed", hallmark=17, non_amg=20)
+    )
+    assert k_hallmark_high == "high"
+    assert "完整" in lbl_hallmark_high or "高可信" in lbl_hallmark_high
+
+    # 2. 短区间但有少数 hallmark 标志蛋白应定为 medium
+    k_hallmark_med, _ = _classify_completeness(
+        11000, 0.91, _make_gate("keep", "hallmark_confirmed", hallmark=2, non_amg=3)
+    )
+    assert k_hallmark_med == "medium"
+
+    # 3. 噬菌体蛋白簇支持（长区间强证据 -> high，否则 -> medium）
+    k_cluster_high, _ = _classify_completeness(
+        30000, 0.92, _make_gate("keep", "phage_cluster_confirmed", hallmark=0, non_amg=8)
+    )
+    assert k_cluster_high == "high"
+    k_cluster_med, _ = _classify_completeness(
+        15000, 0.88, _make_gate("keep", "phage_cluster_confirmed", hallmark=0, non_amg=4)
+    )
+    assert k_cluster_med == "medium"
+
+    # 4. dark_matter_fallback 不得被硬编码折为 low，应按长度与模型分评价
+    k_dm, _ = _classify_completeness(32000, 0.96, _make_gate("keep", "dark_matter_fallback"))
+    assert k_dm == "intact_like"
+
+    # 5. reject 归入 rejected；无门控或 gate_disabled 维持原神经评价规则
+    k_rej, _ = _classify_completeness(42600, 0.99, _make_gate("reject", "rejected_high_gc_no_evidence"))
+    assert k_rej == "rejected"
+    k_no_gate, _ = _classify_completeness(42600, 0.992, None)
+    assert k_no_gate == "intact_like"
+    k_dis, _ = _classify_completeness(42600, 0.992, _make_gate("keep", "gate_disabled"))
+    assert k_dis == "intact_like"
+
 

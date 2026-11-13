@@ -537,3 +537,5 @@ Pop-Location
 2. **前端双模态交互式叠图工作台 (`PhageOverlayMap.vue` & `GenomeViewerModule.vue`)**
    - `PhageOverlayMap.vue` 支持**线性多轨道对齐叠图**与**环形全长叠图**即时切换、滚轮缩放、左键拖拽漫游、顶部/底部全局 Minimap 俯瞰快速跳转、独立图层开关（底图特征 / V4.2 概率曲线 / `GC%` 偏移 / `GC Skew` / 蛋白门控滤除对照）、底图特征实时关键词搜索与步进高亮定位（如 `integrase`, `tRNA`, `dnaA`）、大基因组智能视口过滤抽稀、SVG 矢量导出及一键生成并跳转 `GenomeViewer` 查看整条 Contig 叠图。
    - 同步增强 `GenomeViewerModule.vue`：分离 `prophageOverlayFeatures` (`type === 'prophage_region'`) 至跨正负链半透明包络亮点层，确保全序列底图 CDS 箭头与预测噬菌体区段同时清晰展现。
+3. **蛋白门控完整度分级枚举对齐修复 (`exporter.py`)**
+   - 修正 `_classify_completeness()` 对 `RegionGateResult.tier` 的映射缺失（原错误仅匹配 `"high"` / `"medium"`，导致 `ProteinGate` 真实输出的 `"hallmark_confirmed"`、`"phage_cluster_confirmed"`、`"dark_matter_fallback"` 在开启门控时误落入兜底 `"low"` 分支），改为联合评估真实 `tier`、`hallmark_hits`、`non_amg_hits`、区段长度与模型峰值评分，同步补齐单元回归断言。

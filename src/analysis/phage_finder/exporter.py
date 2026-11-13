@@ -309,16 +309,27 @@ def _classify_completeness(
     peak_score: float,
     gate: Optional[RegionGateResult],
 ) -> Tuple[str, str]:
-    """返回 (机读等级 key, 中文人类可读评估标签)。"""
+    """返回 (机读等级 key, 中文人类可读评估标签)，综合 ProteinGate 真实 tier 与区段尺度/峰分。"""
     if gate is not None:
         tier = (gate.tier or "").lower()
-        if gate.decision == "reject":
+        if gate.decision == "reject" or tier.startswith("rejected"):
             return "rejected", "蛋白门控过滤 (低可信/非典型)"
-        if tier == "high":
-            return "high", "完整/高可信 (High Confidence)"
-        if tier == "medium":
-            return "medium", "疑似完整/中等可信 (Medium)"
-        return "low", "低可信/可能残余片段 (Low)"
+        if tier in {"hallmark_confirmed", "high"}:
+            if length_bp >= 20000 or gate.hallmark_hits >= 5:
+                return "high", "完整/高可信 (蛋白与模型双确证)"
+            return "medium", "部分完整/标志蛋白确证 (Medium)"
+        if tier in {"phage_cluster_confirmed", "medium"}:
+            if length_bp >= 25000 and peak_score >= 0.85 and gate.non_amg_hits >= 6:
+                return "high", "完整/高可信 (噬菌体蛋白簇确证)"
+            return "medium", "疑似完整/蛋白集群确证 (Medium)"
+        if tier == "dark_matter_fallback":
+            if length_bp >= 25000 and peak_score >= 0.85:
+                return "intact_like", "完整候选前噬菌体 (高分暗物质保留)"
+            if length_bp >= 12000:
+                return "medium", "中等长度暗物质前噬菌体"
+            return "fragment", "短片段/暗物质前噬菌体"
+        if tier != "gate_disabled":
+            return "low", "低可信/可能残余片段 (Low)"
 
     if length_bp >= 25000 and peak_score >= 0.75:
         return "intact_like", "完整候选前噬菌体 (模型高置信)"
