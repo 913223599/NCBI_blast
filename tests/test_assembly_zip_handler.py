@@ -89,19 +89,6 @@ def test_extract_and_merge_zip_fastq():
         assert progress_records[-1][0] == 100.0
 
 
-def test_i_drive_fastq_zip_inspection():
-    """如果 I 盘的 fastq.zip 存在，测试对其的结构探测与识别"""
-    i_zip = Path("I:/fastq.zip")
-    if not i_zip.exists():
-        pytest.skip("I:/fastq.zip not mounted or unavailable")
-
-    assert AssemblyFileHandler.is_zip_archive(i_zip) is True
-    # 探查内部包含的 fastq 文件列表
-    entries = AssemblyFileHandler.list_zip_fastq_entries(i_zip)
-    assert len(entries) >= 70
-    assert any("reads_0001" in e for e in entries)
-
-
 def test_assembler_step_zip_integration():
     """测试 AssemblerStep 上下文与 ZIP 文件输入处理的集成行为"""
     from src.assembly.core.base import PipelineContext

@@ -73,12 +73,35 @@ data/*
 *.h3i
 *.h3f
 *.h3p
+*.fasta
+*.fna
+*.fa
+*.faa
+*.ffn
+*.gbk
+*.gbff
+*.pt
+*.pth
+*.onnx
+*.onnx.data
+*.ckpt
+*.safetensors
+*.npz
+*.npy
+*.ubj
+*.xgb
 
 # ------------------------------------------------------------------------------
 # 4. 分析运行结果、中间产物与生成报告
 # ------------------------------------------------------------------------------
 /results/
 /reports/
+/models/
+/benchmarks/
+/training/
+/teachers/
+/expansion_v*/
+checkv_out*/
 quast/quast_results/
 quast/test_data/
 quast/quast_libs/barrnap/build/*.aln
