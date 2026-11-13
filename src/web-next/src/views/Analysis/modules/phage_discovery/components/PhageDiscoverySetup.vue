@@ -312,6 +312,15 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- 队列状态繁忙提示横幅 -->
+    <div v-if="isQueueBusy" class="queue-busy-banner">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+      <span>当前已有扫描任务正在执行或等待中：本次提交将严格串行加入等待队列，前序完成后自动启动。</span>
+    </div>
+
     <!-- 2. 输入源切换 -->
     <div class="source-tabs">
       <button
@@ -599,6 +608,7 @@ onMounted(() => {
       <button
         type="button"
         class="submit-btn"
+        :class="{ 'is-busy-mode': isQueueBusy }"
         :disabled="isUploading || isInspecting || isSubmitting"
         @click="onSubmit"
       >
@@ -623,6 +633,19 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.queue-busy-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .setup-header {
@@ -1121,6 +1144,14 @@ onMounted(() => {
 
 .submit-btn:hover:not(:disabled) {
   background: #1d4ed8;
+}
+
+.submit-btn.is-busy-mode {
+  background: #d97706;
+}
+
+.submit-btn.is-busy-mode:hover:not(:disabled) {
+  background: #b45309;
 }
 
 .submit-btn:disabled {

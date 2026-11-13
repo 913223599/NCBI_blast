@@ -64,19 +64,53 @@ class PhageDiscoveryQueue:
             self._workers.append(worker)
         logger.info("PhageDiscovery 队列引擎已启动 (workers=%s)", self.max_workers)
 
-    async def enqueue(self, task_id: str, req: Any, context: Dict[str, Any]) -> None:
+    async def enqueue(self, task_id: str, req: Any, context: Dict[str, Any]) -> Dict[str, Any]:
         if not self._started:
             await self.start()
 
+        was_busy = len(self.running_ids) > 0 or len(self.queued_ids) > 0
         self.queued_ids.append(task_id)
+        queue_pos = len(self.queued_ids)
+        running_cnt = len(self.running_ids)
+        queued_cnt = len(self.queued_ids)
         await self.queue.put((task_id, req, context))
-        logger.info("前噬菌体扫描任务已入队: %s (当前排队 %s)", task_id, len(self.queued_ids))
+        logger.info("前噬菌体扫描任务已入队: %s (当前排队位次 #%s, 运行中 %s)", task_id, queue_pos, running_cnt)
         await self._broadcast_snapshot()
+        return {
+            "task_id": task_id,
+            "queue_position": queue_pos,
+            "is_busy": was_busy,
+            "running_count": running_cnt,
+            "queued_count": queued_cnt,
+        }
+
+    def remove_from_waiting(self, task_id: str) -> bool:
+        """从等待队列中同步剔除指定任务并触发快照更新。"""
+        removed = False
+        if task_id in self.queued_ids:
+            self.queued_ids.remove(task_id)
+            self.cancelled_ids.add(task_id)
+            removed = True
+        elif task_id in self.running_ids:
+            self.cancelled_ids.add(task_id)
+
+        if removed:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._broadcast_snapshot())
+            except RuntimeError:
+                pass
+        return removed
 
     async def cancel_task(self, task_id: str) -> Dict[str, Any]:
         if task_id in self.queued_ids:
+            self.queued_ids.remove(task_id)
             self.cancelled_ids.add(task_id)
             self.db.mark_cancelled(task_id)
+            await broadcaster.broadcast(
+                "phage_discovery_error",
+                {"task_id": task_id, "error": "排队中的前噬菌体扫描任务已取消", "status": "cancelled"},
+            )
             await self._broadcast_snapshot()
             return {"status": "cancelled", "message": "排队中的前噬菌体扫描任务已取消"}
         if task_id in self.running_ids:
@@ -89,13 +123,35 @@ class PhageDiscoveryQueue:
     def is_cancelled(self, task_id: str) -> bool:
         return task_id in self.cancelled_ids
 
+    def _build_task_meta(self, task_id: str, position: Optional[int] = None) -> Dict[str, Any]:
+        meta = self.db.get_task(task_id) or {}
+        item: Dict[str, Any] = {
+            "task_id": task_id,
+            "task_name": meta.get("task_name") or task_id,
+            "model_version": meta.get("model_version") or "V4.2",
+            "device": meta.get("device") or "cpu",
+            "apply_protein_gate": bool(meta.get("apply_protein_gate", False)),
+            "status": meta.get("status") or ("queued" if position is not None else "running"),
+            "progress": meta.get("progress", 0),
+            "current_step": meta.get("current_step") or "",
+            "created_at": meta.get("created_at") or "",
+        }
+        if position is not None:
+            item["position"] = position
+        return item
+
     def get_queue_snapshot(self) -> Dict[str, Any]:
+        running = list(self.running_ids)
+        queued = list(self.queued_ids)
         return {
             "max_workers": self.max_workers,
-            "running": list(self.running_ids),
-            "queued": list(self.queued_ids),
-            "running_count": len(self.running_ids),
-            "queued_count": len(self.queued_ids),
+            "is_busy": len(running) > 0 or len(queued) > 0,
+            "running": running,
+            "queued": queued,
+            "running_count": len(running),
+            "queued_count": len(queued),
+            "running_tasks": [self._build_task_meta(tid) for tid in running],
+            "waiting_tasks": [self._build_task_meta(tid, idx + 1) for idx, tid in enumerate(queued)],
         }
 
     async def _broadcast_snapshot(self) -> None:
@@ -109,12 +165,18 @@ class PhageDiscoveryQueue:
 
             if task_id in self.cancelled_ids:
                 self.cancelled_ids.discard(task_id)
-                self.db.mark_cancelled(task_id)
+                if self.db.get_task(task_id) is not None:
+                    self.db.mark_cancelled(task_id)
                 self.queue.task_done()
                 await self._broadcast_snapshot()
                 continue
 
             self.running_ids.append(task_id)
+            self.db.update_progress(task_id, 2, "正在调度计算引擎启动扫描...", status="running")
+            await broadcaster.broadcast(
+                "phage_discovery_progress",
+                {"task_id": task_id, "progress": 2, "message": "正在调度计算引擎启动扫描...", "status": "running"},
+            )
             await self._broadcast_snapshot()
 
             try:

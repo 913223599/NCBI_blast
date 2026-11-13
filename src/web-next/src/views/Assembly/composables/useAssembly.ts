@@ -134,16 +134,21 @@ export function useAssembly() {
       }
 
       const assignedTaskId = res.task_id || res.data?.task_id || taskId;
-      const queuePos = res.queue_position || res.data?.queue_position || 1;
+      const rawPos = res.queue_position ?? res.data?.queue_position ?? 1;
+      const queuePos = Number(rawPos) > 0 ? Number(rawPos) : 1;
+      const backendIsBusy = Boolean(res.is_busy ?? res.data?.is_busy ?? isQueued);
+      const backendStatus = res.status || res.data?.status;
+      const shouldWaitInQueue = backendIsBusy || isQueued || queuePos > 1 || backendStatus === 'queued';
 
       if (currentTask.value && currentTask.value.id === taskId) {
         currentTask.value.id = assignedTaskId;
         currentTask.value.queue_position = queuePos;
-        currentTask.value.status = queuePos > 1 ? 'queued' : 'running';
-        if (queuePos > 1) {
+        currentTask.value.status = shouldWaitInQueue ? 'queued' : 'running';
+        if (shouldWaitInQueue) {
           currentTask.value.last_step = `排队中 (#${queuePos})`;
         }
       }
+      isRunning.value = !shouldWaitInQueue;
       activeTaskId.value = assignedTaskId;
 
       // 后台静默刷新历史
@@ -257,8 +262,64 @@ export function useAssembly() {
   onMounted(async () => {
     await fetchHistory();
 
-    // 监听 assembly 广播事件 (包含实时日志与流式进度)
+    // 监听 assembly 广播事件 (包含队列状态、实时日志与流式进度)
     unsubscribeProgress = onEvent((type: string, data: any) => {
+      // 0. 队列状态实时快照同步
+      if (type === 'assembly_queue_status' && data) {
+        const snapshotList: any[] = Array.isArray(data.queue) ? data.queue : [];
+        const runningItem =
+          data.running_task ||
+          snapshotList.find((item: any) => item.status === 'running' || item.id === data.current_task_id) ||
+          null;
+        const waitingItems = Array.isArray(data.waiting_tasks)
+          ? data.waiting_tasks
+          : snapshotList.filter((item: any) => item.status === 'pending' || item.status === 'queued');
+
+        queueStatus.value = {
+          running_task: runningItem,
+          waiting_count: typeof data.waiting_count === 'number' ? data.waiting_count : waitingItems.length,
+          waiting_tasks: waitingItems,
+          is_busy: typeof data.is_busy === 'boolean' ? data.is_busy : Boolean(data.current_task_id || runningItem),
+        };
+
+        const waitingMap = new Map<string, number>();
+        waitingItems.forEach((w: any, idx: number) => {
+          waitingMap.set(w.id, typeof w.position === 'number' ? w.position : idx + 1);
+        });
+
+        historyTasks.value.forEach((t) => {
+          if (data.current_task_id && t.id === data.current_task_id) {
+            if (t.status !== 'completed' && t.status !== 'failed' && t.status !== 'aborted') {
+              t.status = 'running';
+            }
+          } else if (waitingMap.has(t.id)) {
+            const pos = waitingMap.get(t.id) || 1;
+            t.status = 'queued';
+            t.queue_position = pos;
+            t.last_step = `排队中 (#${pos})`;
+          }
+        });
+
+        if (currentTask.value) {
+          if (data.current_task_id && currentTask.value.id === data.current_task_id) {
+            if (
+              currentTask.value.status !== 'completed' &&
+              currentTask.value.status !== 'failed' &&
+              currentTask.value.status !== 'aborted'
+            ) {
+              currentTask.value.status = 'running';
+              isRunning.value = true;
+            }
+          } else if (waitingMap.has(currentTask.value.id)) {
+            const pos = waitingMap.get(currentTask.value.id) || 1;
+            currentTask.value.status = 'queued';
+            currentTask.value.queue_position = pos;
+            currentTask.value.last_step = `排队中 (#${pos})`;
+            isRunning.value = false;
+          }
+        }
+      }
+
       // 1. 实时底层控制台输出流 (毫秒级滚屏)
       if (type === 'assembly_log' && data) {
         const { task_id, line } = data;

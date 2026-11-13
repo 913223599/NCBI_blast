@@ -12,6 +12,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'cancel'): void
+  (e: 'start-new'): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -37,7 +38,10 @@ watch(
           <span class="task-id-label">任务编号: {{ taskId }}</span>
         </div>
       </div>
-      <button type="button" class="cancel-btn" @click="emit('cancel')">中止任务</button>
+      <div class="header-actions">
+        <button type="button" class="queue-new-btn" @click="emit('start-new')">新建排队</button>
+        <button type="button" class="cancel-btn" @click="emit('cancel')">中止任务</button>
+      </div>
     </div>
 
     <div class="bar-section">
@@ -117,6 +121,27 @@ watch(
   font-size: 12px;
   color: #64748b;
   font-family: 'Consolas', monospace;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queue-new-btn {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #2563eb;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.queue-new-btn:hover {
+  background: #dbeafe;
 }
 
 .cancel-btn {

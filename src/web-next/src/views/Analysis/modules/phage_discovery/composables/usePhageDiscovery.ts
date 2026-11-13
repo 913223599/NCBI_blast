@@ -43,12 +43,79 @@ export function usePhageDiscovery() {
   const inspectTotalBp = ref<number>(0)
   const selectedContigIds = ref<string[]>([])
 
+  const isQueued = computed(() => {
+    return currentTask.value?.status === 'queued'
+  })
+
   const isRunning = computed(() => {
-    const st = currentTask.value?.status
-    return st === 'running' || st === 'queued'
+    return currentTask.value?.status === 'running'
+  })
+
+  const isQueueBusy = computed(() => {
+    return (
+      Boolean(queueStatus.value.is_busy) ||
+      queueStatus.value.running_count > 0 ||
+      queueStatus.value.queued_count > 0 ||
+      historyList.value.some((t) => t.status === 'running' || t.status === 'queued')
+    )
   })
 
   let unsubscribeWs: (() => void) | null = null
+  let pollingTimer: ReturnType<typeof setInterval> | null = null
+
+  function syncQueueSnapshot(snap: PhageQueueSnapshot): void {
+    queueStatus.value = snap
+    const runningSet = new Set(snap.running || [])
+    const waitingPosMap = new Map<string, number>()
+
+    if (Array.isArray(snap.waiting_tasks) && snap.waiting_tasks.length > 0) {
+      snap.waiting_tasks.forEach((w, idx) => {
+        waitingPosMap.set(w.task_id, typeof w.position === 'number' ? w.position : idx + 1)
+      })
+    } else {
+      ;(snap.queued || []).forEach((tid, idx) => {
+        waitingPosMap.set(tid, idx + 1)
+      })
+    }
+
+    const activeSnapshotIds = [...runningSet, ...waitingPosMap.keys()]
+    if (activeSnapshotIds.some((id) => !historyList.value.some((t) => t.task_id === id))) {
+      loadHistory()
+    }
+
+    historyList.value.forEach((item) => {
+      if (runningSet.has(item.task_id)) {
+        if (item.status !== 'completed' && item.status !== 'failed' && item.status !== 'cancelled') {
+          item.status = 'running'
+          delete item.queue_position
+        }
+      } else if (waitingPosMap.has(item.task_id)) {
+        const pos = waitingPosMap.get(item.task_id) || 1
+        item.status = 'queued'
+        item.queue_position = pos
+        item.current_step = `排队等待中 (#${pos})`
+      }
+    })
+
+    if (currentTask.value) {
+      const curId = currentTask.value.task_id
+      if (runningSet.has(curId)) {
+        if (
+          currentTask.value.status !== 'completed' &&
+          currentTask.value.status !== 'failed' &&
+          currentTask.value.status !== 'cancelled'
+        ) {
+          currentTask.value.status = 'running'
+          delete currentTask.value.queue_position
+        }
+      } else if (waitingPosMap.has(curId)) {
+        const pos = waitingPosMap.get(curId) || 1
+        currentTask.value.status = 'queued'
+        currentTask.value.queue_position = pos
+        currentTask.value.current_step = `排队等待中 (#${pos})`
+      }
+    }
+  }
 
   async function loadCapabilities(): Promise<void> {
     isCapabilitiesLoading.value = true
@@ -65,7 +132,7 @@ export function usePhageDiscovery() {
   async function loadQueueStatus(): Promise<void> {
     try {
       const snap: PhageQueueSnapshot = await bridge.get_phage_discovery_queue_status()
-      if (snap) queueStatus.value = snap
+      if (snap) syncQueueSnapshot(snap)
     } catch (err) {
       console.error('[PhageDiscovery] 拉取队列状态失败:', err)
     }
@@ -75,6 +142,18 @@ export function usePhageDiscovery() {
     try {
       const res = await bridge.get_phage_discovery_history(100)
       historyList.value = Array.isArray(res?.tasks) ? res.tasks : []
+      const waitingPosMap = new Map<string, number>()
+      ;(queueStatus.value.queued || []).forEach((tid, idx) => waitingPosMap.set(tid, idx + 1))
+      const runningSet = new Set(queueStatus.value.running || [])
+
+      historyList.value.forEach((item) => {
+        if (runningSet.has(item.task_id) && item.status === 'queued') {
+          item.status = 'running'
+        } else if (waitingPosMap.has(item.task_id) && item.status === 'queued') {
+          item.queue_position = waitingPosMap.get(item.task_id)
+        }
+      })
+
       if (currentTask.value) {
         const refreshed = historyList.value.find((t) => t.task_id === currentTask.value?.task_id)
         if (refreshed) {
@@ -103,8 +182,13 @@ export function usePhageDiscovery() {
 
   async function selectTask(task: PhageTaskRecord): Promise<void> {
     errorMsg.value = ''
-    currentTask.value = task
+    const isSwitching = currentTask.value?.task_id !== task.task_id
+    if (isSwitching) {
+      consoleLogs.value = []
+    }
+    currentTask.value = { ...task }
     currentResult.value = null
+    await loadQueueStatus()
     if (task.status === 'completed') {
       await loadTaskResult(task.task_id)
     }
@@ -192,6 +276,8 @@ export function usePhageDiscovery() {
       const res = await bridge.run_phage_discovery_task(payload)
       const taskId: string = res?.task_id
       if (taskId) {
+        const queuePos = Number(res?.queue_position || 1)
+        const busy = Boolean(res?.is_busy || isQueueBusy.value || queuePos > 1)
         const placeholder: PhageTaskRecord = {
           task_id: taskId,
           task_name: payload.task_name,
@@ -200,23 +286,24 @@ export function usePhageDiscovery() {
           device: res?.device || form.device,
           apply_protein_gate: form.apply_protein_gate,
           status: 'queued',
-          progress: 2,
-          current_step: '已加入 V4.2 调度队列...',
+          progress: 0,
+          queue_position: queuePos,
+          current_step: busy ? `排队等待中 (#${queuePos})` : '已加入 V4.2 调度队列...',
           created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
           updated_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
           summary: {},
           files: {},
           result_path: '',
         }
+        historyList.value = [placeholder, ...historyList.value.filter((t) => t.task_id !== taskId)]
         currentTask.value = placeholder
         currentResult.value = null
         consoleLogs.value.push({
           time: formatNowTime(),
-          line: `[QUEUE] 已创建扫描任务 ${taskId} (模型: Student V4.2, 设备: ${placeholder.device})`,
+          line: `[QUEUE] 已提交扫描任务 ${taskId} (位次: #${queuePos}, 设备: ${placeholder.device})`,
           level: 'info',
         })
-        await loadHistory()
-        await loadQueueStatus()
+        await Promise.all([loadHistory(), loadQueueStatus()])
       }
     } catch (err) {
       errorMsg.value = `提交扫描任务失败: ${String(err)}`
@@ -227,8 +314,19 @@ export function usePhageDiscovery() {
 
   async function cancelTask(taskId: string): Promise<void> {
     try {
-      await bridge.cancel_phage_discovery_task(taskId)
-      await loadHistory()
+      const res = await bridge.cancel_phage_discovery_task(taskId)
+      if (res?.status === 'cancelled') {
+        if (currentTask.value?.task_id === taskId) {
+          currentTask.value.status = 'cancelled'
+          currentTask.value.current_step = '任务已取消'
+        }
+        const matched = historyList.value.find((t) => t.task_id === taskId)
+        if (matched) {
+          matched.status = 'cancelled'
+          matched.current_step = '任务已取消'
+        }
+      }
+      await Promise.all([loadHistory(), loadQueueStatus()])
     } catch (err) {
       errorMsg.value = `取消任务失败: ${String(err)}`
     }
@@ -300,7 +398,7 @@ export function usePhageDiscovery() {
 
   function handleWsEvent(eventType: string, data: any): void {
     if (eventType === 'phage_discovery_queue_update' && data) {
-      queueStatus.value = data
+      syncQueueSnapshot(data as PhageQueueSnapshot)
       return
     }
     if (!data || !data.task_id) return
@@ -352,12 +450,22 @@ export function usePhageDiscovery() {
   onMounted(async () => {
     unsubscribeWs = onEvent(handleWsEvent)
     await Promise.all([loadCapabilities(), loadHistory(), loadQueueStatus()])
+    pollingTimer = setInterval(() => {
+      if (isQueueBusy.value || isQueued.value || isRunning.value) {
+        loadQueueStatus()
+        loadHistory()
+      }
+    }, 2500)
   })
 
   onUnmounted(() => {
     if (unsubscribeWs) {
       unsubscribeWs()
       unsubscribeWs = null
+    }
+    if (pollingTimer) {
+      clearInterval(pollingTimer)
+      pollingTimer = null
     }
   })
 
@@ -373,7 +481,9 @@ export function usePhageDiscovery() {
     isSubmitting,
     isResultLoading,
     isInspecting,
+    isQueued,
     isRunning,
+    isQueueBusy,
     inspectedContigs,
     inspectTotalBp,
     selectedContigIds,

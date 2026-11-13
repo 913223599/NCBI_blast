@@ -4,6 +4,7 @@ import { usePhageDiscovery } from './composables/usePhageDiscovery'
 import type { PhageContigOverlayData } from './types'
 import PhageDiscoveryHistory from './components/PhageDiscoveryHistory.vue'
 import PhageDiscoveryProgress from './components/PhageDiscoveryProgress.vue'
+import PhageDiscoveryQueueCard from './components/PhageDiscoveryQueueCard.vue'
 import PhageDiscoveryResults from './components/PhageDiscoveryResults.vue'
 import PhageDiscoverySetup from './components/PhageDiscoverySetup.vue'
 
@@ -24,7 +25,9 @@ const {
   isSubmitting,
   isResultLoading,
   isInspecting,
+  isQueued,
   isRunning,
+  isQueueBusy,
   inspectedContigs,
   inspectTotalBp,
   loadCapabilities,
@@ -200,7 +203,7 @@ async function handleOpenAnnotation(regionIndex?: number): Promise<void> {
             :is-capabilities-loading="isCapabilitiesLoading"
             :is-inspecting="isInspecting"
             :is-submitting="isSubmitting"
-            :is-queue-busy="queueStatus.running_count > 0 || queueStatus.queued_count > 0"
+            :is-queue-busy="isQueueBusy"
             :inspected-contigs="inspectedContigs"
             :inspect-total-bp="inspectTotalBp"
             @submit="submitTask"
@@ -210,7 +213,17 @@ async function handleOpenAnnotation(regionIndex?: number): Promise<void> {
           />
         </section>
 
-        <!-- 2.2 队列/推理进度 -->
+        <!-- 2.2 排队等待卡片 -->
+        <section v-else-if="isQueued" :key="`queued-${currentTask.task_id}`">
+          <PhageDiscoveryQueueCard
+            :task="currentTask"
+            :queue-status="queueStatus"
+            @cancel="cancelTask(currentTask.task_id)"
+            @start-new="startNewTask"
+          />
+        </section>
+
+        <!-- 2.3 运行推理进度 -->
         <section v-else-if="isRunning" :key="`progress-${currentTask.task_id}`">
           <PhageDiscoveryProgress
             :progress="currentTask.progress"
@@ -219,6 +232,7 @@ async function handleOpenAnnotation(regionIndex?: number): Promise<void> {
             :task-id="currentTask.task_id"
             :status="currentTask.status"
             @cancel="cancelTask(currentTask.task_id)"
+            @start-new="startNewTask"
           />
         </section>
 

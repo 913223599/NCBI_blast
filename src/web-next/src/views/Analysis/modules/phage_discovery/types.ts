@@ -195,14 +195,31 @@ export interface PhageTaskRecord {
   summary: Partial<PhageScanSummary>
   files: Record<string, string>
   result_path: string
+  queue_position?: number
+}
+
+export interface PhageQueueTaskItem {
+  task_id: string
+  task_name: string
+  model_version?: string
+  device?: string
+  apply_protein_gate?: boolean
+  status?: string
+  progress?: number
+  current_step?: string
+  created_at?: string
+  position?: number
 }
 
 export interface PhageQueueSnapshot {
   max_workers: number
+  is_busy?: boolean
   running: string[]
   queued: string[]
   running_count: number
   queued_count: number
+  running_tasks?: PhageQueueTaskItem[]
+  waiting_tasks?: PhageQueueTaskItem[]
 }
 
 export interface PhageLogItem {

@@ -202,10 +202,16 @@ class PersistentAssemblyQueue:
         """同步并广播当前队列状态快照"""
         try:
             snapshot = await self.get_queue_status()
+            running_item = next((t for t in snapshot if t.get("status") == "running"), None)
+            waiting_items = [t for t in snapshot if t.get("status") in ("pending", "queued")]
             await broadcaster.broadcast("assembly_queue_status", {
                 "queue": snapshot,
                 "paused": self._paused,
-                "current_task_id": self._current_task_id
+                "current_task_id": self._current_task_id,
+                "running_task": running_item,
+                "waiting_count": len(waiting_items),
+                "waiting_tasks": waiting_items,
+                "is_busy": self._current_task_id is not None,
             })
         except Exception as e:
             logger.error(f"广播队列状态失败: {e}")

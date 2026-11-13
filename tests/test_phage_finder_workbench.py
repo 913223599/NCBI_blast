@@ -505,3 +505,152 @@ def test_completeness_classification_with_protein_gate_tiers():
     assert k_dis == "intact_like"
 
 
+def test_phage_queue_strict_serial_cancel_and_snapshot_metadata(tmp_path: Path):
+    import asyncio
+
+    async def _scenario() -> None:
+        db = PhageDiscoveryDB(tmp_path / "queue_serial.db")
+        q = PhageDiscoveryQueue(max_workers=1, db=db)
+
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        executed_order = []
+        active_now = 0
+        max_active_seen = 0
+
+        async def _fake_executor(task_id: str, req, context):
+            nonlocal active_now, max_active_seen
+            active_now += 1
+            max_active_seen = max(max_active_seen, active_now)
+            executed_order.append(task_id)
+            if task_id == "t1":
+                first_started.set()
+                await release_first.wait()
+            db.mark_completed(task_id, {"region_count": 0}, {}, "")
+            active_now -= 1
+
+        q.set_executor(_fake_executor)
+        await q.start()
+
+        for tid, name in (("t1", "Genome_Alpha"), ("t2", "Genome_Beta"), ("t3", "Genome_Gamma")):
+            db.create_task(tid, name, "student_v4_2", "V4.2", "cpu", False, status="queued")
+            await q.enqueue(tid, None, {})
+
+        await asyncio.wait_for(first_started.wait(), timeout=2.0)
+
+        snap = q.get_queue_snapshot()
+        assert max_active_seen == 1
+        assert snap["running"] == ["t1"]
+        assert snap["queued"] == ["t2", "t3"]
+        assert snap["is_busy"] is True
+        assert snap["running_tasks"][0]["task_id"] == "t1"
+        assert snap["running_tasks"][0]["task_name"] == "Genome_Alpha"
+        assert [w["task_id"] for w in snap["waiting_tasks"]] == ["t2", "t3"]
+        assert [w["position"] for w in snap["waiting_tasks"]] == [1, 2]
+
+        # 取消排队中的 t2：必须立刻从 queued 与 waiting_tasks 剔除，且 t3 位次前移为 #1
+        cancel_res = await q.cancel_task("t2")
+        assert cancel_res["status"] == "cancelled"
+        snap_after_cancel = q.get_queue_snapshot()
+        assert snap_after_cancel["queued"] == ["t3"]
+        assert snap_after_cancel["queued_count"] == 1
+        assert [w["task_id"] for w in snap_after_cancel["waiting_tasks"]] == ["t3"]
+        assert snap_after_cancel["waiting_tasks"][0]["position"] == 1
+        t2_row = db.get_task("t2")
+        assert t2_row is not None and t2_row["status"] == "cancelled"
+
+        # 释放 t1 后，仅 t3 按序执行，max_active_seen 始终为 1
+        release_first.set()
+        deadline = asyncio.get_running_loop().time() + 2.0
+        while asyncio.get_running_loop().time() < deadline:
+            s = q.get_queue_snapshot()
+            if s["running_count"] == 0 and s["queued_count"] == 0:
+                break
+            await asyncio.sleep(0.02)
+
+        assert max_active_seen == 1
+        assert executed_order == ["t1", "t3"]
+        t3_row = db.get_task("t3")
+        assert t3_row is not None and t3_row["status"] == "completed"
+
+        for w in q._workers:
+            w.cancel()
+        await asyncio.gather(*q._workers, return_exceptions=True)
+
+    asyncio.run(_scenario())
+
+
+def test_manager_rapid_concurrent_submit_and_delete_queued(tmp_path: Path, monkeypatch):
+    import asyncio
+    from src.analysis.phage_finder.types import PhageScanRunRequest
+
+    model_dir = tmp_path / "models" / "full_v4" / "student_v4_2"
+    _create_mock_v4_2_dir(model_dir)
+
+    async def _scenario() -> None:
+        db = PhageDiscoveryDB(tmp_path / "rapid_submit.db")
+        mgr = PhageDiscoveryManager(project_root=tmp_path)
+        mgr.db = db
+        mgr.queue = PhageDiscoveryQueue(max_workers=1, db=db)
+
+        t1_entered = asyncio.Event()
+        release_t1 = asyncio.Event()
+        executed = []
+
+        async def _fake_exec(task_id: str, req, context):
+            executed.append(task_id)
+            if len(executed) == 1:
+                t1_entered.set()
+                await release_t1.wait()
+            db.mark_completed(task_id, {"region_count": 0}, {}, "")
+
+        mgr.queue.set_executor(_fake_exec)
+        await mgr.initialize_queue_worker()
+
+        monkeypatch.setattr(
+            "src.analysis.phage_finder.manager.detect_compute_environment",
+            lambda: {"default_device": "cpu", "cuda_available": False, "cpu_count": 4, "safe_workers": 2},
+        )
+
+        fasta_body = f">c1\n{_synth_dna(4000)}\n"
+        req1 = PhageScanRunRequest(task_name="Rapid_1", fasta_content=fasta_body, device="cpu")
+        req2 = PhageScanRunRequest(task_name="Rapid_2", fasta_content=fasta_body, device="cpu")
+        req3 = PhageScanRunRequest(task_name="Rapid_3", fasta_content=fasta_body, device="cpu")
+
+        res1, res2, res3 = await asyncio.gather(
+            mgr.submit_task(req1),
+            mgr.submit_task(req2),
+            mgr.submit_task(req3),
+        )
+        assert len({res1["task_id"], res2["task_id"], res3["task_id"]}) == 3
+        assert res1["status"] == "queued"
+        assert "queue_position" in res2 and res2["queue_position"] >= 1
+        assert res3["is_busy"] is True or res3["queued_count"] >= 2
+
+        await asyncio.wait_for(t1_entered.wait(), timeout=2.0)
+
+        # 删除尚在排队的第 2 个任务后，它绝不应被调度执行
+        mgr.delete_task(res2["task_id"])
+        assert db.get_task(res2["task_id"]) is None
+        assert res2["task_id"] not in mgr.queue.get_queue_snapshot()["queued"]
+
+        release_t1.set()
+        deadline = asyncio.get_running_loop().time() + 2.0
+        while asyncio.get_running_loop().time() < deadline:
+            s = mgr.queue.get_queue_snapshot()
+            if s["running_count"] == 0 and s["queued_count"] == 0:
+                break
+            await asyncio.sleep(0.02)
+
+        assert res1["task_id"] in executed
+        assert res2["task_id"] not in executed
+        assert res3["task_id"] in executed
+
+        for w in mgr.queue._workers:
+            w.cancel()
+        await asyncio.gather(*mgr.queue._workers, return_exceptions=True)
+
+    asyncio.run(_scenario())
+
+
+

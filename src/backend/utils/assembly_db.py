@@ -157,11 +157,11 @@ class AssemblyDB:
             return [dict(row) for row in cursor.fetchall()]
 
     def get_queued_tasks(self) -> List[Dict[str, Any]]:
-        """获取所有等待中的任务 (仅 pending)，按创建时间排序"""
+        """获取所有等待中的任务 (pending / queued)，按创建时间排序"""
         with sqlite3.connect(self.DB_PATH) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT * FROM assembly_tasks WHERE status = 'pending' ORDER BY created_at ASC"
+                "SELECT * FROM assembly_tasks WHERE status IN ('pending', 'queued') ORDER BY created_at ASC"
             )
             return [dict(row) for row in cursor.fetchall()]
 

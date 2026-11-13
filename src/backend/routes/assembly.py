@@ -91,13 +91,25 @@ async def run_assembly_job(payload: Dict[str, Any]):
     assembly_db.create_task(task_id, name, sample_id, sample_type, tech, config)
     
     # 3. 加入持久化队列
+    was_busy = assembly_queue.current_task_id is not None or assembly_queue.get_queue_size() > 0
     await assembly_queue.add_task(payload)
-    
-    queue_size = assembly_queue.get_queue_size()
+
+    waiting_queue = assembly_queue._queue or []
+    queue_pos = next(
+        (idx + 1 for idx, item in enumerate(waiting_queue) if item.get("task_id") == task_id),
+        assembly_queue.get_queue_size(),
+    )
+    is_busy_now = bool(
+        was_busy
+        or (assembly_queue.current_task_id is not None and assembly_queue.current_task_id != task_id)
+        or len(waiting_queue) > 1
+    )
     return BioResponse.ok({
         "message": "Task queued successfully",
         "task_id": task_id,
-        "queue_position": queue_size
+        "status": "queued",
+        "is_busy": is_busy_now,
+        "queue_position": max(1, queue_pos),
     })
 
 

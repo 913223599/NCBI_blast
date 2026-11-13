@@ -8,6 +8,7 @@
 import asyncio
 import json
 import logging
+import secrets
 import shutil
 import time
 from datetime import datetime
@@ -133,8 +134,8 @@ class PhageDiscoveryManager:
         else:
             resolved_dev = env["default_device"]
 
-        ts_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:18]
-        task_id = f"phage_{ts_id}"
+        ts_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        task_id = f"phage_{ts_id}_{secrets.token_hex(3)}"
         out_dir = self.results_root / task_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -166,11 +167,15 @@ class PhageDiscoveryManager:
             "gate_resources": gate_resources,
             "device_fallback": requested_dev == "cuda" and not env["cuda_available"],
         }
-        await self.queue.enqueue(task_id, req, context)
+        enqueue_info = await self.queue.enqueue(task_id, req, context)
 
         return {
             "task_id": task_id,
             "status": "queued",
+            "queue_position": enqueue_info.get("queue_position", 1),
+            "is_busy": bool(enqueue_info.get("is_busy", False)),
+            "running_count": int(enqueue_info.get("running_count", 0)),
+            "queued_count": int(enqueue_info.get("queued_count", 1)),
             "model": model_info,
             "device": resolved_dev,
             "message": "前噬菌体扫描任务已加入调度队列",
@@ -495,6 +500,7 @@ class PhageDiscoveryManager:
         return await self.queue.cancel_task(task_id)
 
     def delete_task(self, task_id: str) -> None:
+        self.queue.remove_from_waiting(task_id)
         task = self.db.get_task(task_id)
         if not task:
             return

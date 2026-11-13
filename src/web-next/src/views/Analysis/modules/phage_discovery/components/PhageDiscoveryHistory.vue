@@ -16,7 +16,10 @@ function formatDate(dateStr?: string): string {
   return dateStr.slice(5, 16)
 }
 
-function getStatusText(status: PhageTaskRecord['status']): string {
+function getStatusText(item: PhageTaskRecord): string {
+  if (item.status === 'queued') {
+    return item.queue_position ? `排队中 #${item.queue_position}` : '排队中'
+  }
   const map: Record<PhageTaskRecord['status'], string> = {
     queued: '排队中',
     running: '扫描中',
@@ -24,7 +27,7 @@ function getStatusText(status: PhageTaskRecord['status']): string {
     failed: '失败',
     cancelled: '已中止',
   }
-  return map[status] || status
+  return map[item.status] || item.status
 }
 </script>
 
@@ -49,7 +52,7 @@ function getStatusText(status: PhageTaskRecord['status']): string {
       <div class="item-main">
         <div class="item-top">
           <span class="item-title" :title="item.task_name">{{ item.task_name || item.task_id }}</span>
-          <span class="status-pill" :class="item.status">{{ getStatusText(item.status) }}</span>
+          <span class="status-pill" :class="item.status">{{ getStatusText(item) }}</span>
         </div>
 
         <div class="item-meta">
