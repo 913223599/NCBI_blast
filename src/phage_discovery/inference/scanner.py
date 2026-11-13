@@ -18,7 +18,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from ..benchmark.metrics import PredictedRegion, WindowPrediction, decode_subwindow_probs_to_regions
+from ..benchmark.metrics import (
+    PredictedRegion,
+    WindowPrediction,
+    assemble_contig_subbin_profile,
+    decode_subwindow_probs_to_regions,
+)
 from ..data.feature_dataset import iter_fasta
 from ..experts.expert_c_orf import extract_contig_orf_tokens
 from ..experts.seq_dataset import encode_dna, reverse_complement_codes
@@ -54,6 +59,127 @@ class ScanResult:
     verified_regions: List[PredictedRegion]
     gate_details: List[RegionGateResult] = field(default_factory=list)
     timings_sec: Dict[str, float] = field(default_factory=dict)
+    region_profiles: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    contig_score_tracks: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+
+
+def _collect_region_profiles(
+    win_preds: Sequence[WindowPrediction],
+    sub_probs: np.ndarray,
+    subbin_profiles: Optional[Dict[str, List[Tuple[int, np.ndarray]]]],
+    regions: Sequence[PredictedRegion],
+    contigs_bp: Dict[str, int],
+    *,
+    smooth_profile: bool,
+    bin_bp: int = 200,
+    flank_bp: int = 2000,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """仅对命中的前噬菌体区段采集含侧翼的 200bp 置信度剖面（供工作台边界曲线可视化）。"""
+    if not regions or not win_preds or len(sub_probs) == 0:
+        return {}
+
+    from collections import defaultdict
+    by_contig_idx: Dict[str, List[int]] = defaultdict(list)
+    for idx, wp in enumerate(win_preds):
+        by_contig_idx[wp.contig_id].append(idx)
+
+    by_contig_regs: Dict[str, List[PredictedRegion]] = defaultdict(list)
+    for reg in regions:
+        by_contig_regs[reg.contig_id].append(reg)
+
+    profiles_out: Dict[str, List[Dict[str, Any]]] = {}
+    for cid, c_regs in by_contig_regs.items():
+        idxs = by_contig_idx.get(cid, [])
+        if not idxs:
+            continue
+        contig_end = contigs_bp.get(cid, 0)
+        prof = assemble_contig_subbin_profile(
+            [win_preds[i] for i in idxs],
+            [sub_probs[i] for i in idxs],
+            contig_end,
+            bin_bp=bin_bp,
+            precomputed_segments=subbin_profiles.get(cid) if subbin_profiles else None,
+            smooth_profile=smooth_profile,
+        )
+        n_bins = len(prof)
+        for reg in c_regs:
+            key = f"{reg.contig_id}:{reg.start_bp}-{reg.end_bp}"
+            s_flank = max(0, reg.start_bp - flank_bp)
+            e_flank = min(contig_end, reg.end_bp + flank_bp)
+            b0 = max(0, s_flank // bin_bp)
+            b1 = min(n_bins, max(b0 + 1, (e_flank + bin_bp - 1) // bin_bp))
+            bins_list: List[Dict[str, Any]] = []
+            for bi in range(b0, b1):
+                bs = bi * bin_bp
+                be = min(contig_end, bs + bin_bp)
+                bins_list.append(
+                    {
+                        "start_bp": bs,
+                        "end_bp": be,
+                        "prob": round(float(prof[bi]), 4),
+                        "in_region": bs < reg.end_bp and be > reg.start_bp,
+                    }
+                )
+            profiles_out[key] = bins_list
+    return profiles_out
+
+
+def _collect_contig_score_tracks(
+    win_preds: Sequence[WindowPrediction],
+    contigs_bp: Dict[str, int],
+    *,
+    num_bins: int = 360,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """将全 Contig 滑动窗口概率下采样为固定分箱景观波形，用于全基因组叠图浏览。"""
+    if not contigs_bp:
+        return {}
+
+    from collections import defaultdict
+
+    by_contig: Dict[str, List[WindowPrediction]] = defaultdict(list)
+    for wp in win_preds:
+        by_contig[wp.contig_id].append(wp)
+
+    tracks: Dict[str, List[Dict[str, Any]]] = {}
+    for cid, c_len in contigs_bp.items():
+        if c_len <= 0:
+            tracks[cid] = []
+            continue
+        actual_bins = min(max(1, c_len // 200), max(16, num_bins))
+        bin_step = max(1.0, float(c_len) / float(actual_bins))
+        wps = by_contig.get(cid, [])
+        max_scores = np.zeros(actual_bins, dtype=np.float32)
+        sum_scores = np.zeros(actual_bins, dtype=np.float32)
+        cnt_scores = np.zeros(actual_bins, dtype=np.int32)
+
+        for wp in wps:
+            b0 = max(0, min(actual_bins - 1, int(float(wp.start_bp) / bin_step)))
+            b1 = max(b0, min(actual_bins - 1, int(float(max(wp.start_bp, wp.end_bp - 1)) / bin_step)))
+            sc = float(wp.score)
+            for bi in range(b0, b1 + 1):
+                if sc > max_scores[bi]:
+                    max_scores[bi] = sc
+                sum_scores[bi] += sc
+                cnt_scores[bi] += 1
+
+        bins_out: List[Dict[str, Any]] = []
+        for bi in range(actual_bins):
+            sb = round(bi * bin_step)
+            eb = min(c_len, round((bi + 1) * bin_step))
+            if eb <= sb:
+                eb = min(c_len, sb + 1)
+            cnt = int(cnt_scores[bi])
+            mean_v = float(sum_scores[bi]) / float(cnt) if cnt > 0 else 0.0
+            bins_out.append(
+                {
+                    "start_bp": sb,
+                    "end_bp": eb,
+                    "max_prob": round(float(max_scores[bi]), 4),
+                    "mean_prob": round(mean_v, 4),
+                }
+            )
+        tracks[cid] = bins_out
+    return tracks
 
 
 def _extract_contig_worker(args: Tuple[str, str, int, int, bool]) -> Dict[str, Any]:
@@ -81,6 +207,7 @@ class GenomeScanner:
         win_size: int = 5000,
         step_size: int = 2500,
         blast_db: Optional[Path] = None,
+        blastp_bin: str = "blastp",
         gate_config: Optional[ProteinGateConfig] = None,
         workers: Optional[int] = None,
         device: Optional[str] = None,
@@ -108,6 +235,7 @@ class GenomeScanner:
         self.refine_pad_bp = refine_pad_bp
         self.smooth_sub_profile = smooth_sub_profile
         self.blast_db = Path(blast_db) if blast_db else None
+        self.blastp_bin = blastp_bin
         self.gate_config = gate_config or ProteinGateConfig(enabled=(blast_db is not None))
         cpu_cnt = os.cpu_count() or 4
         self.workers = workers if workers is not None else max(1, cpu_cnt - 2)
@@ -184,13 +312,19 @@ class GenomeScanner:
         model_dir: Path,
         *,
         blast_db: Optional[Path] = None,
+        blastp_bin: str = "blastp",
         gate_config: Optional[ProteinGateConfig] = None,
         workers: Optional[int] = None,
         device: Optional[str] = None,
         use_context_refiner: Optional[bool] = None,
         use_subbin_refiner: Optional[bool] = None,
+        seed_threshold: Optional[float] = None,
+        extend_threshold: Optional[float] = None,
+        sub_threshold: Optional[float] = None,
+        merge_gap_bp: Optional[int] = None,
+        min_region_bp: Optional[int] = None,
     ) -> "GenomeScanner":
-        """从模型输出目录自动检测 V4/V3/V2 模型权重与 val 标定阈值。"""
+        """从模型输出目录自动检测 V4/V3/V2 模型权重与 val 标定阈值（支持覆盖核心阈值）。"""
         import json
 
         root = Path(model_dir).resolve()
@@ -212,14 +346,17 @@ class GenomeScanner:
                 meta_path=v4_meta,
                 use_context_refiner=use_context_refiner,
                 use_subbin_refiner=use_subbin_refiner,
-                seed_threshold=float(dec.get("seed_threshold", 0.85)),
-                extend_threshold=float(dec.get("extend_threshold", 0.50)),
-                sub_threshold=float(dec.get("sub_threshold", 0.45)),
+                seed_threshold=float(seed_threshold if seed_threshold is not None else dec.get("seed_threshold", 0.85)),
+                extend_threshold=float(extend_threshold if extend_threshold is not None else dec.get("extend_threshold", 0.50)),
+                sub_threshold=float(sub_threshold if sub_threshold is not None else dec.get("sub_threshold", 0.45)),
+                merge_gap_bp=merge_gap_bp if merge_gap_bp is not None else 3000,
+                min_region_bp=min_region_bp if min_region_bp is not None else 3000,
                 plateau_min_windows=int(dec.get("plateau_min_windows", 0)),
                 plateau_second_threshold=dec.get("plateau_second_threshold"),
                 refine_pad_bp=dec.get("refine_pad_bp"),
                 smooth_sub_profile=dec.get("smooth_profile"),
                 blast_db=blast_db,
+                blastp_bin=blastp_bin,
                 gate_config=gate_config,
                 workers=workers,
                 device=device,
@@ -233,10 +370,13 @@ class GenomeScanner:
 
         return cls(
             model_pt_path=root / "student_distilled.pt",
-            seed_threshold=float(dec.get("seed_threshold", 0.85)),
-            extend_threshold=float(dec.get("extend_threshold", 0.50)),
-            sub_threshold=float(dec.get("sub_threshold", 0.45)),
+            seed_threshold=float(seed_threshold if seed_threshold is not None else dec.get("seed_threshold", 0.85)),
+            extend_threshold=float(extend_threshold if extend_threshold is not None else dec.get("extend_threshold", 0.50)),
+            sub_threshold=float(sub_threshold if sub_threshold is not None else dec.get("sub_threshold", 0.45)),
+            merge_gap_bp=merge_gap_bp if merge_gap_bp is not None else 3000,
+            min_region_bp=min_region_bp if min_region_bp is not None else 3000,
             blast_db=blast_db,
+            blastp_bin=blastp_bin,
             gate_config=gate_config,
             workers=workers,
             device=device,
@@ -366,6 +506,8 @@ class GenomeScanner:
         *,
         apply_protein_gate: Optional[bool] = None,
         hit_fetcher: Optional[Callable[[Sequence[Tuple[str, str]]], Dict[str, Tuple[float, str]]]] = None,
+        collect_profiles: bool = False,
+        profile_flank_bp: int = 2000,
     ) -> ScanResult:
         """对内存中给定的 contig 字典执行双阶段扫描。"""
         t_feat0 = time.perf_counter()
@@ -474,6 +616,7 @@ class GenomeScanner:
                 raw_regions,
                 blast_db=self.blast_db,
                 config=self.gate_config,
+                blastp_bin=self.blastp_bin,
                 threads=self.workers,
                 hit_fetcher=hit_fetcher,
             )
@@ -481,6 +624,25 @@ class GenomeScanner:
             verified_regions = list(raw_regions)
             gate_details = []
         gate_sec = round(time.perf_counter() - t_gate0, 3)
+
+        region_profiles = (
+            _collect_region_profiles(
+                win_preds,
+                sub_probs,
+                subbin_profiles,
+                raw_regions,
+                contigs_bp,
+                smooth_profile=smooth_prof,
+                flank_bp=profile_flank_bp,
+            )
+            if collect_profiles
+            else {}
+        )
+        contig_score_tracks = (
+            _collect_contig_score_tracks(win_preds, contigs_bp)
+            if collect_profiles
+            else {}
+        )
 
         return ScanResult(
             contigs_bp=contigs_bp,
@@ -496,6 +658,8 @@ class GenomeScanner:
                 "gate_sec": gate_sec,
                 "total_sec": round(feature_sec + student_sec + decode_sec + gate_sec, 3),
             },
+            region_profiles=region_profiles,
+            contig_score_tracks=contig_score_tracks,
         )
 
     def scan_fasta(
@@ -504,6 +668,8 @@ class GenomeScanner:
         *,
         apply_protein_gate: Optional[bool] = None,
         hit_fetcher: Optional[Callable[[Sequence[Tuple[str, str]]], Dict[str, Tuple[float, str]]]] = None,
+        collect_profiles: bool = False,
+        profile_flank_bp: int = 2000,
     ) -> ScanResult:
         """读取 FASTA 文件并执行双阶段扫描。"""
         contig_seqs = {cid: seq for cid, seq in iter_fasta(Path(fasta_path))}
@@ -511,4 +677,6 @@ class GenomeScanner:
             contig_seqs,
             apply_protein_gate=apply_protein_gate,
             hit_fetcher=hit_fetcher,
+            collect_profiles=collect_profiles,
+            profile_flank_bp=profile_flank_bp,
         )

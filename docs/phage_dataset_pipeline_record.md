@@ -506,3 +506,34 @@ Pop-Location
    - `pyrefly check src/ tests/`（`.venv` 与默认环境双重校核）：全仓库错误数 **`0 errors`**；`src/phage_discovery/` 与 `src/utils/phage_dataset/` 达到 **`0 diagnostics`**（消除 `GroupKFold.split` 参数类型冲突、`implicit-import`、`os.system` 弃用调用及冗余类型强转）。
    - `ruff check` 对 `src/phage_discovery/`、`src/utils/phage_dataset/` 及本次修复模块与测试全部通过。
    - 前端构建验证 `npm run build --prefix src/web-next`（`vue-tsc -b && vite build`）正常退出（`0`）。
+
+---
+
+## 17. Student V4.2 接入组装分析工作台与 `protein_compare` 移除
+
+1. **彻底移除 `核心功能蛋白同源性比对 (protein_compare)`**
+   - 删除 `src/analysis/protein_compare/`、`src/backend/routes/protein_compare.py`、`src/web-next/src/views/Analysis/modules/protein_compare/` 及失效单测 `tests/test_disambiguation.py`、`tests/test_nomenclature.py`、`tests/test_engineering_optimizations.py` 中对应测试。
+2. **仅保留 Student V4.2 版本接入工作台引擎 (`src/analysis/phage_finder/`)**
+   - `model_registry.py`：采用项目根相对路径、`PHAGE_DISCOVERY_*` 环境变量与 `ConfigManager` 动态发现模型与蛋白库，仅识别包含 `student_v4.pt + student_v4_meta.json + subbin_refiner.pt` 的完整 **Student V4.2** 版本，过滤 `V2 / V3.1 / V4.1`；按 `cpu_count() - 2` 计算多核安全并发数。
+   - `metrics.py` 与 `scanner.py`：抽取共享 `assemble_contig_subbin_profile(...)`，在 `ScanResult` 补充 `region_profiles` 200 bp 边界概率剖面与 `blastp_bin` 注入支持。
+   - `db.py` / `queue.py` / `manager.py` / `exporter.py`：SQLite WAL 持久化、单序列 CUDA 异步队列（`gc.collect()` + `torch.cuda.empty_cache()` / `ipc_collect()` 显存回收）、支持 FASTA / FASTA.GZ / GenBank 预检，按需导出 FASTA、TSV、GFF3、GBK 及带 3 kb 侧翼+Pyrodigal ORF 注释的单区微基因组 GenBank，并以 `src/backend/routes/phage_discovery.py` 挂载至 `api_server.py`。
+3. **前端工作台界面与跨模块联动 (`src/web-next/src/views/Analysis/`)**
+   - 新增 `modules/phage_discovery/`，支持文件上传/粘贴/组装历史导入、复用 `ContigSelector` 多 Contig 筛选、计算设备与可选 BLASTp 蛋白门控切换、Contig 全长线性轨道 SVG 与 200 bp SubBin 边界曲线 SVG 展示，以及一键跳转 `GenomeViewerModule` 与 `AnnotationModule`。
+4. **全栈静态检验与端到端回归测试**
+   - `pyrefly`：全仓库 `0 errors`，工作台新模块及测试 `--min-severity=warn` `0 diagnostics`。
+   - `ruff check`：本次修改与新增 Python 模块及测试全部通过（`All checks passed!`）。
+   - 前端构建：`npm run build --prefix src/web-next`（`vue-tsc -b && vite build`）退出码 `0`。
+   - 真实权重冒烟：自动识别本地 `V4.2`（`has_subbin_refiner=True`）及 `NVIDIA GeForce RTX 4070 Laptop GPU`，端到端推理成功。
+   - 全仓库回归：`.\.venv\Scripts\python.exe -m pytest tests/ -q --tb=short` 运行通过 **`196 passed in 258.80s (0:04:18)`**（`0 failed, 0 skipped`）。
+
+---
+
+## 18. 全基因组底图与预测前噬菌体交互式叠图模块 (`PhageOverlayMap`)
+
+1. **序列底图保真解析与连续景观采样 (`scanner.py`, `exporter.py`, `manager.py`, `routes/phage_discovery.py`)**
+   - `scanner.py` 新增 `_collect_contig_score_tracks` 与 `ScanResult.contig_score_tracks`：当启用 `collect_profiles=True` 时，为每条目标 Contig 生成至多 360 分箱的 V4.2 模型连续 `max_prob / mean_prob` 概率曲线数据。
+   - `exporter.py` 新增 `load_sequences_with_annotations`（自动辨识 GenBank 与 FASTA/FASTA.GZ 输入，完整保留原 GenBank 中的 `CDS` / `tRNA` / `rRNA` / `mobile_element` 注释；若为纯 FASTA，则采用 `pyrodigal` 自动构建碱基坐标系特征骨架）、`_compute_contig_base_tracks`（360 分箱 `GC%` 与 `GC Skew`）、`build_contig_overlay_gbk`（整条 Contig 底图与 `prophage_region` 融合 GenBank），并按 Rule 9 分片落盘至 `results/phage_discovery/<task_id>/overlays/contig_<i>.json`。
+   - 新增路由端点 `GET /api/analysis/phage_discovery/{task_id}/overlay` 与 `/overlay-gbk`。
+2. **前端双模态交互式叠图工作台 (`PhageOverlayMap.vue` & `GenomeViewerModule.vue`)**
+   - `PhageOverlayMap.vue` 支持**线性多轨道对齐叠图**与**环形全长叠图**即时切换、滚轮缩放、左键拖拽漫游、顶部/底部全局 Minimap 俯瞰快速跳转、独立图层开关（底图特征 / V4.2 概率曲线 / `GC%` 偏移 / `GC Skew` / 蛋白门控滤除对照）、底图特征实时关键词搜索与步进高亮定位（如 `integrase`, `tRNA`, `dnaA`）、大基因组智能视口过滤抽稀、SVG 矢量导出及一键生成并跳转 `GenomeViewer` 查看整条 Contig 叠图。
+   - 同步增强 `GenomeViewerModule.vue`：分离 `prophageOverlayFeatures` (`type === 'prophage_region'`) 至跨正负链半透明包络亮点层，确保全序列底图 CDS 箭头与预测噬菌体区段同时清晰展现。

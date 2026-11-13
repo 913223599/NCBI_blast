@@ -254,9 +254,9 @@ const electronBridge = {
                 { name: 'Sequence Files', extensions: ['fasta', 'fas', 'fa', 'fna', 'seq', 'txt'] },
                 { name: 'Archives', extensions: ['zip', 'gz'] }
             ];
-        } else if (fileType === 'annotation' || fileType === 'gbk' || fileType === 'protein') {
-            // 注释与蛋白质比对场景
-            dialogTitle = '选择导入: 注释与蛋白质序列文件 (GBK/FASTA)';
+        } else if (fileType === 'annotation' || fileType === 'gbk' || fileType === 'phage') {
+            // 基因组与注释序列场景
+            dialogTitle = '选择导入: 基因组序列与注释文件 (FASTA/GBK)';
             filters = [
                 { name: '注释与序列文件', extensions: ['gbk', 'gb', 'genbank', 'faa', 'fasta', 'fa', 'fna', 'gff', 'gff3', 'json'] },
                 { name: 'GenBank 文件 (*.gbk, *.gb, *.genbank)', extensions: ['gbk', 'gb', 'genbank'] },
@@ -1016,24 +1016,93 @@ const electronBridge = {
         return await apiPost(`/api/analysis/annotation/${taskId}/cancel`, {});
     },
 
-    // ═══ 组装分析：核心蛋白跨样本比对 (Protein Comparison) ═══
-    async get_protein_compare_categories(): Promise<any> {
-        return await apiGet('/api/analysis/protein_compare/categories');
-    },
-
-    async get_comparable_annotation_tasks(): Promise<any> {
-        return await apiGet('/api/analysis/protein_compare/tasks');
-    },
-
-    async run_protein_comparison(payload: { sample_a_id: string; sample_b_id: string; sample_a_name?: string; sample_b_name?: string; category: string }): Promise<any> {
-        return await apiPost('/api/analysis/protein_compare/run', payload);
-    },
-
-    async import_external_compare_file(filePath: string, taskName?: string): Promise<any> {
-        return await apiPost('/api/analysis/protein_compare/import_external', {
-            file_path: filePath,
-            task_name: taskName
+    // ═══ 组装分析：前噬菌体与噬菌体智能发现 (Student V4.2) ═══
+    async request_directory_select(title: string = '选择目录'): Promise<string | null> {
+        const electron = window.electronAPI;
+        if (!electron?.openFileDialog) return null;
+        const paths = await electron.openFileDialog({
+            title,
+            properties: ['openDirectory'],
         });
+        return paths && paths.length > 0 ? (paths[0] ?? null) : null;
+    },
+
+    async get_phage_discovery_models(): Promise<any> {
+        return await apiGet('/api/analysis/phage_discovery/models');
+    },
+
+    async save_phage_discovery_config(payload: {
+        models_root?: string;
+        default_model_dir?: string;
+        blast_db?: string;
+    }): Promise<any> {
+        return await apiPost('/api/analysis/phage_discovery/config', payload);
+    },
+
+    async inspect_phage_discovery_fasta(payload: {
+        fasta_path?: string;
+        fasta_content?: string;
+    }): Promise<any> {
+        return await apiPost('/api/analysis/phage_discovery/inspect', payload);
+    },
+
+    async run_phage_discovery_task(payload: any): Promise<any> {
+        return await apiPost('/api/analysis/phage_discovery/run', payload);
+    },
+
+    async get_phage_discovery_queue_status(): Promise<any> {
+        return await apiGet('/api/analysis/phage_discovery/queue/status');
+    },
+
+    async get_phage_discovery_history(limit: number = 100): Promise<any> {
+        return await apiGet(`/api/analysis/phage_discovery/history?limit=${limit}`);
+    },
+
+    async get_phage_discovery_result(taskId: string): Promise<any> {
+        return await apiGet(`/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/result`);
+    },
+
+    async get_phage_discovery_region_gbk(taskId: string, regionIndex: number): Promise<any> {
+        return await apiGet(
+            `/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/region/${regionIndex}/gbk`
+        );
+    },
+
+    async get_phage_discovery_overlay(taskId: string, contigId?: string): Promise<any> {
+        const query = contigId ? `?contig_id=${encodeURIComponent(contigId)}` : '';
+        return await apiGet(
+            `/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/overlay${query}`
+        );
+    },
+
+    async get_phage_discovery_overlay_gbk(taskId: string, contigId?: string): Promise<any> {
+        const query = contigId ? `?contig_id=${encodeURIComponent(contigId)}` : '';
+        return await apiGet(
+            `/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/overlay-gbk${query}`
+        );
+    },
+
+    async get_phage_discovery_fasta_text(taskId: string, regionIndex?: number): Promise<any> {
+        const query = regionIndex !== undefined ? `?region_index=${regionIndex}` : '';
+        return await apiGet(
+            `/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/fasta-text${query}`
+        );
+    },
+
+    async cancel_phage_discovery_task(taskId: string): Promise<any> {
+        return await apiPost(`/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/cancel`);
+    },
+
+    async delete_phage_discovery_task(taskId: string): Promise<any> {
+        return await apiDelete(`/api/analysis/phage_discovery/${encodeURIComponent(taskId)}`);
+    },
+
+    async open_phage_discovery_folder(taskId: string): Promise<any> {
+        return await apiPost(`/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/open-folder`);
+    },
+
+    get_phage_discovery_download_url(taskId: string, fileType: 'fasta' | 'tsv' | 'gff3' | 'gbk'): string {
+        return `${API_BASE}/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/download/${fileType}`;
     },
 
     async get_pan_genomics_samples(): Promise<any> {

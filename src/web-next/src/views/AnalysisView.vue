@@ -7,7 +7,7 @@
 import { ref } from 'vue'
 import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue'
 import AnnotationModule from './Analysis/modules/annotation/AnnotationModule.vue'
-import ProteinCompareModule from './Analysis/modules/protein_compare/ProteinCompareModule.vue'
+import PhageDiscoveryModule from './Analysis/modules/phage_discovery/PhageDiscoveryModule.vue'
 import PanGenomicsModule from './Analysis/modules/pan_genomics/PanGenomicsModule.vue'
 import SangerTraceModule from './Analysis/modules/sanger_trace/SangerTraceModule.vue'
 
@@ -15,7 +15,7 @@ interface AnalysisTool {
   id: string;
   title: string;
   description: string;
-  iconType: 'chart' | 'dna' | 'book' | 'compare' | 'pangenome' | 'trace';
+  iconType: 'chart' | 'dna' | 'book' | 'phage' | 'pangenome' | 'trace';
   status: 'ready' | 'beta' | 'coming_soon';
 }
 
@@ -35,10 +35,10 @@ const tools = ref<AnalysisTool[]>([
     status: 'ready'
   },
   { 
-    id: 'protein_compare', 
-    title: '核心功能蛋白同源性比对', 
-    description: '比对两个样本中结构蛋白、裂解酶及复制酶等核心功能基因的同源性、序列一致性、氨基酸点突变及变异图谱。', 
-    iconType: 'compare',
+    id: 'phage_discovery', 
+    title: '前噬菌体与噬菌体智能发现', 
+    description: '基于 Student V4.2 与 200bp SubBinRefiner 边界精修模型，从宿主全基因组或拼接 Contigs 中精准分割前噬菌体区域，支持可选蛋白门控验证与联动注释。', 
+    iconType: 'phage',
     status: 'ready'
   },
   { 
@@ -59,9 +59,12 @@ const tools = ref<AnalysisTool[]>([
 
 const activeTool = ref<string | null>(null)
 
-// 传递给 GenomeViewer 的跨模块数据
+// 传递给 GenomeViewer 与 Annotation 的跨模块数据
 const viewerInitialGbk = ref<string>('')
 const viewerInitialName = ref<string>('')
+const annotationInitialFasta = ref<string>('')
+const annotationInitialName = ref<string>('')
+const annotationInitialSampleType = ref<'PHAGE' | 'BACTERIA' | 'VIRUS' | 'GENERAL'>('PHAGE')
 
 function selectTool(tool: AnalysisTool) {
   if (tool.status === 'coming_soon') return
@@ -73,6 +76,13 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
   viewerInitialName.value = payload.taskName
   activeTool.value = 'viewer'
 }
+
+function handleOpenAnnotationFromPhage(payload: { fastaText: string; taskName: string; sampleType?: string }) {
+  annotationInitialFasta.value = payload.fastaText
+  annotationInitialName.value = payload.taskName
+  annotationInitialSampleType.value = (payload.sampleType as any) || 'PHAGE'
+  activeTool.value = 'annotation'
+}
 </script>
 
 <template>
@@ -80,7 +90,7 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
     <header class="analysis-header">
       <div class="header-content">
         <h1>组装分析工作台</h1>
-        <p>基因组功能注释与比较基因组学分析工作台，支持结构与功能注释、同源蛋白比对、多样本泛基因组分析、Sanger 测序突变解析及序列图谱可视化。</p>
+        <p>基因组功能注释与比较基因组学分析工作台，支持结构与功能注释、V4.2 前噬菌体边界发现、多样本泛基因组分析、Sanger 测序突变解析及序列图谱可视化。</p>
       </div>
       <div class="header-stats" v-if="!activeTool">
          <div class="stat-badge">
@@ -116,12 +126,11 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
               <line x1="9" y1="7" x2="15" y2="7" />
               <line x1="9" y1="11" x2="13" y2="11" />
             </svg>
-            <svg v-else-if="tool.iconType === 'compare'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2.2">
-              <path d="M16 3h5v5" />
-              <path d="M4 20L21 3" />
-              <path d="M21 16v5h-5" />
-              <path d="M15 15l6 6" />
-              <path d="M4 4l5 5" />
+            <svg v-else-if="tool.iconType === 'phage'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.1">
+              <polygon points="12 2 19 6 19 13 12 17 5 13 5 6 12 2" />
+              <line x1="12" y1="17" x2="12" y2="22" />
+              <path d="M8 22l4-2 4 2" />
+              <circle cx="12" cy="9.5" r="2.2" />
             </svg>
             <svg v-else-if="tool.iconType === 'pangenome'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.2">
               <circle cx="12" cy="12" r="3" />
@@ -160,9 +169,16 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
         <SangerTraceModule v-if="activeTool === 'sanger_trace'" />
         <AnnotationModule 
           v-else-if="activeTool === 'annotation'" 
+          :initial-fasta="annotationInitialFasta"
+          :initial-name="annotationInitialName"
+          :initial-sample-type="annotationInitialSampleType"
           @open-viewer="handleOpenViewerFromAnnotation" 
         />
-        <ProteinCompareModule v-else-if="activeTool === 'protein_compare'" />
+        <PhageDiscoveryModule
+          v-else-if="activeTool === 'phage_discovery'"
+          @open-viewer="handleOpenViewerFromAnnotation"
+          @open-annotation="handleOpenAnnotationFromPhage"
+        />
         <PanGenomicsModule v-else-if="activeTool === 'pan_genomics'" />
         <GenomeViewerModule 
           v-else-if="activeTool === 'viewer'" 

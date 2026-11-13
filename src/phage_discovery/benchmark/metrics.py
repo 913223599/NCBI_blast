@@ -205,6 +205,53 @@ def decode_window_scores_to_regions(
     return regions
 
 
+def assemble_contig_subbin_profile(
+    contig_win_preds: Sequence[WindowPrediction],
+    contig_sub_probs: Sequence[np.ndarray],
+    contig_end: int,
+    *,
+    bin_bp: int = 200,
+    precomputed_segments: Optional[Sequence[Tuple[int, np.ndarray]]] = None,
+    smooth_profile: bool = True,
+) -> np.ndarray:
+    """将单条 contig 的滑窗 25-bin 亚窗口概率拼接为连续 200bp 置信度剖面。"""
+    n_bins = max(1, (contig_end + bin_bp - 1) // bin_bp)
+    prof_sum = np.zeros(n_bins, dtype=np.float64)
+    prof_cnt = np.zeros(n_bins, dtype=np.float64)
+
+    for wp, sp_raw in zip(contig_win_preds, contig_sub_probs):
+        sp = np.asarray(sp_raw, dtype=np.float64)
+        n_sub = max(1, len(sp))
+        w_span = max(1, wp.end_bp - wp.start_bp)
+        sub_w = float(w_span) / float(n_sub)
+        for k in range(n_sub):
+            bs = wp.start_bp + round(k * sub_w)
+            be = wp.start_bp + round((k + 1) * sub_w)
+            i0 = max(0, min(n_bins - 1, bs // bin_bp))
+            i1 = max(i0 + 1, min(n_bins, (be + bin_bp - 1) // bin_bp))
+            prof_sum[i0:i1] += float(sp[k])
+            prof_cnt[i0:i1] += 1.0
+
+    prof = np.divide(prof_sum, np.maximum(prof_cnt, 1.0))
+    if precomputed_segments:
+        for seg_origin, seg_prof in precomputed_segments:
+            seg_arr = np.asarray(seg_prof, dtype=np.float32)
+            if len(seg_arr) == 0:
+                continue
+            b_start = seg_origin // bin_bp
+            dst_0 = max(0, b_start)
+            src_0 = max(0, -b_start)
+            copy_len = min(n_bins - dst_0, len(seg_arr) - src_0)
+            if copy_len > 0:
+                prof[dst_0:dst_0 + copy_len] = seg_arr[src_0:src_0 + copy_len]
+    elif smooth_profile and n_bins >= 3:
+        smoothed = prof.copy()
+        smoothed[1:-1] = 0.2 * prof[:-2] + 0.6 * prof[1:-1] + 0.2 * prof[2:]
+        prof = smoothed
+
+    return prof
+
+
 def decode_subwindow_probs_to_regions(
     window_preds: Sequence[WindowPrediction],
     sub_probs: np.ndarray,
@@ -252,40 +299,16 @@ def decode_subwindow_probs_to_regions(
     refined_all: List[PredictedRegion] = []
     for cid, c_regs in sorted(coarse_by_contig.items()):
         contig_end = max_end_by_contig.get(cid, 0)
-        n_bins = max(1, (contig_end + bin_bp - 1) // bin_bp)
-        prof_sum = np.zeros(n_bins, dtype=np.float64)
-        prof_cnt = np.zeros(n_bins, dtype=np.float64)
-
-        for idx in by_contig_idx[cid]:
-            wp = window_preds[idx]
-            sp = np.asarray(sub_probs[idx], dtype=np.float64)
-            n_sub = max(1, len(sp))
-            w_span = max(1, wp.end_bp - wp.start_bp)
-            sub_w = float(w_span) / float(n_sub)
-            for k in range(n_sub):
-                bs = wp.start_bp + round(k * sub_w)
-                be = wp.start_bp + round((k + 1) * sub_w)
-                i0 = max(0, min(n_bins - 1, bs // bin_bp))
-                i1 = max(i0 + 1, min(n_bins, (be + bin_bp - 1) // bin_bp))
-                prof_sum[i0:i1] += float(sp[k])
-                prof_cnt[i0:i1] += 1.0
-
-        prof = np.divide(prof_sum, np.maximum(prof_cnt, 1.0))
-        if precomputed_bin_profiles and cid in precomputed_bin_profiles:
-            for seg_origin, seg_prof in precomputed_bin_profiles[cid]:
-                seg_arr = np.asarray(seg_prof, dtype=np.float32)
-                if len(seg_arr) == 0:
-                    continue
-                b_start = seg_origin // bin_bp
-                dst_0 = max(0, b_start)
-                src_0 = max(0, -b_start)
-                copy_len = min(n_bins - dst_0, len(seg_arr) - src_0)
-                if copy_len > 0:
-                    prof[dst_0:dst_0 + copy_len] = seg_arr[src_0:src_0 + copy_len]
-        elif smooth_profile and n_bins >= 3:
-            smoothed = prof.copy()
-            smoothed[1:-1] = 0.2 * prof[:-2] + 0.6 * prof[1:-1] + 0.2 * prof[2:]
-            prof = smoothed
+        idxs = by_contig_idx[cid]
+        prof = assemble_contig_subbin_profile(
+            [window_preds[i] for i in idxs],
+            [sub_probs[i] for i in idxs],
+            contig_end,
+            bin_bp=bin_bp,
+            precomputed_segments=precomputed_bin_profiles.get(cid) if precomputed_bin_profiles else None,
+            smooth_profile=smooth_profile,
+        )
+        n_bins = len(prof)
 
         refined_contig: List[PredictedRegion] = []
         pad_bins = max(1, refine_pad_bp // bin_bp)

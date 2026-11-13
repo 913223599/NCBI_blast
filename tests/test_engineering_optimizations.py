@@ -7,12 +7,11 @@
 3. 全库 Python 后端与 Vue/TS/JS 前端源码零彩色 Emoji、UTF-8 编码声明及 open() 显式编码合规性
 4. BlastStore SQLite WAL 模式、复合索引、批量事务落盘及 BlastTask 500 条内存封顶
 5. GPUSequenceMatcher 向量化 3-mer 滑动窗口局部突变不变性与分块距离矩阵准确性
-6. ProteinComparer 模块化拆分、多拷贝相同序列 1:1 配对及 >=400 对候选集下远缘同源蛋白召回
+6. 前噬菌体发现模型路径解析器动态发现机制与零硬编码盘符字面量
 7. other_tools 路由层与 schemas / sangon_order_inspector 解耦兼容性及零冗余导入
 """
 import ast
 import json
-import random
 import re
 import sqlite3
 import tempfile
@@ -22,13 +21,6 @@ from pathlib import Path
 import numpy as np
 
 from src.analysis.pan_genomics.gpu_accelerator import GPUSequenceMatcher
-from src.analysis.protein_compare.categories import PROTEIN_CATEGORIES, resolve_domain_names
-from src.analysis.protein_compare.engine import ProteinComparer
-from src.analysis.protein_compare.models import (
-    ProteinComparisonResult,
-    ProteinComparisonRow,
-    ProteinItem,
-)
 from src.assembly.utils.path_resolver import (
     get_candidate_safe_work_dirs,
     resolve_ngcs_cli,
@@ -204,136 +196,6 @@ def test_gpu_sequence_matcher_3mer_locality_and_candidate_pairs():
     )
     assert (0, 1) in pairs
     assert (0, 2) not in pairs
-
-
-def test_protein_comparer_identical_duplicates_and_remote_homolog_recall():
-    """
-    验证蛋白比对引擎：
-    1. 多拷贝完全相同序列按次序 1:1 配对，不产生虚假的 unique_b；
-    2. 在 >=400 对候选集下，产品名不同、一致度约 48% 的远缘同源蛋白不被 3-mer 排序丢弃。
-    """
-    assert "capsid_head" in PROTEIN_CATEGORIES
-    dom_names = resolve_domain_names("lysis", "endolysin")
-    assert isinstance(dom_names, tuple) and len(dom_names) == 3
-
-    comparer = ProteinComparer()
-    identical_seq = "MKTLLLTLVVVTIVCLDLGYT" * 4
-    items_a = [
-        ProteinItem(
-            id=f"A_{i}",
-            locus_tag=f"LOC_A_{i}",
-            product="major capsid protein",
-            translation=identical_seq,
-            length_aa=len(identical_seq),
-            start=1 + i * 300,
-            end=252 + i * 300,
-            strand="+",
-            category="capsid_head",
-        )
-        for i in range(4)
-    ]
-    items_b = [
-        ProteinItem(
-            id=f"B_{i}",
-            locus_tag=f"LOC_B_{i}",
-            product="major capsid protein",
-            translation=identical_seq,
-            length_aa=len(identical_seq),
-            start=1 + i * 300,
-            end=252 + i * 300,
-            strand="+",
-            category="capsid_head",
-        )
-        for i in range(4)
-    ]
-    res = comparer.compare_two_samples(
-        "StrainA",
-        items_a,
-        "StrainB",
-        items_b,
-        target_category="capsid_head",
-    )
-    assert isinstance(res, ProteinComparisonResult)
-    assert res.total_compared_pairs == 4
-    assert res.identical_count == 4
-    assert all(isinstance(r, ProteinComparisonRow) and r.match_status == "identical" for r in res.rows)
-
-    # 构造 21 x 21 = 441 对 (>=400) 候选集，检验 ~48% 一致度且产品名不同的同源对召回
-    rng = random.Random(42)
-    alphabet = "ACDEFGHIKLMNPQRSTVWY"
-    base_homolog = "".join(rng.choice(alphabet) for _ in range(120))
-    mutated_chars = list(base_homolog)
-    # 保持连续 3-mer 种子使 K-mer 剪枝通过，整体一致度约 50%
-    for pos in range(60, 120):
-        mutated_chars[pos] = alphabet[(alphabet.index(mutated_chars[pos]) + 7) % len(alphabet)]
-    remote_homolog = "".join(mutated_chars)
-
-    large_a = [
-        ProteinItem(
-            id="A_REMOTE",
-            locus_tag="A_REMOTE",
-            product="putative structural protein alpha",
-            translation=base_homolog,
-            length_aa=len(base_homolog),
-            start=1,
-            end=360,
-            strand="+",
-            category="capsid_head",
-        )
-    ]
-    large_b = [
-        ProteinItem(
-            id="B_REMOTE",
-            locus_tag="B_REMOTE",
-            product="uncharacterized virion component beta",
-            translation=remote_homolog,
-            length_aa=len(remote_homolog),
-            start=1,
-            end=360,
-            strand="+",
-            category="capsid_head",
-        )
-    ]
-    for i in range(20):
-        seq_noise_a = "".join(rng.choice(alphabet) for _ in range(120))
-        seq_noise_b = "".join(rng.choice(alphabet) for _ in range(120))
-        large_a.append(
-            ProteinItem(
-                id=f"A_NOISE_{i}",
-                locus_tag=f"A_NOISE_{i}",
-                product=f"noise protein a{i}",
-                translation=seq_noise_a,
-                length_aa=120,
-                start=1,
-                end=360,
-                strand="+",
-                category="capsid_head",
-            )
-        )
-        large_b.append(
-            ProteinItem(
-                id=f"B_NOISE_{i}",
-                locus_tag=f"B_NOISE_{i}",
-                product=f"noise protein b{i}",
-                translation=seq_noise_b,
-                length_aa=120,
-                start=1,
-                end=360,
-                strand="+",
-                category="capsid_head",
-            )
-        )
-
-    large_res = comparer.compare_two_samples(
-        "LargeA",
-        large_a,
-        "LargeB",
-        large_b,
-        target_category="capsid_head",
-    )
-    remote_row = next(r for r in large_res.rows if r.sample_a_id == "A_REMOTE")
-    assert remote_row.sample_b_id == "B_REMOTE"
-    assert 45.0 <= remote_row.identity_pct <= 55.0
 
 
 def test_other_tools_modular_schemas_and_clean_imports():

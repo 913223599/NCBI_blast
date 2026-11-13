@@ -10,6 +10,9 @@ import ContigSelector from './ContigSelector.vue';
 const props = defineProps<{
   isRunning: boolean;
   isBusy?: boolean;
+  initialFasta?: string;
+  initialName?: string;
+  initialSampleType?: 'PHAGE' | 'BACTERIA' | 'VIRUS' | 'GENERAL';
 }>();
 
 const emit = defineEmits<{
@@ -55,6 +58,19 @@ const isAssemblyLoading = ref<boolean>(false);
 
 // 高级参数折叠开关
 const showAdvanced = ref<boolean>(false);
+
+watch(
+  () => [props.initialFasta, props.initialName, props.initialSampleType] as const,
+  ([fasta, name, sampleType]) => {
+    if (!fasta || !fasta.trim()) return;
+    inputMode.value = 'paste';
+    form.fasta_path = '';
+    form.fasta_content = fasta;
+    if (name && name.trim()) form.task_name = name.trim();
+    if (sampleType) form.sample_type = sampleType;
+  },
+  { immediate: true }
+);
 
 // 预设示例数据
 const SAMPLE_FASTA = `>NC_005816.1 Yersinia pestis KIM 10 plasmid pPCP1, complete sequence

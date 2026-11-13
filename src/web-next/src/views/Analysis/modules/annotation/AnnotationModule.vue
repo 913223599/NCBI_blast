@@ -3,7 +3,7 @@
  * AnnotationModule - 基因组功能注释工作台主模块
  * 采用 侧边栏-主内容 桌面端双栏架构
  */
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useAnnotation } from './composables/useAnnotation';
 import AnnotationHistory from './components/AnnotationHistory.vue';
 import AnnotationSetup from './components/AnnotationSetup.vue';
@@ -11,6 +11,12 @@ import AnnotationProgress from './components/AnnotationProgress.vue';
 import AnnotationResults from './components/AnnotationResults.vue';
 import AnnotationQueueCard from './components/AnnotationQueueCard.vue';
 import type { AnnotationTaskItem, AnnotationRunParams } from './types';
+
+const props = defineProps<{
+  initialFasta?: string;
+  initialName?: string;
+  initialSampleType?: 'PHAGE' | 'BACTERIA' | 'VIRUS' | 'GENERAL';
+}>();
 
 const emit = defineEmits<{
   (e: 'open-viewer', payload: { gbkText: string; taskName: string }): void;
@@ -37,12 +43,22 @@ const {
 // 是否显示新建任务表单
 const showSetupForm = ref<boolean>(false);
 
+watch(
+  () => props.initialFasta,
+  (val) => {
+    if (val && val.trim()) {
+      showSetupForm.value = true;
+    }
+  },
+  { immediate: true }
+);
+
 onMounted(async () => {
   await fetchHistory();
   const firstTask = historyTasks.value[0];
-  if (firstTask && !activeTaskId.value) {
+  if (firstTask && !activeTaskId.value && !props.initialFasta) {
     await loadTaskResult(firstTask.task_id);
-  } else if (historyTasks.value.length === 0) {
+  } else if (historyTasks.value.length === 0 || props.initialFasta) {
     showSetupForm.value = true;
   }
 });
@@ -147,7 +163,14 @@ function onStartNew() {
 
         <!-- 2.1 新建配置面板 (新建模式独占) -->
         <section v-if="showSetupForm || !currentTask" key="setup-panel" class="section-setup">
-          <AnnotationSetup :is-running="isRunning" :is-busy="isEngineBusy" @run="onRunTask" />
+          <AnnotationSetup
+            :is-running="isRunning"
+            :is-busy="isEngineBusy"
+            :initial-fasta="props.initialFasta"
+            :initial-name="props.initialName"
+            :initial-sample-type="props.initialSampleType"
+            @run="onRunTask"
+          />
         </section>
 
         <!-- 2.2 排队等待卡片 -->

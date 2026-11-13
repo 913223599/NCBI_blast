@@ -251,10 +251,29 @@
                   </template>
                 </g>
 
+                <!-- 4.5 预测前噬菌体跨链半透明叠图包络层 (Circular Overlay Track) -->
+                <g class="prophage-overlay-layer" v-if="prophageOverlayFeatures.length > 0">
+                  <path
+                    v-for="(pf, pi) in prophageOverlayFeatures"
+                    :key="'poverlay_' + pi"
+                    :d="getCircularPath({ ...pf, strand: '+' }, sequenceLength, { innerR: 175, outerR: 254 })"
+                    fill="#0ea5e9"
+                    :fill-opacity="selectedFeature === pf ? 0.28 : 0.16"
+                    stroke="#0284c7"
+                    :stroke-width="selectedFeature === pf ? 2.2 : 1.2"
+                    class="feature-glyph"
+                    @mouseenter="hoverFeature = pf"
+                    @mouseleave="hoverFeature = null"
+                    @click.stop="selectFeature(pf)"
+                  >
+                    <title>{{ pf.locus_tag || pf.name }}: {{ pf.product || 'Predicted Prophage' }} [{{ pf.start }}..{{ pf.end }} bp]</title>
+                  </path>
+                </g>
+
                 <!-- 5. 核心基因特征图谱 (正链在外轨 R=215~245，负链在内轨 R=180~210) -->
                 <g class="features-layer">
                   <path 
-                    v-for="(f, i) in features" 
+                    v-for="(f, i) in baseTrackFeatures" 
                     :key="'feat_'+i"
                     :d="getCircularPath(f, sequenceLength, f.strand === '+' ? { innerR: 215, outerR: 245 } : { innerR: 180, outerR: 210 })"
                     :fill="getFeatureColor(f.type, f.category, f.product)"
@@ -318,10 +337,41 @@
                   >{{ tick.label }}</text>
                 </g>
 
+                <!-- 预测前噬菌体跨链半透明叠图高亮层 (Linear Overlay Track) -->
+                <g class="linear-prophage-overlay" v-if="prophageOverlayFeatures.length > 0 && sequenceLength > 0">
+                  <g
+                    v-for="(pf, pi) in prophageOverlayFeatures"
+                    :key="'lpoverlay_' + pi"
+                    class="feature-glyph"
+                    @mouseenter="hoverFeature = pf"
+                    @mouseleave="hoverFeature = null"
+                    @click.stop="selectFeature(pf)"
+                  >
+                    <rect
+                      :x="(pf.start / sequenceLength) * computedLinearWidth"
+                      y="-38"
+                      :width="Math.max(4, ((pf.end - pf.start) / sequenceLength) * computedLinearWidth)"
+                      height="76"
+                      rx="3"
+                      fill="#0ea5e9"
+                      :fill-opacity="selectedFeature === pf ? 0.24 : 0.14"
+                      stroke="#0284c7"
+                      :stroke-width="selectedFeature === pf ? 2 : 1"
+                    />
+                    <text
+                      :x="(pf.start / sequenceLength) * computedLinearWidth + 3"
+                      y="-41"
+                      fill="#0369a1"
+                      font-size="9.5"
+                      font-weight="700"
+                    >{{ pf.locus_tag || pf.name }}</text>
+                  </g>
+                </g>
+
                 <!-- 特征图形渲染 (正链上方，负链下方) -->
                 <g class="linear-features">
                   <path 
-                    v-for="(f, i) in features" 
+                    v-for="(f, i) in baseTrackFeatures" 
                     :key="'lfeat_' + i"
                     :d="getLinearPath(f, sequenceLength, computedLinearWidth, { linearY: f.strand === '+' ? -28 : 8, rowHeight: 20 })" 
                     :fill="getFeatureColor(f.type, f.category, f.product)"
@@ -589,6 +639,14 @@ function isFeatureDimmed(f: any): boolean {
 const filteredFeatures = computed(() => {
   return features.value.filter(matchesSearchAndFilter);
 });
+
+const prophageOverlayFeatures = computed(() =>
+  features.value.filter((f: any) => f.type === "prophage_region")
+);
+
+const baseTrackFeatures = computed(() =>
+  features.value.filter((f: any) => f.type !== "prophage_region")
+);
 
 // GC 轨迹路径
 const gcPaths = computed(() => {
