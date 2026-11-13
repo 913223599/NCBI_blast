@@ -539,3 +539,22 @@ Pop-Location
    - 同步增强 `GenomeViewerModule.vue`：分离 `prophageOverlayFeatures` (`type === 'prophage_region'`) 至跨正负链半透明包络亮点层，确保全序列底图 CDS 箭头与预测噬菌体区段同时清晰展现。
 3. **蛋白门控完整度分级枚举对齐修复 (`exporter.py`)**
    - 修正 `_classify_completeness()` 对 `RegionGateResult.tier` 的映射缺失（原错误仅匹配 `"high"` / `"medium"`，导致 `ProteinGate` 真实输出的 `"hallmark_confirmed"`、`"phage_cluster_confirmed"`、`"dark_matter_fallback"` 在开启门控时误落入兜底 `"low"` 分支），改为联合评估真实 `tier`、`hallmark_hits`、`non_amg_hits`、区段长度与模型峰值评分，同步补齐单元回归断言。
+
+## 19. 任务排队调度机制与前端排队视图全链路修复
+1. **故障诊断与测试先行验证 (`pytest` & `Vitest`)**
+   - **前噬菌体发现 (Student V4.2)**：后端 `PhageDiscoveryQueue(max_workers=1)` 虽然底层串行执行，但前端 `usePhageDiscovery.ts` 将 `queued` 与 `running` 混同为 `isRunning`，`PhageDiscoveryModule.vue` 缺少独立排队等待卡片，导致任务排队提交后界面直接渲染运行中进度视图；同时后端 `submit_task()` 生成的 `task_id` 精确到秒级易在高频并发提交时触发 SQLite `UNIQUE constraint failed` 冲突，且 `cancel_task()` / `delete_task()` 未从待执行队列中清理任务编号并同步 `phage_discovery_queue_update` 元数据。
+   - **基因组组装 (`Assembly`)**：排查发现真实的前后端排队绕过缺陷——当任务 1 正在运行（已从 `_queue` 弹出）时，提交任务 2 后 `_queue` 长度为 `1`（`queue_position = 1`），前端 `useAssembly.ts` 原判断 `queuePos > 1 ? 'queued' : 'running'` 直接将排队中的任务 2 覆写为 `running` 并弹出运行进度界面，且未订阅 WebSocket `assembly_queue_status` 事件；后端 `/assembly/run` 亦缺少 `status: "queued"` 与 `is_busy` 状态标记，`assembly_db.get_queued_tasks()` 漏查 `'queued'` 状态。
+   - 按照规则 6 先在 `tests/test_phage_finder_workbench.py`、`tests/test_assembly_queue.py` 与前端 `phageQueue.test.ts`、`assemblyQueue.test.ts` 编写复现与回归测试。
+2. **前后端全链路排队改造**
+   - **前噬菌体发现后端 (`queue.py`, `manager.py`)**：`enqueue()` 与 `submit_task()` 返回精确 `queue_position`、`is_busy`、`running_count`、`queued_count`；`task_id` 附加随机十六进制后缀消除高频并发主键碰撞；完善 `remove_from_waiting()`、`cancel_task()` 与 `delete_task()` 队列同步清理及快照 `running_tasks` / `waiting_tasks` 详情广播；`_worker_loop` 调度起跑前立即推送 `running`（`2%`）事件。
+   - **前噬菌体发现前端 (`usePhageDiscovery.ts`, `PhageDiscoveryModule.vue`, `PhageDiscoveryQueueCard.vue`, `PhageDiscoverySetup.vue`, `PhageDiscoveryProgress.vue`, `PhageDiscoveryHistory.vue`, `types.ts`)**：拆分 `isQueued` 与 `isRunning` 计算属性，新增独立排队等待卡片 `PhageDiscoveryQueueCard.vue`（展示真实 `#序号`、前方运行中任务、扫描摘要、`取消排队` 与 `继续提交新任务`）；在 `PhageDiscoveryProgress.vue` 顶部增加 `新建排队` 入口；在 `PhageDiscoverySetup.vue` 增加引擎忙碌提示横幅与排队提交文案；在 `selectTask()` 中切换任务时清理日志并支持 `2.5s` 忙时兜底轮询同步。
+   - **基因组组装全栈 (`assembly.py`, `assembly_db.py`, `persistent_queue.py`, `useAssembly.ts`)**：后端补齐 `is_busy` / `running_task` / `waiting_count` / `waiting_tasks` 与 `'queued'` 状态恢复查询；前端 `submitTask()` 按 `backendIsBusy || isQueued || queuePos > 1 || backendStatus === 'queued'` 保持排队态，新增 `assembly_queue_status` 事件监听驱动自动转入运行态与排队位次更新。
+
+## 20. 失效测试代码清理与全库校验归档
+1. **排查与清理失效测试**
+   - 移除前端遗留失效测试 `src/web-next/src/composables/__tests__/useBlastDetailViewer.test.ts`：该测试仍导入已弃用的 `pyqt-bridge` 并 Mock 回调方式，而 `useBlastDetailViewer.ts` 早已迁移至基于 `ElectronBridge` 的异步 Promise 调用，导致 `vitest` 运行直接报错失败。
+   - 移除后端阻塞及空壳测试文件 `tests/test_annotation_cascade.py` 与 `tests/test_diversity_upgrade_evaluation.py`：前者因未隔离真实 WSL 外部进程且向工作区写入产物而导致全量 `pytest` 在首个文件挂起超时（其合法逻辑已完全被 `tests/test_auto_return_workflow.py` 与 `tests/test_annotation_fixes.py` 覆盖）；后者不含任何 `test_*` 用例（直接执行报退出码 `5`）且硬编码依赖本地非受控基准报告（已被 `tests/test_diversity_qc_integration.py` 替代）。
+2. **清理后全栈验证结果**
+   - 后端全量单元测试 `pytest tests/ --tb=short -q`：**`197 passed in 103.74s`**（零超时、零失败、零跳过）。
+   - 前端全量单元测试 `npm run test --prefix src/web-next -- --run`：**`6 passed (6), 42 passed (42)`**。
+   - 前端编译与静态类型检查 `npm run build --prefix src/web-next`（含 `vue-tsc -b && vite build`）通过，后端 `pyrefly check src/ tests/` 报告 **`0 errors`**，并整理分主题提交推送至 Git。
