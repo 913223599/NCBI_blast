@@ -1,6 +1,4 @@
-import os
 import sys
-import json
 import sqlite3
 import logging
 from pathlib import Path
@@ -79,7 +77,7 @@ def upgrade_all():
     # 2. 升级所有的物种预置记录到最新 14位编码连带关系并填充上级
     logging.info("2. Scanning Strain Database & Encoding System...")
     data = db_manager.load_all_data()
-    records = data.get('records', [])
+    records = (data.get('records') if isinstance(data, dict) else None) or []
     
     # Update from records
     record_upgrade = 0

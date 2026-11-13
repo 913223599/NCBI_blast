@@ -77,14 +77,17 @@ class TestPipelineIntegration(unittest.TestCase):
             self.assertIsNone(ani_1_3)
 
             # 验证覆盖度
+            assert res.af_matrix is not None
             self.assertIn('phage_1', res.af_matrix)
             self.assertEqual(res.af_matrix['phage_1']['phage_2'], 100.0)
 
             # 验证分类推断
+            assert res.ani_taxonomy_matrix is not None
             self.assertIn("Same Species", res.ani_taxonomy_matrix['phage_1']['phage_2'])
             self.assertIn("Distinct Genus", res.ani_taxonomy_matrix['phage_1']['phage_3'])
 
             # 验证树结构正常且无错误
+            assert res.ani_clustering is not None
             self.assertIsNotNone(res.ani_clustering)
             self.assertEqual(len(res.ani_clustering['ordered_ids']), 3)
 

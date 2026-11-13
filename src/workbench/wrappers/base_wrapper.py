@@ -10,7 +10,7 @@ from ..models.tool_config import ToolConfig
 
 class WrapperError(Exception):
     """Base exception for wrapper operations."""
-    def __init__(self, message: str, tool_name: str = None, original_error: Exception = None):
+    def __init__(self, message: str, tool_name: Optional[str] = None, original_error: Optional[Exception] = None):
         super().__init__(message)
         self.tool_name = tool_name
         self.original_error = original_error
@@ -50,7 +50,7 @@ class BaseWrapper:
         """
         tool_path = ToolConfig.get_tool_path(tool_name)
         # Ensure all paths are absolute and quoted for Windows space handling
-        cmd = [str(tool_path.absolute())] + [str(Path(arg).absolute()) if (isinstance(arg, (str, Path)) and os.path.isabs(str(arg))) else str(arg) for arg in args]
+        cmd = [str(tool_path.absolute())] + [str(Path(arg).absolute()) if os.path.isabs(arg) else arg for arg in args]
         
         # Isolation: Run inside the tool's parent directory if needed, 
         # but mostly ensured correctly via ToolConfig.

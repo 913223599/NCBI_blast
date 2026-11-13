@@ -75,7 +75,7 @@ class NegativeDatasetDownloader:
         max_length_bp: int = 6500000,
         request_timeout: int = 180,
         retry_backoff_base: float = 1.5,
-        session: Optional[requests.Session] = None,
+        session: Optional[Any] = None,
     ):
         self.data_dir = Path(data_dir).resolve()
         self.fasta_dir = self.data_dir / "fasta"
@@ -179,7 +179,7 @@ class NegativeDatasetDownloader:
         buckets: List[List[Tuple[str, str, str, int]]] = []
 
         for group_name, category, term, weight, rec_batch_size in strata:
-            quota = max(2, int(round(pool_target * (weight / total_weight))))
+            quota = max(2, round(pool_target * (weight / total_weight)))
             resp = self._request_with_retry(
                 f"{EUTILS_BASE}/esearch.fcgi",
                 {

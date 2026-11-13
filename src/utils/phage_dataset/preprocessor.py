@@ -218,7 +218,7 @@ def _extract_single_genome_features(args: Tuple[str, str, str, str, int, int, in
         "accession": acc,
         "tax_group": tax_group,
         "host": host,
-        "has_integrase": int(has_int),
+        "has_integrase": has_int,
         "length_bp": seq_len,
         "gc_percent": gc_percent,
         "cds_count": cds_cnt,

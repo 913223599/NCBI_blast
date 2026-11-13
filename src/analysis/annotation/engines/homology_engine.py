@@ -86,7 +86,11 @@ class HomologyEngine(BaseAnnotationEngine):
             if feat.feature_type != "CDS":
                 continue
 
-            hit = hits_map.get(feat.id) or hits_map.get(feat.locus_tag) or hits_map.get(feat.protein_id)
+            hit = (
+                hits_map.get(feat.id)
+                or hits_map.get(feat.locus_tag)
+                or (hits_map.get(feat.protein_id) if feat.protein_id else None)
+            )
             if not hit:
                 continue
 

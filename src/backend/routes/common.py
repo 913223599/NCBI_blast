@@ -1,10 +1,9 @@
 
-import os
 import time
 import shutil
 import logging
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File
 from typing import List
 
 logger = logging.getLogger("api_server")
@@ -30,7 +29,8 @@ async def upload_file_generic(file: UploadFile = File(...)):
         upload_dir.mkdir(parents=True, exist_ok=True)
         
         # 安全的文件名处理 (仅保留基本字符，防止路径穿越)
-        safe_filename = "".join(c for c in file.filename if c.isalnum() or c in ('.', '_', '-')).strip()
+        raw_filename = file.filename or ""
+        safe_filename = "".join(c for c in raw_filename if c.isalnum() or c in ('.', '_', '-')).strip()
         if not safe_filename:
             safe_filename = f"unnamed_{int(time.time())}"
             

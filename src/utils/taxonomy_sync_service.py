@@ -120,9 +120,8 @@ class TaxonomySyncService:
         
         # Pull current code lookup
         data = self.db_manager.load_all_data()
-        code_lookup = data.get('codeLookup', {})
-        if not code_lookup:
-            code_lookup = {"entries": []}
+        raw_lookup = data.get('codeLookup', {})
+        code_lookup: Dict[str, Any] = raw_lookup if isinstance(raw_lookup, dict) else {"entries": []}
             
         entries = code_lookup.get("entries", [])
         

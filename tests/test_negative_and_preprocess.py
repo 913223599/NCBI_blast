@@ -9,6 +9,7 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import numpy as np
 from Bio import SeqIO
@@ -39,7 +40,7 @@ def _make_gbk_text(
     rec.annotations["molecule_type"] = "DNA"
     rec.annotations["topology"] = "circular"
     rec.annotations["organism"] = organism
-    rec.annotations["taxonomy"] = taxonomy
+    cast(Any, rec.annotations)["taxonomy"] = taxonomy
 
     src_qual = {}
     if host:

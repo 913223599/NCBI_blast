@@ -8,7 +8,7 @@ import os
 import warnings
 import shutil
 from pathlib import Path
-from typing import List, Dict, Any, Generator
+from typing import List, Dict, Any, Generator, Optional
 
 from .universal_parser import UniversalParser
 
@@ -76,7 +76,7 @@ class FileHandler:
         """检查物理文件是否存在"""
         return os.path.exists(file_path)
     
-    def get_file_list(self, directory: str, extension: str = None) -> List[str]:
+    def get_file_list(self, directory: str, extension: Optional[str] = None) -> List[str]:
         """获取目录下的文件列表，可选后缀过滤"""
         try:
             if not os.path.exists(directory):

@@ -6,13 +6,12 @@
 """
 import os
 import csv
-import sqlite3
 import logging
 import subprocess
 import shutil
 import ctypes
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Set, Callable, Tuple
+from typing import Dict, Any, Optional, Set, Callable
 
 from .fuser import AnnotationFuser
 from ...workbench.models.tool_config import ToolConfig
@@ -156,10 +155,11 @@ class FunctionalAssigner:
         out_tsv = work_dir / "blastp_functional_hits.tsv"
 
         phagescope_ready = self.phagescope_dir.exists() and any(self.phagescope_dir.glob("phagescope_proteins.p*"))
-        self.diagnostics["phagescope"] = {
+        phagescope_diag: Dict[str, Any] = {
             "path": str(self.phagescope_dir),
             "ready": phagescope_ready,
         }
+        self.diagnostics["phagescope"] = phagescope_diag
         if not phagescope_ready:
             logger.error(
                 f"PhageScope 数据库索引不可用 (期望目录: {self.phagescope_dir}，"
@@ -244,7 +244,8 @@ class FunctionalAssigner:
         self.diagnostics.setdefault("phagescope", {})["assigned"] = len(functional_results)
         swissprot_dir = ToolConfig.get_db_dir("swissprot")
         swissprot_ready = swissprot_dir.exists() and any(swissprot_dir.glob("swissprot.p*"))
-        self.diagnostics["swissprot"] = {"path": str(swissprot_dir), "ready": swissprot_ready}
+        sp_diag: Dict[str, Any] = {"path": str(swissprot_dir), "ready": swissprot_ready}
+        self.diagnostics["swissprot"] = sp_diag
         sp_before = len(functional_results)
         if swissprot_ready:
             try:
@@ -280,7 +281,8 @@ class FunctionalAssigner:
         # 5. Tier 4: NCBI CDD / Pfam-A 保守结构域与基序深度打捞 (RPS-BLAST)
         cdd_dir = ToolConfig.get_db_dir("cdd_pfam")
         cdd_ready = cdd_dir.exists() and (any(cdd_dir.glob("cdd_pfam.pal")) or any(cdd_dir.glob("cdd_pfam.*.rps")))
-        self.diagnostics["cdd_pfam"] = {"path": str(cdd_dir), "ready": cdd_ready}
+        cdd_diag: Dict[str, Any] = {"path": str(cdd_dir), "ready": cdd_ready}
+        self.diagnostics["cdd_pfam"] = cdd_diag
         cdd_before = len(functional_results)
         if cdd_ready:
             try:

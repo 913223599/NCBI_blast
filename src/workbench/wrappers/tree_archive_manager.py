@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class ArchiveManager:
     """分析结果归档管理器"""
     
-    def __init__(self, base_archive_dir: Path = None):
+    def __init__(self, base_archive_dir: Optional[Path] = None):
         """
         初始化归档管理器
         
@@ -28,8 +28,8 @@ class ArchiveManager:
     def create_session_archive(self, 
                                source_fasta: Path, 
                                result_files: dict,
-                               project_id: str = None,
-                               session_id: str = None) -> Path:
+                               project_id: Optional[str] = None,
+                               session_id: Optional[str] = None) -> Path:
         """
         创建会话归档，将源文件和结果文件组织到结构化目录
         
@@ -78,7 +78,7 @@ class ArchiveManager:
             logger.error(f"Failed to archive session: {e}")
             raise
     
-    def cleanup_staging_area(self, project_id: str, staging_dir: Path = None):
+    def cleanup_staging_area(self, project_id: str, staging_dir: Optional[Path] = None):
         """
         清理临时工作区的冗余产物
         

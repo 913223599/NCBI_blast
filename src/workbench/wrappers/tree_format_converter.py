@@ -4,6 +4,7 @@ Tree Format Converter - 负责进化树格式转换
 """
 import logging
 from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ class TreeFormatConverter:
     def __init__(self):
         pass
     
-    def newick_to_binary(self, input_nwk: Path, output_bin: Path = None) -> Path:
+    def newick_to_binary(self, input_nwk: Path, output_bin: Optional[Path] = None) -> Path:
         """
         将Newick格式转换为NCBI tree-tool的二进制格式
         

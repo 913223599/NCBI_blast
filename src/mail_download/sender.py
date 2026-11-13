@@ -19,7 +19,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr, formatdate, make_msgid
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
 logger = logging.getLogger("mail_download.sender")
 
@@ -59,11 +59,11 @@ class SendResult:
 class MailSender:
     """SMTP 发送器。smtp_factory 可注入（测试用 FakeSMTP）。"""
 
-    def __init__(self, cfg, smtp_factory: Optional[Callable[[], smtplib.SMTP]] = None):
+    def __init__(self, cfg, smtp_factory: Optional[Callable[[], Any]] = None):
         self.cfg = cfg
         self._smtp_factory = smtp_factory
 
-    def _connect(self) -> smtplib.SMTP:
+    def _connect(self) -> Any:
         if self._smtp_factory is not None:
             conn = self._smtp_factory()
         else:

@@ -13,6 +13,7 @@ import tempfile
 from contextlib import closing
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -46,7 +47,7 @@ def _build_synthetic_gbk(
     rec.annotations["molecule_type"] = "DNA"
     rec.annotations["topology"] = "circular"
     rec.annotations["organism"] = f"Escherichia phage {accession}"
-    rec.annotations["taxonomy"] = ["Viruses", "Duplodnaviria", "Caudoviricetes"]
+    cast(Any, rec.annotations)["taxonomy"] = ["Viruses", "Duplodnaviria", "Caudoviricetes"]
 
     src_feat = SeqFeature(
         FeatureLocation(0, length, strand=1),
@@ -283,7 +284,7 @@ def test_phage_identity_verification_filters_non_phages():
             rec.annotations["molecule_type"] = "DNA"
             rec.annotations["topology"] = "linear"
             rec.annotations["organism"] = organism
-            rec.annotations["taxonomy"] = taxonomy
+            cast(Any, rec.annotations)["taxonomy"] = taxonomy
             src = SeqFeature(FeatureLocation(0, 3600, strand=1), type="source", qualifiers={"host": [host]} if host else {})
             cds = SeqFeature(
                 FeatureLocation(0, 300, strand=1),

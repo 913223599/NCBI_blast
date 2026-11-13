@@ -250,7 +250,7 @@ class StrainDBManager:
             self.logger.error(f"Error saving sys config {key}: {e}")
             return False
 
-    def load_all_data(self):
+    def load_all_data(self) -> Dict[str, Any]:
         """加载所有冰箱和记录数据"""
         try:
             conn = self._get_connection()

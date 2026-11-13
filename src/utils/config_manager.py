@@ -7,6 +7,7 @@ import json
 import logging
 import threading
 from pathlib import Path
+from typing import Optional
 
 
 class ConfigManager:
@@ -28,7 +29,7 @@ class ConfigManager:
                     cls._instance = super(ConfigManager, cls).__new__(cls)
         return cls._instance
 
-    def __init__(self, config_file: str = None):
+    def __init__(self, config_file: Optional[str] = None):
         """
         初始化配置管理器
         Args:
@@ -225,6 +226,6 @@ class ConfigManager:
             self._save_config()
 
 
-def get_config_manager(config_file: str = None) -> ConfigManager:
+def get_config_manager(config_file: Optional[str] = None) -> ConfigManager:
     """获取配置管理器单例"""
     return ConfigManager(config_file)

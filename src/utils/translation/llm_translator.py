@@ -1,7 +1,5 @@
-import json
 import logging
-import time
-from typing import List
+from typing import Any, Dict, List, cast
 import requests
 
 logger = logging.getLogger(__name__)
@@ -69,7 +67,7 @@ class LLMTranslator:
 
         while True:
             current_model = self.get_current_model()
-            payload = {
+            payload: Dict[str, Any] = {
                 "model": current_model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
@@ -86,13 +84,20 @@ class LLMTranslator:
                     import dashscope
                     from dashscope import Generation
                     dashscope.api_key = self.api_key
-                    response = Generation.call(
-                        model=current_model,
-                        messages=[
+                    messages = cast(
+                        Any,
+                        [
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": f"请翻译列表：\\n{user_content}"}
+                            {"role": "user", "content": f"请翻译列表：\\n{user_content}"},
                         ],
-                        result_format="message"
+                    )
+                    response = cast(
+                        Any,
+                        Generation.call(
+                            model=current_model,
+                            messages=messages,
+                            result_format="message",
+                        ),
                     )
                     
                     if response.status_code != 200:

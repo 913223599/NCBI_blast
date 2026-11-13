@@ -139,6 +139,7 @@ class TestAnnotationFixes(unittest.TestCase):
         upd = AnnotationFuser.integrate_safety_audit([feat], safety_audit)
         # 不应该因为纯 Acranker 预测把 product 改成 anti-CRISPR protein (Acranker)
         self.assertEqual(feat.product, "hypothetical protein")
+        assert feat.notes is not None
         self.assertIn("Anti-CRISPR", feat.notes)
         self.assertIn("Acranker", feat.notes)
 

@@ -1,12 +1,10 @@
 import os
 import logging
 import asyncio
-import hashlib
+import subprocess
 import tarfile
 import urllib.request
-from pathlib import Path
 from typing import Dict, Any, Optional, List
-from .response import BioResponse
 import time
 from datetime import datetime
 from ...workbench.models.tool_config import ToolConfig
@@ -111,6 +109,10 @@ class BioDatabase:
             "category": self.config.get("category", "未分类数据库"),
             "url": self.config.get("url", "local_only")
         }
+
+    async def update_database(self) -> bool:
+        """异步更新数据库（由具体子类实现）。"""
+        raise NotImplementedError(f"{self.__class__.__name__} 未实现 update_database")
 
 class SilvaDatabase(BioDatabase):
     """
@@ -239,7 +241,7 @@ class Ncbi16SDatabase(BioDatabase):
 
         try:
             # 下载与校验逻辑 (在后台线程池中运行以防止阻塞 asyncio 事件循环)
-            logger.info(f">>> [NCBI] 正在同步 16S 官方库...")
+            logger.info(">>> [NCBI] 正在同步 16S 官方库...")
             await asyncio.to_thread(urllib.request.urlretrieve, download_url, str(target_gz) + ".tmp")
             
             # (简写校验步骤...)
@@ -448,8 +450,10 @@ class DefenseFinderDatabase(BioDatabase):
     async def update_database(self):
         try:
             download_url = self.config.get("url")
+            if not isinstance(download_url, str) or not download_url:
+                raise ValueError("DefenseFinder 缺少有效的下载 URL")
             target_tar = self.base_dir / "defense_finder_models.tar.gz"
-            logger.info(f">>> [DefenseFinder] 开始同步模型库...")
+            logger.info(">>> [DefenseFinder] 开始同步模型库...")
             await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
 
             def _extract():
@@ -479,7 +483,7 @@ class CardDatabase(BioDatabase):
         try:
             download_url = "https://card.mcmaster.ca/latest/data"
             target_tar = self.base_dir / "card_data.tar.bz2"
-            logger.info(f">>> [CARD] 正在同步耐药数据库...")
+            logger.info(">>> [CARD] 正在同步耐药数据库...")
             await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
 
             def _extract_and_build():
@@ -494,8 +498,11 @@ class CardDatabase(BioDatabase):
 
                 if f_faa.exists():
                     tool_path = get_short_path_name(str(ToolConfig.get_tool_path("makeblastdb")))
-                    short_base = get_short_path_name(str(self.base_dir))
-                    os.system(f'"{tool_path}" -in "{f_faa.name}" -dbtype prot -title "CARD Resistome" -out "card_protein"')
+                    subprocess.run(
+                        [tool_path, "-in", f_faa.name, "-dbtype", "prot", "-title", "CARD Resistome", "-out", "card_protein"],
+                        cwd=str(self.base_dir),
+                        check=True,
+                    )
 
             await asyncio.to_thread(_extract_and_build)
             current_version = f"v3.2-{datetime.now().strftime('%Y-%m')}"
@@ -519,8 +526,10 @@ class CddPfamDatabase(BioDatabase):
     async def update_database(self):
         try:
             download_url = self.config.get("url")
+            if not isinstance(download_url, str) or not download_url:
+                raise ValueError("CDD/Pfam 缺少有效的下载 URL")
             target_tar = self.base_dir / "cdd.tar.gz"
-            logger.info(f">>> [CDD/Pfam] 正在同步保守结构域数据库...")
+            logger.info(">>> [CDD/Pfam] 正在同步保守结构域数据库...")
             await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
 
             def _extract():

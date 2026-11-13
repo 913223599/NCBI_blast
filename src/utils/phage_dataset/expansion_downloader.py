@@ -238,8 +238,8 @@ def collect_excluded_accessions(
         exact.add(sanitize_accession(acc))
     if extra_excluded_accs:
         for acc in extra_excluded_accs:
-            if str(acc).strip():
-                exact.add(sanitize_accession(str(acc)))
+            if acc.strip():
+                exact.add(sanitize_accession(acc))
 
     if negative_splits_json and Path(negative_splits_json).exists():
         payload = json.loads(Path(negative_splits_json).read_text(encoding="utf-8"))
@@ -276,7 +276,7 @@ class ExpansionDownloader:
         self.output_dir = Path(output_dir).resolve()
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._custom_session = session is not None
-        self.max_workers = max(1, int(max_workers))
+        self.max_workers = max(1, max_workers)
         self.excluded_exact = set(excluded_exact or set())
         self.excluded_base = set(excluded_base or set())
         if self.excluded_exact:
@@ -396,7 +396,7 @@ class ExpansionDownloader:
 
         for q in queries:
             group_name, category, term, weight, _, _, _, _, _ = q
-            quota = max(4, int(round(pool_target * (weight / total_weight))))
+            quota = max(4, round(pool_target * (weight / total_weight)))
             resp = client._request_with_retry(
                 f"{EUTILS_BASE}/esearch.fcgi",
                 {
@@ -558,7 +558,7 @@ class ExpansionDownloader:
         small_buf: List[Tuple[str, ExpansionQuery]] = []
         normal_buf: List[Tuple[str, ExpansionQuery]] = []
         for uid, q in pending:
-            bsize = max(1, int(q[4]))
+            bsize = max(1, q[4])
             if bsize <= 2:
                 small_buf.append((uid, q))
                 if len(small_buf) >= bsize:

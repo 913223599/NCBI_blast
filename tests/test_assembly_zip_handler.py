@@ -3,11 +3,9 @@
 Unit tests for AssemblyFileHandler ZIP archive detection and streaming extraction.
 """
 
-import os
 import zipfile
 import tempfile
 from pathlib import Path
-import pytest
 
 from src.assembly.utils.file_handler import AssemblyFileHandler
 
@@ -107,6 +105,8 @@ def test_assembler_step_zip_integration():
 
         step = AssemblerStep(ctx)
         # 验证 AssemblyFileHandler 能够正确支持该文件
-        assert AssemblyFileHandler.is_zip_archive(ctx.get("r1")) is True
+        r1_val = ctx.get("r1")
+        assert r1_val is not None
+        assert AssemblyFileHandler.is_zip_archive(r1_val) is True
         assert AssemblyFileHandler.get_sample_id(str(zip_file)) == "sample_reads"
 

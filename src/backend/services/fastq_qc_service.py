@@ -12,7 +12,7 @@ import gzip
 import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Sequence
 
 logger = logging.getLogger("api_server")
 
@@ -92,7 +92,7 @@ class FastqQCFilter:
 
     def filter_reads(
         self,
-        reads_triplets: List[Tuple[str, str, str]],
+        reads_triplets: Sequence[Tuple[str, str, str]],
         sample_name: str = ""
     ) -> Tuple[List[Tuple[str, str]], FastqQCReport]:
         """

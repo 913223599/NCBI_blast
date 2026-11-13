@@ -38,7 +38,7 @@ class MAFFTWrapper:
                 result = subprocess.run(cmd, stdout=f_out, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace')
             
             if result.returncode != 0:
-                err = result.stderr.decode('utf-8', errors='replace')
+                err = result.stderr or ""
                 raise RuntimeError(f"MAFFT Alignment Failed: {err}")
             
             if not Path(output_fasta).exists() or os.path.getsize(output_fasta) < 10:

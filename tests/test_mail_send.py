@@ -14,6 +14,7 @@ import unittest
 import zipfile
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -45,9 +46,9 @@ class FakeSMTP:
 
     def __init__(self, fail_stage=None):
         self.fail_stage = fail_stage  # None / login / sendmail
-        self.login_args = None
-        self.sent_to = None
-        self.sent_msg = None
+        self.login_args: Optional[tuple] = None
+        self.sent_to: Optional[List[str]] = None
+        self.sent_msg: Optional[str] = None
         self.quitted = False
 
     def login(self, user, password):
@@ -63,6 +64,13 @@ class FakeSMTP:
 
     def quit(self):
         self.quitted = True
+
+
+def _make_fake_init(orig_init, fake: FakeSMTP):
+    """构造签名与 MailSender.__init__ 对齐的注入初始化函数。"""
+    def _patched_init(self, cfg, smtp_factory=None):
+        orig_init(self, cfg, smtp_factory=lambda: fake)
+    return _patched_init
 
 
 def make_sender(cfg_override=None, fail_stage=None):
@@ -163,10 +171,12 @@ class TestMailSender(unittest.TestCase):
             self.assertEqual(result.to, "client@example.com")
             self.assertEqual(result.attachment_size, Path(zip_path).stat().st_size)
             # SMTP 调用序列
+            assert fake.login_args is not None
             self.assertEqual(fake.login_args[0], cfg.smtp_account)
             self.assertEqual(fake.sent_to, ["client@example.com"])
             self.assertTrue(fake.quitted)
             # 消息体结构：multipart，含正文与 zip 附件
+            assert fake.sent_msg is not None
             msg = email.message_from_string(fake.sent_msg)
             self.assertEqual(msg["To"], "client@example.com")
             parts = list(msg.walk())
@@ -245,6 +255,7 @@ class TestMailSender(unittest.TestCase):
                 fake.sent_to,
                 ["a@example.com", "b@example.com", "cc1@example.com", "cc2@example.com"],
             )
+            assert fake.sent_msg is not None
             msg = email.message_from_string(fake.sent_msg)
             self.assertEqual(msg["To"], "a@example.com, b@example.com")
             self.assertEqual(msg["Cc"], "cc1@example.com, cc2@example.com")
@@ -275,6 +286,7 @@ class TestMailSender(unittest.TestCase):
                 ["user@example.com", "c1@example.com", "c2@example.com", "c3@example.com"],
             )
 
+            assert fake.sent_msg is not None
             msg = email.message_from_string(fake.sent_msg)
             raw_name, raw_addr = parseaddr(msg["From"])
             self.assertEqual(raw_addr, cfg.smtp_account)
@@ -288,7 +300,9 @@ class TestMailSender(unittest.TestCase):
             zip_part = next(p for p in msg.walk() if p.get_content_type() == "application/zip")
             self.assertEqual(zip_part.get_filename(), "生工16S鉴定结果_定制版.zip")
             text_part = next(p for p in msg.walk() if p.get_content_type() == "text/plain")
-            body_text = text_part.get_payload(decode=True).decode("utf-8")
+            body_payload = text_part.get_payload(decode=True)
+            assert isinstance(body_payload, bytes)
+            body_text = body_payload.decode("utf-8")
             self.assertEqual(body_text, "自定义邮件正文第一行\n自定义正文第二行")
 
     def test_send_rejects_unsafe_custom_attachment_name(self):
@@ -380,7 +394,7 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
             )
             fake = FakeSMTP()
             orig_init = ap_mod.MailSender.__init__
-            ap_mod.MailSender.__init__ = lambda self_s, c, smtp_factory=None: orig_init(self_s, c, smtp_factory=lambda: fake)
+            ap_mod.MailSender.__init__ = _make_fake_init(orig_init, fake)
             try:
                 ok = ap_mod._pack_and_send(
                     cfg,
@@ -455,7 +469,7 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
 
             fake = FakeSMTP()
             orig_init = ap_mod.MailSender.__init__
-            ap_mod.MailSender.__init__ = lambda self_s, c, smtp_factory=None: orig_init(self_s, c, smtp_factory=lambda: fake)
+            ap_mod.MailSender.__init__ = _make_fake_init(orig_init, fake)
             try:
                 # 1. --annotate-only 传 --to self：触发注释、报告、打包并只发往 self@qq.com
                 with patch.object(ap_mod, "_annotate", side_effect=fake_annotate), \
@@ -463,9 +477,12 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
                     rc = ap_mod.main(["--config", str(cfg_path), "--annotate-only", str(batch), "--to", "self"])
                 self.assertEqual(rc, 0)
                 self.assertEqual(fake.sent_to, ["self@qq.com"])
+                assert fake.sent_msg is not None
                 msg = email.message_from_string(fake.sent_msg)
                 body_part = next(p for p in msg.walk() if p.get_content_type() == "text/plain")
-                body_txt = body_part.get_payload(decode=True).decode("utf-8")
+                body_payload = body_part.get_payload(decode=True)
+                assert isinstance(body_payload, bytes)
+                body_txt = body_payload.decode("utf-8")
                 self.assertIn("送测批次001", body_txt)
                 self.assertTrue((send_dir / docx_out.name).is_file())
 
@@ -576,12 +593,30 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
             orig_init = ap_mod.MailSender.__init__
             orig_send = ap_mod.MailSender.send
 
-            def wrapped_send(self_s, zip_path, to=None, subject=None, body=None, cc=None):
+            def wrapped_send(
+                self,
+                attachment,
+                to=None,
+                subject=None,
+                body=None,
+                cc=None,
+                from_name=None,
+                attachment_name=None,
+            ):
                 nonlocal sent_count
                 sent_count += 1
-                return orig_send(self_s, zip_path, to=to, subject=subject, body=body, cc=cc)
+                return orig_send(
+                    self,
+                    attachment,
+                    to=to,
+                    subject=subject,
+                    body=body,
+                    cc=cc,
+                    from_name=from_name,
+                    attachment_name=attachment_name,
+                )
 
-            ap_mod.MailSender.__init__ = lambda self_s, c, smtp_factory=None: orig_init(self_s, c, smtp_factory=lambda: fake)
+            ap_mod.MailSender.__init__ = _make_fake_init(orig_init, fake)
             ap_mod.MailSender.send = wrapped_send
             orig_anno_dir = ap_mod.ANNOTATIONS_DIR
             ap_mod.ANNOTATIONS_DIR = anno_dir
@@ -661,7 +696,7 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
             orig_init = ap_mod.MailSender.__init__
             orig_anno_dir = ap_mod.ANNOTATIONS_DIR
             ap_mod.ANNOTATIONS_DIR = anno_dir
-            ap_mod.MailSender.__init__ = lambda self_s, c, smtp_factory=None: orig_init(self_s, c, smtp_factory=lambda: fake)
+            ap_mod.MailSender.__init__ = _make_fake_init(orig_init, fake)
             try:
                 fake_fetch_cls = lambda _cfg: type(
                     "Fetcher",

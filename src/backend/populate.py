@@ -66,7 +66,8 @@ def prefill_code_lookup():
     conn.close()
     
     final_data = db_manager.load_all_data()
-    entries = final_data.get('codeLookup', {}).get('entries', [])
+    raw_lookup = final_data.get('codeLookup', {})
+    entries = raw_lookup.get('entries', []) if isinstance(raw_lookup, dict) else []
     
     logging.info(f"Successfully finished updating code lookup.")
     logging.info(f"Generated {len(entries)} robust hierarchical records based entirely on ETE4 taxonomy relationships!")

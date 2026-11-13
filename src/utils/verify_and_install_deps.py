@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import importlib.util
 from pathlib import Path
+from typing import Optional
 
 # 强制控制台输出使用 UTF-8 编码，防止 Windows 控制台编码不一致
 if hasattr(sys.stdout, "reconfigure"):
@@ -159,7 +160,7 @@ def heal_configurations(project_root: Path):
         print("[自愈] 未检测到 translations.db，已从冷备库自动恢复。")
 
 
-def detect_blast_installation(project_root: Path = None):
+def detect_blast_installation(project_root: Optional[Path] = None):
     """探测本地 BLAST+ 与 Git 路径并写入 config.json 持久生效"""
     root = project_root or _PROJECT_ROOT
     try:
@@ -214,7 +215,7 @@ def configure_pip_mirror():
         print(f"[警告] 配置 pip 镜像源时出错: {e}")
 
 
-def check_missing_modules(module_map: dict = None) -> list:
+def check_missing_modules(module_map: Optional[dict] = None) -> list:
     """快速检测缺失的依赖模块"""
     module_map = MODULE_IMPORT_MAP if module_map is None else module_map
     missing = []

@@ -10,13 +10,14 @@
      少量邮件抓取全文并做附件级匹配。
 """
 import email
+import email.header
+import email.utils
 import logging
 import imaplib
-import socket
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from email.message import Message
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger("mail_download.fetcher")
 
@@ -113,7 +114,7 @@ def _attachment_parts(msg: Message) -> List[Tuple[str, bytes]]:
         if not fn:
             continue
         payload = part.get_payload(decode=True)
-        if payload is None:
+        if not isinstance(payload, bytes):
             continue
         result.append((sanitize_filename(_decode_header(fn)), payload))
     return result
@@ -145,11 +146,11 @@ def _extension_ok(name: str, exts: Iterable[str]) -> bool:
 class MailFetcher:
     """IMAP 收件器。conn_factory 可注入（测试用 FakeIMAP）。"""
 
-    def __init__(self, cfg, conn_factory: Optional[Callable[[], imaplib.IMAP4_SSL]] = None):
+    def __init__(self, cfg, conn_factory: Optional[Callable[[], Any]] = None):
         self.cfg = cfg
         self._conn_factory = conn_factory
 
-    def _connect(self) -> imaplib.IMAP4_SSL:
+    def _connect(self) -> Any:
         if self._conn_factory is not None:
             return self._conn_factory()
         auth = self.cfg.auth_code

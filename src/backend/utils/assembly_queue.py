@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Any, Callable, Awaitable
+from typing import Dict, Any, Callable, Awaitable, List, Optional
 
 logger = logging.getLogger("api_server")
 
@@ -10,8 +10,10 @@ class AssemblyTaskQueue:
     用于限制高负载任务（如基因组组装）的并发数量，保护服务器资源。
     """
     
-    _instance = None
+    _instance: Optional["AssemblyTaskQueue"] = None
     _max_workers = 2  # 限制同时运行的组装任务数量 (可配置)
+    workers: List[asyncio.Task[Any]]
+    _queue: Optional[asyncio.Queue[Dict[str, Any]]]
 
     def __new__(cls):
         if cls._instance is None:
@@ -39,6 +41,7 @@ class AssemblyTaskQueue:
 
     async def _worker_loop(self, worker_id: int, processor_func: Callable[[Dict[str, Any]], Awaitable[None]]):
         """消费者循环"""
+        assert self._queue is not None
         while True:
             # 等待新任务
             payload = await self._queue.get()
@@ -56,11 +59,12 @@ class AssemblyTaskQueue:
     async def add_task(self, payload: Dict[str, Any]):
         """生产者：添加任务到队列"""
         self._ensure_queue()
+        assert self._queue is not None
         await self._queue.put(payload)
         logger.info(f"[Queue] 任务已入队: {payload.get('task_id')}")
 
     def get_queue_size(self) -> int:
-        return self._queue.qsize()
+        return self._queue.qsize() if self._queue is not None else 0
 
 # 全局单例
 assembly_queue = AssemblyTaskQueue()

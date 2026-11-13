@@ -9,11 +9,11 @@ NGCS 组装引擎长读长缺陷解决方案沙盒原型与评估 (Defects Solut
 3. 容错首尾环化闭合 (Noise-Tolerant Circularization)：识别含有残余测序噪声的首尾 DTR 并精确闭合成环。
 """
 
-import unittest
+import importlib.util
 import sys
-import os
+import unittest
 from pathlib import Path
-from typing import List, Tuple, Dict, Any, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 _TESTS_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _TESTS_DIR.parent
@@ -28,8 +28,19 @@ if _NGCS_ROOT not in sys.path:
     sys.path.append(_NGCS_ROOT)
 
 from ngcs.utils.edlib_compat import edlib
-from ngcs.spectral.backbone import reverse_complement
-from test_ngcs_defects_evaluation import generate_pseudo_random_dna
+
+
+def _load_dna_generator() -> Callable[..., str]:
+    """避免 vendor 目录下同名 tests 包遮蔽本地测试工具函数。"""
+    eval_path = _TESTS_DIR / "test_ngcs_defects_evaluation.py"
+    spec = importlib.util.spec_from_file_location("_ngcs_defects_eval_helper", eval_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return cast(Callable[..., str], mod.generate_pseudo_random_dna)
+
+
+generate_pseudo_random_dna = _load_dna_generator()
 
 
 class EnhancedPostProcessorPrototype:
@@ -95,7 +106,7 @@ class EnhancedPostProcessorPrototype:
             # 在 seqA 末尾扫描 probe 的对齐位置
             search_window_sz = min(LA, max(p_sz * 8, 4000))
             tail_seqA = seqA[-search_window_sz:]
-            aln = edlib.align(probe, tail_seqA, mode="HW", task="locations", k=k_probe_err)
+            aln = cast(Dict[str, Any], edlib.align(probe, tail_seqA, mode="HW", task="locations", k=k_probe_err))
 
             if aln['editDistance'] != -1 and aln.get('locations'):
                 for loc in aln['locations']:
@@ -110,14 +121,13 @@ class EnhancedPostProcessorPrototype:
                     subA = seqA[-cand_ovlp:]
                     subB = seqB[:cand_ovlp]
                     k_full_err = max(3, int(cand_ovlp * max_error_rate))
-                    full_aln = edlib.align(subA, subB, mode="NW", k=k_full_err)
+                    full_aln = cast(Dict[str, Any], edlib.align(subA, subB, mode="NW", k=k_full_err))
 
                     ed = full_aln.get('editDistance', -1)
                     if ed != -1 and ed <= k_full_err:
                         err = float(ed) / float(cand_ovlp)
                         if err <= max_error_rate and cand_ovlp > best_overlap:
                             best_overlap = cand_ovlp
-                            best_error = err
                             # 融合：seqA 前半段 + seqB
                             best_fused = seqA[:-cand_ovlp] + seqB
                 if best_overlap >= min_ovlp:
@@ -148,7 +158,7 @@ class EnhancedPostProcessorPrototype:
         k_err = max(2, int(probe_sz * max_error_rate))
 
         tail_window = seq[-max_test_ovlp:]
-        aln = edlib.align(head_probe, tail_window, mode="HW", task="locations", k=k_err)
+        aln = cast(Dict[str, Any], edlib.align(head_probe, tail_window, mode="HW", task="locations", k=k_err))
 
         if aln['editDistance'] != -1 and aln.get('locations'):
             for loc in aln['locations']:
@@ -159,7 +169,7 @@ class EnhancedPostProcessorPrototype:
                 sub_tail = seq[-cand_ovlp:]
                 sub_head = seq[:cand_ovlp]
                 k_full = max(3, int(cand_ovlp * max_error_rate))
-                full_aln = edlib.align(sub_tail, sub_head, mode="NW", k=k_full)
+                full_aln = cast(Dict[str, Any], edlib.align(sub_tail, sub_head, mode="NW", k=k_full))
                 
                 ed = full_aln.get('editDistance', -1)
                 if ed != -1 and ed <= k_full:

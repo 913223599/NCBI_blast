@@ -6,8 +6,8 @@ assembly_gbk_fixer.py - 基因组 GBK 注释回填工具
 
 import logging
 from pathlib import Path
+from typing import Optional
 from Bio import SeqIO
-from Bio.SeqFeature import SeqFeature, FeatureLocation
 
 logger = logging.getLogger("api_server")
 
@@ -47,7 +47,7 @@ class GBKAnnotationBackfiller:
         
         return res[:100]
 
-    def apply_blast_hits(self, hits_mapping: dict, output_path: Path = None) -> Path:
+    def apply_blast_hits(self, hits_mapping: dict, output_path: Optional[Path] = None) -> Path:
         """
         将 BLAST 命中结果回填到 GBK
         hits_mapping: { "CDS_ID": { "product": "...", "evalue": "..." }, ... }

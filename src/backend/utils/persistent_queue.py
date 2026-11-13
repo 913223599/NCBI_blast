@@ -1,9 +1,8 @@
 import asyncio
 import sqlite3
-import json
 import logging
 import time
-from typing import Dict, Any, Callable, Awaitable, List
+from typing import Dict, Any, Callable, Awaitable, List, Optional, Set, Tuple
 from .assembly_db import assembly_db
 from ..broadcaster import broadcaster
 
@@ -19,7 +18,16 @@ class PersistentAssemblyQueue:
     4. 可暂停/恢复：pause() / resume() 控制新任务派发
     """
     
-    _instance = None
+    _instance: Optional["PersistentAssemblyQueue"] = None
+    _queue: Optional[List[Dict[str, Any]]]
+    _worker_task: Optional[asyncio.Task[Any]]
+    _processor: Optional[Callable[[Dict[str, Any]], Awaitable[None]]]
+    _is_running: bool
+    _queued_ids: Set[str]
+    _paused: bool
+    _resume_event: Optional[asyncio.Event]
+    _new_task_event: Optional[asyncio.Event]
+    _current_task_id: Optional[str]
 
     def __new__(cls):
         if cls._instance is None:
@@ -42,6 +50,13 @@ class PersistentAssemblyQueue:
         if self._resume_event is None:
             self._resume_event = asyncio.Event()
             self._resume_event.set()  # 默认非暂停状态
+
+    def _get_queue_parts(self) -> Tuple[List[Dict[str, Any]], asyncio.Event, asyncio.Event]:
+        self._ensure_queue()
+        assert self._queue is not None
+        assert self._new_task_event is not None
+        assert self._resume_event is not None
+        return self._queue, self._new_task_event, self._resume_event
 
     async def start_workers(self, processor_func: Callable[[Dict[str, Any]], Awaitable[None]]):
         """
@@ -71,31 +86,36 @@ class PersistentAssemblyQueue:
 
     async def add_task(self, payload: Dict[str, Any]):
         """入队新任务"""
-        self._ensure_queue()
+        queue, new_task_event, _ = self._get_queue_parts()
         task_id = payload.get('task_id')
+        if not isinstance(task_id, str) or not task_id:
+            return
         if task_id in self._queued_ids:
             logger.info(f"[Queue] 任务 {task_id} 已经在队列中，忽略重复请求。")
             return
             
         self._queued_ids.add(task_id)
-        self._queue.append(payload)
-        self._new_task_event.set()
+        queue.append(payload)
+        new_task_event.set()
         logger.info(f"[Queue] 任务已追加至队列: {task_id}")
         await self._broadcast_status()
 
     async def _worker_loop(self):
         """消费者循环 (并发数=1，支持暂停门控)"""
+        queue, new_task_event, resume_event = self._get_queue_parts()
         while True:
             # 暂停门控：如果队列被暂停，等待 resume 信号
-            await self._resume_event.wait()
+            await resume_event.wait()
             
-            if not self._queue:
-                self._new_task_event.clear()
-                await self._new_task_event.wait()
+            if not queue:
+                new_task_event.clear()
+                await new_task_event.wait()
                 continue
                 
-            payload = self._queue.pop(0)
+            payload = queue.pop(0)
             task_id = payload.get('task_id')
+            if not isinstance(task_id, str) or not task_id:
+                continue
             self._queued_ids.discard(task_id)
             self._current_task_id = task_id
             
@@ -109,7 +129,8 @@ class PersistentAssemblyQueue:
                 assembly_db.update_task_progress(task_id, "QUEUED", 0, "running")
                 await self._broadcast_status()
                 
-                await self._processor(payload)
+                if self._processor is not None:
+                    await self._processor(payload)
                 
             except Exception as e:
                 logger.error(f"[Queue] 任务派发崩溃: {task_id}, 错误: {e}")
@@ -120,10 +141,11 @@ class PersistentAssemblyQueue:
 
     def remove_task_from_queue(self, task_id: str) -> bool:
         """从等待队列中移除指定任务"""
-        self._ensure_queue()
-        initial_len = len(self._queue)
-        self._queue = [p for p in self._queue if p.get('task_id') != task_id]
-        if len(self._queue) < initial_len:
+        queue, _, _ = self._get_queue_parts()
+        initial_len = len(queue)
+        filtered = [p for p in queue if p.get('task_id') != task_id]
+        self._queue = filtered
+        if len(filtered) < initial_len:
             self._queued_ids.discard(task_id)
             # 同步更新数据库状态为 aborted 以防前端闪烁
             assembly_db.update_task_progress(task_id, "ABORTED", 0, "aborted")
@@ -133,17 +155,17 @@ class PersistentAssemblyQueue:
 
     def reorder_queue(self, task_ids: List[str]):
         """根据传入的 task_id 列表对等待队列进行重排"""
-        self._ensure_queue()
+        queue, _, _ = self._get_queue_parts()
         new_queue = []
         for tid in task_ids:
-            for p in self._queue:
+            for p in queue:
                 if p.get('task_id') == tid:
                     new_queue.append(p)
                     break
         
         # 将传入列表中不存在的其他任务垫底
         existing_tids = {p.get('task_id') for p in new_queue}
-        for p in self._queue:
+        for p in queue:
             if p.get('task_id') not in existing_tids:
                 new_queue.append(p)
                 
@@ -153,18 +175,18 @@ class PersistentAssemblyQueue:
     # ─── 暂停/恢复控制 ────────────────────────────────────
     def pause(self):
         """暂停队列派发（当前运行中的任务不受影响）"""
-        self._ensure_queue()
+        _, _, resume_event = self._get_queue_parts()
         if not self._paused:
             self._paused = True
-            self._resume_event.clear()
+            resume_event.clear()
             logger.info("⏸️ 队列已暂停，新任务将等待恢复后再派发。")
 
     def resume(self):
         """恢复队列派发"""
-        self._ensure_queue()
+        _, _, resume_event = self._get_queue_parts()
         if self._paused:
             self._paused = False
-            self._resume_event.set()
+            resume_event.set()
             logger.info("▶️ 队列已恢复，继续派发任务。")
 
     @property
@@ -172,7 +194,7 @@ class PersistentAssemblyQueue:
         return self._paused
 
     @property
-    def current_task_id(self) -> str:
+    def current_task_id(self) -> Optional[str]:
         return self._current_task_id
 
     # ─── 状态查询与广播 ────────────────────────────────────

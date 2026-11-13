@@ -6,7 +6,7 @@
 import os
 import platform
 import sys
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 class EnvironmentChecker:
@@ -102,7 +102,7 @@ class EnvironmentChecker:
         self.checks.append(f"系统: {platform.system()} {platform.release()}")
         return True
     
-    def check_disk_space(self, path: str = None, required_space_gb: float = 1.0) -> bool:
+    def check_disk_space(self, path: Optional[str] = None, required_space_gb: float = 1.0) -> bool:
         """检查磁盘空间"""
         if path is None:
             path = os.getcwd()

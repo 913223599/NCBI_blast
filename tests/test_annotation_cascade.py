@@ -3,11 +3,8 @@
 多引擎流式级联互补注释流水线单元与集成测试 (TestAnnotationCascade)
 """
 import sys
-import os
-import asyncio
 import unittest
 from pathlib import Path
-from typing import Dict, Any, List
 
 # 确保项目根目录在 sys.path 中
 project_root = Path(__file__).resolve().parent.parent
@@ -77,6 +74,7 @@ class TestAnnotationCascade(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(base.category, "Tail & Host Interaction")
         self.assertEqual(base.source_engine, "PhageScope")
         self.assertTrue(len(base.evidence_sources) > 0)
+        assert base.notes is not None
         self.assertIn("PhageScope", base.notes)
 
     async def test_pipeline_streaming_execution(self):

@@ -6,7 +6,7 @@
 
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from .engines.mummer import MummerEngine
 from .processors.orientator import SequenceOrientator
@@ -29,7 +29,7 @@ class ComparisonPipeline:
         self.orientator = SequenceOrientator()
 
     async def execute(
-        self, ref_file: str, query_file: str, options: Dict[str, Any] = None
+        self, ref_file: str, query_file: str, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         主执行入口

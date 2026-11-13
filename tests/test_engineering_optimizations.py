@@ -99,17 +99,20 @@ def test_source_code_zero_emoji_and_utf8_compliance():
                 continue
             func = node.func
             is_builtin_open = isinstance(func, ast.Name) and func.id == "open"
-            is_attr_open = isinstance(func, ast.Attribute) and func.attr == "open"
-            if not (is_builtin_open or is_attr_open):
+            attr_target = func if isinstance(func, ast.Attribute) and func.attr == "open" else None
+            if not (is_builtin_open or attr_target is not None):
                 continue
-            if is_attr_open and isinstance(func.value, ast.Name) and func.value.id in BINARY_OPEN_MODULES:
+            if attr_target is not None and isinstance(attr_target.value, ast.Name) and attr_target.value.id in BINARY_OPEN_MODULES:
                 continue
 
             # builtin open(file, mode, ...) 中 mode 是第 2 个位置参数；Path.open(mode, ...) 中是第 1 个
             mode = "r"
-            mode_arg_idx = 1 if (is_builtin_open or (is_attr_open and isinstance(func.value, ast.Name) and func.value.id == "io")) else 0
-            if len(node.args) > mode_arg_idx and isinstance(node.args[mode_arg_idx], ast.Constant) and isinstance(node.args[mode_arg_idx].value, str):
-                mode = node.args[mode_arg_idx].value
+            is_io_open = attr_target is not None and isinstance(attr_target.value, ast.Name) and attr_target.value.id == "io"
+            mode_arg_idx = 1 if (is_builtin_open or is_io_open) else 0
+            if len(node.args) > mode_arg_idx:
+                mode_arg = node.args[mode_arg_idx]
+                if isinstance(mode_arg, ast.Constant) and isinstance(mode_arg.value, str):
+                    mode = mode_arg.value
             for kw in node.keywords:
                 if kw.arg == "mode" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
                     mode = kw.value.value
@@ -119,7 +122,7 @@ def test_source_code_zero_emoji_and_utf8_compliance():
             has_enc = any(kw.arg == "encoding" for kw in node.keywords)
             if is_builtin_open and not has_enc and len(node.args) < 4:
                 missing_enc.append(f"{py_file.relative_to(PROJECT_ROOT)}:{node.lineno}")
-            elif is_attr_open and isinstance(func.value, ast.Name) and func.value.id == "io" and not has_enc and len(node.args) < 4:
+            elif is_io_open and not has_enc and len(node.args) < 4:
                 missing_enc.append(f"{py_file.relative_to(PROJECT_ROOT)}:{node.lineno}")
 
     frontend_files = [
@@ -147,7 +150,7 @@ def test_blast_store_wal_batch_save_and_memory_cap():
     """验证 BlastStore 启用 WAL 模式、复合索引、批量事务写入及 BlastTask 内存计数"""
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test_blast.db"
-        store = BlastStore(db_path)
+        store = BlastStore(str(db_path))
 
         with closing(sqlite3.connect(db_path)) as conn:
             journal_mode = conn.execute("PRAGMA journal_mode;").fetchone()[0]

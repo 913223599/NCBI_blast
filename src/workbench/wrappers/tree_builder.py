@@ -73,11 +73,11 @@ class TreeBuilder(BaseWrapper):
                 f"NJ recovery triggered. Original error: {original_error}"
             )
 
+        effective_fasta: Optional[Path] = None
+        was_padded = False
         try:
             from Bio import SeqIO, Phylo
             from Bio.Align import MultipleSeqAlignment
-            from Bio.SeqRecord import SeqRecord
-            from Bio.Seq import Seq
             from Bio.Phylo.TreeConstruction import (
                 DistanceCalculator as BiopythonDC,
                 DistanceTreeConstructor,
@@ -118,7 +118,7 @@ class TreeBuilder(BaseWrapper):
             return False
         finally:
             # 清理临时填充文件
-            if was_padded and effective_fasta != input_fasta and effective_fasta.exists():
+            if was_padded and effective_fasta is not None and effective_fasta != input_fasta and effective_fasta.exists():
                 try:
                     effective_fasta.unlink()
                 except OSError:

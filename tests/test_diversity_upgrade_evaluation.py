@@ -6,17 +6,16 @@
 2. 生态学 Alpha 多样性指标校正保真度
 3. 16S 操纵子多拷贝异质性 (Intragenomic Heterogeneity) 智能诊断准确度
 """
-import os
 import sys
 import json
 import time
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict, cast
 
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        cast(Any, sys.stdout).reconfigure(encoding="utf-8")
+        cast(Any, sys.stderr).reconfigure(encoding="utf-8")
     except Exception:
         pass
 

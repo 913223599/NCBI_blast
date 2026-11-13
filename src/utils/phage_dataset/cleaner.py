@@ -50,8 +50,8 @@ def merge_intervals(
     """
     normalized: List[Tuple[int, int]] = []
     for raw_start, raw_end in intervals:
-        s = min(int(raw_start), int(raw_end)) - max(0, int(flank_bp))
-        e = max(int(raw_start), int(raw_end)) + max(0, int(flank_bp))
+        s = min(raw_start, raw_end) - max(0, flank_bp)
+        e = max(raw_start, raw_end) + max(0, flank_bp)
         if s < 0:
             s = 0
         if max_length is not None and max_length > 0 and e > max_length:
@@ -308,7 +308,7 @@ def _run_blastn_prophage_scan(
         "-out", str(out_tsv),
         "-outfmt", "6 qseqid sseqid pident length qstart qend sstart send evalue bitscore",
         "-perc_identity", str(perc_identity),
-        "-evalue", str(evalue),
+        "-evalue", evalue,
         "-num_threads", str(max(1, threads)),
     ]
     res = subprocess.run(

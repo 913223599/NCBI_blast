@@ -3,7 +3,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +64,8 @@ class AnnotationManager:
                     results[row['sequence_hash']] = label
         return results
 
-    def update_annotation(self, sequence_hash: str, last_known_id: str = None, 
-                          custom_label: str = None, blast_identity: str = None):
+    def update_annotation(self, sequence_hash: str, last_known_id: Optional[str] = None, 
+                          custom_label: Optional[str] = None, blast_identity: Optional[str] = None):
         """Update annotation record using the content hash as key."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""

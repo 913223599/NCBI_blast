@@ -80,7 +80,7 @@ class BlastXmlParser:
                 })
                 yield row_data
 
-    def _extract_metadata(self, title: str) -> Dict[str, str]:
+    def _extract_metadata(self, title: str) -> Dict[str, Any]:
         """
         从标题中提取生物学元数据 (访问号, 物种, 基因等)
         逻辑迁移自 result_converter.py

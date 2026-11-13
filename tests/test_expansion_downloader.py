@@ -5,6 +5,7 @@ V3 靶向扩展下载器单元测试（零泄露、GC范围校验、正负双向
 import io
 import json
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 from Bio import SeqIO
@@ -33,12 +34,15 @@ def _make_genbank_text(
         id=acc,
         name=acc.split(".")[0],
         description=description,
-        annotations={
-            "molecule_type": "DNA",
-            "topology": "linear",
-            "organism": organism,
-            "taxonomy": taxonomy,
-        },
+        annotations=cast(
+            Any,
+            {
+                "molecule_type": "DNA",
+                "topology": "linear",
+                "organism": organism,
+                "taxonomy": taxonomy,
+            },
+        ),
     )
     src_qual = {"organism": [organism]}
     if host:

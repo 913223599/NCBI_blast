@@ -1,16 +1,14 @@
 
-import os
 import re
 import logging
 import shutil
 import zipfile
-import threading
 import time as _time
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from ..broadcaster import broadcaster
 from ...utils.universal_parser import UniversalParser
 
@@ -81,7 +79,6 @@ async def analyze_tree(req: TreeAnalyzeRequest):
     """启动进化树构建流水线 (含 TaskManager 集成)"""
     from ...workbench.pipelines.analysis_pipeline import AnalysisPipeline
     from ...workbench.wrappers.tree_archive_manager import ArchiveManager
-    from ...workbench.models.tool_config import ToolConfig
     from ...workbench.models.task_manager import get_task_manager
 
     def worker(cancel_event=None):
@@ -142,14 +139,16 @@ async def analyze_tree(req: TreeAnalyzeRequest):
                 }
             )
             
-            final_result = {}
+            final_result: Dict[str, Any] = {}
             for step_data in workflow:
                 if cancel_event and cancel_event.is_set():
                     broadcaster.broadcast_sync("tree_error", {"error": "任务已取消"})
                     return
                 step_data["elapsed"] = round(_time.time() - task_start, 2)
                 broadcaster.broadcast_sync("tree_progress", step_data)
-                if "result" in step_data: final_result = step_data["result"]
+                step_res = step_data.get("result")
+                if isinstance(step_res, dict):
+                    final_result = step_res
             
             # 归档归纳
             res_files = {k: final_result[k] for k in ["tree_file", "manifest_file"] if k in final_result}

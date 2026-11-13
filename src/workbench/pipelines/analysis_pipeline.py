@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Iterator
 
 from src.workbench.wrappers.tree_factory import TreeFactory
 
@@ -90,7 +90,7 @@ class AnalysisPipeline:
     # --- Phase 1: FASTA (Inlet) ---
     def stage_fasta_process(self, input_fasta: Path, output_dir: Path) -> Dict[str, Any]:
         """FASTA 元器件逻辑：进行 QC 并在必要时执行去重重命名。"""
-        results = {"status": "success"}
+        results: Dict[str, Any] = {"status": "success"}
         
         # 1. 强制执行去重（核心修复：应对 IQ-TREE 重名崩溃）
         sanitized_fasta = output_dir / "input_sanitized.fasta"
@@ -205,9 +205,9 @@ class AnalysisPipeline:
 
     # --- Phase 2: DIST (Calculator) ---
     def stage_dist_compute(self, input_fasta: Path, output_dm: Path, 
-                          method: str = "rapid", k: int = 20, threads: int = None) -> Dict[str, Any]:
+                          method: str = "rapid", k: int = 20, threads: Optional[int] = None) -> Dict[str, Any]:
         """DIST 元器件逻辑：计算距离矩阵。支持从 FASTA 启动。"""
-        results = {"status": "success", "dm_file": str(output_dm)}
+        results: Dict[str, Any] = {"status": "success", "dm_file": str(output_dm)}
         
         if method == "rapid":
             res = self.tree_tools.hash2dissim(input_fasta, output_dm, k=k, threads=threads)
@@ -227,7 +227,7 @@ class AnalysisPipeline:
 
     def stage_nwk_inference(self, input_dm: Optional[Path], output_nwk: Path, 
                            engine: str = "nj", input_fasta: Optional[Path] = None, 
-                           params: Dict[str, Any] = None) -> Dict[str, Any]:
+                           params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """NWK 元器件逻辑：构树生成 Newick 拓扑。支持多种推断引擎路由。"""
         # 直接透传至 TreeFactory 的统一路由器
         success = self.tree_tools.make_dist_tree(
@@ -292,7 +292,13 @@ class AnalysisPipeline:
             return {"status": "error"}
 
     # --- Auxiliary: Macro Flows ---
-    def run_full_pipeline(self, input_fasta: Path, output_dir: Path, method: str = "rapid", params: Dict[str, Any] = None):
+    def run_full_pipeline(
+        self,
+        input_fasta: Path,
+        output_dir: Path,
+        method: str = "rapid",
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[Dict[str, Any]]:
         """支持全量分流的系统发育分析驱动。"""
         p = params or {}
         msa_method = p.get("msa", "none")

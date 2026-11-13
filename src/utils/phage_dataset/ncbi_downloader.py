@@ -98,7 +98,7 @@ class PhageDatasetDownloader:
         max_length_bp: int = 1000000,
         request_timeout: int = 60,
         retry_backoff_base: float = 1.5,
-        session: Optional[requests.Session] = None,
+        session: Optional[Any] = None,
     ):
         self.data_dir = Path(data_dir).resolve()
         self.fasta_dir = self.data_dir / "fasta"
@@ -218,7 +218,7 @@ class PhageDatasetDownloader:
         pool_target = int(target_count * 1.25) + 10
 
         for group_name, term, weight in host_queries:
-            quota = max(5, int(round(pool_target * weight)))
+            quota = max(5, round(pool_target * weight))
             req_retmax = min(max(quota * 2, quota + 20), 2500)
             resp = self._request_with_retry(
                 f"{EUTILS_BASE}/esearch.fcgi",

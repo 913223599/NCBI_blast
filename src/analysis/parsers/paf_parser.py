@@ -5,7 +5,7 @@ PAF格式解析器
 
 import logging
 import os
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 from ..core.base import BaseParser
@@ -102,7 +102,7 @@ class PAFParser(BaseParser):
                 "variants": []
             }
     
-    def _parse_alignment_line(self, parts: List[str]) -> Dict[str, Any]:
+    def _parse_alignment_line(self, parts: List[str]) -> Optional[Dict[str, Any]]:
         """解析单行比对记录"""
         try:
             q_len = int(parts[1])
