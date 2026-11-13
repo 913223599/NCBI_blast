@@ -8,12 +8,13 @@ Expert B：端到端原始碱基序列专家（PyTorch 1D 膨胀残差卷积，R
 - 显存：batch_size 默认 64，每个 epoch 结束与训练完成后执行 torch.cuda.empty_cache()。
 """
 import argparse
+import gc
 import json
 import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 
@@ -101,12 +102,107 @@ def _one_hot_batch(codes_np: np.ndarray, device):
     return oh.permute(0, 2, 1).float()
 
 
-def _load_part(feature_dir: Path, bench_or_train_dir: Path, split: str, part: str, max_len: int):
-    arrs = load_split_arrays(feature_dir, split, parts=(part,))
-    manifest = json.loads((Path(bench_or_train_dir) / "benchmark_manifest.json").read_text(encoding="utf-8"))
-    fasta = Path(manifest["splits"][split][part]["fasta"])
+def _resolve_part_fasta(
+    feature_dir: Path,
+    bench_or_train_dir: Path,
+    split: str,
+    part: str,
+    fasta_override: Optional[Path] = None,
+) -> Path:
+    """按显式覆盖 -> benchmark_manifest -> 本地约定文件名优先级解析分片 FASTA。"""
+    if fasta_override is not None:
+        return Path(fasta_override)
+    manifest_path = Path(bench_or_train_dir) / "benchmark_manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        split_map = manifest.get("splits", {}).get(split, {})
+        if part in split_map and "fasta" in split_map[part]:
+            return Path(split_map[part]["fasta"])
+    for base in (Path(feature_dir), Path(bench_or_train_dir)):
+        cand = base / f"{split}_{part}.fna"
+        if cand.exists():
+            return cand
+    raise FileNotFoundError(f"无法解析 {split}/{part} 对应的 FASTA 文件（manifest={manifest_path}）")
+
+
+def _load_part(
+    feature_dir: Path,
+    bench_or_train_dir: Path,
+    split: str,
+    part: str,
+    max_len: int,
+    fasta_override: Optional[Path] = None,
+    use_semantic_clean_labels: bool = False,
+) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray, np.ndarray]:
+    arrs = dict(load_split_arrays(feature_dir, split, parts=(part,)))
+    orig_labels = arrs["labels"].astype(np.int8, copy=True)
+    if use_semantic_clean_labels:
+        sem_path = Path(feature_dir) / f"{split}_{part}_semantic.npz"
+        if sem_path.exists():
+            with np.load(sem_path, allow_pickle=False) as sem_npz:
+                if "clean_labels" in sem_npz and len(sem_npz["clean_labels"]) == len(orig_labels):
+                    arrs["labels"] = sem_npz["clean_labels"].astype(np.int8)
+    fasta = _resolve_part_fasta(feature_dir, bench_or_train_dir, split, part, fasta_override=fasta_override)
     codes, lengths = load_window_sequences(fasta, arrs["contig_ids"], arrs["starts"], arrs["ends"], max_len=max_len)
-    return arrs, codes, lengths
+    return arrs, codes, lengths, orig_labels
+
+
+def _load_expert_b_train_data(
+    train_feature_dir: Path,
+    train_dir: Path,
+    max_len: int,
+    *,
+    train_parts: Tuple[str, ...] = ("windows", "chimeras"),
+    extra_mined_fasta: Optional[Path] = None,
+    extra_fasta_map: Optional[Dict[str, Path]] = None,
+    part_weights: Optional[Dict[str, float]] = None,
+    use_semantic_clean_labels: bool = True,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """统一加载训练分片序列、语义清洗标签、原始标签与样本权重。"""
+    f_map = {k: Path(v) for k, v in (extra_fasta_map or {}).items()}
+    if extra_mined_fasta is not None and "mined" not in f_map:
+        f_map["mined"] = Path(extra_mined_fasta)
+
+    ordered_parts = list(train_parts)
+    mined_npz = Path(train_feature_dir) / "train_mined.npz"
+    if "mined" in f_map and f_map["mined"].exists() and mined_npz.exists() and "mined" not in ordered_parts:
+        ordered_parts.append("mined")
+
+    w_map = part_weights or {}
+    codes_all, len_all, y_all, orig_y_all, sub_all, cid_all, sw_all = [], [], [], [], [], [], []
+    for part in ordered_parts:
+        npz_path = Path(train_feature_dir) / f"train_{part}.npz"
+        if not npz_path.exists():
+            continue
+        arrs, codes_p, len_p, orig_y_p = _load_part(
+            train_feature_dir,
+            train_dir,
+            "train",
+            part,
+            max_len,
+            fasta_override=f_map.get(part),
+            use_semantic_clean_labels=use_semantic_clean_labels,
+        )
+        if len(arrs["labels"]) == 0:
+            continue
+        mult = np.full(len(arrs["labels"]), float(w_map.get(part, 1.0)), dtype=np.float32)
+        codes_all.append(codes_p)
+        len_all.append(len_p)
+        y_all.append(arrs["labels"].astype(np.int8))
+        orig_y_all.append(orig_y_p)
+        sub_all.append(arrs["sub_mask"].astype(np.float32))
+        cid_all.append(arrs["contig_ids"])
+        sw_all.append(mult)
+
+    return (
+        np.concatenate(codes_all),
+        np.concatenate(len_all),
+        np.concatenate(y_all),
+        np.concatenate(orig_y_all),
+        np.concatenate(sub_all),
+        np.concatenate(cid_all),
+        np.concatenate(sw_all),
+    )
 
 
 def predict_scores(model, codes: np.ndarray, lengths: np.ndarray, device, batch_size: int = 128) -> np.ndarray:
@@ -140,80 +236,51 @@ def predict_scores_and_subprobs(
     return out, out_sub
 
 
-def train_expert_b(
-    train_feature_dir: Path,
-    train_dir: Path,
-    eval_feature_dir: Path,
-    bench_dir: Path,
-    out_dir: Path,
-    epochs: int = 14,
-    batch_size: int = 64,
-    lr: float = 1e-3,
-    patience: int = 4,
-    max_len: int = 5000,
-    extra_mined_fasta: Optional[Path] = None,
-    seed: int = 42,
-) -> Dict[str, Any]:
+def _fit_expert_b_fold(
+    codes_tr: np.ndarray,
+    len_tr: np.ndarray,
+    y_tr: np.ndarray,
+    sub_tr: np.ndarray,
+    sw_tr: np.ndarray,
+    va_codes: np.ndarray,
+    va_len: np.ndarray,
+    va_y: np.ndarray,
+    *,
+    channels: int,
+    n_blocks: int,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    patience: int,
+    max_len: int,
+    device,
+    ckpt_path: Path,
+    seed: int,
+) -> Tuple[Any, int, float, List[Dict[str, Any]], float, float]:
     import torch
     from sklearn.metrics import average_precision_score
 
-    torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
-    out_root = Path(out_dir).resolve()
-    out_root.mkdir(parents=True, exist_ok=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # 训练集 = 独立窗口 + 嵌合体滑窗（及可选 CheckV 真实前噬菌体切片）
-    parts_tr = [_load_part(train_feature_dir, train_dir, "train", p, max_len) for p in ("windows", "chimeras")]
-    mined_npz = Path(train_feature_dir) / "train_mined.npz"
-    if extra_mined_fasta is not None and Path(extra_mined_fasta).exists() and mined_npz.exists():
-        m_arrs = load_split_arrays(train_feature_dir, "train", parts=("mined",))
-        if len(m_arrs["labels"]) > 0:
-            m_codes, m_len = load_window_sequences(
-                Path(extra_mined_fasta), m_arrs["contig_ids"], m_arrs["starts"], m_arrs["ends"], max_len=max_len,
-            )
-            parts_tr.append((m_arrs, m_codes, m_len))
-
-    all_codes_tr = np.concatenate([p[1] for p in parts_tr])
-    all_len_tr = np.concatenate([p[2] for p in parts_tr])
-    all_y_tr = np.concatenate([p[0]["labels"] for p in parts_tr]).astype(np.int8)
-    all_sub_tr = np.concatenate([p[0]["sub_mask"] for p in parts_tr]).astype(np.float32)
-
-    keep = all_y_tr >= 0
-    codes_tr, len_tr, y_tr, sub_tr = all_codes_tr[keep], all_len_tr[keep], all_y_tr[keep], all_sub_tr[keep]
-    # 边界过渡窗 (-1) 的精确 sub_mask 也一起用于微调 200bp 断点分割头
-    boundary_idx = np.where(all_y_tr == -1)[0]
-    if boundary_idx.size > 0:
-        codes_tr = np.concatenate([codes_tr, all_codes_tr[boundary_idx]])
-        len_tr = np.concatenate([len_tr, all_len_tr[boundary_idx]])
-        y_tr = np.concatenate([y_tr, all_y_tr[boundary_idx]])
-        sub_tr = np.concatenate([sub_tr, all_sub_tr[boundary_idx]])
-    del all_codes_tr, all_len_tr, all_y_tr, all_sub_tr, parts_tr
-
-    va_win = _load_part(eval_feature_dir, bench_dir, "val", "windows", max_len)
-    va_chim = _load_part(eval_feature_dir, bench_dir, "val", "chimeras", max_len)
-    va_codes = np.concatenate([va_win[1], va_chim[1]])
-    va_len = np.concatenate([va_win[2], va_chim[2]])
-    va_y = np.concatenate([va_win[0]["labels"], va_chim[0]["labels"]])
-    va_keep = va_y >= 0
-
-    model = build_model().to(device)
-    n_params = int(sum(p.numel() for p in model.parameters()))
+    model = build_model(channels=channels, n_blocks=n_blocks).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-    steps_per_epoch = int(np.ceil(len(y_tr) / batch_size))
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=epochs * steps_per_epoch)
+    steps_per_epoch = max(1, int(np.ceil(len(y_tr) / batch_size)))
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=max(1, epochs * steps_per_epoch))
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
+
     pos_cnt = float(np.sum(y_tr == 1))
     neg_cnt = float(np.sum(y_tr == 0))
     pos_weight = torch.tensor(neg_cnt / max(1.0, pos_cnt), device=device)
     win_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction="none")
     sub_loss_fn = torch.nn.BCEWithLogitsLoss()
 
+    va_keep = va_y >= 0
+    has_two_classes = bool(np.any(va_keep) and np.unique(va_y[va_keep]).size > 1)
     best_ap = -1.0
     best_epoch = -1
     bad_epochs = 0
-    history = []
-    ckpt_path = out_root / "expert_b_cnn.pt"
+    history: List[Dict[str, Any]] = []
+    ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+
     t0 = time.perf_counter()
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats()
@@ -227,7 +294,6 @@ def train_expert_b(
             b_codes = codes_tr[idx].copy()
             b_len = len_tr[idx]
             b_sub = sub_tr[idx].copy()
-            # 仅对满长窗口或纯正/纯负窗口同步做反向互补与 bin 翻转
             rc_mask = (b_len == max_len) | (b_sub.min(axis=1) == b_sub.max(axis=1))
             if rng.random() < 0.5 and np.any(rc_mask):
                 b_codes[rc_mask] = reverse_complement_codes(b_codes[rc_mask], b_len[rc_mask])
@@ -237,15 +303,17 @@ def train_expert_b(
             ln = torch.from_numpy(b_len).to(device)
             yb_raw = y_tr[idx]
             win_valid = torch.from_numpy((yb_raw >= 0).astype(np.float32)).to(device)
+            wb = torch.from_numpy(sw_tr[idx]).to(device)
+            win_eff = win_valid * wb
             yb = torch.from_numpy(np.maximum(yb_raw, 0).astype(np.float32)).to(device)
             sb = torch.from_numpy(b_sub).to(device)
             opt.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
                 w_logit, s_logits = model(x, ln)
-                loss_w = (win_loss_fn(w_logit, yb) * win_valid).sum() / win_valid.sum().clamp(min=1.0)
+                loss_w = (win_loss_fn(w_logit, yb) * win_eff).sum() / win_eff.sum().clamp(min=1e-4)
                 loss_s = sub_loss_fn(s_logits, sb)
                 loss = 0.7 * loss_w + 0.3 * loss_s
-            scaler.scale(loss).backward()
+            cast(torch.Tensor, scaler.scale(loss)).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scale_before = scaler.get_scale()
@@ -255,15 +323,15 @@ def train_expert_b(
                 sched.step()
             ep_loss += float(loss.item()) * len(idx)
 
-        va_scores = predict_scores(model, va_codes[va_keep], va_len[va_keep], device)
-        ap = float(average_precision_score(va_y[va_keep], va_scores))
-        history.append({"epoch": epoch, "train_loss": round(ep_loss / len(y_tr), 5), "val_auprc": round(ap, 5)})
-        logger.info(f"epoch {epoch}: loss={ep_loss / len(y_tr):.4f} val_auprc={ap:.4f}")
+        va_scores = predict_scores(model, va_codes[va_keep], va_len[va_keep], device, batch_size=max(64, batch_size))
+        ap = float(average_precision_score(va_y[va_keep], va_scores)) if has_two_classes else round(-ep_loss / max(1, len(y_tr)), 5)
+        history.append({"epoch": epoch, "train_loss": round(ep_loss / max(1, len(y_tr)), 5), "val_auprc": round(ap, 5)})
+        logger.info(f"epoch {epoch}: loss={ep_loss / max(1, len(y_tr)):.4f} val_auprc={ap:.4f}")
         if device.type == "cuda":
             torch.cuda.empty_cache()
-        if ap > best_ap:
+        if ap > best_ap or best_epoch < 0:
             best_ap, best_epoch, bad_epochs = ap, epoch, 0
-            tmp = out_root / ".expert_b_cnn.tmp.pt"
+            tmp = ckpt_path.with_name(f".{ckpt_path.name}.tmp")
             torch.save(model.state_dict(), tmp)
             tmp.replace(ckpt_path)
         else:
@@ -274,7 +342,167 @@ def train_expert_b(
     train_sec = round(time.perf_counter() - t0, 2)
     peak_mb = round(torch.cuda.max_memory_allocated() / (1024 * 1024), 1) if device.type == "cuda" else 0.0
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
-    del codes_tr, len_tr, sub_tr
+    return model, best_epoch, best_ap, history, train_sec, peak_mb
+
+
+def compute_group_oof_expert_b_probs(
+    codes: np.ndarray,
+    lengths: np.ndarray,
+    labels: np.ndarray,
+    orig_labels: np.ndarray,
+    sub_mask: np.ndarray,
+    contig_ids: np.ndarray,
+    *,
+    sample_weights: Optional[np.ndarray] = None,
+    n_splits: int = 3,
+    epochs: int = 8,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    patience: int = 3,
+    channels: int = 128,
+    n_blocks: int = 6,
+    max_len: int = 5000,
+    seed: int = 42,
+    tmp_dir: Optional[Path] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """按 contig_id 严格 GroupKFold 生成无泄漏 Expert B OOF 窗口概率与 200bp 亚窗口概率。"""
+    import tempfile
+    import torch
+    from sklearn.model_selection import GroupKFold
+
+    torch.manual_seed(seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    n = len(labels)
+    oof_win = np.zeros(n, dtype=np.float32)
+    oof_sub = np.zeros((n, SUB_BINS), dtype=np.float32)
+    sw_all = np.ones(n, dtype=np.float32) if sample_weights is None else sample_weights.astype(np.float32)
+    unique_groups = np.unique(contig_ids)
+    eff_splits = min(n_splits, len(unique_groups))
+    if eff_splits < 2:
+        return oof_win, oof_sub
+
+    gkf = GroupKFold(n_splits=eff_splits)
+    work_dir = Path(tmp_dir) if tmp_dir is not None else Path(tempfile.gettempdir()) / f"exp_b_oof_{seed}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    for fold_idx, (tr_idx, va_idx) in enumerate(gkf.split(cast(Any, codes), labels, groups=contig_ids)):
+        keep_tr = (labels[tr_idx] >= 0) | (orig_labels[tr_idx] == -1)
+        tr_sel = tr_idx[keep_tr]
+        ckpt_fold = work_dir / f".expert_b_oof_fold{fold_idx}.pt"
+        fold_model, _, _, _, _, _ = _fit_expert_b_fold(
+            codes[tr_sel],
+            lengths[tr_sel],
+            labels[tr_sel],
+            sub_mask[tr_sel],
+            sw_all[tr_sel],
+            codes[va_idx],
+            lengths[va_idx],
+            labels[va_idx],
+            channels=channels,
+            n_blocks=n_blocks,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            patience=patience,
+            max_len=max_len,
+            device=device,
+            ckpt_path=ckpt_fold,
+            seed=seed + fold_idx + 1,
+        )
+        w_sc, s_sc = predict_scores_and_subprobs(
+            fold_model, codes[va_idx], lengths[va_idx], device, batch_size=max(64, batch_size),
+        )
+        oof_win[va_idx] = w_sc
+        oof_sub[va_idx] = s_sc
+        del fold_model
+        if ckpt_fold.exists():
+            ckpt_fold.unlink(missing_ok=True)
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+    return oof_win, oof_sub
+
+
+def train_expert_b(
+    train_feature_dir: Path,
+    train_dir: Path,
+    eval_feature_dir: Path,
+    bench_dir: Path,
+    out_dir: Path,
+    epochs: int = 14,
+    batch_size: int = 64,
+    lr: float = 1e-3,
+    patience: int = 4,
+    max_len: int = 5000,
+    extra_mined_fasta: Optional[Path] = None,
+    train_parts: Tuple[str, ...] = ("windows", "chimeras"),
+    extra_fasta_map: Optional[Dict[str, Path]] = None,
+    part_weights: Optional[Dict[str, float]] = None,
+    channels: int = 128,
+    n_blocks: int = 6,
+    use_semantic_clean_labels: bool = True,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    import torch
+
+    torch.manual_seed(seed)
+    out_root = Path(out_dir).resolve()
+    out_root.mkdir(parents=True, exist_ok=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 训练集 = 独立窗口 + 嵌合体滑窗（及可选挖掘分片与语义清洗标签）
+    all_codes_tr, all_len_tr, all_y_tr, all_orig_y_tr, all_sub_tr, _, all_sw_tr = _load_expert_b_train_data(
+        train_feature_dir,
+        train_dir,
+        max_len,
+        train_parts=train_parts,
+        extra_mined_fasta=extra_mined_fasta,
+        extra_fasta_map=extra_fasta_map,
+        part_weights=part_weights,
+        use_semantic_clean_labels=use_semantic_clean_labels,
+    )
+
+    keep = all_y_tr >= 0
+    codes_tr, len_tr, y_tr = all_codes_tr[keep], all_len_tr[keep], all_y_tr[keep]
+    sub_tr, sw_tr = all_sub_tr[keep], all_sw_tr[keep]
+    # 仅保留真正原始嵌合体边界过渡窗 (-1) 微调 200bp 断点分割头，排除被语义清洗屏蔽的伪负样本
+    boundary_idx = np.where((all_y_tr == -1) & (all_orig_y_tr == -1))[0]
+    if boundary_idx.size > 0:
+        codes_tr = np.concatenate([codes_tr, all_codes_tr[boundary_idx]])
+        len_tr = np.concatenate([len_tr, all_len_tr[boundary_idx]])
+        y_tr = np.concatenate([y_tr, all_y_tr[boundary_idx]])
+        sub_tr = np.concatenate([sub_tr, all_sub_tr[boundary_idx]])
+        sw_tr = np.concatenate([sw_tr, all_sw_tr[boundary_idx]])
+    del all_codes_tr, all_len_tr, all_y_tr, all_orig_y_tr, all_sub_tr, all_sw_tr
+
+    va_win = _load_part(eval_feature_dir, bench_dir, "val", "windows", max_len)
+    va_chim = _load_part(eval_feature_dir, bench_dir, "val", "chimeras", max_len)
+    va_codes = np.concatenate([va_win[1], va_chim[1]])
+    va_len = np.concatenate([va_win[2], va_chim[2]])
+    va_y = np.concatenate([va_win[0]["labels"], va_chim[0]["labels"]])
+
+    ckpt_path = out_root / "expert_b_cnn.pt"
+    model, best_epoch, best_ap, history, train_sec, peak_mb = _fit_expert_b_fold(
+        codes_tr,
+        len_tr,
+        y_tr,
+        sub_tr,
+        sw_tr,
+        va_codes,
+        va_len,
+        va_y,
+        channels=channels,
+        n_blocks=n_blocks,
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        patience=patience,
+        max_len=max_len,
+        device=device,
+        ckpt_path=ckpt_path,
+        seed=seed,
+    )
+    n_params = int(sum(p.numel() for p in model.parameters()))
+    del codes_tr, len_tr, sub_tr, sw_tr
 
     va_win_scores = predict_scores(model, va_win[1], va_win[2], device)
     va_chim_scores, va_chim_sub = predict_scores_and_subprobs(model, va_chim[1], va_chim[2], device)
@@ -307,13 +535,16 @@ def train_expert_b(
         chim_sub_probs=te_chim_sub, sub_threshold=decoder.get("sub_threshold"),
     )
     del model
+    gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
+    arch_meta = {"channels": channels, "n_blocks": n_blocks, "max_len": max_len}
     report: Dict[str, Any] = {
         "model_name": "ExpertB_ResBiGRU_SubSeg",
         "trained_at": datetime.now().isoformat(timespec="seconds"),
         "device": str(device),
+        "architecture": arch_meta,
         "params": n_params,
         "train_rows": int(np.sum(y_tr >= 0)),
         "train_boundary_sub_rows": int(np.sum(y_tr == -1)),

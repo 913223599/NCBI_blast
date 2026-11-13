@@ -8,7 +8,7 @@
 """
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
@@ -57,7 +57,7 @@ def compute_window_metrics(
     """计算窗口级二分类与极低假阳性工作点指标。"""
     yt = np.asarray(y_true, dtype=np.int32)
     ys = np.asarray(y_score, dtype=np.float64)
-    n_total = int(yt.size)
+    n_total = yt.size
     n_pos = int(np.sum(yt == 1))
     n_neg = int(np.sum(yt == 0))
 
@@ -117,10 +117,13 @@ def decode_window_scores_to_regions(
     extend_threshold: float = 0.50,
     merge_gap_bp: int = 3000,
     min_region_bp: int = 3000,
+    plateau_min_windows: int = 0,
+    plateau_second_threshold: Optional[float] = None,
 ) -> List[PredictedRegion]:
     """
     双阈值滞回扫描解码器（Hysteresis Region Caller）：
-    - 当连续滑窗中存在得分 >= extend_threshold 的片段且片段峰值 >= seed_threshold 时，确立候选病毒岛；
+    - 当连续滑窗中存在得分 >= extend_threshold 的片段，且片段峰值 >= seed_threshold
+      （或启用多窗平台条件：窗数 >= plateau_min_windows 且次高分 >= plateau_second_threshold）时，确立候选病毒岛；
     - 间距 <= merge_gap_bp 的同 contig 候选岛自动合并；
     - 长度 < min_region_bp 的孤立碎片予以丢弃以防单窗假阳性。
     """
@@ -161,8 +164,20 @@ def decode_window_scores_to_regions(
         if cur_start >= 0:
             raw_islands.append((cur_start, cur_end, max(cur_scores), cur_scores))
 
-        # 仅保留达到高置信 seed_threshold 的核心岛，随后合并近邻岛屿
-        seeded = [isl for isl in raw_islands if isl[2] >= seed_threshold]
+        # 仅保留达到核心 seed_threshold 或满足多窗平台次高峰条件的岛屿，随后合并近邻岛屿
+        def _is_seeded(sc_list: List[float]) -> bool:
+            if max(sc_list) >= seed_threshold:
+                return True
+            if (
+                plateau_second_threshold is not None
+                and plateau_min_windows > 0
+                and len(sc_list) >= plateau_min_windows
+            ):
+                top2 = sorted(sc_list, reverse=True)
+                return len(top2) >= 2 and top2[1] >= float(plateau_second_threshold)
+            return False
+
+        seeded = [isl for isl in raw_islands if _is_seeded(isl[3])]
         if not seeded:
             continue
 
@@ -199,12 +214,17 @@ def decode_subwindow_probs_to_regions(
     merge_gap_bp: int = 3000,
     min_region_bp: int = 3000,
     bin_bp: int = 200,
+    plateau_min_windows: int = 0,
+    plateau_second_threshold: Optional[float] = None,
+    precomputed_bin_profiles: Optional[Mapping[str, Sequence[Tuple[int, np.ndarray]]]] = None,
+    smooth_profile: bool = True,
+    refine_pad_bp: int = 2000,
 ) -> List[PredictedRegion]:
     """
     两阶段亚窗口精细边界解码器（Coarse-to-Fine Hysteresis + 200bp Segmentation Refiner）：
-    1. 先用窗口级双阈值滞回扫描锁定高置信候选病毒岛（继承低 FP/Mb 抗噪优势）；
-    2. 将同 contig 所有滑窗输出的 25-bin (200bp) 亚窗口概率投影回 contig 200bp 网格，做轻量三点平滑；
-    3. 在每个候选岛 [cs - 2000, ce + 2000] 搜索邻域内，按 sub_threshold 精修起止断点。
+    1. 先用窗口级双阈值滞回扫描锁定高置信候选病毒岛（支持多窗平台次高分激活，继承低 FP/Mb 抗噪优势）；
+    2. 将同 contig 滑窗 25-bin (200bp) 亚窗口概率投影回 200bp 网格（若提供 SubBinContextRefiner 连续概率则优先精准覆盖且跳过模糊平滑）；
+    3. 在每个候选岛 [cs - refine_pad_bp, ce + refine_pad_bp] 搜索邻域内，按 sub_threshold 精修起止断点。
     """
     coarse = decode_window_scores_to_regions(
         window_preds,
@@ -212,6 +232,8 @@ def decode_subwindow_probs_to_regions(
         extend_threshold=extend_threshold,
         merge_gap_bp=merge_gap_bp,
         min_region_bp=min_region_bp,
+        plateau_min_windows=plateau_min_windows,
+        plateau_second_threshold=plateau_second_threshold,
     )
     if not coarse or sub_probs is None or len(sub_probs) == 0:
         return coarse
@@ -241,21 +263,32 @@ def decode_subwindow_probs_to_regions(
             w_span = max(1, wp.end_bp - wp.start_bp)
             sub_w = float(w_span) / float(n_sub)
             for k in range(n_sub):
-                bs = wp.start_bp + int(round(k * sub_w))
-                be = wp.start_bp + int(round((k + 1) * sub_w))
+                bs = wp.start_bp + round(k * sub_w)
+                be = wp.start_bp + round((k + 1) * sub_w)
                 i0 = max(0, min(n_bins - 1, bs // bin_bp))
                 i1 = max(i0 + 1, min(n_bins, (be + bin_bp - 1) // bin_bp))
                 prof_sum[i0:i1] += float(sp[k])
                 prof_cnt[i0:i1] += 1.0
 
         prof = np.divide(prof_sum, np.maximum(prof_cnt, 1.0))
-        if n_bins >= 3:
+        if precomputed_bin_profiles and cid in precomputed_bin_profiles:
+            for seg_origin, seg_prof in precomputed_bin_profiles[cid]:
+                seg_arr = np.asarray(seg_prof, dtype=np.float32)
+                if len(seg_arr) == 0:
+                    continue
+                b_start = seg_origin // bin_bp
+                dst_0 = max(0, b_start)
+                src_0 = max(0, -b_start)
+                copy_len = min(n_bins - dst_0, len(seg_arr) - src_0)
+                if copy_len > 0:
+                    prof[dst_0:dst_0 + copy_len] = seg_arr[src_0:src_0 + copy_len]
+        elif smooth_profile and n_bins >= 3:
             smoothed = prof.copy()
             smoothed[1:-1] = 0.2 * prof[:-2] + 0.6 * prof[1:-1] + 0.2 * prof[2:]
             prof = smoothed
 
         refined_contig: List[PredictedRegion] = []
-        pad_bins = max(1, 2000 // bin_bp)
+        pad_bins = max(1, refine_pad_bp // bin_bp)
         for reg in sorted(c_regs, key=lambda r: (r.start_bp, r.end_bp)):
             b_cs = max(0, reg.start_bp // bin_bp)
             b_ce = min(n_bins, max(b_cs + 1, (reg.end_bp + bin_bp - 1) // bin_bp))
@@ -339,7 +372,7 @@ def _match_regions_at_iou(
                 iou = compute_interval_iou(t.start_bp, t.end_bp, p.start_bp, p.end_bp)
                 if iou >= iou_threshold:
                     boundary_err = (abs(p.start_bp - t.start_bp) + abs(p.end_bp - t.end_bp)) / 2.0
-                    pairs.append((iou, t_idx, p_idx, int(round(boundary_err))))
+                    pairs.append((iou, t_idx, p_idx, round(boundary_err)))
 
     pairs.sort(key=lambda x: x[0], reverse=True)
     matched_t: set[int] = set()

@@ -46,17 +46,25 @@ def _load_weighted_train_split(
     train_feature_dir: Path,
     train_parts: Tuple[str, ...],
     part_weights: Optional[Dict[str, float]] = None,
+    use_semantic_clean_labels: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """按分片加载训练样本并叠加可选分片权重与类别平衡权重。"""
+    """按分片加载训练样本并叠加可选分片权重、语义清洗标签与类别平衡权重。"""
     feats_list, labels_list, mult_list = [], [], []
     w_map = part_weights or {}
     for part in train_parts:
         arrs = load_split_arrays(train_feature_dir, "train", parts=(part,))
-        keep = arrs["labels"] >= 0
+        labels_raw = arrs["labels"]
+        if use_semantic_clean_labels:
+            sem_path = Path(train_feature_dir) / f"train_{part}_semantic.npz"
+            if sem_path.exists():
+                with np.load(sem_path, allow_pickle=False) as sem_npz:
+                    if "clean_labels" in sem_npz and len(sem_npz["clean_labels"]) == len(labels_raw):
+                        labels_raw = sem_npz["clean_labels"]
+        keep = labels_raw >= 0
         if not np.any(keep):
             continue
         f_p = arrs["features"][keep]
-        y_p = arrs["labels"][keep].astype(np.int32)
+        y_p = labels_raw[keep].astype(np.int32)
         m_p = np.full(len(y_p), float(w_map.get(part, 1.0)), dtype=np.float32)
         feats_list.append(f_p)
         labels_list.append(y_p)
@@ -81,13 +89,19 @@ def train_expert_a(
     train_parts: Tuple[str, ...] = ("windows", "chimeras"),
     n_jobs: Optional[int] = None,
     part_weights: Optional[Dict[str, float]] = None,
+    use_semantic_clean_labels: bool = True,
 ) -> Dict[str, Any]:
     import xgboost as xgb
 
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
 
-    x_tr, y_tr, sw_tr = _load_weighted_train_split(train_feature_dir, train_parts, part_weights=part_weights)
+    x_tr, y_tr, sw_tr = _load_weighted_train_split(
+        train_feature_dir,
+        train_parts,
+        part_weights=part_weights,
+        use_semantic_clean_labels=use_semantic_clean_labels,
+    )
     va = load_split_arrays(eval_feature_dir, "val")
     keep_va = va["labels"] >= 0
     x_va, y_va = va["features"][keep_va], va["labels"][keep_va].astype(np.int32)
@@ -131,7 +145,7 @@ def train_expert_a(
         pass
 
     def _predict(arrs: Dict[str, np.ndarray]) -> np.ndarray:
-        return model.predict_proba(arrs["features"])[:, 1].astype(np.float32)
+        return np.asarray(model.predict_proba(arrs["features"]))[:, 1].astype(np.float32)
 
     va_win = load_split_arrays(eval_feature_dir, "val", parts=("windows",))
     va_chim = load_split_arrays(eval_feature_dir, "val", parts=("chimeras",))
@@ -167,7 +181,10 @@ def train_expert_a(
     booster = model.get_booster()
     gain = booster.get_score(importance_type="gain")
     importance = sorted(
-        ((FEATURE_NAMES[int(k[1:])], round(float(v), 3)) for k, v in gain.items()),
+        (
+            (FEATURE_NAMES[int(k[1:])], round(float(v[0] if isinstance(v, list) else v), 3))
+            for k, v in gain.items()
+        ),
         key=lambda kv: kv[1], reverse=True,
     )[:25]
 
@@ -180,10 +197,10 @@ def train_expert_a(
         "model_name": "ExpertA_XGBoost",
         "trained_at": datetime.now().isoformat(timespec="seconds"),
         "device": device,
-        "train_rows": int(len(y_tr)),
+        "train_rows": len(y_tr),
         "train_pos": int(np.sum(y_tr == 1)),
         "train_neg": int(np.sum(y_tr == 0)),
-        "val_rows": int(len(y_va)),
+        "val_rows": len(y_va),
         "best_iteration": int(getattr(model, "best_iteration", -1) or -1),
         "train_sec": train_sec,
         "test_inference_sec": infer_sec,

@@ -298,3 +298,211 @@ Pop-Location
 1. **高保守性导致的退化隐性区段召回回退**：在加入跨门极端宿主难负样本后，`v3_1` 的验证集最优 `seed_threshold` 从 `0.90` 抬升至 `0.95`，导致 K-12 两处高度退化/短小前噬菌体漏检，`v1 test` 极低假阳性阈值区召回（`Recall@0.5%FPR`）从 `0.8360` 降至 `0.7295`，常规细菌短片段误报率（`bacterial_chromosome_le1kb`）从 `0.0932` 升至 `0.1366`。
 2. **`ProteinGate` 的时间开销与互补局限**：`ProteinGate` 在 `4` 株细菌（`3~4` 个候选区）上增加 `4.3~18.9 s` 开销，在 `v1 test`（`80` 个候选区）上耗时 `282.018 s`；且在 `v2 + ProteinGate` 单独应用于链霉菌时，仍有 `30` 个含噬菌体同源辅助基因（AMG/重组酶/转运蛋白）的高 GC 假阳性无法仅靠序列门控剔除，证明 **模型本体对极端宿主分布的学习（`v3_1`）与蛋白门控对普通 GC 转座酶的拦截（`ProteinGate`）二者缺一不可**。
 3. **现阶段选型策略**：对高 GC / 放线菌 / 极端未知细菌环境，启用 **`Student Pro v3.1 + ProteinGate`**（高置信低误报，链霉菌 `0` 误报、金葡菌 `3/3`、LT2 `4/4`、`v1 test F1=0.9740`）；若优先追求常规肠杆菌科退化残片极端覆盖率，可提供 `v2_gate` 作为高敏感备选配置，或通过下调 `v3.1` 推理期阈值（`seed_threshold=0.90`）并依托 `ProteinGate` 兜底筛选。
+
+---
+
+## 13. V4 高容量纯神经架构升级（4D 语义蒸馏 + 嵌入式 ORF Transformer + 上下文精修）与六路实测对比审计（2026-11-13）
+
+为回答“能否尽量通过纯粹神经网络模型完成 `ProteinGate` 的转座酶排异与退化前噬菌体语义识别、并验证适度提升模型容量后的真实对比效果”，本阶段构建、测试并全量训练了 **V4 纯神经三模态体系**（产物归档于 `F:\Phage data\training\full_v4\` 与 `F:\Phage data\models\full_v4\`，综合报告位于 `F:\Phage data\models\full_v4\v4_comprehensive_comparison.json`）。
+
+### 13.1 V4 架构升级与模块化代码落地
+
+1. **零泄露难样本与离线蛋白语义知识准备（`src/phage_discovery/data/v4_semantic_prep.py`）**：
+   - `hard_v4`：严格仅从 `v1 train` 负样本细菌/质粒提取高难度转座酶富集岛与古菌/极端细菌窗共 **`1,483` 条记录（`1,664` 行）**，绝不触碰 `v1 val/test` 与 `unseen_real_genomes`。
+   - 8 份训练分片 4D 语义标注与假阴性清洗：离线运行 `DIAMOND BLASTp` 对齐生成 4 维蛋白语义监督目标 `sem_targets`（`sem_phage_hallmark`, `sem_integrase`, `sem_transp`, `sem_tail_lysis`）及 `sem_valid_mask`（耗时 `187.4 s`），并从 `chimeras`（`242`）、`mined`（`86`）、`ext_mined`（`71`）、`hard_v4`（`13`）、`hard_neg`（`3`）累计清洗 **`415` 条矛盾伪阴性标签**至 `train_*_semantic.npz`。
+2. **多教师 V4 语义对齐与 GroupKFold OOF 升级（`src/phage_discovery/experts/expert_a_xgb.py`, `expert_b_cnn.py`, `expert_c_orf.py`）**：
+   - 统一接入 `clean_labels` 标签对齐与 8 分片加权采样（`110,134` 行）；`Expert B` 仅在真实清晰标签上监督 200 bp `sub_mask`；`Expert C` 增加 `extract_contig_orf_tokens` 供端到端全基因组推理与分片 ORF 缓存核验。
+3. **高容量三模态神经网络与跨窗上下文精修器（`src/phage_discovery/student/distilled_student_v4.py`, `inference/scanner.py`）**：
+   - **容量提升**：参数量从 `v3.1` 的 **`317,842`（`0.32M`）** 提升至 **`3,639,114`（`3.64M`）**，全量 `111,451` 行在 RTX 4070 CUDA 上训练耗时 `3,407.07 s`、峰值显存仅 **`1,275.0 MB`**。
+   - **三模态特征融合与长短尺度修复**：
+     - DNA 骨干采用 `dna_channels=160` 掩码残差空洞卷积 + `pack_padded_sequence` 双向 GRU（严格屏蔽 `<=1 kb` 碎片序列后的 zero-padding 信号稀释）；
+     - 端到端内置 3 层 `ORF Synteny Transformer`（`orf_d_model=128, orf_nhead=4, orf_num_layers=3`）+ 185 维统计特征残差流，通过 Tri-Modal Gate（`fusion_dim=256`）融合；
+     - 新增 `4` 维可微蛋白语义辅助头（`sem_head`），其预测向量反馈输入主分类头 `win_head` 与 `200 bp` 亚窗口分割头 `sub_head`，无需在推理阶段挂载任何外部蛋白检索。
+   - **跨窗上下文精修器（`RegionContextRefiner`）**：对按 `contig` 有序排列的连续 15 维步骤特征（含 `win_logits`、4 维 `sem_logits/probs` 及其邻居信息等）执行双向序列建模，用于区分多窗连贯前噬菌体与 1~2 窗孤立转座酶假阳性脉冲；`GenomeScanner` 已同步支持自动识别 `v4` 与 `use_context_refiner` 开关。
+4. **先导单测与全库回归验证**：
+   - 新增 `tests/test_v4_architecture_and_prep.py`（零泄露、Masked Pooling Padding 不变性、Refiner 排序与 V4 端到端链路 4 项单测），运行全库回归 `pytest tests/ -q --tb=short` 实测 **`196 passed in 221.39s (0:03:41)`**（`0 failed, 0 skipped`）。
+
+### 13.2 训练结果、冻结 `v1 test` 基准六路对照与 4 株陌生基因组实测
+
+#### 1. 教师与学生收敛快照（`F:\Phage data\models\full_v4\`）
+
+- `Expert A v4`（XGBoost-CUDA, `110,134` 行, `best_iteration=1845`）：`test` 窗 `AUROC=0.9902` / `AUPRC=0.9911` / `Rec@0.5%FPR=0.8575`，区域 `F1@0.5=0.9615` / `F1@0.8=0.9359`，`MAE=1398.5 bp`。
+- `Expert B v4`（`160` ch, `2,087,106` 参数）：Epoch 2~3 学习率过冲震荡（`val AUPRC`: `0.95712 -> 0.81493 -> 0.7151 -> 0.91707 -> 0.9452`）触发 `best_epoch=1` 早停，导致独立 `test AUPRC=0.9244`（OOF 3 折使用 128 ch 表现稳健）；`Ensemble` 验证集择优权重退化为 `ExpertA=1.0`。
+- `Expert C v4`（`best_epoch=16`）：`test` 窗 `AUROC=0.9578` / `AUPRC=0.9557`，区域 `F1@0.5=0.8427`。
+- `Student V4`（`111,451` 行）：`best_epoch=8`（`best_val_auprc=0.99589`）；`RegionContextRefiner`：`best_epoch=12`（`best_val_auprc=0.99949`）；`val` 标定最优解码阈值：无 Refiner (`v4_no_refiner_raw`) `seed=0.95, extend=0.30, sub=0.65`；带 Refiner (`v4_raw`) `seed=0.80, extend=0.30, sub=0.65`。
+
+#### 2. 冻结 `v1 test` 基准（4,000 窗口 + 20.862 Mb / 75 嵌合区段）六路客观对照
+
+| 方案 | 推理 / 门控耗时 | Window AUROC / AUPRC | Rec@0.5%FPR | 1~3 kb AUPRC / Rec@0.5%FPR | <=1 kb AUPRC | Microviridae / Leviviricetes TPR | 非噬菌体病毒 FPR (`<=1kb`) | 嵌合 TP/FP/FN | 区域 F1 (IoU>=0.5 / 0.8) | 断点 MAE | 纯阴性 FP/Mb |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `v2_raw` | `0.77s / 0s` | **`0.9905 / 0.9911`** | **`0.8360`** | `0.9815 / 0.6996` | `0.9532` | `0.8500 / 0.9000` | `0.1471 (0.2653)` | `75 / 4 / 0` | `0.9740 / 0.9740` | `757.3 bp` | **`0.3043`** (`1`) |
+| `v3.1_raw` | `0.77s / 0s` | `0.9893 / 0.9895` | `0.7295` | `0.9751 / 0.5442` | `0.9503` | `0.9000 / 0.9000` | `0.0915 (0.1633)` | `75 / 5 / 0` | `0.9677 / 0.9548` | **`740.8 bp`** | `0.6085` (`2`) |
+| `v3.1_gate` | `0.79s / 179.84s` | `0.9893 / 0.9895` | `0.7295` | `0.9751 / 0.5442` | `0.9503` | `0.9000 / 0.9000` | `0.0915 (0.1633)` | `75 / 4 / 0` | `0.9740 / 0.9610` | **`740.8 bp`** | **`0.3043`** (`1`) |
+| `v4_no_refiner_raw` | `9.80s / 0s` | `0.9895 / 0.9898` | `0.7470` | **`0.9834 / 0.7102`** | **`0.9536`** | **`0.9500 / 0.9500`** | **`0.0817`** (`0.1837`) | `75 / 4 / 0` | `0.9740 / 0.9740` | `1046.7 bp` | **`0.3043`** (`1`) |
+| **`v4_raw` (纯神经)** | `10.20s / 0s` | `0.9895 / 0.9898` | `0.7470` | **`0.9834 / 0.7102`** | **`0.9536`** | **`0.9500 / 0.9500`** | **`0.0817`** (`0.1837`) | `74 / 2 / 1` | **`0.9801 / 0.9801`** | `1047.3 bp` | **`0.3043`** (`1`, 总体 **`0.0959`**) |
+| `v4_gate` | `9.93s / 177.62s` | `0.9895 / 0.9898` | `0.7470` | **`0.9834 / 0.7102`** | **`0.9536`** | **`0.9500 / 0.9500`** | **`0.0817`** (`0.1837`) | `74 / 2 / 1` | **`0.9801 / 0.9801`** | `1047.3 bp` | **`0.3043`** (`1`, 拒杀 `0`) |
+
+> **表注**：`v4_raw` 仅余的 `2` 处“FP”经前序 CheckV/BLASTp 与本次 `v4_gate` 核验均为宿主漏掩蔽真实隐蔽原噬菌体（`test_CHIM_0033 [0..12400]` 与 `test_PURE_NEG_0007 [225000..237200]`），`ProteinGate` 在 `v4_raw` 基础上拒杀数 **`0`**；`v4_no_refiner_raw` 中 `test_CHIM_0026 [86000..91800]` 与 `test_CHIM_0039 [37400..42200]` 两处真实短假阳性已被 `RegionContextRefiner` 纯神经彻底消除。
+
+#### 3. 4 株陌生真实细菌全基因组六路对照
+
+| 基因组 | `v2_raw` | `v3.1_raw` | `v3.1_gate` | `v4_no_refiner_raw` | `v4_raw` (纯神经) | `v4_gate` |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `NC_003888.3` 链霉菌 (`8.668 Mb`, GC `72.12%`) | `95` (`10.9605/Mb`) | `0` (`0.0/Mb`) | `0` (`0.0/Mb`) | **`0` (`0.0/Mb`, `28.35s`)** | **`0` (`0.0/Mb`, `28.38s`)** | `0` (`0.0/Mb`) |
+| `NC_003197.2` 鼠伤寒沙门氏菌 LT2 (`4.857 Mb`, GC `52.22%`) | **`4`** | **`4`** | **`4`** | **`4`** (`38.52s`) | **`4`** (`38.28s`) | **`4`** (`hallmark: 4`) |
+| `NC_007795.1` 金葡菌 NCTC 8325 (`2.821 Mb`, GC `32.87%`) | `4` (含转座酶) | `4` (含转座酶) | **`3`** (`rejected_transposase_dom: 1`) | `4` (`1897.8k..1902.2k` 峰 `0.9512`) | **`3` (`0` 转座酶误报, `8.01s`)** | **`3`** (`hallmark: 3`, 拒杀 `0`) |
+| `NC_000913.3` 大肠杆菌 K-12 MG1655 (`4.642 Mb`, GC `50.79%`) | **`5`** | `3` (DLP12/e14/Qin) | `3` (`hallmark: 3`) | `3` (`564k/1202k/2470k`) | **`1` (`1202.4k..1212.2k` e14)** | `1` (`hallmark: 1`) |
+
+### 13.3 机理诊断结论：真实突破 vs 实测暴露缺陷
+
+1. **真实验证的突破与收益**：
+   - **纯神经独立攻克 *S. aureus* 转座酶孤立脉冲**：在 `1897500..1902500` 处，`Student V4` 本体虽然给出了 `raw_p=0.9512`，但其内置 `4D` 语义头自发判定 `sem_hallmark=0.1470`（极低噬菌体核心蛋白语义）；随后 `RegionContextRefiner` 结合相邻窗低分（`0.1643 / 0.0984`）将其精准压降至 `0.7282 (< 0.80)`，**首次在不依赖任何 BLASTp 的情况下使 `v4_raw` 与 `v3.1_gate` / `v4_gate` 在金葡菌上完全对齐（`3/3` 真前噬菌体、0 误报）**。
+   - **远缘非有尾病毒与短中尺度分类全面新高**：`v1 test` 上 `Microviridae TPR@0.5` 升至 `0.9500`（vs `v2=0.85`, `v3.1=0.90`）、`Leviviricetes` 升至 `0.9500`、`Inoviridae` 达 `1.0000`、`non_phage_virus` 误报率降至 `0.0817`、`1~3 kb` `AUPRC=0.9834` / `Rec@0.5%FPR=0.7102`、`<=1 kb` `AUPRC=0.9536` 全部创历史新高，且 `v1 test` 区域严格标准 `F1(IoU>=0.8)` 从 `v3.1_gate` 的 `0.9610` 跃升至 **`0.9801`**。
+   - **V4 主干网络在 K-12 上的潜在完整感知力**：只读窗口级探测显示，基础模型 `v4_no_ref` 在 K-12 全部 5 处已知隐蔽前噬菌体均有强语义与高概率响应（`DLP12` 峰值 `0.9760, sem_hall=0.87`；`e14` 峰值 `0.9813, sem_hall=0.95`；`Rac` 连续 8 窗峰值 `0.9321, sem_hall=0.89`；`Qin` 连续 7 窗峰值 `0.9497, sem_hall=0.80`；`CP4-57` 峰值 `0.9527, sem_hall=0.91`），证明三模态与 4D 语义表征本身已有效恢复退化隐蔽前噬菌体的识别能力。
+2. **实测暴露的四项明确缺陷与成因**：
+   - **缺陷 1（最关键）— `RegionContextRefiner` 因 `in-sample` 过自信校准偏移产生过度压制**：Refiner 直接以 `Student V4` 在训练集 `chimeras` 上的过自信输出训练，导致对“局部窗存在波动或峰值在 `0.75~0.97`、长度约 4~8 窗的退化型片段”施加整体负向压制：
+     - 将 `v1 test` 1 条 `degraded_fragment`（`test_CHIM_0012`，原本 `raw_p` 最高 `0.9798`）压至 `0.7876 (< 0.80)` 造成 `FN=1`；
+     - 将 *E. coli* K-12 的 `DLP12 (0.9760 -> 0.7378)`、`Rac (0.9321 -> 0.7230)`、`Qin (0.9497 -> 0.5773)` 与 `CP4-57 (0.9527 -> 0.6595)` 全部压到 `0.80` 以下，使 `v4_raw` 在 K-12 仅留存 `1` 个（相比 `v2_raw` 的 `5` 个、`v3.1` 的 `3` 个明显退化）。
+   - **缺陷 2 — `200 bp` 断点定位 MAE 退化约 `306 bp`**：`breakpoint_mae_bp` 从 `v3.1` 的 `740.8 bp` 升至 `v4` 的 `1047.3 bp`；消融确认是 V4 容量与 Focal 损失下 `sub_probs` 边界较饱满、最优 `sub_threshold` 触及网格上限 `0.65` 所致（`0.35 -> 0.65` 期间 MAE 从 `1348.1 bp` 单调降至 `1047.3 bp`，但受网格截断仍逊于 `v3.1`）。
+   - **缺陷 3 — `Expert B v4` 独立训练震荡**：`160` 通道配置下学习率调度在 Epoch 2~3 过冲触发 `patience=4` 早停于 Epoch 1（`test AUPRC=0.9244`），使集成权重未采纳独立 `Expert B v4`（但 3-Fold OOF 使用 `128` ch 正常收敛）。
+   - **缺陷 4 — `v1 test` 窗口级超高严格度截断召回及推理延迟权衡**：`Rec@0.5%FPR` 为 `0.7470`（优于 `v3.1` 的 `0.7295`，仍低于 `v2` 的 `0.8360`，其中 `gt_3kb` 从 `0.9309` 降至 `0.8675`）；同时滑窗内置 `Pyrodigal` ORF 编码与 3 层 Transformer 使纯神经每基因组扫描耗时从 `v3.1` 的 `~16~20 s` 增至 `8~38 s`（`v1 test` `20.86 Mb` GPU 推理从 `0.77 s` 增至 `9.8~10.2 s`，但仍比挂载 `ProteinGate` 快约 `18x`）。
+
+---
+
+## 14. V4.1 零泄漏轻量精修（冻结主干 `sub_head` 纯 BCE 校准 + `RegionContextRefiner V2`）与七路对比（2026-11-13）
+
+围绕第 13 节定位的 `RegionContextRefiner` 校准下沉与 `200 bp` 边界 MAE 退化两大问题，在不从头重训 `3.64M` 主干 (`student_v4.pt`) 的前提下完成了 V4.1 轻量修复，先通过全库单元测试回归再执行真实训练与七路严格对比，**严格遵守零测试集泄露原则**。
+
+### 14.1 架构与源码改动（`src/phage_discovery/`）
+
+1. **`RegionContextRefiner V2`（`src/phage_discovery/student/distilled_student_v4.py`）**：
+   - **`group_windows_by_contig` 物理边界拆段**：新增 `max_gap_bp=5000` 与 `source_tags`，防止同一 `contig_id` 相邻窗口跨越物理间隙或不同训练分片拼接成伪连续序列；
+   - **19 维跨窗上下文输入通道**：在原 `15` 维时间步特征基础上，`forward` 内动态追加 `4` 维物理意义明确的局部邻域脉冲对比特征（总计 `19` 维）：排除中心自身 +/-3 窗邻居平均概率 `neigh_p_mean`、7 窗活性密度 `cluster_density`、5 窗最大噬菌体语义峰值 `local_max_hall` 与 `p_hall - p_trnp` 语义差值；`max_delta` 收敛至 `2.2`；
+   - **全量 5 大连续分片联合训练与防过压制目标函数**：将训练集由 V4.0 仅 `chimeras` (`360` 条) 扩充至全部 5 个物理连续分片（`chimeras: 360`, `mined: 492`, `ext_mined: 528`, `hard_neg: 259`, `hard_v4: 14`，合计 **`1,653`** 条连续序列），加强“多窗低置信退化但保留高 `hallmark`”与“远离真界面的 `1~2` 窗孤立低 `hallmark`（含无 `trnp` 触发模式）脉冲”两类增强；损失函数摒弃易造成概率负偏移的 `FocalBCE`，改用轻度正加权 `BCE (pos_w=1.35)` + **非对称正样本正向保底惩罚** `0.35 * relu(rl_t - ref_logits)^2 * y_t` + `0.06 * delta^2`，早停判据设为校准联合分 `val_auprc - 0.12 * val_bce`。
+2. **冻结主干 `sub_head` 纯 BCE 精修（`refine_student_v4_sub_head`）**：
+   - 抽取 `DistilledStudentV4Net._forward_backbone`，在精修期间严格冻结全部主干、`sem_head` 与 `win_head`（`win_max_drift = 0.0`, `sem_max_drift = 0.0`），仅训练 `sub_cond + sub_head`；
+   - 基于训练集筛选边界过渡窗（`0.02 < sub.mean < 0.98`）及平衡采样的纯阳/纯阴锚定窗（`tr_used=10,006`, `tr_trans=2,502`，并补充满长过渡窗反向互补对等样本），结合跳变沿前后各 `2 bins` 的 `2x` 权重，以纯粹 `BCEWithLogitsLoss`（去除 SoftDice 扩散模糊）精修并严格依据 `val_chimeras` 过渡窗/全窗联合 BCE 早停。
+3. **`GenomeScanner` 向后兼容加载（`src/phage_discovery/inference/scanner.py`）**：
+   - 调整精修器权重优先读取模型同目录 `context_refiner.pt`（防复制/备份目录加载串扰），并通过解析 `in_proj.0.weight` 输入维数自动适配 `V4.0 (15d)` 与 `V4.1 (19d)` 权重。
+
+### 14.2 单元测试与真实轻量精修日志
+
+- **代码实施前回归验证（`tests/test_v4_architecture_and_prep.py` + 全库）**：
+  - 新增 `test_refiner_v2_gap_split_and_pulse_vs_degraded_separation` 与 `test_refine_student_v4_sub_head_preserves_win_and_sem_outputs`，专项测试 `6 passed in 26.83s`；全仓库单元测试实测 **`198 passed in 225.05s (0:03:45)`**（0 失败、0 跳过）。
+- **V4.1 真实精修执行 (`F:\Phage data\models\full_v4\student_v4_1\`, 原 V4.0 完整备份至 `student_v4_0_bak`)**：
+  - **`sub_head` 精修**：耗时 `39.66 s`，`best_epoch=12`，`best_val_sub_bce=0.274308`，严格验证 **`win_max_drift = 0.0`**、**`sem_max_drift = 0.0`**、`sub_max_delta = 0.9450`。
+  - **`Refiner V2` 训练**：耗时 `80.91 s`，基于 `1,653` 条连续序列训练至 `best_epoch=19`，验证集达成 **`val_auprc = 0.99888`**、**`val_bce = 0.03076`**（`val_score = 0.99519`）。
+  - **仅依据 `val` 标定解码阈值**：`decoder_tuned_on_val = {seed: 0.95, extend: 0.60, sub: 0.55}`。
+
+### 14.3 冻结 `v1 test` 与 4 株陌生真实细菌全基因组七路实测对比（`v4_1_comprehensive_comparison.json`）
+
+#### 1. 冻结 `v1 test` (`20.862 Mb` 嵌合体与 `4,000` 多尺度窗口) 核心对比
+
+| 方案 | 阈值 (`seed/ext/sub`) | 推理 / 门控耗时 | Window AUROC / AUPRC | Rec@0.5%FPR | Micro / Levi TPR | 非噬菌体病毒 FPR (`<=1kb`) | 嵌合 TP/FP/FN | 区域 F1 (IoU>=0.5 / 0.8) | 断点 MAE (中位) | 退化片段 MAE / IoU | 总体 FP/Mb (纯阴性) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `v2_raw` | `0.90/0.50/0.35` | `0.815s / 0s` | **`0.9905 / 0.9911`** | **`0.8360`** | `0.8500 / 0.9000` | `0.1471 (0.2653)` | `75 / 4 / 0` | `0.9740 / 0.9740` | `757.3 (670.0) bp` | `601.2 bp / 0.9524` | `0.1917 (0.3043)` |
+| `v3.1_raw` | `0.95/0.30/0.35` | `0.826s / 0s` | `0.9893 / 0.9895` | `0.7295` | `0.9000 / 0.9000` | `0.0915 (0.1633)` | `75 / 5 / 0` | `0.9677 / 0.9548` | `740.8 (620.0) bp` | `665.8 bp / 0.9500` | `0.2397 (0.6085)` |
+| `v3.1_gate` | `0.95/0.30/0.35` | `0.793s / 189.256s` | `0.9893 / 0.9895` | `0.7295` | `0.9000 / 0.9000` | `0.0915 (0.1633)` | `75 / 4 / 0` | `0.9740 / 0.9610` | `740.8 (620.0) bp` | `665.8 bp / 0.9500` | `0.1917 (0.3043)` |
+| `v4_0_raw`* | `0.80/0.30/0.65` | `10.142s / 0s` | `0.9895 / 0.9898` | `0.7470` | **`0.9500 / 0.9500`** | **`0.0817`** (`0.1837`) | `75 / 4 / 0` | `0.9740 / 0.9740` | `1046.7 (832.0) bp` | `876.5 bp / 0.9272` | `0.1917 (0.3043)` |
+| `v4_1_no_refiner_raw` | `0.95/0.60/0.45` | `10.320s / 0s` | `0.9895 / 0.9898` | `0.7470` | **`0.9500 / 0.9500`** | **`0.0817`** (`0.1837`) | `75 / 6 / 0` | `0.9615 / 0.9359` | `1604.9 (586.0) bp` | `535.6 bp / 0.9593` | `0.2876 (0.3043)` |
+| **`v4_1_raw` (纯神经)** | `0.95/0.60/0.55` | `11.872s / 0s` | `0.9895 / 0.9898` | `0.7470` | **`0.9500 / 0.9500`** | **`0.0817`** (`0.1837`) | **`75 / 2 / 0`** | **`0.9868 / 0.9868`** | **`728.6 (460.0) bp`** | **`426.9 bp / 0.9656`** | **`0.0959 (0.3043)`** |
+| `v4_1_gate` | `0.95/0.60/0.55` | `13.186s / 199.349s` | `0.9895 / 0.9898` | `0.7470` | **`0.9500 / 0.9500`** | **`0.0817`** (`0.1837`) | **`75 / 2 / 0`** | **`0.9868 / 0.9868`** | **`728.6 (460.0) bp`** | **`426.9 bp / 0.9656`** | **`0.0959 (0.3043)`** (拒杀 `0`) |
+
+> **注***：`v4_0_raw` 在本表同台复测中加载自统一后的 `max_delta=2.2` `RegionContextRefiner` 构造器（其 V4.0 原生 `max_delta=3.0` 归档结果见第 13.2 节：`74/2/1, F1=0.9801, MAE=1047.3 bp`，K-12=`1`，金葡菌=`3`）。`v4_1_raw` 在 `v1 test` 仅余的 `2` 个“FP”为 `test_CHIM_0033 (1000..12400, p=0.9851)` 与 `test_PURE_NEG_0007 (223400..236400, p=0.9915)`，`ProteinGate` 亦未拒绝其中任何一处（`rej={}`）。
+
+#### 2. 4 株陌生真实细菌全基因组七路对照
+
+| 基因组 | `v2_raw` | `v3.1_raw` | `v3.1_gate` | `v4_0_raw`* | `v4_1_no_refiner_raw` | **`v4_1_raw` (纯神经)** | `v4_1_gate` |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `NC_003888.3` 链霉菌 (`72.12%` GC) | `95` (`10.96/Mb`) | `0` (`0.00/Mb`) | `0` (`0.00/Mb`) | `0` (`0.00/Mb`) | `0` (`0.00/Mb`) | **`0` (`0.00/Mb`, `30.92s`)** | `0` (`0.00/Mb`) |
+| `NC_003197.2` 鼠伤寒沙门氏菌 LT2 | **`4`** (`0.82/Mb`) | **`4`** (`0.82/Mb`) | **`4`** (`0.82/Mb`) | **`4`** (`0.82/Mb`) | **`4`** (`0.82/Mb`) | **`4`** (`0.82/Mb`, `40.31s`) | **`4`** (`0.82/Mb`) |
+| `NC_007795.1` 金葡菌 NCTC 8325 | `4` (含转座酶 FP) | `4` (含转座酶 FP) | **`3`** (门控剔除 `1`) | `4` (受 2.2 clamp 回弹) | `4` (`1897.4k` `p=0.951`) | **`3` (`0` 转座酶误报, `8.81s`)** | **`3`** (门控拒杀 `0`) |
+| `NC_000913.3` 大肠杆菌 K-12 MG1655 | **`5`** | `3` (`DLP12/e14/Qin`) | `3` (`DLP12/e14/Qin`) | `4` | `3` (`DLP12/e14/CP4-57`) | `2` (`DLP12/e14`)* | `2` (`DLP12/e14`) |
+
+### 14.4 V4.1 逐窗概率核验：已实现突破与客观留存短板
+
+1. **已实证的核心突破**：
+   - **`v1 test` 全方位刷新历史最佳且完全追平 `ProteinGate`**：`v4_1_raw`（无 BLASTp）将嵌合区域 `F1(IoU>=0.5)` 与严格 `F1(IoU>=0.8)` 同步推进至历史新高 **`0.9868`**（`TP=75, FP=2, FN=0`，无漏检），`overall_fp_per_mb` 降至 **`0.0959`**，且 **`v4_1_gate` 在测试集与 4 株未知基因组上均拒杀 `0` 处（输出完全一致）**，彻底证实了纯神经网络独立达成“门控级精准度”的可行性。
+   - **200 bp 边界精度反超 V3.1 与 V2**：主干窗口与语义头保持零漂移（`0.0`），而 `breakpoint_mae_bp` 从 `1046.7 bp` 锐减至 **`728.6 bp`**（中位误差 **`460.0 bp`**，低于 `v3.1` 的 `740.8 / 620.0 bp`），`degraded_fragment` 边界 MAE 低至 **`426.9 bp`**（`mean_iou=0.9656`）。
+   - **同时攻克 V4.0 Refiner 过度压制与 *S. aureus* 转座酶假阳脉冲**：
+     - 在 `v1 test_CHIM_0012`（V4.0 唯一漏检实例）上，`raw` 序列 `[0.716, 0.922, 0.980, 0.930, 0.751, 0.856]` 经 `Refiner V2` 稳固抬升为 `[0.822, 0.936, 0.980, 0.938, 0.850, 0.860]`，同时 `test_CHIM_0026` 尾部两窗（`[0.938, 0.960] -> [0.908, 0.943]`）与 `test_CHIM_0039` 头部短脉冲（`[0.898, 0.966] -> [0.828, 0.946]`）均被压至 `0.95` 以下彻底清除；
+     - 在 *S. aureus* NCTC8325 `1892.5k..1907.5k` 孤立转座酶单窗脉冲上，将 `raw_p = 0.9512` 干净压制 **`-0.267`** 至 **`0.6842`**，实现 `3/3` 真前噬菌体零假阳。
+2. **必须客观指出的留存短板（对应后续架构级优化建议）**：
+   - **K-12 高阈值临界截断（`seed=0.95` 差千分之几未过线）**：逐窗探针实测显示 `Refiner V2` 在 K-12 实际已彻底修复 V4.0 的压制崩塌——`DLP12` 由 `0.852` 恢复至 **`0.9766`**，`e14` 保持 **`0.9811`**，**`Rac` 由 `raw=0.9321` 正向抬升至 `0.9423`（10 窗均稳定在 `0.65..0.94`）**，`Qin` 保持 **`0.9474`**（且内部 `0.751` 低谷被拉补至 `0.878`），`CP4-57` 为 **`0.9457`**；但因验证集自动择优选择了较高门槛 `seed=0.95`（而非 `0.90`），使 `Rac (0.9423)`、`Qin (0.9474)`、`CP4-57 (0.9457)` 以 `0.0026~0.0077` 之微落在 `0.95` 种子线外，导致最终 K-12 区域解码仅输出 `2` 个（`DLP12`, `e14`）。
+   - **单窗模型（`v4_1_no_refiner_raw`）的本质表征与训练瓶颈仍在**：脱离 Refiner 后单窗仍会对 *S. aureus* 远缘转座酶给出 `0.9512`、对 `<=1 kb` 片段维持 `0.1424` 较高 FPR，且高容量 `3.64M` 主干原先在 `OneCycleLR` Epoch 14 早停截断。若后续追求**无需 Refiner 单窗即能辨别跨菌种陌生蛋白域并进一步拉高短残片表现**，核心在于为学生网络补充 **ORF 翻译氨基酸序列化/二三肽感知分支 + 面向异构尺度/移动元件防火墙的门控混合专家头（Regime-Aware MoE）**。
+
+---
+
+## 15. 场景 A 单株全基因组分割专向优化（Student V4.2：ORF2Bin + SubBinContextRefiner + Plateau Seeding）
+
+为优先解决“场景 A：单株细菌全基因组扫描中的中等信心原噬菌体高原漏检（如 K-12 `Rac/Qin`）与 200 bp 断点边界精度提升”两项短板，在严格遵循“零测试集泄露（所有架构对比、特征消融与解码器标定均严格限定在 `train_*` 与 `v1 val`）”的前提下，于 V4.1 上完成 **Student V4.2** 升级、模块化集成、全仓库回归测试及冻结冷评测。
+
+### 15.1 模块化工程落地与测试验证（先测试后执行）
+
+1. **新增/修改的核心模块**
+   - [subbin_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/student/subbin_refiner.py)（新增）：
+     - `extract_per_orf_viral_scores` 与 `project_orf_to_25bins`：复用冻结 `StudentV4` 的 `OrfStream` 每 ORF 隐式表征生成神经病毒倾向评分并映射至 25 个 `200 bp` 亚窗，产出 `10` 维 `ORF2Bin` 空间特征；
+     - `build_contig_subbin_sequences`：构建全量 `28` 维亚窗序列特征（`18` 维边界邻域与窗口/语义对齐特征 + `10` 维 `ORF2Bin`），包含对齐 `1 kb` 步长窗口的 `O(1)` 快速路径与任意窗口回退路径；
+     - `SubBinContextRefiner`（`subbin_v1_dilated_tcn`, `in_dim=28`, `hidden_dim=96`, `max_delta=2.4`）：多尺度膨胀一维卷积残差精修器，搭配过渡带加权 BCE 损失、正反链翻转对称增强与推理 TTA，以及 `max_chunk_bins=4096, overlap_bins=256` 分块安全推理（显式 `torch.no_grad()`）。
+   - [metrics.py](file:///f:/NCBI%20blast/src/phage_discovery/benchmark/metrics.py) & [model_eval.py](file:///f:/NCBI%20blast/src/phage_discovery/benchmark/model_eval.py)：
+     - 为 `decode_window_scores_to_regions` 与 `decode_subwindow_probs_to_regions` 增加 `plateau_min_windows=0` / `plateau_second_threshold=None`（“多窗高原触发”：`len >= k` 且次高窗概率 `>= t_2nd` 时允许作为候选区域种子）与 `precomputed_bin_profiles` / `smooth_profile` / `refine_pad_bp` 参数，将 `0.48, 0.50` 纳入默认 `DEFAULT_SUB_GRID`；
+     - 验证集（`v1 val`）独立对比表明：`Refiner V2 + Plateau Seeding (seed=0.95 | len>=4 & 2nd>=0.90)` 在 `v1 val` 上保持 `TP=75/FP=3/FN=0 (F1=0.9804, pureNegFP/Mb=0.0)` 完全不回撤；尝试放大 Refiner 幅度的 `V2.1 (max_delta=2.8)` 反而引起 `v1 val FN=1`，遂予废弃并保留 `Refiner V2 (max_delta=2.2)`。
+   - [distilled_student_v4.py](file:///f:/NCBI%20blast/src/phage_discovery/student/distilled_student_v4.py) & [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py)：
+     - 支持 `subbin_refiner.pt` 训练保存、元信息持久化与 `GenomeScanner.from_model_dir` 自动版本识别（保留 `_predict_windows` 旧版二元组接口不变，新增 `_predict_windows_with_profiles` 并由 `scan_sequences` 自动接管全基因组 `200 bp` 精修曲线与 Plateau 解码）；
+     - 兼容性抽检确认：加载 `student_v4_1` 时 `subbin_refiner is None, plateau_min_windows=0, sub_threshold=0.55`；加载 `student_v4_2` 时 `subbin_refiner` 自动加载，`plateau_min_windows=4, plateau_second_threshold=0.9, sub_threshold=0.45, refine_pad_bp=3000, smooth_sub_profile=False`。
+   - [test_v4_architecture_and_prep.py](file:///f:/NCBI%20blast/tests/test_v4_architecture_and_prep.py)：
+     - 新增 `ORF2Bin` 映射与分块推理/单窗越界防护单测、`Plateau Seeding` 与 `precomputed_bin_profiles` 解码单测，并扩展 V4.2 端到端闭环验证。
+2. **回归测试结果**
+   - V4/基准/门控专项测试（`test_v4_architecture_and_prep.py`, `test_benchmark_pipeline.py`, `test_protein_gate_and_scanner.py`）：**`13 passed in 28.45s`**。
+   - 全仓库回归测试（`.\.venv\Scripts\python.exe -m pytest tests/ -q --tb=short`）：**`200 passed in 238.87s (0:03:58)`**（`0 failed, 0 skipped`）。
+
+### 15.2 V4.2 训练结果与零泄漏 `v1 val` 解码器标定（`F:\Phage data\models\full_v4\student_v4_2\`）
+
+- **训练输出**：在保留原有 `student_v4_1` 目录完全不动的基础上，由 [run_v4_2_upgrade_and_eval.py](file:///C:/Users/Administrator/.gemini/antigravity/brain/a84b4add-178c-4aff-97a2-c2e69eae3a98/scratch/run_v4_2_upgrade_and_eval.py) 基于全量 `train_*` 切分（`tr_chunks=3217`, `va_seqs=75`）完成 `SubBinContextRefiner` 训练（`ORF2Bin` 投影 `3.55s`，`16` 轮训练 `31.57s`，Epoch `15` 早停 `best_val_joint_bce=0.291703`）。
+- **`v1 val`（仅验证集）解码器择优**：
+  - 选定配置：`seed_threshold=0.95, extend_threshold=0.30, sub_threshold=0.45, plateau_min_windows=4, plateau_second_threshold=0.90, refine_pad_bp=3000, smooth_profile=False`。
+  - `v1 val`（完整 V4.2 vs 去除 SubBinContextRefiner 的 `val_raw`）：
+    - `val_raw`（仅 Refiner V2 + 原 `sub_head`）：`TP=75 / FP=6 / FN=0`, `F1=0.9615`, `pureNegFP/Mb=0.3334`, `MAE=539.3 bp` (`Med=364.0 bp`, `degraded_fragment MAE=541.8 bp`)。
+    - **`V4.2`（+ SubBinContextRefiner）**：**`TP=75 / FP=3 / FN=0`**, **`F1(IoU>=0.5 & 0.8)=0.9804`**, **`pureNegFP/Mb=0.0`**, **`mean_iou=0.9812`**, **`MAE=424.4 bp` (`Med=272.0 bp`)**（其中 `degraded_fragment MAE=381.6 bp`, `intact_single MAE=436.6 bp`, `multi_tandem MAE=439.2 bp`），对比 V4.1 验证集基线（`563.4 bp`）降低 **`139.0 bp`**。
+
+### 15.3 冻结 `v1 test` 与 4 株真实细菌全基因组冷对比（[v4_2_comprehensive_comparison.json](file:///F:/Phage%20data/models/full_v4/v4_2_comprehensive_comparison.json)）
+
+#### 1. 冻结 `v1 test`（20.862 Mb，75 真前噬菌体 + 15 条纯阴性）
+
+| 方案 | 阈值 (`seed/ext/sub`) | 推理 / 门控耗时 | 嵌合 TP/FP/FN | F1 (`IoU>=0.5 / 0.8`) | `mean_iou` | 断点 `MAE (Med)` | `intact_single MAE` | `multi_tandem MAE` | `degraded_fragment MAE` (`Med`) | 总体 FP/Mb (纯阴性) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `v2_raw` | `0.90/0.50/0.35` | `0.815s / 0s` | `75 / 4 / 0` | `0.9740 / 0.9740` | `0.9655` | `757.3 (670.0) bp` | `830.4 bp` | `785.1 bp` | `601.2 bp` | `0.1917 (0.3043)` |
+| `v3.1_raw` | `0.95/0.30/0.35` | `0.826s / 0s` | `75 / 5 / 0` | `0.9677 / 0.9548` | `0.9659` | `740.8 (620.0) bp` | `797.7 bp` | `734.7 bp` | `665.8 bp` | `0.2397 (0.6085)` |
+| `v4_1_raw` (纯神经) | `0.95/0.60/0.55` | `11.872s / 0s` | **`75 / 2 / 0`** | **`0.9868 / 0.9868`** | `0.9682` | `728.6 (460.0) bp` | `821.9 bp` | `825.5 bp` | **`426.9 bp`** | **`0.0959 (0.3043)`** |
+| **`v4_2_raw` (纯神经)** | `0.95/0.30/0.45` (+Plateau) | `13.698s / 0s` | **`75 / 2 / 0`** | **`0.9868` / `0.9737`** | **`0.9688`** | **`702.0 (378.0) bp`** | **`530.7 bp`** | **`758.3 bp`** | `865.2 (381.0) bp` | **`0.0959 (0.3043)`** |
+| `v4_2_gate` (+ProteinGate) | `0.95/0.30/0.45` (+Plateau) | `13.299s / 193.926s` | **`75 / 2 / 0`** | **`0.9868` / `0.9737`** | **`0.9688`** | **`702.0 (378.0) bp`** | **`530.7 bp`** | **`758.3 bp`** | `865.2 (381.0) bp` | **`0.0959 (0.3043)`** (拒杀 `0`) |
+
+> **说明**：`v4_2_raw` 在 `v1 test` 主指标（`TP=75/FP=2/FN=0, F1=0.9868`）与纯神经零门控拒杀保持历史最优，同时将全局 `MedAE` 由 `460.0 bp` 大幅压缩至 **`378.0 bp`**（`-82.0 bp`）、`intact_single MAE` 由 `821.9 bp` 锐降至 **`530.7 bp`**（`-291.2 bp`）、`multi_tandem MAE` 由 `825.5 bp` 降至 **`758.3 bp`**。诚实可见的小幅回撤在于：`degraded_fragment` 虽保持中位数 `381.0 bp` 且 `TP=18/FP=0/FN=0 (F1=1.0)`，但受个别长尾样本拖累致均值由 `426.9 bp` 升至 `865.2 bp`，且 `strict_iou_0_8` 有 `1` 例退化为 `0.5 <= IoU < 0.8` 区间（`sF1: 0.9868 -> 0.9737`）。
+
+#### 2. 4 株陌生真实细菌全基因组扫描与 CheckV 独立金标准边界对齐
+
+| 基因组（`len / GC%`） | `v4_1_raw` | `v4_2_raw` (纯神经) | `v4_2_gate` (+ProteinGate) | V4.1 vs V4.2 CheckV 对齐及区间要点 |
+| :--- | :--- | :--- | :--- | :--- |
+| `NC_003888.3` 链霉菌 (`8.668 Mb / 72.12%`) | `0` (`0.00/Mb`) | **`0` (`0.00/Mb`, `30.578s`)** | `0` (`0.00/Mb`, `31.446s`) | 高 GC 宿主维持绝对 `0` 误报，Plateau Seeding 未引入任何假阳 |
+| `NC_000913.3` 大肠杆菌 K-12 MG1655 (`4.642 Mb / 50.79%`) | `2` (`DLP12`, `e14`) | **`4` (`36.207s`)** | **`4` (`4/4 hallmark_confirmed`, `42.894s`)** | 新增召回 **`Rac` (`1411600..1436000, p=0.9423`)** 与 **`Qin` (`1633800..1653200, p=0.9474`)**，4/4 全过蛋白门控实锤（`CP4-57` 仍未过线） |
+| `NC_007795.1` 金葡菌 NCTC 8325 (`2.821 Mb / 32.87%`) | `3` (`0` 转座酶 FP) | **`3` (`0` 转座酶 FP, `8.451s`)** | **`3` (`3/3 hallmark_confirmed`, `21.369s`)** | CheckV `mean_IoU` **`0.8560 -> 0.9407`**，**`mean_MAE` `3373.3 -> 1362.7 bp`（`-2010.6 bp`，反超 V3.1 的 `1516.7 bp`）**；`phi11` 达 `IoU=0.9882 / MAE=307.5 bp`，`phi13` 从 `0.7459 (5824 bp)` 升至 `0.8886 (2562 bp)` |
+| `NC_003197.2` 鼠伤寒沙门氏菌 LT2 (`4.857 Mb / 52.22%`) | `4` (`0.82/Mb`) | **`4` (`0.82/Mb`, `40.078s`)** | **`4` (`4/4 hallmark_confirmed`, `52.887s`)** | CheckV 前两段达百 bp 精度（`Gifsy-2`: `IoU=0.9936 / MAE=137.0 bp`, `Fels-1`: **`IoU=0.9959 / MAE=93.5 bp`**）；第 3 段 (`2845818..2889112`) 尾部偏早截断（`IoU 0.7840 -> 0.7108, MAE 4765 -> 6465 bp`），使 LT2 均值略调至 `IoU=0.9001, MAE=2231.8 bp`（对比 V4.1 `0.9024 / 2159.8 bp`） |
+
+### 15.4 结论与后续路线留档
+
+- **场景 A（单株细菌全基因组扫描与 200 bp 分割）阶段性收口**：V4.2 在未触碰测试集、不增加 BLASTp 依赖的纯神经网络下，同时达成了 **K-12 真前噬菌体召回倍增（`2 -> 4`，`4/4 hallmark_confirmed`）、高 GC 与低 GC 转座酶 0 误报、以及 `v1 test` 与 *S. aureus* NCTC 8325 断点精度跃迁（`v1 test MedAE 460 -> 378 bp`, `NCTC8325 CheckV MAE 3373.3 -> 1362.7 bp`）**。
+- **残余边界与下一阶段方向**：K-12 `CP4-57`（偏弱退化）、LT2 第 3 段末梢及 `v1 test` 极少数退化片段长尾边界误差与 `<=1 kb` 窗口能力瓶颈，属于原始 `StudentV4` 主干缺少**氨基酸级表征（ORF 翻译序列/二三肽分支）与尺度/MGE 防火墙路由头（Regime-Aware MoE）** 的结构上限，将作为后续 V5 主干与复杂混合多菌/短片段场景的优化重点。
+
+---
+
+## 16. 工程收口：模型目录瘦身、废弃代码清理与静态检查归零
+
+1. **模型产物归档精简（`F:\Phage data\models\`）**
+   - 仅保留稳定可复现里程碑与核心专家基线：`full_v2`、`full_v3_1`、`full_v4/expert_{a,b,c}`、`full_v4/ensemble`、`full_v4/student_v4_1`、`full_v4/student_v4_2` 及其基准评估报告。
+   - 移除作废实验产物与中间断点缓存（`full_v3`、`full_v4/student`、`student_v4_0_bak`、OOF/Refiner 临时 `.npz`/`.json`）。
+2. **代码库清理**
+   - 移除失效脚本与误追踪大库：`src/backend/test_read.py`、根目录遗留空标识文件与 `translations_backup_20260829_111949.db`（保留 `tools/_deprecated/` 下仍被运行时路径修复工具引用的 `libwinpthread-1.dll`）。
+3. **静态检查与兼容性修复**
+   - `pyrefly check src/ tests/`（`.venv` 与默认环境双重校核）：全仓库错误数 **`0 errors`**；`src/phage_discovery/` 与 `src/utils/phage_dataset/` 达到 **`0 diagnostics`**（消除 `GroupKFold.split` 参数类型冲突、`implicit-import`、`os.system` 弃用调用及冗余类型强转）。
+   - `ruff check` 对 `src/phage_discovery/`、`src/utils/phage_dataset/` 及本次修复模块与测试全部通过。
+   - 前端构建验证 `npm run build --prefix src/web-next`（`vue-tsc -b && vite build`）正常退出（`0`）。

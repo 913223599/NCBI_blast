@@ -53,7 +53,7 @@ def _window_batch_worker(args: Tuple[List[Tuple[str, str, int]], int, int]) -> L
         res = extract_contig_windows(wid, seq, win_size=max(win_size, len(seq)), step_size=step_size)
         n_win = len(res["starts"])
         res["labels"] = np.full(n_win, label, dtype=np.int8)
-        fill_val = 1.0 if int(label) == 1 else 0.0
+        fill_val = 1.0 if label == 1 else 0.0
         res["sub_mask"] = np.full((n_win, SUB_BINS), fill_val, dtype=np.float32)
         out.append(res)
     return out
@@ -97,7 +97,8 @@ def _concat_results(results: List[Dict[str, Any]], source_flag: int) -> Dict[str
 
 def _save_npz_atomic(path: Path, payload: Dict[str, np.ndarray]) -> None:
     tmp = path.with_name(f".{path.stem}.tmp.npz")
-    np.savez_compressed(tmp, feature_names=np.asarray(FEATURE_NAMES), **payload)
+    save_payload: Dict[str, Any] = {"feature_names": np.asarray(FEATURE_NAMES), **payload}
+    np.savez_compressed(tmp, **save_payload)
     tmp.replace(path)
 
 

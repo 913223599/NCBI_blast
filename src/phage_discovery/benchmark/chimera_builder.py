@@ -13,14 +13,13 @@ import argparse
 import csv
 import json
 import logging
-import os
 import random
 import sqlite3
 from collections import defaultdict
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 logger = logging.getLogger("phage_discovery.benchmark.chimera_builder")
 
@@ -64,7 +63,7 @@ def compute_clean_intervals(
     if not masked_intervals:
         return [(0, length_bp)] if length_bp >= min_segment_bp else []
 
-    sorted_masks = sorted((max(0, int(s)), min(length_bp, int(e))) for s, e in masked_intervals if e > s)
+    sorted_masks = sorted((max(0, s), min(length_bp, e)) for s, e in masked_intervals if e > s)
     clean: List[Tuple[int, int]] = []
     cursor = 0
     for ms, me in sorted_masks:
@@ -107,8 +106,8 @@ def split_negative_genomes_by_category(
         shuffled = list(accs)
         rng.shuffle(shuffled)
         n = len(shuffled)
-        n_val = max(1, int(round(n * ratios[1]))) if n >= 5 else 0
-        n_test = max(1, int(round(n * ratios[2]))) if n >= 3 else 0
+        n_val = max(1, round(n * ratios[1])) if n >= 5 else 0
+        n_test = max(1, round(n * ratios[2])) if n >= 3 else 0
         n_train = max(0, n - n_val - n_test)
         for acc in shuffled[:n_train]:
             acc_to_split[acc] = "train"
@@ -351,8 +350,8 @@ def _build_chimera_benchmark_for_split(
 
     # 缓存单次遍历需要用的宿主序列长度只读一次即可，按需流式读取，不批量囤积内存
     mode_schedule: List[str] = []
-    n_intact = max(1, int(round(chimeras_count * 0.45)))
-    n_degraded = max(1, int(round(chimeras_count * 0.30)))
+    n_intact = max(1, round(chimeras_count * 0.45))
+    n_degraded = max(1, round(chimeras_count * 0.30))
     n_multi = max(1, chimeras_count - n_intact - n_degraded)
     mode_schedule.extend(["intact_single"] * n_intact)
     mode_schedule.extend(["degraded_fragment"] * n_degraded)

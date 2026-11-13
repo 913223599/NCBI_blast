@@ -11,18 +11,21 @@ Expert C：ORF 语法拓扑序列专家（Pyrodigal 基因 Token + Transformer E
 """
 import argparse
 import concurrent.futures
+import gc
 import json
 import logging
 import os
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
 from ..benchmark.model_eval import evaluate_model_scores_on_split, load_split_info, tune_decoder_on_val
 from ..data.feature_dataset import iter_fasta, load_split_arrays
+from .expert_b_cnn import _resolve_part_fasta
 
 logger = logging.getLogger("phage_discovery.experts.expert_c_orf")
 
@@ -82,13 +85,13 @@ def _extract_contig_orfs_worker(
         gf = _get_gf()
         found = gf.find_genes(seq.encode("ascii", errors="replace"))
         for g in found:
-            s0 = int(g.begin) - 1
-            e0 = int(g.end)
+            s0 = g.begin - 1
+            e0 = g.end
             sub = seq[s0:e0]
             sub_len = max(1, len(sub))
             gc = (sub.count("G") + sub.count("C")) / float(sub_len)
             aa = g.translate()
-            genes_info.append((s0, e0, int(g.strand), gc, _encode_protein_22(aa)))
+            genes_info.append((s0, e0, g.strand, gc, _encode_protein_22(aa)))
         genes_info.sort(key=lambda t: t[0])
 
     outputs: List[Tuple[int, np.ndarray, int]] = []
@@ -115,6 +118,24 @@ def _extract_contig_orfs_worker(
             mat[ti, 8:] = aa_vec
         outputs.append((row_idx, mat, len(in_win)))
     return outputs
+
+
+def extract_contig_orf_tokens(
+    seq: str,
+    starts: Sequence[int],
+    ends: Sequence[int],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """针对单条 contig 的窗口坐标列表直接提取 ORF Token 张量与有效基因计数。"""
+    n_win = len(starts)
+    tokens = np.zeros((n_win, MAX_ORFS_PER_WIN, ORF_FEAT_DIM), dtype=np.float32)
+    counts = np.zeros(n_win, dtype=np.int32)
+    if n_win == 0:
+        return tokens, counts
+    win_items = [(i, s, e) for i, (s, e) in enumerate(zip(starts, ends))]
+    for row_idx, mat, cnt in _extract_contig_orfs_worker(("", seq, win_items)):
+        tokens[row_idx] = mat
+        counts[row_idx] = cnt
+    return tokens, counts
 
 
 def extract_orf_tensors_for_part(
@@ -227,23 +248,234 @@ def _load_or_extract_part(
     cache_dir: Path,
     workers: Optional[int],
     fasta_override: Optional[Path] = None,
+    use_semantic_clean_labels: bool = False,
 ) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray]:
-    arrs = load_split_arrays(feature_dir, split, parts=(part,))
+    arrs = dict(load_split_arrays(feature_dir, split, parts=(part,)))
+    if use_semantic_clean_labels:
+        sem_path = Path(feature_dir) / f"{split}_{part}_semantic.npz"
+        if sem_path.exists():
+            with np.load(sem_path, allow_pickle=False) as sem_npz:
+                if "clean_labels" in sem_npz and len(sem_npz["clean_labels"]) == len(arrs["labels"]):
+                    arrs["labels"] = sem_npz["clean_labels"].astype(np.int8)
+
     cache_path = cache_dir / f"{split}_{part}_orf_tokens_v2.npz"
     if cache_path.exists():
         with np.load(cache_path) as data:
-            return arrs, data["tokens"], data["counts"]
-    if fasta_override is not None:
-        fasta = Path(fasta_override)
-    else:
-        manifest = json.loads((Path(manifest_dir) / "benchmark_manifest.json").read_text(encoding="utf-8"))
-        fasta = Path(manifest["splits"][split][part]["fasta"])
+            if len(data["counts"]) == len(arrs["labels"]):
+                return arrs, data["tokens"], data["counts"]
+
+    fasta = _resolve_part_fasta(feature_dir, manifest_dir, split, part, fasta_override=fasta_override)
     tokens, counts = extract_orf_tensors_for_part(fasta, arrs, workers=workers)
     cache_dir.mkdir(parents=True, exist_ok=True)
     tmp = cache_path.with_name(f".{cache_path.stem}.tmp.npz")
     np.savez_compressed(tmp, tokens=tokens, counts=counts)
     tmp.replace(cache_path)
     return arrs, tokens, counts
+
+
+def _load_expert_c_train_data(
+    train_feature_dir: Path,
+    train_dir: Path,
+    workers: Optional[int],
+    *,
+    train_parts: Tuple[str, ...] = ("windows", "chimeras"),
+    extra_mined_fasta: Optional[Path] = None,
+    extra_fasta_map: Optional[Dict[str, Path]] = None,
+    part_weights: Optional[Dict[str, float]] = None,
+    use_semantic_clean_labels: bool = True,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """统一加载训练分片 ORF Token、标签、contig_ids 与分片权重。"""
+    f_map = {k: Path(v) for k, v in (extra_fasta_map or {}).items()}
+    if extra_mined_fasta is not None and "mined" not in f_map:
+        f_map["mined"] = Path(extra_mined_fasta)
+
+    ordered_parts = list(train_parts)
+    mined_npz = Path(train_feature_dir) / "train_mined.npz"
+    if "mined" in f_map and f_map["mined"].exists() and mined_npz.exists() and "mined" not in ordered_parts:
+        ordered_parts.append("mined")
+
+    w_map = part_weights or {}
+    tk_list, cn_list, y_list, cid_list, sw_list = [], [], [], [], []
+    for part in ordered_parts:
+        npz_path = Path(train_feature_dir) / f"train_{part}.npz"
+        if not npz_path.exists():
+            continue
+        arrs, tk_p, cn_p = _load_or_extract_part(
+            train_feature_dir,
+            train_dir,
+            "train",
+            part,
+            Path(train_feature_dir),
+            workers,
+            fasta_override=f_map.get(part),
+            use_semantic_clean_labels=use_semantic_clean_labels,
+        )
+        if len(arrs["labels"]) == 0:
+            continue
+        tk_list.append(tk_p)
+        cn_list.append(cn_p)
+        y_list.append(arrs["labels"].astype(np.int8))
+        cid_list.append(arrs["contig_ids"])
+        sw_list.append(np.full(len(arrs["labels"]), float(w_map.get(part, 1.0)), dtype=np.float32))
+
+    return (
+        np.concatenate(tk_list),
+        np.concatenate(cn_list),
+        np.concatenate(y_list),
+        np.concatenate(cid_list),
+        np.concatenate(sw_list),
+    )
+
+
+def _fit_expert_c_fold(
+    tk_tr: np.ndarray,
+    cn_tr: np.ndarray,
+    y_tr: np.ndarray,
+    sw_tr: np.ndarray,
+    va_tk: np.ndarray,
+    va_cn: np.ndarray,
+    va_y: np.ndarray,
+    *,
+    d_model: int,
+    nhead: int,
+    num_layers: int,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    patience: int,
+    device,
+    ckpt_path: Path,
+    seed: int,
+) -> Tuple[Any, int, float, List[Dict[str, Any]], float, float]:
+    import torch
+    from sklearn.metrics import average_precision_score
+
+    rng = np.random.default_rng(seed)
+    model = build_orf_transformer(d_model=d_model, nhead=nhead, num_layers=num_layers).to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
+    steps_per_ep = max(1, int(np.ceil(len(y_tr) / batch_size)))
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=max(1, epochs * steps_per_ep))
+    pos_weight = torch.tensor(float(np.sum(y_tr == 0)) / max(1.0, float(np.sum(y_tr == 1))), device=device)
+    loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction="none")
+
+    va_keep = va_y >= 0
+    has_two_classes = bool(np.any(va_keep) and np.unique(va_y[va_keep]).size > 1)
+    best_ap = -1.0
+    best_ep = -1
+    bad_ep = 0
+    history: List[Dict[str, Any]] = []
+    ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats()
+    t0 = time.perf_counter()
+
+    for ep in range(1, epochs + 1):
+        model.train()
+        order = rng.permutation(len(y_tr))
+        ep_loss = 0.0
+        for bi in range(steps_per_ep):
+            idx = order[bi * batch_size:(bi + 1) * batch_size]
+            tk = torch.from_numpy(tk_tr[idx]).to(device)
+            cn = torch.from_numpy(cn_tr[idx]).to(device)
+            yb = torch.from_numpy(y_tr[idx].astype(np.float32)).to(device)
+            wb = torch.from_numpy(sw_tr[idx]).to(device)
+            opt.zero_grad(set_to_none=True)
+            loss_vec = loss_fn(model(tk, cn), yb)
+            loss = (loss_vec * wb).sum() / wb.sum().clamp(min=1e-4)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            opt.step()
+            sched.step()
+            ep_loss += float(loss.item()) * len(idx)
+
+        va_sc = _predict_orf(model, va_tk[va_keep], va_cn[va_keep], device, batch_size=max(128, batch_size))
+        ap = float(average_precision_score(va_y[va_keep], va_sc)) if has_two_classes else round(-ep_loss / max(1, len(y_tr)), 5)
+        history.append({"epoch": ep, "train_loss": round(ep_loss / max(1, len(y_tr)), 5), "val_auprc": round(ap, 5)})
+        logger.info(f"epoch {ep}: loss={ep_loss / max(1, len(y_tr)):.4f} val_auprc={ap:.4f}")
+        if ap > best_ap or best_ep < 0:
+            best_ap, best_ep, bad_ep = ap, ep, 0
+            tmp = ckpt_path.with_name(f".{ckpt_path.name}.tmp")
+            torch.save(model.state_dict(), tmp)
+            tmp.replace(ckpt_path)
+        else:
+            bad_ep += 1
+            if bad_ep >= patience:
+                break
+
+    train_sec = round(time.perf_counter() - t0, 2)
+    peak_mb = round(torch.cuda.max_memory_allocated() / (1024 * 1024), 1) if device.type == "cuda" else 0.0
+    model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
+    return model, best_ep, best_ap, history, train_sec, peak_mb
+
+
+def compute_group_oof_expert_c_probs(
+    tokens: np.ndarray,
+    counts: np.ndarray,
+    labels: np.ndarray,
+    contig_ids: np.ndarray,
+    *,
+    sample_weights: Optional[np.ndarray] = None,
+    n_splits: int = 3,
+    epochs: int = 12,
+    batch_size: int = 128,
+    lr: float = 1e-3,
+    patience: int = 4,
+    d_model: int = 128,
+    nhead: int = 8,
+    num_layers: int = 3,
+    seed: int = 42,
+    tmp_dir: Optional[Path] = None,
+) -> np.ndarray:
+    """按 contig_id 严格 GroupKFold 生成无泄漏 Expert C OOF 概率。"""
+    import torch
+    from sklearn.model_selection import GroupKFold
+
+    torch.manual_seed(seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    n = len(labels)
+    oof_probs = np.zeros(n, dtype=np.float32)
+    sw_all = np.ones(n, dtype=np.float32) if sample_weights is None else sample_weights.astype(np.float32)
+    unique_groups = np.unique(contig_ids)
+    eff_splits = min(n_splits, len(unique_groups))
+    if eff_splits < 2:
+        return oof_probs
+
+    gkf = GroupKFold(n_splits=eff_splits)
+    work_dir = Path(tmp_dir) if tmp_dir is not None else Path(tempfile.gettempdir()) / f"exp_c_oof_{seed}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    for fold_idx, (tr_idx, va_idx) in enumerate(gkf.split(cast(Any, tokens), labels, groups=contig_ids)):
+        tr_sel = tr_idx[labels[tr_idx] >= 0]
+        if len(tr_sel) == 0:
+            continue
+        ckpt_fold = work_dir / f".expert_c_oof_fold{fold_idx}.pt"
+        fold_model, _, _, _, _, _ = _fit_expert_c_fold(
+            tokens[tr_sel],
+            counts[tr_sel],
+            labels[tr_sel],
+            sw_all[tr_sel],
+            tokens[va_idx],
+            counts[va_idx],
+            labels[va_idx],
+            d_model=d_model,
+            nhead=nhead,
+            num_layers=num_layers,
+            epochs=epochs,
+            batch_size=batch_size,
+            lr=lr,
+            patience=patience,
+            device=device,
+            ckpt_path=ckpt_fold,
+            seed=seed + fold_idx + 1,
+        )
+        oof_probs[va_idx] = _predict_orf(fold_model, tokens[va_idx], counts[va_idx], device, batch_size=max(128, batch_size))
+        del fold_model
+        if ckpt_fold.exists():
+            ckpt_fold.unlink(missing_ok=True)
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+    return oof_probs
 
 
 def train_expert_c(
@@ -257,98 +489,69 @@ def train_expert_c(
     lr: float = 1e-3,
     patience: int = 5,
     extra_mined_fasta: Optional[Path] = None,
+    train_parts: Tuple[str, ...] = ("windows", "chimeras"),
+    extra_fasta_map: Optional[Dict[str, Path]] = None,
+    part_weights: Optional[Dict[str, float]] = None,
+    d_model: int = 128,
+    nhead: int = 8,
+    num_layers: int = 3,
+    use_semantic_clean_labels: bool = True,
     workers: Optional[int] = None,
     seed: int = 42,
 ) -> Dict[str, Any]:
     import torch
-    from sklearn.metrics import average_precision_score
 
     torch.manual_seed(seed)
-    rng = np.random.default_rng(seed)
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     t_ext = time.perf_counter()
-    tr_w = _load_or_extract_part(train_feature_dir, train_dir, "train", "windows", Path(train_feature_dir), workers)
-    tr_c = _load_or_extract_part(train_feature_dir, train_dir, "train", "chimeras", Path(train_feature_dir), workers)
-    tr_parts = [tr_w, tr_c]
-    mined_npz = Path(train_feature_dir) / "train_mined.npz"
-    if extra_mined_fasta is not None and Path(extra_mined_fasta).exists() and mined_npz.exists():
-        tr_m = _load_or_extract_part(
-            train_feature_dir, train_dir, "train", "mined", Path(train_feature_dir), workers,
-            fasta_override=Path(extra_mined_fasta),
-        )
-        if len(tr_m[0]["labels"]) > 0:
-            tr_parts.append(tr_m)
+    all_tk_tr, all_cn_tr, all_y_tr, _, all_sw_tr = _load_expert_c_train_data(
+        train_feature_dir,
+        train_dir,
+        workers,
+        train_parts=train_parts,
+        extra_mined_fasta=extra_mined_fasta,
+        extra_fasta_map=extra_fasta_map,
+        part_weights=part_weights,
+        use_semantic_clean_labels=use_semantic_clean_labels,
+    )
     va_w = _load_or_extract_part(eval_feature_dir, bench_dir, "val", "windows", Path(eval_feature_dir), workers)
     va_c = _load_or_extract_part(eval_feature_dir, bench_dir, "val", "chimeras", Path(eval_feature_dir), workers)
     te_w = _load_or_extract_part(eval_feature_dir, bench_dir, "test", "windows", Path(eval_feature_dir), workers)
     te_c = _load_or_extract_part(eval_feature_dir, bench_dir, "test", "chimeras", Path(eval_feature_dir), workers)
     extract_sec = round(time.perf_counter() - t_ext, 2)
 
-    tk_tr = np.concatenate([p[1] for p in tr_parts])
-    cn_tr = np.concatenate([p[2] for p in tr_parts])
-    y_tr = np.concatenate([p[0]["labels"] for p in tr_parts]).astype(np.int8)
-    keep = y_tr >= 0
-    tk_tr, cn_tr, y_tr = tk_tr[keep], cn_tr[keep], y_tr[keep]
+    keep = all_y_tr >= 0
+    tk_tr, cn_tr, y_tr, sw_tr = all_tk_tr[keep], all_cn_tr[keep], all_y_tr[keep], all_sw_tr[keep]
+    del all_tk_tr, all_cn_tr, all_y_tr, all_sw_tr
 
     va_tk = np.concatenate([va_w[1], va_c[1]])
     va_cn = np.concatenate([va_w[2], va_c[2]])
     va_y = np.concatenate([va_w[0]["labels"], va_c[0]["labels"]])
-    va_keep = va_y >= 0
 
-    model = build_orf_transformer().to(device)
-    n_params = int(sum(p.numel() for p in model.parameters()))
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-    steps_per_ep = int(np.ceil(len(y_tr) / batch_size))
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=epochs * steps_per_ep)
-    pos_weight = torch.tensor(float(np.sum(y_tr == 0)) / max(1.0, float(np.sum(y_tr == 1))), device=device)
-    loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-
-    best_ap = -1.0
-    best_ep = -1
-    bad_ep = 0
-    history = []
     ckpt_path = out_root / "expert_c_orf.pt"
-    if device.type == "cuda":
-        torch.cuda.reset_peak_memory_stats()
-
-    t0 = time.perf_counter()
-    for ep in range(1, epochs + 1):
-        model.train()
-        order = rng.permutation(len(y_tr))
-        ep_loss = 0.0
-        for bi in range(steps_per_ep):
-            idx = order[bi * batch_size:(bi + 1) * batch_size]
-            tk = torch.from_numpy(tk_tr[idx]).to(device)
-            cn = torch.from_numpy(cn_tr[idx]).to(device)
-            yb = torch.from_numpy(y_tr[idx].astype(np.float32)).to(device)
-            opt.zero_grad(set_to_none=True)
-            loss = loss_fn(model(tk, cn), yb)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            opt.step()
-            sched.step()
-            ep_loss += float(loss.item()) * len(idx)
-
-        va_sc = _predict_orf(model, va_tk[va_keep], va_cn[va_keep], device)
-        ap = float(average_precision_score(va_y[va_keep], va_sc))
-        history.append({"epoch": ep, "train_loss": round(ep_loss / len(y_tr), 5), "val_auprc": round(ap, 5)})
-        logger.info(f"epoch {ep}: loss={ep_loss / len(y_tr):.4f} val_auprc={ap:.4f}")
-        if ap > best_ap:
-            best_ap, best_ep, bad_ep = ap, ep, 0
-            tmp = out_root / ".expert_c_orf.tmp.pt"
-            torch.save(model.state_dict(), tmp)
-            tmp.replace(ckpt_path)
-        else:
-            bad_ep += 1
-            if bad_ep >= patience:
-                break
-
-    train_sec = round(time.perf_counter() - t0, 2)
-    peak_mb = round(torch.cuda.max_memory_allocated() / (1024 * 1024), 1) if device.type == "cuda" else 0.0
-    model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
+    model, best_ep, best_ap, history, train_sec, peak_mb = _fit_expert_c_fold(
+        tk_tr,
+        cn_tr,
+        y_tr,
+        sw_tr,
+        va_tk,
+        va_cn,
+        va_y,
+        d_model=d_model,
+        nhead=nhead,
+        num_layers=num_layers,
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        patience=patience,
+        device=device,
+        ckpt_path=ckpt_path,
+        seed=seed,
+    )
+    n_params = int(sum(p.numel() for p in model.parameters()))
 
     va_win_sc = _predict_orf(model, va_w[1], va_w[2], device)
     va_chim_sc = _predict_orf(model, va_c[1], va_c[2], device)
@@ -369,7 +572,8 @@ def train_expert_c(
                                                 decoder["seed_threshold"], decoder["extend_threshold"])
     test_report = evaluate_model_scores_on_split(bench_dir, "test", te_w[0], te_win_sc, te_c[0], te_chim_sc,
                                                  decoder["seed_threshold"], decoder["extend_threshold"])
-    del model, tk_tr, cn_tr
+    del model, tk_tr, cn_tr, sw_tr
+    gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
@@ -377,9 +581,10 @@ def train_expert_c(
         "model_name": "ExpertC_ORFTransformer",
         "trained_at": datetime.now().isoformat(timespec="seconds"),
         "device": str(device),
+        "architecture": {"d_model": d_model, "nhead": nhead, "num_layers": num_layers},
         "params": n_params,
         "extract_sec": extract_sec,
-        "train_rows": int(len(y_tr)),
+        "train_rows": len(y_tr),
         "best_epoch": best_ep,
         "best_val_auprc": round(best_ap, 5),
         "history": history,

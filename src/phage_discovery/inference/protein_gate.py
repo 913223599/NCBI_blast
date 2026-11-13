@@ -8,7 +8,6 @@
    未表征噬菌体蛋白簇、细菌转座酶（Transposase/IS）与通用宿主辅助代谢酶（ABC transporter 等）；
 3. 针对极端高 GC（>=67%）OOD 假阳性施加强蛋白证据拦截，同时对正常 GC 高置信暗物质噬菌体保留保守豁免通路。
 """
-import concurrent.futures
 import logging
 import os
 import re
@@ -118,7 +117,7 @@ def _predict_orfs_for_regions(
                 if len(aa) >= 20:
                     orf_records.append((f"r{idx}__g{gi}", aa))
                     orf_cnt += 1
-                    coding_bp += abs(int(gene.end) - int(gene.begin)) + 1
+                    coding_bp += abs(gene.end - gene.begin) + 1
         coding_density = min(1.0, float(coding_bp) / float(max(1, reg_len)))
         region_stats.append(
             {

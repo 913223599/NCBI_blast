@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """前噬菌体测试流程与基准构建/评测引擎单元测试。"""
 import csv
-import json
 import sqlite3
 from contextlib import closing
 from pathlib import Path

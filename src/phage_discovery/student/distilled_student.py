@@ -18,7 +18,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
@@ -151,14 +151,14 @@ def compute_group_oof_xgb_probs(
     import xgboost as xgb
     from sklearn.model_selection import GroupKFold
 
-    unique_groups = int(np.unique(contig_ids).size)
+    unique_groups = np.unique(contig_ids).size
     k = min(n_splits, max(2, unique_groups))
     gkf = GroupKFold(n_splits=k)
     oof = np.zeros(len(labels), dtype=np.float32)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     cpu_cnt = os.cpu_count() or 4
 
-    for tr_idx, va_idx in gkf.split(features, labels, groups=contig_ids):
+    for tr_idx, va_idx in gkf.split(cast(Any, features), labels, groups=contig_ids):
         y_fold = labels[tr_idx]
         n_pos = max(1, int(np.sum(y_fold == 1)))
         n_neg = max(1, int(np.sum(y_fold == 0)))
@@ -204,6 +204,9 @@ def build_distilled_student(feat_dim: int, feat_mean: np.ndarray, feat_std: np.n
             return self.act(x + self.bn(self.pw(self.dw(x))))
 
     class DistilledStudentNet(nn.Module):
+        feat_mean: torch.Tensor
+        feat_std: torch.Tensor
+
         def __init__(self):
             super().__init__()
             self.register_buffer("feat_mean", torch.from_numpy(feat_mean.astype(np.float32)))
@@ -409,7 +412,7 @@ def train_distilled_student(
 
     resolved_extras: List[Tuple[str, Path, float]] = []
     if extra_sources:
-        resolved_extras.extend([(str(p), Path(fp), float(w)) for p, fp, w in extra_sources])
+        resolved_extras.extend([(p, Path(fp), float(w)) for p, fp, w in extra_sources])
     elif extra_mined_fasta is not None:
         resolved_extras.append(("mined", Path(extra_mined_fasta), 1.0))
 
@@ -532,7 +535,7 @@ def train_distilled_student(
                 loss_sub = _sub_bce_dice_loss(sub_logits, sb, sample_weight=wb)
                 loss = (1.0 - kd_alpha) * loss_sup + kd_alpha * loss_kd + sub_weight * loss_sub
 
-            scaler.scale(loss).backward()
+            cast(torch.Tensor, scaler.scale(loss)).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scale_before = scaler.get_scale()

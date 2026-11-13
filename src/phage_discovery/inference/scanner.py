@@ -20,9 +20,24 @@ import numpy as np
 
 from ..benchmark.metrics import PredictedRegion, WindowPrediction, decode_subwindow_probs_to_regions
 from ..data.feature_dataset import iter_fasta
+from ..experts.expert_c_orf import extract_contig_orf_tokens
 from ..experts.seq_dataset import encode_dna, reverse_complement_codes
 from ..features.window_features import FEATURE_NAMES, SUB_BINS, extract_contig_windows
 from ..student.distilled_student import build_distilled_student
+from ..student.distilled_student_v4 import (
+    REFINER_STEP_FEAT_DIM,
+    _predict_v4_all,
+    build_distilled_student_v4,
+    build_region_context_refiner,
+    group_windows_by_contig,
+    predict_with_context_refiner,
+)
+from ..student.subbin_refiner import (
+    extract_per_orf_viral_scores,
+    load_subbin_refiner_checkpoint,
+    predict_subbin_probs_with_refiner,
+    project_orf_to_25bins,
+)
 from .protein_gate import ProteinGateConfig, RegionGateResult, evaluate_regions_with_protein_gate
 
 logger = logging.getLogger("phage_discovery.inference.scanner")
@@ -41,13 +56,18 @@ class ScanResult:
     timings_sec: Dict[str, float] = field(default_factory=dict)
 
 
-def _extract_contig_worker(args: Tuple[str, str, int, int]) -> Dict[str, Any]:
-    cid, seq, win_size, step_size = args
-    return extract_contig_windows(cid, seq, win_size=win_size, step_size=step_size, truth_regions=None)
+def _extract_contig_worker(args: Tuple[str, str, int, int, bool]) -> Dict[str, Any]:
+    cid, seq, win_size, step_size, extract_orfs = args
+    res = extract_contig_windows(cid, seq, win_size=win_size, step_size=step_size, truth_regions=None)
+    if extract_orfs:
+        tk, cn = extract_contig_orf_tokens(seq, res["starts"], res["ends"])
+        res["orf_tokens"] = tk
+        res["orf_counts"] = cn
+    return res
 
 
 class GenomeScanner:
-    """加载训练好的 Student Pro 模型并提供端到端双阶段扫描能力。"""
+    """加载训练好的 Student Pro / Student V4 模型并提供端到端双阶段扫描能力。"""
 
     def __init__(
         self,
@@ -64,17 +84,29 @@ class GenomeScanner:
         gate_config: Optional[ProteinGateConfig] = None,
         workers: Optional[int] = None,
         device: Optional[str] = None,
+        meta_path: Optional[Path] = None,
+        use_context_refiner: Optional[bool] = None,
+        use_subbin_refiner: Optional[bool] = None,
+        plateau_min_windows: int = 0,
+        plateau_second_threshold: Optional[float] = None,
+        refine_pad_bp: Optional[int] = None,
+        smooth_sub_profile: Optional[bool] = None,
     ):
+        import json
         import torch
 
         self.model_pt_path = Path(model_pt_path).resolve()
         self.seed_threshold = float(seed_threshold)
         self.extend_threshold = float(extend_threshold)
         self.sub_threshold = float(sub_threshold)
-        self.merge_gap_bp = int(merge_gap_bp)
-        self.min_region_bp = int(min_region_bp)
-        self.win_size = int(win_size)
-        self.step_size = int(step_size)
+        self.merge_gap_bp = merge_gap_bp
+        self.min_region_bp = min_region_bp
+        self.win_size = win_size
+        self.step_size = step_size
+        self.plateau_min_windows = plateau_min_windows
+        self.plateau_second_threshold = float(plateau_second_threshold) if plateau_second_threshold is not None else None
+        self.refine_pad_bp = refine_pad_bp
+        self.smooth_sub_profile = smooth_sub_profile
         self.blast_db = Path(blast_db) if blast_db else None
         self.gate_config = gate_config or ProteinGateConfig(enabled=(blast_db is not None))
         cpu_cnt = os.cpu_count() or 4
@@ -85,13 +117,66 @@ class GenomeScanner:
         else:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        feat_dim = len(FEATURE_NAMES)
-        dummy_mean = np.zeros(feat_dim, dtype=np.float32)
-        dummy_std = np.ones(feat_dim, dtype=np.float32)
-        self.model = build_distilled_student(feat_dim, dummy_mean, dummy_std).to(self.device)
-        state = torch.load(self.model_pt_path, map_location=self.device, weights_only=True)
-        self.model.load_state_dict(state)
-        self.model.eval()
+        resolved_meta = Path(meta_path).resolve() if meta_path is not None else (self.model_pt_path.parent / "student_v4_meta.json")
+        self.model_version = "v3"
+        self.model: Any
+        self.refiner: Any = None
+        self.subbin_refiner: Any = None
+        if resolved_meta.exists() or self.model_pt_path.name == "student_v4.pt":
+            meta = json.loads(resolved_meta.read_text(encoding="utf-8")) if resolved_meta.exists() else {}
+            feat_dim = int(meta.get("feat_dim", len(FEATURE_NAMES)))
+            dummy_mean = np.zeros(feat_dim, dtype=np.float32)
+            dummy_std = np.ones(feat_dim, dtype=np.float32)
+            self.model_version = "v4"
+            self.model = build_distilled_student_v4(
+                feat_dim,
+                dummy_mean,
+                dummy_std,
+                dna_channels=int(meta.get("dna_channels", 160)),
+                orf_d_model=int(meta.get("orf_d_model", 128)),
+                orf_nhead=int(meta.get("orf_nhead", 4)),
+                orf_num_layers=int(meta.get("orf_num_layers", 3)),
+                fusion_dim=int(meta.get("fusion_dim", 256)),
+                sem_dim=int(meta.get("sem_dim", 4)),
+            ).to(self.device)
+            state = torch.load(self.model_pt_path, map_location=self.device, weights_only=True)
+            self.model.load_state_dict(state)
+            self.model.eval()
+
+            want_ref = bool(meta.get("use_context_refiner", False)) if use_context_refiner is None else use_context_refiner
+            if want_ref:
+                ref_cand = self.model_pt_path.parent / "context_refiner.pt"
+                if not ref_cand.exists() and meta.get("refiner_ckpt") and Path(meta["refiner_ckpt"]).exists():
+                    ref_cand = Path(meta["refiner_ckpt"])
+                if ref_cand.exists():
+                    ref_state = torch.load(ref_cand, map_location=self.device, weights_only=True)
+                    in_w = ref_state.get("in_proj.0.weight")
+                    if in_w is not None and hasattr(in_w, "shape") and len(in_w.shape) == 2:
+                        use_ctx = int(in_w.shape[1]) > REFINER_STEP_FEAT_DIM
+                    else:
+                        use_ctx = str(meta.get("refiner_arch", "v1")).lower() == "v2"
+                    self.refiner = build_region_context_refiner(use_context_features=use_ctx).to(self.device)
+                    self.refiner.load_state_dict(ref_state)
+                    self.refiner.eval()
+
+            want_subbin = bool(meta.get("use_subbin_refiner", False)) if use_subbin_refiner is None else use_subbin_refiner
+            sb_local = self.model_pt_path.parent / "subbin_refiner.pt"
+            if use_subbin_refiner is None and not want_subbin and sb_local.exists():
+                want_subbin = True
+            if want_subbin:
+                sb_cand = sb_local
+                if not sb_cand.exists() and meta.get("subbin_ckpt") and Path(meta["subbin_ckpt"]).exists():
+                    sb_cand = Path(meta["subbin_ckpt"])
+                if sb_cand.exists():
+                    self.subbin_refiner = load_subbin_refiner_checkpoint(sb_cand, self.device)
+        else:
+            feat_dim = len(FEATURE_NAMES)
+            dummy_mean = np.zeros(feat_dim, dtype=np.float32)
+            dummy_std = np.ones(feat_dim, dtype=np.float32)
+            self.model = build_distilled_student(feat_dim, dummy_mean, dummy_std).to(self.device)
+            state = torch.load(self.model_pt_path, map_location=self.device, weights_only=True)
+            self.model.load_state_dict(state)
+            self.model.eval()
 
     @classmethod
     def from_model_dir(
@@ -102,13 +187,46 @@ class GenomeScanner:
         gate_config: Optional[ProteinGateConfig] = None,
         workers: Optional[int] = None,
         device: Optional[str] = None,
+        use_context_refiner: Optional[bool] = None,
+        use_subbin_refiner: Optional[bool] = None,
     ) -> "GenomeScanner":
-        """从模型输出目录自动读取 student_distilled.pt 与 student_report.json 中 val 标定阈值。"""
+        """从模型输出目录自动检测 V4/V3/V2 模型权重与 val 标定阈值。"""
         import json
 
         root = Path(model_dir).resolve()
+        v4_meta = root / "student_v4_meta.json"
+        v4_pt = root / "student_v4.pt"
+        if v4_meta.exists() and v4_pt.exists():
+            rep_path = root / "student_v4_report.json"
+            if not rep_path.exists():
+                rep_path = root / "student_report.json"
+            dec: Dict[str, Any] = {}
+            if rep_path.exists():
+                rep = json.loads(rep_path.read_text(encoding="utf-8"))
+                if use_context_refiner is False and rep.get("decoder_raw_on_val"):
+                    dec = rep["decoder_raw_on_val"]
+                else:
+                    dec = rep.get("decoder_tuned_on_val") or {}
+            return cls(
+                model_pt_path=v4_pt,
+                meta_path=v4_meta,
+                use_context_refiner=use_context_refiner,
+                use_subbin_refiner=use_subbin_refiner,
+                seed_threshold=float(dec.get("seed_threshold", 0.85)),
+                extend_threshold=float(dec.get("extend_threshold", 0.50)),
+                sub_threshold=float(dec.get("sub_threshold", 0.45)),
+                plateau_min_windows=int(dec.get("plateau_min_windows", 0)),
+                plateau_second_threshold=dec.get("plateau_second_threshold"),
+                refine_pad_bp=dec.get("refine_pad_bp"),
+                smooth_sub_profile=dec.get("smooth_profile"),
+                blast_db=blast_db,
+                gate_config=gate_config,
+                workers=workers,
+                device=device,
+            )
+
         rep_path = root / "student_report.json"
-        dec: Dict[str, Any] = {}
+        dec = {}
         if rep_path.exists():
             rep = json.loads(rep_path.read_text(encoding="utf-8"))
             dec = rep.get("decoder_tuned_on_val") or {}
@@ -124,20 +242,77 @@ class GenomeScanner:
             device=device,
         )
 
-    def _predict_windows(
+    def _predict_windows_with_profiles(
         self,
         codes: np.ndarray,
         lengths: np.ndarray,
         feats: np.ndarray,
         batch_size: int = 128,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        orf_tokens: Optional[np.ndarray] = None,
+        orf_counts: Optional[np.ndarray] = None,
+        contig_ids: Optional[np.ndarray] = None,
+        starts: Optional[np.ndarray] = None,
+        ends: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[Dict[str, List[Tuple[int, np.ndarray]]]]]:
         import torch
 
         n = len(feats)
         out = np.zeros(n, dtype=np.float32)
         out_sub = np.zeros((n, SUB_BINS), dtype=np.float32)
         if n == 0:
-            return out, out_sub
+            return out, out_sub, None
+
+        if self.model_version == "v4":
+            if orf_tokens is None or orf_counts is None:
+                from ..experts.expert_c_orf import MAX_ORFS_PER_WIN, ORF_FEAT_DIM
+                orf_tokens = np.zeros((n, MAX_ORFS_PER_WIN, ORF_FEAT_DIM), dtype=np.float32)
+                orf_counts = np.zeros(n, dtype=np.int32)
+            pred = _predict_v4_all(
+                self.model, codes, lengths, feats, orf_tokens, orf_counts, self.device, batch_size=batch_size,
+            )
+            win_scores = pred["win_probs"]
+            if self.refiner is not None and contig_ids is not None and starts is not None:
+                win_scores = predict_with_context_refiner(
+                    self.refiner,
+                    pred["win_logits"],
+                    pred["sem_logits"],
+                    pred["sub_probs"],
+                    lengths,
+                    contig_ids,
+                    starts,
+                    self.device,
+                    max_len=codes.shape[1],
+                )
+            sub_probs = pred["sub_probs"]
+            subbin_profiles: Optional[Dict[str, List[Tuple[int, np.ndarray]]]] = None
+            if (
+                self.subbin_refiner is not None
+                and contig_ids is not None
+                and starts is not None
+                and ends is not None
+            ):
+                orf_bins = None
+                if bool(getattr(self.subbin_refiner, "use_orf_bins", True)):
+                    orf_attn = extract_per_orf_viral_scores(self.model, orf_tokens, orf_counts, self.device)
+                    orf_bins = project_orf_to_25bins(orf_tokens, orf_counts, orf_attn)
+                groups = group_windows_by_contig(contig_ids, starts, max_gap_bp=self.win_size)
+                subbin_profiles, sub_probs = predict_subbin_probs_with_refiner(
+                    self.subbin_refiner,
+                    groups,
+                    contig_ids,
+                    starts,
+                    ends,
+                    win_scores,
+                    pred["win_probs"],
+                    pred["sem_logits"],
+                    pred["sub_probs"],
+                    self.device,
+                    win_orf_25bins=orf_bins,
+                    min_windows=2,
+                )
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+            return win_scores, sub_probs, subbin_profiles
 
         rc = reverse_complement_codes(codes, lengths)
         max_len = codes.shape[1]
@@ -159,7 +334,31 @@ class GenomeScanner:
                 out_sub[i:i + batch_size] = sp.float().cpu().numpy()
         if self.device.type == "cuda":
             torch.cuda.empty_cache()
-        return out, out_sub
+        return out, out_sub, None
+
+    def _predict_windows(
+        self,
+        codes: np.ndarray,
+        lengths: np.ndarray,
+        feats: np.ndarray,
+        batch_size: int = 128,
+        orf_tokens: Optional[np.ndarray] = None,
+        orf_counts: Optional[np.ndarray] = None,
+        contig_ids: Optional[np.ndarray] = None,
+        starts: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        win_scores, sub_probs, _ = self._predict_windows_with_profiles(
+            codes,
+            lengths,
+            feats,
+            batch_size=batch_size,
+            orf_tokens=orf_tokens,
+            orf_counts=orf_counts,
+            contig_ids=contig_ids,
+            starts=starts,
+            ends=None,
+        )
+        return win_scores, sub_probs
 
     def scan_sequences(
         self,
@@ -173,7 +372,8 @@ class GenomeScanner:
         contigs_bp = {cid: len(seq) for cid, seq in contig_seqs.items()}
         total_bp = sum(contigs_bp.values())
 
-        tasks = [(cid, seq, self.win_size, self.step_size) for cid, seq in contig_seqs.items()]
+        extract_orfs = self.model_version == "v4"
+        tasks = [(cid, seq, self.win_size, self.step_size, extract_orfs) for cid, seq in contig_seqs.items()]
         extracted: List[Dict[str, Any]] = []
         if len(tasks) > 1 and self.workers > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=min(self.workers, len(tasks))) as ex:
@@ -189,6 +389,11 @@ class GenomeScanner:
         feats_list: List[np.ndarray] = []
         codes_list: List[np.ndarray] = []
         len_list: List[int] = []
+        orf_tk_list: List[np.ndarray] = []
+        orf_cn_list: List[np.ndarray] = []
+        cid_list: List[str] = []
+        start_list: List[int] = []
+        end_list: List[int] = []
 
         for item in extracted:
             cid = item["contig_id"]
@@ -196,6 +401,9 @@ class GenomeScanner:
             starts = item["starts"]
             ends = item["ends"]
             feats_list.append(item["features"])
+            if extract_orfs and "orf_tokens" in item:
+                orf_tk_list.append(item["orf_tokens"])
+                orf_cn_list.append(item["orf_counts"])
             for s, e in zip(starts, ends):
                 sub = seq_upper[int(s):int(e)]
                 enc = np.full(self.win_size, 4, dtype=np.uint8)
@@ -203,6 +411,9 @@ class GenomeScanner:
                 enc[:len(raw)] = raw
                 codes_list.append(enc)
                 len_list.append(len(raw))
+                cid_list.append(cid)
+                start_list.append(int(s))
+                end_list.append(int(e))
                 win_preds.append(
                     WindowPrediction(
                         contig_id=cid,
@@ -212,11 +423,23 @@ class GenomeScanner:
                     )
                 )
 
+        subbin_profiles: Optional[Dict[str, List[Tuple[int, np.ndarray]]]] = None
         if feats_list:
             feats_arr = np.concatenate(feats_list, axis=0)
             codes_arr = np.stack(codes_list, axis=0)
             len_arr = np.asarray(len_list, dtype=np.int64)
-            win_scores, sub_probs = self._predict_windows(codes_arr, len_arr, feats_arr)
+            orf_tk_arr = np.concatenate(orf_tk_list, axis=0) if orf_tk_list else None
+            orf_cn_arr = np.concatenate(orf_cn_list, axis=0) if orf_cn_list else None
+            win_scores, sub_probs, subbin_profiles = self._predict_windows_with_profiles(
+                codes_arr,
+                len_arr,
+                feats_arr,
+                orf_tokens=orf_tk_arr,
+                orf_counts=orf_cn_arr,
+                contig_ids=np.asarray(cid_list),
+                starts=np.asarray(start_list, dtype=np.int64),
+                ends=np.asarray(end_list, dtype=np.int64),
+            )
             for idx, wp in enumerate(win_preds):
                 wp.score = float(win_scores[idx])
         else:
@@ -224,6 +447,9 @@ class GenomeScanner:
         student_sec = round(time.perf_counter() - t_inf0, 3)
 
         t_dec0 = time.perf_counter()
+        has_profiles = bool(subbin_profiles)
+        smooth_prof = self.smooth_sub_profile if self.smooth_sub_profile is not None else (not has_profiles)
+        refine_pad = self.refine_pad_bp if self.refine_pad_bp is not None else (3000 if has_profiles else 2000)
         raw_regions = decode_subwindow_probs_to_regions(
             win_preds,
             sub_probs,
@@ -232,10 +458,15 @@ class GenomeScanner:
             sub_threshold=self.sub_threshold,
             merge_gap_bp=self.merge_gap_bp,
             min_region_bp=self.min_region_bp,
+            plateau_min_windows=self.plateau_min_windows,
+            plateau_second_threshold=self.plateau_second_threshold,
+            precomputed_bin_profiles=subbin_profiles,
+            smooth_profile=smooth_prof,
+            refine_pad_bp=refine_pad,
         )
         decode_sec = round(time.perf_counter() - t_dec0, 3)
 
-        use_gate = self.gate_config.enabled if apply_protein_gate is None else bool(apply_protein_gate)
+        use_gate = self.gate_config.enabled if apply_protein_gate is None else apply_protein_gate
         t_gate0 = time.perf_counter()
         if use_gate:
             verified_regions, gate_details = evaluate_regions_with_protein_gate(
