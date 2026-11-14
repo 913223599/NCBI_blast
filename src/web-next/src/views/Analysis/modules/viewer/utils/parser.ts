@@ -97,7 +97,47 @@ export function parseGenBank(text: string) {
     currentSeq = "N".repeat(Math.max(...resultFeatures.map((f) => f.end)));
   }
 
-  return { sequence: currentSeq, features: resultFeatures };
+  return {
+    sequence: currentSeq,
+    features: normalizeLegacyOverlayFeatures(resultFeatures, currentSeq.length),
+  };
+}
+
+/**
+ * 清洗并兼容历史 PhageDiscovery 导出的 misc_feature 区段标记：
+ * - 覆盖整条序列（无宿主侧翼）的贯穿标注直接剔除，防止覆盖正链全部 ORF
+ * - 含宿主侧翼的区段标注升级为 prophage_region，走半透明跨链包络层渲染
+ */
+function normalizeLegacyOverlayFeatures(features: any[], seqLen: number): any[] {
+  const cleaned: any[] = [];
+  for (const feat of features) {
+    const fType = (feat.type || "").toLowerCase();
+    const note = feat.note || "";
+    const isLegacyProphageMisc =
+      fType === "misc_feature" &&
+      !feat.product &&
+      !feat.gene &&
+      /(GlobalCoord=|PeakScore=|Completeness=)/i.test(note);
+
+    if (isLegacyProphageMisc) {
+      const span = Math.max(0, Number(feat.end || 0) - Number(feat.start || 0) + 1);
+      if (seqLen > 0 && span >= seqLen * 0.98) {
+        continue;
+      }
+      const qLabel = feat.qualifiers?.label || feat.name || "Prophage";
+      cleaned.push({
+        ...feat,
+        type: "prophage_region",
+        locus_tag: feat.locus_tag || String(qLabel).split(/\s+/)[0] || "Prophage",
+        name: String(qLabel),
+        product: `Predicted Prophage (${qLabel})`,
+        category: "Other Functional",
+      });
+      continue;
+    }
+    cleaned.push(feat);
+  }
+  return cleaned;
 }
 
 function isValidFeatureType(type?: string): boolean {
@@ -115,7 +155,7 @@ function finalizeFeature(feat: any) {
   feat.note = q.note || q.Note || q.inference || "";
   feat.translation = q.translation || "";
   
-  // 决定显示主名称 (优先使用 gene -> locus_tag + product -> product -> type)
+  // 决定显示主名称 (优先使用 gene -> locus_tag + product -> product -> label -> type)
   if (feat.gene && feat.product) {
     feat.name = `${feat.gene} (${feat.product})`;
   } else if (feat.product) {
@@ -124,6 +164,8 @@ function finalizeFeature(feat: any) {
     feat.name = feat.gene;
   } else if (feat.locus_tag) {
     feat.name = feat.locus_tag;
+  } else if (q.label) {
+    feat.name = q.label;
   } else {
     feat.name = `${feat.type}_${feat.start}_${feat.end}`;
   }

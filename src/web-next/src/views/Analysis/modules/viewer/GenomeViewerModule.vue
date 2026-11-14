@@ -84,7 +84,7 @@
         <div class="sidebar-header">
           <div class="sidebar-title-wrap">
             <span class="sidebar-title">基因特征定位</span>
-            <span class="feat-total-tag">{{ filteredFeatures.length }} / {{ features.length }} 个</span>
+            <span class="feat-total-tag">{{ filteredFeatures.length }} / {{ baseTrackFeatures.length }} 个</span>
           </div>
         </div>
 
@@ -291,7 +291,7 @@
 
                 <!-- 6. 选中基因高亮发光描边 -->
                 <path 
-                  v-if="selectedFeature"
+                  v-if="selectedFeature && selectedFeature.type !== 'prophage_region'"
                   :d="getCircularPath(selectedFeature, sequenceLength, selectedFeature.strand === '+' ? { innerR: 215, outerR: 245 } : { innerR: 180, outerR: 210 })"
                   fill="none" 
                   stroke="#ffffff" 
@@ -307,7 +307,7 @@
                   <text x="0" y="-24" text-anchor="middle" class="center-title">{{ fileName || 'Phage Genome' }}</text>
                   <text x="0" y="-2" text-anchor="middle" class="center-length">{{ formatLength(sequenceLength) }}</text>
                   <text x="0" y="18" text-anchor="middle" class="center-sub">GC 含量: {{ overallGC }}%</text>
-                  <text x="0" y="34" text-anchor="middle" class="center-cds-count">CDS: {{ features.length }} 个特征</text>
+                  <text x="0" y="34" text-anchor="middle" class="center-cds-count">CDS: {{ baseTrackFeatures.length }} 个特征</text>
                 </g>
 
               </g>
@@ -389,7 +389,7 @@
 
                 <!-- 线性选中高亮 -->
                 <path 
-                  v-if="selectedFeature"
+                  v-if="selectedFeature && selectedFeature.type !== 'prophage_region'"
                   :d="getLinearPath(selectedFeature, sequenceLength, computedLinearWidth, { linearY: selectedFeature.strand === '+' ? -28 : 8, rowHeight: 20 })" 
                   fill="none" 
                   stroke="#0f172a" 
@@ -438,14 +438,20 @@
           >
             <div class="tt-header">
               <span class="tt-locus">{{ hoverFeature.locus_tag || hoverFeature.name }}</span>
-              <span class="tt-cat-badge" :style="{ backgroundColor: getFeatureColor(hoverFeature.type, hoverFeature.category, hoverFeature.product) + '20', color: getFeatureColor(hoverFeature.type, hoverFeature.category, hoverFeature.product) }">
-                {{ hoverFeature.category }}
+              <span class="tt-cat-badge" :style="{ backgroundColor: (hoverFeature.type === 'prophage_region' ? '#0284c7' : getFeatureColor(hoverFeature.type, hoverFeature.category, hoverFeature.product)) + '20', color: hoverFeature.type === 'prophage_region' ? '#0284c7' : getFeatureColor(hoverFeature.type, hoverFeature.category, hoverFeature.product) }">
+                {{ hoverFeature.type === 'prophage_region' ? '预测前噬菌体区段' : hoverFeature.category }}
               </span>
             </div>
             <div class="tt-product">{{ hoverFeature.product || 'hypothetical protein' }}</div>
             <div class="tt-meta">
-              <span>坐标: {{ hoverFeature.start.toLocaleString() }} - {{ hoverFeature.end.toLocaleString() }} bp ({{ hoverFeature.strand === '+' ? '正链 +' : '负链 -' }})</span>
-              <span>长度: {{ hoverFeature.end - hoverFeature.start + 1 }} bp ({{ Math.round((hoverFeature.end - hoverFeature.start + 1)/3) }} aa)</span>
+              <template v-if="hoverFeature.type === 'prophage_region'">
+                <span>区段区间: {{ hoverFeature.start.toLocaleString() }} - {{ hoverFeature.end.toLocaleString() }} bp</span>
+                <span>区段跨度: {{ (hoverFeature.end - hoverFeature.start + 1).toLocaleString() }} bp</span>
+              </template>
+              <template v-else>
+                <span>坐标: {{ hoverFeature.start.toLocaleString() }} - {{ hoverFeature.end.toLocaleString() }} bp ({{ hoverFeature.strand === '+' ? '正链 +' : '负链 -' }})</span>
+                <span>长度: {{ hoverFeature.end - hoverFeature.start + 1 }} bp ({{ Math.round((hoverFeature.end - hoverFeature.start + 1)/3) }} aa)</span>
+              </template>
             </div>
           </div>
 
@@ -466,10 +472,10 @@
           <div class="feature-inspector-drawer" v-if="selectedFeature">
             <div class="drawer-header">
               <div class="drawer-title-group">
-                <span class="drawer-icon-tag" :style="{ backgroundColor: getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product) }"></span>
+                <span class="drawer-icon-tag" :style="{ backgroundColor: selectedFeature.type === 'prophage_region' ? '#0284c7' : getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product) }"></span>
                 <span class="drawer-locus">{{ selectedFeature.locus_tag || selectedFeature.name || 'CDS Feature' }}</span>
-                <span class="drawer-cat-chip" :style="{ color: getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product), backgroundColor: getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product) + '15' }">
-                  {{ selectedFeature.category }}
+                <span class="drawer-cat-chip" :style="{ color: selectedFeature.type === 'prophage_region' ? '#0284c7' : getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product), backgroundColor: (selectedFeature.type === 'prophage_region' ? '#0284c7' : getFeatureColor(selectedFeature.type, selectedFeature.category, selectedFeature.product)) + '15' }">
+                  {{ selectedFeature.type === 'prophage_region' ? '预测前噬菌体区段' : selectedFeature.category }}
                 </span>
               </div>
               <button class="drawer-close" @click="selectedFeature = null">×</button>
@@ -477,14 +483,21 @@
 
             <div class="drawer-body">
               <div class="info-row">
-                <span class="info-k">产物功能:</span>
+                <span class="info-k">{{ selectedFeature.type === 'prophage_region' ? '区段描述:' : '产物功能:' }}</span>
                 <span class="info-v highlight">{{ selectedFeature.product || 'hypothetical protein' }}</span>
               </div>
               <div class="info-row">
                 <span class="info-k">物理区间:</span>
-                <span class="info-v">{{ selectedFeature.start.toLocaleString() }} .. {{ selectedFeature.end.toLocaleString() }} bp ({{ selectedFeature.strand === '+' ? '正链 Forward +' : '反链 Reverse -' }})</span>
+                <span class="info-v">
+                  <template v-if="selectedFeature.type === 'prophage_region'">
+                    {{ selectedFeature.start.toLocaleString() }} .. {{ selectedFeature.end.toLocaleString() }} bp (全长 {{ (selectedFeature.end - selectedFeature.start + 1).toLocaleString() }} bp 跨链区段)
+                  </template>
+                  <template v-else>
+                    {{ selectedFeature.start.toLocaleString() }} .. {{ selectedFeature.end.toLocaleString() }} bp ({{ selectedFeature.strand === '+' ? '正链 Forward +' : '反链 Reverse -' }})
+                  </template>
+                </span>
               </div>
-              <div class="info-row">
+              <div class="info-row" v-if="selectedFeature.type !== 'prophage_region'">
                 <span class="info-k">蛋白规模:</span>
                 <span class="info-v">{{ Math.round((selectedFeature.end - selectedFeature.start + 1) / 3) }} aa (分子量约 {{ ((selectedFeature.end - selectedFeature.start + 1) / 3 * 0.11).toFixed(2) }} kDa)</span>
               </div>
@@ -501,9 +514,9 @@
             <div class="drawer-actions">
               <button @click="copySequence" class="act-btn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                复制核酸 CDS
+                {{ selectedFeature.type === 'prophage_region' ? '复制区段核酸序列' : '复制核酸 CDS' }}
               </button>
-              <button @click="copyTranslation" class="act-btn" v-if="selectedFeature.translation || rawSequence">
+              <button @click="copyTranslation" class="act-btn" v-if="selectedFeature.type !== 'prophage_region' && (selectedFeature.translation || rawSequence)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                 复制蛋白翻译序列
               </button>
@@ -594,9 +607,17 @@ const overallGC = computed(() => {
   return Number(((gcCount / seq.length) * 100).toFixed(2));
 });
 
+const prophageOverlayFeatures = computed(() =>
+  features.value.filter((f: any) => f.type === "prophage_region")
+);
+
+const baseTrackFeatures = computed(() =>
+  features.value.filter((f: any) => f.type !== "prophage_region")
+);
+
 const categoryCounts = computed(() => {
   const counts: Record<string, number> = {};
-  for (const f of features.value) {
+  for (const f of baseTrackFeatures.value) {
     const cat = f.category || "Hypothetical";
     counts[cat] = (counts[cat] || 0) + 1;
   }
@@ -624,6 +645,9 @@ function matchesSearchAndFilter(f: any): boolean {
 // 判断图谱上的特征是否需要半透明变暗 (多重联动)
 function isFeatureDimmed(f: any): boolean {
   if (selectedFeature.value) {
+    if (selectedFeature.value.type === "prophage_region") {
+      return !(f.start >= selectedFeature.value.start && f.end <= selectedFeature.value.end);
+    }
     return selectedFeature.value !== f;
   }
   if (highlightedCategory.value) {
@@ -635,18 +659,10 @@ function isFeatureDimmed(f: any): boolean {
   return false;
 }
 
-// 过滤后的基因特征列表
+// 过滤后的基因特征列表（剔除仅用于跨链包络叠图渲染的 prophage_region）
 const filteredFeatures = computed(() => {
-  return features.value.filter(matchesSearchAndFilter);
+  return baseTrackFeatures.value.filter(matchesSearchAndFilter);
 });
-
-const prophageOverlayFeatures = computed(() =>
-  features.value.filter((f: any) => f.type === "prophage_region")
-);
-
-const baseTrackFeatures = computed(() =>
-  features.value.filter((f: any) => f.type !== "prophage_region")
-);
 
 // GC 轨迹路径
 const gcPaths = computed(() => {
@@ -880,7 +896,8 @@ function copySequence() {
   if (!selectedFeature.value) return;
   const seq = extractFeatureSequence(rawSequence.value, selectedFeature.value.start, selectedFeature.value.end, selectedFeature.value.strand);
   navigator.clipboard.writeText(seq);
-  showToast("核酸 CDS 序列已成功复制到剪贴板");
+  const label = selectedFeature.value.type === "prophage_region" ? "前噬菌体区段核酸序列" : "核酸 CDS 序列";
+  showToast(`${label}已成功复制到剪贴板`);
 }
 
 function copyTranslation() {

@@ -366,16 +366,22 @@ def _build_region_seq_record(
         },
     )
 
-    rec.features.append(
-        SeqFeature(
-            FeatureLocation(max(0, rel_prophage_start), min(len(slice_seq), rel_prophage_end), strand=1),
-            type="misc_feature",
-            qualifiers={
-                "label": [region_label],
-                "note": [note],
-            },
+    rel_start = max(0, rel_prophage_start)
+    rel_end = min(len(slice_seq), rel_prophage_end)
+    # 仅在包含真实宿主侧翼序列时写入 prophage_region 包络标注，避免纯噬菌体全长出现贯穿头尾的覆盖特征
+    if (rel_start > 0 or rel_end < len(slice_seq)) and rel_end > rel_start:
+        rec.features.append(
+            SeqFeature(
+                FeatureLocation(rel_start, rel_end, strand=1),
+                type="prophage_region",
+                qualifiers={
+                    "locus_tag": [(region_label.split() or [clean_id])[0]],
+                    "label": [region_label],
+                    "product": [f"Predicted Prophage ({region_label})"],
+                    "note": [note],
+                },
+            )
         )
-    )
 
     for idx, orf in enumerate(orfs, start=1):
         b0 = max(0, int(orf["begin"]) - 1)

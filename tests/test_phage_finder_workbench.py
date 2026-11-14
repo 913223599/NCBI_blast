@@ -174,13 +174,57 @@ def test_exporter_inspect_and_multi_format_artifacts(tmp_path: Path):
     assert flanked_gbk.exists()
     parsed_gbk = SeqIO.read(str(flanked_gbk), "genbank")
     assert len(parsed_gbk.seq) == 13000  # 9000bp region + 2000bp left + 2000bp right
-    assert any(feat.type == "misc_feature" for feat in parsed_gbk.features)
+    assert any(feat.type == "prophage_region" for feat in parsed_gbk.features)
+    assert not any(feat.type == "misc_feature" for feat in parsed_gbk.features)
 
     # 核心 GenBank 同样能回读
     core_gbk = out_dir / "phage_test_01_prophages.gbk"
     core_recs = list(SeqIO.parse(str(core_gbk), "genbank"))
     assert len(core_recs) == 1
     assert len(core_recs[0].seq) == 9000
+    assert not any(feat.type in {"misc_feature", "prophage_region"} for feat in core_recs[0].features)
+
+
+def test_exporter_full_length_region_omits_spanning_feature(tmp_path: Path):
+    """整条序列被预测为一个前噬菌体（无宿主侧翼）时，region_1.gbk 不得生成贯穿头尾的区段覆盖特征。"""
+    seq1 = _synth_dna(15000, "ATGAAATTGCATGGCTAGCTAGCTAGCTAG")
+    region = PredictedRegion(
+        contig_id="phage_full",
+        start_bp=0,
+        end_bp=15000,
+        peak_score=0.9977,
+        mean_score=0.9650,
+        window_count=6,
+    )
+    scan_res = ScanResult(
+        contigs_bp={"phage_full": 15000},
+        total_bp=15000,
+        total_windows=6,
+        raw_regions=[region],
+        verified_regions=[region],
+        gate_details=[],
+        timings_sec={"total_sec": 0.25},
+        region_profiles={},
+    )
+    out_dir = tmp_path / "results" / "phage_discovery" / "phage_full_01"
+    export_scan_artifacts(
+        task_id="phage_full_01",
+        task_name="Full_Phage",
+        model_info={"model_id": "student_v4_2", "version": "V4.2", "label": "Student V4.2"},
+        device_used="cpu",
+        apply_protein_gate=False,
+        sequences={"phage_full": seq1},
+        scan_result=scan_res,
+        out_dir=out_dir,
+        flank_bp=3000,
+        project_root=tmp_path,
+    )
+
+    region_gbk = out_dir / "regions" / "region_1.gbk"
+    assert region_gbk.exists()
+    parsed = SeqIO.read(str(region_gbk), "genbank")
+    assert len(parsed.seq) == 15000
+    assert not any(feat.type in {"misc_feature", "prophage_region"} for feat in parsed.features)
 
 
 def test_fastapi_phage_discovery_end_to_end_and_protein_compare_removed(tmp_path: Path, monkeypatch):

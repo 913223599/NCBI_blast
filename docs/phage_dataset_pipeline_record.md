@@ -572,3 +572,15 @@ Pop-Location
 3. **测试先行与全栈回归验证**
    - 遵循测试先行规则新增 Vitest 组件回归测试 [phageOverlayAndResults.test.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/__tests__/phageOverlayAndResults.test.ts)，先复现 3 条失败断言后完成组件修复并转绿。
    - 修改后验证全量前端单元测试 `npm run test --prefix src/web-next -- --run`：**`7 passed (7), 45 passed (45)`**；`npm run build --prefix src/web-next`（`vue-tsc -b && vite build`）退出码 `0` 构建通过；`pytest tests/test_engineering_optimizations.py -q`（**`6 passed`**）确认全仓无 Emoji 与 UTF-8 规范合规。
+
+## 22. 图谱浏览器联动贯穿全长错误注释（misc_feature_1_*）全链路修复
+1. **根因排查**
+   - `exporter.py` 的 `_build_region_seq_record()` 此前使用 `type="misc_feature"` 标注预测区段，且当输入为完整噬菌体全长基因组或无宿主侧翼区间（`rel_prophage_start == 0` 且 `rel_prophage_end == len(slice_seq)`）时，仍写入一条从首碱基贯穿至末尾的全长特征。
+   - `GenomeViewer` 前端 `parseGenBank()` 读取 `misc_feature` 时，因缺失 `/gene` 与 `/product` 而生成 `misc_feature_1_<len>`，进而被渲染在正链 `CDS` 主轨道上形成贯穿头尾的巨大灰色箭头遮盖全部内部真实 ORF，并在详情面板被误算为超长假定蛋白（`aa` / `kDa`）及混入左侧基因特征清单。
+   - 同时排查到 `GenomeViewerModule.vue` 的 `filteredFeatures`、`categoryCounts` 与中心徽标 `CDS` 计数此前未排除 `prophage_region`，导致全长叠图模式下包络框也混入基因列表与 `Hypothetical` 统计并算出错误蛋白尺寸。
+2. **双端修复方案**
+   - **导出源头 (`src/analysis/phage_finder/exporter.py`)**：`_build_region_seq_record()` 仅在真实存在宿主侧翼（`rel_start > 0 or rel_end < len(slice_seq)`）时写入 `type="prophage_region"`（统一交由跨链包络层渲染），不再写出 `misc_feature` 污染正链轨道；纯噬菌体全长或核心 `core_rec` 不再附加冗余的贯穿头尾区段特征。
+   - **历史兼容与解析纯化 (`src/web-next/src/views/Analysis/modules/viewer/utils/parser.ts`)**：新增 `normalizeLegacyOverlayFeatures()` 后处理，对磁盘已保存的历史旧 `misc_feature`（无 `/gene`/`/product` 且含 `GlobalCoord=`/`PeakScore=`/`Completeness=`）进行自动兼容清洗——贯穿全长（`>= 98%`）者直接过滤剔除，局部带侧翼者自动升级为 `prophage_region` 跨链包络框，同时保留常规短 `misc_feature` 与 `/label` 显示名称。
+   - **视图列表、计数与详情纯化 (`src/web-next/src/views/Analysis/modules/viewer/GenomeViewerModule.vue`)**：将 `filteredFeatures`、`categoryCounts`、侧边栏与中心特征数统一基于 `baseTrackFeatures`（剔除 `prophage_region`）；高亮选中 `prophage_region` 时取消单链错位高亮并联动高亮其区间内基因；悬浮提示与详情抽屉针对 `prophage_region` 隐去误导性的 `蛋白规模 (aa/kDa)` 与 `复制蛋白翻译序列` 按钮。
+3. **涉及模块回归验证**
+   - 遵循规则 6 先编写后端 `test_exporter_full_length_region_omits_spanning_feature` 与前端 [phageViewerOverlay.test.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/viewer/__tests__/phageViewerOverlay.test.ts)（先复现失败后修补转绿），随后仅测试涉及模块并跳过无关全量回归。
