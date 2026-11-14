@@ -85,6 +85,48 @@ const allBaseFeatures = computed<PhageBaseFeature[]>(() => props.overlayData?.ba
 const allScoreBins = computed<PhageScoreTrackBin[]>(() => props.overlayData?.score_tracks || [])
 const allBaseBins = computed<PhageBaseTrackBin[]>(() => props.overlayData?.base_tracks || [])
 
+// ─── 底图真实能力门控（仅原生 GenBank 含对应注释时展示对应功能分类） ───
+const isGenbankSource = computed(() => props.overlayData?.source_format === 'genbank')
+const hasIntegraseOrTransposase = computed(
+  () =>
+    isGenbankSource.value &&
+    allBaseFeatures.value.some((f) =>
+      /(integrase|transposase|recombinase|excisionase)/.test(
+        `${f.gene || ''} ${f.product || ''} ${f.note || ''}`.toLowerCase()
+      )
+    )
+)
+const hasRnaFeatures = computed(
+  () =>
+    isGenbankSource.value &&
+    allBaseFeatures.value.some((f) => {
+      const t = (f.type || '').toLowerCase()
+      return t === 'trna' || t === 'rrna'
+    })
+)
+const baseLayerLabel = computed(() => {
+  if (hasRnaFeatures.value) return '底图基因 (CDS/tRNA)'
+  if (isGenbankSource.value) return '底图基因 (CDS)'
+  return '底图特征 (ORF)'
+})
+const searchPlaceholder = computed(() => {
+  if (hasIntegraseOrTransposase.value || hasRnaFeatures.value) {
+    return '检索底图基因 (如 gene / product / locus_tag)...'
+  }
+  if (isGenbankSource.value) {
+    return '检索底图基因 (如 locus_tag / gene / product)...'
+  }
+  return '检索底图 ORF 编号或坐标 (如 ORF_0010)...'
+})
+const activeRegion = computed<PhageRegionItem | null>(() => {
+  if (allRegions.value.length === 0) return null
+  return (
+    allRegions.value.find((r) => r.index === props.selectedRegionIndex) ??
+    allRegions.value[0] ??
+    null
+  )
+})
+
 // 切换 Contig 或新数据到达时重置视口
 watch(
   () => [props.overlayData?.contig_id, props.overlayData?.length_bp],
@@ -794,7 +836,7 @@ function onMinimapClick(e: MouseEvent): void {
       <div class="layer-toggles">
         <label class="layer-chip" :class="{ on: showBaseFeatures }">
           <input v-model="showBaseFeatures" type="checkbox" />
-          <span>底图基因 (CDS/tRNA)</span>
+          <span>{{ baseLayerLabel }}</span>
         </label>
         <label class="layer-chip" :class="{ on: showScoreCurve }">
           <input v-model="showScoreCurve" type="checkbox" />
@@ -820,7 +862,7 @@ function onMinimapClick(e: MouseEvent): void {
             v-model="featureSearch"
             type="text"
             class="feat-search-input"
-            placeholder="检索底图基因 (如 integrase / tRNA / dnaA)..."
+            :placeholder="searchPlaceholder"
             @keyup.enter="jumpToMatchedFeature(0)"
           />
           <template v-if="matchedFeatureList.length > 0">
@@ -875,10 +917,10 @@ function onMinimapClick(e: MouseEvent): void {
       <!-- 图例说明栏 -->
       <div class="legend-strip">
         <span class="lg-item"><i class="sw prophage"></i>预测噬菌体区段</span>
-        <span class="lg-item"><i class="sw cds-in"></i>区段内基因</span>
-        <span class="lg-item"><i class="sw cds-host"></i>宿主基因</span>
-        <span class="lg-item"><i class="sw integrase"></i>整合酶 / 转座酶</span>
-        <span class="lg-item"><i class="sw trna"></i>tRNA / rRNA</span>
+        <span class="lg-item"><i class="sw cds-in"></i>{{ isGenbankSource ? '区段内基因' : '区段内 ORF' }}</span>
+        <span class="lg-item"><i class="sw cds-host"></i>{{ isGenbankSource ? '宿主基因' : '宿主 ORF' }}</span>
+        <span v-if="hasIntegraseOrTransposase" class="lg-item"><i class="sw integrase"></i>整合酶 / 转座酶</span>
+        <span v-if="hasRnaFeatures" class="lg-item"><i class="sw trna"></i>tRNA / rRNA</span>
         <span v-if="featureSearch.trim()" class="lg-item"><i class="sw match"></i>检索命中高亮</span>
         <span class="viewport-range">
           当前视口: {{ (viewStartBp + 1).toLocaleString() }} - {{ viewEndBp.toLocaleString() }} bp
@@ -956,9 +998,10 @@ function onMinimapClick(e: MouseEvent): void {
             rx="4"
           />
           <rect
+            :data-region-badge="item.reg.region_id"
             :x="item.x1"
             y="46"
-            :width="Math.max(item.w, 42)"
+            :width="Math.max(item.w, item.reg.region_id.length * 6.8 + 12)"
             height="16"
             rx="3"
             :fill="item.active ? '#1d4ed8' : '#0284c7'"
@@ -1200,6 +1243,24 @@ function onMinimapClick(e: MouseEvent): void {
         >
           {{ reg.region_id }} ({{ formatBpAxis(reg.start_bp) }} - {{ formatBpAxis(reg.end_bp) }})
         </button>
+        <div v-if="activeRegion" class="pills-actions">
+          <button
+            type="button"
+            class="pill-action-btn viewer"
+            data-testid="active-region-viewer-btn"
+            @click="emit('open-region-viewer', activeRegion.index)"
+          >
+            查看 {{ activeRegion.region_id }} 图谱
+          </button>
+          <button
+            type="button"
+            class="pill-action-btn anno"
+            data-testid="active-region-anno-btn"
+            @click="emit('open-annotation', activeRegion.index)"
+          >
+            注释 {{ activeRegion.region_id }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1733,5 +1794,30 @@ function onMinimapClick(e: MouseEvent): void {
   background: #2563eb;
   border-color: #2563eb;
   color: white;
+}
+
+.pills-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pill-action-btn {
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  border: none;
+  color: white;
+}
+
+.pill-action-btn.viewer {
+  background: #2563eb;
+}
+
+.pill-action-btn.anno {
+  background: #0f766e;
 }
 </style>

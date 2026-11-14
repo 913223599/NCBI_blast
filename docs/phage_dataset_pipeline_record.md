@@ -558,3 +558,17 @@ Pop-Location
    - 后端全量单元测试 `pytest tests/ --tb=short -q`：**`197 passed in 103.74s`**（零超时、零失败、零跳过）。
    - 前端全量单元测试 `npm run test --prefix src/web-next -- --run`：**`6 passed (6), 42 passed (42)`**。
    - 前端编译与静态类型检查 `npm run build --prefix src/web-next`（含 `vue-tsc -b && vite build`）通过，后端 `pyrefly check src/ tests/` 报告 **`0 errors`**，并整理分主题提交推送至 Git。
+
+## 21. 叠图区段图表去重、真实特征能力门控与标签防裁切优化
+1. **移除重合的下方旧边界精细概率曲线卡片 (`PhageDiscoveryResults.vue`)**
+   - 上方新构建的交互式 `PhageOverlayMap` 已完整涵盖全基因组与单区段的 `V4.2 分数` 曲线、快速聚焦区段（含侧翼缩放）等可视化能力，因此移除下方重复的 `边界精细概率曲线 (200bp SubBin 分辨率)` 卡片、冗余 `PROF_*` / `profileGeometry` 几何计算代码及旧 SVG 样式规则。
+   - 将原先卡片右上角的“在图谱浏览器中查看” / “注释此区段”快捷联动操作无损迁移至 `PhageOverlayMap.vue` 底部的快速聚焦栏（`.region-pills-bar`），激活并触发已定义的 `open-region-viewer` 与 `open-annotation` 事件，直接作用于当前选中的 `activeRegion`。
+2. **底图真实能力感知与禁用虚假特征展示 (`PhageOverlayMap.vue`)**
+   - 当输入序列为 `FASTA` 时，后台仅经由 Pyrodigal 提取无基因名、无功能注释的 de novo ORF（`source_format === 'fasta'`），工作台叠图界面并不具备识别 `整合酶 / 转座酶` 或 `tRNA / rRNA` 的能力。
+   - 在 `PhageOverlayMap.vue` 新增 `isGenbankSource`、`hasIntegraseOrTransposase`、`hasRnaFeatures`、`baseLayerLabel`、`searchPlaceholder` 等能力感知计算属性：
+     - `FASTA + Pyrodigal` 模式下彻底隐藏 `整合酶 / 转座酶`（紫色）与 `tRNA / rRNA`（绿色）图例，并将区段内/宿主图例、图层开关及检索框提示准确修正为 `区段内 ORF`、`宿主 ORF`、`底图特征 (ORF)` 与 `检索底图 ORF 编号或坐标 (如 ORF_0010)...`。
+     - 仅当输入为原生 `GenBank` 且底图特征真包含对应注释时，按需渲染 `整合酶 / 转座酶`、`tRNA / rRNA` 图例及 `(CDS/tRNA)` 标签。
+   - 修复线性模式中区段徽标背景 `<rect>` 最小宽度固定 `42` 导致 `Phage_001` 文本右侧溢出的视觉裁切缺陷，改为按文本长度自适应计算 `Math.max(item.w, item.reg.region_id.length * 6.8 + 12)`。
+3. **测试先行与全栈回归验证**
+   - 遵循测试先行规则新增 Vitest 组件回归测试 [phageOverlayAndResults.test.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/__tests__/phageOverlayAndResults.test.ts)，先复现 3 条失败断言后完成组件修复并转绿。
+   - 修改后验证全量前端单元测试 `npm run test --prefix src/web-next -- --run`：**`7 passed (7), 45 passed (45)`**；`npm run build --prefix src/web-next`（`vue-tsc -b && vite build`）退出码 `0` 构建通过；`pytest tests/test_engineering_optimizations.py -q`（**`6 passed`**）确认全仓无 Emoji 与 UTF-8 规范合规。
