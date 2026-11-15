@@ -56,7 +56,11 @@ function getStatusText(item: PhageTaskRecord): string {
         </div>
 
         <div class="item-meta">
-          <span class="tag-badge version">V4.2</span>
+          <span class="tag-badge version">{{
+            String(item.summary?.model_label || '').includes('Stage 1.2') || item.model_id === 'stage1_2'
+              ? 'Stage 1.2'
+              : (item.model_version || 'Stage 1.2')
+          }}</span>
           <span class="tag-badge device">{{ String(item.device || 'cpu').toUpperCase() }}</span>
           <span v-if="item.apply_protein_gate" class="tag-badge gate">蛋白门控</span>
           <span v-if="item.status === 'completed' && item.summary?.region_count !== undefined" class="hit-badge">

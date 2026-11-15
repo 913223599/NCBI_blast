@@ -32,6 +32,8 @@ class PhageScanRunRequest(BaseModel):
     seed_threshold: Optional[float] = Field(default=None, ge=0.05, le=0.999, description="种子激活阈值")
     extend_threshold: Optional[float] = Field(default=None, ge=0.05, le=0.999, description="滞回扩展阈值")
     sub_threshold: Optional[float] = Field(default=None, ge=0.05, le=0.999, description="200bp 精细边界阈值")
+    plateau_min_windows: Optional[int] = Field(default=None, ge=0, le=20, description="平台兜底最小连续窗口数 (0 表示禁用)")
+    plateau_second_threshold: Optional[float] = Field(default=None, ge=0.05, le=0.999, description="平台兜底次高分阈值")
     merge_gap_bp: int = Field(default=3000, ge=0, le=50000, description="邻近前噬菌体片段合并最大间隔 (bp)")
     min_region_bp: int = Field(default=3000, ge=400, le=50000, description="最短保留区段长度 (bp)")
 

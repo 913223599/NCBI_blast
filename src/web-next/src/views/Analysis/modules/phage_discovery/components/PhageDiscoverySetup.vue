@@ -39,7 +39,7 @@ const configModelDir = ref<string>('')
 const configBlastDb = ref<string>('')
 
 const form = reactive<PhageScanForm>({
-  task_name: 'PhageDiscovery_V42',
+  task_name: 'PhageDiscovery_Stage1_2',
   fasta_path: '',
   fasta_content: '',
   selected_contigs: [],
@@ -158,7 +158,7 @@ function onAssemblyTaskSelected(): void {
     form.fasta_path = candidatePath
     form.fasta_content = ''
     uploadedFileName.value = t.name || t.task_id
-    if (!form.task_name || form.task_name === 'PhageDiscovery_V42') {
+    if (!form.task_name || form.task_name === 'PhageDiscovery_Stage1_2' || form.task_name === 'PhageDiscovery_V42') {
       form.task_name = `${t.name || t.task_id}_PhageScan`
     }
     emit('inspect', { fasta_path: candidatePath })
@@ -233,7 +233,7 @@ function loadDemoSequence(): void {
   const corePhage = blockPhage.repeat(90)
   const hostRight = blockHost.repeat(40)
   form.fasta_content = `>Demo_Bacterial_Chromosome_With_Candidate_Region\n${hostLeft}${corePhage}${hostRight}\n`
-  form.task_name = 'Demo_Genome_V42'
+  form.task_name = 'Demo_Genome_Stage1_2'
   emit('inspect', { fasta_content: form.fasta_content })
 }
 
@@ -242,7 +242,7 @@ function clearPasteData(): void {
 }
 
 async function browseCustomModelDir(): Promise<void> {
-  const picked = await bridge.request_directory_select('选择 Student V4.2 模型目录')
+  const picked = await bridge.request_directory_select('选择前噬菌体发现模型目录')
   if (picked) {
     configModelDir.value = picked
   }
@@ -285,7 +285,7 @@ function onSubmit(): void {
     return
   }
   if (!activeV42Model.value && !form.custom_model_dir.trim()) {
-    (window as any).app?.showNotification('未检测到 Student V4.2 模型权重，请先配置模型目录', 'error')
+    (window as any).app?.showNotification('未检测到本地前噬菌体识别模型权重，请先配置模型目录', 'error')
     showPathConfig.value = true
     return
   }
@@ -304,7 +304,7 @@ onMounted(() => {
     <!-- 1. 顶部标题与示例加载 -->
     <div class="setup-header">
       <div class="title-block">
-        <h2>前噬菌体与噬菌体边界精细扫描 (Student V4.2)</h2>
+        <h2>前噬菌体与噬菌体边界精细扫描</h2>
         <p class="subtitle">基于多尺度 DNA 序列与 ORF 语义上下文模型，结合 200bp SubBinRefiner 实现精确切割</p>
       </div>
       <div class="header-actions">
@@ -449,8 +449,8 @@ onMounted(() => {
     <div class="engine-status-card" :class="{ missing: !activeV42Model }">
       <div class="engine-head">
         <div class="engine-title-row">
-          <span class="version-pill">Student V4.2</span>
-          <strong>{{ activeV42Model ? activeV42Model.label : '未检测到本地 V4.2 模型目录' }}</strong>
+          <span class="version-pill">{{ activeV42Model?.feature_profile === 'stage1' ? 'Stage 1.2' : 'Student V4.2' }}</span>
+          <strong>{{ activeV42Model ? activeV42Model.label : '未检测到本地模型目录' }}</strong>
         </div>
         <div class="engine-tools">
           <button
@@ -474,18 +474,18 @@ onMounted(() => {
         <span class="meta-path" :title="activeV42Model.path">{{ activeV42Model.path }}</span>
       </div>
       <div v-else class="engine-missing-tip">
-        请将完整 V4.2 模型目录放置于项目 <code>models/full_v4/student_v4_2</code> 或相邻 <code>Phage data/models/full_v4/student_v4_2</code> 下，或点击右侧手动指定目录。
+        请将模型目录放置于项目 <code>models/full_v4/stage1_2</code> 或相邻 <code>Phage data/models/full_v4/stage1_2</code> 下，或点击右侧手动指定目录。
       </div>
 
       <div v-if="showPathConfig" class="path-config-drawer">
         <div class="config-row">
-          <label>自定义 V4.2 模型目录:</label>
+          <label>自定义模型目录:</label>
           <div class="input-with-btn">
             <input
               v-model="configModelDir"
               type="text"
               class="text-input"
-              placeholder="包含 student_v4.pt 与 subbin_refiner.pt 的目录路径"
+              placeholder="包含 stage1_2.pt（或 student_v4.pt）与 subbin_refiner.pt 的目录路径"
             />
             <button type="button" class="outline-btn" @click="browseCustomModelDir">浏览</button>
           </div>
@@ -546,7 +546,7 @@ onMounted(() => {
           已检测到 blastp 与蛋白参考库 ({{ gateStatus.blast_db }})
         </span>
         <span v-else class="status-warn">
-          未检测到完整的本地 blastp / phage_refseq_prot 库，当前默认采用纯 V4.2 神经引擎极速发现模式
+          未检测到完整的本地 blastp / phage_refseq_prot 库，当前默认采用纯神经引擎极速发现模式
         </span>
       </div>
     </div>
@@ -569,7 +569,7 @@ onMounted(() => {
           边界精修解码参数调优 (种子阈值 / 滞回延伸 / 200bp 切割尺度)
         </button>
         <button v-if="showAdvanced" type="button" class="reset-btn" @click="resetThresholds">
-          恢复 V4.2 默认
+          恢复默认参数
         </button>
       </div>
 
@@ -617,8 +617,8 @@ onMounted(() => {
           <path v-else d="M12 5v14M5 12h14" />
         </svg>
         <span v-if="isSubmitting">正在排队提交...</span>
-        <span v-else-if="isQueueBusy">加入 V4.2 扫描队列</span>
-        <span v-else>启动 V4.2 前噬菌体全基因组扫描</span>
+        <span v-else-if="isQueueBusy">加入扫描队列</span>
+        <span v-else>启动前噬菌体全基因组扫描</span>
       </button>
     </div>
   </div>

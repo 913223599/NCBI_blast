@@ -34,7 +34,7 @@ watch(
       <div class="header-left">
         <div class="spinner-ring"></div>
         <div>
-          <h3>Student V4.2 基因组前噬菌体识别与边界精修中</h3>
+          <h3>基因组前噬菌体识别与边界精修中</h3>
           <span class="task-id-label">任务编号: {{ taskId }}</span>
         </div>
       </div>

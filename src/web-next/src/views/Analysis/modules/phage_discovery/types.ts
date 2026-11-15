@@ -18,6 +18,8 @@ export interface PhageModelInfo {
   path: string
   weights_file: string
   params: number
+  feature_profile?: string
+  func_dim?: number
   has_context_refiner: boolean
   has_subbin_refiner: boolean
   decoder_defaults: PhageDecoderDefaults

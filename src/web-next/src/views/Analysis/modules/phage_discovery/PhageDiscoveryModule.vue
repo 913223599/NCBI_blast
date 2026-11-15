@@ -157,7 +157,7 @@ async function handleOpenAnnotation(regionIndex?: number): Promise<void> {
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
-            <span>V4.2 扫描历史</span>
+            <span>前噬菌体扫描历史</span>
             <span
               v-if="queueStatus.running_count > 0 || queueStatus.queued_count > 0"
               class="queue-counter-tag"

@@ -16,10 +16,12 @@ ENV_MODELS_ROOT = "PHAGE_DISCOVERY_MODELS_ROOT"
 ENV_MODEL_DIR = "PHAGE_DISCOVERY_MODEL_DIR"
 ENV_BLAST_DB = "PHAGE_DISCOVERY_BLAST_DB"
 
-# 仅保留 V4.2 版本相对候选路径
+# 优先探测 Stage 1.2 模型目录，同时保留旧 V4.2 目录命名兼容
 _KNOWN_V4_2_SPECS: List[Tuple[str, str, str, int]] = [
-    ("student_v4_2", "full_v4/student_v4_2", "Student V4.2 边界精修模型", 1),
-    ("student_v4_2", "student_v4_2", "Student V4.2 边界精修模型", 2),
+    ("stage1_2", "full_v4/stage1_2", "Stage 1.2 边界精修模型", 1),
+    ("stage1_2", "stage1_2", "Stage 1.2 边界精修模型", 2),
+    ("student_v4_2", "full_v4/student_v4_2", "Student V4.2 边界精修模型", 3),
+    ("student_v4_2", "student_v4_2", "Student V4.2 边界精修模型", 4),
 ]
 
 
@@ -98,13 +100,14 @@ def _inspect_v4_2_dir(
     label: str,
     priority: int,
 ) -> Optional[Dict[str, Any]]:
-    """校验目录是否为完整 V4.2 模型权重包并返回标定默认值与评估摘要。"""
+    """校验目录是否为完整 Stage 1.2 / V4.2 模型权重包并返回标定默认值与评估摘要。"""
+    from ...phage_discovery.inference.scanner import resolve_model_dir_files
+
     root = model_dir.resolve()
-    v4_pt = root / "student_v4.pt"
-    v4_meta = root / "student_v4_meta.json"
+    v4_pt, v4_meta, rep_path = resolve_model_dir_files(root)
     subbin_pt = root / "subbin_refiner.pt"
 
-    if not (v4_pt.exists() and v4_meta.exists()):
+    if not (v4_pt is not None and v4_meta is not None and v4_pt.exists() and v4_meta.exists()):
         return None
 
     meta: Dict[str, Any] = {}
@@ -118,32 +121,52 @@ def _inspect_v4_2_dir(
         return None
 
     rep: Dict[str, Any] = {}
-    for rep_name in ("student_v4_report.json", "student_report.json"):
-        rep_path = root / rep_name
-        if rep_path.exists():
-            try:
-                rep = json.loads(rep_path.read_text(encoding="utf-8"))
-                break
-            except Exception:
-                rep = {}
+    if rep_path is not None and rep_path.exists():
+        try:
+            rep = json.loads(rep_path.read_text(encoding="utf-8"))
+        except Exception:
+            rep = {}
 
     dec = rep.get("decoder_tuned_on_val") or {}
     has_ref = (root / "context_refiner.pt").exists() or bool(meta.get("use_context_refiner"))
+    p_min_win = int(dec.get("plateau_min_windows") or 0)
+    raw_p_sec = dec.get("plateau_second_threshold")
+    p_sec_thr = float(raw_p_sec) if raw_p_sec is not None else None
+    raw_pad = dec.get("refine_pad_bp")
+    refine_pad_bp = int(raw_pad) if raw_pad is not None else None
+    raw_smooth = dec.get("smooth_profile")
+    smooth_profile = bool(raw_smooth) if raw_smooth is not None else None
+
+    feature_profile = str(meta.get("feature_profile") or "legacy_v4")
+    func_dim = int(meta.get("func_dim") or 0)
+    is_stage1_2 = (feature_profile == "stage1" and func_dim > 0) or model_id.startswith("stage1_2")
+    resolved_label = label
+    if is_stage1_2 and "Stage 1.2" not in resolved_label:
+        if "Student V4.2" in resolved_label:
+            resolved_label = resolved_label.replace("Student V4.2", "Stage 1.2", 1)
+        else:
+            resolved_label = f"{resolved_label} (Stage 1.2)"
 
     return {
         "model_id": model_id,
-        "label": label,
-        "version": "V4.2",
+        "label": resolved_label,
+        "version": "Stage 1.2" if is_stage1_2 else "V4.2",
         "priority": priority,
         "path": str(root),
         "weights_file": str(v4_pt),
         "params": int(meta.get("params") or rep.get("params") or 0),
+        "feature_profile": feature_profile,
+        "func_dim": func_dim,
         "has_context_refiner": has_ref,
         "has_subbin_refiner": True,
         "decoder_defaults": {
             "seed_threshold": float(dec.get("seed_threshold", 0.95)),
             "extend_threshold": float(dec.get("extend_threshold", 0.30)),
             "sub_threshold": float(dec.get("sub_threshold", 0.45)),
+            "plateau_min_windows": p_min_win,
+            "plateau_second_threshold": p_sec_thr,
+            "refine_pad_bp": refine_pad_bp,
+            "smooth_profile": smooth_profile,
             "merge_gap_bp": 3000,
             "min_region_bp": 3000,
         },
@@ -219,14 +242,14 @@ def resolve_model_dir(
             raise FileNotFoundError(f"指定的 V4.2 模型目录不存在: {custom_model_dir}")
         info = _inspect_v4_2_dir(
             custom_path,
-            model_id="student_v4_2_custom",
-            label=f"Student V4.2 ({custom_path.name})",
+            model_id="stage1_2_custom",
+            label=f"Stage 1.2 ({custom_path.name})" if "stage1_2" in custom_path.name.lower() else f"Student V4.2 ({custom_path.name})",
             priority=0,
         )
         if not info:
             raise FileNotFoundError(
-                f"目录 {custom_path} 不是完整的 V4.2 模型目录 "
-                "(需同时包含 student_v4.pt、student_v4_meta.json 与 subbin_refiner.pt)"
+                f"目录 {custom_path} 不是完整的 Stage 1.2 / V4.2 模型目录 "
+                "(需同时包含 stage1_2.pt/student_v4.pt、对应 *_meta.json 与 subbin_refiner.pt)"
             )
         return info
 
@@ -234,8 +257,8 @@ def resolve_model_dir(
     if not available:
         searched = ", ".join(str(p) for p in _get_candidate_model_roots(project_root))
         raise FileNotFoundError(
-            "未检测到可用的 Student V4.2 模型。请将模型放置于项目 models/full_v4/student_v4_2 或 "
-            f"同级 Phage data/models/full_v4/student_v4_2 下，或在界面中指定 V4.2 目录。已探测路径: {searched}"
+            "未检测到可用的 Stage 1.2 / V4.2 模型。请将模型放置于项目 models/full_v4/stage1_2 或 "
+            f"同级 Phage data/models/full_v4/stage1_2 下，或在界面中指定模型目录。已探测路径: {searched}"
         )
 
     if model_id:
@@ -277,8 +300,8 @@ def resolve_protein_gate_resources(
     candidates.extend([
         project_root / "database" / "phage_discovery" / "phage_refseq_prot",
         project_root / "database" / "blastdb" / "phage_refseq_prot",
-        project_root / "database" / "swissprot" / "swissprot",
         sibling_data / "blastdb" / "phage_refseq_prot",
+        project_root / "database" / "swissprot" / "swissprot",
     ])
 
     resolved_db: Optional[Path] = None

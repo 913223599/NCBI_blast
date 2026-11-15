@@ -152,7 +152,7 @@ class PhageDiscoveryManager:
             task_id=task_id,
             task_name=req.task_name or "PhageDiscovery_Task",
             model_id=str(model_info["model_id"]),
-            model_version="V4.2",
+            model_version=str(model_info.get("version") or "Stage 1.2"),
             device=resolved_dev,
             apply_protein_gate=req.apply_protein_gate,
             status="queued",
@@ -262,6 +262,21 @@ class PhageDiscoveryManager:
             seed_thr = float(req.seed_threshold if req.seed_threshold is not None else dec.get("seed_threshold", 0.95))
             ext_thr = float(req.extend_threshold if req.extend_threshold is not None else dec.get("extend_threshold", 0.30))
             sub_thr = float(req.sub_threshold if req.sub_threshold is not None else dec.get("sub_threshold", 0.45))
+            plateau_min_w = int(
+                req.plateau_min_windows
+                if req.plateau_min_windows is not None
+                else (dec.get("plateau_min_windows") or 0)
+            )
+            plateau_sec_raw = (
+                req.plateau_second_threshold
+                if req.plateau_second_threshold is not None
+                else dec.get("plateau_second_threshold")
+            )
+            plateau_sec_thr: Optional[float] = (
+                float(plateau_sec_raw)
+                if (plateau_min_w > 0 and plateau_sec_raw is not None)
+                else None
+            )
             merge_gap = req.merge_gap_bp
             min_len = req.min_region_bp
 
@@ -271,10 +286,11 @@ class PhageDiscoveryManager:
                 blast_db_path = Path(str(gate_res["blast_db"]))
                 blastp_bin = str(gate_res.get("blastp_bin") or "blastp")
 
+            model_disp = str(model_info.get("label") or model_info.get("version") or "Stage 1.2")
             emit_progress(
                 22,
-                "正在加载 Student V4.2 主干网络与 SubBinRefiner 边界精修权重...",
-                f"[STEP 2/5] 加载模型目录: {model_info['path']} (V4.2, SubBinRefiner={model_info['has_subbin_refiner']})",
+                f"正在加载 {model_disp} 与 SubBinRefiner 边界精修权重...",
+                f"[STEP 2/5] 加载模型目录: {model_info['path']} ({model_disp}, SubBinRefiner={model_info['has_subbin_refiner']})",
             )
 
             scanner: Optional[GenomeScanner] = None
@@ -290,6 +306,8 @@ class PhageDiscoveryManager:
                     sub_threshold=sub_thr,
                     merge_gap_bp=merge_gap,
                     min_region_bp=min_len,
+                    plateau_min_windows=plateau_min_w,
+                    plateau_second_threshold=plateau_sec_thr,
                 )
 
                 if self.queue.is_cancelled(task_id):
@@ -298,13 +316,18 @@ class PhageDiscoveryManager:
                 emit_progress(
                     38,
                     f"正在执行滑动窗口与 200bp SubBin 精细边界分割 ({total_bp:,} bp)...",
-                    f"[STEP 3/5] 启动 V4.2 扫描解码 (seed={seed_thr:.2f}, extend={ext_thr:.2f}, sub={sub_thr:.2f})",
+                    (
+                        f"[STEP 3/5] 启动 {model_disp} 扫描解码 (seed={seed_thr:.2f}, extend={ext_thr:.2f}, "
+                        f"sub={sub_thr:.2f}, plateau=({plateau_min_w}, {plateau_sec_thr}))"
+                    ),
                 )
+                collect_func = int(model_info.get("func_dim") or 0) > 0
                 scan_result = scanner.scan_sequences(
                     target_seqs,
                     apply_protein_gate=req.apply_protein_gate,
                     collect_profiles=True,
                     profile_flank_bp=2000,
+                    collect_functional_partitions=collect_func,
                 )
 
                 if self.queue.is_cancelled(task_id):
@@ -346,12 +369,13 @@ class PhageDiscoveryManager:
 
         try:
             exported = await run_in_threadpool(run_blocking)
+            model_info_done = context.get("model_info") or {}
             self.db.mark_completed(
                 task_id=task_id,
                 summary=exported["summary"],
                 files=exported["files"],
                 result_path=exported["result_path"],
-                model_version="V4.2",
+                model_version=str(model_info_done.get("version") or "Stage 1.2"),
                 device_used=context["resolved_device"],
             )
             await broadcaster.broadcast(

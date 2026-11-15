@@ -64,7 +64,7 @@ const runningAheadTask = computed(() => {
       </div>
 
       <p class="queue-tip">
-        Student V4.2 引擎采用单任务严格串行调度以保障物理显存安全与识别稳定性。前序扫描任务完成后，系统将自动启动本任务。
+        扫描引擎采用单任务严格串行调度以保障物理显存安全与识别稳定性。前序扫描任务完成后，系统将自动启动本任务。
       </p>
 
       <div class="task-details-grid">

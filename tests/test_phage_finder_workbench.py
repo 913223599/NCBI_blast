@@ -697,4 +697,361 @@ def test_manager_rapid_concurrent_submit_and_delete_queued(tmp_path: Path, monke
     asyncio.run(_scenario())
 
 
+def test_model_registry_exposes_stage1_2_plateau_and_func_metadata(tmp_path: Path):
+    models_root = tmp_path / "models"
+    v4_2_dir = models_root / "full_v4" / "student_v4_2"
+    _create_mock_v4_2_dir(v4_2_dir)
+    (v4_2_dir / "student_v4_meta.json").write_text(
+        json.dumps(
+            {
+                "params": 152947,
+                "feature_profile": "stage1",
+                "func_dim": 9,
+                "use_context_refiner": True,
+                "use_subbin_refiner": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (v4_2_dir / "student_v4_report.json").write_text(
+        json.dumps(
+            {
+                "decoder_tuned_on_val": {
+                    "seed_threshold": 0.95,
+                    "extend_threshold": 0.30,
+                    "sub_threshold": 0.35,
+                    "plateau_min_windows": 4,
+                    "plateau_second_threshold": 0.90,
+                    "refine_pad_bp": 3000,
+                    "smooth_profile": False,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    found = discover_available_models(project_root=tmp_path)
+    assert len(found) == 1
+    info = found[0]
+    assert "Stage 1.2" in info["label"]
+    assert info["feature_profile"] == "stage1"
+    assert info["func_dim"] == 9
+    dec = info["decoder_defaults"]
+    assert dec["plateau_min_windows"] == 4
+    assert dec["plateau_second_threshold"] == 0.90
+    assert dec["refine_pad_bp"] == 3000
+    assert dec["smooth_profile"] is False
+
+
+def test_scanner_from_model_dir_propagates_and_overrides_plateau(tmp_path: Path, monkeypatch):
+    from src.phage_discovery.inference.scanner import GenomeScanner
+
+    model_dir = tmp_path / "stage1_2_mock"
+    _create_mock_v4_2_dir(model_dir)
+    (model_dir / "student_v4_report.json").write_text(
+        json.dumps(
+            {
+                "decoder_tuned_on_val": {
+                    "seed_threshold": 0.95,
+                    "extend_threshold": 0.30,
+                    "sub_threshold": 0.35,
+                    "plateau_min_windows": 4,
+                    "plateau_second_threshold": 0.90,
+                    "refine_pad_bp": 3000,
+                    "smooth_profile": False,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    captured_kwargs = []
+
+    def _fake_init(self, **kwargs):
+        captured_kwargs.append(kwargs)
+
+    monkeypatch.setattr(GenomeScanner, "__init__", _fake_init)
+
+    GenomeScanner.from_model_dir(model_dir)
+    assert captured_kwargs[-1]["plateau_min_windows"] == 4
+    assert captured_kwargs[-1]["plateau_second_threshold"] == 0.90
+    assert captured_kwargs[-1]["refine_pad_bp"] == 3000
+    assert captured_kwargs[-1]["smooth_sub_profile"] is False
+
+    GenomeScanner.from_model_dir(model_dir, plateau_min_windows=2, plateau_second_threshold=0.88)
+    assert captured_kwargs[-1]["plateau_min_windows"] == 2
+    assert captured_kwargs[-1]["plateau_second_threshold"] == 0.88
+
+    GenomeScanner.from_model_dir(model_dir, plateau_min_windows=0, plateau_second_threshold=None)
+    assert captured_kwargs[-1]["plateau_min_windows"] == 0
+    assert captured_kwargs[-1]["plateau_second_threshold"] is None
+
+
+def test_manager_execute_forwards_plateau_and_functional_partitions(tmp_path: Path, monkeypatch):
+    import asyncio
+    from src.analysis.phage_finder.types import PhageScanRunRequest
+
+    model_dir = tmp_path / "models" / "full_v4" / "student_v4_2"
+    _create_mock_v4_2_dir(model_dir)
+    (model_dir / "student_v4_meta.json").write_text(
+        json.dumps(
+            {
+                "params": 152947,
+                "feature_profile": "stage1",
+                "func_dim": 9,
+                "use_context_refiner": True,
+                "use_subbin_refiner": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (model_dir / "student_v4_report.json").write_text(
+        json.dumps(
+            {
+                "decoder_tuned_on_val": {
+                    "seed_threshold": 0.95,
+                    "extend_threshold": 0.30,
+                    "sub_threshold": 0.35,
+                    "plateau_min_windows": 4,
+                    "plateau_second_threshold": 0.90,
+                    "refine_pad_bp": 3000,
+                    "smooth_profile": False,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    from_dir_calls = []
+    scan_seq_calls = []
+
+    class _SpyScanner:
+        @classmethod
+        def from_model_dir(cls, model_path, **kwargs):
+            from_dir_calls.append(kwargs)
+            return cls()
+
+        def scan_sequences(self, contig_seqs: Dict[str, str], **kwargs) -> ScanResult:
+            scan_seq_calls.append(kwargs)
+            return ScanResult(
+                contigs_bp={k: len(v) for k, v in contig_seqs.items()},
+                total_bp=sum(len(v) for v in contig_seqs.values()),
+                total_windows=2,
+                raw_regions=[],
+                verified_regions=[],
+                gate_details=[],
+                timings_sec={"total_sec": 0.01},
+            )
+
+    monkeypatch.setattr("src.analysis.phage_finder.manager.GenomeScanner", _SpyScanner)
+    monkeypatch.setattr(
+        "src.analysis.phage_finder.manager.detect_compute_environment",
+        lambda: {"default_device": "cpu", "cuda_available": False, "cpu_count": 4, "safe_workers": 2},
+    )
+
+    fasta_path = tmp_path / "test.fasta"
+    fasta_path.write_text(f">ctg1\n{_synth_dna(8000)}\n", encoding="utf-8")
+
+    isolated_db = PhageDiscoveryDB(db_path=tmp_path / "db" / "spy_phage_discovery.db")
+
+    async def _run_case(req_overrides: Dict[str, object]) -> None:
+        mgr = PhageDiscoveryManager(project_root=tmp_path)
+        mgr.db = isolated_db
+        mgr.queue = PhageDiscoveryQueue(max_workers=1, db=isolated_db)
+        model_info = resolve_model_dir(project_root=tmp_path)
+        task_id = f"spy_{len(from_dir_calls)}"
+        task_dir = tmp_path / "results" / "phage_discovery" / task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        mgr.db.create_task(
+            task_id=task_id,
+            task_name="Spy",
+            model_id=str(model_info["model_id"]),
+            model_version="V4.2",
+            device="cpu",
+            apply_protein_gate=False,
+            status="queued",
+        )
+        req = PhageScanRunRequest(
+            task_name="Spy",
+            fasta_path=str(fasta_path),
+            device="cpu",
+            apply_protein_gate=False,
+            **req_overrides,
+        )
+        ctx = {
+            "task_dir": str(task_dir),
+            "staged_fasta_path": str(fasta_path),
+            "model_info": model_info,
+            "resolved_device": "cpu",
+            "workers": 1,
+            "gate_resources": {},
+            "device_fallback": False,
+        }
+        await mgr.execute_pipeline_task(task_id, req, ctx)
+
+    asyncio.run(_run_case({}))
+    assert from_dir_calls[-1]["plateau_min_windows"] == 4
+    assert from_dir_calls[-1]["plateau_second_threshold"] == 0.90
+    assert scan_seq_calls[-1]["collect_functional_partitions"] is True
+
+    asyncio.run(_run_case({"plateau_min_windows": 0}))
+    assert from_dir_calls[-1]["plateau_min_windows"] == 0
+    assert from_dir_calls[-1]["plateau_second_threshold"] is None
+
+
+def test_exporter_attaches_optional_functional_modules(tmp_path: Path):
+    seq1 = _synth_dna(18000, "ATGAAATTGCATGGCTAGCTAGCTAGCTAG")
+    reg = PredictedRegion("chr_func", 4000, 12000, 0.96, 0.89, 4)
+    scan_res = ScanResult(
+        contigs_bp={"chr_func": 18000},
+        total_bp=18000,
+        total_windows=7,
+        raw_regions=[reg],
+        verified_regions=[reg],
+        gate_details=[],
+        timings_sec={"total_sec": 0.1},
+        region_functional_modules={
+            "chr_func:4000-12000": {
+                "module_scores": {"head_packaging": 0.82, "tail": 0.78},
+                "active_modules": ["head_packaging", "tail"],
+                "orf_module_counts": {"head_packaging": 2, "tail": 3},
+                "has_structural_core": True,
+                "has_lysis_module": False,
+                "structural_completeness_hint": "complete_structural_core",
+                "lifestyle_hint": "lytic_or_cryptic",
+                "mge_contamination_score": 0.02,
+                "orf_count": 8,
+                "orfs": [{"start_bp": 4100, "end_bp": 4700}],
+            }
+        },
+    )
+    out_dir = tmp_path / "out_func"
+    exported = export_scan_artifacts(
+        task_id="func_export_01",
+        task_name="FuncExport",
+        model_info={"model_id": "student_v4_2", "version": "V4.2", "label": "Stage 1.2"},
+        device_used="cpu",
+        apply_protein_gate=False,
+        sequences={"chr_func": seq1},
+        scan_result=scan_res,
+        out_dir=out_dir,
+        flank_bp=2000,
+        project_root=tmp_path,
+    )
+    reg_out = exported["payload"]["regions"][0]
+    assert "functional_modules" in reg_out
+    assert reg_out["functional_modules"]["structural_completeness_hint"] == "complete_structural_core"
+    assert reg_out["functional_modules"]["active_modules"] == ["head_packaging", "tail"]
+
+
+def test_protein_gate_prefers_phage_refseq_over_generic_swissprot(tmp_path: Path, monkeypatch):
+    from src.analysis.phage_finder.model_registry import resolve_protein_gate_resources
+
+    ws_root = tmp_path / "workspace"
+    swiss_dir = ws_root / "database" / "swissprot"
+    swiss_dir.mkdir(parents=True, exist_ok=True)
+    (swiss_dir / "swissprot.pin").write_bytes(b"mock_swissprot")
+
+    sibling_db_dir = tmp_path / "Phage data" / "blastdb"
+    sibling_db_dir.mkdir(parents=True, exist_ok=True)
+    (sibling_db_dir / "phage_refseq_prot.pin").write_bytes(b"mock_phage_db")
+
+    monkeypatch.delenv("PHAGE_DISCOVERY_BLAST_DB", raising=False)
+    monkeypatch.setattr("src.analysis.phage_finder.model_registry._get_phage_config", lambda: {})
+    monkeypatch.setattr("src.workbench.models.tool_config.ToolConfig.resolve_bio_tool", lambda name: "blastp")
+
+    res = resolve_protein_gate_resources(project_root=ws_root)
+    assert res["ready"] is True
+    assert Path(res["blast_db"]).name == "phage_refseq_prot"
+
+
+def test_model_registry_and_scanner_prefer_stage1_2_directory_and_filenames(tmp_path: Path, monkeypatch):
+    from src.phage_discovery.inference.scanner import GenomeScanner
+
+    ws_root = tmp_path / "workspace"
+    models_root = ws_root / "models" / "full_v4"
+    _create_mock_v4_2_dir(models_root / "student_v4_2")
+
+    s12_dir = models_root / "stage1_2"
+    s12_dir.mkdir(parents=True, exist_ok=True)
+    (s12_dir / "stage1_2.pt").write_bytes(b"mock_stage1_2_weights")
+    (s12_dir / "context_refiner.pt").write_bytes(b"mock_ctx")
+    (s12_dir / "subbin_refiner.pt").write_bytes(b"mock_subbin")
+    (s12_dir / "stage1_2_meta.json").write_text(
+        json.dumps(
+            {
+                "params": 3715879,
+                "feature_profile": "stage1",
+                "func_dim": 9,
+                "use_context_refiner": True,
+                "use_subbin_refiner": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (s12_dir / "stage1_2_report.json").write_text(
+        json.dumps(
+            {
+                "decoder_tuned_on_val": {
+                    "seed_threshold": 0.95,
+                    "extend_threshold": 0.30,
+                    "sub_threshold": 0.35,
+                    "plateau_min_windows": 4,
+                    "plateau_second_threshold": 0.90,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("PHAGE_DISCOVERY_MODEL_DIR", raising=False)
+    monkeypatch.delenv("PHAGE_DISCOVERY_MODELS_ROOT", raising=False)
+    monkeypatch.setattr("src.analysis.phage_finder.model_registry._get_phage_config", lambda: {})
+
+    found = discover_available_models(project_root=ws_root)
+    assert len(found) == 2
+    assert found[0]["model_id"] == "stage1_2"
+    assert Path(found[0]["path"]).resolve() == s12_dir.resolve()
+    assert Path(found[0]["weights_file"]).name == "stage1_2.pt"
+    assert "Stage 1.2" in found[0]["label"]
+    assert found[0]["version"] == "Stage 1.2"
+    assert found[0]["decoder_defaults"]["plateau_min_windows"] == 4
+
+    import asyncio
+    from src.analysis.phage_finder.types import PhageScanRunRequest
+
+    mgr = PhageDiscoveryManager(project_root=ws_root)
+
+    async def _noop_enqueue(task_id: str, req, ctx):
+        return {"queue_position": 1, "is_busy": False, "running_count": 0, "queued_count": 1}
+
+    monkeypatch.setattr(mgr.queue, "enqueue", _noop_enqueue)
+    sub_res = asyncio.run(
+        mgr.submit_task(PhageScanRunRequest(task_name="s12_run_check", fasta_content=">c1\n" + ("ATGC" * 100)))
+    )
+    row = mgr.db.get_task(sub_res["task_id"])
+    assert row is not None
+    assert row["model_version"] == "Stage 1.2"
+
+    captured: Dict[str, object] = {}
+
+    def _fake_init(self, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(GenomeScanner, "__init__", _fake_init)
+    GenomeScanner.from_model_dir(s12_dir)
+    assert Path(str(captured["model_pt_path"])).name == "stage1_2.pt"
+    assert Path(str(captured["meta_path"])).name == "stage1_2_meta.json"
+    assert captured["plateau_min_windows"] == 4
+    assert captured["plateau_second_threshold"] == 0.90
+
+
+
 

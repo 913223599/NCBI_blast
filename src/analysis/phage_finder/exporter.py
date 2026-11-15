@@ -729,7 +729,10 @@ def export_scan_artifacts(
                 f"{region.contig_id}\tPyrodigal\tCDS\t{gs}\t{ge}\t.\t{strand_ch}\t0\tID={orf_id};Parent={region_id};aa_len={orf['length_aa']}"
             )
 
-        region_records.append({
+        func_modules_map = getattr(scan_result, "region_functional_modules", None) or {}
+        func_mod = func_modules_map.get(profile_key)
+
+        region_record: Dict[str, Any] = {
             "index": idx,
             "region_id": region_id,
             "contig_id": region.contig_id,
@@ -754,7 +757,12 @@ def export_scan_artifacts(
             "matched_titles": matched_titles,
             "profile": profile_bins,
             "gbk_file": _normalize_storage_path(str(flanked_gbk_path), project_root),
-        })
+        }
+        if isinstance(func_mod, dict) and func_mod:
+            region_record["functional_modules"] = {
+                k: v for k, v in func_mod.items() if k != "orfs"
+            }
+        region_records.append(region_record)
 
     # 也记录被 ProteinGate 淘汰的候选供专业复核参考（不纳入正式交付，但在详情中可查）
     rejected_candidates: List[Dict[str, Any]] = []

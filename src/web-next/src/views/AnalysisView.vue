@@ -37,7 +37,7 @@ const tools = ref<AnalysisTool[]>([
   { 
     id: 'phage_discovery', 
     title: '前噬菌体与噬菌体智能发现', 
-    description: '基于 Student V4.2 与 200bp SubBinRefiner 边界精修模型，从宿主全基因组或拼接 Contigs 中精准分割前噬菌体区域，支持可选蛋白门控验证与联动注释。', 
+    description: '基于 Stage 1.2 与 200bp SubBinRefiner 边界精修模型，从宿主全基因组或拼接 Contigs 中精准分割前噬菌体区域，支持可选蛋白门控验证与联动注释。', 
     iconType: 'phage',
     status: 'ready'
   },
@@ -90,7 +90,7 @@ function handleOpenAnnotationFromPhage(payload: { fastaText: string; taskName: s
     <header class="analysis-header">
       <div class="header-content">
         <h1>组装分析工作台</h1>
-        <p>基因组功能注释与比较基因组学分析工作台，支持结构与功能注释、V4.2 前噬菌体边界发现、多样本泛基因组分析、Sanger 测序突变解析及序列图谱可视化。</p>
+        <p>基因组功能注释与比较基因组学分析工作台，支持结构与功能注释、前噬菌体边界发现、多样本泛基因组分析、Sanger 测序突变解析及序列图谱可视化。</p>
       </div>
       <div class="header-stats" v-if="!activeTool">
          <div class="stat-badge">

@@ -94,7 +94,11 @@ function formatBp(bp?: number): string {
       <div class="results-topbar">
         <div class="top-title">
           <h3>{{ task.task_name }}</h3>
-          <span class="ver-badge">Student V4.2</span>
+          <span class="ver-badge">{{
+            String(summary.model_label || '').includes('Stage 1.2') || task.model_id === 'stage1_2'
+              ? 'Stage 1.2'
+              : (summary.model_version || 'Stage 1.2')
+          }}</span>
           <span class="dev-badge">{{ String(summary.device_used || task.device || 'cpu').toUpperCase() }}</span>
           <span v-if="summary.apply_protein_gate" class="gate-badge">BLASTp 门控验证</span>
         </div>
@@ -134,7 +138,7 @@ function formatBp(bp?: number): string {
           <div class="kpi-sub">{{ summary.contig_count ?? contigs.length }} 条 Contig ({{ summary.total_windows ?? 0 }} 窗口)</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">V4.2 总推理耗时</div>
+          <div class="kpi-label">模型总推理耗时</div>
           <div class="kpi-value">{{ (summary.timings_sec?.total_sec ?? 0).toFixed(2) }} s</div>
           <div class="kpi-sub">200bp SubBin 精细分割已启用</div>
         </div>

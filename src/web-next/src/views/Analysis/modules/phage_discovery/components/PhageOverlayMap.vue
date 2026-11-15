@@ -840,7 +840,7 @@ function onMinimapClick(e: MouseEvent): void {
         </label>
         <label class="layer-chip" :class="{ on: showScoreCurve }">
           <input v-model="showScoreCurve" type="checkbox" />
-          <span>V4.2 概率曲线</span>
+          <span>模型概率曲线</span>
         </label>
         <label class="layer-chip" :class="{ on: showGcTrack }">
           <input v-model="showGcTrack" type="checkbox" />
@@ -906,7 +906,7 @@ function onMinimapClick(e: MouseEvent): void {
     </div>
 
     <!-- 主 SVG 交互绘布 -->
-    <div v-if="isLoading" class="overlay-loading">正在组装全序列底图与 V4.2 预测叠图轨道...</div>
+    <div v-if="isLoading" class="overlay-loading">正在组装全序列底图与预测叠图轨道...</div>
 
     <div
       v-else-if="overlayData"
@@ -942,7 +942,7 @@ function onMinimapClick(e: MouseEvent): void {
         <text x="6" y="34" class="track-label">坐标轴</text>
         <text x="6" y="90" class="track-label">+ 链特征</text>
         <text x="6" y="122" class="track-label">- 链特征</text>
-        <text x="6" y="194" class="track-label">V4.2 分数</text>
+        <text x="6" y="194" class="track-label">预测分数</text>
         <text x="6" y="274" class="track-label">GC% 偏移</text>
         <text x="6" y="328" class="track-label">GC Skew</text>
 

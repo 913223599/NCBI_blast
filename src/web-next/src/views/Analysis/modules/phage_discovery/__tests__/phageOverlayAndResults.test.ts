@@ -1,6 +1,17 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('../../../../../bridge/electron-bridge', () => ({
+  getBridge: () => ({
+    get_assembly_history: vi.fn().mockResolvedValue([]),
+    request_directory_select: vi.fn().mockResolvedValue(null),
+    request_file_load: vi.fn().mockResolvedValue(null),
+  }),
+}))
+
+import PhageDiscoveryHistory from '../components/PhageDiscoveryHistory.vue'
 import PhageDiscoveryResults from '../components/PhageDiscoveryResults.vue'
+import PhageDiscoverySetup from '../components/PhageDiscoverySetup.vue'
 import PhageOverlayMap from '../components/PhageOverlayMap.vue'
 import type {
   PhageContigOverlayData,
@@ -337,5 +348,96 @@ describe('PhageDiscoveryResults 与 PhageOverlayMap 回归测试', () => {
     expect(legendWithoutMarkers).not.toContain('整合酶 / 转座酶')
     expect(legendWithoutMarkers).not.toContain('tRNA / rRNA')
   })
+
+  it('根据模型元数据正确显示 Stage 1.2 名称而非固定写死 V4.2', () => {
+    const setupWrapper = mount(PhageDiscoverySetup, {
+      props: {
+        capabilities: {
+          models: [
+            {
+              model_id: 'student_v4_2',
+              label: 'Stage 1.2 边界精修模型',
+              version: 'V4.2',
+              priority: 1,
+              path: 'models/student_v4_2',
+              weights_file: 'models/student_v4_2/student_v4.pt',
+              params: 3715879,
+              feature_profile: 'stage1',
+              func_dim: 9,
+              has_context_refiner: true,
+              has_subbin_refiner: true,
+              decoder_defaults: {
+                seed_threshold: 0.95,
+                extend_threshold: 0.3,
+                sub_threshold: 0.35,
+                merge_gap_bp: 3000,
+                min_region_bp: 3000,
+              },
+              recommended: true,
+            },
+          ],
+          compute: {
+            cpu_cores: 16,
+            safe_workers: 14,
+            cuda_available: true,
+            gpu_name: 'RTX 4070',
+            gpu_vram_gb: 12,
+            default_device: 'cuda',
+          },
+          protein_gate: { ready: true, blastp_bin: 'blastp', blast_db: 'phage_refseq_prot' },
+          has_model: true,
+        },
+        isCapabilitiesLoading: false,
+        isInspecting: false,
+        isSubmitting: false,
+        isQueueBusy: false,
+        inspectedContigs: [],
+        inspectTotalBp: 0,
+      },
+    })
+    expect(setupWrapper.find('.version-pill').text()).toBe('Stage 1.2')
+    expect(setupWrapper.text()).toContain('Stage 1.2 边界精修模型')
+    expect(setupWrapper.text()).not.toContain('启动 V4.2')
+    const taskNameInput = setupWrapper.find('input[placeholder="输入样本或菌株标识"]')
+    expect((taskNameInput.element as HTMLInputElement).value).toBe('PhageDiscovery_Stage1_2')
+    expect(setupWrapper.html()).not.toContain('PhageDiscovery_V42')
+    expect(setupWrapper.html()).not.toContain('自定义 V4.2 模型目录')
+    expect(setupWrapper.html()).not.toContain('纯 V4.2 神经引擎')
+    expect(setupWrapper.html()).not.toContain('恢复 V4.2 默认')
+
+    const { task, result } = createTaskAndResult()
+    task.summary = { model_label: 'Stage 1.2 边界精修模型' }
+    result.summary.model_label = 'Stage 1.2 边界精修模型'
+
+    const historyWrapper = mount(PhageDiscoveryHistory, {
+      props: { tasks: [task] },
+    })
+    expect(historyWrapper.find('.tag-badge.version').text()).toBe('Stage 1.2')
+
+    const runningTask = {
+      ...task,
+      status: 'running' as const,
+      model_id: 'stage1_2',
+      model_version: 'V4.2',
+      summary: {},
+    }
+    const runningHistoryWrapper = mount(PhageDiscoveryHistory, {
+      props: { tasks: [runningTask] },
+    })
+    expect(runningHistoryWrapper.find('.tag-badge.version').text()).toBe('Stage 1.2')
+
+    const resultsWrapper = mount(PhageDiscoveryResults, {
+      props: {
+        task,
+        result,
+        isLoading: false,
+        overlayData: null,
+        isOverlayLoading: false,
+      },
+    })
+    expect(resultsWrapper.find('.ver-badge').text()).toBe('Stage 1.2')
+    expect(resultsWrapper.text()).not.toContain('V4.2 总推理耗时')
+  })
 })
+
 

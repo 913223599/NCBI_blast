@@ -128,7 +128,7 @@ class PhageDiscoveryQueue:
         item: Dict[str, Any] = {
             "task_id": task_id,
             "task_name": meta.get("task_name") or task_id,
-            "model_version": meta.get("model_version") or "V4.2",
+            "model_version": meta.get("model_version") or "Stage 1.2",
             "device": meta.get("device") or "cpu",
             "apply_protein_gate": bool(meta.get("apply_protein_gate", False)),
             "status": meta.get("status") or ("queued" if position is not None else "running"),

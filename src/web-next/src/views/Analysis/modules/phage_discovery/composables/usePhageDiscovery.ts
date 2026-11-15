@@ -261,7 +261,7 @@ export function usePhageDiscovery() {
           form.selected_contigs.length > 0 && form.selected_contigs.length < inspectedContigs.value.length
             ? form.selected_contigs
             : null,
-        model_id: 'student_v4_2',
+        model_id: capabilities.value?.models?.[0]?.model_id || 'stage1_2',
         custom_model_dir: form.custom_model_dir.trim() || null,
         device: form.device,
         workers: form.workers > 0 ? form.workers : null,
@@ -278,17 +278,18 @@ export function usePhageDiscovery() {
       if (taskId) {
         const queuePos = Number(res?.queue_position || 1)
         const busy = Boolean(res?.is_busy || isQueueBusy.value || queuePos > 1)
+        const activeModel = capabilities.value?.models?.[0]
         const placeholder: PhageTaskRecord = {
           task_id: taskId,
           task_name: payload.task_name,
-          model_id: res?.model?.model_id || 'student_v4_2',
-          model_version: 'V4.2',
+          model_id: res?.model?.model_id || activeModel?.model_id || 'stage1_2',
+          model_version: res?.model?.version || activeModel?.version || 'Stage 1.2',
           device: res?.device || form.device,
           apply_protein_gate: form.apply_protein_gate,
           status: 'queued',
           progress: 0,
           queue_position: queuePos,
-          current_step: busy ? `排队等待中 (#${queuePos})` : '已加入 V4.2 调度队列...',
+          current_step: busy ? `排队等待中 (#${queuePos})` : '已加入扫描调度队列...',
           created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
           updated_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
           summary: {},
