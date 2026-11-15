@@ -584,3 +584,196 @@ Pop-Location
    - **视图列表、计数与详情纯化 (`src/web-next/src/views/Analysis/modules/viewer/GenomeViewerModule.vue`)**：将 `filteredFeatures`、`categoryCounts`、侧边栏与中心特征数统一基于 `baseTrackFeatures`（剔除 `prophage_region`）；高亮选中 `prophage_region` 时取消单链错位高亮并联动高亮其区间内基因；悬浮提示与详情抽屉针对 `prophage_region` 隐去误导性的 `蛋白规模 (aa/kDa)` 与 `复制蛋白翻译序列` 按钮。
 3. **涉及模块回归验证**
    - 遵循规则 6 先编写后端 `test_exporter_full_length_region_omits_spanning_feature` 与前端 [phageViewerOverlay.test.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/viewer/__tests__/phageViewerOverlay.test.ts)（先复现失败后修补转绿），随后仅测试涉及模块并跳过无关全量回归。
+
+---
+
+## 23. 阶段 1 模型优化消融评测（ORF 丰富编码 + 二三肽特征 + PHROGs MMseqs 语义）
+
+1. **模块化特征架构与零覆盖隔离设计**
+   - **Window 与 ORF 解耦设计（先消融后落盘）**：早期 `599d` 全量特征对照证实，直接将 `343d` 约化三肽拼接进窗口级表格向量会在 XGBoost 中引入稀疏过拟合（`test_windows Rec@0.5%` 由 `0.8315` 降至 `0.7645`）。据此将结构收敛为：**窗口级采用紧凑 `256d`**（原 `185d` + `49d` `7×7` 约化二肽 + `12d` Pyrodigal 质量统计 + `10d` 生物物理/6-frame 兜底），而将 `27d` (`3×3×3`) 约化三肽与 Pyrodigal 编码细节收敛至**逐 ORF Token（`117d` = 原 `30d` + `87d`）** 专供 `ORFTransformer` 与 `OrfStream`；当短片段未检出完整 Pyrodigal 基因时启用向量化 6-frame 最长可读框兜底（`is_fallback_6frame` 标记位）。
+   - **源码落地与向后兼容**：新增 [peptide_features.py](file:///f:/NCBI%20blast/src/phage_discovery/features/peptide_features.py) 与 [phrog_teacher.py](file:///f:/NCBI%20blast/src/phage_discovery/data/phrog_teacher.py)，扩展 [window_features.py](file:///f:/NCBI%20blast/src/phage_discovery/features/window_features.py)、[expert_c_orf.py](file:///f:/NCBI%20blast/src/phage_discovery/experts/expert_c_orf.py)、[expert_a_xgb.py](file:///f:/NCBI%20blast/src/phage_discovery/experts/expert_a_xgb.py)、[distilled_student_v4.py](file:///f:/NCBI%20blast/src/phage_discovery/student/distilled_student_v4.py) 与 [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py)，通过 `feature_profile` / `orf_feat_dim` 元数据持久化实现 `V4.2`（`185d / 30d`）与 `Stage 1`（`256d / 117d`）完全无缝隔离与自动识别。
+   - **PHROGs MMseqs2 语义补全**：基于 `database/pharokka_db/phrogs_profile_db` 对 8 个训练分片（`111,866` 窗）增量搜索（剔除 `unknown function`），累计在不更改 `clean_labels` 的前提下在各分片新增回填高特异噬菌体特征标志窗（`windows: 559`、`chimeras: 273`、`mined: 64`、`hard_v4: 56`、`ext_rare: 44`、`ext_windows: 31`、`ext_mined: 27`、`hard_neg: 5`）。
+
+2. **Teacher 与 Student 隔离训练数据（`F:\Phage data\models\full_v4\stage1_ablation\`）**
+   - **`Expert A`（`185d -> 256d`）**：`v1 test` 总体 `AUPRC 0.9911 -> 0.9915`、`<=1kb Rec@0.5% 0.4970 -> 0.5396`、嵌合 `F1 0.9615 -> 0.9677`（`negFP/Mb = 0.6085` 不变）；增益榜前 15 中 Pyrodigal 与 7×7 二肽特征稳定上榜（`pyro_overlap_gene_frac`、`dp7_11`、`pyro_mean_score`、`pyro_mean_cscore`、`pyro_min_cscore`）。
+   - **`Expert C`（`30d -> 117d`）**：纯 ORF 神经网络全尺度跃升，`win AUPRC 0.9557 -> 0.9661`、`win Rec@0.5% 0.3345 -> 0.4950`、`<=1kb AUPRC 0.7735 -> 0.8241`、`<=1kb Rec@0.5% 0.0000 -> 0.1128`、嵌合 `F1 0.8427 -> 0.8571`（伴随 `negFP/Mb 0.3043 -> 0.9128`）。
+   - **`Student V4.2 Stage 1`**：参数仅微增 **`+0.81%`**（`3,639,114 -> 3,668,426`），Epoch 16 达到 **`best_val_auprc = 0.99622`**（对比 `V4.2`: `0.99589`、`Ensemble Stage1`: `0.99586`），`val` 自动校准最优解码达成 `F1 = 0.9934, MAE = 413.8 bp, FP/Mb = 0.0`（`seed=0.95, extend=0.30, sub=0.45, plateau=4/0.90`）。
+
+3. **`Student V4.2` vs `Student V4.2 Stage 1` 同台冷评测（收益与损失审计）**
+   - **明确收益**：
+     1. **嵌合体边界精度大幅跃升**：`v1 test` 全局断点 **`MAE 702.0 -> 426.0 bp`（`-39.3%`）**、**`MedAE 378.0 -> 250.0 bp`（`-33.9%`）**、`mean_iou 0.9688 -> 0.9807`，最困难的 `degraded_fragment MAE` 由 `865.3` 锐降至 **`347.0 bp`（`-59.9%`）**，达成 **`75/75 (100%)`** 满足 `strict_iou_0_8`（`sF1: 0.9737 -> 0.9740`）。
+     2. **窗口整体排序与常规阈值更优**：`win AUPRC 0.9898 -> 0.9901`、`AUROC 0.9895 -> 0.9901`、`F1@0.5 0.9457 -> 0.9507`、`<=1kb AUPRC 0.9536 -> 0.9577`（`<=1kb F1@0.5 0.8778 -> 0.8956`，`FPR@95%TPR 0.3010 -> 0.2265`）、`>3kb Rec@0.5%FPR 0.8675 -> 0.9057`；非噬菌体病毒与质粒假阳性明显下降（`0.0817 -> 0.0392` 与 `0.0946 -> 0.0743`）。
+     3. **真实基因组边界微改善**：`NC_003888.3` 链霉菌维持 **`0` 误报**，`NC_000913.3` K-12 维持 **`4/4`**，`NC_003197.2` LT2 4/4 且 CheckV 对齐提升（`mean_IoU 0.9001 -> 0.9060`、`MAE 2231.8 -> 2107.2 bp`，修复第 3 段尾部截断 `IoU 0.7108 -> 0.7621`），`NC_007795.1` 金葡菌维持 **`3/3` 零转座酶误报**且 `phi13` CheckV IoU 由 `0.8886` 升至 **`0.9451`**（`MAE 2562 -> 1262 bp`）。
+   - **明确损失与开销**：
+     1. **嵌合体新增 2 处 `6.8 kb` 假阳性区段**：`v1 test` 嵌合体 `TP/FP/FN` 由 `75/2/0` 变为 `75/4/0`（主 `F1 0.9868 -> 0.9740`，`overall FP/Mb 0.0959 -> 0.1917`；`pure_negative_fp_per_mb` 仍保持 `0.3043` 不变）。新增 2 处为 `test_CHIM_0026: 85400..92200` 与 `test_CHIM_0039: 35600..42400`，均为 `6.8 kb` 短高置信峰且均未遭蛋白门控拒杀。
+     2. **窗口极端低假阳端 (`Rec@0.5%FPR`) 回撤**：整体 `0.7470 -> 0.6605`、`1_3kb AUPRC 0.9834 -> 0.9750`。审计定位为 `test_windows` 中 `8` 个重复/相似的 `1,738 bp` 细菌负样本片段在 Stage 1 被抬高至 `0.981~0.983` 集体占据前 8 名高分负例，从而推高了 `0.5%FPR` 截断门槛（`0.9687 -> 0.9755`）。
+     3. **罕见非有尾小基因组（<15 kb）召回小幅下降**：`Microviridae: 0.95 -> 0.85`、`Leviviricetes: 0.95 -> 0.90`、`Inoviridae: 1.0 -> 0.9688`（有尾主体 `Caudoviricetes` 升至 `0.9760`）。
+     4. **从头扫描端到端特征耗时微增**：模型 GPU 推理本身持平微快（`5Mb: 3.174s -> 2.943s`，显存 `+2.4 MB` 至 `516.9 MB`），但 FASTA 全特征提取耗时平均增加约 `5.5% ~ 17.8%`（单基因组多 `1.1s ~ 2.9s`）。
+
+4. **阶段性结论与后续建议**
+   - Stage 1 证明了 **逐 ORF 丰富编码 + 二三肽 + PHROGs 语义** 对 **200 bp 边界切割（特别是退化残缺片段）与全基因组真实边界对齐** 具有极大正向价值，但同时略微放大了对宿主内部 **6–8 kb 短片段局部信号的敏感度** 并略削弱超短微病毒（Microviridae/Leviviricetes）权重。建议先**保留现有 `student_v4_2` 生产权重不动**，后续若升版融合时重点配合：**仅正样本或分尺度路由过滤 6–8 kb 短嵌合伪峰**（或 `min_region_bp / plateau` 联调）以及针对非有尾短小病毒补强采样，避免直接替换引入 `v1 test` 主 F1 回退。
+
+---
+
+## 24. 阶段 1.2 精度纠偏、三源合一 9 维功能基因分区蒸馏与全量同台冷对比评测
+
+针对阶段 1（Stage 1）消融中暴露的三项回撤（嵌合体新增 2 处 6.8 kb 短伪峰、`v1 test` 窗口端 `Recall@0.5%FPR` 降至 `0.6605` 以及非有尾小基因组召回微降），同时为后续“原噬菌体完整度判定、生活方式推测与 MGE 污染过滤”建立逐 ORF 功能识别能力，**步骤 31（阶段 1.2）** 在完全隔离目录（`F:\Phage data\training\stage1_2_ablation\` 与 `F:\Phage data\models\full_v4\stage1_2_ablation\`，严禁覆写生产权重 `student_v4_2/`）完成端到端重构与冷评测：
+
+1. **零人工拍参的架构与多任务自校准（`src/phage_discovery/data/functional_partitions.py`, `src/phage_discovery/student/distilled_student_v4.py`）**
+   - **彻底移除手工分片加权**：`part_weights=None`，不再依赖人工调整分片倍率，避免顾此失彼。
+   - **Kendall 同方差多任务不确定性自动加权（`HomoscedasticMultiTaskLoss`）**：对 `Student V4` 6 个并行监督头（`win_bce`、`sub_bce`、`sem_distill`、`orf_phage_bce`、`win_func_bce`、`orf_func_bce`）引入可学习对数方差约束（`min_log_var=-3.0, max_log_var=3.0`）。Stage 1.2 收敛后学得的实际平衡权重为 `[1.2747, 20.0855, 8.6843, 4.7463, 2.1717, 1.0731]`。
+   - **双层客观 9 维功能基因分区定义（`FUNCTIONAL_PARTITION_NAMES`）**：
+     `head_packaging`, `connector`, `tail`, `lysis`, `integration_excision`, `dna_rna_replication`, `transcription_regulation`, `moron_amg_defense`, `transposon_plasmid_mge`；配合窗口级别与逐 ORF 级别双层监督头（`func_dim=9`）以及 `IoU>=0.8` 的 ORF 对齐掩码，对 `unknown function` 实施掩码豁免（不强压为负类）。
+
+2. **零泄露非有尾多尺度补强与三源合一客观数据清洗（Step A & Step B）**
+   - **非有尾小基因组多尺度零泄露补强 (`train_rare_multiscale`)**：从本地 303 株非有尾候选基因组中，经全基因组 `stride=1` 的 21-mer containment 审计（阈值 `0.25`）剔除 55 株与评估集存在 k-mer 重叠的基因组，保留 **248 株纯净非有尾基因组**，构建 `600 / 1000 / 1800 / 3000 bp` 多尺度均衡窗口正负样本共 **5,680 行**（正负各 2,840 行）。
+   - **三源合一 9 维功能注释真值**：解析 `4,631` 个非评估 `.gbk` CDS 注释并联合 `DIAMOND phage_refseq_prot` 与 `PHROGs + PHOLD MMseqs2` 对 `269,613` 条唯一蛋白序列进行客观三源证据对齐（`GBK=160,856`、`DIAMOND=144,061`、`PHROG/PHOLD=135,700`，含 `109,404` 条合并 PHROG+PHOLD 条目）。
+   - **9 分片缓存对齐与矛盾样本屏蔽**：全量 `117,546` 行样本（9 分片：`windows 36,000`、`chimeras 37,912`、`mined 12,595`、`hard_neg 5,142`、`ext_rare 2,310`、`ext_windows 1,710`、`ext_mined 14,533`、`hard_v4 1,664`、`rare_multiscale 5,680`）同步构建 `_functional.npz` 与 `_semantic.npz`，累计清洗/掩蔽 **458** 条矛盾负样本与潜在泄露样本，累计有效标注 `orf_phage_pos = 289,363`、`orf_func_known_valid = 464,500`。
+
+3. **Teacher OOF 与 Stage 1.2 Student 训练链路（Step C & Step D）**
+   - **Teacher 再训练与 5 折 GroupKFold OOF**：`Expert A (256d)`（`train_rows=115,827`, `best_iteration=1,648`, `train_sec=18.49s`, Val `val_f1=0.9554`, `val_strict_f1=0.9299`, `val_fp_per_mb=0.3334`, `val_breakpoint_mae_bp=1286.2`）与 `Expert C (117d)`（`params=565,762`, `best_epoch=17`, `best_val_auprc=0.9764`, `train_sec=184.64s`）联同冻结 Expert B 输出生成 `train_stage1_2_teacher_oof.npz`（`117,546` 行）。
+   - **Student V4.2 Stage 1.2 主体与双 Refiner**：`train_rows=117,144`, `params=3,715,879`（`func_dim=9`, `use_homoscedastic_loss=true`），峰值显存 `1,279.3 MB`（`train_sec=6,487.39s`, `best_epoch=24`, `best_val_auprc=0.99588`）；`sub_head_refinement`（`best_epoch=4`, `best_val_sub_bce=0.164185`, `sub_max_delta=0.9193`）；`RegionContextRefiner v2`（`tr_contigs=3,306`, `best_epoch=9`, `best_val_auprc=0.99808`, `best_val_bce=0.02536`）；`SubBinContextRefiner`（`tr_chunks=3,230`, `best_epoch=3`, `best_val_joint_bce=0.247988`）。验证集自动解码选参得到 `seed_threshold=0.95`, `extend_threshold=0.30`, `sub_threshold=0.35`, `plateau_min_windows=0`, `plateau_second_threshold=null`（Val `val_f1=0.9867`, `val_strict_f1=0.9867`, `val_fp_per_mb=0.0`, `val_breakpoint_mae_bp=312.3`）。
+
+4. **推理暴露接口升级与单窗极值抬升缺陷修复（`src/phage_discovery/inference/scanner.py`）**
+   - 在 `ScanResult` 中新增 `region_functional_modules`，输出逐预测区段的 `module_scores`、`active_modules`、`orf_module_counts`、`structural_completeness_hint`、`lifestyle_hint` 与 `mge_contamination_score`。
+   - 诊断并修复了 `_collect_region_functional_modules` 中早期 `max(mean_probs, 0.7 * max_probs)` 导致的单窗口极值抬升问题（先前单窗偶发峰值把无实际对应 ORF 的 `connector` 也拉高至 `~0.70`），切换为当存在预测 ORF 时按 `0.4 * mean_probs + 0.6 * orf_max_vec` 聚合（无 ORF 时退回 `mean_probs`），并写入 `tests/test_stage1_2_functional_partitions.py`（`test_collect_region_functional_modules_avoids_single_window_peak_inflation`）回归锁定。
+
+5. **全量同台冷对比评测（`V4.2` vs `Stage 1` vs `Stage 1.2`）**
+   - **A. `v1 test` 4,000 窗口基准对照**
+
+| 评测维度 | `V4.2`（生产基线） | `Stage 1`（阶段 1） | `Stage 1.2`（本阶段） | 关键变化解析 |
+| :--- | :---: | :---: | :---: | :--- |
+| **整体 AUROC / AUPRC** | `0.9895 / 0.9898` | `0.9901 / 0.9901` | **`0.9912 / 0.9905`** | 三代最高，排序区分度稳定抬升 |
+| **整体 Recall / FPR@0.5 / F1** | `0.9705 / 0.0820 / 0.9457` (`FN=59`) | `0.9740 / 0.0750 / 0.9507` (`FN=52`) | **`0.9780 / 0.0770 / 0.9518`** (`FN=44`) | **Stage 1 新增的 16 个 FN 回撤救回 14 个** |
+| **整体 `Rec@0.5%FPR` / `FPR@95%TPR`** | `0.7470 / 0.0555` | `0.6605 / 0.0470` | **`0.7750 / 0.0335`** | `Rec@0.5%FPR` **反超 V4.2 (+0.0280) 与 Stage 1 (+0.1145)** |
+| **`<=1000bp` Recall / F1 / AUPRC** | `0.8872 / 0.8398 / 0.9214` | `0.9024 / 0.8567 / 0.9013` | **`0.9177 / 0.8600 / 0.9269`** | 短窗全面超越前两代（`Rec@0.5%FPR` 由 `0.2012 -> 0.3628`） |
+| **`3000bp` Recall / `Rec@0.5%FPR` / `FPR@95%TPR`** | `0.9865 / 0.8451 / 0.02472` | `0.9899 / 0.8384 / 0.02921` | `0.9933 / 0.2862 / 0.01798` | 召回与 `FPR@95%TPR` 均最优；`Rec@0.5%FPR` 回撤系该分桶 (`neg_cnt=364` 仅容许 `1` 个 FP) 被 `1447bp`x3/`1738bp`x6 等高同源细菌片段集中在 `0.905~0.925` 卡线所致（较 Stage 1 的 `0.981~0.983` 实已显著压低） |
+| **`5000bp` Recall / F1 / `FPR@95%TPR`** | `0.9869 / 0.9735 / 0.01891` | `0.9876 / 0.9735 / 0.01234` | **`0.9891 / 0.9753 / 0.00987`** | 主尺度长窗 F1 与假阳抑制均最佳 |
+| **罕见非有尾类群召回 (`n=32/20/20/8`)** | `Ino 1.0000 / Levi 0.9500 / Micro 0.9500 / Tecti 1.0000` | `Ino 0.9688 / Levi 0.9000 / Micro 0.8500 / Tecti 1.0000` | **`全 4 类 1.0000`** | 非有尾小基因组召回回撤 **100% 消除** |
+
+   - **B. `v1 test` 嵌合体全基因组基准（75 真前噬菌体，共 `20.862 Mb`）**
+
+| 模型配置 | 主指标 `TP/FP/FN` (`IoU>=0.5`) | 主 `F1` | 严格 `F1` (`IoU>=0.8`) | 全图 `MAE / MedAE (bp)` | 退化片段 (`degraded_fragment`, n=18) `MAE / MedAE` | `FP/Mb` (总 / 纯负对照) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `V4.2`（`plateau=4, 0.90`） | `75 / 2 / 0` | `0.9868` | `0.9737` (`74/3/1`) | `702.0 / 378.0` | `865.2 / 381.0` | `0.0959 / 0.3043` |
+| `Stage 1`（`plateau=4, 0.90`） | `75 / 4 / 0` | `0.9740` | `0.9740` (`75/4/0`) | `426.0 / 250.0` | `347.0 / 227.0` | `0.1917 / 0.3043` |
+| `Stage 1.2 raw`（Val 选参 `plateau=0`） | `74 / 2 / 1` | `0.9801` | `0.9669` (`73/3/2`) | `437.1 / 180.0` | `253.6 / 156.0` | `0.0959 / 0.3043` |
+| `Stage 1.2 plateau_aligned`（`4, 0.90`） | `75 / 3 / 0` | `0.9804` | `0.9673` (`74/4/1`) | `435.9 / 186.0` | **`258.5 / 176.0` (`TP=18/18`)** | `0.1438 / 0.3043` |
+
+   - 根因审计说明：Stage 1 新增的 `test_CHIM_0026:85400-92200`（6.8 kb 伪峰）在 Stage 1.2 中无论是否启用 plateau 均已**彻底消除**；`Stage 1.2 raw` 的唯一漏报 `test_CHIM_0012 (26127..42591)` 最高峰已达 `0.9350`（仅低于单点种子阈值 `0.95`），启用 `plateau=(4, 0.90)` 即恢复 `TP=75/75, FN=0`，此时 `FP=3` 均为高密含噬菌体基因区（`test_CHIM_0033` 含 `17/19`、`test_CHIM_0039` 含 `6/6`、`test_PURE_NEG_0007` 含 `20/25` 噬菌体 ORF）。同时退化片段 `MedAE` 由 `381.0 bp (V4.2) -> 227.0 bp (Stage 1) -> 156.0~176.0 bp (Stage 1.2)` 进一步逼近 200 bp 极限分辨率。
+
+   - **C. `unseen_real_genomes` 4 株真实细菌基因组、CheckV 对齐与 9 维功能模块验证**
+     - `NC_003888.3`（链霉菌阴性对照）：`V4.2` / `Stage 1` / `Stage 1.2 (raw & plateau_aligned)` 全部保持 **`0` 假阳性**（总耗时 `34.487s` / `32.654s`）。
+     - `NC_000913.3`（*E. coli* K-12）：`stage1_2_raw` 因 `Val` 选参为 `plateau=0` 且 4 个隐蔽前噬菌体峰值落于 `0.9247~0.9495`（`DLP12=0.9416, e14=0.9495, Rac=0.9247, Qin=0.9355`）导致默认阈值 `count=0`；配合 `plateau=(4, 0.90)` 则**全部 `4/4` 检出**，且功能模块成功区分残缺隐蔽特征：`e14 (1199600..1212400)` 与 `Rac (1410600..1434800)` 正确标记为 **`cryptic_or_incomplete`**（`head_packaging`/`connector` ORF 计数均为 `0`），`DLP12 (565800..582400)` 敏锐捕捉到高 MGE 污染（`mge_contamination_score=0.6975`, `transposon_plasmid_mge` ORF 计数 `2`）。
+     - `NC_003197.2`（*S. enterica* LT2）：CheckV `3/3` 检出（`mean_iou=0.8892`, `mean_mae=2452.5 bp`，其中 `Gifsy-2 1097800..1144000` 达到 **`IoU=0.9901, MAE=229.5 bp`**；相较 `V4.2` CheckV `0.9001` 与 `Stage 1` CheckV `0.9060` 在第 3 段边界略收缩至 `33.8 kb`）。4 个主体区段全部正确判为 **`complete_structural_core`**（`head=4~8, connector=1~2, tail=14~17, lysis=4~5`）；`plateau_aligned` 额外检出的 `4419600..4438000` 则准确标记为 **`cryptic_or_incomplete`**（仅 `tail=13, lysis=2, moron=1`，无头部/连接颈/整合酶 ORF）。
+     - `NC_007795.1`（*S. aureus* NCTC8325）：CheckV **`3/3` 检出（`mean_iou=0.9247`, `mean_mae=1819.3 bp`）**（`V4.2` `0.9407`、`Stage 1` `0.9404`），无转座酶假阳性，且全部正确判为 `complete_structural_core`（`mge_contamination_score=0.0408~0.1455`）。
+
+6. **当前阶段遗留细节与下一步建议（保留 `student_v4_2` 生产权重暂不覆盖）**
+   - **遗留细节**：(1) Val 自动调参因 Val 嵌合体上无低于 `0.95` 的真值峰而选出 `plateau_min_windows=0`，令真实隐蔽原噬菌体（峰值 `0.925~0.949`）需依赖 `plateau=(4, 0.90)` 保底检出；(2) `K-12 DLP12` 因窗均值加权在 `orf_module_counts['head_packaging']=0` 情况下 `module_scores['head_packaging']=0.5473 >= 0.45`，仍被启发式划为 `complete_structural_core`（后续可要求结构核心激活在存在 ORF 时至少有 1 个同模块 ORF 确认）；(3) `3000bp` 分桶在超严截断 (`0.5% FPR`) 下仍受 `1447bp / 1738bp` 同源细菌片段群集中得 `0.905~0.925` 影响，CheckV 主体均值亦略低于 `Stage 1`（`0.8892 / 0.9247` vs `0.9060 / 0.9404`）。
+   - **决策建议**：继续**保留现有生产模型 `F:\Phage data\models\full_v4\student_v4_2\` 不动**；将 Stage 1.2 产物（`stage1_2_ablation/`）作为功能模块识别与零泄露多尺度优化验证版留档，后续（步骤 32 候选）再针对 Val 解码 plateau 搜索防退化约束、结构核心最少 ORF 确认门控及 `1447/1738bp` 同源负例细校准后推进融合上线。
+
+---
+
+## 25. 30 个零泄露独立 FASTA 横向对照（V4.2 vs Stage 1.2）与四组件正交校验
+
+为在训练与冻结基准集以外验证 **V4.2 生产模型** 与 **Stage 1.2 消融模型** 的真实泛化差异，**步骤 32** 通过临时评测脚本 [run_30fasta_benchmark.py](file:///C:/Users/Administrator/.gemini/antigravity/brain/a84b4add-178c-4aff-97a2-c2e69eae3a98/scratch/run_30fasta_benchmark.py)（固定随机种子 `seed=20261114`）从 `F:\Phage data` 冻结 `test` 分片与实验室真实纳米孔三代组装中抽取 **30 个零泄露 FASTA（总计 `39.614 Mb`）**，同台运行三路模型解码并引入四大正交/独立组件进行交叉仲裁，完整结果已落盘于 [random_30fasta_comparison_report.json](file:///F:/Phage%20data/models/full_v4/stage1_2_ablation/random_30fasta_eval/random_30fasta_comparison_report.json)：
+
+1. **零泄露随机抽样队列构成（`n = 30`, `39.614 Mb`）**
+   - **A 组（细菌全基因组 + 实验室真实组装，共 `10` 例，`38.734 Mb`）**：`v1 test` 独立细菌完整染色体 `9` 株（`NZ_AP045834.1` 弧菌、`NZ_CP019184.1` 沙门氏菌、`NZ_CP023147.1` 分枝杆菌、`NZ_CP061944.1` 假单胞菌、`NZ_CP097190.1` 克雷伯菌、`NZ_CP103399.1` 李斯特菌、`NZ_CP167021.1` 化脓性链球菌、`NZ_CP171830.1` 克雷伯菌、`NZ_CP199964.1` 鲍曼不动杆菌）+ 本项目真实三代 Flye 组装 `LAB_FLYE_ASM`（`147 contigs`, `970,217 bp`）。
+   - **B 组（阴性特异度对照，共 `10` 例，`0.461 Mb`）**：`v1 test` 细菌质粒 `7` 条（`4.2–133.8 kb`）+ 非噬菌体真核/古菌病毒 `3` 株（`NC_030884.1` SIRV3、`NC_076464.1` 植物双生病毒、`NC_010537.1` AFV9）。
+   - **C 组（独立真噬菌体阳性对照，共 `10` 例，`0.419 Mb`）**：`v1 test` 有尾噬菌体 `Caudoviricetes` `7` 株（`15.8–152.5 kb`）+ 非有尾小噬菌体 `3` 株（`Inoviridae` `NC_001331.1` 7,349 bp、`Microviridae` `NC_048874.1` 4,526 bp、`Leviviricetes` `NC_138365.1` 3,709 bp）。
+
+2. **四路正交校验体系与同台宏观对比汇总**
+   - 四路校验组件：`CheckV v1.0.3`（对全部 B/C、`LAB_FLYE_ASM` 整条序列以及全部 224 条/区段预测片段批量校验）+ `PhiSpy`（对 A 组 9 株完整 `.gbk` 独立预测）+ `ProteinGate`（RefSeq Phage BLASTp）+ `MMseqs2`（Pharokka `PHROGs` 库）。
+
+| 模型 / 解码策略 | 预测区段总数 (`raw`) | 正交仲裁确认真噬菌体 (`ortho_confirmed`) | 待核实/宿主岛 (`unconfirmed`) | A 组检出 (`raw / confirmed`) | B 组阴性误报 (`raw / Gate 放行`) | C 组真噬菌体检出 (含 3 非有尾) | 全队列扫描总耗时 (`s`) | 纯神经+特征耗时 (`不含 BLASTp`) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`V4.2` 生产基线** (`plateau=4, 0.90`) | `35` | `32`（注：含 1 例质粒因 PHROG 非结构>=8 误记） | `3` | `21 / 21` | **`4 / 4`** (`3` 条质粒) | `10 / 10` (`3/3`, 平均覆 98.71%) | `375.96 s` | `255.01 s` |
+| **`Stage 1.2 raw`** (`Val 选参 plateau=0`) | `31` | `30` | `1` | `21 / 20` | **`0 / 0`** | `10 / 10` (`3/3`, 平均覆 **100.00%**) | `384.42 s` | `269.15 s` |
+| **`Stage 1.2 plateau`** (`plateau=4, 0.90`) | `35` | **`34`** | `1` | **`25 / 24`** | **`0 / 0`** | `10 / 10` (`3/3`, 平均覆 **100.00%**) | `382.49 s` | `267.08 s` |
+
+3. **核心优势与短板深度核查结论（全部由 GBK / CheckV / PhiSpy / PHROGs 直接验证）**
+   - **B 组细菌质粒抗假阳性能力实质性跃升（`4` 处误报 -> `0` 误报）**：`V4.2` 在 3 条质粒产生了 4 处误报且全部绕过 `ProteinGate`：`NZ_CP034080.1:22600..51200`（`CheckV v=1, h=9` 宿主主控片段，靠含 1 个溶菌酶与阻遏蛋白绕过门控）、`NZ_CP107304.1:0..50800`（`CheckV v=1, h=7, Gate tnp=10` 转座酶簇）、`NZ_CP107304.1:89200..103669`（`.gbk` 实测为 `ParB/RepB` + `PsiB` + `Hok/RelE` 纯接合质粒区段，`CheckV v=0, h=1`，因 PHROG 非结构交叉命中 `10` 条而同时欺骗了 `V4.2`、`ProteinGate` 与 PHROG 简单计分）以及 `NZ_CP117345.1:37200..51400`（`CheckV v=0, h=3`）。**`Stage 1.2`（`raw` 与 `plateau`）在这 10 例阴性对照上全部准确判零**；且 3 株古菌/真核病毒均 `0` 误报。
+   - **A 组细菌与复杂三代组装真实召回与全长边界明显胜出**：
+     - 在 `NZ_CP199964.1`（鲍曼不动杆菌）上，`Stage 1.2 plateau` 新增抓获 `2626600..2645400`（`18,800 bp`, `peak=0.9313`），与 `PhiSpy (2629395..2648086)` IoU 达 **`0.7449`**，经 CheckV（`v=21, h=0`）、PHROG（`25`, 含 18 个结构基因）与 ProteinGate（`20hm`）三重确认为高纯度真前噬菌体（`V4.2` 与 `Stage 1.2 raw` 均漏检）；同时对同株另一前噬菌体 `2049600..2092800` 边界从 `V4.2` 的 `33.2 kb (v=19)` 恢复至 `43.2 kb (v=25)`。
+     - 在实验室三代组装 `LAB_FLYE_ASM` 上，整序列 `CheckV` 提示 `contig_19 (52,433 bp)` 为 `High-quality (comp=100.0%, v=26)`：`V4.2` 仅截取后端 `20000..49400 (29.4 kb, v=19)`，而 **`Stage 1.2` 精确覆盖全长 `0..52433 (52.4 kb, v=26, High-quality 100%)`**；对 `contig_141 (45,273 bp, CheckV Medium-quality v=10, h=4)`，`V4.2` 与 `Stage 1.2 raw` 完全漏检，**`Stage 1.2 plateau` 成功捕获两段（`4400..16200` `v=3, PHROG=15` 与 `27600..45273` `v=7, PHROG=31`）**；且对 `Stage 1.2 raw` 漏检的 `contig_2`（`peak=0.9455`），`Stage 1.2 plateau` 亦成功救回（`0..10400`, `v=11`）。
+   - **C 组小基因组覆盖率达成 100%**：`NC_001331.1`（`Inoviridae` 丝状噬菌体 `7,349 bp`）在 `V4.2` 被截断为 `200..6600 (87.09%)`，`Stage 1.2` 实现 **`0..7349` (100.0%)** 全覆盖，全部 10 株平均覆盖 `98.71% -> 100.00%`。
+   - **9 维功能模块评估与两项需关注的现存短板**：
+     1. **短片段敏感点（`NZ_CP097190.1:808800..815600`）与 `complete_structural_core` 启发式过宽**：`Stage 1.2` 在 `NZ_CP097190.1` 上报出 1 处 `6.8 kb` 整合酶岛（`.gbk` 实测为 `site-specific integrase` + `Rha regulator` 等 5 个 CDS，`CheckV v=1, h=0`），功能头准确预测出 `integration_excision=1`，但窗均值加权令无结构 ORF 命中的 `head_packaging` 跨过 `0.45` 线而误归为 `complete_structural_core`。在 `35` 个评估区段中，`Stage 1.2` 结构完整度与生活方式两大类与 `MMseqs2 PHROGs` 的客观一致率均为 **`30 / 35` (`85.7%`)**（其中结构完整度 5 例不一致均为窗均值导致对短片段过宽松；而 `NZ_CP103399.1:742k..777k` 生活方式不一致反而是 Stage 1.2 正确捕捉到了 GBK 真实的 `recombinase` + `phage repressor`，而 PHROG 库漏标）。
+     2. **`plateau=4, 0.90` 显著优于 `raw`（`plateau=0`）**：`Stage 1.2 raw` 漏掉了 3 个真前噬菌体区段（`NZ_CP199964.1:2626.6k`、`LAB_FLYE contig_141`、`contig_2`），开启 `plateau=(4, 0.90)` 后全部救回且未增加任何 B 组误报。
+     3. **PhiSpy 对照下的共同盲区**：PhiSpy 在 9 株细菌共预测 `28` 个区段，`Stage 1.2 plateau` 高契合命中的 `16` 个全部获正交确认为真噬菌体（共有区段与 PhiSpy 平均 IoU `0.7711`，`V4.2` 为 `0.7862`；另 `NZ_CP167021.1` 第 5 段因偏右边界错位 IoU 低于 0.25）；PhiSpy 独有的 `11` 个额外区段经独立 CheckV 核验，**4 个为宿主核心误报**（`viral=0, host=7~11` 核糖体/TusBCD 操纵子，两模型正确免疫）、**2 个为弱信号区（`viral=2`）**、**5 个为真实短退化/混合防御岛漏检**（`8.4–10.3 kb` 4 处 `viral=4~9` + `NZ_CP199964.1:1016672..1055738` 39.1 kb `viral=12, host=2`）。
+
+---
+
+## 26. Stage 1.2 替代 V4.2 阻塞缺陷修复与工作台端到端替换验收（步骤 33）
+
+针对第 24、25 节识别出的两项阻碍 `Stage 1.2` 直接替代生产 `Student V4.2` 的工程与逻辑问题，**步骤 33** 采用“回归单测先行（红） -> 模块化修复（绿） -> 真实基因组及便携工作台端到端验证”闭环实施了修正与替换可行性评估：
+
+1. **测试先行构建回归基线（5 项新增用例全部先行复现失败，修复前 `5 failed, 15 passed`）**
+   - 在 [test_stage1_2_functional_partitions.py](file:///f:/NCBI%20blast/tests/test_stage1_2_functional_partitions.py) 新增 `test_collect_region_functional_modules_requires_head_orf_for_complete_core`：复现并覆盖无 `head_packaging` 实证 ORF 时因窗口均值或次优多标签分数漂移导致的 `complete_structural_core` 误判。
+   - 在 [test_phage_finder_workbench.py](file:///f:/NCBI%20blast/tests/test_phage_finder_workbench.py) 新增 4 项工作台与扫描器用例：`test_model_registry_exposes_stage1_2_plateau_and_func_metadata`、`test_scanner_from_model_dir_propagates_and_overrides_plateau`、`test_manager_execute_forwards_plateau_and_functional_partitions`、`test_exporter_attaches_optional_functional_modules`。
+
+2. **两项根因修复内容（保留 `F:\Phage data\models\full_v4\student_v4_2\` 生产目录暂不覆盖）**
+   - **修复 1（`head_packaging` 实证 ORF 结构核心门控）**：更新 [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py) `_collect_region_functional_modules()`。当区段存在解析 ORF（`orfs_sorted` 非空）时，`active_modules` 要求至少具备 `orf_module_counts[name] >= 1` 或 `orf_max_vec[mi] >= module_threshold` 的 ORF 证据；且判定 `complete_structural_core` 时强制要求**实证主导结构模块计数** `confirmed_struct = [m for m in ("head_packaging", "connector", "tail") if m in active_modules and orf_module_counts.get(m, 0) >= 1]` 满足 `len(confirmed_struct) >= 2 and "head_packaging" in confirmed_struct`（无 ORF 时按原窗口级逻辑回退）。
+   - **修复 2（`plateau=(4, 0.90)` 默认部署与全链路参数透传）**：
+     - 更新 [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py) `GenomeScanner.from_model_dir()`：通过 `_UNSET_ARG` 哨兵支持调用端按需显式覆盖 `plateau_min_windows`、`plateau_second_threshold`、`refine_pad_bp`、`smooth_sub_profile`（包括显式传 `0 / None` 禁用 plateau）。
+     - 更新 [model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py) `_inspect_v4_2_dir()`：读取并暴露 `feature_profile`、`func_dim` 以及 `decoder_defaults` 中的 `plateau_min_windows`、`plateau_second_threshold`、`refine_pad_bp`、`smooth_profile`（向后兼容旧版 `V4.2` 元数据）。
+     - 更新 [types.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/types.py) `PhageScanRunRequest` 与 [manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py) `execute_pipeline_task()`：在工作台调度中透传 `plateau_min_windows` / `plateau_second_threshold`，并当 `func_dim > 0` 时自动开启 `collect_functional_partitions=True`。
+     - 更新 [exporter.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/exporter.py) `export_scan_artifacts()`：向后兼容地在 `region_records` 中附带轻量汇总字段 `functional_modules`（剔除重型逐 ORF `orfs` 明细防 JSON 膨胀）。
+     - 备份原 `Stage 1.2` 评估报告至 `F:\Phage data\models\full_v4\stage1_2_ablation\student_v4_2_stage1_2\student_v4_report.json.bak`，在 `student_v4_report.json` 中保留原无界检索快照至 `decoder_tuned_on_val_unbounded_search`，并将 `decoder_tuned_on_val` 校准为 `seed=0.95, extend=0.30, sub=0.35, plateau_min_windows=4, plateau_second_threshold=0.90, refine_pad_bp=3000, smooth_profile=false`。
+
+3. **静态检查、单测全集与真实端到端替代性实测结果**
+   - **代码检查与单元测试**：修改后 `ruff check` 输出 `All checks passed!`，`python -m py_compile` 退出码 `0`；覆盖 `Stage 1.2`、工作台、V4 架构及 Stage 1 特征的 4 套测试共 **`35 passed in 76.11s`**（`0 failed, 0 skipped`）。
+   - **Check A — 真实基因组零手动参数覆盖推理**（使用 `GenomeScanner.from_model_dir(stage1_2_dir, blast_db=phage_refseq_prot, workers=30, device="cuda")`，零阈值覆写，详情见 [verify_dropin_e2e_report.json](file:///C:/Users/Administrator/.gemini/antigravity/brain/a84b4add-178c-4aff-97a2-c2e69eae3a98/scratch/verify_dropin_e2e_report.json)）：
+     - `from_model_dir` 自动加载 `seed=0.95, extend=0.3, sub=0.35, plateau_min_windows=4, plateau_second_threshold=0.9, refine_pad_bp=3000, smooth_sub_profile=False, func_dim=9, feature_profile='stage1'`。
+     - `NC_000913.3` (*E. coli* K-12)：`4/4` 全部召回（`DLP12` `565800..582400`、`e14`、`Rac`、`Qin`）；其中 **`DLP12` (`head_packaging` ORF=0, `mge_contamination_score=0.6975`) 已修正为 `cryptic_or_incomplete`**，`Qin` 保持 `complete_structural_core`。
+     - `NZ_CP097190.1`：`4/4` 召回，原过宽短区段 **`808800..815600` (`head_packaging` ORF=0) 已修正为 `cryptic_or_incomplete`**（`"head_packaging"` 亦未进入 `active_modules`），其余 3 个完整前噬菌体保持 `complete_structural_core`。
+     - `NZ_CP199964.1`：`2/2` 召回（自动借 `plateau=(4, 0.9)` 救回 `2626600..2645400` 18.8 kb `peak=0.9313`），均判定 `complete_structural_core`。
+     - `NZ_CP107304.1`（质粒）：`raw=0, verified=0`（`0` 假阳性）。
+     - `LAB_FLYE_ASM`（147 contigs）：`8/8` 全部召回（含 `contig_19` `0..52433` 100% 全长、`contig_141` 两段 `peak=0.931/0.9219`、`contig_2` `0..10400` `peak=0.9455` 等）。
+     - `NC_001331.1`（7,349 bp `Inoviridae`）与 `NC_048874.1`（4,526 bp `Microviridae`）：均 `100%` 全长检出且无过度门控误杀（`NC_048874.1` 为 `complete_structural_core`）。
+   - **Check B — 便携工作台隔离端到端替换测试**：
+     - 将 5 个权重与元数据文件（`student_v4.pt`, `context_refiner.pt`, `subbin_refiner.pt`, `student_v4_meta.json`, `student_v4_report.json`）拷贝至全新隔离目录 `models/full_v4/student_v4_2/`，并故意将 `student_v4_meta.json` 中的绝对 `*_ckpt` 训练路径改写为不存在路径以模拟跨目录/跨机迁移。
+     - `discover_available_models()` 与 `PhageDiscoveryManager` 自动发现并加载该目录，在 `cuda` + `phage_refseq_prot` 上执行 150-contig 混合 FASTA（总 `1,085,761 bp`）扫描，总耗时 `25.641s`，`status="completed"`，`region_count=10, rejected_count=0`，所有产物（`FASTA/TSV/GFF3/GBK/result.json`、`150` 个 `overlays/contig_*.json`、`10` 个侧翼 `region_*.gbk`）正常落盘且 `get_region_gbk`、`get_contig_overlay` 读取无误，导出 `regions` 自动附带精简 `functional_modules` 且无 `orfs` 冗余膨胀。
+   - **附带观测说明**：若不传 `custom_blast_db` 调用 `resolve_protein_gate_resources()`，当项目存在 `database/swissprot/swissprot` 时当前逻辑会优先命中通用库 `swissprot`（导致 `NZ_CP097190.1` 与 `LAB_FLYE_ASM` 在开启 ProteinGate 时分别多拒 1 个与 2 个候选），在配置中显式指定 `phage_refseq_prot` 则为 `0` 误拒。
+
+---
+
+## 27. 正式备份旧 V4.2、部署 Stage 1.2 上线及蛋白库探测优先级修正（步骤 34）
+
+经用户确认正式切换，**步骤 34** 完成了生产模型目录的原子替换与蛋白库默认探测优先级修正：
+
+1. **测试先行与蛋白门控库发现顺序修正**
+   - 在 [test_phage_finder_workbench.py](file:///f:/NCBI%20blast/tests/test_phage_finder_workbench.py#L951-L969) 新增 `test_protein_gate_prefers_phage_refseq_over_generic_swissprot`，验证同时存在 `database/swissprot/swissprot` 与 `../Phage data/blastdb/phage_refseq_prot` 时修复前失败（命中 `swissprot`）。
+   - 修复 [model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py#L289-L295) `resolve_protein_gate_resources()` 候选顺序：将 `sibling_data / "blastdb" / "phage_refseq_prot"` 提升至通用库 `database/swissprot/swissprot` 之前（`phage_refseq_prot` 专库优先，通用 `swissprot` 兜底）。
+
+2. **安全备份旧 V4.2 并原子部署 Stage 1.2 至生产目录**
+   - 将原生产目录完整备份至 `F:\Phage data\models\full_v4\student_v4_2_legacy_v4_2_backup`（保留完整可回滚权重与报告）。
+   - 从 `F:\Phage data\models\full_v4\stage1_2_ablation\student_v4_2_stage1_2` 复制全套模型与校验文件（`student_v4.pt` `14,956,421 bytes`、`context_refiner.pt`、`subbin_refiner.pt`、`student_scores.npz`、`student_v4_meta.json`、`student_v4_report.json` 及同口径 `student_report.json`），同步更新 `student_v4_meta.json` / 报告中的路径指向新生产目录 [student_v4_2](file:///F:/Phage%20data/models/full_v4/student_v4_2)，并原子替换上线；原消融目录保持完好留存。
+
+3. **切换上线后全链路验收**
+   - **静态检查与单元测试**：`ruff check`（`All checks passed!`）、`python -m py_compile` 通过；4 套 pytest 共 **`36 passed in 77.98s`**（`0 failed, 0 skipped`）。
+   - **默认生产路径冒烟测试**：不传任何 `custom_model_dir` / `blast_db` / 手动阈值，直接通过 `discover_available_models()` 与 `PhageDiscoveryManager` 探测到生产 [student_v4_2](file:///F:/Phage%20data/models/full_v4/student_v4_2)（`params=3715879`, `feature_profile='stage1'`, `func_dim=9`, `plateau=(4, 0.9)`）与 `F:\Phage data\blastdb\phage_refseq_prot`，在 `CUDA + ProteinGate` 下扫描 6 条测试序列（含 `NC_001331.1`、`NC_048874.1`、`NZ_CP107304.1` 质粒与 `LAB_FLYE_ASM` `contig_19`/`contig_141`/`contig_2`，共 `227,497 bp`）：总耗时 **`15.548s`**，检出 `6` 个真实区段（`NC_001331.1` `0..7349`、`NC_048874.1` `0..4526`、`contig_19` `0..52433`、`contig_141` 两段 `peak=0.931/0.9219`、`contig_2` `0..10400` `peak=0.9455`），`rejected_count=0`，`NZ_CP107304.1` 质粒 `0` 误报。
+4. **模型名称、前端界面与运行日志简洁区分 `Stage 1.2`**
+   - **后端日志与模型标签**：更新 [model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py#L140-L153) `_inspect_v4_2_dir()`，当检测到 `feature_profile == "stage1"` 且 `func_dim > 0` 时自动将默认名称映射为 `Stage 1.2 边界精修模型`（保留 `version: "V4.2"` 协议兼容）；同步更新 [manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py) `[STEP 2/5]` 与 `[STEP 3/5]` 日志，使其打印当前模型的真实名称而非硬编码 `V4.2`。
+   - **前端组件与构建刷新**：先在 [phageOverlayAndResults.test.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/__tests__/phageOverlayAndResults.test.ts) 新增回归用例校验 `Stage 1.2` 标签展示，随后更新 [types.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/types.ts)、[PhageDiscoveryModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/PhageDiscoveryModule.vue)、[PhageDiscoverySetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoverySetup.vue)、[PhageDiscoveryHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryHistory.vue)、[PhageDiscoveryProgress.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryProgress.vue)、[PhageDiscoveryQueueCard.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryQueueCard.vue)、[PhageDiscoveryResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryResults.vue) 与 [AnalysisView.vue](file:///f:/NCBI%20blast/src/web-next/src/views/AnalysisView.vue)，动态展示 `Stage 1.2` 并移除残留写死的 `Student V4.2` / `V4.2` 文案。
+   - **构建与全量验证**：Vitest 前端测试 `8` 个文件共 **`49 passed`**（含 `phageOverlayAndResults.test.ts` `4` 项通过）；`npm run build --prefix src/web-next`（`vue-tsc -b && vite build`）通过并刷新 `src/web-next/dist`（`1175 modules transformed`，`built in 12.63s`）；`ruff check`（`All checks passed!`）、`py_compile` 与 [test_phage_finder_workbench.py](file:///f:/NCBI%20blast/tests/test_phage_finder_workbench.py) **`13 passed in 8.87s`**。
+5. **TypeScript 与 Pyrefly 静态诊断清零**
+   - **测试对象属性补全**：在 [phageOverlayAndResults.test.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/__tests__/phageOverlayAndResults.test.ts#L387-L389) 补齐 `PhageCapabilities` 必填字段 `has_model: true`，消除 TS2741 缺失属性报错。
+   - **冗余类型转换清理**：按 Pyrefly `unnecessary-type-conversion` 检查清理 [manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py#L324)、[functional_partitions.py](file:///f:/NCBI%20blast/src/phage_discovery/data/functional_partitions.py) 与 [window_features.py](file:///f:/NCBI%20blast/src/phage_discovery/features/window_features.py) 中所有多余的 `bool()`、`int()`、`str()` 及 `float()` 调用。
+   - **修复后重验**：`pyrefly check --min-severity warn` 输出 `INFO 0 diagnostics (2 suppressed)`，`ruff check` 输出 `All checks passed!`，`py_compile` 通过，`tests/test_phage_finder_workbench.py` + `tests/test_stage1_2_functional_partitions.py` + `tests/test_stage1_orf_peptide.py` 共 **`28 passed in 71.36s`**；`vue-tsc --noEmit` 对 `phageOverlayAndResults.test.ts` 退出码 `0`，Vitest `8` 文件 **`49 passed`**，`npm run build --prefix src/web-next` 通过（`15.22s`）。
+6. **生产目录物理命名迁移至 `stage1_2` 与前端残留 `V4.2` 文案清零**
+   - **先导测试（红灯）**：新增 `test_model_registry_and_scanner_prefer_stage1_2_directory_and_filenames` 与前端 `PhageDiscovery_Stage1_2` 默认任务名/文案断言（均按预期先行失败）。
+   - **模块化文件名解析与目录重整**：在 [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py) 抽取公共函数 `resolve_model_dir_files()`，使 `GenomeScanner` 与 [model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py) 优先探测 `full_v4/stage1_2` 目录及 `stage1_2.pt` / `stage1_2_meta.json` / `stage1_2_report.json`（同时向后兼容 `student_v4_2` 与 `student_v4.*`）；同时清理 [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py) 中 8 处冗余 `float()`/`int()`。
+   - **前端残余清理**：更新 [PhageDiscoverySetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoverySetup.vue)（默认任务名改 `PhageDiscovery_Stage1_2`、移除配置抽屉/兜底文案/默认按钮里的 `V4.2`）、[PhageOverlayMap.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageOverlayMap.vue)（`模型概率曲线`、`预测分数`）与 [usePhageDiscovery.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/composables/usePhageDiscovery.ts)（动态使用激活 `model_id` 并去除 `已加入 V4.2 调度队列...`）。
+   - **生产磁盘目录切换**：将全套 `Stage 1.2` 权重、元数据、评分与校准报告正式部署于 `F:\Phage data\models\full_v4\stage1_2`（`stage1_2.pt`, `stage1_2_meta.json`, `stage1_2_report.json`, `stage1_2_scores.npz`, `context_refiner.pt`, `subbin_refiner.pt`），确认旧版安全留存于 `student_v4_2_legacy_v4_2_backup` 后清理过渡目录 `student_v4_2`。
+   - **全量终验**：`discover_available_models()` 唯一探测到 `stage1_2`（`params=3715879`, `feature_profile='stage1'`, `func_dim=9`, `plateau=(4, 0.9)`）；`ruff check` 通过、`pyrefly check --min-severity warn` 输出 `INFO 0 diagnostics`、`py_compile` 退出码 `0`、4 套 `pytest` 共 **`37 passed in 78.02s`**；`vue-tsc --noEmit` 退出码 `0`、Vitest `8` 文件 **`49 passed`**、`vite build` 刷新 `dist`（`1175 modules transformed`，`13.27s`）。
+7. **修复扫描运行中/排队中历史卡片仍显示 `V4.2` 徽章的问题**
+   - **根因定位**：[model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py#L140-L157) 对 `Stage 1.2` 模型仍返回 `version: "V4.2"`，且 [manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py#L151-L159) 在 `submit_task` 入库与 `mark_completed` 时均硬编码写入 `model_version="V4.2"`；任务运行中 `summary` 尚为空，导致 [PhageDiscoveryHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryHistory.vue#L59) 回退显示 `V4.2`。
+   - **修复方案**：[model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py) 对 `Stage 1.2` 模型返回 `version: "Stage 1.2"`（兼容传统 `V4.2`）；[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py)、[queue.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/queue.py) 与 [usePhageDiscovery.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/composables/usePhageDiscovery.ts) 动态透传 `model_info["version"]`；[PhageDiscoveryHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryHistory.vue) 与 [PhageDiscoveryResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryResults.vue) 对 `model_id === 'stage1_2'` 强制优先展示 `Stage 1.2`；同步清理 [PhageDiscoverySetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoverySetup.vue) `Demo_Genome_Stage1_2` 等剩余提示文案。
+   - **回归测试与构建**：先新增 `Stage 1.2` `version` / `submit_task` 入库单测及运行中历史卡片 Vitest 用例（均先红后绿）；修复后 `ruff check` 与 `pyrefly check --min-severity warn`（`0 diagnostics`）通过、[test_phage_finder_workbench.py](file:///f:/NCBI%20blast/tests/test_phage_finder_workbench.py) **`14 passed in 8.50s`**、Vitest `8` 文件 **`49 passed`**、`npm run build --prefix src/web-next` 刷新 `dist`（`1175 modules transformed`，`12.93s`）。
+
+
+
+
+
