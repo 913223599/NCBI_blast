@@ -21,9 +21,24 @@ import numpy as np
 
 from ..benchmark.model_eval import evaluate_model_scores_on_split, load_split_info, tune_decoder_on_val
 from ..data.feature_dataset import load_split_arrays
-from ..features.window_features import FEATURE_NAMES
+from ..features.window_features import FEATURE_NAMES, FEATURE_NAMES_STAGE1
 
 logger = logging.getLogger("phage_discovery.experts.expert_a_xgb")
+
+
+def _resolve_feature_names(feat_dim: int, feature_dir: Path, train_parts: Tuple[str, ...]) -> list[str]:
+    """按输入特征维度解析对应的特征名列表（兼容 V4 185 维、Stage 1 256 维与自定义特征）。"""
+    if feat_dim == len(FEATURE_NAMES_STAGE1):
+        return list(FEATURE_NAMES_STAGE1)
+    if feat_dim == len(FEATURE_NAMES):
+        return list(FEATURE_NAMES)
+    for part in train_parts:
+        npz_path = Path(feature_dir) / f"train_{part}.npz"
+        if npz_path.exists():
+            with np.load(npz_path, allow_pickle=False) as d:
+                if "feature_names" in d and len(d["feature_names"]) == feat_dim:
+                    return [str(x) for x in d["feature_names"].tolist()]
+    return [f"f{i}" for i in range(feat_dim)]
 
 
 def _select_device() -> str:
@@ -178,11 +193,24 @@ def train_expert_a(
         decoder["seed_threshold"], decoder["extend_threshold"],
     )
 
+    feat_dim = int(x_tr.shape[1])
+    feat_names = _resolve_feature_names(feat_dim, Path(train_feature_dir), train_parts)
+    feat_name_set = set(feat_names)
+
+    def _map_feat_key(k: str) -> str:
+        if k in feat_name_set:
+            return k
+        if k.startswith("f") and k[1:].isdigit():
+            idx = int(k[1:])
+            if 0 <= idx < len(feat_names):
+                return feat_names[idx]
+        return k
+
     booster = model.get_booster()
     gain = booster.get_score(importance_type="gain")
     importance = sorted(
         (
-            (FEATURE_NAMES[int(k[1:])], round(float(v[0] if isinstance(v, list) else v), 3))
+            (_map_feat_key(k), round(float(v[0] if isinstance(v, list) else v), 3))
             for k, v in gain.items()
         ),
         key=lambda kv: kv[1], reverse=True,
@@ -197,6 +225,8 @@ def train_expert_a(
         "model_name": "ExpertA_XGBoost",
         "trained_at": datetime.now().isoformat(timespec="seconds"),
         "device": device,
+        "feat_dim": feat_dim,
+        "feature_profile": "stage1" if feat_dim == len(FEATURE_NAMES_STAGE1) else "v4",
         "train_rows": len(y_tr),
         "train_pos": int(np.sum(y_tr == 1)),
         "train_neg": int(np.sum(y_tr == 0)),

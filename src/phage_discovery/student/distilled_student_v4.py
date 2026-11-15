@@ -30,6 +30,11 @@ from ..experts.expert_b_cnn import _resolve_part_fasta
 from ..experts.expert_c_orf import MAX_ORFS_PER_WIN, ORF_FEAT_DIM, _load_or_extract_part
 from ..experts.seq_dataset import load_window_sequences, reverse_complement_codes
 from ..features.window_features import SUB_BINS
+from ..data.functional_partitions import (
+    FUNCTIONAL_PARTITION_NAMES,
+    NUM_FUNC_PARTITIONS,
+    HomoscedasticMultiTaskLoss,
+)
 from .distilled_student import _focal_bce_with_logits, _kd_bce_loss, _sub_bce_dice_loss
 
 logger = logging.getLogger("phage_discovery.student.distilled_student_v4")
@@ -55,10 +60,15 @@ def build_distilled_student_v4(
     orf_num_layers: int = 3,
     fusion_dim: int = 256,
     sem_dim: int = SEMANTIC_DIM,
+    orf_feat_dim: int = ORF_FEAT_DIM,
+    func_dim: int = 0,
 ):
-    """构建 V4 高容量三模态隐式语义神经网络学生模型（支持 Masked Pooling 与多任务输出）。"""
+    """构建 V4 高容量三模态隐式语义神经网络学生模型（支持 Masked Pooling、多任务输出与可选 9 维功能分区蒸馏头）。"""
     import torch
     from torch import nn
+
+    resolved_orf_dim = int(orf_feat_dim)
+    resolved_func_dim = max(0, int(func_dim))
 
     class ResBlock1dMasked(nn.Module):
         def __init__(self, ch: int, dilation: int):
@@ -78,7 +88,7 @@ def build_distilled_student_v4(
         def __init__(self):
             super().__init__()
             self.proj = nn.Sequential(
-                nn.Linear(ORF_FEAT_DIM, orf_d_model),
+                nn.Linear(resolved_orf_dim, orf_d_model),
                 nn.LayerNorm(orf_d_model),
                 nn.GELU(),
             )
@@ -102,7 +112,7 @@ def build_distilled_student_v4(
             )
             self.empty_emb = nn.Parameter(torch.zeros(1, fusion_dim))
 
-        def forward(self, tokens, counts):
+        def forward(self, tokens, counts, return_seq: bool = False):
             bsz, seq_len, _ = tokens.shape
             pos = torch.arange(seq_len, device=tokens.device)[None, :]
             valid_mask = pos < counts[:, None]
@@ -124,7 +134,10 @@ def build_distilled_student_v4(
             count_feat = torch.log1p(counts.float()).unsqueeze(-1)
             emb = self.out_proj(torch.cat([mean_pool, max_pool, attn_pool, count_feat], dim=-1))
             empty = self.empty_emb.expand(bsz, -1).to(emb.dtype)
-            return torch.where(has_any[:, None], emb, empty)
+            out_emb = torch.where(has_any[:, None], emb, empty)
+            if return_seq:
+                return out_emb, h * vm
+            return out_emb
 
     class DistilledStudentV4Net(nn.Module):
         feat_mean: torch.Tensor
@@ -132,6 +145,8 @@ def build_distilled_student_v4(
 
         def __init__(self):
             super().__init__()
+            self.orf_feat_dim = resolved_orf_dim
+            self.func_dim = resolved_func_dim
             self.register_buffer("feat_mean", torch.tensor(feat_mean, dtype=torch.float32))
             self.register_buffer("feat_std", torch.tensor(feat_std, dtype=torch.float32))
 
@@ -202,6 +217,21 @@ def build_distilled_student_v4(
                 nn.GELU(),
                 nn.Linear(96, sem_dim),
             )
+            if self.func_dim > 0:
+                self.func_head = nn.Sequential(
+                    nn.Linear(fusion_dim, 128),
+                    nn.GELU(),
+                    nn.Linear(128, self.func_dim),
+                )
+                self.orf_phage_head = nn.Linear(orf_d_model, 1)
+                self.orf_func_head = nn.Sequential(
+                    nn.Linear(orf_d_model, 96),
+                    nn.GELU(),
+                    nn.Linear(96, self.func_dim),
+                )
+                self.func_win_residual = nn.Linear(self.func_dim, 1)
+                nn.init.zeros_(self.func_win_residual.weight)
+                nn.init.zeros_(self.func_win_residual.bias)
             self.win_head = nn.Sequential(
                 nn.Linear(fusion_dim + sem_dim, 128),
                 nn.GELU(),
@@ -263,17 +293,22 @@ def build_distilled_student_v4(
             lengths=None,
             orf_tokens=None,
             orf_counts=None,
+            return_orf_seq: bool = False,
         ):
             bsz, _, max_seq = dna.shape
             if lengths is None:
                 lengths = torch.full((bsz,), max_seq, dtype=torch.long, device=dna.device)
             if orf_tokens is None:
-                orf_tokens = torch.zeros((bsz, MAX_ORFS_PER_WIN, ORF_FEAT_DIM), dtype=dna.dtype, device=dna.device)
+                orf_tokens = torch.zeros((bsz, MAX_ORFS_PER_WIN, self.orf_feat_dim), dtype=dna.dtype, device=dna.device)
             if orf_counts is None:
                 orf_counts = torch.zeros((bsz,), dtype=torch.long, device=dna.device)
 
             e_dna, h_seq = self._forward_dna_branch(dna, lengths)
-            e_orf = self.orf_stream(orf_tokens, orf_counts)
+            if return_orf_seq:
+                e_orf, h_orf_seq = self.orf_stream(orf_tokens, orf_counts, return_seq=True)
+            else:
+                e_orf = self.orf_stream(orf_tokens, orf_counts, return_seq=False)
+                h_orf_seq = None
 
             tab_norm = (tab - self.feat_mean) / self.feat_std
             e_tab0 = self.tab_in(tab_norm)
@@ -287,6 +322,8 @@ def build_distilled_student_v4(
                 e_tab * (1.0 + weights[:, 2:3]),
             ], dim=-1)
             h_fused = self.fusion_mlp(gated)
+            if return_orf_seq:
+                return h_seq, h_fused, h_orf_seq
             return h_seq, h_fused
 
         def forward(
@@ -298,27 +335,57 @@ def build_distilled_student_v4(
             orf_counts=None,
             return_aux: bool = False,
         ):
-            h_seq, h_fused = self._forward_backbone(
-                dna,
-                tab,
-                lengths=lengths,
-                orf_tokens=orf_tokens,
-                orf_counts=orf_counts,
-            )
+            need_orf_seq = self.func_dim > 0 and return_aux
+            if need_orf_seq:
+                h_seq, h_fused, h_orf_seq = self._forward_backbone(
+                    dna,
+                    tab,
+                    lengths=lengths,
+                    orf_tokens=orf_tokens,
+                    orf_counts=orf_counts,
+                    return_orf_seq=True,
+                )
+            else:
+                h_seq, h_fused = self._forward_backbone(
+                    dna,
+                    tab,
+                    lengths=lengths,
+                    orf_tokens=orf_tokens,
+                    orf_counts=orf_counts,
+                    return_orf_seq=False,
+                )
+                h_orf_seq = None
 
             sem_logits = self.sem_head(h_fused)
             win_logit = self.win_head(torch.cat([h_fused, torch.sigmoid(sem_logits)], dim=-1)).squeeze(-1)
+
+            func_logits = None
+            orf_phage_logits = None
+            orf_func_logits = None
+            if self.func_dim > 0:
+                func_logits = self.func_head(h_fused)
+                win_logit = win_logit + self.func_win_residual(torch.sigmoid(func_logits)).squeeze(-1)
+                if h_orf_seq is not None:
+                    orf_phage_logits = self.orf_phage_head(h_orf_seq).squeeze(-1)
+                    orf_func_logits = self.orf_func_head(h_orf_seq)
 
             sub_feat = self.sub_pool(h_seq) + self.sub_cond(h_fused).unsqueeze(-1)
             sub_logits = self.sub_head(sub_feat).squeeze(1)
 
             if return_aux:
-                return {
+                out_dict = {
                     "win_logit": win_logit,
                     "sub_logits": sub_logits,
                     "sem_logits": sem_logits,
                     "win_emb": h_fused,
                 }
+                if func_logits is not None:
+                    out_dict["func_logits"] = func_logits
+                if orf_phage_logits is not None:
+                    out_dict["orf_phage_logits"] = orf_phage_logits
+                if orf_func_logits is not None:
+                    out_dict["orf_func_logits"] = orf_func_logits
+                return out_dict
             return win_logit, sub_logits
 
     return DistilledStudentV4Net()
@@ -441,14 +508,26 @@ def extract_refiner_step_features(
     sub_probs: np.ndarray,
     lengths: np.ndarray,
     max_len: int = 5000,
+    func_logits: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """将单窗模型输出汇总为与绝对基因组无关的 15 维时间步特征，供 RegionContextRefiner 使用。"""
+    """将单窗模型输出汇总为与绝对基因组无关的 15 维时间步特征（支持融合 9 维功能模块共现度），供 RegionContextRefiner 使用。"""
     n = len(win_logits)
     out = np.zeros((n, REFINER_STEP_FEAT_DIM), dtype=np.float32)
     if n == 0:
         return out
+    eff_sem_logits = np.asarray(sem_logits, dtype=np.float32).copy()
+    if func_logits is not None and len(func_logits) == n and func_logits.shape[1] >= 8:
+        f_probs = 1.0 / (1.0 + np.exp(-np.clip(func_logits[:, :8].astype(np.float64), -20.0, 20.0)))
+        part_sorted = np.sort(f_probs, axis=1)
+        top2_prob = np.clip(part_sorted[:, -2], 1e-4, 1.0 - 1e-4).astype(np.float32)
+        top2_logit = np.log(top2_prob / (1.0 - top2_prob)).astype(np.float32)
+        # 融合多模块共现度（Top-2 噬菌体功能模块 logit），抑制仅单模块孤立同源命中的虚高 hallmark
+        eff_sem_logits[:, 0] = 0.60 * eff_sem_logits[:, 0] + 0.40 * top2_logit
+        if func_logits.shape[1] >= 9:
+            eff_sem_logits[:, 2] = np.maximum(eff_sem_logits[:, 2], func_logits[:, 8].astype(np.float32))
+
     win_probs = 1.0 / (1.0 + np.exp(-np.clip(win_logits, -20.0, 20.0)))
-    sem_probs = 1.0 / (1.0 + np.exp(-np.clip(sem_logits, -20.0, 20.0)))
+    sem_probs = 1.0 / (1.0 + np.exp(-np.clip(eff_sem_logits, -20.0, 20.0)))
     sub_mean = sub_probs.mean(axis=1)
     sub_max = sub_probs.max(axis=1)
     sub_std = sub_probs.std(axis=1)
@@ -458,7 +537,7 @@ def extract_refiner_step_features(
 
     out[:, 0] = win_logits
     out[:, 1] = win_probs
-    out[:, 2:6] = np.clip(sem_logits, -12.0, 12.0)
+    out[:, 2:6] = np.clip(eff_sem_logits, -12.0, 12.0)
     out[:, 6:10] = sem_probs
     out[:, 10] = sub_mean
     out[:, 11] = sub_max
@@ -510,25 +589,42 @@ def _predict_v4_all(
     orf_counts: np.ndarray,
     device,
     batch_size: int = 128,
+    *,
+    drop_tabular_prob: float = 0.0,
+    drop_orf_prob: float = 0.0,
+    seed: int = 0,
+    return_orf_preds: bool = False,
 ) -> Dict[str, np.ndarray]:
     import torch
 
     model.eval()
     n = len(feats)
+    func_dim = int(getattr(model, "func_dim", 0))
     out_win_logit = np.zeros(n, dtype=np.float32)
     out_win_prob = np.zeros(n, dtype=np.float32)
     out_sub_prob = np.zeros((n, SUB_BINS), dtype=np.float32)
     out_sem_logit = np.zeros((n, SEMANTIC_DIM), dtype=np.float32)
+    out_func_logit = np.zeros((n, func_dim), dtype=np.float32) if func_dim > 0 else None
+    out_orf_phage = np.zeros((n, MAX_ORFS_PER_WIN), dtype=np.float32) if (return_orf_preds and func_dim > 0) else None
+    out_orf_func = np.zeros((n, MAX_ORFS_PER_WIN, func_dim), dtype=np.float32) if (return_orf_preds and func_dim > 0) else None
     if n == 0:
-        return {
+        res_empty = {
             "win_logits": out_win_logit,
             "win_probs": out_win_prob,
             "sub_probs": out_sub_prob,
             "sem_logits": out_sem_logit,
         }
+        if out_func_logit is not None:
+            res_empty["func_logits"] = out_func_logit
+        if out_orf_phage is not None:
+            res_empty["orf_phage_probs"] = out_orf_phage
+        if out_orf_func is not None:
+            res_empty["orf_func_probs"] = out_orf_func
+        return res_empty
 
     rc = reverse_complement_codes(codes, lengths)
     max_len = codes.shape[1]
+    rng_drop = np.random.default_rng(seed) if (drop_tabular_prob > 0.0 or drop_orf_prob > 0.0) else None
     with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
         for i in range(0, n, batch_size):
             sl = slice(i, i + batch_size)
@@ -540,6 +636,15 @@ def _predict_v4_all(
             ln = torch.from_numpy(lengths[sl].astype(np.int64)).to(device)
             tk = torch.from_numpy(orf_tokens[sl]).to(device)
             cn = torch.from_numpy(orf_counts[sl].astype(np.int64)).to(device)
+            if rng_drop is not None:
+                m_sz = len(tb)
+                if drop_orf_prob > 0.0:
+                    orf_d = torch.from_numpy(rng_drop.random(m_sz) < drop_orf_prob).to(device)
+                    cn = torch.where(orf_d, torch.zeros_like(cn), cn)
+                    tk = torch.where(orf_d[:, None, None], torch.zeros_like(tk), tk)
+                if drop_tabular_prob > 0.0 and hasattr(model, "feat_mean"):
+                    tab_d = torch.from_numpy(rng_drop.random(m_sz) < drop_tabular_prob).to(device)
+                    tb = torch.where(tab_d[:, None], model.feat_mean.unsqueeze(0).expand_as(tb), tb)
 
             r1 = model(oh1, tb, lengths=ln, orf_tokens=tk, orf_counts=cn, return_aux=True)
             r2 = model(oh2, tb, lengths=ln, orf_tokens=tk, orf_counts=cn, return_aux=True)
@@ -555,13 +660,28 @@ def _predict_v4_all(
             out_sub_prob[sl] = sp.cpu().numpy()
 
             out_sem_logit[sl] = ((r1["sem_logits"].float() + r2["sem_logits"].float()) * 0.5).cpu().numpy()
+            if out_func_logit is not None and "func_logits" in r1 and "func_logits" in r2:
+                out_func_logit[sl] = ((r1["func_logits"].float() + r2["func_logits"].float()) * 0.5).cpu().numpy()
+            if out_orf_phage is not None and "orf_phage_logits" in r1 and "orf_phage_logits" in r2:
+                op_mean = (torch.sigmoid(r1["orf_phage_logits"].float()) + torch.sigmoid(r2["orf_phage_logits"].float())) * 0.5
+                out_orf_phage[sl] = op_mean.cpu().numpy()
+            if out_orf_func is not None and "orf_func_logits" in r1 and "orf_func_logits" in r2:
+                of_mean = (torch.sigmoid(r1["orf_func_logits"].float()) + torch.sigmoid(r2["orf_func_logits"].float())) * 0.5
+                out_orf_func[sl] = of_mean.cpu().numpy()
 
-    return {
+    res_out = {
         "win_logits": out_win_logit,
         "win_probs": out_win_prob,
         "sub_probs": out_sub_prob,
         "sem_logits": out_sem_logit,
     }
+    if out_func_logit is not None:
+        res_out["func_logits"] = out_func_logit
+    if out_orf_phage is not None:
+        res_out["orf_phage_probs"] = out_orf_phage
+    if out_orf_func is not None:
+        res_out["orf_func_probs"] = out_orf_func
+    return res_out
 
 
 def predict_with_context_refiner(
@@ -577,6 +697,7 @@ def predict_with_context_refiner(
     max_len: int = 5000,
     min_seq_len: int = 3,
     max_gap_bp: Optional[int] = 5000,
+    func_logits: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """使用 RegionContextRefiner 对按 contig 排好序且物理连续的窗口序列进行跨窗精修。"""
     import torch
@@ -587,7 +708,9 @@ def predict_with_context_refiner(
         return out_probs.astype(np.float32)
 
     refiner.eval()
-    step_feats = extract_refiner_step_features(win_logits, sem_logits, sub_probs, lengths, max_len=max_len)
+    step_feats = extract_refiner_step_features(
+        win_logits, sem_logits, sub_probs, lengths, max_len=max_len, func_logits=func_logits,
+    )
     groups = group_windows_by_contig(contig_ids, starts, max_gap_bp=max_gap_bp)
     with torch.no_grad():
         for idxs in groups:
@@ -607,7 +730,10 @@ def _apply_refiner_augmentations(
     labels: np.ndarray,
     rng: np.random.Generator,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """针对隐蔽退化弱前噬菌体（>=3窗高hallmark）与 1~2 窗孤立低 hallmark 假阳脉冲合成训练增强。"""
+    """
+    针对隐蔽退化弱前噬菌体（>=3 窗连续簇）与 1~2 窗孤立假阳脉冲（含转座酶脉冲与单模块同源诱饵脉冲）合成训练增强，
+    消除长训 Student 在训练集上零假阳导致的暴露偏差（Exposure Bias）。
+    """
     sf = step_feats.copy()
     rl = raw_logits.copy()
     w = len(labels)
@@ -620,7 +746,7 @@ def _apply_refiner_augmentations(
         sf[sl, 0] = clipped
         sf[sl, 1] = 1.0 / (1.0 + np.exp(-clipped))
 
-    # 1) 搜索连续正前噬菌体片段 (>=3 窗)，模拟隐蔽/退化中置信度分布并保持 hallmark 语义
+    # 1) 搜索连续正前噬菌体片段 (>=3 窗)，模拟隐蔽/退化中置信度分布并保持多模块协同语义
     pos_runs: List[Tuple[int, int]] = []
     cur = 0
     while cur < w:
@@ -640,21 +766,19 @@ def _apply_refiner_augmentations(
         span = int(rng.integers(3, min(10, seg_len) + 1))
         anchor = int(rng.integers(seg_s, seg_e - span + 1))
         sl = slice(anchor, anchor + span)
-        # 温和缩放至 0.65~2.95 logit（对应 p ~ 0.66~0.95），避免与真实中等置信前噬菌体失调
         ceil_logit = float(rng.uniform(1.25, 2.95))
         degraded = rng.uniform(0.70, ceil_logit, size=span).astype(np.float32)
         if span >= 5 and rng.random() < 0.30:
             dip_idx = int(rng.integers(1, span - 1))
             degraded[dip_idx] = float(rng.uniform(0.40, 1.05))
         _sync_logit_and_prob(sl, np.minimum(rl[sl], degraded))
-        # 确保连续弱化区保有典型 phage hallmark（至少若干核心窗）与低 transposase，避免被误当转座酶脉冲
         hall_floor = rng.uniform(0.45, 2.0, size=span).astype(np.float32)
         sf[sl, 2] = np.maximum(sf[sl, 2], hall_floor)
         sf[sl, 6] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 2], -20.0, 20.0)))
         sf[sl, 4] = np.minimum(sf[sl, 4], rng.uniform(-2.8, -1.0, size=span).astype(np.float32))
         sf[sl, 8] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 4], -20.0, 20.0)))
 
-    # 2) 在远离正前噬菌体（前后各至少 2 窗均为 0）的纯阴性背景注入 1~2 窗孤立低 hallmark 假阳脉冲
+    # 2) 在远离正前噬菌体（前后各至少 2 窗均为 0）的纯阴性背景注入 1~2 窗孤立假阳脉冲
     safe_neg_starts: List[int] = []
     for i in range(w):
         if labels[i] != 0:
@@ -664,37 +788,46 @@ def _apply_refiner_augmentations(
         if left_ok and right_ok:
             safe_neg_starts.append(i)
 
-    if safe_neg_starts and rng.random() < 0.45:
+    if safe_neg_starts and rng.random() < 0.55:
         pos0 = int(rng.choice(safe_neg_starts))
         mode = float(rng.random())
         max_width = 2 if (pos0 + 1 in safe_neg_starts and pos0 + 1 < w) else 1
-        width = 2 if (mode >= 0.80 and max_width == 2) else int(rng.integers(1, max_width + 1))
+        width = 2 if (mode >= 0.55 and max_width == 2) else int(rng.integers(1, max_width + 1))
         sl = slice(pos0, pos0 + width)
-        spike_logit = rng.uniform(1.6, 3.8, size=width).astype(np.float32)
+        spike_logit = rng.uniform(1.6, 3.9, size=width).astype(np.float32)
         _sync_logit_and_prob(sl, spike_logit)
 
-        # 所有孤立假阳脉冲共同特征：低 phage_hallmark 与低 tail
-        sf[sl, 2] = rng.uniform(-3.4, -1.0, size=width).astype(np.float32)
-        sf[sl, 6] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 2], -20.0, 20.0)))
-        sf[sl, 5] = np.minimum(sf[sl, 5], rng.uniform(-2.6, -0.7, size=width).astype(np.float32))
-        sf[sl, 9] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 5], -20.0, 20.0)))
-
-        if mode < 0.35:
-            # 模式 1：显式高 transposase 脉冲
+        if mode < 0.25:
+            # 模式 1：显式高 transposase 孤立脉冲
+            sf[sl, 2] = rng.uniform(-3.4, -1.0, size=width).astype(np.float32)
+            sf[sl, 6] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 2], -20.0, 20.0)))
             sf[sl, 4] = rng.uniform(1.0, 3.5, size=width).astype(np.float32)
             sf[sl, 8] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 4], -20.0, 20.0)))
-        elif mode < 0.80:
-            # 模式 2：类似 S. aureus 转座酶的低 hallmark 且无明显语义孤立脉冲
-            sf[sl, 3] = rng.uniform(-4.5, -1.5, size=width).astype(np.float32)
+            sf[sl, 5] = np.minimum(sf[sl, 5], rng.uniform(-2.6, -0.7, size=width).astype(np.float32))
+            sf[sl, 9] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 5], -20.0, 20.0)))
+        elif mode < 0.65:
+            # 模式 2/3：低 hallmark 且无明显语义的 1~2 窗孤立脉冲
+            sf[sl, 2] = rng.uniform(-3.4, -1.0, size=width).astype(np.float32)
+            sf[sl, 6] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 2], -20.0, 20.0)))
+            sf[sl, 3] = rng.uniform(-5.0, -1.5, size=width).astype(np.float32)
             sf[sl, 7] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 3], -20.0, 20.0)))
-            sf[sl, 4] = rng.uniform(-5.5, -2.0, size=width).astype(np.float32)
+            sf[sl, 4] = rng.uniform(-5.0, -1.5, size=width).astype(np.float32)
             sf[sl, 8] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 4], -20.0, 20.0)))
+            sf[sl, 5] = np.minimum(sf[sl, 5], rng.uniform(-2.6, -0.7, size=width).astype(np.float32))
+            sf[sl, 9] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 5], -20.0, 20.0)))
         else:
-            # 模式 3：低 integrase + 低 hallmark 双窗孤立脉冲
-            sf[sl, 3] = rng.uniform(-5.2, -2.5, size=width).astype(np.float32)
+            # 模式 4：1~2 窗孤立单模块同源诱饵脉冲（带中高 tail/hallmark 与 sub_probs，但左右邻居全为 0）
+            sf[sl, 2] = rng.uniform(-0.8, 1.4, size=width).astype(np.float32)
+            sf[sl, 6] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 2], -20.0, 20.0)))
+            sf[sl, 3] = rng.uniform(-4.5, -1.2, size=width).astype(np.float32)
             sf[sl, 7] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 3], -20.0, 20.0)))
-            sf[sl, 4] = rng.uniform(-4.0, -1.5, size=width).astype(np.float32)
+            sf[sl, 4] = rng.uniform(-4.5, -1.2, size=width).astype(np.float32)
             sf[sl, 8] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 4], -20.0, 20.0)))
+            sf[sl, 5] = rng.uniform(0.2, 2.2, size=width).astype(np.float32)
+            sf[sl, 9] = 1.0 / (1.0 + np.exp(-np.clip(sf[sl, 5], -20.0, 20.0)))
+            sf[sl, 10] = rng.uniform(0.50, 0.85, size=width).astype(np.float32)
+            sf[sl, 11] = rng.uniform(0.75, 0.96, size=width).astype(np.float32)
+            sf[sl, 13] = rng.uniform(0.55, 0.92, size=width).astype(np.float32)
     return sf, rl
 
 
@@ -1174,8 +1307,10 @@ def _load_v4_part(
     *,
     fasta_override: Optional[Path] = None,
     use_semantic: bool = True,
+    use_functional: bool = False,
+    feature_profile: str = "v4",
 ) -> Dict[str, Any]:
-    """统一加载某个分片的 tabular 特征、DNA 编码、ORF 张量以及可选 offline 语义目标。"""
+    """统一加载某个分片的 tabular 特征、DNA 编码、ORF 张量以及可选 offline 语义/9D功能分区目标。"""
     arrs, tokens, counts = _load_or_extract_part(
         feature_dir,
         manifest_or_train_dir,
@@ -1185,6 +1320,7 @@ def _load_v4_part(
         workers,
         fasta_override=fasta_override,
         use_semantic_clean_labels=False,
+        feature_profile=feature_profile,
     )
     orig_labels = arrs["labels"].astype(np.int8, copy=True)
     clean_labels = orig_labels.copy()
@@ -1210,6 +1346,38 @@ def _load_v4_part(
                 elif np.any(sem_targets > 0):
                     sem_valid = np.ones(n, dtype=np.float32)
 
+    has_functional_file = False
+    func_targets = np.zeros((n, NUM_FUNC_PARTITIONS), dtype=np.float32)
+    func_valid = np.ones((n, NUM_FUNC_PARTITIONS), dtype=np.float32)
+    orf_phage_targets = np.zeros((n, MAX_ORFS_PER_WIN), dtype=np.float32)
+    orf_phage_valid = np.zeros((n, MAX_ORFS_PER_WIN), dtype=np.float32)
+    orf_func_targets = np.zeros((n, MAX_ORFS_PER_WIN, NUM_FUNC_PARTITIONS), dtype=np.float32)
+    orf_func_valid = np.zeros((n, MAX_ORFS_PER_WIN), dtype=np.float32)
+
+    if use_functional:
+        func_path = Path(feature_dir) / f"{split}_{part}_functional.npz"
+        if func_path.exists():
+            has_functional_file = True
+            with np.load(func_path, allow_pickle=False) as fn_npz:
+                if "func_targets" in fn_npz and len(fn_npz["func_targets"]) == n:
+                    func_targets = fn_npz["func_targets"].astype(np.float32)
+                if "func_valid_mask" in fn_npz and len(fn_npz["func_valid_mask"]) == n:
+                    func_valid = fn_npz["func_valid_mask"].astype(np.float32)
+                if "orf_phage_targets" in fn_npz and len(fn_npz["orf_phage_targets"]) == n:
+                    orf_phage_targets = fn_npz["orf_phage_targets"].astype(np.float32)
+                if "orf_phage_valid" in fn_npz and len(fn_npz["orf_phage_valid"]) == n:
+                    orf_phage_valid = fn_npz["orf_phage_valid"].astype(np.float32)
+                if "orf_func_targets" in fn_npz and len(fn_npz["orf_func_targets"]) == n:
+                    orf_func_targets = fn_npz["orf_func_targets"].astype(np.float32)
+                if "orf_func_valid" in fn_npz and len(fn_npz["orf_func_valid"]) == n:
+                    orf_func_valid = fn_npz["orf_func_valid"].astype(np.float32)
+                if "sem_targets" in fn_npz and len(fn_npz["sem_targets"]) == n:
+                    # 严格使用客观三源 4D 语义替换旧版可能存在 y 依赖或 PHROG 回填污染的标签
+                    sem_targets = fn_npz["sem_targets"].astype(np.float32)
+                    sem_valid = np.ones(n, dtype=np.float32)
+                if "clean_labels" in fn_npz and len(fn_npz["clean_labels"]) == n:
+                    clean_labels = fn_npz["clean_labels"].astype(np.int8)
+
     fasta = _resolve_part_fasta(feature_dir, manifest_or_train_dir, split, part, fasta_override=fasta_override)
     codes, lengths = load_window_sequences(fasta, arrs["contig_ids"], arrs["starts"], arrs["ends"], max_len=max_len)
     return {
@@ -1222,6 +1390,13 @@ def _load_v4_part(
         "clean_labels": clean_labels,
         "sem_targets": sem_targets,
         "sem_valid": sem_valid,
+        "has_functional": has_functional_file,
+        "func_targets": func_targets,
+        "func_valid": func_valid,
+        "orf_phage_targets": orf_phage_targets,
+        "orf_phage_valid": orf_phage_valid,
+        "orf_func_targets": orf_func_targets,
+        "orf_func_valid": orf_func_valid,
     }
 
 
@@ -1265,11 +1440,15 @@ def train_distilled_student_v4(
     subbin_epochs: int = 16,
     enable_plateau_decoder: bool = True,
     use_semantic: bool = True,
+    use_functional: bool = False,
+    use_homoscedastic_loss: bool = False,
+    feature_profile: str = "v4",
     workers: Optional[int] = None,
     seed: int = 42,
 ) -> Dict[str, Any]:
-    """训练 V4 高容量三模态蒸馏学生模型、边界亚窗口精修头与跨窗上下文精修器并生成测试报告。"""
+    """训练 V4 高容量三模态蒸馏学生模型（可选 9D 客观功能分区蒸馏与 Kendall 自动加权）与跨窗上下文精修器并生成测试报告。"""
     import torch
+    import torch.nn.functional as F
     from sklearn.metrics import average_precision_score
 
     torch.manual_seed(seed)
@@ -1305,6 +1484,8 @@ def train_distilled_student_v4(
             workers,
             fasta_override=f_map.get(part),
             use_semantic=use_semantic,
+            use_functional=use_functional,
+            feature_profile=feature_profile,
         )
         n_p = len(pdata["clean_labels"])
         if n_p == 0:
@@ -1324,6 +1505,13 @@ def train_distilled_student_v4(
     clean_y_all = np.concatenate([p["clean_labels"] for p in loaded_parts])
     sem_t_all = np.concatenate([p["sem_targets"] for p in loaded_parts])
     sem_v_all = np.concatenate([p["sem_valid"] for p in loaded_parts])
+    has_func_data = bool(use_functional and any(p.get("has_functional", False) for p in loaded_parts))
+    func_t_all = np.concatenate([p["func_targets"] for p in loaded_parts]) if has_func_data else None
+    func_v_all = np.concatenate([p["func_valid"] for p in loaded_parts]) if has_func_data else None
+    orf_ph_t_all = np.concatenate([p["orf_phage_targets"] for p in loaded_parts]) if has_func_data else None
+    orf_ph_v_all = np.concatenate([p["orf_phage_valid"] for p in loaded_parts]) if has_func_data else None
+    orf_fn_t_all = np.concatenate([p["orf_func_targets"] for p in loaded_parts]) if has_func_data else None
+    orf_fn_v_all = np.concatenate([p["orf_func_valid"] for p in loaded_parts]) if has_func_data else None
     cids_all = np.concatenate([p["arrs"]["contig_ids"] for p in loaded_parts])
     starts_all = np.concatenate([p["arrs"]["starts"] for p in loaded_parts])
     ends_all = np.concatenate([p["arrs"]["ends"] for p in loaded_parts])
@@ -1367,8 +1555,14 @@ def train_distilled_student_v4(
     oof_sec = round(time.perf_counter() - t_oof0, 2)
 
     # 验证集与测试集准备（严禁使用任何测试数据进行训练/早停）
-    va_w = _load_v4_part(eval_feature_dir, bench_dir, "val", "windows", max_len, workers, use_semantic=False)
-    va_c = _load_v4_part(eval_feature_dir, bench_dir, "val", "chimeras", max_len, workers, use_semantic=False)
+    va_w = _load_v4_part(
+        eval_feature_dir, bench_dir, "val", "windows", max_len, workers,
+        use_semantic=False, feature_profile=feature_profile,
+    )
+    va_c = _load_v4_part(
+        eval_feature_dir, bench_dir, "val", "chimeras", max_len, workers,
+        use_semantic=False, feature_profile=feature_profile,
+    )
     va_codes = np.concatenate([va_w["codes"], va_c["codes"]])
     va_len = np.concatenate([va_w["lengths"], va_c["lengths"]])
     va_feats = np.concatenate([va_w["arrs"]["features"], va_c["arrs"]["features"]])
@@ -1392,6 +1586,16 @@ def train_distilled_student_v4(
     sem_v_tr = sem_v_all[use_row]
     sw_tr = sw_all[use_row]
 
+    func_t_tr = func_t_all[use_row] if (has_func_data and func_t_all is not None) else None
+    func_v_tr = func_v_all[use_row] if (has_func_data and func_v_all is not None) else None
+    orf_ph_t_tr = orf_ph_t_all[use_row] if (has_func_data and orf_ph_t_all is not None) else None
+    orf_ph_v_tr = orf_ph_v_all[use_row] if (has_func_data and orf_ph_v_all is not None) else None
+    orf_fn_t_tr = orf_fn_t_all[use_row] if (has_func_data and orf_fn_t_all is not None) else None
+    orf_fn_v_tr = orf_fn_v_all[use_row] if (has_func_data and orf_fn_v_all is not None) else None
+    del func_t_all, func_v_all, orf_ph_t_all, orf_ph_v_all, orf_fn_t_all, orf_fn_v_all
+    func_dim = NUM_FUNC_PARTITIONS if has_func_data else 0
+
+    orf_feat_dim = int(tokens_tr.shape[-1])
     valid_idx = y_tr >= 0
     feat_mean, feat_std = _normalize_feature_stats(feats_tr[valid_idx] if np.any(valid_idx) else feats_tr)
     model = build_distilled_student_v4(
@@ -1403,10 +1607,21 @@ def train_distilled_student_v4(
         orf_nhead=orf_nhead,
         orf_num_layers=orf_num_layers,
         fusion_dim=fusion_dim,
+        orf_feat_dim=orf_feat_dim,
+        func_dim=func_dim,
     ).to(device)
     n_params = int(sum(p.numel() for p in model.parameters()))
 
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
+    num_tasks = (6 if func_dim > 0 else 3) if use_homoscedastic_loss else 0
+    mt_loss_fn = (
+        HomoscedasticMultiTaskLoss(num_tasks=num_tasks, min_log_var=-3.0, max_log_var=3.0).to(device)
+        if use_homoscedastic_loss
+        else None
+    )
+    param_groups: List[Dict[str, Any]] = [{"params": list(model.parameters()), "weight_decay": 1e-2}]
+    if mt_loss_fn is not None:
+        param_groups.append({"params": list(mt_loss_fn.parameters()), "weight_decay": 0.0})
+    opt = torch.optim.AdamW(param_groups, lr=lr)
     steps_per_ep = max(1, int(np.ceil(len(y_tr) / batch_size)))
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=max(1, epochs * steps_per_ep))
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
@@ -1416,6 +1631,19 @@ def train_distilled_student_v4(
     pos_w = float(np.clip(neg_cnt / max(1.0, pos_cnt), 0.5, 4.0))
     sem_pos_weight = torch.tensor([1.5, 1.5, 2.0, 1.5], dtype=torch.float32, device=device)
     sem_loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=sem_pos_weight, reduction="none")
+
+    func_pos_weight_t = None
+    orf_ph_pos_w_t = None
+    if func_dim > 0 and func_t_tr is not None and func_v_tr is not None:
+        fn_pos = np.sum((func_t_tr > 0.5) * func_v_tr, axis=0)
+        fn_neg = np.sum((func_t_tr <= 0.5) * func_v_tr, axis=0)
+        fn_pw = np.clip(np.sqrt(fn_neg / np.maximum(1.0, fn_pos)), 1.0, 6.0).astype(np.float32)
+        func_pos_weight_t = torch.tensor(fn_pw, dtype=torch.float32, device=device)
+        if orf_ph_t_tr is not None and orf_ph_v_tr is not None:
+            op_pos = float(np.sum((orf_ph_t_tr > 0.5) * orf_ph_v_tr))
+            op_neg = float(np.sum((orf_ph_t_tr <= 0.5) * orf_ph_v_tr))
+            orf_ph_pos_w_t = torch.tensor([float(np.clip(np.sqrt(op_neg / max(1.0, op_pos)), 1.0, 5.0))], dtype=torch.float32, device=device)
+        logger.info(f"Stage 1.2 自动客观功能统计 pos_weight={np.round(fn_pw, 2).tolist()}")
 
     ckpt_path = out_root / "student_v4.pt"
     best_ap = -1.0
@@ -1428,6 +1656,8 @@ def train_distilled_student_v4(
     t0 = time.perf_counter()
     for ep in range(1, epochs + 1):
         model.train()
+        if mt_loss_fn is not None:
+            mt_loss_fn.train()
         order = rng.permutation(len(y_tr))
         ep_loss = 0.0
         for bi in range(steps_per_ep):
@@ -1449,6 +1679,7 @@ def train_distilled_student_v4(
             cn_t = torch.from_numpy(counts_tr[idx].astype(np.int64)).to(device)
 
             # 轻量模态随机丢弃（Modality Dropout）：随机将少数样本 Tabular 或 ORF 屏蔽，增强纯 DNA 分支表征
+            orf_keep_for_loss = None
             if modality_dropout_prob > 0.0:
                 m_drop = rng.random(len(idx))
                 orf_drop = m_drop < modality_dropout_prob
@@ -1457,6 +1688,7 @@ def train_distilled_student_v4(
                     od_t = torch.from_numpy(orf_drop).to(device)
                     cn_t = torch.where(od_t, torch.zeros_like(cn_t), cn_t)
                     tk_t = torch.where(od_t[:, None, None], torch.zeros_like(tk_t), tk_t)
+                    orf_keep_for_loss = (~od_t).to(torch.float32)
                 if np.any(tab_drop):
                     td_t = torch.from_numpy(tab_drop).to(device)
                     tb_t = torch.where(td_t[:, None], model.feat_mean.unsqueeze(0).expand_as(tb_t), tb_t)
@@ -1469,6 +1701,17 @@ def train_distilled_student_v4(
             st_t = torch.from_numpy(sem_t_tr[idx]).to(device)
             sv_t = torch.from_numpy(sem_v_tr[idx]).to(device)
             wb = torch.from_numpy(sw_tr[idx]).to(device)
+
+            if func_dim > 0 and func_t_tr is not None:
+                fn_t = torch.from_numpy(func_t_tr[idx]).to(device)
+                fn_v = torch.from_numpy(func_v_tr[idx]).to(device)
+                op_t = torch.from_numpy(orf_ph_t_tr[idx]).to(device)
+                op_v = torch.from_numpy(orf_ph_v_tr[idx]).to(device)
+                of_t = torch.from_numpy(orf_fn_t_tr[idx]).to(device)
+                of_v = torch.from_numpy(orf_fn_v_tr[idx]).to(device)
+                if orf_keep_for_loss is not None:
+                    op_v = op_v * orf_keep_for_loss[:, None]
+                    of_v = of_v * orf_keep_for_loss[:, None]
 
             opt.zero_grad(set_to_none=True)
             with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
@@ -1483,16 +1726,46 @@ def train_distilled_student_v4(
                 l_kd = _kd_bce_loss(
                     w_logit, tp, temperature=temperature, valid_mask=win_valid, sample_weight=wb,
                 )
+                l_win = (1.0 - distill_alpha) * l_hard + distill_alpha * l_kd
                 l_sub = _sub_bce_dice_loss(s_logits, sb, sample_weight=wb)
                 sem_elem = sem_loss_fn(sem_logits, st_t).mean(dim=1)
                 sem_eff = sv_t * wb
                 l_sem = (sem_elem * sem_eff).sum() / sem_eff.sum().clamp(min=1e-4)
 
-                loss = (1.0 - distill_alpha) * l_hard + distill_alpha * l_kd + sub_weight * l_sub + sem_weight * l_sem
+                func_losses: List[torch.Tensor] = []
+                if func_dim > 0 and func_t_tr is not None:
+                    fn_bce = F.binary_cross_entropy_with_logits(
+                        out_d["func_logits"].float(), fn_t, pos_weight=func_pos_weight_t, reduction="none",
+                    )
+                    fn_eff = fn_v * wb[:, None]
+                    l_win_func = (fn_bce * fn_eff).sum() / fn_eff.sum().clamp(min=1e-4)
+
+                    op_bce = F.binary_cross_entropy_with_logits(
+                        out_d["orf_phage_logits"].float(), op_t, pos_weight=orf_ph_pos_w_t[0], reduction="none",
+                    )
+                    op_eff = op_v * wb[:, None]
+                    l_orf_phage = (op_bce * op_eff).sum() / op_eff.sum().clamp(min=1e-4)
+
+                    of_bce = F.binary_cross_entropy_with_logits(
+                        out_d["orf_func_logits"].float(), of_t, pos_weight=func_pos_weight_t, reduction="none",
+                    )
+                    of_eff = of_v[:, :, None] * wb[:, None, None]
+                    l_orf_func = (of_bce * of_eff).sum() / of_eff.sum().clamp(min=1e-4)
+                    func_losses = [l_win_func, l_orf_phage, l_orf_func]
+
+            if mt_loss_fn is not None:
+                task_list = [l_win.float(), l_sub.float(), l_sem.float(), *[x.float() for x in func_losses]]
+                loss = mt_loss_fn(task_list)
+            else:
+                loss = l_win + sub_weight * l_sub + sem_weight * l_sem
+                if func_losses:
+                    loss = loss + 0.25 * (func_losses[0] + func_losses[1] + func_losses[2]) / 3.0
 
             cast(torch.Tensor, scaler.scale(loss)).backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if mt_loss_fn is not None:
+                torch.nn.utils.clip_grad_norm_(mt_loss_fn.parameters(), 1.0)
             scale_before = scaler.get_scale()
             scaler.step(opt)
             scaler.update()
@@ -1505,8 +1778,21 @@ def train_distilled_student_v4(
             batch_size=max(64, batch_size),
         )
         ap = float(average_precision_score(va_y[va_keep], va_pred["win_probs"])) if has_two_va else -ep_loss
-        history.append({"epoch": ep, "train_loss": round(ep_loss / max(1, len(y_tr)), 5), "val_auprc": round(ap, 5)})
-        logger.info(f"StudentV4 epoch {ep}: loss={ep_loss / max(1, len(y_tr)):.4f} val_auprc={ap:.4f}")
+        ep_entry: Dict[str, Any] = {
+            "epoch": ep,
+            "train_loss": round(ep_loss / max(1, len(y_tr)), 5),
+            "val_auprc": round(ap, 5),
+        }
+        if mt_loss_fn is not None:
+            with torch.no_grad():
+                tw = torch.exp(-torch.clamp(mt_loss_fn.log_vars, mt_loss_fn.min_log_var, mt_loss_fn.max_log_var)).cpu().numpy()
+            ep_entry["task_precisions"] = [round(float(x), 4) for x in tw]
+            logger.info(
+                f"StudentV4 epoch {ep}: loss={ep_loss / max(1, len(y_tr)):.4f} val_auprc={ap:.4f} task_prec={ep_entry['task_precisions']}"
+            )
+        else:
+            logger.info(f"StudentV4 epoch {ep}: loss={ep_loss / max(1, len(y_tr)):.4f} val_auprc={ap:.4f}")
+        history.append(ep_entry)
         if device.type == "cuda":
             torch.cuda.empty_cache()
         if ap > best_ap or best_ep < 0:
@@ -1522,6 +1808,10 @@ def train_distilled_student_v4(
     train_sec = round(time.perf_counter() - t0, 2)
     peak_mb = round(torch.cuda.max_memory_allocated() / (1024 * 1024), 1) if device.type == "cuda" else 0.0
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
+    learned_task_weights = history[best_ep - 1].get("task_precisions") if (best_ep >= 1 and best_ep <= len(history)) else None
+    del func_t_tr, func_v_tr, orf_ph_t_tr, orf_ph_v_tr, orf_fn_t_tr, orf_fn_v_tr
+    if mt_loss_fn is not None:
+        del mt_loss_fn
 
     sub_tune_info: Dict[str, Any] = {"enabled": False}
     if tune_sub_head:
@@ -1558,8 +1848,14 @@ def train_distilled_student_v4(
     va_c_pred = _predict_v4_all(
         model, va_c["codes"], va_c["lengths"], va_c["arrs"]["features"], va_c["tokens"], va_c["counts"], device,
     )
-    te_w = _load_v4_part(eval_feature_dir, bench_dir, "test", "windows", max_len, workers, use_semantic=False)
-    te_c = _load_v4_part(eval_feature_dir, bench_dir, "test", "chimeras", max_len, workers, use_semantic=False)
+    te_w = _load_v4_part(
+        eval_feature_dir, bench_dir, "test", "windows", max_len, workers,
+        use_semantic=False, feature_profile=feature_profile,
+    )
+    te_c = _load_v4_part(
+        eval_feature_dir, bench_dir, "test", "chimeras", max_len, workers,
+        use_semantic=False, feature_profile=feature_profile,
+    )
 
     t_inf0 = time.perf_counter()
     te_w_pred = _predict_v4_all(
@@ -1598,18 +1894,60 @@ def train_distilled_student_v4(
         )
 
     if train_refiner and tr_c_pred is not None:
-        tr_sf = extract_refiner_step_features(
-            tr_c_pred["win_logits"], tr_c_pred["sem_logits"], tr_c_pred["sub_probs"], len_all[refiner_mask_all], max_len=max_len,
+        tr_sf_clean = extract_refiner_step_features(
+            tr_c_pred["win_logits"],
+            tr_c_pred["sem_logits"],
+            tr_c_pred["sub_probs"],
+            len_all[refiner_mask_all],
+            max_len=max_len,
+            func_logits=tr_c_pred.get("func_logits"),
         )
+        # 构造真实无泄露 OOD 扰动视图（屏蔽部分 Tabular/ORF 模态）消除长训学生过拟合引起的 Refiner 暴露偏差
+        tr_c_pred_ood = _predict_v4_all(
+            model,
+            codes_all[refiner_mask_all],
+            len_all[refiner_mask_all],
+            feats_all[refiner_mask_all],
+            tokens_all[refiner_mask_all],
+            counts_all[refiner_mask_all],
+            device,
+            drop_tabular_prob=0.25,
+            drop_orf_prob=0.15,
+            seed=seed + 101,
+        )
+        tr_sf_ood = extract_refiner_step_features(
+            tr_c_pred_ood["win_logits"],
+            tr_c_pred_ood["sem_logits"],
+            tr_c_pred_ood["sub_probs"],
+            len_all[refiner_mask_all],
+            max_len=max_len,
+            func_logits=tr_c_pred_ood.get("func_logits"),
+        )
+        tr_sf = np.concatenate([tr_sf_clean, tr_sf_ood], axis=0)
+        tr_wl = np.concatenate([tr_c_pred["win_logits"], tr_c_pred_ood["win_logits"]], axis=0)
+        tr_y_ref = np.concatenate([clean_y_all[refiner_mask_all], clean_y_all[refiner_mask_all]], axis=0)
+        tr_cids_ref = np.concatenate([cids_all[refiner_mask_all], cids_all[refiner_mask_all]], axis=0)
+        tr_starts_ref = np.concatenate([starts_all[refiner_mask_all], starts_all[refiner_mask_all]], axis=0)
+        tr_tags_ref = np.concatenate([
+            part_tags_all[refiner_mask_all],
+            np.array([f"ood::{t}" for t in part_tags_all[refiner_mask_all]], dtype=object),
+        ], axis=0)
+        del tr_c_pred_ood, tr_sf_clean, tr_sf_ood
+
         va_sf = extract_refiner_step_features(
-            va_c_pred["win_logits"], va_c_pred["sem_logits"], va_c_pred["sub_probs"], va_c["lengths"], max_len=max_len,
+            va_c_pred["win_logits"],
+            va_c_pred["sem_logits"],
+            va_c_pred["sub_probs"],
+            va_c["lengths"],
+            max_len=max_len,
+            func_logits=va_c_pred.get("func_logits"),
         )
         refiner, r_rep = train_context_refiner(
             tr_sf,
-            tr_c_pred["win_logits"],
-            clean_y_all[refiner_mask_all],
-            cids_all[refiner_mask_all],
-            starts_all[refiner_mask_all],
+            tr_wl,
+            tr_y_ref,
+            tr_cids_ref,
+            tr_starts_ref,
             va_sf,
             va_c_pred["win_logits"],
             va_c["orig_labels"],
@@ -1618,8 +1956,9 @@ def train_distilled_student_v4(
             out_path=refiner_ckpt,
             epochs=refiner_epochs,
             seed=seed,
-            tr_source_tags=part_tags_all[refiner_mask_all],
+            tr_source_tags=tr_tags_ref,
         )
+        del tr_sf, tr_wl, tr_y_ref, tr_cids_ref, tr_starts_ref, tr_tags_ref
         refiner_info = {"enabled": True, "ckpt_path": str(refiner_ckpt), **r_rep}
 
     va_chim_raw_sc = va_c_pred["win_probs"]
@@ -1627,10 +1966,12 @@ def train_distilled_student_v4(
     va_chim_ref_sc = predict_with_context_refiner(
         refiner, va_c_pred["win_logits"], va_c_pred["sem_logits"], va_c_pred["sub_probs"],
         va_c["lengths"], va_c["arrs"]["contig_ids"], va_c["arrs"]["starts"], device, max_len=max_len,
+        func_logits=va_c_pred.get("func_logits"),
     ) if refiner is not None else va_chim_raw_sc
     te_chim_ref_sc = predict_with_context_refiner(
         refiner, te_c_pred["win_logits"], te_c_pred["sem_logits"], te_c_pred["sub_probs"],
         te_c["lengths"], te_c["arrs"]["contig_ids"], te_c["arrs"]["starts"], device, max_len=max_len,
+        func_logits=te_c_pred.get("func_logits"),
     ) if refiner is not None else te_chim_raw_sc
 
     va_subbin_profiles = None
@@ -1644,7 +1985,7 @@ def train_distilled_student_v4(
             len_all[refiner_mask_all],
             np.array([f"{t}::{c}" for t, c in zip(part_tags_all[refiner_mask_all], cids_all[refiner_mask_all])], dtype=object),
             starts_all[refiner_mask_all],
-            device, max_len=max_len,
+            device, max_len=max_len, func_logits=tr_c_pred.get("func_logits"),
         ) if refiner is not None else tr_c_pred["win_probs"]
 
         tr_orf_bins = project_orf_to_25bins(
@@ -1782,7 +2123,9 @@ def train_distilled_student_v4(
 
     meta = {
         "model_version": "v4",
+        "feature_profile": feature_profile,
         "feat_dim": int(feat_std.shape[0]),
+        "orf_feat_dim": orf_feat_dim,
         "max_len": max_len,
         "dna_channels": dna_channels,
         "orf_d_model": orf_d_model,
@@ -1790,6 +2133,9 @@ def train_distilled_student_v4(
         "orf_num_layers": orf_num_layers,
         "fusion_dim": fusion_dim,
         "sem_dim": SEMANTIC_DIM,
+        "func_dim": int(func_dim),
+        "func_partition_names": list(FUNCTIONAL_PARTITION_NAMES) if func_dim > 0 else [],
+        "use_homoscedastic_loss": bool(use_homoscedastic_loss),
         "use_context_refiner": bool(refiner_info["enabled"]),
         "refiner_arch": refiner_info.get("refiner_arch", "v2" if refiner_info["enabled"] else "none"),
         "refiner_ckpt": str(refiner_ckpt) if refiner_info["enabled"] else None,
@@ -1806,7 +2152,7 @@ def train_distilled_student_v4(
 
     active_dec = decoder_ref if refiner_info["enabled"] else decoder_raw
     report: Dict[str, Any] = {
-        "model_name": "StudentV4_TriModal_MaskedSemantic",
+        "model_name": "StudentV4_TriModal_FunctionalDistilled" if func_dim > 0 else "StudentV4_TriModal_MaskedSemantic",
         "model_version": "v4",
         "trained_at": datetime.now().isoformat(timespec="seconds"),
         "device": str(device),
@@ -1822,6 +2168,7 @@ def train_distilled_student_v4(
         "est_sec_per_5mb": est_sec_per_5mb,
         "best_epoch": best_ep,
         "best_val_auprc": round(best_ap, 5),
+        "learned_task_weights": learned_task_weights,
         "history": history,
         "sub_head_refinement": sub_tune_info,
         "context_refiner": refiner_info,

@@ -25,6 +25,7 @@ from ..benchmark.metrics import (
     decode_subwindow_probs_to_regions,
 )
 from ..data.feature_dataset import iter_fasta
+from ..data.functional_partitions import FUNCTIONAL_PARTITION_NAMES
 from ..experts.expert_c_orf import extract_contig_orf_tokens
 from ..experts.seq_dataset import encode_dna, reverse_complement_codes
 from ..features.window_features import FEATURE_NAMES, SUB_BINS, extract_contig_windows
@@ -46,6 +47,7 @@ from ..student.subbin_refiner import (
 from .protein_gate import ProteinGateConfig, RegionGateResult, evaluate_regions_with_protein_gate
 
 logger = logging.getLogger("phage_discovery.inference.scanner")
+_UNSET_ARG: Any = object()
 
 
 @dataclass
@@ -61,6 +63,7 @@ class ScanResult:
     timings_sec: Dict[str, float] = field(default_factory=dict)
     region_profiles: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
     contig_score_tracks: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    region_functional_modules: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
 def _collect_region_profiles(
@@ -124,6 +127,162 @@ def _collect_region_profiles(
     return profiles_out
 
 
+def _collect_region_functional_modules(
+    win_preds: Sequence[WindowPrediction],
+    regions: Sequence[PredictedRegion],
+    func_aux: Optional[Dict[str, np.ndarray]],
+    orf_tokens: Optional[np.ndarray],
+    orf_counts: Optional[np.ndarray],
+    *,
+    module_threshold: float = 0.45,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    依据 9D 功能分区蒸馏预测汇总每个识别区段的高级功能组成（区段级模块分布 + 逐 ORF 功能解析），
+    为后续噬菌体生活方式推断、尾丝/裂解酶提取与 MGE 去噪等高级识别处理预留标准化结果接口。
+    """
+    if not regions or not win_preds or not func_aux or "func_logits" not in func_aux:
+        return {}
+
+    from collections import defaultdict
+
+    func_logits = func_aux["func_logits"]
+    func_probs = 1.0 / (1.0 + np.exp(-np.clip(func_logits, -20.0, 20.0)))
+    orf_phage_probs = func_aux.get("orf_phage_probs")
+    orf_func_probs = func_aux.get("orf_func_probs")
+
+    by_contig: Dict[str, List[int]] = defaultdict(list)
+    for wi, wp in enumerate(win_preds):
+        by_contig[wp.contig_id].append(wi)
+
+    n_names = len(FUNCTIONAL_PARTITION_NAMES)
+    out: Dict[str, Dict[str, Any]] = {}
+    for reg in regions:
+        key = f"{reg.contig_id}:{reg.start_bp}-{reg.end_bp}"
+        w_idxs = by_contig.get(reg.contig_id, [])
+        if not w_idxs:
+            continue
+
+        weighted_probs = np.zeros(n_names, dtype=np.float64)
+        w_sum = 0.0
+        orf_best: Dict[Tuple[int, int, int], Dict[str, Any]] = {}
+
+        for wi in w_idxs:
+            wp = win_preds[wi]
+            ov_bp = min(reg.end_bp, wp.end_bp) - max(reg.start_bp, wp.start_bp)
+            if ov_bp <= 0:
+                continue
+            weight = float(ov_bp) * max(0.05, wp.score)
+            fp = func_probs[wi]
+            weighted_probs += fp[:n_names] * weight
+            w_sum += weight
+
+            if (
+                orf_tokens is not None
+                and orf_counts is not None
+                and orf_phage_probs is not None
+                and orf_func_probs is not None
+            ):
+                cnt = min(orf_tokens.shape[1], int(orf_counts[wi]))
+                w_len = max(1.0, float(wp.end_bp - wp.start_bp))
+                for k in range(cnt):
+                    rel_s = float(orf_tokens[wi, k, 6])
+                    rel_e = float(orf_tokens[wi, k, 7])
+                    gs = round(wp.start_bp + rel_s * w_len)
+                    ge = round(wp.start_bp + rel_e * w_len)
+                    if ge <= reg.start_bp or gs >= reg.end_bp or ge <= gs:
+                        continue
+                    strand = 1 if float(orf_tokens[wi, k, 1]) >= 0.0 else -1
+                    ph_p = float(orf_phage_probs[wi, k])
+                    f_vec = orf_func_probs[wi, k, :n_names].astype(float)
+                    o_key = (gs, ge, strand)
+                    # 若 ORF 被多个相邻滑窗覆盖，优先保留中心化程度最高的窗口预测
+                    center_dist = abs(0.5 * (rel_s + rel_e) - 0.5)
+                    prev_rec = orf_best.get(o_key)
+                    if prev_rec is None or center_dist < prev_rec["_cdist"]:
+                        top_idx = int(np.argmax(f_vec))
+                        orf_best[o_key] = {
+                            "_cdist": center_dist,
+                            "start_bp": gs,
+                            "end_bp": ge,
+                            "strand": strand,
+                            "phage_ortholog_prob": round(ph_p, 4),
+                            "top_module": FUNCTIONAL_PARTITION_NAMES[top_idx] if float(f_vec[top_idx]) >= module_threshold else ("phage_unknown" if ph_p >= 0.5 else "unassigned"),
+                            "top_module_prob": round(float(f_vec[top_idx]), 4),
+                            "func_probs": {name: round(float(f_vec[m_i]), 4) for m_i, name in enumerate(FUNCTIONAL_PARTITION_NAMES)},
+                        }
+
+        if w_sum <= 0.0:
+            continue
+        mean_probs = weighted_probs / w_sum
+        orfs_sorted = [
+            {k: v for k, v in rec.items() if k != "_cdist"}
+            for _, rec in sorted(orf_best.items(), key=lambda item: item[0][0])
+        ]
+        orf_max_vec = np.zeros(n_names, dtype=np.float64)
+        orf_module_counts: Dict[str, int] = {name: 0 for name in FUNCTIONAL_PARTITION_NAMES}
+        if orfs_sorted:
+            for rec in orfs_sorted:
+                fp_map = rec["func_probs"]
+                for mi, name in enumerate(FUNCTIONAL_PARTITION_NAMES):
+                    v = float(fp_map.get(name, 0.0))
+                    if v > orf_max_vec[mi]:
+                        orf_max_vec[mi] = v
+                top_mod = str(rec.get("top_module", ""))
+                if top_mod in orf_module_counts:
+                    orf_module_counts[top_mod] += 1
+            module_scores = {
+                name: round(float(0.4 * mean_probs[mi] + 0.6 * orf_max_vec[mi]), 4)
+                for mi, name in enumerate(FUNCTIONAL_PARTITION_NAMES)
+            }
+        else:
+            module_scores = {
+                name: round(float(mean_probs[mi]), 4)
+                for mi, name in enumerate(FUNCTIONAL_PARTITION_NAMES)
+            }
+
+        active_modules = [
+            name for mi, name in enumerate(FUNCTIONAL_PARTITION_NAMES[:8])
+            if module_scores[name] >= module_threshold
+            and (
+                not orfs_sorted
+                or orf_module_counts.get(name, 0) >= 1
+                or float(orf_max_vec[mi]) >= module_threshold
+            )
+        ]
+        if orfs_sorted:
+            confirmed_struct = [
+                m for m in ("head_packaging", "connector", "tail")
+                if m in active_modules and orf_module_counts.get(m, 0) >= 1
+            ]
+            has_structural_core = len(confirmed_struct) > 0
+            completeness_hint = (
+                "complete_structural_core"
+                if (len(confirmed_struct) >= 2 and "head_packaging" in confirmed_struct)
+                else "cryptic_or_incomplete"
+            )
+        else:
+            struct_core_cnt = sum(m in active_modules for m in ("head_packaging", "connector", "tail"))
+            has_structural_core = struct_core_cnt > 0
+            completeness_hint = (
+                "complete_structural_core"
+                if (struct_core_cnt >= 2 and "head_packaging" in active_modules)
+                else "cryptic_or_incomplete"
+            )
+        out[key] = {
+            "module_scores": module_scores,
+            "active_modules": active_modules,
+            "orf_module_counts": orf_module_counts,
+            "has_structural_core": has_structural_core,
+            "has_lysis_module": "lysis" in active_modules,
+            "structural_completeness_hint": completeness_hint,
+            "lifestyle_hint": "temperate_candidate" if "integration_excision" in active_modules else "lytic_or_cryptic",
+            "mge_contamination_score": module_scores.get("transposon_plasmid_mge", 0.0),
+            "orf_count": len(orfs_sorted),
+            "orfs": orfs_sorted,
+        }
+    return out
+
+
 def _collect_contig_score_tracks(
     win_preds: Sequence[WindowPrediction],
     contigs_bp: Dict[str, int],
@@ -155,7 +314,7 @@ def _collect_contig_score_tracks(
         for wp in wps:
             b0 = max(0, min(actual_bins - 1, int(float(wp.start_bp) / bin_step)))
             b1 = max(b0, min(actual_bins - 1, int(float(max(wp.start_bp, wp.end_bp - 1)) / bin_step)))
-            sc = float(wp.score)
+            sc = wp.score
             for bi in range(b0, b1 + 1):
                 if sc > max_scores[bi]:
                     max_scores[bi] = sc
@@ -182,14 +341,38 @@ def _collect_contig_score_tracks(
     return tracks
 
 
-def _extract_contig_worker(args: Tuple[str, str, int, int, bool]) -> Dict[str, Any]:
-    cid, seq, win_size, step_size, extract_orfs = args
-    res = extract_contig_windows(cid, seq, win_size=win_size, step_size=step_size, truth_regions=None)
+def _extract_contig_worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
+    if len(args) == 6:
+        cid, seq, win_size, step_size, extract_orfs, feature_profile = args
+    else:
+        cid, seq, win_size, step_size, extract_orfs = args
+        feature_profile = "v4"
+    res = extract_contig_windows(
+        cid, seq, win_size=win_size, step_size=step_size, truth_regions=None, feature_profile=feature_profile,
+    )
     if extract_orfs:
-        tk, cn = extract_contig_orf_tokens(seq, res["starts"], res["ends"])
+        tk, cn = extract_contig_orf_tokens(seq, res["starts"], res["ends"], feature_profile=feature_profile)
         res["orf_tokens"] = tk
         res["orf_counts"] = cn
     return res
+
+
+def _first_existing_file(root: Path, names: Sequence[str]) -> Optional[Path]:
+    """按候选顺序返回目录中首个存在的文件路径。"""
+    for name in names:
+        cand = root / name
+        if cand.exists():
+            return cand
+    return None
+
+
+def resolve_model_dir_files(model_dir: Path) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
+    """统一解析模型目录中的权重、元信息与评估报告路径（优先识别 Stage 1.2，兼容 V4 命名）。"""
+    root = Path(model_dir).resolve()
+    weights = _first_existing_file(root, ("stage1_2.pt", "student_v4.pt"))
+    meta = _first_existing_file(root, ("stage1_2_meta.json", "student_v4_meta.json"))
+    report = _first_existing_file(root, ("stage1_2_report.json", "student_v4_report.json", "student_report.json"))
+    return weights, meta, report
 
 
 class GenomeScanner:
@@ -223,15 +406,15 @@ class GenomeScanner:
         import torch
 
         self.model_pt_path = Path(model_pt_path).resolve()
-        self.seed_threshold = float(seed_threshold)
-        self.extend_threshold = float(extend_threshold)
-        self.sub_threshold = float(sub_threshold)
+        self.seed_threshold = seed_threshold
+        self.extend_threshold = extend_threshold
+        self.sub_threshold = sub_threshold
         self.merge_gap_bp = merge_gap_bp
         self.min_region_bp = min_region_bp
         self.win_size = win_size
         self.step_size = step_size
         self.plateau_min_windows = plateau_min_windows
-        self.plateau_second_threshold = float(plateau_second_threshold) if plateau_second_threshold is not None else None
+        self.plateau_second_threshold = plateau_second_threshold if plateau_second_threshold is not None else None
         self.refine_pad_bp = refine_pad_bp
         self.smooth_sub_profile = smooth_sub_profile
         self.blast_db = Path(blast_db) if blast_db else None
@@ -245,17 +428,34 @@ class GenomeScanner:
         else:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        resolved_meta = Path(meta_path).resolve() if meta_path is not None else (self.model_pt_path.parent / "student_v4_meta.json")
+        resolved_meta = (
+            Path(meta_path).resolve()
+            if meta_path is not None
+            else (_first_existing_file(self.model_pt_path.parent, ("stage1_2_meta.json", "student_v4_meta.json")) or (self.model_pt_path.parent / "student_v4_meta.json"))
+        )
         self.model_version = "v3"
+        self.feature_profile = "v4"
+        self.orf_feat_dim = 30
+        self.func_dim = 0
+        self._last_func_aux: Optional[Dict[str, np.ndarray]] = None
         self.model: Any
         self.refiner: Any = None
         self.subbin_refiner: Any = None
-        if resolved_meta.exists() or self.model_pt_path.name == "student_v4.pt":
+        if resolved_meta.exists() or self.model_pt_path.name in ("stage1_2.pt", "student_v4.pt"):
             meta = json.loads(resolved_meta.read_text(encoding="utf-8")) if resolved_meta.exists() else {}
             feat_dim = int(meta.get("feat_dim", len(FEATURE_NAMES)))
+            self.feature_profile = str(
+                meta.get("feature_profile", "stage1" if feat_dim > len(FEATURE_NAMES) else "v4")
+            )
+            self.orf_feat_dim = int(meta.get("orf_feat_dim", 117 if self.feature_profile == "stage1" else 30))
             dummy_mean = np.zeros(feat_dim, dtype=np.float32)
             dummy_std = np.ones(feat_dim, dtype=np.float32)
             self.model_version = "v4"
+            state = torch.load(self.model_pt_path, map_location=self.device, weights_only=True)
+            func_dim = int(meta.get("func_dim", 0))
+            if func_dim == 0 and "func_head.2.weight" in state:
+                func_dim = int(state["func_head.2.weight"].shape[0])
+            self.func_dim = func_dim
             self.model = build_distilled_student_v4(
                 feat_dim,
                 dummy_mean,
@@ -266,8 +466,9 @@ class GenomeScanner:
                 orf_num_layers=int(meta.get("orf_num_layers", 3)),
                 fusion_dim=int(meta.get("fusion_dim", 256)),
                 sem_dim=int(meta.get("sem_dim", 4)),
+                orf_feat_dim=self.orf_feat_dim,
+                func_dim=func_dim,
             ).to(self.device)
-            state = torch.load(self.model_pt_path, map_location=self.device, weights_only=True)
             self.model.load_state_dict(state)
             self.model.eval()
 
@@ -323,24 +524,40 @@ class GenomeScanner:
         sub_threshold: Optional[float] = None,
         merge_gap_bp: Optional[int] = None,
         min_region_bp: Optional[int] = None,
+        plateau_min_windows: Optional[int] = None,
+        plateau_second_threshold: Any = _UNSET_ARG,
+        refine_pad_bp: Optional[int] = None,
+        smooth_sub_profile: Any = _UNSET_ARG,
     ) -> "GenomeScanner":
-        """从模型输出目录自动检测 V4/V3/V2 模型权重与 val 标定阈值（支持覆盖核心阈值）。"""
+        """从模型输出目录自动检测 V4/V3/V2 模型权重与 val 标定阈值（支持覆盖核心阈值与 plateau 解码参数）。"""
         import json
 
         root = Path(model_dir).resolve()
-        v4_meta = root / "student_v4_meta.json"
-        v4_pt = root / "student_v4.pt"
-        if v4_meta.exists() and v4_pt.exists():
-            rep_path = root / "student_v4_report.json"
-            if not rep_path.exists():
-                rep_path = root / "student_report.json"
+        v4_pt, v4_meta, resolved_rep = resolve_model_dir_files(root)
+        if v4_meta is not None and v4_pt is not None and v4_meta.exists() and v4_pt.exists():
             dec: Dict[str, Any] = {}
-            if rep_path.exists():
-                rep = json.loads(rep_path.read_text(encoding="utf-8"))
+            if resolved_rep is not None and resolved_rep.exists():
+                rep = json.loads(resolved_rep.read_text(encoding="utf-8"))
                 if use_context_refiner is False and rep.get("decoder_raw_on_val"):
                     dec = rep["decoder_raw_on_val"]
                 else:
                     dec = rep.get("decoder_tuned_on_val") or {}
+
+            p_min_win = int(
+                plateau_min_windows
+                if plateau_min_windows is not None
+                else (dec.get("plateau_min_windows") or 0)
+            )
+            if plateau_second_threshold is not _UNSET_ARG:
+                p_sec_thr = plateau_second_threshold
+            elif plateau_min_windows is not None and p_min_win <= 0:
+                p_sec_thr = None
+            else:
+                p_sec_thr = dec.get("plateau_second_threshold")
+
+            r_pad_bp = refine_pad_bp if refine_pad_bp is not None else dec.get("refine_pad_bp")
+            s_prof = dec.get("smooth_profile") if smooth_sub_profile is _UNSET_ARG else smooth_sub_profile
+
             return cls(
                 model_pt_path=v4_pt,
                 meta_path=v4_meta,
@@ -351,10 +568,10 @@ class GenomeScanner:
                 sub_threshold=float(sub_threshold if sub_threshold is not None else dec.get("sub_threshold", 0.45)),
                 merge_gap_bp=merge_gap_bp if merge_gap_bp is not None else 3000,
                 min_region_bp=min_region_bp if min_region_bp is not None else 3000,
-                plateau_min_windows=int(dec.get("plateau_min_windows", 0)),
-                plateau_second_threshold=dec.get("plateau_second_threshold"),
-                refine_pad_bp=dec.get("refine_pad_bp"),
-                smooth_sub_profile=dec.get("smooth_profile"),
+                plateau_min_windows=p_min_win,
+                plateau_second_threshold=p_sec_thr,
+                refine_pad_bp=r_pad_bp,
+                smooth_sub_profile=s_prof,
                 blast_db=blast_db,
                 blastp_bin=blastp_bin,
                 gate_config=gate_config,
@@ -393,9 +610,11 @@ class GenomeScanner:
         contig_ids: Optional[np.ndarray] = None,
         starts: Optional[np.ndarray] = None,
         ends: Optional[np.ndarray] = None,
+        return_orf_preds: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray, Optional[Dict[str, List[Tuple[int, np.ndarray]]]]]:
         import torch
 
+        self._last_func_aux = None
         n = len(feats)
         out = np.zeros(n, dtype=np.float32)
         out_sub = np.zeros((n, SUB_BINS), dtype=np.float32)
@@ -404,12 +623,26 @@ class GenomeScanner:
 
         if self.model_version == "v4":
             if orf_tokens is None or orf_counts is None:
-                from ..experts.expert_c_orf import MAX_ORFS_PER_WIN, ORF_FEAT_DIM
-                orf_tokens = np.zeros((n, MAX_ORFS_PER_WIN, ORF_FEAT_DIM), dtype=np.float32)
+                from ..experts.expert_c_orf import MAX_ORFS_PER_WIN
+                orf_tokens = np.zeros((n, MAX_ORFS_PER_WIN, self.orf_feat_dim), dtype=np.float32)
                 orf_counts = np.zeros(n, dtype=np.int32)
             pred = _predict_v4_all(
-                self.model, codes, lengths, feats, orf_tokens, orf_counts, self.device, batch_size=batch_size,
+                self.model,
+                codes,
+                lengths,
+                feats,
+                orf_tokens,
+                orf_counts,
+                self.device,
+                batch_size=batch_size,
+                return_orf_preds=return_orf_preds,
             )
+            if return_orf_preds and self.func_dim > 0 and "func_logits" in pred:
+                self._last_func_aux = {
+                    k: pred[k]
+                    for k in ("func_logits", "orf_phage_probs", "orf_func_probs")
+                    if k in pred
+                }
             win_scores = pred["win_probs"]
             if self.refiner is not None and contig_ids is not None and starts is not None:
                 win_scores = predict_with_context_refiner(
@@ -422,6 +655,7 @@ class GenomeScanner:
                     starts,
                     self.device,
                     max_len=codes.shape[1],
+                    func_logits=pred.get("func_logits"),
                 )
             sub_probs = pred["sub_probs"]
             subbin_profiles: Optional[Dict[str, List[Tuple[int, np.ndarray]]]] = None
@@ -508,6 +742,8 @@ class GenomeScanner:
         hit_fetcher: Optional[Callable[[Sequence[Tuple[str, str]]], Dict[str, Tuple[float, str]]]] = None,
         collect_profiles: bool = False,
         profile_flank_bp: int = 2000,
+        collect_functional_partitions: bool = False,
+        functional_module_threshold: float = 0.45,
     ) -> ScanResult:
         """对内存中给定的 contig 字典执行双阶段扫描。"""
         t_feat0 = time.perf_counter()
@@ -515,7 +751,10 @@ class GenomeScanner:
         total_bp = sum(contigs_bp.values())
 
         extract_orfs = self.model_version == "v4"
-        tasks = [(cid, seq, self.win_size, self.step_size, extract_orfs) for cid, seq in contig_seqs.items()]
+        tasks = [
+            (cid, seq, self.win_size, self.step_size, extract_orfs, self.feature_profile)
+            for cid, seq in contig_seqs.items()
+        ]
         extracted: List[Dict[str, Any]] = []
         if len(tasks) > 1 and self.workers > 1:
             with concurrent.futures.ProcessPoolExecutor(max_workers=min(self.workers, len(tasks))) as ex:
@@ -566,6 +805,8 @@ class GenomeScanner:
                 )
 
         subbin_profiles: Optional[Dict[str, List[Tuple[int, np.ndarray]]]] = None
+        orf_tk_arr: Optional[np.ndarray] = None
+        orf_cn_arr: Optional[np.ndarray] = None
         if feats_list:
             feats_arr = np.concatenate(feats_list, axis=0)
             codes_arr = np.stack(codes_list, axis=0)
@@ -581,6 +822,7 @@ class GenomeScanner:
                 contig_ids=np.asarray(cid_list),
                 starts=np.asarray(start_list, dtype=np.int64),
                 ends=np.asarray(end_list, dtype=np.int64),
+                return_orf_preds=collect_functional_partitions,
             )
             for idx, wp in enumerate(win_preds):
                 wp.score = float(win_scores[idx])
@@ -643,6 +885,18 @@ class GenomeScanner:
             if collect_profiles
             else {}
         )
+        region_functional_modules = (
+            _collect_region_functional_modules(
+                win_preds,
+                raw_regions,
+                self._last_func_aux,
+                orf_tk_arr,
+                orf_cn_arr,
+                module_threshold=functional_module_threshold,
+            )
+            if collect_functional_partitions
+            else {}
+        )
 
         return ScanResult(
             contigs_bp=contigs_bp,
@@ -660,6 +914,7 @@ class GenomeScanner:
             },
             region_profiles=region_profiles,
             contig_score_tracks=contig_score_tracks,
+            region_functional_modules=region_functional_modules,
         )
 
     def scan_fasta(
@@ -670,6 +925,8 @@ class GenomeScanner:
         hit_fetcher: Optional[Callable[[Sequence[Tuple[str, str]]], Dict[str, Tuple[float, str]]]] = None,
         collect_profiles: bool = False,
         profile_flank_bp: int = 2000,
+        collect_functional_partitions: bool = False,
+        functional_module_threshold: float = 0.45,
     ) -> ScanResult:
         """读取 FASTA 文件并执行双阶段扫描。"""
         contig_seqs = {cid: seq for cid, seq in iter_fasta(Path(fasta_path))}
@@ -679,4 +936,6 @@ class GenomeScanner:
             hit_fetcher=hit_fetcher,
             collect_profiles=collect_profiles,
             profile_flank_bp=profile_flank_bp,
+            collect_functional_partitions=collect_functional_partitions,
+            functional_module_threshold=functional_module_threshold,
         )

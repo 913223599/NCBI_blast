@@ -25,6 +25,12 @@ import numpy as np
 
 from ..benchmark.model_eval import evaluate_model_scores_on_split, load_split_info, tune_decoder_on_val
 from ..data.feature_dataset import iter_fasta, load_split_arrays
+from ..features.peptide_features import (
+    STAGE1_ORF_EXTRA_DIM,
+    encode_orf_peptide_extra,
+    encode_pyrodigal_gene_attrs,
+    find_best_6frame_orf,
+)
 from .expert_b_cnn import _resolve_part_fasta
 
 logger = logging.getLogger("phage_discovery.experts.expert_c_orf")
@@ -37,8 +43,14 @@ _HYDROPHOBIC = set("AVILMFYW")
 _CHARGED = set("DEKRH")
 
 ORF_FEAT_DIM = 30
+STAGE1_ORF_FEAT_DIM = ORF_FEAT_DIM + STAGE1_ORF_EXTRA_DIM
 MAX_ORFS_PER_WIN = 36
 _GF = None
+
+
+def get_orf_feat_dim(feature_profile: str = "v4") -> int:
+    """按特征配置返回单条 ORF Token 的向量维度（v4=30, stage1=117）。"""
+    return STAGE1_ORF_FEAT_DIM if feature_profile == "stage1" else ORF_FEAT_DIM
 
 
 def _get_gf():
@@ -69,18 +81,25 @@ def _encode_protein_22(aa_seq: str) -> np.ndarray:
 
 
 def _extract_contig_orfs_worker(
-    item: Tuple[str, str, List[Tuple[int, int, int]]],
+    item: Tuple[Any, ...],
 ) -> List[Tuple[int, np.ndarray, int]]:
     """
-    输入 (contig_id, seq, [(row_idx, start_bp, end_bp), ...])，对整条 contig 预测一次基因，
-    然后映射至各窗口，返回 [(row_idx, token_matrix(MAX_ORFS, 30), valid_count), ...]。
+    输入 (contig_id, seq, [(row_idx, start_bp, end_bp), ...], [feature_profile])，对整条 contig 预测一次基因，
+    然后映射至各窗口，返回 [(row_idx, token_matrix(MAX_ORFS, D), valid_count), ...]。
     """
-    _, seq, win_items = item
+    if len(item) == 4:
+        _, seq, win_items, feature_profile = item
+    else:
+        _, seq, win_items = item
+        feature_profile = "v4"
+
+    is_stage1 = feature_profile == "stage1"
+    orf_dim = get_orf_feat_dim(feature_profile)
     seq = seq.upper()
     n_seq = max(1, len(seq))
     ctx_gc = (seq.count("G") + seq.count("C")) / float(n_seq)
 
-    genes_info: List[Tuple[int, int, int, float, np.ndarray]] = []
+    genes_info: List[Tuple[int, int, int, float, np.ndarray, Optional[np.ndarray]]] = []
     if len(seq) >= 100:
         gf = _get_gf()
         found = gf.find_genes(seq.encode("ascii", errors="replace"))
@@ -91,15 +110,34 @@ def _extract_contig_orfs_worker(
             sub_len = max(1, len(sub))
             gc = (sub.count("G") + sub.count("C")) / float(sub_len)
             aa = g.translate()
-            genes_info.append((s0, e0, g.strand, gc, _encode_protein_22(aa)))
+            extra = (
+                encode_orf_peptide_extra(aa, encode_pyrodigal_gene_attrs(g, len(aa), is_fallback=0.0))
+                if is_stage1
+                else None
+            )
+            genes_info.append((s0, e0, g.strand, gc, _encode_protein_22(aa), extra))
         genes_info.sort(key=lambda t: t[0])
 
     outputs: List[Tuple[int, np.ndarray, int]] = []
     for row_idx, ws, we in win_items:
         wlen = max(1, we - ws)
         in_win = [g for g in genes_info if ws <= (g[0] + g[1]) // 2 < we][:MAX_ORFS_PER_WIN]
-        mat = np.zeros((MAX_ORFS_PER_WIN, ORF_FEAT_DIM), dtype=np.float32)
-        for ti, (gs, ge, strand, gc, aa_vec) in enumerate(in_win):
+        if is_stage1 and not in_win:
+            fb = find_best_6frame_orf(seq[ws:we], min_aa=20)
+            if fb is not None:
+                rs, re_, f_strand, aa_seq, _ = fb
+                gs = ws + rs
+                ge = ws + re_
+                sub_fb = seq[gs:ge]
+                gc_fb = (sub_fb.count("G") + sub_fb.count("C")) / float(max(1, len(sub_fb)))
+                extra_fb = encode_orf_peptide_extra(
+                    aa_seq,
+                    encode_pyrodigal_gene_attrs(None, len(aa_seq), is_fallback=1.0),
+                )
+                in_win = [(gs, ge, f_strand, gc_fb, _encode_protein_22(aa_seq), extra_fb)]
+
+        mat = np.zeros((MAX_ORFS_PER_WIN, orf_dim), dtype=np.float32)
+        for ti, (gs, ge, strand, gc, aa_vec, extra_vec) in enumerate(in_win):
             glen = max(1, ge - gs)
             prev_end = in_win[ti - 1][1] if ti > 0 else ws
             gap = gs - prev_end
@@ -115,7 +153,9 @@ def _extract_contig_orfs_worker(
                 (ge - ws) / float(wlen),
             ], dtype=np.float32)
             mat[ti, :8] = topo
-            mat[ti, 8:] = aa_vec
+            mat[ti, 8:ORF_FEAT_DIM] = aa_vec
+            if is_stage1 and extra_vec is not None:
+                mat[ti, ORF_FEAT_DIM:] = extra_vec
         outputs.append((row_idx, mat, len(in_win)))
     return outputs
 
@@ -124,15 +164,18 @@ def extract_contig_orf_tokens(
     seq: str,
     starts: Sequence[int],
     ends: Sequence[int],
+    *,
+    feature_profile: str = "v4",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """针对单条 contig 的窗口坐标列表直接提取 ORF Token 张量与有效基因计数。"""
+    orf_dim = get_orf_feat_dim(feature_profile)
     n_win = len(starts)
-    tokens = np.zeros((n_win, MAX_ORFS_PER_WIN, ORF_FEAT_DIM), dtype=np.float32)
+    tokens = np.zeros((n_win, MAX_ORFS_PER_WIN, orf_dim), dtype=np.float32)
     counts = np.zeros(n_win, dtype=np.int32)
     if n_win == 0:
         return tokens, counts
     win_items = [(i, s, e) for i, (s, e) in enumerate(zip(starts, ends))]
-    for row_idx, mat, cnt in _extract_contig_orfs_worker(("", seq, win_items)):
+    for row_idx, mat, cnt in _extract_contig_orfs_worker(("", seq, win_items, feature_profile)):
         tokens[row_idx] = mat
         counts[row_idx] = cnt
     return tokens, counts
@@ -142,10 +185,13 @@ def extract_orf_tensors_for_part(
     fasta_path: Path,
     arrs: Dict[str, np.ndarray],
     workers: Optional[int] = None,
+    *,
+    feature_profile: str = "v4",
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """按特征分片窗口坐标提取全套 ORF Token 张量 (N, MAX_ORFS, 30) 与有效基因数 (N,)。"""
+    """按特征分片窗口坐标提取全套 ORF Token 张量 (N, MAX_ORFS, D) 与有效基因数 (N,)。"""
+    orf_dim = get_orf_feat_dim(feature_profile)
     n_rows = len(arrs["starts"])
-    tokens = np.zeros((n_rows, MAX_ORFS_PER_WIN, ORF_FEAT_DIM), dtype=np.float32)
+    tokens = np.zeros((n_rows, MAX_ORFS_PER_WIN, orf_dim), dtype=np.float32)
     counts = np.zeros(n_rows, dtype=np.int32)
 
     by_contig: Dict[str, List[Tuple[int, int, int]]] = {}
@@ -153,7 +199,7 @@ def extract_orf_tensors_for_part(
         by_contig.setdefault(str(cid), []).append((idx, int(s), int(e)))
 
     tasks = [
-        (cid, seq, by_contig[cid])
+        (cid, seq, by_contig[cid], feature_profile)
         for cid, seq in iter_fasta(fasta_path)
         if cid in by_contig
     ]
@@ -175,7 +221,12 @@ def extract_orf_tensors_for_part(
     return tokens, counts
 
 
-def build_orf_transformer(d_model: int = 128, nhead: int = 8, num_layers: int = 3):
+def build_orf_transformer(
+    d_model: int = 128,
+    nhead: int = 8,
+    num_layers: int = 3,
+    orf_feat_dim: int = ORF_FEAT_DIM,
+):
     import torch
     from torch import nn
 
@@ -183,7 +234,7 @@ def build_orf_transformer(d_model: int = 128, nhead: int = 8, num_layers: int = 
         def __init__(self):
             super().__init__()
             self.proj = nn.Sequential(
-                nn.Linear(ORF_FEAT_DIM, d_model),
+                nn.Linear(int(orf_feat_dim), d_model),
                 nn.LayerNorm(d_model),
                 nn.GELU(),
             )
@@ -249,6 +300,7 @@ def _load_or_extract_part(
     workers: Optional[int],
     fasta_override: Optional[Path] = None,
     use_semantic_clean_labels: bool = False,
+    feature_profile: str = "v4",
 ) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray]:
     arrs = dict(load_split_arrays(feature_dir, split, parts=(part,)))
     if use_semantic_clean_labels:
@@ -258,14 +310,16 @@ def _load_or_extract_part(
                 if "clean_labels" in sem_npz and len(sem_npz["clean_labels"]) == len(arrs["labels"]):
                     arrs["labels"] = sem_npz["clean_labels"].astype(np.int8)
 
-    cache_path = cache_dir / f"{split}_{part}_orf_tokens_v2.npz"
+    expected_dim = get_orf_feat_dim(feature_profile)
+    suffix = "_orf_tokens_stage1.npz" if feature_profile == "stage1" else "_orf_tokens_v2.npz"
+    cache_path = cache_dir / f"{split}_{part}{suffix}"
     if cache_path.exists():
         with np.load(cache_path) as data:
-            if len(data["counts"]) == len(arrs["labels"]):
+            if len(data["counts"]) == len(arrs["labels"]) and data["tokens"].shape[-1] == expected_dim:
                 return arrs, data["tokens"], data["counts"]
 
     fasta = _resolve_part_fasta(feature_dir, manifest_dir, split, part, fasta_override=fasta_override)
-    tokens, counts = extract_orf_tensors_for_part(fasta, arrs, workers=workers)
+    tokens, counts = extract_orf_tensors_for_part(fasta, arrs, workers=workers, feature_profile=feature_profile)
     cache_dir.mkdir(parents=True, exist_ok=True)
     tmp = cache_path.with_name(f".{cache_path.stem}.tmp.npz")
     np.savez_compressed(tmp, tokens=tokens, counts=counts)
@@ -283,6 +337,7 @@ def _load_expert_c_train_data(
     extra_fasta_map: Optional[Dict[str, Path]] = None,
     part_weights: Optional[Dict[str, float]] = None,
     use_semantic_clean_labels: bool = True,
+    feature_profile: str = "v4",
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """统一加载训练分片 ORF Token、标签、contig_ids 与分片权重。"""
     f_map = {k: Path(v) for k, v in (extra_fasta_map or {}).items()}
@@ -309,6 +364,7 @@ def _load_expert_c_train_data(
             workers,
             fasta_override=f_map.get(part),
             use_semantic_clean_labels=use_semantic_clean_labels,
+            feature_profile=feature_profile,
         )
         if len(arrs["labels"]) == 0:
             continue
@@ -346,12 +402,16 @@ def _fit_expert_c_fold(
     device,
     ckpt_path: Path,
     seed: int,
+    orf_feat_dim: Optional[int] = None,
 ) -> Tuple[Any, int, float, List[Dict[str, Any]], float, float]:
     import torch
     from sklearn.metrics import average_precision_score
 
     rng = np.random.default_rng(seed)
-    model = build_orf_transformer(d_model=d_model, nhead=nhead, num_layers=num_layers).to(device)
+    feat_dim = int(orf_feat_dim or tk_tr.shape[-1])
+    model = build_orf_transformer(
+        d_model=d_model, nhead=nhead, num_layers=num_layers, orf_feat_dim=feat_dim,
+    ).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
     steps_per_ep = max(1, int(np.ceil(len(y_tr) / batch_size)))
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=max(1, epochs * steps_per_ep))
@@ -426,6 +486,7 @@ def compute_group_oof_expert_c_probs(
     num_layers: int = 3,
     seed: int = 42,
     tmp_dir: Optional[Path] = None,
+    orf_feat_dim: Optional[int] = None,
 ) -> np.ndarray:
     """按 contig_id 严格 GroupKFold 生成无泄漏 Expert C OOF 概率。"""
     import torch
@@ -433,6 +494,7 @@ def compute_group_oof_expert_c_probs(
 
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    feat_dim = int(orf_feat_dim or tokens.shape[-1])
     n = len(labels)
     oof_probs = np.zeros(n, dtype=np.float32)
     sw_all = np.ones(n, dtype=np.float32) if sample_weights is None else sample_weights.astype(np.float32)
@@ -467,6 +529,7 @@ def compute_group_oof_expert_c_probs(
             device=device,
             ckpt_path=ckpt_fold,
             seed=seed + fold_idx + 1,
+            orf_feat_dim=feat_dim,
         )
         oof_probs[va_idx] = _predict_orf(fold_model, tokens[va_idx], counts[va_idx], device, batch_size=max(128, batch_size))
         del fold_model
@@ -498,6 +561,7 @@ def train_expert_c(
     use_semantic_clean_labels: bool = True,
     workers: Optional[int] = None,
     seed: int = 42,
+    feature_profile: str = "v4",
 ) -> Dict[str, Any]:
     import torch
 
@@ -505,6 +569,7 @@ def train_expert_c(
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    orf_feat_dim = get_orf_feat_dim(feature_profile)
 
     t_ext = time.perf_counter()
     all_tk_tr, all_cn_tr, all_y_tr, _, all_sw_tr = _load_expert_c_train_data(
@@ -516,11 +581,20 @@ def train_expert_c(
         extra_fasta_map=extra_fasta_map,
         part_weights=part_weights,
         use_semantic_clean_labels=use_semantic_clean_labels,
+        feature_profile=feature_profile,
     )
-    va_w = _load_or_extract_part(eval_feature_dir, bench_dir, "val", "windows", Path(eval_feature_dir), workers)
-    va_c = _load_or_extract_part(eval_feature_dir, bench_dir, "val", "chimeras", Path(eval_feature_dir), workers)
-    te_w = _load_or_extract_part(eval_feature_dir, bench_dir, "test", "windows", Path(eval_feature_dir), workers)
-    te_c = _load_or_extract_part(eval_feature_dir, bench_dir, "test", "chimeras", Path(eval_feature_dir), workers)
+    va_w = _load_or_extract_part(
+        eval_feature_dir, bench_dir, "val", "windows", Path(eval_feature_dir), workers, feature_profile=feature_profile,
+    )
+    va_c = _load_or_extract_part(
+        eval_feature_dir, bench_dir, "val", "chimeras", Path(eval_feature_dir), workers, feature_profile=feature_profile,
+    )
+    te_w = _load_or_extract_part(
+        eval_feature_dir, bench_dir, "test", "windows", Path(eval_feature_dir), workers, feature_profile=feature_profile,
+    )
+    te_c = _load_or_extract_part(
+        eval_feature_dir, bench_dir, "test", "chimeras", Path(eval_feature_dir), workers, feature_profile=feature_profile,
+    )
     extract_sec = round(time.perf_counter() - t_ext, 2)
 
     keep = all_y_tr >= 0
@@ -550,6 +624,7 @@ def train_expert_c(
         device=device,
         ckpt_path=ckpt_path,
         seed=seed,
+        orf_feat_dim=orf_feat_dim,
     )
     n_params = int(sum(p.numel() for p in model.parameters()))
 
@@ -581,6 +656,8 @@ def train_expert_c(
         "model_name": "ExpertC_ORFTransformer",
         "trained_at": datetime.now().isoformat(timespec="seconds"),
         "device": str(device),
+        "feature_profile": feature_profile,
+        "orf_feat_dim": orf_feat_dim,
         "architecture": {"d_model": d_model, "nhead": nhead, "num_layers": num_layers},
         "params": n_params,
         "extract_sec": extract_sec,

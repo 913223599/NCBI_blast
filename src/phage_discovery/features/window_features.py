@@ -22,10 +22,27 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from ...utils.phage_dataset.preprocessor import CANONICAL_4MER_NAMES, compute_canonical_4mer_freq
+from .peptide_features import (
+    DIPEPTIDE_7X7_DIM,
+    PYRODIGAL_WINDOW_AGG_DIM,
+    STAGE1_WINDOW_EXTRA_DIM,
+    STAGE1_WINDOW_EXTRA_NAMES,
+    compute_best_6frame_coding_fraction,
+    compute_biophysical_summary,
+    encode_peptide_7x7_dipeptide,
+    encode_peptide_7x7x7_triad,
+    encode_pyrodigal_gene_attrs,
+    find_best_6frame_orf,
+)
 
 GeneTuple = Tuple[int, int, int]  # (0-based start, end exclusive, strand)
 # (start, end, strand, aa_22_vec, g1_cnt, c1_cnt, n1_cnt, g2_cnt, c2_cnt, n2_cnt, g3_cnt, c3_cnt, n3_cnt)
 RichGeneRecord = Tuple[int, int, int, np.ndarray, int, int, int, int, int, int, int, int, int]
+# Stage 1 在 RichGeneRecord 基础上附带：(dp49, ct343, pyro_attrs_11)
+Stage1GeneRecord = Tuple[
+    int, int, int, np.ndarray, int, int, int, int, int, int, int, int, int,
+    np.ndarray, np.ndarray, np.ndarray,
+]
 
 SUB_BINS = 25  # 每个 5kb 窗口划分为 25 个子块（200 bp 粒度）用于精细边界定位
 
@@ -70,6 +87,16 @@ FEATURE_NAMES: List[str] = (
     + _AA_NAMES
     + _FLANK_NAMES
 )
+FEATURE_NAMES_STAGE1: List[str] = FEATURE_NAMES + STAGE1_WINDOW_EXTRA_NAMES
+_AA_SLICE_START: int = FEATURE_NAMES.index("aa_A")
+_AA_SLICE_END: int = _AA_SLICE_START + 22
+
+
+def get_feature_names(feature_profile: str = "v4") -> List[str]:
+    """按特征版本配置返回对应窗口特征名称列表。"""
+    if feature_profile.lower() in ("stage1", "v5_stage1"):
+        return FEATURE_NAMES_STAGE1
+    return FEATURE_NAMES
 
 _GENE_FINDER: Optional[Any] = None
 
@@ -145,6 +172,28 @@ def _predict_genes_rich(seq: str) -> List[RichGeneRecord]:
     return records
 
 
+def _predict_genes_rich_stage1(seq: str) -> List[Stage1GeneRecord]:
+    if len(seq) < 100:
+        return []
+    finder = _get_gene_finder()
+    genes = finder.find_genes(seq.encode("ascii", errors="replace"))
+    records: List[Stage1GeneRecord] = []
+    for g in genes:
+        s0 = int(g.begin) - 1
+        e0 = int(g.end)
+        strand = int(g.strand)
+        aa_raw = g.translate()
+        aa_vec = _encode_protein_22(aa_raw)
+        aa_clean = aa_raw.rstrip("*")
+        c_counts = _codon_gc_counts(seq[s0:e0], strand)
+        dp49 = encode_peptide_7x7_dipeptide(aa_clean)
+        ct343 = encode_peptide_7x7x7_triad(aa_clean)
+        pyro_attrs = encode_pyrodigal_gene_attrs(g, len(aa_clean), is_fallback=0.0)
+        records.append((s0, e0, strand, aa_vec, *c_counts, dp49, ct343, pyro_attrs))
+    records.sort(key=lambda r: r[0])
+    return records
+
+
 def _gene_stats(genes: Sequence[Tuple[int, int, int]], win_start: int, win_end: int) -> List[float]:
     """统计与窗口相交（中点落入窗口）的基因结构特征。"""
     win_len = max(1, win_end - win_start)
@@ -213,7 +262,7 @@ def _rich_codon_and_aa_stats(
     weights = np.asarray([max(1, g[1] - g[0]) for g in in_win], dtype=np.float32)
     aa_stack = np.stack([g[3] for g in in_win], axis=0)
     aa_avg = np.average(aa_stack, axis=0, weights=weights).astype(np.float32)
-    return [float(gc1), float(gc2), float(gc3), float(gc3_bias)], aa_avg
+    return [gc1, gc2, gc3, gc3_bias], aa_avg
 
 
 def _flank_summary(
@@ -310,19 +359,96 @@ def _compute_sub_mask(
     return mask
 
 
-def extract_contig_windows(
+def _compute_stage1_window_extra(
+    in_win: Sequence[Stage1GeneRecord],
+    aa_22_avg: np.ndarray,
+    coding_frac_6frame: float,
+) -> np.ndarray:
+    """计算单个窗口的 Stage 1 额外 71 维特征（49 二肽 + 12 Pyrodigal 质控 + 10 生物物理汇总）。"""
+    out = np.zeros(STAGE1_WINDOW_EXTRA_DIM, dtype=np.float32)
+    off_pyro = DIPEPTIDE_7X7_DIM
+    off_bio = off_pyro + PYRODIGAL_WINDOW_AGG_DIM
+
+    if not in_win:
+        out[off_bio:] = compute_biophysical_summary(
+            aa_22_avg,
+            out[:DIPEPTIDE_7X7_DIM],
+            np.empty(0, dtype=np.float32),
+            [],
+            coding_frac_6frame,
+        )
+        return out
+
+    lengths = [max(1, g[1] - g[0]) for g in in_win]
+    weights = np.asarray(lengths, dtype=np.float32)
+    dp_avg = np.average(np.stack([g[13] for g in in_win], axis=0), axis=0, weights=weights).astype(np.float32)
+    ct_avg = np.average(np.stack([g[14] for g in in_win], axis=0), axis=0, weights=weights).astype(np.float32)
+
+    attrs = np.stack([g[15] for g in in_win], axis=0)
+    cscores = attrs[:, 0]
+    scores = attrs[:, 1]
+    rscores = attrs[:, 2]
+    sscores = attrs[:, 3]
+    tscores = attrs[:, 4]
+    is_partial = np.maximum(attrs[:, 5], attrs[:, 6])
+    has_rbs = attrs[:, 7]
+    is_atg = attrs[:, 8]
+    is_fb = attrs[:, 9]
+
+    overlap_cnt = 0
+    n_g = len(in_win)
+    if n_g >= 2:
+        for gi in range(n_g):
+            has_ov = False
+            if gi > 0 and in_win[gi][0] < in_win[gi - 1][1]:
+                has_ov = True
+            if gi + 1 < n_g and in_win[gi + 1][0] < in_win[gi][1]:
+                has_ov = True
+            if has_ov:
+                overlap_cnt += 1
+
+    pyro_agg = np.array([
+        float(cscores.mean()),
+        float(cscores.max()),
+        float(cscores.min()),
+        float(scores.mean()),
+        float(rscores.mean()),
+        float(sscores.mean()),
+        float(tscores.mean()),
+        float(is_partial.mean()),
+        float(has_rbs.mean()),
+        float(is_atg.mean()),
+        overlap_cnt / n_g,
+        float(is_fb.mean()),
+    ], dtype=np.float32)
+
+    out[:off_pyro] = dp_avg
+    out[off_pyro:off_bio] = pyro_agg
+    out[off_bio:] = compute_biophysical_summary(
+        aa_22_avg, dp_avg, ct_avg, lengths, coding_frac_6frame,
+    )
+    return out
+
+
+def extract_contig_windows_for_spans(
     contig_id: str,
     seq: str,
-    win_size: int = 5000,
-    step_size: int = 2500,
+    spans: Sequence[Tuple[int, int]],
+    *,
     truth_regions: Optional[Sequence[Tuple[int, int]]] = None,
+    feature_profile: str = "v4",
+    context_win_size: int = 5000,
 ) -> Dict[str, Any]:
-    """
-    对单条 contig 统一预测基因后滑窗提取 185 维特征及 25 维 200bp 精细掩码标签。
-    """
+    """按指定窗口区间列表提取特征，支持 v4 (185 维) 与 stage1 (256 维) 两种版本。"""
     seq = seq.upper()
     n = len(seq)
-    rich_genes = _predict_genes_rich(seq)
+    is_stage1 = feature_profile.lower() in ("stage1", "v5_stage1")
+    if is_stage1:
+        rich_s1 = _predict_genes_rich_stage1(seq)
+        rich_genes: List[RichGeneRecord] = [g[:13] for g in rich_s1]  # type: ignore[misc]
+    else:
+        rich_s1 = []
+        rich_genes = _predict_genes_rich(seq)
     simple_genes: List[GeneTuple] = [(g[0], g[1], g[2]) for g in rich_genes]
 
     ctx_kmer = compute_canonical_4mer_freq(seq)
@@ -330,23 +456,9 @@ def extract_contig_windows(
     ctx_gc = (seq.count("G") + seq.count("C")) / max(1, n)
     regions = list(truth_regions or [])
 
-    spans: List[Tuple[int, int]] = []
-    if n <= win_size:
-        spans.append((0, n))
-    else:
-        pos = 0
-        while pos < n:
-            end_pos = min(n, pos + win_size)
-            if end_pos - pos < win_size // 2 and spans:
-                spans.append((max(0, n - win_size), n))
-                break
-            spans.append((pos, end_pos))
-            if end_pos == n:
-                break
-            pos += step_size
-
-    ctx_is_self = n <= win_size
-    feats = np.zeros((len(spans), len(FEATURE_NAMES)), dtype=np.float32)
+    feat_dim = len(get_feature_names(feature_profile))
+    ctx_is_self = n <= context_win_size
+    feats = np.zeros((len(spans), feat_dim), dtype=np.float32)
     overlaps = np.zeros(len(spans), dtype=np.float32)
     sub_masks = np.zeros((len(spans), SUB_BINS), dtype=np.float32)
 
@@ -371,10 +483,48 @@ def extract_contig_windows(
                 flank_vec[3] = w_gc - rgc
                 flank_vec[5] = w_gd - rgd
 
-        feats[i] = compute_window_features(
-            win_sub, s, e, simple_genes, ctx_unit, ctx_gc, ctx_is_self,
-            rich_genes=rich_genes, flank_feats=flank_vec,
-        )
+        if not is_stage1:
+            feats[i] = compute_window_features(
+                win_sub, s, e, simple_genes, ctx_unit, ctx_gc, ctx_is_self,
+                rich_genes=rich_genes, flank_feats=flank_vec,
+            )
+        else:
+            in_win_s1 = [g for g in rich_s1 if s <= (g[0] + g[1]) // 2 < e]
+            coding_6f = compute_best_6frame_coding_fraction(win_sub)
+            if in_win_s1:
+                base_185 = compute_window_features(
+                    win_sub, s, e, simple_genes, ctx_unit, ctx_gc, ctx_is_self,
+                    rich_genes=rich_genes, flank_feats=flank_vec,
+                )
+                aa_22_avg = base_185[_AA_SLICE_START:_AA_SLICE_END]
+                extra_414 = _compute_stage1_window_extra(in_win_s1, aa_22_avg, coding_6f)
+            else:
+                fb = find_best_6frame_orf(win_sub, min_aa=15)
+                if fb is not None:
+                    rs, re_, f_strand, f_aa, coding_6f = fb
+                    gs_abs, ge_abs = s + rs, s + re_
+                    f_aa22 = _encode_protein_22(f_aa)
+                    f_cc = _codon_gc_counts(win_sub[rs:re_], f_strand)
+                    fb_rich: RichGeneRecord = (gs_abs, ge_abs, f_strand, f_aa22, *f_cc)
+                    fb_dp49 = encode_peptide_7x7_dipeptide(f_aa)
+                    fb_ct343 = encode_peptide_7x7x7_triad(f_aa)
+                    fb_pyro = encode_pyrodigal_gene_attrs(None, len(f_aa), is_fallback=1.0)
+                    fb_s1: Stage1GeneRecord = (*fb_rich, fb_dp49, fb_ct343, fb_pyro)
+                    base_185 = compute_window_features(
+                        win_sub, s, e, [(gs_abs, ge_abs, f_strand)], ctx_unit, ctx_gc, ctx_is_self,
+                        rich_genes=[fb_rich], flank_feats=flank_vec,
+                    )
+                    extra_414 = _compute_stage1_window_extra([fb_s1], f_aa22, coding_6f)
+                else:
+                    base_185 = compute_window_features(
+                        win_sub, s, e, simple_genes, ctx_unit, ctx_gc, ctx_is_self,
+                        rich_genes=rich_genes, flank_feats=flank_vec,
+                    )
+                    extra_414 = _compute_stage1_window_extra([], base_185[_AA_SLICE_START:_AA_SLICE_END], coding_6f)
+
+            feats[i, :185] = base_185
+            feats[i, 185:] = extra_414
+
         if regions:
             overlaps[i] = _overlap_fraction(s, e, regions)
             sub_masks[i] = _compute_sub_mask(s, e, regions, SUB_BINS)
@@ -387,3 +537,41 @@ def extract_contig_windows(
         "sub_mask": sub_masks,
         "features": feats,
     }
+
+
+def extract_contig_windows(
+    contig_id: str,
+    seq: str,
+    win_size: int = 5000,
+    step_size: int = 2500,
+    truth_regions: Optional[Sequence[Tuple[int, int]]] = None,
+    *,
+    feature_profile: str = "v4",
+) -> Dict[str, Any]:
+    """
+    对单条 contig 统一预测基因后滑窗提取 185 维（v4）或 256 维（stage1）特征及 25 维 200bp 精细掩码标签。
+    """
+    n = len(seq)
+    spans: List[Tuple[int, int]] = []
+    if n <= win_size:
+        spans.append((0, n))
+    else:
+        pos = 0
+        while pos < n:
+            end_pos = min(n, pos + win_size)
+            if end_pos - pos < win_size // 2 and spans:
+                spans.append((max(0, n - win_size), n))
+                break
+            spans.append((pos, end_pos))
+            if end_pos == n:
+                break
+            pos += step_size
+
+    return extract_contig_windows_for_spans(
+        contig_id,
+        seq,
+        spans,
+        truth_regions=truth_regions,
+        feature_profile=feature_profile,
+        context_win_size=win_size,
+    )

@@ -72,6 +72,10 @@ def extract_per_orf_viral_scores(
             logits = orf_stream.attn_score(h).squeeze(-1)
             logits_masked = logits.masked_fill(~valid_mask, 0.0)
             probs = torch.sigmoid(logits_masked) * valid_mask.to(logits.dtype)
+            if hasattr(model, "orf_phage_head"):
+                ph_logits = model.orf_phage_head(h).squeeze(-1).masked_fill(~valid_mask, 0.0)
+                ph_probs = torch.sigmoid(ph_logits) * valid_mask.to(ph_logits.dtype)
+                probs = 0.5 * probs + 0.5 * ph_probs
             out_attn[sl] = probs.float().cpu().numpy()
 
     if was_training:
