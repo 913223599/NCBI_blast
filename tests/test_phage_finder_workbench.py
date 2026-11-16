@@ -1053,5 +1053,140 @@ def test_model_registry_and_scanner_prefer_stage1_2_directory_and_filenames(tmp_
     assert captured["plateau_second_threshold"] == 0.90
 
 
+def test_model_registry_promotes_unified_model_over_stage1_2_when_present(tmp_path: Path, monkeypatch):
+    ws_root = tmp_path / "workspace"
+    models_v4 = ws_root / "models" / "full_v4"
+    s12_dir = models_v4 / "stage1_2"
+    s12_dir.mkdir(parents=True, exist_ok=True)
+    (s12_dir / "stage1_2.pt").write_bytes(b"mock_s12")
+    (s12_dir / "context_refiner.pt").write_bytes(b"mock_ctx")
+    (s12_dir / "subbin_refiner.pt").write_bytes(b"mock_sub")
+    (s12_dir / "stage1_2_meta.json").write_text(
+        json.dumps({"params": 3715879, "feature_profile": "stage1", "func_dim": 9, "use_subbin_refiner": True}),
+        encoding="utf-8",
+    )
+
+    uni_dir = models_v4 / "orf_judge_unified"
+    uni_dir.mkdir(parents=True, exist_ok=True)
+    (uni_dir / "unified_judge_seq.pt").write_bytes(b"mock_uni")
+    (uni_dir / "orf_judge_statonly.pt").write_bytes(b"mock_stat")
+    (uni_dir / "unified_summary.json").write_text(json.dumps({"total_params": 1684718}), encoding="utf-8")
+
+    monkeypatch.delenv("PHAGE_DISCOVERY_MODEL_DIR", raising=False)
+    monkeypatch.delenv("PHAGE_DISCOVERY_MODELS_ROOT", raising=False)
+    monkeypatch.setattr("src.analysis.phage_finder.model_registry._get_phage_config", lambda: {})
+
+    found = discover_available_models(project_root=ws_root)
+    assert len(found) >= 2
+    assert found[0]["model_id"] == "unified"
+    assert found[0]["version"] == "Unified V4"
+    assert found[0]["has_unified_judge"] is True
+    assert Path(found[0]["unified_judge_dir"]).resolve() == uni_dir.resolve()
+    assert found[1]["model_id"] == "stage1_2"
+
+
+def test_manager_executes_unified_phage_model_and_exports_unified_artifacts(tmp_path: Path, monkeypatch):
+    import asyncio
+    from src.analysis.phage_finder.types import PhageScanRunRequest
+    from src.phage_discovery.inference.unified_model import UnifiedScanResult
+
+    ws_root = tmp_path / "workspace"
+    models_v4 = ws_root / "models" / "full_v4"
+    s12_dir = models_v4 / "stage1_2"
+    s12_dir.mkdir(parents=True, exist_ok=True)
+    (s12_dir / "stage1_2.pt").write_bytes(b"mock_s12")
+    (s12_dir / "subbin_refiner.pt").write_bytes(b"mock_sub")
+    (s12_dir / "stage1_2_meta.json").write_text(
+        json.dumps({"params": 3715879, "feature_profile": "stage1", "func_dim": 9, "use_subbin_refiner": True}),
+        encoding="utf-8",
+    )
+    uni_dir = models_v4 / "orf_judge_unified"
+    uni_dir.mkdir(parents=True, exist_ok=True)
+    (uni_dir / "unified_judge_seq.pt").write_bytes(b"mock_uni")
+    (uni_dir / "orf_judge_statonly.pt").write_bytes(b"mock_stat")
+
+    class _MockScanner:
+        workers = 1
+
+        @classmethod
+        def from_model_dir(cls, model_path, **kwargs):
+            return cls()
+
+    class _MockUnifiedModel:
+        def __init__(self, dna_scanner, judge_bundle=None, **kwargs):
+            self.dna_scanner = dna_scanner
+            self.judge_bundle = judge_bundle
+
+        def scan_sequences(self, contig_seqs: Dict[str, str], **kwargs) -> UnifiedScanResult:
+            cid, seq = next(iter(contig_seqs.items()))
+            reg = PredictedRegion(cid, 1000, 9000, peak_score=0.95, mean_score=0.88, window_count=4)
+            key = f"{cid}:1000-9000"
+            return UnifiedScanResult(
+                contigs_bp={cid: len(seq)},
+                total_bp=len(seq),
+                total_windows=5,
+                base_regions=[],
+                regions=[reg],
+                region_annotations={
+                    key: {
+                        "n_orfs": 9,
+                        "mean_phage_prob": 0.91,
+                        "max_p9_defense_prob": 0.18,
+                        "r2_core_completeness_sum": 4.2,
+                        "r2_core_active_count": 4,
+                        "completeness_class": "complete_structural_core",
+                        "active_modules": ["head_packaging", "connector", "tail", "lysis"],
+                    }
+                },
+                routing_stats={"total_contigs": 1, "protein_activated_contigs": 1, "protein_skip_ratio": 0.0, "unified_judge_mode": True},
+                timings_sec={"dna_feature_sec": 0.02, "protein_judge_sec": 0.01, "total_sec": 0.03},
+                suppressed_candidates=[{"contig_id": cid, "start_bp": 12000, "end_bp": 18000, "reason": "base_veto", "mean_phage_prob": 0.21, "max_p9": 0.85}],
+                region_profiles={key: [{"start_bp": 800, "end_bp": 1000, "prob": 0.1, "in_region": False}, {"start_bp": 1000, "end_bp": 1200, "prob": 0.92, "in_region": True}]},
+                contig_score_tracks={cid: [{"start_bp": 0, "end_bp": len(seq), "max_prob": 0.95, "mean_prob": 0.5}]},
+            )
+
+    monkeypatch.setattr("src.analysis.phage_finder.manager.GenomeScanner", _MockScanner)
+    monkeypatch.setattr("src.analysis.phage_finder.manager.load_judge_ensemble_bundle", lambda *a, **kw: {"unified_mode": True})
+    monkeypatch.setattr("src.analysis.phage_finder.manager.UnifiedPhageModel", _MockUnifiedModel)
+    monkeypatch.setattr("src.analysis.phage_finder.model_registry._get_phage_config", lambda: {})
+    monkeypatch.setattr(
+        "src.analysis.phage_finder.manager.detect_compute_environment",
+        lambda: {"default_device": "cpu", "cuda_available": False, "cpu_cores": 4, "safe_workers": 2},
+    )
+
+    fa_path = ws_root / "test_unified.fasta"
+    fa_path.write_text(f">ctg_u1\n{_synth_dna(20000)}\n", encoding="utf-8")
+
+    isolated_db = PhageDiscoveryDB(db_path=tmp_path / "db" / "uni_wb.db")
+    mgr = PhageDiscoveryManager(project_root=ws_root)
+    mgr.db = isolated_db
+    mgr.queue = PhageDiscoveryQueue(max_workers=1, db=isolated_db)
+    model_info = resolve_model_dir(project_root=ws_root)
+    assert model_info["model_id"] == "unified"
+
+    task_id = "uni_wb_01"
+    task_dir = ws_root / "results" / "phage_discovery" / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+    mgr.db.create_task(task_id, "Unified_Test", "unified", "Unified V4", "cpu", False, status="queued")
+    req = PhageScanRunRequest(task_name="Unified_Test", fasta_path=str(fa_path), device="cpu", apply_protein_gate=False)
+    ctx = {
+        "task_dir": str(task_dir),
+        "staged_fasta_path": str(fa_path),
+        "model_info": model_info,
+        "resolved_device": "cpu",
+        "workers": 1,
+        "gate_resources": {},
+        "device_fallback": False,
+    }
+    asyncio.run(mgr.execute_pipeline_task(task_id, req, ctx))
+    exported = json.loads((task_dir / f"{task_id}_result.json").read_text(encoding="utf-8"))
+    assert exported["summary"]["model_id"] == "unified"
+    assert exported["summary"]["model_version"] == "Unified V4"
+    assert exported["summary"]["region_count"] == 1
+    assert exported["regions"][0]["completeness_key"] == "high"
+    assert "head_packaging" in exported["regions"][0]["functional_modules"]["active_modules"]
+    assert len(exported["rejected_candidates"]) == 1
+
+
 
 

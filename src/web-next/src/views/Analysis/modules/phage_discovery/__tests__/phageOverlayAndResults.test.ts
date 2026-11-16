@@ -438,6 +438,129 @@ describe('PhageDiscoveryResults 与 PhageOverlayMap 回归测试', () => {
     expect(resultsWrapper.find('.ver-badge').text()).toBe('Stage 1.2')
     expect(resultsWrapper.text()).not.toContain('V4.2 总推理耗时')
   })
+
+  it('存在 Unified V4 模型时在设置页、历史页与结果页准确显示 Unified 徽章与功能分区', async () => {
+    const uniSetup = mount(PhageDiscoverySetup, {
+      props: {
+        capabilities: {
+          models: [
+            {
+              model_id: 'unified',
+              label: 'Unified 分化按需模型 (Stage 1.2 DNA底座 + UnifiedJudge)',
+              version: 'Unified V4',
+              priority: 1,
+              path: 'models/full_v4/stage1_2',
+              weights_file: 'models/full_v4/stage1_2/stage1_2.pt',
+              params: 5400597,
+              feature_profile: 'stage1',
+              func_dim: 9,
+              has_context_refiner: true,
+              has_subbin_refiner: true,
+              has_unified_judge: true,
+              unified_judge_dir: 'models/full_v4/orf_judge_unified',
+              unified_models_root: 'models/full_v4',
+              decoder_defaults: {
+                seed_threshold: 0.95,
+                extend_threshold: 0.3,
+                sub_threshold: 0.35,
+                merge_gap_bp: 3000,
+                min_region_bp: 3000,
+              },
+              recommended: true,
+            },
+            {
+              model_id: 'stage1_2',
+              label: 'Stage 1.2 DNA底座模型 (兼容项)',
+              version: 'Stage 1.2',
+              priority: 2,
+              path: 'models/full_v4/stage1_2',
+              weights_file: 'models/full_v4/stage1_2/stage1_2.pt',
+              params: 3715879,
+              feature_profile: 'stage1',
+              func_dim: 9,
+              has_context_refiner: true,
+              has_subbin_refiner: true,
+              has_unified_judge: false,
+              decoder_defaults: {
+                seed_threshold: 0.95,
+                extend_threshold: 0.3,
+                sub_threshold: 0.35,
+                merge_gap_bp: 3000,
+                min_region_bp: 3000,
+              },
+              recommended: false,
+            },
+          ],
+          compute: {
+            cpu_cores: 16,
+            safe_workers: 14,
+            cuda_available: true,
+            gpu_name: 'RTX 4070',
+            gpu_vram_gb: 8,
+            default_device: 'cuda',
+          },
+          protein_gate: { ready: false, blastp_bin: '', blast_db: '' },
+          has_model: true,
+        },
+        isCapabilitiesLoading: false,
+        isInspecting: false,
+        isSubmitting: false,
+        isQueueBusy: false,
+        inspectedContigs: [],
+        inspectTotalBp: 0,
+      },
+    })
+    expect(uniSetup.find('.version-pill').text()).toBe('Unified V4')
+    expect(uniSetup.text()).toContain('Unified 按需分化蛋白引擎已就绪')
+    expect(uniSetup.text()).toContain('统一根目录')
+    expect(uniSetup.text()).toContain('models/full_v4')
+    expect(uniSetup.text()).toContain('DNA 底座')
+    expect(uniSetup.text()).toContain('models/full_v4/stage1_2')
+    expect(uniSetup.text()).toContain('分化蛋白引擎')
+    expect(uniSetup.text()).toContain('models/full_v4/orf_judge_unified')
+    const select = uniSetup.find('#phage-model-select')
+    expect(select.exists()).toBe(true)
+    expect((select.element as HTMLSelectElement).value).toBe('unified')
+    await select.setValue('stage1_2')
+    expect(uniSetup.find('.version-pill').text()).toBe('Stage 1.2')
+    expect(uniSetup.text()).toContain('模型目录')
+    expect(uniSetup.text()).not.toContain('分化蛋白引擎')
+    await select.setValue('unified')
+    await uniSetup.find('button.sample-btn').trigger('click')
+    await uniSetup.find('button.submit-btn').trigger('click')
+    const submitted = uniSetup.emitted('submit')?.[0]?.[0] as any
+    expect(submitted?.model_id).toBe('unified')
+    expect(submitted?.task_name).toBe('Demo_Genome_Unified')
+
+    const { task, result } = createTaskAndResult()
+    task.model_id = 'unified'
+    task.model_version = 'Unified V4'
+    task.summary = { model_label: 'Unified 分化按需模型 (Stage 1.2 DNA底座 + UnifiedJudge)', model_version: 'Unified V4' }
+    result.summary.model_id = 'unified'
+    result.summary.model_version = 'Unified V4'
+    result.summary.model_label = 'Unified 分化按需模型 (Stage 1.2 DNA底座 + UnifiedJudge)'
+    result.summary.routing_stats = { protein_skip_ratio: 0.85, unified_judge_mode: true }
+    result.regions[0].functional_modules = {
+      active_modules: ['head_packaging', 'tail', 'lysis'],
+      unified_core_active_count: 3,
+    }
+
+    const uniHistory = mount(PhageDiscoveryHistory, { props: { tasks: [task] } })
+    expect(uniHistory.find('.tag-badge.version').text()).toBe('Unified V4')
+
+    const uniResults = mount(PhageDiscoveryResults, {
+      props: {
+        task,
+        result,
+        isLoading: false,
+        overlayData: null,
+        isOverlayLoading: false,
+      },
+    })
+    expect(uniResults.find('.ver-badge').text()).toBe('Unified V4')
+    expect(uniResults.text()).toContain('85.0%')
+    expect(uniResults.text()).toContain('head_packaging')
+  })
 })
 
 

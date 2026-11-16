@@ -308,8 +308,9 @@ def _classify_completeness(
     length_bp: int,
     peak_score: float,
     gate: Optional[RegionGateResult],
+    unified_ann: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, str]:
-    """返回 (机读等级 key, 中文人类可读评估标签)，综合 ProteinGate 真实 tier 与区段尺度/峰分。"""
+    """返回 (机读等级 key, 中文人类可读评估标签)，融合 Unified 完整度头或 ProteinGate 真实 tier。"""
     if gate is not None:
         tier = (gate.tier or "").lower()
         if gate.decision == "reject" or tier.startswith("rejected"):
@@ -330,6 +331,16 @@ def _classify_completeness(
             return "fragment", "短片段/暗物质前噬菌体"
         if tier != "gate_disabled":
             return "low", "低可信/可能残余片段 (Low)"
+
+    if isinstance(unified_ann, dict) and unified_ann:
+        cls_u = str(unified_ann.get("structural_completeness_hint") or unified_ann.get("completeness_class") or "")
+        core_cnt = int(unified_ann.get("unified_core_active_count") or unified_ann.get("r2_core_active_count") or 0)
+        mean_ph = float(unified_ann.get("unified_mean_phage_prob") or unified_ann.get("mean_phage_prob") or peak_score)
+        if cls_u == "complete_structural_core":
+            return "high", f"完整前噬菌体核心 (Unified, 核心模块 {core_cnt}/5)"
+        if core_cnt >= 2 or length_bp >= 12000:
+            return "medium", f"部分完整/隐蔽前噬菌体 (Unified, 核心模块 {core_cnt}/5)"
+        return "fragment", f"残余前噬菌体片段 (Unified, 均分 {mean_ph:.2f})"
 
     if length_bp >= 25000 and peak_score >= 0.75:
         return "intact_like", "完整候选前噬菌体 (模型高置信)"
@@ -582,6 +593,8 @@ def export_scan_artifacts(
     source_format: str = "fasta",
     input_source_path: Optional[str] = None,
     project_root: Path = PROJECT_ROOT,
+    unified_suppressed: Optional[List[Dict[str, Any]]] = None,
+    routing_stats: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """将完整扫描结果、全基因组底图叠图分片与多格式生信产物安全落盘，并返回轻量级元数据与文件映射。"""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -638,10 +651,13 @@ def export_scan_artifacts(
 
         core_orfs = _extract_orfs_in_slice(core_seq)
         gate_res = gate_map.get((region.contig_id, region.start_bp, region.end_bp))
-        comp_key, comp_label = _classify_completeness(length_bp, region.peak_score, gate_res)
+        profile_key = f"{region.contig_id}:{region.start_bp}-{region.end_bp}"
+        func_modules_map = getattr(scan_result, "region_functional_modules", None) or {}
+        func_mod = func_modules_map.get(profile_key)
+        unified_ann = func_mod if (isinstance(func_mod, dict) and model_info.get("has_unified_judge")) else None
+        comp_key, comp_label = _classify_completeness(length_bp, region.peak_score, gate_res, unified_ann=unified_ann)
 
         region_id = f"Phage_{idx:03d}"
-        profile_key = f"{region.contig_id}:{region.start_bp}-{region.end_bp}"
         profile_bins = scan_result.region_profiles.get(profile_key, [])
 
         # 生成带宿主侧翼微区域的 GenBank (供 GenomeViewer 一键打开，兼顾速度与基因上下文)
@@ -729,9 +745,6 @@ def export_scan_artifacts(
                 f"{region.contig_id}\tPyrodigal\tCDS\t{gs}\t{ge}\t.\t{strand_ch}\t0\tID={orf_id};Parent={region_id};aa_len={orf['length_aa']}"
             )
 
-        func_modules_map = getattr(scan_result, "region_functional_modules", None) or {}
-        func_mod = func_modules_map.get(profile_key)
-
         region_record: Dict[str, Any] = {
             "index": idx,
             "region_id": region_id,
@@ -764,7 +777,7 @@ def export_scan_artifacts(
             }
         region_records.append(region_record)
 
-    # 也记录被 ProteinGate 淘汰的候选供专业复核参考（不纳入正式交付，但在详情中可查）
+    # 也记录被 ProteinGate 或 Unified 二审淘汰的候选供专业复核参考（不纳入正式交付，但在详情中可查）
     rejected_candidates: List[Dict[str, Any]] = []
     for g in scan_result.gate_details:
         if g.decision == "reject":
@@ -778,6 +791,22 @@ def export_scan_artifacts(
                 "transposase_hits": g.transposase_hits,
                 "matched_titles": list(g.matched_titles_sample),
             })
+    for sup in unified_suppressed or ():
+        s_bp = int(sup.get("start_bp", 0))
+        e_bp = int(sup.get("end_bp", 0))
+        mean_ph = float(sup.get("mean_phage_prob", 0.0))
+        max_p9 = float(sup.get("max_p9", 0.0))
+        reason = str(sup.get("reason", "filtered"))
+        rejected_candidates.append({
+            "contig_id": str(sup.get("contig_id", "")),
+            "start_bp": s_bp,
+            "end_bp": e_bp,
+            "length_bp": max(0, e_bp - s_bp),
+            "peak_score": round(mean_ph, 4),
+            "hallmark_hits": 0,
+            "transposase_hits": 0,
+            "matched_titles": [f"[Unified二审拦截:{reason}] phage_prob={mean_ph:.2f}, max_p9={max_p9:.2f}"],
+        })
 
     fasta_out = out_dir / f"{task_id}_prophages.fasta"
     tsv_out = out_dir / f"{task_id}_regions.tsv"
@@ -859,6 +888,8 @@ def export_scan_artifacts(
         "apply_protein_gate": apply_protein_gate,
         "timings_sec": dict(scan_result.timings_sec),
     }
+    if routing_stats:
+        summary["routing_stats"] = dict(routing_stats)
 
     payload = {
         "task_id": task_id,

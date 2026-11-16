@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PhageTaskRecord } from '../types'
+import { formatPhageModelBadge } from '../utils'
 
 defineProps<{
   tasks: PhageTaskRecord[]
@@ -57,9 +58,11 @@ function getStatusText(item: PhageTaskRecord): string {
 
         <div class="item-meta">
           <span class="tag-badge version">{{
-            String(item.summary?.model_label || '').includes('Stage 1.2') || item.model_id === 'stage1_2'
-              ? 'Stage 1.2'
-              : (item.model_version || 'Stage 1.2')
+            formatPhageModelBadge({
+              modelId: item.model_id,
+              modelVersion: item.summary?.model_version || item.model_version,
+              modelLabel: item.summary?.model_label,
+            })
           }}</span>
           <span class="tag-badge device">{{ String(item.device || 'cpu').toUpperCase() }}</span>
           <span v-if="item.apply_protein_gate" class="tag-badge gate">蛋白门控</span>

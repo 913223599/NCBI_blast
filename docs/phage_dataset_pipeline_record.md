@@ -773,7 +773,372 @@ Pop-Location
    - **修复方案**：[model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py) 对 `Stage 1.2` 模型返回 `version: "Stage 1.2"`（兼容传统 `V4.2`）；[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py)、[queue.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/queue.py) 与 [usePhageDiscovery.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/composables/usePhageDiscovery.ts) 动态透传 `model_info["version"]`；[PhageDiscoveryHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryHistory.vue) 与 [PhageDiscoveryResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryResults.vue) 对 `model_id === 'stage1_2'` 强制优先展示 `Stage 1.2`；同步清理 [PhageDiscoverySetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoverySetup.vue) `Demo_Genome_Stage1_2` 等剩余提示文案。
    - **回归测试与构建**：先新增 `Stage 1.2` `version` / `submit_task` 入库单测及运行中历史卡片 Vitest 用例（均先红后绿）；修复后 `ruff check` 与 `pyrefly check --min-severity warn`（`0 diagnostics`）通过、[test_phage_finder_workbench.py](file:///f:/NCBI%20blast/tests/test_phage_finder_workbench.py) **`14 passed in 8.50s`**、Vitest `8` 文件 **`49 passed`**、`npm run build --prefix src/web-next` 刷新 `dist`（`1175 modules transformed`，`12.93s`）。
 
+---
+
+## 28. P0 离线多教师蒸馏（pyhmmer + phold）与 Stage 1.2 零新增参数热启动消融验证（步骤 35）
+
+为验证在不增加推理期任何参数（严格保持 `params = 3,715,879`）的前提下，引入细菌防御/反防御 HMM 教师与 `ProstT5 + Foldseek` 三维结构暗物质教师能否增强 `Stage 1.2` 模型表现，我们在隔离目录 `F:\Phage data\training\stage1_3_p0_ablation` 与 `F:\Phage data\models\full_v4\stage1_3_p0_ablation`（生产目录 [stage1_2](file:///F:/Phage%20data/models/full_v4/stage1_2) 保持完全未动）开展了完整 P0 多教师蒸馏与同台冷对比消融实验：
+
+1. **新增/扩展模块化组件与先导测试**
+   - [hmm_adversarial_teacher.py](file:///f:/NCBI%20blast/src/phage_discovery/teachers/hmm_adversarial_teacher.py)：基于相对路径解析本地 HMM 库（`DefenseFinder` 1,332 文件、`dbAPIS` 183 条、`VirSorter2 Pfam-A-Viruses` 1,074 条），通过 WSL2 28 核 `pyhmmer 0.12.0` 与 30,000 条/片断点 Checkpoint 执行扫描。
+   - [phold_teacher.py](file:///f:/NCBI%20blast/src/phage_discovery/teachers/phold_teacher.py)：封装 WSL2 GPU `phold 1.2.6`（本地 `ProstT5_fp16` + `Foldseek`），按序列长度降序预排序并约束 `max_aa_len=600`（守住 RTX 4070 8GB 物理显存红线、避开超长序列 $O(L^2)$ 溢出及 `--omit_probs` 空引用缺陷），支持 4,000 条/片 Checkpoint。
+   - [functional_partitions.py](file:///f:/NCBI%20blast/src/phage_discovery/data/functional_partitions.py)：新增 `classify_protein_with_p0_teachers()`（将 `DefenseFinder`、`NetFlax`、`CARD`、`VFDB` 结构/HMM 命中显式反转隔离为 `adversarial_host_flag=True, is_phage_ortholog=False`，避免污染 `P7` 宿主劫持标签）及 `build_p0_teacher_calibration()`。
+   - [distilled_student_v4.py](file:///f:/NCBI%20blast/src/phage_discovery/student/distilled_student_v4.py)：在 `train_distilled_student_v4()` 增加 `init_student_ckpt`（严格热加载 `stage1_2.pt`）、`backbone_lr_scale=0.25` 差分学习率及 `sample_weights_override`。
+   - [run_p0_distill_ablation.py](file:///f:/NCBI%20blast/scripts/run_p0_distill_ablation.py) 与 [test_p0_teachers_and_distill.py](file:///f:/NCBI%20blast/tests/test_p0_teachers_and_distill.py)：实现分步流水线与 4 项单元回归测试。
+
+2. **离线多教师扫库与校准目标构建实测**
+   - **Step 1（`--step hmm`）**：扫描 Stage 1.2 全 9 分片 **`269,613`** 条唯一蛋白（28 核、9 chunks，耗时 `7m46s`），缓存至 `p0_hmm_aa_hits.pkl.gz`，命中 **`22,580`** 条（`defense_finder=15,653`, `wsl_vs2_pfam_vir=6,901`, `dbapis=869`）。
+   - **Step 2（`--step phold`）**：先用 150 条跨长度真实暗物质完成 WSL 冒烟（`80.84s`，召回 `76/150` 并精准检出 `terminase large subunit` 与 `VFDB virulence factor`），随后对核心 6 难分片（`hard_neg`, `hard_v4`, `rare_multiscale`, `ext_rare`, `mined`, `ext_mined`）全部 **`33,405`** 条暗物质蛋白分 9 块完成结构扫描，结构召回 **`18,648 / 33,405 (55.82%)`**，落盘 `p0_phold_aa_hits.pkl.gz`。
+   - **Step 3（`--step targets`）**：耗时 `24.19s` 完成全量融合，共标识 **`19,092`** 条唯一宿主对抗蛋白（`DefenseFinder`/`NetFlax`/`CARD`/`VFDB`），对 **`28,512`** 个窗口进行了对抗校准，对 **`28,243`** 个宿主对抗窗口与 **`427`** 个无病毒证据却高预测分的 MGE/暗物质风险窗口施加 `1.75x` 难负例惩罚权重。
+
+3. **热启动蒸馏训练与严格同台冷对比结果（[p0_vs_stage1_2_comparison.json](file:///F:/Phage%20data/models/full_v4/stage1_3_p0_ablation/p0_vs_stage1_2_comparison.json)）**
+   - **零新增参数热启动微调（`--step train`）**：从 `stage1_2.pt` 加载并采用 `lr=4e-4, backbone_lr_scale=0.25, batch_size=64, patience=4` 微调，`params=3,715,879`，在 `epoch 1` 达到最高 `val_auprc=0.99611` 并于 `epoch 5` 早停，随后重训 `ContextRefiner` 与 `SubBinContextRefiner`（验证集自动网格搜索解得 `seed=0.95, extend=0.40, sub=0.35, plateau=(4, 0.90)`）。
+   - **`v1 test` 窗口评测对比（`Stage 1.2` -> `P0 消融`）**：
+     - **Overall**：`AUROC 0.9912 -> 0.9913`，`AUPRC 0.9905 -> 0.9905`，`Precision 0.9270 -> 0.9283`（`FP 154 -> 151`，`FPR@0.5 0.0770 -> 0.0755`），`F1 0.9518 -> 0.9520`，`Recall@0.5%FPR 0.7750 -> 0.7785`（`+0.35%`）。
+     - **分尺度低误报率区间全线提升**：`<=1000bp Rec@0.5%FPR` 从 **`0.3628 -> 0.3902`（+2.74%）**（但默认阈值 `0.5` 处 recall 从 `0.9177 -> 0.9116`，反映短片段打分排序改善而偏正阈值略收紧）；`3000bp Rec@0.5%FPR` 从 **`0.2862 -> 0.2896`（+0.34%）**；`5000bp F1 0.9753 -> 0.9763`、`FP 54 -> 51`、`Rec@0.5%FPR 0.9040 -> 0.9091`（**+0.51%**）。
+   - **`v1 test` 嵌合体边界评测对比**：`TP/FP/FN` 维持 `[74, 2, 1]`（`F1=0.9801`, `Strict IoU>=0.8 F1=0.9669`, `pure_neg_fp_per_mb=0.3043`），`breakpoint_mae_bp` 从 **`437.1 bp -> 433.0 bp`（-4.1 bp）**，`strict IoU>=0.8 MAE` 从 **`368.6 bp -> 364.5 bp`（-4.1 bp）**。
+   - **未见真实基因组实盘（`unseen_real_genomes`，关闭蛋白门控同台对照）**：4 株菌总区段数两模型完全一致且 `0` 误报（*E. coli* K-12 `4` 个、*S. enterica* LT2 `5` 个、*S. aureus* NCTC8325 `3` 个、*S. coelicolor* `0` 个）；其中 *E. coli* `DLP12`（`565800..582400 -> 567000..582400`）收紧左侧 `1.2 kb` 冗余，`Qin` 由 `complete_structural_core` 转为更符合生物学实际缺陷隐匿型的 `cryptic_or_incomplete`（其余 *S. aureus* `3` 个完整前噬菌体维持 `complete_structural_core` 且峰值略升）。
+
+4. **诊断与下一步决定**
+   - **提升温和的根因诊断**：在当前热启动配方中，早停依据仅为“干净标准验证集 `v1 val` 的主任务 AUPRC”（基线本就高达 `0.996+`），导致训练在第 1 个 Epoch 即定格最佳检查点，而此时同方差损失中的功能/ORF 分支任务精度权重（`task_prec`）才刚刚开始拉升（epoch 1 仅 `~1.12`，epoch 2~5 才升至 `1.86~11.9`），对抗宿主负例与结构暗物质语义信号尚未充分反哺共享主干表示。
+   - **现阶段处置**：实验证实 `P0` 多教师管线及 1.9 万条对抗负样本标注链路稳定可用且对 `v1` 有温和正向增益，但幅度尚不足以立即替代线上 `Stage 1.2`；**生产目录 [stage1_2](file:///F:/Phage%20data/models/full_v4/stage1_2) 保持不动**，本次消融产物留存于 `F:\Phage data\models\full_v4\stage1_3_p0_ablation`，作为后续联合“防御岛/暗物质独立难验证集早停机制 + 语义通道扩容（P1）”实验的对照组基准。
+
+---
+
+## 29. 独立轻量化 `OrfFunctionalJudge`（序列+邻域上下文）功能与防御对抗扩展模块实证消融（步骤 36）
+
+为验证在不动摇 `Stage 1.2` 边界主干的前提下，将“逐 ORF 10 类功能分区（原 9 类 `P0..P8` + 新增第 10 类 `P9 host_defense_virulence`）与噬菌体同源基因判断”解耦并下放给**独立、轻量、单一职责的后置精判模块 `OrfFunctionalJudge`** 能否突破多任务拥挤瓶颈，我们在全零泄露真实基准上完成了“序列输入 vs 纯统计输入 vs 50/50 集成”消融与区段级实盘收益评测（生产目录 [stage1_2](file:///F:/Phage%20data/models/full_v4/stage1_2) 保持完全未动）：
+
+1. **新增模块化组件、修复与消融流水线**
+   - [orf_functional_judge.py](file:///f:/NCBI%20blast/src/phage_discovery/student/orf_functional_judge.py)：实现 10 类定义 `JUDGE_CLASS_NAMES`、纯序列/拓扑 104D 编码 `encode_contig_orf_stat_features()`（消除 Pyrodigal 内部打分漂移）、多尺度 1D 氨基酸卷积编码器 + 3 层上下文 Transformer `OrfFunctionalJudge`（支持 `use_aa_seq=False/True` 开关对照）与快速推理接口 `predict_contig_orfs_with_judge()`。
+   - [hmm_adversarial_teacher.py](file:///f:/NCBI%20blast/src/phage_discovery/teachers/hmm_adversarial_teacher.py) 与 [phold_teacher.py](file:///f:/NCBI%20blast/src/phage_discovery/teachers/phold_teacher.py)：修复 Pyrodigal 默认翻译保留末尾终止符 `*` 导致整条完整蛋白被过滤的缺陷，改为 `.strip().rstrip("*")` 后再判定内部终止密码子。
+   - [run_orf_judge_ablation.py](file:///f:/NCBI%20blast/scripts/run_orf_judge_ablation.py) 与 [test_orf_functional_judge.py](file:///f:/NCBI%20blast/tests/test_orf_functional_judge.py)：构建四步离线验证流水线与 4 项先行单元测试。
+
+2. **零泄露测试真值缓存与按 Contig 隔离训练集构建**
+   - **`eval_truth_cache.pkl.gz`（Step 1）**：解析 `v1_test_chimeras`（75 contigs, 21,262 ORFs）与 4 株 `unseen_real_genomes`（19,255 ORFs），通过 24 核 WSL `pyhmmer` 扫描 `all_phrogs` / `defense_finder` / `dbapis` / `wsl_vs2_pfam_vir`，共构建 `34,885` 条唯一蛋白注释（严格零重合 `strictly_unseen = 28,318` 条，其中噬菌体同源 `18,364`、已知功能模块 `6,787`、`DefenseFinder` 命中 `2,901`）。
+   - **`judge_dataset.npz`（Step 2）**：从 `all_9_parts_orfs.pkl.gz` 切分 `45,451` contigs（90/10 按 contig 隔离，并掩码过滤验证集中与训练集重合的 AA 槽位），得到 `train_windows = 49,173`、`val_windows = 5,325`（`train_aa_vocab = 250,362`）。
+   - **对照训练（Step 3）**：
+     - `Stat-Only`（`use_aa_seq=False, params=691,723`）：12 epochs 约 `62s` 完成，zero-overlap val 最高 `MacroF1(P0..8) = 0.5167, Top1Acc = 0.7470, PhageAUROC = 0.8486`（权重：[orf_judge_statonly.pt](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation/orf_judge_statonly.pt)）。
+     - `AA-Seq`（`use_aa_seq=True, params=1,081,100`）：Epoch 10 达到最高 `MacroF1(P0..8) = 0.5507, Top1Acc = 0.7538, PhageAUROC = 0.8745`（Epoch 8 `PhageAUROC = 0.8765`，权重：[orf_judge_seq.pt](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation/orf_judge_seq.pt)）。
+
+3. **32,782 个严格零重合真实 ORF 四方同台实测（[orf_judge_ensemble_and_regions.json](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation/orf_judge_ensemble_and_regions.json)）**
+   - 对齐全部 `32,782` 个 `strictly_unseen` ORF（`n_known = 21,941`, `n_p08_pos = 6,444`, `defense_finder_count = 2,764`, `host_defense_virulence = 1,629`），全集推理耗时 `Stat-Only = 2.78s`、`AA-Seq = 12.09s`（对比 `Stage 1.2` 全扫描特征提取抽样 `151.14s`）：
+     - **`Stage 1.2` 原生头**：`is_phage AUROC = 0.7517`、`AUPRC = 0.7500`、`DefenseFinder 误判率 = 46.35%`、`P0..8 Macro-F1 = 0.4562`、`Micro-F1 = 0.4428`、`Top1 = 0.6327`（`transposon_plasmid_mge F1 = 0.1724`、`moron_amg_defense F1 = 0.2466`、`P9 = 无`）。
+     - **`Judge (Stat-Only)`**：`is_phage AUROC = 0.7728`、`AUPRC = 0.8027`、`DF 误判率 = 41.21%`、`Macro-F1 = 0.5017`、`Micro-F1 = 0.4970`、`Top1 = 0.6564`、`DF P9 AUROC = 0.7901 / AUPRC = 0.3512`（`P9 整体 AUPRC = 0.4384 / AUROC = 0.8397`）。
+     - **`Judge (AA-Seq)`**：`is_phage AUROC = 0.7885`、`AUPRC = 0.8078`、`DF 误判率 = 39.44%`、`Macro-F1 = 0.4631`、`Micro-F1 = 0.4783`、`Top1 = 0.6516`、`DF P9 AUROC = 0.7828 / AUPRC = 0.4528`（`P9 整体 AUPRC = 0.5802 / AUROC = 0.8558`、`transposon_plasmid_mge F1 = 0.4024 / AUROC = 0.9499`）；序列 1D 卷积对短催化基序和对抗蛋白具有优势，但对未知保守结构蛋白出现序列记忆过拟合。
+     - **`Judge (Stat+Seq 50/50 融合)`**：两路表示强烈互补并全线刷出最高分——`is_phage AUROC = 0.8106 (+5.89%)`、`AUPRC = 0.8340 (+8.40%)`、`DF 误判率 = 39.83% (-6.52%)`、`DF P9 AUROC = 0.8148 / AUPRC = 0.4317`、`P9 整体 AUPRC = 0.5454 / AUROC = 0.8731`、`Macro-F1 = 0.5474 (+9.12%)`、`Micro-F1 = 0.5521 (+10.93%)`、`Top1 = 0.6873 (+5.46%)`（`integration_excision 0.5942 -> 0.6627`、`dna_rna_replication 0.4434 -> 0.6044`、`transcription_regulation 0.2122 -> 0.3587`、`moron_amg_defense 0.2466 -> 0.4894`、`transposon_plasmid_mge 0.1724 -> 0.4779`）。
+
+4. **区段级与真实基因组候选区段实盘收益结论**
+   - **真实基因组建出 108 个原生候选区段透视（`unseen_real_genomes`）**：共有 `202` 个 `pyhmmer` 客观功能模块存在实例，`Stage 1.2` 原生头仅召回 `97 / 202 (48.02%)`，而 **`Judge (Stat+Seq 50/50)` 召回 `168 / 202 (83.17%, +35.15%)`**；在 *E. coli* K-12（`24/31 -> 29/31`）、*S. enterica* LT2 与 *S. aureus* NCTC8325 典型前噬菌体上基本达成模块全召回，同时在高 GC *Streptomyces* 无真实病毒模块候选区段中准确给出 `max P9 = 0.728 ~ 0.977` 对抗预警。
+   - **嵌合体 75 真值区段 vs 宿主背景 / 高 Defense 岛对比**：`Stat-Only` 区段功能模块 `Macro-F1 = 0.8058`、`Micro-F1 = 0.8995`（高于 `Stage 1.2` 的 `0.7863 / 0.8886`），`vsHost_net = 0.9874`；`AA-Seq` 区段 `ModMacroF1 = 0.8265`（其中 `transposon_plasmid_mge` 区段 F1 达 `0.48` vs `Stage 1.2` 的 `0.20`），高 DefenseFinder 宿主岛 `P9` 检出率 `100%`（`Stage 1.2` 为 `0%`）；但在“完整 `intact` vs 残片 `degraded` 区分”上，携带全序列 200bp/5kb DNA 窗口语境的 `Stage 1.2`（`AUROC = 0.8265`）仍略高于纯局部 31-ORF 上下文模型（`Stat-Only = 0.8158`, `Ensemble = 0.7856`）。
+   - **工程落地定位**：实验实证了**“主干聚焦边界分割 + 独立后置 `OrfFunctionalJudge (Stat+Seq)` 精判功能/MGE/宿主防御对抗”**的解耦路线收益极大且推理开销仅约 `15s`（`2.78s + 12.09s`）；后续如需正式上线，可将两路模型封装为区段后置精判与轻量化蛋白门控二分类先验，并对 `AA-Seq` 分支补充正则化及分位阈值校准。
+
+---
+
+## 30. `OrfFunctionalJudge` R1 → R2 → R3 单变量递进升级与零泄露消融实证（步骤 37）
+
+围绕第 29 节暴露出的四大核心瓶颈——（1）`AA-Seq` 对未知结构蛋白序列局部死记过拟合；（2）单通道仅见局部 1D 卷积缺少操纵子相对共线性感知；（3）稀缺类在 `pos_weight` 训练下的概率漂移导致 `50/50` 平均后在固定 `0.5` 阈值归零；（4）缺乏折叠结构同源表征先验——我们在严格统一基准（**32,782 条零株系重合 `strictly_unseen` ORF + 75 嵌合真值区段 + 108 真实基因组原生检出区段**，生产目录 [stage1_2](file:///F:/Phage%20data/models/full_v4/stage1_2) 全程未动）依次推进三级单变量消融实验：
+
+### 1. 递进架构设计与新增/扩展模块
+1. **升级 1（R1，操纵子拓扑感知 + 先功能后鉴伪门控）**：
+   - 在 [orf_functional_judge.py](file:///f:/NCBI%20blast/src/phage_discovery/student/orf_functional_judge.py) 实现 `arch="r1"`：序列编码端采用 `aa_mask_prob` 随机残基掩码 + `stem stride=2` 与 `ds_conv` 下采样压缩显存 + 2 层远程自注意力 + 4 头多原型池化；上下文端以基因间相对距离/链向/同向操纵子断点偏置注意力 `RelativeOperonAttentionBlock` 替代绝对位置编码；决策端采用 `FuncToPhageGatedHead`（先判功能再由 `P9` 抑制与 `P0..P4` 结构协同显式耦合门控 `is_phage`）与互斥惩罚项。
+   - **显存红线实践**：针对 RTX 4070 8GB，序列支路训练自动锁定 `seq_bs=16, grad_accum=8`（等效 `bs=128`），峰值显存控制在 `2.4~4.0 GiB` 安全区内，无共享内存溢出。
+2. **升级 2（R2，双尺度短基序 + 本地 `ProstT5_fp16` 折叠同源表征蒸馏）**：
+   - 新增 [prostt5_embed_teacher.py](file:///f:/NCBI%20blast/src/phage_discovery/teachers/prostt5_embed_teacher.py) 与 [test_r2_prostt5_judge.py](file:///f:/NCBI%20blast/tests/test_r2_prostt5_judge.py)：借助 WSL2 `/usr/bin/python3` GPU 挂载本地 `database/phold_db` 内置 `ProstT5_fp16`（绑定 `shared.weight -> encoder.embed_tokens.weight`），耗时 `1341.4s`（8 个 `5,000` 条/片断点分片）完成 `40,000` 条高价值优先蛋白的 `1024D` 折叠表征提取（覆盖 `96,896` 个训练 ORF 槽位），缓存至 [prostt5_train_index.npz](file:///F:/Phage%20data/training/orf_judge_ablation/prostt5_train_index.npz)。
+   - 在 `arch="r2"` 中叠加 `stride=1` 浅层高分辨率短基序支路 `hi_motif`（找回被 4 倍下采样抹平的防御系统短活性中心）与 `distill_proj`（`0.7*cosine + 0.3*smooth_l1` 对齐 1024D 折叠表征）。
+3. **升级 3（R3，操纵子宏观态势门控 + 窗级完整度回归 + 零泄露 Logit 校准与跨模态协同）**：
+   - 在 `arch="r3"` 中增加 `OperonMacroContextGate`（窗口注意力+最大池化结合宏观拓扑特征 FiLM 调制逐 ORF）与 `win_core_head`（利用窗口核心模块 `P0..P4` 丰度回归辅助监督），同时将硬对抗防御互斥惩罚加权至 `0.65`。
+   - 新增单一职责后置校准模块 [judge_calibration.py](file:///f:/NCBI%20blast/src/phage_discovery/student/judge_calibration.py) 与单测 [test_r3_judge_and_calibration.py](file:///f:/NCBI%20blast/tests/test_r3_judge_and_calibration.py)：**严格仅在零重叠验证集 `va_*` (`va_unseen==1`) 上**拟合按类 Logit 融合权重及温和 L2 正则偏置校准（冻结 `is_phage` 负偏置防放水、限制 `P0..P4` 正偏置上限），并实现可选的 `Stage 1.2` DNA 主干信号轻度跨模态残差协同（`s12_phage_weight=0.22, s12_func_weight=0.05`）。
+
+### 2. 训练规模与收敛记录
+- **R1**（[train_summary.json](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation_r1/train_summary.json)）：`r1_aa_seq_ctx` (`params=1,223,874`)，14 epochs 耗时 `1729.34s`，Epoch 14 验证集 `MacroF1=0.5561, Top1Acc=0.7682, PhageAUROC=0.8668`。
+- **R2**（[train_summary.json](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation_r2/train_summary.json)）：`r2_aa_seq_ctx` (`params=1,547,746`)，14 epochs 耗时 `1987.28s`，Epoch 13 验证集 `MacroF1=0.5507, Top1Acc=0.7697, PhageAUROC=0.8789`。
+- **R3**（[train_summary.json](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation_r3/train_summary.json)）：`r3_stat_only_ctx` (`params=809,216`) 耗时 `109.25s` 验证集达 `MacroF1=0.5509, Top1Acc=0.7760, PhageAUROC=0.8567`；`r3_aa_seq_ctx` (`params=1,662,820`) 耗时 `3021.58s` 验证集刷新最高 **`MacroF1=0.5573, Top1Acc=0.7808, PhageAUROC=0.8742`**。
+
+### 3. 四代同台全量实测对比（32,782 零泄露 ORF 与 75 嵌合区段）
+
+| 模型版本与形态 | `is_phage AUROC` | `is_phage AUPRC` | `DF 误判率 (DF_FP)` | `P0..8 MacroF1` | `P0..8 MicroF1` | `Top1Acc` | `P9 整体 AUPRC` | 区段 `vsHost_net` | 区段 `Intact_AUROC` | 区段 `ModMacroF1 / MicroF1` |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`Stage 1.2` 原生基准** | `0.7517` | `0.7500` | `0.4635` | `0.4562` | `0.4428` | `0.6327` | `-` | `0.9849` | `0.8265` | `0.7863 / 0.8886` |
+| **Baseline `50/50`** | `0.8106` | `0.8340` | `0.3983` | `0.5474` | `0.5521` | `0.6873` | `0.5454` | `0.9840` | `0.7856` | `0.7912 / 0.8998` |
+| **R1 `Stat-Only`** | `0.7880` | `0.8164` | `0.4041` | `0.5257` | `0.5158` | `0.6816` | `0.4211` | `-` | `-` | `-` |
+| **R1 `AA-Seq`** | `0.7940` | `0.8258` | `0.4193` | `0.5073` | `0.5104` | `0.6710` | `0.4010` | `-` | `-` | `-` |
+| **R1 `50/50`** | `0.8151` | `0.8442` | `0.4110` | `0.5561` | `0.5567` | `0.6963` | `0.4328` | `-` | `-` | `-` |
+| **R2 `AA-Seq` 单模** | `0.8028` | `0.8317` | `0.4168` | `0.5126` | `0.5171` | `0.6819` | `0.4604` | `0.9920` | **`0.8343`** | `0.7938 / 0.8821` |
+| **R2 (`R1 Stat + R2 Seq 50/50`)** | `0.8215` | `0.8478` | `0.4146` | **`0.5672`** | `0.5638` | `0.6993` | `0.4619` | `0.9913` | `0.8255` | `0.7673 / 0.8879` |
+| **R3 `Stat-Only`** | `0.7935` | `0.8210` | **`0.3781`** | `0.5275` | `0.5212` | `0.6808` | `0.4284` | **`0.9932`** | `0.7865` | **`0.8092`** `/ 0.8992` |
+| **R3 `AA-Seq`** | `0.8008` | `0.8298` | `0.3987` | `0.5136` | `0.5156` | `0.6915` | `0.4576` | `0.9836` | `0.7934` | `0.7843 / 0.8791` |
+| **R3 `Calibrated Ensemble` (纯 Judge)** | `0.8229` | `0.8516` | `0.3962` | `0.5639` | `0.5664` | `0.7093` | `0.4678` | `0.9916` | `0.7641` | `0.8022 / 0.8963` |
+| **R3 `Cross-Modal S1.2` (跨模态终态)** | **`0.8294`** | **`0.8577`** | `0.3849` | **`0.5699`** | **`0.5721`** | **`0.7107`** | **`0.4678`** | `0.9924` | `0.7632` | `0.8070 /` **`0.9000`** |
+
+*(注：R1/R2/R3 结果文件分别见 [R1报告](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation_r1/orf_judge_vs_stage1_2.json)、[R2区段报告](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation_r2/orf_judge_ensemble_and_regions.json) 与 [R3区段报告](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation_r3/orf_judge_ensemble_and_regions.json)；在 108 个 `unseen` 原生候选区段共 202 个功能存在实例中，`Stage 1.2` 原生召回 `97/202`，`Baseline` 召回 `168/202`，`R2` 召回 `167/202`，`R3` 在收紧防御误报门槛后召回 `161/202`。)*
+
+### 4. 关键科学发现与客观选型定论
+1. **逐级单变量实证结论**：
+   - **R1 治愈了序列记忆过拟合**：`AA-Seq` 结构类 F1 大幅拉升（`head 0.5231 -> 0.6379`、`connector 0.3860 -> 0.5632`、`tail 0.5412 -> 0.6246`），但 4 倍下采样削弱了短防御活性基序（`P9 AUPRC 0.5802 -> 0.4010`）。
+   - **R2 验证了折叠同源表征与高分辨率短基序支路的决定性价值**：单模 `AA-Seq` 不仅将 `P9 AUPRC` 拉回并涨至 `0.4604`（`is_phage AUROC` 首破 `0.80`），更在区段完整度 `Intact_AUROC` 上以 **`0.8343`** 首次正面反超 DNA 主干 `Stage 1.2`（`0.8265`）；`R1 Stat + R2 Seq 50/50` 拿下未校准全功能最高 `MacroF1 = 0.5672`（较 `Stage 1.2` 提升 `+11.10%`），但概率硬平均导致区段级 `transposon_plasmid_mge` 归零。
+   - **R3 验证了宏观排雷门控、Logit 校准与跨模态 DNA/AA 协同的上限**：`R3 Stat-Only` 单模即达成全系最低 `DF_FP = 0.3781` 与最高区段 `ModMacroF1 = 0.8092`；Logit 空间校准救活 `transposon_plasmid_mge`（`0.0 -> 0.2353`）并将纯 Judge 推上 `AUROC=0.8229 / AUPRC=0.8516 / Top1=0.7093`；接入 `Stage 1.2` 跨模态后刷出全系列最高 ORF 判别（**`AUROC=0.8294 / AUPRC=0.8577 / MacroF1=0.5699 / Top1=0.7107`**、`DF_FP=0.3849`、区段 `ModMicroF1=0.9000`）。
+2. **如实记录 R3 的唯一副作用与部署策略**：`OperonMacroContextGate` 的全窗平滑化与逐类偏置偏移使得累加连续评分 `Intact_AUROC`（`sum(max(P0..P4))`）在 R3 回落至 `0.7934 (AA-Seq) / 0.7641 (Calib)`，低于 `R2 AA-Seq` 单模的 `0.8343`。因此工程整合时应将 **R3 `Cross-Modal + Calib` 作为主精判与防御岛排雷引擎**，而将 **R2 未校准核心结构支路输出作为完整度 (`intact vs degraded`) 参考分**（后续可在 R4 探索引入“HMM 结构域包络 + 3Di 过程思维链与对抗错题库重放”）。
+
+---
+
+## 31. `Stage 1.2` + `R2/R3 Judge` 后置联动边界与灰区挽救单变量消融（步骤 38）
+
+为验证在不动摇 `Stage 1.2` 权重的前提下，引入 [judge_region_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/judge_region_refiner.py)（含边界外延裁边、基于 `200bp SubBin` 灰区高响应碎片的 `R3` 二审捞回及 `R2` 核心完整度拆分汇总）对最终区段边界精确度与隐蔽前噬菌体召回的净收益，我们在 `v1 test_chimeras`（75 嵌合区段）及 4 株 `unseen_real_genomes` 全基因组上开展了逐级单变量检验（生产 [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py) 默认路径暂未修改，结果缓存于 [p0_linkage_eval.json](file:///F:/Phage%20data/models/full_v4/orf_judge_ablation_r3/p0_linkage_eval.json)）：
+
+| 联动方案 | `v1` TP/FP/FN (`IoU>=0.5`) | `v1` F1 / `meanIoU` | `v1` 断点 `MAE` (`bp`) | `v1 Strict0.8` TP / F1 | *S. aureus* NCTC8325 | *E. coli* K-12 MG1655 | *S. enterica* LT2 | *S. coelicolor* A3(2) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`E0` (`Stage 1.2` 原生基准)** | `75 / 3 / 0` | `0.9804 / 0.9795` | **`435.9 bp`** | `74 /` **`0.9673`** | `3` (CheckV 均值 `0.9247`) | `4` (`DLP12/e14/Rac/Qin`) | `5` (`Fels-2` IoU `0.7320`) | **`0`** |
+| **`E1` (+ DNA 门控语义微调)** | `75 / 3 / 0` | `0.9804 / 0.9644` | `709.4 bp` (退步) | `73 / 0.9542` | `3` (`Gifsy` 降至 `0.8879`) | `4` | `5` (`Fels-2` `0.7716`, `Gifsy-2` `0.9119`) | `0` |
+| **`E2` (+ `SubBin` 灰区 `R3` 二审，关闭外延)** | **`75 / 3 / 0`** | **`0.9804 / 0.9795`** | **`435.9 bp`** | **`74 / 0.9673`** | **`3` (完全无损)** | **`6`** (零误报救回 **`CPS-53 2467.8k..2475k`** 与 `2558.6k..2565.4k`) | **`6`** (零误报救回 **`1963k..1968.2k`** `7/7` 真 ORF) | **`0`** |
+| **`E3` (`E2` + DNA 门控语义微调)** | `75 / 3 / 0` | `0.9804 / 0.9644` | `709.4 bp` | `73 / 0.9542` | `3` | `6` | `6` | `0` |
+
+### 关键实证取舍定论
+1. **明确否决 ORF 级向外扩边（`E1`）**：即便加上 `min_ext_backbone_score=0.22` DNA 过渡带门控，由于相邻宿主近端 ORF 在 `32-ORF` 滑窗上下文内易被宏观传染且基因粒度（`~1 kb`）远粗于 `200bp SubBin`，仍会将 `v1_test` 断点误差由 `435.9 bp` 恶化至 `709.4 bp`（无门控初测更是恶化至 `1581.1 bp`）；因此 `Stage 1.2` `200bp SubBin` 原生物理断点应保持绝对主导，不应由后置 ORF 强行外延。
+2. **明确采纳 `E2`（`SubBin` 高响应灰区提取 + `R3` 严格二审 + `R2` 完整度）**：在不增加 `v1` 任何假阳性（`pure_negative_false_positives = 1` 不变）、不损失 `0.1 bp` 原生边界精度、且保持高 GC *S. coelicolor* **`0` 误报**的前提下，精准捞回因全局 `ContextRefiner` 下压 `win_score` 而遗漏的短隐蔽前噬菌体（`K-12` 检出由 `4 → 6`、`LT2` 检出由 `5 → 6`，均经 `pyhmmer` 真值蛋白核实为真实噬菌体片段）。
+
+---
+
+## 32. 统一分化底座 + 按需激活路由模型 (`UnifiedPhageModel`) 验证（步骤 39）
+
+针对 R2 完整度与 R3 排雷能力需串联两套独立蛋白大模型的问题，在 [orf_functional_judge.py](file:///f:/NCBI%20blast/src/phage_discovery/student/orf_functional_judge.py) 与 [unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py) 实现 `arch="unified"` 共享知识底座内部分化架构及单入口条件路由模型 `UnifiedPhageModel`，并由 [train_unified_judge.py](file:///f:/NCBI%20blast/scripts/train_unified_judge.py) 在冻结 R3 共享底座 `h_base` 与 Head C 权重的前提下，采用 R2 结构教师无平滑核心 logits 蒸馏出仅 `21,898` 参数的完整度分化头 `intact_func_head`（耗时 `130.09s`，收敛 `val_core_kd=4.0567`，产出 [unified_judge_seq.pt](file:///F:/Phage%20data/models/full_v4/orf_judge_unified/unified_judge_seq.pt) 与 [unified_eval_report.json](file:///F:/Phage%20data/models/full_v4/orf_judge_unified/unified_eval_report.json)）。
+
+### 1. 模型整合收益与 `32,782` 零泄露 ORF / 75 嵌合区段同台实测
+
+| 对比维度 | 分离双蛋白底座 (`R3 + R2`) | **统一分化模型 (`Unified`)** | 变化说明 |
+| :--- | :---: | :---: | :--- |
+| **Judge 总参数量** | `4,019,782` | **`2,493,934`** (头 B 仅 `21,898`) | **减少 `1,525,848` (`-37.96%`)**，不再加载 `R2_seq.pt` |
+| **32,782 ORF `is_phage AUROC / AUPRC` (`Cross-Modal`)** | `0.8294 / 0.8577` | **`0.8294 / 0.8577`** | **100% 零损复现 R3 最高精度** |
+| **32,782 ORF `DF_FP / MacroF1 / Top1`** | `0.3849 / 0.5699 / 0.7107` | **`0.3849 / 0.5699 / 0.7107`** | **100% 零损守住防御岛排雷与 10 类分区** |
+| **区段 `vsHost / vsDF / ModMacroF1 / ModMicroF1`** | `0.9924 / 1.0000 / 0.8070 / 0.9000` | **`0.9924 / 1.0000 / 0.8070 / 0.9000`** | **防御岛 `DF_FP = 0.0000` 与功能识别无任何退化** |
+| **区段 `Intact_AUROC`（单次前向）** | Head C `0.7632` / 独立 R2 `0.8343` | Head C `0.7632` -> **Head B `0.7992`** | 从单次 `h_base` 拉回 `+0.0360`（全冻结 R3 `h_base` 限制其达上限 `0.8343`） |
+
+### 2. `UnifiedPhageModel` 端到端按需激活路由实测
+
+| 数据集 / 模式 | 检出区段与边界精度 | 蛋白底座唤醒比例 (`activated / total`) | 蛋白跳过率 (`skip_ratio`) | 分段耗时 (`DNA` + `蛋白` = `总计`) |
+| :--- | :--- | :---: | :---: | :---: |
+| **`v1_test`（全专家按需模式）** | `TP/FP/FN=75/3/0, F1=0.9804, meanIoU=0.9795, MAE=435.9bp, Strict0.8=74` | `61 / 75` | **`18.67%`** | `31.995s + 12.920s = 44.915s` |
+| **`v1_test`（仅 `boundary` 专家）** | `TP/FP/FN=75/3/0, F1=0.9804, meanIoU=0.9795, MAE=435.9bp, Strict0.8=74` | `0 / 75` | **`100.00%`** | `32.353s + 0.000s = 32.353s` (`-28.0%`) |
+| ***S. aureus* NCTC8325** (`2.82 Mb`) | `3` 个 (`CheckV_IoU`: `0.9123 / 0.9407 / 0.9211`)，全标 `complete_structural_core` | `1 / 1` | `0.00%` | `10.216s + 3.777s = 13.993s` |
+| ***E. coli* K-12 MG1655** (`4.64 Mb`) | `4 -> 6`（含灰区救回 `CPS-53 2467.8k` 与 `2558.6k`）；`DLP12 (2.45)`、`Rac (2.50)`、`2467.8k (0.78)`、`2558.6k (1.14)` 均正确标 `cryptic_or_incomplete` | `1 / 1` | `0.00%` | `38.550s + 16.659s = 55.209s` |
+| ***S. enterica* LT2** (`4.86 Mb`) | `5 -> 6`（救回 `1963k..1968.2k`）；4 大完整噬菌体全标 `complete_structural_core` (`4.94~4.98`)，2 残余标 `cryptic_or_incomplete` | `1 / 1` | `0.00%` | `42.267s + 18.122s = 60.389s` |
+| ***S. coelicolor* A3(2)** (`8.67 Mb` 纯宿主) | **`0` 检出 (`0` 误报)** | **`0 / 1`** | **`100.00%`** | `35.025s +` **`0.000s`** `= 35.025s` |
+
+### 3. 科学结论与客观边界
+1. **单底座分化的工程与生物收益成立**：仅增加 `21,898` 参数的分化头即在单次前向中同时提供 R3 顶级防御排雷/10类分区与 R2 式完整度判别；在 *E. coli* K-12 上不仅无损保住 `6` 处全召回，还将分离版 R2 误判为 `complete_structural_core` 的缺陷噬菌体 `DLP12`（`3.22 -> 2.45`）与 `6.8kb` 短碎片 `2558.6k..2565.4k`（`2.51 -> 1.14`）准确纠正回 `cryptic_or_incomplete`。
+2. **客观局限记录**：因训练阶段为保持 100% R3 精度而彻底冻结 R3 `h_base`（其内含 `OperonMacroContextGate` 前段特征编码与局部上下文平滑），仅微调线性/MLP `Head B` 将 `Intact_AUROC` 从 `0.7632/0.7641` 拉回至 `0.7992`，尚未达到独立无平滑 `R2_seq` 单模上限（`0.8343`）；未来若在 `OrfContextEncoder` 之前分裂双支路并行联合微调，有望在不掉 R3 精度的前提下彻底追平 `0.834+`。
+
+---
+
+## 33. `UnifiedPhageModel` 生产准入大样本压力测试（步骤 40）
+
+针对上线生产环境前必须核验的质粒/非噬菌体病毒误报率、高碎片化宏基因组短 Contig（`6~15 kb`）稳定性及显存/分片流式吞吐，从 [negative_splits.json](file:///F:/Phage%20data/benchmarks/v1/negative_splits.json) 的严格零泄露 `test` 分片（扣除 `prophage_masks ± 5 kb`）及 `v1_test` 截断构造了 7 组端到端压力基准（详表见 [production_stress_report.json](file:///F:/Phage%20data/models/full_v4/orf_judge_unified/production_stress_report.json)）：
+
+| 测试组（零训练泄露） | 样本规模 / Contig 数 | `Stage 1.2` 原生基准 | `UnifiedPhageModel` | 蛋白跳过率 / 耗时 / 峰值显存 |
+| :--- | :---: | :---: | :---: | :---: |
+| **`A1` 纯质粒完整长段** (`>=3kb`) | `3.77 Mb` / `92` 条 | `FP=4` (`1.061/Mb`) | **`FP=6`** (`1.592/Mb`, `veto=0`, **`gray_rescued=2`**) | `skip=0.8370` / `15.71s` / `587.3 MB` |
+| **`A2` 非噬菌体真核/古菌病毒** | `0.25 Mb` / `16` 条 | `FP=0` (`0.000/Mb`) | **`FP=2`** (`7.871/Mb`, **`gray_rescued=2`**, 两株古菌梭状病毒) | `skip=0.8750` / `10.23s` / `403.1 MB` |
+| **`A3` 细菌染色体干净长段** (整批) | `36.12 Mb` / `84` 条 | `FP=6` (`0.166/Mb`) | **`FP=8`** (`0.222/Mb`, `veto=0`, **`gray_rescued=2`**) | `skip=0.8690` / `67.90s` / `1010.9 MB` |
+| **`A3_chunked` (`10 Mb/片`, `4` 片)** | `36.12 Mb` / `84` 条 | `FP=6` | **`FP=8`** (`activated=11/84` 完全一致) | `rss_delta=24.1MB` / `118.15s` / `1010.9 MB` |
+| **`B1` 碎片化质粒短 Contig** (`6~15kb`) | `3.47 Mb` / `342` 条 | `FP=5` (`1.440/Mb`) | **`FP=9`** (`2.591/Mb`, `veto=0`, **`gray_rescued=4`**) | `skip=0.9327` / `22.73s` / `527.7 MB` |
+| **`B2` 碎片化细菌短 Contig** (`6~15kb`) | `15.01 Mb` / `1462` 条 | `FP=1` (`0.067/Mb`) | **`FP=3`** (`0.200/Mb`, `veto=0`, **`gray_rescued=2`**) | `skip=0.9952` / `39.84s` / `527.7 MB` |
+| **`C1` 短侧翼 `±4kb` 正样本** | `4.87 Mb` / `75` 条 | `TP=75/0/0, F1=1.0, MAE=981.0bp` | **`TP=75/0/0, F1=1.0, MAE=981.0bp`** | `skip=0.0000` / `21.05s` / `645.1 MB` |
+| **`C2` 截断 `12kb` 超短正样本** | `0.90 Mb` / `75` 条 | `75/75 (100.0%)` | **`75/75 (100.0%)`** | `skip=0.0000` / `27.24s` / `527.0 MB` |
+
+### 压测暴露的 3 个关键生产隐患与定位结论
+1. **`gray_rescue` 准入与 `base_veto` 拦截在质粒/MGE 场景存在过松虫洞（核心阻断点）**：
+   - `rescue_and_filter_regions_with_judge` 将“命中 `P0..P6` 中任意 2 类 (`active_phage_mods >= 2`)”作为灰区放行条件，导致缺少 `head/connector/tail` 形态结构蛋白、仅含质粒/ICE 常见的 `integration_excision + dna_rna_replication + transcription_regulation` 的质粒碎片与细菌 MGE 岛在二审中被误捞，使 `B1` 碎片化质粒误报率从 `1.440/Mb` 升至 `2.591/Mb`、`A2` 古菌梭状病毒由 `0` 升至 `2`。
+   - 同时，`strict_veto` 仅在 `core_mods == 0` 时才触发，致使含有 `max_p9=0.7931`、`mean_phage_prob=0.4306` 且带有 `transposon_plasmid_mge` 标签但偶含 `1` 个 `lysis` 预测的质粒区间（`NZ_CP134785.1_clean1 6200..36600`）绕过了拦截，导致 `base_vetoed = 0`。
+2. **显存安全充裕，但按批重建子进程池推高分片耗时**：`36.12 Mb` 细菌单批峰值显存仅 `1010.9 MB`（`8 GB` 显存余量充足），但 `10 Mb/片` 直接重复调用 `scan_sequences` 因逐片拉起/销毁 `ProcessPoolExecutor` 使总耗时由 `67.90s` 增至 `118.15s`（`+74%`），后续流式分片必须复用持久进程池。
+3. **正样本短碎片召回鲁棒性已彻底过关**：在 `±4 kb` 短侧翼和无侧翼 `12 kb` 超短截断正样本中均守住 **`100.0% (75/75)`** 全召回且零误杀（*注：`A3` 中 `NZ_CP097190.1_clean10 80800..93800` 检出 `head/connector/tail/lysis/integration` 全套核心 `core_sum=4.00`，疑似 `negative_index` 掩蔽遗漏的真实残余前噬菌体*）。
+
+---
+
+## 34. 生产转正风控修复、流式分片持久池与标准交付验收（步骤 41）
+
+针对步 40 暴露出的质粒/MGE 灰区误救、防御岛逃逸与分片进程重建开销，按批准计划 [production_readiness_plan.md](file:///C:/Users/Administrator/.gemini/antigravity/brain/a84b4add-178c-4aff-97a2-c2e69eae3a98/production_readiness_plan.md) 完成了 3 阶段工程与算法落地：
+
+### 1. 代码落地模块
+- **二审风控加固**（[judge_region_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/judge_region_refiner.py)）：抽出 `_should_veto_base_region`（新增零形态核心 `P0..P2==0` + 低均值 `<0.48` 质粒/防御对抗否决通道，拦截含单个 `lysis` 噪声的 `ParA/ParB` 质粒误报）与 `_passes_gray_rescue_criteria`（强制灰区救回需具形态结构证据或双核心 `lysis` 簇，且高 `P8` 激活时需多形态交叉佐证），新增 `suppressed_out` 可追溯审计记录。
+- **持久进程池流式分片与断点续跑**（[unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)）：在 `UnifiedPhageModel` 新增 `scan_fasta_streaming`，跨 Chunk 仅启动并复用 1 个安全限核 `ProcessPoolExecutor`，每片落盘 `chunks.jsonl` 与原子更新 `checkpoint.json` 并强制 `gc.collect()` + `torch.cuda.empty_cache()`。
+- **标准化导出与正式入口**（[report_exporter.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/report_exporter.py)、[inference/__init__.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/__init__.py)、[predict_unified.py](file:///f:/NCBI%20blast/scripts/predict_unified.py)）：导出 `regions.tsv`、`regions.gff3`（1-based inclusive）、按需流式切分的 `prophages.fna` 与 `scan_summary.json`。
+
+### 2. 全量修复前后同台对照与回归结果（[production_readiness_verified_report.json](file:///F:/Phage%20data/models/full_v4/orf_judge_unified/production_readiness_verified_report.json)）
+
+| 验证组（全量复测） | 修复前 (`Unified` 初版) | **修复后 (`Unified` 生产预备版)** | 关键对照与核实细节 |
+| :--- | :---: | :---: | :--- |
+| **`A1` 纯质粒 (`3.77 Mb`, `92` 条)** | `FP=6 (1.592/Mb)` | **`FP=4 (1.061/Mb)`**（追平 `Stage 1.2`） | `base_vetoed=1`（击落 `NZ_CP134785.1` `ParA/ParB+P9+P8`），`gray_rescued=1`（`14/15` 拒救） |
+| **`A2` 非噬菌体病毒 (`0.25 Mb`, `16` 条)** | `FP=2 (7.871/Mb)` | `FP=2 (7.871/Mb)` | `2` 株古菌梭状病毒因含病毒衣壳 (`head_packaging`, `mean_ph=0.93`) 仍从灰区召回 |
+| **`A3` 细菌完整长段 (`36.12 Mb`, `84` 条)** | `FP=8 (0.222/Mb)` | **`FP=7 (0.194/Mb)`** | `gray_rescued=1`（GenBank 确认为掩蔽漏标 `major capsid + integrase` `NZ_CP097190.1`） |
+| **`A3_streaming` (`10 Mb/片` 持久池)** | `118.15s`（无续跑/非复用） | **`86.23s`** (`resume_half=39.82s`, `rss_delta=30.9MB`, `gpu_peak=1010.9MB`) | 耗时较重建池降 `27%`（较全载 `65.15s` 高 `+32.4%`），`exact_match=True` 且 4 类文件导出齐全 |
+| **`B1` 碎片质粒 (`3.47 Mb`, `342` 条)** | `FP=9 (2.591/Mb)` | **`FP=6 (1.728/Mb)`**（减降 `33%`） | `base_vetoed=1`、`gray_rejected=16/18`；较 `S1.2` 原生 `5` 处仍多 `1` 处（含 `plasmid_frag0257` `head+lysis` 误触） |
+| **`B2` 碎片细菌 (`15.01 Mb`, `1,462` 条)** | `FP=3 (0.200/Mb)` | **`FP=2 (0.133/Mb)`**（`skip=99.52%`） | 仅保留 `S1.2` 原生 `1` 处与掩蔽漏标真核衣壳碎片 `bacteria_frag0713` |
+| **`C1 / C2` 截断正样本 (`n=75`)** | `100.0% / 100.0%` | **`100.0% / 100.0%`**（`F1=1.00, MAE=981.0bp`） | 正样本短侧翼与无侧翼 `12 kb` 片段零损全召回 |
+| **`v1_test` 75 嵌合体** | `75/3/0, F1=0.9804, MAE=435.9bp` | **`75/3/0, F1=0.9804, MAE=435.9bp`** | 与 `Stage 1.2` / 分离版 `E2` 精度完全无损一致 |
+| **4 株 `unseen_real_genomes`** | *S. aureus*=3, `K-12`=6, `LT2`=6, `A3(2)`=0 | ***S. aureus*=`3`, `K-12`=`5`, `LT2`=`6`, `A3(2)`=`0`** | `K-12` 稳健救回真 `CPS-53 (2467.8k)` 并依规剥除 `7/9` 宿主化 `2558.6k` 残骸至 `suppressed` |
+
+### 3. CLI 端到端与回归验证
+- 使用 [predict_unified.py](file:///f:/NCBI%20blast/scripts/predict_unified.py)（`--chunk-mb 3 --no-resume`）实跑 *E. coli* K-12（`4,641,652 bp`），耗时 `53.644s` 输出规范的 `regions.tsv`、`regions.gff3`、`prophages.fna` 与 `scan_summary.json`（5 处检出 + 1 处抑制预览）。
+- 全量代码规范与回归检查：`ruff check` 全绿通过（`All checks passed!`）；8 个测试套件共 `38` 项用例全部通过（**`38 passed in 50.06s`**）；`nvidia-smi` 显示 GPU 显存回归基线（`774 MiB / 8188 MiB`）。
+- **上线结论**：当前已满足**正式单株与中小规模基因组及带断点保护分片任务上线要求**（推荐以 [predict_unified.py](file:///f:/NCBI%20blast/scripts/predict_unified.py) 投产运行，同时留意高质粒碎片与古菌病毒样本在极少数携带病毒同源蛋白区段上仍可能保留残余召回）。
+
+---
+
+## 35. 生产主工作台全链路切换：用 `Unified V4` 替代默认 `Stage 1.2`（步骤 42）
+
+为将线上 FastAPI + Vue 工作台默认主模型由纯 `Stage 1.2` 无缝升级为 `UnifiedPhageModel`，保留 `stage1_2` DNA 底座磁盘资产并完成全链路生产替换：
+
+### 1. 生产全链路切换改造
+- **自动模型注册切换**（[model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py)）：在探测 `stage1_2` 后自动查找配套 `orf_judge_unified`（`unified_judge_seq.pt` + `orf_judge_statonly.pt`），当存在时将 **`unified` (`Unified V4`, `5,400,597` 参数)** 自动置顶为默认激活模型（`models[0]`），`stage1_2` 自动退居次席作为安全降级备选。
+- **工作台引擎与剖面打通**（[unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)、[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py)、[exporter.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/exporter.py)）：
+  - `UnifiedPhageModel.scan_sequences` 支持输出 200bp `region_profiles` 与 `contig_score_tracks`；
+  - `PhageDiscoveryManager` 识别 `has_unified_judge` 后主路径改由 `UnifiedPhageModel` 执行（仍透传界面调优阈值及可选外接 `BLASTp` 门控），并把 `Head B` 完整度级别、10 类功能模块、`protein_skip_ratio` 与二审拦截记录接入导出 JSON / GBK / GFF3 / TSV；
+  - `Release` 生命期结束后强制释放全部 GPU 缓存（`release_gpu_memory()`）。
+- **前端工作台升级**（[utils.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/utils.ts)、[PhageDiscoverySetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoverySetup.vue)、[PhageDiscoveryResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryResults.vue)、[PhageDiscoveryHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryHistory.vue)）：新增统一徽章工具函数正确显示 `Unified V4` 与按需引擎状态芯片、蛋白跳过率 KPI 与命中区段功能模块标签。
+
+### 2. 真实权重端到端与回归验收
+- **真实工作台运行实测**（隔离环境调用真实 [manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py) 与 `F:\Phage data\models\full_v4`）：
+  - `get_capabilities()` 自动首选 **`('unified', 'Unified V4', has_unified_judge=True)`**；
+  - *E. coli* K-12：`regions=5`（含救回 `CPS-53 Phage_005: 2467800..2475000`，`e14/Qin` 标 `high`，`DLP12/Rac` 标 `medium`）、`rejected=1`、叠图 `360` bins 及 `region_1.gbk` (`43,892` 字符) 均正常输出（`54.869s`）；
+  - *S. coelicolor* A3(2)：`regions=0`、`rejected=0`、**`skip=1.0` (`100%` 跳过蛋白推理)**、叠图 `360` bins（`34.89s`）。
+- **全套自动化校验（最后一次编辑代码后）**：后端工作台 `16` 项与算法核心 `38` 项全通过；前端 Vitest `6/6` 通过且 `vue-tsc -b && vite build` 生产打包无错完成。
 
 
 
 
+
+
+
+
+---
+
+## 36. 8 株权威金标准宿主全基因组实测与“漏查 / 多出”独立蛋白库仲裁（步骤 43）
+
+在完成生产主工作台全链路切换之后，选取 **8 株前噬菌体数目、生物功能与基因座界限已在经典文献及 NCBI RefSeq 中明确锚定**、且**完整宿主序列零存在于本地负样本库 (`negative_index.tsv` 命中 0 条)** 的跨菌属参考基因组（革兰氏阳性 4 属 + 革兰氏阴性 4 属，合计 **`31,216,619 bp` (`31.22 Mb`)**），以已投产的默认配置运行 `UnifiedPhageModel`（`prefer_unified_judge=True`, CUDA GPU），并使用独立本地蛋白库 **PHROGs (`all_phrogs.h3m`, `E<=1e-4`) + DefenseFinder (`1,332` 个 HMM) + RefSeq 官方 `/product=`** 对每一处漏查（`FN`）、额外多出（`Extra`）、已知非噬菌体干扰对照（`Confounder`）及二审拦截候选（`Suppressed`）逐区进行交叉验证（完整评测结果留档：[gold_standard_hosts_eval.json](file:///F:/Phage%20data/models/full_v4/orf_judge_unified/gold_standard_hosts_eval.json)，评估与仲裁脚本位于 scratch 目录）。
+
+### 1. 训练集透明度审计与总盘表现
+- **训练集重合披露**：8 株宿主全基因组均未进入 `negative_index.tsv`。正样本训练集 `splits/train.tsv` 收录过 6 株独立游离噬菌体同源记录（`933W`/`NC_000924.1`, `Stx2_Min27`/`NC_004914.3`, *Listeria* `A118`/`NC_003216.1`, `Fels-1`/`NC_010391.1`, `Gifsy-1`/`NC_010392.1`, `Gifsy-2`/`NC_010393.1`）；而 *E. faecalis* V583 (`pp1..pp7`)、*L. lactis* IL1403 (`bIL285..bIL312`)、*S. pyogenes* SF370 (`Spy370.1..4`)、*B. subtilis* 168 (`PBSX/SPbeta/skin`，仅 `SPbeta` 与 `Pf1` 在 `test.tsv`) 及 *S. enterica* LT2 (`Fels-2` 与退化残片) 的独立游离记录均未进入 `train.tsv`。
+- **8 株总计实测结果**（总推理耗时 `270.98s`）：
+  - **经典核心前噬菌体召回率 (`gold_prophage`)**：**`35 / 38 (92.1%)`**；
+  - **卫星 / 高度退化前噬菌体样元件 (`gold_satellite_or_island`)**：`4 / 18`（精准召回 IL1403 3 株卫星 + LT2 `STM4200` 退化残骸；对 Sakai 6 株毒力/防御岛 `SpLE1..SpLE6` 与 *B. subtilis* 4 处高龄非核心岛做到零误报）；
+  - **经典已知非噬菌体干扰对照误报 (`known_nonphage_confounder`)**：`2 / 4`（精准拒识 `ICEBs1` 与 `vanB_PAI`；但误报两处纯尾部细菌素）；
+  - **金标准外额外多出 (`Extra`)**：`2` 处（全 `31.22 Mb` 宿主染色体中 6 株做到了 `Extra=0`）。
+
+| 权威参考菌株 (RefSeq) | 基因组长度 / 耗时 | DNA 底座 -> 最终检出 (拦截) | 核心前噬菌体命中 | 卫星/退化元件命中 | 干扰对照误报 | 金标准外 Extra | 关键实测边界与特征 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| *S. pyogenes* SF370 (`NC_002737.2`) | `1.85 Mb` / `11.35s` | `3 -> 3 (0)` | `3 / 3` (`Spy370.1..3`) | `0 / 1` (`SpyCIM1`) | `--` | `0` | 3 大诱导前噬菌体 IoU `0.806~0.966` 全判 `complete_structural_core` |
+| *L. lactis* IL1403 (`NC_002662.1`) | `2.37 Mb` / `15.10s` | `6 -> 6 (0)` | `3 / 3` (`bIL285/286/309`) | `3 / 3` (`bIL310/311/312`) | `--` | `0` | 隔 `18.5 kb` 的 `bIL309` 与 `bIL312` 精准分离，Head B 对 3 大 3 小完整度分化 `100%` 准确 |
+| *P. aeruginosa* PAO1 (`NC_002516.2`) | `6.26 Mb` / `46.92s` | `2 -> 2 (0)` | `1 / 1` (`Pf4` `10.8 kb`) | `--` | `1 / 1` (`R2/F2 pyocin`) | `0` | 精准检出 `Pf4` 丝状噬菌体 (`IoU=0.858`)；但尾部样细菌素 `R2/F2 pyocin` 误报且判成完整前噬菌体 |
+| *B. subtilis* 168 (`NC_000964.3`) | `4.22 Mb` / `37.34s` | `4 -> 4 (0)` | `3 / 3` (`PBSX/SPbeta/skin`) | `0 / 4` (`pp1/3/6/yjc`) | `0 / 1` (`ICEBs1`) | `0` | 完美拒识 `ICEBs1` 与 4 个非核心防御岛；但 `134.3 kb` 巨型 `SPbeta` 中间出现 `15 kb` 断裂分拆成 2 段 |
+| *E. coli* O157 Sakai (`NC_002695.2`) | `5.50 Mb` / `65.33s` | `14 -> 14 (2)` | `15 / 18` (`Sp1..18`) | `0 / 6` (`SpLE1..6`) | `--` | `0` | 13 株单区精准命中（`Sp10=0.997`）；`Sp11+Sp12` 因 `0 bp` 相邻发生串联粘连合并；`SpLE1..6` `0/6` 零误报；漏 `Sp2, Sp16, Sp17` |
+| *S. enterica* LT2 (`NC_003197.2`) | `4.86 Mb` / `59.88s` | `5 -> 6 (1)` | `4 / 4` (`Fels-1/2`, `Gifsy-1/2`) | `1 / 2` (`STM4200` 救回) | `--` | `1` | 灰区主动救回真 `STM4200` (`IoU=0.936`) 与隐蔽真微前噬菌体 `STM1867..1871`；五大致病岛 `0` 误报；`STM2234` 碎片遭灰区拦截 |
+| *E. faecalis* V583 (`NC_004668.1`) | `3.22 Mb` / `18.27s` | `6 -> 6 (2)` | `5 / 5` (`pp1,3,4,5,6`) | `0 / 2` (`pp2`, `pp7`) | `0 / 1` (`vanB_PAI`) | `1` | 未训先泛化 `5/5` 全中；成功拒识 `vanB_PAI`；多报 1 段紧邻 `vanB` 的 `47.2 kb` 接合耐药移动岛 (`EF2297..EF2340`) |
+| *L. monocytogenes* EGD-e (`NC_003210.1`) | `2.94 Mb` / `16.79s` | `1 -> 2 (1)` | `1 / 1` (`A118`, `IoU=0.978`) | `--` | `1 / 1` (`monocin`) | `0` | 完美拒识 `LIPI-1` 与防御岛 `SUP_0_1143400_1150000`；但尾部细菌素 `monocin` 由灰区主动救回误报 |
+
+### 2. 漏查与多出区段独立分子验证定论（不修改当前权重参数，客观记录能力边界）
+1. **“漏查 (`FN`)”独立验证结果**：
+   - **二审灰区阈值过严导致的真实短/低分噬菌体漏检 (`3` 例)**：`Sakai Sp16` (`8.55 kb`, `PHROG=100%`, `head=1, int=1`, `mean_p=0.5786`)、`Sakai Sp17` (`24.19 kb`, `PHROG=82.8%`, `core=9`, `mean_p=0.7803`) 与 `LT2_remnant_STM2234` (`9.88 kb`, `PHROG=90.0%`, `head=1, tail=3, lysis=1`, `mean_p=0.6533`)，**`Stage 1.2` DNA 灰区均已正确提案，但均因 `mean_phage_prob < 0.85` 与边缘 `max_p9 (0.34~0.47)` 被 `Head A` 二审 `gray_rejected` 拦截**；
+   - **卫星海盗岛 / 强退化抗噬菌体防御岛的合理或边界性未报**：`SF370 SpyCIM1`、`Sakai Sp2`（P4 样）与 `V583 pp7_EfCIV583` 经 PHROGs 与 DefenseFinder 验证均为 `head=0, tail=0, int=1` 且携带 **`3~7` 个抗噬菌体防御蛋白**的寄生染色体岛；`V583 pp2_phage02`（`14.6 kb`, `head=1, tail=5, int=0`）为极度宿主体内化无整合酶残核，`DNA_NO_PROPOSAL`；而 `Sakai SpLE1..SpLE6`（含 LEE 岛 `SpLE4` 与携带 `10` 个 `Zorya/Druantia/RM` 防御基因的 `SpLE6`）及 *B. subtilis* 168 `prophage_1/3/6/yjc` 缺乏核心头尾骨架，模型对其零误报为预期表现。
+2. **“多出 (`Extra`) / 非噬菌体误报”与拦截验证结果**：
+   - **真隐蔽微型前噬菌体额外检出 (`1` 例)**：`LT2 EXTRA_1963000_1968200` (`5.2 kb`，灰区主动救回)。经 RefSeq 与 PHROGs 证实内部紧凑排列 `STM1867 (pagK) -> STM1868 (mig-3 tail) -> STM1868A (lytic enzyme) -> STM1869 (tail) -> STM1870 (recE-like) -> STM1871 (integrase)`（`PHROG=87.5%`），属于未被传统 4 大前噬菌体列表涵盖的真实退化微型前噬菌体（`Head B` 准确标为 `cryptic_or_incomplete`）。
+   - **细菌驯化尾部样细菌素假阳性 (`2` 例)**：革兰氏阴性菌 *P. aeruginosa* PAO1 的 **`R2/F2 pyocin`**（`23.2 kb`, `IoU=0.789`, `mean_p=0.9031` 且 `Head B` 误触发 `complete_structural_core`）与革兰氏阳性菌 *L. monocytogenes* EGD-e 的 **`monocin`**（`10.0 kb`, `IoU=0.735`, 甚至系由灰区主动救回）。独立 `pyhmmer` 铁证二者皆为 **`head=0, int=0`** 的无衣壳、无整合酶纯尾部+裂解细菌素（`PAO1 tail=20`, `EGD-e tail=5, lysis=2`），揭示现有蛋白头部尚缺针对“有尾无头无整合 Tailocin”的一票否决约束。
+   - **巨型接合耐药移动岛误报 (`1` 例)**：`V583 EXTRA_2215600_2262800`（`47.2 kb`, 紧邻 `vanB_PAI` 右翼）。经 `.gbk` + `pyhmmer` 验证实为携 `vanY-B/S-B/R-B`、`VirB4/VirB6/VirD4` 接合转移酶、`MobT/relaxase`、`ltrA` 反转录酶及 **`10` 个 DefenseFinder 防御模块**的接合转座移动岛；`Head B` 已精准标其带 `transposon_plasmid_mge` 与 `cryptic_or_incomplete (1/4)`，但主区段未能触发 `Head A base_veto`。
+   - **二审精确拒杀对照 (`2` 例)**：`V583 SUP_0 (2453k..2459.8k)` 与 `EGD-e SUP_0 (1143.4k..1150k)` 均仅含 `FtsK/SpoIIIE` 等迁移蛋白与 `2~3` 个 `DefenseFinder` 模块（`head=0, tail=0, int=0`），被 `gray_rejected` 精准拦截。
+3. **拓扑边界短板实锤**：紧邻（`0 bp` 间隔）串联噬菌体（`Sakai Sp11 + Sp12`）会在 DNA 滑窗与合区阶段粘连为单个预测，而超过典型前噬菌体尺度的 `134 kb` 巨型噬菌体（`B. subtilis SPbeta`）则因内部高变异段导致滑窗中断被分裂为两段。
+
+---
+
+## 37. 工作台模型引擎识别与多路径展示 UI 修复（步骤 44）
+
+针对生产界面虽实际已锁定 `Unified V4`，但设置卡路径栏仅渲染底层共用目录 `...\stage1_2` 且无引擎下拉切换、易使用户误以为错选旧版 `Stage 1.2` 的展示盲区，实施轻量无破坏 UI 修复（本次未修改任何模型权重与裁决参数）：
+
+1. **类型与提交链路透传选定模型 ID**（[types.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/types.ts)、[usePhageDiscovery.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/composables/usePhageDiscovery.ts)）：为 `PhageModelInfo` 补齐 `unified_models_root` 声明，为 `PhageScanForm` 添加 `model_id`，提交负载优先采用用户选定模型并向后兼容默认 `models[0]`。
+2. **显式引擎选择与双底座目录分栏呈现**（[PhageDiscoverySetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoverySetup.vue)）：
+   - 当检测到多套引擎（如 `Unified V4` + 兼容 `Stage 1.2`）时提供下拉选择器（默认锁定置顶主力 `Unified V4`）；
+   - 启用 `UnifiedJudge` 时将原孤立单行小字升级为结构化路径面板，明确并列展示 **`统一根目录`** (`...\full_v4`)、**`DNA 底座`** (`...\stage1_2`) 与 **`分化蛋白引擎`** (`...\orf_judge_unified`)；
+   - 同步修复“载入验证样本”示例名随当前选用模型切换为 `Demo_Genome_Unified`。
+3. **测试与构建验证**（[phageOverlayAndResults.test.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/__tests__/phageOverlayAndResults.test.ts)）：新增多模型下拉、三路径分栏展示与提交 `model_id` 验证用例；最后一次修改后前端 TypeScript (`vue-tsc -b`)、生产打包 (`vite build`) 与单测全绿通过。
+
+---
+
+## 38. 各候选优化方案逐项“收益 vs 损失”量化消融测试（步骤 45，沙盒验证暂未改生产代码）
+
+在不改动 `src/` 与生产权重文件的前提下，构建覆盖 **Gold-8 权威宿主 (`31.22 Mb`) + 3 株 Unseen 基因组 (`S. aureus NCTC8325 / E. coli K-12 / S. coelicolor A3(2)`) + 全量 8 组生产防回归基准 (`A1_plasmids`, `A2_non_phage_virus`, `A3_bacteria_clean`, `B1_frag_plasmids`, `B2_frag_bacteria`, `C1_flank4k`, `C2_12kb`, `v1_test`)** 的确定性推理中间态缓存与同源沙盒（消融脚本 [run_ablation_suite.py](file:///C:/Users/Administrator/.gemini/antigravity/brain/a84b4add-178c-4aff-97a2-c2e69eae3a98/scratch/run_ablation_suite.py)、架构解耦脚本 [opt5_arch_ablation.py](file:///C:/Users/Administrator/.gemini/antigravity/brain/a84b4add-178c-4aff-97a2-c2e69eae3a98/scratch/opt5_arch_ablation.py)），逐个隔离实测各项优化的真实收益与损失代价。
+
+### 1. 后置裁决与拓扑优化逐项对比（`Opt-1 ~ Opt-4b`）
+
+| 实验策略 | Gold-8 前噬菌体 (`38`) | 卫星/退化 (`18`) | 干扰误报 (`4`) | 额外 `Extra` | 裂 (`Sp`) / 并 (`Tan`) | Unseen (`Sau,K12,A32`) | Stress 误报 (`A1 / A2 / A3 / B1 / B2`) | 正样本抗断 (`C1 / C2 / v1_F1 / MAE / s08`) | 结论与取舍定论 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **`0_Baseline` (现行生产)** | `35/38` | `4/18` | `2/4` | `2` | `1 / 2` | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | 生产基准线（Mean IoU=`0.8070`） |
+| **`1a_Opt1_MGECrossVeto`** | `35/38` | `4/18` | `2/4` | **`1` (-1)** | `1 / 2` | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **纯收益零损失**：精准清除 `V583 ICE` |
+| **`1b_Opt1_AggPlasmidVeto`** | `35/38` | `2/18` (-2) | `2/4` | `1` (-1) | `1 / 2` | `3, 5, 0` | `1 / 2 / 5 / 3 / 2` (-8) | `0.9933 / 67(-8) / 0.9868 / 435.9bp / 74` | **损失过大否决**：虽杀 `A1/B1` 质粒但误伤 `Sat -2` 且 `C2 12kb` 断崖跌 `8/75` |
+| **`2a_Opt2_GrayTailocinGuard`** | `35/38` | `4/18` | **`1/4` (-1)** | `2` | `1 / 2` | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **纯收益零损失**：精准拦截灰区 `monocin`，零误杀 `STM4200` 与 `C2` |
+| **`2b_Opt2_Base+GrayTailocin`** | `35/38` | `3/18` (-1) | **`0/4` (-2)** | `2` | `1 / 2` | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 64(-11) / 0.9804 / 435.9bp / 74` | **损失过大否决**：`C2 12kb` 短碎段因天然缺头/整合酶暴跌 `11/75` |
+| **`3a_Opt3_ElasticSp17`** | **`36/38` (+1)** | `4/18` | `2/4` | `2` | `1 / 2` | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **纯收益零损失**：跨头结构并集精准捞回 `Sakai Sp17` |
+| **`3b_Opt3_ShortMorph_n4`** | `36/38` (+1) | `5/18` (+1) | `2/4` | `2` | `1 / 2` | `3, 5, 0` | `4 / 2 / 8(+1) / 6 / 3(+1)` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | 小代价：`n>=4` 虽救回 `STM2234` 但引出 `A3 +1` 与 `B2 +1` |
+| **`3b2_Opt3_ShortMorph_n6`** | **`36/38` (+1)** | **`5/18` (+1)** | `2/4` | `2` | `1 / 2` | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **纯收益零损失**：卡严 `n>=6` 精确保住 `STM2234` 且规避 `A3/B2` 误报 |
+| **`3c_Opt3_IntOnly_Sp16`** | **`37/38` (+2)** | `5/18` (+1) | `2/4` | `2` | `1 / 2` | `3, 6(+1), 0` | `4 / 2 / 8(+1) / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **代价明显暂缓**：仅凭 `Int` 救 `Sp16` 会连带放大 `K-12 (+1)` 与 `A3 (+1)` 假阳性 |
+| **`4a_Opt4a_TandemSplit_v1`** | `35/38` | `4/18` | `2/4` | `2` | `1 / 0` (-2) | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `0.9804 / 75 / 0.9677 / 717.4bp / 73` | **误切惩罚严重**：误将 `C1` 与 `v1` 单株大噬菌体（`c1_10/11/32`, `CHIM_0009/0010`）切碎 |
+| **`4a2_Opt4a_StrictSplit_v2`** | `35/38` | `4/18` | `2/4` | `2` | `1 /` **`0` (-2)** | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **纯收益零损失**：须同时存在两簇 `>=3` 强 `P0>=0.80` + 中间 `P4>=0.70` + 深谷 `ph<0.35`（`Sp11/12` IoU 升至 `0.956/0.899`） |
+| **`4b_Opt4b_CompBridge_v1`** | `35/38` | `4/18` | `2/4` | `2` | `1 / 4` (+2) | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **负收益**：未桥接 `SPbeta`（缺口高分比例 `15.8%<25%`）反误并 `bIL309+bIL312` |
+| **`4b2_Opt4b_StrictBridge_v2`** | `35/38` | `4/18` | `2/4` | `2` | **`0` (-1)** `/ 2` | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **纯收益零损失**：严格互补双臂（`>=30kb` 早+`Int` 臂补全缺 `Int` 的结构臂，总长 `>=75kb`+谷中 `>=2` 锚钉），`SPbeta` IoU `0.451 -> 0.843` |
+| **`6_PLUS_SHORTMORPH_n6` (全零损合集)** | **`36/38`** | **`5/18`** | **`1/4`** | **`1`** | **`0 / 0`** | `3, 5, 0` | `4 / 2 / 7 / 6 / 2` | `1.0000 / 75 / 0.9804 / 435.9bp / 74` | **黄金零损组合**：Gold-8 Mean IoU **`0.8070 -> 0.8504 (+0.0434)`**，全部 10 项防回归基准严格 `0` 损失 |
+
+### 2. `Opt-5` 零泄露纯架构特征分叉解耦对照实验（冻结共享底座）
+
+保持 `judge_dataset.npz`（`49,173` 训练 / `5,325` 验证）与 `R2` 教师蒸馏目标严格不变，对比 **Head B (`intact_func_head`)** 不同特征分叉起点对 `32,782` 未见 ORF、`75` 嵌合体 `Intact_AUROC` 与端到端指标的纯影响：
+
+| Head B 分叉变体 | 可训练参数 | 验证 `val_core_kd` | `75` 嵌合体 `Intact_AUROC` | `32,782` ORF `Core5_mAP / mF1` | `Sakai Sp17 P2` | `PAO1 pyocin` (`Head/Conn/Tail/Lysis/Int >=0.5`) | 联合 `6_ZeroLossRules` 端到端结果 | 核心发现 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- | :--- |
+| **`Prod_HeadB` (`h_base`, 生产)** | `21,898` | `4.0567` | `0.7992` | `0.6355 / 0.6081` | `0.563` | `[1, 0, 17, 2, 0]` | `Pro=36/38 Sat=5/18 Conf=1/4 Ex=1 Sp=0 Tan=0` | 稳定基线 |
+| **`B0_retrain` (`h_base` 同源重训)** | `21,898` | `4.1766` | `0.8070` | `0.6327 / 0.6105` | `0.547` | `[1, 0, 17, 2, 0]` | `Pro=35/38`（`Sp17` 擦线落榜）`Sat=5/18 Conf=1/4 Ex=1 Sp=0 Tan=0` | 单靠 `h_base` 随机起伏影响临界阈值 |
+| **`B1_orf_fuse` (纯单 `e_orf`)** | `21,898` | `9.5962` | `0.8606` | **`0.3470 / 0.3470`** | `0.062` | `[1, 0, 7, 1, 0]` | `Pro=35/38 Conf=1/4 Ex=2 Sp=1 Tan=2` | **严重坍塌**：丢掉操纵子上下文导致 `P0..P3 mAP` 暴跌且失去 `Opt-1a/4` 判别基础 |
+| **`B2_conv3` (`e_orf + 3-ORF Conv1d`)** | `99,178` | `6.1846` | `0.7817` | `0.5109 / 0.5119` | `0.414` | `[0, 1, 11, 2, 0]` | `Pro=35/38 Conf=2/4 Ex=2 Sp=1 Tan=0` | 短程卷积仍不足以代替相对拓扑自注意（反误判 `V583 ICE` `2` 个伪 `P0`） |
+| **`B3_dualskip` (`cat[e_orf, h_base]`)** | `73,578` | **`3.7920`** | **`0.8197`** (`+0.0205`) | **`0.6412 / 0.6132`** | **`0.651`** | `[1, 0, 17, 2, 0]` | **`Pro=36/38 Sat=5/18 Conf=1/4 Ex=1 Sp=0 Tan=0`** | **最优无泄露架构升级**：`Core5_mAP/mF1` 超越 `Native_R2`，`Intact_AUROC` 逼近独立 `R2` 且不损任何生产基准 |
+| `Native_R2` (独立 `R2` 参考上限) | `1,547,746` (独立模型) | `--` | `0.8343` | `0.6377 / 0.5854` | `0.945` | **`[0, 6, 17, 3, 1]`** | `Pro=36/38 Sat=4/18 Conf=2/4 Ex=2 Sp=1 Tan=0` | 证实 **原生 R2 教师本身即把 `PAO1 pyocin` 判出 `17 Tail + 6 Conn`**，根除细菌素必须引入外部 Tailocin 硬负样本联合微调共享底座 |
+
+---
+
+## 39. 零损失规则与拓扑优化组合正式落地生产与全链路实机验收（步骤 46）
+
+按第 38 节严格消融证实，**在不改动现行 `UnifiedJudge` 权重文件的前提下**，将唯一全基准零损失组合 `6_PLUS_SHORTMORPH_n6` 正式模块化合入生产推理管线（不引入任何牺牲 `C2 12kb` 短片或新增 `K-12/A3` 假阳性的激进规则；`Opt-5 DualSkip` 保留与后续外部硬负样本重训一并规划升级权重）：
+
+### 1. 生产代码改动清单
+1. **后置仲裁与拓扑精修引擎**（[judge_region_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/judge_region_refiner.py)）：
+   - `_get_r2_core_probs` 统一安全读取 `Head B` 核心结构 5 维概率并向后兼容旧版单头字典；
+   - `_should_veto_base_region` 合入 **Opt-1a 跨头联合 MGE/ICE 排雷** (`r2_morph_cnt==0 & max_p8>=0.55 & max_p9>=0.45 & mean_p9>=0.18 & mean_ph<0.72`)；
+   - `_is_gray_tailocin_like` + `_passes_gray_rescue_criteria` 合入 **Opt-3a 弹性结构梯度救援**、**Opt-3b2 短形态簇挽救 (`6 <= n_orf <= 10`)** 与 **Opt-2a 灰区纯尾簇 Tailocin 拦截**；
+   - 新增独立模块化拓扑精修函数 **`bridge_complementary_phage_fragments`**（**Opt-4b2** 严格互补半臂桥接）与 **`split_tandem_prophage_regions`**（**Opt-4a2** 严格双芯+整合酶谷底拆分），并纳入 `rescue_and_filter_regions_with_judge` 默认后处理管线。
+2. **统一扫描统计对齐**（[unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)）：为单次与流式分片扫描初始化补充 `topology_bridged` / `topology_split` 统计字段（FastAPI 工作台 [manager.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/manager.py) 自动通过 `UnifiedPhageModel` 无缝继承全套新能力）。
+3. **单元测试补强**（[test_judge_region_refiner.py](file:///f:/NCBI%20blast/tests/test_judge_region_refiner.py)）：新增 `5` 项覆盖跨头 ICE 排雷、灰区 Tailocin 拦截、弹性/短形态挽救与 `4-ORF` 隔离、互补半臂桥接不误并卫星岛、双芯串联拆分不误切巨噬菌体的单元测试。
+
+### 2. 上线后真机全链路回归验收结果
+1. **自动化单元测试**：`pytest tests/test_judge_region_refiner.py tests/test_orf_functional_judge.py tests/test_unified_differentiated_model.py tests/test_unified_production_pipeline.py tests/test_phage_finder_workbench.py -v` **全部 `39 passed in 11.36s`**。
+2. **全量基准函数级对接复核**：生产函数 `rescue_and_filter_regions_with_judge` 在完整双基准中间态上的输出 `100%` 对齐消融最佳组合（`Pro=36/38, Sat=5/18, Conf=1/4, Ex=1, Sp=0, Tan=0`，`Sau=3, K12=5, A32=0`，`A1=4, A2=2, A3=7, B1=6, B2=2`，`C1=1.0000`, `C2=75/75`, `v1=75/3/0 F1=0.9804 MAE=435.9bp s08=74`）。
+3. **`UnifiedPhageModel` 真机 GPU 从 FASTA 端到端重扫实测**（实测摘要留档于 `prod_verify_gold8/phase1_summary.json`）：
+   - **Gold-8 权威宿主 (`31.22 Mb`)**：核心前噬菌体 **`36 / 38 (94.7%)`**（Sakai `16/18`，精准捞回 `Sp17`）、卫星/退化元件 **`5 / 18`**（LT2 `2/2`，精准捞回 `STM2234`）、干扰对照误报 **`1 / 4`**（EGD-e `monocin`、B. subtilis `ICEBs1`、V583 `vanB_PAI` 全 **`0` 误报**，仅余 PAO1 `R2/F2 pyocin`）、金标准外 Extra **`1`**（V583 `47.2 kb` 接合耐药移动岛清零 `1 -> 0`）；**`split = 0, tandem = 0`**，Gold-8 前噬菌体 **Mean IoU 从 `0.8070` 跃升至 `0.8504 (+0.0434)`**，其中 `SPbeta` (`0.451 -> 0.8427`)、`Sp11` (`0.490 -> 0.9560`)、`Sp12` (`0.491 -> 0.8990`) 全部在拓扑合/分后自动获得 `complete_structural_core (core_cnt=5)` 准确标注；
+   - **`v1_test` (`20.86 Mb`, `75` 嵌合体)**：真机实跑 **`TP/FP/FN = 75/3/0, F1 = 0.9804, meanIoU = 0.9795, MAE = 435.9bp, Strict0.8 = 74`**（`topology_bridged=0, topology_split=0, base_vetoed=0`），实现边界精度与防回归 **`0` 损耗**上线。
+
+---
+
+## 40. 淘汰历史模型与消融产物目录清理及删后复验（步骤 47）
+
+对 `F:\Phage data\models\`、工作台配置 [config.json](file:///f:/NCBI%20blast/config.json) 及推理源码依赖完成全仓审计后，清理全部不再被生产端或模型迭代引用的历史淘汰权重与消融实验产物，共移除 **`13` 个目录、`108` 个文件，释放 `214.44 MB`**：
+
+### 1. 已安全清理目录明细
+| 清理类别 | 已移除目录 | 文件数 | 释放体积 | 淘汰原因 |
+| :--- | :--- | :---: | :---: | :--- |
+| **历史早期代际** | `F:\Phage data\models\full_v2` | `14` | `23.72 MB` | 已被 `full_v4` 全面取代 |
+| **历史早期代际** | `F:\Phage data\models\full_v3_1` | `9` | `18.42 MB` | 已被 `full_v4` 全面取代 |
+| **V4 早期过渡与备份** | `full_v4\student_v4_1`、`full_v4\student_v4_2_legacy_v4_2_backup` | `13` | `37.07 MB` | 缺 SubBin 过渡版与 V4.2 迁徙遗留备份 |
+| **DNA 端消融废弃产物** | `full_v4\stage1_ablation`、`full_v4\stage1_2_ablation`、`full_v4\stage1_3_p0_ablation` | `53` | `96.19 MB` | 验证后废弃或已转正定型的中间调参拷贝 |
+| **早期蛋白裁判淘汰版** | `full_v4\orf_judge_ablation`、`full_v4\orf_judge_ablation_r1` | `9` | `14.29 MB` | 已被 R3 / Unified 完全取代 |
+| **旧三专家分散权重** | `full_v4\ensemble`、`expert_a`、`expert_b`、`expert_c` | `10` | `24.75 MB` | 已蒸馏合并入单模 `stage1_2.pt`，生产不再加载 |
+
+### 2. 严格保留项与删后功能验收
+1. **生产现役双引擎（完整保留）**：[stage1_2](file:///F:/Phage%20data/models/full_v4/stage1_2)（`20.32 MB`）与 [orf_judge_unified](file:///F:/Phage%20data/models/full_v4/orf_judge_unified)（`10.16 MB`）及 `full_v4` 顶层 3 份评估比对 JSON（`0.25 MB`）。
+2. **直系热启动基座与回退备用（审慎保留待后续确认）**：`full_v4\orf_judge_ablation_r2`（`6.04 MB`，[train_unified_judge.py](file:///f:/NCBI%20blast/scripts/train_unified_judge.py) 教师蒸馏源与 `prefer_unified=False` 兼容支路）与 `full_v4\orf_judge_ablation_r3`（`9.65 MB`）；本地训练特征集 `F:\Phage data\training\` 与 `archive\`、`database\` 注释库均保持原状未改动。
+3. **清理后全链路验证全绿**：
+   - `discover_available_models()` 正常返回 `['unified', 'stage1_2']`，`resolve_model_dir()` 锁定默认 `unified`；
+   - `pytest`（`5` 个核心测试集 `39` 项用例）：**`39 passed in 11.59s`**；
+   - `UnifiedPhageModel` CUDA 真机重扫 `NC_002737.2_Streptococcus_pyogenes_SF370.fasta`（`11.275s`）：精确命中 `3` 处前噬菌体 `[(529800, 571000), (778200, 819600), (1189600, 1223400)]`。

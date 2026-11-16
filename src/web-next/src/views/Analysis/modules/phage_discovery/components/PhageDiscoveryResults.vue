@@ -6,6 +6,7 @@ import type {
   PhageScanResultPayload,
   PhageTaskRecord,
 } from '../types'
+import { formatPhageModelBadge } from '../utils'
 import PhageOverlayMap from './PhageOverlayMap.vue'
 
 const props = defineProps<{
@@ -95,9 +96,11 @@ function formatBp(bp?: number): string {
         <div class="top-title">
           <h3>{{ task.task_name }}</h3>
           <span class="ver-badge">{{
-            String(summary.model_label || '').includes('Stage 1.2') || task.model_id === 'stage1_2'
-              ? 'Stage 1.2'
-              : (summary.model_version || 'Stage 1.2')
+            formatPhageModelBadge({
+              modelId: summary.model_id || task.model_id,
+              modelVersion: summary.model_version || task.model_version,
+              modelLabel: summary.model_label,
+            })
           }}</span>
           <span class="dev-badge">{{ String(summary.device_used || task.device || 'cpu').toUpperCase() }}</span>
           <span v-if="summary.apply_protein_gate" class="gate-badge">BLASTp 门控验证</span>
@@ -140,7 +143,13 @@ function formatBp(bp?: number): string {
         <div class="kpi-card">
           <div class="kpi-label">模型总推理耗时</div>
           <div class="kpi-value">{{ (summary.timings_sec?.total_sec ?? 0).toFixed(2) }} s</div>
-          <div class="kpi-sub">200bp SubBin 精细分割已启用</div>
+          <div class="kpi-sub">
+            {{
+              summary.routing_stats?.unified_judge_mode
+                ? `200bp 精确分割 · 蛋白跳过率 ${(((summary.routing_stats?.protein_skip_ratio ?? 0) * 100).toFixed(1))}%`
+                : '200bp SubBin 精细分割已启用'
+            }}
+          </div>
         </div>
       </div>
 
@@ -210,6 +219,9 @@ function formatBp(bp?: number): string {
                 <td>
                   <div class="comp-cell">
                     <span class="comp-tag" :class="r.completeness_key">{{ r.completeness_label }}</span>
+                    <span v-if="r.functional_modules?.active_modules?.length" class="gate-mini">
+                      模块: {{ r.functional_modules.active_modules.slice(0, 4).join(', ') }}
+                    </span>
                     <span v-if="r.gate_decision !== 'bypass'" class="gate-mini">
                       Hallmark {{ r.hallmark_hits }} | 转座酶 {{ r.transposase_hits }}
                     </span>

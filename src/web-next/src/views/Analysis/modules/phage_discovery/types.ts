@@ -22,6 +22,9 @@ export interface PhageModelInfo {
   func_dim?: number
   has_context_refiner: boolean
   has_subbin_refiner: boolean
+  has_unified_judge?: boolean
+  unified_judge_dir?: string
+  unified_models_root?: string
   decoder_defaults: PhageDecoderDefaults
   recommended: boolean
 }
@@ -87,6 +90,17 @@ export interface PhageRegionItem {
   matched_titles: string[]
   profile: PhageProfileBin[]
   gbk_file: string
+  functional_modules?: {
+    active_modules?: string[]
+    has_structural_core?: boolean
+    has_lysis_module?: boolean
+    structural_completeness_hint?: string
+    unified_mean_phage_prob?: number
+    unified_core_sum?: number
+    unified_core_active_count?: number
+    unified_max_p9?: number
+    [key: string]: any
+  }
 }
 
 export interface PhageRejectedCandidate {
@@ -159,6 +173,11 @@ export interface PhageScanSummary {
   device_used: string
   apply_protein_gate: boolean
   timings_sec: Record<string, number>
+  routing_stats?: {
+    protein_skip_ratio?: number
+    unified_judge_mode?: boolean
+    [key: string]: any
+  }
 }
 
 export interface PhageContigSummary {
@@ -232,6 +251,7 @@ export interface PhageLogItem {
 
 export interface PhageScanForm {
   task_name: string
+  model_id?: string
   fasta_path: string
   fasta_content: string
   selected_contigs: string[]

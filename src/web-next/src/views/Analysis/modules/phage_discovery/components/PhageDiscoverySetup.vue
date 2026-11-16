@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { getBridge } from '../../../../../bridge/electron-bridge'
 import ContigSelector from '../../annotation/components/ContigSelector.vue'
 import type { PhageCapabilities, PhageContigInspectItem, PhageScanForm } from '../types'
+import { formatPhageModelBadge } from '../utils'
 
 const props = defineProps<{
   capabilities: PhageCapabilities | null
@@ -40,6 +41,7 @@ const configBlastDb = ref<string>('')
 
 const form = reactive<PhageScanForm>({
   task_name: 'PhageDiscovery_Stage1_2',
+  model_id: '',
   fasta_path: '',
   fasta_content: '',
   selected_contigs: [],
@@ -55,9 +57,38 @@ const form = reactive<PhageScanForm>({
   min_region_bp: 3000,
 })
 
+const availableModels = computed(() => props.capabilities?.models || [])
+
+watch(
+  availableModels,
+  (list) => {
+    if (!list.length) {
+      form.model_id = ''
+      return
+    }
+    if (!form.model_id || !list.some((m) => m.model_id === form.model_id)) {
+      form.model_id = list[0]?.model_id || ''
+    }
+  },
+  { immediate: true }
+)
+
 const activeV42Model = computed(() => {
-  const list = props.capabilities?.models || []
-  return list.length > 0 ? list[0] : null
+  const list = availableModels.value
+  if (!list.length) return null
+  return list.find((m) => m.model_id === form.model_id) || list[0] || null
+})
+
+const activeModelBadge = computed(() => {
+  const m = activeV42Model.value
+  if (!m) return 'Unified V4'
+  return formatPhageModelBadge({
+    modelId: m.model_id,
+    modelVersion: m.version,
+    modelLabel: m.label,
+    featureProfile: m.feature_profile,
+    hasUnifiedJudge: m.has_unified_judge,
+  })
 })
 
 const computeEnv = computed(() => props.capabilities?.compute)
@@ -90,6 +121,11 @@ watch(
   activeV42Model,
   (model) => {
     if (!model?.decoder_defaults) return
+    if (model.has_unified_judge && form.task_name === 'PhageDiscovery_Stage1_2') {
+      form.task_name = 'PhageDiscovery_Unified'
+    } else if (!model.has_unified_judge && form.task_name === 'PhageDiscovery_Unified') {
+      form.task_name = 'PhageDiscovery_Stage1_2'
+    }
     form.seed_threshold = model.decoder_defaults.seed_threshold
     form.extend_threshold = model.decoder_defaults.extend_threshold
     form.sub_threshold = model.decoder_defaults.sub_threshold
@@ -158,7 +194,12 @@ function onAssemblyTaskSelected(): void {
     form.fasta_path = candidatePath
     form.fasta_content = ''
     uploadedFileName.value = t.name || t.task_id
-    if (!form.task_name || form.task_name === 'PhageDiscovery_Stage1_2' || form.task_name === 'PhageDiscovery_V42') {
+    if (
+      !form.task_name ||
+      form.task_name === 'PhageDiscovery_Unified' ||
+      form.task_name === 'PhageDiscovery_Stage1_2' ||
+      form.task_name === 'PhageDiscovery_V42'
+    ) {
       form.task_name = `${t.name || t.task_id}_PhageScan`
     }
     emit('inspect', { fasta_path: candidatePath })
@@ -233,7 +274,7 @@ function loadDemoSequence(): void {
   const corePhage = blockPhage.repeat(90)
   const hostRight = blockHost.repeat(40)
   form.fasta_content = `>Demo_Bacterial_Chromosome_With_Candidate_Region\n${hostLeft}${corePhage}${hostRight}\n`
-  form.task_name = 'Demo_Genome_Stage1_2'
+  form.task_name = activeV42Model.value?.has_unified_judge ? 'Demo_Genome_Unified' : 'Demo_Genome_Stage1_2'
   emit('inspect', { fasta_content: form.fasta_content })
 }
 
@@ -445,11 +486,11 @@ onMounted(() => {
       <span>GC {{ singleContig.gc_percent }}%</span>
     </div>
 
-    <!-- 4. V4.2 模型状态与算力卡片 -->
+    <!-- 4. 模型引擎选择与算力状态卡片 -->
     <div class="engine-status-card" :class="{ missing: !activeV42Model }">
       <div class="engine-head">
         <div class="engine-title-row">
-          <span class="version-pill">{{ activeV42Model?.feature_profile === 'stage1' ? 'Stage 1.2' : 'Student V4.2' }}</span>
+          <span class="version-pill">{{ activeModelBadge }}</span>
           <strong>{{ activeV42Model ? activeV42Model.label : '未检测到本地模型目录' }}</strong>
         </div>
         <div class="engine-tools">
@@ -467,14 +508,37 @@ onMounted(() => {
         </div>
       </div>
 
+      <div v-if="availableModels.length > 1" class="engine-selector-row">
+        <label for="phage-model-select" class="selector-label">切换推理模型:</label>
+        <select id="phage-model-select" v-model="form.model_id" class="engine-select">
+          <option v-for="m in availableModels" :key="`${m.model_id}:${m.path}`" :value="m.model_id">
+            [{{ m.version }}] {{ m.label }}{{ m.has_unified_judge ? ' (默认主力)' : ' (仅DNA底座/兼容)' }}
+          </option>
+        </select>
+      </div>
+
       <div v-if="activeV42Model" class="engine-meta-row">
+        <span v-if="activeV42Model.has_unified_judge" class="meta-chip ok">Unified 按需分化蛋白引擎已就绪</span>
         <span class="meta-chip ok">200bp SubBinRefiner 已就绪</span>
         <span v-if="activeV42Model.has_context_refiner" class="meta-chip ok">ContextRefiner 已就绪</span>
         <span class="meta-chip">参数量 {{ formatParamsCount(activeV42Model.params) }}</span>
-        <span class="meta-path" :title="activeV42Model.path">{{ activeV42Model.path }}</span>
+      </div>
+      <div v-if="activeV42Model" class="engine-paths-grid">
+        <div v-if="activeV42Model.has_unified_judge && activeV42Model.unified_models_root" class="engine-path-item">
+          <span class="path-tag">统一根目录</span>
+          <span class="meta-path" :title="activeV42Model.unified_models_root">{{ activeV42Model.unified_models_root }}</span>
+        </div>
+        <div class="engine-path-item">
+          <span class="path-tag">{{ activeV42Model.has_unified_judge ? 'DNA 底座' : '模型目录' }}</span>
+          <span class="meta-path" :title="activeV42Model.path">{{ activeV42Model.path }}</span>
+        </div>
+        <div v-if="activeV42Model.has_unified_judge && activeV42Model.unified_judge_dir" class="engine-path-item">
+          <span class="path-tag ok">分化蛋白引擎</span>
+          <span class="meta-path" :title="activeV42Model.unified_judge_dir">{{ activeV42Model.unified_judge_dir }}</span>
+        </div>
       </div>
       <div v-else class="engine-missing-tip">
-        请将模型目录放置于项目 <code>models/full_v4/stage1_2</code> 或相邻 <code>Phage data/models/full_v4/stage1_2</code> 下，或点击右侧手动指定目录。
+        请将模型放置于项目 <code>models/full_v4/stage1_2</code>（配套 <code>orf_judge_unified</code>）或相邻 <code>Phage data/models/full_v4</code> 下，或点击右侧手动指定目录。
       </div>
 
       <div v-if="showPathConfig" class="path-config-drawer">
@@ -485,7 +549,7 @@ onMounted(() => {
               v-model="configModelDir"
               type="text"
               class="text-input"
-              placeholder="包含 stage1_2.pt（或 student_v4.pt）与 subbin_refiner.pt 的目录路径"
+              placeholder="包含 stage1_2.pt（或 student_v4.pt）与 subbin_refiner.pt 的目录（同级存在 orf_judge_unified 时自动装配 Unified V4）"
             />
             <button type="button" class="outline-btn" @click="browseCustomModelDir">浏览</button>
           </div>
@@ -929,6 +993,31 @@ onMounted(() => {
   cursor: pointer;
 }
 
+.engine-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.selector-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.engine-select {
+  height: 30px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #1e293b;
+  background: white;
+  flex: 1;
+  min-width: 0;
+}
+
 .engine-meta-row {
   display: flex;
   flex-wrap: wrap;
@@ -950,13 +1039,46 @@ onMounted(() => {
   color: #15803d;
 }
 
+.engine-paths-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.engine-path-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.path-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #475569;
+  font-weight: 600;
+}
+
+.path-tag.ok {
+  background: #dcfce7;
+  color: #15803d;
+}
+
 .meta-path {
-  color: #64748b;
+  color: #475569;
   font-family: 'Consolas', monospace;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 420px;
+  flex: 1;
+  min-width: 0;
 }
 
 .engine-missing-tip {

@@ -18,7 +18,10 @@ from typing import Any, Dict, List, Optional
 from starlette.concurrency import run_in_threadpool
 
 from ...backend.broadcaster import broadcaster
-from ...phage_discovery.inference.scanner import GenomeScanner
+from ...phage_discovery.inference.judge_region_refiner import load_judge_ensemble_bundle
+from ...phage_discovery.inference.protein_gate import evaluate_regions_with_protein_gate
+from ...phage_discovery.inference.scanner import GenomeScanner, ScanResult
+from ...phage_discovery.inference.unified_model import UnifiedPhageModel
 from .db import phage_discovery_db
 from .exporter import (
     build_contig_overlay_gbk,
@@ -294,6 +297,8 @@ class PhageDiscoveryManager:
             )
 
             scanner: Optional[GenomeScanner] = None
+            judge_bundle: Optional[Dict[str, Any]] = None
+            upm: Optional[UnifiedPhageModel] = None
             try:
                 scanner = GenomeScanner.from_model_dir(
                     Path(str(model_info["path"])),
@@ -313,30 +318,107 @@ class PhageDiscoveryManager:
                 if self.queue.is_cancelled(task_id):
                     raise InterruptedError("任务已被用户中止")
 
-                emit_progress(
-                    38,
-                    f"正在执行滑动窗口与 200bp SubBin 精细边界分割 ({total_bp:,} bp)...",
-                    (
-                        f"[STEP 3/5] 启动 {model_disp} 扫描解码 (seed={seed_thr:.2f}, extend={ext_thr:.2f}, "
-                        f"sub={sub_thr:.2f}, plateau=({plateau_min_w}, {plateau_sec_thr}))"
-                    ),
-                )
-                collect_func = int(model_info.get("func_dim") or 0) > 0
-                scan_result = scanner.scan_sequences(
-                    target_seqs,
-                    apply_protein_gate=req.apply_protein_gate,
-                    collect_profiles=True,
-                    profile_flank_bp=2000,
-                    collect_functional_partitions=collect_func,
-                )
+                use_unified = bool(model_info.get("has_unified_judge"))
+                unified_suppressed: List[Dict[str, Any]] = []
+                unified_routing_stats: Optional[Dict[str, Any]] = None
+
+                if use_unified:
+                    uni_root_raw = str(model_info.get("unified_models_root") or "").strip()
+                    uni_root = Path(uni_root_raw) if uni_root_raw else Path(str(model_info["unified_judge_dir"])).parent
+                    judge_bundle = load_judge_ensemble_bundle(
+                        uni_root,
+                        device=resolved_dev,
+                        prefer_unified=True,
+                    )
+                    upm = UnifiedPhageModel(dna_scanner=scanner, judge_bundle=judge_bundle)
+                    emit_progress(
+                        38,
+                        f"正在执行 Unified 分化按需扫描与 200bp 精细边界切割 ({total_bp:,} bp)...",
+                        (
+                            f"[STEP 3/5] 启动 {model_disp} 扫描解码 (seed={seed_thr:.2f}, extend={ext_thr:.2f}, "
+                            f"sub={sub_thr:.2f}, plateau=({plateau_min_w}, {plateau_sec_thr}))"
+                        ),
+                    )
+                    unified_res = upm.scan_sequences(
+                        target_seqs,
+                        collect_profiles=True,
+                        profile_flank_bp=2000,
+                        collect_score_tracks=True,
+                    )
+                    unified_suppressed = list(unified_res.suppressed_candidates)
+                    unified_routing_stats = dict(unified_res.routing_stats)
+
+                    func_mods_map: Dict[str, Dict[str, Any]] = {}
+                    for reg in unified_res.regions:
+                        k = f"{reg.contig_id}:{reg.start_bp}-{reg.end_bp}"
+                        ann = unified_res.region_annotations.get(k) or {}
+                        mods = list(ann.get("active_modules") or [])
+                        func_mods_map[k] = {
+                            "active_modules": mods,
+                            "has_structural_core": bool({"head_packaging", "connector", "tail"} & set(mods)),
+                            "has_lysis_module": "lysis" in mods,
+                            "structural_completeness_hint": str(ann.get("completeness_class") or "cryptic_or_incomplete"),
+                            "orf_count": int(ann.get("n_orfs") or 0),
+                            "unified_mean_phage_prob": float(ann.get("mean_phage_prob") or 0.0),
+                            "unified_core_sum": float(ann.get("r2_core_completeness_sum") or 0.0),
+                            "unified_core_active_count": int(ann.get("r2_core_active_count") or 0),
+                            "unified_max_p9": float(ann.get("max_p9_defense_prob") or 0.0),
+                        }
+
+                    verified_regions = list(unified_res.regions)
+                    gate_details = []
+                    if req.apply_protein_gate and blast_db_path is not None:
+                        verified_regions, gate_details = evaluate_regions_with_protein_gate(
+                            target_seqs,
+                            unified_res.regions,
+                            blast_db=blast_db_path,
+                            blastp_bin=blastp_bin,
+                            workers=workers,
+                        )
+
+                    scan_result = ScanResult(
+                        contigs_bp=unified_res.contigs_bp,
+                        total_bp=unified_res.total_bp,
+                        total_windows=unified_res.total_windows,
+                        raw_regions=list(unified_res.regions),
+                        verified_regions=verified_regions,
+                        gate_details=gate_details,
+                        timings_sec=unified_res.timings_sec,
+                        region_profiles=unified_res.region_profiles,
+                        contig_score_tracks=unified_res.contig_score_tracks,
+                        region_functional_modules=func_mods_map,
+                    )
+                else:
+                    emit_progress(
+                        38,
+                        f"正在执行滑动窗口与 200bp SubBin 精细边界分割 ({total_bp:,} bp)...",
+                        (
+                            f"[STEP 3/5] 启动 {model_disp} 扫描解码 (seed={seed_thr:.2f}, extend={ext_thr:.2f}, "
+                            f"sub={sub_thr:.2f}, plateau=({plateau_min_w}, {plateau_sec_thr}))"
+                        ),
+                    )
+                    collect_func = int(model_info.get("func_dim") or 0) > 0
+                    scan_result = scanner.scan_sequences(
+                        target_seqs,
+                        apply_protein_gate=req.apply_protein_gate,
+                        collect_profiles=True,
+                        profile_flank_bp=2000,
+                        collect_functional_partitions=collect_func,
+                    )
 
                 if self.queue.is_cancelled(task_id):
                     raise InterruptedError("任务已被用户中止")
 
+                hit_regions = scan_result.verified_regions if req.apply_protein_gate else scan_result.raw_regions
+                extra_msg = (
+                    f", 蛋白跳过率={unified_routing_stats.get('protein_skip_ratio', 0.0):.1%}, 拦截={len(unified_suppressed)}"
+                    if unified_routing_stats
+                    else ""
+                )
                 emit_progress(
                     78,
-                    f"扫描完成，发现 {len(scan_result.verified_regions if req.apply_protein_gate else scan_result.raw_regions)} 个候选区，正在导出 GFF3/GBK/FASTA...",
-                    f"[STEP 4/5] 窗口数={scan_result.total_windows}, 原始命中={len(scan_result.raw_regions)}, 耗时={scan_result.timings_sec.get('total_sec', 0):.2f}s",
+                    f"扫描完成，发现 {len(hit_regions)} 个候选区，正在导出 GFF3/GBK/FASTA...",
+                    f"[STEP 4/5] 窗口数={scan_result.total_windows}, 命中={len(hit_regions)}, 耗时={scan_result.timings_sec.get('total_sec', 0):.2f}s{extra_msg}",
                 )
 
                 exported = export_scan_artifacts(
@@ -353,6 +435,8 @@ class PhageDiscoveryManager:
                     source_format=source_format,
                     input_source_path=context.get("staged_fasta_path"),
                     project_root=self.project_root,
+                    unified_suppressed=unified_suppressed,
+                    routing_stats=unified_routing_stats,
                 )
 
                 elapsed = round(time.perf_counter() - t0, 2)
@@ -363,6 +447,10 @@ class PhageDiscoveryManager:
                 )
                 return exported
             finally:
+                if upm is not None:
+                    del upm
+                if judge_bundle is not None:
+                    del judge_bundle
                 if scanner is not None:
                     del scanner
                 release_gpu_memory()

@@ -435,6 +435,7 @@ def build_window_and_orf_functional_targets(
     orf_func_targets = np.zeros((n_win, max_orfs, NUM_FUNC_PARTITIONS), dtype=np.float32)
     orf_func_valid = np.zeros((n_win, max_orfs), dtype=np.float32)
     sem_targets = np.zeros((n_win, 4), dtype=np.float32)
+    adv_host_counts = np.zeros(n_win, dtype=np.int32)
     clean_labels = labels.astype(np.int8, copy=True)
 
     for i in range(n_win):
@@ -512,6 +513,8 @@ def build_window_and_orf_functional_targets(
                     has_unknown_phage_orf = True
                 else:
                     orf_func_valid[i, k] = 1.0
+                if bool(best_info.get("adversarial_host_flag", False)):
+                    adv_host_counts[i] += 1
             else:
                 # 未命中任何已知噬菌体或特殊功能注释的普通背景 ORF
                 orf_phage_targets[i, k] = 0.0
@@ -553,7 +556,171 @@ def build_window_and_orf_functional_targets(
         "orf_func_targets": orf_func_targets,
         "orf_func_valid": orf_func_valid,
         "sem_targets": sem_targets,
+        "adv_host_counts": adv_host_counts,
         "clean_labels": clean_labels,
+    }
+
+
+_HOST_ADV_PHOLD_SOURCES = frozenset({"card", "vfdb", "defensefinder", "netflax"})
+
+
+def _is_valid_phold_phage_hit(phold_hit: Dict[str, Any]) -> bool:
+    src = str(phold_hit.get("source_type", "none")).lower()
+    if src not in {"phrog", "acr"}:
+        return False
+    conf = str(phold_hit.get("confidence", "")).lower()
+    ev = float(phold_hit.get("evalue", 1.0))
+    bs = float(phold_hit.get("bitscore", 0.0))
+    if conf in {"high", "medium"}:
+        return True
+    return ev <= 1e-5 and bs >= 120.0
+
+
+def classify_protein_with_p0_teachers(
+    phrog_category: str = "",
+    phrog_annot: str = "",
+    diamond_title: str = "",
+    gbk_product: str = "",
+    phold_hit: Optional[Dict[str, Any]] = None,
+    hmm_hit: Optional[Dict[str, Tuple[str, float, float]]] = None,
+) -> Dict[str, Any]:
+    """
+    在客观三源分类基础上叠加 P0 离线结构教师 (phold 3Di+Foldseek) 与 HMM 对抗教师 (DefenseFinder/dbAPIS/VS2)：
+    - 若结构/HMM 明确指向宿主耐药/毒力/防御/毒素-抗毒素（CARD/VFDB/DefenseFinder/Netflax）且无核心结构域，
+      标记 adversarial_host_flag=True 且严禁混入噬菌体 moron_amg_defense 正类；
+    - 若 phold 真实 PHROG/ACR 或 dbAPIS/VS2 病毒域显著命中，补全暗物质蛋白的噬菌体同源性及 9D 功能分区。
+    """
+    base = classify_protein_to_functional_partitions(
+        phrog_category=phrog_category,
+        phrog_annot=phrog_annot,
+        diamond_title=diamond_title,
+        gbk_product=gbk_product,
+    )
+    func_vec = np.array(base["func_vec"], dtype=np.float32, copy=True)
+    sem4_vec = np.array(base["sem4_vec"], dtype=np.float32, copy=True)
+    is_phage = bool(base["is_phage_ortholog"])
+    is_known = bool(base["is_func_known"])
+    adv_host_flag = False
+
+    # 1. 检查宿主耐药/毒力/防御系统对抗证据
+    has_host_df = bool(hmm_hit and "defense_finder" in hmm_hit and float(hmm_hit["defense_finder"][1]) <= 1e-5)
+    has_host_phold = False
+    if phold_hit:
+        psrc = str(phold_hit.get("source_type", "")).lower()
+        peval = float(phold_hit.get("evalue", 1.0))
+        pconf = str(phold_hit.get("confidence", "")).lower()
+        if psrc in _HOST_ADV_PHOLD_SOURCES and (pconf in {"high", "medium"} or peval <= 1e-5):
+            has_host_phold = True
+
+    # 2. 检查真实噬菌体结构与反防御补全证据
+    extra_cat = ""
+    extra_prod = ""
+    has_phage_complement = False
+    if phold_hit and _is_valid_phold_phage_hit(phold_hit):
+        has_phage_complement = True
+        psrc = str(phold_hit.get("source_type", "")).lower()
+        pfunc = str(phold_hit.get("function", "")).strip()
+        pprod = str(phold_hit.get("product", "")).strip()
+        if psrc == "acr":
+            func_vec[7] = 1.0
+        elif pfunc and pfunc.lower() != "unknown function":
+            extra_cat = pfunc
+            extra_prod = pprod
+
+    if hmm_hit:
+        if "dbapis" in hmm_hit and float(hmm_hit["dbapis"][1]) <= 1e-5:
+            has_phage_complement = True
+            func_vec[7] = 1.0
+        if "wsl_vs2_pfam_vir" in hmm_hit and float(hmm_hit["wsl_vs2_pfam_vir"][1]) <= 1e-6:
+            has_phage_complement = True
+            hmm_name = str(hmm_hit["wsl_vs2_pfam_vir"][0])
+            extra_prod = f"{extra_prod} {hmm_name}".strip()
+
+    if has_phage_complement and (extra_cat or extra_prod):
+        sub = classify_protein_to_functional_partitions(
+            phrog_category=extra_cat,
+            phrog_annot=extra_prod,
+        )
+        func_vec = np.maximum(func_vec, np.asarray(sub["func_vec"], dtype=np.float32))
+        sem4_vec = np.maximum(sem4_vec, np.asarray(sub["sem4_vec"], dtype=np.float32))
+        if np.any(func_vec[:4] > 0.5):
+            is_phage = True
+        elif not has_host_df and not has_host_phold:
+            is_phage = True
+        is_known = bool(np.any(func_vec > 0.5)) or not is_phage
+    elif has_phage_complement:
+        if np.any(func_vec > 0.5):
+            is_phage = True
+            is_known = True
+
+    # 若确认为宿主耐药/毒力/防御且未有强噬菌体结构域 P0..P3 支撑，打上对抗宿主旗标并禁止误归为噬菌体 moron
+    has_core_struct = bool(np.any(func_vec[:4] > 0.5))
+    if (has_host_df or has_host_phold) and not has_core_struct:
+        adv_host_flag = True
+        if not bool(base["is_phage_ortholog"]) or float(func_vec[7]) > 0.5:
+            is_phage = False
+            func_vec[7] = 0.0
+            is_known = True
+
+    # 同步 4 维兼容性语义向量
+    if func_vec[0] > 0.5 or func_vec[1] > 0.5 or func_vec[2] > 0.5:
+        sem4_vec[0] = 1.0
+    if func_vec[4] > 0.5:
+        sem4_vec[1] = 1.0
+    if func_vec[8] > 0.5:
+        sem4_vec[2] = 1.0
+    if func_vec[2] > 0.5 or func_vec[3] > 0.5:
+        sem4_vec[3] = 1.0
+
+    return {
+        "is_phage_ortholog": bool(is_phage),
+        "is_func_known": bool(is_known),
+        "func_vec": func_vec,
+        "sem4_vec": sem4_vec,
+        "adversarial_host_flag": bool(adv_host_flag),
+    }
+
+
+def build_p0_teacher_calibration(
+    *,
+    labels: np.ndarray,
+    teacher_probs: np.ndarray,
+    func_targets: np.ndarray,
+    adv_host_counts: np.ndarray,
+    base_sample_weights: Optional[np.ndarray] = None,
+    hard_neg_weight: float = 1.75,
+    suppression_blend: float = 0.65,
+    mge_prob_trigger: float = 0.35,
+) -> Dict[str, Any]:
+    """
+    依据 P0 对抗教师信号（宿主防御/耐药/毒力命中与无核心结构的 MGE 岛）对训练集教师软概率
+    与难负例权重执行平滑对抗校准，防止学生盲从旧 OOF 在易混宿主岛上的高估软分数。
+    """
+    y = np.asarray(labels, dtype=np.int8)
+    tp = np.asarray(teacher_probs, dtype=np.float32).copy()
+    sw = (
+        np.asarray(base_sample_weights, dtype=np.float32).copy()
+        if base_sample_weights is not None
+        else np.ones(len(y), dtype=np.float32)
+    )
+    ft = np.asarray(func_targets, dtype=np.float32)
+    adv_cnt = np.asarray(adv_host_counts, dtype=np.int32)
+
+    no_core_struct = np.sum(ft[:, :4] > 0.5, axis=1) == 0
+    is_clean_neg = y == 0
+    is_mge_fp_risk = (ft[:, 8] > 0.5) & (tp >= float(mge_prob_trigger))
+    adv_mask = is_clean_neg & no_core_struct & ((adv_cnt >= 1) | is_mge_fp_risk)
+
+    blend = float(np.clip(suppression_blend, 0.0, 1.0))
+    tp[adv_mask] = tp[adv_mask] * (1.0 - blend)
+    sw[adv_mask] = np.maximum(sw[adv_mask], float(hard_neg_weight))
+
+    return {
+        "teacher_probs": tp,
+        "sample_weights": sw,
+        "calibrated_count": int(np.sum(adv_mask)),
+        "adv_host_neg_count": int(np.sum(is_clean_neg & no_core_struct & (adv_cnt >= 1))),
+        "mge_fp_risk_count": int(np.sum(is_clean_neg & no_core_struct & is_mge_fp_risk)),
     }
 
 

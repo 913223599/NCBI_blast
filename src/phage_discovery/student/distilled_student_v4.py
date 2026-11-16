@@ -1443,6 +1443,9 @@ def train_distilled_student_v4(
     use_functional: bool = False,
     use_homoscedastic_loss: bool = False,
     feature_profile: str = "v4",
+    init_student_ckpt: Optional[Path] = None,
+    backbone_lr_scale: float = 0.25,
+    sample_weights_override: Optional[np.ndarray] = None,
     workers: Optional[int] = None,
     seed: int = 42,
 ) -> Dict[str, Any]:
@@ -1516,6 +1519,12 @@ def train_distilled_student_v4(
     starts_all = np.concatenate([p["arrs"]["starts"] for p in loaded_parts])
     ends_all = np.concatenate([p["arrs"]["ends"] for p in loaded_parts])
     sw_all = np.concatenate(sw_list)
+    if sample_weights_override is not None:
+        if len(sample_weights_override) != len(clean_y_all):
+            raise ValueError(
+                f"sample_weights_override 长度不匹配: {len(sample_weights_override)} vs {len(clean_y_all)}"
+            )
+        sw_all = np.asarray(sample_weights_override, dtype=np.float32)
     part_tags_all = np.concatenate(part_tag_list)
     refiner_mask_all = np.isin(part_tags_all, CONTIG_REF_PARTS)
     del loaded_parts, sw_list, part_tag_list
@@ -1598,6 +1607,22 @@ def train_distilled_student_v4(
     orf_feat_dim = int(tokens_tr.shape[-1])
     valid_idx = y_tr >= 0
     feat_mean, feat_std = _normalize_feature_stats(feats_tr[valid_idx] if np.any(valid_idx) else feats_tr)
+    warm_started_from: Optional[str] = None
+    init_sd: Optional[Dict[str, torch.Tensor]] = None
+    if init_student_ckpt is not None:
+        init_path = Path(init_student_ckpt).resolve()
+        if not init_path.exists():
+            raise FileNotFoundError(f"热启动权重文件不存在: {init_path}")
+        init_sd = torch.load(init_path, map_location="cpu", weights_only=True)
+        if (
+            "feat_mean" in init_sd
+            and "feat_std" in init_sd
+            and tuple(init_sd["feat_mean"].shape) == tuple(feat_mean.shape)
+        ):
+            feat_mean = init_sd["feat_mean"].detach().cpu().numpy().astype(np.float32)
+            feat_std = init_sd["feat_std"].detach().cpu().numpy().astype(np.float32)
+        warm_started_from = str(init_path)
+
     model = build_distilled_student_v4(
         feats_tr.shape[1],
         feat_mean,
@@ -1610,6 +1635,9 @@ def train_distilled_student_v4(
         orf_feat_dim=orf_feat_dim,
         func_dim=func_dim,
     ).to(device)
+    if init_sd is not None:
+        model.load_state_dict(init_sd, strict=True)
+        logger.info("已热加载原模型权重（零参数增量）: %s", warm_started_from)
     n_params = int(sum(p.numel() for p in model.parameters()))
 
     num_tasks = (6 if func_dim > 0 else 3) if use_homoscedastic_loss else 0
@@ -1618,12 +1646,35 @@ def train_distilled_student_v4(
         if use_homoscedastic_loss
         else None
     )
-    param_groups: List[Dict[str, Any]] = [{"params": list(model.parameters()), "weight_decay": 1e-2}]
-    if mt_loss_fn is not None:
-        param_groups.append({"params": list(mt_loss_fn.parameters()), "weight_decay": 0.0})
+    head_prefixes = (
+        "win_head.",
+        "sem_head.",
+        "func_head.",
+        "orf_phage_head.",
+        "orf_func_head.",
+        "func_win_residual.",
+        "sub_head.",
+    )
+    if warm_started_from is not None:
+        bb_scale = float(np.clip(backbone_lr_scale, 0.01, 1.0))
+        bb_params = [p for n, p in model.named_parameters() if not n.startswith(head_prefixes)]
+        hd_params = [p for n, p in model.named_parameters() if n.startswith(head_prefixes)]
+        param_groups: List[Dict[str, Any]] = [
+            {"params": bb_params, "weight_decay": 1e-2, "lr": lr * bb_scale},
+            {"params": hd_params, "weight_decay": 1e-2, "lr": lr},
+        ]
+        max_lrs: Any = [lr * bb_scale, lr]
+        if mt_loss_fn is not None:
+            param_groups.append({"params": list(mt_loss_fn.parameters()), "weight_decay": 0.0, "lr": lr})
+            max_lrs.append(lr)
+    else:
+        param_groups = [{"params": list(model.parameters()), "weight_decay": 1e-2}]
+        max_lrs = lr
+        if mt_loss_fn is not None:
+            param_groups.append({"params": list(mt_loss_fn.parameters()), "weight_decay": 0.0})
     opt = torch.optim.AdamW(param_groups, lr=lr)
     steps_per_ep = max(1, int(np.ceil(len(y_tr) / batch_size)))
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=max(1, epochs * steps_per_ep))
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=max_lrs, total_steps=max(1, epochs * steps_per_ep))
     scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
 
     pos_cnt = float(np.sum(y_tr == 1))
@@ -2154,6 +2205,7 @@ def train_distilled_student_v4(
     report: Dict[str, Any] = {
         "model_name": "StudentV4_TriModal_FunctionalDistilled" if func_dim > 0 else "StudentV4_TriModal_MaskedSemantic",
         "model_version": "v4",
+        "warm_started_from": warm_started_from,
         "trained_at": datetime.now().isoformat(timespec="seconds"),
         "device": str(device),
         "architecture": meta,

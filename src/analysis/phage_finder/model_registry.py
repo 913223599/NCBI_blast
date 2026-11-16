@@ -93,6 +93,68 @@ def _get_candidate_model_roots(project_root: Path = PROJECT_ROOT) -> List[Path]:
     return unique
 
 
+def _find_unified_judge_dir(backbone_dir: Path, project_root: Path = PROJECT_ROOT) -> Optional[Path]:
+    """按相对路径优先级探测配套的 Unified 分化蛋白模型目录。"""
+    sibling_data = project_root.parent / "Phage data"
+    candidates = [
+        backbone_dir / "orf_judge_unified",
+        backbone_dir.parent / "orf_judge_unified",
+        project_root / "models" / "full_v4" / "orf_judge_unified",
+        sibling_data / "models" / "full_v4" / "orf_judge_unified",
+    ]
+    for cand in candidates:
+        try:
+            resolved = cand.resolve()
+            if not (resolved / "unified_judge_seq.pt").is_file():
+                continue
+            has_stat = (resolved / "orf_judge_statonly.pt").is_file() or (
+                resolved.parent / "orf_judge_ablation_r3" / "orf_judge_statonly.pt"
+            ).is_file()
+            if has_stat:
+                return resolved
+        except OSError:
+            continue
+    return None
+
+
+def _read_unified_judge_params(unified_dir: Path) -> int:
+    summary_p = unified_dir / "unified_summary.json"
+    if summary_p.is_file():
+        try:
+            obj = json.loads(summary_p.read_text(encoding="utf-8"))
+            return int(obj.get("total_params") or 0)
+        except Exception:
+            return 0
+    return 0
+
+
+def _build_unified_promoted_info(
+    base_info: Dict[str, Any],
+    unified_dir: Path,
+    *,
+    priority: int = 1,
+    keep_model_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """基于可用 Stage 1.2 DNA 底座构造 Unified V4 生产主力模型描述。"""
+    promoted = dict(base_info)
+    uni_params = _read_unified_judge_params(unified_dir)
+    dna_params = int(base_info.get("params") or 0)
+    promoted.update(
+        {
+            "model_id": keep_model_id or "unified",
+            "label": "Unified 分化按需模型 (Stage 1.2 DNA底座 + UnifiedJudge)",
+            "version": "Unified V4",
+            "priority": priority,
+            "params": (dna_params + uni_params) if uni_params > 0 else dna_params,
+            "has_unified_judge": True,
+            "unified_judge_dir": str(unified_dir),
+            "unified_models_root": str(unified_dir.parent),
+            "recommended": True,
+        }
+    )
+    return promoted
+
+
 def _inspect_v4_2_dir(
     model_dir: Path,
     *,
@@ -159,6 +221,9 @@ def _inspect_v4_2_dir(
         "func_dim": func_dim,
         "has_context_refiner": has_ref,
         "has_subbin_refiner": True,
+        "has_unified_judge": False,
+        "unified_judge_dir": "",
+        "unified_models_root": "",
         "decoder_defaults": {
             "seed_threshold": float(dec.get("seed_threshold", 0.95)),
             "extend_threshold": float(dec.get("extend_threshold", 0.30)),
@@ -175,11 +240,41 @@ def _inspect_v4_2_dir(
 
 
 def discover_available_models(project_root: Path = PROJECT_ROOT) -> List[Dict[str, Any]]:
-    """扫描所有候选位置，仅返回已部署且去重后的可用 V4.2 模型列表。"""
+    """扫描所有候选位置，优先发现 Unified V4 统一模型并保留纯 Stage 1.2 / V4.2 兼容路径。"""
     found: List[Dict[str, Any]] = []
-    seen_paths = set()
+    seen_keys = set()
 
-    # 1. 优先检查环境变量或配置显式指定的 V4.2 模型目录
+    def _register_entry(info: Optional[Dict[str, Any]], *, allow_unified_promote: bool) -> None:
+        if not info:
+            return
+        uni_dir = (
+            _find_unified_judge_dir(Path(str(info["path"])), project_root)
+            if allow_unified_promote and str(info.get("feature_profile")) == "stage1"
+            else None
+        )
+        if uni_dir is not None:
+            uni_info = _build_unified_promoted_info(
+                info,
+                uni_dir,
+                priority=0 if int(info.get("priority", 99)) == 0 else 1,
+            )
+            ukey = (uni_info["model_id"], uni_info["path"])
+            if ukey not in seen_keys:
+                seen_keys.add(ukey)
+                found.append(uni_info)
+            fallback = dict(info)
+            fallback["priority"] = max(2, int(info.get("priority", 1)) + 1)
+            fkey = (fallback["model_id"], fallback["path"])
+            if fkey not in seen_keys:
+                seen_keys.add(fkey)
+                found.append(fallback)
+        else:
+            key = (info["model_id"], info["path"])
+            if key not in seen_keys:
+                seen_keys.add(key)
+                found.append(info)
+
+    # 1. 优先检查环境变量或配置显式指定的模型目录
     cfg = _get_phage_config()
     for source_id, raw_val, lbl, prio in (
         ("env_v4_2", os.environ.get(ENV_MODEL_DIR), "Student V4.2 (环境变量指定)", 0),
@@ -193,11 +288,9 @@ def discover_available_models(project_root: Path = PROJECT_ROOT) -> List[Dict[st
                 label=lbl,
                 priority=prio,
             )
-            if info and info["path"] not in seen_paths:
-                seen_paths.add(info["path"])
-                found.append(info)
+            _register_entry(info, allow_unified_promote=True)
 
-    # 2. 遍历各候选根目录下的 V4.2 标准路径（不再发现旧版 V2/V3/V4.1）
+    # 2. 遍历各候选根目录下的标准路径
     for root_dir in _get_candidate_model_roots(project_root):
         if not root_dir.exists() or not root_dir.is_dir():
             continue
@@ -208,9 +301,7 @@ def discover_available_models(project_root: Path = PROJECT_ROOT) -> List[Dict[st
             label="Student V4.2 边界精修模型",
             priority=1,
         )
-        if direct_info and direct_info["path"] not in seen_paths:
-            seen_paths.add(direct_info["path"])
-            found.append(direct_info)
+        _register_entry(direct_info, allow_unified_promote=True)
 
         for mid, rel_sub, label, prio in _KNOWN_V4_2_SPECS:
             sub_dir = root_dir / rel_sub
@@ -222,9 +313,7 @@ def discover_available_models(project_root: Path = PROJECT_ROOT) -> List[Dict[st
                 label=label,
                 priority=prio,
             )
-            if info and info["path"] not in seen_paths:
-                seen_paths.add(info["path"])
-                found.append(info)
+            _register_entry(info, allow_unified_promote=(mid == "stage1_2"))
 
     found.sort(key=lambda item: (int(item.get("priority", 99)), str(item.get("model_id", ""))))
     return found
@@ -235,7 +324,7 @@ def resolve_model_dir(
     custom_model_dir: Optional[str] = None,
     project_root: Path = PROJECT_ROOT,
 ) -> Dict[str, Any]:
-    """解析并返回唯一受支持的 V4.2 模型目录元信息。"""
+    """解析并返回唯一受支持的 Unified / Stage 1.2 / V4.2 模型目录元信息。"""
     if custom_model_dir and custom_model_dir.strip():
         custom_path = _resolve_user_path(custom_model_dir, project_root)
         if custom_path is None or not custom_path.exists():
@@ -251,6 +340,9 @@ def resolve_model_dir(
                 f"目录 {custom_path} 不是完整的 Stage 1.2 / V4.2 模型目录 "
                 "(需同时包含 stage1_2.pt/student_v4.pt、对应 *_meta.json 与 subbin_refiner.pt)"
             )
+        uni_dir = _find_unified_judge_dir(custom_path, project_root) if info.get("feature_profile") == "stage1" else None
+        if uni_dir is not None and (not model_id or model_id == "unified"):
+            return _build_unified_promoted_info(info, uni_dir, priority=0, keep_model_id="unified")
         return info
 
     available = discover_available_models(project_root)

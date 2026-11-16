@@ -261,7 +261,7 @@ export function usePhageDiscovery() {
           form.selected_contigs.length > 0 && form.selected_contigs.length < inspectedContigs.value.length
             ? form.selected_contigs
             : null,
-        model_id: capabilities.value?.models?.[0]?.model_id || 'stage1_2',
+        model_id: form.model_id || capabilities.value?.models?.[0]?.model_id || 'stage1_2',
         custom_model_dir: form.custom_model_dir.trim() || null,
         device: form.device,
         workers: form.workers > 0 ? form.workers : null,
@@ -278,12 +278,14 @@ export function usePhageDiscovery() {
       if (taskId) {
         const queuePos = Number(res?.queue_position || 1)
         const busy = Boolean(res?.is_busy || isQueueBusy.value || queuePos > 1)
-        const activeModel = capabilities.value?.models?.[0]
+        const activeModel =
+          (capabilities.value?.models || []).find((m) => m.model_id === payload.model_id) ||
+          capabilities.value?.models?.[0]
         const placeholder: PhageTaskRecord = {
           task_id: taskId,
           task_name: payload.task_name,
-          model_id: res?.model?.model_id || activeModel?.model_id || 'stage1_2',
-          model_version: res?.model?.version || activeModel?.version || 'Stage 1.2',
+          model_id: res?.model?.model_id || activeModel?.model_id || 'unified',
+          model_version: res?.model?.version || activeModel?.version || 'Unified V4',
           device: res?.device || form.device,
           apply_protein_gate: form.apply_protein_gate,
           status: 'queued',

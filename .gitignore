@@ -224,6 +224,14 @@ src/test_shm.py
 !/scripts/repair_integrity.ps1
 !/scripts/check_npm_deps.js
 !/scripts/bootstrap_runtime.ps1
+!/scripts/predict_unified.py
+!/scripts/train_unified_judge.py
+!/scripts/run_orf_judge_ablation.py
+!/scripts/run_p0_distill_ablation.py
+!/scripts/fetch_v4_3_external_tailocins.py
+!/scripts/build_v4_3_dataset.py
+!/scripts/train_v4_3_unified.py
+!/scripts/finetune_stage1_2_v4_3.py
 .lingma/rules/
 
 # ------------------------------------------------------------------------------
