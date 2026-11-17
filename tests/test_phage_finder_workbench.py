@@ -1084,6 +1084,15 @@ def test_model_registry_promotes_unified_model_over_stage1_2_when_present(tmp_pa
     assert Path(found[0]["unified_judge_dir"]).resolve() == uni_dir.resolve()
     assert found[1]["model_id"] == "stage1_2"
 
+    # 当升级为 unified_v4_3 时应准确上报 Unified V4.3 版本标识
+    (uni_dir / "unified_summary.json").write_text(
+        json.dumps({"arch": "unified_v4_3", "total_params": 1747664}),
+        encoding="utf-8",
+    )
+    found_v43 = discover_available_models(project_root=ws_root)
+    assert found_v43[0]["version"] == "Unified V4.3"
+    assert found_v43[0]["params"] == 3715879 + 1747664
+
 
 def test_manager_executes_unified_phage_model_and_exports_unified_artifacts(tmp_path: Path, monkeypatch):
     import asyncio

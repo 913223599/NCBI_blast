@@ -117,15 +117,17 @@ def _find_unified_judge_dir(backbone_dir: Path, project_root: Path = PROJECT_ROO
     return None
 
 
-def _read_unified_judge_params(unified_dir: Path) -> int:
+def _read_unified_judge_meta(unified_dir: Path) -> Dict[str, Any]:
+    """从 unified_summary.json 读取 Unified 引擎架构代际与参数量元数据。"""
     summary_p = unified_dir / "unified_summary.json"
     if summary_p.is_file():
         try:
             obj = json.loads(summary_p.read_text(encoding="utf-8"))
-            return int(obj.get("total_params") or 0)
+            if isinstance(obj, dict):
+                return obj
         except Exception:
-            return 0
-    return 0
+            return {}
+    return {}
 
 
 def _build_unified_promoted_info(
@@ -135,15 +137,27 @@ def _build_unified_promoted_info(
     priority: int = 1,
     keep_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """基于可用 Stage 1.2 DNA 底座构造 Unified V4 生产主力模型描述。"""
+    """基于可用 Stage 1.2 DNA 底座构造 Unified V4 / V4.3 生产主力模型描述。"""
     promoted = dict(base_info)
-    uni_params = _read_unified_judge_params(unified_dir)
+    uni_meta = _read_unified_judge_meta(unified_dir)
+    uni_params = int(uni_meta.get("total_params") or 0)
+    uni_arch = str(uni_meta.get("arch") or "").lower()
+    is_v4_3 = uni_arch == "unified_v4_3"
+    if not is_v4_3:
+        s12_meta_p = Path(str(base_info.get("path") or "")) / "stage1_2_meta.json"
+        if s12_meta_p.is_file():
+            try:
+                is_v4_3 = "v4_3_dna_finetune" in json.loads(s12_meta_p.read_text(encoding="utf-8"))
+            except Exception:
+                is_v4_3 = False
+    version_tag = "Unified V4.3" if is_v4_3 else "Unified V4"
     dna_params = int(base_info.get("params") or 0)
     promoted.update(
         {
             "model_id": keep_model_id or "unified",
             "label": "Unified 分化按需模型 (Stage 1.2 DNA底座 + UnifiedJudge)",
-            "version": "Unified V4",
+            "version": version_tag,
+            "unified_arch": str(uni_meta.get("arch") or "unified"),
             "priority": priority,
             "params": (dna_params + uni_params) if uni_params > 0 else dna_params,
             "has_unified_judge": True,
