@@ -90,7 +90,7 @@ def _extract_hard_slice_worker(args: Tuple[str, str, int]) -> Dict[str, Any]:
         "cids": np.array([cid] * len(starts), dtype=object),
         "starts": np.asarray(starts, dtype=np.int64),
         "ends": np.asarray(ends, dtype=np.int64),
-        "kinds": np.full(len(starts), int(kind), dtype=np.int32),
+        "kinds": np.full(len(starts), kind, dtype=np.int32),
     }
 
 
@@ -125,7 +125,7 @@ def build_or_load_hard_dna_cache(pd_root: Path, *, workers: int = 16) -> Dict[st
 
     logger.info("16核并发提取 V4.3 DNA 硬负切片窗口 (%d 条区段+短碎片)...", len(tasks))
     parts: List[Dict[str, Any]] = []
-    safe_w = max(2, min(16, int(workers)))
+    safe_w = max(2, min(16, workers))
     with concurrent.futures.ProcessPoolExecutor(max_workers=safe_w) as ex:
         for res in ex.map(_extract_hard_slice_worker, tasks, chunksize=4):
             if res.get("n", 0) > 0:
@@ -547,12 +547,14 @@ def finetune_stage1_2_v4_3(
                 l_hh = (F.binary_cross_entropy_with_logits(f_log[:, :2], torch.zeros_like(f_log[:, :2]), reduction="none").mean(dim=1) * hw).sum() / hm.sum().clamp(min=1.0)
                 # 对质粒/病毒/ICE 压制全核心 P0..P4
                 is_pl = is_v43 & (b_kind != 1)
-                l_hpl = 0.0
+                l_hpl = w_log.new_tensor(0.0)
                 if torch.any(is_pl):
                     l_hpl = F.binary_cross_entropy_with_logits(f_log[is_pl, :5], torch.zeros_like(f_log[is_pl, :5]))
                 loss = loss + 0.9 * l_hw + 0.45 * l_hh + 0.35 * l_hpl
 
-            scaler.scale(loss).backward()
+            scaled_loss = scaler.scale(loss)
+            assert isinstance(scaled_loss, torch.Tensor)
+            scaled_loss.backward()
             scaler.unscale_(opt)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scale_b = scaler.get_scale()
@@ -643,9 +645,9 @@ def finetune_stage1_2_v4_3(
     meta_out["refiner_ckpt"] = str(out_ref_pt)
     meta_out["subbin_ckpt"] = str(exp_s12_dir / "subbin_refiner.pt")
     meta_out["v4_3_dna_finetune"] = {
-        "hard_neg_windows": int(n_hard),
-        "epochs": int(epochs),
-        "lr": float(lr),
+        "hard_neg_windows": n_hard,
+        "epochs": epochs,
+        "lr": lr,
         "refiner_eval": ref_info,
         "elapsed_sec": round(time.perf_counter() - t0, 2),
     }

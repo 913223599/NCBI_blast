@@ -5,7 +5,7 @@
 import json
 import time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -859,7 +859,7 @@ def test_manager_execute_forwards_plateau_and_functional_partitions(tmp_path: Pa
 
     isolated_db = PhageDiscoveryDB(db_path=tmp_path / "db" / "spy_phage_discovery.db")
 
-    async def _run_case(req_overrides: Dict[str, object]) -> None:
+    async def _run_case(plateau_min_windows: Optional[int] = None) -> None:
         mgr = PhageDiscoveryManager(project_root=tmp_path)
         mgr.db = isolated_db
         mgr.queue = PhageDiscoveryQueue(max_workers=1, db=isolated_db)
@@ -881,7 +881,7 @@ def test_manager_execute_forwards_plateau_and_functional_partitions(tmp_path: Pa
             fasta_path=str(fasta_path),
             device="cpu",
             apply_protein_gate=False,
-            **req_overrides,
+            plateau_min_windows=plateau_min_windows,
         )
         ctx = {
             "task_dir": str(task_dir),
@@ -894,12 +894,12 @@ def test_manager_execute_forwards_plateau_and_functional_partitions(tmp_path: Pa
         }
         await mgr.execute_pipeline_task(task_id, req, ctx)
 
-    asyncio.run(_run_case({}))
+    asyncio.run(_run_case())
     assert from_dir_calls[-1]["plateau_min_windows"] == 4
     assert from_dir_calls[-1]["plateau_second_threshold"] == 0.90
     assert scan_seq_calls[-1]["collect_functional_partitions"] is True
 
-    asyncio.run(_run_case({"plateau_min_windows": 0}))
+    asyncio.run(_run_case(0))
     assert from_dir_calls[-1]["plateau_min_windows"] == 0
     assert from_dir_calls[-1]["plateau_second_threshold"] is None
 

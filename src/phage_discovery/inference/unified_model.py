@@ -51,7 +51,7 @@ def _resolve_safe_workers(requested: int) -> int:
     """保留部分 CPU 核心防止长时间满载导致主机卡死。"""
     cpu_cnt = os.cpu_count() or 4
     safe_cap = max(1, cpu_cnt - 2)
-    return max(1, min(int(requested), safe_cap))
+    return max(1, min(requested, safe_cap))
 
 
 def _release_accelerator_memory() -> None:
@@ -338,7 +338,7 @@ class UnifiedPhageModel:
                 final_regions,
                 contigs_bp,
                 smooth_profile=smooth_p,
-                flank_bp=int(profile_flank_bp),
+                flank_bp=profile_flank_bp,
             )
 
         score_tracks: Dict[str, List[Dict[str, Any]]] = (
@@ -379,11 +379,11 @@ class UnifiedPhageModel:
     def _region_to_dict(reg: PredictedRegion) -> Dict[str, Any]:
         return {
             "contig_id": reg.contig_id,
-            "start_bp": int(reg.start_bp),
-            "end_bp": int(reg.end_bp),
-            "peak_score": float(reg.peak_score),
-            "mean_score": float(reg.mean_score),
-            "window_count": int(reg.window_count),
+            "start_bp": reg.start_bp,
+            "end_bp": reg.end_bp,
+            "peak_score": reg.peak_score,
+            "mean_score": reg.mean_score,
+            "window_count": reg.window_count,
         }
 
     @staticmethod
@@ -414,7 +414,7 @@ class UnifiedPhageModel:
             executor=executor,
         )
         for tk in ("dna_feature_sec", "dna_infer_decode_sec", "protein_judge_sec", "total_sec"):
-            timings_acc[tk] = round(timings_acc.get(tk, 0.0) + float(chunk_res.timings_sec.get(tk, 0.0)), 3)
+            timings_acc[tk] = round(timings_acc.get(tk, 0.0) + chunk_res.timings_sec.get(tk, 0.0), 3)
 
         base_by_cid: Dict[str, List[Dict[str, Any]]] = {cid: [] for cid in chunk_seqs}
         for reg in chunk_res.base_regions:
@@ -518,7 +518,7 @@ class UnifiedPhageModel:
                 if cid in completed_set:
                     continue
                 seq_len = len(seq)
-                if cur_chunk and (cur_bp + seq_len) > int(chunk_max_bp):
+                if cur_chunk and (cur_bp + seq_len) > chunk_max_bp:
                     self._flush_streaming_chunk(
                         cur_chunk,
                         active_experts=active_experts,
@@ -599,7 +599,7 @@ class UnifiedPhageModel:
             "active_experts": sorted(experts),
             "unified_judge_mode": bool(self.judge_bundle and self.judge_bundle.get("unified_mode", False)),
             "rescue_stats": rescue_acc,
-            "streaming_chunk_max_bp": int(chunk_max_bp),
+            "streaming_chunk_max_bp": chunk_max_bp,
         }
 
         if export_outputs:

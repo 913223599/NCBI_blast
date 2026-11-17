@@ -45,7 +45,7 @@ def _extract_single_contig_orfs(item: Tuple[str, str]) -> Tuple[str, List[Tuple[
         for g in gf.find_genes(s_up.encode("ascii", errors="replace")):
             aa = g.translate(include_stop=False).strip()
             if aa and "*" not in aa:
-                lst.append((int(g.begin - 1), int(g.end), int(g.strand), aa))
+                lst.append((g.begin - 1, g.end, g.strand, aa))
     lst.sort(key=lambda x: (x[0], x[1]))
     return cid, lst
 
@@ -63,7 +63,7 @@ def extract_contig_orfs_pyrodigal(
         return {}
 
     cpu_cnt = os.cpu_count() or 8
-    max_w = int(workers) if workers is not None else max(1, min(16, cpu_cnt - 4))
+    max_w = workers if workers is not None else max(1, min(16, cpu_cnt - 4))
     out: Dict[str, List[Tuple[int, int, int, str]]] = {}
     if max_w <= 1 or len(items) == 1:
         for it in items:
@@ -210,7 +210,7 @@ def _is_phage_extension_orf(ph_p: float, f10_row: np.ndarray, *, min_phage_prob:
         return False
     core_max = float(np.max(f10_row[:5]))
     func_max = float(np.max(f10_row[:7]))
-    if ph_p >= float(min_phage_prob):
+    if ph_p >= min_phage_prob:
         return True
     return (core_max >= 0.50 or func_max >= 0.62) and ph_p >= 0.30
 
@@ -238,7 +238,7 @@ def merge_nearby_regions(
         items = sorted(by_cid[cid], key=lambda x: (x.start_bp, x.end_bp))
         cur: List[PredictedRegion] = []
         for r in items:
-            if cur and (r.start_bp - cur[-1].end_bp) <= int(merge_gap_bp):
+            if cur and (r.start_bp - cur[-1].end_bp) <= merge_gap_bp:
                 prev = cur[-1]
                 cur[-1] = PredictedRegion(
                     contig_id=cid,
@@ -289,8 +289,8 @@ def refine_region_boundaries_with_judge(
         for wp in c_wps:
             if wp.end_bp > gs and wp.start_bp < ge:
                 if wp.score > best_s:
-                    best_s = float(wp.score)
-        return best_s >= float(min_ext_backbone_score)
+                    best_s = wp.score
+        return best_s >= min_ext_backbone_score
 
     refined: List[PredictedRegion] = []
     for reg in regions:
@@ -303,7 +303,7 @@ def refine_region_boundaries_with_judge(
 
         ph_probs = sc["phage_probs"]
         f10_probs = sc["func10_probs"]
-        c_len = int(contigs_bp.get(cid, orfs[-1][1]))
+        c_len = contigs_bp.get(cid, orfs[-1][1])
 
         in_idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if reg.start_bp <= 0.5 * (gs + ge) <= reg.end_bp]
         if not in_idxs:
@@ -311,8 +311,8 @@ def refine_region_boundaries_with_judge(
             continue
 
         first_i, last_i = in_idxs[0], in_idxs[-1]
-        new_start = int(reg.start_bp)
-        new_end = int(reg.end_bp)
+        new_start = reg.start_bp
+        new_end = reg.end_bp
 
         # 1. 可选边缘温和裁边
         if allow_edge_trim and len(in_idxs) >= 5:
@@ -321,7 +321,7 @@ def refine_region_boundaries_with_judge(
                 if _is_strong_host_edge_orf(float(ph_probs[first_i]), f10_probs[first_i]):
                     first_i += 1
                     trim_l += 1
-                    new_start = max(int(reg.start_bp), int(orfs[first_i][0]))
+                    new_start = max(reg.start_bp, orfs[first_i][0])
                 else:
                     break
             trim_r = 0
@@ -329,62 +329,62 @@ def refine_region_boundaries_with_judge(
                 if _is_strong_host_edge_orf(float(ph_probs[last_i]), f10_probs[last_i]):
                     last_i -= 1
                     trim_r += 1
-                    new_end = min(int(reg.end_bp), int(orfs[last_i][1]))
+                    new_end = min(reg.end_bp, orfs[last_i][1])
                 else:
                     break
 
         # 2. 向左语义外延（受 DNA 主干过渡带与 max_host_gap_orfs 约束）
-        cur_left_edge = int(orfs[first_i][0]) if trim_triggered(new_start, reg.start_bp) else new_start
+        cur_left_edge = orfs[first_i][0] if trim_triggered(new_start, reg.start_bp) else new_start
         anchor_start = reg.start_bp
         gap_cnt = 0
         li = first_i - 1
         while li >= 0:
             gs, ge, _, _ = orfs[li]
-            if (anchor_start - gs) > int(max_flank_bp):
+            if (anchor_start - gs) > max_flank_bp:
                 break
-            if (cur_left_edge - ge) > int(max_step_gap_bp):
+            if (cur_left_edge - ge) > max_step_gap_bp:
                 break
-            if not _has_backbone_support(cid, int(gs), int(ge)):
+            if not _has_backbone_support(cid, gs, ge):
                 break
             if _is_phage_extension_orf(float(ph_probs[li]), f10_probs[li], min_phage_prob=min_ext_phage_prob):
-                new_start = min(new_start, int(gs))
-                cur_left_edge = int(gs)
+                new_start = min(new_start, gs)
+                cur_left_edge = gs
                 gap_cnt = 0
                 li -= 1
             else:
                 if _is_strong_host_edge_orf(float(ph_probs[li]), f10_probs[li]):
                     break
                 gap_cnt += 1
-                if gap_cnt > int(max_host_gap_orfs):
+                if gap_cnt > max_host_gap_orfs:
                     break
-                cur_left_edge = int(gs)
+                cur_left_edge = gs
                 li -= 1
 
         # 3. 向右语义外延（受 DNA 主干过渡带约束）
-        cur_right_edge = int(orfs[last_i][1]) if new_end < reg.end_bp else new_end
+        cur_right_edge = orfs[last_i][1] if new_end < reg.end_bp else new_end
         anchor_end = reg.end_bp
         gap_cnt = 0
         ri = last_i + 1
         while ri < len(orfs):
             gs, ge, _, _ = orfs[ri]
-            if (ge - anchor_end) > int(max_flank_bp):
+            if (ge - anchor_end) > max_flank_bp:
                 break
-            if (gs - cur_right_edge) > int(max_step_gap_bp):
+            if (gs - cur_right_edge) > max_step_gap_bp:
                 break
-            if not _has_backbone_support(cid, int(gs), int(ge)):
+            if not _has_backbone_support(cid, gs, ge):
                 break
             if _is_phage_extension_orf(float(ph_probs[ri]), f10_probs[ri], min_phage_prob=min_ext_phage_prob):
-                new_end = max(new_end, int(ge))
-                cur_right_edge = int(ge)
+                new_end = max(new_end, ge)
+                cur_right_edge = ge
                 gap_cnt = 0
                 ri += 1
             else:
                 if _is_strong_host_edge_orf(float(ph_probs[ri]), f10_probs[ri]):
                     break
                 gap_cnt += 1
-                if gap_cnt > int(max_host_gap_orfs):
+                if gap_cnt > max_host_gap_orfs:
                     break
-                cur_right_edge = int(ge)
+                cur_right_edge = ge
                 ri += 1
 
         refined.append(
@@ -437,7 +437,7 @@ def extract_subbin_gray_candidates(
         )
         if len(prof) == 0:
             continue
-        active = (prof >= float(sub_active_threshold)).copy()
+        active = (prof >= sub_active_threshold).copy()
         if active.size >= 3:
             active[1:-1] = active[1:-1] | ((~active[1:-1]) & active[:-2] & active[2:])
 
@@ -453,7 +453,7 @@ def extract_subbin_gray_candidates(
             segs.append((seg_s, len(active)))
 
         merged_segs: List[Tuple[int, int]] = []
-        gap_bins = max(0, int(merge_gap_bp) // int(bin_bp))
+        gap_bins = max(0, merge_gap_bp // bin_bp)
         for bs, be in segs:
             if merged_segs and (bs - merged_segs[-1][1]) <= gap_bins:
                 merged_segs[-1] = (merged_segs[-1][0], be)
@@ -461,14 +461,14 @@ def extract_subbin_gray_candidates(
                 merged_segs.append((bs, be))
 
         for bs, be in merged_segs:
-            s_bp = int(bs * bin_bp)
-            e_bp = min(int(contig_end), int(be * bin_bp))
-            if (e_bp - s_bp) < int(min_region_bp):
+            s_bp = bs * bin_bp
+            e_bp = min(contig_end, be * bin_bp)
+            if (e_bp - s_bp) < min_region_bp:
                 continue
             seg_vals = prof[bs:be]
             pk = float(np.max(seg_vals))
             mn = float(np.mean(seg_vals))
-            if pk >= float(min_peak_sub_prob) and mn >= float(min_mean_sub_prob):
+            if pk >= min_peak_sub_prob and mn >= min_mean_sub_prob:
                 cands.append(
                     PredictedRegion(
                         contig_id=cid,
@@ -496,7 +496,7 @@ def _region_overlaps_any(
         if r.contig_id != cand.contig_id:
             continue
         if min_clearance_bp > 0:
-            if max(r.start_bp - int(min_clearance_bp), cand.start_bp) < min(r.end_bp + int(min_clearance_bp), cand.end_bp):
+            if max(r.start_bp - min_clearance_bp, cand.start_bp) < min(r.end_bp + min_clearance_bp, cand.end_bp):
                 return True
         elif min(r.end_bp, cand.end_bp) - max(r.start_bp, cand.start_bp) >= min_overlap_bp:
             return True
@@ -529,9 +529,9 @@ def _should_veto_base_region(
     # 极低蛋白响应且零核心模块（Head/Conn/Tail/Lysis/Int 全无）：安全清除纯粹 DNA 误提质粒或纯复制型片段（如 V583 2227k ICE 残片）
     if mean_ph <= 0.10 and core_mods == 0 and int(np.sum(ph_sub >= 0.50)) == 0:
         return True
-    if mean_ph < float(strict_veto_max_mean_phage) and core_mods == 0 and max_p9 >= 0.65:
+    if mean_ph < strict_veto_max_mean_phage and core_mods == 0 and max_p9 >= 0.65:
         return True
-    if morph_mods == 0 and mean_ph < float(morph_veto_max_mean_phage):
+    if morph_mods == 0 and mean_ph < morph_veto_max_mean_phage:
         if (max_p9 >= 0.65 and max_p8 >= 0.50) or max_p9 >= 0.72 or (max_p8 >= 0.60 and mean_ph < 0.46):
             return True
 
@@ -596,7 +596,7 @@ def _passes_gray_rescue_criteria(
     cand_mean_score: float = 0.0,
 ) -> bool:
     """对 SubBin 灰区候选执行梯度核验与 Tailocin 排雷，兼顾极短隐蔽前噬菌体挽救与零误报防线。"""
-    n_orf = int(len(ph_sub))
+    n_orf = len(ph_sub)
     mean_ph = float(np.mean(ph_sub))
     frac_ph = float(np.mean(ph_sub >= 0.50))
     pos_cnt = int(np.sum(ph_sub >= 0.50))
@@ -608,15 +608,15 @@ def _passes_gray_rescue_criteria(
     mean_p9 = float(np.mean(f10_sub[:, 9]))
 
     passed = (
-        mean_ph >= float(rescue_min_mean_phage)
-        and frac_ph >= float(rescue_min_frac_phage)
-        and pos_cnt >= max(3, int(rescue_min_orfs) - 1)
-        and active_phage_mods >= int(rescue_min_active_modules)
-        and mean_p9 <= float(rescue_max_mean_p9)
+        mean_ph >= rescue_min_mean_phage
+        and frac_ph >= rescue_min_frac_phage
+        and pos_cnt >= max(3, rescue_min_orfs - 1)
+        and active_phage_mods >= rescue_min_active_modules
+        and mean_p9 <= rescue_max_mean_p9
         and df_cnt <= pos_cnt // 2
     )
     if passed and require_structural_evidence:
-        morph_mods = int(np.sum(max_f10[:3] >= float(rescue_min_morph_prob)))
+        morph_mods = int(np.sum(max_f10[:3] >= rescue_min_morph_prob))
         core_mods = int(np.sum(max_f10[:5] >= 0.50))
         has_lysis_pair = float(max_f10[3]) >= 0.65 and core_mods >= 2
         if morph_mods == 0 and not has_lysis_pair:
@@ -628,10 +628,10 @@ def _passes_gray_rescue_criteria(
     if not passed and require_structural_evidence and enable_elastic_rescue:
         # Opt-3a 弹性高置信梯度：整合 Head A/B 形态核心并集，在多模块齐备时放宽边缘 P8 阻断（如 Sakai Sp17）
         comb_morph = np.maximum(max_f10[:3], max_r2[:3])
-        comb_morph_mods = int(np.sum(comb_morph >= float(rescue_min_morph_prob)))
+        comb_morph_mods = int(np.sum(comb_morph >= rescue_min_morph_prob))
         comb_core = int(np.sum(np.maximum(max_f10[:5], max_r2[:5]) >= 0.50))
         if (
-            n_orf >= int(rescue_min_orfs)
+            n_orf >= rescue_min_orfs
             and mean_ph >= 0.72
             and frac_ph >= 0.75
             and active_phage_mods >= 3
@@ -661,9 +661,9 @@ def _passes_gray_rescue_criteria(
         # Opt-3c 非尾丝状噬菌体(Inovirus)高平台 DNA + 双流双衣壳与整合酶协同挽救（如 PAO1 Pf4）
         r2_head_cnt = int(np.sum(r2_use[:, 0] >= 0.50))
         if (
-            int(cand_len_bp) >= 10000
-            and float(cand_peak_score) >= 0.98
-            and float(cand_mean_score) >= 0.90
+            cand_len_bp >= 10000
+            and cand_peak_score >= 0.98
+            and cand_mean_score >= 0.90
             and n_orf >= 12
             and mean_ph >= 0.28
             and df_cnt == 0
@@ -711,7 +711,7 @@ def bridge_complementary_phage_fragments(
         sc: Dict[str, np.ndarray],
     ) -> Tuple[int, int, int, int, int, int]:
         idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if reg.start_bp <= 0.5 * (gs + ge) <= reg.end_bp]
-        span = int(reg.end_bp - reg.start_bp)
+        span = reg.end_bp - reg.start_bp
         if not idxs:
             return 0, 0, 0, 0, 0, span
         r2 = _get_r2_core_probs(sc)[idxs]
@@ -736,8 +736,8 @@ def bridge_complementary_phage_fragments(
         cur = regs_s[0]
         ph_arr = sc["phage_probs"]
         for nxt in regs_s[1:]:
-            gap = int(nxt.start_bp - cur.end_bp)
-            if 3000 < gap <= int(max_bridge_gap_bp):
+            gap = nxt.start_bp - cur.end_bp
+            if 3000 < gap <= max_bridge_gap_bp:
                 h1, t1, l1, i1, rep1, len1 = _arm_stats(cur, orfs, sc)
                 h2, t2, l2, i2, rep2, len2 = _arm_stats(nxt, orfs, sc)
                 arm_1_early = (h1 == 0 and len1 >= 30000 and rep1 >= 10 and i1 >= 1) and (
@@ -824,9 +824,9 @@ def split_tandem_prophage_regions(
         p4_strong = [i for i in mid_idxs if float(r2_probs[i, 4]) >= 0.70]
         deep_valley = [i for i in mid_idxs if float(ph_probs[i]) < 0.35]
         if len(p4_strong) >= 2 and len(deep_valley) >= 2:
-            p4_onset = int(orfs[p4_strong[0]][0])
-            pre_val = [i for i in deep_valley if int(orfs[i][1]) <= p4_onset + 3000]
-            split_bp = int(orfs[pre_val[-1]][1]) if pre_val else p4_onset
+            p4_onset = orfs[p4_strong[0]][0]
+            pre_val = [i for i in deep_valley if orfs[i][1] <= p4_onset + 3000]
+            split_bp = orfs[pre_val[-1]][1] if pre_val else p4_onset
             if (split_bp - reg.start_bp) >= 20000 and (reg.end_bp - split_bp) >= 20000:
                 half_win = max(1, reg.window_count // 2)
                 out.append(
@@ -920,8 +920,8 @@ def rescue_and_filter_regions_with_judge(
                 if suppressed_out is not None:
                     suppressed_out.append({
                         "contig_id": reg.contig_id,
-                        "start_bp": int(reg.start_bp),
-                        "end_bp": int(reg.end_bp),
+                        "start_bp": reg.start_bp,
+                        "end_bp": reg.end_bp,
                         "reason": "base_veto",
                         "mean_phage_prob": round(float(np.mean(ph_sub)), 4),
                         "max_p9": round(float(np.max(f10_sub[:, 9])), 4),
@@ -940,7 +940,7 @@ def rescue_and_filter_regions_with_judge(
             stats["gray_rejected"] += 1
             continue
         idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if cand.start_bp <= 0.5 * (gs + ge) <= cand.end_bp]
-        if len(idxs) < int(rescue_min_orfs):
+        if len(idxs) < rescue_min_orfs:
             stats["gray_rejected"] += 1
             continue
 
@@ -960,9 +960,9 @@ def rescue_and_filter_regions_with_judge(
             r2_sub=r2_sub,
             enable_elastic_rescue=enable_elastic_rescue,
             enable_tailocin_guard=enable_tailocin_guard,
-            cand_len_bp=int(cand.end_bp - cand.start_bp),
-            cand_peak_score=float(cand.peak_score),
-            cand_mean_score=float(cand.mean_score),
+            cand_len_bp=cand.end_bp - cand.start_bp,
+            cand_peak_score=cand.peak_score,
+            cand_mean_score=cand.mean_score,
         ):
             kept.append(cand)
             stats["gray_rescued"] += 1
@@ -971,8 +971,8 @@ def rescue_and_filter_regions_with_judge(
             if suppressed_out is not None:
                 suppressed_out.append({
                     "contig_id": cand.contig_id,
-                    "start_bp": int(cand.start_bp),
-                    "end_bp": int(cand.end_bp),
+                    "start_bp": cand.start_bp,
+                    "end_bp": cand.end_bp,
                     "reason": "gray_rejected",
                     "mean_phage_prob": round(float(np.mean(ph_sub)), 4),
                     "max_p9": round(float(np.max(f10_sub[:, 9])), 4),
@@ -1011,11 +1011,11 @@ def summarize_region_with_judge(
     r2_sub = _get_r2_core_probs(scored)[idxs]
 
     max_f10 = np.max(f10_sub, axis=0)
-    active_mods = [JUDGE_CLASS_NAMES[c] for c in range(9) if float(max_f10[c]) >= float(module_threshold)]
+    active_mods = [JUDGE_CLASS_NAMES[c] for c in range(9) if float(max_f10[c]) >= module_threshold]
     r2_core_max = np.max(r2_sub, axis=0)
     core_sum = float(np.sum(r2_core_max))
     core_cnt = int(np.sum(r2_core_max >= 0.45))
-    has_head = float(r2_core_max[0]) >= 0.45 or float(max_f10[0]) >= float(module_threshold)
+    has_head = float(r2_core_max[0]) >= 0.45 or float(max_f10[0]) >= module_threshold
     comp_cls = "complete_structural_core" if (core_cnt >= 3 and has_head) else "cryptic_or_incomplete"
 
     return {
