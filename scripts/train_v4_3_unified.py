@@ -25,7 +25,7 @@ import numpy as np
 import torch
 from sklearn.metrics import roc_auc_score
 from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Subset, TensorDataset
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -50,6 +50,20 @@ def _clear_cuda() -> None:
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+def _build_balanced_train_indices(tr_hk: np.ndarray) -> np.ndarray:
+    """构造均衡重采样索引：剔除易误伤丝状噬菌体的古菌病毒(3)，对稀疏 Tailocin(1) 12x、ICE(4) 6x 过采样。"""
+    hk = np.asarray(tr_hk, dtype=np.int64)
+    base_idx = np.where((hk == 0) | (hk == 2))[0]
+    tc_idx = np.where(hk == 1)[0]
+    ice_idx = np.where(hk == 4)[0]
+    parts = [base_idx]
+    if len(tc_idx) > 0:
+        parts.append(np.tile(tc_idx, 12))
+    if len(ice_idx) > 0:
+        parts.append(np.tile(ice_idx, 6))
+    return np.concatenate(parts, axis=0)
 
 
 def _extract_teacher_anchors(
@@ -147,7 +161,8 @@ def _train_statonly_v4_3(
         torch.from_numpy(ds["tr_kn"]),
         torch.from_numpy(ds["tr_hard_kind"]),
     )
-    tr_loader = DataLoader(tr_ds, batch_size=batch_size, shuffle=True)
+    bal_idx = _build_balanced_train_indices(ds["tr_hard_kind"])
+    tr_loader = DataLoader(Subset(tr_ds, bal_idx.tolist()), batch_size=batch_size, shuffle=True)
     va_ds = TensorDataset(
         torch.from_numpy(ds["va_ids"]),
         torch.from_numpy(ds["va_lens"]),
@@ -189,9 +204,8 @@ def _train_statonly_v4_3(
             is_base_m = vm * (hk == 0).unsqueeze(-1).to(torch.float32)
 
             hard_w = torch.ones_like(hk, dtype=torch.float32)
-            hard_w = torch.where(hk == 1, 4.0, hard_w)
-            hard_w = torch.where(hk == 3, 2.5, hard_w)
-            hard_w = torch.where((hk == 2) | (hk == 4), 2.0, hard_w)
+            hard_w = torch.where(hk == 1, 2.0, hard_w)
+            hard_w = torch.where((hk == 2) | (hk == 4), 1.5, hard_w)
             hard_w = hard_w.unsqueeze(-1)
 
             lf = (bce_f(f_log, y10) * km).sum() / km.sum().clamp(min=1.0) / float(NUM_JUDGE_CLASSES)
@@ -399,7 +413,13 @@ def train_unified_v4_3(
     else:
         hva_loader = None
 
-    tr_loader = DataLoader(tr_ds, batch_size=batch_size, shuffle=True, pin_memory=(device.type == "cuda"))
+    bal_tr_idx = _build_balanced_train_indices(ds["tr_hard_kind"])
+    tr_loader = DataLoader(
+        Subset(tr_ds, bal_tr_idx.tolist()),
+        batch_size=batch_size,
+        shuffle=True,
+        pin_memory=(device.type == "cuda"),
+    )
     va_loader = DataLoader(va_ds, batch_size=64, shuffle=False, pin_memory=(device.type == "cuda"))
 
     opt = torch.optim.AdamW(
@@ -457,11 +477,10 @@ def train_unified_v4_3(
                     nn.functional.mse_loss(f_log, r3_f, reduction="none") * base_m
                 ).sum() / base_m.sum().clamp(min=1.0) / float(NUM_JUDGE_CLASSES)
 
-                # 2. Phage Head: 按硬负子类精确分配样本聚焦权重（Tailocin 5.0x / 非噬菌体病毒 3.5x / 质粒&ICE 2.5x）
+                # 2. Phage Head: 配合 12x Tailocin / 6x ICE 均衡采样，温和聚焦各硬负子类
                 hk_w = torch.ones_like(hk, dtype=torch.float32)
-                hk_w = torch.where(hk == 1, 5.0, hk_w)
-                hk_w = torch.where(hk == 3, 3.5, hk_w)
-                hk_w = torch.where((hk == 2) | (hk == 4), 2.5, hk_w)
+                hk_w = torch.where(hk == 1, 2.0, hk_w)
+                hk_w = torch.where((hk == 2) | (hk == 4), 1.5, hk_w)
                 ph_w = vm * hk_w.unsqueeze(-1)
                 l_ph = (bce_bin(p_log, ph) * ph_w).sum() / ph_w.sum().clamp(min=1.0)
 
@@ -481,7 +500,7 @@ def train_unified_v4_3(
                 l_tc = 0.0
                 if torch.any(tc_mask):
                     tc_tgt = win_is_tailocin[tc_mask].to(torch.float32)
-                    tc_wt = torch.where(win_is_tailocin[tc_mask], 6.0, 1.0)
+                    tc_wt = torch.where(win_is_tailocin[tc_mask], 4.0, 1.0)
                     l_tc = (nn.functional.binary_cross_entropy_with_logits(tc_log[tc_mask], tc_tgt, reduction="none") * tc_wt).mean()
 
                 # 5. DualSkip Head B (intact_func_head): 真实核心监督 + R2 无平滑教师蒸馏 (基础窗口)
@@ -554,9 +573,9 @@ def train_unified_v4_3(
         hard_fp = 0.0
         hard_mean = 0.0
         if hva_loader is not None:
-            h_probs = []
+            h_probs, h_kinds = [], []
             with torch.no_grad():
-                for ids, lens, st, vc, _ in hva_loader:
+                for ids, lens, st, vc, hk_b in hva_loader:
                     t_id = ids.to(device, dtype=torch.long)
                     t_ln = lens.to(device, dtype=torch.long)
                     t_st = st.to(device, dtype=torch.float32)
@@ -566,11 +585,20 @@ def train_unified_v4_3(
                     pos = torch.arange(CTX_WIN_ORFS, device=device)[None, :]
                     vm_h = pos < t_vc[:, None]
                     h_probs.append(torch.sigmoid(p_log)[vm_h].float().cpu().numpy())
-            hp = np.concatenate(h_probs)
-            hard_fp = float(np.mean(hp >= 0.5))
-            hard_mean = float(np.mean(hp))
+                    hk_expand = torch.broadcast_to(hk_b.to(device, dtype=torch.long)[:, None], p_log.shape)
+                    h_kinds.append(hk_expand[vm_h].cpu().numpy())
+            hp_all = np.concatenate(h_probs)
+            hk_all = np.concatenate(h_kinds)
+            keep_hv = hk_all != 3
+            if np.any(keep_hv):
+                hp = hp_all[keep_hv]
+                hk_v = hk_all[keep_hv]
+                cls_fps = [float(np.mean(hp[hk_v == k] >= 0.5)) for k in (1, 2, 4) if np.any(hk_v == k)]
+                cls_mns = [float(np.mean(hp[hk_v == k])) for k in (1, 2, 4) if np.any(hk_v == k)]
+                hard_fp = float(np.mean(cls_fps)) if cls_fps else 0.0
+                hard_mean = float(np.mean(cls_mns)) if cls_mns else 0.0
 
-        # 平衡评分：保住原 zero-overlap 精度 + 奖励显著降低硬负样本误报率
+        # 平衡评分：保住原 zero-overlap 精度 + 奖励子类均衡降误报率，至少预热 4 epochs 防止过早截断 tailocin 头
         score = mf["macro_f1_p08"] + 0.5 * ph_auroc - 0.35 * hard_fp
         logger.info(
             "[V4.3 Unified] Ep %d/%d loss=%.4f | Unseen: MacroF1=%.4f PhageAUROC=%.4f | HardNegVal: meanP=%.4f FPR@0.5=%.4f",
@@ -582,8 +610,10 @@ def train_unified_v4_3(
             hard_mean,
             hard_fp,
         )
-        if score > best_score:
-            best_score = score
+        eligible = (ep >= 4) or (epochs < 4)
+        if (eligible and score > best_score) or not best_sd:
+            if eligible:
+                best_score = score
             best_sd = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             best_metrics = {
                 "epoch": ep,

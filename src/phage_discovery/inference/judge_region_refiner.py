@@ -526,6 +526,9 @@ def _should_veto_base_region(
     morph_mods = int(np.sum(max_f10[:3] >= 0.50))
     max_p8 = float(max_f10[8])
     max_p9 = float(max_f10[9])
+    # 极低蛋白响应且零核心模块（Head/Conn/Tail/Lysis/Int 全无）：安全清除纯粹 DNA 误提质粒或纯复制型片段（如 V583 2227k ICE 残片）
+    if mean_ph <= 0.10 and core_mods == 0 and int(np.sum(ph_sub >= 0.50)) == 0:
+        return True
     if mean_ph < float(strict_veto_max_mean_phage) and core_mods == 0 and max_p9 >= 0.65:
         return True
     if morph_mods == 0 and mean_ph < float(morph_veto_max_mean_phage):
@@ -553,7 +556,25 @@ def _is_gray_tailocin_like(
     r2_head_max = float(max_r2[0])
     r2_conn_max = float(max_r2[1])
     int_max = float(max(max_r2[4], max_f10[4]))
-    return r2_tail_cnt >= 3 and r2_head_max < 0.45 and r2_conn_max < 0.45 and int_max < 0.45
+    if r2_tail_cnt >= 3 and r2_head_max < 0.45 and r2_conn_max < 0.45 and int_max < 0.45:
+        return True
+
+    # 校准后 Head A (f10_sub) 明确为纯尾+裂解且无 Head/Connector/Integrase 时，允许容忍 Head B 至多 1 个单 ORF 噪音
+    f10_tail_cnt = int(np.sum(f10_sub[:, 2] >= 0.50))
+    f10_head_cnt = int(np.sum(f10_sub[:, 0] >= 0.50))
+    f10_conn_cnt = int(np.sum(f10_sub[:, 1] >= 0.50))
+    r2_head_cnt = int(np.sum(r2_sub[:, 0] >= 0.55))
+    r2_conn_cnt = int(np.sum(r2_sub[:, 1] >= 0.55))
+    return (
+        f10_tail_cnt >= 3
+        and f10_head_cnt == 0
+        and f10_conn_cnt == 0
+        and float(max_f10[0]) < 0.48
+        and float(max_f10[1]) < 0.48
+        and r2_head_cnt <= 1
+        and r2_conn_cnt <= 1
+        and int_max < 0.45
+    )
 
 
 def _passes_gray_rescue_criteria(
@@ -570,6 +591,9 @@ def _passes_gray_rescue_criteria(
     r2_sub: Optional[np.ndarray] = None,
     enable_elastic_rescue: bool = True,
     enable_tailocin_guard: bool = True,
+    cand_len_bp: int = 0,
+    cand_peak_score: float = 0.0,
+    cand_mean_score: float = 0.0,
 ) -> bool:
     """对 SubBin 灰区候选执行梯度核验与 Tailocin 排雷，兼顾极短隐蔽前噬菌体挽救与零误报防线。"""
     n_orf = int(len(ph_sub))
@@ -630,6 +654,25 @@ def _passes_gray_rescue_criteria(
             and float(max_f10[8]) < 0.25
             and float(max_f10[2]) >= 0.75
             and r2_tail_or_head >= 1
+        ):
+            passed = True
+
+    if not passed and require_structural_evidence and enable_elastic_rescue:
+        # Opt-3c 非尾丝状噬菌体(Inovirus)高平台 DNA + 双流双衣壳与整合酶协同挽救（如 PAO1 Pf4）
+        r2_head_cnt = int(np.sum(r2_use[:, 0] >= 0.50))
+        if (
+            int(cand_len_bp) >= 10000
+            and float(cand_peak_score) >= 0.98
+            and float(cand_mean_score) >= 0.90
+            and n_orf >= 12
+            and mean_ph >= 0.28
+            and df_cnt == 0
+            and mean_p9 <= 0.28
+            and float(max_f10[8]) < 0.75
+            and float(max_f10[0]) >= 0.65
+            and float(max_r2[0]) >= 0.65
+            and r2_head_cnt >= 2
+            and float(max(max_f10[4], max_r2[4])) >= 0.70
         ):
             passed = True
 
@@ -917,6 +960,9 @@ def rescue_and_filter_regions_with_judge(
             r2_sub=r2_sub,
             enable_elastic_rescue=enable_elastic_rescue,
             enable_tailocin_guard=enable_tailocin_guard,
+            cand_len_bp=int(cand.end_bp - cand.start_bp),
+            cand_peak_score=float(cand.peak_score),
+            cand_mean_score=float(cand.mean_score),
         ):
             kept.append(cand)
             stats["gray_rescued"] += 1

@@ -1142,3 +1142,39 @@ Pop-Location
    - `discover_available_models()` 正常返回 `['unified', 'stage1_2']`，`resolve_model_dir()` 锁定默认 `unified`；
    - `pytest`（`5` 个核心测试集 `39` 项用例）：**`39 passed in 11.59s`**；
    - `UnifiedPhageModel` CUDA 真机重扫 `NC_002737.2_Streptococcus_pyogenes_SF370.fasta`（`11.275s`）：精确命中 `3` 处前噬菌体 `[(529800, 571000), (778200, 819600), (1189600, 1223400)]`。
+
+---
+
+## 41. `V4.3` 双模态硬负抑制 + `DualSkip` 联合迭代、四重门禁对比及生产切换归档（步骤 48）
+
+为彻底消除现役生产权重在 Gold-8 与压力集上残余的驯化细菌素（`PAO1 R2/F2 pyocin`、`EGD-e monocin`）、移动岛及高分质粒误报，同时把统一蛋白引擎 `Head B` 从 `Intact_AUROC=0.7992` 升级为 `DualSkip`，我们在独立沙盒完成多轮数据扩展、均衡重训与后处理精确协同迭代，并于全部门禁实测达标后正式转正替换生产目录 `F:\Phage data\models\full_v4`。
+
+### 1. 数据扩展与双模态训练流程
+1. **外源零泄露硬负语料拉取**（[fetch_v4_3_external_tailocins.py](file:///f:/NCBI%20blast/scripts/fetch_v4_3_external_tailocins.py)）：从公开 RefSeq/GenBank 拉取无重叠加严审查样本，对 `Gold-8` 与 `val/test` 全负参考集执行 `5-mer Jaccard < 0.50` 防泄露 + 去内部冗余 + 剔除含 `capsid/portal/terL` 候选，最终纳入 `27` 条（淘汰 `49` 条，涵盖 `17` 条 R/F/PVC/maltocin/monocin/carotovoricin `tailocin`、`4` 条去冗余 `mge_ice`、`4` 条古菌病毒、`2` 条 *Acinetobacter* 质粒）；
+2. **全量联合数据集构建**（[build_v4_3_dataset.py](file:///f:/NCBI%20blast/scripts/build_v4_3_dataset.py)）：合并基础零泄露集 `49,173` 窗与内外源挖掘硬负例 `1,694` 窗组成 `50,867` 蛋白训练窗（`hard_val_windows=126`），同步输出 `236` 条 DNA 切片与短碎片共 `1,898` 窗口。
+3. **非退化双模态微调与类别均衡策略**（[finetune_stage1_2_v4_3.py](file:///f:/NCBI%20blast/scripts/finetune_stage1_2_v4_3.py)、[train_v4_3_unified.py](file:///f:/NCBI%20blast/scripts/train_v4_3_unified.py)）：
+   - 诊断发现 `kind=3`（古菌丝状/梭形病毒）负监督会顺带压低真丝状前噬菌体 `PAO1 Pf4_inovirus`（DNA `0.9569 -> 0.9037`，蛋白 `0.3751 -> 0.0691`），遂在 `Stage 1.2` 与 `Unified` 训练阶段过滤 `kind=3`（`1,898 -> 1,871` DNA 窗）；
+   - `Stage 1.2` 冻结 `sub_cond.` 与 `sub_head.`（保 200bp 断点分辨率），以 `3 epochs, lr=4e-5` 联合教师锚定微调后 `Val_AUPRC=0.99603`、`HardDNA FP@0.5=0.1566`，`ContextRefiner V4.3` `val_auprc=0.99867`；
+   - 在 `statonly` 与 `UnifiedJudge` 双支路通过 `_build_balanced_train_indices` 对极度稀疏 `Tailocin(1)`（`93` 窗）做 `12x` 过采样、`ICE(4)` 做 `6x` 过采样，采用子类均衡 `hard_va` 并要求 `ep >= 4` 再择优，使 `Unified` 神经网络对 `PAO1 R2/F2 pyocin` 均分从 `0.8805` 降至 `0.4279~0.5127`；蛋白裁判总参量为 `2,556,880`（较早期分离双底座 `4,019,782` 压缩 `36.39%`，与 `Stage 1.2 DNA 3,715,879` 在工作台合显主干参数 `5,463,543`）。
+4. **后置精确协同规则与单元回归验证**（[judge_region_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/judge_region_refiner.py)、[test_judge_region_refiner.py](file:///f:/NCBI%20blast/tests/test_judge_region_refiner.py)）：
+   - `_should_veto_base_region` 新增零核心极低蛋白置信度（`mean_ph <= 0.10 and core_mods == 0`）拦截（彻底清除 `V583 2227k` 假复制岛）；
+   - `_is_gray_tailocin_like` 新增基于校准后 `Head A` 的纯尾拦截（容忍 `Head B` 至多 `1` 个单 ORF 噪音）；
+   - `_passes_gray_rescue_criteria` 新增 `Opt-3c`：针对 `>= 10kb`、`SubBin` 连续平台（`peak >= 0.98, mean >= 0.90`）、零防御且双流一致核实双衣壳 `>= 0.65` + 整合酶 `>= 0.70` 的丝状前噬菌体协同挽救（精准以 `IoU=0.9007, gt_cov=1.0` 挽回 `PAO1 Pf4_inovirus`）。
+
+### 2. 四重基准全量实测对比（现役原 `V4` vs 升级 `V4.3`）
+| 评测项目 | 升级前现役 (`full_v4`) | 升级后现役 (`V4.3`) | 变化幅度与说明 |
+| :--- | :--- | :--- | :--- |
+| **Gold-8 `Prophage`** | `35 / 38` | **`35 / 38`** | 持平（8 株中 7 株全中，`Sakai 15/18`） |
+| **Gold-8 `ConfounderFP`** | `2 / 4` (`PAO1 pyocin` + `EGD-e monocin`) | **`0 / 4`** | **细菌素 / ICE / vanB 全归零** |
+| **Gold-8 `Extra`** | `2` (`LT2=1, V583=1`) | **`0`** | **8 株全部零多余误报** |
+| **Gold-8 `Sat/Isl`** | `4 / 18` | `3 / 18` | 仅 `IL1403` `IS983` 断裂岛 `bIL311_ps3` 未入 |
+| **`v1_test` (`75` 嵌合体)** | `75/3/0, F1=0.9804, MAE=435.9bp, s08=74` | **`75/1/0, F1=0.9934, MAE=476.2bp, s08=74`** | **`FP 3 -> 1`, `F1 +0.0130`** |
+| **`C1` (±4kb) / `C2` (12kb)** | `75/0/0 (F1=1.0000)` / `75/75` | **`75/0/0 (F1=1.0000)` / `74/75 (98.7%)`** | `C1` 满分；`C2` 仅 1 条极残碎段差 |
+| **`DualSkip Intact_AUROC`** | `0.7992` | **`0.8216`** (`DF_FP=0.0000`, `vsDF=1.0000`) | **`+0.0224`** |
+| **`Stress` 总误报 (`A1..B2`)** | **`21`** (`4 / 2 / 7 / 6 / 2`) | **`7`** (`0 / 1 / 2 / 2 / 2`) | **总误报骤降 `-66.7%`**（`A1` 质粒清零，`A3` 降 `-71.4%`） |
+
+### 3. 生产切换备份与上线复验
+1. **备份与原子部署**：将旧现役模型完整归档备份至 `F:\Phage data\models\_archive\full_v4_pre_v4_3_20261117`（隔离路径不被自动发现器扫入），将验证权重原子写入 [full_v4](file:///F:/Phage%20data/models/full_v4)，刷新 [stage1_2_meta.json](file:///F:/Phage%20data/models/full_v4/stage1_2/stage1_2_meta.json)、[unified_summary.json](file:///F:/Phage%20data/models/full_v4/orf_judge_unified/unified_summary.json) 指向生产路径并同步清理实验沙盒 `full_v4_3_exp`。
+2. **上线终验**：
+   - 完整 `pytest tests/ -v` 通过：**`258 passed in 153.12s`**（0 failed, 0 skipped）；
+   - 切换后默认生产路径 CUDA 实测：`discover_available_models()` 正常返回 `['unified', 'stage1_2']`，`PAO1` 精准检出 `(785200, 797200)`（零 pyocin 误报）、`V583` `5/5` 全中且零 `Extra`、`EGD-e` `1/1` 且零 `monocin`、`v1_test` 精确复现 `TP=75, FP=1, FN=0, F1=0.9934, MAE=476.2bp, Strict0.8=74`。

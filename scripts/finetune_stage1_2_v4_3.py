@@ -228,7 +228,7 @@ def _finetune_context_refiner_v4_3(
                 if is_hard_g:
                     sf_b[row, :ln] = tr_sf[g]
                     rl_b[row, :ln] = tr_wl[g]
-                    wt_b[row, :ln] = 2.5
+                    wt_b[row, :ln] = 1.5
                 else:
                     sf_aug, rl_aug = _apply_refiner_augmentations(tr_sf[g], tr_wl[g], tr_y[g], rng)
                     sf_b[row, :ln] = sf_aug
@@ -247,12 +247,12 @@ def _finetune_context_refiner_v4_3(
             opt.zero_grad(set_to_none=True)
             ref_logits = refiner(sf_t, rl_t, seq_lens=ln_t)
             bce_raw = F.binary_cross_entropy_with_logits(ref_logits, y_t, reduction="none")
-            w_cls = torch.where(y_t > 0.5, 1.35, 1.0) * vm_t * wt_t
+            w_cls = torch.where(y_t > 0.5, 1.5, 1.0) * vm_t * wt_t
             loss_cls = (bce_raw * w_cls).sum() / w_cls.sum().clamp(min=1.0)
-            # 强正向锚定：坚决不准把真实高分前噬菌体拉低
+            # 强正向锚定：坚决不准把真实高分或边缘前噬菌体拉低
             pos_mask = y_t * vm_t
-            loss_pos = 0.60 * (F.relu(rl_t - ref_logits) ** 2 * pos_mask).sum() / pos_mask.sum().clamp(min=1.0)
-            loss_reg = 0.08 * (((ref_logits - rl_t) * vm_t) ** 2).sum() / vm_t.sum().clamp(min=1.0)
+            loss_pos = 1.20 * (F.relu(rl_t - ref_logits) ** 2 * pos_mask).sum() / pos_mask.sum().clamp(min=1.0)
+            loss_reg = 0.12 * (((ref_logits - rl_t) * vm_t) ** 2).sum() / vm_t.sum().clamp(min=1.0)
             loss = loss_cls + loss_pos + loss_reg
             loss.backward()
             torch.nn.utils.clip_grad_norm_(refiner.parameters(), 1.0)
@@ -291,9 +291,9 @@ def _finetune_context_refiner_v4_3(
 def finetune_stage1_2_v4_3(
     pd_root: Path,
     *,
-    epochs: int = 5,
+    epochs: int = 3,
     batch_size: int = 64,
-    lr: float = 8e-5,
+    lr: float = 4e-5,
     workers: int = 16,
 ) -> Path:
     t0 = time.perf_counter()
@@ -304,8 +304,12 @@ def finetune_stage1_2_v4_3(
     exp_s12_dir.mkdir(parents=True, exist_ok=True)
     meta = json.loads((v4_s12_dir / "stage1_2_meta.json").read_text(encoding="utf-8"))
 
-    # 1. 构建/读取 V4.3 DNA 硬负窗口
+    # 1. 构建/读取 V4.3 DNA 硬负窗口（跳过非噬菌体病毒 kind=3，防止压低小片段丝状前噬菌体如 Pf4）
     hard = build_or_load_hard_dna_cache(pd_root, workers=workers)
+    keep_h = hard["kinds"] != 3
+    if not np.all(keep_h):
+        logger.info("过滤 Stage 1.2 非噬菌体病毒硬负窗 (kind=3): %d -> %d", len(hard["codes"]), int(np.sum(keep_h)))
+        hard = {k: v[keep_h] for k, v in hard.items()}
     n_hard = len(hard["codes"])
 
     # 2. 加载原版 Stage 1.2 全量 9 个分片训练数据（117k 窗）
@@ -436,24 +440,29 @@ def finetune_stage1_2_v4_3(
     ).to(device)
     model.load_state_dict(init_sd, strict=True)
 
-    head_prefixes = ("win_head.", "sem_head.", "func_head.", "orf_phage_head.", "orf_func_head.", "func_win_residual.", "sub_head.")
-    bb_params = [p for n, p in model.named_parameters() if not n.startswith(head_prefixes)]
-    hd_params = [p for n, p in model.named_parameters() if n.startswith(head_prefixes)]
+    # 锁定 200bp SubBin 解码分支 (sub_cond / sub_head)，保住原 435.9bp 边界精度不漂移
+    for name, param in model.named_parameters():
+        if name.startswith(("sub_cond.", "sub_head.")):
+            param.requires_grad_(False)
+
+    head_prefixes = ("win_head.", "sem_head.", "func_head.", "orf_phage_head.", "orf_func_head.", "func_win_residual.")
+    bb_params = [p for n, p in model.named_parameters() if p.requires_grad and not n.startswith(head_prefixes)]
+    hd_params = [p for n, p in model.named_parameters() if p.requires_grad and n.startswith(head_prefixes)]
     opt = torch.optim.AdamW(
         [
-            {"params": bb_params, "lr": lr * 0.25, "weight_decay": 1e-2},
+            {"params": bb_params, "lr": lr * 0.15, "weight_decay": 1e-2},
             {"params": hd_params, "lr": lr, "weight_decay": 1e-2},
         ]
     )
 
-    # 每个 epoch 混入全量原样本 + 4x 过采样 V4.3 硬负索引
+    # 每个 epoch 混入全量原样本 + 2x 温和过采样 V4.3 硬负索引
     base_indices = np.arange(n_base_tr, dtype=np.int64)
     hard_indices = np.arange(n_base_tr, n_base_tr + n_hard, dtype=np.int64)
-    epoch_indices = np.concatenate([base_indices, np.tile(hard_indices, 4)], axis=0)
+    epoch_indices = np.concatenate([base_indices, np.tile(hard_indices, 2)], axis=0)
     steps_per_ep = max(1, int(np.ceil(len(epoch_indices) / batch_size)))
     sched = torch.optim.lr_scheduler.OneCycleLR(
         opt,
-        max_lr=[lr * 0.25, lr],
+        max_lr=[lr * 0.15, lr],
         total_steps=max(1, epochs * steps_per_ep),
     )
     scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
@@ -524,21 +533,24 @@ def finetune_stage1_2_v4_3(
                     w_log, yb, pos_weight=pos_w, gamma=2.0, valid_mask=win_valid * bm,
                 )
                 l_sub = _sub_bce_dice_loss(s_log, sb, sample_weight=bm)
-                loss = loss + 0.9 * l_anchor_w + 0.9 * l_anchor_s + 0.45 * l_anchor_f + 0.25 * l_anchor_m + 0.35 * l_focal + 0.25 * l_sub
+                loss = loss + 2.4 * l_anchor_w + 3.0 * l_anchor_s + 1.0 * l_anchor_f + 0.5 * l_anchor_m + 0.35 * l_focal + 0.25 * l_sub
 
             if torch.any(is_v43):
                 hm = is_v43.to(torch.float32)
-                hw = torch.where(b_kind == 1, 4.0, torch.where(b_kind == 2, 3.0, 2.5)) * hm
+                hw = torch.where(
+                    b_kind == 1,
+                    3.2,
+                    torch.where((b_kind == 2) | (b_kind == 3), 2.5, 2.0),
+                ) * hm
                 l_hw = (F.binary_cross_entropy_with_logits(w_log, torch.zeros_like(w_log), reduction="none") * hw).sum() / hm.sum().clamp(min=1.0)
-                l_hs = (F.binary_cross_entropy_with_logits(s_log, torch.zeros_like(s_log), reduction="none").mean(dim=1) * hw).sum() / hm.sum().clamp(min=1.0)
-                # 对 Tailocin 与非噬菌体均明确压制 DNA 侧伪衣壳/连接蛋白 (P0, P1) 幻觉，不动 Tail/Lysis (P2, P3)
+                # 对 Tailocin 与非噬菌体均明确压制 DNA 侧伪衣壳/连接蛋白 (P0, P1) 幻觉，不动 200bp SubBin 与 Tail/Lysis
                 l_hh = (F.binary_cross_entropy_with_logits(f_log[:, :2], torch.zeros_like(f_log[:, :2]), reduction="none").mean(dim=1) * hw).sum() / hm.sum().clamp(min=1.0)
-                # 对质粒/ICE 压制全核心 P0..P4
+                # 对质粒/病毒/ICE 压制全核心 P0..P4
                 is_pl = is_v43 & (b_kind != 1)
                 l_hpl = 0.0
                 if torch.any(is_pl):
                     l_hpl = F.binary_cross_entropy_with_logits(f_log[is_pl, :5], torch.zeros_like(f_log[is_pl, :5]))
-                loss = loss + 1.2 * l_hw + 0.55 * l_hs + 0.45 * l_hh + 0.35 * l_hpl
+                loss = loss + 0.9 * l_hw + 0.45 * l_hh + 0.35 * l_hpl
 
             scaler.scale(loss).backward()
             scaler.unscale_(opt)
@@ -616,8 +628,8 @@ def finetune_stage1_2_v4_3(
         v4_s12_dir / "context_refiner.pt",
         out_ref_pt,
         device=device,
-        epochs=6,
-        lr=8e-5,
+        epochs=3,
+        lr=4e-5,
     )
 
     # 6. 平滑复制 subbin_refiner 与元信息/阈值文件至沙盒 stage1_2 目录
@@ -645,9 +657,9 @@ def finetune_stage1_2_v4_3(
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--phage-data-root", default=os.environ.get("PHAGE_DATA_ROOT", str(REPO_ROOT.parent / "Phage data")))
-    ap.add_argument("--epochs", type=int, default=5)
+    ap.add_argument("--epochs", type=int, default=3)
     ap.add_argument("--batch-size", type=int, default=64)
-    ap.add_argument("--lr", type=float, default=8e-5)
+    ap.add_argument("--lr", type=float, default=4e-5)
     ap.add_argument("--workers", type=int, default=16)
     args = ap.parse_args()
     finetune_stage1_2_v4_3(

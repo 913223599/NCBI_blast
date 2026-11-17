@@ -11,13 +11,16 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import time
 import urllib.parse
 import urllib.request
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+import pyrodigal
 from Bio import SeqIO
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -25,27 +28,31 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("fetch_v4_3_external")
 
-# 检索跨属典型无头收缩尾细菌素 / 纳米注射器 / 接合移动岛基因座（严格排除 PAO1 与 Gold-8 菌株）
+# 检索跨属典型无头收缩尾细菌素 / 纳米注射器 / 接合移动岛 / 古菌病毒 / 多样质粒基因座（严格排除测试集菌株）
 DEFAULT_QUERIES: Tuple[Tuple[str, str], ...] = (
     # 1. 非 PAO1 假单胞菌 R-/F-Tailocin (如 P. protegens / P. fluorescens / P. chlororaphis / P. syringae)
     ("tailocin_pseudomonas", '("Pseudomonas protegens"[Organism] OR "Pseudomonas chlororaphis"[Organism] OR "Pseudomonas syringae"[Organism]) AND (tailocin[Title] OR pyocin[All Fields] OR "phage tail-like bacteriocin"[All Fields]) AND 15000:120000[SLEN]'),
     ("tailocin_r_type_locus", '("R-type pyocin"[All Fields] OR "F-type pyocin"[All Fields] OR "phage tail-like bacteriocin"[Title] OR "tailocin"[Title]) NOT "PAO1"[All Fields] AND 10000:150000[SLEN]'),
-    # 2. PVC / Afp / eCIS 收缩尾纳米注射器 (Photorhabdus / Serratia / Xenorhabdus / Budvicia)
+    # 2. PVC / Afp / eCIS / MACs 收缩尾纳米注射器 (Photorhabdus / Serratia / Xenorhabdus / Pseudoalteromonas / Streptomyces)
     ("tailocin_pvc_afp", '("Photorhabdus"[Organism] AND ("virulence cassette"[All Fields] OR "PVC"[Title])) OR ("Serratia"[Organism] AND ("antifeeding"[All Fields] OR "afp"[Title])) AND 10000:250000[SLEN]'),
-    ("tailocin_maltocin_ecis", '("maltocin"[Title] OR "xenorhabdicin"[Title] OR "serracin"[Title] OR "carotovoricin"[Title] OR "extracellular contractile injection"[Title]) AND 10000:180000[SLEN]'),
+    ("tailocin_ecis_diverse", '("maltocin"[Title] OR "xenorhabdicin"[Title] OR "serracin"[Title] OR "carotovoricin"[Title] OR "extracellular contractile injection"[Title] OR "metamorphosis associated contractile"[All Fields] OR ("Streptomyces"[Organism] AND "contractile injection"[All Fields])) AND 10000:180000[SLEN]'),
     # 3. 革兰氏阳性菌 Diffocin / Monocin (Clostridioides difficile / Listeria non-EGDe / Bacillus non-168)
-    ("tailocin_diffocin", '("Clostridioides difficile"[Organism] OR "Clostridium difficile"[Organism]) AND ("diffocin"[All Fields] OR "phage tail-like"[All Fields]) AND 10000:120000[SLEN]'),
+    ("tailocin_diffocin", '("Clostridioides difficile"[Organism] OR "Clostridium difficile"[Organism]) AND ("diffocin"[All Fields] OR "phage tail-like"[All Fields] OR "tailocin"[All Fields]) AND 10000:120000[SLEN]'),
     ("tailocin_monocin", '("monocin"[Title] OR ("Listeria innocua"[Organism] AND bacteriocin[All Fields]) OR ("Bacillus"[Organism] AND "phage tail-like bacteriocin"[All Fields])) NOT "EGD-e"[All Fields] NOT "168"[Title] AND 8000:120000[SLEN]'),
     # 4. 非 V583 接合转座移动岛 / ICE（如 ICEKp / ICEclc / SXT / Tn916 基因座）
     ("ice_conjugative", '("integrative conjugative element"[Title] OR "ICEKp"[Title] OR "ICEclc"[Title] OR "SXT/R391"[Title]) NOT "Enterococcus faecalis V583"[All Fields] AND 20000:160000[SLEN]'),
+    # 5. 古菌与真核非噬菌体病毒（填补 Fusellovirus / Rudivirus 等古菌梭形/杆状病毒训练盲区）
+    ("virus_archaeal", '("Fuselloviridae"[Organism] OR "Fusellovirus"[Organism] OR "Sulfolobus spindle-shaped"[Title] OR "Rudiviridae"[Organism] OR "Lipothrixviridae"[Organism] OR "Bicaudaviridae"[Organism]) AND 8000:100000[SLEN]'),
+    # 6. 多样化不动杆菌等临床质粒（填补 A1/B1 Acinetobacter 质粒盲区，严格剔除原噬菌体与 test 同源株）
+    ("plasmid_acinetobacter", '("Acinetobacter baumannii"[Organism] OR "Acinetobacter"[Organism]) AND plasmid[Title] AND "complete sequence"[Title] AND 6000:65000[SLEN]'),
 )
 
-# 补充从完整细菌染色体中按蛋白检索定位并精准截取 ±15kb 操纵子上下文（覆盖 Diffocin / Photorhabdus PVC / Xenorhabdicin / Carotovoricin）
+# 补充从完整细菌染色体中按蛋白检索定位并精准截取 ±18kb 操纵子上下文（限定 srcdb_genbank 以获取 coded_by 坐标，覆盖 Diffocin / Photorhabdus PVC / Xenorhabdicin / Pectobacterium）
 CHROMOSOME_LOCUS_QUERIES: Tuple[Tuple[str, str], ...] = (
-    ("tailocin_diffocin_locus", '("diffocin"[Protein Name] OR "myophage-like bacteriocin"[Protein Name]) AND "Clostridioides difficile"[Organism]'),
-    ("tailocin_pvc_locus", '("Photorhabdus virulence cassette"[All Fields] OR "Pvc1"[Gene Name] OR "Pvc2"[Gene Name] OR "Pvc16"[Gene Name]) AND "Photorhabdus"[Organism]'),
-    ("tailocin_xenorhabdus_locus", '("xenorhabdicin"[All Fields] OR "tail sheath"[Protein Name]) AND "Xenorhabdus"[Organism]'),
-    ("tailocin_carotovoricin_locus", '("carotovoricin"[All Fields] OR "Erwinia carotovora"[Organism]) AND ("tail sheath"[Protein Name] OR "bacteriocin"[Title])'),
+    ("tailocin_diffocin_locus", '"Clostridioides difficile"[Organism] AND (diffocin OR "phage tail sheath" OR "tail sheath") AND srcdb_genbank[PROP]'),
+    ("tailocin_pvc_locus", '"Photorhabdus"[Organism] AND ("virulence cassette" OR pvc OR "phage tail sheath" OR antifeeding) AND srcdb_genbank[PROP]'),
+    ("tailocin_xenorhabdus_locus", '("xenorhabdicin"[All Fields] OR "tail sheath"[Protein Name]) AND "Xenorhabdus"[Organism] AND srcdb_genbank[PROP]'),
+    ("tailocin_carotovoricin_locus", '"Pectobacterium"[Organism] AND ("tail sheath"[Protein Name] OR "carotovoricin"[All Fields]) AND srcdb_genbank[PROP]'),
 )
 
 # 任何包含这些禁词（测试集宿主与经典菌株）的记录一律拒收
@@ -196,18 +203,27 @@ def _kmer_set(seq: str, k: int = 5) -> Set[str]:
     return {s[i : i + k] for i in range(len(s) - k + 1)}
 
 
-def _build_forbidden_kmer_index(pd_root: Path) -> Tuple[Set[str], List[Tuple[str, Set[str]]]]:
+def _build_forbidden_kmer_index(
+    pd_root: Path,
+    *,
+    include_valtest_neg: bool = False,
+) -> Tuple[Set[str], List[Tuple[str, Set[str]]]]:
     """收集 Gold-8、Unseen 与 test/val 负样本的 accession 黑名单及关键靶点蛋白 5-mer 索引。"""
+    import csv
+
     forbidden_accs: Set[str] = set()
+    val_test_accs: Set[str] = set()
     splits_p = pd_root / "benchmarks" / "v1" / "negative_splits.json"
     if splits_p.is_file():
         ns = json.loads(splits_p.read_text(encoding="utf-8"))
         for acc, sp in ns.items():
             if sp != "train":
-                forbidden_accs.add(str(acc).split(".")[0].lower())
+                acc_base = str(acc).split(".")[0].lower()
+                forbidden_accs.add(acc_base)
+                val_test_accs.add(str(acc))
 
     target_proteins: List[Tuple[str, Set[str]]] = []
-    # 从 Gold-8 已知干扰区（PAO1 pyocin, EGD-e monocin, V583 ICE）与完整 Gold-8/Unseen 提取所有蛋白 k-mer
+    # 1. Gold-8 与 Unseen 全量基因组蛋白
     for bdir in (pd_root / "benchmarks" / "gold_standard_hosts", pd_root / "benchmarks" / "unseen_real_genomes"):
         if not bdir.is_dir():
             continue
@@ -226,7 +242,99 @@ def _build_forbidden_kmer_index(pd_root: Path) -> Tuple[Set[str], List[Tuple[str
                     aa = str((feat.qualifiers.get("translation") or [""])[0]).strip()
                     if len(aa) >= 60:
                         target_proteins.append((f"{gbk.stem}:{feat.qualifiers.get('locus_tag', [''])[0]}", _kmer_set(aa)))
+
+    # 2. val / test 分片的全部质粒与非噬菌体病毒蛋白（仅用于外源增量拉取时防泄露至 Stress）
+    neg_root = pd_root / "negative"
+    neg_idx = neg_root / "index" / "negative_index.tsv"
+    if include_valtest_neg and neg_idx.is_file() and val_test_accs:
+        gf_meta = pyrodigal.GeneFinder(meta=True)
+        with neg_idx.open("r", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh, delimiter="\t"):
+                acc = str(row["accession"])
+                if acc not in val_test_accs:
+                    continue
+                if row.get("negative_category") not in ("plasmid", "non_phage_virus"):
+                    continue
+                gb_p = neg_root / row["gbk_relpath"] if row.get("gbk_relpath") else neg_root / "gbk" / f"{acc}.gbk"
+                added_for_acc = 0
+                if gb_p.is_file():
+                    try:
+                        for rec in SeqIO.parse(str(gb_p), "genbank"):
+                            for feat in rec.features:
+                                if feat.type != "CDS":
+                                    continue
+                                aa = str((feat.qualifiers.get("translation") or [""])[0]).strip()
+                                if len(aa) >= 60:
+                                    target_proteins.append((f"neg_valtest:{acc}", _kmer_set(aa)))
+                                    added_for_acc += 1
+                    except Exception:  # noqa: BLE001
+                        pass
+                if added_for_acc == 0:
+                    fa_p = neg_root / row["fasta_relpath"] if row.get("fasta_relpath") else neg_root / "fasta" / f"{acc}.fasta"
+                    if fa_p.is_file():
+                        try:
+                            for rec in SeqIO.parse(str(fa_p), "fasta"):
+                                s_up = str(rec.seq).upper()
+                                if len(s_up) >= 300:
+                                    for g in gf_meta.find_genes(s_up.encode("ascii", errors="replace")):
+                                        aa = g.translate(include_stop=False).strip()
+                                        if len(aa) >= 60 and "*" not in aa:
+                                            target_proteins.append((f"neg_valtest:{acc}", _kmer_set(aa)))
+                        except Exception:  # noqa: BLE001
+                            pass
+
     return forbidden_accs, target_proteins
+
+
+class _KmerLeakGuard:
+    """基于精确鸽巢倒排索引的快速 5-mer Jaccard 去重审查器。"""
+
+    def __init__(self, ref_kmers: Sequence[Tuple[str, Set[str]]]) -> None:
+        self.srcs: List[str] = [src for src, _ in ref_kmers]
+        self.sets: List[Set[str]] = [rks for _, rks in ref_kmers]
+        self.lens: List[int] = [len(rks) for rks in self.sets]
+        self.inv_idx: Dict[str, List[int]] = defaultdict(list)
+        for idx, rks in enumerate(self.sets):
+            for km in rks:
+                self.inv_idx[km].append(idx)
+
+    def add_protein(self, src: str, ks: Set[str]) -> None:
+        if len(ks) < 20:
+            return
+        idx = len(self.sets)
+        self.srcs.append(src)
+        self.sets.append(ks)
+        self.lens.append(len(ks))
+        for km in ks:
+            self.inv_idx[km].append(idx)
+
+    def max_jaccard_above(self, aa: str, threshold: float) -> Tuple[float, str]:
+        ks = _kmer_set(aa)
+        l1 = len(ks)
+        if l1 < 20:
+            return 0.0, ""
+        need_hits = math.ceil(float(threshold) * l1)
+        probe_n = max(1, l1 - need_hits + 1)
+        ranked = sorted(ks, key=lambda m: len(self.inv_idx.get(m, ())))[:probe_n]
+        cand_ids: Set[int] = set()
+        for km in ranked:
+            cand_ids.update(self.inv_idx.get(km, ()))
+        if not cand_ids:
+            return 0.0, ""
+        max_l2 = int(l1 / float(threshold)) + 1
+        best_j = 0.0
+        best_src = ""
+        for r_i in cand_ids:
+            l2 = self.lens[r_i]
+            if l2 < need_hits or l2 > max_l2:
+                continue
+            inter = len(ks & self.sets[r_i])
+            if inter >= need_hits:
+                jac = inter / float(l1 + l2 - inter)
+                if jac > best_j:
+                    best_j = jac
+                    best_src = self.srcs[r_i]
+        return best_j, best_src
 
 
 def _max_kmer_jaccard(aa: str, ref_kmers: Sequence[Tuple[str, Set[str]]]) -> Tuple[float, str]:
@@ -235,7 +343,6 @@ def _max_kmer_jaccard(aa: str, ref_kmers: Sequence[Tuple[str, Set[str]]]) -> Tup
         return 0.0, ""
     best_j = 0.0
     best_src = ""
-    # 快速过滤：利用集合长度比剪枝减少无效交集运算
     l1 = len(ks)
     for src, rks in ref_kmers:
         l2 = len(rks)
@@ -251,16 +358,17 @@ def _max_kmer_jaccard(aa: str, ref_kmers: Sequence[Tuple[str, Set[str]]]) -> Tup
     return best_j, best_src
 
 
-def fetch_and_filter_external(pd_root: Path, *, max_per_query: int = 10, max_jaccard: float = 0.50) -> Dict[str, Any]:
+def fetch_and_filter_external(pd_root: Path, *, max_per_query: int = 12, max_jaccard: float = 0.50) -> Dict[str, Any]:
     out_dir = pd_root / "training" / "v4_3_external"
     gbk_cache_dir = out_dir / "raw_gbk"
     out_dir.mkdir(parents=True, exist_ok=True)
     gbk_cache_dir.mkdir(parents=True, exist_ok=True)
 
-    forbidden_accs, ref_kmers = _build_forbidden_kmer_index(pd_root)
-    logger.info("零泄露屏障就绪: forbidden_accs=%d, gold_ref_proteins=%d", len(forbidden_accs), len(ref_kmers))
+    forbidden_accs, ref_kmers = _build_forbidden_kmer_index(pd_root, include_valtest_neg=True)
+    ref_guard = _KmerLeakGuard(ref_kmers)
+    self_guard = _KmerLeakGuard([])
+    logger.info("零泄露屏障就绪: forbidden_accs=%d, gold+valtest_ref_proteins=%d", len(forbidden_accs), len(ref_kmers))
 
-    # 读取断点记录，已解析成功的 UID 不重复请求 NCBI
     seen_uids: Dict[str, str] = {}
     uid_ckpt = out_dir / "fetched_uids.json"
     if uid_ckpt.is_file():
@@ -269,7 +377,8 @@ def fetch_and_filter_external(pd_root: Path, *, max_per_query: int = 10, max_jac
     query_hits: List[Tuple[str, str, Optional[int], Optional[int]]] = []
     for tag, term in DEFAULT_QUERIES:
         try:
-            uids = _esearch_ids(term, retmax=max_per_query, db="nuccore")
+            q_max = max(max_per_query, 18 if tag == "virus_archaeal" else max_per_query)
+            uids = _esearch_ids(term, retmax=q_max, db="nuccore")
             logger.info("检索 [%s] 返回 %d 条 UID", tag, len(uids))
             for u in uids:
                 query_hits.append((tag, str(u), None, None))
@@ -279,7 +388,7 @@ def fetch_and_filter_external(pd_root: Path, *, max_per_query: int = 10, max_jac
 
     for tag, pterm in CHROMOSOME_LOCUS_QUERIES:
         try:
-            puids = _esearch_ids(pterm, retmax=max(4, max_per_query // 2), db="protein")
+            puids = _esearch_ids(pterm, retmax=max(6, max_per_query // 2), db="protein")
             slices = _resolve_nuccore_slices_from_proteins(puids, pad_bp=18000)
             logger.info("染色体基因座切片检索 [%s] 解析出 %d 个操纵子窗口", tag, len(slices))
             for nuc_acc, ss, se in slices:
@@ -328,27 +437,27 @@ def fetch_and_filter_external(pd_root: Path, *, max_per_query: int = 10, max_jac
                 continue
             visited_accs.add(slice_key)
 
-            # 1. Accession / 物种名称黑名单 & SHA256 重复过滤
+            # 1. Accession / 物种名称黑名单过滤
             meta_txt = f"{acc} {desc} {org}".lower()
             if acc_base in forbidden_accs or any(tok in meta_txt for tok in FORBIDDEN_ORGANISM_TOKENS):
                 rejected_audit.append({"acc": slice_key, "tag": tag, "reason": "forbidden_host_or_split", "org": org})
                 continue
 
-            seq_hash = hashlib.sha256(seq_str.encode("ascii", errors="ignore")).hexdigest()
-            if seq_hash in seen_sha256:
-                rejected_audit.append({"acc": slice_key, "tag": tag, "reason": "duplicate_sequence_sha256", "org": org})
-                continue
-            seen_sha256.add(seq_hash)
-
-            if not (8000 <= len(seq_str) <= 300000):
+            if not (6000 <= len(seq_str) <= 300000):
                 rejected_audit.append({"acc": slice_key, "tag": tag, "reason": f"length_out_of_range({len(seq_str)})", "org": org})
                 continue
 
-            # 2. 产品注释校验：确认具备目标功能域，且无真正噬菌体衣壳/Portal/TerL
-            cds_prots: List[Tuple[int, int, int, str, str]] = []
+            is_ice = tag.startswith("ice_")
+            is_virus = tag.startswith("virus_")
+            is_plasmid = tag.startswith("plasmid_")
+            kind = "mge_ice" if is_ice else ("non_phage_virus" if is_virus else ("plasmid" if is_plasmid else "tailocin"))
+
+            # 2. 产品注释解析 + 排雷校验（禁止真噬菌体衣壳/Portal/TerL污染）
+            cds_prots: List[Tuple[int, int, int, str, str, bool]] = []
             has_head_block = False
             tail_kw_hits = 0
             ice_kw_hits = 0
+            tail_spans: List[Tuple[int, int]] = []
             for feat in rec.features:
                 if feat.type != "CDS":
                     continue
@@ -358,15 +467,25 @@ def fetch_and_filter_external(pd_root: Path, *, max_per_query: int = 10, max_jac
                 txt = f"{prod} {gene} {note}"
                 if any(bk in txt for bk in PHAGE_HEAD_BLOCKLIST):
                     has_head_block = True
-                if any(tk in txt for tk in TAILOCIN_REQUIRED_KEYWORDS):
+                is_tk = any(tk in txt for tk in TAILOCIN_REQUIRED_KEYWORDS)
+                if is_tk:
                     tail_kw_hits += 1
+                    tail_spans.append((int(feat.location.start), int(feat.location.end)))
                 if any(ik in txt for ik in ICE_REQUIRED_KEYWORDS):
                     ice_kw_hits += 1
                 aa = str((feat.qualifiers.get("translation") or [""])[0]).strip()
                 if aa and "*" not in aa:
-                    cds_prots.append((int(feat.location.start), int(feat.location.end), int(feat.location.strand or 1), aa, prod))
+                    cds_prots.append((int(feat.location.start), int(feat.location.end), int(feat.location.strand or 1), aa, prod, is_tk))
 
-            if len(cds_prots) < 10:
+            if not cds_prots:
+                gf = pyrodigal.GeneFinder(meta=True)
+                for g in gf.find_genes(seq_str.encode("ascii", errors="replace")):
+                    aa = g.translate(include_stop=False).strip()
+                    if aa and "*" not in aa:
+                        cds_prots.append((int(g.begin - 1), int(g.end), int(g.strand), aa, "", False))
+
+            min_cds = 6 if (is_virus or is_plasmid) else 10
+            if len(cds_prots) < min_cds:
                 rejected_audit.append({"acc": slice_key, "tag": tag, "reason": f"too_few_annotated_cds({len(cds_prots)})", "org": org})
                 continue
 
@@ -374,21 +493,46 @@ def fetch_and_filter_external(pd_root: Path, *, max_per_query: int = 10, max_jac
                 rejected_audit.append({"acc": slice_key, "tag": tag, "reason": "contains_phage_capsid_portal_terl", "org": org})
                 continue
 
-            is_ice = tag.startswith("ice_")
-            if (not is_ice and tail_kw_hits < 3) or (is_ice and ice_kw_hits < 2):
-                rejected_audit.append({
-                    "acc": slice_key,
-                    "tag": tag,
-                    "reason": f"insufficient_target_keywords(tail={tail_kw_hits},ice={ice_kw_hits})",
-                    "org": org,
-                })
+            if kind == "tailocin" and tail_kw_hits < 3:
+                rejected_audit.append({"acc": slice_key, "tag": tag, "reason": f"insufficient_target_keywords(tail={tail_kw_hits})", "org": org})
+                continue
+            if kind == "mge_ice" and ice_kw_hits < 2:
+                rejected_audit.append({"acc": slice_key, "tag": tag, "reason": f"insufficient_target_keywords(ice={ice_kw_hits})", "org": org})
                 continue
 
-            # 3. 与 Gold-8/Unseen 全量测试蛋白执行 5-mer Jaccard 严格零泄露审查
+            # 自动将携带超大质粒骨架的 Tailocin 记录（如 153kb pADAP）裁切至核心收缩尾操纵子 ±4kb
+            crop_note = ""
+            if kind == "tailocin" and len(seq_str) > 55000 and len(tail_spans) >= 4:
+                # 若尾词聚集，选取密度最高的 50kb 核心区段
+                ts_sorted = sorted(tail_spans)
+                best_win = (ts_sorted[0][0], ts_sorted[0][1])
+                best_cnt = 0
+                for i in range(len(ts_sorted)):
+                    w_s = ts_sorted[i][0]
+                    w_e = w_s + 45000
+                    in_w = [sp for sp in ts_sorted if sp[0] >= w_s and sp[1] <= w_e]
+                    if len(in_w) > best_cnt:
+                        best_cnt = len(in_w)
+                        best_win = (in_w[0][0], in_w[-1][1])
+                if best_cnt >= 4 and (best_win[1] - best_win[0]) <= 55000:
+                    cs = max(0, best_win[0] - 4000)
+                    ce = min(len(seq_str), best_win[1] + 4000)
+                    if ce - cs >= 10000:
+                        seq_str = seq_str[cs:ce]
+                        cds_prots = [c for c in cds_prots if c[0] >= cs and c[1] <= ce]
+                        crop_note = f"cropped_{cs}_{ce}"
+
+            seq_hash = hashlib.sha256(seq_str.encode("ascii", errors="ignore")).hexdigest()
+            if seq_hash in seen_sha256:
+                rejected_audit.append({"acc": slice_key, "tag": tag, "reason": "duplicate_sequence_sha256", "org": org})
+                continue
+            seen_sha256.add(seq_hash)
+
+            # 3. 与 Gold-8 / Unseen / val+test 质粒及非噬菌体病毒执行双向 5-mer Jaccard 严格零泄露审查
             leak_hit = None
             max_sim = 0.0
-            for _, _, _, aa, _ in cds_prots:
-                jac, src = _max_kmer_jaccard(aa, ref_kmers)
+            for _, _, _, aa, _, _ in cds_prots:
+                jac, src = ref_guard.max_jaccard_above(aa, max_jaccard)
                 if jac > max_sim:
                     max_sim = jac
                 if jac >= max_jaccard:
@@ -404,15 +548,34 @@ def fetch_and_filter_external(pd_root: Path, *, max_per_query: int = 10, max_jac
                 })
                 continue
 
+            # 4. 外源库内部近重复去冗余（如抑制同一批高度同源的 LC469607-613 ICE 过度重复）
+            long_aas = [aa for _, _, _, aa, _, _ in cds_prots if len(aa) >= 60]
+            if long_aas and len(self_guard.sets) > 0:
+                dup_hits = sum(1 for aa in long_aas if self_guard.max_jaccard_above(aa, 0.80)[0] >= 0.80)
+                if dup_hits / float(len(long_aas)) >= 0.65:
+                    rejected_audit.append({
+                        "acc": slice_key,
+                        "tag": tag,
+                        "reason": f"external_near_duplicate({dup_hits}/{len(long_aas)})",
+                        "org": org,
+                    })
+                    continue
+
             cid = f"EXT_{tag}_{acc}"
             if s_start is not None:
                 cid = f"{cid}_{s_start}_{s_stop}"
+            if crop_note:
+                cid = f"{cid}_{crop_note}"
+
+            for aa in long_aas:
+                self_guard.add_protein(cid, _kmer_set(aa))
+
             fna_lines.append(f">{cid}\n{seq_str}\n")
             accepted_records.append({
                 "contig_id": cid,
                 "accession": acc,
                 "tag": tag,
-                "kind": "mge_ice" if is_ice else "tailocin",
+                "kind": kind,
                 "organism": org,
                 "description": desc,
                 "length_bp": len(seq_str),

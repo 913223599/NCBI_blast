@@ -197,11 +197,17 @@ def collect_hard_neg_contigs(
         ext_seqs = {cid: seq for cid, seq in iter_fasta(ext_fna_p)}
         for cid, seq in ext_seqs.items():
             meta = ext_info.get(cid, {})
-            kind = HARD_KIND_MGE_ICE if meta.get("kind") == "mge_ice" else HARD_KIND_TAILOCIN
+            kind_str = str(meta.get("kind", "tailocin"))
+            if kind_str == "mge_ice":
+                kind, rep_times = HARD_KIND_MGE_ICE, 2
+            elif kind_str == "non_phage_virus":
+                kind, rep_times = HARD_KIND_NONPHAGE_VIRUS, 3
+            elif kind_str == "plasmid":
+                kind, rep_times = HARD_KIND_PLASMID, 2
+            else:
+                kind, rep_times = HARD_KIND_TAILOCIN, 3
             orfs = _extract_orfs_pyrodigal(seq)
             if len(orfs) >= 6:
-                # 对 Tailocin 给予 3x 重复权重与 DNA 硬负入库
-                rep_times = 3 if kind == HARD_KIND_TAILOCIN else 2
                 hard_contigs.append({
                     "contig_id": cid,
                     "hard_kind": kind,
@@ -212,7 +218,7 @@ def collect_hard_neg_contigs(
                 })
                 dna_fna_lines.append(f">{cid}\n{seq}\n")
                 dna_manifest.append({"contig_id": cid, "kind": kind, "length_bp": len(seq), "source": "external_ncbi"})
-        logger.info("已纳入外源硬负样本: %d 条 (含 Tailocin 与 ICE)", len(ext_seqs))
+        logger.info("已纳入外源硬负样本: %d 条 (Tailocin/ICE/古菌病毒/质粒)", len(ext_seqs))
 
     # 2. 处理 train 303 条质粒与 75 条非噬菌体病毒
     pl_vir_seqs: Dict[str, str] = {}
@@ -505,16 +511,41 @@ def build_judge_v4_3_npz(pd_root: Path, *, workers: int = 12, device: str = "cud
 
     out_dir = pd_root / "training" / "orf_judge_v4_3"
     all_aas = sorted({o[3] for item in contigs for o in item["orfs"]})
-    logger.info("对新增 %d 条硬负样本序列的 %d 个唯一 ORF 运行全库 pyhmmer 标注...", len(contigs), len(all_aas))
     libs = resolve_hmm_library_paths(db_root=REPO_ROOT / "database")
-    hmm_state = run_chunked_hmm_teacher(
-        [(_aa_key(a), a) for a in all_aas],
-        out_dir / "hard_neg_pyhmmer.pkl.gz",
-        libs_cfg=libs,
-        selected_libs=("all_phrogs", "defense_finder", "dbapis"),
-        chunk_size=15000,
-        cpus=max(2, min(12, workers)),
+    full_hmm_cache = out_dir / "hard_neg_pyhmmer.pkl.gz"
+    cached_hits: Dict[str, Any] = {}
+    if full_hmm_cache.is_file():
+        with gzip.open(full_hmm_cache, "rb") as fh:
+            old_obj = pickle.load(fh)
+        if isinstance(old_obj, dict) and "hits" in old_obj:
+            cached_hits = dict(old_obj["hits"])
+    missing_aas = [a for a in all_aas if _aa_key(a) not in cached_hits]
+    logger.info(
+        "硬负样本唯一 ORF 共 %d 个 (复用已有 HMM 缓存命中=%d, 增量补扫新序列 ORF=%d)...",
+        len(all_aas),
+        len(all_aas) - len(missing_aas),
+        len(missing_aas),
     )
+    if missing_aas:
+        inc_cache = out_dir / "hard_neg_pyhmmer_inc.pkl.gz"
+        if inc_cache.is_file():
+            inc_cache.unlink()
+        inc_state = run_chunked_hmm_teacher(
+            [(_aa_key(a), a) for a in missing_aas],
+            inc_cache,
+            libs_cfg=libs,
+            selected_libs=("all_phrogs", "defense_finder", "dbapis"),
+            chunk_size=15000,
+            cpus=max(2, min(12, workers)),
+        )
+        cached_hits.update(inc_state["hits"])
+        tmp_hc = full_hmm_cache.with_name(f".{full_hmm_cache.name}.tmp.{os.getpid()}")
+        with gzip.open(tmp_hc, "wb", compresslevel=4) as fh:
+            pickle.dump({"done_chunks": 1, "chunk_size": len(all_aas), "total_items": len(all_aas), "hits": cached_hits}, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp_hc.replace(full_hmm_cache)
+        if inc_cache.is_file():
+            inc_cache.unlink()
+    hmm_state = {"hits": cached_hits}
     ph_map = _load_merged_phrog_phold_annots(REPO_ROOT / "database" / "pharokka_db")
 
     # 编码全部硬负样本窗口并严格赋予生物学解耦监督标签

@@ -366,3 +366,107 @@ def test_tandem_split_separates_dual_core_and_protects_jumbo_phage():
     assert 43000 <= tan_segs[0].end_bp <= 46000
     assert len(jmb_segs) == 1 and jmb_segs[0].end_bp == 99900
 
+
+def test_base_veto_blocks_dead_zero_evidence_mge_but_keeps_satellite_with_integrase():
+    orfs = _make_fake_orfs(20, step_bp=1000)
+    ph = np.zeros(20, dtype=np.float32)
+    f10 = np.zeros((20, 10), dtype=np.float32)
+    r2_core = np.zeros((20, 5), dtype=np.float32)
+
+    # 区间 A (0..9): 零噬菌体蛋白证据的纯复制片段 (mean_ph=0.03, 仅 P5 replication，core_mods==0) -> 必拒
+    ph[0:10] = 0.03
+    f10[2, 5] = 0.85
+
+    # 区间 B (10..19): 退化卫星岛 (如 bIL311_ps3: mean_ph=0.143, 含 P4 integrase) -> 绝不能误杀
+    ph[10:20] = 0.143
+    f10[13, 4] = 0.78
+    r2_core[13, 4] = 0.75
+
+    base = [
+        PredictedRegion("c1", 0, 9900, 0.90, 0.72, 4),
+        PredictedRegion("c1", 10000, 19900, 0.94, 0.80, 4),
+    ]
+    res, stats = rescue_and_filter_regions_with_judge(
+        base,
+        [],
+        {"c1": orfs},
+        {"c1": {"phage_probs": ph, "func10_probs": f10, "r2_core_probs": r2_core}},
+    )
+    assert stats["base_vetoed"] == 1
+    assert stats["base_kept"] == 1
+    assert len(res) == 1 and res[0].start_bp == 10000
+
+
+def test_gray_tailocin_guard_blocks_pure_tail_with_single_r2_noise_but_keeps_connector_phage():
+    orfs = _make_fake_orfs(20, step_bp=1000)
+    ph = np.full(20, 0.85, dtype=np.float32)
+
+    # 候选 1 (0..9): PAO1 R2/F2 pyocin 样（Head A 无 Head/Conn/Int，仅有 6 个 Tail + 1 个 Lysis，但 Head B 单 ORF 误飙 0.65/0.55）-> 拦截
+    f10 = np.zeros((20, 10), dtype=np.float32)
+    r2_core = np.zeros((20, 5), dtype=np.float32)
+    f10[1:7, 2] = 0.99
+    f10[8, 3] = 0.95
+    f10[0, 0] = 0.44
+    f10[0, 1] = 0.43
+    r2_core[1:7, 2] = 0.99
+    r2_core[0, 0] = 0.65
+    r2_core[0, 1] = 0.55
+
+    # 候选 2 (12..19): 卫星前噬菌体样（Head A/B 均显式检出 Connector=0.75 + 多个 Tail + Lysis）-> 绝不误杀
+    f10[12, 1] = 0.75
+    f10[13:18, 2] = 0.99
+    f10[18, 3] = 0.96
+    r2_core[12, 1] = 0.78
+    r2_core[13:18, 2] = 0.99
+
+    cands = [
+        PredictedRegion("c1", 0, 9900, 0.88, 0.70, 4),
+        PredictedRegion("c1", 12000, 19900, 0.88, 0.70, 4),
+    ]
+    res, stats = rescue_and_filter_regions_with_judge(
+        [],
+        cands,
+        {"c1": orfs},
+        {"c1": {"phage_probs": ph, "func10_probs": f10, "r2_core_probs": r2_core}},
+    )
+    assert stats["gray_rejected"] == 1
+    assert stats["gray_rescued"] == 1
+    assert len(res) == 1 and res[0].start_bp == 12000
+
+
+def test_inovirus_gray_rescue_recovers_long_high_subbin_head_int_island_without_plasmid_leak():
+    orfs = _make_fake_orfs(26, step_bp=1000)
+    ph = np.zeros(26, dtype=np.float32)
+    f10 = np.zeros((26, 10), dtype=np.float32)
+    r2_core = np.zeros((26, 5), dtype=np.float32)
+
+    # 候选 1 (0..12, 12.9kb): Pf4 丝状前噬菌体样（mean_ph=0.33, 仅双流双衣壳>=0.73 + Integrase>=0.95，无 Tail/Conn）-> 挽救
+    ph[0:13] = 0.33
+    f10[2, 0] = 0.74
+    f10[9, 4] = 0.96
+    r2_core[2:4, 0] = 0.72
+    r2_core[9, 4] = 0.98
+
+    # 候选 2 (14..20, 6.9kb 短古菌/质粒碎片, 缺少 r2 双衣壳) -> 拦截
+    ph[14:21] = 0.40
+    f10[15, 0] = 0.80
+    f10[18, 4] = 0.90
+    r2_core[15, 0] = 0.35
+    r2_core[18, 4] = 0.92
+
+    cands = [
+        PredictedRegion("c1", 0, 12900, 0.990, 0.925, 5),
+        PredictedRegion("c1", 14000, 20900, 0.995, 0.920, 3),
+    ]
+    res, stats = rescue_and_filter_regions_with_judge(
+        [],
+        cands,
+        {"c1": orfs},
+        {"c1": {"phage_probs": ph, "func10_probs": f10, "r2_core_probs": r2_core}},
+        rescue_min_orfs=6,
+    )
+    assert stats["gray_rescued"] == 1
+    assert stats["gray_rejected"] == 1
+    assert len(res) == 1 and res[0].start_bp == 0
+
+
