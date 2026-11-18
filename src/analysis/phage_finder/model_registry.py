@@ -138,19 +138,21 @@ def _build_unified_promoted_info(
     keep_model_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """基于可用 Stage 1.2 DNA 底座构造 Unified V4 / V4.3 生产主力模型描述。"""
+    from ...phage_discovery.inference.judge_region_refiner import resolve_unified_version_tag
+
     promoted = dict(base_info)
     uni_meta = _read_unified_judge_meta(unified_dir)
     uni_params = int(uni_meta.get("total_params") or 0)
-    uni_arch = str(uni_meta.get("arch") or "").lower()
-    is_v4_3 = uni_arch == "unified_v4_3"
-    if not is_v4_3:
-        s12_meta_p = Path(str(base_info.get("path") or "")) / "stage1_2_meta.json"
-        if s12_meta_p.is_file():
-            try:
-                is_v4_3 = "v4_3_dna_finetune" in json.loads(s12_meta_p.read_text(encoding="utf-8"))
-            except Exception:
-                is_v4_3 = False
-    version_tag = "Unified V4.3" if is_v4_3 else "Unified V4"
+    s12_meta: Dict[str, Any] = {}
+    s12_meta_p = Path(str(base_info.get("path") or "")) / "stage1_2_meta.json"
+    if s12_meta_p.is_file():
+        try:
+            loaded_s12 = json.loads(s12_meta_p.read_text(encoding="utf-8"))
+            if isinstance(loaded_s12, dict):
+                s12_meta = loaded_s12
+        except Exception:
+            s12_meta = {}
+    version_tag = resolve_unified_version_tag(uni_meta, s12_meta)
     dna_params = int(base_info.get("params") or 0)
     promoted.update(
         {
@@ -158,6 +160,7 @@ def _build_unified_promoted_info(
             "label": "Unified 分化按需模型 (Stage 1.2 DNA底座 + UnifiedJudge)",
             "version": version_tag,
             "unified_arch": str(uni_meta.get("arch") or "unified"),
+            "schema_version": str(uni_meta.get("schema_version") or "1.0"),
             "priority": priority,
             "params": (dna_params + uni_params) if uni_params > 0 else dna_params,
             "has_unified_judge": True,

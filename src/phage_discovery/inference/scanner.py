@@ -26,7 +26,7 @@ from ..benchmark.metrics import (
 )
 from ..data.feature_dataset import iter_fasta
 from ..data.functional_partitions import FUNCTIONAL_PARTITION_NAMES
-from ..experts.expert_c_orf import extract_contig_orf_tokens
+from ..experts.expert_c_orf import build_contig_orf_tokens_from_genes
 from ..experts.seq_dataset import encode_dna, reverse_complement_codes
 from ..features.window_features import FEATURE_NAMES, SUB_BINS, extract_contig_windows
 from ..student.distilled_student import build_distilled_student
@@ -342,18 +342,50 @@ def _collect_contig_score_tracks(
 
 
 def _extract_contig_worker(args: Tuple[Any, ...]) -> Dict[str, Any]:
-    if len(args) == 6:
+    return_judge_orfs = False
+    global_ctx: Optional[Tuple[np.ndarray, float, bool]] = None
+    if len(args) == 8:
+        cid, seq, win_size, step_size, extract_orfs, feature_profile, return_judge_orfs, global_ctx = args
+    elif len(args) == 7:
+        cid, seq, win_size, step_size, extract_orfs, feature_profile, return_judge_orfs = args
+    elif len(args) == 6:
         cid, seq, win_size, step_size, extract_orfs, feature_profile = args
     else:
         cid, seq, win_size, step_size, extract_orfs = args
         feature_profile = "v4"
+
+    need_genes = bool(extract_orfs or return_judge_orfs)
+    g_kmer, g_gc, g_self = global_ctx if global_ctx is not None else (None, None, None)
     res = extract_contig_windows(
-        cid, seq, win_size=win_size, step_size=step_size, truth_regions=None, feature_profile=feature_profile,
+        cid,
+        seq,
+        win_size=win_size,
+        step_size=step_size,
+        truth_regions=None,
+        feature_profile=feature_profile,
+        return_gene_records=need_genes,
+        global_ctx_kmer_unit=g_kmer,
+        global_ctx_gc=g_gc,
+        global_ctx_is_self=g_self,
     )
+    gene_records = res.pop("gene_records", [])
     if extract_orfs:
-        tk, cn = extract_contig_orf_tokens(seq, res["starts"], res["ends"], feature_profile=feature_profile)
+        tk, cn = build_contig_orf_tokens_from_genes(
+            seq,
+            res["starts"],
+            res["ends"],
+            gene_records,
+            feature_profile=feature_profile,
+        )
         res["orf_tokens"] = tk
         res["orf_counts"] = cn
+    if return_judge_orfs:
+        judge_orfs: List[Tuple[int, int, int, str]] = []
+        for s0, e0, strand, aa_raw, *_ in gene_records:
+            aa_clean = (aa_raw[:-1] if aa_raw.endswith("*") else aa_raw).strip()
+            if aa_clean and "*" not in aa_clean:
+                judge_orfs.append((int(s0), int(e0), int(strand), aa_clean))
+        res["judge_orfs"] = judge_orfs
     return res
 
 

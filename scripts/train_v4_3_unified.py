@@ -529,7 +529,9 @@ def train_unified_v4_3(
                     + 1.1 * l_b_wm
                 )
 
-            scaler.scale(loss / float(grad_accum)).backward()
+            scaled_loss = scaler.scale(loss / float(grad_accum))
+            assert isinstance(scaled_loss, torch.Tensor)
+            scaled_loss.backward()
             if (step_idx + 1) % grad_accum == 0 or (step_idx + 1) == len(tr_loader):
                 scaler.unscale_(opt)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
@@ -694,7 +696,10 @@ def train_unified_v4_3(
     tmp_cal.replace(out_cal)
 
     summary = {
+        "schema_version": "1.0",
+        "model_version": "Unified V4.3",
         "arch": "unified_v4_3",
+        "dna_backbone_profile": "stage1",
         "total_params": total_cnt,
         "trainable_params": trainable_cnt,
         "best_val_metrics": best_metrics,

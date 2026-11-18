@@ -43,6 +43,10 @@ Stage1GeneRecord = Tuple[
     int, int, int, np.ndarray, int, int, int, int, int, int, int, int, int,
     np.ndarray, np.ndarray, np.ndarray,
 ]
+# 供上游推理器复用的统一基因记录：(start, end, strand, aa_raw, aa_22_vec, dp49, pyro_attrs_11)
+ReusedGeneRecord = Tuple[
+    int, int, int, str, np.ndarray, Optional[np.ndarray], Optional[np.ndarray],
+]
 
 SUB_BINS = 25  # 每个 5kb 窗口划分为 25 个子块（200 bp 粒度）用于精细边界定位
 
@@ -155,7 +159,11 @@ def _codon_gc_counts(cds_dna: str, strand: int) -> Tuple[int, int, int, int, int
     return tuple(res)  # type: ignore[return-value]
 
 
-def _predict_genes_rich(seq: str) -> List[RichGeneRecord]:
+def _predict_genes_rich(
+    seq: str,
+    *,
+    out_reused: Optional[List[ReusedGeneRecord]] = None,
+) -> List[RichGeneRecord]:
     if len(seq) < 100:
         return []
     finder = _get_gene_finder()
@@ -165,14 +173,23 @@ def _predict_genes_rich(seq: str) -> List[RichGeneRecord]:
         s0 = int(g.begin) - 1
         e0 = int(g.end)
         strand = int(g.strand)
-        aa_vec = _encode_protein_22(g.translate())
+        aa_raw = g.translate()
+        aa_vec = _encode_protein_22(aa_raw)
         c_counts = _codon_gc_counts(seq[s0:e0], strand)
         records.append((s0, e0, strand, aa_vec, *c_counts))
+        if out_reused is not None:
+            out_reused.append((s0, e0, strand, aa_raw, aa_vec, None, None))
     records.sort(key=lambda r: r[0])
+    if out_reused is not None:
+        out_reused.sort(key=lambda r: r[0])
     return records
 
 
-def _predict_genes_rich_stage1(seq: str) -> List[Stage1GeneRecord]:
+def _predict_genes_rich_stage1(
+    seq: str,
+    *,
+    out_reused: Optional[List[ReusedGeneRecord]] = None,
+) -> List[Stage1GeneRecord]:
     if len(seq) < 100:
         return []
     finder = _get_gene_finder()
@@ -190,7 +207,11 @@ def _predict_genes_rich_stage1(seq: str) -> List[Stage1GeneRecord]:
         ct343 = encode_peptide_7x7x7_triad(aa_clean)
         pyro_attrs = encode_pyrodigal_gene_attrs(g, len(aa_clean), is_fallback=0.0)
         records.append((s0, e0, strand, aa_vec, *c_counts, dp49, ct343, pyro_attrs))
+        if out_reused is not None:
+            out_reused.append((s0, e0, strand, aa_raw, aa_vec, dp49, pyro_attrs))
     records.sort(key=lambda r: r[0])
+    if out_reused is not None:
+        out_reused.sort(key=lambda r: r[0])
     return records
 
 
@@ -430,6 +451,31 @@ def _compute_stage1_window_extra(
     return out
 
 
+def _compute_global_context_from_upper(
+    seq_up: str,
+    *,
+    context_win_size: int = 5000,
+) -> Tuple[np.ndarray, float, bool]:
+    """对已转为大写的 DNA 序列计算归一化 4-mer 背景频率、GC 占比及自上下文标记。"""
+    n = len(seq_up)
+    ctx_kmer = compute_canonical_4mer_freq(seq_up)
+    ctx_unit = ctx_kmer / (float(np.linalg.norm(ctx_kmer)) or 1.0)
+    ctx_gc = (seq_up.count("G") + seq_up.count("C")) / max(1, n)
+    return np.asarray(ctx_unit, dtype=np.float32), ctx_gc, n <= context_win_size
+
+
+def compute_sequence_global_context(
+    seq: str,
+    *,
+    context_win_size: int = 5000,
+) -> Tuple[np.ndarray, float, bool]:
+    """
+    1-Pass 向量化计算整条序列的全局背景上下文 (kmer_unit, gc, is_self)。
+    供超长单 Contig 流式分片扫描时在各分片间透传，消除分片局部统计带来的背景漂移。
+    """
+    return _compute_global_context_from_upper(seq.upper(), context_win_size=context_win_size)
+
+
 def extract_contig_windows_for_spans(
     contig_id: str,
     seq: str,
@@ -438,26 +484,37 @@ def extract_contig_windows_for_spans(
     truth_regions: Optional[Sequence[Tuple[int, int]]] = None,
     feature_profile: str = "v4",
     context_win_size: int = 5000,
+    return_gene_records: bool = False,
+    global_ctx_kmer_unit: Optional[np.ndarray] = None,
+    global_ctx_gc: Optional[float] = None,
+    global_ctx_is_self: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """按指定窗口区间列表提取特征，支持 v4 (185 维) 与 stage1 (256 维) 两种版本。"""
+    """按指定窗口区间列表提取特征，支持 v4 (185 维) 与 stage1 (256 维) 两种版本，并可选附带复用的 ORF 记录与全局背景注入。"""
     seq = seq.upper()
     n = len(seq)
     is_stage1 = feature_profile.lower() in ("stage1", "v5_stage1")
+    reused_genes: Optional[List[ReusedGeneRecord]] = [] if return_gene_records else None
     if is_stage1:
-        rich_s1 = _predict_genes_rich_stage1(seq)
+        rich_s1 = _predict_genes_rich_stage1(seq, out_reused=reused_genes)
         rich_genes: List[RichGeneRecord] = [g[:13] for g in rich_s1]  # type: ignore[misc]
     else:
         rich_s1 = []
-        rich_genes = _predict_genes_rich(seq)
+        rich_genes = _predict_genes_rich(seq, out_reused=reused_genes)
     simple_genes: List[GeneTuple] = [(g[0], g[1], g[2]) for g in rich_genes]
 
-    ctx_kmer = compute_canonical_4mer_freq(seq)
-    ctx_unit = ctx_kmer / (float(np.linalg.norm(ctx_kmer)) or 1.0)
-    ctx_gc = (seq.count("G") + seq.count("C")) / max(1, n)
+    if global_ctx_kmer_unit is not None and global_ctx_gc is not None:
+        ctx_unit = np.asarray(global_ctx_kmer_unit, dtype=np.float32)
+        ctx_gc = global_ctx_gc
+        ctx_is_self = global_ctx_is_self if global_ctx_is_self is not None else (n <= context_win_size)
+    else:
+        ctx_unit, ctx_gc, default_is_self = _compute_global_context_from_upper(
+            seq,
+            context_win_size=context_win_size,
+        )
+        ctx_is_self = global_ctx_is_self if global_ctx_is_self is not None else default_is_self
     regions = list(truth_regions or [])
 
     feat_dim = len(get_feature_names(feature_profile))
-    ctx_is_self = n <= context_win_size
     feats = np.zeros((len(spans), feat_dim), dtype=np.float32)
     overlaps = np.zeros(len(spans), dtype=np.float32)
     sub_masks = np.zeros((len(spans), SUB_BINS), dtype=np.float32)
@@ -529,7 +586,7 @@ def extract_contig_windows_for_spans(
             overlaps[i] = _overlap_fraction(s, e, regions)
             sub_masks[i] = _compute_sub_mask(s, e, regions, SUB_BINS)
 
-    return {
+    result: Dict[str, Any] = {
         "contig_id": contig_id,
         "starts": np.asarray([s for s, _ in spans], dtype=np.int64),
         "ends": np.asarray([e for _, e in spans], dtype=np.int64),
@@ -537,6 +594,9 @@ def extract_contig_windows_for_spans(
         "sub_mask": sub_masks,
         "features": feats,
     }
+    if reused_genes is not None:
+        result["gene_records"] = reused_genes
+    return result
 
 
 def extract_contig_windows(
@@ -547,6 +607,10 @@ def extract_contig_windows(
     truth_regions: Optional[Sequence[Tuple[int, int]]] = None,
     *,
     feature_profile: str = "v4",
+    return_gene_records: bool = False,
+    global_ctx_kmer_unit: Optional[np.ndarray] = None,
+    global_ctx_gc: Optional[float] = None,
+    global_ctx_is_self: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     对单条 contig 统一预测基因后滑窗提取 185 维（v4）或 256 维（stage1）特征及 25 维 200bp 精细掩码标签。
@@ -574,4 +638,8 @@ def extract_contig_windows(
         truth_regions=truth_regions,
         feature_profile=feature_profile,
         context_win_size=win_size,
+        return_gene_records=return_gene_records,
+        global_ctx_kmer_unit=global_ctx_kmer_unit,
+        global_ctx_gc=global_ctx_gc,
+        global_ctx_is_self=global_ctx_is_self,
     )

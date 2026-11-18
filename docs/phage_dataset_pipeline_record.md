@@ -1178,3 +1178,123 @@ Pop-Location
 2. **上线终验**：
    - 完整 `pytest tests/ -v` 通过：**`258 passed in 153.12s`**（0 failed, 0 skipped）；
    - 切换后默认生产路径 CUDA 实测：`discover_available_models()` 正常返回 `['unified', 'stage1_2']`，`PAO1` 精准检出 `(785200, 797200)`（零 pyocin 误报）、`V583` `5/5` 全中且零 `Extra`、`EGD-e` `1/1` 且零 `monocin`、`v1_test` 精确复现 `TP=75, FP=1, FN=0, F1=0.9934, MAE=476.2bp, Strict0.8=74`。
+
+---
+
+## 42. Step 1 纯工程优化落地：单次 `Pyrodigal` 全链路复用、超长单 Contig 流式切片与版本契约规范（步骤 49）
+
+围绕生产推理耗时分布与超大序列防 OOM 瓶颈，在不改动任何 `.pt` 权重和模型预测数值分布的前提下，完成 Step 1 三项纯工程升级，并与优化前同机器同参数开展完整对照评测：
+
+### 1. 代码重构与模块化改动清单
+1. **单次 `Pyrodigal` 预测全链路复用（3 次 -> 1 次，0.00 浮点误差等价）**：
+   - [window_features.py](file:///f:/NCBI%20blast/src/phage_discovery/features/window_features.py)：为 `_predict_genes_rich`、`_predict_genes_rich_stage1` 及 `extract_contig_windows_for_spans` / `extract_contig_windows` 增加可选 `return_gene_records` 通道，在一次 `find_genes` 迭代内顺带打包可复用的 `ReusedGeneRecord`（保留原始氨基酸、7x7 二肽与 11 维 Pyrodigal 属性）。
+   - [expert_c_orf.py](file:///f:/NCBI%20blast/src/phage_discovery/experts/expert_c_orf.py)：抽出共享窗口组装核心 `_assemble_contig_orf_tokens` 与直接复用构建入口 `build_contig_orf_tokens_from_genes`，在 *E. coli* K-12 等实测序列（`v4` / `stage1`）上与原独立 `extract_contig_orf_tokens` 验证最大绝对误差 **`0.0`**。
+   - [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py) & [unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)：改造 `_extract_contig_worker`（支持 7 元组 `return_judge_orfs`）与 `UnifiedPhageModel._run_dna_backbone_core`，仅对激活了 `UnifiedJudge` 的 Contig 复用首次提取好的 `judge_orfs` 并用后即弃；同时完全向后兼容既有子类覆写 `_run_dna_backbone` 与测试 mock。
+2. **修复 `scan_fasta_streaming` 超长单 Contig 序列内部切片与分段断点续跑**：
+   - [unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)：新增 `plan_long_contig_segments`（超长单 Contig 按 `chunk_max_bp` 与默认至多 `200 kb` 重叠带切分）、`_compute_segment_ownership`、`_count_owned_windows`（净非重窗口精确统计）及 `_reconcile_segmented_contig_results`（按主导归属中点 + 内部人工切口净距 `clearance` 择优保留完整区段，严防截断或重复报警）；`checkpoint.json` 支持分段级 `completed_segments` 断点续跑。
+3. **版本契约全链路标准化**：
+   - 新增统一版本解析 `resolve_unified_version_tag`（[judge_region_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/judge_region_refiner.py)），在 [model_registry.py](file:///f:/NCBI%20blast/src/analysis/phage_finder/model_registry.py)、[unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)、[report_exporter.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/report_exporter.py)、[train_v4_3_unified.py](file:///f:/NCBI%20blast/scripts/train_v4_3_unified.py)、[train_unified_judge.py](file:///f:/NCBI%20blast/scripts/train_unified_judge.py) 与生产 [unified_summary.json](file:///F:/Phage%20data/models/full_v4/orf_judge_unified/unified_summary.json) 中统一写入与透传 `schema_version`、`model_version`（`Unified V4.3`）与 `judge_arch`。
+
+### 2. 优化前后同台真机实测对照（收益 vs 缺陷）
+
+| 对照样本 | 优化前耗时 | 优化后耗时 | 加速比 | 关键阶段耗时对比 (`dna_feat` / `protein`) | 检出区段吻合度 |
+| :--- | :---: | :---: | :---: | :--- | :--- |
+| **K-12 (`4.64 Mb`, 单条)** | `99.333s` | **`44.993s`** | **`2.21x`** | `dna_feat: 58.61s -> 34.29s` / `prot: 34.07s -> 3.23s` | **`4 / 4` (`exact_match=True`)** |
+| **PAO1 (`6.26 Mb`, 单条)** | `84.499s` | **`45.733s`** | **`1.85x`** | `dna_feat: 52.40s -> 33.84s` / `prot: 24.48s -> 4.09s` | **`1 / 1` (`exact_match=True`)** |
+| **B168 (`4.22 Mb`, 单条)** | `72.704s` | **`35.238s`** | **`2.06x`** | `dna_feat: 44.25s -> 26.10s` / `prot: 22.61s -> 3.35s` | **`4 / 4` (`exact_match=True`)** |
+| **`v1_test` (`20.86 Mb`, 75 条)** | `74.742s` | **`59.758s`** | **`1.25x`** | `dna_feat: 23.94s -> 17.77s` / `prot: 18.95s -> 12.68s` | **`76 / 76` (`exact_match=True`)** |
+| **`PAO1` 流式 `chunk=2 Mb`** | `84.993s` (`1` 片未切) | **`44.374s`** (`4` 片) | **`1.92x`** | 精准落盘 `2.0M / 2.0M / 2.0M / 864kb` (`2,505` 净窗)；断点后 2 片续跑 **`15.796s`** | `1 / 1` (`785000..797200`, 左端 `-200 bp`) |
+| **`B168` 流式 `chunk=2 Mb`** | 未支持切片 | **`36.479s`** (`3` 片) | 较全扫仅 `+1.2s` | 精准落盘 `2.0M / 2.0M / 616kb` (`1,686` 净窗) | `4 / 4` (边缘 3 处 `±200 bp` 漂移) |
+
+### 3. 遗留缺陷与新瓶颈客观记录
+1. **流式强切片带来 `±200 bp` 局部背景漂移**：当强制将完整长染色体拆成 `2 Mb` 片段扫描时，片段局部的全局背景 `ctx_kmer_cosdist` 与 `ctx_gc_diff` 与整条染色体微异，会触发部分区段末端单个 `200 bp SubBin` 边界漂移（如 `PAO1 Pf4`: `785200 -> 785000`、`B168 PBSX`: `1323200 -> 1323000`）。
+2. **单条序列剩余 1 次 `Pyrodigal` 仍居耗时主体**：3 次变 1 次后，整条单株细菌的首次 `Pyrodigal`（仍受单条 Contig 单核串行限制）占优化后总耗时的 **`68% ~ 76%`**（`34.29s / 44.56s`）；而 75 条并发场景下 `dna_infer_decode_sec`（`27.324s`）成为新一号耗时项。
+3. **质量回归验证**：Pyrefly (`--min-severity warn`) 输出 **`INFO 0 diagnostics`**；6 组 `pytest` 测试套件共 **`51 passed`**（包含新增超长单 Contig 分段续跑去重与单次 `Pyrodigal` 复用测试）。
+
+---
+
+## 43. 边缘/边界精密定界升级：`SubBin` 重标定 + 双模态防劈断 + 两级互补桥接 + `attL/attR` 1 bp 整合断点对齐（步骤 50）
+
+围绕 *E. coli* K-12 工作台 `Phage_001` (`571.8 kb - 582.0 kb`) 等真实前噬菌体边界存在“受 `200 bp` 离散网格限制、劈断末端整合酶/头部 ORF、及长距多段分裂（`B. subtilis SPbeta` 后半尾臂孤立被拒）”的切割精度瓶颈，完成了跨模型分布核查、全基准定量消融与模块化生产落地：
+
+### 1. 关键发现与选型结论
+1. **模型与解码层诊断**：
+   - 验证发现现役 `subbin_refiner.pt` 沿用旧版 V4.2 权重及 `sub_threshold=0.35`，在 `V4.3` 微调后的 `Stage 1.2 + ContextRefiner` 分布下边界略宽，直接重标定至 `sub_threshold=0.45` 即可零代价压缩边缘过冲；
+   - 测试独立沙盒热启动重训边缘锐化 `Warm_Sharp SubBinContextRefiner` 后客观弃用该微调权重：虽可将 `v1` 嵌合体中位误差进一步压至 `170~208 bp`，但会同步压低退化前噬菌体灰区峰值导致 K-12 丢失 `e14`/`Rac`（`4 -> 2`）且降低 `Gold-8` 总体 `meanIoU`；故生产决定**保留现役 `subbin_refiner.pt` 权重**，将 [stage1_2_report.json](file:///F:/Phage%20data/models/full_v4/stage1_2/stage1_2_report.json) 备份至 `F:\Phage data\models\_archive\stage1_2_report_pre_boundary_20261117.json` 并校准 `decoder_tuned_on_val.sub_threshold = 0.45`。
+2. **双模态门控防劈断（阻断融合假体与低 SubBin 细菌岛拉偏）**：
+   - 早期纯蛋白级外延与无门控 `ORF Snap` 消融证实：若不校验 `200 bp SubBin` 在外露半截处的过渡支持，`v1_test` 54 例跨域拼接/宿主边基因被强行拉入反而使 `MAE` 从 `476.2 bp` 恶化至 `563.3~996.9 bp`（如 LT2 `Gifsy-1` 右侧 `SubBin=0.001` 处存在连续高分非噬菌体辅助蛋白）。
+   - 仅当被边界劈断的噬菌体 ORF 同时满足蛋白高置信且其基因外露段保有连续 `200 bp SubBin` 支持时才外扩囊括完整 ORF；当边界切入低分/高防御宿主基因且外露 `SubBin` 低时向内回退。
+
+### 2. 模块化源码落地清单
+1. **新增 `attL/attR` 1 bp 整合断点校准模块**（[att_boundary_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/att_boundary_refiner.py)）：
+   - 实现 `AttAlignmentHit` 与 `refine_regions_with_att_sites`，在区段左右 `±1650 bp` 过渡区建立 `9-mer` 索引检索 `0/1` 错配直接重复，强制过滤低熵/微卫星串联重复、保护高置信核心噬菌体 CDS、并严禁向外越过外部明确宿主基因（彻底阻断 `PAO1 Pf4` 类跨宿主随机重复误配），结合整合酶 `P4` 与基因间区先验实现安全 1 bp 对齐及零代价回退。
+2. **升级双模态防劈断与两级互补拓扑桥接**（[judge_region_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/judge_region_refiner.py)）：
+   - 新增 `refine_region_boundaries_bimodal` 执行 DNA-Protein 双模态防劈断与宿主收缩（保留旧版 `refine_region_boundaries_with_judge` 接口向后兼容）；
+   - 新增基于“暂存-桥接后核销”契约（`reconcile_tentative_siblings`）的兄弟臂协同挽救，并升级 `bridge_complementary_phage_fragments` 为两级拓扑桥接（先 `<=10 kb` 合拢互补子结构臂 `Head` 与 `Tail+Lysis`，再 `<=20 kb` 桥接早臂与完整结构臂），严格保证未合并的孤立碎片自动剔除、绝不引入新增孤立误报。
+3. **集成全链路边界定界并补充单元回归**（[unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)、[__init__.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/__init__.py)、[test_att_boundary_refiner.py](file:///f:/NCBI%20blast/tests/test_att_boundary_refiner.py)、[test_judge_region_refiner.py](file:///f:/NCBI%20blast/tests/test_judge_region_refiner.py)、[test_unified_production_pipeline.py](file:///f:/NCBI%20blast/tests/test_unified_production_pipeline.py)）：
+   - 在 `UnifiedPhageModel.scan_sequences` 中依次串联“双模态筛选 -> 双模态防劈断 -> 两级拓扑桥接与兄弟臂核销 -> 串联拆分 -> `attL/attR` 1 bp 对齐”，在 `routing_stats["rescue_stats"]` 记录 `sibling_rescued`、`boundary_snapped`、`att_aligned`，并在命中区段 `region_annotations[key]["att_site"]` 写出结构化重复元数据（`region_profiles` 同步对齐至新边界）。
+
+### 3. 上线后真机全量回归与四重基准端到端验收结果
+1. **质量门禁与全量单元测试**：
+   - 七项涉改源码与测试经 `pyrefly check --min-severity warn` 验证达 **`INFO 0 diagnostics`**；全部文件均为无 BOM UTF-8 且无 Emoji；
+   - 全仓库 `pytest tests/ -v` 通过：**`266 passed in 181.88s`**（0 failed, 0 skipped）。
+2. **四重基准端到端实测对照（直接通过生产目录 `F:\Phage data\models\full_v4` 加载执行）**：
+
+| 评测基准 / 指标 | 优化前 (`V4.3 Base`) | 优化后 (`V4.3 Precision Boundary`) | 变化幅度与实测明细 |
+| :--- | :--- | :--- | :--- |
+| **`v1_val` (`75` 嵌合体)** | `F1=0.9867, mIoU=0.9815, MAE=412.2 bp, Med=290.0 bp, splitORFs=44` | **`F1=0.9867, mIoU=0.9831, MAE=369.0 bp, Med=226.0 bp, splitORFs=19`** | **`MAE -43.2 bp`, `Med -64.0 bp`, 劈断 `-56.8%`** (`snap=49, att=3`, `35.757s`) |
+| **`v1_test` (`75` 嵌合体)** | `F1=0.9934, mIoU=0.9772, MAE=476.2 bp, Med=236.0 bp, s0.8_MAE=409.2 bp, splitORFs=38` | **`F1=0.9934, mIoU=0.9790, MAE=423.4 bp, Med=196.0 bp, s0.8_MAE=355.8 bp, splitORFs=14`** | **`MAE -52.8 bp (-11.1%)`, `Med -40.0 bp`, `s0.8 MAE -53.4 bp`, 劈断 `-63.2%`** (`snap=47, att=8`, `34.89s`) |
+| **`Gold-8` (`31.22 Mb`, 38 主前噬菌体)** | `Pro=35/38, Conf=0/4, Ex=0, meanIoU=0.8759, meanErr=3388.4 bp, splitORFs=33` | **`Pro=35/38, Sat=3/18, Conf=0/4, Ex=0, meanIoU=0.8944, medIoU=0.9363, meanErr=2526.0 bp, splitORFs=4`** | **`meanIoU +0.0185`, 平均边误 `-862.4 bp (-25.5%)`, 劈断 `-87.9%`** (`sib=1, bridged=2, att=12`) |
+| **K-12 (`NC_000913.3`)** | `4` 个 (`Phage_001`: `571,800..582,000`, `splitORFs=6`) | **`4` 个 (`Phage_001`: `571,453..582,097`, `splitORFs=1`)** | 完整囊括左整合酶与右头部 ORF；`e14`、`Rac`、`Qin` 均对齐完整端点 (`24.79s`) |
+| **Sau / LT2 / A3_2** | `Sau=3`, `LT2=5`, `A3_2=0` | **`Sau=3 (split=0, att=1)`, `LT2=5 (split=0, att=2)`, `A3_2=0`** | 全保持零多余误报，LT2 与 Sau 多端实现 1 bp / 基因边界对齐 |
+| **Stress `A1..B2` 负压测** | `A1=0, A2=1, A3=2, B1=2, B2=2` (总 `7`) | **`A1=0, A2=1, A3=2 (streaming exact_match=True), B1=2, B2=2` (总 `7`)** | **全负压力误报零增长** |
+| **Stress `C1` / `C2` 截断集** | `C1: 75/75 (F1=1.0000, MAE=1040.9 bp)` / `C2: 74/75` | **`C1: 75/75 (F1=1.0000, MAE=974.8 bp)` / `C2: 74/75 (98.7%)`** | **`C1` 断点误差同步净降 `-66.1 bp`** |
+
+3. **代表性单前噬菌体边界精度飞跃实测**：
+   - `B. subtilis SPbeta` (`134 kb`)：`IoU 0.4497 -> 0.8413`（`+0.3916`，兄弟尾臂挽救与两级拓扑桥接全线合拢）；
+   - `L. lactis bIL309_pi1` / `bIL286_pi3` / `bIL285_pi2`：`IoU 0.9999 (dL=+0, dR=+2)` / `0.9994 (dL=+7, dR=-17)` / `0.9950`；
+   - *E. coli* O157 Sakai `Sp15` / `Sp13` / `Sp1`：`IoU 0.9995 (dL=-22, dR=+0)` / `0.9974 (dL=-1, dR=+54)` / `0.9956 (dL=-29, dR=+18)`；
+   - *E. faecalis* V583 `pp1` / `pp3` & *L. monocytogenes* `phiEGDe2_A118`：`IoU 0.9985 (dR=+0)` / `0.9967` & `0.9832 (dR=+0)`；*P. aeruginosa* PAO1 `Pf4_inovirus` 稳守 `IoU=0.9007`。
+
+---
+
+## 44. V2 治本边界精密修复与超长单 Contig 流式背景注入（步骤 51）
+
+围绕第 42–43 节实测中遗留的两类核心瓶颈——（1）`Gold-8` 占比总误差 **`82.41%`** 的 `>3 kb` 缺失早区/整合侧翼（主体为 `cls=5/6/7` 早期调控臂，末端多以整合酶 `Integrase` 收尾）及 `K-12 Qin` 左缘最后 `1` 处 `Tail` 劈断；（2）流式超长单 Contig 强制分片带来的局部 `4-mer / GC` 背景漂移（如 `PAO1 -200 bp` / `B168 PBSX -200 bp`），经多轮消融解剖后完成了全量模块化源码升级与四重黄金基准实测验收：
+
+### 1. 关键消融诊断结论
+1. **窄谷伴生次级峰 vs 远端冗余孤岛的本质差异**：
+   - 在 `v1_test CHIM_0057`、`V583 pp4`、`Sakai Sp4` 中，主结构核外仅隔 `2.7~3.8 kb` 低谷（不含宿主墙）即存在不含冗余 `Head` 核心的强 `SubBin` 伴生早期高峰，仅因超过 `3.0 kb` 合并窗口而被截丢；而类似 `CHIM_0026` 外侧则隔有长达 `~7 kb` 的连续零信号沟壑与冗余 `Head` 核心，必须隔离禁止合并。
+2. **盲目低阈值滞回的副作用与精确核心校准**：
+   - 实验对比证实，全局开启 `edge_sub_thr=0.32` 向外滞回会导致 `v1_test MAE` 回弹（`351.0 -> 370.5 bp`）及 `Gold-8 splitORFs` 升高（`5 -> 9`），故予以舍弃；转而精准校准核心形态/整合酶防劈断门槛（`r2_core >= 0.70, phage >= 0.90, p9 < 0.20` 且外露区段具至少 `out_sub_max >= 0.05` DNA 残余支持、串联接壤点 `<= 200 bp` 侧严禁越线），一举消除 `K-12 Qin Tail (r2=0.74)` 与 `Sakai Sp18 Integrase (r2=0.917)` 等核心断口而不波及人工嵌合体零信号边。
+3. **非阻断式闭环整合酶极点锚定**：
+   - 首轮对齐 `attL/attR` 时将搜索半径自 `1650 bp` 校准至 `2100 bp`（严格受原四重宿主/核心护栏约束），零代价捕获 `Sakai Sp11` `-1908 bp` 处精确重复位点（`IoU 0.9465 -> 0.9988`）；
+   - 将受限 `Integrase (cls4)` 极点检索置于首轮 `att` 对齐与串联分裂**之后**：凡已获精确 `att` 闭合区段严格锁死（保护 `Sp15`）；严禁重组拼接相邻区段（永不回粘 `Sp11/Sp12`）；区分真整合酶与 `IS` 转座酶（`cls4 >= cls8 + 0.05`）；采用 `bp_len` 长度加权质量并封锁未被强噬菌体蛋白（`phage >= 0.80`）覆盖的 `>= 3 kb` 全零 DNA 死水沟。
+4. **`tRNA TpsiC-loop` 窄窗短重复消融表现**：
+   - 实现可切换的内置正反双链 `tRNA T-loop + CCA/TGG` 锚点 `11..13 bp` 短重复补充检索（`enable_trna_short_dr`，默认关闭保持零噪声先验），沙盒实测在 `v1 / K-12 / Gold-8` 上带来额外命中增量为空且无负回退。
+
+### 2. 源码模块化落地清单
+1. **流式超长单 Contig 全局上下文 1-Pass 注入（机制 4）**：
+   - [window_features.py](file:///f:/NCBI%20blast/src/phage_discovery/features/window_features.py)：新增 `compute_sequence_global_context` 及共享内部构建 `_compute_global_context_from_upper`，向 `extract_contig_windows_for_spans` 与 `extract_contig_windows` 开放可选 `global_ctx_kmer_unit` / `global_ctx_gc` / `global_ctx_is_self` 注入通道；
+   - [scanner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/scanner.py) & [unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)：`_extract_contig_worker` 兼容 8 元组 `global_ctx`（保持旧 5/6/7 元组向后兼容）；`_stream_long_single_contig` 在遍历分段前一次性计算全序列全局背景并向每一分片 `scan_sequences` 透传。
+2. **V2 治本精修算法落盘（机制 1–3）**：
+   - [judge_region_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/judge_region_refiner.py)：新增模块化组件 `absorb_companion_subbin_peaks`、`snap_split_core_orfs`、`close_flanks_to_integrase_anchors`（及单一方向参数化检索辅助 `_search_directional_integrase_anchor`、`_has_unannotated_dead_moat`、`_is_true_integrase_orf`）；
+   - [att_boundary_refiner.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/att_boundary_refiner.py)：将默认 `flank_pad_bp` 校准为 `2100`，并内置双链 `tRNA` 保守基序检测（`_find_trna_3prime_anchors`、`_search_trna_short_att_hit`）；
+   - [unified_model.py](file:///f:/NCBI%20blast/src/phage_discovery/inference/unified_model.py)：在 `UnifiedPhageModel.scan_sequences` 串联新 V2 精修链路并在 `rescue_stats` 持久化 `companion_absorbed`、`core_orfs_snapped`、`integrase_closed` 统计项。
+3. **测试补充与静态门禁**：
+   - 增补 6 组覆盖伴生峰吸纳、串联锁死核心防劈断、整合酶闭环五重护栏、`2100 bp` 窗口与 `tRNA` 短重复、以及流式全局背景特征完全一致性的单元测试（[test_att_boundary_refiner.py](file:///f:/NCBI%20blast/tests/test_att_boundary_refiner.py)、[test_judge_region_refiner.py](file:///f:/NCBI%20blast/tests/test_judge_region_refiner.py)、[test_unified_production_pipeline.py](file:///f:/NCBI%20blast/tests/test_unified_production_pipeline.py)）；
+   - 全涉改源码与测试经 `pyrefly check --min-severity warn` 输出 **`INFO 0 diagnostics`**；全仓库 `pytest tests/ -v` 实跑 **`272 passed in 175.98s`**。
+
+### 3. 四重黄金基准及流式一致性 V2 端到端实测结果
+
+| 评测基准 / 指标 | V1 精确边界基线 (`步骤 50`) | V2 治本升级 (`当前生产`) | 净变化与明细说明 |
+| :--- | :--- | :--- | :--- |
+| **`v1_val` (`75` 嵌合体)** | `F1=0.9867, mIoU=0.9831, MAE=369.0 bp, Med=226.0 bp, splitORFs=19` | **`F1=0.9867, mIoU=0.9833, MAE=361.8 bp, Med=226.0 bp, splitORFs=18`** | `MAE -7.2 bp`, 劈断 `19 -> 18` |
+| **`v1_test` (`75` 嵌合体)** | `F1=0.9934, mIoU=0.9790, MAE=423.4 bp, s0.8=74/75, splitORFs=14` | **`F1=0.9934, mIoU=0.9824, MAE=361.8 bp, s0.8=75/75, splitORFs=10`** | **`MAE -61.6 bp`**, `s0.8` 达成 **满分 `75/75`**, 劈断 `-4` |
+| **`Gold-8` (`31.22 Mb`)** | `Pro=35/38, Conf=0, Ex=0, meanIoU=0.8944, medIoU=0.9363, meanErr=2526.0 bp, medErr=1163.5 bp, splitORFs=4` | **`Pro=35/38, Sat=3/18, Conf=0, Ex=0, meanIoU=0.9204, medIoU=0.9459, meanErr=1945.3 bp, medErr=824.0 bp, splitORFs=4`** | **`meanIoU +0.0260`**, 平均边误 **`-580.7 bp (-23.0%)`**, 中位边误 **`-339.5 bp (-29.2%)`** |
+| **Unseen `K-12` (`NC_000913.3`)** | `n=4, splitORFs=1` (`Qin` `1632200..1652708`) | **`n=4, splitORFs=0`** (`Qin` **`1631001..1652708`**) | **剩余最后 `1` 处 `splitORF` 彻底清零** |
+| **Unseen `Sau / LT2 / A3_2`** | `Sau=3, LT2=5, A3_2=0` | **`Sau=3 (split=0), LT2=5 (split=0, Gifsy-1 +0.0038), A3_2=0`** | 全保持零误报 |
+| **Stress `A1..B2` 负压测** | `A1=0, A2=1, A3=2, B1=2, B2=2` (总 `7`) | **`A1=0, A2=1, A3=2 (streaming exact_match=True), B1=2, B2=2` (总 `7`)** | **五组全负压力测试零新增假阳** |
+| **Stress `C1 / C2` 截断集** | `C1: 75/75 (MAE=974.8 bp)` / `C2: 74/75` | **`C1: 75/75 (F1=1.0000, MAE=891.3 bp)` / `C2: 74/75 (98.7%)`** | **`C1 MAE` 再净降 `-83.5 bp`** |
+| **`Gold-8` 重点疑难个体** | `Sp11=0.9465, Sp18=0.8028, Sp8=0.8307, pp4=0.6331, Sp4=0.5764, Sp9=0.6991` | **`Sp11=0.9988, Sp18=0.9651, Sp8=0.9235, pp4=0.9168, Sp4=0.8111, Sp9=0.7802`** | 分别挽回 `~1.9~11.7 kb` 缺失侧翼，`Sp15` 保持 `0.9995` 无伤 |
+| **流式 `chunk=2 Mb` 一致性** | `PAO1` `-200 bp`、`B168` `3` 处 `±200 bp` 漂移 | **`PAO1: exact_match=True` (`785200..797200`)；`B168`: `PBSX`/`SPbeta` 严格一致** | `B168` 仅 `skin_element` 极平缓边缘存在单一 `200 bp` 阈值跨界 (`2662600..2699400` vs `2662800..2699200`) |

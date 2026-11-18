@@ -60,12 +60,12 @@ def _export_regions_tsv(
             writer.writerow(
                 {
                     "contig_id": reg.contig_id,
-                    "start_bp": int(reg.start_bp),
-                    "end_bp": int(reg.end_bp),
-                    "length_bp": int(reg.end_bp - reg.start_bp),
-                    "peak_score": round(float(reg.peak_score), 4),
-                    "mean_score": round(float(reg.mean_score), 4),
-                    "window_count": int(reg.window_count),
+                    "start_bp": reg.start_bp,
+                    "end_bp": reg.end_bp,
+                    "length_bp": reg.end_bp - reg.start_bp,
+                    "peak_score": round(reg.peak_score, 4),
+                    "mean_score": round(reg.mean_score, 4),
+                    "window_count": reg.window_count,
                     "n_orfs": int(ann.get("n_orfs", 0)),
                     "mean_phage_prob": ann.get("mean_phage_prob", ""),
                     "max_p9_defense_prob": ann.get("max_p9_defense_prob", ""),
@@ -89,13 +89,13 @@ def _export_regions_gff3(
         for idx, reg in enumerate(regions, start=1):
             key = f"{reg.contig_id}:{reg.start_bp}-{reg.end_bp}"
             ann = region_annotations.get(key, {})
-            gff_start = max(1, int(reg.start_bp) + 1)
-            gff_end = max(gff_start, int(reg.end_bp))
+            gff_start = max(1, reg.start_bp + 1)
+            gff_end = max(gff_start, reg.end_bp)
             mods = ",".join(str(m) for m in (ann.get("active_modules") or []))
             attrs = [
                 f"ID={quote(f'{reg.contig_id}_prophage_{idx}')}",
-                f"peak_score={float(reg.peak_score):.4f}",
-                f"mean_score={float(reg.mean_score):.4f}",
+                f"peak_score={reg.peak_score:.4f}",
+                f"mean_score={reg.mean_score:.4f}",
             ]
             if ann:
                 attrs.append(f"completeness={quote(str(ann.get('completeness_class', '')))}")
@@ -111,7 +111,7 @@ def _export_regions_gff3(
                 "prophage",
                 str(gff_start),
                 str(gff_end),
-                f"{float(reg.peak_score):.4f}",
+                f"{reg.peak_score:.4f}",
                 ".",
                 ".",
                 ";".join(attrs),
@@ -141,7 +141,7 @@ def _export_prophage_fasta(
                 seq = contig_seqs.get(reg.contig_id)
                 if not seq:
                     continue
-                sub = seq[max(0, int(reg.start_bp)) : max(0, int(reg.end_bp))]
+                sub = seq[max(0, reg.start_bp) : max(0, reg.end_bp)]
                 if not sub:
                     continue
                 key = f"{reg.contig_id}:{reg.start_bp}-{reg.end_bp}"
@@ -156,7 +156,7 @@ def _export_prophage_fasta(
                 if not regs:
                     continue
                 for reg in regs:
-                    sub = seq[max(0, int(reg.start_bp)) : max(0, int(reg.end_bp))]
+                    sub = seq[max(0, reg.start_bp) : max(0, reg.end_bp)]
                     if not sub:
                         continue
                     key = f"{reg.contig_id}:{reg.start_bp}-{reg.end_bp}"
@@ -199,11 +199,15 @@ def export_unified_scan_outputs(
         source_fasta_path=source_fasta_path,
     )
 
+    routing_dict = dict(routing_stats or {})
     summary_obj: Dict[str, Any] = {
-        "total_bp": int(total_bp),
-        "total_windows": int(total_windows),
+        "schema_version": str(routing_dict.get("schema_version") or "1.0"),
+        "model_version": str(routing_dict.get("model_version") or ""),
+        "judge_arch": str(routing_dict.get("judge_arch") or ""),
+        "total_bp": total_bp,
+        "total_windows": total_windows,
         "region_count": len(regions),
-        "routing_stats": dict(routing_stats or {}),
+        "routing_stats": routing_dict,
         "timings_sec": dict(timings_sec or {}),
         "suppressed_candidate_count": len(suppressed_candidates or ()),
     }

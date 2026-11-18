@@ -284,7 +284,10 @@ def train_unified_model(pd_root: Path, *, epochs: int = 16, batch_size: int = 25
             dst_f.write_bytes(src_f.read_bytes())
 
     meta = {
+        "schema_version": "1.0",
+        "model_version": "Unified V4",
         "arch": "unified",
+        "dna_backbone_profile": "stage1",
         "total_params": sum(p.numel() for p in uni_model.parameters()),
         "trainable_head_params": head_params,
         "best_val_core_kd": round(best_val_loss, 5),

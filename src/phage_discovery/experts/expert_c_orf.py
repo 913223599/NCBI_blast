@@ -26,8 +26,11 @@ import numpy as np
 from ..benchmark.model_eval import evaluate_model_scores_on_split, load_split_info, tune_decoder_on_val
 from ..data.feature_dataset import iter_fasta, load_split_arrays
 from ..features.peptide_features import (
+    DIPEPTIDE_7X7_DIM,
+    PYRODIGAL_ORF_ATTR_DIM,
     STAGE1_ORF_EXTRA_DIM,
     encode_orf_peptide_extra,
+    encode_peptide_3x3x3_triad,
     encode_pyrodigal_gene_attrs,
     find_best_6frame_orf,
 )
@@ -80,55 +83,30 @@ def _encode_protein_22(aa_seq: str) -> np.ndarray:
     return out
 
 
-def _extract_contig_orfs_worker(
-    item: Tuple[Any, ...],
+def _assemble_contig_orf_tokens(
+    seq_upper: str,
+    win_items: Sequence[Tuple[int, int, int]],
+    genes_info: Sequence[Tuple[int, int, int, float, np.ndarray, Optional[np.ndarray]]],
+    *,
+    feature_profile: str = "v4",
 ) -> List[Tuple[int, np.ndarray, int]]:
-    """
-    输入 (contig_id, seq, [(row_idx, start_bp, end_bp), ...], [feature_profile])，对整条 contig 预测一次基因，
-    然后映射至各窗口，返回 [(row_idx, token_matrix(MAX_ORFS, D), valid_count), ...]。
-    """
-    if len(item) == 4:
-        _, seq, win_items, feature_profile = item
-    else:
-        _, seq, win_items = item
-        feature_profile = "v4"
-
+    """基于已排序基因信息组装各滑动窗口的 ORF Token 张量列表。"""
     is_stage1 = feature_profile == "stage1"
     orf_dim = get_orf_feat_dim(feature_profile)
-    seq = seq.upper()
-    n_seq = max(1, len(seq))
-    ctx_gc = (seq.count("G") + seq.count("C")) / float(n_seq)
-
-    genes_info: List[Tuple[int, int, int, float, np.ndarray, Optional[np.ndarray]]] = []
-    if len(seq) >= 100:
-        gf = _get_gf()
-        found = gf.find_genes(seq.encode("ascii", errors="replace"))
-        for g in found:
-            s0 = g.begin - 1
-            e0 = g.end
-            sub = seq[s0:e0]
-            sub_len = max(1, len(sub))
-            gc = (sub.count("G") + sub.count("C")) / float(sub_len)
-            aa = g.translate()
-            extra = (
-                encode_orf_peptide_extra(aa, encode_pyrodigal_gene_attrs(g, len(aa), is_fallback=0.0))
-                if is_stage1
-                else None
-            )
-            genes_info.append((s0, e0, g.strand, gc, _encode_protein_22(aa), extra))
-        genes_info.sort(key=lambda t: t[0])
+    n_seq = max(1, len(seq_upper))
+    ctx_gc = (seq_upper.count("G") + seq_upper.count("C")) / float(n_seq)
 
     outputs: List[Tuple[int, np.ndarray, int]] = []
     for row_idx, ws, we in win_items:
         wlen = max(1, we - ws)
         in_win = [g for g in genes_info if ws <= (g[0] + g[1]) // 2 < we][:MAX_ORFS_PER_WIN]
         if is_stage1 and not in_win:
-            fb = find_best_6frame_orf(seq[ws:we], min_aa=20)
+            fb = find_best_6frame_orf(seq_upper[ws:we], min_aa=20)
             if fb is not None:
                 rs, re_, f_strand, aa_seq, _ = fb
                 gs = ws + rs
                 ge = ws + re_
-                sub_fb = seq[gs:ge]
+                sub_fb = seq_upper[gs:ge]
                 gc_fb = (sub_fb.count("G") + sub_fb.count("C")) / float(max(1, len(sub_fb)))
                 extra_fb = encode_orf_peptide_extra(
                     aa_seq,
@@ -160,6 +138,95 @@ def _extract_contig_orfs_worker(
     return outputs
 
 
+def _extract_contig_orfs_worker(
+    item: Tuple[Any, ...],
+) -> List[Tuple[int, np.ndarray, int]]:
+    """
+    输入 (contig_id, seq, [(row_idx, start_bp, end_bp), ...], [feature_profile])，对整条 contig 预测一次基因，
+    然后映射至各窗口，返回 [(row_idx, token_matrix(MAX_ORFS, D), valid_count), ...]。
+    """
+    if len(item) == 4:
+        _, seq, win_items, feature_profile = item
+    else:
+        _, seq, win_items = item
+        feature_profile = "v4"
+
+    is_stage1 = feature_profile == "stage1"
+    seq_upper = seq.upper()
+    genes_info: List[Tuple[int, int, int, float, np.ndarray, Optional[np.ndarray]]] = []
+    if len(seq_upper) >= 100:
+        gf = _get_gf()
+        found = gf.find_genes(seq_upper.encode("ascii", errors="replace"))
+        for g in found:
+            s0 = g.begin - 1
+            e0 = g.end
+            sub = seq_upper[s0:e0]
+            sub_len = max(1, len(sub))
+            gc = (sub.count("G") + sub.count("C")) / float(sub_len)
+            aa = g.translate()
+            extra = (
+                encode_orf_peptide_extra(aa, encode_pyrodigal_gene_attrs(g, len(aa), is_fallback=0.0))
+                if is_stage1
+                else None
+            )
+            genes_info.append((s0, e0, g.strand, gc, _encode_protein_22(aa), extra))
+        genes_info.sort(key=lambda t: t[0])
+
+    return _assemble_contig_orf_tokens(seq_upper, win_items, genes_info, feature_profile=feature_profile)
+
+
+def build_contig_orf_tokens_from_genes(
+    seq: str,
+    starts: Sequence[int],
+    ends: Sequence[int],
+    gene_records: Sequence[Tuple[Any, ...]],
+    *,
+    feature_profile: str = "v4",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """直接复用窗口特征阶段已预测的 Pyrodigal 基因记录生成 ORF Token 张量，免去重复基因预测。"""
+    orf_dim = get_orf_feat_dim(feature_profile)
+    n_win = len(starts)
+    tokens = np.zeros((n_win, MAX_ORFS_PER_WIN, orf_dim), dtype=np.float32)
+    counts = np.zeros(n_win, dtype=np.int32)
+    if n_win == 0:
+        return tokens, counts
+
+    is_stage1 = feature_profile == "stage1"
+    seq_upper = seq.upper()
+    genes_info: List[Tuple[int, int, int, float, np.ndarray, Optional[np.ndarray]]] = []
+    for rec in gene_records:
+        s0, e0, strand, aa_raw, aa_vec, dp49, pyro_attrs = rec
+        sub = seq_upper[int(s0) : int(e0)]
+        gc = (sub.count("G") + sub.count("C")) / float(max(1, len(sub)))
+        extra: Optional[np.ndarray] = None
+        if is_stage1:
+            extra = np.zeros(STAGE1_ORF_EXTRA_DIM, dtype=np.float32)
+            if pyro_attrs is not None:
+                extra[:PYRODIGAL_ORF_ATTR_DIM] = pyro_attrs
+                extra[PYRODIGAL_ORF_ATTR_DIM - 1] = float(np.log1p(max(0, len(aa_raw))) / 7.0)
+            else:
+                extra[:PYRODIGAL_ORF_ATTR_DIM] = encode_pyrodigal_gene_attrs(None, len(aa_raw), is_fallback=1.0)
+            if dp49 is not None:
+                extra[PYRODIGAL_ORF_ATTR_DIM : PYRODIGAL_ORF_ATTR_DIM + DIPEPTIDE_7X7_DIM] = dp49
+            else:
+                from ..features.peptide_features import encode_peptide_7x7_dipeptide
+
+                extra[PYRODIGAL_ORF_ATTR_DIM : PYRODIGAL_ORF_ATTR_DIM + DIPEPTIDE_7X7_DIM] = (
+                    encode_peptide_7x7_dipeptide(aa_raw)
+                )
+            extra[PYRODIGAL_ORF_ATTR_DIM + DIPEPTIDE_7X7_DIM :] = encode_peptide_3x3x3_triad(aa_raw)
+        genes_info.append((int(s0), int(e0), int(strand), gc, aa_vec, extra))
+
+    genes_info.sort(key=lambda t: t[0])
+    win_items = [(i, int(s), int(e)) for i, (s, e) in enumerate(zip(starts, ends))]
+    for row_idx, mat, cnt in _assemble_contig_orf_tokens(
+        seq_upper, win_items, genes_info, feature_profile=feature_profile
+    ):
+        tokens[row_idx] = mat
+        counts[row_idx] = cnt
+    return tokens, counts
+
+
 def extract_contig_orf_tokens(
     seq: str,
     starts: Sequence[int],
@@ -174,7 +241,7 @@ def extract_contig_orf_tokens(
     counts = np.zeros(n_win, dtype=np.int32)
     if n_win == 0:
         return tokens, counts
-    win_items = [(i, s, e) for i, (s, e) in enumerate(zip(starts, ends))]
+    win_items = [(i, int(s), int(e)) for i, (s, e) in enumerate(zip(starts, ends))]
     for row_idx, mat, cnt in _extract_contig_orfs_worker(("", seq, win_items, feature_profile)):
         tokens[row_idx] = mat
         counts[row_idx] = cnt
@@ -234,7 +301,7 @@ def build_orf_transformer(
         def __init__(self):
             super().__init__()
             self.proj = nn.Sequential(
-                nn.Linear(int(orf_feat_dim), d_model),
+                nn.Linear(orf_feat_dim, d_model),
                 nn.LayerNorm(d_model),
                 nn.GELU(),
             )
@@ -372,7 +439,7 @@ def _load_expert_c_train_data(
         cn_list.append(cn_p)
         y_list.append(arrs["labels"].astype(np.int8))
         cid_list.append(arrs["contig_ids"])
-        sw_list.append(np.full(len(arrs["labels"]), float(w_map.get(part, 1.0)), dtype=np.float32))
+        sw_list.append(np.full(len(arrs["labels"]), w_map.get(part, 1.0), dtype=np.float32))
 
     return (
         np.concatenate(tk_list),
@@ -626,7 +693,7 @@ def train_expert_c(
         seed=seed,
         orf_feat_dim=orf_feat_dim,
     )
-    n_params = int(sum(p.numel() for p in model.parameters()))
+    n_params = sum(p.numel() for p in model.parameters())
 
     va_win_sc = _predict_orf(model, va_w[1], va_w[2], device)
     va_chim_sc = _predict_orf(model, va_c[1], va_c[2], device)

@@ -1093,6 +1093,22 @@ def test_model_registry_promotes_unified_model_over_stage1_2_when_present(tmp_pa
     assert found_v43[0]["version"] == "Unified V4.3"
     assert found_v43[0]["params"] == 3715879 + 1747664
 
+    # 显式写入 schema_version / model_version 契约字段时优先按显式版本标识上报
+    (uni_dir / "unified_summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "model_version": "Unified V4.3-Test",
+                "arch": "unified_v4_3",
+                "total_params": 1747664,
+            }
+        ),
+        encoding="utf-8",
+    )
+    found_explicit = discover_available_models(project_root=ws_root)
+    assert found_explicit[0]["version"] == "Unified V4.3-Test"
+    assert found_explicit[0]["schema_version"] == "1.0"
+
 
 def test_manager_executes_unified_phage_model_and_exports_unified_artifacts(tmp_path: Path, monkeypatch):
     import asyncio

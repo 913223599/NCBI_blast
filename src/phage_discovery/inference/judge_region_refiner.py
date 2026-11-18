@@ -10,12 +10,13 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -92,6 +93,28 @@ def _load_judge_ckpt(ckpt_path: Path, device: str):
     return model
 
 
+def resolve_unified_version_tag(
+    uni_meta: Optional[Dict[str, Any]] = None,
+    s12_meta: Optional[Dict[str, Any]] = None,
+) -> str:
+    """按显式声明优先、架构标识与 DNA 微调元信息兜底的契约统一解析版本标签。"""
+    u_m = uni_meta or {}
+    s_m = s12_meta or {}
+    explicit = str(u_m.get("model_version") or u_m.get("version") or "").strip()
+    if explicit:
+        return explicit
+
+    uni_arch = str(u_m.get("arch") or "").strip().lower()
+    if uni_arch.startswith("unified_v"):
+        suffix = uni_arch[len("unified_v") :].replace("_", ".")
+        if suffix:
+            return f"Unified V{suffix}"
+
+    if "v4_3_dna_finetune" in s_m or str(s_m.get("model_version") or "").lower() == "v4_3":
+        return "Unified V4.3"
+    return "Unified V4"
+
+
 def load_judge_ensemble_bundle(
     models_v4_root: Path,
     *,
@@ -103,6 +126,7 @@ def load_judge_ensemble_bundle(
     """从 models/full_v4 下按相对路径加载统一分化模型（优先）或回退加载 R3 + R2 分离模型组。"""
     root = Path(models_v4_root).resolve()
     uni_dir = root / "orf_judge_unified"
+    uni_meta: Dict[str, Any] = {}
     if prefer_unified and (uni_dir / "unified_judge_seq.pt").is_file():
         stat_pt = uni_dir / "orf_judge_statonly.pt"
         if not stat_pt.is_file():
@@ -111,6 +135,14 @@ def load_judge_ensemble_bundle(
         cal_npz = uni_dir / "logit_calibrator.npz"
         if not cal_npz.is_file():
             cal_npz = root / r3_subdir / "logit_calibrator.npz"
+        summary_p = uni_dir / "unified_summary.json"
+        if summary_p.is_file():
+            try:
+                loaded_sum = json.loads(summary_p.read_text(encoding="utf-8"))
+                if isinstance(loaded_sum, dict):
+                    uni_meta = loaded_sum
+            except Exception:
+                uni_meta = {}
         r2_seq_obj = None
         use_uni = True
     else:
@@ -135,12 +167,31 @@ def load_judge_ensemble_bundle(
             "phage_bias": float(cd["phage_bias"][0]),
         }
 
+    r3_seq_model = _load_judge_ckpt(seq_pt, device)
+    judge_arch = str(uni_meta.get("arch") or getattr(r3_seq_model, "arch", "") or ("unified" if use_uni else "r3"))
+    if use_uni and not uni_meta.get("arch"):
+        uni_meta = {**uni_meta, "arch": judge_arch}
+
+    s12_meta: Dict[str, Any] = {}
+    s12_meta_p = root / "stage1_2" / "stage1_2_meta.json"
+    if s12_meta_p.is_file():
+        try:
+            loaded_s12 = json.loads(s12_meta_p.read_text(encoding="utf-8"))
+            if isinstance(loaded_s12, dict):
+                s12_meta = loaded_s12
+        except Exception:
+            s12_meta = {}
+    model_version = resolve_unified_version_tag(uni_meta, s12_meta) if use_uni else "R3+R2 Ensemble"
+
     return {
         "r3_stat": _load_judge_ckpt(stat_pt, device),
-        "r3_seq": _load_judge_ckpt(seq_pt, device),
+        "r3_seq": r3_seq_model,
         "calibrator": calibrator,
         "r2_seq": r2_seq_obj,
         "unified_mode": use_uni,
+        "judge_arch": judge_arch,
+        "model_version": model_version,
+        "judge_summary_meta": uni_meta,
         "device": device,
     }
 
@@ -398,6 +449,689 @@ def refine_region_boundaries_with_judge(
             )
         )
     return merge_nearby_regions(refined, merge_gap_bp=merge_gap_bp)
+
+
+def _subbin_interval_stats(
+    prof: Optional[np.ndarray],
+    start_bp: int,
+    end_bp: int,
+    *,
+    bin_bp: int = 200,
+) -> Tuple[float, float]:
+    """计算指定 DNA 区间在 200 bp SubBin 连续置信度曲线上的均值与峰值。"""
+    if prof is None or len(prof) == 0 or end_bp <= start_bp:
+        return 0.0, 0.0
+    b0 = max(0, start_bp // bin_bp)
+    b1 = min(len(prof), max(b0 + 1, (end_bp + bin_bp - 1) // bin_bp))
+    sl = prof[b0:b1]
+    if len(sl) == 0:
+        return 0.0, 0.0
+    return float(np.mean(sl)), float(np.max(sl))
+
+
+def refine_region_boundaries_bimodal(
+    regions: Sequence[PredictedRegion],
+    orfs_by_contig: Dict[str, List[Tuple[int, int, int, str]]],
+    scored_by_contig: Dict[str, Dict[str, np.ndarray]],
+    contigs_bp: Dict[str, int],
+    profiles_by_contig: Mapping[str, np.ndarray],
+    *,
+    snap_out_sub_mean: float = 0.15,
+    snap_out_sub_max: float = 0.24,
+    snap_min_phage: float = 0.80,
+    min_hang_bp: int = 25,
+    min_region_bp: int = 3000,
+    merge_gap_bp: int = 3000,
+    bin_bp: int = 200,
+) -> Tuple[List[PredictedRegion], int]:
+    """
+    DNA 200 bp SubBin 与 UnifiedJudge 双模态门控边界防劈断校准：
+    1. 仅当被边界劈断的 ORF 既具备高置信噬菌体蛋白语义 (phage >= snap_min_phage 或核心模块支持)
+       又在其基因外露部分保有明确 200 bp SubBin 过渡支持时，外扩囊括完整 ORF，防止把跨界嵌合片段盲目拖入；
+    2. 若被劈断 ORF 为强宿主/防御基因 (p9 >= 0.62 或 phage < 0.15 且非核心模块) 且外露 SubBin 偏低，则回退缩进至该基因外缘。
+    """
+    if not regions:
+        return [], 0
+
+    refined: List[PredictedRegion] = []
+    snapped_edges = 0
+
+    for reg in regions:
+        cid = reg.contig_id
+        orfs = orfs_by_contig.get(cid, [])
+        sc = scored_by_contig.get(cid)
+        prof = profiles_by_contig.get(cid)
+        if not orfs or sc is None or len(sc.get("phage_probs", ())) != len(orfs):
+            refined.append(reg)
+            continue
+
+        ph_p = sc["phage_probs"]
+        f10_p = sc["func10_probs"]
+        c_len = contigs_bp.get(cid, orfs[-1][1])
+        ns, ne = reg.start_bp, reg.end_bp
+
+        # 左边界劈断检查
+        for idx, (gs, ge, _, _) in enumerate(orfs):
+            if gs >= ns:
+                break
+            if ge > ns + min_hang_bp:
+                overhang = ns - gs
+                out_mean, out_max = _subbin_interval_stats(prof, gs, ns, bin_bp=bin_bp)
+                p_val = float(ph_p[idx])
+                p9_val = float(f10_p[idx, 9])
+                core_max = float(np.max(f10_p[idx, :5]))
+                func_max = float(np.max(f10_p[idx, :8]))
+
+                if p9_val < 0.55 and (p_val >= snap_min_phage or (core_max >= 0.55 and p_val >= 0.65)):
+                    if (out_mean >= snap_out_sub_mean) or (overhang <= 300 and out_max >= snap_out_sub_max):
+                        if gs < ns:
+                            ns = gs
+                            snapped_edges += 1
+                elif (p9_val >= 0.62 and p_val < 0.45) or (p_val < 0.15 and func_max < 0.30 and float(f10_p[idx, 4]) < 0.25):
+                    if out_mean < 0.20 and (ne - ge) >= min_region_bp and ge > ns:
+                        ns = ge
+                        snapped_edges += 1
+
+        # 右边界劈断检查
+        for idx in range(len(orfs) - 1, -1, -1):
+            gs, ge, _, _ = orfs[idx]
+            if ge <= ne:
+                break
+            if gs < ne - min_hang_bp:
+                overhang = ge - ne
+                out_mean, out_max = _subbin_interval_stats(prof, ne, ge, bin_bp=bin_bp)
+                p_val = float(ph_p[idx])
+                p9_val = float(f10_p[idx, 9])
+                core_max = float(np.max(f10_p[idx, :5]))
+                func_max = float(np.max(f10_p[idx, :8]))
+
+                if p9_val < 0.55 and (p_val >= snap_min_phage or (core_max >= 0.55 and p_val >= 0.65)):
+                    if (out_mean >= snap_out_sub_mean) or (overhang <= 300 and out_max >= snap_out_sub_max):
+                        if ge > ne:
+                            ne = ge
+                            snapped_edges += 1
+                elif (p9_val >= 0.62 and p_val < 0.45) or (p_val < 0.15 and func_max < 0.30 and float(f10_p[idx, 4]) < 0.25):
+                    if out_mean < 0.20 and (gs - ns) >= min_region_bp and gs < ne:
+                        ne = gs
+                        snapped_edges += 1
+
+        refined.append(
+            PredictedRegion(
+                contig_id=cid,
+                start_bp=max(0, min(ns, ne)),
+                end_bp=min(c_len, max(ns, ne)),
+                peak_score=reg.peak_score,
+                mean_score=reg.mean_score,
+                window_count=reg.window_count,
+            )
+        )
+    return merge_nearby_regions(refined, merge_gap_bp=merge_gap_bp), snapped_edges
+
+
+def _extract_active_subbin_segments(
+    prof: np.ndarray,
+    start_bp: int,
+    end_bp: int,
+    contig_len: int,
+    *,
+    sub_thr: float = 0.45,
+    bin_bp: int = 200,
+) -> List[Tuple[int, int]]:
+    """提取指定区间内平滑填充单 bin 缺口后的连续 >= sub_thr 的 SubBin 活跃片段。"""
+    n_bins = len(prof)
+    b0 = max(0, start_bp // bin_bp)
+    b1 = min(n_bins, (end_bp + bin_bp - 1) // bin_bp)
+    if b1 <= b0:
+        return []
+    act = prof[b0:b1] >= sub_thr
+    if act.size >= 3:
+        act = act.copy()
+        act[1:-1] = act[1:-1] | ((~act[1:-1]) & act[:-2] & act[2:])
+    segs: List[Tuple[int, int]] = []
+    cur_s = -1
+    for offset, flag in enumerate(act):
+        ab = b0 + offset
+        if flag and cur_s < 0:
+            cur_s = ab
+        elif not flag and cur_s >= 0:
+            segs.append((cur_s * bin_bp, min(contig_len, ab * bin_bp)))
+            cur_s = -1
+    if cur_s >= 0:
+        segs.append((cur_s * bin_bp, min(contig_len, b1 * bin_bp)))
+    return segs
+
+
+def _can_absorb_companion_peak(
+    prof: np.ndarray,
+    orfs: Sequence[Tuple[int, int, int, str]],
+    ph: np.ndarray,
+    f10: np.ndarray,
+    r2: np.ndarray,
+    ps: int,
+    pe: int,
+    valley_s: int,
+    valley_e: int,
+    *,
+    min_peak_len_bp: int = 4200,
+    bin_bp: int = 200,
+) -> bool:
+    """校验窄谷对面的伴生 SubBin 次级峰是否属于同一前噬菌体的早期/极点侧翼臂。"""
+    if (pe - ps) < min_peak_len_bp:
+        return False
+    sm, sx = _subbin_interval_stats(prof, ps, pe, bin_bp=bin_bp)
+    if sx < 0.85 or sm < 0.65:
+        return False
+
+    v_idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if valley_s <= 0.5 * (gs + ge) <= valley_e]
+    p_idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if ps <= 0.5 * (gs + ge) <= pe]
+    if not p_idxs:
+        return False
+
+    if v_idxs:
+        if float(np.max(f10[v_idxs, 9])) >= 0.65:
+            return False
+        consec_host = 0
+        for vi in v_idxs:
+            if float(ph[vi]) < 0.15 and float(f10[vi, 4]) < 0.20:
+                consec_host += 1
+                if consec_host >= 3:
+                    return False
+            else:
+                consec_host = 0
+
+    n_head = int(np.sum((r2[p_idxs, 0] >= 0.55) | (f10[p_idxs, 0] >= 0.60)))
+    if n_head > 0:
+        return False
+    if float(np.max(f10[p_idxs, 9])) >= 0.65:
+        return False
+    return any(float(ph[pi]) >= 0.70 or float(f10[pi, 4]) >= 0.70 for pi in p_idxs)
+
+
+def absorb_companion_subbin_peaks(
+    regions: Sequence[PredictedRegion],
+    orfs_by_contig: Mapping[str, Sequence[Tuple[int, int, int, str]]],
+    scored_by_contig: Mapping[str, Dict[str, np.ndarray]],
+    profiles_by_contig: Mapping[str, np.ndarray],
+    contigs_bp: Mapping[str, int],
+    *,
+    max_valley_bp: int = 4500,
+    search_span_bp: int = 16000,
+    min_peak_len_bp: int = 4200,
+    sub_thr: float = 0.45,
+    merge_gap_bp: int = 3000,
+    bin_bp: int = 200,
+) -> Tuple[List[PredictedRegion], int]:
+    """
+    吸纳与主区段仅隔窄低谷 (<=4.5 kb) 且未独立成区的强 SubBin 伴生次级峰。
+    通过谷内宿主墙校验、次级峰无冗余 Head 核约束与邻近主区段间隔保护杜绝错误并发。
+    """
+    if not regions:
+        return [], 0
+
+    by_cid: Dict[str, List[PredictedRegion]] = defaultdict(list)
+    for r in regions:
+        by_cid[r.contig_id].append(r)
+
+    absorbed_cnt = 0
+    out: List[PredictedRegion] = []
+    for cid, regs in sorted(by_cid.items()):
+        regs_s = sorted(regs, key=lambda x: (x.start_bp, x.end_bp))
+        prof = profiles_by_contig.get(cid)
+        orfs = orfs_by_contig.get(cid, [])
+        sc = scored_by_contig.get(cid)
+        if prof is None or len(prof) == 0 or not orfs or sc is None or len(sc.get("phage_probs", ())) != len(orfs):
+            out.extend(regs_s)
+            continue
+
+        ph = sc["phage_probs"]
+        f10 = sc["func10_probs"]
+        r2 = _get_r2_core_probs(sc)
+        c_len = contigs_bp.get(cid, max(len(prof) * bin_bp, orfs[-1][1]))
+
+        for idx_r, reg in enumerate(regs_s):
+            ns, ne = reg.start_bp, reg.end_bp
+            prev_limit = regs_s[idx_r - 1].end_bp + 2000 if idx_r > 0 else 0
+            next_limit = regs_s[idx_r + 1].start_bp - 2000 if idx_r + 1 < len(regs_s) else c_len
+
+            l_lim = max(prev_limit, ns - search_span_bp)
+            l_peaks = _extract_active_subbin_segments(prof, l_lim, max(l_lim, ns - bin_bp), c_len, sub_thr=sub_thr, bin_bp=bin_bp)
+            if l_peaks:
+                ps, pe = l_peaks[-1]
+                if 0 < (ns - pe) <= max_valley_bp and _can_absorb_companion_peak(
+                    prof, orfs, ph, f10, r2, ps, pe, pe, ns, min_peak_len_bp=min_peak_len_bp, bin_bp=bin_bp
+                ):
+                    ns = ps
+                    absorbed_cnt += 1
+
+            r_lim = min(next_limit, ne + search_span_bp)
+            r_peaks = _extract_active_subbin_segments(prof, min(r_lim, ne + bin_bp), r_lim, c_len, sub_thr=sub_thr, bin_bp=bin_bp)
+            if r_peaks:
+                ps, pe = r_peaks[0]
+                if 0 < (ps - ne) <= max_valley_bp and _can_absorb_companion_peak(
+                    prof, orfs, ph, f10, r2, ps, pe, ne, ps, min_peak_len_bp=min_peak_len_bp, bin_bp=bin_bp
+                ):
+                    ne = pe
+                    absorbed_cnt += 1
+
+            out.append(PredictedRegion(cid, ns, ne, reg.peak_score, reg.mean_score, reg.window_count))
+
+    return merge_nearby_regions(out, merge_gap_bp=merge_gap_bp), absorbed_cnt
+
+
+def _should_snap_core_orf(
+    ph: np.ndarray,
+    f10: np.ndarray,
+    r2: np.ndarray,
+    prof: np.ndarray,
+    idx_o: int,
+    out_s: int,
+    out_e: int,
+    *,
+    min_r2_core: float,
+    min_ph_core: float,
+    max_p9_core: float,
+    min_out_sub_max: float,
+    bin_bp: int,
+) -> bool:
+    """判定被边界轻度切分的边缘 ORF 是否属于具备外侧 DNA 残余支持的高置信噬菌体核心/整合酶蛋白。"""
+    if float(ph[idx_o]) < min_ph_core or float(f10[idx_o, 9]) >= max_p9_core:
+        return False
+    if float(np.max(r2[idx_o, :5])) < min_r2_core:
+        return False
+    _, out_max = _subbin_interval_stats(prof, out_s, out_e, bin_bp=bin_bp)
+    return out_max >= min_out_sub_max
+
+
+def snap_split_core_orfs(
+    regions: Sequence[PredictedRegion],
+    orfs_by_contig: Mapping[str, Sequence[Tuple[int, int, int, str]]],
+    scored_by_contig: Mapping[str, Dict[str, np.ndarray]],
+    profiles_by_contig: Mapping[str, np.ndarray],
+    *,
+    min_r2_core: float = 0.70,
+    min_ph_core: float = 0.90,
+    max_p9_core: float = 0.20,
+    min_out_sub_max: float = 0.05,
+    max_snap_out_bp: int = 2200,
+    min_hang_bp: int = 25,
+    tandem_touch_bp: int = 200,
+    bin_bp: int = 200,
+) -> Tuple[List[PredictedRegion], int]:
+    """
+    在串联切分之后、att 对齐之前执行的精确核心与整合蛋白防劈断校准：
+    - 锁定紧邻同 Contig 相邻区段 (<=200 bp) 的串联切分点，绝不越线吞入邻近前噬菌体；
+    - 精确接纳高置信形态/整合酶核心边缘断口，要求外露段具备 >= min_out_sub_max 的 DNA 残余支持。
+    """
+    if not regions:
+        return [], 0
+
+    by_cid: Dict[str, List[PredictedRegion]] = defaultdict(list)
+    for r in regions:
+        by_cid[r.contig_id].append(r)
+
+    snapped = 0
+    out: List[PredictedRegion] = []
+    for cid, regs in sorted(by_cid.items()):
+        regs_s = sorted(regs, key=lambda x: (x.start_bp, x.end_bp))
+        orfs = orfs_by_contig.get(cid, [])
+        sc = scored_by_contig.get(cid)
+        prof = profiles_by_contig.get(cid)
+        if not orfs or sc is None or prof is None or len(sc.get("phage_probs", ())) != len(orfs):
+            out.extend(regs_s)
+            continue
+
+        ph = sc["phage_probs"]
+        f10 = sc["func10_probs"]
+        r2 = _get_r2_core_probs(sc)
+        for idx_r, reg in enumerate(regs_s):
+            ns, ne = reg.start_bp, reg.end_bp
+            prev_end = regs_s[idx_r - 1].end_bp if idx_r > 0 else 0
+            next_start = regs_s[idx_r + 1].start_bp if idx_r + 1 < len(regs_s) else 10**12
+            touch_prev = idx_r > 0 and (ns - prev_end) <= tandem_touch_bp
+            touch_next = (idx_r + 1 < len(regs_s)) and (next_start - ne) <= tandem_touch_bp
+
+            if not touch_prev:
+                for i, (gs, ge, _, _) in enumerate(orfs):
+                    if gs >= ns:
+                        break
+                    if gs >= prev_end and ge > ns + min_hang_bp and (ns - gs) <= max_snap_out_bp:
+                        if _should_snap_core_orf(
+                            ph,
+                            f10,
+                            r2,
+                            prof,
+                            i,
+                            gs,
+                            ns,
+                            min_r2_core=min_r2_core,
+                            min_ph_core=min_ph_core,
+                            max_p9_core=max_p9_core,
+                            min_out_sub_max=min_out_sub_max,
+                            bin_bp=bin_bp,
+                        ):
+                            ns = min(ns, gs)
+                            snapped += 1
+
+            if not touch_next:
+                for i in range(len(orfs) - 1, -1, -1):
+                    gs, ge, _, _ = orfs[i]
+                    if ge <= ne:
+                        break
+                    if ge <= next_start and gs < ne - min_hang_bp and (ge - ne) <= max_snap_out_bp:
+                        if _should_snap_core_orf(
+                            ph,
+                            f10,
+                            r2,
+                            prof,
+                            i,
+                            ne,
+                            ge,
+                            min_r2_core=min_r2_core,
+                            min_ph_core=min_ph_core,
+                            max_p9_core=max_p9_core,
+                            min_out_sub_max=min_out_sub_max,
+                            bin_bp=bin_bp,
+                        ):
+                            ne = max(ne, ge)
+                            snapped += 1
+
+            out.append(PredictedRegion(cid, ns, ne, reg.peak_score, reg.mean_score, reg.window_count))
+    return out, snapped
+
+
+def _is_true_integrase_orf(ph: np.ndarray, f10: np.ndarray, idx_o: int) -> bool:
+    """区分高置信噬菌体整合酶 (P4) 与插入序列转座酶 (P8)，杜绝将宿主 IS 元件误作整合极点。"""
+    p4 = float(f10[idx_o, 4])
+    p8 = float(f10[idx_o, 8])
+    return p4 >= 0.65 and p4 >= p8 + 0.05 and float(ph[idx_o]) >= 0.72 and float(f10[idx_o, 9]) < 0.35
+
+
+def _has_unannotated_dead_moat(
+    prof: np.ndarray,
+    orfs: Sequence[Tuple[int, int, int, str]],
+    ph: np.ndarray,
+    f10: np.ndarray,
+    s_bp: int,
+    e_bp: int,
+    *,
+    max_moat_bp: int = 3000,
+    bin_bp: int = 200,
+) -> bool:
+    """检测跨越区间是否存在 >= max_moat_bp 且不被强噬菌体 ORF (ph>=0.80) 支撑的全冷 DNA 死水沟。"""
+    b0 = max(0, s_bp // bin_bp)
+    b1 = min(len(prof), (e_bp + bin_bp - 1) // bin_bp)
+    if b1 <= b0:
+        return False
+    strong_bins = np.zeros(b1 - b0, dtype=bool)
+    for idx_o, (gs, ge, _, _) in enumerate(orfs):
+        if ge <= s_bp or gs >= e_bp:
+            continue
+        if float(ph[idx_o]) >= 0.80 and float(f10[idx_o, 9]) < 0.40:
+            ib0 = max(b0, gs // bin_bp) - b0
+            ib1 = min(b1, (ge + bin_bp - 1) // bin_bp) - b0
+            strong_bins[ib0:ib1] = True
+
+    need_bins = max_moat_bp // bin_bp
+    run = 0
+    for offset, v in enumerate(prof[b0:b1]):
+        if float(v) < 0.035 and not strong_bins[offset]:
+            run += 1
+            if run >= need_bins:
+                return True
+        else:
+            run = 0
+    return False
+
+
+def _passes_integrase_span_quality(
+    prof: np.ndarray,
+    orfs: Sequence[Tuple[int, int, int, str]],
+    sc: Dict[str, np.ndarray],
+    r2: np.ndarray,
+    span_idxs: List[int],
+    anch_i: int,
+    dist_bp: int,
+    s_bp: int,
+    e_bp: int,
+    *,
+    max_search_bp: int,
+    min_long_sub_mean: float,
+    max_moat_bp: int,
+    bin_bp: int,
+) -> bool:
+    """基于碱基长度 (bp) 加权与死水沟校验判定 Integrase 闭环检索跨度是否安全可靠。"""
+    ph = sc["phage_probs"]
+    f10 = sc["func10_probs"]
+    if not span_idxs or dist_bp > max_search_bp or not _is_true_integrase_orf(ph, f10, anch_i):
+        return False
+
+    span_ph = ph[span_idxs]
+    span_f10 = f10[span_idxs]
+    span_r2 = r2[span_idxs]
+    if int(np.sum((span_r2[:, 0] >= 0.60) | (span_f10[:, 0] >= 0.65))) > 0:
+        return False
+    if _has_unannotated_dead_moat(prof, orfs, ph, f10, s_bp, e_bp, max_moat_bp=max_moat_bp, bin_bp=bin_bp):
+        return False
+
+    consec_host = 0
+    for si in span_idxs:
+        if float(ph[si]) < 0.20 and float(f10[si, 4]) < 0.20:
+            consec_host += 1
+            if consec_host >= 3:
+                return False
+        else:
+            consec_host = 0
+
+    lens = np.array([max(50, orfs[si][1] - orfs[si][0]) for si in span_idxs], dtype=np.float64)
+    bp_tot = float(np.sum(lens))
+    bp_mean = float(np.sum(span_ph * lens) / bp_tot)
+    bp_frac = float(np.sum(lens[span_ph >= 0.50]) / bp_tot)
+    host_bp = float(np.sum(lens[(span_ph < 0.20) | (span_f10[:, 9] >= 0.62)]))
+    max_p9 = float(np.max(span_f10[:, 9]))
+    sm, sx = _subbin_interval_stats(prof, s_bp, e_bp, bin_bp=bin_bp)
+
+    if dist_bp <= 2200:
+        return bp_mean >= 0.72 and host_bp == 0.0 and max_p9 < 0.35 and sx >= 0.25
+    return (
+        bp_mean >= 0.62
+        and bp_frac >= 0.56
+        and max_p9 < 0.62
+        and host_bp <= 2500.0
+        and (sm >= min_long_sub_mean or sx >= 0.28)
+    )
+
+
+def _search_directional_integrase_anchor(
+    orfs: Sequence[Tuple[int, int, int, str]],
+    sc: Dict[str, np.ndarray],
+    r2: np.ndarray,
+    prof: np.ndarray,
+    *,
+    anchor_edge_bp: int,
+    limit_bp: int,
+    boundary_orf_idx: int,
+    direction: int,
+    edge_in_int: float,
+    locked_side: bool,
+    max_search_bp: int,
+    min_long_sub_mean: float,
+    max_moat_bp: int,
+    bin_bp: int,
+) -> Optional[int]:
+    """沿单向 (direction=-1 向左, +1 向右) 搜索未封口端点的真 Integrase 锚点并延拓同族整合酶簇。"""
+    if locked_side or edge_in_int >= 0.55:
+        return None
+
+    ph = sc["phage_probs"]
+    f10 = sc["func10_probs"]
+    cand_indices = (
+        range(boundary_orf_idx - 1, -1, -1)
+        if direction < 0
+        else range(boundary_orf_idx + 1, len(orfs))
+    )
+
+    best_idx: Optional[int] = None
+    for ci in cand_indices:
+        cand_bound = orfs[ci][0] if direction < 0 else orfs[ci][1]
+        if (cand_bound < limit_bp) if direction < 0 else (cand_bound > limit_bp):
+            break
+        dist_bp = (anchor_edge_bp - cand_bound) if direction < 0 else (cand_bound - anchor_edge_bp)
+        if dist_bp > max_search_bp:
+            break
+        span_idxs = list(range(ci, boundary_orf_idx)) if direction < 0 else list(range(boundary_orf_idx + 1, ci + 1))
+        s_bp, e_bp = (cand_bound, anchor_edge_bp) if direction < 0 else (anchor_edge_bp, cand_bound)
+        if _passes_integrase_span_quality(
+            prof,
+            orfs,
+            sc,
+            r2,
+            span_idxs,
+            ci,
+            dist_bp,
+            s_bp,
+            e_bp,
+            max_search_bp=max_search_bp,
+            min_long_sub_mean=min_long_sub_mean,
+            max_moat_bp=max_moat_bp,
+            bin_bp=bin_bp,
+        ):
+            best_idx = ci
+
+    if best_idx is None:
+        return None
+
+    # 同一末端 <=500 bp 内的连续 Integrase 碎片簇整体囊括
+    while True:
+        next_idx = best_idx + direction
+        if next_idx < 0 or next_idx >= len(orfs):
+            break
+        next_bound = orfs[next_idx][0] if direction < 0 else orfs[next_idx][1]
+        within_limit = (next_bound >= limit_bp) if direction < 0 else (next_bound <= limit_bp)
+        adj_gap = (orfs[best_idx][0] - orfs[next_idx][1]) if direction < 0 else (orfs[next_idx][0] - orfs[best_idx][1])
+        next_dist = abs(next_bound - anchor_edge_bp)
+        if (
+            within_limit
+            and adj_gap <= 500
+            and next_dist <= max_search_bp
+            and _is_true_integrase_orf(ph, f10, next_idx)
+        ):
+            best_idx = next_idx
+        else:
+            break
+
+    final_bound = orfs[best_idx][0] if direction < 0 else orfs[best_idx][1]
+    if (final_bound < anchor_edge_bp) if direction < 0 else (final_bound > anchor_edge_bp):
+        return final_bound
+    return None
+
+
+def close_flanks_to_integrase_anchors(
+    regions: Sequence[PredictedRegion],
+    orfs_by_contig: Mapping[str, Sequence[Tuple[int, int, int, str]]],
+    scored_by_contig: Mapping[str, Dict[str, np.ndarray]],
+    profiles_by_contig: Mapping[str, np.ndarray],
+    contigs_bp: Mapping[str, int],
+    *,
+    locked_keys: Optional[Set[str]] = None,
+    max_search_bp: int = 18000,
+    min_long_sub_mean: float = 0.040,
+    max_moat_bp: int = 3000,
+    bin_bp: int = 200,
+) -> Tuple[List[PredictedRegion], int]:
+    """
+    基于真整合酶 (Integrase P4) 极点锚定的侧翼闭环定界：
+    - 严禁修改已被精确 attL/attR 对齐锁死的区段 (locked_keys)；
+    - 严禁重新合并区段，并锁死串联/紧贴边界 (<=1.5 kb)，永久保护背靠背前噬菌体对；
+    - 仅在未封口侧翼搜索受高蛋白连续度与非死水沟支撑保护的 Integrase 极点延伸。
+    """
+    if not regions:
+        return [], 0
+
+    locked = locked_keys or set()
+    by_cid: Dict[str, List[PredictedRegion]] = defaultdict(list)
+    for r in regions:
+        by_cid[r.contig_id].append(r)
+
+    closed_cnt = 0
+    out: List[PredictedRegion] = []
+    for cid, regs in sorted(by_cid.items()):
+        regs_s = sorted(regs, key=lambda x: (x.start_bp, x.end_bp))
+        orfs = orfs_by_contig.get(cid, [])
+        sc = scored_by_contig.get(cid)
+        prof = profiles_by_contig.get(cid)
+        if not orfs or sc is None or prof is None or len(sc.get("phage_probs", ())) != len(orfs):
+            out.extend(regs_s)
+            continue
+
+        ph = sc["phage_probs"]
+        f10 = sc["func10_probs"]
+        r2 = _get_r2_core_probs(sc)
+        c_len = contigs_bp.get(cid, max(len(prof) * bin_bp, orfs[-1][1]))
+
+        for idx_r, reg in enumerate(regs_s):
+            if f"{cid}:{reg.start_bp}-{reg.end_bp}" in locked:
+                out.append(reg)
+                continue
+
+            ns, ne = reg.start_bp, reg.end_bp
+            prev_end = regs_s[idx_r - 1].end_bp if idx_r > 0 else 0
+            next_start = regs_s[idx_r + 1].start_bp if idx_r + 1 < len(regs_s) else c_len
+            lock_l = idx_r > 0 and (ns - prev_end) <= 1500
+            lock_r = (idx_r + 1 < len(regs_s)) and (next_start - ne) <= 1500
+            prev_limit = prev_end + 3500 if idx_r > 0 else 0
+            next_limit = next_start - 3500 if idx_r + 1 < len(regs_s) else c_len
+
+            in_idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if ns <= 0.5 * (gs + ge) <= ne]
+            if not in_idxs:
+                out.append(reg)
+                continue
+
+            left_in_int = max((float(f10[i, 4]) for i in in_idxs[:3] if float(ph[i]) >= 0.65), default=0.0)
+            right_in_int = max((float(f10[i, 4]) for i in in_idxs[-3:] if float(ph[i]) >= 0.65), default=0.0)
+
+            new_l = _search_directional_integrase_anchor(
+                orfs,
+                sc,
+                r2,
+                prof,
+                anchor_edge_bp=ns,
+                limit_bp=prev_limit,
+                boundary_orf_idx=in_idxs[0],
+                direction=-1,
+                edge_in_int=left_in_int,
+                locked_side=lock_l,
+                max_search_bp=max_search_bp,
+                min_long_sub_mean=min_long_sub_mean,
+                max_moat_bp=max_moat_bp,
+                bin_bp=bin_bp,
+            )
+            if new_l is not None:
+                ns = new_l
+                closed_cnt += 1
+
+            new_r = _search_directional_integrase_anchor(
+                orfs,
+                sc,
+                r2,
+                prof,
+                anchor_edge_bp=ne,
+                limit_bp=next_limit,
+                boundary_orf_idx=in_idxs[-1],
+                direction=1,
+                edge_in_int=right_in_int,
+                locked_side=lock_r,
+                max_search_bp=max_search_bp,
+                min_long_sub_mean=min_long_sub_mean,
+                max_moat_bp=max_moat_bp,
+                bin_bp=bin_bp,
+            )
+            if new_r is not None:
+                ne = new_r
+                closed_cnt += 1
+
+            out.append(PredictedRegion(cid, ns, ne, reg.peak_score, reg.mean_score, reg.window_count))
+
+    return out, closed_cnt
 
 
 def extract_subbin_gray_candidates(
@@ -690,13 +1424,16 @@ def bridge_complementary_phage_fragments(
     orfs_by_contig: Dict[str, List[Tuple[int, int, int, str]]],
     scored_by_contig: Dict[str, Dict[str, np.ndarray]],
     *,
+    max_subarm_gap_bp: int = 10000,
     max_bridge_gap_bp: int = 20000,
 ) -> Tuple[List[PredictedRegion], int]:
     """
-    Opt-4b2 严格互补半臂桥接：
-    当同一 Contig 上两个邻接区段间距在 (3kb, 20kb]、总跨度 >= 75kb、gap 内具备 >= 2 个高置信噬菌体锚钉 (>=0.70)，
-    且一方是缺失 Head 的 >=30kb 早期复制/整合长臂、另一方是缺失 Integrase 的完整 Head+Tail+Lysis 结构臂时，
-    桥接回单株完整巨型前噬菌体（如 B. subtilis SPbeta），严禁合并两株独立完整噬菌体或独立小卫星岛。
+    Opt-4b2 两级严格互补半臂桥接：
+    - Pass 1（结构子臂合拢 <=10kb）：先将中间无强宿主防御且各自专精互补的 Head 臂 (h>=3, l==0, i==0)
+      与 Tail+Lysis 臂 (h==0, t>=3, l>=1, i==0) 合拢成完整结构大臂；
+    - Pass 2（早臂-结构臂桥接 <=20kb）：一方是缺失 Head 的 >=30kb 早期复制/整合长臂、
+      另一方是缺失 Integrase 的完整 Head+Tail+Lysis 结构臂，总跨度 >= 75kb 且 gap 内无宿主防御墙并含锚点支持时，
+      桥接回单株完整巨型前噬菌体（如 B. subtilis SPbeta），严禁合并两株独立完整噬菌体或独立小卫星岛。
     """
     if len(regions) <= 1:
         return list(regions), 0
@@ -723,6 +1460,35 @@ def bridge_complementary_phage_fragments(
         n_rep = int(np.sum(f10[:, 5] >= 0.50)) + int(np.sum(f10[:, 6] >= 0.50))
         return n_head, n_tail, n_lysis, n_int, n_rep, span
 
+    def _gap_supports_bridge(
+        cur: PredictedRegion,
+        nxt: PredictedRegion,
+        orfs: Sequence[Tuple[int, int, int, str]],
+        sc: Dict[str, np.ndarray],
+    ) -> bool:
+        gap_idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if cur.end_bp <= 0.5 * (gs + ge) <= nxt.start_bp]
+        if not gap_idxs:
+            return False
+        ph_arr = sc["phage_probs"]
+        f10 = sc["func10_probs"]
+        r2 = _get_r2_core_probs(sc)
+        p9_host = sum(1 for i in gap_idxs if float(f10[i, 9]) >= 0.65 and float(ph_arr[i]) < 0.40)
+        if p9_host >= 2:
+            return False
+        strong_anchors = sum(1 for i in gap_idxs if float(ph_arr[i]) >= 0.70)
+        core_or_ph = sum(1 for i in gap_idxs if float(np.max(r2[i, :5])) >= 0.45 or float(ph_arr[i]) >= 0.55)
+        return (strong_anchors >= 2) or (p9_host == 0 and core_or_ph >= 3)
+
+    def _merge_pair(cur: PredictedRegion, nxt: PredictedRegion, cid: str) -> PredictedRegion:
+        return PredictedRegion(
+            contig_id=cid,
+            start_bp=cur.start_bp,
+            end_bp=nxt.end_bp,
+            peak_score=max(cur.peak_score, nxt.peak_score),
+            mean_score=round(0.5 * (cur.mean_score + nxt.mean_score), 5),
+            window_count=cur.window_count + nxt.window_count,
+        )
+
     out: List[PredictedRegion] = []
     bridged_cnt = 0
     for cid in sorted(by_cid.keys()):
@@ -733,9 +1499,26 @@ def bridge_complementary_phage_fragments(
             out.extend(regs_s)
             continue
 
-        cur = regs_s[0]
-        ph_arr = sc["phage_probs"]
+        # Pass 1: 结构子臂优先合拢
+        pass1: List[PredictedRegion] = [regs_s[0]]
         for nxt in regs_s[1:]:
+            cur = pass1[-1]
+            gap = nxt.start_bp - cur.end_bp
+            if 1000 < gap <= max_subarm_gap_bp:
+                h1, t1, l1, i1, _, _ = _arm_stats(cur, orfs, sc)
+                h2, t2, l2, i2, _, _ = _arm_stats(nxt, orfs, sc)
+                sub_12 = (h1 >= 3 and i1 == 0 and l1 == 0) and (h2 == 0 and t2 >= 3 and l2 >= 1 and i2 == 0)
+                sub_21 = (h2 >= 3 and i2 == 0 and l2 == 0) and (h1 == 0 and t1 >= 3 and l1 >= 1 and i1 == 0)
+                if (sub_12 or sub_21) and _gap_supports_bridge(cur, nxt, orfs, sc):
+                    pass1[-1] = _merge_pair(cur, nxt, cid)
+                    bridged_cnt += 1
+                    continue
+            pass1.append(nxt)
+
+        # Pass 2: 早臂-结构臂桥接
+        pass2: List[PredictedRegion] = [pass1[0]]
+        for nxt in pass1[1:]:
+            cur = pass2[-1]
             gap = nxt.start_bp - cur.end_bp
             if 3000 < gap <= max_bridge_gap_bp:
                 h1, t1, l1, i1, rep1, len1 = _arm_stats(cur, orfs, sc)
@@ -746,22 +1529,13 @@ def bridge_complementary_phage_fragments(
                 arm_2_early = (h2 == 0 and len2 >= 30000 and rep2 >= 10 and i2 >= 1) and (
                     h1 >= 3 and t1 >= 5 and l1 >= 1 and i1 == 0
                 )
-                gap_idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if cur.end_bp <= 0.5 * (gs + ge) <= nxt.start_bp]
-                gap_anchors = sum(1 for i in gap_idxs if float(ph_arr[i]) >= 0.70)
-                if (arm_1_early or arm_2_early) and (nxt.end_bp - cur.start_bp) >= 75000 and gap_anchors >= 2:
-                    cur = PredictedRegion(
-                        contig_id=cid,
-                        start_bp=cur.start_bp,
-                        end_bp=nxt.end_bp,
-                        peak_score=max(cur.peak_score, nxt.peak_score),
-                        mean_score=round(0.5 * (cur.mean_score + nxt.mean_score), 5),
-                        window_count=cur.window_count + nxt.window_count,
-                    )
+                if (arm_1_early or arm_2_early) and (nxt.end_bp - cur.start_bp) >= 75000 and _gap_supports_bridge(cur, nxt, orfs, sc):
+                    pass2[-1] = _merge_pair(cur, nxt, cid)
                     bridged_cnt += 1
                     continue
-            out.append(cur)
-            cur = nxt
-        out.append(cur)
+            pass2.append(nxt)
+
+        out.extend(pass2)
     return out, bridged_cnt
 
 
@@ -855,6 +1629,69 @@ def split_tandem_prophage_regions(
     return out, split_cnt
 
 
+def reconcile_tentative_siblings(
+    regions: Sequence[PredictedRegion],
+    tentative_siblings: Sequence[Dict[str, Any]],
+    *,
+    stats: Optional[Dict[str, int]] = None,
+    suppressed_out: Optional[List[Dict[str, Any]]] = None,
+) -> List[PredictedRegion]:
+    """
+    验证暂存邻接兄弟臂是否在拓扑桥接阶段真正并入了更大前噬菌体；
+    凡未与主臂合拢的孤立碎片均安全撤回并计为 gray_rejected，严防新增独立误报。
+    """
+    if not tentative_siblings:
+        return list(regions)
+
+    sib_entries = list(tentative_siblings)
+    kept_out: List[PredictedRegion] = []
+
+    for reg in regions:
+        matched_isolated = False
+        for ent in sib_entries:
+            cand: PredictedRegion = ent["region"]
+            if reg.contig_id != cand.contig_id:
+                continue
+            ov = min(reg.end_bp, cand.end_bp) - max(reg.start_bp, cand.start_bp)
+            cand_len = max(1, cand.end_bp - cand.start_bp)
+            reg_len = reg.end_bp - reg.start_bp
+            # 若最终输出区段就是该暂存孤岛自己（未被其他臂桥接扩大），判定为未并入，安全剔除
+            if ov >= 0.8 * cand_len and reg_len <= cand_len + 1500:
+                matched_isolated = True
+                break
+        if not matched_isolated:
+            kept_out.append(reg)
+
+    for ent in sib_entries:
+        cand = ent["region"]
+        cand_len = max(1, cand.end_bp - cand.start_bp)
+        merged_into_host = any(
+            reg.contig_id == cand.contig_id
+            and (min(reg.end_bp, cand.end_bp) - max(reg.start_bp, cand.start_bp)) >= 0.7 * cand_len
+            and (reg.end_bp - reg.start_bp) >= cand_len + 2000
+            for reg in kept_out
+        )
+        if merged_into_host:
+            if stats is not None:
+                if not ent.get("is_shadow", False):
+                    stats["gray_rescued"] = stats.get("gray_rescued", 0) + 1
+                stats["sibling_rescued"] = stats.get("sibling_rescued", 0) + 1
+        else:
+            if not ent.get("is_shadow", False):
+                if stats is not None:
+                    stats["gray_rejected"] = stats.get("gray_rejected", 0) + 1
+                if suppressed_out is not None:
+                    suppressed_out.append({
+                        "contig_id": cand.contig_id,
+                        "start_bp": cand.start_bp,
+                        "end_bp": cand.end_bp,
+                        "reason": "gray_rejected",
+                        "mean_phage_prob": ent["mean_phage_prob"],
+                        "max_p9": ent["max_p9"],
+                    })
+    return kept_out
+
+
 def rescue_and_filter_regions_with_judge(
     base_regions: Sequence[PredictedRegion],
     relaxed_regions: Sequence[PredictedRegion],
@@ -876,14 +1713,16 @@ def rescue_and_filter_regions_with_judge(
     enable_elastic_rescue: bool = True,
     enable_tailocin_guard: bool = True,
     enable_topology_postprocess: bool = True,
+    enable_sibling_arm_rescue: bool = True,
     max_bridge_gap_bp: int = 20000,
     suppressed_out: Optional[List[Dict[str, Any]]] = None,
+    tentative_siblings_out: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[List[PredictedRegion], Dict[str, int]]:
     """
     主干双通道区段级仲裁与拓扑精修：
       1. 保留高置信主干区段，联合 Head A/B 拦截强防御岛、质粒 MGE 与复合接合耐药移动岛；
       2. 对远离主区段 (>= min_base_clearance_bp) 的 SubBin 灰区候选执行弹性梯度审核，并拦截纯尾簇细菌素；
-      3. 执行互补半臂桥接（挽救超长断裂前噬菌体）与严格双芯串联拆分。
+      3. 协同挽救紧邻已知前噬菌体的互补分离子臂并执行两级互补半臂桥接及严格双芯串联拆分。
     """
     kept: List[PredictedRegion] = []
     stats = {
@@ -892,6 +1731,7 @@ def rescue_and_filter_regions_with_judge(
         "gray_candidates": 0,
         "gray_rescued": 0,
         "gray_rejected": 0,
+        "sibling_rescued": 0,
         "topology_bridged": 0,
         "topology_split": 0,
     }
@@ -930,22 +1770,37 @@ def rescue_and_filter_regions_with_judge(
         kept.append(reg)
         stats["base_kept"] += 1
 
+    deferred_gray_rejects: List[Tuple[PredictedRegion, Optional[np.ndarray], Optional[np.ndarray], int, bool]] = []
     for cand in relaxed_regions:
-        if _region_overlaps_any(cand, base_regions, min_overlap_bp=500, min_clearance_bp=min_base_clearance_bp):
+        if _region_overlaps_any(cand, base_regions, min_overlap_bp=500, min_clearance_bp=0):
             continue
-        stats["gray_candidates"] += 1
+        in_clearance_shadow = _region_overlaps_any(cand, base_regions, min_overlap_bp=500, min_clearance_bp=min_base_clearance_bp)
+        if not in_clearance_shadow:
+            stats["gray_candidates"] += 1
+        elif not enable_sibling_arm_rescue:
+            continue
+
         orfs = orfs_by_contig.get(cand.contig_id, [])
         sc = scored_by_contig.get(cand.contig_id)
         if not orfs or sc is None:
-            stats["gray_rejected"] += 1
+            if not in_clearance_shadow:
+                stats["gray_rejected"] += 1
             continue
         idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if cand.start_bp <= 0.5 * (gs + ge) <= cand.end_bp]
         if len(idxs) < rescue_min_orfs:
-            stats["gray_rejected"] += 1
+            if enable_sibling_arm_rescue and len(idxs) >= 3 and (cand.end_bp - cand.start_bp) >= 4000:
+                deferred_gray_rejects.append((cand, sc["phage_probs"][idxs], sc["func10_probs"][idxs], len(idxs), in_clearance_shadow))
+            elif not in_clearance_shadow:
+                stats["gray_rejected"] += 1
             continue
 
         ph_sub = sc["phage_probs"][idxs]
         f10_sub = sc["func10_probs"][idxs]
+        if in_clearance_shadow:
+            # 紧邻 base 区段的碎片仅允许进入暂存兄弟臂判定，绝不放行成为独立区段
+            deferred_gray_rejects.append((cand, ph_sub, f10_sub, len(idxs), True))
+            continue
+
         r2_sub = _get_r2_core_probs(sc)[idxs]
         if _passes_gray_rescue_criteria(
             ph_sub,
@@ -967,30 +1822,85 @@ def rescue_and_filter_regions_with_judge(
             kept.append(cand)
             stats["gray_rescued"] += 1
         else:
-            stats["gray_rejected"] += 1
-            if suppressed_out is not None:
-                suppressed_out.append({
-                    "contig_id": cand.contig_id,
-                    "start_bp": cand.start_bp,
-                    "end_bp": cand.end_bp,
-                    "reason": "gray_rejected",
-                    "mean_phage_prob": round(float(np.mean(ph_sub)), 4),
-                    "max_p9": round(float(np.max(f10_sub[:, 9])), 4),
-                })
+            deferred_gray_rejects.append((cand, ph_sub, f10_sub, len(idxs), False))
 
+    tentative_siblings: List[Dict[str, Any]] = []
+    if deferred_gray_rejects:
+        kept_by_cid: Dict[str, List[PredictedRegion]] = defaultdict(list)
+        if enable_sibling_arm_rescue and kept:
+            for kr in kept:
+                kept_by_cid[kr.contig_id].append(kr)
+
+        for cand, ph_sub, f10_sub, n_orfs, is_shadow in deferred_gray_rejects:
+            assert ph_sub is not None and f10_sub is not None
+            mean_ph_v = round(float(np.mean(ph_sub)), 4)
+            max_p9_v = round(float(np.max(f10_sub[:, 9])), 4)
+            queued_sibling = False
+            if enable_sibling_arm_rescue and (cand.end_bp - cand.start_bp) >= 4000 and n_orfs >= 3:
+                anchors = kept_by_cid.get(cand.contig_id, [])
+                near_anchor = any(
+                    0 <= max(a.start_bp - cand.end_bp, cand.start_bp - a.end_bp) <= max_bridge_gap_bp
+                    for a in anchors
+                )
+                if near_anchor and mean_ph_v >= 0.70 and max_p9_v < 0.55 and float(np.max(f10_sub[:, :5])) >= 0.50:
+                    tentative_siblings.append({
+                        "region": cand,
+                        "mean_phage_prob": mean_ph_v,
+                        "max_p9": max_p9_v,
+                        "is_shadow": is_shadow,
+                    })
+                    queued_sibling = True
+            if not queued_sibling and not is_shadow:
+                stats["gray_rejected"] += 1
+                if suppressed_out is not None:
+                    suppressed_out.append({
+                        "contig_id": cand.contig_id,
+                        "start_bp": cand.start_bp,
+                        "end_bp": cand.end_bp,
+                        "reason": "gray_rejected",
+                        "mean_phage_prob": mean_ph_v,
+                        "max_p9": max_p9_v,
+                    })
+
+    # 重要：仅正式通过单岛核验的区段走邻接合并，暂存兄弟臂严禁靠 merge_nearby_regions 粘合，
+    # 必须直接进入互补拓扑桥接验证并在未成功并入主臂时安全剔除。
     merged = merge_nearby_regions(kept, merge_gap_bp=merge_gap_bp)
     if enable_topology_postprocess:
+        bridge_input = list(merged) + [ent["region"] for ent in tentative_siblings]
         merged, stats["topology_bridged"] = bridge_complementary_phage_fragments(
-            merged,
+            bridge_input,
             orfs_by_contig,
             scored_by_contig,
             max_bridge_gap_bp=max_bridge_gap_bp,
+        )
+        merged = reconcile_tentative_siblings(
+            merged,
+            tentative_siblings,
+            stats=stats,
+            suppressed_out=suppressed_out,
         )
         merged, stats["topology_split"] = split_tandem_prophage_regions(
             merged,
             orfs_by_contig,
             scored_by_contig,
         )
+    elif tentative_siblings:
+        if tentative_siblings_out is not None:
+            tentative_siblings_out.extend(tentative_siblings)
+        else:
+            for ent in tentative_siblings:
+                if not ent.get("is_shadow", False):
+                    stats["gray_rejected"] += 1
+                    if suppressed_out is not None:
+                        cand = ent["region"]
+                        suppressed_out.append({
+                            "contig_id": cand.contig_id,
+                            "start_bp": cand.start_bp,
+                            "end_bp": cand.end_bp,
+                            "reason": "gray_rejected",
+                            "mean_phage_prob": ent["mean_phage_prob"],
+                            "max_p9": ent["max_p9"],
+                        })
     return merged, stats
 
 

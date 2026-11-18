@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """双阶段高精度噬菌体基因组扫描与蛋白门控验证包。"""
+from .att_boundary_refiner import AttAlignmentHit, refine_regions_with_att_sites
 from .protein_gate import (
     ProteinGateConfig,
     RegionGateResult,
@@ -10,6 +11,8 @@ from .scanner import GenomeScanner, ScanResult
 from .unified_model import ALL_UNIFIED_EXPERTS, UnifiedPhageModel, UnifiedScanResult
 
 __all__ = [
+    "AttAlignmentHit",
+    "refine_regions_with_att_sites",
     "ProteinGateConfig",
     "RegionGateResult",
     "evaluate_regions_with_protein_gate",
