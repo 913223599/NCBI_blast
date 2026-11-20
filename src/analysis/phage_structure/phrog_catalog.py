@@ -55,11 +55,12 @@ ROLE_LABELS_CN: Dict[str, str] = {
     "LYSIS": "裂解系统 (Endolysin/Holin/Spanin)",
     "INTEGRASE": "溶原整合/切除重组酶",
     "NON_TAILED_MARKER": "非有尾噬菌体特征蛋白 (丝状/微病毒)",
+    "NON_TAIL_ENZYME": "非尾部代谢/核酸/调控酶 (护卫屏蔽)",
     "T6SS_CONFOUNDER": "宿主 VI 型分泌系统混淆干扰蛋白",
     "OTHER": "其他辅助或未知蛋白",
 }
 
-STRUCTURAL_INDEX_VERSION = "v2_non_tailed_n4"
+STRUCTURAL_INDEX_VERSION = "v3_seq_first_multidomain"
 
 STRUCTURAL_PHROG_CATEGORIES = frozenset({
     "head and packaging",
@@ -67,6 +68,13 @@ STRUCTURAL_PHROG_CATEGORIES = frozenset({
     "tail",
     "lysis",
     "integration and excision",
+})
+
+# 将常见混淆酶类与代谢调控蛋白也纳入本地高速验证库，避免在长尾部操纵子内因缺失 HMM 命中伪装成未知大蛋白
+NON_TAIL_GUARD_CATEGORIES = frozenset({
+    "DNA, RNA and nucleotide metabolism",
+    "moron, auxiliary metabolic gene and host takeover",
+    "transcription regulation",
 })
 
 _EXTRA_INDEX_ANNOT_RE = re.compile(
@@ -136,6 +144,8 @@ _ROLE_RULES: List[Tuple[str, re.Pattern[str]]] = [
     # 8. 裂解与整合
     ("LYSIS", re.compile(r"\b(?:endolysin|holin|antiholin|spanin|rz-like|rz1|lysozyme|muramidase|amidase)\b", re.I)),
     ("INTEGRASE", re.compile(r"\b(?:integrase|excisionase|site-specific\s+recombinase)\b", re.I)),
+    # 9. 非尾部代谢、核酸加工及调控酶类（位于结构/裂解角色之后，杜绝在长尾区伪装成未注释 TMP）
+    ("NON_TAIL_ENZYME", re.compile(r"\b(?:homing\s+endonuclease|lipase|acylhydrolase|dna\s+polymerase|rna\s+polymerase|dna\s+helicase|dna\s+methyltransferase|methylase|ribonucleoside[- ]diphosphate\s+reductase|ribonucleotide\s+reductase|exonuclease|endonuclease|topoisomerase|dna\s+ligase|primase|resolvase|helicase|transcriptional\s+(?:regulator|repressor|activator)|anti-?repressor|anti-?crispr|nucleotide\s+kinase|dutpase)\b", re.I)),
 ]
 
 
@@ -195,12 +205,15 @@ class PhrogCatalog:
         return self._records.get(norm, ("", ""))
 
     def structural_phrog_ids(self) -> set[str]:
+        """抽取结构相关 PHROG 以及具备明确注释的非尾护卫家族（酶/代谢/调控）供 HMM 高速校验。"""
         self.ensure_loaded()
-        return {
-            pid
-            for pid, (cat, ann) in self._records.items()
-            if cat in STRUCTURAL_PHROG_CATEGORIES or bool(_EXTRA_INDEX_ANNOT_RE.search(ann or ""))
-        }
+        out: set[str] = set()
+        for pid, (cat, ann) in self._records.items():
+            if cat in STRUCTURAL_PHROG_CATEGORIES or bool(_EXTRA_INDEX_ANNOT_RE.search(ann or "")):
+                out.add(pid)
+            elif cat in NON_TAIL_GUARD_CATEGORIES and ann and ann.lower() not in {"hypothetical protein", "unknown function"}:
+                out.add(pid)
+        return out
 
 
 _DEFAULT_CATALOG: Optional[PhrogCatalog] = None
@@ -219,7 +232,7 @@ def classify_structural_role(
     phrog_category: str = "",
 ) -> Tuple[str, str]:
     """
-    综合 PHROG ID 权威词典和蛋白产物名称，将蛋白映射至精确结构角色。
+    综合 PHROG ID 权威词典和蛋白产物名称，将蛋白映射至精确结构/防混淆角色。
     返回: (role_code, role_label_cn)
     """
     cat = phrog_category
@@ -249,4 +262,6 @@ def classify_structural_role(
         return "TAIL_OTHER", ROLE_LABELS_CN["TAIL_OTHER"]
     if "head" in c_low:
         return "HEAD_SCAFFOLD_PROTEASE", ROLE_LABELS_CN["HEAD_SCAFFOLD_PROTEASE"]
+    if any(k in c_low for k in ("dna, rna", "nucleotide metabolism", "transcription regulation", "moron, auxiliary metabolic")):
+        return "NON_TAIL_ENZYME", ROLE_LABELS_CN["NON_TAIL_ENZYME"]
     return "OTHER", ROLE_LABELS_CN["OTHER"]

@@ -101,6 +101,12 @@ function sourceModeText(mode: string): string {
         <span v-if="item.status === 'completed' && item.summary?.estimated_tail_length_nm != null">
           尾长约 {{ item.summary.estimated_tail_length_nm }} nm
         </span>
+        <span v-else-if="item.status === 'completed' && item.summary?.primary_morphotype === 'Podoviridae-like'">
+          短尾约 10–25 nm（无 TMP 标尺）
+        </span>
+        <span v-else-if="item.status === 'completed' && item.summary?.primary_morphotype === 'Non-tailed'">
+          无复合尾器 (0 nm)
+        </span>
         <span v-else>{{ item.created_at?.slice(5, 16) || '' }}</span>
       </div>
     </div>

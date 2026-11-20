@@ -24,6 +24,7 @@ from src.analysis.phage_structure.sequence_annotator import (
     scan_proteins_with_pyhmmer,
 )
 from src.analysis.phage_structure.tmp_analyzer import (
+    analyze_single_tmp,
     detect_polyx_regions,
     detect_tandem_repeats,
     select_and_analyze_tmps,
@@ -328,8 +329,10 @@ def test_phagetailfinder_log_viterbi_collinearity_and_tailocin_warning() -> None
 
 
 def test_schitoviridae_nontailed_and_lytic_tmp_collinearity() -> None:
-    """验证 Schitoviridae (N4-like)、5类 Non-tailed 与带溶菌域 TMP 共线性识别（防 DNA 甲基化酶误抓）。"""
-    # 1. Schitoviridae (N4-like): 巨型 vRNAP + 非收缩鞘 + 405aa 短通道蛋白不能误判 Sipho/Myo
+    """验证 Schitoviridae (N4-like)、5类 Non-tailed 与基于上下文/多域机制的假 TMP 通用免疫。"""
+    # 0. 验证即使词典不打单点补丁、外部仍传 phrog_2120 且名称写为 tape measure，但只要位于头包装三明治区且无长尾干核心，
+    #    通用操纵子语境校验仍能独立将其拦截为 []（不再依赖逐个 phrog_xxxx 补丁）
+    # 1. Schitoviridae (N4-like): 巨型 vRNAP + 非收缩鞘 + 374/405aa 通道蛋白不能误判 Sipho/Myo 且禁止用 TMP 估测尾长
     n4_prots = [
         StructureProteinItem(
             locus_tag="N4_VRNAP", contig_id="n4", start=100, end=10600, strand="+", length_aa=3500,
@@ -340,8 +343,8 @@ def test_schitoviridae_nontailed_and_lytic_tmp_collinearity() -> None:
             product="major head protein", phrog_id="phrog_1357", structural_role="MCP", hmm_score=500.0, translation="M" * 401,
         ),
         StructureProteinItem(
-            locus_tag="N4_CHAN", contig_id="n4", start=12300, end=13515, strand="+", length_aa=405,
-            product="tail length tape measure protein", phrog_id="phrog_2120", structural_role="TMP", hmm_score=460.0, translation="M" * 405,
+            locus_tag="N4_CHAN_EXPLICIT_GBK", contig_id="n4", start=12300, end=13515, strand="+", length_aa=374,
+            product="tail length tape measure protein", phrog_id="phrog_2120", structural_role="TMP", hmm_score=433.0, translation="M" * 374,
         ),
         StructureProteinItem(
             locus_tag="N4_POR", contig_id="n4", start=13600, end=15889, strand="+", length_aa=763,
@@ -353,8 +356,25 @@ def test_schitoviridae_nontailed_and_lytic_tmp_collinearity() -> None:
         ),
     ]
     n4_tmps = select_and_analyze_tmps(n4_prots, has_tailed_context=True)
-    n4_pred = classify_morphotype(n4_prots, n4_tmps, genome_length_bp=70000)
+    assert n4_tmps == []  # 通用操纵子与头部三明治规则直接在 TMP 选择层拦截，不靠特例补丁
+    n4_pred = classify_morphotype(n4_prots, n4_tmps, genome_length_bp=72566)
     assert n4_pred.morphotype_code == "Podoviridae-like"
+    assert n4_pred.estimated_tail_length_nm is None
+    assert n4_pred.estimated_tail_range_nm == []
+    # 若上游强行注入未通过验证的假 TMP，MorphotypeClassifier 也必须兜底压制尾长并输出警告
+    fake_injected = [
+        analyze_single_tmp(
+            StructureProteinItem(
+                locus_tag="FAKE_374", contig_id="n4", start=12300, end=13515, strand="+", length_aa=374,
+                product="tail length tape measure protein", structural_role="TMP", hmm_score=433.0, translation="M" * 374,
+            ),
+            evidence_kind="confirmed_tmp",
+        )
+    ]
+    n4_guarded = classify_morphotype(n4_prots, fake_injected, genome_length_bp=72566)
+    assert n4_guarded.morphotype_code == "Podoviridae-like"
+    assert n4_guarded.estimated_tail_length_nm is None
+    assert any("非长尾/肌尾" in w or "无 TMP 分子标尺" in w for w in n4_guarded.warnings)
 
     # 2. Compact Tectiviridae (缺 Portal/Connector，短 TerL 225aa，带弱跨膜溶菌域) -> Non-tailed
     tecti_prots = [
@@ -508,3 +528,173 @@ def test_fastapi_batch_import_auto_queue_execution(tmp_path: Path) -> None:
         finally:
             for tid in tids:
                 client.delete(f"/api/analysis/phage_structure/{tid}")
+
+
+def test_adversarial_nonstandard_gbk_immunity(tmp_path: Path) -> None:
+    """
+    对抗性非标准 GBK 免疫测试：
+    1) 内存级验证：未核实文本且夹在头部的假 "tape measure" (385aa) 必须被剔除，
+       而隐藏于 MTP->TAP 下游且被错标为 hypothetical / 多域遮蔽的真 960aa TMP 必须被精准挽救；
+    2) 端到端真实 GBK 篡改测试：删除 /phrog 标签、将 TerL/Portal 恶意改为 tape measure、将真 TMP 改为未知蛋白并删除 translation，
+       验证序列优先 HMM + 多域 Pfam + 上下文验证完全还原真实结构与尾长。
+    """
+    real_seq = ("MAKL" + "G" * 6 + "ASTKQLRAEG" * 5) * 16
+    adv_prots = [
+        StructureProteinItem(
+            locus_tag="ADV_POR", contig_id="adv1", start=100, end=1600, strand="+", length_aa=500,
+            product="portal protein", structural_role="PORTAL", hmm_score=500.0, translation="M" * 500,
+        ),
+        StructureProteinItem(
+            locus_tag="ADV_BOGUS_TMP", contig_id="adv1", start=1700, end=2855, strand="+", length_aa=385,
+            product="tail length tape measure protein", raw_product="tail length tape measure protein",
+            structural_role="TMP", hmm_score=0.0, evidence_source="unverified_text", translation="M" * 385,
+        ),
+        StructureProteinItem(
+            locus_tag="ADV_MCP", contig_id="adv1", start=2900, end=4100, strand="+", length_aa=400,
+            product="major head protein", structural_role="MCP", hmm_score=400.0, translation="M" * 400,
+        ),
+        StructureProteinItem(
+            locus_tag="ADV_MTP", contig_id="adv1", start=6000, end=6600, strand="+", length_aa=200,
+            product="major tail protein", structural_role="MTP", hmm_score=220.0, translation="M" * 200,
+        ),
+        StructureProteinItem(
+            locus_tag="ADV_TAP", contig_id="adv1", start=6650, end=7100, strand="+", length_aa=150,
+            product="tail assembly chaperone", structural_role="TAP", hmm_score=160.0, translation="M" * 150,
+        ),
+        StructureProteinItem(
+            locus_tag="ADV_REAL_TMP", contig_id="adv1", start=7120, end=7120 + len(real_seq) * 3, strand="+",
+            length_aa=len(real_seq), product="uncharacterized protein", raw_product="uncharacterized protein",
+            structural_role="OTHER", hmm_score=0.0, evidence_source="genbank",
+            ptf_pfam="PF01464", ptf_pfam_desc="SLT", ptf_all_pfams=["PF01464", "PF06791"],
+            ptf_is_tail=True, ptf_tail_prob=0.92, translation=real_seq,
+        ),
+    ]
+    tmps = select_and_analyze_tmps(adv_prots, has_tailed_context=True, contig_length_bp=25000)
+    assert [t.locus_tag for t in tmps] == ["ADV_REAL_TMP"]
+    pred = classify_morphotype(adv_prots, tmps, genome_length_bp=25000)
+    assert pred.morphotype_code == "Siphoviridae-like"
+    assert pred.estimated_tail_length_nm == round(len(real_seq) * 0.145, 1)
+
+    # 若本地 ANNO_NC_005859 与 WSL PyHMMER 就绪，运行真实完整序列的恶意非标 GBK 还原测试
+    anno_gbk = REPO_ROOT / "results" / "annotations" / "ANNO_NC_005859" / "ANNO.gbk"
+    if check_wsl_pyhmmer_ready() and resolve_structural_hmm_path() is not None and anno_gbk.is_file():
+        from Bio import SeqIO
+        from src.analysis.phage_structure.tail_finder_adapter import (
+            is_phagetailfinder_ready,
+            run_phagetailfinder_on_contigs,
+        )
+
+        clean_cmap = parse_input_contigs(fasta_path=str(anno_gbk))
+        scan_proteins_with_pyhmmer(clean_cmap, workers=8, verify_annotated=True)
+        if is_phagetailfinder_ready():
+            run_phagetailfinder_on_contigs(clean_cmap, workers=8)
+        clean_prots = list(clean_cmap.values())[0]["proteins"]
+        clean_tmps = select_and_analyze_tmps(clean_prots, has_tailed_context=True)
+        assert clean_tmps, "基线 NC_005859 应能稳定检出 TMP"
+        clean_tmp_len = clean_tmps[0].length_aa
+        clean_tmp_lt = clean_tmps[0].locus_tag
+
+        # 构造严重污染的不标准 GBK：清空全部 /phrog、/note，随机互换虚假/未知产物名，并剥除 TMP 的 /translation
+        recs = list(SeqIO.parse(str(anno_gbk), "genbank"))
+        for rec in recs:
+            for feat in rec.features:
+                if feat.type != "CDS":
+                    continue
+                lt = (feat.qualifiers.get("locus_tag") or [""])[0]
+                prod = (feat.qualifiers.get("product") or [""])[0].lower()
+                feat.qualifiers.pop("phrog", None)
+                feat.qualifiers.pop("note", None)
+                feat.qualifiers.pop("db_xref", None)
+                if lt == clean_tmp_lt or "tape measure" in prod:
+                    feat.qualifiers["product"] = ["uncharacterized conserved phage protein"]
+                    feat.qualifiers.pop("translation", None)
+                elif "terminase large" in prod or "portal" in prod:
+                    feat.qualifiers["product"] = ["putative tail length tape measure protein"]
+
+        messy_gbk = tmp_path / "corrupted_nonstandard.gbk"
+        with messy_gbk.open("w", encoding="utf-8") as fh:
+            SeqIO.write(recs, fh, "genbank")
+
+        adv_cmap = parse_input_contigs(fasta_path=str(messy_gbk))
+        scan_proteins_with_pyhmmer(adv_cmap, workers=8, verify_annotated=True)
+        if is_phagetailfinder_ready():
+            run_phagetailfinder_on_contigs(adv_cmap, workers=8)
+        adv_rec_prots = list(adv_cmap.values())[0]["proteins"]
+        adv_tmps = select_and_analyze_tmps(adv_rec_prots, has_tailed_context=True)
+        adv_pred = classify_morphotype(adv_rec_prots, adv_tmps)
+        assert adv_pred.morphotype_code == "Siphoviridae-like"
+        assert adv_tmps and adv_tmps[0].length_aa == clean_tmp_len
+        assert adv_pred.estimated_tail_length_nm == round(clean_tmp_len * 0.145, 1)
+
+
+def test_unverified_gbk_non_tailed_text_ignored_on_podo() -> None:
+    """
+    大中型具备经序列验证的 Portal/TerL/MCP 的短尾基因组中，
+    未经过 HMM 核实的 unverified_text ("major coat protein") 绝不能劫持判定为 Non-tailed。
+    """
+    podo_with_coat_text = [
+        StructureProteinItem(
+            locus_tag="EP_01", contig_id="ep15", start=100, end=1600, strand="+", length_aa=500,
+            product="terminase large subunit", structural_role="TERL", hmm_score=173.6,
+            evidence_source="pyhmmer_phrog", translation="M" * 500,
+        ),
+        StructureProteinItem(
+            locus_tag="EP_02", contig_id="ep15", start=1650, end=3300, strand="+", length_aa=550,
+            product="head-tail adaptor", structural_role="CONN_GENERAL", hmm_score=780.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 550,
+        ),
+        StructureProteinItem(
+            locus_tag="EP_03", contig_id="ep15", start=3350, end=4400, strand="+", length_aa=335,
+            product="major head protein", structural_role="MCP", hmm_score=305.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 335,
+        ),
+        StructureProteinItem(
+            locus_tag="EP_04", contig_id="ep15", start=4500, end=4840, strand="+", length_aa=111,
+            product="major coat protein", raw_product="major coat protein",
+            structural_role="NON_TAILED_MARKER", hmm_score=0.0,
+            evidence_source="unverified_text", translation="M" * 111,
+        ),
+        StructureProteinItem(
+            locus_tag="EP_05", contig_id="ep15", start=5000, end=5600, strand="+", length_aa=180,
+            product="internal virion protein", structural_role="INTERNAL_VIRION", hmm_score=230.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 180,
+        ),
+    ]
+    pred = classify_morphotype(podo_with_coat_text, [], genome_length_bp=39672)
+    assert pred.morphotype_code == "Podoviridae-like"
+    assert pred.class_scores["Non-tailed"] == 0.0
+
+
+def test_isolated_lysozyme2_crass_not_self_authenticated_tmp() -> None:
+    """
+    CrAss-like 等缺乏长尾干 (MTP/TSP/TTP/TAP/BASEPLATE) 锚点的有头基因组中，
+    仅含 PF18013 (Phage_lysozyme2) + 弱 TMP 命中的 <650aa 孤立蛋白不可自我认证为 TMP。
+    """
+    crass_prots = [
+        StructureProteinItem(
+            locus_tag="CR_TERL", contig_id="cr1", start=1000, end=3250, strand="+", length_aa=750,
+            product="terminase large subunit", structural_role="TERL", hmm_score=327.7,
+            evidence_source="pyhmmer_phrog", translation="M" * 750,
+        ),
+        StructureProteinItem(
+            locus_tag="CR_POR", contig_id="cr1", start=3300, end=5700, strand="+", length_aa=800,
+            product="portal protein", structural_role="PORTAL", hmm_score=459.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 800,
+        ),
+        StructureProteinItem(
+            locus_tag="CR_MCP", contig_id="cr1", start=8000, end=9500, strand="+", length_aa=500,
+            product="major head protein", structural_role="MCP", hmm_score=354.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 500,
+        ),
+        StructureProteinItem(
+            locus_tag="CR_LYZ2", contig_id="cr1", start=15000, end=16420, strand="+", length_aa=472,
+            product="tail length tape measure protein", structural_role="TMP", hmm_score=77.3,
+            evidence_source="pyhmmer_phrog", ptf_pfam="PF18013", ptf_all_pfams=["PF18013"],
+            ptf_is_tail=True, ptf_tail_prob=0.99, translation="M" * 472,
+        ),
+    ]
+    tmps = select_and_analyze_tmps(crass_prots, has_tailed_context=True, contig_length_bp=99915)
+    assert tmps == []
+    pred = classify_morphotype(crass_prots, tmps, genome_length_bp=99915)
+    assert pred.morphotype_code == "Podoviridae-like"
+

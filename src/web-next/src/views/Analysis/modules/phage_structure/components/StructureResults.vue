@@ -145,18 +145,19 @@ const filteredProteins = computed(() => {
             {{
               activeContig.prediction.estimated_tail_length_nm != null
                 ? `${activeContig.prediction.estimated_tail_length_nm} nm`
-                : '未定标'
+                : activeContig.prediction.morphotype_code === 'Podoviridae-like'
+                  ? '短尾无 TMP 标尺'
+                  : activeContig.prediction.morphotype_code === 'Non-tailed'
+                    ? '无复合尾器'
+                    : '未定标'
             }}
           </div>
           <div class="k-sub">
-            <template
-              v-if="
-                activeContig.prediction.estimated_tail_length_nm != null &&
-                (activeContig.prediction.morphotype_code === 'Podoviridae-like' ||
-                  activeContig.prediction.morphotype_code === 'Non-tailed')
-              "
-            >
-              检出疑似标尺蛋白（非长尾构型，仅供参考）
+            <template v-if="activeContig.prediction.morphotype_code === 'Podoviridae-like'">
+              典型短尾物理长度约 10–25 nm（非卷尺蛋白定长）
+            </template>
+            <template v-else-if="activeContig.prediction.morphotype_code === 'Non-tailed'">
+              非有尾噬菌体构型，无尾部尺度结构 (0 nm)
             </template>
             <template v-else>
               {{

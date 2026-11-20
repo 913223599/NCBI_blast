@@ -192,6 +192,7 @@ class PhageStructureManager:
                     strand=str(f.get("strand") or "+"),
                     length_aa=int(f.get("protein_length_aa") or len(aa)),
                     product=prod,
+                    raw_product=prod,
                     phrog_id=phrog_id,
                     structural_role=role,
                     role_label_cn=role_cn,
@@ -482,13 +483,14 @@ class PhageStructureManager:
             if self.queue.is_cancelled(task_id):
                 raise RuntimeError("任务已被用户取消")
 
-            _emit_progress(45, f"正在执行 PHROGs 结构同源 HMM 深度扫描 ({workers} 核)...")
+            _emit_progress(45, f"正在执行 PHROGs 序列同源校验与混淆屏障扫描 ({workers} 核)...")
             scan_proteins_with_pyhmmer(
                 cmap,
                 evalue_cutoff=req.evalue_cutoff,
                 score_cutoff=req.score_cutoff,
                 workers=workers,
                 force_rescan=req.force_hmm_rescan,
+                verify_annotated=True,
                 on_progress=lambda msg: _emit_progress(52, msg),
             )
 
@@ -533,13 +535,23 @@ class PhageStructureManager:
                 mm = build_module_matrix(prots)
                 cp = build_connector_profile(prots)
                 ptf_cnt, ptf_clusters = ptf_map.get(cid, (0, []))
+                # 仅以实际尾部干线结构核心或可信尾部基因簇判定背景，避免未核实的孤立 TMP 文本误激活共线性捕手
+                verified_tmp_cnt = sum(
+                    1
+                    for p in prots
+                    if p.structural_role == "TMP" and p.evidence_source in ("pyhmmer_phrog", "phold_3d")
+                )
                 has_tail_bg = (
-                    mm.tail_sheath_count
-                    + mm.major_tail_count
-                    + mm.tail_assembly_chaperone_count
-                    + mm.tape_measure_count
-                ) > 0
-                tmps = select_and_analyze_tmps(prots, has_tailed_context=has_tail_bg, max_workers=workers)
+                    (mm.tail_sheath_count + mm.major_tail_count + mm.tail_tube_count + mm.tail_assembly_chaperone_count + verified_tmp_cnt) > 0
+                    or mm.baseplate_count >= 2
+                    or len(ptf_clusters) >= 1
+                )
+                tmps = select_and_analyze_tmps(
+                    prots,
+                    has_tailed_context=has_tail_bg,
+                    contig_length_bp=int(info["length_bp"]),
+                    max_workers=workers,
+                )
                 pred = classify_morphotype(
                     prots,
                     tmps,
@@ -548,6 +560,7 @@ class PhageStructureManager:
                     ptf_clusters=ptf_clusters,
                     genome_length_bp=int(info["length_bp"]),
                 )
+                effective_tmps = [] if pred.morphotype_code in ("Podoviridae-like", "Non-tailed") else tmps
 
                 hmm_matched = sum(1 for p in prots if p.hmm_score > 0 or p.phrog_id)
                 c_res = ContigStructureResult(
@@ -561,7 +574,7 @@ class PhageStructureManager:
                     module_matrix=mm,
                     ptf_tail_protein_count=ptf_cnt,
                     ptf_tail_clusters=ptf_clusters,
-                    tmp_analyses=tmps,
+                    tmp_analyses=effective_tmps,
                     structural_proteins=sorted(prots, key=lambda x: x.start),
                 )
                 contig_results.append(c_res)

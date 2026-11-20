@@ -347,6 +347,7 @@ def run_phagetailfinder_on_contigs(
         win_faa = Path(tf.name)
 
     pfam_hits: Dict[str, Tuple[str, str, float]] = {}
+    all_pfams_by_tid: Dict[str, List[str]] = {}
     try:
         wsl_faa = WSLManager.to_wsl_path(str(win_faa))
         py_code = (
@@ -354,17 +355,25 @@ def run_phagetailfinder_on_contigs(
             f"with pyhmmer.easel.SequenceFile('{wsl_faa}', digital=True, alphabet=pyhmmer.easel.Alphabet.amino()) as sf: seqs = sf.read_block()\n"
             f"with pyhmmer.plan7.HMMFile('{wsl_hmm}') as hf:\n"
             "  best = {}\n"
-            f"  for top in pyhmmer.hmmsearch(hf, seqs, cpus={max(1, workers)}, E={evalue_cutoff}):\n"
+            "  all_doms = {}\n"
+            f"  for top in pyhmmer.hmmsearch(hf, seqs, cpus={max(1, workers)}, E={evalue_cutoff}, Z=200):\n"
             "    acc = (top.query.accession.decode() if isinstance(top.query.accession, bytes) else str(top.query.accession or '')).split('.')[0]\n"
             "    qname = top.query.name.decode() if isinstance(top.query.name, bytes) else str(top.query.name or '')\n"
             "    for h in top:\n"
             "      if h.included:\n"
             "        t = h.name.decode() if isinstance(h.name, bytes) else str(h.name)\n"
+            "        if acc:\n"
+            "          all_doms.setdefault(t, []).append((h.score, acc))\n"
             "        prev = best.get(t)\n"
             "        if prev is None or h.score > prev[2]:\n"
             "          best[t] = (acc, qname, h.score)\n"
             "for tid, (acc, qnm, sc) in best.items():\n"
-            "  print(f'{tid}\\t{acc}\\t{qnm}\\t{sc:.3f}')\n"
+            "  seen = []\n"
+            "  for _, d_acc in sorted(all_doms.get(tid, []), reverse=True):\n"
+            "    if d_acc not in seen:\n"
+            "      seen.append(d_acc)\n"
+            "  all_str = ','.join(seen[:8])\n"
+            "  print(f'{tid}\\t{acc}\\t{qnm}\\t{sc:.3f}\\t{all_str}')\n"
         )
         distro = WSLManager.get_best_distro()
         res = subprocess.run(
@@ -377,8 +386,10 @@ def run_phagetailfinder_on_contigs(
         )
         for line in res.stdout.splitlines():
             parts = line.strip().split("\t")
-            if len(parts) == 4:
+            if len(parts) >= 4:
                 pfam_hits[parts[0]] = (parts[1], parts[2], float(parts[3]))
+                if len(parts) >= 5 and parts[4]:
+                    all_pfams_by_tid[parts[0]] = [x for x in parts[4].split(",") if x]
     finally:
         win_faa.unlink(missing_ok=True)
 
@@ -387,11 +398,16 @@ def run_phagetailfinder_on_contigs(
         ordered: List[StructureProteinItem] = sorted(info["proteins"], key=lambda x: x.start)
         obs_seq: List[Optional[str]] = []
         for p in ordered:
-            hit = pfam_hits.get(f"{cid}||{p.locus_tag}")
+            qid = f"{cid}||{p.locus_tag}"
+            hit = pfam_hits.get(qid)
             if hit:
                 acc, qname, _sc = hit
                 p.ptf_pfam = acc
                 p.ptf_pfam_desc = qname
+                dom_list = all_pfams_by_tid.get(qid, [])
+                if acc and acc not in dom_list:
+                    dom_list = [acc] + dom_list
+                p.ptf_all_pfams = dom_list
                 obs_seq.append(acc)
             else:
                 obs_seq.append(None)

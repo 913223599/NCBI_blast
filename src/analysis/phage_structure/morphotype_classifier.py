@@ -153,7 +153,10 @@ def classify_morphotype(
         if "rna polymerase" in (p.product or "").lower()
     ]
     is_n4_like = bool(n4_vrnap_prots)
-    nt_list = by_role.get("NON_TAILED_MARKER", [])
+    nt_all = by_role.get("NON_TAILED_MARKER", [])
+    # 遵循 sequence-first：未经过序列 HMM/3D 验证的纯文本 "coat protein" 在大中型有尾基因组中不得拥有一票否决权
+    verified_nt_list = [p for p in nt_all if p.evidence_source != "unverified_text"]
+    nt_list = verified_nt_list
     has_true_tail_backbone = bool(
         by_role.get("TSP")
         or by_role.get("MTP")
@@ -190,6 +193,9 @@ def classify_morphotype(
         and mm.connector_count == 0
         and not has_true_tail_backbone
     )
+    # 若小型紧凑且无 Portal 基因组的注释仅存在文本标记，仍允许参与辅助判定；中大型有尾基因组只认序列实证
+    effective_nt_list = verified_nt_list if (verified_nt_list or not is_compact_tailless_bg) else nt_all
+    nt_list = effective_nt_list
     has_non_tailed_signal = bool(nt_list) or (
         is_compact_tailless_bg and (len(nt_helper_prots) + len(short_p9_atpase) + len(non_tailed_capsid_phrogs)) >= 2
     )
@@ -427,8 +433,18 @@ def classify_morphotype(
     )
     has_long_tail_hallmark = bool(tsp_list or mtp_list or has_real_long_tmp)
     if has_head_core and not has_long_tail_hallmark and not has_non_tailed_signal:
-        # 若已具备完整 Portal+TerL(>=300aa)+MCP+TAIL_OTHER 但未含长尾核心蛋白，确保跨越 Incomplete 阈值
-        has_complete_head_tail_podo = bool(by_role.get("PORTAL") and by_role.get("MCP") and by_role.get("TAIL_OTHER") and est_bp >= 25_000)
+        # 若已具备完整 Portal+TerL(>=300aa)+MCP 且存在 TAIL_OTHER / PTF尾部信号 / 裂解完整生活史骨架，确保跨越 Incomplete 阈值识别远缘短尾 (如 CrAss-like)
+        has_terl_full = any(p.length_aa >= 300 for p in by_role.get("TERL", []))
+        has_ptf_or_lysis_ctx = bool(ptf_clusters) or any(
+            p.ptf_is_tail and p.ptf_tail_prob >= 0.72 for p in proteins
+        ) or (mm.lysis_count > 0 and len(proteins) >= 20)
+        has_complete_head_tail_podo = bool(
+            by_role.get("PORTAL")
+            and has_terl_full
+            and by_role.get("MCP")
+            and est_bp >= 25_000
+            and (bool(by_role.get("TAIL_OTHER")) or has_ptf_or_lysis_ctx)
+        )
         w_abs = 2.6 if (mm.tail_fiber_rbp_count > 0 or mm.connector_count > 0 or has_complete_head_tail_podo) else 1.8
         scores["Podoviridae-like"] += w_abs
         evidence.append(
@@ -509,7 +525,7 @@ def classify_morphotype(
         tot_ptf_orfs = sum(cl.orf_count for cl in ptf_clusters)
         tot_novel = sum(cl.novel_orf_count for cl in ptf_clusters)
         top_cluster = max(ptf_clusters, key=lambda c: (c.orf_count, c.mean_tail_prob))
-        if tot_ptf_orfs >= 2 and not by_role.get("NON_TAILED_MARKER"):
+        if tot_ptf_orfs >= 2 and not nt_list:
             target_morph = "Myoviridae-like" if tsp_list else ("Podoviridae-like" if (best_code == "Podoviridae-like") else "Siphoviridae-like")
             evidence.append(
                 EvidenceItem(
@@ -531,6 +547,20 @@ def classify_morphotype(
     label_cn, feature_tag = MORPHOTYPE_META[best_code]
     primary_tmp = tmp_analyses[0] if tmp_analyses else None
 
+    # 生物物理一致性约束：仅长尾 (Siphoviridae) 与肌尾 (Myoviridae) 使用 TMP/gp29 标尺定长；
+    # 短尾 (Podoviridae-like ~10-25 nm) 与非有尾 (Non-tailed 0 nm) 不具备 TMP 分子标尺，严禁误用蛋白长度估算尾长。
+    if best_code in ("Podoviridae-like", "Non-tailed", "Incomplete"):
+        est_len_nm: Optional[float] = None
+        est_range_nm: List[float] = []
+        if tmp_analyses and best_code in ("Podoviridae-like", "Non-tailed"):
+            loci_preview = ", ".join(t.locus_tag for t in tmp_analyses[:2])
+            warnings.append(
+                f"注释中存在疑似 TMP 误标片段 ({loci_preview})，但该噬菌体属 {best_code} 构型（无 TMP 分子标尺），已自动抑制标尺推算以免高估尾长。"
+            )
+    else:
+        est_len_nm = primary_tmp.est_tail_length_nm if primary_tmp else None
+        est_range_nm = list(primary_tmp.est_tail_range_nm) if primary_tmp else []
+
     return MorphotypePrediction(
         morphotype_code=best_code,  # type: ignore[arg-type]
         morphotype_label_cn=label_cn,
@@ -539,8 +569,8 @@ def classify_morphotype(
         class_scores={k: round(v, 2) for k, v in scores.items()},
         decision_basis=basis,
         lifestyle_hint=lifestyle,  # type: ignore[arg-type]
-        estimated_tail_length_nm=primary_tmp.est_tail_length_nm if primary_tmp else None,
-        estimated_tail_range_nm=list(primary_tmp.est_tail_range_nm) if primary_tmp else [],
+        estimated_tail_length_nm=est_len_nm,
+        estimated_tail_range_nm=est_range_nm,
         evidence_chain=sorted(evidence, key=lambda x: -x.weight),
         warnings=warnings,
     )

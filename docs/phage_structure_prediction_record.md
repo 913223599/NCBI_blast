@@ -112,3 +112,87 @@
 * **后端全量测试**（`pytest tests/test_phage_structure.py -v`）：**`9 / 9 PASSED in 73.10s`**（含新增 `test_fastapi_batch_import_auto_queue_execution`：验证多文件批量入队、自动串行执行与持久化有序查询）；
 * **前端自动化测试**（`npx vitest run`）：**`9` 个测试文件共 `54` 项用例全部通过**（含新增 `utils.ts` 批量命名/格式/编号缩写/多记录计数单测）；
 * **前端类型检查与生产构建**（`vue-tsc -b && vite build`）：零报错完成构建（`13.36s`）；全部改动文件通过 `UTF-8` 无 BOM 与零 Emoji 审计。
+
+---
+
+## 6. 电镜实拍验证短尾误算 `54.2 nm` 尾长问题排查与生物物理约束修复（步骤 56）
+
+### 6.1 问题现象与电镜/基因实证归因
+1. **实拍电镜观测对比**：用户上传的 `60,000x`（`50 nm` 标尺 = `179 px`）、`30,000x`（`100 nm` 标尺 = `179 px`）、`15,000x`（`200 nm` 标尺 = `178 px`）负染透射电镜照片显示，实际分离株（*Enterobacter* 短尾噬菌体 `附件2霍氏肠杆菌噬菌体2`）二十面体衣壳直径仅约 `50–58 nm`，末端附着约 `14–18 nm` 极短不可收缩尾部（全粒整体尺寸约 `55–70 nm`）；而软件页面在正确判出 `Podoviridae-like (99.0%)` 的同时，错误显示了 `TMP 推算理论尾长 54.2 nm`。
+2. **双重机理根因**：
+   - **源头 PHROG 误标污染**：该 `72.57 kb` N4 样短尾基因组（含特征性 `virion RNA polymerase phrog_2206` 与 `N4-like RNAP phrog_2166`）在主要衣壳（`MCP phrog_1357`）与门户蛋白（`PORTAL phrog_1216`）之间编码了一条 `374 aa` 内部/通道结构蛋白（`ORF_0008`），因 `PHROGs v4` 数据库历史性将其所在的 **`phrog_2120`** 误标为 `"tail length tape measure protein"`，导致系统按 `374 × 0.145 = 54.2 nm` 计算尾长；
+   - **缺乏短尾/非有尾物理约束**：在 `Suite A (120 ICTV)` 检查中进一步发现，全部 `4` 株 `Schitoviridae`（`phrog_2120`, `377–443 aa -> 54.7–64.2 nm`）及 `2` 株 `Guelinviridae`（将 `PF01551 Peptidase_M23` 肽聚糖水解酶误聚为 TMP 的 `458/521 aa -> 66.4/75.5 nm`）共 `6 / 30` 株短尾株均因未能从生物物理层面隔离 TMP 标尺而误算假尾长。
+
+### 6.2 工程修复与回归验真
+1. **词典纠偏与特征解析（[phrog_catalog.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/phrog_catalog.py)、[sequence_annotator.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/sequence_annotator.py)）**：
+   - 建立 `_PHROG_ROLE_OVERRIDES`，优先将 `phrog_2120` 纠偏映射为 `INTERNAL_VIRION`（即使注释文本继承自 PHROGs `"tail length tape measure protein"`）；并在 `.gbk` 直读解析中补齐对 `/note` 与 `/db_xref` 内 `PHROG` 编号的自动提取。
+2. **形态-标尺物理一致性闭环（[morphotype_classifier.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/morphotype_classifier.py)、[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)）**：
+   - 明确物理铁律：仅 `Siphoviridae-like` 与 `Myoviridae-like` 使用 TMP/gp29 定长；一旦终判属于 `Podoviridae-like`、`Non-tailed` 或 `Incomplete`，强制将 `estimated_tail_length_nm` 置 `None`、`estimated_tail_range_nm` 置 `[]`，并清零误导性的 `tmp_analyses` 虚假标尺条目（若曾从注释名撞中伪 TMP，则输出清晰警告）。
+3. **前端与模型图字幕细节优化（[TailMorphotypeDiagram.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/TailMorphotypeDiagram.vue)、[StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue)、[StructureHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureHistory.vue)）**：
+   - 将 `Podoviridae-like` 示意说明右置避免压碰蓝色六边形衣壳边缘，KPI 卡与记录栏面向短尾显示“`短尾无 TMP 标尺 · 典型短尾物理长度约 10–25 nm`”，非有尾显示“`无复合尾器 (0 nm)`”。
+4. **全量重测结果（步骤 56 代码落盘后）**：
+   - `附件2霍氏肠杆菌噬菌体2` 裸序列端到端重算：**`Podoviridae-like (conf=0.99, est_nm=None, tmps=0)`**，彻底消除 `54.2 nm` 虚假估测；
+   - `pytest tests/test_phage_structure.py -v`：**`9 / 9 PASSED in 81.77s`**；
+   - `src/web-next` `npx vitest run`（`9` 文件 `54` 项全通过）+ `vue-tsc -b && vite build`（`14.55s`）；
+   - 重跑 [benchmark_phage_structure.py](file:///f:/NCBI%20blast/scripts/benchmark_phage_structure.py) `--fresh`（`115.74 s`）：**Suite A 120 株跨 24 ICTV 科准确率 `100.0% (120/120), Macro-F1=1.0`**，且 `Podoviridae-like / Non-tailed` 伪 TMP 误报由 `6/60` 降为 **`0/60`**；**Suite B 30 株 TEM 金标准维持 `30/30 形态全对`、`29/30 检出 TMP`、`Pearson r=0.9888, MAE=19.74 nm, MAPE=10.06%`**。
+
+---
+
+## 7. 免补丁通用架构重构：序列优先 HMM 校验 + 多结构域 Pfam + 操纵子语境审计（步骤 57）
+
+### 7.1 架构缺陷深度复盘（针对非标准 `.gbk` 与全科属 TMP 选尺误差）
+此前步骤 56 暴露出一个根本性架构隐患：单靠对个别误标 PHROG（如 `_PHROG_ROLE_OVERRIDES["phrog_2120"]`）或自由文本正则打补丁无法应对真实科研中五花八门的非标准 `.gbk`/`.faa` 文件，且导致多重系统性错估：
+1. **外部文本轻信与 E-value 批次漂移**：[sequence_annotator.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/sequence_annotator.py) 对携带非 `hypothetical` `/product` 及任意 `/phrog` 标签的 `.gbk` 默认跳过 PyHMMER 验证，[tmp_analyzer.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_analyzer.py) 则直接放行 `evidence_source != "pyhmmer_phrog"`，使任意误标为 `"tape measure protein"` 的头蛋白/假蛋白直接通过；同时 `pyhmmer.hmmsearch` 未锁定基准搜索空间 `Z`，导致同一基因组在单株 vs 批量提交时 Pfam E-value 出现显著漂移。
+2. **Pfam 单域截断与防混淆护卫缺失**：[tail_finder_adapter.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tail_finder_adapter.py) 仅保留每条蛋白最高分 1 个 Pfam 域，掩盖了兼有溶菌域与 `PF06791`/`PF10145`/`PF12789(PTR)` 的真 TMP（例如 `NC_004084` `452 aa PF10145+PF06791` 被屏蔽而误选 `270 aa` 碎片、`NC_071039` `2236 aa PF12789 PTR` 漏检）；且本地 `structural_phrogs.h3m` 缺失核酸内切酶/脂肪酶/甲基转移酶等负选家族，致使 `NC_071039` (`PF05443 ROS_MUCR` homing endonuclease)、`NC_019925` (`PF18741 MTES_1575` homing endonuclease)、`NC_047978` (`PF13472 Lipase_GDSL_2`) 被错抓为 TMP。
+3. **缺少操纵子语境校验与 TAP 下游共线性符号反转**：未剔除位于 `MCP`/`PORTAL` 三明治间却无长尾骨架的假 TMP，且局部共线性扫描中将 `TAP` 上游锚点偏差符号方向写反，导致 `Chaseviridae` (`1205–1279 aa`) 漏检或误抓，并错过 `SPO1` `TAP -> +1` (`890 aa`) 及 `Kyanoviridae NC_028955` (`623 aa sc=29.7`)。
+
+### 7.2 通用免补丁重构实现
+1. **移除特例补丁并升级扩展防混淆 HMM 索引（[phrog_catalog.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/phrog_catalog.py)、[types.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/types.py)）**：
+   - 彻底移除 `_PHROG_ROLE_OVERRIDES` 单点硬编码映射；
+   - 新增 `NON_TAIL_ENZYME` 通用负选角色与 `NON_TAIL_GUARD_CATEGORIES`，将 `PHROG` 命名代谢/核酸/调控护卫家族一并提取至 `STRUCTURAL_INDEX_VERSION = "v3_seq_first_multidomain"` 本地库（`structural_phrogs.h3m` 平滑重抽耗时约 `32 s`）；
+   - `StructureProteinItem` 新增 `raw_product`（审计追溯外部原文）与 `ptf_all_pfams`（全多结构域 Pfam accession 列表）。
+2. **序列优先核实与全多结构域稳健提取（[sequence_annotator.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/sequence_annotator.py)、[tail_finder_adapter.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tail_finder_adapter.py)、[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)）**：
+   - `parse_input_contigs` 增强对缺 `/translation`、多 `/product`、`/function` 兜底及重复 `locus_tag` 的非标准 `.gbk` 兼容性；
+   - `scan_proteins_with_pyhmmer` 默认开启 `verify_annotated=True`，对全部 `>= 25 aa` 蛋白强制运行本地 HMM 序列核实：实质冲突时以权威 HMM 推翻错误 `.gbk` 字符并置 `pyhmmer_phrog`，无命中外部声称标为 `unverified_text`（`hmm_score=0.0`），彻底取消文本直通特权；新增低复杂度周期伪序列护卫 `_is_low_complexity_repeat_artifact`；
+   - 两引擎 `pyhmmer.hmmsearch` 均固定参考参数 `Z=200` 实现单株与批量规模的 100% E-value 不变性；`run_phagetailfinder_on_contigs` 收集并排序输出 `ptf_all_pfams`。
+3. **多证据（多域 Pfam + 操纵子语境 + 生物物理尺标）联合校验器（[tmp_analyzer.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_analyzer.py)）**：
+   - 扩充 `_DIRECT_TMP_PFAMS`（`PF06791`, `PF09718`, `PF06120 Phage_HK97_TLTM`, `PF10145 PhageMin_Tail`, `PF12789 PTR`）与 `_CONFOUNDER_PFAMS`（`PF05443`, `PF18741`, `PF13472`, `PF16075 DUF4815`, 尾丝/尾刺域等），并修正 `RNA_pol_A_CTD (PF03118)` 子域重复误拦截保护噬菌体 `Mu` 等真 TMP；
+   - 新增 `_inspect_operon_context`（支持窄间距环状断点、修正同链 `TAP -> +1` 识别方向、检测 `MCP`/`PORTAL` 头部三明治、统计同链尾干锚点），在源头通用否决一切无长尾骨架的假 TMP 及跨转录方向假阳性（消除 `phiKZ` opposite-strand `ORF_0029`、`附件2` `ORF_0008` 及任意恶意 `.gbk` 伪标注），同时挽救远缘超长自证 TMP（`P74-26 5006 aa`）、`Chaseviridae 4/4`（含 `TAP -> +1` `YqaJ/SLT` 融合构型）、`NC_071039` (`2236 aa PTR`)、`NC_004084` (`452 aa PF10145+PF06791`) 与 `SPO1` (`890 aa`)。
+
+### 7.3 全量回归、对抗测试与合规验收
+* **后端单元与对抗测试**（`pytest tests/test_phage_structure.py -v`）：**`10 / 10 PASSED in 123.97s`**（新增 `test_adversarial_nonstandard_gbk_immunity` 验证：彻底抹除 `/phrog`、把 `TerL`/`Portal` 伪造为 `"tape measure protein"` 并隐藏真 `TMP` 后仍 `100%` 还原 `Siphoviridae-like` 与精确尾长；且移除词典硬编码补丁后 N4/Schitoviridae 假 `374 aa` TMP 直接在源头被零误差剔除）。
+* **120 株 ICTV 全谱盲测 & 30 株电镜金标准重测**（[benchmark_phage_structure.py](file:///f:/NCBI%20blast/scripts/benchmark_phage_structure.py) `--fresh`, `143.45s`）：
+  - **Suite A（120 ICTV）**：`Accuracy = 1.0 (120/120), Macro-F1 = 1.0`，短尾/非有尾伪 TMP **`0 / 60`**，**全谱有尾噬菌体（`Myoviridae-like` + `Siphoviridae-like`）有效 TMP 检出率由 `56/60` 提升至 `60 / 60 (missing=0)`**；
+  - **Suite B（30 TEM）**：**`30 / 30` 形态全对**、`29 / 30` 检出 TMP（含 `Mu 690aa`, `SPO1 890aa`, `Syn9 1051aa`, `P1 1140aa`, `P74-26 5006aa`），整体尾长线性相关性 **`Pearson r = 0.9893`, MAE(0.145) = 19.44 nm, MAPE = 9.85%`**（较此前 `r=0.9888, MAE=19.74 nm, MAPE=10.06%` 进一步优化）。
+* **实测用户样本回归**：`附件2霍氏肠杆菌噬菌体2` 稳定判为 **`Podoviridae-like (0.99), tail=None, tmps=[]`**；`h15x6_1-1` (`167.5 nm`)、`hp9` (`143.4 nm`)、`jp1` (`gp29 85.0 nm`)、`jp3` (`299.6 nm`)、`12-a` (`167.3 nm`) 全链路无回归。
+* **代码与文档合规审计**：相关模块文件及本文档全部通过 `UTF-8` 无 BOM 编码与零 Emoji 校验。
+
+
+---
+
+## 8. 外部独立数据集双格式验证与下游共性架构巩固（步骤 58）
+
+### 8.1 独立验证数据集构建（与原 150 株基准 100% 零重叠）
+为验证“序列优先 HMM + 多结构域 Pfam + 操纵子语境”重构在全新未测基因组与现实非标准 `.gbk` 中的真实泛化能力，新增构建 [validation_datasets.py](file:///f:/NCBI%20blast/scripts/validation_datasets.py) 与分片断点验证脚本 [validate_external_phage_structure.py](file:///f:/NCBI%20blast/scripts/validate_external_phage_structure.py)，严格排除此前已测 `120 + 30 + 6` 株基线保留集合，构建两套全新双输入对照验证集（同时运行 **纯裸 `.fasta`** 与 **原始 `.gbk`** 双模式）：
+1. **Suite D（NCBI Entrez 在线拉取独立外部集，33 株）**：其中 `14` 株在本地 `F:\Phage data` `5,000` 基因组库中亦不存在（含 2023–2025 新发现噬菌体及 1996 经典 `NC_004302 r1t` 等），内含 `2` 株零 CDS 注释 `UNVERIFIED_ORG` `.gbk`（`MN871481 PaSz-1_45_92k`、`MN871489 PaZh_1`）、`8` 株含缺失 `/translation` 的 `.gbk` 及 `6` 株 `hypothetical >= 70%` 样本，覆盖 `22` 株文献实测 TEM 有尾株（`Myo x8 + Sipho x14`）与 `11` 株短尾/非有尾外部对照（`Podo x6 + Non-tailed x5`）。
+2. **Suite C（本地 4,852 株未测库存跨 38 个 ICTV 科分层盲测集，160 株）**：在既有 30 科基础上增补 `Vandenendeviridae`、`Lindbergviridae`、`Andersonviridae`、`Stanwilliamsviridae`（130 kb 巨大链霉菌长尾）、`Hodgkinviridae`、`Orlajensenviridae`（17 kb 微型长尾）、`Autographivirales` 拆分新科、`Steigviridae`（99 kb CrAss-like 短尾）及 `Steitzviridae`（+ssRNA 无尾噬菌体）共 `38` 个形态明确 ICTV 科（各形态 40 株，内含 `40` 株缺失 `/translation` 与 `17` 株 `hypothetical >= 70%` 真实非标 `.gbk`）。
+
+### 8.2 首轮验证曝光的 3 处通用共性盲区及机理修复
+首轮全量双格式运行中（`Suite D FASTA 33/33, GBK 32/33`; `Suite C GBK 160/160, FASTA 159/160, Tailed TMP 78/80`），精准曝光出 3 处非个体特例的共性机理缺陷并完成通用修复：
+1. **下游分类器未隔离未核实非有尾文本（[morphotype_classifier.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/morphotype_classifier.py)）**：`NC_004775 (epsilon15)` `.gbk` 内 `epsilon15p10` 未命中任何 PHROG HMM（`evidence_source="unverified_text"`, `hmm_score=0.0`），但下游规则仅凭其原始注释 `"major coat protein"` 赋予 `Non-tailed +5.0`，以 `5.0 vs 4.8` 压倒了真实短尾骨架。修复为严格贯彻 `sequence-first`：大中型具备明确包装骨架基因组不再允许未核实 `unverified_text` 触发决定性 `NON_TAILED_MARKER` 加分。
+2. **PhageTailFinder 单孤儿溶菌酶自证环与远缘 CrAss 阈值失配（[tmp_analyzer.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_analyzer.py)、[morphotype_classifier.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/morphotype_classifier.py)）**：`Steigviridae NC_049978 (IAS virus)` 的 `472 aa` 蛋白携带 `PF18013 (Phage_lysozyme2)` 并获高 PTF 概率，旧逻辑允许单个蛋白兼充 `has_true_tail_backbone` 与自身 `ptf_support`，从而在周围零长尾干锚点 (`trunk=0, bp=0`) 下将自身认证为 `confirmed_tmp` 并遮断了 `HEAD_PRESENT_LONG_TAIL_ABSENT`。修复为：PTF 全基因组尾部骨架至少须 2 个独立 `>= 150 aa` 高概率位点、`ptf_support` 仅统计邻域其他 PTF 蛋白、含溶菌域且缺乏直接 TMP Pfam 的 `<650 aa` 蛋白必须有真实邻域锚点支持；同时将“具备完整 `PORTAL + TERL(>=300 aa) + MCP` 且含 PTF/TAIL_OTHER/裂解生活史特征但全面缺失长/肌尾主干的 `>=25 kb` 基因组”稳健抬升至 `2.6` 越过 `Incomplete` 阈值（`2.2`）。
+3. **中等尺度融合型 TMP 与广域隔断长尾 TMP 召回拓展（[tmp_analyzer.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_analyzer.py)）**：将严格位于 `TAP -> +1` 且邻接基板的 `YqaJ/exonuclease-TMP` 融合检出门槛由 `>=650 aa` 合理下调至 `>=500 aa`（召回 `Chaseviridae NC_025459` `592 aa` TMP）；并在确有 `MTP/TSP/TTP` 长尾干背景时新增 `window=8` 广域操纵子检测以兼容末端带溶菌域的放线菌长尾 TMP（召回 `Hodgkinviridae NC_047976` `955 aa` TMP）。
+
+### 8.3 修复后全量独立外部及基线复验实测结果（零退化、双模式 100% 一致）
+* **单元与机理回归测试**（`.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v`）：**`12 / 12 PASSED in 128.13s`**（新增 `test_unverified_gbk_non_tailed_text_ignored_on_podo` 与 `test_isolated_lysozyme2_crass_not_self_authenticated_tmp`）。
+* **Suite D（33 株 NCBI 在线独立外部集，`validate_external_phage_structure.py --fresh`, `381.95s` 总耗时内完成）**：
+  - **四形态分类准确率**：**FASTA `100.0% (33/33, F1=1.0)`**；**GBK `100.0% (33/33, F1=1.0)`**；**双格式形态一致率 `100.0% (33/33)`**；`<=5%` 误差内 TMP 尾长一致 **`33/33`**（精确 aa 一致 `32/33`，唯一微差来自 `NC_005178 D3112` RefSeq 移码拆分双段 TMP 分别命中 `688 vs 720 aa -> 99.8 vs 104.4 nm`）；
+  - **独立外部 TEM 尾长定量回归**：`21 / 22` 检出 TMP（唯一未检出为 *Chimalliviridae* 巨型核心噬菌体 `MN871489 PaZh_1`，与同科 `phiKZ` 一致缺乏典型细菌 PHROG TMP，但仍正确判定为 `Myoviridae-like`），线性相关性 **`Pearson r = 0.9086`（FASTA, `MAE=28.16 nm, MAPE=16.24%`）/ `Pearson r = 0.9118`（GBK, `MAE=27.94 nm, MAPE=16.12%`）**（注：`NC_007458 Gamma` 经 Schuch & Fischetti 2006 原文献核实 TEM 实测为 `200–217 nm`，预测 `186.0 nm` 误差仅 `7.0%`）；
+  - **非标 `.gbk` 子集稳定性**：缺失 `/translation` (`n=8`) 及 `hypothetical >= 70%` (`n=6`) 子集准确率及双格式一致率全部 **`1.0`**。
+* **Suite C（160 株本地跨 38 ICTV 科完全未测集）**：
+  - **四形态分类准确率**：**FASTA `100.0% (160/160, Macro-F1=1.0)`**；**GBK `100.0% (160/160, Macro-F1=1.0)`**；
+  - **双格式全谱一致性**：形态一致率 **`100.0% (160/160)`**、`<=5%` 误差内尾长一致率 **`100.0% (160/160)`**（精确 aa 一致 `150/160 = 93.75%`，其余 10 例仅为同 TMP 基因位点上游起始密码子微差）；
+  - **假阳性与召回铁律**：短尾及非有尾对照组（`80` 株）伪 TMP **`FASTA = 0/80` & `GBK = 0/80`**；长/肌尾实验组（`80` 株）TMP 有效检出 **`FASTA = 80/80` & `GBK = 80/80`**；缺失 `/translation` (`n=40`) 与高 `hypothetical` (`n=17`) 子集均达到 **`100.0%` (`1.0`)** 双模式一致准确。
+* **既有 150 株基准集复测验证**（`.venv/Scripts/python.exe scripts/benchmark_phage_structure.py --fresh`, `147.93s`）：
+  - **Suite A (120 ICTV)** 保持 **`100.0% (120/120, Macro-F1=1.0, err=0)`**；
+  - **Suite B (30 TEM)** 保持 **`30/30` 形态、`29/30` TMP、`Pearson r=0.9893, MAE=19.44 nm, MAPE=9.85%`**，零退化验证闭环。

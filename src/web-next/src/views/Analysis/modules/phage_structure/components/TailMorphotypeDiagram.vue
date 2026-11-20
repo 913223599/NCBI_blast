@@ -253,9 +253,12 @@ const coreTailTitle = computed(() => {
           <rect x="200" y="78" width="58" height="10" rx="5" fill="url(#podoCoreGrad)" stroke="#d97706" stroke-width="1" />
           <!-- 末端尾刺针 (Tail Needle) -->
           <polygon points="268,76 312,83 268,90" fill="#dc2626" stroke="#b91c1c" stroke-width="1" />
-          <!-- 短尾部件示意引导字样 -->
-          <text x="262" y="142" text-anchor="middle" class="svg-caption">
-            紧凑短尾管 (TTPA/B) · 内部注射通道 · 末端刺针与吸附尾丝
+          <!-- 短尾部件示意引导字样（右置于尾部侧旁，避免压迫左侧衣壳图形） -->
+          <text x="515" y="78" text-anchor="middle" class="svg-caption">
+            紧凑短尾管 (TTPA/B) · 内部注射通道 · 尾刺针
+          </text>
+          <text x="515" y="96" text-anchor="middle" class="svg-caption-muted">
+            典型短尾实测物理长度约 10–25 nm（非 TMP 标尺机制）
           </text>
         </template>
 
@@ -387,8 +390,14 @@ h4 {
 }
 
 .svg-caption {
-  fill: #64748b;
+  fill: #475569;
   font-size: 11px;
+  font-weight: 600;
+}
+
+.svg-caption-muted {
+  fill: #64748b;
+  font-size: 10.5px;
   font-weight: 500;
 }
 

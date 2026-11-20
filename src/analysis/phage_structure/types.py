@@ -147,6 +147,7 @@ class StructureProteinItem(BaseModel):
     strand: str
     length_aa: int
     product: str
+    raw_product: str = ""
     phrog_id: str = ""
     phrog_category: str = ""
     structural_role: str = "OTHER"
@@ -158,6 +159,7 @@ class StructureProteinItem(BaseModel):
     ptf_tail_prob: float = 0.0
     ptf_pfam: str = ""
     ptf_pfam_desc: str = ""
+    ptf_all_pfams: List[str] = Field(default_factory=list)
     translation: str = ""
 
 

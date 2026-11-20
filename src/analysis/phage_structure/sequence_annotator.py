@@ -241,6 +241,7 @@ def parse_input_contigs(
                     strand="+",
                     length_aa=len(aa),
                     product=prod,
+                    raw_product=prod,
                     structural_role=role,
                     role_label_cn=role_cn,
                     evidence_source="faa_header",
@@ -267,32 +268,56 @@ def parse_input_contigs(
         prots = []
         if is_gbk:
             cds_idx = 0
+            seen_loci: set[str] = set()
             for feat in getattr(rec, "features", []):
                 if feat.type != "CDS":
                     continue
                 cds_idx += 1
                 q = feat.qualifiers or {}
-                lt = str((q.get("locus_tag") or q.get("protein_id") or [f"{cid}_CDS_{cds_idx:04d}"])[0])
-                prod = str((q.get("product") or ["hypothetical protein"])[0])
-                phrog_raw = str((q.get("phrog") or [""])[0])
-                aa = str((q.get("translation") or [""])[0]).strip().upper().rstrip("*")
+                lt_raw = str((q.get("locus_tag") or q.get("protein_id") or q.get("gene") or [f"{cid}_CDS_{cds_idx:04d}"])[0]).strip()
+                lt = lt_raw or f"{cid}_CDS_{cds_idx:04d}"
+                if lt in seen_loci:
+                    lt = f"{lt}_{cds_idx:04d}"
+                seen_loci.add(lt)
+
+                prod_vals = [str(x).strip() for x in (q.get("product") or []) if str(x).strip()]
+                func_vals = [str(x).strip() for x in (q.get("function") or []) if str(x).strip()]
+                prod = prod_vals[0] if prod_vals else (func_vals[0] if func_vals else "hypothetical protein")
+
+                phrog_raw = str((q.get("phrog") or [""])[0]).strip()
+                if not phrog_raw:
+                    note_blob = " ".join(str(x) for x in (q.get("note", []) + q.get("db_xref", []) + q.get("inference", [])))
+                    m_ph = re.search(r"phrog[\s_:#-]*(\d+)", note_blob, re.I)
+                    if m_ph:
+                        phrog_raw = f"phrog_{m_ph.group(1)}"
+
+                aa = str((q.get("translation") or [""])[0]).strip().upper().replace(" ", "").rstrip("*")
                 if not aa and n_bp > 0:
                     try:
                         aa = str(feat.extract(rec.seq).translate(table=11, to_stop=True)).upper()
                     except Exception:
-                        aa = ""
+                        try:
+                            aa = str(feat.extract(rec.seq).translate(table=11)).split("*")[0].upper()
+                        except Exception:
+                            aa = ""
                 if not aa:
                     continue
                 role, role_cn = classify_structural_role(prod, phrog_id=phrog_raw)
+                try:
+                    start_bp = int(feat.location.start) + 1
+                    end_bp = int(feat.location.end)
+                except Exception:
+                    continue
                 prots.append(
                     StructureProteinItem(
                         locus_tag=lt,
                         contig_id=cid,
-                        start=int(feat.location.start) + 1,
-                        end=int(feat.location.end),
+                        start=start_bp,
+                        end=end_bp,
                         strand="+" if (feat.location.strand or 1) >= 0 else "-",
                         length_aa=len(aa),
                         product=prod,
+                        raw_product=prod,
                         phrog_id=phrog_raw,
                         structural_role=role,
                         role_label_cn=role_cn,
@@ -375,6 +400,16 @@ def predict_missing_orfs_parallel(
             contig_map[cid]["proteins"] = prots
 
 
+def _is_low_complexity_repeat_artifact(aa_seq: str) -> bool:
+    """识别纯周期人为合成/极端低复杂度重复肽段，防止胶原/纤维类 HMM 出现假性高分漂移。"""
+    s = (aa_seq or "").strip().upper().rstrip("*")
+    n = len(s)
+    if n < 60:
+        return False
+    kmers = {s[i : i + 4] for i in range(n - 3)}
+    return (len(kmers) / max(1, n - 3)) < 0.20
+
+
 def scan_proteins_with_pyhmmer(
     contig_map: Dict[str, Dict[str, Any]],
     *,
@@ -382,23 +417,27 @@ def scan_proteins_with_pyhmmer(
     score_cutoff: float = 28.0,
     workers: int = 12,
     force_rescan: bool = False,
+    verify_annotated: bool = True,
     on_progress: Optional[Callable[[str], None]] = None,
 ) -> int:
     """
-    通过 WSL pyhmmer 对结构特征 HMM 子集执行高速扫描，并回填精确 PHROG ID 与结构角色。
-    返回成功命中 HMM 的蛋白数目。
+    通过 WSL pyhmmer 对扩展结构与防混淆 HMM 库执行序列优先的权威同源扫描。
+    默认会对所有含有效氨基酸翻译 (>=25 aa) 的外部注释蛋白执行独立序列核实，
+    防止非标准 GenBank / FAA 自由文本误导结构预测与尾长估算。
     """
     hmm_path = ensure_structural_hmm_db(on_progress=on_progress)
     WSLManager.ensure_project_link()
     wsl_hmm = WSLManager.to_wsl_path(str(hmm_path))
 
-    # 决定需要提交 HMM 检索的蛋白（裸序列、未知产品名或缺失 PHROG 标签，或强制重扫）
+    # 序列优先：默认对全部拥有氨基酸翻译的 ORF 统一提交序列 HMM 验证（不再轻信外部 .gbk /product 字符串）
     query_items: List[Tuple[str, StructureProteinItem]] = []
     for cid, info in contig_map.items():
         for p in info["proteins"]:
+            if not p.raw_product:
+                p.raw_product = p.product or ""
             is_unannotated = bool(_UNANNOTATED_RE.match(p.product or ""))
             has_phrog_ref = bool(p.phrog_id and str(p.phrog_id).strip().lower().startswith(("phrog_", "1", "2", "3", "4", "5", "6", "7", "8", "9")))
-            if force_rescan or is_unannotated or not has_phrog_ref or p.structural_role == "OTHER":
+            if force_rescan or verify_annotated or is_unannotated or not has_phrog_ref or p.structural_role == "OTHER":
                 if p.translation and len(p.translation) >= 25:
                     qid = f"{cid}||{p.locus_tag}"
                     query_items.append((qid, p))
@@ -407,7 +446,7 @@ def scan_proteins_with_pyhmmer(
         return 0
 
     if on_progress:
-        on_progress(f"正在通过 WSL PyHMMER ({workers} 核) 扫描 {len(query_items)} 条蛋白序列对结构 PHROGs 库...")
+        on_progress(f"正在通过 WSL PyHMMER ({workers} 核) 对 {len(query_items)} 条蛋白执行独立序列同源校验...")
 
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".faa", newline="\n", delete=False) as tf:
         for qid, p in query_items:
@@ -424,7 +463,7 @@ def scan_proteins_with_pyhmmer(
             f"with pyhmmer.easel.SequenceFile('{wsl_faa}', digital=True, alphabet=pyhmmer.easel.Alphabet.amino()) as sf: seqs = sf.read_block()\n"
             f"with pyhmmer.plan7.HMMFile('{wsl_hmm}') as hf:\n"
             "  best = {}\n"
-            f"  for top in pyhmmer.hmmsearch(hf, seqs, cpus={max(1, workers)}, E={evalue_cutoff}):\n"
+            f"  for top in pyhmmer.hmmsearch(hf, seqs, cpus={max(1, workers)}, E={evalue_cutoff}, Z=200):\n"
             "    q = top.query.name.decode() if isinstance(top.query.name, bytes) else str(top.query.name)\n"
             "    for h in top:\n"
             f"      if h.included and h.score >= {score_cutoff}:\n"
@@ -455,18 +494,43 @@ def scan_proteins_with_pyhmmer(
     matched_count = 0
     for qid, p in query_items:
         hit = hits_map.get(qid)
-        if not hit:
+        is_low_comp = _is_low_complexity_repeat_artifact(p.translation)
+        if not hit or (is_low_comp and hit[1] < 250.0):
+            # 若外部 .gbk / 注解自封了高影响结构角色但未通过独立 HMM 验证，显式标记为未核实文本声称
+            if p.evidence_source not in ("pyrodigal", "pyhmmer_phrog", "phold_3d"):
+                p.hmm_score = 0.0
+                p.hmm_evalue = 1.0
+                p.evidence_source = "unverified_text"
             continue
+
         ph_id, sc, ev = hit
         cat, ann = catalog.get_phrog_info(ph_id)
+        ext_role, _ = classify_structural_role(p.raw_product or p.product)
+        hmm_role, hmm_role_cn = classify_structural_role(ann, phrog_id=ph_id, phrog_category=cat)
+
+        role_conflict = (ext_role != "OTHER" and hmm_role != "OTHER" and ext_role != hmm_role)
+        # 若外部已给出明确结构角色，弱/中等交叉漂移 (<50分) 不强行改写，避免低特异性重复域误盖真注解
+        if role_conflict and sc < 50.0 and not force_rescan:
+            if p.evidence_source not in ("pyrodigal", "pyhmmer_phrog", "phold_3d"):
+                p.hmm_score = 0.0
+                p.hmm_evalue = 1.0
+                p.evidence_source = "unverified_text"
+            continue
+
         p.phrog_id = ph_id
         p.phrog_category = cat
         p.hmm_score = round(sc, 2)
         p.hmm_evalue = ev
-        if ann and (_UNANNOTATED_RE.match(p.product or "") or force_rescan or p.structural_role == "OTHER"):
+        p.evidence_source = "pyhmmer_phrog"
+
+        is_unannot = bool(_UNANNOTATED_RE.match(p.product or ""))
+        if ann and (force_rescan or is_unannot or p.structural_role == "OTHER" or role_conflict):
             p.product = ann
-            p.evidence_source = "pyhmmer_phrog"
-        role, role_cn = classify_structural_role(p.product, phrog_id=ph_id, phrog_category=cat)
+
+        if ann or ph_id:
+            role, role_cn = classify_structural_role(p.product if not role_conflict else ann, phrog_id=ph_id, phrog_category=cat)
+        else:
+            role, role_cn = hmm_role, hmm_role_cn
         p.structural_role = role
         p.role_label_cn = role_cn
         matched_count += 1
