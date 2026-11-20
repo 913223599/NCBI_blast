@@ -149,12 +149,23 @@ const filteredProteins = computed(() => {
             }}
           </div>
           <div class="k-sub">
-            {{
-              formatTailLength(
-                activeContig.prediction.estimated_tail_length_nm,
-                activeContig.prediction.estimated_tail_range_nm
-              )
-            }}
+            <template
+              v-if="
+                activeContig.prediction.estimated_tail_length_nm != null &&
+                (activeContig.prediction.morphotype_code === 'Podoviridae-like' ||
+                  activeContig.prediction.morphotype_code === 'Non-tailed')
+              "
+            >
+              检出疑似标尺蛋白（非长尾构型，仅供参考）
+            </template>
+            <template v-else>
+              {{
+                formatTailLength(
+                  activeContig.prediction.estimated_tail_length_nm,
+                  activeContig.prediction.estimated_tail_range_nm
+                )
+              }}
+            </template>
           </div>
         </div>
         <div class="kpi-card">
@@ -485,7 +496,8 @@ const filteredProteins = computed(() => {
 
 .k-sub {
   margin-top: 4px;
-  font-size: 0.78rem;
+  font-size: 0.77rem;
+  line-height: 1.4;
   color: #64748b;
 }
 
@@ -776,6 +788,7 @@ const filteredProteins = computed(() => {
   font-size: 0.74rem;
   color: #64748b;
   font-family: ui-monospace, monospace;
+  word-break: break-word;
 }
 
 .ptf-pill {

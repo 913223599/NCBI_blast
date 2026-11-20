@@ -38,6 +38,7 @@ const {
   loadLinkedSources,
   inspectInput,
   submitTask,
+  submitBatchTasks,
   selectTask,
   startNewTask,
   cancelTask,
@@ -46,6 +47,13 @@ const {
   openResultsFolder,
   fetchGbkForViewer,
 } = usePhageStructure()
+
+function handleSelectTaskById(taskId: string): void {
+  const found = historyList.value.find((t) => t.task_id === taskId)
+  if (found) {
+    selectTask(found)
+  }
+}
 
 watch(
   () => props.initialPayload,
@@ -85,9 +93,28 @@ async function handleOpenViewer(): Promise<void> {
               <line x1="12" y1="17" x2="12" y2="22" />
               <line x1="8" y1="22" x2="16" y2="22" />
             </svg>
-            <span>结构与尾型预测记录</span>
+            <span>结构与尾型记录</span>
+            <span
+              v-if="queueStatus.running_count > 0 || queueStatus.queued_count > 0"
+              class="queue-counter-tag"
+              :title="`运行中: ${queueStatus.running_count}, 排队中: ${queueStatus.queued_count}`"
+            >
+              {{ queueStatus.running_count + queueStatus.queued_count }} 队列中
+            </span>
           </div>
-          <button type="button" class="new-task-btn" @click="startNewTask">新建</button>
+          <button type="button" class="new-task-btn" @click="startNewTask">新建 / 批量</button>
+        </div>
+
+        <div
+          v-if="queueStatus.running_count > 0 && queueStatus.running_tasks?.[0]"
+          class="queue-live-strip"
+          @click="handleSelectTaskById(queueStatus.running_tasks[0].task_id)"
+        >
+          <span class="ql-dot"></span>
+          <span class="ql-txt" :title="queueStatus.running_tasks[0].task_name">
+            运行中: {{ queueStatus.running_tasks[0].task_name }}
+          </span>
+          <span v-if="queueStatus.queued_count > 0" class="ql-wait">+{{ queueStatus.queued_count }}</span>
         </div>
 
         <div class="sidebar-list">
@@ -120,6 +147,7 @@ async function handleOpenViewer(): Promise<void> {
             :inspect-total-bp="inspectTotalBp"
             :initial-payload="initialPayload"
             @submit="submitTask"
+            @submit-batch="submitBatchTasks"
             @inspect="inspectInput"
             @refresh-sources="loadLinkedSources"
           />
@@ -132,6 +160,7 @@ async function handleOpenViewer(): Promise<void> {
             :queue-status="queueStatus"
             @cancel="cancelTask(currentTask.task_id)"
             @start-new="startNewTask"
+            @view-task="handleSelectTaskById"
           />
         </section>
 
@@ -173,55 +202,117 @@ async function handleOpenViewer(): Promise<void> {
 <style scoped>
 .structure-module-container {
   width: 100%;
-  padding: 20px 24px;
+  padding: 20px 24px 40px 24px;
   box-sizing: border-box;
 }
 
 .desktop-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 290px 1fr;
   gap: 20px;
   align-items: start;
 }
 
 .sidebar {
-  background: #f8fafc;
+  background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   padding: 14px;
   position: sticky;
-  top: 16px;
+  top: 14px;
+  max-height: calc(100vh - 140px);
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
 .sidebar-title {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   font-size: 0.9rem;
   font-weight: 700;
   color: #1e293b;
+  min-width: 0;
+}
+
+.queue-counter-tag {
+  font-size: 11px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.queue-live-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: #1e40af;
+}
+
+.queue-live-strip:hover {
+  background: #dbeafe;
+}
+
+.ql-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #2563eb;
+  flex-shrink: 0;
+}
+
+.ql-txt {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ql-wait {
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: #fef3c7;
+  color: #b45309;
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .new-task-btn {
-  padding: 5px 12px;
+  padding: 5px 10px;
   border-radius: 7px;
   border: none;
   background: #2563eb;
   color: #ffffff;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .sidebar-list {
-  max-height: calc(100vh - 200px);
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 

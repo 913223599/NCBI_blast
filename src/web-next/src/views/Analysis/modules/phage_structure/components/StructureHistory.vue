@@ -12,20 +12,21 @@ const emit = defineEmits<{
   (e: 'delete', taskId: string): void
 }>()
 
-function statusLabel(status: string): string {
-  switch (status) {
+function statusLabel(item: StructureTaskHistoryItem): string {
+  if (item.status === 'queued') {
+    return item.queue_position ? `排队 #${item.queue_position}` : '排队中'
+  }
+  switch (item.status) {
     case 'completed':
       return '已完成'
     case 'running':
-      return '预测中'
-    case 'queued':
-      return '排队中'
+      return item.progress > 0 ? `预测中 ${item.progress}%` : '预测中'
     case 'cancelled':
       return '已中止'
     case 'failed':
       return '失败'
     default:
-      return status
+      return item.status
   }
 }
 
@@ -68,7 +69,7 @@ function sourceModeText(mode: string): string {
       </div>
 
       <div class="item-badges">
-        <span class="status-pill" :class="item.status">{{ statusLabel(item.status) }}</span>
+        <span class="status-pill" :class="item.status">{{ statusLabel(item) }}</span>
         <span
           v-if="item.status === 'completed' && item.summary?.primary_morphotype"
           class="morph-pill"
@@ -81,6 +82,19 @@ function sourceModeText(mode: string): string {
           {{ getMorphotypeTheme(item.summary.primary_morphotype).shortLabel }}
         </span>
         <span class="src-tag">{{ sourceModeText(item.source_mode) }}</span>
+      </div>
+
+      <div v-if="item.status === 'running' || item.status === 'queued'" class="mini-progress-wrap">
+        <div class="mini-progress-bar">
+          <div
+            class="mini-progress-fill"
+            :class="item.status"
+            :style="{ width: `${item.status === 'running' ? Math.max(8, item.progress || 8) : 12}%` }"
+          ></div>
+        </div>
+        <div v-if="item.current_step" class="item-step" :title="item.current_step">
+          {{ item.current_step }}
+        </div>
       </div>
 
       <div class="item-foot">
@@ -214,5 +228,42 @@ function sourceModeText(mode: string): string {
   margin-top: 6px;
   font-size: 0.74rem;
   color: #64748b;
+}
+
+.mini-progress-wrap {
+  margin-top: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mini-progress-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.mini-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.mini-progress-fill.running {
+  background: linear-gradient(90deg, #2563eb, #0ea5e9);
+}
+
+.mini-progress-fill.queued {
+  background: #f59e0b;
+  opacity: 0.65;
+}
+
+.item-step {
+  font-size: 0.71rem;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

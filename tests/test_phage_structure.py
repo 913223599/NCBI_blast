@@ -427,3 +427,84 @@ def test_schitoviridae_nontailed_and_lytic_tmp_collinearity() -> None:
     ]
     hv_pred = classify_morphotype(halovirus_myo, select_and_analyze_tmps(halovirus_myo), genome_length_bp=58000)
     assert hv_pred.morphotype_code == "Myoviridae-like"
+
+
+def test_fastapi_batch_import_auto_queue_execution(tmp_path: Path) -> None:
+    """校验批量导入 API（多文件顺序入队 + 多条 FASTA 拆分）依次自动排队执行完毕与持久化排序。"""
+    from fastapi.testclient import TestClient
+    from src.backend.api_server import app
+
+    faa_1 = (
+        ">B1_MCP major capsid protein\n" + "A" * 340 + "\n"
+        ">B1_TSP tail sheath protein\n" + "M" * 520 + "\n"
+        ">B1_BASE baseplate wedge subunit\n" + "V" * 260 + "\n"
+    )
+    faa_2 = (
+        ">B2_PORTAL portal protein\n" + "A" * 420 + "\n"
+        ">B2_TTPA tail tubular protein A\n" + "L" * 210 + "\n"
+        ">B2_TTPB tail tubular protein B\n" + "K" * 720 + "\n"
+    )
+    f1 = tmp_path / "batch_myo_sample.faa"
+    f2 = tmp_path / "batch_podo_sample.faa"
+    f1.write_text(faa_1, encoding="utf-8")
+    f2.write_text(faa_2, encoding="utf-8")
+
+    from src.analysis.phage_structure.manager import get_phage_structure_manager
+    from src.analysis.phage_structure.types import StructureBatchItemRequest, StructureBatchRunRequest
+
+    mgr = get_phage_structure_manager()
+    split_req = StructureBatchRunRequest(
+        items=[StructureBatchItemRequest(source_mode="paste", fasta_content=">S1\nATG" + "A" * 120 + "\n>S2\nATG" + "C" * 120 + "\n")],
+        split_fasta_records=True,
+    )
+    expanded = mgr._expand_batch_item_to_runs(split_req.items[0], split_req, 1)
+    assert [r.task_name for r in expanded] == ["S1_Structure", "S2_Structure"]
+
+    with TestClient(app) as client:
+        batch_resp = client.post(
+            "/api/analysis/phage_structure/batch",
+            json={
+                "items": [
+                    {"source_mode": "file", "fasta_path": str(f1)},
+                    {"source_mode": "file", "fasta_path": str(f2)},
+                ],
+                "enable_phagetailfinder": False,
+            },
+        )
+        assert batch_resp.status_code == 200
+        payload = batch_resp.json()
+        assert payload["batch_count"] == 2
+        tids = payload["task_ids"]
+        assert len(tids) == 2
+        assert payload["tasks"][0]["task_name"] == "batch_myo_sample_Structure"
+        assert payload["tasks"][1]["task_name"] == "batch_podo_sample_Structure"
+
+        try:
+            finished: dict[str, dict] = {}
+            for _ in range(300):
+                for tid in tids:
+                    if tid in finished:
+                        continue
+                    r = client.get(f"/api/analysis/phage_structure/{tid}/result")
+                    if r.status_code == 200:
+                        finished[tid] = r.json()
+                if len(finished) == 2:
+                    break
+                hist_now = client.get("/api/analysis/phage_structure/history?limit=10").json()["tasks"]
+                failed_rows = [it for it in hist_now if it["task_id"] in tids and it["status"] == "failed"]
+                if failed_rows:
+                    raise AssertionError(f"批量任务执行失败: {failed_rows}")
+                time.sleep(0.2)
+
+            assert len(finished) == 2
+            assert finished[tids[0]]["primary_prediction"]["morphotype_code"] == "Myoviridae-like"
+            assert finished[tids[1]]["primary_prediction"]["morphotype_code"] == "Podoviridae-like"
+
+            hist = client.get("/api/analysis/phage_structure/history?limit=10").json()["tasks"]
+            hist_ids = [item["task_id"] for item in hist]
+            assert tids[1] in hist_ids and tids[0] in hist_ids
+            # 确定性逆序（后入队 rowid 更大排前，保证同秒不乱序）
+            assert hist_ids.index(tids[1]) < hist_ids.index(tids[0])
+        finally:
+            for tid in tids:
+                client.delete(f"/api/analysis/phage_structure/{tid}")

@@ -2,6 +2,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getBridge, onEvent } from '../../../../../bridge/electron-bridge'
 import type {
   PhageStructureResult,
+  StructureBatchRunPayload,
   StructureCapabilities,
   StructureInspectContig,
   StructureLinkedSources,
@@ -153,6 +154,7 @@ export function usePhageStructure() {
     try {
       const res = await bridge.get_phage_structure_history(100)
       historyList.value = Array.isArray(res?.tasks) ? res.tasks : []
+      syncQueueSnapshot(queueStatus.value)
       if (currentTask.value) {
         const fresh = historyList.value.find((t) => t.task_id === currentTask.value?.task_id)
         if (fresh) {
@@ -242,6 +244,48 @@ export function usePhageStructure() {
       await Promise.all([loadHistory(), loadQueueStatus()])
     } catch (err) {
       errorMsg.value = `提交预测任务失败: ${String(err)}`
+    } finally {
+      isSubmitting.value = false
+    }
+  }
+
+  async function submitBatchTasks(batchPayload: StructureBatchRunPayload): Promise<void> {
+    isSubmitting.value = true
+    errorMsg.value = ''
+    consoleLogs.value = []
+    try {
+      const res = await bridge.run_phage_structure_batch(batchPayload)
+      if (!res || res.success === false || !Array.isArray(res.tasks) || res.tasks.length === 0) {
+        throw new Error(res?.error || res?.detail || '批量入队失败，未创建有效任务')
+      }
+      const first = res.tasks[0]
+      const snap = res.queue as StructureQueueSnapshot | undefined
+      if (snap) {
+        syncQueueSnapshot(snap)
+      }
+      const firstIsRunning = snap ? (snap.running || []).includes(first.task_id) : !first.is_busy
+      const created: StructureTaskHistoryItem = {
+        task_id: first.task_id,
+        task_name: first.task_name,
+        source_mode: first.source_mode || 'file',
+        status: firstIsRunning ? 'running' : 'queued',
+        progress: 0,
+        queue_position: first.queue_position,
+        current_step: firstIsRunning
+          ? `批量队列共 ${res.batch_count} 个样本，正在启动第 1 个任务...`
+          : `批量队列共 ${res.batch_count} 个样本，排队等待中 (#${first.queue_position || 1})`,
+        created_at: new Date().toISOString().slice(0, 19).replace('T', ' '),
+      }
+      currentTask.value = created
+      currentResult.value = null
+      appendLog(`已将 ${res.batch_count} 个结构与尾部形态预测任务按序加入后台排队队列`)
+      ;(window as any).app?.showNotification?.(
+        `已批量导入 ${res.batch_count} 个预测任务到队列，系统将自动依次执行`,
+        'success'
+      )
+      await Promise.all([loadHistory(), loadQueueStatus()])
+    } catch (err) {
+      errorMsg.value = `批量提交排队任务失败: ${String(err)}`
     } finally {
       isSubmitting.value = false
     }
@@ -401,6 +445,7 @@ export function usePhageStructure() {
     loadHistory,
     inspectInput,
     submitTask,
+    submitBatchTasks,
     selectTask,
     startNewTask,
     cancelTask,

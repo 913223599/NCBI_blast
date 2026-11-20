@@ -45,29 +45,50 @@ class PhageStructureQueue:
         self.cancelled_ids: set[str] = set()
         self._workers: List[asyncio.Task[None]] = []
         self._executor: Optional[Callable[[str, Any, Dict[str, Any]], Awaitable[None]]] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._started = False
 
     def set_executor(self, executor: Callable[[str, Any, Dict[str, Any]], Awaitable[None]]) -> None:
         self._executor = executor
 
     async def start(self) -> None:
-        if self._started:
+        loop = asyncio.get_running_loop()
+        if (
+            self._started
+            and self._loop is loop
+            and any(not w.done() for w in self._workers)
+        ):
             return
         self._started = True
-        active_ids = list(set(self.queued_ids + self.running_ids))
-        self.db.reset_interrupted_tasks(exclude_task_ids=active_ids)
+        self._loop = loop
+        self.queue = asyncio.Queue()
+        self.queued_ids.clear()
+        self.running_ids.clear()
+        self.cancelled_ids.clear()
+        self._workers = []
+        self.db.reset_interrupted_tasks(exclude_task_ids=[])
         for idx in range(self.max_workers):
             self._workers.append(asyncio.create_task(self._worker_loop(idx)))
         logger.info("PhageStructure 队列引擎已启动 (workers=%s)", self.max_workers)
 
-    async def enqueue(self, task_id: str, req: Any, context: Dict[str, Any]) -> Dict[str, Any]:
-        if not self._started:
-            await self.start()
+    async def broadcast_snapshot(self) -> None:
+        """向前端广播当前最新队列快照。"""
+        await self._broadcast_snapshot()
+
+    async def enqueue(
+        self,
+        task_id: str,
+        req: Any,
+        context: Dict[str, Any],
+        broadcast: bool = True,
+    ) -> Dict[str, Any]:
+        await self.start()
         was_busy = len(self.running_ids) > 0 or len(self.queued_ids) > 0
         self.queued_ids.append(task_id)
         queue_pos = len(self.queued_ids)
         await self.queue.put((task_id, req, context))
-        await self._broadcast_snapshot()
+        if broadcast:
+            await self._broadcast_snapshot()
         return {
             "task_id": task_id,
             "queue_position": queue_pos,

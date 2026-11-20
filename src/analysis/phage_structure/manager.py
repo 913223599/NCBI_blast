@@ -53,6 +53,8 @@ from .types import (
     ContigStructureResult,
     MorphotypePrediction,
     PhageStructureResult,
+    StructureBatchItemRequest,
+    StructureBatchRunRequest,
     StructureInspectRequest,
     StructureProteinItem,
     StructureRunRequest,
@@ -248,22 +250,190 @@ class PhageStructureManager:
             "contigs": contigs_meta,
         }
 
-    async def submit_task(self, req: StructureRunRequest) -> Dict[str, Any]:
+    def _validate_run_request(self, req: StructureRunRequest) -> None:
         if req.source_mode in ("annotation", "phage_discovery") and not req.source_task_id:
             raise ValueError("联动分析必须指定关联的历史任务 ID")
-        if req.source_mode in ("file", "paste") and not req.fasta_path and not (req.fasta_content and req.fasta_content.strip()):
+        if (
+            req.source_mode in ("file", "paste")
+            and not req.fasta_path
+            and not (req.fasta_content and req.fasta_content.strip())
+        ):
             raise ValueError("必须提供基因组文件或粘贴 FASTA / GenBank 序列文本")
 
-        task_id = f"pstruct_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}"
-        task_name = (req.task_name or "").strip() or f"PhageStructure_{task_id}"
-        self.db.create_task(task_id=task_id, task_name=task_name, source_mode=req.source_mode, status="queued")
+    @staticmethod
+    def _derive_batch_task_name(item: StructureBatchItemRequest, idx: int) -> str:
+        if item.task_name and item.task_name.strip():
+            return item.task_name.strip()
+        if item.fasta_path:
+            stem = Path(item.fasta_path).name
+            for suf in (".gz", ".fasta", ".fa", ".fna", ".faa", ".gbk", ".gbff", ".gb", ".genbank"):
+                if stem.lower().endswith(suf):
+                    stem = stem[: -len(suf)]
+            if stem:
+                return f"{stem}_Structure"
+        if item.source_task_id:
+            suffix = f"_Phage_{item.region_index:03d}" if item.region_index is not None else ""
+            return f"{item.source_task_id}{suffix}_Structure"
+        return f"PhageStructure_Batch_{idx:02d}"
 
-        q_info = await self.queue.enqueue(task_id, req, {"task_name": task_name})
+    @staticmethod
+    def _split_multi_fasta_content(text: str) -> List[tuple[str, str]]:
+        """将多条 FASTA 文本按记录头拆分为 [(record_id, single_fasta_text), ...]。"""
+        blocks: List[tuple[str, str]] = []
+        cur_header: Optional[str] = None
+        cur_lines: List[str] = []
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                if cur_header is not None and cur_lines:
+                    rec_id = cur_header[1:].strip().split()[0] if len(cur_header) > 1 else f"Seq_{len(blocks) + 1}"
+                    blocks.append((rec_id, cur_header + "\n" + "\n".join(cur_lines) + "\n"))
+                cur_header = line
+                cur_lines = []
+            elif cur_header is not None:
+                cur_lines.append(line)
+        if cur_header is not None and cur_lines:
+            rec_id = cur_header[1:].strip().split()[0] if len(cur_header) > 1 else f"Seq_{len(blocks) + 1}"
+            blocks.append((rec_id, cur_header + "\n" + "\n".join(cur_lines) + "\n"))
+        return blocks
+
+    def _expand_batch_item_to_runs(
+        self,
+        item: StructureBatchItemRequest,
+        batch_req: StructureBatchRunRequest,
+        idx: int,
+    ) -> List[StructureRunRequest]:
+        base_kwargs = {
+            "threads": batch_req.threads,
+            "genetic_code": batch_req.genetic_code,
+            "evalue_cutoff": batch_req.evalue_cutoff,
+            "score_cutoff": batch_req.score_cutoff,
+            "force_hmm_rescan": batch_req.force_hmm_rescan,
+            "enable_phold_enhance": batch_req.enable_phold_enhance,
+            "enable_phagetailfinder": batch_req.enable_phagetailfinder,
+            "ptf_accurate_mode": batch_req.ptf_accurate_mode,
+        }
+        base_name = self._derive_batch_task_name(item, idx)
+
+        if (
+            batch_req.split_phage_regions
+            and item.source_mode == "phage_discovery"
+            and item.source_task_id
+            and item.region_index is None
+        ):
+            cmap = self._load_contigs_from_phage_discovery(item.source_task_id)
+            import re as _re
+
+            region_indices: List[int] = []
+            seen_idx: set[int] = set()
+            for cid in cmap.keys():
+                m = _re.match(r"^Phage_(\d+)", cid)
+                if m:
+                    r_idx = int(m.group(1))
+                    if r_idx not in seen_idx:
+                        seen_idx.add(r_idx)
+                        region_indices.append(r_idx)
+            if len(region_indices) > 1:
+                stem_base = base_name[:-10] if base_name.endswith("_Structure") else base_name
+                runs: List[StructureRunRequest] = []
+                for r_idx in region_indices:
+                    r_req = StructureRunRequest(
+                        task_name=f"{stem_base}_Phage_{r_idx:03d}_Structure",
+                        source_mode="phage_discovery",
+                        source_task_id=item.source_task_id,
+                        region_index=r_idx,
+                        metadata={**(item.metadata or {}), "batch": True, "split_region": r_idx},
+                        **base_kwargs,
+                    )
+                    self._validate_run_request(r_req)
+                    runs.append(r_req)
+                return runs
+
+        if (
+            batch_req.split_fasta_records
+            and item.source_mode == "paste"
+            and item.fasta_content
+            and item.fasta_content.lstrip().startswith(">")
+        ):
+            records = self._split_multi_fasta_content(item.fasta_content)
+            if len(records) > 1:
+                runs = []
+                for rec_idx, (rec_id, rec_text) in enumerate(records, start=1):
+                    r_req = StructureRunRequest(
+                        task_name=f"{rec_id}_Structure" if rec_id else f"{base_name}_{rec_idx:02d}",
+                        source_mode="paste",
+                        fasta_content=rec_text,
+                        metadata={**(item.metadata or {}), "batch": True, "split_record": rec_idx},
+                        **base_kwargs,
+                    )
+                    self._validate_run_request(r_req)
+                    runs.append(r_req)
+                return runs
+
+        single_req = StructureRunRequest(
+            task_name=base_name,
+            source_mode=item.source_mode,
+            fasta_path=item.fasta_path,
+            fasta_content=item.fasta_content,
+            source_task_id=item.source_task_id,
+            region_index=item.region_index,
+            selected_contigs=item.selected_contigs,
+            metadata={**(item.metadata or {}), "batch": True},
+            **base_kwargs,
+        )
+        self._validate_run_request(single_req)
+        return [single_req]
+
+    async def _enqueue_run_request(
+        self,
+        req: StructureRunRequest,
+        *,
+        task_id: Optional[str] = None,
+        broadcast: bool = True,
+    ) -> Dict[str, Any]:
+        self._validate_run_request(req)
+        tid = task_id or f"pstruct_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}"
+        task_name = (req.task_name or "").strip() or f"PhageStructure_{tid}"
+        self.db.create_task(task_id=tid, task_name=task_name, source_mode=req.source_mode, status="queued")
+        q_info = await self.queue.enqueue(tid, req, {"task_name": task_name}, broadcast=broadcast)
         return {
-            "task_id": task_id,
+            "task_id": tid,
             "task_name": task_name,
+            "source_mode": req.source_mode,
             "status": "queued",
             **q_info,
+        }
+
+    async def submit_task(self, req: StructureRunRequest) -> Dict[str, Any]:
+        return await self._enqueue_run_request(req, broadcast=True)
+
+    async def submit_batch_tasks(self, batch_req: StructureBatchRunRequest) -> Dict[str, Any]:
+        """批量校验、展开并按序将多样本推入后端串行分析队列。"""
+        expanded_runs: List[StructureRunRequest] = []
+        for idx, item in enumerate(batch_req.items, start=1):
+            expanded_runs.extend(self._expand_batch_item_to_runs(item, batch_req, idx))
+
+        if not expanded_runs:
+            raise ValueError("批量提交列表中未解析出可分析的样本任务")
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        batch_id = f"psbatch_{stamp}_{secrets.token_hex(3)}"
+        created_items: List[Dict[str, Any]] = []
+        for idx, run_req in enumerate(expanded_runs, start=1):
+            run_req.metadata = {**(run_req.metadata or {}), "batch_id": batch_id, "batch_index": idx}
+            tid = f"pstruct_{stamp}_{idx:03d}_{secrets.token_hex(3)}"
+            item_res = await self._enqueue_run_request(run_req, task_id=tid, broadcast=False)
+            created_items.append(item_res)
+
+        await self.queue.broadcast_snapshot()
+        return {
+            "batch_id": batch_id,
+            "batch_count": len(created_items),
+            "task_ids": [it["task_id"] for it in created_items],
+            "tasks": created_items,
+            "queue": self.queue.get_queue_snapshot(),
         }
 
     async def execute_pipeline_task(self, task_id: str, req: StructureRunRequest, context: Dict[str, Any]) -> None:

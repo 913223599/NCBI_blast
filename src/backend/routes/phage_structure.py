@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from ...analysis.phage_structure import (
+    StructureBatchRunRequest,
     StructureInspectRequest,
     StructureRunRequest,
     get_phage_structure_manager,
@@ -65,6 +66,20 @@ async def run_structure_prediction(req: StructureRunRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"结构预测任务提交失败: {exc}") from exc
+
+
+@router.post("/batch")
+async def run_structure_batch_prediction(req: StructureBatchRunRequest):
+    """批量导入并按序推入结构预测排队队列，由后台引擎自动依次完成分析。"""
+    mgr = get_phage_structure_manager()
+    try:
+        return await mgr.submit_batch_tasks(req)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"批量结构预测入队失败: {exc}") from exc
 
 
 @router.get("/queue/status")

@@ -40,6 +40,41 @@ class StructureRunRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="附加上下文元数据")
 
 
+class StructureBatchItemRequest(BaseModel):
+    """批量结构预测中的单个待分析样本条目。"""
+
+    task_name: Optional[str] = Field(default=None, description="可选样本任务名称")
+    source_mode: Literal["file", "paste", "annotation", "phage_discovery"] = "file"
+    fasta_path: Optional[str] = None
+    fasta_content: Optional[str] = None
+    source_task_id: Optional[str] = None
+    region_index: Optional[int] = Field(default=None, ge=1)
+    selected_contigs: Optional[List[str]] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StructureBatchRunRequest(BaseModel):
+    """批量提交多样本入队依次自动分析请求参数。"""
+
+    items: List[StructureBatchItemRequest] = Field(..., min_length=1, description="批量样本条目列表")
+    threads: Optional[int] = Field(default=None, ge=1, le=64)
+    genetic_code: int = Field(default=11)
+    evalue_cutoff: float = Field(default=1e-4, gt=0.0, le=1.0)
+    score_cutoff: float = Field(default=28.0, ge=10.0, le=500.0)
+    force_hmm_rescan: bool = Field(default=False)
+    enable_phold_enhance: bool = Field(default=False)
+    enable_phagetailfinder: bool = Field(default=True)
+    ptf_accurate_mode: bool = Field(default=False)
+    split_phage_regions: bool = Field(
+        default=False,
+        description="针对前噬菌体联动源，当未指定 region_index 时是否按检出区段拆分为独立排队任务",
+    )
+    split_fasta_records: bool = Field(
+        default=False,
+        description="针对文本粘贴的纯 FASTA 多条序列，是否按记录逐条拆分为独立排队任务",
+    )
+
+
 class PolyXRegion(BaseModel):
     """卷尺蛋白中的多聚/低复杂度富集微区 (polyX)。"""
 

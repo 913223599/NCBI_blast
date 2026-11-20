@@ -74,6 +74,40 @@ export interface StructureRunForm {
   ptf_accurate_mode: boolean
 }
 
+export interface StructureBatchQueuedEntry {
+  id: string
+  file_name: string
+  task_name: string
+  source_mode: StructureSourceMode
+  fasta_path?: string
+  fasta_content?: string
+  source_task_id?: string
+  region_index?: number
+  format_label: string
+}
+
+export interface StructureBatchRunPayload {
+  items: Array<{
+    task_name?: string
+    source_mode: StructureSourceMode
+    fasta_path?: string
+    fasta_content?: string
+    source_task_id?: string
+    region_index?: number
+    selected_contigs?: string[]
+  }>
+  threads?: number
+  genetic_code: number
+  evalue_cutoff: number
+  score_cutoff: number
+  force_hmm_rescan: boolean
+  enable_phold_enhance: boolean
+  enable_phagetailfinder: boolean
+  ptf_accurate_mode: boolean
+  split_phage_regions?: boolean
+  split_fasta_records?: boolean
+}
+
 export interface PolyXRegion {
   start_aa: number
   end_aa: number

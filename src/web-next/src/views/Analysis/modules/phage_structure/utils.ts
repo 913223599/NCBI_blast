@@ -206,3 +206,40 @@ export function summarizeRoleCounts(proteins: StructureProteinItem[]): Record<st
   }
   return grouped
 }
+
+const SEQ_EXT_RE = /(?:\.(?:fasta|fa|fna|faa|gbk|gb|gbff|genbank|gz))+$/i
+
+export function deriveStructureTaskName(filename: string): string {
+  const base = filename.replace(/\\/g, '/').split('/').pop() || filename
+  const stem = base.replace(SEQ_EXT_RE, '').trim()
+  return stem ? `${stem}_Structure` : 'PhageStructure_Task'
+}
+
+export function detectSequenceFormatLabel(filename: string): string {
+  const lower = filename.toLowerCase()
+  if (lower.endsWith('.faa') || lower.endsWith('.faa.gz')) return 'FAA'
+  if (/\.(gbk|gb|gbff|genbank)(\.gz)?$/i.test(lower)) return 'GBK'
+  if (/\.(fasta|fa|fna)(\.gz)?$/i.test(lower)) return 'FASTA'
+  return 'SEQ'
+}
+
+export function compactLocusLabel(locus: string, maxLen: number = 22): string {
+  if (!locus || locus.length <= maxLen) return locus
+  const cdsMatch = locus.match(/(?:_|-)(CDS_\d+|gp\d+|orf_?\d+)$/i)
+  if (cdsMatch && cdsMatch[1]) {
+    const tail = cdsMatch[1]
+    const headLen = Math.max(4, maxLen - tail.length - 3)
+    return `${locus.slice(0, headLen)}...${tail}`
+  }
+  const half = Math.max(6, Math.floor((maxLen - 3) / 2))
+  return `${locus.slice(0, half)}...${locus.slice(locus.length - half)}`
+}
+
+export function countFastaRecords(text: string): number {
+  if (!text) return 0
+  let cnt = 0
+  for (const raw of text.split(/\r?\n/)) {
+    if (raw.trim().startsWith('>')) cnt += 1
+  }
+  return cnt
+}

@@ -33,8 +33,11 @@ async def upload_file_generic(file: UploadFile = File(...)):
         safe_filename = "".join(c for c in raw_filename if c.isalnum() or c in ('.', '_', '-')).strip()
         if not safe_filename:
             safe_filename = f"unnamed_{int(time.time())}"
-            
+
         file_path = upload_dir / safe_filename
+        if file_path.exists():
+            import secrets
+            file_path = upload_dir / f"{file_path.stem}_{secrets.token_hex(3)}{file_path.suffix}"
         
         # 物理保存
         with open(file_path, "wb") as buffer:

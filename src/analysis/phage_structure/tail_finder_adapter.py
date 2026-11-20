@@ -341,7 +341,9 @@ def run_phagetailfinder_on_contigs(
 
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".faa", newline="\n", delete=False) as tf:
         for qid, p in query_items:
-            tf.write(f">{qid}\n{p.translation}\n")
+            aa_seq = p.translation.replace("*", "").strip()
+            if aa_seq:
+                tf.write(f">{qid}\n{aa_seq}\n")
         win_faa = Path(tf.name)
 
     pfam_hits: Dict[str, Tuple[str, str, float]] = {}
@@ -349,7 +351,7 @@ def run_phagetailfinder_on_contigs(
         wsl_faa = WSLManager.to_wsl_path(str(win_faa))
         py_code = (
             "import pyhmmer\n"
-            f"with pyhmmer.easel.SequenceFile('{wsl_faa}', digital=True) as sf: seqs = sf.read_block()\n"
+            f"with pyhmmer.easel.SequenceFile('{wsl_faa}', digital=True, alphabet=pyhmmer.easel.Alphabet.amino()) as sf: seqs = sf.read_block()\n"
             f"with pyhmmer.plan7.HMMFile('{wsl_hmm}') as hf:\n"
             "  best = {}\n"
             f"  for top in pyhmmer.hmmsearch(hf, seqs, cpus={max(1, workers)}, E={evalue_cutoff}):\n"

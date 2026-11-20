@@ -308,17 +308,21 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
 
 .analysis-content {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .tools-grid {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
   padding: 32px 40px;
   overflow-y: auto;
+  align-content: start;
 }
 
 .tool-card {
@@ -406,6 +410,7 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
 
 .tool-workspace {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 0;

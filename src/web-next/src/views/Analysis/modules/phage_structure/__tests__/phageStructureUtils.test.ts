@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildModuleMatrixCards,
+  compactLocusLabel,
+  countFastaRecords,
+  deriveStructureTaskName,
+  detectSequenceFormatLabel,
   formatGenomeBp,
   formatTailLength,
   getMorphotypeTheme,
@@ -56,5 +60,15 @@ describe('phage_structure utils', () => {
     expect(getRoleModuleGroup('TMP')).toBe('tail_core')
     expect(getRoleTrackColor('TSP')).toBe('#1d4ed8')
     expect(getRoleTrackColor('TMP')).toBe('#f59e0b')
+  })
+
+  it('derives batch task names, formats, fasta record counts, and compact locus tags', () => {
+    expect(deriveStructureTaskName('/data/phages/Enterobacter_p2.gbk.gz')).toBe('Enterobacter_p2_Structure')
+    expect(detectSequenceFormatLabel('sample.gbff')).toBe('GBK')
+    expect(detectSequenceFormatLabel('proteins.faa')).toBe('FAA')
+    expect(detectSequenceFormatLabel('phage.fna.gz')).toBe('FASTA')
+    expect(compactLocusLabel('NODE_1_length_72586_cov_126.271825_CDS_0012', 20)).toContain('CDS_0012')
+    expect(compactLocusLabel('SHORT_01', 20)).toBe('SHORT_01')
+    expect(countFastaRecords('>seq1\nATGC\n>seq2\nGGGG\n')).toBe(2)
   })
 })

@@ -198,7 +198,7 @@ class PhageStructureDB:
     def list_history(self, limit: int = 100) -> List[Dict[str, Any]]:
         with closing(self._connect()) as conn:
             rows = conn.execute(
-                "SELECT * FROM phage_structure_tasks ORDER BY created_at DESC LIMIT ?",
+                "SELECT * FROM phage_structure_tasks ORDER BY created_at DESC, rowid DESC LIMIT ?",
                 (limit,),
             ).fetchall()
             return [self._deserialize(r) for r in rows]

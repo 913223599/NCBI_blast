@@ -44,7 +44,7 @@ export let WS_URL = `ws://127.0.0.1:8765/ws?client_id=${MY_CLIENT_ID}`;
 // 【自适应逻辑强化】
 if (typeof window !== 'undefined') {
     const { protocol, hostname, port, origin } = window.location;
-    
+
     // 如果是通过浏览器直接访问 (非 Vite 开发模式的 5173 端口)
     if (port !== '5173' && (protocol === 'http:' || protocol === 'https:')) {
         console.log(`[ElectronBridge] 检测到外部浏览器访问，自动切换 API 基址至: ${origin}`);
@@ -60,7 +60,7 @@ export async function apiGet(endpoint: string): Promise<any> {
     try {
         const response = await fetch(`${API_BASE}${endpoint}`);
         if (!response.ok) return { success: false, error: `HTTP ${response.status}`, status: response.status };
-        
+
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
             return await response.json();
@@ -76,23 +76,23 @@ export async function apiPost(endpoint: string, body?: any): Promise<any> {
     try {
         const response = await fetch(`${API_BASE}${endpoint}`, {
             method: 'POST',
-            headers: { 
+            headers: {
                 'Content-Type': 'application/json',
                 'X-Client-ID': MY_CLIENT_ID
             },
             body: body ? JSON.stringify(body) : undefined
         });
-        
+
         const contentType = response.headers.get('content-type');
         if (response.ok && contentType && contentType.includes('application/json')) {
             return await response.json();
         }
-        
+
         if (!response.ok) {
             const errorText = await response.text().catch(() => 'Unknown Error');
             return { success: false, error: `HTTP ${response.status}: ${errorText}`, status: response.status };
         }
-        
+
         return { success: true, text: await response.text() };
     } catch (err) {
         console.error(`[ElectronBridge] POST ${endpoint} 失败:`, err);
@@ -102,7 +102,7 @@ export async function apiPost(endpoint: string, body?: any): Promise<any> {
 
 export async function apiDelete(endpoint: string): Promise<any> {
     try {
-        const response = await fetch(`${API_BASE}${endpoint}`, { 
+        const response = await fetch(`${API_BASE}${endpoint}`, {
             method: 'DELETE',
             headers: { 'X-Client-ID': MY_CLIENT_ID }
         });
@@ -256,12 +256,15 @@ const electronBridge = {
             ];
         } else if (fileType === 'annotation' || fileType === 'gbk' || fileType === 'phage') {
             // 基因组与注释序列场景
-            dialogTitle = '选择导入: 基因组序列与注释文件 (FASTA/GBK)';
+            dialogTitle = multiple
+                ? '批量选择导入: 基因组序列与注释文件 (FASTA/GBK/FAA)'
+                : '选择导入: 基因组序列与注释文件 (FASTA/GBK)';
             filters = [
-                { name: '注释与序列文件', extensions: ['gbk', 'gb', 'genbank', 'faa', 'fasta', 'fa', 'fna', 'gff', 'gff3', 'json'] },
-                { name: 'GenBank 文件 (*.gbk, *.gb, *.genbank)', extensions: ['gbk', 'gb', 'genbank'] },
+                { name: '注释与序列文件', extensions: ['gbk', 'gb', 'gbff', 'genbank', 'faa', 'fasta', 'fa', 'fna', 'gff', 'gff3', 'gz', 'json'] },
+                { name: 'GenBank 文件 (*.gbk, *.gb, *.gbff, *.genbank)', extensions: ['gbk', 'gb', 'gbff', 'genbank'] },
                 { name: 'FASTA 序列 (*.fasta, *.faa, *.fa, *.fna)', extensions: ['fasta', 'faa', 'fa', 'fna'] },
                 { name: 'GFF 注释 (*.gff, *.gff3)', extensions: ['gff', 'gff3'] },
+                { name: '压缩序列 (*.gz)', extensions: ['gz'] },
                 { name: 'JSON 特征 (*.json)', extensions: ['json'] }
             ];
         } else if (fileType === 'fasta') {
@@ -312,7 +315,7 @@ const electronBridge = {
         });
 
         if (!paths || paths.length === 0) return null;
-        
+
         // 批量模式：尝试触发旧版 treeView 兼容逻辑 (可选)
         if (multiple && (window as any).treeView?.handleExternalFiles) {
             (window as any).treeView.handleExternalFiles(paths);
@@ -330,7 +333,7 @@ const electronBridge = {
 
     async save_file(content: string, filenameHint: string, callback?: (success: boolean) => void) {
         const electron = window.electronAPI;
-        
+
         // 方案 A: Electron 原生保存对话框
         if (electron) {
             const path = await electron.saveFileDialog({
@@ -351,15 +354,15 @@ const electronBridge = {
             const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
-            
+
             link.setAttribute('href', url);
             link.setAttribute('download', filenameHint || 'export.csv');
             link.style.visibility = 'hidden';
-            
+
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            
+
             URL.revokeObjectURL(url);
             callback?.(true);
         } catch (err) {
@@ -462,9 +465,9 @@ const electronBridge = {
     },
 
     async get_alignment_visualization_data(
-        xmlPath: string, 
-        sortMode: string = 'evalue', 
-        queryIdOrCallback?: string | ((res: string) => void), 
+        xmlPath: string,
+        sortMode: string = 'evalue',
+        queryIdOrCallback?: string | ((res: string) => void),
         callback?: (res: string) => void
     ) {
         let queryId: string | undefined = undefined;
@@ -563,14 +566,14 @@ const electronBridge = {
         // 需要知道当前活动的树路径
         const currentPath = (window as any).treeView?.currentTreePath;
         if (!currentPath) {
-             (window as any).app?.showNotification('未找到当前活动的树文件路径', 'error');
-             return;
+            (window as any).app?.showNotification('未找到当前活动的树文件路径', 'error');
+            return;
         }
 
         (window as any).app?.showLoading('正在重定根...');
-        const result = await apiPost('/api/tree/reroot', { 
-            old_path: currentPath, 
-            node_id: nodeId 
+        const result = await apiPost('/api/tree/reroot', {
+            old_path: currentPath,
+            node_id: nodeId
         });
         (window as any).app?.hideLoading();
 
@@ -651,7 +654,7 @@ const electronBridge = {
     async save_api_key(service: string, key: string) {
         await apiPost(`/api/settings/api_key/${service}`, { key });
     },
-    
+
     async get_lan_share_info() {
         return await apiGet('/api/settings/lan_info');
     },
@@ -700,7 +703,7 @@ const electronBridge = {
         const result = await apiPost('/api/strain/record', { data: record });
         callback?.(result.success);
     },
-    
+
     async db_save_records_batch(records: any[], callback?: (res: boolean) => void) {
         const result = await apiPost('/api/strain/records/batch', { data: records });
         callback?.(result.success);
@@ -861,7 +864,7 @@ const electronBridge = {
         try {
             const formData = new FormData();
             formData.append('file', file);
-            
+
             const response = await fetch(`${API_BASE}/api/common/upload`, {
                 method: 'POST',
                 body: formData
@@ -901,7 +904,7 @@ const electronBridge = {
     async get_blast_databases() {
         return await apiGet('/api/blast/databases');
     },
-    
+
     /** 手动触发 Conda 环境部署 */
     async setup_assembly_env() {
         return await apiPost('/api/assembly/setup_conda');
@@ -1128,6 +1131,28 @@ const electronBridge = {
         return await apiPost('/api/analysis/phage_structure/run', payload);
     },
 
+    async run_phage_structure_batch(payload: any): Promise<any> {
+        return await apiPost('/api/analysis/phage_structure/batch', payload);
+    },
+
+    async upload_files_batch(files: File[]): Promise<any[]> {
+        try {
+            const formData = new FormData();
+            for (const file of files) {
+                formData.append('files', file);
+            }
+            const response = await fetch(`${API_BASE}/api/common/upload_batch`, {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await response.json();
+            return Array.isArray(data) ? data : [];
+        } catch (err) {
+            console.error('[ElectronBridge] 批量上传失败:', err);
+            return [];
+        }
+    },
+
     async get_phage_structure_queue_status(): Promise<any> {
         return await apiGet('/api/analysis/phage_structure/queue/status');
     },
@@ -1190,10 +1215,10 @@ const electronBridge = {
         });
     },
 
-    async create_blast_from_traces(payload: { 
-        task_name: string; 
-        sequences: { id: string; sequence: string }[]; 
-        program?: string; 
+    async create_blast_from_traces(payload: {
+        task_name: string;
+        sequences: { id: string; sequence: string }[];
+        program?: string;
         database?: string;
         evalue?: number;
         max_hits?: number;

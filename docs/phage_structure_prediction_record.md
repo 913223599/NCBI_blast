@@ -85,3 +85,30 @@
 * **后端结构预测全量测试**（`pytest tests/test_phage_structure.py -v`）：**`8 / 8 PASSED in 65.73s`**（覆盖词典消歧、polyX/TR 检测、T6SS 防伪、合成形态、5 株真注释全链路、FastAPI 挂载与联动、PhageTailFinder 对数 Viterbi 与无头 Tailocin 预警，以及 `Schitoviridae`、`Tectiviridae`、`PF06791/TAP紧邻序`、`Vertoviridae` 古菌肌尾专测）。
 * **前端组件单测与生产构建**：`vitest` 9 个文件 `53` 项全绿，`vue-tsc -b && vite build` 完成（自最后一次前端视图更新后未修改任何 `.ts/.vue` 文件）。
 * **代码合规校验**：[src/analysis/phage_structure/](file:///f:/NCBI%20blast/src/analysis/phage_structure/)、`scripts/benchmark_phage_structure.py`、`tests/test_phage_structure.py` 及本文档全部强制采用 `UTF-8` 编码、无任何硬编码盘符路径与 Emoji 字符。
+
+---
+
+## 5. UI 视觉修复与批量导入自动排队分析升级（步骤 55）
+
+针对桌面端实际预览截图暴露的视觉错位及科研多株批量导入需求，对全栈结构预测模块进行了以下精细重构：
+
+### 5.1 UI 错位、SVG 穿模与滚动容器修复
+1. **粒子模型图（[TailMorphotypeDiagram.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/TailMorphotypeDiagram.vue)）重构**：
+   - 修复 `Podoviridae-like` 短尾模式中橙色椭圆横压蓝色二十面体衣壳“头部包装”文字区的 SVG 坐标穿模，将内注射核心（`INTERNAL_VIRION`）迁移至 Portal 出口至 `TTPA/B` 短尾管内部通道中轴，衔接流线形尾刺针与对称吸附尾丝；
+   - 优化缺失显式连接器时生硬大灰块，改用柔和虚线环区分状态；丰富 `Non-tailed` 无尾衣壳与丝状波纹双构型视图；
+   - 修正第 4 格“尾丝 / RBP”卡片曾错误显示“估算尾长”的错位逻辑（恢复展示真实 RBP 基因并在第 3 格展示尾长标尺），并通过 [compactLocusLabel](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/utils.ts) 保留 `...CDS_00XX` 基因编号尾缀、配合安全内边距与两级 flex 滚动链修复（[App.vue](file:///f:/NCBI%20blast/src/web-next/src/App.vue)、[AnalysisView.vue](file:///f:/NCBI%20blast/src/web-next/src/views/AnalysisView.vue) 补齐 `min-height: 0` 与底部喘息边距）杜绝嵌套裁切。
+2. **短尾 TMP KPI 辅证提示与侧栏队列可视化**：
+   - [StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue) 对非长尾构型意外命中的疑似短标尺加注“非长尾构型，仅供参考”；
+   - [PhageStructureModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/PhageStructureModule.vue)、[StructureHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureHistory.vue) 与 [StructureQueueCard.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureQueueCard.vue) 对齐项目多队列规范，新增侧栏顶部队列计数标签、运行中快捷条、迷你进度条、排队位次 `#N` 徽章以及同批排队清单视图。
+
+### 5.2 全场景批量导入与自动串行排队
+1. **后端批量队列接口与并发稳健性修复**：
+   - 新增 `StructureBatchItemRequest` / `StructureBatchRunRequest`（[types.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/types.py)）、`PhageStructureManager.submit_batch_tasks`（[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)）及 `POST /api/analysis/phage_structure/batch`（[phage_structure.py](file:///f:/NCBI%20blast/src/backend/routes/phage_structure.py)），支持多文件顺序入队、前噬菌体区段自动拆批（`split_phage_regions`）与粘贴多条 FASTA 拆分（`split_fasta_records`）；
+   - 修复 [db.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/db.py) 同秒批量写入时的排序稳定性（`ORDER BY created_at DESC, rowid DESC`）、[queue.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/queue.py) 跨事件循环重启自愈重绑、[common.py](file:///f:/NCBI%20blast/src/backend/routes/common.py) 批量上传同名碰撞保护，以及 [sequence_annotator.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/sequence_annotator.py) / [tail_finder_adapter.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tail_finder_adapter.py) 在 `pyhmmer.easel.SequenceFile` 中显式声明 `Alphabet.amino()` 防止特殊单字母序列误认作核酸。
+2. **前端批量选择、拖拽与增量追加清单**：
+   - [StructureSetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureSetup.vue) 与 [electron-bridge.ts](file:///f:/NCBI%20blast/src/web-next/src/bridge/electron-bridge.ts) 全面启用原生/浏览器多选、批量拖入、批量上传 `/api/common/upload_batch`，配备可内联编辑任务名称的待排队队列列表；同时支持历史功能注释多选、前噬菌体扫描多选及按区段自动拆分入队。
+
+### 5.3 步骤 55 回归验证结果
+* **后端全量测试**（`pytest tests/test_phage_structure.py -v`）：**`9 / 9 PASSED in 73.10s`**（含新增 `test_fastapi_batch_import_auto_queue_execution`：验证多文件批量入队、自动串行执行与持久化有序查询）；
+* **前端自动化测试**（`npx vitest run`）：**`9` 个测试文件共 `54` 项用例全部通过**（含新增 `utils.ts` 批量命名/格式/编号缩写/多记录计数单测）；
+* **前端类型检查与生产构建**（`vue-tsc -b && vite build`）：零报错完成构建（`13.36s`）；全部改动文件通过 `UTF-8` 无 BOM 与零 Emoji 审计。
