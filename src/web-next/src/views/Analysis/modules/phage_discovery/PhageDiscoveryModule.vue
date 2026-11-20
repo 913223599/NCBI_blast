@@ -11,6 +11,7 @@ import PhageDiscoverySetup from './components/PhageDiscoverySetup.vue'
 const emit = defineEmits<{
   (e: 'open-viewer', payload: { gbkText: string; taskName: string }): void
   (e: 'open-annotation', payload: { fastaText: string; taskName: string; sampleType?: string }): void
+  (e: 'open-structure', payload: { taskId: string; taskName: string; regionIndex?: number }): void
 }>()
 
 const {
@@ -144,6 +145,16 @@ async function handleOpenAnnotation(regionIndex?: number): Promise<void> {
     ;(window as any).app?.showNotification(`跳转注释工作台失败: ${String(err)}`, 'error')
   }
 }
+
+function handleOpenStructure(regionIndex?: number): void {
+  if (!currentTask.value) return
+  const baseName = currentTask.value.task_name || currentTask.value.task_id
+  emit('open-structure', {
+    taskId: currentTask.value.task_id,
+    taskName: regionIndex !== undefined ? `${baseName}_Phage_${String(regionIndex).padStart(3, '0')}` : baseName,
+    regionIndex,
+  })
+}
 </script>
 
 <template>
@@ -249,6 +260,7 @@ async function handleOpenAnnotation(regionIndex?: number): Promise<void> {
             @open-viewer="handleOpenViewer"
             @open-overlay-viewer="handleOpenOverlayViewer"
             @open-annotation="handleOpenAnnotation"
+            @open-structure="handleOpenStructure"
             @contig-change="loadOverlayForContig"
           />
         </section>

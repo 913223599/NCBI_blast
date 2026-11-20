@@ -173,6 +173,14 @@ async def lifespan(app: FastAPI):
     except Exception as ep:
         logger.error(f"PhageDiscovery 队列引擎启动失败: {ep}")
 
+    # B5. 初始化噬菌体结构与尾部形态预测队列调度工作者
+    try:
+        from src.analysis.phage_structure.manager import get_phage_structure_manager
+        asyncio.create_task(get_phage_structure_manager().initialize_queue_worker())
+        logger.info("[INIT] PhageStructure 结构预测队列引擎已启动 (max_workers=1)")
+    except Exception as eps:
+        logger.error(f"PhageStructure 队列引擎启动失败: {eps}")
+
     # D. 打印局域网共享地址与初始化 WSL 环境
     try:
         from .lan_share import LanShareManager
@@ -336,12 +344,13 @@ app.include_router(taxonomy.router)
 app.include_router(core.router)
 
 # 注册基因组拼接与数据库管理路由
-from .routes import assembly, database, analysis, annotation, phage_discovery, pan_genomics, sanger_trace, diversity, other_tools
+from .routes import assembly, database, analysis, annotation, phage_discovery, phage_structure, pan_genomics, sanger_trace, diversity, other_tools
 app.include_router(assembly.router, prefix="/api")
 app.include_router(database.router, prefix="/api")
 app.include_router(analysis.router, prefix="/api")
 app.include_router(annotation.router, prefix="/api")
 app.include_router(phage_discovery.router, prefix="/api")
+app.include_router(phage_structure.router, prefix="/api")
 app.include_router(pan_genomics.router, prefix="/api")
 app.include_router(sanger_trace.router)
 app.include_router(diversity.router, prefix="/api")

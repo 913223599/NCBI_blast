@@ -1298,3 +1298,105 @@ Pop-Location
 | **Stress `C1 / C2` 截断集** | `C1: 75/75 (MAE=974.8 bp)` / `C2: 74/75` | **`C1: 75/75 (F1=1.0000, MAE=891.3 bp)` / `C2: 74/75 (98.7%)`** | **`C1 MAE` 再净降 `-83.5 bp`** |
 | **`Gold-8` 重点疑难个体** | `Sp11=0.9465, Sp18=0.8028, Sp8=0.8307, pp4=0.6331, Sp4=0.5764, Sp9=0.6991` | **`Sp11=0.9988, Sp18=0.9651, Sp8=0.9235, pp4=0.9168, Sp4=0.8111, Sp9=0.7802`** | 分别挽回 `~1.9~11.7 kb` 缺失侧翼，`Sp15` 保持 `0.9995` 无伤 |
 | **流式 `chunk=2 Mb` 一致性** | `PAO1` `-200 bp`、`B168` `3` 处 `±200 bp` 漂移 | **`PAO1: exact_match=True` (`785200..797200`)；`B168`: `PBSX`/`SPbeta` 严格一致** | `B168` 仅 `skin_element` 极平缓边缘存在单一 `200 bp` 阈值跨界 (`2662600..2699400` vs `2662800..2699200`) |
+
+---
+
+## 45. 项目全维度能力测试构建与跨 8 大门/界零泄露真实宿主实测（步骤 52）
+
+为彻底打破此前测试集仅偏重常见厚壁菌与 γ-变形菌的验证局限，构建了“离线软件/数学不变量 CI 单测 + `39.3 Mb` 跨门零泄露参考基因组实战套件”双重能力校验体系，全面实测模型在陌生宿主门类、边界极端输入及全栈应用链路上的真实上限与客观缺陷：
+
+### 1. 能力测试构建清单
+1. **CI 自动化全能力单元测试（[test_capability_comprehensive.py](file:///f:/NCBI%20blast/tests/test_capability_comprehensive.py)）**：
+   - **正反双链对称不变量**：检验 `decode_subwindow_probs_to_regions` 与 `refine_regions_with_att_sites` 对正向及严格反向互补序列输出的镜像精确等价性；
+   - **恶劣序列输入鲁棒性**：检验 mixed-case soft-masked DNA 零数值偏差（`< 1e-6`）、`600 bp N-gap` 断裂隔离（不误触发 1 bp `att`）及 `< 3 kb`/全 `N` 极限输入的无 `NaN/Inf` 安全兜底；
+   - **跨噬菌体核心横劈流式恢复**：以 `chunk_max_bp=15 kb, overlap=6 kb` 强制将分片边界落入 `[10400..19600]` 中央，校验 `scan_fasta_streaming` 去重仲裁精确恢复为 1 条完整区段且输出一致性通过；
+   - **全链路与 CLI 产物自洽**：验证 `scripts/predict_unified.py` CLI 运行后生成 `regions.tsv`、`regions.gff3`（1-based 换算）、`prophages.fna`（子串逐碱基一致）与 `scan_summary.json`（含 V2 新计数字段）；验证 V2 四阶段联动管线及 `model_registry` 对 `Unified V4.3` 校准 `sub_threshold=0.45` 的自动识别；
+   - **回归结果**：[test_capability_comprehensive.py](file:///f:/NCBI%20blast/tests/test_capability_comprehensive.py) **`6 passed in 2.71s`**，全仓 `pytest tests/ -v` **`278 passed in 155.15s`**（Pyrefly `INFO 0 diagnostics`）。
+
+2. **跨门参考基准实战与端到端套件（[benchmark_project_capabilities.py](file:///f:/NCBI%20blast/scripts/benchmark_project_capabilities.py)）**：
+   - 从 NCBI 拉取构建 `14` 条 **100% 零泄露**（校验全不位于既有 `5,885` 个训练集/负库 accession 内）的完整染色体至 `F:\Phage data\benchmarks\cross_phylum_unseen\`（`~39.3 Mb`，`GC 30.3% ~ 68.5%`，覆盖 **放线菌门、α/β/ε-变形菌纲、拟杆菌门、蓝细菌门、Table-4 柔膜菌门与古菌界 Euryarchaeota / Thermoproteota**），结合本地官方 `.gbk` 完成逐区间 CDS 交叉审计，全量报告输出至 `F:\Phage data\models\full_v4\orf_judge_unified\project_capability_validation_report.json`。
+
+### 2. 跨门泛化与端到端实测关键发现
+
+| 测试维度 / 典型物种（门纲与 GC%） | 实测表现 | 交叉 GenBank 核验结论与能力判定 |
+| :--- | :--- | :--- |
+| **高 GC β-变形菌 *B. pseudomallei* K96243 (`NC_006351.1`, `68.5%`)** | 精准命中经典 `phiK96243`（**`IoU=0.8838`**, `[1426426..1462232]`） | **优秀**：Chr1 另稳健检出 2 个含 25/5 项真噬菌体 CDS 的前噬菌体（`145.6..181.6 kb`, `1321.9..1342.2 kb`） |
+| **β-变形菌 *N. meningitidis* MC58 (`NC_003112.2`, `51.5%`)** | 检出 **`2`** 个真阳性（`1104.6..1135.6 kb`, `1690.2..1701.4 kb`） | **优秀**：成功捕获经典 `Mu-like Pnm` 以及极短高同化丝状前噬菌体 **`Nf1`**（携带 `Zot` + `TspB` + `Rep`） |
+| **高/中 GC 放线菌 *C. diphtheriae* (`NC_002935.2`, `53.5%`)** | 命中 `Corynephage tox+` (**`IoU=0.8525`**) 与 `DIP_prophage_2` (**`IoU=0.7739`**) | **混合（暴露假阳）**：另 1 处 `[779200..797200]` 为贴靠 `tRNA-Arg` 的 **Panacea 防御/甲基化岛**（灰区假阳） |
+| **高 GC 放线菌 *M. tuberculosis* H37Rv & *C. glutamicum* (`65.6% / 53.8%`)** | **检出 `0` 例** | **短板暴露**：未能检出约 `9~10 kb` 短小退化 `phiRv1 / phiRv2` 及低密度注释 `CGP1/2/3` |
+| **极低 GC ε-变形菌 *C. jejuni* RM1221 (`NC_003912.7`, `30.3%`)** | 正链命中 `CJIE4`（`IoU=0.6268`），未误报质粒型 `CJIE3` | **短板暴露**：漏检 `CJIE1 / CJIE2`；且反链镜像扫出 `[209238..222831] (CJIE1)` + `CJIE4`（**双链切窗相位不对称**） |
+| **拟杆菌门 *B. thetaiotaomicron* (`NC_004663.1`, `6.26 Mb, 42.8%`)** | 检出 2 处；**`2 Mb` 流式分片 `exact_match=True`** | **混合（暴露跨域假阳）**：`1142.8..1162.6 kb` 为真整合可动岛；`5322.8..5344.2 kb` 系拟杆菌特有 **`SusC/SusD` 多糖操纵子误报** |
+| **古菌界 *T. kodakarensis* KOD1 (`NC_006624.1`, `52.0%`)** | 跨界命中 4 大古菌前病毒中的 **3 例**：**`TKV4 (IoU=0.8965)`、`TKV3 (0.8125)`、`TKV2 (0.3218)`** | **惊喜表现**：仅漏检 `TKV1`；对照古菌 *Sulfolobus* (`NC_007181.1`, `36.7%`) **严格 `0` 误报** |
+| **极端低 GC / 非标准密码对照 (*Prochlorococcus* `30.8%` / *Mycoplasma* `31.7% Table-4`)** | 均 **`preds = 0`（零误报）**；α-变形菌 `NA1000 / 1021` 亦 **`0` 误报** | **抗干扰达标**；同时真机 CLI (`predict_unified.py`)、工作台 `model_registry` (`Unified V4.3, sub=0.45`) 与全格式产物一致性校验全通过 |
+
+---
+
+## 46. 噬菌体结构与尾部形态预测功能组件全栈落地（步骤 53）
+
+围绕“尾部特征蛋白标志分型（TSP/MTP/TAP/TTPA-B） + Virfam 头-颈-尾连接器分型 + 卷尺蛋白（TMP）polyX/TRs 分子标尺长度定标”机理，在「组装分析工作台」中独立构建了完整的后端算法、异步队列、REST 路由与桌面前端交互组件：
+
+### 1. 核心生物信息学引擎设计与落地
+1. **PHROGs 结构词典与精细角色消歧（[phrog_catalog.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/phrog_catalog.py)）**：
+   - 自动抽取并缓存 `database/pharokka_db/all_phrogs.h3m` 中的 `head and packaging`、`connector`、`tail`、`lysis`、`integration and excision` 共 `2,741` 个结构 HMM 至 [structural_phrogs.h3m](file:///f:/NCBI%20blast/database/phage_structure/structural_phrogs.h3m)（`232 MB`），WSL `PyHMMER` 扫完单株噬菌体平均仅需数秒；
+   - 建立 `22` 类精确结构角色映射与混淆防护：严格区分短尾 `TTPA_B`（`tail tubular protein`）与长/肌尾 `TTP`（`tail tube protein`），屏蔽 `tail length tape measure protein chaperone`（归入 `TAP`）误入 TMP，隔离宿主 `T6SS (tssB/C, Hcp, VgrG)` 收缩鞘与丝状/无尾衣壳标志（`Inoviridae / Microviridae`）。
+2. **卷尺蛋白（TMP）分子标尺定量剖析（[tmp_analyzer.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_analyzer.py)）**：
+   - 支持经典 `TMP`、肌尾 `gp29` 基板-尾长决定蛋白及缺标有尾场景共线性候选蛋白，剔除 `<250 aa` 或低分片段伪命中；
+   - 扫描连续同聚与 12 aa 窗口 `polyX` 寡聚微区、支持物化等价保守替换的 `3..120 aa` 串联重复阵列（TRs）与 40 分箱 Kyte-Doolittle 疏水性剖面，并按 α-螺旋轴向 `0.145 nm/aa`（`0.140~0.150 nm/aa` 区间）推算理论尾管物理量纲，同时在结果解说中严谨标明理论线性估计边界与结构折叠折减局限。
+3. **可解释融合判型、序列注释与 3D 补漏（[morphotype_classifier.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/morphotype_classifier.py)、[sequence_annotator.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/sequence_annotator.py)）**：
+   - 融合四维证据与 Virfam 连接器分型（`Type 1/2/3`），并在强 `TSP` 存在时合理降权巨型肌尾头内/项圈交叉匹配（如将 `T4` 的短尾背景噪声压降至 `2.52 vs 12.2`）；
+   - 支持 FASTA / GenBank（`.gbk/.gbff`）/ 蛋白 FAA / 历史功能注释任务 / 前噬菌体扫描区段输入；裸序列经多核 `Pyrodigal`（保留主机核心）+ WSL `PyHMMER` 并行解析；支持可选开启离线 `Phold AI (ProstT5 + Foldseek)` 对 `>=100 aa` 长未知假定蛋白补漏（限 `batch_size=1` 与前后 CUDA 显存强制回收）。
+4. **队列持久化、断点落盘与工作台 API 接入（[db.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/db.py)、[queue.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/queue.py)、[exporter.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/exporter.py)、[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)、[phage_structure.py](file:///f:/NCBI%20blast/src/backend/routes/phage_structure.py)、[api_server.py](file:///f:/NCBI%20blast/src/backend/api_server.py)）**：
+   - 建立 `database/phage_structure.db`（WAL 模式）与串行异步队列（含重启中断自愈与 WebSocket 实时推流）；
+   - 按 Contig 写入 `checkpoints/contig_XXX.json` 分片落盘防止内存囤积，并导出 `structure_report.json`、`morphotype_summary.tsv`、`structure_features.tsv`、`tmp_analysis.tsv` 与可直达图谱浏览器的 `annotated_structure.gbk`。
+
+### 2. 前端工作台模块化架构与跨模块联动
+- 新增前端全栈目录 [phage_structure](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/)（零 Emoji、纯矢量 SVG）：
+  - 主容器与调度：[PhageStructureModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/PhageStructureModule.vue)、[usePhageStructure.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/composables/usePhageStructure.ts)、[types.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/types.ts)、[utils.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/utils.ts)；
+  - 交互配置与结果视图：[StructureSetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureSetup.vue)、[StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue)、[StructureHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureHistory.vue)、[StructureQueueCard.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureQueueCard.vue)、[StructureProgress.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureProgress.vue)；
+  - 三大科研可视化组件：[TailMorphotypeDiagram.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/TailMorphotypeDiagram.vue)（动态颗粒剖面构型图）、[TmpRulerChart.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/TmpRulerChart.vue)（TMP 物理标尺 / TR 弧拱 / polyX 热斑 / Kyte-Doolittle 疏水折线）、[StructuralOperonTrack.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructuralOperonTrack.vue)（双链操纵子物理矢图）；
+- 在 [AnalysisView.vue](file:///f:/NCBI%20blast/src/web-next/src/views/AnalysisView.vue) 注册第 6 张工具卡，完成 [electron-bridge.ts](file:///f:/NCBI%20blast/src/web-next/src/bridge/electron-bridge.ts) 桥接以及 [AnnotationResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/annotation/components/AnnotationResults.vue)、[PhageDiscoveryResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_discovery/components/PhageDiscoveryResults.vue) 与 `GenomeViewer` 双向直通。
+
+### 3. 全链路实测与构建验收结果
+
+| 验收条目 | 实测输出 / 形态与定量表现 | 验证结论 |
+| :--- | :--- | :--- |
+| **经典肌尾噬菌体 T4 (`NC_000866.4`)** | `Myoviridae-like (conf=0.99, Myo=12.2 vs Podo=2.52)`，检出 `gp29` (`590 aa, est=85.5 nm, TR=10 aa`)，`8.39 s` | **HTTP 端到端通过** |
+| **经典长尾噬菌体 Lambda (`NC_001416.1`)** | `Siphoviridae-like (conf=0.99, Sipho=10.6, Type_1_Sipho_Myo)`，检出 `TMP 853 aa (est=123.7 nm, polyX=58 aa, TR=18 aa)`，`7.77 s` | **HTTP 端到端通过** |
+| **经典短尾噬菌体 T7 (`NC_001604.1`)** | `Podoviridae-like (conf=0.99, Podo=8.2)`，`TMP=None`，`8.14 s` | **HTTP 端到端通过** |
+| **经典短尾噬菌体 P22 (`NC_002371.2`)** | `Podoviridae-like (conf=0.99, Podo=9.9, Type_3_Podoviridae)`，有效过滤 `203 aa` 伪碎片，`8.05 s` | **HTTP 端到端通过** |
+| **非有尾丝状噬菌体 M13 (`NC_003287.2`)** | `Non-tailed (conf=0.99, Non-tailed=8.0)`，未误推为短尾，`7.25 s` | **HTTP 端到端通过** |
+| **静态与质量门禁** | `pyrefly check`: **`INFO 0 diagnostics`**；UTF-8 无 BOM / 零 Emoji 审计 (`32` 文件全通过) | **通过** |
+| **后端与前端自动化测试及构建** | [test_phage_structure.py](file:///f:/NCBI%20blast/tests/test_phage_structure.py): **`6 passed in 60.60s`**；`vitest run`: **`9 files, 53 passed`**（含 [phageStructureUtils.test.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/__tests__/phageStructureUtils.test.ts) `3` 项）；`vue-tsc -b && vite build`: **`built in 14.80s`** | **全量通过** |
+
+---
+
+## 47. PhageTailFinder 双状态隐马尔可夫模块部署与全栈集成（步骤 54）
+
+为弥补单基因序列 HMM 在极端远缘与连续未知尾部基因簇召回上的短板，将开源工具 `HIT-ImmunologyLab/PhageTailFinder` 部署并深度整合入「噬菌体结构与尾部形态预测」模块：
+
+### 1. 离线数据库重建与核心工程修复
+1. **代码与官方模型参数部署（[third_party/PhageTailFinder](file:///f:/NCBI%20blast/third_party/PhageTailFinder/)）**：
+   - 完整检出 `PhageTailFinder` 源码及其官方双状态 HMM 参数表（`start_prob`、`transition_prob`、`emission_prob`、`pfam_DICT`，总计涵盖 `4,256` 条记录 / `3,668` 个唯一 Pfam 家族）。
+2. **本地 `Pfam-A` 100% 自动建库（[build_ptf_pfam_db.py](file:///f:/NCBI%20blast/scripts/build_ptf_pfam_db.py)）**：
+   - 鉴于原高校 `db.tar.gz` 下载地址长期连接超时不可达，实现基于 WSL 本地已就绪 `/opt/virsorter2_db/hmm/pfam/Pfam-A-*.hmm` 的精准提取脚本， **`15.69 s`** 完成全部 **`3,668 / 3,668 (100.00%)`** 目标 Pfam 家族抽提并输出至 [ptf_pfams.h3m](file:///f:/NCBI%20blast/database/phage_tail_finder/ptf_pfams.h3m)（`137.46 MB`）。
+3. **对数域双状态 HMM 适配器（[tail_finder_adapter.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tail_finder_adapter.py)）**：
+   - 将原仓库 `predict.py` / `viterbi.py` 中的三个原始缺陷升级为生产级能力：（1）合并原表内 `588` 个同时归属尾/非尾样本的重合 Pfam 条件概率并平滑处理，避免单字典覆写锁死；（2）将连乘 Viterbi 升级为全对数空间 `decode_tail_sequence`（Viterbi + Forward-Backward 逐 ORF 尾部后验概率），消除长染色体或数百基因噬菌体的浮点下溢问题；（3）调度 WSL `PyHMMER` 14 核并发扫库并聚类产出 `TailFinderCluster`。
+
+### 2. 前后端集成与新增严谨保护
+- **后端联动（[types.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/types.py)、[morphotype_classifier.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/morphotype_classifier.py)、[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)、[exporter.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/exporter.py)）**：
+  - 支持请求参数 `enable_phagetailfinder`（默认开启）与 `ptf_accurate_mode`；`structure_features.tsv` 新增 `ptf_is_tail`、`ptf_tail_prob`、`ptf_pfam` 列；
+  - 新增两项高解释性诊断规则：当 `PhageTailFinder` 检出完整共线性尾部簇时于证据链呈现新捕获未知蛋白数量；当检出收缩尾鞘但 `head_packaging_count == 0` 且样本长度 `>= 12` ORF 时自动触发 **Tailocin / eCIS 无头伪阳警告**。
+- **前端界面升级（[StructureSetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureSetup.vue)、[StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue)、[StructuralOperonTrack.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructuralOperonTrack.vue)）**：
+  - 展示引擎就绪标签、高级参数切换、共线性尾基因簇卡片及单蛋白尾概率徽章与操纵子轨道叠加。
+
+### 3. 全链路双引擎对比实测与回归门禁
+- **5 株经典参考噬菌体 HTTP 端到端实测**（同时开启 PHROG HMM + PhageTailFinder）：
+  - **T4 (`NC_000866.4`)**：`Myoviridae-like (0.99)`，PhageTailFinder 识别 **`19 / 261`** 尾蛋白、聚为 `6` 个尾部基因簇（主簇位于 `86..121 kb` 与 `154..159 kb`），总耗时 `13.89 s`；
+  - **Lambda (`NC_001416.1`)**：`Siphoviridae-like (0.99)`，识别 **`14 / 62`** 尾蛋白并严密聚为单连续核心簇 `PTF_Cluster_1 [7612..22557 bp]`（平均尾概率 **`0.9748`**），**成功凭借共线性拯救 `6` 个 PHROG 未命中假定基因**，总耗时 `13.45 s`；
+  - **T7 (`NC_001604.1`)**：`Podoviridae-like (0.99)`，识别 `2 / 51` 独立短尾蛋白，耗时 `13.89 s`；
+  - **P22 (`NC_002371.2`)**：`Podoviridae-like (0.99)`，识别 `2 / 66` 独立蛋白，耗时 `13.61 s`；
+  - **M13 (`NC_003287.2`)**：`Non-tailed (0.99)`，仅 1 条受体蛋白触发 `1 / 8`，主判未受干扰，耗时 `13.47 s`。
+- **最终静态与自动化回归结果**：
+  - `pyrefly check --min-severity warn`：**`INFO 0 diagnostics`**；
+  - [test_phage_structure.py](file:///f:/NCBI%20blast/tests/test_phage_structure.py)：**`7 passed in 71.83s`**（含 `600 ORF` 对数 Viterbi 共线性挽救及无头 Tailocin 警示单测）；
+  - 前端 `vitest run`：**`9 files, 53 passed`**；`vue-tsc -b && vite build`：**`built in 16.93s`**；全新增代码与文档 UTF-8（无 BOM）及零 Emoji 审计全部通过。

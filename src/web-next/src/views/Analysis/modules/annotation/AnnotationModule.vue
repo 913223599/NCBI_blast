@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'open-viewer', payload: { gbkText: string; taskName: string }): void;
+  (e: 'open-structure', payload: { taskId: string; taskName: string }): void;
 }>();
 
 const {
@@ -100,6 +101,14 @@ async function handleDeleteTask(taskId: string) {
 
 function onOpenViewer(gbkText: string, taskName: string) {
   emit('open-viewer', { gbkText, taskName });
+}
+
+function onOpenStructure() {
+  if (!currentTask.value) return;
+  emit('open-structure', {
+    taskId: currentTask.value.task_id,
+    taskName: currentTask.value.task_name || currentTask.value.task_id,
+  });
 }
 
 function onStartNew() {
@@ -201,6 +210,7 @@ function onStartNew() {
             :key="currentTask.task_id"
             :task="currentTask"
             @open-in-viewer="(gbk, name) => onOpenViewer(gbk, name)"
+            @open-structure="onOpenStructure"
             @download="(type) => downloadFile(currentTask!.task_id, type)"
           />
         </section>

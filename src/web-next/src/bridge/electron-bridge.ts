@@ -1105,6 +1105,64 @@ const electronBridge = {
         return `${API_BASE}/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/download/${fileType}`;
     },
 
+    // ═══ 噬菌体结构与尾部形态预测 (PhageStructure) ═══
+    async get_phage_structure_capabilities(): Promise<any> {
+        return await apiGet('/api/analysis/phage_structure/capabilities');
+    },
+
+    async get_phage_structure_sources(): Promise<any> {
+        return await apiGet('/api/analysis/phage_structure/sources');
+    },
+
+    async inspect_phage_structure_input(payload: {
+        source_mode: 'file' | 'paste' | 'annotation' | 'phage_discovery';
+        fasta_path?: string;
+        fasta_content?: string;
+        source_task_id?: string;
+        region_index?: number;
+    }): Promise<any> {
+        return await apiPost('/api/analysis/phage_structure/inspect', payload);
+    },
+
+    async run_phage_structure_task(payload: any): Promise<any> {
+        return await apiPost('/api/analysis/phage_structure/run', payload);
+    },
+
+    async get_phage_structure_queue_status(): Promise<any> {
+        return await apiGet('/api/analysis/phage_structure/queue/status');
+    },
+
+    async get_phage_structure_history(limit: number = 100): Promise<any> {
+        return await apiGet(`/api/analysis/phage_structure/history?limit=${limit}`);
+    },
+
+    async get_phage_structure_result(taskId: string): Promise<any> {
+        return await apiGet(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}/result`);
+    },
+
+    async get_phage_structure_gbk(taskId: string): Promise<any> {
+        return await apiGet(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}/gbk`);
+    },
+
+    async cancel_phage_structure_task(taskId: string): Promise<any> {
+        return await apiPost(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}/cancel`);
+    },
+
+    async delete_phage_structure_task(taskId: string): Promise<any> {
+        return await apiDelete(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}`);
+    },
+
+    async open_phage_structure_folder(taskId: string): Promise<any> {
+        return await apiPost(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}/open-folder`);
+    },
+
+    get_phage_structure_download_url(
+        taskId: string,
+        fileType: 'json' | 'summary_tsv' | 'features_tsv' | 'tmp_tsv' | 'gbk'
+    ): string {
+        return `${API_BASE}/api/analysis/phage_structure/${encodeURIComponent(taskId)}/download/${fileType}`;
+    },
+
     async get_pan_genomics_samples(): Promise<any> {
         return await apiGet('/api/analysis/pan_genomics/samples');
     },

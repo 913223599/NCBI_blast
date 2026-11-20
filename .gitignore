@@ -174,8 +174,8 @@ stop
 # 9. 临时开发脚本与草稿目录 (保留 /scripts/ 下核心生产与运维脚本)
 # ------------------------------------------------------------------------------
 /scratch/
-tmp_*.py
-temp_*.py
+/tmp_*.py
+/temp_*.py
 check_qc.py
 fix_pfam.py
 merge_vdb.py
@@ -232,6 +232,9 @@ src/test_shm.py
 !/scripts/build_v4_3_dataset.py
 !/scripts/train_v4_3_unified.py
 !/scripts/finetune_stage1_2_v4_3.py
+!/scripts/benchmark_project_capabilities.py
+!/scripts/build_ptf_pfam_db.py
+!/scripts/benchmark_phage_structure.py
 .lingma/rules/
 
 # ------------------------------------------------------------------------------

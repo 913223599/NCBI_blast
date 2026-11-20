@@ -1,0 +1,546 @@
+# -*- coding: utf-8 -*-
+"""
+噬菌体结构与尾部形态预测管理器 (PhageStructureManager)
+
+职责：
+1. 探测本地计算资源、PHROG HMM 索引状态以及可选历史注解/前噬菌体数据源；
+2. 协调 File / Paste / Annotation Task / PhageDiscovery Region 4 种源的预检与参数提交；
+3. 按 Contig 分片落盘 Checkpoint 并并发剖析 TMP 分子标尺与 Virfam+PHROG 多证据形态归类；
+4. 安全返回结构预测全文、GenBank 可视化跳转载荷、文件导出与任务销毁。
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import secrets
+import shutil
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from starlette.concurrency import run_in_threadpool
+
+from ...backend.broadcaster import broadcaster
+from ...workbench.models.tool_config import ToolConfig
+from ..annotation.db import annotation_db
+from ..phage_finder.db import phage_discovery_db
+from .db import phage_structure_db
+from .exporter import export_structure_artifacts
+from .morphotype_classifier import (
+    build_connector_profile,
+    build_module_matrix,
+    classify_morphotype,
+)
+from .phrog_catalog import classify_structural_role
+from .queue import phage_structure_queue, release_gpu_memory
+from .sequence_annotator import (
+    check_phold_ready,
+    check_wsl_pyhmmer_ready,
+    enhance_with_phold_3d,
+    get_safe_workers,
+    parse_input_contigs,
+    predict_missing_orfs_parallel,
+    resolve_all_phrogs_hmm_path,
+    resolve_structural_hmm_path,
+    scan_proteins_with_pyhmmer,
+)
+from .tmp_analyzer import select_and_analyze_tmps
+from .tail_finder_adapter import is_phagetailfinder_ready, run_phagetailfinder_on_contigs
+from .types import (
+    ContigStructureResult,
+    MorphotypePrediction,
+    PhageStructureResult,
+    StructureInspectRequest,
+    StructureProteinItem,
+    StructureRunRequest,
+    TailFinderCluster,
+)
+
+logger = logging.getLogger("analysis.phage_structure.manager")
+
+
+class PhageStructureManager:
+    """单例管理噬菌体结构与尾部形态预测全生命周期。"""
+
+    def __init__(self, project_root: Optional[Path] = None):
+        self.project_root = Path(project_root) if project_root else ToolConfig.PROJECT_ROOT
+        self.results_root = self.project_root / "results" / "phage_structure"
+        self.results_root.mkdir(parents=True, exist_ok=True)
+        self.db = phage_structure_db
+        self.queue = phage_structure_queue
+        self.queue.set_executor(self.execute_pipeline_task)
+
+    async def initialize_queue_worker(self) -> None:
+        await self.queue.start()
+
+    def get_capabilities(self) -> Dict[str, Any]:
+        struct_hmm = resolve_structural_hmm_path()
+        all_hmm = resolve_all_phrogs_hmm_path()
+        wsl_pyhmmer = check_wsl_pyhmmer_ready()
+        cpu_cores = os.cpu_count() or 4
+        return {
+            "ready": wsl_pyhmmer and (struct_hmm is not None or all_hmm is not None),
+            "wsl_pyhmmer_ready": wsl_pyhmmer,
+            "phold_ready": check_phold_ready(),
+            "phagetailfinder_ready": is_phagetailfinder_ready(),
+            "structural_hmm_cached": struct_hmm is not None,
+            "structural_hmm_path": str(struct_hmm) if struct_hmm else "",
+            "all_phrogs_available": all_hmm is not None,
+            "cpu_cores": cpu_cores,
+            "safe_workers": get_safe_workers(),
+        }
+
+    def list_linked_sources(self) -> Dict[str, Any]:
+        """获取系统内已完成的功能注释与前噬菌体扫描记录作为快捷数据源。"""
+        anno_items: List[Dict[str, Any]] = []
+        for t in annotation_db.list_tasks(limit=80):
+            if t.get("status") == "completed":
+                summ = t.get("summary") or {}
+                anno_items.append({
+                    "task_id": t["task_id"],
+                    "task_name": t["task_name"],
+                    "sample_type": t.get("sample_type", "PHAGE"),
+                    "cds_count": summ.get("cds_count", 0),
+                    "total_length": summ.get("total_length", 0),
+                    "created_at": t.get("created_at", ""),
+                })
+
+        phage_items: List[Dict[str, Any]] = []
+        for t in phage_discovery_db.list_tasks(limit=80):
+            if t.get("status") == "completed":
+                summ = t.get("summary") or {}
+                if int(summ.get("region_count") or 0) > 0:
+                    phage_items.append({
+                        "task_id": t["task_id"],
+                        "task_name": t["task_name"],
+                        "region_count": summ.get("region_count", 0),
+                        "total_prophage_bp": summ.get("total_prophage_bp", 0),
+                        "created_at": t.get("created_at", ""),
+                    })
+        return {"annotations": anno_items, "phage_discoveries": phage_items}
+
+    def _load_contigs_from_annotation(
+        self,
+        anno_task_id: str,
+        selected_contigs: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        task_row = annotation_db.get_task(anno_task_id)
+        if not task_row:
+            raise FileNotFoundError(f"未找到历史注释任务: {anno_task_id}")
+        anno_dir = self.project_root / "results" / "annotations" / anno_task_id
+        feat_json = anno_dir / "features.json"
+        gbk_p = anno_dir / "ANNO.gbk"
+        fasta_p = anno_dir / "input_sequence.fasta"
+
+        contig_seqs: Dict[str, str] = {}
+        if fasta_p.is_file():
+            parsed = parse_input_contigs(fasta_path=str(fasta_p))
+            contig_seqs = {cid: info["dna_seq"] for cid, info in parsed.items()}
+        elif gbk_p.is_file():
+            parsed = parse_input_contigs(fasta_path=str(gbk_p), selected_contigs=selected_contigs)
+            if not feat_json.is_file():
+                return parsed
+            contig_seqs = {cid: info["dna_seq"] for cid, info in parsed.items()}
+
+        if not feat_json.is_file():
+            raise FileNotFoundError(f"注释任务缺少特征文件: {feat_json}")
+
+        raw_feats = json.loads(feat_json.read_text(encoding="utf-8"))
+        sel_set = set(selected_contigs) if selected_contigs else None
+        out: Dict[str, Dict[str, Any]] = {}
+
+        for f in raw_feats:
+            if f.get("feature_type") != "CDS":
+                continue
+            cid = str(f.get("contig_id") or "contig_1")
+            if sel_set is not None and cid not in sel_set:
+                continue
+            if cid not in out:
+                dna = contig_seqs.get(cid, "")
+                n_bp = len(dna)
+                gc_pct = round((dna.count("G") + dna.count("C")) * 100.0 / max(1, n_bp), 2) if n_bp else 0.0
+                out[cid] = {
+                    "length_bp": n_bp,
+                    "gc_percent": gc_pct,
+                    "dna_seq": dna,
+                    "proteins": [],
+                    "input_type": "annotation",
+                }
+            aa = str(f.get("translation") or "").strip().upper().rstrip("*")
+            prod = str(f.get("product") or "hypothetical protein")
+            phrog_id = str(f.get("phrog") or "")
+            if not phrog_id:
+                notes = str(f.get("notes") or "")
+                import re
+                m = re.search(r"PHROG\s*#?(\d+)", notes, re.I)
+                if m:
+                    phrog_id = f"phrog_{m.group(1)}"
+            role, role_cn = classify_structural_role(prod, phrog_id=phrog_id)
+            start_bp = int(f.get("start") or 0)
+            end_bp = int(f.get("end") or 0)
+            out[cid]["proteins"].append(
+                StructureProteinItem(
+                    locus_tag=str(f.get("locus_tag") or f.get("id") or f"CDS_{len(out[cid]['proteins']) + 1}"),
+                    contig_id=cid,
+                    start=start_bp,
+                    end=end_bp,
+                    strand=str(f.get("strand") or "+"),
+                    length_aa=int(f.get("protein_length_aa") or len(aa)),
+                    product=prod,
+                    phrog_id=phrog_id,
+                    structural_role=role,
+                    role_label_cn=role_cn,
+                    evidence_source=str(f.get("source_engine") or "annotation"),
+                    translation=aa,
+                )
+            )
+            out[cid]["length_bp"] = max(out[cid]["length_bp"], end_bp)
+
+        if not out:
+            raise ValueError(f"注释任务 {anno_task_id} 中未检测到 CDS 编码基因")
+        return out
+
+    def _load_contigs_from_phage_discovery(
+        self,
+        pd_task_id: str,
+        region_index: Optional[int] = None,
+        selected_contigs: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        pd_dir = self.project_root / "results" / "phage_discovery" / pd_task_id
+        fa_p = pd_dir / "prophages.fasta"
+        if not fa_p.is_file():
+            raise FileNotFoundError(f"前噬菌体扫描任务未导出区段序列: {fa_p}")
+
+        cmap = parse_input_contigs(fasta_path=str(fa_p), selected_contigs=selected_contigs)
+        if region_index is not None:
+            prefix = f"Phage_{region_index:03d}"
+            filtered = {cid: val for cid, val in cmap.items() if cid.startswith(prefix)}
+            if not filtered:
+                raise FileNotFoundError(f"任务 {pd_task_id} 中未找到区段 {prefix}")
+            return filtered
+        return cmap
+
+    def inspect_input(self, req: StructureInspectRequest) -> Dict[str, Any]:
+        if req.source_mode == "annotation" and req.source_task_id:
+            cmap = self._load_contigs_from_annotation(req.source_task_id)
+        elif req.source_mode == "phage_discovery" and req.source_task_id:
+            cmap = self._load_contigs_from_phage_discovery(req.source_task_id, region_index=req.region_index)
+        else:
+            cmap = parse_input_contigs(fasta_path=req.fasta_path, fasta_content=req.fasta_content)
+
+        contigs_meta = [
+            {
+                "id": cid,
+                "length_bp": info["length_bp"],
+                "gc_percent": info["gc_percent"],
+                "cds_count": len(info["proteins"]),
+                "input_type": info["input_type"],
+            }
+            for cid, info in cmap.items()
+        ]
+        return {
+            "success": True,
+            "num_contigs": len(contigs_meta),
+            "total_length": sum(c["length_bp"] for c in contigs_meta),
+            "contigs": contigs_meta,
+        }
+
+    async def submit_task(self, req: StructureRunRequest) -> Dict[str, Any]:
+        if req.source_mode in ("annotation", "phage_discovery") and not req.source_task_id:
+            raise ValueError("联动分析必须指定关联的历史任务 ID")
+        if req.source_mode in ("file", "paste") and not req.fasta_path and not (req.fasta_content and req.fasta_content.strip()):
+            raise ValueError("必须提供基因组文件或粘贴 FASTA / GenBank 序列文本")
+
+        task_id = f"pstruct_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(3)}"
+        task_name = (req.task_name or "").strip() or f"PhageStructure_{task_id}"
+        self.db.create_task(task_id=task_id, task_name=task_name, source_mode=req.source_mode, status="queued")
+
+        q_info = await self.queue.enqueue(task_id, req, {"task_name": task_name})
+        return {
+            "task_id": task_id,
+            "task_name": task_name,
+            "status": "queued",
+            **q_info,
+        }
+
+    async def execute_pipeline_task(self, task_id: str, req: StructureRunRequest, context: Dict[str, Any]) -> None:
+        loop = asyncio.get_running_loop()
+
+        def _emit_progress(pct: int, step_msg: str) -> None:
+            self.db.update_progress(task_id, pct, step_msg, status="running")
+            asyncio.run_coroutine_threadsafe(
+                broadcaster.broadcast(
+                    "phage_structure_progress",
+                    {"task_id": task_id, "progress": pct, "current_step": step_msg, "status": "running"},
+                ),
+                loop,
+            )
+
+        t0 = time.perf_counter()
+        task_dir = self.results_root / task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        chk_dir = task_dir / "checkpoints"
+        chk_dir.mkdir(parents=True, exist_ok=True)
+
+        def _run_sync() -> PhageStructureResult:
+            _emit_progress(8, "正在解析输入基因组与现有注释特征...")
+            if req.source_mode == "annotation" and req.source_task_id:
+                cmap = self._load_contigs_from_annotation(req.source_task_id, req.selected_contigs)
+            elif req.source_mode == "phage_discovery" and req.source_task_id:
+                cmap = self._load_contigs_from_phage_discovery(
+                    req.source_task_id,
+                    region_index=req.region_index,
+                    selected_contigs=req.selected_contigs,
+                )
+            else:
+                cmap = parse_input_contigs(
+                    fasta_path=req.fasta_path,
+                    fasta_content=req.fasta_content,
+                    selected_contigs=req.selected_contigs,
+                )
+
+            if self.queue.is_cancelled(task_id):
+                raise RuntimeError("任务已被用户取消")
+
+            workers = get_safe_workers(req.threads)
+            _emit_progress(22, f"正在并行执行 ORF 基因识别 (Pyrodigal, {workers} 核)...")
+            predict_missing_orfs_parallel(cmap, genetic_code=req.genetic_code, workers=workers)
+
+            if self.queue.is_cancelled(task_id):
+                raise RuntimeError("任务已被用户取消")
+
+            _emit_progress(45, f"正在执行 PHROGs 结构同源 HMM 深度扫描 ({workers} 核)...")
+            scan_proteins_with_pyhmmer(
+                cmap,
+                evalue_cutoff=req.evalue_cutoff,
+                score_cutoff=req.score_cutoff,
+                workers=workers,
+                force_rescan=req.force_hmm_rescan,
+                on_progress=lambda msg: _emit_progress(52, msg),
+            )
+
+            if self.queue.is_cancelled(task_id):
+                raise RuntimeError("任务已被用户取消")
+
+            if req.enable_phold_enhance:
+                release_gpu_memory()
+                _emit_progress(60, "正在运行 Phold 3D (ProstT5 + Foldseek) 补漏长假定蛋白...")
+                enhance_with_phold_3d(
+                    cmap,
+                    workers=workers,
+                    on_progress=lambda msg: _emit_progress(64, msg),
+                )
+                release_gpu_memory()
+                if self.queue.is_cancelled(task_id):
+                    raise RuntimeError("任务已被用户取消")
+
+            ptf_map: Dict[str, tuple[int, List[TailFinderCluster]]] = {}
+            if req.enable_phagetailfinder and is_phagetailfinder_ready():
+                _emit_progress(68, f"正在运行 PhageTailFinder 双状态 HMM 尾部基因簇预测 ({workers} 核)...")
+                try:
+                    ptf_map = run_phagetailfinder_on_contigs(
+                        cmap,
+                        workers=workers,
+                        accurate_mode=req.ptf_accurate_mode,
+                        on_progress=lambda msg: _emit_progress(70, msg),
+                    )
+                except Exception as ptf_exc:
+                    logger.warning("PhageTailFinder 双状态 HMM 扫描跳过: %s", ptf_exc)
+
+            if self.queue.is_cancelled(task_id):
+                raise RuntimeError("任务已被用户取消")
+
+            _emit_progress(74, "正在剖析卷尺蛋白 (TMP) polyX/TR 特征并融合 Virfam 连接器判定...")
+            contig_results: List[ContigStructureResult] = []
+            contig_seqs: Dict[str, str] = {}
+
+            for idx, (cid, info) in enumerate(cmap.items(), start=1):
+                contig_seqs[cid] = info.get("dna_seq", "")
+                prots: List[StructureProteinItem] = info["proteins"]
+                mm = build_module_matrix(prots)
+                cp = build_connector_profile(prots)
+                ptf_cnt, ptf_clusters = ptf_map.get(cid, (0, []))
+                has_tail_bg = (
+                    mm.tail_sheath_count
+                    + mm.major_tail_count
+                    + mm.tail_assembly_chaperone_count
+                    + mm.tape_measure_count
+                ) > 0
+                tmps = select_and_analyze_tmps(prots, has_tailed_context=has_tail_bg, max_workers=workers)
+                pred = classify_morphotype(
+                    prots,
+                    tmps,
+                    mm,
+                    cp,
+                    ptf_clusters=ptf_clusters,
+                    genome_length_bp=int(info["length_bp"]),
+                )
+
+                hmm_matched = sum(1 for p in prots if p.hmm_score > 0 or p.phrog_id)
+                c_res = ContigStructureResult(
+                    contig_id=cid,
+                    length_bp=int(info["length_bp"]),
+                    gc_percent=float(info["gc_percent"]),
+                    total_orfs=len(prots),
+                    hmm_matched_orfs=hmm_matched,
+                    prediction=pred,
+                    connector_profile=cp,
+                    module_matrix=mm,
+                    ptf_tail_protein_count=ptf_cnt,
+                    ptf_tail_clusters=ptf_clusters,
+                    tmp_analyses=tmps,
+                    structural_proteins=sorted(prots, key=lambda x: x.start),
+                )
+                contig_results.append(c_res)
+                # 逐 Contig 分片落盘断点保护，防大批量任务 OOM
+                shard_p = chk_dir / f"contig_{idx:03d}.json"
+                shard_p.write_text(json.dumps(c_res.model_dump(), ensure_ascii=False), encoding="utf-8")
+
+            # 按证据强弱和 Contig 长度选举整任务代表判定
+            primary = max(
+                contig_results,
+                key=lambda c: (
+                    c.prediction.morphotype_code != "Incomplete",
+                    c.prediction.confidence,
+                    c.length_bp,
+                ),
+            ).prediction
+
+            elapsed = round(time.perf_counter() - t0, 2)
+            total_bp = sum(c.length_bp for c in contig_results)
+            summary = {
+                "primary_morphotype": primary.morphotype_code,
+                "primary_morphotype_cn": primary.morphotype_label_cn,
+                "primary_confidence": primary.confidence,
+                "estimated_tail_length_nm": primary.estimated_tail_length_nm,
+                "contig_count": len(contig_results),
+                "total_bp": total_bp,
+                "total_orfs": sum(c.total_orfs for c in contig_results),
+                "tmp_count": sum(len(c.tmp_analyses) for c in contig_results),
+                "ptf_tail_protein_count": sum(c.ptf_tail_protein_count for c in contig_results),
+                "ptf_cluster_count": sum(len(c.ptf_tail_clusters) for c in contig_results),
+                "elapsed_sec": elapsed,
+            }
+            res_obj = PhageStructureResult(
+                task_id=task_id,
+                task_name=context["task_name"],
+                created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                source_mode=req.source_mode,
+                elapsed_sec=elapsed,
+                total_bp=total_bp,
+                contig_count=len(contig_results),
+                primary_prediction=primary,
+                contigs=contig_results,
+                summary=summary,
+                files={},
+            )
+            _emit_progress(90, "正在导出结构报告表格与 GenBank 交互图谱文件...")
+            files = export_structure_artifacts(res_obj, contig_seqs, task_dir)
+            res_obj.files = files
+            # 更新 JSON 内的 files 字段
+            Path(files["json"]).write_text(json.dumps(res_obj.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+            return res_obj
+
+        try:
+            final_res = await run_in_threadpool(_run_sync)
+            self.db.mark_completed(
+                task_id=task_id,
+                summary=final_res.summary,
+                files=final_res.files,
+                result_path=final_res.files["json"],
+            )
+            await broadcaster.broadcast(
+                "phage_structure_completed",
+                {
+                    "task_id": task_id,
+                    "status": "completed",
+                    "progress": 100,
+                    "summary": final_res.summary,
+                },
+            )
+        except Exception as exc:
+            if self.queue.is_cancelled(task_id):
+                self.db.mark_cancelled(task_id)
+                await broadcaster.broadcast(
+                    "phage_structure_error",
+                    {"task_id": task_id, "error": "任务已取消", "status": "cancelled"},
+                )
+            else:
+                raise
+        finally:
+            release_gpu_memory()
+
+    def list_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        return self.db.list_history(limit=limit)
+
+    def get_task_result(self, task_id: str) -> Dict[str, Any]:
+        task = self.db.get_task(task_id)
+        if not task:
+            raise FileNotFoundError(f"未找到结构预测任务: {task_id}")
+        res_path = Path(task.get("result_path") or "")
+        if not res_path.is_file():
+            fallback = self.results_root / task_id / "structure_report.json"
+            if fallback.is_file():
+                res_path = fallback
+            else:
+                raise FileNotFoundError(f"结果报告尚不存在或已移除: {task_id}")
+        return json.loads(res_path.read_text(encoding="utf-8"))
+
+    def get_task_gbk(self, task_id: str) -> Dict[str, Any]:
+        task = self.db.get_task(task_id)
+        if not task:
+            raise FileNotFoundError(f"未找到任务: {task_id}")
+        gbk_p = Path((task.get("files") or {}).get("gbk") or (self.results_root / task_id / "annotated_structure.gbk"))
+        if not gbk_p.is_file():
+            raise FileNotFoundError("当前任务未包含可供图谱打开的核酸序列 GenBank 文件")
+        return {
+            "gbkText": gbk_p.read_text(encoding="utf-8"),
+            "taskName": task.get("task_name") or task_id,
+        }
+
+    def resolve_task_file(self, task_id: str, file_type: str) -> Path:
+        task = self.db.get_task(task_id)
+        if not task:
+            raise FileNotFoundError(f"未找到任务: {task_id}")
+        task_dir = self.results_root / task_id
+        if file_type == "folder":
+            if not task_dir.is_dir():
+                raise FileNotFoundError(f"任务目录不存在: {task_dir}")
+            return task_dir
+        fmap = task.get("files") or {}
+        if file_type in fmap and Path(fmap[file_type]).is_file():
+            return Path(fmap[file_type])
+        default_names = {
+            "json": "structure_report.json",
+            "summary_tsv": "morphotype_summary.tsv",
+            "features_tsv": "structure_features.tsv",
+            "tmp_tsv": "tmp_analysis.tsv",
+            "gbk": "annotated_structure.gbk",
+        }
+        cand = task_dir / default_names.get(file_type, "")
+        if cand.is_file():
+            return cand
+        raise FileNotFoundError(f"未找到 {file_type} 导出产物")
+
+    async def cancel_task(self, task_id: str) -> Dict[str, Any]:
+        return await self.queue.cancel_task(task_id)
+
+    def delete_task(self, task_id: str) -> None:
+        self.queue.remove_from_waiting(task_id)
+        task_dir = self.results_root / task_id
+        if task_dir.is_dir():
+            shutil.rmtree(task_dir, ignore_errors=True)
+        self.db.delete_task(task_id)
+
+
+_STRUCTURE_MANAGER: Optional[PhageStructureManager] = None
+
+
+def get_phage_structure_manager() -> PhageStructureManager:
+    global _STRUCTURE_MANAGER
+    if _STRUCTURE_MANAGER is None:
+        _STRUCTURE_MANAGER = PhageStructureManager()
+    return _STRUCTURE_MANAGER

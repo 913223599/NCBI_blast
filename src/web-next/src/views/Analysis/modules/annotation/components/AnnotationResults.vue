@@ -13,6 +13,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'open-in-viewer', gbkText: string, taskName: string): void;
+  (e: 'open-structure'): void;
   (e: 'download', fileType: string): void;
 }>();
 
@@ -189,6 +190,10 @@ const totalSafetyHits = computed(() => {
             <path d="M2 12h20" />
           </svg>
           在序列交互可视化中查看
+        </button>
+
+        <button class="structure-btn" @click="emit('open-structure')" title="基于当前注释预测噬菌体尾部形态与卷尺蛋白 (TMP) 分子标尺">
+          尾部形态与结构预测
         </button>
 
         <!-- 下载与打开文件夹菜单组 -->
@@ -611,6 +616,27 @@ const totalSafetyHits = computed(() => {
 
 .viewer-btn:hover {
   background: #059669;
+  transform: translateY(-1px);
+}
+
+.structure-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #4f46e5;
+  color: white;
+  border: none;
+  padding: 7px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.22);
+  transition: all 0.2s;
+}
+
+.structure-btn:hover {
+  background: #4338ca;
   transform: translateY(-1px);
 }
 

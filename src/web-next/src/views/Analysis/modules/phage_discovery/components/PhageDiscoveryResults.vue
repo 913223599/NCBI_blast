@@ -23,6 +23,7 @@ const emit = defineEmits<{
   (e: 'open-viewer', regionIndex: number): void
   (e: 'open-overlay-viewer', contigId: string): void
   (e: 'open-annotation', regionIndex?: number): void
+  (e: 'open-structure', regionIndex?: number): void
   (e: 'contig-change', contigId: string): void
 }>()
 
@@ -114,6 +115,14 @@ function formatBp(bp?: number): string {
             @click="emit('open-annotation')"
           >
             全部前噬菌体送入功能注释
+          </button>
+          <button
+            v-if="regions.length > 0"
+            type="button"
+            class="primary-handoff-btn indigo"
+            @click="emit('open-structure')"
+          >
+            全部区段尾型预测
           </button>
           <button type="button" class="action-btn" @click="emit('download', 'fasta')">FASTA</button>
           <button type="button" class="action-btn" @click="emit('download', 'tsv')">TSV</button>
@@ -234,6 +243,9 @@ function formatBp(bp?: number): string {
                     </button>
                     <button type="button" class="mini-btn teal" @click="emit('open-annotation', r.index)">
                       注释
+                    </button>
+                    <button type="button" class="mini-btn indigo" @click="emit('open-structure', r.index)">
+                      尾型
                     </button>
                   </div>
                 </td>
@@ -366,6 +378,14 @@ function formatBp(bp?: number): string {
 
 .primary-handoff-btn:hover {
   background: #115e59;
+}
+
+.primary-handoff-btn.indigo {
+  background: #4f46e5;
+}
+
+.primary-handoff-btn.indigo:hover {
+  background: #4338ca;
 }
 
 .action-btn {
@@ -570,6 +590,10 @@ function formatBp(bp?: number): string {
 
 .mini-btn.teal {
   background: #0f766e;
+}
+
+.mini-btn.indigo {
+  background: #4f46e5;
 }
 
 .collapse-btn {

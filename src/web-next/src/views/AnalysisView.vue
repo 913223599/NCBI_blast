@@ -8,6 +8,8 @@ import { ref } from 'vue'
 import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue'
 import AnnotationModule from './Analysis/modules/annotation/AnnotationModule.vue'
 import PhageDiscoveryModule from './Analysis/modules/phage_discovery/PhageDiscoveryModule.vue'
+import PhageStructureModule from './Analysis/modules/phage_structure/PhageStructureModule.vue'
+import type { StructureInitialPayload } from './Analysis/modules/phage_structure/types'
 import PanGenomicsModule from './Analysis/modules/pan_genomics/PanGenomicsModule.vue'
 import SangerTraceModule from './Analysis/modules/sanger_trace/SangerTraceModule.vue'
 
@@ -15,7 +17,7 @@ interface AnalysisTool {
   id: string;
   title: string;
   description: string;
-  iconType: 'chart' | 'dna' | 'book' | 'phage' | 'pangenome' | 'trace';
+  iconType: 'chart' | 'dna' | 'book' | 'phage' | 'structure' | 'pangenome' | 'trace';
   status: 'ready' | 'beta' | 'coming_soon';
 }
 
@@ -39,6 +41,13 @@ const tools = ref<AnalysisTool[]>([
     title: '前噬菌体与噬菌体智能发现', 
     description: '基于 Stage 1.2 与 200bp SubBinRefiner 边界精修模型，从宿主全基因组或拼接 Contigs 中精准分割前噬菌体区域，支持可选蛋白门控验证与联动注释。', 
     iconType: 'phage',
+    status: 'ready'
+  },
+  {
+    id: 'phage_structure',
+    title: '噬菌体结构与尾部形态预测',
+    description: '综合识别尾鞘 TSP、MTP、TAP、TTPA/B 与 Virfam 连接器模块区分肌尾/长尾/短尾/非有尾，并定量解析卷尺蛋白 (TMP) polyX 与串联重复标尺。',
+    iconType: 'structure',
     status: 'ready'
   },
   { 
@@ -65,9 +74,13 @@ const viewerInitialName = ref<string>('')
 const annotationInitialFasta = ref<string>('')
 const annotationInitialName = ref<string>('')
 const annotationInitialSampleType = ref<'PHAGE' | 'BACTERIA' | 'VIRUS' | 'GENERAL'>('PHAGE')
+const structureInitialPayload = ref<StructureInitialPayload | null>(null)
 
 function selectTool(tool: AnalysisTool) {
   if (tool.status === 'coming_soon') return
+  if (tool.id !== 'phage_structure') {
+    structureInitialPayload.value = null
+  }
   activeTool.value = tool.id
 }
 
@@ -82,6 +95,25 @@ function handleOpenAnnotationFromPhage(payload: { fastaText: string; taskName: s
   annotationInitialName.value = payload.taskName
   annotationInitialSampleType.value = (payload.sampleType as any) || 'PHAGE'
   activeTool.value = 'annotation'
+}
+
+function handleOpenStructureFromAnnotation(payload: { taskId: string; taskName: string }) {
+  structureInitialPayload.value = {
+    sourceMode: 'annotation',
+    taskId: payload.taskId,
+    taskName: payload.taskName,
+  }
+  activeTool.value = 'phage_structure'
+}
+
+function handleOpenStructureFromPhage(payload: { taskId: string; taskName: string; regionIndex?: number }) {
+  structureInitialPayload.value = {
+    sourceMode: 'phage_discovery',
+    taskId: payload.taskId,
+    taskName: payload.taskName,
+    regionIndex: payload.regionIndex,
+  }
+  activeTool.value = 'phage_structure'
 }
 </script>
 
@@ -132,6 +164,13 @@ function handleOpenAnnotationFromPhage(payload: { fastaText: string; taskName: s
               <path d="M8 22l4-2 4 2" />
               <circle cx="12" cy="9.5" r="2.2" />
             </svg>
+            <svg v-else-if="tool.iconType === 'structure'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.1">
+              <polygon points="12 2 17 5 17 10 12 13 7 10 7 5 12 2" />
+              <rect x="10" y="13" width="4" height="7" rx="1" />
+              <line x1="8" y1="16" x2="16" y2="16" />
+              <line x1="12" y1="20" x2="7" y2="23" />
+              <line x1="12" y1="20" x2="17" y2="23" />
+            </svg>
             <svg v-else-if="tool.iconType === 'pangenome'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.2">
               <circle cx="12" cy="12" r="3" />
               <circle cx="4" cy="12" r="2" />
@@ -173,11 +212,18 @@ function handleOpenAnnotationFromPhage(payload: { fastaText: string; taskName: s
           :initial-name="annotationInitialName"
           :initial-sample-type="annotationInitialSampleType"
           @open-viewer="handleOpenViewerFromAnnotation" 
+          @open-structure="handleOpenStructureFromAnnotation"
         />
         <PhageDiscoveryModule
           v-else-if="activeTool === 'phage_discovery'"
           @open-viewer="handleOpenViewerFromAnnotation"
           @open-annotation="handleOpenAnnotationFromPhage"
+          @open-structure="handleOpenStructureFromPhage"
+        />
+        <PhageStructureModule
+          v-else-if="activeTool === 'phage_structure'"
+          :initial-payload="structureInitialPayload"
+          @open-viewer="handleOpenViewerFromAnnotation"
         />
         <PanGenomicsModule v-else-if="activeTool === 'pan_genomics'" />
         <GenomeViewerModule 
