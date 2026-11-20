@@ -239,13 +239,22 @@ def run_batch_pipeline(
                 mm = build_module_matrix(prots)
                 cp = build_connector_profile(prots)
                 ptf_cnt, ptf_clusters = ptf_map.get(uid, (0, []))
+                verified_tmp_cnt = sum(
+                    1
+                    for p in prots
+                    if p.structural_role == "TMP" and p.evidence_source in ("pyhmmer_phrog", "phold_3d")
+                )
                 has_tail_bg = (
-                    mm.tail_sheath_count
-                    + mm.major_tail_count
-                    + mm.tail_assembly_chaperone_count
-                    + mm.tape_measure_count
-                ) > 0
-                tmps = select_and_analyze_tmps(prots, has_tailed_context=has_tail_bg, max_workers=workers)
+                    (mm.tail_sheath_count + mm.major_tail_count + mm.tail_tube_count + mm.tail_assembly_chaperone_count + verified_tmp_cnt) > 0
+                    or mm.baseplate_count >= 2
+                    or len(ptf_clusters) >= 1
+                )
+                tmps = select_and_analyze_tmps(
+                    prots,
+                    has_tailed_context=has_tail_bg,
+                    contig_length_bp=int(info["length_bp"]),
+                    max_workers=workers,
+                )
                 pred = classify_morphotype(
                     prots,
                     tmps,
@@ -254,7 +263,8 @@ def run_batch_pipeline(
                     ptf_clusters=ptf_clusters,
                     genome_length_bp=int(info["length_bp"]),
                 )
-                primary_tmp = tmps[0] if tmps else None
+                effective_tmps = [] if pred.morphotype_code in ("Podoviridae-like", "Non-tailed") else tmps
+                primary_tmp = effective_tmps[0] if effective_tmps else None
                 prot_map = {p.locus_tag: p for p in prots}
                 tmp_prot = prot_map.get(primary_tmp.locus_tag) if primary_tmp else None
 

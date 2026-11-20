@@ -235,6 +235,8 @@ src/test_shm.py
 !/scripts/benchmark_project_capabilities.py
 !/scripts/build_ptf_pfam_db.py
 !/scripts/benchmark_phage_structure.py
+!/scripts/validation_datasets.py
+!/scripts/validate_external_phage_structure.py
 .lingma/rules/
 
 # ------------------------------------------------------------------------------
