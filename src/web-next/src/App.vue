@@ -143,23 +143,6 @@ onMounted(async () => {
         } catch (e) {
           console.error('Failed to parse detailed results stream', e)
         }
-      } else if (type === 'tree_progress') {
-        globalApp.updateLoading(data.percent || 0, data.msg || '正在分析...')
-      } else if (type === 'tree_finished') {
-        globalApp.hideLoading()
-        if ((window as any).treeView?.loadNewick) {
-          (window as any).treeView.loadNewick(
-            data.tree_file_content || data.tree_file, 
-            data.algorithm, 
-            data.source,
-            undefined,
-            false,
-            data.id_to_hash
-          )
-        }
-      } else if (type === 'tree_error') {
-        globalApp.hideLoading()
-        appStore.showNotification(`分析失败: ${data.error || data}`, 'error')
       }
     })
 
@@ -178,9 +161,6 @@ onMounted(async () => {
     // 初始化各个数据库状态
     console.log('[App] 正在初始化数据库...')
     await strainStore.initFromDatabase()
-    
-    // 初始化树历史
-    appStore.initTreeHistory()
     
     // 如果有 loadAllHistory 等方法，也应在此调用
     if (typeof (blastStore as any).loadAllHistory === 'function') {

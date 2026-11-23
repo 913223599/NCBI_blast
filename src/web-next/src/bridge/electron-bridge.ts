@@ -144,7 +144,8 @@ class BridgeSignal {
 const signals = {
     recall_event: new BridgeSignal(),
     blast_event: new BridgeSignal(),
-    sync_event: new BridgeSignal()
+    sync_event: new BridgeSignal(),
+    phylo_event: new BridgeSignal()
 };
 
 function connectWebSocket(): void {
@@ -187,11 +188,13 @@ function connectWebSocket(): void {
                 signals.blast_event.emit(msg.type, JSON.stringify(msg.data));
             }
 
-            // 2. 映射到特定信号对象 (兼容旧架构)
+            // 2. 映射到特定信号对象
             if (msg.type === 'recall_result') {
                 signals.recall_event.emit(msg.data.success, msg.data.message || msg.data.recalled_name);
-            } else if (['translation_done', 'single_result_update', 'task_progress', 'batch_translation_result', 'tree_progress', 'tree_finished', 'tree_error'].includes(msg.type)) {
+            } else if (['translation_done', 'single_result_update', 'task_progress', 'batch_translation_result'].includes(msg.type)) {
                 signals.blast_event.emit(msg.type, JSON.stringify(msg.data));
+            } else if (msg.type && String(msg.type).startsWith('phylo_')) {
+                signals.phylo_event.emit(msg.type, msg.data);
             }
 
             // 3. 兼容旧架构：触发 window.handleBridgeEvent
@@ -315,11 +318,6 @@ const electronBridge = {
         });
 
         if (!paths || paths.length === 0) return null;
-
-        // 批量模式：尝试触发旧版 treeView 兼容逻辑 (可选)
-        if (multiple && (window as any).treeView?.handleExternalFiles) {
-            (window as any).treeView.handleExternalFiles(paths);
-        }
 
         return paths;
     },
@@ -556,71 +554,6 @@ const electronBridge = {
         return result;
     },
 
-    // ═══ 进化树（通过 HTTP + WS 推送）═══
-    async request_tree_analysis(paramsJson: string) {
-        const params = JSON.parse(paramsJson);
-        await apiPost('/api/tree/analyze', params);
-    },
-
-    async request_tree_reroot(nodeId: string) {
-        // 需要知道当前活动的树路径
-        const currentPath = (window as any).treeView?.currentTreePath;
-        if (!currentPath) {
-            (window as any).app?.showNotification('未找到当前活动的树文件路径', 'error');
-            return;
-        }
-
-        (window as any).app?.showLoading('正在重定根...');
-        const result = await apiPost('/api/tree/reroot', {
-            old_path: currentPath,
-            node_id: nodeId
-        });
-        (window as any).app?.hideLoading();
-
-        if (result.success && window.treeView) {
-            window.treeView.loadNewick(result.newick, 'Rerooted', result.source);
-        } else if (result.error) {
-            (window as any).app?.showNotification(`重定根失败: ${result.error}`, 'error');
-        }
-    },
-
-    async clear_tree_workspace(callback?: (res: boolean) => void) {
-        const result = await apiDelete('/api/tree/workspace');
-        callback?.(result.success);
-    },
-
-    async list_tree_sequences(callback: (res: string) => void) {
-        const result = await apiGet('/api/tree/sequences');
-        callback(JSON.stringify(result));
-    },
-
-    async get_tree_content(filename: string, callback: (res: string) => void) {
-        const result = await apiGet(`/api/tree/content/${filename}`);
-        callback(result.content || '');
-    },
-
-    async save_tree_sequences(content: string) {
-        await apiPost('/api/tree/save_sequences', { content });
-    },
-
-    async recall_tree_sequences(sourceFilename: string) {
-        await apiPost('/api/tree/recall', { source_filename: sourceFilename });
-    },
-
-    async delete_tree_archive(relPath: string) {
-        await apiDelete(`/api/tree/archive/${encodeURIComponent(relPath)}`);
-    },
-
-    async add_tree_workspace_files(pathsJson: string) {
-        const paths = JSON.parse(pathsJson);
-        await apiPost('/api/tree/workspace/add', { paths });
-    },
-
-    async delete_analysis_files(pathsJson: string) {
-        const paths = JSON.parse(pathsJson);
-        await apiPost('/api/tree/analysis/delete', { paths });
-    },
-
     async request_batch_blast(seqIdsJson: string, sourceRelPath: string) {
         const seq_ids = JSON.parse(seqIdsJson);
         return await apiPost('/api/blast/batch_from_tree', { seq_ids, source_rel_path: sourceRelPath });
@@ -815,22 +748,6 @@ const electronBridge = {
 
     on_js_error(message: string) {
         console.error(`[Frontend Error] ${message}`);
-    },
-
-    // 进化树历史记录
-    async db_load_tree_history(callback?: (res: string) => void) {
-        const result = await apiGet('/api/tree/history');
-        callback?.(JSON.stringify(result));
-    },
-
-    async db_save_tree_history(history: any[], callback?: (res: string) => void) {
-        const result = await apiPost('/api/tree/history', { history });
-        callback?.(JSON.stringify(result));
-    },
-
-    async db_delete_tree_history(groupId: string, physical: boolean = false, callback?: (res: string) => void) {
-        const result = await apiDelete(`/api/tree/history/${groupId}?physical=${physical}`);
-        callback?.(JSON.stringify(result));
     },
 
     async get_annotations_by_hashes(hashesJson: string) {

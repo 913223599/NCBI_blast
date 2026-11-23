@@ -332,13 +332,13 @@ app.add_middleware(
 )
 
 # 动态载入分散在各路由模块的接口
-from .routes import blast, strains, dictionary, tree, settings, core, common, taxonomy
+from .routes import blast, strains, dictionary, phylo, settings, core, common, taxonomy
 
 app.include_router(common.router)
 app.include_router(blast.router)
 app.include_router(strains.router)
 app.include_router(dictionary.router)
-app.include_router(tree.router)
+app.include_router(phylo.router)
 app.include_router(settings.router)
 app.include_router(taxonomy.router)
 app.include_router(core.router)

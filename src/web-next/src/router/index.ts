@@ -21,7 +21,7 @@ const routes: RouteRecordRaw[] = [
     {
         path: '/tree',
         name: 'tree',
-        component: () => import('../views/TreeView.vue'),
+        component: () => import('../modules/phylo/components/PhyloWorkbench.vue'),
         meta: { title: '进化树', icon: 'tree' }
     },
     {
