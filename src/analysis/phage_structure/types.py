@@ -289,12 +289,15 @@ class AiMorphotypePrediction(BaseModel):
         "Siphoviridae-like",
         "Podoviridae-like",
         "Non-tailed",
+        "Incomplete",
     ]
     confidence: float
     calibrated_probs: Dict[str, float] = Field(default_factory=dict)
     mode: Literal["dual_modal_fusion", "ai_deep_only"] = "dual_modal_fusion"
     model_version: str = ""
     agreement_with_rules: bool = True
+    abstained: bool = False
+    entropy_norm: float = 0.0
     conflict_note: str = ""
     deep_tail_prob_max: float = 0.0
     deep_head_prob_max: float = 0.0

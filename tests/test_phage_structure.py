@@ -1204,6 +1204,7 @@ def test_t2_2_unified_judge_ai_classifier_and_blind_rescue() -> None:
             class_scores={"Myoviridae-like": 0.0, "Siphoviridae-like": 0.0, "Podoviridae-like": 0.0, "Non-tailed": 0.0},
             decision_basis="missing_hmm",
         )
+        # 2. 规则引擎陷入 Incomplete (>=5kb) -> 自动切换至 ai_deep_only 救回/拒识双分支轨道
         res_deep = predict_contig_morphotype_ai(
             proteins=synth_prots,
             length_bp=max(pos + 500, 12_000),
@@ -1212,13 +1213,55 @@ def test_t2_2_unified_judge_ai_classifier_and_blind_rescue() -> None:
             connector_profile=cp,
             tmp_analyses=[],
             ptf_clusters=[],
-            completeness=CompletenessAssessment(status="incomplete", score=0.2, summary="missing"),
+            completeness=CompletenessAssessment(status="incomplete", score=0.2, reasons=["missing"]),
             rule_prediction=rule_inc,
         )
         assert res_deep is not None
         assert res_deep.mode == "ai_deep_only"
-        assert res_deep.predicted_morphotype in MORPH_CLASSES
-        assert not res_deep.agreement_with_rules and res_deep.conflict_note
+        assert abs(sum(res_deep.calibrated_probs.values()) - 1.0) < 0.01
+        if res_deep.abstained:
+            assert res_deep.predicted_morphotype == "Incomplete"
+            assert res_deep.agreement_with_rules is True
+        else:
+            assert res_deep.predicted_morphotype in MORPH_CLASSES
+            assert not res_deep.agreement_with_rules and res_deep.conflict_note
+
+        # 3. 真实完整噬菌体基因组 (ANNO_NC_005859) 剥离同源注解后应能完成零 HMM 救回
+        anno_gbk = REPO_ROOT / "results" / "annotations" / "ANNO_NC_005859" / "ANNO.gbk"
+        if anno_gbk.is_file():
+            cmap_real = parse_input_contigs(fasta_path=str(anno_gbk))
+            first_info = next(iter(cmap_real.values()))
+            blind_real_prots = [
+                StructureProteinItem(
+                    locus_tag=p.locus_tag,
+                    contig_id=p.contig_id,
+                    start=p.start,
+                    end=p.end,
+                    strand=p.strand,
+                    length_aa=p.length_aa,
+                    product="hypothetical protein",
+                    structural_role="OTHER",
+                    evidence_source="pyrodigal",
+                    translation=p.translation,
+                )
+                for p in first_info["proteins"]
+            ]
+            res_real_blind = predict_contig_morphotype_ai(
+                proteins=blind_real_prots,
+                length_bp=int(first_info["length_bp"]),
+                gc_percent=float(first_info["gc_percent"]),
+                module_matrix=StructuralModuleMatrix(),
+                connector_profile=ConnectorProfile(),
+                tmp_analyses=[],
+                ptf_clusters=[],
+                completeness=CompletenessAssessment(status="incomplete", score=0.1, reasons=["blind"]),
+                rule_prediction=rule_inc,
+            )
+            assert res_real_blind is not None
+            assert res_real_blind.mode == "ai_deep_only"
+            assert res_real_blind.abstained is False
+            assert res_real_blind.predicted_morphotype in MORPH_CLASSES
+            assert not res_real_blind.agreement_with_rules and res_real_blind.conflict_note
     finally:
         release_ai_judge_memory()
 
@@ -1276,6 +1319,162 @@ def test_t2_2_ai_rule_conflict_triggers_phold_3d() -> None:
     )
     ok_agree, reason_agree = should_trigger_phold_3d(rule_pred, [dummy_tmp], 45_000, ai_prediction=ai_agree)
     assert not ok_agree and reason_agree == ""
+
+
+def test_t2_2_v2_fine_role_probe_and_fragment_abstention() -> None:
+    """
+    验证 V2 架构核心契约：
+    1) extract_unified_judge_orf_and_genome_features、FineRoleOrfMLP 与 aggregate_fine_role_contig_features；
+    2) 规则 Incomplete 遇缺乏结构语义或高熵 7 kb 碎片时触发保守拒识 (abstained=True -> Incomplete)，
+       且 should_trigger_phold_3d 不会把拒识误判为 ai_rule_conflict。
+    """
+    import numpy as np
+    import torch
+    from src.analysis.phage_structure.ai_morphotype_model import (
+        DEEP_TOTAL_DIM,
+        FINE_ROLE_CHANNELS,
+        FINE_ROLE_SUMMARY_DIM,
+        FUSION_META_V2_DIM,
+        MORPH_CLASSES,
+        ORF_EMBED_DIM,
+        FineRoleOrfMLP,
+        aggregate_fine_role_contig_features,
+        build_fusion_meta_v2_features,
+        check_ai_classifier_ready,
+        check_unified_judge_ready,
+        encode_fine_role_targets,
+        extract_unified_judge_orf_and_genome_features,
+        load_ai_predictor_bundle,
+        predict_contig_morphotype_ai,
+        release_ai_judge_memory,
+    )
+    from src.analysis.phage_structure.manager import should_trigger_phold_3d
+    from src.analysis.phage_structure.types import (
+        CompletenessAssessment,
+        ConnectorProfile,
+        MorphotypePrediction,
+        StructuralModuleMatrix,
+    )
+
+    if not check_unified_judge_ready(REPO_ROOT):
+        pytest.skip("UnifiedJudge V4.3 未部署，跳过 V2 细粒度解码与拒识测试")
+
+    frag_prots = []
+    pos = 120
+    frag_motifs = ["MKALIVGSDTPQREWY", "MVTGLKQPRASEDFGH", "MNPQRSTVWYKLMACG"]
+    for idx in range(1, 7):
+        aa_seq = frag_motifs[idx % len(frag_motifs)] * 8
+        end_pos = pos + len(aa_seq) * 3 - 1
+        frag_prots.append(
+            StructureProteinItem(
+                locus_tag=f"FRAG_ORF_{idx:02d}",
+                contig_id="frag_7kb",
+                start=pos,
+                end=end_pos,
+                strand="+",
+                length_aa=len(aa_seq),
+                product="hypothetical protein",
+                structural_role="OTHER",
+                evidence_source="pyrodigal",
+                translation=aa_seq,
+            )
+        )
+        pos = end_pos + 45
+
+    try:
+        deep_v, orf_emb, aa_lens, diag = extract_unified_judge_orf_and_genome_features(
+            frag_prots, length_bp=7000, gc_percent=50.0
+        )
+        assert deep_v.shape == (DEEP_TOTAL_DIM,)
+        assert orf_emb.shape == (len(frag_prots), ORF_EMBED_DIM)
+        assert len(aa_lens) == len(frag_prots)
+        assert "coding_density" in diag
+
+        targets = encode_fine_role_targets(frag_prots)
+        assert targets.shape == (len(frag_prots), len(FINE_ROLE_CHANNELS))
+        assert int(targets.sum()) == 0
+
+        mlp = FineRoleOrfMLP(in_dim=ORF_EMBED_DIM, num_roles=len(FINE_ROLE_CHANNELS)).eval()
+        with torch.no_grad():
+            dummy_probs = torch.sigmoid(mlp(torch.from_numpy(orf_emb))).numpy()
+        assert dummy_probs.shape == (len(frag_prots), len(FINE_ROLE_CHANNELS))
+
+        fine_84 = aggregate_fine_role_contig_features(dummy_probs, aa_lens, length_bp=7000, gc_percent=50.0)
+        assert fine_84.shape == (FINE_ROLE_SUMMARY_DIM,)
+
+        meta_85 = build_fusion_meta_v2_features(
+            np.array([[0.25, 0.25, 0.25, 0.25]], dtype=np.float32),
+            np.array([[0.05]], dtype=np.float32),
+            np.array([[0.05]], dtype=np.float32),
+            np.max(dummy_probs, axis=0, keepdims=True),
+            np.zeros((1, 67), dtype=np.float32),
+        )
+        assert meta_85.shape == (1, FUSION_META_V2_DIM)
+
+        # 使用合成确定性高熵/低置信 V2 bundle 验证保守拒识门控与 Phold 触发屏蔽
+        class _UniformPipe:
+            def predict_proba(self, X: np.ndarray) -> np.ndarray:
+                return np.tile(np.array([[0.27, 0.26, 0.24, 0.23]], dtype=np.float64), (len(X), 1))
+
+        synth_v2_bundle = {
+            "model_version": "morphotype_ai_v2",
+            "judge_version": "Unified V4.3",
+            "classes": MORPH_CLASSES,
+            "fine_role_mlp_state_dict": mlp.state_dict(),
+            "deep_only_pipeline": _UniformPipe(),
+            "deep_only_temperature": 1.0,
+            "fusion_pipeline": _UniformPipe(),
+            "fusion_temperature": 1.0,
+        }
+        rule_inc = MorphotypePrediction(
+            morphotype_code="Incomplete",
+            morphotype_label_cn="特征不完整",
+            tail_feature_tag="Incomplete",
+            confidence=0.25,
+            class_scores={"Myoviridae-like": 0.0, "Siphoviridae-like": 0.0, "Podoviridae-like": 0.0, "Non-tailed": 0.0},
+            decision_basis="missing",
+        )
+        abstain_pred = predict_contig_morphotype_ai(
+            proteins=frag_prots,
+            length_bp=7000,
+            gc_percent=50.0,
+            module_matrix=StructuralModuleMatrix(),
+            connector_profile=ConnectorProfile(),
+            tmp_analyses=[],
+            ptf_clusters=[],
+            completeness=CompletenessAssessment(status="incomplete", score=0.2, reasons=["missing"]),
+            rule_prediction=rule_inc,
+            bundle=synth_v2_bundle,
+        )
+        assert abstain_pred is not None
+        assert abstain_pred.abstained is True
+        assert abstain_pred.predicted_morphotype == "Incomplete"
+        assert abstain_pred.agreement_with_rules is True
+        assert abstain_pred.entropy_norm > 0.72
+
+        ok_phold, phold_reason = should_trigger_phold_3d(rule_inc, [], 7000, ai_prediction=abstain_pred)
+        assert not ok_phold and phold_reason != "ai_rule_conflict"
+
+        if check_ai_classifier_ready(REPO_ROOT, version="v2"):
+            v2_bundle = load_ai_predictor_bundle(project_root=REPO_ROOT, version="v2")
+            assert v2_bundle is not None and v2_bundle.get("model_version") == "morphotype_ai_v2"
+            real_pred = predict_contig_morphotype_ai(
+                proteins=frag_prots,
+                length_bp=7000,
+                gc_percent=50.0,
+                module_matrix=StructuralModuleMatrix(),
+                connector_profile=ConnectorProfile(),
+                tmp_analyses=[],
+                ptf_clusters=[],
+                completeness=CompletenessAssessment(status="incomplete", score=0.2, reasons=["missing"]),
+                rule_prediction=rule_inc,
+                bundle=v2_bundle,
+            )
+            assert real_pred is not None
+            assert real_pred.abstained is True and real_pred.predicted_morphotype == "Incomplete"
+    finally:
+        release_ai_judge_memory()
+
 
 
 

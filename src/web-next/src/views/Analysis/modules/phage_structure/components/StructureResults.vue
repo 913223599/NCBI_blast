@@ -282,12 +282,20 @@ const filteredProteins = computed(() => {
             </span>
             <span
               class="ai-agree-pill"
-              :class="activeContig.ai_prediction.agreement_with_rules ? 'agree' : 'conflict'"
+              :class="
+                activeContig.ai_prediction.abstained
+                  ? 'abstained'
+                  : activeContig.ai_prediction.agreement_with_rules
+                    ? 'agree'
+                    : 'conflict'
+              "
             >
               {{
-                activeContig.ai_prediction.agreement_with_rules
-                  ? '与规则引擎结论一致'
-                  : '与规则引擎存在分歧'
+                activeContig.ai_prediction.abstained
+                  ? '高不确定度 · 保守拒识 (Incomplete)'
+                  : activeContig.ai_prediction.agreement_with_rules
+                    ? '与规则引擎结论一致'
+                    : '与规则引擎存在分歧'
               }}
             </span>
           </div>
@@ -324,6 +332,10 @@ const filteredProteins = computed(() => {
             <div class="ai-stat-row">
               <span>UnifiedJudge V4.3 头部最高语义概率：</span>
               <span class="mono">{{ (activeContig.ai_prediction.deep_head_prob_max * 100).toFixed(1) }}%</span>
+            </div>
+            <div v-if="activeContig.ai_prediction.entropy_norm !== undefined" class="ai-stat-row">
+              <span>预测分布归一化香农熵：</span>
+              <span class="mono">{{ Number(activeContig.ai_prediction.entropy_norm).toFixed(3) }}</span>
             </div>
             <div v-if="activeContig.ai_prediction.conflict_note" class="ai-conflict-note">
               {{ activeContig.ai_prediction.conflict_note }}
@@ -974,6 +986,11 @@ const filteredProteins = computed(() => {
 .ai-agree-pill.conflict {
   background: #fef3c7;
   color: #b45309;
+}
+
+.ai-agree-pill.abstained {
+  background: #e2e8f0;
+  color: #475569;
 }
 
 .ai-body {

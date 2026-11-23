@@ -104,6 +104,7 @@ def should_trigger_phold_3d(
         return True, "incomplete_large_contig"
     if (
         ai_prediction is not None
+        and not ai_prediction.abstained
         and ai_prediction.confidence >= 0.75
         and not ai_prediction.agreement_with_rules
     ):
@@ -180,6 +181,7 @@ def evaluate_single_contig_structure(
         comp_thresholds=thresholds.completeness,
     )
     effective_tmps = [] if pred.morphotype_code in ("Podoviridae-like", "Non-tailed") else tmps
+    info["_raw_tmps"] = list(tmps)
     hmm_matched = sum(1 for p in prots if p.hmm_score > 0 or p.phrog_id)
 
     return ContigStructureResult(
@@ -241,6 +243,7 @@ class PhageStructureManager:
     def _attach_ai_predictions(
         self,
         eval_by_cid: Dict[str, ContigStructureResult],
+        cmap: Dict[str, Dict[str, Any]],
         target_cids: Sequence[str],
     ) -> None:
         """为指定 Contig 集合附加双轨 AI 形态概率校准，结束后强制释放 PyTorch 显存。"""
@@ -256,13 +259,14 @@ class PhageStructureManager:
                 c_res = eval_by_cid.get(cid)
                 if c_res is None:
                     continue
+                raw_tmps = (cmap.get(cid) or {}).get("_raw_tmps", c_res.tmp_analyses)
                 ai_pred = predict_contig_morphotype_ai(
                     proteins=c_res.structural_proteins,
                     length_bp=c_res.length_bp,
                     gc_percent=c_res.gc_percent,
                     module_matrix=c_res.module_matrix,
                     connector_profile=c_res.connector_profile,
-                    tmp_analyses=c_res.tmp_analyses,
+                    tmp_analyses=raw_tmps,
                     ptf_clusters=c_res.ptf_tail_clusters,
                     completeness=c_res.completeness,
                     rule_prediction=c_res.prediction,
@@ -273,6 +277,7 @@ class PhageStructureManager:
                 c_res.ai_prediction = ai_pred
                 if (
                     ai_pred is not None
+                    and not ai_pred.abstained
                     and not ai_pred.agreement_with_rules
                     and ai_pred.confidence >= 0.75
                     and ai_pred.conflict_note
@@ -731,7 +736,7 @@ class PhageStructureManager:
 
             if req.enable_ai_classifier and check_ai_classifier_ready(self.project_root):
                 _emit_progress(77, "正在运行 UnifiedJudge V4.3 双轨 AI 形态分类与校准...")
-                self._attach_ai_predictions(eval_by_cid, list(eval_by_cid.keys()))
+                self._attach_ai_predictions(eval_by_cid, cmap, list(eval_by_cid.keys()))
 
             if req.enable_phold_enhance and req.phold_trigger_mode != "off":
                 triggered_reasons: Dict[str, str] = {}
@@ -782,7 +787,7 @@ class PhageStructureManager:
                         )
                     if req.enable_ai_classifier and check_ai_classifier_ready(self.project_root):
                         _emit_progress(86, "正在结合 3D 复核补注释刷新双轨 AI 预测概率...")
-                        self._attach_ai_predictions(eval_by_cid, list(triggered_reasons.keys()))
+                        self._attach_ai_predictions(eval_by_cid, cmap, list(triggered_reasons.keys()))
 
             contig_results: List[ContigStructureResult] = []
             for idx, cid in enumerate(cmap.keys(), start=1):

@@ -280,12 +280,19 @@ export interface CompletenessAssessment {
 }
 
 export interface AiMorphotypePrediction {
-  predicted_morphotype: 'Myoviridae-like' | 'Siphoviridae-like' | 'Podoviridae-like' | 'Non-tailed'
+  predicted_morphotype:
+    | 'Myoviridae-like'
+    | 'Siphoviridae-like'
+    | 'Podoviridae-like'
+    | 'Non-tailed'
+    | 'Incomplete'
   confidence: number
   calibrated_probs: Record<string, number>
   mode: 'dual_modal_fusion' | 'ai_deep_only'
   model_version: string
   agreement_with_rules: boolean
+  abstained?: boolean
+  entropy_norm?: number
   conflict_note: string
   deep_tail_prob_max: number
   deep_head_prob_max: number

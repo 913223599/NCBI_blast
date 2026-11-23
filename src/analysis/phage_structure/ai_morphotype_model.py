@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
+import torch
+import torch.nn as nn
 
 from ...workbench.models.tool_config import ToolConfig
 from .types import (
@@ -60,17 +62,64 @@ DEEP_DISTILL_SLICE = slice(DEEP_H_DIM, DEEP_H_DIM + DEEP_DISTILL_DIM)
 DEEP_SUMMARY_SLICE = slice(DEEP_H_DIM + DEEP_DISTILL_DIM, DEEP_TOTAL_DIM)
 
 STRUCT_TOTAL_DIM: int = 67
-FUSION_META_DIM: int = 8 + STRUCT_TOTAL_DIM  # 75 (4 log-probs + entropy + margin + tail_max + head_max + 67 struct)
+FUSION_META_DIM: int = 8 + STRUCT_TOTAL_DIM  # 75 (V1: 4 log-probs + entropy + margin + tail_max + head_max + 67 struct)
 
-_AI_PREDICTOR_CACHE: Optional[Dict[str, Any]] = None
+# V2 ORF 级 9 通道细粒度形态学角色监督契约
+FINE_ROLE_CHANNELS: Tuple[str, ...] = (
+    "MYO_TSP",
+    "MYO_BASE_TTP",
+    "SIPHO_MTP_TAP",
+    "LONG_TMP",
+    "PODO_CORE",
+    "NON_TAILED_CORE",
+    "CONN_SIPHO_MYO",
+    "CONN_PODO",
+    "HEAD_CAPSID",
+)
+FINE_ROLE_CHANNEL_TO_ROLES: Tuple[Tuple[str, ...], ...] = (
+    ("TSP",),
+    ("BASEPLATE_MYO", "FIBRITIN_COLLAR", "TTP"),
+    ("MTP", "TAP", "DIT"),
+    ("TMP",),
+    ("TTPA_B", "INTERNAL_VIRION", "TAIL_NEEDLE", "COLLAR_PODO"),
+    ("NON_TAILED_MARKER",),
+    ("CONN_AD1", "CONN_HC1", "CONN_NECK1", "CONN_TAIL_TERM"),
+    ("CONN_AD3", "CONN_HC3"),
+    ("MCP", "PORTAL", "TERL", "TERS", "HEAD_SCAFFOLD_PROTEASE"),
+)
+ROLE_TO_FINE_CHANNEL: Dict[str, int] = {
+    role: idx
+    for idx, roles in enumerate(FINE_ROLE_CHANNEL_TO_ROLES)
+    for role in roles
+}
+
+ORF_EMBED_DIM: int = 160 + 1024 + 10 + 10 + 3  # 1207
+FINE_ROLE_SUMMARY_DIM: int = len(FINE_ROLE_CHANNELS) * 8 + 12  # 84
+FUSION_META_V2_DIM: int = 8 + len(FINE_ROLE_CHANNELS) + STRUCT_TOTAL_DIM + 1  # 85
+
+_AI_PREDICTOR_CACHE: Dict[str, Dict[str, Any]] = {}
 _JUDGE_RUNTIME_CACHE: Dict[str, Any] = {}
+_FINE_MLP_CACHE: Dict[Tuple[int, str], nn.Module] = {}
 
 
-def get_ai_model_paths(project_root: Optional[Path] = None) -> Tuple[Path, Path]:
-    """返回相对工程根目录的 AI 双轨分类器权重路径与元数据路径。"""
+def get_ai_model_paths(
+    project_root: Optional[Path] = None,
+    version: str = "auto",
+) -> Tuple[Path, Path]:
+    """返回相对工程根目录的 AI 双轨分类器权重路径与元数据路径；auto 模式优先 V2 并平滑回退 V1。"""
     root = Path(project_root) if project_root else ToolConfig.PROJECT_ROOT
     model_dir = root / "models" / "phage_structure"
-    return model_dir / "morphotype_ai_v1.joblib", model_dir / "morphotype_ai_v1_meta.json"
+    v2_p = model_dir / "morphotype_ai_v2.joblib"
+    v2_m = model_dir / "morphotype_ai_v2_meta.json"
+    v1_p = model_dir / "morphotype_ai_v1.joblib"
+    v1_m = model_dir / "morphotype_ai_v1_meta.json"
+    if version == "v2":
+        return v2_p, v2_m
+    if version == "v1":
+        return v1_p, v1_m
+    if v2_p.is_file():
+        return v2_p, v2_m
+    return v1_p, v1_m
 
 
 def _resolve_unified_judge_dir(project_root: Optional[Path] = None) -> Optional[Path]:
@@ -103,22 +152,23 @@ def check_unified_judge_ready(project_root: Optional[Path] = None) -> bool:
     return _resolve_unified_judge_dir(project_root) is not None
 
 
-def check_ai_classifier_ready(project_root: Optional[Path] = None) -> bool:
+def check_ai_classifier_ready(
+    project_root: Optional[Path] = None,
+    version: str = "auto",
+) -> bool:
     """检查双轨 AI 形态分类权重包与 UnifiedJudge 底座是否均已就绪。"""
-    joblib_p, _ = get_ai_model_paths(project_root)
+    joblib_p, _ = get_ai_model_paths(project_root, version=version)
     return joblib_p.is_file() and check_unified_judge_ready(project_root)
 
 
 def release_ai_judge_memory() -> None:
-    """释放缓存的 PyTorch UnifiedJudge 显存并执行垃圾回收，切换引擎前强制调用。"""
-    global _JUDGE_RUNTIME_CACHE
+    """释放缓存的 PyTorch UnifiedJudge 与细粒度角色解码器显存，切换引擎前强制调用。"""
+    global _JUDGE_RUNTIME_CACHE, _FINE_MLP_CACHE
     _JUDGE_RUNTIME_CACHE.clear()
+    _FINE_MLP_CACHE.clear()
     gc.collect()
     try:
-        import importlib
-
-        torch = importlib.import_module("torch")
-        if hasattr(torch, "cuda") and torch.cuda.is_available():
+        if torch.cuda.is_available():
             torch.cuda.empty_cache()
             if hasattr(torch.cuda, "ipc_collect"):
                 torch.cuda.ipc_collect()
@@ -132,7 +182,6 @@ def load_unified_judge_seq_model(
     project_root: Optional[Path] = None,
 ) -> Tuple[Any, str, str]:
     """加载并缓存冻结的 UnifiedJudge V4.3 主序列+操纵子注意力网络。"""
-    import torch
     from ...phage_discovery.inference.judge_region_refiner import resolve_unified_version_tag
     from ...phage_discovery.student.orf_functional_judge import build_orf_functional_judge
 
@@ -174,7 +223,75 @@ def load_unified_judge_seq_model(
     return model, version_tag, eff_dev
 
 
-def extract_unified_judge_genome_features(
+class FineRoleOrfMLP(nn.Module):
+    """基于 UnifiedJudge V4.3 逐 ORF 1207 维语义嵌入的 9 通道细粒度结构角色解码器。"""
+
+    def __init__(
+        self,
+        in_dim: int = ORF_EMBED_DIM,
+        num_roles: int = len(FINE_ROLE_CHANNELS),
+    ) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.LayerNorm(in_dim),
+            nn.Linear(in_dim, 256),
+            nn.GELU(),
+            nn.Dropout(0.25),
+            nn.Linear(256, 128),
+            nn.GELU(),
+            nn.Dropout(0.20),
+            nn.Linear(128, num_roles),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+def encode_fine_role_targets(proteins: Sequence[StructureProteinItem]) -> np.ndarray:
+    """将结构蛋白角色编码为 9 通道 uint8 多标签矩阵（供 V2 ORF 解码器监督训练）。"""
+    y = np.zeros((len(proteins), len(FINE_ROLE_CHANNELS)), dtype=np.uint8)
+    for idx, prot in enumerate(proteins):
+        ch = ROLE_TO_FINE_CHANNEL.get(prot.structural_role)
+        if ch is not None:
+            y[idx, ch] = 1
+    return y
+
+
+def predict_fine_role_probs(
+    orf_embed: np.ndarray,
+    state_dict: Dict[str, Any],
+    *,
+    device: str = "cpu",
+    batch_size: int = 512,
+) -> np.ndarray:
+    """基于纯 CPU state_dict 重建 FineRoleOrfMLP 并批量输出逐 ORF 9 通道细粒度概率。"""
+    if orf_embed.shape[0] == 0:
+        return np.zeros((0, len(FINE_ROLE_CHANNELS)), dtype=np.float32)
+
+    cache_key = (id(state_dict), device)
+    model = _FINE_MLP_CACHE.get(cache_key)
+    if model is None:
+        mlp = FineRoleOrfMLP(in_dim=int(orf_embed.shape[1]), num_roles=len(FINE_ROLE_CHANNELS))
+        mlp.load_state_dict(state_dict, strict=True)
+        mlp.to(device)
+        mlp.eval()
+        for param in mlp.parameters():
+            param.requires_grad_(False)
+        _FINE_MLP_CACHE[cache_key] = mlp
+        model = mlp
+
+    dev = torch.device(device)
+    out_chunks: List[np.ndarray] = []
+    bs = max(1, batch_size)
+    with torch.no_grad():
+        for i in range(0, orf_embed.shape[0], bs):
+            xb = torch.from_numpy(orf_embed[i : i + bs]).to(dev, dtype=torch.float32)
+            probs = torch.sigmoid(model(xb)).float().cpu().numpy()
+            out_chunks.append(probs)
+    return np.vstack(out_chunks).astype(np.float32)
+
+
+def extract_unified_judge_orf_and_genome_features(
     proteins: Sequence[StructureProteinItem],
     length_bp: int,
     gc_percent: float = 50.0,
@@ -182,12 +299,11 @@ def extract_unified_judge_genome_features(
     judge_model: Any = None,
     device: Optional[str] = None,
     batch_size: int = 16,
-) -> Tuple[np.ndarray, Dict[str, float]]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, float]]:
     """
-    仅基于 Contig 排序 ORF（零 HMM / 零 Pfam / 零 PTF）通过 UnifiedJudge V4.3 提取 2916 维深度特征，
-    同时返回核心可解释信号摘要 (deep_tail_prob_max, deep_head_prob_max)。
+    仅基于 Contig 排序 ORF（零 HMM / 零 Pfam / 零 PTF）执行单次 UnifiedJudge V4.3 前向，
+    同时产出 2916 维 Contig 表征、逐 ORF 1207 维语义嵌入、ORF 氨基酸长度与可解释信号摘要。
     """
-    import torch
     from ...phage_discovery.student.orf_functional_judge import (
         CTX_WIN_ORFS,
         NUM_JUDGE_CLASSES,
@@ -196,8 +312,14 @@ def extract_unified_judge_genome_features(
 
     sorted_prots = [p for p in sorted(proteins, key=lambda x: x.start) if (p.translation or "").strip()]
     m = len(sorted_prots)
+    empty_diag = {"deep_tail_prob_max": 0.0, "deep_head_prob_max": 0.0, "coding_density": 0.0}
     if m == 0:
-        return np.zeros(DEEP_TOTAL_DIM, dtype=np.float32), {"deep_tail_prob_max": 0.0, "deep_head_prob_max": 0.0}
+        return (
+            np.zeros(DEEP_TOTAL_DIM, dtype=np.float32),
+            np.zeros((0, ORF_EMBED_DIM), dtype=np.float32),
+            np.zeros(0, dtype=np.float32),
+            empty_diag,
+        )
 
     if judge_model is None:
         judge_model, _, eff_dev = load_unified_judge_seq_model(device=device)
@@ -212,7 +334,12 @@ def extract_unified_judge_genome_features(
 
     windows = slice_contig_orf_windows(orfs, ctx_len=CTX_WIN_ORFS, stride=16)
     if not windows:
-        return np.zeros(DEEP_TOTAL_DIM, dtype=np.float32), {"deep_tail_prob_max": 0.0, "deep_head_prob_max": 0.0}
+        return (
+            np.zeros(DEEP_TOTAL_DIM, dtype=np.float32),
+            np.zeros((0, ORF_EMBED_DIM), dtype=np.float32),
+            np.zeros(0, dtype=np.float32),
+            empty_diag,
+        )
 
     acc_h = np.zeros((m, 160), dtype=np.float64)
     acc_distill = np.zeros((m, 1024), dtype=np.float64)
@@ -351,10 +478,136 @@ def extract_unified_judge_genome_features(
         ]
     ).astype(np.float32)
     full_vec = np.nan_to_num(full_vec, nan=0.0, posinf=0.0, neginf=0.0)
-    return full_vec, {
-        "deep_tail_prob_max": round(deep_tail_max, 4),
-        "deep_head_prob_max": round(deep_head_max, 4),
+
+    eff_bp = max(1.0, float(length_bp))
+    rel_pos = np.clip(
+        np.array([0.5 * (p.start + p.end) / eff_bp for p in sorted_prots], dtype=np.float32),
+        0.0,
+        1.0,
+    )
+    strand_sign = np.array([1.0 if p.strand != "-" else -1.0 for p in sorted_prots], dtype=np.float32)
+    log_len_norm = (np.log1p(aa_lens) / 8.0).astype(np.float32)
+    orf_embed = np.hstack(
+        [
+            h_orf,
+            dist_orf,
+            f_orf,
+            i_orf,
+            log_len_norm[:, None],
+            rel_pos[:, None],
+            strand_sign[:, None],
+        ]
+    ).astype(np.float32)
+    orf_embed = np.nan_to_num(orf_embed, nan=0.0, posinf=0.0, neginf=0.0)
+
+    return (
+        full_vec,
+        orf_embed,
+        aa_lens,
+        {
+            "deep_tail_prob_max": round(deep_tail_max, 4),
+            "deep_head_prob_max": round(deep_head_max, 4),
+            "coding_density": round(coding_density, 4),
+        },
+    )
+
+
+def extract_unified_judge_genome_features(
+    proteins: Sequence[StructureProteinItem],
+    length_bp: int,
+    gc_percent: float = 50.0,
+    *,
+    judge_model: Any = None,
+    device: Optional[str] = None,
+    batch_size: int = 16,
+) -> Tuple[np.ndarray, Dict[str, float]]:
+    """
+    仅基于 Contig 排序 ORF（零 HMM / 零 Pfam / 零 PTF）通过 UnifiedJudge V4.3 提取 2916 维深度特征，
+    同时返回核心可解释信号摘要 (deep_tail_prob_max, deep_head_prob_max)。
+    """
+    deep_vec, _, _, diag = extract_unified_judge_orf_and_genome_features(
+        proteins,
+        length_bp=length_bp,
+        gc_percent=gc_percent,
+        judge_model=judge_model,
+        device=device,
+        batch_size=batch_size,
+    )
+    return deep_vec, {
+        "deep_tail_prob_max": diag["deep_tail_prob_max"],
+        "deep_head_prob_max": diag["deep_head_prob_max"],
     }
+
+
+def aggregate_fine_role_contig_features(
+    orf_role_probs: np.ndarray,
+    orf_aa_lens: np.ndarray,
+    length_bp: int,
+    gc_percent: float = 50.0,
+    coding_density: float = 0.85,
+) -> np.ndarray:
+    """将逐 ORF 9 通道细粒度结构角色概率汇聚为 84 维 Contig 判别特征（零 HMM 依赖）。"""
+    m = int(orf_role_probs.shape[0])
+    if m == 0:
+        return np.zeros(FINE_ROLE_SUMMARY_DIM, dtype=np.float32)
+
+    p = np.clip(np.asarray(orf_role_probs, dtype=np.float64), 0.0, 1.0)
+    aa = np.maximum(1.0, np.asarray(orf_aa_lens, dtype=np.float64).reshape(-1))
+    log_aa = np.log1p(aa)
+    top_k = min(2, m)
+
+    feats: List[float] = []
+    max_per_ch: List[float] = []
+    for c_i in range(len(FINE_ROLE_CHANNELS)):
+        pc = p[:, c_i]
+        max_val = float(np.max(pc))
+        max_per_ch.append(max_val)
+        top2_val = float(np.mean(np.sort(pc)[-top_k:]))
+        sum_val = float(np.sum(pc))
+        cnt35 = float(np.sum(pc > 0.35))
+        cnt50 = float(np.sum(pc > 0.50))
+        frac35 = float(cnt35 / max(1, m))
+        mask35 = pc > 0.35
+        max_len_35 = float(np.log1p(np.max(aa[mask35]))) if np.any(mask35) else 0.0
+        w_mean_aa = float(np.sum(pc * log_aa) / max(1e-3, sum_val))
+        feats.extend([max_val, top2_val, sum_val, cnt35, cnt50, frac35, max_len_35, w_mean_aa])
+
+    # 6-ORF 滑动窗口共线性共现统计与跨形态对比差异（12 维）
+    win_len = min(6, m)
+    win_myo = 0.0
+    win_sip = 0.0
+    win_pod = 0.0
+    win_tail_sum = 0.0
+    for st in range(0, m - win_len + 1):
+        seg = p[st : st + win_len]
+        seg_max = np.max(seg, axis=0)
+        win_myo = max(win_myo, float(seg_max[0] * seg_max[1]))
+        win_sip = max(win_sip, float(seg_max[2] * seg_max[3]))
+        win_pod = max(win_pod, float(seg_max[4] * seg_max[8]))
+        win_tail_sum = max(win_tail_sum, float(np.sum(np.max(seg[:, :5], axis=1))))
+
+    m0, m1, m2, m3, m4, m5, m6, m7, _ = max_per_ch
+    non_capsid_peak = float(np.max(p[:, :8]))
+    gc_density_term = float(coding_density * np.log1p(max(1, length_bp)) / 12.0 + 0.05 * (gc_percent / 100.0))
+
+    feats.extend(
+        [
+            win_myo,
+            win_sip,
+            win_pod,
+            win_tail_sum,
+            m0 - m2,
+            m1 - m2,
+            max(m0, m1) - m4,
+            m3 - m4,
+            m6 - m7,
+            m5 - max(m0, m2, m4),
+            non_capsid_peak,
+            gc_density_term,
+        ]
+    )
+    vec = np.asarray(feats, dtype=np.float32)
+    return np.nan_to_num(vec, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def extract_structured_morph_features(
@@ -470,7 +723,7 @@ def build_fusion_meta_features(
     deep_head_max: np.ndarray,
     struct_features: np.ndarray,
 ) -> np.ndarray:
-    """将校准后 4 类深度概率编码为 8 维高信噪比语义摘要，并与 67 维结构特征拼接为 75 维 Meta-Fusion 向量。"""
+    """将校准后 4 类深度概率编码为 8 维高信噪比语义摘要，并与 67 维结构特征拼接为 75 维 Meta-Fusion 向量 (V1)。"""
     p = np.clip(np.asarray(deep_probs, dtype=np.float64), 1e-6, 1.0)
     p = p / np.maximum(p.sum(axis=-1, keepdims=True), 1e-12)
     log_p = np.log(p)
@@ -481,6 +734,34 @@ def build_fusion_meta_features(
     h_max = np.asarray(deep_head_max, dtype=np.float64).reshape(p.shape[0], 1)
     s_mat = np.asarray(struct_features, dtype=np.float64).reshape(p.shape[0], -1)
     meta = np.hstack([log_p, entropy, margin, t_max, h_max, s_mat]).astype(np.float32)
+    return np.nan_to_num(meta, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def build_fusion_meta_v2_features(
+    deep_probs: np.ndarray,
+    deep_tail_max: np.ndarray,
+    deep_head_max: np.ndarray,
+    fine_role_max_9: np.ndarray,
+    struct_features: np.ndarray,
+    has_rule_hit: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """构建 V2 85 维动态置信度融合特征 (8 维深概率摘要 + 9 维细粒度角色峰值 + 67 维结构特征 + 1 维规则命中指示)。"""
+    p = np.clip(np.asarray(deep_probs, dtype=np.float64), 1e-6, 1.0)
+    p = p / np.maximum(p.sum(axis=-1, keepdims=True), 1e-12)
+    log_p = np.log(p)
+    entropy = -np.sum(p * log_p, axis=-1, keepdims=True)
+    p_sorted = np.sort(p, axis=-1)
+    margin = p_sorted[:, -1:] - p_sorted[:, -2:-1]
+    t_max = np.asarray(deep_tail_max, dtype=np.float64).reshape(p.shape[0], 1)
+    h_max = np.asarray(deep_head_max, dtype=np.float64).reshape(p.shape[0], 1)
+    f9 = np.asarray(fine_role_max_9, dtype=np.float64).reshape(p.shape[0], len(FINE_ROLE_CHANNELS))
+    s_mat = np.asarray(struct_features, dtype=np.float64).reshape(p.shape[0], -1)
+    if has_rule_hit is None:
+        rule_signal = s_mat[:, :16].sum(axis=1) + s_mat[:, 37:52].sum(axis=1) + s_mat[:, 55]
+        hit_col = (rule_signal > 0.0).astype(np.float64).reshape(p.shape[0], 1)
+    else:
+        hit_col = np.asarray(has_rule_hit, dtype=np.float64).reshape(p.shape[0], 1)
+    meta = np.hstack([log_p, entropy, margin, t_max, h_max, f9, s_mat, hit_col]).astype(np.float32)
     return np.nan_to_num(meta, nan=0.0, posinf=0.0, neginf=0.0)
 
 
@@ -509,21 +790,22 @@ def compute_ece(y_true: Union[Sequence[int], np.ndarray], probs: np.ndarray, *, 
 def load_ai_predictor_bundle(
     *,
     project_root: Optional[Path] = None,
+    version: str = "auto",
     force_reload: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """按相对路径加载并缓存 Morphotype AI 双轨权重包。"""
-    global _AI_PREDICTOR_CACHE
-    if _AI_PREDICTOR_CACHE is not None and not force_reload:
-        return _AI_PREDICTOR_CACHE
-    joblib_p, _ = get_ai_model_paths(project_root)
+    """按相对路径加载并缓存 Morphotype AI 双轨权重包（优先 V2 并平滑兼容 V1）。"""
+    joblib_p, _ = get_ai_model_paths(project_root, version=version)
     if not joblib_p.is_file():
         return None
+    cache_key = str(joblib_p.resolve())
+    if cache_key in _AI_PREDICTOR_CACHE and not force_reload:
+        return _AI_PREDICTOR_CACHE[cache_key]
     import joblib
 
     bundle = joblib.load(joblib_p)
     if not isinstance(bundle, dict):
         return None
-    _AI_PREDICTOR_CACHE = bundle
+    _AI_PREDICTOR_CACHE[cache_key] = bundle
     return bundle
 
 
@@ -544,9 +826,10 @@ def predict_contig_morphotype_ai(
     min_deep_rescue_bp: int = 5000,
 ) -> Optional[AiMorphotypePrediction]:
     """
-    基于 UnifiedJudge V4.3 深度特征 + 结构特征对单条 Contig 运行校准双轨 AI 判别：
+    基于 UnifiedJudge V4.3 深度特征 + 结构特征对单条 Contig 运行校准双轨 AI 判别（兼容 V1 与 V2）：
     - 当规则引擎具备结构命中时优先运行双模态融合 (`dual_modal_fusion`)；
-    - 当规则引擎陷入 Incomplete 但序列 >=5 kb 时自动切换至纯深层语义轨迹 (`ai_deep_only`) 进行零 HMM 救回推断。
+    - 当规则引擎陷入 Incomplete 但序列 >=5 kb 时自动切换至纯深层语义轨迹 (`ai_deep_only`)，
+      并结合归一化熵、校准置信度与语义峰值实施残缺碎片保守拒识 (`abstained`)。
     """
     eff_bundle = bundle or load_ai_predictor_bundle()
     if eff_bundle is None:
@@ -562,7 +845,7 @@ def predict_contig_morphotype_ai(
         logger.debug("跳过 AI 形态预测，UnifiedJudge 加载失败: %s", exc)
         return None
 
-    deep_vec, deep_diag = extract_unified_judge_genome_features(
+    deep_vec, orf_embed, aa_lens, deep_diag = extract_unified_judge_orf_and_genome_features(
         proteins,
         length_bp=length_bp,
         gc_percent=gc_percent,
@@ -590,7 +873,53 @@ def predict_contig_morphotype_ai(
         and length_bp >= min_deep_rescue_bp
         and deep_pipe is not None
     )
-    if use_deep_only and deep_pipe is not None:
+
+    fine_max_9: Optional[np.ndarray] = None
+    is_v2 = (
+        eff_bundle.get("model_version") == "morphotype_ai_v2"
+        or "fine_role_mlp_state_dict" in eff_bundle
+    )
+    if is_v2 and "fine_role_mlp_state_dict" in eff_bundle and deep_pipe is not None:
+        orf_probs = predict_fine_role_probs(
+            orf_embed,
+            eff_bundle["fine_role_mlp_state_dict"],
+            device=eff_dev,
+        )
+        fine_max_9 = (
+            np.max(orf_probs, axis=0).astype(np.float32)
+            if orf_probs.shape[0] > 0
+            else np.zeros(len(FINE_ROLE_CHANNELS), dtype=np.float32)
+        )
+        fine_84 = aggregate_fine_role_contig_features(
+            orf_probs,
+            aa_lens,
+            length_bp=length_bp,
+            gc_percent=gc_percent,
+            coding_density=float(deep_diag.get("coding_density", 0.85)),
+        )
+        deep_v2_in = np.concatenate([deep_vec, fine_84])[None, :]
+        deep_raw = deep_pipe.predict_proba(deep_v2_in)
+        deep_cal = apply_temperature_scaling(deep_raw, deep_temp)
+
+        if use_deep_only:
+            cal_probs = deep_cal[0]
+            mode_tag = "ai_deep_only"
+        else:
+            has_hit = np.array([[0.0 if rule_prediction.morphotype_code == "Incomplete" else 1.0]], dtype=np.float32)
+            x_meta_v2 = build_fusion_meta_v2_features(
+                deep_cal,
+                np.array([[deep_diag["deep_tail_prob_max"]]], dtype=np.float32),
+                np.array([[deep_diag["deep_head_prob_max"]]], dtype=np.float32),
+                fine_max_9[None, :],
+                struct_vec[None, :],
+                has_rule_hit=has_hit,
+            )
+            pipe = eff_bundle["fusion_pipeline"]
+            temp = float(eff_bundle.get("fusion_temperature", 1.0))
+            raw_probs = pipe.predict_proba(x_meta_v2)
+            cal_probs = apply_temperature_scaling(raw_probs, temp)[0]
+            mode_tag = "dual_modal_fusion"
+    elif use_deep_only and deep_pipe is not None:
         raw_probs = deep_pipe.predict_proba(deep_vec[None, :])
         cal_probs = apply_temperature_scaling(raw_probs, deep_temp)[0]
         mode_tag = "ai_deep_only"
@@ -621,18 +950,48 @@ def predict_contig_morphotype_ai(
     conf = round(float(cal_probs[best_idx]), 4)
     prob_map = {cls_name: round(float(cal_probs[i]), 4) for i, cls_name in enumerate(classes)}
 
-    agrees = pred_code == rule_prediction.morphotype_code
-    if agrees:
-        conflict_note = ""
-    elif rule_prediction.morphotype_code == "Incomplete":
+    p_safe = np.clip(cal_probs.astype(np.float64), 1e-7, 1.0)
+    p_safe = p_safe / np.sum(p_safe)
+    entropy_norm = round(float(-np.sum(p_safe * np.log(p_safe)) / np.log(max(2, len(classes)))), 4)
+
+    abstained = False
+    if mode_tag == "ai_deep_only":
+        fine_tail_max = (
+            float(np.max(fine_max_9[:6]))
+            if fine_max_9 is not None
+            else float(deep_diag["deep_tail_prob_max"])
+        )
+        extreme_uncertainty = conf < 0.50 or entropy_norm > 0.85
+        lacks_structural_semantics = (
+            deep_diag["deep_tail_prob_max"] < 0.40
+            and deep_diag["deep_head_prob_max"] < 0.40
+            and fine_tail_max < 0.45
+        )
+        if extreme_uncertainty or lacks_structural_semantics:
+            abstained = True
+
+    if abstained:
+        pred_code = "Incomplete"
+        agrees = True
         conflict_note = (
-            f"规则引擎因缺少 PHROG/Pfam 同源判为 Incomplete，UnifiedJudge 深度表征在零 HMM 依赖下推断为 "
-            f"{pred_code} (校准置信度 {conf * 100:.1f}%)"
+            f"AI 深度表征校准置信度较低 ({conf * 100:.1f}%, 归一化熵 {entropy_norm:.2f}) "
+            f"或缺乏结构模块语义信号，采取保守拒识维持 Incomplete"
         )
     else:
-        conflict_note = (
-            f"AI 模型 ({pred_code}, {conf * 100:.1f}%) 与规则引擎 ({rule_prediction.morphotype_code}) 结论不一致，建议结合 3D 复核与基因簇人工核实"
-        )
+        agrees = pred_code == rule_prediction.morphotype_code
+        if agrees:
+            conflict_note = ""
+        elif rule_prediction.morphotype_code == "Incomplete":
+            conflict_note = (
+                f"规则引擎因缺少 PHROG/Pfam 同源判为 Incomplete，UnifiedJudge 深度表征在零 HMM 依赖下推断为 "
+                f"{pred_code} (校准置信度 {conf * 100:.1f}%)"
+            )
+            if conf < 0.65:
+                conflict_note += "（置信度偏低，建议结合 3D 结构复核）"
+        else:
+            conflict_note = (
+                f"AI 模型 ({pred_code}, {conf * 100:.1f}%) 与规则引擎 ({rule_prediction.morphotype_code}) 结论不一致，建议结合 3D 复核与基因簇人工核实"
+            )
 
     return AiMorphotypePrediction(
         predicted_morphotype=pred_code,  # type: ignore[arg-type]
@@ -641,6 +1000,8 @@ def predict_contig_morphotype_ai(
         mode=mode_tag,  # type: ignore[arg-type]
         model_version=f"{eff_bundle.get('model_version', 'morphotype_ai_v1')} ({judge_ver})",
         agreement_with_rules=agrees,
+        abstained=abstained,
+        entropy_norm=entropy_norm,
         conflict_note=conflict_note,
         deep_tail_prob_max=deep_diag["deep_tail_prob_max"],
         deep_head_prob_max=deep_diag["deep_head_prob_max"],

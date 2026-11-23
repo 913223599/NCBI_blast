@@ -366,3 +366,63 @@
   - 前端：`npx vitest run` **`9 files, 54 passed`**；`npm run build`（`vue-tsc -b && vite build`）`13.52s` 构建通过，0 报错；
   - 后端：`.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v` **`21 passed in 141.95s`**（含新增 `test_t2_2_unified_judge_ai_classifier_and_blind_rescue` 与 `test_t2_2_ai_rule_conflict_triggers_phold_3d`）；
   - 合规：全部新增及改动文件通过 `UTF-8` 无 BOM、零 Emoji 及 Python AST 语法校验，无违规项。
+
+---
+
+## 13. 步骤 63：阶段 2 / M3 第三批——`morphotype_ai_v2` ORF 级细粒度角色解码器、1,977 株全科双模态扩充与物理语义解耦拒识门控实测（2026-11-23）
+
+针对 `V1` 版本中仅依赖 Contig 级全局 P2 加权平均表征在肌尾细粒度结构分辨上的信息稀释瓶颈，以及缺乏对短碎片的保守拒识门控问题，本批次升级并验证了 `morphotype_ai_v2` 双轨架构。全量语料经分片落盘缓存扩展至 `1,977` 株（57 ICTV 科 / `223,790` 个 ORF），与冻结盲测集 `Suite E`（224 株）保持严格 **0 重叠**。
+
+### 13.1 核心架构升级与校准/门控进化
+1. **逐 ORF 9 通道细粒度解码器与 84 维表征**（[ai_morphotype_model.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/ai_morphotype_model.py)、[build_local_structure_corpus_cache.py](file:///f:/NCBI%20blast/scripts/build_local_structure_corpus_cache.py)）：
+   - 利用单次 `UnifiedJudge V4.3` 前向同时抽取 `2,916` 维 Contig 表征与逐 ORF `1,207` 维语义特征（`h_base(160) + distill_out(1024) + func10(10) + intact10(10) + 长度/相对位置/链方向(3)`），经 `31` 个分片 NPZ (`corpus_v2_chunks/chunk_00000~00030.npz` + `corpus_v2_index.jsonl`, 总耗时 `1249.2s`) 完成全量断点持久化。
+   - 在冻结底座之上于 GPU 训练轻量 `FineRoleOrfMLP`（`LayerNorm(1207) -> 256 -> 128 -> 9`，仅持久化纯 CPU `state_dict`），针对 `MYO_TSP`、`MYO_BASE_TTP`、`SIPHO_MTP_TAP`、`LONG_TMP`、`PODO_CORE`、`NON_TAILED_CORE`、`CONN_SIPHO_MYO`、`CONN_PODO` 与 `HEAD_CAPSID` 共 9 通道细粒度监督学习，并聚合为 `84` 维 Contig 判别摘要（9 通道 × 8 统计量 + 12 维 6-ORF 共线滑动窗口及形态竞争特征），与 `2,916` 维构成 `3,000` 维 V2 深度输入。
+2. **全科 `Meta-85` 双模态扩展与有界 Brier 温度校准**（[train_ai_morphotype_v2.py](file:///f:/NCBI%20blast/scripts/train_ai_morphotype_v2.py)）：
+   - 双模态融合训练集从 V1 的 `341` 株扩展至 `1,977` 株（57 个 ICTV 科），引入 9 通道细粒度峰值与 `has_rule_hit` 构造 `FUSION_META_V2_DIM = 85` 输入；
+   - 发现无界 NLL 温度缩放在跨科离群错误牵引下易将 `soft_ensemble` 温度拉高至 `1.66~1.95`，导致 `ECE` 恶化并压低正常完整基因组置信度；改用有界**多分类 Brier Score 温度缩放（`_fit_temperature_brier`）**与**校准合格优先选头（`_select_best_calibrated_head`, `ECE <= 0.05` 且未反升）**，显著提升概率可靠性。
+3. **双层物理语义解耦保守拒识门控与线上对齐修复**（[ai_morphotype_model.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/ai_morphotype_model.py)、[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)、[StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue)）：
+   - 初版紧阈值门控（`conf < 0.65 | ent > 0.72` + `lacks < 0.25/0.35`）在零 HMM 下误将 `26.7%`（`527/1977`）具有明确头尾语义的完整基因组拒识为 `Incomplete`；升级为**解耦双层物理门控**：仅在极端高熵不可分辨（`conf < 0.50 or entropy_norm > 0.85`）或完全缺失全部头尾语义（`deep_tail_prob_max < 0.40 and deep_head_prob_max < 0.40 and fine_tail_max < 0.45`）时触发 `abstained = True`（返回 `Incomplete`），并在 `manager.py` 屏蔽拒识样本对 `Phold 3D` 的 `ai_rule_conflict` 误触发、缓存 `_raw_tmps` 保证线上特征与离线训练 `100%` 对齐，前端已增加 `Incomplete` 拒识徽标与归一化熵展示。
+
+### 13.2 跨科泛化、4 轨对比与拒识压测实测数据（[t2_2_v2_cv_summary.md](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_ai/t2_2_v2_cv_summary.md)、[t2_2_v2_cv_report.json](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_ai/t2_2_v2_cv_report.json)）
+* **实验 A（`1,930` 株 / 40 个 ICTV 科 零 HMM 跨科 5 折隔离 CV：V1 vs V2）**：
+
+| 模型方案 | 分类头 | Acc | Macro-F1 | 校准前 ECE | 校准后 ECE | Brier |
+|---|---|---:|---:|---:|---:|---:|
+| `V1 AI-Deep-Only` | `histgbr` | `74.15%` | `0.7870` | `0.1593` | `0.0498` | `0.3854` |
+| `V2 FineRole-Only-84` | `histgbr` | `81.14%` | `0.8298` | `0.1104` | `0.0535` | `0.3020` |
+| **`V2 AI-Deep-Only`** | **`histgbr`** | **`79.64%` (`+5.49%`)** | **`0.8341` (`+0.0471`)** | `0.1102` | **`0.0303`** | `0.3122` |
+
+  - **ORF 级零 HMM 跨科 5 折均值 ROC-AUC**：`MYO_TSP = 0.9469`、`MYO_BASE_TTP = 0.9402`、`SIPHO_MTP_TAP = 0.9146`、`LONG_TMP = 0.8998`、`PODO_CORE = 0.8690`、`NON_TAILED_CORE = 0.9402`、`CONN_SIPHO_MYO = 0.9895`、`HEAD_CAPSID = 0.9267`。
+  - **薄弱科 V1 -> V2 跨科精度跃升**：*Hodgkinviridae* (`n=17`): `23.5% -> 88.2% (+64.7%)`、*Straboviridae* (`n=185`): `35.1% -> 74.6% (+39.5%)`、*Lindbergviridae* (`n=41`): `14.6% -> 19.5% (+4.9%)`、*Autotranscriptaviridae* (`n=136`): `100.0% -> 100.0%`、*Tectiviridae* (`n=12`): `16.7% -> 16.7%`；*Peduoviridae* (`n=88`) 在严格跨科零 HMM 留出下仍为 `0.0%`（因 P2 类温和肌尾虽有局部鞘信号但主干蛋白共享长尾 MTP/TAP 折叠，生产环境通过规则与融合轨道 100% 纠偏）。
+* **实验 B（全量 `1,977` 株 / 57 ICTV 科与 `341` 子集 5 折 4 轨公平对比）**：
+
+| 方案 | 1,977 全集 Acc | 1,977 Macro-F1 | 1,977 校准后 ECE | 341 子集 Acc | 341 Macro-F1 | 备注 |
+|---|---:|---:|---:|---:|---:|---|
+| `Rule Engine` | `99.75%` | `0.9982` | - | `100.00%` | `1.0000` | 全集 `Incomplete = 2` |
+| `AI-Deep-Only V2 (histgbr)` | `81.08%` | `0.8502` | **`0.0359`** | `85.34%` | `0.8597` | `T = 2.0249`，`Brier = 0.2506` |
+| `Structured-ML (histgbr)` | `98.79%` | `0.9865` | `0.0063` | `97.36%` | `0.9726` | 仅 67 维规则结构化特征 |
+| **`Dual-Modal Fusion V2 (soft_ensemble)`** | **`99.75%`** | **`0.9978`** | **`0.0125`** | **`99.71%`** | **`0.9971`** | `341` 切片较 V1 (`96.19%`) 仅错 1 株 (`ECE=0.0162`) |
+
+* **实验 C（HMM 失明与 6~10 kb 非结构碎片拒识压测对比）**：
+  - `6-10 kb` 非结构碎片保守拒识拦截率：**`229/240 (95.4%)`**（较 NLL 旧门控 `81.2%` 提升 `+14.2%`）；
+  - `1,977` 株完整基因组零 HMM 误拒识率：由初版 NLL+紧阈值 **`527/1977 (26.7%)`** 降至 **`103/1977 (5.2%)`**，未拒识保留区 1,874 株准确率提升至 **`83.03%`**（被拒识 103 株原始准确率仅 **`45.6%`**，确认选择性拒识带来净精度收益）。
+
+### 13.3 冻结盲测集 `Suite E`（224 株 × FASTA/GBK）V1 vs V2 只读评测对比（[suite_e_ai_v2_dual_track_eval.md](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_ai/suite_e_ai_v2_dual_track_eval.md)）
+严格保持只读评估纪律，未在观察到任何 `Suite E` 结果后修改模型或阈值：
+
+| 评估子集 | 轨道 | V1 Acc | V1 ECE | V2 Acc | V2 Macro-F1 | V2 ECE / 备注 |
+|---|---|---:|---:|---:|---:|---|
+| `FASTA 全集 (224)` | `Rule Engine` | `100.00%` | - | `100.00%` | `1.0000` | `Incomplete = 0` |
+| `FASTA 全集 (224)` | `AI-Deep-Only (0-HMM)` | `99.55%` | `0.0456` | `99.11%` | `0.9911` | **`ECE = 0.0396`** |
+| **`FASTA 全集 (224)`** | **`Dual-Modal Fusion AI`** | `100.00%` | `0.0026` | **`100.00%`** | **`1.0000`** | **`ECE = 0.0000`**，一致率 `100.0%`，在线拒识 `0` |
+| `GBK 全集 (224)` | `AI-Deep-Only (0-HMM)` | `99.55%` | `0.0533` | `98.66%` | `0.9866` | **`ECE = 0.0457`**（较 V1 `<0.05` 达标） |
+| **`GBK 全集 (224)`** | **`Dual-Modal Fusion AI`** | `100.00%` | `0.0029` | **`100.00%`** | **`1.0000`** | **`ECE = 0.0000`**，一致率 `100.0%`，在线拒识 `0` |
+| `FASTA post-2025/08 (24)` | `AI-Deep` / `Fusion` | `100.0%` / `100.0%` | `0.0566 / 0.0027` | `95.83%` / **`100.00%`** | `0.9580 / 1.0000` | 融合轨道零误差 (`ECE = 0.0000`) |
+| `GBK post-2025/08 (24)` | `AI-Deep` / `Fusion` | `100.0%` / `100.0%` | `0.0742 / 0.0029` | **`100.00%` / `100.00%`** | **`1.0000 / 1.0000`** | 外部新菌株零误差 (`ECE = 0.0769 / 0.0000`) |
+
+### 13.4 产物性能、全栈验证与合规审计
+* **权重与显存开销**：生成 [morphotype_ai_v2.joblib](file:///f:/NCBI%20blast/models/phage_structure/morphotype_ai_v2.joblib)（**`2.621 MB`**，纯 CPU `state_dict` + sklearn pipeline，支持自动回退 V1）及 [morphotype_ai_v2_meta.json](file:///f:/NCBI%20blast/models/phage_structure/morphotype_ai_v2_meta.json)；训练峰值 GPU 显存仅 **`98.7 MB`**，在线推理延迟保持 **`27.57 ms/genome`**。
+* **测试与构建验证**：
+  - 后端全量测试：`.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v` **`22 passed in 141.25s`**（含 `test_t2_2_v2_fine_role_probe_and_fragment_abstention` 实测真 V2 bundle 7 kb 非结构碎片拒识与 `ANNO_NC_005859` 零 HMM 盲测救援）；
+  - 前端验证：`npx vitest run` **`9 files, 54 passed in 3.03s`**；`npm run build`（`vue-tsc -b && vite build`）`19.79s` 构建通过。
+  - 合规审计：涉及前后端源码、脚本、单测、报告及文档全部通过 `UTF-8` 无 BOM、零 Emoji 及 Python AST 语法校验。
