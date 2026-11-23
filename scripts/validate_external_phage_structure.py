@@ -180,7 +180,16 @@ def run_dual_mode_pipeline(
 
         print(f"  [{mode.upper()}] 已完成批次 {min(start + len(batch), len(pending))}/{len(pending)}")
 
-    return [done_map[str(e["acc"])] for e in entries]
+    # 每次返回时用当前版本化数据集元数据（尤其是 tem_truth.tsv）同步覆盖，防止旧 checkpoint 残留过期真值
+    sync_fields = ("tem_nm", "tem_range", "doi", "verification_status", "tem_state", "includes_baseplate", "tem_method")
+    synced_rows: List[Dict[str, Any]] = []
+    for e in entries:
+        row = dict(done_map[str(e["acc"])])
+        for fk in sync_fields:
+            if fk in e:
+                row[fk] = e[fk]
+        synced_rows.append(row)
+    return synced_rows
 
 
 def evaluate_dual_concordance(
@@ -289,8 +298,8 @@ def evaluate_dual_concordance(
     }
 
 
-def evaluate_external_tem(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """计算 Suite D 独立外部 TEM 尾长回归精度（绝无旧 Suite B 样本）。"""
+def _compute_external_tem_stats(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """针对给定 TEM 行计算相关性与 0.145 回归误差。"""
     paired = []
     missing = []
     for r in rows:
@@ -317,6 +326,8 @@ def evaluate_external_tem(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "expected": r["expected"],
             "predicted": r["predicted"],
             "tem_nm": float(tem_nm),
+            "verification_status": r.get("verification_status", "unverified"),
+            "doi": r.get("doi", ""),
             "length_aa": int(tmp["length_aa"]),
             "est_0145_nm": est,
             "abs_err_nm": round(abs_err, 2),
@@ -357,6 +368,27 @@ def evaluate_external_tem(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "by_morph": by_morph,
         "details": paired,
     }
+
+
+def evaluate_external_tem(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """计算 Suite D 独立外部 TEM 尾长回归精度（默认严格仅纳入 verified 真值）。"""
+    tem_rows = [r for r in rows if r.get("tem_nm") is not None]
+    verified_rows = [r for r in tem_rows if r.get("verification_status") == "verified"]
+    unverified_excluded = [
+        {"acc": r["acc"], "name": r.get("name"), "tem_nm": r.get("tem_nm")}
+        for r in tem_rows
+        if r.get("verification_status") != "verified"
+    ]
+    primary = _compute_external_tem_stats(verified_rows if verified_rows else tem_rows)
+    all_stats = _compute_external_tem_stats(tem_rows)
+    primary["all_tem_total"] = len(tem_rows)
+    primary["unverified_excluded_count"] = len(unverified_excluded)
+    primary["unverified_excluded"] = unverified_excluded
+    primary["all_incl_unverified"] = {
+        k: all_stats.get(k)
+        for k in ("tem_total", "tmp_found", "pearson_r", "mae_0145_nm", "median_abs_err_nm", "mape_0145_pct")
+    }
+    return primary
 
 
 def _evaluate_by_family(rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -472,12 +504,14 @@ def main() -> None:
         f"TMP精确一致={sd['concordance']['tmp_exact_aa_count']}/{sd['total']}"
     )
     print(
-        f"  TEM定量 (FASTA): {sd['tem_fasta'].get('tmp_found')}/{sd['tem_fasta'].get('tem_total')}, "
-        f"r={sd['tem_fasta'].get('pearson_r')}, MAE={sd['tem_fasta'].get('mae_0145_nm')}nm, MAPE={sd['tem_fasta'].get('mape_0145_pct')}%"
+        f"  TEM定量 (FASTA verified, 剔除unverified={sd['tem_fasta'].get('unverified_excluded_count')}): {sd['tem_fasta'].get('tmp_found')}/{sd['tem_fasta'].get('tem_total')}, "
+        f"r={sd['tem_fasta'].get('pearson_r')}, MAE={sd['tem_fasta'].get('mae_0145_nm')}nm, MAPE={sd['tem_fasta'].get('mape_0145_pct')}% "
+        f"(all={sd['tem_fasta'].get('all_incl_unverified', {}).get('pearson_r')}/{sd['tem_fasta'].get('all_incl_unverified', {}).get('mae_0145_nm')}nm/{sd['tem_fasta'].get('all_incl_unverified', {}).get('mape_0145_pct')}%)"
     )
     print(
-        f"  TEM定量 (GBK)  : {sd['tem_gbk'].get('tmp_found')}/{sd['tem_gbk'].get('tem_total')}, "
-        f"r={sd['tem_gbk'].get('pearson_r')}, MAE={sd['tem_gbk'].get('mae_0145_nm')}nm, MAPE={sd['tem_gbk'].get('mape_0145_pct')}%"
+        f"  TEM定量 (GBK   verified, 剔除unverified={sd['tem_gbk'].get('unverified_excluded_count')}): {sd['tem_gbk'].get('tmp_found')}/{sd['tem_gbk'].get('tem_total')}, "
+        f"r={sd['tem_gbk'].get('pearson_r')}, MAE={sd['tem_gbk'].get('mae_0145_nm')}nm, MAPE={sd['tem_gbk'].get('mape_0145_pct')}% "
+        f"(all={sd['tem_gbk'].get('all_incl_unverified', {}).get('pearson_r')}/{sd['tem_gbk'].get('all_incl_unverified', {}).get('mae_0145_nm')}nm/{sd['tem_gbk'].get('all_incl_unverified', {}).get('mape_0145_pct')}%)"
     )
     sc = report["suite_c_unseen_local"]
     print(

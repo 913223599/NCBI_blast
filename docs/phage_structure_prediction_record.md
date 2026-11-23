@@ -196,3 +196,36 @@
 * **既有 150 株基准集复测验证**（`.venv/Scripts/python.exe scripts/benchmark_phage_structure.py --fresh`, `147.93s`）：
   - **Suite A (120 ICTV)** 保持 **`100.0% (120/120, Macro-F1=1.0, err=0)`**；
   - **Suite B (30 TEM)** 保持 **`30/30` 形态、`29/30` TMP、`Pearson r=0.9893, MAE=19.44 nm, MAPE=9.85%`**，零退化验证闭环。
+
+
+---
+
+## 9. 阶段 0：评估体系加固与 M1 多维基线确立（步骤 59）
+
+依据 [phage_structure_optimization_plan.md](file:///f:/NCBI%20blast/docs/phage_structure_optimization_plan.md) 先测量、后修改与“调参集 / 盲测集严格分离”原则，本阶段未改动 `src/` 下任何核心预测或分类算法源码，全面完成 `T0.1 / T0.2 / T0.3` 评估底座建设与 M1 全量基线实测。
+
+### 9.1 T0.1 冻结盲测集 Suite E 与 m1_baseline 首次盲测结果
+* **冻结清单与零重叠保障**：通过 [validation_datasets.py](file:///f:/NCBI%20blast/scripts/validation_datasets.py) 排除先期已测全部 `344` 株样本（`Suite A + B + C + D + 单元测试保留集`），汇总 `24` 株 `2025/08/10` 之后 NCBI 新公开基因组（`SUITE_E_POST_2025_EXTERNAL`）与 `200` 株本地库存跨科配对基因组（每形态 50 株），共计 **`224` 株（覆盖 `38` 个 ICTV 科，含缺失 `/translation` 非标 `.gbk` `54` 株、`hypothetical >= 70%` `32` 株）**，以 SHA256 哈希写入版本化清单 [suite_e_manifest.json](file:///f:/NCBI%20blast/tests/fixtures/phage_structure/suite_e_manifest.json)。
+* **首次盲测实测（[run_suite_e_blind.py](file:///f:/NCBI%20blast/scripts/run_suite_e_blind.py) `--milestone m1_baseline --fresh`，总耗时 `470.33 s`，报告 [suite_e_m1_baseline_report.json](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_suite_e/suite_e_m1_baseline_report.json)）**：
+  - **纯裸 `.fasta` 模式**：**`Accuracy = 1.0 (224/224), Macro-F1 = 1.0`**；`post-2025/08` 外部 `24` 株 **`1.0`**；假 TMP `0/112`；有尾 TMP 召回 **`112/112`**。
+  - **原始 `.gbk` 模式**：**`Accuracy = 0.9955 (223/224), Macro-F1 = 0.9955`**；`post-2025/08` 外部 `24` 株 **`1.0`**；假 TMP `0/112`；有尾 TMP 召回 **`110/112`**；双格式形态一致率 **`0.9955 (223/224)`**，`<=5%` 误差尾长一致率 **`0.9821`**（精确 aa 一致 `215/224`）；`missing_translation (n=54)` 与 `high_hypothetical >=70% (n=32)` 双模式准确率均 **`1.0`**。
+  - **机制级客观诊断（严格只作记录，未对 Suite E 做规则微调）**：GBK 模式唯二异常样本为 `NC_052964`（`64,096 bp`，原始 `.gbk` 仅稀疏注释 `6` 个 CDS 导致漏标尾部，被误判为 `Podoviridae-like`）与 `NC_070890`（`143,349 bp`，`.gbk` 仅注释 `48` 个 CDS 致 TMP 漏检），均精准印证现有 `predict_missing_orfs` 对 `CDS >= 1` 稀疏/残缺注释 `.gbk` 缺乏基因密度检查与间隙回补；同时运行日志出现遗传密码表 4 与 11 冲突警告（`requested translation table (11) has different STOP codons than the one these genes were called with (4)`），为 M2 阶段 `T1.1 / T1.2` 提供实证入口。
+
+### 9.2 T0.2 一手文献 TEM 标准真值表构建与回归重算
+* **标准真值库构建**：回溯全部 `52` 株文献 TEM 样本并 CrossRef 实测校验 DOI，落盘 [tem_truth.tsv](file:///f:/NCBI%20blast/tests/fixtures/phage_structure/tem_truth.tsv)，包含测量状态（`extended`）、是否含基板（`yes/no/unknown`）、实验方法（`TEM/Cryo-EM`）、DOI 与核对状态：
+  - **`verified` 共 `41` 株**（`Suite B 22 + Suite D 19`）：完成多项一手文献纠偏（如 `phiKZ 180 nm` 替代 `198 nm`、`Tuc2009 144 nm` 替代 `160 nm`、`SPP1 160 nm` 螺旋尾管替代混合 `188 nm`、`T4 92.5 nm` 伸展尾鞘、`A511 199.4 nm`、`D29 120 nm`、`SPbeta 320 nm`、`P74-26 800 nm`、`Gamma 208.5 nm (200-217 区间中值)`）。
+  - **`unverified` 共 `11` 株**（`Suite B 8 株`：`Syn9, L5, HK97, sk1, A118, phiC31, N15, c2`；`Suite D 3 株`：`Bxz1, D3112, phi80`）：仅参与形态分类评价，严格剔除出定量尾长回归。
+* **脚本迁移与清洗前后回归对比**（[benchmark_phage_structure.py](file:///f:/NCBI%20blast/scripts/benchmark_phage_structure.py)、[validation_datasets.py](file:///f:/NCBI%20blast/scripts/validation_datasets.py)、[validate_external_phage_structure.py](file:///f:/NCBI%20blast/scripts/validate_external_phage_structure.py) 均改为单点读取 `tem_truth.tsv`）：
+  - **Suite B（`verified = 21/22` 检出，形态 `30/30`）**：`Pearson r = 0.9900`, `MAE(0.145) = 17.50 nm`（旧全量 `19.44 nm`）, `MAPE = 8.65%`（旧 `9.85%`）；`<=2500 aa (n=20)` 留一法线性拟合收敛至 `slope = 0.14002 nm/aa, intercept = +13.95 nm`（`LOOCV MAE = 14.96 nm`）；`Myoviridae-like (n=9)` 平均有符号偏差 `-18.23 nm` 显著低于 `Siphoviridae-like (n=12)` `-7.14 nm`。
+  - **Suite D（`verified = 18/19` 检出，FASTA 与 GBK 完全一致）**：清洗并剔除 `3` 株未核实噪音后，**`Pearson r` 由旧 `0.9086 / 0.9118` 跃升至 `0.9422`**，`MAE(0.145)` 降至 **`26.50 nm`**（旧 `28.16 / 27.94 nm`），`MAPE` 降至 **`14.38%`**（旧 `16.24% / 16.12%`）。
+
+### 9.3 T0.3 碎片 Contig 与嵌合前噬菌体基准（193 样本）
+* 新建 [benchmark_fragmented_contigs.py](file:///f:/NCBI%20blast/scripts/benchmark_fragmented_contigs.py)（基于 `24` 株源株切片与 `blind_sota_clinical` 宿主嵌合，`163.41 s`，报告 [fragmented_baseline_report.json](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_fragmented/fragmented_baseline_report.json)）：
+  - `chimeric_full_prophage (n=12)`：`Incomplete = 0.00%`, `Tailed->Podo = 0/12 (0.00%)`, `exact = 100.00%`；
+  - `targeted_tail_only (n=11)`：`Incomplete = 0.00%`, `Tailed->Podo = 0/11 (0.00%)`, `exact = 100.00%`；
+  - `sliding_5kb (n=46)` / `10kb (n=38)` / `20kb (n=30)`：`Incomplete` 依次为 `65.22% / 65.79% / 46.67%`，`Tailed->Podo = 0.00%`；
+  - `sliding_30kb (n=28)` / `40kb (n=24)`：`Incomplete = 35.71% / 29.17%`，`Tailed->Podo` 误判分别升至 **`2/22 (9.09%)`** 与 **`3/20 (15.00%)`**；
+  - `targeted_head_only (n=2)` 与 `chimeric_head_truncated (n=2)`：`Incomplete = 0.00%`，**`Tailed->Podo = 2/2 (100.00%)`**；实证了大片段截断丢尾情形下负向短尾规则的无门控盲区。
+
+### 9.4 阶段 0 全套单元测试验证
+* `.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v`：**`13 passed in 130.56s (0:02:10)`**（新增 `test_tem_truth_table_and_suite_e_disjoint` 校验 `52` 条真值完整性、DOI 合规性及与 Suite E 224 株绝对零重叠），相关产物均通过 `UTF-8` 无 BOM 及零 Emoji 检查。

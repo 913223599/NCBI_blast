@@ -1,0 +1,2249 @@
+{
+  "frozen_version": "suite_e_v1",
+  "excluded_prior_count": 344,
+  "total_entries": 224,
+  "external_post_202508_count": 24,
+  "local_unseen_count": 200,
+  "entries": [
+    {
+      "acc": "PQ469686",
+      "origin": "ncbi_post_202508",
+      "family": "Straboviridae",
+      "host": "ELT2",
+      "expected": "Myoviridae-like",
+      "desc": "Post-2025/08 Escherichia Straboviridae",
+      "fasta_sha256": "ddc112c83d81b02a1a9c5cf7d14a7d15ec60bd1a3ad92137ecd9b54655afe8d3",
+      "gbk_sha256": "cb93480ddb88136e7d1747318724936738927671c23d19494ec07ca1a05c7293"
+    },
+    {
+      "acc": "PV821423",
+      "origin": "ncbi_post_202508",
+      "family": "Herelleviridae",
+      "host": "Romulus",
+      "expected": "Myoviridae-like",
+      "desc": "Post-2025/08 Staphylococcus Herelleviridae",
+      "fasta_sha256": "35ece1f497d324f5030da860054ff207f97fdbc5e3222fe071df47cc9321d785",
+      "gbk_sha256": "5270428255d776a1789536f94e777f3930edf0218db4ff25bcd0463dbf348f1f"
+    },
+    {
+      "acc": "PX400618",
+      "origin": "ncbi_post_202508",
+      "family": "Peduoviridae",
+      "host": "PhiBP82.2",
+      "expected": "Myoviridae-like",
+      "desc": "Post-2025/08 Burkholderia Peduoviridae",
+      "fasta_sha256": "34c7e4968d8b998f2b039c9d5511773e7291648a68f3fae003d32adcaef9e550",
+      "gbk_sha256": "177964c837b7e23d23c6b7f2437943e4e102af2d1f2cd87889c8da9a004b37eb"
+    },
+    {
+      "acc": "PX277138",
+      "origin": "ncbi_post_202508",
+      "family": "Vandenendeviridae",
+      "host": "LL-5504721-AH",
+      "expected": "Myoviridae-like",
+      "desc": "Post-2025/08 Pseudomonas Vandenendeviridae",
+      "fasta_sha256": "ae9f779d530f487267172ba1fa91ff1a91854d33d573e143c6d314bfa39028ea",
+      "gbk_sha256": "1d5ad916f2acb16fa3a009d6f94f4e5de2f2e94bb61d44cfed798da4b4df7b16"
+    },
+    {
+      "acc": "PX277137",
+      "origin": "ncbi_post_202508",
+      "family": "Lindbergviridae",
+      "host": "E2005-A",
+      "expected": "Myoviridae-like",
+      "desc": "Post-2025/08 Pseudomonas Lindbergviridae",
+      "fasta_sha256": "be931937af090fe3ec1103702b2a0e27900060fdd5cfe85967ceeefb63492429",
+      "gbk_sha256": "b9f0203dd7d96b206cbd3dee5910d3e6b48d0acc2bffaafb70d1e520b3458ec2"
+    },
+    {
+      "acc": "PX411236",
+      "origin": "ncbi_post_202508",
+      "family": "Ackermannviridae",
+      "host": "vB_CECAV_034",
+      "expected": "Myoviridae-like",
+      "desc": "Post-2025/08 Salmonella Ackermannviridae",
+      "fasta_sha256": "9681d6172c1b2cbdabb0221380459023a5729be8d41b7f38cac1840ba4747ee4",
+      "gbk_sha256": "dc994c07e515394e3bc7e248de7e697a5d66ba88b2cadd2d50ddc40220ac1945"
+    },
+    {
+      "acc": "PQ564757",
+      "origin": "ncbi_post_202508",
+      "family": "Demerecviridae",
+      "host": "KSP7",
+      "expected": "Siphoviridae-like",
+      "desc": "Post-2025/08 Salmonella Demerecviridae",
+      "fasta_sha256": "11b0396f2d5213a8a057c902c99c8e81f9c7375230e0cb1abe53f94146efd55b",
+      "gbk_sha256": "d8ccd1c4e7900cd2d536b5b3a25d6cb3b51652ca445769e15ccb8d3208e30652"
+    },
+    {
+      "acc": "QB005391",
+      "origin": "ncbi_post_202508",
+      "family": "Drexlerviridae",
+      "host": "vB_Kpn9997-EKp3",
+      "expected": "Siphoviridae-like",
+      "desc": "Post-2025/08 Klebsiella Drexlerviridae",
+      "fasta_sha256": "87aefa7715c96c3a7de1fa58ab1500861fc9b382a366c6eed92bba5a572d5b7a",
+      "gbk_sha256": "f711a31c6c2f69bbe1b5bc595fa8c277baea3372b83a4b60560311b626fa3b76"
+    },
+    {
+      "acc": "PZ585225",
+      "origin": "ncbi_post_202508",
+      "family": "Mesyanzhinovviridae",
+      "host": "PA14_MA16",
+      "expected": "Siphoviridae-like",
+      "desc": "Post-2025/08 Pseudomonas Mesyanzhinovviridae",
+      "fasta_sha256": "c7a872999bb3f7bc1f3cbe366dbd4e1c758a125ba724219410f452eb6229f89d",
+      "gbk_sha256": "f9d15fb54346fca4dc056d00c4b8d895c972964ed204dfa732174ba16cea4dbc"
+    },
+    {
+      "acc": "PX138300",
+      "origin": "ncbi_post_202508",
+      "family": "Aliceevansviridae",
+      "host": "P09",
+      "expected": "Siphoviridae-like",
+      "desc": "Post-2025/08 Streptococcus Aliceevansviridae",
+      "fasta_sha256": "8234590e147cab606fd1f87037892dd0aca1f92618eae18731dcb9880b562d49",
+      "gbk_sha256": "bb5473704cc03054de2dce0321de139e91e9d7307d71d5024145979637196d7f"
+    },
+    {
+      "acc": "PZ295849",
+      "origin": "ncbi_post_202508",
+      "family": "Casjensviridae",
+      "host": "Odze",
+      "expected": "Siphoviridae-like",
+      "desc": "Post-2025/08 Aeromonas Casjensviridae",
+      "fasta_sha256": "4aabddd668c465854e12b26c432a182fc5d09cf6f51279c14a287db2a82ec481",
+      "gbk_sha256": "68f7bc88a1cc101a23411bce638646eeeadece4a8dbc35e1f2c82068d5f9820a"
+    },
+    {
+      "acc": "PX828564",
+      "origin": "ncbi_post_202508",
+      "family": "Casjensviridae",
+      "host": "BCVI_Sma-b24phi",
+      "expected": "Siphoviridae-like",
+      "desc": "Post-2025/08 Stenotrophomonas Casjensviridae",
+      "fasta_sha256": "d190bd4d11aa78433a2372ba36811b6ba3bdf6123a220c2819028e6957d947d1",
+      "gbk_sha256": "5a3e180cf1f2e6f4f0da1f03cfaff54d183df5d94d181e230fdffc6127aaa939"
+    },
+    {
+      "acc": "QB184940",
+      "origin": "ncbi_post_202508",
+      "family": "Autotranscriptaviridae",
+      "host": "UroKP46",
+      "expected": "Podoviridae-like",
+      "desc": "Post-2025/08 Klebsiella Autotranscriptaviridae",
+      "fasta_sha256": "61b6797e4dfabd2ea32adfdfa654d08d3b1ff8edacd6258ad92253e014a3b803",
+      "gbk_sha256": "a3a72372a71e4f461354445116bbffb29327a33128c1f0eca7d3a4569f796e6c"
+    },
+    {
+      "acc": "OZ562183",
+      "origin": "ncbi_post_202508",
+      "family": "Schitoviridae",
+      "host": "ZamKleb01",
+      "expected": "Podoviridae-like",
+      "desc": "Post-2025/08 Klebsiella Schitoviridae",
+      "fasta_sha256": "dd67653bd85401d671e98767ff5e3a802b454b1853195ae5bb65626bfab2d545",
+      "gbk_sha256": "9860f25d9030c393206dc56bcc06e4e7258ee22bfc2f3445da0548ba4bb5e6e1"
+    },
+    {
+      "acc": "PZ593363",
+      "origin": "ncbi_post_202508",
+      "family": "Rountreeviridae",
+      "host": "SA53-CTH4",
+      "expected": "Podoviridae-like",
+      "desc": "Post-2025/08 Staphylococcus Rountreeviridae",
+      "fasta_sha256": "524d4235e466e713db9940efd77bbc87fbe38d8dd960eeece78f60e786fbeeae",
+      "gbk_sha256": "fe17ad8f038454e87340690dbab9de0e96b561095f2932c25172daadb3e78caf"
+    },
+    {
+      "acc": "PX404141",
+      "origin": "ncbi_post_202508",
+      "family": "Zobellviridae",
+      "host": "P71S",
+      "expected": "Podoviridae-like",
+      "desc": "Post-2025/08 Pseudomonas Zobellviridae",
+      "fasta_sha256": "a3931008613fd3cda495a2414e61e81d2ec932ddb5ddf64190aaefd809bae162",
+      "gbk_sha256": "f1103e413aad3fbf73ac5a175fae33017764d3913bb853d6221133592b2ce622"
+    },
+    {
+      "acc": "PX974340",
+      "origin": "ncbi_post_202508",
+      "family": "Salasmaviridae",
+      "host": "GH_01",
+      "expected": "Podoviridae-like",
+      "desc": "Post-2025/08 Bacillus Salasmaviridae",
+      "fasta_sha256": "d4d06a7e47c0aead86d5cb535bde0bdb4c26445143a2aab3d40e10480b6778c3",
+      "gbk_sha256": "a1ac4bcc8b7c1fda1efd985e9461988c988f01cac6e5b245478b6f6ac9129996"
+    },
+    {
+      "acc": "PV983592",
+      "origin": "ncbi_post_202508",
+      "family": "Guelinviridae",
+      "host": "PhiCP17-i",
+      "expected": "Podoviridae-like",
+      "desc": "Post-2025/08 Clostridium Guelinviridae",
+      "fasta_sha256": "5752d228a14c7bb80b2bb95b5a6e56c398c563301b9067c4021dbfba380abc29",
+      "gbk_sha256": "79119a76fcbbed348220557a35b436d73a07ad3c62ed8ed179d656dff88fc594"
+    },
+    {
+      "acc": "PX216439",
+      "origin": "ncbi_post_202508",
+      "family": "Inoviridae",
+      "host": "RG2",
+      "expected": "Non-tailed",
+      "desc": "Post-2025/08 Xanthomonas Inoviridae",
+      "fasta_sha256": "20f5da2349cbd22ee37d4235278e4e03b12f0d854f019dacf8ced197193317b5",
+      "gbk_sha256": "b24978321da64472b5501b7a03ad692c0b4163f058de405e3bf990e9355b55f0"
+    },
+    {
+      "acc": "PX433842",
+      "origin": "ncbi_post_202508",
+      "family": "Inoviridae",
+      "host": "Ino_60253",
+      "expected": "Non-tailed",
+      "desc": "Post-2025/08 UNVERIFIED Inoviridae",
+      "fasta_sha256": "1dc355d192cf2fe3d51f9b689b59e114c8795da90d01c935d0b02fd4460b05fd",
+      "gbk_sha256": "306b571ffaaa5b27e9ae06a77f9f949625df4a1746ef061981de887825fe88fb"
+    },
+    {
+      "acc": "PZ531164",
+      "origin": "ncbi_post_202508",
+      "family": "Eubullaviridae",
+      "host": "Thayendanegea",
+      "expected": "Non-tailed",
+      "desc": "Post-2025/08 Salmonella Microviricetes",
+      "fasta_sha256": "832ebf1156607c43dbe88e1dfdf653074cb503cdbab20bea94f03eda4085afa0",
+      "gbk_sha256": "bc80cfec9ad3801c7fbd110336c01dc94acc4d0014a92ae2251b1cd25dea33d2"
+    },
+    {
+      "acc": "PX306536",
+      "origin": "ncbi_post_202508",
+      "family": "Tectiviridae",
+      "host": "PRD1-C1",
+      "expected": "Non-tailed",
+      "desc": "Post-2025/08 Escherichia Alphatectivirus",
+      "fasta_sha256": "396d0aeed4683183890ca98f9560bed2667e29359b8d00626c0d28b650112a4c",
+      "gbk_sha256": "f3da2609cf16c806f00fee363d91145a2be3f1dd67f2aeda2777e18891c94dbe"
+    },
+    {
+      "acc": "PZ201852",
+      "origin": "ncbi_post_202508",
+      "family": "Tectiviridae",
+      "host": "ZRIMUP76",
+      "expected": "Non-tailed",
+      "desc": "Post-2025/08 Streptomyces Deltatectivirus",
+      "fasta_sha256": "31da1877ab3e3ad632c24a036b8ec401d2bf31796b21ded8fc0930109291ba18",
+      "gbk_sha256": "294ebf15d9ee402c9c8611798ae658c170d77d2d3ce8277df56b321a1a5a4ca6"
+    },
+    {
+      "acc": "PZ823764",
+      "origin": "ncbi_post_202508",
+      "family": "Fiersviridae",
+      "host": "MAG_Levivir_03",
+      "expected": "Non-tailed",
+      "desc": "Post-2025/08 MAG +ssRNA Fiersviridae",
+      "fasta_sha256": "00c65f86e1ab1f7b44d849311c581e4acaa29a52a9355000bf55d48936ab7f6b",
+      "gbk_sha256": "c32128523333f9f0d5d656015b3317c92823c043781e88f537e696290487ca30"
+    },
+    {
+      "acc": "NC_019452",
+      "origin": "local_unseen_pool",
+      "family": "Ackermannviridae",
+      "host": "Escherichia coli O157:H7",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage PhaxI",
+      "fasta_sha256": "adde7204d95a3adcea6229f44e8f76517798f4d5a11ade46c37645a49cfaeb71",
+      "gbk_sha256": "8fd5926c24ee9d8e826de5d7d9777c3ea152b6e26f898fe1d6caea15e99e4905"
+    },
+    {
+      "acc": "NC_027337",
+      "origin": "local_unseen_pool",
+      "family": "Andersonviridae",
+      "host": "Escherichia coli B strains",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage vB_EcoM-VpaE1",
+      "fasta_sha256": "7a089680166f6c2d8bfbb082f3eec6f61de33b561e47109ba889602f1e37f77f",
+      "gbk_sha256": "11bc9ae26fae02ab62efd675d37912f691dd74c85d671146b77e05945becf44a"
+    },
+    {
+      "acc": "NC_048799",
+      "origin": "local_unseen_pool",
+      "family": "Chaseviridae",
+      "host": "Escherichia coli",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage Mangalitsa",
+      "fasta_sha256": "b2980002fe209c7cdc09bc9b2382ba7b2fadc1f3d98433f1a429a12aa61c6e28",
+      "gbk_sha256": "c8d048fe4142c09a395e965d4d4705e50287dfca42eb59461d8d7c3301461ac2"
+    },
+    {
+      "acc": "NC_007066",
+      "origin": "local_unseen_pool",
+      "family": "Herelleviridae",
+      "host": "Staphylococcus aureus",
+      "expected": "Myoviridae-like",
+      "desc": "Staphylococcus phage G1",
+      "fasta_sha256": "b56553a9c1a5f5b041237e8aea9f07609e28ac1473726465fd7d1172f3f1a750",
+      "gbk_sha256": "b797a422c391bdb1ae6ea5a9d2f89b1412f1b86d3e51c3c963ac74cecd24b462"
+    },
+    {
+      "acc": "NC_026926",
+      "origin": "local_unseen_pool",
+      "family": "Kyanoviridae",
+      "host": "Synechococcus",
+      "expected": "Myoviridae-like",
+      "desc": "Synechococcus phage ACG-2014j",
+      "fasta_sha256": "791ef41ff03d0674f0953b6f0fd29668478c29b595c50999506a8b61e364aa70",
+      "gbk_sha256": "109695bc83d5d35f2f1aa6d3f163e8f1aa7a3b869ad2d70579ab19929eb9def7"
+    },
+    {
+      "acc": "NC_011165",
+      "origin": "local_unseen_pool",
+      "family": "Lindbergviridae",
+      "host": "Pseudomonas aeruginosa",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage LBL3",
+      "fasta_sha256": "3dfed54e8c10409632360799f0d81e6bbf7c4dd6991381e84afa315da19b76a8",
+      "gbk_sha256": "a8b0d7c33381e0216ec876be0674bfb1177fbfb3311ec6feee5f0110308934ea"
+    },
+    {
+      "acc": "NC_005056",
+      "origin": "local_unseen_pool",
+      "family": "Peduoviridae",
+      "host": "Escherichia coli W strain ATCC9637",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage Wphi",
+      "fasta_sha256": "973e107c23f04b3b84d0ed53bc1e68be2c9f0507f69c243628245ef09e258004",
+      "gbk_sha256": "33ec48d4ff367e0851c682e1432e17a1b808cd5fead5199ccd688b578f1f257e"
+    },
+    {
+      "acc": "NC_070887",
+      "origin": "local_unseen_pool",
+      "family": "Pootjesviridae",
+      "host": "Rhizobium",
+      "expected": "Myoviridae-like",
+      "desc": "Rhizobium phage AF3",
+      "fasta_sha256": "d61867d40673c3247b39806dc50f5416c775fce2840ed6498c3156ef247a1262",
+      "gbk_sha256": "8adbcf149ff9ed2d9261a04948c9cfe4f1fc9bda740b38bee7a1809a2bd29f16"
+    },
+    {
+      "acc": "NC_007023",
+      "origin": "local_unseen_pool",
+      "family": "Straboviridae",
+      "host": "Escherichia",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage RB43",
+      "fasta_sha256": "8c5d5555a4975145ba3b1515486bfadd226cadd2cb64de5e84a0d6ac78f29d6b",
+      "gbk_sha256": "18f57e22a9ec23476885d259c306cc3203bc70d04819acbef39bd7da51964ac2"
+    },
+    {
+      "acc": "NC_019918",
+      "origin": "local_unseen_pool",
+      "family": "Vandenendeviridae",
+      "host": "Pseudomonas aeruginosa C2-10",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage vB_PaeM_C2-10_Ab1",
+      "fasta_sha256": "11247a4964900ada6ee4985e5858ebfeabd4d5e3eb0bf85f9153ff5e3f90f499",
+      "gbk_sha256": "988d55e411993373ded037b7811dcecac6bb44d34909e655ba645d063865ea18"
+    },
+    {
+      "acc": "NC_022343",
+      "origin": "local_unseen_pool",
+      "family": "Ackermannviridae",
+      "host": "Klebsiella",
+      "expected": "Myoviridae-like",
+      "desc": "Klebsiella phage 0507-KN2-1",
+      "fasta_sha256": "7cf1ad98972f0ec989437fdbc9e581a6a78cd70de6b9cb8d95af332d5c72c4c6",
+      "gbk_sha256": "8d9f4bc426df110baeb2868fc01771fb364a7d0b14e2e0e1cf9e8dd99d356028"
+    },
+    {
+      "acc": "NC_027360",
+      "origin": "local_unseen_pool",
+      "family": "Andersonviridae",
+      "host": "Salmonella enterica subsp. enterica",
+      "expected": "Myoviridae-like",
+      "desc": "Enterobacteria phage UAB_Phi87",
+      "fasta_sha256": "ed5f9e8fd863501d6fa27eec77a4edd296f5569176b5ffe678b539bb8c3a2e75",
+      "gbk_sha256": "f1f3681639d47f239550226201efd06598737951653498feec8cdb7d5bcedc91"
+    },
+    {
+      "acc": "NC_048803",
+      "origin": "local_unseen_pool",
+      "family": "Chaseviridae",
+      "host": "Proteus mirabilis",
+      "expected": "Myoviridae-like",
+      "desc": "Proteus phage Myduc",
+      "fasta_sha256": "691c3d1366d435ed80da00b69f9628455f66fe48eb76e48dd259527657b9c74d",
+      "gbk_sha256": "3e10d17095d806ae9784302b4abb46a44fb5735bd7ce7d55c87e61e85d82cab8"
+    },
+    {
+      "acc": "NC_018857",
+      "origin": "local_unseen_pool",
+      "family": "Herelleviridae",
+      "host": "Bacillus cereus",
+      "expected": "Myoviridae-like",
+      "desc": "Bacillus phage BPS13",
+      "fasta_sha256": "865262083bb5440512acab3d66c194b86437932d157ee84284ea3e98664a68cd",
+      "gbk_sha256": "d4ad8230135bf0d2d3011d2805f1b497e18c12a6771d15ebbc79257e8e1fcb76"
+    },
+    {
+      "acc": "NC_031242",
+      "origin": "local_unseen_pool",
+      "family": "Kyanoviridae",
+      "host": "Synechococcus sp.",
+      "expected": "Myoviridae-like",
+      "desc": "Cyanophage S-RIM50",
+      "fasta_sha256": "d5ac3c092bffa94fbd5d74bde6b74b44ebc0ad777aa1c1d4e4d075e653c18353",
+      "gbk_sha256": "5c14872ffacac0f064128231d540d4166c45da2f2ddfab6215eaf7197bad1264"
+    },
+    {
+      "acc": "NC_011703",
+      "origin": "local_unseen_pool",
+      "family": "Lindbergviridae",
+      "host": "Pseudomonas",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage 14-1",
+      "fasta_sha256": "169164a62083ddbcb32982f829eb022003f088ede54169e59cf7d50e8e33c35e",
+      "gbk_sha256": "3970dab22052c5706b6d5bf0150870e7eabaccedce51ba1a4e626582dc77f279"
+    },
+    {
+      "acc": "NC_005340",
+      "origin": "local_unseen_pool",
+      "family": "Peduoviridae",
+      "host": "Salmonella",
+      "expected": "Myoviridae-like",
+      "desc": "Salmonella phage PSP3",
+      "fasta_sha256": "8f620f3293be80c3a8e2ba941db316338c51c866b9868840f39c5955a413add9",
+      "gbk_sha256": "ae76188ec1e4b787aa94ccf3d2f28a655b4a8250fb41c001c8d153a97a43260f"
+    },
+    {
+      "acc": "NC_070888",
+      "origin": "local_unseen_pool",
+      "family": "Pootjesviridae",
+      "host": "Rhizobium leguminosarum",
+      "expected": "Myoviridae-like",
+      "desc": "Rhizobium phage RL38J1",
+      "fasta_sha256": "fcd59a7586a86505378e125f604adddcb1ca1ee784712a921b0e180d078294ee",
+      "gbk_sha256": "cf4d229a102ad863571e9d457db05ba27c19b910638d8c3682db1c218b3c8fd7"
+    },
+    {
+      "acc": "NC_008208",
+      "origin": "local_unseen_pool",
+      "family": "Straboviridae",
+      "host": "Aeromonas salmonicida",
+      "expected": "Myoviridae-like",
+      "desc": "Aeromonas phage 25",
+      "fasta_sha256": "e57d35cd84d0d2e4ce11b612f84f5a022a9b9b07ee6fccdace9a9c724887ca82",
+      "gbk_sha256": "1aeddc838a39840a287b61804529361223f8ce2661bd71fb8cf3f98999f1e1d7"
+    },
+    {
+      "acc": "NC_022966",
+      "origin": "local_unseen_pool",
+      "family": "Vandenendeviridae",
+      "host": "Pseudomonas aeruginosa PAK",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage PAK_P5",
+      "fasta_sha256": "4c221cd4706e711e7cda9c9fdb8f8f4c6113336c023042021e1b056d0f526a1f",
+      "gbk_sha256": "f2d68f9282fbdd35a87334960577914755cce9d7ae4085294db7843b1c42ce82"
+    },
+    {
+      "acc": "NC_022768",
+      "origin": "local_unseen_pool",
+      "family": "Ackermannviridae",
+      "host": "Salmonella typhimurium",
+      "expected": "Myoviridae-like",
+      "desc": "Salmonella phage Maynard",
+      "fasta_sha256": "c3370e884de81f9964dc09c354e4346cb5f2cf29c8624ee3987b3e5a77f5dba9",
+      "gbk_sha256": "676331e98aa2acee92fa0423e9111e9c3d689b725db6d6ebc1e1745e59e2bb09"
+    },
+    {
+      "acc": "NC_027369",
+      "origin": "local_unseen_pool",
+      "family": "Andersonviridae",
+      "host": "Escherichia coli serotype O157:H7",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage EC6",
+      "fasta_sha256": "5f27f99192c28a1b63c548701ca079b549248ba16680a3ebb289fedbd5dac0e6",
+      "gbk_sha256": "633800df9eb90e8e8f4ea9abb16b29b727c01ea09532922e1676e65436923c9a"
+    },
+    {
+      "acc": "NC_048845",
+      "origin": "local_unseen_pool",
+      "family": "Chaseviridae",
+      "host": "Escherichia coli K-12 MG1655",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage flopper",
+      "fasta_sha256": "262bbeb6503e572d23cb6f27d0638ec93872611e4174de9f8e3824d18589e53a",
+      "gbk_sha256": "77ba12aebfce182bfb8383fefa737bff9bccaf160f2b7e69346f4a8d4b21a31b"
+    },
+    {
+      "acc": "NC_019487",
+      "origin": "local_unseen_pool",
+      "family": "Herelleviridae",
+      "host": "Bacillus",
+      "expected": "Myoviridae-like",
+      "desc": "Bacillus phage SP-10",
+      "fasta_sha256": "95d6eb6fbd61ee246478d7e88da17bee50adbf3f51a5b33af268df762578d27f",
+      "gbk_sha256": "3fde90c7fd6238387cbe35b8db37c5b12227934af0b21dcc7e2a7724d2252f5f"
+    },
+    {
+      "acc": "NC_048049",
+      "origin": "local_unseen_pool",
+      "family": "Kyanoviridae",
+      "host": "Synechococcus sp. WH 7803",
+      "expected": "Myoviridae-like",
+      "desc": "Synechococcus phage S-T4",
+      "fasta_sha256": "1f11bba80092762003dd17d6a6d680dbd7bc03d1ece25cc0b96dd36a8820a02e",
+      "gbk_sha256": "99a8e16bef9b54e2ee28899c3f961e68d7f166d98ba38df47c8e043a0624c592"
+    },
+    {
+      "acc": "NC_028971",
+      "origin": "local_unseen_pool",
+      "family": "Lindbergviridae",
+      "host": "Pseudomonas aeruginosa PAO1",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage DL68",
+      "fasta_sha256": "2360b1191a10bece62e67463d7c24761df0ad7a22c6eb866ef017ccfb85f22e3",
+      "gbk_sha256": "f387c28a9fd8066965722d78ffb396bb2aa3b521eadde1084ff86292b1ab5fae"
+    },
+    {
+      "acc": "NC_008193",
+      "origin": "local_unseen_pool",
+      "family": "Peduoviridae",
+      "host": "Pasteurella multocida",
+      "expected": "Myoviridae-like",
+      "desc": "Pasteurella phage F108",
+      "fasta_sha256": "80944cacb6e6e91312f6b190a679d767a3a6aa073e087e69aa7947542ee9f48c",
+      "gbk_sha256": "e79de3556743b64c2650be5681818e6b0a1b0ec181ae3af38507e5db59b67aa2"
+    },
+    {
+      "acc": "NC_070890",
+      "origin": "local_unseen_pool",
+      "family": "Pootjesviridae",
+      "host": "Agrobacterium tumefaciens C58",
+      "expected": "Myoviridae-like",
+      "desc": "Agrobacterium phage Atu_ph04",
+      "fasta_sha256": "20d1d6a5310651d773f060b5bc2df4ab2b92bc8e32c981911d50601b34d8b159",
+      "gbk_sha256": "69ea485de6c75d6e244b5645240c50a42031c7735040d056c3d8ae2594b4d1ca"
+    },
+    {
+      "acc": "NC_012740",
+      "origin": "local_unseen_pool",
+      "family": "Straboviridae",
+      "host": "Escherichia coli K12",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage JSE",
+      "fasta_sha256": "c0c184849aec6f8a8082526439bd39df53045886ce742eb6eb07069e1a6e5045",
+      "gbk_sha256": "481b97e10a2961bda198d70c03025bcabe679049e331cec256e8fa1d58e2b384"
+    },
+    {
+      "acc": "NC_022974",
+      "origin": "local_unseen_pool",
+      "family": "Vandenendeviridae",
+      "host": "Pseudomonas aeruginosa CHA",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage CHA_P1",
+      "fasta_sha256": "d1e306be122633ca822800a38dafc0ac95583d7b0f239f91aa772efe9ca5ddce",
+      "gbk_sha256": "03ccdea2c2d4040dbe026797a815e740bba60b89759360ae3a5ba80345fcef8b"
+    },
+    {
+      "acc": "NC_022772",
+      "origin": "local_unseen_pool",
+      "family": "Ackermannviridae",
+      "host": "Salmonella enteritidis",
+      "expected": "Myoviridae-like",
+      "desc": "Salmonella phage Marshall",
+      "fasta_sha256": "2b8708dfadcac072eb2129241f3b87c4b3b109f5da7767f412049daaaa07dfe4",
+      "gbk_sha256": "081dd7cd357fd60a9481d589c9707c238e0392827e9faff8f19af3cb21e7fb48"
+    },
+    {
+      "acc": "NC_028247",
+      "origin": "local_unseen_pool",
+      "family": "Andersonviridae",
+      "host": "Citrobacter freundii",
+      "expected": "Myoviridae-like",
+      "desc": "Citrobacter phage Michonne",
+      "fasta_sha256": "6a158f09e81c6eb9ebee5e710ab29251c66c7f97f6515449575a36856c198aff",
+      "gbk_sha256": "b5cd5d84cbaaccb5cb6e675fc555da6b8808f2f2f2b6043a031a2583ab34388e"
+    },
+    {
+      "acc": "NC_048875",
+      "origin": "local_unseen_pool",
+      "family": "Chaseviridae",
+      "host": "Pantoea agglomerans strain SER",
+      "expected": "Myoviridae-like",
+      "desc": "Pantoea phage vB_PagM_SSEM1",
+      "fasta_sha256": "132235608ef9be4d430da963eaa92156513dcb46a987bc19763342f96fb05fec",
+      "gbk_sha256": "a57a301767f4bcef1e2aa8ea9f1453c760b12051080ff006cd1d936ba59bf698"
+    },
+    {
+      "acc": "NC_020081",
+      "origin": "local_unseen_pool",
+      "family": "Herelleviridae",
+      "host": "Bacillus pumilus GL1",
+      "expected": "Myoviridae-like",
+      "desc": "Bacillus phage phiAGATE",
+      "fasta_sha256": "63ca7d309021af180c32bdaa93a44da3d4ad5c4dda4a795bb3aee6cb679cd479",
+      "gbk_sha256": "13f9b1efc14d7507b28d344f3d2ff30cad6456e513a6a95a54b854d8ef5b9b36"
+    },
+    {
+      "acc": "NC_055719",
+      "origin": "local_unseen_pool",
+      "family": "Kyanoviridae",
+      "host": "Synechococcus sp. WH8102",
+      "expected": "Myoviridae-like",
+      "desc": "Synechococcus phage S-H35",
+      "fasta_sha256": "8c8b66d11a0925c4d408c6882f1f930d41033a93bd0830f0e5a591b83fa54f98",
+      "gbk_sha256": "7f65b42f4f6bea75245fcf782e492062db7e975fe1355a28cffecda0940b368a"
+    },
+    {
+      "acc": "NC_042092",
+      "origin": "local_unseen_pool",
+      "family": "Lindbergviridae",
+      "host": "Pseudomonas syringae pv. avii",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage tabernarius",
+      "fasta_sha256": "baeae5b080740b6c5bb8b04ac1f30ef48111a1a43e62c53943bc14777264d85e",
+      "gbk_sha256": "1daaa366d152e1135ed65e56796a2ca4b8a49ff512379708a369d1fd2bc7dff5"
+    },
+    {
+      "acc": "NC_008201",
+      "origin": "local_unseen_pool",
+      "family": "Peduoviridae",
+      "host": "Mannheimia haemolytica biovar 1 serotype A1; ST1",
+      "expected": "Myoviridae-like",
+      "desc": "Mannheimia phage PHL101",
+      "fasta_sha256": "f24757baf4fc49a72533b9ef814093f425c58dbd84787e96edfad156ba89603a",
+      "gbk_sha256": "6cd3bffc93bfee9fbc6aa93c77edb93b88790485db9ea356638b1e96cdc3d028"
+    },
+    {
+      "acc": "NC_070889",
+      "origin": "local_unseen_pool",
+      "family": "Pootjesviridae",
+      "host": "Rhizobium leguminosarum",
+      "expected": "Myoviridae-like",
+      "desc": "Rhizobium phage RL2RES",
+      "fasta_sha256": "49250e69e1c462996e75da37c37f54a292bdc8b547cd52ca29dec52f58dde1e3",
+      "gbk_sha256": "73cf9ec9905a1cbeca999fd675e58a00944f14e183c72f8830ef29b842deb80c"
+    },
+    {
+      "acc": "NC_014260",
+      "origin": "local_unseen_pool",
+      "family": "Straboviridae",
+      "host": "Escherichia coli strain 8099",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage IME08",
+      "fasta_sha256": "363492876e34ad95c7214b588f8ac804bb99e28af2e1721533124fc40ac09eca",
+      "gbk_sha256": "3d10a01f3369c73e0a35063cbf8886d5453357c3a75a0a82666c443021f6efff"
+    },
+    {
+      "acc": "NC_023601",
+      "origin": "local_unseen_pool",
+      "family": "Vandenendeviridae",
+      "host": "Pseudomonas syringae pv. actinidiae ICMP 18800",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage phiPsa374",
+      "fasta_sha256": "8bfb39f85c1029da12bf31395c2178a5c37cfdb85e6495f8b1a57980f24aa8d9",
+      "gbk_sha256": "98b4627a87792b9cb669df209b8fbcda4bafda3b0350fa4edcba502125a2f2bf"
+    },
+    {
+      "acc": "NC_025452",
+      "origin": "local_unseen_pool",
+      "family": "Ackermannviridae",
+      "host": "Dickeya sp.",
+      "expected": "Myoviridae-like",
+      "desc": "Dickeya phage RC-2014",
+      "fasta_sha256": "2e9879dbf06808545b57ac115f2dd951e28f72f3289ff976600ae376a04ed13e",
+      "gbk_sha256": "4d50b67e712b9353e39dcd0d4619fbf76bc8f6ddba8d41899b44a70d1a49a9ed"
+    },
+    {
+      "acc": "NC_028808",
+      "origin": "local_unseen_pool",
+      "family": "Andersonviridae",
+      "host": "Escherichia coli MG1655",
+      "expected": "Myoviridae-like",
+      "desc": "Escherichia phage phiSUSP1",
+      "fasta_sha256": "da92900ca5baf23dbafa7a4794d33723ea5c41ba1df02219583f9c8e8ab5d9c2",
+      "gbk_sha256": "a15dba647bf09cfef501f3522a2ce0d580cad573be653032a73297697ac2ec36"
+    },
+    {
+      "acc": "NC_070840",
+      "origin": "local_unseen_pool",
+      "family": "Chaseviridae",
+      "host": "Aeromonas hydrophila ZPAH75",
+      "expected": "Myoviridae-like",
+      "desc": "Aeromonas phage ZPAH14",
+      "fasta_sha256": "0b1f5987d669234cd7694b63907d959f6a2ef436d23636d3f094a0e76b884e8a",
+      "gbk_sha256": "d22b00dc79b75409489a943e569f0edc3a9d292a13a15be87d67f3f1fdfc8974"
+    },
+    {
+      "acc": "NC_020871",
+      "origin": "local_unseen_pool",
+      "family": "Herelleviridae",
+      "host": "Listeria monocytogenes CRIFS culture collection code: C519",
+      "expected": "Myoviridae-like",
+      "desc": "Listeria phage vB_LmoM_AG20",
+      "fasta_sha256": "02ef14a9ac290ba1bf93c4d39f2a2585acb0ef08706404133b578ac722cd1c71",
+      "gbk_sha256": "07a1fe1907dcd5c4218a130843b1dfe4b0b8ee589fbda2a1d1a642846fe42b8e"
+    },
+    {
+      "acc": "NC_070839",
+      "origin": "local_unseen_pool",
+      "family": "Kyanoviridae",
+      "host": "Synechococcus sp. CB0101",
+      "expected": "Myoviridae-like",
+      "desc": "Synechococcus phage S-SZBM1",
+      "fasta_sha256": "71637a4b5b0d0f27936a342a1fb2553f7c87399c6173a4f197ee41f2fb622fe3",
+      "gbk_sha256": "1fe6f9963c7acf1af4804cc9e4ab7da09bebdb58a36978efd824fb9e275beefb"
+    },
+    {
+      "acc": "NC_047962",
+      "origin": "local_unseen_pool",
+      "family": "Lindbergviridae",
+      "host": "Xanthomonas campestris",
+      "expected": "Myoviridae-like",
+      "desc": "Xanthomonas phage Carpasina",
+      "fasta_sha256": "2ee147f59a549a8c4b51dec55a2f6800f85de3e56f45a48334fc33eff09f70fa",
+      "gbk_sha256": "8595d65fd43e6b1b308ef82dedd53a4cba2a0786bdaf77104e7c706a8eba7a6a"
+    },
+    {
+      "acc": "NC_009234",
+      "origin": "local_unseen_pool",
+      "family": "Peduoviridae",
+      "host": "Burkholderia thailandensis",
+      "expected": "Myoviridae-like",
+      "desc": "Burkholderia phage phiE202",
+      "fasta_sha256": "0890d4487aac96dd1474969c20e78a83bec63a2943a12da253c5591cfe7e9f3a",
+      "gbk_sha256": "58da3286249d97e6c2f8bd613c50e0bad62917dfd4a0f999528014493b40821f"
+    },
+    {
+      "acc": "NC_014660",
+      "origin": "local_unseen_pool",
+      "family": "Straboviridae",
+      "host": "Acinetobacter",
+      "expected": "Myoviridae-like",
+      "desc": "Acinetobacter phage Ac42",
+      "fasta_sha256": "6040bfcf779addc6e8da6b2297c5e4e0b08fefd6218fc6bdb11ece715794f369",
+      "gbk_sha256": "aa30224133ca3c96f08bf431947d21ec6ce10125bd2ff5304adeda9f505a0a7a"
+    },
+    {
+      "acc": "NC_028652",
+      "origin": "local_unseen_pool",
+      "family": "Vandenendeviridae",
+      "host": "Pseudomonas aeruginosa clinical strain TJC422",
+      "expected": "Myoviridae-like",
+      "desc": "Pseudomonas phage C11",
+      "fasta_sha256": "3d9553230e31093d35d716a9b2d028ace93c5a8fd8e20eaaf7e5e0ee9854df00",
+      "gbk_sha256": "e3e9812d606797db479d5d3f0ed02551b354fe1db35b2fec19a0f452853d0ef9"
+    },
+    {
+      "acc": "NC_027119",
+      "origin": "local_unseen_pool",
+      "family": "Ackermannviridae",
+      "host": "Salmonella enterica serovar Typhimurium",
+      "expected": "Myoviridae-like",
+      "desc": "Salmonella phage Det7",
+      "fasta_sha256": "7c6611b44aba601ed188108b101ea425569ddfe72bb68d632f429470b79e7c6a",
+      "gbk_sha256": "3255fd4fede3682c7468ab876c2f5d3b006cc4f2a6194a150e8d60bde4b002ab"
+    },
+    {
+      "acc": "NC_004303",
+      "origin": "local_unseen_pool",
+      "family": "Aliceevansviridae",
+      "host": "Streptococcus",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptococcus phage 01205",
+      "fasta_sha256": "bd1fb9c47bc2aa36273831ed5c5d1f707a62f55cee5426873e9bae339b9bcf43",
+      "gbk_sha256": "b0571e9273f4530edee8fc47823794de084bf015ebb1eabdaf3e7494da5775fe"
+    },
+    {
+      "acc": "NC_021780",
+      "origin": "local_unseen_pool",
+      "family": "Casjensviridae",
+      "host": "Salmonella enterica",
+      "expected": "Siphoviridae-like",
+      "desc": "Salmonella phage FSL SP-088",
+      "fasta_sha256": "5acfedcc8409dd8eb127a2a7076358211020edb79b3aa5f538692323095ac893",
+      "gbk_sha256": "cc451a32c2662b8d37fd1338f75a5f77bdbf9635ea375b032023c7cff8727a92"
+    },
+    {
+      "acc": "NC_024139",
+      "origin": "local_unseen_pool",
+      "family": "Demerecviridae",
+      "host": "Escherichia coli O157:H7",
+      "expected": "Siphoviridae-like",
+      "desc": "Escherichia phage vB_EcoS_FFH_1",
+      "fasta_sha256": "bc4146d46eb2527d4fd7a6d81b60e5e437d6de62d12f3fb9952e92eff31d166b",
+      "gbk_sha256": "62cd15aaf1c7de4682df071faf98066bf4e45008025540af04e1fc8788dfcd69"
+    },
+    {
+      "acc": "NC_007603",
+      "origin": "local_unseen_pool",
+      "family": "Drexlerviridae",
+      "host": "Escherichia coli",
+      "expected": "Siphoviridae-like",
+      "desc": "Escherichia phage Rtp",
+      "fasta_sha256": "f3cfc20f26669e3e11dd3180eab894ef48acc970774f9b452d07f3cb868de3de",
+      "gbk_sha256": "f6ab8ca205b855f794d1e927d1569adcf699604a104cc17affa9e09aa8c12ed8"
+    },
+    {
+      "acc": "NC_047989",
+      "origin": "local_unseen_pool",
+      "family": "Hodgkinviridae",
+      "host": "Microbacterium paraoxydans NWU1",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage RobsFeet",
+      "fasta_sha256": "d891bc82a42156c1a516d84ec9c2da347d696f043203597f02b7c5e1b59ee9fb",
+      "gbk_sha256": "91e58d8eafffa29b68742325287599886e38983a5922145fc0da842b432a38a7"
+    },
+    {
+      "acc": "NC_028770",
+      "origin": "local_unseen_pool",
+      "family": "Mesyanzhinovviridae",
+      "host": "Pseudomonas aeruginosa",
+      "expected": "Siphoviridae-like",
+      "desc": "Pseudomonas phage PaMx11",
+      "fasta_sha256": "a5cba43017774f08972c05c1eb40fe15f033611a3ead891f4ed521649bf59efd",
+      "gbk_sha256": "8b681b96efafbfdf2979c40ca2a2b9b026a0beefbe3c50ed72cbd06bb9ee8242"
+    },
+    {
+      "acc": "NC_052935",
+      "origin": "local_unseen_pool",
+      "family": "Orlajensenviridae",
+      "host": "Microbacterium foliorum NRRL B-24224 SEA",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage Kaijohn",
+      "fasta_sha256": "250668d2bcbae77d4c7821387420fc471148052c4c019a45226d78f5d2ccad3c",
+      "gbk_sha256": "17d018532987d15412ea5be32bc7be27374e66ad2089b9bd9e9856cc2ebc27c3"
+    },
+    {
+      "acc": "NC_042012",
+      "origin": "local_unseen_pool",
+      "family": "Stanwilliamsviridae",
+      "host": "Streptomyces griseus ATCC 10137",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptomyces phage Samisti12",
+      "fasta_sha256": "f3b902f069da2616270a44870b0737f14e44aff9ab85523e7d019881790cdfc5",
+      "gbk_sha256": "f4507596f601cd93ff76c460df020d5953ddfea56feac813d830e3a23cea663e"
+    },
+    {
+      "acc": "NC_028878",
+      "origin": "local_unseen_pool",
+      "family": "Vilmaviridae",
+      "host": "Mycobacterium smegmatis mc2 155",
+      "expected": "Siphoviridae-like",
+      "desc": "Mycobacterium phage Archie",
+      "fasta_sha256": "37f2db7ee67051c53dbbb35455dbc0f956d1170d58d61ecd0062210f64db85a5",
+      "gbk_sha256": "cef27415bc054231abb99873de704c3b34f27c02e3d405d4f6d543bb03128607"
+    },
+    {
+      "acc": "NC_055738",
+      "origin": "local_unseen_pool",
+      "family": "Zierdtviridae",
+      "host": "Gordonia terrae 3612",
+      "expected": "Siphoviridae-like",
+      "desc": "Gordonia phage Flapper",
+      "fasta_sha256": "3037ee3b9265f9ba60343585ff7f87635f1f18fa88cc3c8046599eb3dd5796f8",
+      "gbk_sha256": "049c833008101493d66beae314605dcbd85dded472db972d8c0d747ee94e580a"
+    },
+    {
+      "acc": "NC_013598",
+      "origin": "local_unseen_pool",
+      "family": "Aliceevansviridae",
+      "host": "Streptococcus thermophilus",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptococcus phage ALQ13.2",
+      "fasta_sha256": "84ca7f82cb16e592027cd11e117a0136b8193e92675e2ddb90e4fb198295109f",
+      "gbk_sha256": "e98929a592b1c364d57f57660bd1d5388c8aa133a4776d7a3215b892705c8673"
+    },
+    {
+      "acc": "NC_029106",
+      "origin": "local_unseen_pool",
+      "family": "Casjensviridae",
+      "host": "Achromobacter xylosoxidans",
+      "expected": "Siphoviridae-like",
+      "desc": "Achromobacter phage phiAxp-2",
+      "fasta_sha256": "c8b6f268b8ac5f9665e7759e19fd8e54327d97f5f765c699120ad2bbf9235c6a",
+      "gbk_sha256": "1a7b8035bf01b5b82965aa1b2b14cdca83e3fb7c59aa98f90222f16951ed4e46"
+    },
+    {
+      "acc": "NC_028754",
+      "origin": "local_unseen_pool",
+      "family": "Demerecviridae",
+      "host": "Salmonella enterica subsp. enterica serovar Typhimurium",
+      "expected": "Siphoviridae-like",
+      "desc": "Salmonella phage Shivani",
+      "fasta_sha256": "31accef4c4daf6e8821180becdfd7f22399f85296aad9a888ecafdd6d908e07f",
+      "gbk_sha256": "022a74077ba379fcd97bb6a412d37298c89318589007a1aca0d4615f47649c85"
+    },
+    {
+      "acc": "NC_023743",
+      "origin": "local_unseen_pool",
+      "family": "Drexlerviridae",
+      "host": "Escherichia coli CFT073",
+      "expected": "Siphoviridae-like",
+      "desc": "Escherichia phage phiEB49",
+      "fasta_sha256": "ee42ed77b6d0dc24143fc48e7b7a2b79f7e8071aac35d33d6b9d3268a9ee178d",
+      "gbk_sha256": "d4ad58eac3d6448eb7a3a920d5fede6751087f1cc8340edc3118d8505eb08687"
+    },
+    {
+      "acc": "NC_073369",
+      "origin": "local_unseen_pool",
+      "family": "Hodgkinviridae",
+      "host": "Microbacterium foliorum NRRL B-24224",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage Honeyfin",
+      "fasta_sha256": "86477ae8f31cc5984a1e2231098067f0bda01111adb6e496bd000cb658d14442",
+      "gbk_sha256": "210cb2ba798e6ce8f41f7b8d8b1d83973d06a444e8815d90674774d98481509b"
+    },
+    {
+      "acc": "NC_047877",
+      "origin": "local_unseen_pool",
+      "family": "Mesyanzhinovviridae",
+      "host": "Bordetella bronchiseptica ATCC 10580",
+      "expected": "Siphoviridae-like",
+      "desc": "Bordetella phage CN2",
+      "fasta_sha256": "bbeed47d6b8bd8d309fdf2eaf6d3f68b97a0d0deec6f143180bc91d24c050f08",
+      "gbk_sha256": "7dd7aef22b9d1987ea637247d3e5f8c9ad96cf1c08df98fe711d23e126f0b566"
+    },
+    {
+      "acc": "NC_052936",
+      "origin": "local_unseen_pool",
+      "family": "Orlajensenviridae",
+      "host": "Microbacterium foliorum NRRL B-24224 SEA",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage Nobel",
+      "fasta_sha256": "fba128337a3efae29b87e9273c735fde21fa1be592120aa7e2aa3d4f71a1411e",
+      "gbk_sha256": "795db32bc94e7bed80018afb042adafb62d25b9ce7143d153676fc17c410aa31"
+    },
+    {
+      "acc": "NC_048730",
+      "origin": "local_unseen_pool",
+      "family": "Stanwilliamsviridae",
+      "host": "Streptomyces lividans JI 1326",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptomyces phage Yaboi",
+      "fasta_sha256": "2e7f90eafa6734413403fe5f3e32f7b555a2f42be7f8f8ab5888c7b2749a1f11",
+      "gbk_sha256": "9e31c6388cbed46ba024c6db03b91e635f64123355ff787d37a49fc79fadc2a0"
+    },
+    {
+      "acc": "NC_055827",
+      "origin": "local_unseen_pool",
+      "family": "Vilmaviridae",
+      "host": "Mycobacterium smegmatis mc#155",
+      "expected": "Siphoviridae-like",
+      "desc": "Mycobacterium phage DirkDirk",
+      "fasta_sha256": "0ab85807df259fd913e954a142bc62050ffa4009a37dcc6568e605e0a459f905",
+      "gbk_sha256": "b51c0a0777080b5b55ee7db04c566463563ee7a7dac4d25fe8abd4055b2c7f57"
+    },
+    {
+      "acc": "NC_055766",
+      "origin": "local_unseen_pool",
+      "family": "Zierdtviridae",
+      "host": "Gordonia terrae CAG3",
+      "expected": "Siphoviridae-like",
+      "desc": "Gordonia phage Foxboro",
+      "fasta_sha256": "d9382e75a6a419f20e1a56f18abdb5cba94d7ac31e93a596a10c4a3f735d0c1c",
+      "gbk_sha256": "e358bdf77e21c48d68390711706d970d744366421655588c4095731c1fed4a0e"
+    },
+    {
+      "acc": "NC_018285",
+      "origin": "local_unseen_pool",
+      "family": "Aliceevansviridae",
+      "host": "Streptococcus salivarius 57.I",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptococcus phage YMC-2011",
+      "fasta_sha256": "d477e0fb5da64fdf873948098e4b2c91ec479dff8e35b9d64276168c824dd5e4",
+      "gbk_sha256": "4dce870d01f34a3c8a49a3283d5893df137f9cedb2d8cba19b282cddf7f7a5e8"
+    },
+    {
+      "acc": "NC_031228",
+      "origin": "local_unseen_pool",
+      "family": "Casjensviridae",
+      "host": "Salmonella enterica Hadar",
+      "expected": "Siphoviridae-like",
+      "desc": "Salmonella phage BP12C",
+      "fasta_sha256": "eeba3f66e9ba39880a8c6f5f6e56bf615ece5dd141ac4b8230b3cfed89d2c20b",
+      "gbk_sha256": "488d4b92f77689abbcb8f79c6bf3e916fd8ce05780efbf034b7dc4a7919a3a3d"
+    },
+    {
+      "acc": "NC_031022",
+      "origin": "local_unseen_pool",
+      "family": "Demerecviridae",
+      "host": "Shigella sonnei",
+      "expected": "Siphoviridae-like",
+      "desc": "Shigella phage SHSML-45",
+      "fasta_sha256": "18c8ef9893af4ade82d0ca94972abe9f3f9ade47af3ddf3d352553493dadd276",
+      "gbk_sha256": "cb3e45b222d7951707325eb8ba25d2974225190103338526648407becba97852"
+    },
+    {
+      "acc": "NC_024210",
+      "origin": "local_unseen_pool",
+      "family": "Drexlerviridae",
+      "host": "Escherichia",
+      "expected": "Siphoviridae-like",
+      "desc": "Escherichia phage e4/1c",
+      "fasta_sha256": "446369847291bd4d8ca2bceae2ad5cdb1b6a62e8792bfcc4d7287d1b4d13cb38",
+      "gbk_sha256": "ce39bdf82a091b602295590ce3233d78ed9cf77d9af6a62eae9c16de7dd108e1"
+    },
+    {
+      "acc": "NC_073373",
+      "origin": "local_unseen_pool",
+      "family": "Hodgkinviridae",
+      "host": "Microbacterium paraoxydans NRRL B-14843",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage Tyrumbra",
+      "fasta_sha256": "1a80ac4b9285f3c6acbcedbea8c8680c48bce43c9f91cbfbbf805826cb492396",
+      "gbk_sha256": "f6e0b245b8b18807c6ffa9af878d7fa9e1071ab3d40302d5f414fad6e27a8b30"
+    },
+    {
+      "acc": "NC_052964",
+      "origin": "local_unseen_pool",
+      "family": "Mesyanzhinovviridae",
+      "host": "Pseudomonas sp.",
+      "expected": "Siphoviridae-like",
+      "desc": "Pseudomonas phage Epa5",
+      "fasta_sha256": "16fe72b399539fb1b834baaeb4f6eef0a9d0b78fdb2e9185f462817c73c69cf2",
+      "gbk_sha256": "2447e0b4a57dd4c4fa883ab4d3a429538c9baaf431ac6f4eaf509ff13c5917df"
+    },
+    {
+      "acc": "NC_052937",
+      "origin": "local_unseen_pool",
+      "family": "Orlajensenviridae",
+      "host": "Microbacterium foliorum NRRL B-24224",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage Noelani",
+      "fasta_sha256": "44ddbaa19231756e591760eb876e9028eb69c21d49461f9adc1545fef4e1cd5d",
+      "gbk_sha256": "f8ba9b354965d8150395bfac648409184997272434c7baad4d7ed2a681b78833"
+    },
+    {
+      "acc": "NC_048742",
+      "origin": "local_unseen_pool",
+      "family": "Stanwilliamsviridae",
+      "host": "Streptomyces griseofuscus ATCC 23916",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptomyces phage Gilson",
+      "fasta_sha256": "acb2e253f818260ab0db3cc460249cc40fd65a0cc3856da47241306910f26c1b",
+      "gbk_sha256": "fdc66b643052347d177acf3349469e4a441d4c05bb98735a4daa19c6861c6d9b"
+    },
+    {
+      "acc": "NC_041970",
+      "origin": "local_unseen_pool",
+      "family": "Vilmaviridae",
+      "host": "Mycobacterium smegmatis mc2 155",
+      "expected": "Siphoviridae-like",
+      "desc": "Mycobacterium phage Bongo",
+      "fasta_sha256": "c9de841c022ba3fff66d7f8ff11f473a1fe023bace937773764bcbf2f566d4b9",
+      "gbk_sha256": "cd7f4e61977094a6ea547a3b16fba0e5b142f9b36a0c447ec3e6e2558f235e43"
+    },
+    {
+      "acc": "NC_055772",
+      "origin": "local_unseen_pool",
+      "family": "Zierdtviridae",
+      "host": "Corynebacterium vitaeruminis NCIB 9291",
+      "expected": "Siphoviridae-like",
+      "desc": "Corynebacterium phage Kimchi1738",
+      "fasta_sha256": "316b03b3d94b0b65ca7bf9fea7b8bd3796571be5a9111f726428e87e752e97e1",
+      "gbk_sha256": "f031ddce20f2169a7ce724d0db4ae286e0f299bea2473c611571b828fc6e7887"
+    },
+    {
+      "acc": "NC_022776",
+      "origin": "local_unseen_pool",
+      "family": "Aliceevansviridae",
+      "host": "Streptococcus thermophilus SK778",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptococcus phage TP-778L",
+      "fasta_sha256": "2c58eab08ae2586c229efcf60cd2cde7ae8f463959c5708a8da9107ccfe123d9",
+      "gbk_sha256": "5fe1ccd522e9aa3e1ceae6e923d31fcbe7a04982648614657bf4ac145aadee7c"
+    },
+    {
+      "acc": "NC_042344",
+      "origin": "local_unseen_pool",
+      "family": "Casjensviridae",
+      "host": "Xylella fastidiosa",
+      "expected": "Siphoviridae-like",
+      "desc": "Xylella phage Sano",
+      "fasta_sha256": "37fa0644515cdbcb2ce2cf144e5c2c3b66847dfd7ebb1d7274fe0b9191476d29",
+      "gbk_sha256": "261d3b2077458d2bbaaa7120716192b18579fd02bea35fc990694815ea52d7f6"
+    },
+    {
+      "acc": "NC_031042",
+      "origin": "local_unseen_pool",
+      "family": "Demerecviridae",
+      "host": "Salmonella typhimurium",
+      "expected": "Siphoviridae-like",
+      "desc": "Salmonella phage NR01",
+      "fasta_sha256": "59820cdc560e51ed254b00afa49d97e7f9299d757b6725a1fe6f121319fe448d",
+      "gbk_sha256": "c65103e0f2497e45a6665672de39e51626a1c47b029c75a3977c4510f1cc5585"
+    },
+    {
+      "acc": "NC_024784",
+      "origin": "local_unseen_pool",
+      "family": "Drexlerviridae",
+      "host": "E. coli O157:H7 R508 (phage type 14)",
+      "expected": "Siphoviridae-like",
+      "desc": "Escherichia phage vB_EcoS_AHS24",
+      "fasta_sha256": "c8c8e6b34a0d74d71e2b6840c2b0349e23f5e950ac9e28f2b992cfeb0c3bdf94",
+      "gbk_sha256": "a10588b44109eab9366590df6dbb3f823c4e1c1f8fb68079726dead0acae0acb"
+    },
+    {
+      "acc": "NC_048165",
+      "origin": "local_unseen_pool",
+      "family": "Hodgkinviridae",
+      "host": "Microbacterium paraoxydans NWU1",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage Fireman",
+      "fasta_sha256": "44c310536cbca3909b49149255e44ec8e84535a3dbb629d8d6420a4e5479410f",
+      "gbk_sha256": "1cca84d2d3cd2ab6516109acc8c98699df8525c61c072fa3f0dcddcd740d5a52"
+    },
+    {
+      "acc": "NC_073026",
+      "origin": "local_unseen_pool",
+      "family": "Mesyanzhinovviridae",
+      "host": "Xanthomonas arboricola pv. juglandis IVIA 1317-1a",
+      "expected": "Siphoviridae-like",
+      "desc": "Xanthomonas phage vB_Xar_IVIA-DoCa5",
+      "fasta_sha256": "f2fe0b0782f74e628a378edcf5ab68815a466ff4f3f879933a865ddd118d4625",
+      "gbk_sha256": "35f10eafaf832611347de1bfde969afe68b4435b3cd82f9cb7e1842043da551f"
+    },
+    {
+      "acc": "NC_052938",
+      "origin": "local_unseen_pool",
+      "family": "Orlajensenviridae",
+      "host": "Microbacterium foliorum NRRL B-24224",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage PoRanda",
+      "fasta_sha256": "299ea17ce77a3842fc4b3cd0e6316f96288d9e98de8fc6504b4f917ceb3dd6a3",
+      "gbk_sha256": "da61afadd2a7babe3818720e665035f0e93d40026b2326b67b93dbf9a5c4df29"
+    },
+    {
+      "acc": "NC_070781",
+      "origin": "local_unseen_pool",
+      "family": "Stanwilliamsviridae",
+      "host": "Streptomyces sanglieri UNT16F27A",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptomyces phage Tomas",
+      "fasta_sha256": "80570d4e2eb2cd11a0dd09e73e39223c02f8501c64185e464ffa7b929cc51211",
+      "gbk_sha256": "461056579ef430b3019a604af7167d7f4caae5487814dee17df56df724c0740f"
+    },
+    {
+      "acc": "NC_041971",
+      "origin": "local_unseen_pool",
+      "family": "Vilmaviridae",
+      "host": "Mycobacterium smegmatis mc2 155",
+      "expected": "Siphoviridae-like",
+      "desc": "Mycobacterium phage Rey",
+      "fasta_sha256": "f30f2b767b968b75f6e996987f07ccee839290f07ef57f5b6c1d075ccd9c46d1",
+      "gbk_sha256": "7ef1007ec48ee486ccdeff21057ea4bf560c58452952ee8faa28e765ec3ff5b5"
+    },
+    {
+      "acc": "NC_055755",
+      "origin": "local_unseen_pool",
+      "family": "Zierdtviridae",
+      "host": "Gordonia terrae 3612",
+      "expected": "Siphoviridae-like",
+      "desc": "Gordonia phage NatB6",
+      "fasta_sha256": "1a27cd54a117dcf51041ec0fc97affefdd97a83e0016f1a01afb1d09e1ab3f8d",
+      "gbk_sha256": "9084d3c831581a25b7c8626f499a9f29f446e21d211e5938f3e6b3900abd14bd"
+    },
+    {
+      "acc": "NC_028984",
+      "origin": "local_unseen_pool",
+      "family": "Aliceevansviridae",
+      "host": "Streptococcus mutans P42-SM",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptococcus phage M102AD",
+      "fasta_sha256": "1cd2303ed1696c155cc253d1f4309acf3e622baf65f049d0aedcf73dd91502dc",
+      "gbk_sha256": "73297cf13877c6573ca6cc5511213341d6e1dd36efe49ec0fbe1a7cb52f1bc97"
+    },
+    {
+      "acc": "NC_048632",
+      "origin": "local_unseen_pool",
+      "family": "Casjensviridae",
+      "host": "Salmonella gallinarum",
+      "expected": "Siphoviridae-like",
+      "desc": "Salmonella phage 35",
+      "fasta_sha256": "2e09b8ff898e32ba42792855a523c9ce14b0704196cd8561d947556caee80fa7",
+      "gbk_sha256": "4d835f79a2148b2cfbf030d903037e9bf84403f580a3cd59439306de2c1e840c"
+    },
+    {
+      "acc": "NC_031933",
+      "origin": "local_unseen_pool",
+      "family": "Demerecviridae",
+      "host": "Salmonella enterica subsp. Enteritidis",
+      "expected": "Siphoviridae-like",
+      "desc": "Salmonella phage 118970_sal2",
+      "fasta_sha256": "99c381e9b4fd8a0aab7473da3fe3dd15646685ed2cbeb20a77af7ea037ae9aa4",
+      "gbk_sha256": "e993a3ec85a3fc5ca09f40e18243df38ec085238f1c06d266bccc71c7a3c894b"
+    },
+    {
+      "acc": "NC_026010",
+      "origin": "local_unseen_pool",
+      "family": "Drexlerviridae",
+      "host": "Shigella flexneri ATCC 12022",
+      "expected": "Siphoviridae-like",
+      "desc": "Shigella phage pSf-2",
+      "fasta_sha256": "2299412611c20f2eded4558f3f7c2f5e2fc74fa34f98b889981707e50b0b06c5",
+      "gbk_sha256": "02e0d8eeb63ce652a274d9c82d53ce4217b6f639799085fbc85d36c472e80a2a"
+    },
+    {
+      "acc": "NC_047993",
+      "origin": "local_unseen_pool",
+      "family": "Hodgkinviridae",
+      "host": "Microbacterium foliorum NRRL B-24224 SEA",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage Quhwah",
+      "fasta_sha256": "b163927a0f67144ca059a08e2f9a4d5b399ee409823f0c877e7d268b53531ab5",
+      "gbk_sha256": "0b94468c2b2e9ee0d624d14a20fd9dfc58f9a8f1187f90cefd066d16aeafe226"
+    },
+    {
+      "acc": "NC_073028",
+      "origin": "local_unseen_pool",
+      "family": "Mesyanzhinovviridae",
+      "host": "Stenotrophomonas maltophilia SM102",
+      "expected": "Siphoviridae-like",
+      "desc": "Stenotrophomonas phage vB_Sm_QDWS359",
+      "fasta_sha256": "24a10329786bca0b710436022cbfc1c8db9d73afa747821b44b707d1f8cacffe",
+      "gbk_sha256": "d4ab33c642ac566d26e62054d365406f883717b9c431e50e1573329a8249e75a"
+    },
+    {
+      "acc": "NC_052940",
+      "origin": "local_unseen_pool",
+      "family": "Orlajensenviridae",
+      "host": "Microbacterium paraoxydans NWU1",
+      "expected": "Siphoviridae-like",
+      "desc": "Microbacterium phage BonaeVitae",
+      "fasta_sha256": "dd00d3e12dc9760f977f0499c047321f5994b78f125b6750a377c29ca74d7e15",
+      "gbk_sha256": "28b0667a78fd5e80016535f9b6795674309eea3276f2d52eec6ffbe6e523e320"
+    },
+    {
+      "acc": "NC_070782",
+      "origin": "local_unseen_pool",
+      "family": "Stanwilliamsviridae",
+      "host": "Streptomyces venezuelae ATCC 10712",
+      "expected": "Siphoviridae-like",
+      "desc": "Streptomyces phage Coruscant",
+      "fasta_sha256": "5cf4ad0fb5d85ae3d54ddb45441329d8c036f3a7c34dbd79f6984a264f301ad8",
+      "gbk_sha256": "d328b73c51600927164ce1e2ddf35e1cc3fd6047c933e8c4c5da03b6bb9d52d0"
+    },
+    {
+      "acc": "NC_042313",
+      "origin": "local_unseen_pool",
+      "family": "Vilmaviridae",
+      "host": "Mycobacterium smegmatis mc2 155",
+      "expected": "Siphoviridae-like",
+      "desc": "Mycobacterium phage JoeDirt",
+      "fasta_sha256": "2aadbbc80f36ba4d6dc8b36f052fab7ff0d9c7b803291fcd062e313709a442cc",
+      "gbk_sha256": "f533e4639d86b76c72bc67394a481063180805feb044ac0a120a054ec023e248"
+    },
+    {
+      "acc": "NC_055807",
+      "origin": "local_unseen_pool",
+      "family": "Zierdtviridae",
+      "host": "Corynebacterium vitaeruminis NCIB 9291",
+      "expected": "Siphoviridae-like",
+      "desc": "Corynebacterium phage Stickynote",
+      "fasta_sha256": "f9cb65d8f46c5fd1af9f9ef98573edb008acf226800490042589dbe28f2dad6c",
+      "gbk_sha256": "ee29a845849323fab9ae8c501679ca1ce4bc50b26f14a66898c00a242410c044"
+    },
+    {
+      "acc": "NC_025456",
+      "origin": "local_unseen_pool",
+      "family": "Autographiviridae",
+      "host": "Synechococcus sp. CB0101",
+      "expected": "Podoviridae-like",
+      "desc": "Synechococcus phage S-CBP1",
+      "fasta_sha256": "b44f2c2f18093342a31a06f56e05a15ed494f6571ad66052babdac038844ada5",
+      "gbk_sha256": "e8e07296ab9bd67f0155a7922c1eb124c9b203b981a98afa28dd0ca92157eb4d"
+    },
+    {
+      "acc": "NC_028850",
+      "origin": "local_unseen_pool",
+      "family": "Autonotataviridae",
+      "host": "Yersinia enterocolitica",
+      "expected": "Podoviridae-like",
+      "desc": "Yersinia phage vB_YenP_ISAO8",
+      "fasta_sha256": "4268e4ca07b73bae4e96262c3c1ac0a5c3748f482b11ef829b3fd6969019ab95",
+      "gbk_sha256": "c62eb2464b8d85c73491422ed665a6e9d03f587e267220e8746671e64c51679d"
+    },
+    {
+      "acc": "NC_009936",
+      "origin": "local_unseen_pool",
+      "family": "Autoscriptoviridae",
+      "host": "Pseudomonas aeruginosa",
+      "expected": "Podoviridae-like",
+      "desc": "Pseudomonas phage LKA1",
+      "fasta_sha256": "009c004929af6690cd1adc3659fcfdc28138fe15736bb1301baa93df72ea9303",
+      "gbk_sha256": "8d62b24969c2dc0e39d74b5f6a4083011eeff7e5a3fd2cb844ff63c7dc54e255"
+    },
+    {
+      "acc": "NC_008152",
+      "origin": "local_unseen_pool",
+      "family": "Autosignataviridae",
+      "host": "Escherichia",
+      "expected": "Podoviridae-like",
+      "desc": "Escherichia phage K1-5",
+      "fasta_sha256": "a3fac444c28d8e9c4b7d5a4568955475858b2548203505eb340cd8b6510b0add",
+      "gbk_sha256": "8219cf4e1c54479183365404d0818e455801cbec1a3600e86f3d42b2702ff2f7"
+    },
+    {
+      "acc": "NC_007456",
+      "origin": "local_unseen_pool",
+      "family": "Autotranscriptaviridae",
+      "host": "Escherichia coli",
+      "expected": "Podoviridae-like",
+      "desc": "Escherichia phage K1F",
+      "fasta_sha256": "6b7e40958af7ab88607c5b2778de297f6b7c7b7887e42aabd1654fd90c55b278",
+      "gbk_sha256": "40ab6dab49831e1dbcb12780d345c4a9a720b42f373b89fe1c66ed9f19937588"
+    },
+    {
+      "acc": "NC_048774",
+      "origin": "local_unseen_pool",
+      "family": "Grimontviridae",
+      "host": "Aeromonas hydrophila",
+      "expected": "Podoviridae-like",
+      "desc": "Aeromonas phage LAh_6",
+      "fasta_sha256": "851bbd5a32d0c3f3dcd99df657cbc9eae0ec98d23d4f57f0dcf0e62f9054cc1a",
+      "gbk_sha256": "a51478b5c81481bf4c5f5e76b0910182f077985f74c8222d77a40c70cc213932"
+    },
+    {
+      "acc": "NC_107625",
+      "origin": "local_unseen_pool",
+      "family": "Guelinviridae",
+      "host": "Clostridium perfringens",
+      "expected": "Podoviridae-like",
+      "desc": "Clostridium phage vB_CpeP_PM11",
+      "fasta_sha256": "976172b963091c872851c05acee0216c3e3ac171479aba51c4ba9c13c7b77846",
+      "gbk_sha256": "f4e3809ff25a37376e865e4e465b41f8b07661fcd1bb5c4c35f1522c135144ad"
+    },
+    {
+      "acc": "NC_009875",
+      "origin": "local_unseen_pool",
+      "family": "Rountreeviridae",
+      "host": "Staphylococcus aureus",
+      "expected": "Podoviridae-like",
+      "desc": "Staphylococcus phage SAP-2",
+      "fasta_sha256": "0d8485929778a0afb6bf7fcd52d32ed6f8bf45748567be0e43a789c42a4b7353",
+      "gbk_sha256": "fef614aa0b0338c9b669a5cc6773f7de4f92788204c4525d6267df5a49b2bb21"
+    },
+    {
+      "acc": "NC_011048",
+      "origin": "local_unseen_pool",
+      "family": "Salasmaviridae",
+      "host": "Bacillus subtilis",
+      "expected": "Podoviridae-like",
+      "desc": "Bacillus phage phi29",
+      "fasta_sha256": "5e625e7f9444d92e78f6dfd0da650d3ee5fca7d0a02e1bf0aa7f1c22dab3073a",
+      "gbk_sha256": "a3b17d8bd5618411c7d2d65ae7a1454ba309867585c375aa18b17090d9f88dea"
+    },
+    {
+      "acc": "NC_021540",
+      "origin": "local_unseen_pool",
+      "family": "Schitoviridae",
+      "host": "Vibrio cholerae",
+      "expected": "Podoviridae-like",
+      "desc": "Vibrio phage JA-1",
+      "fasta_sha256": "5b4d96021325bd9fc7223b584785b4abff5b89b5949cd2600d60a0f4c5e091d3",
+      "gbk_sha256": "f938501f8a33d05e16472f4d169bcc497d752d6570bcd7f1fe939769177e9df1"
+    },
+    {
+      "acc": "NC_055871",
+      "origin": "local_unseen_pool",
+      "family": "Steigviridae",
+      "host": "Unspecified",
+      "expected": "Podoviridae-like",
+      "desc": "uncultured phage cr106_1",
+      "fasta_sha256": "5e2385b99eda328811f714f0a474bbe7e685b23d928656e7264866738a902c8b",
+      "gbk_sha256": "08728f0ccc891911277c2a33922b8bf241897819ef3afc4a03a0db6fba4ce706"
+    },
+    {
+      "acc": "NC_048671",
+      "origin": "local_unseen_pool",
+      "family": "Zobellviridae",
+      "host": "Lentibacter sp. SH36",
+      "expected": "Podoviridae-like",
+      "desc": "Lentibacter phage vB_LenP_ICBM2",
+      "fasta_sha256": "6078c486583d561df53801f2c165a60d901cdaec718b82f3ca801b100cbf5b43",
+      "gbk_sha256": "d52d1c12f50b094fabc7ac9c2206f28969d010f98ff95772a0736f8dc630bbbe"
+    },
+    {
+      "acc": "NC_029031",
+      "origin": "local_unseen_pool",
+      "family": "Autographiviridae",
+      "host": "Synechococcus sp. WH7803",
+      "expected": "Podoviridae-like",
+      "desc": "Synechococcus phage S-CBP42",
+      "fasta_sha256": "2b8c8e04a5c8a4dd54c182c3e4364fd1ae13c97352bacd3fc1f6bd3df36b6613",
+      "gbk_sha256": "8271cc357d22c97a9f1ee91039eee5e12dd6863cfa78de43fd814d53ac90a7da"
+    },
+    {
+      "acc": "NC_028988",
+      "origin": "local_unseen_pool",
+      "family": "Autonotataviridae",
+      "host": "Ralstonia solanacearum",
+      "expected": "Podoviridae-like",
+      "desc": "Ralstonia phage RSJ2",
+      "fasta_sha256": "435547a109d5a538486082c4660abd399e52a24afd764fdc532f910737f664d2",
+      "gbk_sha256": "e302d1f5389f9457d980dc1150e9765816a235d7793edd44019963dd3268a6c8"
+    },
+    {
+      "acc": "NC_017865",
+      "origin": "local_unseen_pool",
+      "family": "Autoscriptoviridae",
+      "host": "Pseudomonas aeruginosa PA32",
+      "expected": "Podoviridae-like",
+      "desc": "Pseudomonas phage vB_Pae-TbilisiM32",
+      "fasta_sha256": "4f15d4db756a3cebfd04e5c134fa33c360c5801f7ed319baac840137ec602692",
+      "gbk_sha256": "3bee8af584c396d8f9fcce8fc2b8318740e6f802343054e796c39f1834e7d42a"
+    },
+    {
+      "acc": "NC_025822",
+      "origin": "local_unseen_pool",
+      "family": "Autosignataviridae",
+      "host": "Vibrio alginolyticus",
+      "expected": "Podoviridae-like",
+      "desc": "Vibrio phage phi-A318",
+      "fasta_sha256": "76253f389b138a15bb4761631010af8e518b68b203497dfb3329e5dfaf82004a",
+      "gbk_sha256": "5bb7d3b2422cf3f4301db27c4914c0501b4879cdc804421f828fe012367ad229"
+    },
+    {
+      "acc": "NC_010807",
+      "origin": "local_unseen_pool",
+      "family": "Autotranscriptaviridae",
+      "host": "Salmonella enterica subsp. enterica serovar Gallinarum",
+      "expected": "Podoviridae-like",
+      "desc": "Salmonella phage phiSG-JL2",
+      "fasta_sha256": "ada667c553b64cf55774aa0541ecf4b4bf910666da7a6b15319a54feda884ad6",
+      "gbk_sha256": "b732c155f493fad21b92dc0212563a9e4a16ea1601667176b4a613f658d696cd"
+    },
+    {
+      "acc": "NC_070975",
+      "origin": "local_unseen_pool",
+      "family": "Grimontviridae",
+      "host": "Proteus mirabilis",
+      "expected": "Podoviridae-like",
+      "desc": "Proteus phage Vb_PmiP-P59",
+      "fasta_sha256": "0c5f737efa132016402aa73ac91c948f16458585b839d4668f54424808ef9a98",
+      "gbk_sha256": "efd28cd4704b1715ff7d3fe6ce8214d7de3ba4b9b6ab3da7baa675e5b1a0ae61"
+    },
+    {
+      "acc": "NC_110374",
+      "origin": "local_unseen_pool",
+      "family": "Guelinviridae",
+      "host": "Clostridium perfringens JCM 1290",
+      "expected": "Podoviridae-like",
+      "desc": "Clostridium phage CPQ9",
+      "fasta_sha256": "61dd430f308942ec98faee9c7667ce5fc5ae4844b59bfd880a2fc1b02a4768b7",
+      "gbk_sha256": "15cb203993913f4f48741647a6a28a82929dff1da272c7cdc3d8b78da95d1d90"
+    },
+    {
+      "acc": "NC_024149",
+      "origin": "local_unseen_pool",
+      "family": "Rountreeviridae",
+      "host": "Lactococcus garvieae",
+      "expected": "Podoviridae-like",
+      "desc": "Lactococcus phage WP-2",
+      "fasta_sha256": "aa2b69fbff0587d18130b4dfeefa36e802ad9fa50df2204cf1d3e3618b6c9c86",
+      "gbk_sha256": "37533d40a77bfbfdc0bba3ae3dd76da918a37272080357473f229f4bb9904b9f"
+    },
+    {
+      "acc": "NC_031015",
+      "origin": "local_unseen_pool",
+      "family": "Salasmaviridae",
+      "host": "Bacillus thuringiensis subspecies kurstaki",
+      "expected": "Podoviridae-like",
+      "desc": "Bacillus phage Claudi",
+      "fasta_sha256": "295af0af16505ec7b6af2b25690b3e7e952ca0f0a74427720ceb436911ffb547",
+      "gbk_sha256": "6ce538983dacde698c61112545eb2f82c11e307ee011a4ff86f6deb3c0b4d286"
+    },
+    {
+      "acc": "NC_021782",
+      "origin": "local_unseen_pool",
+      "family": "Schitoviridae",
+      "host": "Salmonella enterica",
+      "expected": "Podoviridae-like",
+      "desc": "Salmonella phage FSL SP-076",
+      "fasta_sha256": "9581615d6ea1f96a0922b9d74eb8821a40500aab337a7d3295d2cded4eb7c6af",
+      "gbk_sha256": "9a8b3d57942c7fa664c4b1fa7505a533da74fad7e31cff2b66a4cd3cfd6f9c2f"
+    },
+    {
+      "acc": "NC_055878",
+      "origin": "local_unseen_pool",
+      "family": "Steigviridae",
+      "host": "Unspecified",
+      "expected": "Podoviridae-like",
+      "desc": "uncultured phage cr108_1",
+      "fasta_sha256": "3caf7d21defafb1fe0b2dc3bb939a909d061270fe4894dd663b1cac4737ecccd",
+      "gbk_sha256": "848f75e21f3f24b3145da6ee7d394f9ed721c00eba0f6782194784c5633afe90"
+    },
+    {
+      "acc": "NC_007808",
+      "origin": "local_unseen_pool",
+      "family": "Zobellviridae",
+      "host": "Pseudomonas aeruginosa",
+      "expected": "Podoviridae-like",
+      "desc": "Pseudomonas phage PA11",
+      "fasta_sha256": "9888991a1ed1c418cf81916f8f23b2cbcabc75dfb9aace7fe57f0c700a8209b4",
+      "gbk_sha256": "e82651bbeb44b093de55f13630d3cad2b3c51071220c5676a9a13ba2007c21e4"
+    },
+    {
+      "acc": "NC_047738",
+      "origin": "local_unseen_pool",
+      "family": "Autographiviridae",
+      "host": "Rhizobium etli Brasil5",
+      "expected": "Podoviridae-like",
+      "desc": "Rhizobium phage RHEph01",
+      "fasta_sha256": "61866808ea6765dce7464bd6afd08e058fb62bd7fb3d6ad399ed7c6e388968d0",
+      "gbk_sha256": "ec50f3fceaebd04c098ac59e8ceeba9d77560e0f56f796c5a4b22ed801d9728a"
+    },
+    {
+      "acc": "NC_029092",
+      "origin": "local_unseen_pool",
+      "family": "Autonotataviridae",
+      "host": "Caulobacter sp.",
+      "expected": "Podoviridae-like",
+      "desc": "Caulobacter phage Percy",
+      "fasta_sha256": "a492cbc9d4e492852b12ff0234d74a1145bfb29d5f2264a1117d1b16c6fd3751",
+      "gbk_sha256": "43c1957ad97d693f5e15e783ab1b4d6ac2866f1a81693444fe646e01f0996da8"
+    },
+    {
+      "acc": "NC_021316",
+      "origin": "local_unseen_pool",
+      "family": "Autoscriptoviridae",
+      "host": "Acinetobacter baumannii",
+      "expected": "Podoviridae-like",
+      "desc": "Acinetobacter phage Abp1",
+      "fasta_sha256": "11d054eec0fa453a569d8530c3a4b47af0fd85f76d3771987bd5bd8ea2f7f340",
+      "gbk_sha256": "68ce23fabed1762c0647e44597d288a5212d9cd6fc39a6f18c40d6f181c28eb2"
+    },
+    {
+      "acc": "NC_027379",
+      "origin": "local_unseen_pool",
+      "family": "Autosignataviridae",
+      "host": "Proteus mirabilis strain 922 (LMMB NIBOCH collection)",
+      "expected": "Podoviridae-like",
+      "desc": "Proteus phage PM 85",
+      "fasta_sha256": "d282320841ba669b41eacd2ba1705924551c979cb55cab9373803cff2c838737",
+      "gbk_sha256": "ee748db67dde6b2f457d392f7b5f648d4b7c4d4bc25565a373ea82bf876f94eb"
+    },
+    {
+      "acc": "NC_011043",
+      "origin": "local_unseen_pool",
+      "family": "Autotranscriptaviridae",
+      "host": "Klebsiella sp. 390",
+      "expected": "Podoviridae-like",
+      "desc": "Klebsiella phage K11",
+      "fasta_sha256": "752c994a7dcf3d8b9b4805ac06c4d99167ce41fd04ef1a9bd7b326989c473dbb",
+      "gbk_sha256": "6f5ef78dbefce30b8255e069a23f7032b792986c0e7c2aedafc5f355c7499ce9"
+    },
+    {
+      "acc": "NC_070976",
+      "origin": "local_unseen_pool",
+      "family": "Grimontviridae",
+      "host": "Proteus mirabilis H10_20",
+      "expected": "Podoviridae-like",
+      "desc": "Proteus phage 3H10_20",
+      "fasta_sha256": "1edf10f8b23ff1c6db90c7bd10dbabd80e282148fb91d3ce7254036104e40eec",
+      "gbk_sha256": "16562f2b795bc6b09d922221af6a81f97d6b58442574cfb98e7c21a310ae6d0f"
+    },
+    {
+      "acc": "NC_110339",
+      "origin": "local_unseen_pool",
+      "family": "Guelinviridae",
+      "host": "Clostridium perfringens",
+      "expected": "Podoviridae-like",
+      "desc": "Clostridium phage vB_CP_qdyz_P5",
+      "fasta_sha256": "c3bff155f96065e4ca38f5f05027f73f49d9a15670c37d44fe5855dd9a5510ab",
+      "gbk_sha256": "9cbddbe9da834d42a16d50f59f50b74f98294e79ec41a26cf16c5e3a45fd7d26"
+    },
+    {
+      "acc": "NC_028693",
+      "origin": "local_unseen_pool",
+      "family": "Rountreeviridae",
+      "host": "Enterococcus faecalis 2003",
+      "expected": "Podoviridae-like",
+      "desc": "Enterococcus phage vB_EfaP_IME195",
+      "fasta_sha256": "5c6340ef63357feeb37e73ec6458a5ced6ccf3194493598ddb54403f39f1a428",
+      "gbk_sha256": "a5a0b937603b6b5a0dea346d569c95d0ad45b5390cd11a94b68f7d638bd42f3c"
+    },
+    {
+      "acc": "NC_031032",
+      "origin": "local_unseen_pool",
+      "family": "Salasmaviridae",
+      "host": "Bacillus",
+      "expected": "Podoviridae-like",
+      "desc": "Bacillus phage Stitch",
+      "fasta_sha256": "bbbcd642ca744225543de53353db67ca00abf72c189375c5e56bb090631581ba",
+      "gbk_sha256": "b02e75da9bfee2357451d82874d7db894d88a682fba5d28e879c381d26a86709"
+    },
+    {
+      "acc": "NC_023581",
+      "origin": "local_unseen_pool",
+      "family": "Schitoviridae",
+      "host": "Acinetobacter baumannii M2",
+      "expected": "Podoviridae-like",
+      "desc": "Acinetobacter phage Presley",
+      "fasta_sha256": "e95dd11bab1c4ffc85a7410707a23fb96739ab17c38d761f2acb0fddaf5bf046",
+      "gbk_sha256": "a20c96f7ca951c814a8d321c25f19c90bcc6b8647f6f870b1c35ba20d5a587c6"
+    },
+    {
+      "acc": "NC_055880",
+      "origin": "local_unseen_pool",
+      "family": "Steigviridae",
+      "host": "Unspecified",
+      "expected": "Podoviridae-like",
+      "desc": "uncultured phage cr111_1",
+      "fasta_sha256": "d7f06f157f660e1664923168c4e6a3aa55f93e080c583364a797cfc1a18d090e",
+      "gbk_sha256": "a6c5334f6a5f59204c1d94d281d01ff8193d98422bb298a141e60ccbeec2e85e"
+    },
+    {
+      "acc": "NC_024791",
+      "origin": "local_unseen_pool",
+      "family": "Zobellviridae",
+      "host": "Vibrio cholerae",
+      "expected": "Podoviridae-like",
+      "desc": "Vibrio phage ICP2_2013_A_Haiti",
+      "fasta_sha256": "2f23ccc6223f6900cf4f717b955ab29d9d22f0bd9690a4020f9cdadbf8db4f35",
+      "gbk_sha256": "cb5805e9c113c1e6535dd076b17ccd4e2d6747cb12624f6e74695c39f8c0bdbf"
+    },
+    {
+      "acc": "NC_047802",
+      "origin": "local_unseen_pool",
+      "family": "Autographiviridae",
+      "host": "Pectobacterium carotovorum subsp. carotovorum PB29",
+      "expected": "Podoviridae-like",
+      "desc": "Pectobacterium phage PP99",
+      "fasta_sha256": "7984b3cdaa19cff4ac39e3a5a88347c386d405be9fbbeadce7ec4d4e7513053c",
+      "gbk_sha256": "a445f1f9ed8922d0ea50e52b2520d06fa0059c0e87bcceec074fece1036d6086"
+    },
+    {
+      "acc": "NC_030928",
+      "origin": "local_unseen_pool",
+      "family": "Autonotataviridae",
+      "host": "Xanthomonas arboricola pv. juglandis X-J303",
+      "expected": "Podoviridae-like",
+      "desc": "Xanthomonas phage f20-Xaj",
+      "fasta_sha256": "362d71689ef300da7895ef428543413e6c60c8cfaf27d6d34e0365ade1eb6a98",
+      "gbk_sha256": "a5c78d001814be59416d12d6fb6bc7fb9bd4e2cbb2d9ab7060496a4f18611836"
+    },
+    {
+      "acc": "NC_021337",
+      "origin": "local_unseen_pool",
+      "family": "Autoscriptoviridae",
+      "host": "carbapenem-resistant Acinetobacter baumannii",
+      "expected": "Podoviridae-like",
+      "desc": "Acinetobacter phage AB3",
+      "fasta_sha256": "a433cc59ad4a98613f66fb3e74c7bede0cbbbf241a6226620f35f4543cb83fcf",
+      "gbk_sha256": "c435228e2a0502c1dfd4e8b9028eb265d3455f332a23d2f4d52972b66d37a0ac"
+    },
+    {
+      "acc": "NC_027390",
+      "origin": "local_unseen_pool",
+      "family": "Autosignataviridae",
+      "host": "Proteus mirabilis strain 824 (LMMB NIBOCH collection)",
+      "expected": "Podoviridae-like",
+      "desc": "Proteus phage PM 93",
+      "fasta_sha256": "355e056bc24d50049f63e6d3118b57630a20619fd0f6558f92d4502c1f970de5",
+      "gbk_sha256": "16af20a5c6dc850bb4d39b512392272a38b8248f5ebcbc023f1e3d2ea672ab90"
+    },
+    {
+      "acc": "NC_011085",
+      "origin": "local_unseen_pool",
+      "family": "Autotranscriptaviridae",
+      "host": "Morganella morganii",
+      "expected": "Podoviridae-like",
+      "desc": "Morganella phage MmP1",
+      "fasta_sha256": "94f8b3a75d517d2890f196fdf2a81d8475fbc9e4e72266b771dc5aa2736fe69d",
+      "gbk_sha256": "3044c6ace6bd12ba2e77ca95013f0bc3f3def109382de80ff756f9025dfdd72b"
+    },
+    {
+      "acc": "NC_070978",
+      "origin": "local_unseen_pool",
+      "family": "Grimontviridae",
+      "host": "Vibrio parahaemolyticus",
+      "expected": "Podoviridae-like",
+      "desc": "Vibrio phage Vp_R1",
+      "fasta_sha256": "4f75b1fcac3ddedf20793907fdfe6f461cc44ff5d17af90ac51c744fe33a7d45",
+      "gbk_sha256": "442d9ad89b2901032abb4dd4eaa8eecebe4527c2fa8511c6fd402a0c12bb0e12"
+    },
+    {
+      "acc": "NC_110375",
+      "origin": "local_unseen_pool",
+      "family": "Guelinviridae",
+      "host": "Clostridium perfringens",
+      "expected": "Podoviridae-like",
+      "desc": "Clostridium phage CPQ3",
+      "fasta_sha256": "a2feaabcceb0096e6b385f168aefc5e0b08f6523900bbf261eaf8c95ad1c6ebe",
+      "gbk_sha256": "620782d7fed1a2dc656bdb4befbaecabd6022531d901b1fd99dd8f6e28617748"
+    },
+    {
+      "acc": "NC_047813",
+      "origin": "local_unseen_pool",
+      "family": "Rountreeviridae",
+      "host": "Staphylococcus epidermidis RP62A",
+      "expected": "Podoviridae-like",
+      "desc": "Staphylococcus phage Andhra",
+      "fasta_sha256": "d41d438193cb3e40a0a123465d339d18dfc725a061e2ec0f7d9b4fdb2aedc1dc",
+      "gbk_sha256": "49334505dcfd16525b5478c7d7aeb8e8994b72f657ac4b4c55fbcd37801871e4"
+    },
+    {
+      "acc": "NC_042114",
+      "origin": "local_unseen_pool",
+      "family": "Salasmaviridae",
+      "host": "Streptococcus pneumoniae",
+      "expected": "Podoviridae-like",
+      "desc": "Streptococcus phage CP-7",
+      "fasta_sha256": "9e95708a6670ab65403a1c0cb4b9fe7de264940ce108021625b6f94ca12ad650",
+      "gbk_sha256": "961fe909fea83b89fcc48f640523e897479dd7a353e0bf6311dbcf6e2ea0ca2a"
+    },
+    {
+      "acc": "NC_023589",
+      "origin": "local_unseen_pool",
+      "family": "Schitoviridae",
+      "host": "Shigella boydii ATCC 35966",
+      "expected": "Podoviridae-like",
+      "desc": "Shigella phage pSb-1",
+      "fasta_sha256": "dd380891a3eb8e10105c25168ec919f63a3316fe358ee18c07eba2fac537fa96",
+      "gbk_sha256": "23e2380fe6346a4b78cb939687a8348feb3847f09184ec23707536e2e0c8fc9a"
+    },
+    {
+      "acc": "NC_055881",
+      "origin": "local_unseen_pool",
+      "family": "Steigviridae",
+      "host": "Unspecified",
+      "expected": "Podoviridae-like",
+      "desc": "uncultured phage cr112_1",
+      "fasta_sha256": "8d53c35468a227b5478eacc7295e2b15d581ef2479583a5a60f75bac0582dac8",
+      "gbk_sha256": "adb3f29b0303c8305aa485cb1c6a21a51fc3c0650b72b63b85417a1e53287108"
+    },
+    {
+      "acc": "NC_048672",
+      "origin": "local_unseen_pool",
+      "family": "Zobellviridae",
+      "host": "Lentibacter sp. SH36",
+      "expected": "Podoviridae-like",
+      "desc": "Lentibacter phage vB_LenP_ICBM1",
+      "fasta_sha256": "00011492db8b239f5a4d0f783b650bf5726ad3c26dcd2a7dedaed87de4e8c533",
+      "gbk_sha256": "34c6b55e8f7928b94403f7a1cdc5e302b665b75bf54b93c0b9685c61e5aef561"
+    },
+    {
+      "acc": "NC_047834",
+      "origin": "local_unseen_pool",
+      "family": "Autographiviridae",
+      "host": "Alteromonas sp. H4",
+      "expected": "Podoviridae-like",
+      "desc": "Alteromonas phage vB_AspP-H4/4",
+      "fasta_sha256": "f6067083dde9a8dee15781f73471f0d7c2831f084855660420824e6ecb196f2c",
+      "gbk_sha256": "846f587c222dd042b3ae58e85d62d999dec2e46fd73e12bc9e21686a9ad5f89e"
+    },
+    {
+      "acc": "NC_031014",
+      "origin": "local_unseen_pool",
+      "family": "Autonotataviridae",
+      "host": "Pseudomonas syringae",
+      "expected": "Podoviridae-like",
+      "desc": "Pseudomonas phage Andromeda",
+      "fasta_sha256": "4961f37d738f541eb28225bb4faad5781497a5aebc53a546348b01a8c6b93d4f",
+      "gbk_sha256": "94d5b2760b656c4cf70d40ddcad8283ea1ba6d9017a02aacd57e7e342a1e01fb"
+    },
+    {
+      "acc": "NC_138361",
+      "origin": "local_unseen_pool",
+      "family": "Fiersviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Pepevirus faecihabitans",
+      "fasta_sha256": "d0dc76eb267fc9cf36443d7d89be0348003001e886e2cd6fd8fd93635b241b87",
+      "gbk_sha256": "30e85a4429aecf155c4f6c1b3bee788f0b079da44cf08dc1e54bf0be72071d12"
+    },
+    {
+      "acc": "NC_001954",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Escherichia coli",
+      "expected": "Non-tailed",
+      "desc": "Escherichia phage If1",
+      "fasta_sha256": "adec91e68a95c8b2c1914eefa0bb27c745ee10ecefd3ee7342d74dfecf47c8c5",
+      "gbk_sha256": "5e7bc77c1fc64affd2de82e125b8a236f06ac408cc1d7bee91ba0e95eee46a67"
+    },
+    {
+      "acc": "NC_007818",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Escherichia",
+      "expected": "Non-tailed",
+      "desc": "Escherichia phage ID21",
+      "fasta_sha256": "538ea4cf0d2ef6be09947cd59e247b2df8211398a4dde79c76697eb6873b646f",
+      "gbk_sha256": "3070c91684a3835baa00c42d2c91801a9fb54766937a83e93a8dc21d89e8f16d"
+    },
+    {
+      "acc": "NC_139178",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus allonemorishabitans",
+      "fasta_sha256": "c29e593c2e884da2406d534c881007eafb9e5a5db1d3620d1e9bbdaff0330440",
+      "gbk_sha256": "4386c8b35e6ea254119cfbd0b214ac53dae2b083b90eb1a4f0379d76e055df39"
+    },
+    {
+      "acc": "NC_138362",
+      "origin": "local_unseen_pool",
+      "family": "Fiersviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Pepevirus faecivicinum",
+      "fasta_sha256": "3f5f48bba7656a46a7e6d93d4e79dbb5765a51b2a3a0beb4c52227b5bdaaa994",
+      "gbk_sha256": "0b4eac78879706cc527fffa508663eed6eaac682ea75bdc29bb0089a40cb6bfa"
+    },
+    {
+      "acc": "NC_004306",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Vibrio cholerae O139",
+      "expected": "Non-tailed",
+      "desc": "Fibrovirus fs1",
+      "fasta_sha256": "394ce7226d34c514d468f9c9923d1f5667b4ae44420d1fb3a7622ff1e3e5970b",
+      "gbk_sha256": "24169610db0f654a2bcd70fe3f38b44ab58e895d6b18aeac202b47f903a27f46"
+    },
+    {
+      "acc": "NC_030472",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Pan troglodytes",
+      "expected": "Non-tailed",
+      "desc": "Chimpanzee faeces associated microphage 1",
+      "fasta_sha256": "8f80d885ae626dc9ac07899c07f419427d800020b5bb4eb63da8a957fd3651bc",
+      "gbk_sha256": "c1e664436d447d82b7e756b543c96a7eb2c6f2925c49a137386822f9d804ffb8"
+    },
+    {
+      "acc": "NC_139179",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus faecadaptatum",
+      "fasta_sha256": "1523edc18e3d11d69931a579337cd851e1a465d4e1294a726ca5fa42cfdfb359",
+      "gbk_sha256": "e31675947a77bd795252b4a56884c448db9d0e8594bf69d2256f9cec00019848"
+    },
+    {
+      "acc": "NC_138363",
+      "origin": "local_unseen_pool",
+      "family": "Fiersviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Pepevirus faecivivens",
+      "fasta_sha256": "c0273f7ece9aedc14f35d5e5c036370fe57368ad61a2a7d66ae8187f237ca3d8",
+      "gbk_sha256": "ce5b1e503e5122896ad4dbc485a1968957d6661d131f0932650d7214f01dc30e"
+    },
+    {
+      "acc": "NC_005949",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Vibrio parahaemolyticus",
+      "expected": "Non-tailed",
+      "desc": "Vibrio phage Vf12",
+      "fasta_sha256": "ddb5e6e6bd65433938df6e5d5b908d3d9b57b8e2c0d893887289d7dbcfc753b9",
+      "gbk_sha256": "cce4d146065399b3a5ccbd89d8a0870c22a2e24e88b993ad4081a1f1b0b42180"
+    },
+    {
+      "acc": "NC_040342",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Alces alces",
+      "expected": "Non-tailed",
+      "desc": "Alces alces faeces associated microvirus MP11 5517",
+      "fasta_sha256": "dc3d620d4b3a2a084353d3d5c668140e87b3c20d01dda7ee21b8285823953d17",
+      "gbk_sha256": "156787ed2b252407f14fa27bf5b551f325a8c314580802d07b4a08e7fe86cf3c"
+    },
+    {
+      "acc": "NC_139180",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus faecicola",
+      "fasta_sha256": "59c8f372ae5b243dcdac23ccf8a628bc18841383160febd39e175a47acd20376",
+      "gbk_sha256": "70f6b2a92876367b91d1336c408fefe97a43218c22c8cadb6321eb9c5d9fb019"
+    },
+    {
+      "acc": "NC_138364",
+      "origin": "local_unseen_pool",
+      "family": "Fiersviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Perrunavirus faecadaptatum",
+      "fasta_sha256": "ca2051bcb4f022f6d700d2390a3fc35ad74c6ff064075dd1ed3aef14ea773190",
+      "gbk_sha256": "20afc2853316ca61b31bb9ab771149a8537b2b1d7ecc037530a30a3012de3ec6"
+    },
+    {
+      "acc": "NC_006294",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Vibrio cholerae",
+      "expected": "Non-tailed",
+      "desc": "Vibrio phage KSF1",
+      "fasta_sha256": "d646475337a3e35080273d44a77a4109fd095d3014b88b84b43c01a5012fdb6d",
+      "gbk_sha256": "3c51958a291f8db003bda86c51ab0a017df8536def974fe93c33d9c94e09a3d2"
+    },
+    {
+      "acc": "NC_007817",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Escherichia coli",
+      "expected": "Non-tailed",
+      "desc": "Escherichia phage ID2 Moscow/ID/2001",
+      "fasta_sha256": "4e580009c0b0d70fc84a926a9ee078eecc5fd966f42eed8dc8680c4ca1f95412",
+      "gbk_sha256": "f9b805e4ef192867b46792a4f62f0f7ff92ac9504085e5f20f30ab228841a420"
+    },
+    {
+      "acc": "NC_139181",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus faecihabitans",
+      "fasta_sha256": "2af4ab60ee335f4fae2e06a1dda29ba45c1637523f30a3ce567531c94f8b1cca",
+      "gbk_sha256": "211a43ef3d617a500b0cfa8c72707b372a3aaaf732d14fe312b4006b361c562b"
+    },
+    {
+      "acc": "NC_138365",
+      "origin": "local_unseen_pool",
+      "family": "Fiersviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Perrunavirus faecihabitans",
+      "fasta_sha256": "2b7d1dc28024d69813233b0b25656ef1af9ed8753e2684207a61026f95a820d2",
+      "gbk_sha256": "bc138170e8eb55d69d8fd78b35c06bfadf81031daabbbbac5f1f7a435e54d448"
+    },
+    {
+      "acc": "NC_011399",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Ralstonia",
+      "expected": "Non-tailed",
+      "desc": "Ralstonia phage RSM3",
+      "fasta_sha256": "09632272f8114b33a34c8ba0ccf4e85f8b875ffce782f4ac42618c3d71e7b29d",
+      "gbk_sha256": "f535ea2da3a7757961ff188279b22e4d5226ab4e95d210f9e99713df34290ec7"
+    },
+    {
+      "acc": "NC_007819",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Escherichia",
+      "expected": "Non-tailed",
+      "desc": "Escherichia phage ID32",
+      "fasta_sha256": "6f285b1ca67b2021ced34ca73062be45ce10637146fd60144ded095b465f4fc7",
+      "gbk_sha256": "0764f103154f5ed641b39b4f5961ad6f476618ea3813f3b36a677d393e3e5c0d"
+    },
+    {
+      "acc": "NC_139182",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus faecivicinum",
+      "fasta_sha256": "346d0042f6c55dcaea756c6b677b11297ba18f99c254b6781ad37cf71734e03d",
+      "gbk_sha256": "8271a1187dde1087d4125ac64e1d7c407dc8b2f0d8920c46f457573d85d5bc9d"
+    },
+    {
+      "acc": "NC_138366",
+      "origin": "local_unseen_pool",
+      "family": "Fiersviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Perrunavirus faecivivens",
+      "fasta_sha256": "9013547bb82253deed8604a61a9e7844bca3daaaf1f0cf07f060b259e4e57662",
+      "gbk_sha256": "9918db08be2de1fe7206dbcdccb2efa8f8836e6a8f2f003079a28592ed82abb2"
+    },
+    {
+      "acc": "NC_015297",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Ralstonia solanacearum",
+      "expected": "Non-tailed",
+      "desc": "Ralstonia phage PE226",
+      "fasta_sha256": "b0636a5d817f8790ac6d6239c87e9a13e328b841b82f3584aa223ef26329c692",
+      "gbk_sha256": "c7f4eb992ecc2c838596934942b8dc880ba779948041a4c0f41db6e3b991fb3e"
+    },
+    {
+      "acc": "NC_030476",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Pan troglodytes",
+      "expected": "Non-tailed",
+      "desc": "Chimpanzee faeces associated microphage 2",
+      "fasta_sha256": "f65c5a738620b9d1805701df4fac69f3ca1c6dff6b277c76ecc48f532f8baa46",
+      "gbk_sha256": "a5f553fee81c3b4ec63516cd83fe4cee2957fef393edc6489960bf9bba3ccb5c"
+    },
+    {
+      "acc": "NC_139187",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus faecivivens",
+      "fasta_sha256": "84d9d49aee1f7e9619da859ae4444d598d4b5819454ccce762920567cb5fc3a2",
+      "gbk_sha256": "dfd919bfae46264d57750b064bdcf5155442392f55087105c1d3f94075cce542"
+    },
+    {
+      "acc": "NC_015586",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Stenotrophomonas maltophilia",
+      "expected": "Non-tailed",
+      "desc": "Stenotrophomonas phage phiSHP2",
+      "fasta_sha256": "921e9d73db4b87cf39e9297dbe43e56ab08c903a9d564399e547f78225981104",
+      "gbk_sha256": "cae7fa990f2fb0339d755a92a9bdd50b4c315b98ed281d705b0f4740b9a8f418"
+    },
+    {
+      "acc": "NC_040349",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Alces alces",
+      "expected": "Non-tailed",
+      "desc": "Alces alces faeces associated microvirus MP21 4718",
+      "fasta_sha256": "95f0fc14a2baf1488506b93c94320db6e52b5ea037adb178d9db510c30afb8e3",
+      "gbk_sha256": "0dfb0442d656ee3038832891b9019bc33abbf89620b3762a000847aa2be84dce"
+    },
+    {
+      "acc": "NC_139188",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus frumenticola",
+      "fasta_sha256": "a873e8b13a9bc9b135aa213d593d0944d7039c9a0a412bfb79184acbcce8a1d6",
+      "gbk_sha256": "558e3f30e2dfd516a02e6341a5f44201f45d6f96841dc84c67e0be50d59f92cd"
+    },
+    {
+      "acc": "NC_016162",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Vibrio cholerae str. 10E09PW02",
+      "expected": "Non-tailed",
+      "desc": "Vibrio phage VCY",
+      "fasta_sha256": "6a955dd58b2b9a82fcd5e34dae228dd96937779dec53d4988c5f28bf7a7233b7",
+      "gbk_sha256": "553846f8de903e3d04416783bb688cbd10c58862ad72f63d390517be179a0ea5"
+    },
+    {
+      "acc": "NC_007820",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Escherichia",
+      "expected": "Non-tailed",
+      "desc": "Escherichia phage NC35",
+      "fasta_sha256": "4641626d8759de04b0c1ab9948ded8e967e6006a68299357152bbad2b83a2373",
+      "gbk_sha256": "e414797558fd15a6a2e8bf92d3a46ea653978c8706196eb070a1ab0cf8b3f6f5"
+    },
+    {
+      "acc": "NC_139189",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus frumentivicinum",
+      "fasta_sha256": "090cfd81ec0002dcb51e4c6cd50371dbf2dfbf1945677444edc7ea75ff3504d3",
+      "gbk_sha256": "4bc4af5f677708ac2b957cce4fb70ff4299c5165868e949279d39ebda3d6cd6e"
+    },
+    {
+      "acc": "NC_021562",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Vibrio cholerae O139 serogroup strain ICDC-4470",
+      "expected": "Non-tailed",
+      "desc": "Vibrio phage VFJ",
+      "fasta_sha256": "1efbe2c2ec75a0071f20e4c7dc8c047b373630532b9f9ff9bf593c1a6ffd8699",
+      "gbk_sha256": "60c0fe5a1ec3c967dcb9a9a32f00e46947cbb67806bb96fbf01e3f5154d3c745"
+    },
+    {
+      "acc": "NC_007821",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Escherichia coli",
+      "expected": "Non-tailed",
+      "desc": "Enterobacteria phage WA13",
+      "fasta_sha256": "0ef134a4e9d9850c410ddd9a1fd8b73dc60cec7abaea9604d81990b16bb438ad",
+      "gbk_sha256": "76f0b74c4561c5517798f0e43c0456007fd834efcf82ec0b727344fe7520752e"
+    },
+    {
+      "acc": "NC_139190",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus fundenecus",
+      "fasta_sha256": "18f109fe1af8a04e3df6bfc69aa8e43fde09a6ee9cf1fbe540fdaf1b210abc8f",
+      "gbk_sha256": "8f7983bbec8a987ccca51128e2444bbf9c52e1f74657f40b5024c8dae7758588"
+    },
+    {
+      "acc": "NC_021569",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Stenotrophomonas maltophilia Khak84",
+      "expected": "Non-tailed",
+      "desc": "Stenotrophomonas phage SMA7",
+      "fasta_sha256": "c3f24fce423f495e6d3440980ba8a80cf4a70521d320b4b8e4b8c9029bd8f8f4",
+      "gbk_sha256": "80298134db5086a72f98fcec5b6ce9578146fefb24788153427584a13e72c6bf"
+    },
+    {
+      "acc": "NC_040350",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Alces alces",
+      "expected": "Non-tailed",
+      "desc": "Alces alces faeces associated microvirus MP10 5560",
+      "fasta_sha256": "255455deb296aecc6904700a09a539d056dcd74fa52adf7c95bbe87edeb42511",
+      "gbk_sha256": "f1b2f00400d39d720ec4de4fed0a75bd29bae1b23fabfcf567386e15a88be694"
+    },
+    {
+      "acc": "NC_139191",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus fundicola",
+      "fasta_sha256": "e9a4049f628bf4fb564b2d7021381da91afbf53237857ab04ee40a3540ba06ef",
+      "gbk_sha256": "9d02206101ef45dab10e4d0f2378d69c51b71381fa346f10c39c625c41d71a40"
+    },
+    {
+      "acc": "NC_025823",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Enterobacteria",
+      "expected": "Non-tailed",
+      "desc": "Enterobacteria phage f1",
+      "fasta_sha256": "5caa6585b44d4670208d7cf8a1030d94d7de0f925c18553eee8f161ec3d8b442",
+      "gbk_sha256": "691b583734f2215a53207ec9052712e17b61ef6e734c3edddbaf8fa28282aed3"
+    },
+    {
+      "acc": "NC_007822",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Escherichia",
+      "expected": "Non-tailed",
+      "desc": "Escherichia phage WA45",
+      "fasta_sha256": "5733030c1072d9393f4054804630d7dc168014fa6db42b378a0c4eb2a6c7ede0",
+      "gbk_sha256": "cd48d056db3f7e447d8923ef953c54f0fa8c7e834be74d1e23c92211e70c4e04"
+    },
+    {
+      "acc": "NC_139192",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus fundihabitans",
+      "fasta_sha256": "2765a9d890a10e83cbeaa3632fa09b485fb735f67cf0dc529865f0303d25f765",
+      "gbk_sha256": "13326e56345c87edf2bea195e0d67a4382183035a29ca5f47d29d7b7a1f77588"
+    },
+    {
+      "acc": "NC_026612",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Homo sapiens",
+      "expected": "Non-tailed",
+      "desc": "Uncultured phage WW-nAnB strain 2",
+      "fasta_sha256": "7f47884ecd3c1d83c23db44949fbbae3736134afee262b324d545433adb386fa",
+      "gbk_sha256": "8184db445d967afb79b79dc1d8b584e721119e63d8bd602b176ad3f3c9ce212e"
+    },
+    {
+      "acc": "NC_007856",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Escherichia coli",
+      "expected": "Non-tailed",
+      "desc": "Enterobacteria phage ID18",
+      "fasta_sha256": "bf6459cab7b017541e358f2b34c05a17f33e955a394e59a9ebe466baee4326b8",
+      "gbk_sha256": "f42d6ecc10e187c30be26a377847febba8b06c0c3bba490005c24a8d32ad2a13"
+    },
+    {
+      "acc": "NC_139193",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus infecundadaptatum",
+      "fasta_sha256": "ef82a222e3895d4de0f0c8329d545c9f0c90453311ee80e0317acfa78ded9901",
+      "gbk_sha256": "7bd43e17e661d4022d070ac68a3034aab3c4491f0b8809a96a213a0fdf6fb377"
+    },
+    {
+      "acc": "NC_043028",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Xanthomonas oryzae ATCC 35933",
+      "expected": "Non-tailed",
+      "desc": "Xanthomonas phage Xf109",
+      "fasta_sha256": "e367e160413adbed8a5dfe2e93e01fe1dad0ec00576ea710c251ea7d9ef7b472",
+      "gbk_sha256": "7e11730fe88e9e6c6642d7f4d29184c645694d06af67b9b437869e178e6a271a"
+    },
+    {
+      "acc": "NC_040373",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Alces alces",
+      "expected": "Non-tailed",
+      "desc": "Alces alces faeces associated microvirus MP18 4940",
+      "fasta_sha256": "80c94a7719bf2f18abbc211f1b565aff7bd9ec28ec7f68a2f8d1991afa21a326",
+      "gbk_sha256": "07bf54e0c6df1b262649951695a6c2d6e10916f40ae594a5af8e2e83a470583a"
+    },
+    {
+      "acc": "NC_139194",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus montisvivens",
+      "fasta_sha256": "af7e8025c2fdc55f51bea6cbe0fefff296cf6d5485b13f7a07b27c3f960e1944",
+      "gbk_sha256": "4ab905913a5f9472fbeb75b4cb374a957d00ec7bd8b966c77c707655971a9595"
+    },
+    {
+      "acc": "NC_043029",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Stenotrophomonas maltophilia str. Khak84",
+      "expected": "Non-tailed",
+      "desc": "Stenotrophomonas phage SMA6",
+      "fasta_sha256": "31dade5872afb3286b1cf8ec86c72bc3ea1cf1f898a100709beceb2968ba9aca",
+      "gbk_sha256": "a3c47c18a9042de8eef0c344a8b019fd5f3e578970f2456c0c106bb1a0b57ef1"
+    },
+    {
+      "acc": "NC_007823",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Escherichia",
+      "expected": "Non-tailed",
+      "desc": "Escherichia phage NC28",
+      "fasta_sha256": "1f0fcfb20d003be892fe83013bf5de244370d538a2ae5cb5b1f5e4944b12a01d",
+      "gbk_sha256": "448502180055ddc6263716bba8f75af7e72ff4b277122b3c3da8902504798d41"
+    },
+    {
+      "acc": "NC_139195",
+      "origin": "local_unseen_pool",
+      "family": "Steitzviridae",
+      "host": "Unspecified",
+      "expected": "Non-tailed",
+      "desc": "Alehxovirus nemorisadaptatum",
+      "fasta_sha256": "a3e48ad2c8e0420aa9c5604d19587502ce9030933e33b2311e9945802a8755b3",
+      "gbk_sha256": "3ab2e8d460740f39a58b86b00cfa37fdb4554b6d1122fdb05070e2514d657bfe"
+    },
+    {
+      "acc": "NC_047765",
+      "origin": "local_unseen_pool",
+      "family": "Inoviridae",
+      "host": "Ralstonia solanacearum UW551",
+      "expected": "Non-tailed",
+      "desc": "Ralstonia phage Rs551",
+      "fasta_sha256": "8968c5984aca02482027bd94edb11e3f839c9572f113d0d7d0e589c461f0c5db",
+      "gbk_sha256": "8df1d569f0467ad6b4d69b888f965df8d0e9fb4938367e9346c224a648c4034d"
+    },
+    {
+      "acc": "NC_040374",
+      "origin": "local_unseen_pool",
+      "family": "Microviridae",
+      "host": "Alces alces",
+      "expected": "Non-tailed",
+      "desc": "Alces alces faeces associated microvirus MP15 5067",
+      "fasta_sha256": "6351ffb41c35e8e4f305078e1c2f0b5dc3995fe53f9068f0d9877a572acc4070",
+      "gbk_sha256": "6adf07f7dffb6676fa27a73c868b8495c25d05aa73042b2d68e3f7f47cde6a25"
+    }
+  ]
+}

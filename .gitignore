@@ -237,6 +237,8 @@ src/test_shm.py
 !/scripts/benchmark_phage_structure.py
 !/scripts/validation_datasets.py
 !/scripts/validate_external_phage_structure.py
+!/scripts/run_suite_e_blind.py
+!/scripts/benchmark_fragmented_contigs.py
 .lingma/rules/
 
 # ------------------------------------------------------------------------------

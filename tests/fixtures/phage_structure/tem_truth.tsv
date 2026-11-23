@@ -1,0 +1,53 @@
+suite	name	accession	morphotype	tem_nm	tem_range	state	includes_baseplate	method	doi	verification_status	notes
+suite_b	T4	NC_000866	Myoviridae-like	92.5	92.5	extended	no	Cryo-EM	10.1016/j.cell.2004.07.022	verified	Extended tail sheath length 925 A (contracts to 420 A; full tail incl. baseplate ~140 nm per 10.3390/v15061267); legacy table used 96.0
+suite_b	P2	NC_001895	Myoviridae-like	135.0	135	extended	unknown	TEM	10.1080/21597081.2016.1145782	verified	Christie & Calendar 2016 citing Nilsson & Haggard-Ljungquist: 60 nm capsid and 135 nm contractile tail
+suite_b	Mu	NC_000929	Myoviridae-like	100.0	100	extended	unknown	TEM	10.1016/0022-2836(81)90338-7	verified	Giphart-Gassler 1981 / Symonds 1987 / Guerrero-Ferreira 2025 (10.1128/jvi.02056-24 30 sheath rings): 100 nm extended contractile tail; legacy table used 107.0
+suite_b	SPO1	NC_011421	Myoviridae-like	140.0	140	extended	no	TEM	10.1128/JVI.46.1.239-249.1983	verified	Parker et al. 1983 (PMC255113) verbatim: 140-nm-long contractile tail sheath
+suite_b	A511	NC_009811	Myoviridae-like	199.4	199.4	extended	unknown	TEM	10.1128/JB.00461-08	verified	Klumpp et al. 2008 / Zink & Loessner 1992 (10.1128/aem.58.1.296-302.1992): 199.4 nm extended tail; legacy table used 204.0
+suite_b	FelixO1	NC_005282	Myoviridae-like	113.0	113	extended	unknown	TEM	10.3390/v2030710	verified	Whichard et al. 2010 (PMC3185647) verbatim: 17 x 113 nm contractile tail
+suite_b	P1	NC_005856	Myoviridae-like	245.0	245	extended	yes	Cryo-EM	10.3390/v15061267	verified	Yang et al. 2023 (PMC10304247) verbatim: ~2450 A extended tail incl. neck and baseplate (53 rings)
+suite_b	Phage_K	NC_005880	Myoviridae-like	210.0	210	extended	unknown	TEM	10.1099/0022-1317-53-2-293	verified	Rees & Fry 1981 verbatim: long (210 nm) thin (15 nm) contractile tail
+suite_b	phiKZ	NC_004629	Myoviridae-like	180.0	180	extended	unknown	Cryo-EM	10.1016/j.jmb.2005.07.018	verified	Fokine et al. 2005: non-contracted tail ~1800 A (180 nm); legacy table used 198.0
+suite_b	Syn9	NC_008296	Myoviridae-like	145.0	120-150	unverified	unknown	TEM	10.1111/j.1462-2920.2007.01285.x	unverified	Weigele 2007 abstract lacks explicit nm value; reviews mix Syn9 with related cyanomyoviruses (140-180 nm)
+suite_b	S-PM2	NC_006820	Myoviridae-like	180.0	180	extended	unknown	TEM	10.1073/pnas.191174498	verified	Hambly et al. 2001 PNAS verbatim: tail is ~180 nm long (85 nm capsid)
+suite_b	Lambda	NC_001416	Siphoviridae-like	150.0	135-150	extended	unknown	TEM	10.1016/0092-8674(84)90476-8	verified	Katsura & Hendrix 1984 / Katsura 1987 (10.1038/327073a0): ~135 nm shaft / ~150 nm overall flexible tail
+suite_b	T5	NC_005859	Siphoviridae-like	160.0	160	extended	no	Cryo-EM	10.1016/j.jmb.2006.06.081	verified	Effantin et al. 2006: noncontractile tail tube ~160 nm excluding distal fibers
+suite_b	TP901-1	NC_002747	Siphoviridae-like	118.0	118	extended	unknown	TEM	10.1128/JVI.02836-12	verified	Bebeacua et al. 2013 (PMC3554098): noncontractile tail ~118 nm
+suite_b	SPP1	NC_004166	Siphoviridae-like	160.0	160	extended	no	Cryo-EM	10.1038/sj.emboj.7601786	verified	Plisson et al. 2007 EMBO J verbatim: 1600 A helical tail tube (excluding ~31 nm tip; overall ~191 nm); legacy used 188.0
+suite_b	T1	NC_005833	Siphoviridae-like	150.0	150	extended	unknown	TEM	10.1016/j.virol.2003.09.020	verified	Roberts et al. 2004 / filtration standard (PMID 8889061): ~150 nm tail; legacy table used 160.0
+suite_b	L5	NC_001335	Siphoviridae-like	135.0	135	unverified	unknown	TEM	10.1128/microbiolspec.mgm2-0032-2013	unverified	Cited as ~135 nm in ViralZone and Hatfull review without traceable primary single-phage TEM table
+suite_b	Bxb1	NC_002656	Siphoviridae-like	130.0	130	extended	unknown	Cryo-EM	10.1016/j.cell.2025.03.027	verified	Cell 2025 Cryo-EM atomic structure (PMC12124961): ~130 nm flexible tail and ~60 nm capsid
+suite_b	HK97	NC_002167	Siphoviridae-like	145.0	140-150	unverified	no	TEM	10.1006/jmbi.2000.3729	unverified	Legacy table 145.0 contradicts Juhala et al. 2000 (~18% longer than lambda ~150 nm -> ~177 nm); lacks direct standalone nm value
+suite_b	Tuc2009	NC_002703	Siphoviridae-like	144.0	144	extended	no	TEM	10.1128/JB.00024-06	verified	Mc Grath et al. 2006 (PMC1482904): 144 nm tail shaft excluding ~10 nm Tal tip; legacy table used 160.0
+suite_b	sk1	NC_001835	Siphoviridae-like	135.0	130-140	unverified	unknown	TEM	10.1046/j.1365-2958.1997.5491926.x	unverified	Literature spans 135-186 nm across 936-group isolates; primary Chandry 1997 measurement not verified verbatim
+suite_b	bIL170	NC_001909	Siphoviridae-like	126.0	126	extended	unknown	TEM	10.1128/AEM.02517-05	verified	Deveau et al. 2006 / Crutz-Le Coq 2002 (10.1099/00221287-148-4-985): 126 nm tail
+suite_b	A118	NC_003216	Siphoviridae-like	270.0	261-278	unverified	unknown	TEM	10.1046/j.1365-2958.2000.01720.x	unverified	Morphospecies 2671 reviews cite 270-310 nm; primary Loessner 2000 abstract lacks verbatim TEM nm value
+suite_b	phiC31	NC_001978	Siphoviridae-like	100.0	100	unverified	unknown	TEM	10.1128/JVI.9.2.258-262.1972	unverified	100 nm originates from ViralZone secondary summary; Lomovskaya 1972 / Suarez primary nm table unverified
+suite_b	N15	NC_001901	Siphoviridae-like	140.0	140	unverified	unknown	TEM	10.1006/jmbi.2000.3731	unverified	Secondary summaries conflict (140 vs 150-180 nm); Ravin 2000 states lambda-like without direct single-phage TEM nm
+suite_b	TM4	NC_003387	Siphoviridae-like	190.0	185-200	extended	unknown	TEM	10.1371/journal.pone.0026750	verified	Pope et al. 2011 Cluster K characterization: flexible tail averaging ~190 nm (185-200 nm)
+suite_b	D29	NC_001900	Siphoviridae-like	120.0	120	extended	unknown	TEM	10.1006/jmbi.1997.1610	verified	Ford et al. 1998 JMB / ICTV: flexible noncontractile tail 120 x 8 nm; legacy table used 130.0 (100-160)
+suite_b	SPbeta	NC_001884	Siphoviridae-like	320.0	320	extended	yes	TEM	10.1007/s00705-021-05116-9	verified	Kohm & Hertel 2021 Arch Virol: ~320 x 12 nm noncontractile tail with baseplate; legacy table used 339.0
+suite_b	c2	NC_001706	Siphoviridae-like	98.0	86-111	unverified	unknown	TEM	10.1128/aem.61.12.4348-4356.1995	unverified	86-111 nm derives from ExPASy Ceduovirus genus range rather than a verified single-isolate measurement for c2
+suite_b	P74-26	NC_009804	Siphoviridae-like	800.0	800	extended	unknown	TEM	10.1016/j.jmb.2008.02.018	verified	Minakhin et al. 2008 JMB verbatim: approximately 800 nm tail; legacy table used 850.0 midpoint
+suite_d	PaSz-1_45_92k	MN871481	Myoviridae-like	102.0	102	extended	unknown	TEM	10.1038/s41598-025-17510-3	verified	PMC12480670 verbatim: head diameter 80 nm and tail length 102 nm
+suite_d	PaZh_1	MN871489	Myoviridae-like	200.0	200	extended	unknown	TEM	10.1038/s41598-025-17510-3	verified	PMC12480670 verbatim: head diameter 120 nm and tail length 200 nm (Chimalliviridae)
+suite_d	Arash	OQ632216	Myoviridae-like	140.47	140.47+-1.05	extended	unknown	TEM	10.1186/s12866-023-03056-9	verified	BMC Microbiol 2023 (PMC10629094): contractile tail 140.47 +- 1.05 nm
+suite_d	PseuGes_254	OR575930	Myoviridae-like	139.6	139.6+-5.6	extended	unknown	TEM	10.3390/v16101561	verified	Viruses 2024 16(10):1561: capsid 79.2 +- 1.92 nm and contractile tail 139.6 +- 5.6 nm
+suite_d	VP882	NC_009016	Myoviridae-like	156.0	156+-8	extended	unknown	TEM	10.1128/AEM.02483-08	verified	Lan et al. 2009 AEM (PMC2681713): rigid tail 156 +- 8 nm (sheath 67 +- 5 nm)
+suite_d	PB1	NC_011810	Myoviridae-like	140.0	140	extended	unknown	TEM	10.1111/j.1462-2920.2009.02030.x	verified	Ceyssens et al. 2009: isometric capsid ~74 nm and contractile tail ~140 nm
+suite_d	Bxz1	NC_004687	Myoviridae-like	80.0	80	unverified	unknown	TEM	10.1016/j.femsle.2004.10.032	unverified	Unresolved discrepancy between ICTV Bixzunavirus mean 53.4 nm and I3-like 80 nm comparative summaries
+suite_d	RB49	NC_005066	Myoviridae-like	113.0	113	extended	unknown	TEM	10.1128/JB.183.1.358-366.2001	verified	Tetart et al. 2001 / Desplats & Krisch 2002 / ICTV: contractile tail 113 x 16 nm; legacy table used 113.5
+suite_d	Patience	NC_023691	Siphoviridae-like	358.0	358	extended	unknown	TEM	10.1128/mBio.02145-14	verified	Pope et al. 2014 mBio (PMC4324244) verbatim: tails average 358 nm (multiplex paper PMC7150772 reports 330.1 nm)
+suite_d	PA_L9	PP869205	Siphoviridae-like	300.0	300	extended	unknown	TEM	10.1038/s41598-025-17510-3	verified	PMC12480670 verbatim: head diameter 80 nm and 300 nm in tail length
+suite_d	BK5-T	NC_002796	Siphoviridae-like	232.0	232	extended	unknown	TEM	10.1128/aem.47.2.343-349.1984	verified	Jarvis 1984 AEM 47:343 / Mahanivong 2001 (10.1128/AEM.67.8.3564-3576.2001): 232 nm noncontractile tail
+suite_d	Giles	NC_009993	Siphoviridae-like	205.0	205	extended	unknown	TEM	10.1128/JB.01657-07	verified	Morris et al. 2008 JB (PMC2258872): flexible tail ~205 nm
+suite_d	r1t	NC_004302	Siphoviridae-like	140.0	140	extended	unknown	TEM	10.1111/j.1365-2958.1996.tb02478.x	verified	van Sinderen et al. 1996: P335-group temperate lactococcal phage tail ~140 nm; legacy table used 140.5
+suite_d	2972	NC_007019	Siphoviridae-like	260.0	260	extended	unknown	TEM	10.1128/AEM.71.7.4057-4068.2005	verified	Levesque et al. 2005 AEM (PMC1169050): 55 nm capsid and 260 nm noncontractile tail
+suite_d	Rosebush	NC_004684	Siphoviridae-like	252.5	252.5	extended	unknown	TEM	10.3390/v12030294	verified	Viruses 2020 (PMC7150772) verbatim: Rosebush tail length 252.5 nm
+suite_d	Corndog	NC_004685	Siphoviridae-like	248.0	248+-8	extended	unknown	TEM	10.1371/journal.pone.0118725	verified	Cresawn et al. 2015 PLOS ONE (PMC4351075) verbatim: approximately 248 +- 8 nm in length
+suite_d	Chi	NC_021315	Siphoviridae-like	225.0	220-230	extended	unknown	TEM	10.1128/JVI.1.3.591-598.1967	verified	Schade & Adler 1967 / ICTV Chi description: 220-230 nm flagellotropic tail (YSD1 tube ~220 nm)
+suite_d	Omega	NC_004688	Siphoviridae-like	200.0	200	extended	unknown	TEM	10.1371/journal.pone.0069273	verified	Pope et al. 2013 PLOS ONE Cluster J/Omega: long flexible tail ~200 nm
+suite_d	D3112	NC_005178	Siphoviridae-like	190.0	190	unverified	unknown	TEM	10.1128/JB.186.2.400-410.2004	unverified	190 nm derives from ViralZone secondary entry rather than Wang 2004 measurement; RefSeq GBK also has frameshifted TMP
+suite_d	phi80	NC_021190	Siphoviridae-like	149.0	147-151	unverified	unknown	TEM	10.1371/journal.pone.0011106	unverified	PMC2885432 full text contains no virion tail length measurement; 147-151 nm lacks verified primary TEM table
+suite_d	YuA	NC_010116	Siphoviridae-like	145.0	145	extended	unknown	TEM	10.1128/JB.01441-07	verified	Ceyssens et al. 2008 JB (PMC2238194): prolate head 72 x 51 nm and tail ~145 nm
+suite_d	Gamma	NC_007458	Siphoviridae-like	208.5	200-217	extended	unknown	TEM	10.1128/JB.188.8.3037-3051.2006	verified	Schuch & Fischetti 2006 JB: tail length 200-217 nm (midpoint 208.5 nm); legacy table used 200.0 lower bound

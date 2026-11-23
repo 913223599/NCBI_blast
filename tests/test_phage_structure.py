@@ -698,3 +698,40 @@ def test_isolated_lysozyme2_crass_not_self_authenticated_tmp() -> None:
     pred = classify_morphotype(crass_prots, tmps, genome_length_bp=99915)
     assert pred.morphotype_code == "Podoviridae-like"
 
+
+def test_tem_truth_table_and_suite_e_disjoint() -> None:
+    """
+    校验 T0.2 TEM 标准真值表完整性、DOI 合规性以及 T0.1 Suite E 盲测集零重叠冻结边界。
+    """
+    import csv
+    import json
+
+    truth_tsv = REPO_ROOT / "tests" / "fixtures" / "phage_structure" / "tem_truth.tsv"
+    manifest_json = REPO_ROOT / "tests" / "fixtures" / "phage_structure" / "suite_e_manifest.json"
+    assert truth_tsv.is_file()
+    assert manifest_json.is_file()
+
+    with truth_tsv.open("r", encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+
+    assert len(rows) == 52
+    suite_b = [r for r in rows if r["suite"] == "suite_b"]
+    suite_d = [r for r in rows if r["suite"] == "suite_d"]
+    assert len(suite_b) == 30
+    assert len(suite_d) == 22
+
+    accs = [r["accession"] for r in rows]
+    assert len(set(accs)) == 52
+    verified = [r for r in rows if r["verification_status"] == "verified"]
+    assert len(verified) >= 40
+    for r in verified:
+        assert float(r["tem_nm"]) > 0
+        assert r["state"] == "extended"
+        assert r["doi"].startswith("10."), f"Invalid DOI in verified row: {r}"
+
+    manifest = json.loads(manifest_json.read_text(encoding="utf-8"))
+    suite_e_accs = {e["acc"] for e in manifest["entries"]}
+    assert len(suite_e_accs) == 224
+    assert suite_e_accs.isdisjoint(set(accs))
+
+

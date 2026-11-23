@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import sys
 import time
@@ -28,12 +29,15 @@ from scripts.benchmark_phage_structure import (  # noqa: E402
     FAMILY_TO_MORPH,
     LOCAL_FASTA_DIR,
     TEM_REFERENCES,
+    load_tem_truth_records,
     sample_120_ictv_genomes,
 )
 
 LOCAL_GBK_DIR = LOCAL_FASTA_DIR.parent / "gbk"
 LOCAL_INDEX_TSV = LOCAL_FASTA_DIR.parent / "index" / "phage_index.tsv"
 EXTERNAL_DATA_DIR = PROJECT_ROOT / "data" / "validation" / "external_ncbi"
+SUITE_E_DATA_DIR = PROJECT_ROOT / "data" / "validation" / "suite_e_frozen"
+SUITE_E_FROZEN_MANIFEST = PROJECT_ROOT / "tests" / "fixtures" / "phage_structure" / "suite_e_manifest.json"
 
 # 扩展至更多 2024-2025 ICTV 确切形态明确的科（不混入不确定或古菌域外科）
 EXTENDED_FAMILY_TO_MORPH: Dict[str, str] = {
@@ -65,48 +69,52 @@ class ExternalTemCase:
     tem_nm: Optional[float]
     tem_range: str
     source_note: str
+    doi: str = ""
+    verification_status: str = "unverified"
+    tem_state: str = "unknown"
+    includes_baseplate: str = "unknown"
+    tem_method: str = "TEM"
+
+
+def _build_suite_d_external_cases() -> List[ExternalTemCase]:
+    """合并 tem_truth.tsv 中的 Suite D 22 株 TEM 样本与 11 株短尾/无尾外部对照。"""
+    cases: List[ExternalTemCase] = [
+        ExternalTemCase(
+            name=rec.name,
+            acc=rec.accession,
+            expected=rec.morphotype,
+            tem_nm=rec.tem_nm,
+            tem_range=rec.tem_range,
+            source_note=rec.notes,
+            doi=rec.doi,
+            verification_status=rec.verification_status,
+            tem_state=rec.state,
+            includes_baseplate=rec.includes_baseplate,
+            tem_method=rec.method,
+        )
+        for rec in load_tem_truth_records(suite="suite_d")
+    ]
+    non_tem_controls = [
+        # --- Podoviridae-like 外部对照 (6 株) ---
+        ExternalTemCase("BUCT775", "PV277657", "Podoviridae-like", None, "12.31+-1.51", "2025 Acinetobacter Friunavirus podovirus"),
+        ExternalTemCase("Bhz16", "PV067733", "Podoviridae-like", None, "podovirus", "2025 Acinetobacter podovirus Bhz16"),
+        ExternalTemCase("epsilon15", "NC_004775", "Podoviridae-like", None, "short", "Salmonella temperate podovirus epsilon15"),
+        ExternalTemCase("phiKMV", "NC_005045", "Podoviridae-like", None, "short", "Pseudomonas Autoscriptoviridae phiKMV"),
+        ExternalTemCase("LUZ19", "NC_010326", "Podoviridae-like", None, "short", "Pseudomonas Autographiviridae LUZ19"),
+        ExternalTemCase("VpV262_N4", "NC_013651", "Podoviridae-like", None, "short", "Vibrio N4-like Schitoviridae"),
+        # --- Non-tailed 外部对照 (5 株) ---
+        ExternalTemCase("PR772", "AY441783", "Non-tailed", None, "tailless", "Tectiviridae lipid-containing tailless PR772"),
+        ExternalTemCase("MS2", "NC_001417", "Non-tailed", None, "tailless", "Fiersviridae +ssRNA tailless MS2"),
+        ExternalTemCase("phiCPAR39", "NC_002180", "Non-tailed", None, "tailless", "Chlamydia Microviridae tailless"),
+        ExternalTemCase("phiX174", "NC_001422", "Non-tailed", None, "tailless", "Escherichia Microviridae phiX174"),
+        ExternalTemCase("CTXphi", "NC_015209", "Non-tailed", None, "filamentous", "Vibrio Inoviridae filamentous CTXphi"),
+    ]
+    cases.extend(non_tem_controls)
+    return cases
 
 
 # 全新外部独立验证集 Suite D（33 株：100% 剔除原有 151 株；其中 14 株甚至不在本地 5000 株内）
-SUITE_D_EXTERNAL_CASES: List[ExternalTemCase] = [
-    # --- Myoviridae-like TEM 定量 (8 株) ---
-    ExternalTemCase("PaSz-1_45_92k", "MN871481", "Myoviridae-like", 102.0, "102", "2024-2025 UNVERIFIED Pseudomonas myovirus"),
-    ExternalTemCase("PaZh_1", "MN871489", "Myoviridae-like", 200.0, "200", "2024-2025 UNVERIFIED Pseudomonas jumbo myovirus"),
-    ExternalTemCase("Arash", "OQ632216", "Myoviridae-like", 140.47, "140.47+-1.05", "Salmonella myovirus OQ632216"),
-    ExternalTemCase("PseuGes_254", "OR575930", "Myoviridae-like", 139.6, "139.6+-5.6", "Pseudomonas gessardii myovirus OR575930"),
-    ExternalTemCase("VP882", "NC_009016", "Myoviridae-like", 156.0, "156+-8", "Vibrio 38kb small-genome myovirus"),
-    ExternalTemCase("PB1", "NC_011810", "Myoviridae-like", 140.0, "140", "Pseudomonas Pbunavirus PB1"),
-    ExternalTemCase("Bxz1", "NC_004687", "Myoviridae-like", 80.0, "80", "Mycobacterium I3-like short contractile tail"),
-    ExternalTemCase("RB49", "NC_005066", "Myoviridae-like", 113.5, "113-114", "Enterobacteria T4-superfamily myovirus RB49"),
-    # --- Siphoviridae-like TEM 定量 (14 株) ---
-    ExternalTemCase("Patience", "NC_023691", "Siphoviridae-like", 358.0, "358", "Mycobacterium ultra-long siphovirus"),
-    ExternalTemCase("PA_L9", "PP869205", "Siphoviridae-like", 300.0, "300", "2024-2025 Pseudomonas siphovirus"),
-    ExternalTemCase("BK5-T", "NC_002796", "Siphoviridae-like", 232.0, "232", "Lactococcus siphovirus BK5-T"),
-    ExternalTemCase("Giles", "NC_009993", "Siphoviridae-like", 205.0, "205", "Mycobacteriophage Giles"),
-    ExternalTemCase("r1t", "NC_004302", "Siphoviridae-like", 140.5, "140-141", "Lactococcus phage r1t historical GenBank"),
-    ExternalTemCase("2972", "NC_007019", "Siphoviridae-like", 260.0, "260", "Streptococcus thermophilus phage 2972"),
-    ExternalTemCase("Rosebush", "NC_004684", "Siphoviridae-like", 252.5, "252.5", "Mycobacteriophage Rosebush"),
-    ExternalTemCase("Corndog", "NC_004685", "Siphoviridae-like", 248.0, "248+-8", "Mycobacteriophage Corndog"),
-    ExternalTemCase("Chi", "NC_021315", "Siphoviridae-like", 225.0, "220-230", "Salmonella flagellotropic phage Chi"),
-    ExternalTemCase("Omega", "NC_004688", "Siphoviridae-like", 200.0, "200", "Mycobacteriophage Omega"),
-    ExternalTemCase("D3112", "NC_005178", "Siphoviridae-like", 190.0, "190", "Pseudomonas transposable siphovirus D3112 (split N+C ORFs)"),
-    ExternalTemCase("phi80", "NC_021190", "Siphoviridae-like", 149.0, "147-151", "Enterobacteria lambdoid phage phi80"),
-    ExternalTemCase("YuA", "NC_010116", "Siphoviridae-like", 145.0, "145", "Pseudomonas phage YuA"),
-    ExternalTemCase("Gamma", "NC_007458", "Siphoviridae-like", 200.0, "200-217", "Bacillus anthracis phage Gamma (Schuch 2006)"),
-    # --- Podoviridae-like 外部对照 (6 株) ---
-    ExternalTemCase("BUCT775", "PV277657", "Podoviridae-like", None, "12.31+-1.51", "2025 Acinetobacter Friunavirus podovirus"),
-    ExternalTemCase("Bhz16", "PV067733", "Podoviridae-like", None, "podovirus", "2025 Acinetobacter podovirus Bhz16"),
-    ExternalTemCase("epsilon15", "NC_004775", "Podoviridae-like", None, "short", "Salmonella temperate podovirus epsilon15"),
-    ExternalTemCase("phiKMV", "NC_005045", "Podoviridae-like", None, "short", "Pseudomonas Autoscriptoviridae phiKMV"),
-    ExternalTemCase("LUZ19", "NC_010326", "Podoviridae-like", None, "short", "Pseudomonas Autographiviridae LUZ19"),
-    ExternalTemCase("VpV262_N4", "NC_013651", "Podoviridae-like", None, "short", "Vibrio N4-like Schitoviridae"),
-    # --- Non-tailed 外部对照 (5 株) ---
-    ExternalTemCase("PR772", "AY441783", "Non-tailed", None, "tailless", "Tectiviridae lipid-containing tailless PR772"),
-    ExternalTemCase("MS2", "NC_001417", "Non-tailed", None, "tailless", "Fiersviridae +ssRNA tailless MS2"),
-    ExternalTemCase("phiCPAR39", "NC_002180", "Non-tailed", None, "tailless", "Chlamydia Microviridae tailless"),
-    ExternalTemCase("phiX174", "NC_001422", "Non-tailed", None, "tailless", "Escherichia Microviridae phiX174"),
-    ExternalTemCase("CTXphi", "NC_015209", "Non-tailed", None, "filamentous", "Vibrio Inoviridae filamentous CTXphi"),
-]
+SUITE_D_EXTERNAL_CASES: List[ExternalTemCase] = _build_suite_d_external_cases()
 
 
 def get_baseline_excluded_accs(local_fasta_index: Dict[str, Path]) -> Set[str]:
@@ -201,24 +209,61 @@ def prepare_suite_d_external(out_dir: Path = EXTERNAL_DATA_DIR) -> List[Dict[str
     return entries
 
 
-def sample_suite_c_unseen_local(
-    per_class: int = 40,
-    extra_excluded: Optional[Set[str]] = None,
+# 2025/08/10 INPHARED 发布日之后 NCBI 新公开的跨科完整基因组（Suite E 外部补充，24 株）
+# 格式: (name, acc, family, expected, source_note)
+SUITE_E_POST_2025_EXTERNAL: List[Tuple[str, str, str, str, str]] = [
+    # Myoviridae-like (6 株 / 6 科)
+    ("ELT2", "PQ469686", "Straboviridae", "Myoviridae-like", "Post-2025/08 Escherichia Straboviridae"),
+    ("Romulus", "PV821423", "Herelleviridae", "Myoviridae-like", "Post-2025/08 Staphylococcus Herelleviridae"),
+    ("PhiBP82.2", "PX400618", "Peduoviridae", "Myoviridae-like", "Post-2025/08 Burkholderia Peduoviridae"),
+    ("LL-5504721-AH", "PX277138", "Vandenendeviridae", "Myoviridae-like", "Post-2025/08 Pseudomonas Vandenendeviridae"),
+    ("E2005-A", "PX277137", "Lindbergviridae", "Myoviridae-like", "Post-2025/08 Pseudomonas Lindbergviridae"),
+    ("vB_CECAV_034", "PX411236", "Ackermannviridae", "Myoviridae-like", "Post-2025/08 Salmonella Ackermannviridae"),
+    # Siphoviridae-like (6 株 / 5 科 6 宿主)
+    ("KSP7", "PQ564757", "Demerecviridae", "Siphoviridae-like", "Post-2025/08 Salmonella Demerecviridae"),
+    ("vB_Kpn9997-EKp3", "QB005391", "Drexlerviridae", "Siphoviridae-like", "Post-2025/08 Klebsiella Drexlerviridae"),
+    ("PA14_MA16", "PZ585225", "Mesyanzhinovviridae", "Siphoviridae-like", "Post-2025/08 Pseudomonas Mesyanzhinovviridae"),
+    ("P09", "PX138300", "Aliceevansviridae", "Siphoviridae-like", "Post-2025/08 Streptococcus Aliceevansviridae"),
+    ("Odze", "PZ295849", "Casjensviridae", "Siphoviridae-like", "Post-2025/08 Aeromonas Casjensviridae"),
+    ("BCVI_Sma-b24phi", "PX828564", "Casjensviridae", "Siphoviridae-like", "Post-2025/08 Stenotrophomonas Casjensviridae"),
+    # Podoviridae-like (6 株 / 6 科 5 宿主)
+    ("UroKP46", "QB184940", "Autotranscriptaviridae", "Podoviridae-like", "Post-2025/08 Klebsiella Autotranscriptaviridae"),
+    ("ZamKleb01", "OZ562183", "Schitoviridae", "Podoviridae-like", "Post-2025/08 Klebsiella Schitoviridae"),
+    ("SA53-CTH4", "PZ593363", "Rountreeviridae", "Podoviridae-like", "Post-2025/08 Staphylococcus Rountreeviridae"),
+    ("P71S", "PX404141", "Zobellviridae", "Podoviridae-like", "Post-2025/08 Pseudomonas Zobellviridae"),
+    ("GH_01", "PX974340", "Salasmaviridae", "Podoviridae-like", "Post-2025/08 Bacillus Salasmaviridae"),
+    ("PhiCP17-i", "PV983592", "Guelinviridae", "Podoviridae-like", "Post-2025/08 Clostridium Guelinviridae"),
+    # Non-tailed (6 株 / 4 演化支)
+    ("RG2", "PX216439", "Inoviridae", "Non-tailed", "Post-2025/08 Xanthomonas Inoviridae"),
+    ("Ino_60253", "PX433842", "Inoviridae", "Non-tailed", "Post-2025/08 UNVERIFIED Inoviridae"),
+    ("Thayendanegea", "PZ531164", "Eubullaviridae", "Non-tailed", "Post-2025/08 Salmonella Microviricetes"),
+    ("PRD1-C1", "PX306536", "Tectiviridae", "Non-tailed", "Post-2025/08 Escherichia Alphatectivirus"),
+    ("ZRIMUP76", "PZ201852", "Tectiviridae", "Non-tailed", "Post-2025/08 Streptomyces Deltatectivirus"),
+    ("MAG_Levivir_03", "PZ823764", "Fiersviridae", "Non-tailed", "Post-2025/08 MAG +ssRNA Fiersviridae"),
+]
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 16), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sample_unseen_local_stratified(
+    per_class: int,
+    *,
+    excluded_accs: Set[str],
 ) -> List[Dict[str, object]]:
     """
-    从 F:\\Phage data 未测配对库（4,852 株）按 35+ ICTV 科轮转+宿主分散抽取跨科未知样本。
-    优先融合本地 phage_index.tsv 更新分类与 INPHARED 元数据，100% 排除基线及 Suite D。
+    从 F:\\Phage data 本地配对库中按扩展 ICTV 科轮转 + 宿主分散抽取分层未测样本，
+    严格保证与 excluded_accs 零交集。
     """
     local_fasta = {p.stem.split(".")[0]: p for p in LOCAL_FASTA_DIR.glob("*.fasta")}
     local_gbk = {p.stem.split(".")[0]: p for p in LOCAL_GBK_DIR.glob("*.gbk")}
     paired_accs = set(local_fasta) & set(local_gbk)
 
-    excluded = get_baseline_excluded_accs(local_fasta)
-    if extra_excluded:
-        excluded |= set(extra_excluded)
-    excluded |= {c.acc for c in SUITE_D_EXTERNAL_CASES}
-
-    # 先读取 INPHARED 做科/宿主补充索引
     inphared_tsv = PROJECT_ROOT / "database" / "pharokka_db" / "9Aug2025_data.tsv"
     inphared_meta: Dict[str, Tuple[str, str, str]] = {}
     if inphared_tsv.is_file():
@@ -236,7 +281,7 @@ def sample_suite_c_unseen_local(
     with LOCAL_INDEX_TSV.open("r", encoding="utf-8", errors="ignore", newline="") as fh:
         for row in csv.DictReader(fh, delimiter="\t"):
             acc = str(row.get("accession") or "").strip().split(".")[0]
-            if not acc or acc not in paired_accs or acc in excluded:
+            if not acc or acc not in paired_accs or acc in excluded_accs:
                 continue
             if row.get("is_phage") != "1":
                 continue
@@ -303,6 +348,159 @@ def sample_suite_c_unseen_local(
     return selected
 
 
+def sample_suite_c_unseen_local(
+    per_class: int = 40,
+    extra_excluded: Optional[Set[str]] = None,
+) -> List[Dict[str, object]]:
+    """
+    构建调参集 Suite C（每形态 40 株），100% 排除基线及 Suite D（不排除后续 Suite E，保持 C 可复现一致）。
+    """
+    local_fasta = {p.stem.split(".")[0]: p for p in LOCAL_FASTA_DIR.glob("*.fasta")}
+    excluded = get_baseline_excluded_accs(local_fasta)
+    if extra_excluded:
+        excluded |= set(extra_excluded)
+    excluded |= {c.acc for c in SUITE_D_EXTERNAL_CASES}
+    return _sample_unseen_local_stratified(per_class=per_class, excluded_accs=excluded)
+
+
+def _download_ncbi_pair(acc: str, fasta_dir: Path, gbk_dir: Path) -> Tuple[Path, Path]:
+    fa_path = fasta_dir / f"{acc}.fasta"
+    gb_path = gbk_dir / f"{acc}.gbk"
+    if not fa_path.is_file() or fa_path.stat().st_size < 200:
+        fa_txt = _fetch_ncbi_text(acc, "fasta")
+        if not fa_txt.startswith(">"):
+            raise RuntimeError(f"下载 FASTA 异常 ({acc}): {fa_txt[:120]}")
+        fa_path.write_text(fa_txt, encoding="utf-8")
+        time.sleep(0.35)
+    if not gb_path.is_file() or gb_path.stat().st_size < 400:
+        gb_txt = _fetch_ncbi_text(acc, "gbwithparts")
+        if "LOCUS " not in gb_txt[:200] or "ORIGIN" not in gb_txt:
+            raise RuntimeError(f"下载 GBK 异常 ({acc}): 缺少 LOCUS 或 ORIGIN")
+        gb_path.write_text(gb_txt, encoding="utf-8")
+        time.sleep(0.35)
+    return fa_path, gb_path
+
+
+def build_and_freeze_suite_e(
+    *,
+    local_per_class: int = 50,
+    manifest_path: Path = SUITE_E_FROZEN_MANIFEST,
+    external_dir: Path = SUITE_E_DATA_DIR,
+) -> List[Dict[str, object]]:
+    """
+    构建并永久冻结纯粹盲测集 Suite E（本地每形态 50 株 + 24 株 2025/08 后 NCBI 新株）。
+    若冻结清单已存在，则直接按清单加载并核验零重叠断言与文件 SHA256，绝不重新抽样改动名单。
+    """
+    local_fasta = {p.stem.split(".")[0]: p for p in LOCAL_FASTA_DIR.glob("*.fasta")}
+    local_gbk = {p.stem.split(".")[0]: p for p in LOCAL_GBK_DIR.glob("*.gbk")}
+
+    # 全量先前已用集合 = Suite A(120) + Suite B(30) + 单元测试排除 + Suite D(33) + Suite C(160)
+    suite_d_accs = {c.acc for c in SUITE_D_EXTERNAL_CASES}
+    suite_c_accs = {str(x["acc"]) for x in sample_suite_c_unseen_local(per_class=40, extra_excluded=suite_d_accs)}
+    all_prior_excluded = get_baseline_excluded_accs(local_fasta) | suite_d_accs | suite_c_accs
+
+    fasta_ext_dir = external_dir / "fasta"
+    gbk_ext_dir = external_dir / "gbk"
+    fasta_ext_dir.mkdir(parents=True, exist_ok=True)
+    gbk_ext_dir.mkdir(parents=True, exist_ok=True)
+
+    if manifest_path.is_file():
+        frozen = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entries: List[Dict[str, object]] = []
+        frozen_accs: Set[str] = set()
+        for rec in frozen["entries"]:
+            acc = str(rec["acc"])
+            frozen_accs.add(acc)
+            if rec["origin"] == "ncbi_post_202508":
+                fa_p, gb_p = _download_ncbi_pair(acc, fasta_ext_dir, gbk_ext_dir)
+            else:
+                if acc not in local_fasta or acc not in local_gbk:
+                    raise FileNotFoundError(f"冻结清单本地株缺失: {acc}")
+                fa_p, gb_p = local_fasta[acc], local_gbk[acc]
+            if _sha256_file(fa_p) != rec["fasta_sha256"] or _sha256_file(gb_p) != rec["gbk_sha256"]:
+                raise AssertionError(f"Suite E 文件 SHA256 哈希不一致 ({acc})，冻结集合已被改动！")
+            entries.append({
+                **rec,
+                "fasta_path": str(fa_p),
+                "gbk_path": str(gb_p),
+                "gbk_profile": inspect_gbk_annotation_profile(gb_p),
+            })
+        overlap = frozen_accs & all_prior_excluded
+        assert len(overlap) == 0, f"Suite E 与调参/基线集存在重叠: {sorted(overlap)}"
+        return entries
+
+    # 首次冻结构建
+    ext_accs = {acc for _, acc, _, _, _ in SUITE_E_POST_2025_EXTERNAL}
+    local_picks = _sample_unseen_local_stratified(
+        per_class=local_per_class,
+        excluded_accs=all_prior_excluded | ext_accs,
+    )
+
+    frozen_records: List[Dict[str, object]] = []
+    runtime_entries: List[Dict[str, object]] = []
+
+    for name, acc, fam, exp_m, note in SUITE_E_POST_2025_EXTERNAL:
+        if acc in all_prior_excluded or acc in local_fasta:
+            raise AssertionError(f"Suite E 外部株 {acc} 与本地或先前基准重叠！")
+        fa_p, gb_p = _download_ncbi_pair(acc, fasta_ext_dir, gbk_ext_dir)
+        rec = {
+            "acc": acc,
+            "origin": "ncbi_post_202508",
+            "family": fam,
+            "host": name,
+            "expected": exp_m,
+            "desc": note,
+            "fasta_sha256": _sha256_file(fa_p),
+            "gbk_sha256": _sha256_file(gb_p),
+        }
+        frozen_records.append(rec)
+        runtime_entries.append({
+            **rec,
+            "fasta_path": str(fa_p),
+            "gbk_path": str(gb_p),
+            "gbk_profile": inspect_gbk_annotation_profile(gb_p),
+        })
+
+    for item in local_picks:
+        acc = str(item["acc"])
+        fa_p = Path(str(item["fasta_path"]))
+        gb_p = Path(str(item["gbk_path"]))
+        rec = {
+            "acc": acc,
+            "origin": "local_unseen_pool",
+            "family": item["family"],
+            "host": item["host"],
+            "expected": item["expected"],
+            "desc": item["desc"],
+            "fasta_sha256": _sha256_file(fa_p),
+            "gbk_sha256": _sha256_file(gb_p),
+        }
+        frozen_records.append(rec)
+        runtime_entries.append({
+            **rec,
+            "fasta_path": str(fa_p),
+            "gbk_path": str(gb_p),
+            "gbk_profile": item["gbk_profile"],
+        })
+
+    e_accs = {str(r["acc"]) for r in frozen_records}
+    assert len(e_accs) == len(frozen_records), "Suite E 存在重复编号"
+    overlap = e_accs & all_prior_excluded
+    assert len(overlap) == 0, f"Suite E 与先验集合存在交集: {sorted(overlap)}"
+
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "frozen_version": "suite_e_v1",
+        "excluded_prior_count": len(all_prior_excluded),
+        "total_entries": len(frozen_records),
+        "external_post_202508_count": len(SUITE_E_POST_2025_EXTERNAL),
+        "local_unseen_count": len(local_picks),
+        "entries": frozen_records,
+    }
+    manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return runtime_entries
+
+
 if __name__ == "__main__":
     print("正在准备外部 NCBI 下载集 (Suite D)...")
     d_entries = prepare_suite_d_external()
@@ -313,3 +511,9 @@ if __name__ == "__main__":
     miss_t = sum(1 for e in c_entries if e["gbk_profile"]["missing_translation"])  # type: ignore[index]
     high_h = sum(1 for e in c_entries if e["gbk_profile"]["high_hyp_70"])  # type: ignore[index]
     print(f"Suite C 就绪: {len(c_entries)} 株, 覆盖 {len(fam_counts)} 个 ICTV 科, 缺/translation={miss_t}, hyp>=70%={high_h}")
+    print("正在构建/核验冻结盲测集 (Suite E)...")
+    e_entries = build_and_freeze_suite_e(local_per_class=50)
+    e_fams = Counter(str(e["family"]) for e in e_entries)
+    e_miss_t = sum(1 for e in e_entries if e["gbk_profile"]["missing_translation"])  # type: ignore[index]
+    e_high_h = sum(1 for e in e_entries if e["gbk_profile"]["high_hyp_70"])  # type: ignore[index]
+    print(f"Suite E 冻结就绪: {len(e_entries)} 株, 覆盖 {len(e_fams)} 个科, 缺/translation={e_miss_t}, hyp>=70%={e_high_h}")

@@ -16,6 +16,7 @@ import sys
 import time
 import urllib.request
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -41,6 +42,63 @@ LOCAL_FASTA_DIR = Path(r"F:\Phage data\fasta")
 BENCH_DIR = Path(r"F:\Phage data\benchmarks\phage_structure")
 TEM_FASTA_DIR = BENCH_DIR / "tem_refs"
 RESULTS_DIR = PROJECT_ROOT / "results" / "benchmarks" / "phage_structure"
+TEM_TRUTH_TSV = PROJECT_ROOT / "tests" / "fixtures" / "phage_structure" / "tem_truth.tsv"
+
+
+@dataclass(frozen=True)
+class TemTruthRecord:
+    """文献电镜 (TEM / Cryo-EM) 实测尾长标准真值记录。"""
+
+    suite: str
+    name: str
+    accession: str
+    morphotype: str
+    tem_nm: float
+    tem_range: str
+    state: str
+    includes_baseplate: str
+    method: str
+    doi: str
+    verification_status: str
+    notes: str
+
+
+def load_tem_truth_records(
+    suite: Optional[str] = None,
+    verified_only: bool = False,
+    tsv_path: Optional[Path] = None,
+) -> List[TemTruthRecord]:
+    """从版本化真值表 tem_truth.tsv 加载电镜尾长金标准集合。"""
+    target_path = tsv_path or TEM_TRUTH_TSV
+    if not target_path.is_file():
+        raise FileNotFoundError(f"缺失 TEM 真值表文件: {target_path}")
+    records: List[TemTruthRecord] = []
+    with target_path.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        for row in reader:
+            row_suite = (row.get("suite") or "").strip()
+            status = (row.get("verification_status") or "").strip()
+            if suite and row_suite != suite:
+                continue
+            if verified_only and status != "verified":
+                continue
+            records.append(
+                TemTruthRecord(
+                    suite=row_suite,
+                    name=(row.get("name") or "").strip(),
+                    accession=(row.get("accession") or "").strip(),
+                    morphotype=(row.get("morphotype") or "").strip(),
+                    tem_nm=float(row["tem_nm"]),
+                    tem_range=(row.get("tem_range") or "").strip(),
+                    state=(row.get("state") or "unknown").strip(),
+                    includes_baseplate=(row.get("includes_baseplate") or "unknown").strip(),
+                    method=(row.get("method") or "TEM").strip(),
+                    doi=(row.get("doi") or "").strip(),
+                    verification_status=status,
+                    notes=(row.get("notes") or "").strip(),
+                )
+            )
+    return records
 
 # 2022+ ICTV 权威形态明确科映射 (覆盖 27 个科)
 FAMILY_TO_MORPH: Dict[str, str] = {
@@ -76,39 +134,13 @@ FAMILY_TO_MORPH: Dict[str, str] = {
     "Corticoviridae": "Non-tailed",
 }
 
-# 已公开文献 TEM 实测尾长金标准 (nm)
+# 已公开文献 TEM 实测尾长金标准 (从 tem_truth.tsv 单点真源动态加载)
 # 格式: (name, acc_base, expected_morphotype, tem_mid_nm, tem_range_str, source_note)
+SUITE_B_TRUTH_RECORDS: List[TemTruthRecord] = load_tem_truth_records(suite="suite_b")
+TEM_TRUTH_BY_ACC: Dict[str, TemTruthRecord] = {r.accession: r for r in SUITE_B_TRUTH_RECORDS}
 TEM_REFERENCES: List[Tuple[str, str, str, float, str, str]] = [
-    ("T4", "NC_000866", "Myoviridae-like", 96.0, "92.5-100", "Extended sheath TEM/Cryo-EM"),
-    ("P2", "NC_001895", "Myoviridae-like", 135.0, "135", "Contractile tail"),
-    ("Mu", "NC_000929", "Myoviridae-like", 107.0, "100-114", "Contractile tail"),
-    ("SPO1", "NC_011421", "Myoviridae-like", 140.0, "130-150", "Bacillus phage SPO1"),
-    ("A511", "NC_009811", "Myoviridae-like", 204.0, "200-204", "Listeria phage A511 extended"),
-    ("FelixO1", "NC_005282", "Myoviridae-like", 113.0, "113-117", "Salmonella phage FelixO1"),
-    ("P1", "NC_005856", "Myoviridae-like", 245.0, "245", "Enterobacteria phage P1 Cryo-EM extended"),
-    ("Phage_K", "NC_005880", "Myoviridae-like", 210.0, "190-210", "Staphylococcus phage K"),
-    ("phiKZ", "NC_004629", "Myoviridae-like", 198.0, "180-215", "Pseudomonas jumbo phage phiKZ"),
-    ("Syn9", "NC_008296", "Myoviridae-like", 145.0, "120-150", "Cyanophage Syn9 TEM"),
-    ("S-PM2", "NC_006820", "Myoviridae-like", 180.0, "170-200", "Synechococcus phage S-PM2"),
-    ("Lambda", "NC_001416", "Siphoviridae-like", 150.0, "135-150", "Lambda tube ~150nm"),
-    ("T5", "NC_005859", "Siphoviridae-like", 160.0, "160", "Escherichia phage T5 tube"),
-    ("TP901-1", "NC_002747", "Siphoviridae-like", 118.0, "118-135", "Mahony/Pedersen WT TEM 118nm"),
-    ("SPP1", "NC_004166", "Siphoviridae-like", 188.0, "186-190", "Bacillus phage SPP1"),
-    ("T1", "NC_005833", "Siphoviridae-like", 160.0, "150-170", "Escherichia phage T1"),
-    ("L5", "NC_001335", "Siphoviridae-like", 135.0, "135", "Mycobacteriophage L5 ViralZone 135nm"),
-    ("Bxb1", "NC_002656", "Siphoviridae-like", 130.0, "130", "Mycobacteriophage Bxb1 ~130nm"),
-    ("HK97", "NC_002167", "Siphoviridae-like", 145.0, "140-150", "Enterobacteria phage HK97"),
-    ("Tuc2009", "NC_002703", "Siphoviridae-like", 160.0, "150-175", "Lactococcus phage Tuc2009"),
-    ("sk1", "NC_001835", "Siphoviridae-like", 135.0, "130-140", "Lactococcus phage sk1"),
-    ("bIL170", "NC_001909", "Siphoviridae-like", 126.0, "126", "Lactococcus phage bIL170"),
-    ("A118", "NC_003216", "Siphoviridae-like", 270.0, "261-278", "Listeria phage A118"),
-    ("phiC31", "NC_001978", "Siphoviridae-like", 100.0, "100", "Streptomyces phage phiC31"),
-    ("N15", "NC_001901", "Siphoviridae-like", 140.0, "140", "Coliphage N15"),
-    ("TM4", "NC_003387", "Siphoviridae-like", 190.0, "185-200", "Mycobacterium phage TM4"),
-    ("D29", "NC_001900", "Siphoviridae-like", 130.0, "100-160", "Mycobacterium phage D29"),
-    ("SPbeta", "NC_001884", "Siphoviridae-like", 339.0, "320-358", "Bacillus phage SPbeta"),
-    ("c2", "NC_001706", "Siphoviridae-like", 98.0, "86-111", "Lactococcus phage c2"),
-    ("P74-26", "NC_009804", "Siphoviridae-like", 850.0, "800-1000", "Thermus ultra-long tail Cryo-EM (ORF95=5006aa)"),
+    (r.name, r.accession, r.morphotype, r.tem_nm, r.tem_range, r.notes)
+    for r in SUITE_B_TRUTH_RECORDS
 ]
 
 # 仅在单元测试用过的代表株排除在 120 株未知抽样池外，保证真实泛化测试
@@ -361,27 +393,8 @@ def _pearson(xs: List[float], ys: List[float]) -> float:
     return num / den if den > 1e-12 else 0.0
 
 
-def evaluate_suite_b_tem(rows: List[Dict[str, Any]], tem_meta: Dict[str, Tuple[str, str, str, float, str, str]]) -> Dict[str, Any]:
-    paired: List[Dict[str, Any]] = []
-    for r in rows:
-        meta = tem_meta[r["acc"]]
-        name, _acc, exp_m, tem_nm, tem_rng, note = meta
-        tmp = r.get("tmp")
-        paired.append({
-            "name": name,
-            "acc": r["acc"],
-            "expected_morph": exp_m,
-            "pred_morph": r["predicted"],
-            "tem_nm": tem_nm,
-            "tem_range": tem_rng,
-            "tmp_aa": tmp["length_aa"] if tmp else None,
-            "est_0145_nm": tmp["est_tail_length_nm"] if tmp else None,
-            "polyx_aa": tmp["polyx_total_aa"] if tmp else None,
-            "tr_aa": tmp["tr_total_aa"] if tmp else None,
-            "evidence_kind": tmp["evidence_kind"] if tmp else None,
-            "note": note,
-        })
-
+def _compute_tem_regression_stats(paired: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """针对传入 TEM 样本对计算 Pearson r、MAE/MAPE 与分形态 LOOCV 指标。"""
     valid = [p for p in paired if p["tmp_aa"] is not None]
     xs = [float(p["tmp_aa"]) for p in valid]
     ys_true = [float(p["tem_nm"]) for p in valid]
@@ -389,7 +402,6 @@ def evaluate_suite_b_tem(rows: List[Dict[str, Any]], tem_meta: Dict[str, Tuple[s
     err_0145 = [abs(a - b) for a, b in zip(ys_0145, ys_true)]
     mape_0145 = [abs(a - b) / b * 100.0 for a, b in zip(ys_0145, ys_true)]
 
-    # 按形态拆开（Siphoviridae vs Myoviridae）分别看长度误差与拟合
     by_morph: Dict[str, Dict[str, float]] = {}
     for m in ("Myoviridae-like", "Siphoviridae-like"):
         sub = [p for p in valid if p["expected_morph"] == m]
@@ -405,7 +417,6 @@ def evaluate_suite_b_tem(rows: List[Dict[str, Any]], tem_meta: Dict[str, Tuple[s
                 "mean_signed_bias_nm": round(statistics.mean(a - b for a, b in zip(sp, sy)), 2),
             }
 
-    # 尝试最小二乘 LOOCV 线性回归 (区分全长拟合 vs 排除极长特例 P74-26)
     def loocv_linear(sub_x: List[float], sub_y: List[float]) -> Tuple[float, float, float, float]:
         loocv_err = []
         loocv_pct = []
@@ -426,8 +437,6 @@ def evaluate_suite_b_tem(rows: List[Dict[str, Any]], tem_meta: Dict[str, Tuple[s
         return round(slope, 5), round(inter, 2), round(statistics.mean(loocv_err), 2), round(statistics.mean(loocv_pct), 2)
 
     slope_all, inter_all, loocv_mae_all, loocv_mape_all = loocv_linear(xs, ys_true) if len(xs) >= 5 else (0.145, 0.0, 0.0, 0.0)
-
-    # 排除极端 P74-26 (>2500aa) 与分形态 LOOCV 验证真实日常有尾尺度精度
     normal_sub = [p for p in valid if p["tmp_aa"] <= 2500]
     loocv_normal = (
         loocv_linear([float(p["tmp_aa"]) for p in normal_sub], [float(p["tem_nm"]) for p in normal_sub])
@@ -451,7 +460,6 @@ def evaluate_suite_b_tem(rows: List[Dict[str, Any]], tem_meta: Dict[str, Tuple[s
             "bias": round(statistics.mean(a - b for a, b in zip(sp, sy)), 2),
         }
 
-    # 比较形态分组校准（Myo/Sipho 各自 1D LOOCV）vs 全局静态 0.145
     morph_loocv_abs_errs: List[float] = []
     morph_loocv_pct_errs: List[float] = []
     for sub in (myo_norm, sipho_norm):
@@ -470,9 +478,8 @@ def evaluate_suite_b_tem(rows: List[Dict[str, Any]], tem_meta: Dict[str, Tuple[s
                 morph_loocv_pct_errs.append(abs(pr - sy[i]) / sy[i] * 100.0)
 
     return {
-        "total_tem": len(paired),
-        "tmp_found_count": len(valid),
-        "morph_correct": sum(1 for p in paired if p["pred_morph"] == p["expected_morph"]),
+        "n_paired": len(paired),
+        "n_tmp_found": len(valid),
         "pearson_r_all": round(_pearson(xs, ys_true), 4) if len(xs) >= 3 else 0.0,
         "mae_0145_nm": round(statistics.mean(err_0145), 2) if err_0145 else 0.0,
         "mape_0145_pct": round(statistics.mean(mape_0145), 2) if mape_0145 else 0.0,
@@ -494,6 +501,60 @@ def evaluate_suite_b_tem(rows: List[Dict[str, Any]], tem_meta: Dict[str, Tuple[s
             "loocv_mape_pct": round(statistics.mean(morph_loocv_pct_errs), 2) if morph_loocv_pct_errs else 0.0,
         },
         "by_morph": by_morph,
+    }
+
+
+def evaluate_suite_b_tem(rows: List[Dict[str, Any]], tem_meta: Dict[str, Tuple[str, str, str, float, str, str]]) -> Dict[str, Any]:
+    paired: List[Dict[str, Any]] = []
+    for r in rows:
+        meta = tem_meta[r["acc"]]
+        name, acc_key, exp_m, tem_nm, tem_rng, note = meta
+        truth_rec = TEM_TRUTH_BY_ACC.get(acc_key)
+        tmp = r.get("tmp")
+        paired.append({
+            "name": name,
+            "acc": acc_key,
+            "expected_morph": exp_m,
+            "pred_morph": r["predicted"],
+            "tem_nm": tem_nm,
+            "tem_range": tem_rng,
+            "verification_status": truth_rec.verification_status if truth_rec else "unverified",
+            "doi": truth_rec.doi if truth_rec else "",
+            "tem_state": truth_rec.state if truth_rec else "unknown",
+            "includes_baseplate": truth_rec.includes_baseplate if truth_rec else "unknown",
+            "tem_method": truth_rec.method if truth_rec else "TEM",
+            "tmp_aa": tmp["length_aa"] if tmp else None,
+            "est_0145_nm": tmp["est_tail_length_nm"] if tmp else None,
+            "polyx_aa": tmp["polyx_total_aa"] if tmp else None,
+            "tr_aa": tmp["tr_total_aa"] if tmp else None,
+            "evidence_kind": tmp["evidence_kind"] if tmp else None,
+            "note": note,
+        })
+
+    verified_paired = [p for p in paired if p["verification_status"] == "verified"]
+    unverified_items = [{"name": p["name"], "acc": p["acc"], "tem_nm": p["tem_nm"]} for p in paired if p["verification_status"] != "verified"]
+
+    # 主定量统计严格仅纳入 verified 真值，避免未核实文献噪声误导回归校准
+    primary_stats = _compute_tem_regression_stats(verified_paired if verified_paired else paired)
+    all_stats = _compute_tem_regression_stats(paired)
+
+    return {
+        "total_tem": len(paired),
+        "verified_total": len(verified_paired),
+        "verified_tmp_found_count": primary_stats["n_tmp_found"],
+        "tmp_found_count": all_stats["n_tmp_found"],
+        "morph_correct": sum(1 for p in paired if p["pred_morph"] == p["expected_morph"]),
+        "unverified_excluded_count": len(unverified_items),
+        "unverified_excluded": unverified_items,
+        "pearson_r_all": primary_stats["pearson_r_all"],
+        "mae_0145_nm": primary_stats["mae_0145_nm"],
+        "mape_0145_pct": primary_stats["mape_0145_pct"],
+        "standard_range_le2500aa": primary_stats["standard_range_le2500aa"],
+        "loocv_linear_fit_all": primary_stats["loocv_linear_fit_all"],
+        "loocv_linear_fit_le2500aa": primary_stats["loocv_linear_fit_le2500aa"],
+        "loocv_morph_stratified_le2500aa": primary_stats["loocv_morph_stratified_le2500aa"],
+        "by_morph": primary_stats["by_morph"],
+        "all_entries_incl_unverified": all_stats,
         "details": paired,
     }
 
@@ -564,8 +625,13 @@ def main() -> None:
     print(f"误判样本数: {len(suite_a_report['errors'])}")
     for e in suite_a_report["errors"][:15]:
         print(f"  ERR: {e['acc']} ({e['family']}, host={e['host']}) exp={e['expected']} -> pred={e['predicted']} scores={e['scores']} conn={e['connector']} ptf={e['ptf_cnt']}")
-    print(f"\n[Suite B] TEM 实测尾长验证 ({suite_b_report['tmp_found_count']}/{suite_b_report['total_tem']} 检出TMP, 形态正确 {suite_b_report['morph_correct']}/{suite_b_report['total_tem']}):")
-    print(f"  Pearson r={suite_b_report['pearson_r_all']}, MAE(0.145)={suite_b_report['mae_0145_nm']}nm, MAPE(0.145)={suite_b_report['mape_0145_pct']}%")
+    print(
+        f"\n[Suite B] TEM 实测尾长验证 (verified={suite_b_report['verified_tmp_found_count']}/{suite_b_report['verified_total']}, "
+        f"all={suite_b_report['tmp_found_count']}/{suite_b_report['total_tem']}, 剔除unverified={suite_b_report['unverified_excluded_count']}, "
+        f"形态正确 {suite_b_report['morph_correct']}/{suite_b_report['total_tem']}):"
+    )
+    print(f"  Verified Pearson r={suite_b_report['pearson_r_all']}, MAE(0.145)={suite_b_report['mae_0145_nm']}nm, MAPE(0.145)={suite_b_report['mape_0145_pct']}%")
+    print(f"  All-Incl-Unverified Summary: r={suite_b_report['all_entries_incl_unverified']['pearson_r_all']}, MAE={suite_b_report['all_entries_incl_unverified']['mae_0145_nm']}nm, MAPE={suite_b_report['all_entries_incl_unverified']['mape_0145_pct']}%")
     print(f"  Standard <=2500aa (0.145): {suite_b_report['standard_range_le2500aa']}")
     print(f"  By Morph: {suite_b_report['by_morph']}")
     print(f"  LOOCV Fit All: {suite_b_report['loocv_linear_fit_all']}")
