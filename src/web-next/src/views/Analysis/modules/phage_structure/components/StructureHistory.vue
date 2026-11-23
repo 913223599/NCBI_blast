@@ -31,10 +31,10 @@ function statusLabel(item: StructureTaskHistoryItem): string {
 }
 
 function sourceModeText(mode: string): string {
-  if (mode === 'annotation') return '注释导入'
-  if (mode === 'phage_discovery') return '前噬菌体联动'
-  if (mode === 'paste') return '文本粘贴'
-  return '本地文件'
+  if (mode === 'annotation') return '注释'
+  if (mode === 'phage_discovery') return '前噬菌体'
+  if (mode === 'paste') return '粘贴'
+  return '文件'
 }
 </script>
 
@@ -82,6 +82,15 @@ function sourceModeText(mode: string): string {
           {{ getMorphotypeTheme(item.summary.primary_morphotype).shortLabel }}
         </span>
         <span class="src-tag">{{ sourceModeText(item.source_mode) }}</span>
+        <span v-if="item.status === 'completed' && item.summary?.estimated_tail_length_nm != null" class="len-txt">
+          {{ item.summary.estimated_tail_length_nm }} nm
+        </span>
+        <span v-else-if="item.status === 'completed' && item.summary?.primary_morphotype === 'Podoviridae-like'" class="len-txt">
+          10–25 nm
+        </span>
+        <span v-else-if="item.status === 'completed' && item.summary?.primary_morphotype === 'Non-tailed'" class="len-txt">
+          无尾
+        </span>
       </div>
 
       <div v-if="item.status === 'running' || item.status === 'queued'" class="mini-progress-wrap">
@@ -97,17 +106,8 @@ function sourceModeText(mode: string): string {
         </div>
       </div>
 
-      <div class="item-foot">
-        <span v-if="item.status === 'completed' && item.summary?.estimated_tail_length_nm != null">
-          尾长约 {{ item.summary.estimated_tail_length_nm }} nm
-        </span>
-        <span v-else-if="item.status === 'completed' && item.summary?.primary_morphotype === 'Podoviridae-like'">
-          短尾约 10–25 nm（无 TMP 标尺）
-        </span>
-        <span v-else-if="item.status === 'completed' && item.summary?.primary_morphotype === 'Non-tailed'">
-          无复合尾器 (0 nm)
-        </span>
-        <span v-else>{{ item.created_at?.slice(5, 16) || '' }}</span>
+      <div v-if="item.status !== 'completed'" class="item-foot">
+        <span>{{ item.created_at?.slice(5, 16) || '' }}</span>
       </div>
     </div>
   </div>
@@ -117,7 +117,7 @@ function sourceModeText(mode: string): string {
 .history-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 
 .empty-history {
@@ -131,7 +131,7 @@ function sourceModeText(mode: string): string {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 7px 9px;
   cursor: pointer;
   transition: all 0.16s ease;
 }
@@ -155,7 +155,7 @@ function sourceModeText(mode: string): string {
 }
 
 .item-name {
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: #1e293b;
   overflow: hidden;
@@ -183,7 +183,13 @@ function sourceModeText(mode: string): string {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin-top: 6px;
+  margin-top: 4px;
+}
+
+.len-txt {
+  font-size: 0.72rem;
+  color: #64748b;
+  align-self: center;
 }
 
 .status-pill,
@@ -231,7 +237,7 @@ function sourceModeText(mode: string): string {
 }
 
 .item-foot {
-  margin-top: 6px;
+  margin-top: 3px;
   font-size: 0.74rem;
   color: #64748b;
 }

@@ -426,3 +426,33 @@
   - 后端全量测试：`.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v` **`22 passed in 141.25s`**（含 `test_t2_2_v2_fine_role_probe_and_fragment_abstention` 实测真 V2 bundle 7 kb 非结构碎片拒识与 `ANNO_NC_005859` 零 HMM 盲测救援）；
   - 前端验证：`npx vitest run` **`9 files, 54 passed in 3.03s`**；`npm run build`（`vue-tsc -b && vite build`）`19.79s` 构建通过。
   - 合规审计：涉及前后端源码、脚本、单测、报告及文档全部通过 `UTF-8` 无 BOM、零 Emoji 及 Python AST 语法校验。
+
+---
+
+## 14. 步骤 64：结构预测模块界面精简与紧凑布局（2026-11-23）
+
+围绕“减少无意义形容与长说明文案、压缩留白以提升单屏信息密度”的需求，仅修改 `src/web-next/src/views/Analysis/modules/phage_structure/` 展示层文案与样式，不改动数据结构、接口字段、props/emit 或后端逻辑。
+
+### 14.1 改动文件清单（共 8 个前端文件）
+* 布局框架：[PhageStructureModule.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/PhageStructureModule.vue)
+* 左侧记录：[StructureHistory.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureHistory.vue)
+* 任务配置：[StructureSetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureSetup.vue)
+* 结果看板：[StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue)
+* 图形组件：[TailMorphotypeDiagram.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/TailMorphotypeDiagram.vue)、[StructuralOperonTrack.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructuralOperonTrack.vue)、[TmpRulerChart.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/TmpRulerChart.vue)
+* 工具文案：[utils.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/utils.ts)（仅精简 `buildModuleMatrixCards` 标题）
+
+### 14.2 布局收紧与代表性文案精简对照
+* **间距与布局原则**：左侧记录栏宽度由 `290px` 收缩至 `240px`，网格与主内容间距收紧至 `12px / 10px`；外框内边距、各面板与 KPI 卡片内边距压缩约 `30%–40%`；任务名改为左标签右输入框单行排布；已完成历史记录将尾长并入状态标签行消除独立底栏；删除设置页横幅长描述、拖拽副标题以及形态图/基因轨道/TMP 标尺卡片副标题，`TailMorphotypeDiagram` SVG 最大高度由 `174px` 降至 `130px`。
+
+| 模块区域 | 优化前文案 | 优化后文案 |
+|---|---|---|
+| 设置页横幅与状态标签 | `噬菌体尾部形态与结构定标预测` + 长说明；`WSL PyHMMER 就绪` / `AI 双轨分类器已就绪` | `尾部形态与结构预测`（删长说明）；`PyHMMER` / `AI 分类器` |
+| 设置页输入模式切换 | `批量上传 / 拖拽 FASTA · GBK · FAA`、`从历史功能注释批量导入` | `文件上传`、`粘贴序列`、`注释导入`、`前噬菌体导入` |
+| 结果页 KPI 与模块标题 | `主导尾部形态判别`、`六大结构组件检出矩阵`、`多证据分型竞争打分` | `形态`、`结构模块`、`形态得分` |
+| 结果页 AI 卡片与证据 | `AI 双轨校准概率与规则一致性`、`双模态融合 (Deep + 结构证据)` | `AI 分类`、`融合` / `纯 AI（无 HMM）`、`判定证据 (N)` |
+| 历史卡片来源与尾长 | 独立尾长行 `短尾约 10–25 nm（无 TMP 标尺）` / `前噬菌体联动` | 并入标签行 `10–25 nm` / `前噬菌体` |
+
+### 14.3 验证与合规审计
+* **前端单元测试**：`npx vitest run` **`9 files, 54 passed in 2.12s`**（`phageStructureUtils.test.ts` 全部通过）。
+* **类型与生产构建**：`npm run build`（`vue-tsc -b && vite build`）**`built in 25.56s`**，0 类型错误，0 构建报错，`src/web-next/dist/` 已刷新。
+* **合规扫描**：全部 8 个改动前端文件及本留档文档通过 `UTF-8` 无 BOM 与零 Emoji 校验；旧文案常量 `未显式检出` 全局搜索清零。

@@ -149,7 +149,7 @@ export function buildModuleMatrixCards(matrix: StructuralModuleMatrix): ModuleMa
   return [
     {
       key: 'head',
-      title: '头部与包装模块',
+      title: '头部/包装',
       count: matrix.head_packaging_count,
       detail: 'Portal / TerL / MCP',
       color: '#0ea5e9',
@@ -157,7 +157,7 @@ export function buildModuleMatrixCards(matrix: StructuralModuleMatrix): ModuleMa
     },
     {
       key: 'connector',
-      title: '头-尾连接器模块',
+      title: '连接器',
       count: matrix.connector_count,
       detail: 'Virfam Ad1-3 / Hc1-3 / Neck1',
       color: '#8b5cf6',
@@ -165,7 +165,7 @@ export function buildModuleMatrixCards(matrix: StructuralModuleMatrix): ModuleMa
     },
     {
       key: 'myo',
-      title: '肌尾收缩装置',
+      title: '肌尾组件',
       count: matrix.tail_sheath_count + matrix.tail_tube_count + matrix.baseplate_count,
       detail: `TSP x${matrix.tail_sheath_count} · TTP x${matrix.tail_tube_count} · 基板 x${matrix.baseplate_count}`,
       color: '#2563eb',
@@ -173,7 +173,7 @@ export function buildModuleMatrixCards(matrix: StructuralModuleMatrix): ModuleMa
     },
     {
       key: 'sipho',
-      title: '长尾 / 尺蛋白组件',
+      title: '长尾/TMP',
       count: matrix.major_tail_count + matrix.tail_assembly_chaperone_count + matrix.tape_measure_count,
       detail: `MTP x${matrix.major_tail_count} · TAP x${matrix.tail_assembly_chaperone_count} · TMP x${matrix.tape_measure_count}`,
       color: '#16a34a',
@@ -181,7 +181,7 @@ export function buildModuleMatrixCards(matrix: StructuralModuleMatrix): ModuleMa
     },
     {
       key: 'podo',
-      title: '短尾特异注入模块',
+      title: '短尾注入',
       count: matrix.tail_tubular_ab_count + matrix.internal_virion_count + matrix.tail_needle_count,
       detail: `TTPA/B x${matrix.tail_tubular_ab_count} · 内核心 x${matrix.internal_virion_count} · 尾针 x${matrix.tail_needle_count}`,
       color: '#ea580c',
@@ -189,7 +189,7 @@ export function buildModuleMatrixCards(matrix: StructuralModuleMatrix): ModuleMa
     },
     {
       key: 'rbp_lysis',
-      title: '尾丝吸附与裂解',
+      title: '尾丝/裂解',
       count: matrix.tail_fiber_rbp_count + matrix.lysis_count,
       detail: `RBP/尾丝 x${matrix.tail_fiber_rbp_count} · 裂解/整合酶 x${matrix.lysis_count + matrix.integrase_count}`,
       color: '#0d9488',

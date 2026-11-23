@@ -202,14 +202,14 @@ async function handleOpenViewer(): Promise<void> {
 <style scoped>
 .structure-module-container {
   width: 100%;
-  padding: 20px 24px 40px 24px;
+  padding: 12px 16px 24px 16px;
   box-sizing: border-box;
 }
 
 .desktop-layout {
   display: grid;
-  grid-template-columns: 290px 1fr;
-  gap: 20px;
+  grid-template-columns: 240px 1fr;
+  gap: 12px;
   align-items: start;
 }
 
@@ -217,7 +217,7 @@ async function handleOpenViewer(): Promise<void> {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  padding: 14px;
+  padding: 10px;
   position: sticky;
   top: 14px;
   max-height: calc(100vh - 140px);
@@ -230,7 +230,7 @@ async function handleOpenViewer(): Promise<void> {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .sidebar-title {
@@ -320,7 +320,7 @@ async function handleOpenViewer(): Promise<void> {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .error-banner {

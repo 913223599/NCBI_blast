@@ -91,7 +91,7 @@ const filteredProteins = computed(() => {
 
 <template>
   <div class="results-root">
-    <div v-if="isLoading" class="loading-box">正在载入结构与尾部形态解析报告...</div>
+    <div v-if="isLoading" class="loading-box">加载中...</div>
 
     <template v-else-if="result && activeContig">
       <!-- 1. 顶部操作工具栏 -->
@@ -125,11 +125,11 @@ const filteredProteins = computed(() => {
             class="primary-btn"
             @click="emit('open-viewer')"
           >
-            在基因组图谱中查看
+            图谱查看
           </button>
-          <button type="button" class="act-btn" @click="emit('download', 'summary_tsv')">形态汇总 TSV</button>
-          <button type="button" class="act-btn" @click="emit('download', 'features_tsv')">结构基因 TSV</button>
-          <button type="button" class="act-btn" @click="emit('download', 'tmp_tsv')">TMP 标尺 TSV</button>
+          <button type="button" class="act-btn" @click="emit('download', 'summary_tsv')">汇总 TSV</button>
+          <button type="button" class="act-btn" @click="emit('download', 'features_tsv')">基因 TSV</button>
+          <button type="button" class="act-btn" @click="emit('download', 'tmp_tsv')">TMP TSV</button>
           <button type="button" class="act-btn" @click="emit('download', 'json')">JSON</button>
           <button type="button" class="act-btn" @click="emit('open-folder')">打开目录</button>
         </div>
@@ -137,7 +137,7 @@ const filteredProteins = computed(() => {
 
       <!-- 多 Contig 选择条 -->
       <div v-if="result.contigs.length > 1" class="contig-switcher">
-        <span class="cs-label">切换预测 Contig ({{ result.contigs.length }}):</span>
+        <span class="cs-label">Contig ({{ result.contigs.length }}):</span>
         <button
           v-for="c in result.contigs"
           :key="c.contig_id"
@@ -153,36 +153,33 @@ const filteredProteins = computed(() => {
       <!-- 2. 核心 4 大 KPI 看板 -->
       <div class="kpi-grid">
         <div class="kpi-card highlight" :style="{ borderColor: theme.badgeBorder }">
-          <div class="k-lbl">主导尾部形态判别</div>
+          <div class="k-lbl">形态</div>
           <div class="k-val" :style="{ color: theme.accentColor }">
             {{ activeContig.prediction.morphotype_code }}
           </div>
           <div class="k-sub">{{ activeContig.prediction.tail_feature_tag }}</div>
         </div>
         <div class="kpi-card">
-          <div class="k-lbl">融合置信度 / 生活史倾向</div>
+          <div class="k-lbl">置信度</div>
           <div class="k-val">{{ (activeContig.prediction.confidence * 100).toFixed(1) }}%</div>
-          <div class="k-sub">生活史推论: {{ activeContig.prediction.lifestyle_hint }}</div>
+          <div class="k-sub">生活史: {{ activeContig.prediction.lifestyle_hint }}</div>
         </div>
         <div class="kpi-card">
-          <div class="k-lbl">TMP 推算理论尾长</div>
+          <div class="k-lbl">尾长</div>
           <div class="k-val">
             {{
               activeContig.prediction.estimated_tail_length_nm != null
                 ? `${activeContig.prediction.estimated_tail_length_nm} nm`
                 : activeContig.prediction.morphotype_code === 'Podoviridae-like'
-                  ? '短尾无 TMP 标尺'
+                  ? '10–25 nm'
                   : activeContig.prediction.morphotype_code === 'Non-tailed'
-                    ? '无复合尾器'
+                    ? '无尾'
                     : '未定标'
             }}
           </div>
-          <div class="k-sub">
+          <div v-if="activeContig.prediction.morphotype_code !== 'Non-tailed'" class="k-sub">
             <template v-if="activeContig.prediction.morphotype_code === 'Podoviridae-like'">
-              典型短尾物理长度约 10–25 nm（非卷尺蛋白定长）
-            </template>
-            <template v-else-if="activeContig.prediction.morphotype_code === 'Non-tailed'">
-              非有尾噬菌体构型，无尾部尺度结构 (0 nm)
+              短尾，无 TMP
             </template>
             <template v-else>
               {{
@@ -195,10 +192,10 @@ const filteredProteins = computed(() => {
           </div>
         </div>
         <div class="kpi-card">
-          <div class="k-lbl">基因组与 PHROG 识别率</div>
+          <div class="k-lbl">基因组</div>
           <div class="k-val">{{ formatGenomeBp(activeContig.length_bp) }}</div>
           <div class="k-sub">
-            GC {{ activeContig.gc_percent }}% · 结构注释 {{ activeContig.hmm_matched_orfs }} / {{ activeContig.total_orfs }} ORF · 密码表 Table {{ activeContig.genetic_code_used ?? 11 }}<template v-if="activeContig.completeness"> · 完整度: {{ formatCompletenessStatus(activeContig.completeness.status) }}</template>
+            GC {{ activeContig.gc_percent }}% · 结构 {{ activeContig.hmm_matched_orfs }}/{{ activeContig.total_orfs }} ORF · Table {{ activeContig.genetic_code_used ?? 11 }}<template v-if="activeContig.completeness"> · {{ formatCompletenessStatus(activeContig.completeness.status) }}</template>
           </div>
         </div>
       </div>
@@ -206,7 +203,7 @@ const filteredProteins = computed(() => {
       <!-- 3. 警告提示区 -->
       <div v-if="activeContig.prediction.warnings.length > 0" class="warn-box">
         <div v-for="(w, idx) in activeContig.prediction.warnings" :key="idx" class="warn-line">
-          [复核提示] {{ w }}
+          {{ w }}
         </div>
       </div>
 
@@ -222,7 +219,7 @@ const filteredProteins = computed(() => {
       <!-- 5. 6大核心功能模块状态矩阵 + 形态得分竞争柱 -->
       <div class="split-row">
         <div class="panel-box">
-          <h4>六大结构组件检出矩阵</h4>
+          <h4>结构模块</h4>
           <div class="matrix-grid">
             <div
               v-for="m in moduleCards"
@@ -241,7 +238,7 @@ const filteredProteins = computed(() => {
         </div>
 
         <div class="panel-box">
-          <h4>多证据分型竞争打分</h4>
+          <h4>形态得分</h4>
           <div class="score-bars">
             <div v-for="sc in classScoreEntries" :key="sc.code" class="sc-row">
               <div class="sc-meta">
@@ -257,7 +254,7 @@ const filteredProteins = computed(() => {
             </div>
           </div>
           <div class="basis-box">
-            <strong>主要判定依据：</strong>{{ activeContig.prediction.decision_basis }}
+            <strong>依据：</strong>{{ activeContig.prediction.decision_basis }}
           </div>
         </div>
       </div>
@@ -266,7 +263,7 @@ const filteredProteins = computed(() => {
       <div v-if="activeContig.ai_prediction" class="panel-box ai-panel">
         <div class="ai-head">
           <div class="ai-title-wrap">
-            <h4>AI 双轨校准概率与规则一致性</h4>
+            <h4>AI 分类</h4>
             <span class="ai-ver-tag">{{ activeContig.ai_prediction.model_version }}</span>
           </div>
           <div class="ai-badges">
@@ -276,8 +273,8 @@ const filteredProteins = computed(() => {
             >
               {{
                 activeContig.ai_prediction.mode === 'ai_deep_only'
-                  ? '纯 AI 深度推断 (零 HMM 救回)'
-                  : '双模态融合 (Deep + 结构证据)'
+                  ? '纯 AI（无 HMM）'
+                  : '融合'
               }}
             </span>
             <span
@@ -292,10 +289,10 @@ const filteredProteins = computed(() => {
             >
               {{
                 activeContig.ai_prediction.abstained
-                  ? '高不确定度 · 保守拒识 (Incomplete)'
+                  ? '拒识 (Incomplete)'
                   : activeContig.ai_prediction.agreement_with_rules
-                    ? '与规则引擎结论一致'
-                    : '与规则引擎存在分歧'
+                    ? '与规则一致'
+                    : '与规则不一致'
               }}
             </span>
           </div>
@@ -319,22 +316,22 @@ const filteredProteins = computed(() => {
 
           <div class="ai-side-meta">
             <div class="ai-stat-row">
-              <span>AI 推荐形态：</span>
+              <span>AI 判定：</span>
               <strong>
                 {{ getMorphotypeTheme(activeContig.ai_prediction.predicted_morphotype).shortLabel }}
                 ({{ (activeContig.ai_prediction.confidence * 100).toFixed(1) }}%)
               </strong>
             </div>
             <div class="ai-stat-row">
-              <span>UnifiedJudge V4.3 尾部最高语义概率：</span>
+              <span>尾部语义最高概率：</span>
               <span class="mono">{{ (activeContig.ai_prediction.deep_tail_prob_max * 100).toFixed(1) }}%</span>
             </div>
             <div class="ai-stat-row">
-              <span>UnifiedJudge V4.3 头部最高语义概率：</span>
+              <span>头部语义最高概率：</span>
               <span class="mono">{{ (activeContig.ai_prediction.deep_head_prob_max * 100).toFixed(1) }}%</span>
             </div>
             <div v-if="activeContig.ai_prediction.entropy_norm !== undefined" class="ai-stat-row">
-              <span>预测分布归一化香农熵：</span>
+              <span>归一化熵：</span>
               <span class="mono">{{ Number(activeContig.ai_prediction.entropy_norm).toFixed(3) }}</span>
             </div>
             <div v-if="activeContig.ai_prediction.conflict_note" class="ai-conflict-note">
@@ -346,7 +343,7 @@ const filteredProteins = computed(() => {
 
       <!-- 6. 证据链明细 -->
       <div class="panel-box">
-        <h4>可解释推理证据链 ({{ activeContig.prediction.evidence_chain.length }} 项命中规则)</h4>
+        <h4>判定证据 ({{ activeContig.prediction.evidence_chain.length }})</h4>
         <div class="ev-list">
           <div v-for="(ev, idx) in activeContig.prediction.evidence_chain" :key="idx" class="ev-row">
             <span
@@ -370,19 +367,19 @@ const filteredProteins = computed(() => {
         class="panel-box"
       >
         <h4>
-          PhageTailFinder 双状态 HMM 尾部基因簇预测
-          <span class="ptf-head-tag">共识别 {{ activeContig.ptf_tail_protein_count ?? 0 }} 个尾部关联 ORF</span>
+          PhageTailFinder 尾部簇
+          <span class="ptf-head-tag">{{ activeContig.ptf_tail_protein_count ?? 0 }} 个尾部 ORF</span>
         </h4>
         <div v-if="(activeContig.ptf_tail_clusters?.length ?? 0) === 0" class="ptf-note">
-          未形成连续尾部蛋白簇（仅零星散在候选蛋白）。
+          无连续尾部簇
         </div>
         <div v-else class="ptf-grid">
           <div v-for="cl in activeContig.ptf_tail_clusters || []" :key="cl.cluster_id" class="ptf-card">
             <div class="ptf-top">
               <strong>{{ cl.cluster_id }}</strong>
-              <span class="ptf-prob">平均尾概率 {{ (cl.mean_tail_prob * 100).toFixed(1) }}%</span>
+              <span class="ptf-prob">尾概率 {{ (cl.mean_tail_prob * 100).toFixed(1) }}%</span>
             </div>
-            <div class="ptf-coord">{{ cl.start_bp }}..{{ cl.end_bp }} bp ({{ cl.orf_count }} ORF · 新颖未知 x{{ cl.novel_orf_count }})</div>
+            <div class="ptf-coord">{{ cl.start_bp }}..{{ cl.end_bp }} bp · {{ cl.orf_count }} ORF · 新颖 {{ cl.novel_orf_count }}</div>
             <div class="ptf-loci">{{ cl.loci.slice(0, 8).join(', ') }}{{ cl.loci.length > 8 ? ` (+${cl.loci.length - 8})` : '' }}</div>
           </div>
         </div>
@@ -400,13 +397,13 @@ const filteredProteins = computed(() => {
       <!-- 9. 特征结构蛋白明细表 -->
       <div class="panel-box">
         <div class="tbl-head">
-          <h4>结构与辅助功能蛋白明细 ({{ filteredProteins.length }})</h4>
+          <h4>结构蛋白 ({{ filteredProteins.length }})</h4>
           <div class="tbl-controls">
             <select v-model="roleFilter" class="filter-sel">
-              <option value="STRUCTURAL">仅展示结构 / 连接 / 尾部特征 ORF</option>
-              <option value="ALL">展示全部预测 ORF</option>
+              <option value="STRUCTURAL">仅结构/尾部 ORF</option>
+              <option value="ALL">全部 ORF</option>
             </select>
-            <input v-model="searchText" type="text" class="search-inp" placeholder="搜索基因、PHROG 或产物名称..." />
+            <input v-model="searchText" type="text" class="search-inp" placeholder="搜索基因 / PHROG / 产物" />
           </div>
         </div>
         <div class="tbl-wrap">
@@ -416,11 +413,11 @@ const filteredProteins = computed(() => {
                 <th>Locus Tag</th>
                 <th>区间 (bp)</th>
                 <th>长度 (aa)</th>
-                <th>结构角色分类</th>
+                <th>结构角色</th>
                 <th>PHROG ID</th>
                 <th>HMM Score</th>
                 <th>PhageTailFinder</th>
-                <th>蛋白产物注释</th>
+                <th>注释</th>
                 <th>来源</th>
               </tr>
             </thead>
@@ -454,7 +451,7 @@ const filteredProteins = computed(() => {
 .results-root {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 
 .loading-box {
@@ -469,8 +466,8 @@ const filteredProteins = computed(() => {
 .top-bar {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 14px 18px;
+  border-radius: 10px;
+  padding: 8px 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -487,7 +484,7 @@ const filteredProteins = computed(() => {
 
 .tb-left h3 {
   margin: 0;
-  font-size: 1.06rem;
+  font-size: 0.96rem;
   color: #0f172a;
 }
 
@@ -516,28 +513,28 @@ const filteredProteins = computed(() => {
 
 .tb-actions {
   display: flex;
-  gap: 7px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 
 .primary-btn {
-  padding: 6px 13px;
+  padding: 4px 10px;
   border-radius: 8px;
   border: none;
   background: #2563eb;
   color: #ffffff;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
 }
 
 .act-btn {
-  padding: 6px 11px;
+  padding: 4px 9px;
   border-radius: 8px;
   border: 1px solid #cbd5e1;
   background: #f8fafc;
   color: #334155;
-  font-size: 0.79rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -551,7 +548,7 @@ const filteredProteins = computed(() => {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -581,15 +578,15 @@ const filteredProteins = computed(() => {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
 }
 
 .kpi-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 14px 16px;
+  border-radius: 10px;
+  padding: 9px 12px;
 }
 
 .kpi-card.highlight {
@@ -603,15 +600,15 @@ const filteredProteins = computed(() => {
 }
 
 .k-val {
-  margin-top: 5px;
-  font-size: 1.24rem;
+  margin-top: 2px;
+  font-size: 1.1rem;
   font-weight: 800;
   color: #0f172a;
 }
 
 .k-sub {
-  margin-top: 4px;
-  font-size: 0.77rem;
+  margin-top: 2px;
+  font-size: 0.74rem;
   line-height: 1.4;
   color: #64748b;
 }
@@ -620,8 +617,8 @@ const filteredProteins = computed(() => {
   background: #fffbeb;
   border: 1px solid #fde68a;
   border-radius: 10px;
-  padding: 10px 14px;
-  font-size: 0.83rem;
+  padding: 6px 10px;
+  font-size: 0.8rem;
   color: #92400e;
   display: flex;
   flex-direction: column;
@@ -630,34 +627,34 @@ const filteredProteins = computed(() => {
 
 .split-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 10px;
 }
 
 .panel-box {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 16px 18px;
+  border-radius: 10px;
+  padding: 10px 14px;
 }
 
 .panel-box h4 {
-  margin: 0 0 12px 0;
-  font-size: 0.96rem;
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
   color: #0f172a;
 }
 
 .matrix-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
 }
 
 .mat-item {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 6px 9px;
   opacity: 0.72;
 }
 
@@ -693,7 +690,7 @@ const filteredProteins = computed(() => {
 }
 
 .mat-sub {
-  margin-top: 5px;
+  margin-top: 2px;
   font-size: 0.74rem;
   color: #64748b;
 }
@@ -701,7 +698,7 @@ const filteredProteins = computed(() => {
 .score-bars {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .sc-row {
@@ -719,7 +716,7 @@ const filteredProteins = computed(() => {
 }
 
 .sc-track {
-  height: 8px;
+  height: 6px;
   border-radius: 999px;
   background: #f1f5f9;
   overflow: hidden;
@@ -732,11 +729,11 @@ const filteredProteins = computed(() => {
 }
 
 .basis-box {
-  margin-top: 12px;
-  padding: 9px 12px;
+  margin-top: 8px;
+  padding: 6px 10px;
   border-radius: 8px;
   background: #f8fafc;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: #334155;
   line-height: 1.5;
 }
@@ -744,7 +741,7 @@ const filteredProteins = computed(() => {
 .ev-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .ev-row {
@@ -752,8 +749,8 @@ const filteredProteins = computed(() => {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 0.82rem;
-  padding: 7px 10px;
+  font-size: 0.78rem;
+  padding: 4px 8px;
   border-radius: 8px;
   background: #f8fafc;
 }
@@ -782,7 +779,7 @@ const filteredProteins = computed(() => {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .tbl-head h4 {
@@ -813,7 +810,7 @@ const filteredProteins = computed(() => {
 .feat-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.8rem;
+  font-size: 0.77rem;
 }
 
 .feat-table th {
@@ -823,12 +820,12 @@ const filteredProteins = computed(() => {
   color: #475569;
   font-weight: 700;
   text-align: left;
-  padding: 9px 10px;
+  padding: 6px 8px;
   border-bottom: 1px solid #e2e8f0;
 }
 
 .feat-table td {
-  padding: 8px 10px;
+  padding: 5px 8px;
   border-bottom: 1px solid #f1f5f9;
   color: #1e293b;
 }
@@ -868,14 +865,14 @@ const filteredProteins = computed(() => {
 .ptf-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 10px;
+  gap: 6px;
 }
 
 .ptf-card {
   background: #f8fafc;
   border: 1px solid #dbeafe;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 7px 9px;
 }
 
 .ptf-top {
@@ -932,7 +929,7 @@ const filteredProteins = computed(() => {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .ai-title-wrap {
@@ -996,18 +993,18 @@ const filteredProteins = computed(() => {
 .ai-body {
   display: grid;
   grid-template-columns: minmax(260px, 1.3fr) minmax(240px, 1fr);
-  gap: 16px;
+  gap: 10px;
   align-items: start;
 }
 
 .ai-side-meta {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 7px 10px;
   font-size: 0.81rem;
   color: #334155;
 }

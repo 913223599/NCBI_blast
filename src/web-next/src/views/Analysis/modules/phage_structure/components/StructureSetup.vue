@@ -308,7 +308,7 @@ async function handleFilesUpload(rawFiles: File[], append: boolean): Promise<voi
   const validFiles = rawFiles.filter((f) => ALLOWED_EXT_RE.test(f.name) || rawFiles.length === 1)
   const skippedCount = rawFiles.length - validFiles.length
   if (skippedCount > 0) {
-    uploadNotice.value = `已自动跳过 ${skippedCount} 个非 FASTA / GenBank 序列文件`
+    uploadNotice.value = `已跳过 ${skippedCount} 个非序列文件`
   }
   if (!validFiles.length) return
 
@@ -565,47 +565,44 @@ function onSubmit(): void {
     <!-- 顶部状态条 -->
     <div class="engine-banner">
       <div class="eb-left">
-        <h3>噬菌体尾部形态与结构定标预测</h3>
-        <p>
-          融合特征尾部蛋白 (TSP/MTP/TAP/TTPA-B)、Virfam 连接器、PhageTailFinder 双状态 HMM 与 TMP 分子标尺解析（支持批量导入自动排队）
-        </p>
+        <h3>尾部形态与结构预测</h3>
       </div>
       <div class="eb-chips">
         <span class="chip" :class="capabilities?.wsl_pyhmmer_ready ? 'ok' : 'warn'">
-          {{ isCapabilitiesLoading ? '检测中...' : capabilities?.wsl_pyhmmer_ready ? 'WSL PyHMMER 就绪' : 'PyHMMER 不可用' }}
+          {{ isCapabilitiesLoading ? '检测中...' : capabilities?.wsl_pyhmmer_ready ? 'PyHMMER' : 'PyHMMER 不可用' }}
         </span>
         <span class="chip" :class="capabilities?.structural_hmm_cached ? 'ok' : 'neutral'">
-          {{ capabilities?.structural_hmm_cached ? '结构 PHROGs 索引已缓存' : '首次运行自动提取结构库' }}
+          {{ capabilities?.structural_hmm_cached ? 'PHROG 索引' : 'PHROG 索引待建' }}
         </span>
         <span class="chip" :class="capabilities?.phagetailfinder_ready ? 'ok' : 'neutral'">
-          PhageTailFinder {{ capabilities?.phagetailfinder_ready ? '双状态 HMM 就绪' : '未就绪' }}
+          {{ capabilities?.phagetailfinder_ready ? 'PhageTailFinder' : 'PhageTailFinder 未就绪' }}
         </span>
-        <span v-if="capabilities?.phold_ready" class="chip ok">Phold 3D 模型就绪</span>
-        <span v-if="capabilities?.unified_judge_ready" class="chip ok">UnifiedJudge V4.3 就绪</span>
-        <span v-if="capabilities?.ai_classifier_ready" class="chip ok">AI 双轨分类器已就绪</span>
+        <span v-if="capabilities?.phold_ready" class="chip ok">Phold 3D</span>
+        <span v-if="capabilities?.unified_judge_ready" class="chip ok">UnifiedJudge</span>
+        <span v-if="capabilities?.ai_classifier_ready" class="chip ok">AI 分类器</span>
       </div>
     </div>
 
     <!-- 主表单卡 -->
     <div class="setup-card">
       <div v-if="!isBatchSubmission" class="field-row">
-        <label class="field-label">分析任务命名</label>
-        <input v-model="form.task_name" type="text" class="text-input" placeholder="例如: Phage_T4_Morphotype" />
+        <label class="field-label">任务名</label>
+        <input v-model="form.task_name" type="text" class="text-input" placeholder="Phage_T4" />
       </div>
 
       <!-- 4 源模式切换 -->
       <div class="tabs-bar">
         <button type="button" class="tab-btn" :class="{ active: uiTab === 'upload' }" @click="switchTab('upload')">
-          批量上传 / 拖拽 FASTA · GBK · FAA
+          文件上传
         </button>
         <button type="button" class="tab-btn" :class="{ active: uiTab === 'paste' }" @click="switchTab('paste')">
-          直接粘贴序列文本
+          粘贴序列
         </button>
         <button type="button" class="tab-btn" :class="{ active: uiTab === 'annotation' }" @click="switchTab('annotation')">
-          从历史功能注释批量导入 ({{ linkedSources.annotations.length }})
+          注释导入 ({{ linkedSources.annotations.length }})
         </button>
         <button type="button" class="tab-btn" :class="{ active: uiTab === 'phage_discovery' }" @click="switchTab('phage_discovery')">
-          从前噬菌体扫描区段批量导入 ({{ linkedSources.phage_discoveries.length }})
+          前噬菌体导入 ({{ linkedSources.phage_discoveries.length }})
         </button>
       </div>
 
@@ -629,18 +626,17 @@ function onSubmit(): void {
           @click="triggerFileSelect(batchFiles.length > 0)"
         >
           <div class="drop-title">
-            <template v-if="isUploading">正在上传并解析导入文件...</template>
+            <template v-if="isUploading">上传中...</template>
             <template v-else-if="batchFiles.length === 1">
-              已选择: {{ uploadedFileName }}（点击可继续追加更多文件自动批量排队，或直接拖入多个文件）
+              已选: {{ uploadedFileName }}（点击追加）
             </template>
             <template v-else-if="batchFiles.length > 1">
-              已导入 {{ batchFiles.length }} 个基因组 / 蛋白文件（点击此处继续追加，或继续拖拽追加）
+              已导入 {{ batchFiles.length }} 个文件（点击追加）
             </template>
             <template v-else>
-              点击多选或一次拖入多个 FASTA / GenBank (.gbk) / 蛋白 FAA 文件到此区域
+              点击或拖入 FASTA / GBK / FAA（可多选）
             </template>
           </div>
-          <div class="drop-sub">支持单株直测与批量多文件队列导入：提交后后台按序自动执行，无需逐个等待</div>
         </div>
 
         <div v-if="uploadNotice" class="notice-line">{{ uploadNotice }}</div>
@@ -651,7 +647,7 @@ function onSubmit(): void {
             {{ batchFiles[0]?.format_label }} · {{ batchFiles[0]?.file_name }}
           </span>
           <div class="sf-actions">
-            <button type="button" class="mini-act" @click="triggerFileSelect(true)">+ 追加更多文件</button>
+            <button type="button" class="mini-act" @click="triggerFileSelect(true)">+ 追加</button>
             <button type="button" class="mini-act danger" @click="clearBatchFiles">移除</button>
           </div>
         </div>
@@ -659,10 +655,10 @@ function onSubmit(): void {
         <!-- 多文件批量待排队列表 -->
         <div v-if="batchFiles.length > 1" class="batch-list-box">
           <div class="batch-list-head">
-            <span>待自动排队任务清单 ({{ batchFiles.length }} 个样本将依次入队分析)</span>
+            <span>批量队列 ({{ batchFiles.length }})</span>
             <div class="bl-actions">
-              <button type="button" class="mini-act" @click="triggerFileSelect(true)">+ 继续追加文件</button>
-              <button type="button" class="mini-act danger" @click="clearBatchFiles">清空列表</button>
+              <button type="button" class="mini-act" @click="triggerFileSelect(true)">+ 追加</button>
+              <button type="button" class="mini-act danger" @click="clearBatchFiles">清空</button>
             </div>
           </div>
           <div class="batch-rows">
@@ -673,7 +669,7 @@ function onSubmit(): void {
                 v-model="entry.task_name"
                 type="text"
                 class="br-name-inp"
-                placeholder="自定义任务名"
+                placeholder="任务名"
               />
               <span class="br-file" :title="entry.fasta_path || entry.file_name">{{ entry.file_name }}</span>
               <button type="button" class="br-del" title="从批次中移除" @click="removeBatchFile(entry.id)">移除</button>
@@ -688,25 +684,25 @@ function onSubmit(): void {
           v-model="form.fasta_content"
           rows="7"
           class="paste-area"
-          placeholder="在此粘贴单条/多条 FASTA 核酸、蛋白 FAA 或 GenBank (LOCUS ...) 文本..."
+          placeholder="粘贴 FASTA / FAA / GenBank 文本"
         ></textarea>
         <label v-if="canSplitPastedFasta" class="split-banner">
           <input v-model="splitFastaRecords" type="checkbox" />
           <span>
-            检测到 <strong>{{ pastedRecordCount }}</strong> 条独立 FASTA 序列，勾选后按每条序列自动拆分为 {{ pastedRecordCount }} 个独立排队任务
+            检测到 <strong>{{ pastedRecordCount }}</strong> 条序列，拆分为独立任务
           </span>
         </label>
       </div>
 
       <!-- Tab 3: 功能注释批量多选导入 -->
       <div v-else-if="uiTab === 'annotation'" class="linked-box">
-        <div v-if="isSourcesLoading" class="empty-src">正在读取历史注释任务...</div>
-        <div v-else-if="linkedSources.annotations.length === 0" class="empty-src">暂无已完成的全基因组注释任务</div>
+        <div v-if="isSourcesLoading" class="empty-src">读取中...</div>
+        <div v-else-if="linkedSources.annotations.length === 0" class="empty-src">无可用注释任务</div>
         <template v-else>
           <div class="linked-toolbar">
-            <span>可多选勾选多个注释样本一键加入排队队列（已选 {{ selectedAnnotationIds.length }} / {{ linkedSources.annotations.length }}）</span>
+            <span>已选 {{ selectedAnnotationIds.length }} / {{ linkedSources.annotations.length }}</span>
             <button type="button" class="mini-act" @click="selectAllAnnotations">
-              {{ selectedAnnotationIds.length === linkedSources.annotations.length ? '取消全选' : '全选全部' }}
+              {{ selectedAnnotationIds.length === linkedSources.annotations.length ? '取消全选' : '全选' }}
             </button>
           </div>
           <div class="src-grid">
@@ -731,13 +727,13 @@ function onSubmit(): void {
 
       <!-- Tab 4: 前噬菌体扫描区段批量导入与自动拆分 -->
       <div v-else class="linked-box">
-        <div v-if="isSourcesLoading" class="empty-src">正在读取前噬菌体扫描任务...</div>
-        <div v-else-if="linkedSources.phage_discoveries.length === 0" class="empty-src">暂无已检出前噬菌体区段的扫描任务</div>
+        <div v-if="isSourcesLoading" class="empty-src">读取中...</div>
+        <div v-else-if="linkedSources.phage_discoveries.length === 0" class="empty-src">无前噬菌体扫描任务</div>
         <template v-else>
           <div class="linked-toolbar">
-            <span>支持多选前噬菌体扫描任务批量入队（已选 {{ selectedDiscoveryIds.length }} / {{ linkedSources.phage_discoveries.length }}）</span>
+            <span>已选 {{ selectedDiscoveryIds.length }} / {{ linkedSources.phage_discoveries.length }}</span>
             <button type="button" class="mini-act" @click="selectAllDiscoveries">
-              {{ selectedDiscoveryIds.length === linkedSources.phage_discoveries.length ? '取消全选' : '全选全部' }}
+              {{ selectedDiscoveryIds.length === linkedSources.phage_discoveries.length ? '取消全选' : '全选' }}
             </button>
           </div>
           <div class="src-grid">
@@ -761,11 +757,11 @@ function onSubmit(): void {
             <label v-if="selectedDiscoveryTotalRegions > 1 && !(selectedDiscoveryIds.length === 1 && form.region_index)" class="split-banner">
               <input v-model="splitPhageRegions" type="checkbox" />
               <span>
-                按检出区段自动拆分为 <strong>{{ selectedDiscoveryTotalRegions }}</strong> 个独立排队任务逐一预测尾型
+                按区段拆分为 <strong>{{ selectedDiscoveryTotalRegions }}</strong> 个任务
               </span>
             </label>
             <div v-if="selectedDiscoveryIds.length === 1 && !splitPhageRegions" class="region-opt">
-              <label>或指定单一区段序号（留空评估全部区段）：</label>
+              <label>指定区段（空=全部）：</label>
               <input v-model.number="form.region_index" type="number" min="1" class="num-input" placeholder="全部" @change="triggerLinkedInspect" />
             </div>
           </div>
@@ -785,24 +781,24 @@ function onSubmit(): void {
       <!-- 高级参数折叠 -->
       <div class="adv-toggle-row">
         <button type="button" class="link-btn" @click="showAdvanced = !showAdvanced">
-          {{ showAdvanced ? '收起高级判定参数（全批共用）' : '展开高级并行与阈值参数（全批共用）' }}
+          {{ showAdvanced ? '收起高级参数' : '高级参数' }}
         </button>
       </div>
 
       <div v-if="showAdvanced" class="adv-grid">
         <div class="adv-field">
-          <label>并行核心数 (留空自动)</label>
+          <label>线程数</label>
           <input v-model.number="form.threads" type="number" min="1" max="64" class="text-input" />
         </div>
         <div class="adv-field">
-          <label>遗传密码表</label>
+          <label>密码表</label>
           <select v-model.number="form.genetic_code" class="text-input">
-            <option :value="11">Table 11 (标准原核/噬菌体)</option>
-            <option :value="4">Table 4 (支原体/螺旋体)</option>
+            <option :value="11">Table 11（标准）</option>
+            <option :value="4">Table 4（支原体）</option>
           </select>
         </div>
         <div class="adv-field">
-          <label>PHROG 比特分下限 (Score)</label>
+          <label>PHROG Score 下限</label>
           <input v-model.number="form.score_cutoff" type="number" min="15" max="200" step="1" class="text-input" />
         </div>
         <div class="adv-field">
@@ -811,15 +807,15 @@ function onSubmit(): void {
         </div>
         <label class="chk-row">
           <input v-model="form.force_hmm_rescan" type="checkbox" />
-          <span>强制对已注释蛋白重跑 PHROG 结构 HMM 扫描</span>
+          <span>强制重跑 PHROG HMM</span>
         </label>
         <label class="chk-row" :class="{ disabled: !capabilities?.phagetailfinder_ready }">
           <input v-model="form.enable_phagetailfinder" type="checkbox" :disabled="!capabilities?.phagetailfinder_ready" />
-          <span>启用 PhageTailFinder 双状态 HMM 尾部模块识别（基于 3,668 Pfam 共线性建模）</span>
+          <span>PhageTailFinder 尾部识别</span>
         </label>
         <label v-if="form.enable_phagetailfinder && capabilities?.phagetailfinder_ready" class="chk-row">
           <input v-model="form.ptf_accurate_mode" type="checkbox" />
-          <span>PhageTailFinder 精确保守模式（提高未命中 Pfam 基因的非尾惩罚以降低误召回）</span>
+          <span>PhageTailFinder 保守模式</span>
         </label>
         <label class="chk-row" :class="{ disabled: !capabilities?.ai_classifier_ready }">
           <input
@@ -828,21 +824,21 @@ function onSubmit(): void {
             :disabled="!capabilities?.ai_classifier_ready"
           />
           <span>
-            启用双轨 AI 深度分类（复用 UnifiedJudge V4.3 输出校准概率，并在 HMM 失明时提供零同源救回）
+            AI 双轨分类
           </span>
         </label>
         <label class="chk-row" :class="{ disabled: !capabilities?.phold_ready }">
           <input v-model="form.enable_phold_enhance" type="checkbox" :disabled="!capabilities?.phold_ready" />
           <span>
-            启用 Phold 3D 结构折叠复核（ProstT5 + Foldseek；按条件触发模式对高置信常规样本 0s 额外开销）
+            Phold 3D 复核
           </span>
         </label>
         <div v-if="form.enable_phold_enhance && capabilities?.phold_ready" class="field">
-          <label>Phold 3D 触发策略</label>
+          <label>Phold 触发</label>
           <select v-model="form.phold_trigger_mode">
-            <option value="auto">按条件自动触发（仅缺失 TMP / 低分差 / 大 Contig 残缺 / AI 冲突，常规 0s 开销）</option>
-            <option value="always">强制复核全部 Contig（耗时显著增加）</option>
-            <option value="off">仅就绪保留但不执行 3D 复核</option>
+            <option value="auto">自动（按条件）</option>
+            <option value="always">全部复核</option>
+            <option value="off">不执行</option>
           </select>
         </div>
       </div>
@@ -850,16 +846,16 @@ function onSubmit(): void {
       <!-- 提交底栏 -->
       <div class="submit-bar">
         <span v-if="isBatchSubmission" class="queue-hint batch">
-          已就绪 {{ plannedTaskCount }} 个待排队任务，提交后后台串行队列将自动依次分析完成。
+          {{ plannedTaskCount }} 个任务待入队
         </span>
-        <span v-else-if="isQueueBusy" class="queue-hint">当前存在运行中任务，提交后将自动进入安全等待队列。</span>
-        <span v-else class="queue-hint">支持单样本提交或批量多文件导入，结构 HMM 索引已浓缩加速。</span>
+        <span v-else-if="isQueueBusy" class="queue-hint">有任务运行中，提交后排队</span>
+        <span v-else class="queue-hint"></span>
         <button type="button" class="submit-btn" :disabled="!canSubmit" @click="onSubmit">
-          <template v-if="isSubmitting">正在提交排队队列...</template>
-          <template v-else-if="isUploading">正在上传文件...</template>
-          <template v-else-if="!isBatchSubmission && isInspecting">正在预检输入...</template>
-          <template v-else-if="isBatchSubmission">批量加入排队队列 ({{ plannedTaskCount }} 个任务)</template>
-          <template v-else>开始结构与形态预测</template>
+          <template v-if="isSubmitting">提交中...</template>
+          <template v-else-if="isUploading">上传中...</template>
+          <template v-else-if="!isBatchSubmission && isInspecting">预检中...</template>
+          <template v-else-if="isBatchSubmission">批量入队 ({{ plannedTaskCount }})</template>
+          <template v-else>开始预测</template>
         </button>
       </div>
     </div>
@@ -870,43 +866,37 @@ function onSubmit(): void {
 .setup-shell {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 
 .engine-banner {
   background: linear-gradient(135deg, #f8fafc, #eff6ff);
   border: 1px solid #dbeafe;
   border-radius: 14px;
-  padding: 16px 20px;
+  padding: 10px 14px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .eb-left h3 {
   margin: 0;
-  font-size: 1.08rem;
+  font-size: 0.98rem;
   color: #0f172a;
-}
-
-.eb-left p {
-  margin: 4px 0 0 0;
-  font-size: 0.84rem;
-  color: #475569;
 }
 
 .eb-chips {
   display: flex;
-  gap: 8px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 
 .chip {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
 }
 
@@ -929,46 +919,52 @@ function onSubmit(): void {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
-  padding: 20px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 
 .field-row {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-row .text-input {
+  flex: 1;
 }
 
 .field-label {
   font-size: 0.84rem;
   font-weight: 600;
   color: #334155;
+  white-space: nowrap;
 }
 
 .text-input,
 .num-input {
-  padding: 9px 12px;
+  padding: 6px 10px;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
-  font-size: 0.88rem;
+  font-size: 0.84rem;
   color: #0f172a;
 }
 
 .tabs-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .tab-btn {
-  padding: 8px 14px;
+  padding: 5px 11px;
   border-radius: 9px;
   border: 1px solid #cbd5e1;
   background: #f8fafc;
   color: #334155;
-  font-size: 0.83rem;
+  font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
 }
@@ -988,7 +984,7 @@ function onSubmit(): void {
 .drop-zone {
   border: 2px dashed #cbd5e1;
   border-radius: 12px;
-  padding: 28px 20px;
+  padding: 16px 14px;
   text-align: center;
   background: #f8fafc;
   cursor: pointer;
@@ -996,7 +992,7 @@ function onSubmit(): void {
 }
 
 .drop-zone.compact {
-  padding: 18px 16px;
+  padding: 10px 12px;
 }
 
 .drop-zone:hover,
@@ -1010,15 +1006,9 @@ function onSubmit(): void {
 }
 
 .drop-title {
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   font-weight: 600;
   color: #1e293b;
-}
-
-.drop-sub {
-  margin-top: 6px;
-  font-size: 0.8rem;
-  color: #64748b;
 }
 
 .notice-line {
@@ -1196,7 +1186,7 @@ function onSubmit(): void {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 14px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1222,7 +1212,7 @@ function onSubmit(): void {
 .src-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 10px;
+  gap: 6px;
   max-height: 220px;
   overflow-y: auto;
 }
@@ -1231,7 +1221,7 @@ function onSubmit(): void {
   background: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: 9px;
-  padding: 10px 12px;
+  padding: 7px 9px;
   cursor: pointer;
 }
 
@@ -1318,10 +1308,10 @@ function onSubmit(): void {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 14px;
+  padding: 10px;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .adv-field {
@@ -1352,7 +1342,7 @@ function onSubmit(): void {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid #f1f5f9;
   flex-wrap: wrap;
 }
@@ -1368,12 +1358,12 @@ function onSubmit(): void {
 }
 
 .submit-btn {
-  padding: 10px 22px;
+  padding: 7px 18px;
   border-radius: 9px;
   border: none;
   background: #2563eb;
   color: #ffffff;
-  font-size: 0.9rem;
+  font-size: 0.86rem;
   font-weight: 600;
   cursor: pointer;
 }

@@ -28,12 +28,12 @@ function collectLoci(roles: string[]): string[] {
 
 function topLociFull(roles: string[]): string {
   const found = collectLoci(roles)
-  return found.length > 0 ? found.join(', ') : '未显式检出'
+  return found.length > 0 ? found.join(', ') : '未检出'
 }
 
 function topLociCompact(roles: string[]): string {
   const found = collectLoci(roles)
-  return found.length > 0 ? found.map((loc) => compactLocusLabel(loc, 19)).join(', ') : '未显式检出'
+  return found.length > 0 ? found.map((loc) => compactLocusLabel(loc, 19)).join(', ') : '未检出'
 }
 
 const isMyo = computed(() => props.morphotypeCode === 'Myoviridae-like')
@@ -46,9 +46,9 @@ const coreTailDisplay = computed(() => {
   const roles = isPodo.value ? ['TTPA_B', 'INTERNAL_VIRION', 'TAIL_NEEDLE'] : ['TSP', 'MTP', 'TMP', 'TAP']
   const compact = topLociCompact(roles)
   if (!isPodo.value && props.estimatedLengthNm != null) {
-    return compact === '未显式检出'
-      ? `标尺约 ${props.estimatedLengthNm} nm`
-      : `${compact} (约 ${props.estimatedLengthNm} nm)`
+    return compact === '未检出'
+      ? `${props.estimatedLengthNm} nm`
+      : `${compact} (${props.estimatedLengthNm} nm)`
   }
   return compact
 })
@@ -56,7 +56,7 @@ const coreTailTitle = computed(() => {
   const roles = isPodo.value ? ['TTPA_B', 'INTERNAL_VIRION', 'TAIL_NEEDLE'] : ['TSP', 'MTP', 'TMP', 'TAP']
   const full = topLociFull(roles)
   if (!isPodo.value && props.estimatedLengthNm != null) {
-    return `${full} | 理论 TMP 尾长约 ${props.estimatedLengthNm} nm`
+    return `${full} | TMP 尾长 ${props.estimatedLengthNm} nm`
   }
   return full
 })
@@ -65,10 +65,7 @@ const coreTailTitle = computed(() => {
 <template>
   <div class="diagram-card">
     <div class="diagram-head">
-      <div>
-        <h4>噬菌体粒子形态与尾部结构模型图</h4>
-        <p class="diagram-sub">根据检出特征模块动态映射三维组件归属（悬停基因编号可查看完整 Locus Tag）</p>
-      </div>
+      <h4>形态示意</h4>
       <span class="conn-chip">{{ connectorProfile.type_label_cn }}</span>
     </div>
 
@@ -118,7 +115,7 @@ const coreTailTitle = computed(() => {
           stroke-linecap="round"
         />
         <text x="472" y="132" text-anchor="middle" class="svg-caption">
-          丝状纤毛 (Inoviridae) 或二十面体无尾基因组构型（缺乏 Portal-Tail 复合尾器）
+          无尾构型 (Inoviridae / 二十面体)
         </text>
       </svg>
 
@@ -161,7 +158,7 @@ const coreTailTitle = computed(() => {
             opacity="0.94"
           />
           <polygon points="65,8 120,38 65,68 10,38" fill="#ffffff" opacity="0.16" />
-          <text x="65" y="64" text-anchor="middle" class="capsid-txt">头部包装</text>
+          <text x="65" y="64" text-anchor="middle" class="capsid-txt">头部</text>
           <text x="65" y="81" text-anchor="middle" class="capsid-num">
             x{{ moduleMatrix.head_packaging_count }} 蛋白
           </text>
@@ -255,10 +252,10 @@ const coreTailTitle = computed(() => {
           <polygon points="268,76 312,83 268,90" fill="#dc2626" stroke="#b91c1c" stroke-width="1" />
           <!-- 短尾部件示意引导字样（右置于尾部侧旁，避免压迫左侧衣壳图形） -->
           <text x="515" y="78" text-anchor="middle" class="svg-caption">
-            紧凑短尾管 (TTPA/B) · 内部注射通道 · 尾刺针
+            短尾管 (TTPA/B) · 尾针
           </text>
           <text x="515" y="96" text-anchor="middle" class="svg-caption-muted">
-            典型短尾实测物理长度约 10–25 nm（非 TMP 标尺机制）
+            10–25 nm，无 TMP
           </text>
         </template>
 
@@ -266,7 +263,7 @@ const coreTailTitle = computed(() => {
         <template v-else>
           <line x1="217" y1="83" x2="380" y2="83" stroke="#cbd5e1" stroke-width="12" stroke-dasharray="10 8" />
           <text x="300" y="138" text-anchor="middle" class="svg-caption">
-            未检出完整尾型模块，可能为截断 Contig 或极度分异噬菌体片段
+            未检出完整尾部模块
           </text>
         </template>
       </svg>
@@ -274,26 +271,26 @@ const coreTailTitle = computed(() => {
       <!-- 自适应 HTML 注释指引卡（防溢出/防裁切/紧凑基因编号） -->
       <div v-if="isNonTailed" class="callout-grid two-col">
         <div class="callout-box purple">
-          <div class="c-title">丝状 / 无尾衣壳特征模块 ({{ moduleMatrix.non_tailed_marker_count }})</div>
+          <div class="c-title">无尾标记 ({{ moduleMatrix.non_tailed_marker_count }})</div>
           <div class="c-sub" :title="topLociFull(['NON_TAILED_MARKER'])">
             {{ topLociCompact(['NON_TAILED_MARKER']) }}
           </div>
         </div>
         <div class="callout-box slate">
-          <div class="c-title">无有尾噬菌体复合尾器</div>
-          <div class="c-sub">缺乏 TSP / MTP / TMP 典型尾部模块</div>
+          <div class="c-title">无尾器</div>
+          <div class="c-sub">无 TSP/MTP/TMP</div>
         </div>
       </div>
 
       <div v-else class="callout-grid four-col">
         <div class="callout-box sky">
-          <div class="c-title">头部与包装 ({{ moduleMatrix.head_packaging_count }})</div>
+          <div class="c-title">头部 ({{ moduleMatrix.head_packaging_count }})</div>
           <div class="c-sub" :title="topLociFull(['MCP', 'PORTAL', 'TERL'])">
             {{ topLociCompact(['MCP', 'PORTAL', 'TERL']) }}
           </div>
         </div>
         <div class="callout-box violet">
-          <div class="c-title">头-尾连接 ({{ moduleMatrix.connector_count }})</div>
+          <div class="c-title">连接器 ({{ moduleMatrix.connector_count }})</div>
           <div
             class="c-sub"
             :title="topLociFull(['CONN_AD1', 'CONN_AD2', 'CONN_AD3', 'CONN_HC1', 'CONN_HC2', 'CONN_HC3', 'CONN_NECK1', 'CONN_GENERAL', 'COLLAR_PODO'])"
@@ -302,13 +299,13 @@ const coreTailTitle = computed(() => {
           </div>
         </div>
         <div class="callout-box amber">
-          <div class="c-title">{{ isPodo ? '短尾管状 / 注射模块' : '核心尾部与 TMP 标尺' }}</div>
+          <div class="c-title">{{ isPodo ? '短尾/注射' : '尾部/TMP' }}</div>
           <div class="c-sub" :title="coreTailTitle">
             {{ coreTailDisplay }}
           </div>
         </div>
         <div class="callout-box teal">
-          <div class="c-title">尾丝 / RBP ({{ moduleMatrix.tail_fiber_rbp_count }})</div>
+          <div class="c-title">尾丝/RBP ({{ moduleMatrix.tail_fiber_rbp_count }})</div>
           <div class="c-sub" :title="topLociFull(['TAIL_FIBER_RBP', 'FIBRITIN_COLLAR'])">
             {{ topLociCompact(['TAIL_FIBER_RBP', 'FIBRITIN_COLLAR']) }}
           </div>
@@ -322,28 +319,22 @@ const coreTailTitle = computed(() => {
 .diagram-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 16px 20px 18px 20px;
+  border-radius: 10px;
+  padding: 10px 14px;
 }
 
 .diagram-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 h4 {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 0.9rem;
   color: #0f172a;
-}
-
-.diagram-sub {
-  margin: 3px 0 0 0;
-  font-size: 0.8rem;
-  color: #64748b;
 }
 
 .conn-chip {
@@ -361,13 +352,13 @@ h4 {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 10px 12px 12px 12px;
+  padding: 4px 8px;
 }
 
 .morpho-svg {
   width: 100%;
   height: auto;
-  max-height: 174px;
+  max-height: 130px;
   display: block;
 }
 
@@ -403,8 +394,8 @@ h4 {
 
 .callout-grid {
   display: grid;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 6px;
 }
 
 .callout-grid.two-col {
@@ -418,7 +409,7 @@ h4 {
 .callout-box {
   border-radius: 8px;
   border: 1px solid #cbd5e1;
-  padding: 9px 11px;
+  padding: 5px 8px;
   min-width: 0;
 }
 

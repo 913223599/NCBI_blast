@@ -46,16 +46,11 @@ function buildArrowPoints(p: StructureProteinItem): string {
 <template>
   <div class="operon-card">
     <div class="operon-head">
-      <div>
-        <h4>结构操纵子物理基因组轨道</h4>
-        <p class="operon-sub">
-          展示 {{ formatGenomeBp(safeTotalBp) }} 范围内的头部-连接器-尾部-TMP-裂解基因物理排布（正链上排，负链下排，点击基因块查看明细）
-        </p>
-      </div>
+      <h4>基因轨道 ({{ formatGenomeBp(safeTotalBp) }})</h4>
       <label class="toggle-lbl">
         <input v-model="onlyStructural" type="checkbox" />
         <span>
-          仅高亮结构与尾模块 ORF ({{ proteins.filter((p) => p.structural_role !== 'OTHER' || p.ptf_is_tail).length }}/{{ proteins.length }})
+          仅结构 ORF ({{ proteins.filter((p) => p.structural_role !== 'OTHER' || p.ptf_is_tail).length }}/{{ proteins.length }})
         </span>
       </label>
     </div>
@@ -94,7 +89,7 @@ function buildArrowPoints(p: StructureProteinItem): string {
       <span class="sb-coord">{{ selectedProtein.start }}..{{ selectedProtein.end }} bp ({{ selectedProtein.strand }}) · {{ selectedProtein.length_aa }} aa</span>
       <span v-if="selectedProtein.phrog_id" class="sb-phrog">{{ selectedProtein.phrog_id }} (score {{ selectedProtein.hmm_score }})</span>
       <span v-if="selectedProtein.ptf_is_tail" class="sb-phrog">
-        PhageTailFinder 尾概率 {{ (selectedProtein.ptf_tail_prob * 100).toFixed(0) }}%
+        PTF 尾概率 {{ (selectedProtein.ptf_tail_prob * 100).toFixed(0) }}%
         {{ selectedProtein.ptf_pfam ? `(${selectedProtein.ptf_pfam})` : '' }}
       </span>
       <span class="sb-prod">{{ selectedProtein.product }}</span>
@@ -106,29 +101,23 @@ function buildArrowPoints(p: StructureProteinItem): string {
 .operon-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 18px 20px;
+  border-radius: 10px;
+  padding: 10px 14px;
 }
 
 .operon-head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 h4 {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 0.9rem;
   color: #0f172a;
-}
-
-.operon-sub {
-  margin: 3px 0 0 0;
-  font-size: 0.8rem;
-  color: #64748b;
 }
 
 .toggle-lbl {
@@ -143,9 +132,9 @@ h4 {
 .legend-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 10px;
-  font-size: 0.76rem;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 0.72rem;
   color: #475569;
 }
 
@@ -166,7 +155,7 @@ h4 {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  padding: 8px;
+  padding: 4px;
 }
 
 .track-svg {
@@ -185,8 +174,8 @@ h4 {
 }
 
 .selected-banner {
-  margin-top: 10px;
-  padding: 8px 12px;
+  margin-top: 6px;
+  padding: 5px 9px;
   border-radius: 8px;
   background: #eff6ff;
   border: 1px solid #bfdbfe;
