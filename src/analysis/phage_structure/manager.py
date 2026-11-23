@@ -37,6 +37,14 @@ from .morphotype_classifier import (
 )
 from .phrog_catalog import classify_structural_role
 from .queue import phage_structure_queue, release_gpu_memory
+from .ai_morphotype_model import (
+    check_ai_classifier_ready,
+    check_unified_judge_ready,
+    load_ai_predictor_bundle,
+    load_unified_judge_seq_model,
+    predict_contig_morphotype_ai,
+    release_ai_judge_memory,
+)
 from .sequence_annotator import (
     check_phold_ready,
     check_wsl_pyhmmer_ready,
@@ -52,6 +60,7 @@ from .tmp_analyzer import select_and_analyze_tmps
 from .tail_finder_adapter import is_phagetailfinder_ready, run_phagetailfinder_on_contigs
 from .thresholds import DEFAULT_THRESHOLDS, MorphotypeClassifierThresholds, PhageStructureThresholds
 from .types import (
+    AiMorphotypePrediction,
     ContigStructureResult,
     MorphotypePrediction,
     PhageStructureResult,
@@ -72,12 +81,14 @@ def should_trigger_phold_3d(
     tmps: Sequence[TmpAnalysisItem],
     length_bp: int,
     thresholds: MorphotypeClassifierThresholds = DEFAULT_THRESHOLDS.classifier,
+    ai_prediction: Optional[AiMorphotypePrediction] = None,
 ) -> Tuple[bool, str]:
     """
     判断单条 Contig 是否需要按条件触发 Phold 3D (ProstT5 + Foldseek) 增强复核：
     1. tailed_without_tmp：已判为长尾/肌尾，但序列同源未检出任何 TMP；
     2. low_margin_ambiguous：非 Incomplete 且最高与次高候选分差过小 (且次高 > 2.0)；
-    3. incomplete_large_contig：长度 >= phold_incomplete_min_bp 却因缺少 PHROG 同源落入 Incomplete。
+    3. incomplete_large_contig：长度 >= phold_incomplete_min_bp 却因缺少 PHROG 同源落入 Incomplete；
+    4. ai_rule_conflict：AI 双轨模型高置信结论 (>=0.75) 与规则引擎存在分歧。
     """
     if pred.morphotype_code in ("Myoviridae-like", "Siphoviridae-like") and len(tmps) == 0:
         return True, "tailed_without_tmp"
@@ -91,6 +102,12 @@ def should_trigger_phold_3d(
             return True, "low_margin_ambiguous"
     if pred.morphotype_code == "Incomplete" and length_bp >= thresholds.phold_incomplete_min_bp:
         return True, "incomplete_large_contig"
+    if (
+        ai_prediction is not None
+        and ai_prediction.confidence >= 0.75
+        and not ai_prediction.agreement_with_rules
+    ):
+        return True, "ai_rule_conflict"
     return False, ""
 
 
@@ -106,6 +123,7 @@ def evaluate_single_contig_structure(
     phold_triggered: bool = False,
     phold_trigger_reason: str = "",
     phold_rescued_orfs: int = 0,
+    ai_prediction: Optional[AiMorphotypePrediction] = None,
 ) -> ContigStructureResult:
     """基于蛋白同源与 PTF 簇结果执行单条 Contig 的 TMP 选尺、完整度评估与形态分类。"""
     prots: List[StructureProteinItem] = info["proteins"]
@@ -177,6 +195,7 @@ def evaluate_single_contig_structure(
         phold_3d_trigger_reason=phold_trigger_reason,
         phold_3d_rescued_orfs=phold_rescued_orfs,
         prediction=pred,
+        ai_prediction=ai_prediction,
         connector_profile=cp,
         module_matrix=mm,
         ptf_tail_protein_count=ptf_cnt,
@@ -210,12 +229,61 @@ class PhageStructureManager:
             "wsl_pyhmmer_ready": wsl_pyhmmer,
             "phold_ready": check_phold_ready(),
             "phagetailfinder_ready": is_phagetailfinder_ready(),
+            "unified_judge_ready": check_unified_judge_ready(self.project_root),
+            "ai_classifier_ready": check_ai_classifier_ready(self.project_root),
             "structural_hmm_cached": struct_hmm is not None,
             "structural_hmm_path": str(struct_hmm) if struct_hmm else "",
             "all_phrogs_available": all_hmm is not None,
             "cpu_cores": cpu_cores,
             "safe_workers": get_safe_workers(),
         }
+
+    def _attach_ai_predictions(
+        self,
+        eval_by_cid: Dict[str, ContigStructureResult],
+        target_cids: Sequence[str],
+    ) -> None:
+        """为指定 Contig 集合附加双轨 AI 形态概率校准，结束后强制释放 PyTorch 显存。"""
+        if not target_cids or not check_ai_classifier_ready(self.project_root):
+            return
+        release_gpu_memory()
+        ai_bundle = load_ai_predictor_bundle(project_root=self.project_root)
+        if ai_bundle is None:
+            return
+        try:
+            judge_model, _, eff_dev = load_unified_judge_seq_model(project_root=self.project_root)
+            for cid in target_cids:
+                c_res = eval_by_cid.get(cid)
+                if c_res is None:
+                    continue
+                ai_pred = predict_contig_morphotype_ai(
+                    proteins=c_res.structural_proteins,
+                    length_bp=c_res.length_bp,
+                    gc_percent=c_res.gc_percent,
+                    module_matrix=c_res.module_matrix,
+                    connector_profile=c_res.connector_profile,
+                    tmp_analyses=c_res.tmp_analyses,
+                    ptf_clusters=c_res.ptf_tail_clusters,
+                    completeness=c_res.completeness,
+                    rule_prediction=c_res.prediction,
+                    bundle=ai_bundle,
+                    judge_model=judge_model,
+                    device=eff_dev,
+                )
+                c_res.ai_prediction = ai_pred
+                if (
+                    ai_pred is not None
+                    and not ai_pred.agreement_with_rules
+                    and ai_pred.confidence >= 0.75
+                    and ai_pred.conflict_note
+                    and ai_pred.conflict_note not in c_res.prediction.warnings
+                ):
+                    c_res.prediction.warnings.append(ai_pred.conflict_note)
+        except Exception as exc:
+            logger.warning("双轨 AI 形态推理跳过: %s", exc)
+        finally:
+            release_ai_judge_memory()
+            release_gpu_memory()
 
     def list_linked_sources(self) -> Dict[str, Any]:
         """获取系统内已完成的功能注释与前噬菌体扫描记录作为快捷数据源。"""
@@ -439,6 +507,7 @@ class PhageStructureManager:
             "phold_trigger_mode": batch_req.phold_trigger_mode,
             "enable_phagetailfinder": batch_req.enable_phagetailfinder,
             "ptf_accurate_mode": batch_req.ptf_accurate_mode,
+            "enable_ai_classifier": batch_req.enable_ai_classifier,
         }
         base_name = self._derive_batch_task_name(item, idx)
 
@@ -660,6 +729,10 @@ class PhageStructureManager:
                     thresholds=DEFAULT_THRESHOLDS,
                 )
 
+            if req.enable_ai_classifier and check_ai_classifier_ready(self.project_root):
+                _emit_progress(77, "正在运行 UnifiedJudge V4.3 双轨 AI 形态分类与校准...")
+                self._attach_ai_predictions(eval_by_cid, list(eval_by_cid.keys()))
+
             if req.enable_phold_enhance and req.phold_trigger_mode != "off":
                 triggered_reasons: Dict[str, str] = {}
                 for cid, c_res in eval_by_cid.items():
@@ -671,6 +744,7 @@ class PhageStructureManager:
                             c_res.tmp_analyses,
                             c_res.length_bp,
                             thresholds=DEFAULT_THRESHOLDS.classifier,
+                            ai_prediction=c_res.ai_prediction,
                         )
                         if should_run:
                             triggered_reasons[cid] = reason
@@ -706,6 +780,9 @@ class PhageStructureManager:
                             phold_trigger_reason=reason,
                             phold_rescued_orfs=rescued_map.get(cid, 0),
                         )
+                    if req.enable_ai_classifier and check_ai_classifier_ready(self.project_root):
+                        _emit_progress(86, "正在结合 3D 复核补注释刷新双轨 AI 预测概率...")
+                        self._attach_ai_predictions(eval_by_cid, list(triggered_reasons.keys()))
 
             contig_results: List[ContigStructureResult] = []
             for idx, cid in enumerate(cmap.keys(), start=1):

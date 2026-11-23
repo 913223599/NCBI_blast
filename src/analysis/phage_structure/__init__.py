@@ -39,7 +39,14 @@ from .tmp_analyzer import (
     detect_tandem_repeats,
     select_and_analyze_tmps,
 )
+from .ai_morphotype_model import (
+    check_ai_classifier_ready,
+    check_unified_judge_ready,
+    predict_contig_morphotype_ai,
+    release_ai_judge_memory,
+)
 from .types import (
+    AiMorphotypePrediction,
     ConnectorProfile,
     ContigStructureResult,
     MorphotypePrediction,
@@ -73,6 +80,11 @@ __all__ = [
     "StructureBatchRunRequest",
     "StructureInspectRequest",
     "StructureRunRequest",
+    "AiMorphotypePrediction",
+    "check_ai_classifier_ready",
+    "check_unified_judge_ready",
+    "predict_contig_morphotype_ai",
+    "release_ai_judge_memory",
     "TailFinderCluster",
     "PolyXRegion",
     "TandemRepeatUnit",

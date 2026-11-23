@@ -1104,5 +1104,180 @@ def test_t1_4_conditional_phold_trigger_policy() -> None:
     assert not ok5 and r5 == ""
 
 
+def test_t2_2_unified_judge_ai_classifier_and_blind_rescue() -> None:
+    """
+    验证 T2.2：UnifiedJudge V4.3 深度特征提取维度契约、双模态融合校准输出、
+    以及在规则引擎陷入 Incomplete 时自动切换至 ai_deep_only 零 HMM 救回轨道。
+    """
+    from src.analysis.phage_structure.ai_morphotype_model import (
+        DEEP_TOTAL_DIM,
+        MORPH_CLASSES,
+        STRUCT_TOTAL_DIM,
+        check_ai_classifier_ready,
+        extract_structured_morph_features,
+        extract_unified_judge_genome_features,
+        predict_contig_morphotype_ai,
+        release_ai_judge_memory,
+    )
+    from src.analysis.phage_structure.types import (
+        CompletenessAssessment,
+        ConnectorProfile,
+        MorphotypePrediction,
+        StructuralModuleMatrix,
+    )
+
+    if not check_ai_classifier_ready(REPO_ROOT):
+        pytest.skip("morphotype_ai_v1.joblib 或 UnifiedJudge V4.3 未部署，跳过端到端 AI 测试")
+
+    aa_motifs = [
+        "MAKLGVSQTRLPAEIVKDYNWFGHC",
+        "MVQKLRTYPASEDFGHIKLMNPQRS",
+        "MSTGIVKLPQRADEFYWHCNMVKTQ",
+    ]
+    synth_prots = []
+    pos = 100
+    for idx in range(1, 25):
+        aa_seq = (aa_motifs[idx % len(aa_motifs)] * (6 + (idx % 10)))
+        end_pos = pos + len(aa_seq) * 3 - 1
+        synth_prots.append(
+            StructureProteinItem(
+                locus_tag=f"AI_ORF_{idx:03d}",
+                contig_id="ai_test_contig",
+                start=pos,
+                end=end_pos,
+                strand="+" if idx % 5 != 0 else "-",
+                length_aa=len(aa_seq),
+                product="hypothetical protein",
+                structural_role="MCP" if idx == 4 else ("MTP" if idx == 12 else "OTHER"),
+                evidence_source="pyrodigal",
+                translation=aa_seq,
+            )
+        )
+        pos = end_pos + 30
+
+    try:
+        deep_vec, deep_diag = extract_unified_judge_genome_features(
+            synth_prots, length_bp=pos + 500, gc_percent=48.5
+        )
+        assert deep_vec.shape == (DEEP_TOTAL_DIM,)
+        assert "deep_tail_prob_max" in deep_diag and "deep_head_prob_max" in deep_diag
+
+        mm = StructuralModuleMatrix(head_packaging_count=1, major_tail_count=1)
+        cp = ConnectorProfile()
+        comp = CompletenessAssessment(status="complete", score=0.9, summary="ok")
+        s_vec = extract_structured_morph_features(
+            mm, cp, [], [], comp, length_bp=pos + 500, total_orfs=len(synth_prots)
+        )
+        assert s_vec.shape == (STRUCT_TOTAL_DIM,)
+
+        # 1. 常规有规则命中场景 -> dual_modal_fusion
+        rule_sipho = MorphotypePrediction(
+            morphotype_code="Siphoviridae-like",
+            morphotype_label_cn="长尾噬菌体样 (Siphoviridae-like)",
+            tail_feature_tag="Siphoviridae_noncontractile_tail",
+            confidence=0.88,
+            class_scores={"Siphoviridae-like": 8.0, "Myoviridae-like": 1.0, "Podoviridae-like": 0.5, "Non-tailed": 0.0},
+            decision_basis="test",
+        )
+        res_fus = predict_contig_morphotype_ai(
+            proteins=synth_prots,
+            length_bp=pos + 500,
+            gc_percent=48.5,
+            module_matrix=mm,
+            connector_profile=cp,
+            tmp_analyses=[],
+            ptf_clusters=[],
+            completeness=comp,
+            rule_prediction=rule_sipho,
+        )
+        assert res_fus is not None
+        assert res_fus.mode == "dual_modal_fusion"
+        assert res_fus.predicted_morphotype in MORPH_CLASSES
+        assert abs(sum(res_fus.calibrated_probs.values()) - 1.0) < 0.01
+
+        # 2. 规则引擎陷入 Incomplete (>=5kb) -> 自动切换至 ai_deep_only 救回轨道
+        rule_inc = MorphotypePrediction(
+            morphotype_code="Incomplete",
+            morphotype_label_cn="特征不完整",
+            tail_feature_tag="Incomplete",
+            confidence=0.25,
+            class_scores={"Myoviridae-like": 0.0, "Siphoviridae-like": 0.0, "Podoviridae-like": 0.0, "Non-tailed": 0.0},
+            decision_basis="missing_hmm",
+        )
+        res_deep = predict_contig_morphotype_ai(
+            proteins=synth_prots,
+            length_bp=max(pos + 500, 12_000),
+            gc_percent=48.5,
+            module_matrix=StructuralModuleMatrix(),
+            connector_profile=cp,
+            tmp_analyses=[],
+            ptf_clusters=[],
+            completeness=CompletenessAssessment(status="incomplete", score=0.2, summary="missing"),
+            rule_prediction=rule_inc,
+        )
+        assert res_deep is not None
+        assert res_deep.mode == "ai_deep_only"
+        assert res_deep.predicted_morphotype in MORPH_CLASSES
+        assert not res_deep.agreement_with_rules and res_deep.conflict_note
+    finally:
+        release_ai_judge_memory()
+
+
+def test_t2_2_ai_rule_conflict_triggers_phold_3d() -> None:
+    """
+    验证 T2.2：AI 双轨模型高置信结论 (>=0.75) 与规则引擎不一致时触发 ai_rule_conflict，
+    而低置信冲突或结论一致时不误触发 Phold 3D。
+    """
+    from src.analysis.phage_structure.manager import should_trigger_phold_3d
+    from src.analysis.phage_structure.types import AiMorphotypePrediction, MorphotypePrediction, TmpAnalysisItem
+
+    rule_pred = MorphotypePrediction(
+        morphotype_code="Siphoviridae-like",
+        morphotype_label_cn="长尾",
+        tail_feature_tag="tag",
+        confidence=0.9,
+        class_scores={"Siphoviridae-like": 9.2, "Myoviridae-like": 0.5, "Podoviridae-like": 0.0, "Non-tailed": 0.0},
+        decision_basis="test",
+    )
+    dummy_tmp = TmpAnalysisItem(
+        locus_tag="T_CONF", contig_id="c1", product="TMP", length_aa=850, est_tail_length_nm=123.3
+    )
+
+    ai_conflict_high = AiMorphotypePrediction(
+        predicted_morphotype="Myoviridae-like",
+        confidence=0.86,
+        calibrated_probs={"Myoviridae-like": 0.86, "Siphoviridae-like": 0.10, "Podoviridae-like": 0.03, "Non-tailed": 0.01},
+        mode="dual_modal_fusion",
+        model_version="morphotype_ai_v1",
+        agreement_with_rules=False,
+        conflict_note="high-conf conflict",
+    )
+    ok_trig, reason = should_trigger_phold_3d(rule_pred, [dummy_tmp], 45_000, ai_prediction=ai_conflict_high)
+    assert ok_trig and reason == "ai_rule_conflict"
+
+    ai_conflict_low = AiMorphotypePrediction(
+        predicted_morphotype="Myoviridae-like",
+        confidence=0.60,
+        calibrated_probs={"Myoviridae-like": 0.60, "Siphoviridae-like": 0.35, "Podoviridae-like": 0.04, "Non-tailed": 0.01},
+        mode="dual_modal_fusion",
+        model_version="morphotype_ai_v1",
+        agreement_with_rules=False,
+    )
+    ok_low, reason_low = should_trigger_phold_3d(rule_pred, [dummy_tmp], 45_000, ai_prediction=ai_conflict_low)
+    assert not ok_low and reason_low == ""
+
+    ai_agree = AiMorphotypePrediction(
+        predicted_morphotype="Siphoviridae-like",
+        confidence=0.95,
+        calibrated_probs={"Siphoviridae-like": 0.95, "Myoviridae-like": 0.03, "Podoviridae-like": 0.01, "Non-tailed": 0.01},
+        mode="dual_modal_fusion",
+        model_version="morphotype_ai_v1",
+        agreement_with_rules=True,
+    )
+    ok_agree, reason_agree = should_trigger_phold_3d(rule_pred, [dummy_tmp], 45_000, ai_prediction=ai_agree)
+    assert not ok_agree and reason_agree == ""
+
+
+
 
 

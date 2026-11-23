@@ -38,7 +38,11 @@ class StructureRunRequest(BaseModel):
     enable_phold_enhance: bool = Field(default=False, description="是否对未知长 ORF 启动 Phold 3D 结构折叠补漏")
     phold_trigger_mode: Literal["auto", "always", "off"] = Field(
         default="auto",
-        description="Phold 3D 触发策略：auto 仅对低置信/缺失 TMP/大片段 Incomplete 复核；always 强制全量；off 关闭",
+        description="Phold 3D 触发策略：auto 仅对低置信/缺失 TMP/大片段 Incomplete/AI 冲突复核；always 强制全量；off 关闭",
+    )
+    enable_ai_classifier: bool = Field(
+        default=True,
+        description="是否启用基于 UnifiedJudge V4.3 的双轨 AI 形态分类与概率校准",
     )
     enable_phagetailfinder: bool = Field(default=True, description="是否运行 PhageTailFinder 双状态 HMM 尾部基因簇预测")
     ptf_accurate_mode: bool = Field(default=False, description="PhageTailFinder 精确模式 (提高未命中 HMM 的保守惩罚)")
@@ -70,6 +74,7 @@ class StructureBatchRunRequest(BaseModel):
     force_hmm_rescan: bool = Field(default=False)
     enable_phold_enhance: bool = Field(default=False)
     phold_trigger_mode: Literal["auto", "always", "off"] = Field(default="auto")
+    enable_ai_classifier: bool = Field(default=True)
     enable_phagetailfinder: bool = Field(default=True)
     ptf_accurate_mode: bool = Field(default=False)
     split_phage_regions: bool = Field(
@@ -276,6 +281,25 @@ class CompletenessAssessment(BaseModel):
     reasons: List[str] = Field(default_factory=list)
 
 
+class AiMorphotypePrediction(BaseModel):
+    """基于 UnifiedJudge V4.3 深度底座与结构化特征的双轨 AI 形态分类与校准结果。"""
+
+    predicted_morphotype: Literal[
+        "Myoviridae-like",
+        "Siphoviridae-like",
+        "Podoviridae-like",
+        "Non-tailed",
+    ]
+    confidence: float
+    calibrated_probs: Dict[str, float] = Field(default_factory=dict)
+    mode: Literal["dual_modal_fusion", "ai_deep_only"] = "dual_modal_fusion"
+    model_version: str = ""
+    agreement_with_rules: bool = True
+    conflict_note: str = ""
+    deep_tail_prob_max: float = 0.0
+    deep_head_prob_max: float = 0.0
+
+
 class ContigStructureResult(BaseModel):
     """单条 Contig / 前噬菌体区段的结构预测完整剖析结果。"""
 
@@ -290,6 +314,7 @@ class ContigStructureResult(BaseModel):
     phold_3d_triggered: bool = False
     phold_3d_trigger_reason: str = ""
     phold_3d_rescued_orfs: int = 0
+    ai_prediction: Optional[AiMorphotypePrediction] = None
     prediction: MorphotypePrediction
     connector_profile: ConnectorProfile
     module_matrix: StructuralModuleMatrix

@@ -60,6 +60,18 @@ const classScoreEntries = computed(() => {
   }))
 })
 
+const aiProbEntries = computed(() => {
+  const probs = activeContig.value?.ai_prediction?.calibrated_probs || {}
+  return Object.entries(probs)
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, prob]) => ({
+      code,
+      prob,
+      pct: Math.round(prob * 1000) / 10,
+      theme: getMorphotypeTheme(code),
+    }))
+})
+
 const filteredProteins = computed(() => {
   const list = activeContig.value?.structural_proteins || []
   const kw = searchText.value.trim().toLowerCase()
@@ -246,6 +258,76 @@ const filteredProteins = computed(() => {
           </div>
           <div class="basis-box">
             <strong>主要判定依据：</strong>{{ activeContig.prediction.decision_basis }}
+          </div>
+        </div>
+      </div>
+
+      <!-- 5.5 AI 双轨校准概率与规则一致性卡片 -->
+      <div v-if="activeContig.ai_prediction" class="panel-box ai-panel">
+        <div class="ai-head">
+          <div class="ai-title-wrap">
+            <h4>AI 双轨校准概率与规则一致性</h4>
+            <span class="ai-ver-tag">{{ activeContig.ai_prediction.model_version }}</span>
+          </div>
+          <div class="ai-badges">
+            <span
+              class="ai-mode-pill"
+              :class="activeContig.ai_prediction.mode === 'ai_deep_only' ? 'deep' : 'fusion'"
+            >
+              {{
+                activeContig.ai_prediction.mode === 'ai_deep_only'
+                  ? '纯 AI 深度推断 (零 HMM 救回)'
+                  : '双模态融合 (Deep + 结构证据)'
+              }}
+            </span>
+            <span
+              class="ai-agree-pill"
+              :class="activeContig.ai_prediction.agreement_with_rules ? 'agree' : 'conflict'"
+            >
+              {{
+                activeContig.ai_prediction.agreement_with_rules
+                  ? '与规则引擎结论一致'
+                  : '与规则引擎存在分歧'
+              }}
+            </span>
+          </div>
+        </div>
+
+        <div class="ai-body">
+          <div class="score-bars">
+            <div v-for="ap in aiProbEntries" :key="ap.code" class="sc-row">
+              <div class="sc-meta">
+                <span>{{ ap.theme.label }}</span>
+                <span class="sc-num">{{ ap.pct.toFixed(1) }}%</span>
+              </div>
+              <div class="sc-track">
+                <div
+                  class="sc-fill"
+                  :style="{ width: `${ap.pct}%`, backgroundColor: ap.theme.accentColor }"
+                ></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ai-side-meta">
+            <div class="ai-stat-row">
+              <span>AI 推荐形态：</span>
+              <strong>
+                {{ getMorphotypeTheme(activeContig.ai_prediction.predicted_morphotype).shortLabel }}
+                ({{ (activeContig.ai_prediction.confidence * 100).toFixed(1) }}%)
+              </strong>
+            </div>
+            <div class="ai-stat-row">
+              <span>UnifiedJudge V4.3 尾部最高语义概率：</span>
+              <span class="mono">{{ (activeContig.ai_prediction.deep_tail_prob_max * 100).toFixed(1) }}%</span>
+            </div>
+            <div class="ai-stat-row">
+              <span>UnifiedJudge V4.3 头部最高语义概率：</span>
+              <span class="mono">{{ (activeContig.ai_prediction.deep_head_prob_max * 100).toFixed(1) }}%</span>
+            </div>
+            <div v-if="activeContig.ai_prediction.conflict_note" class="ai-conflict-note">
+              {{ activeContig.ai_prediction.conflict_note }}
+            </div>
           </div>
         </div>
       </div>
@@ -825,5 +907,108 @@ const filteredProteins = computed(() => {
 .ptf-muted {
   color: #94a3b8;
   font-size: 0.74rem;
+}
+
+.ai-panel {
+  border-color: #c7d2fe;
+  background: linear-gradient(180deg, #fafbff 0%, #ffffff 100%);
+}
+
+.ai-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.ai-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-title-wrap h4 {
+  margin: 0;
+}
+
+.ai-ver-tag {
+  font-size: 0.73rem;
+  font-family: ui-monospace, monospace;
+  color: #4338ca;
+  background: #eef2ff;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.ai-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-mode-pill,
+.ai-agree-pill {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.ai-mode-pill.fusion {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.ai-mode-pill.deep {
+  background: #f3e8ff;
+  color: #6b21a8;
+}
+
+.ai-agree-pill.agree {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.ai-agree-pill.conflict {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.ai-body {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.3fr) minmax(240px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.ai-side-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.81rem;
+  color: #334155;
+}
+
+.ai-stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-conflict-note {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+  line-height: 1.45;
+  font-size: 0.79rem;
 }
 </style>

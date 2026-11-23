@@ -80,8 +80,10 @@ const form = reactive<StructureRunForm>({
   score_cutoff: 28.0,
   force_hmm_rescan: false,
   enable_phold_enhance: false,
+  phold_trigger_mode: 'auto',
   enable_phagetailfinder: true,
   ptf_accurate_mode: false,
+  enable_ai_classifier: true,
 })
 
 watch(
@@ -478,8 +480,10 @@ function buildSharedOptions() {
     score_cutoff: form.score_cutoff,
     force_hmm_rescan: form.force_hmm_rescan,
     enable_phold_enhance: form.enable_phold_enhance,
+    phold_trigger_mode: form.phold_trigger_mode,
     enable_phagetailfinder: form.enable_phagetailfinder,
     ptf_accurate_mode: form.ptf_accurate_mode,
+    enable_ai_classifier: form.enable_ai_classifier,
   }
 }
 
@@ -577,6 +581,8 @@ function onSubmit(): void {
           PhageTailFinder {{ capabilities?.phagetailfinder_ready ? '双状态 HMM 就绪' : '未就绪' }}
         </span>
         <span v-if="capabilities?.phold_ready" class="chip ok">Phold 3D 模型就绪</span>
+        <span v-if="capabilities?.unified_judge_ready" class="chip ok">UnifiedJudge V4.3 就绪</span>
+        <span v-if="capabilities?.ai_classifier_ready" class="chip ok">AI 双轨分类器已就绪</span>
       </div>
     </div>
 
@@ -815,10 +821,30 @@ function onSubmit(): void {
           <input v-model="form.ptf_accurate_mode" type="checkbox" />
           <span>PhageTailFinder 精确保守模式（提高未命中 Pfam 基因的非尾惩罚以降低误召回）</span>
         </label>
+        <label class="chk-row" :class="{ disabled: !capabilities?.ai_classifier_ready }">
+          <input
+            v-model="form.enable_ai_classifier"
+            type="checkbox"
+            :disabled="!capabilities?.ai_classifier_ready"
+          />
+          <span>
+            启用双轨 AI 深度分类（复用 UnifiedJudge V4.3 输出校准概率，并在 HMM 失明时提供零同源救回）
+          </span>
+        </label>
         <label class="chk-row" :class="{ disabled: !capabilities?.phold_ready }">
           <input v-model="form.enable_phold_enhance" type="checkbox" :disabled="!capabilities?.phold_ready" />
-          <span>启用 Phold 3D 结构折叠对 &ge;100 aa 未知蛋白补漏（ProstT5 + Foldseek，耗时更长）</span>
+          <span>
+            启用 Phold 3D 结构折叠复核（ProstT5 + Foldseek；按条件触发模式对高置信常规样本 0s 额外开销）
+          </span>
         </label>
+        <div v-if="form.enable_phold_enhance && capabilities?.phold_ready" class="field">
+          <label>Phold 3D 触发策略</label>
+          <select v-model="form.phold_trigger_mode">
+            <option value="auto">按条件自动触发（仅缺失 TMP / 低分差 / 大 Contig 残缺 / AI 冲突，常规 0s 开销）</option>
+            <option value="always">强制复核全部 Contig（耗时显著增加）</option>
+            <option value="off">仅就绪保留但不执行 3D 复核</option>
+          </select>
+        </div>
       </div>
 
       <!-- 提交底栏 -->

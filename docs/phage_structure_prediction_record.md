@@ -307,3 +307,62 @@
 * **前端单元测试与构建**：`npx vitest run` **`9 files, 54 passed in 1.87s`**；`npm run build`（`vue-tsc -b && vite build`）`built in 14.35s`。
 * **后端全量单元测试（`.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v`）**：**`19 passed in 144.61s (0:02:24)`**（含新增 `test_m3_genetic_code_table4_high_gc_no_zero_orf`、`test_t2_1_thresholds_centralized_and_override` 与 `test_t1_4_conditional_phold_trigger_policy`，全量零警告）。
 * **合规审计**：涉及前后端源码、脚本、单测及留档文档全部通过 `UTF-8` 无 BOM 与零 Emoji 校验。
+
+---
+
+## 12. 步骤 62：阶段 2 / M3 第二批——复用 `UnifiedJudge V4.3` 底座构建 `T2.2` 双轨 AI 形态分类器与跨科泛化实测（2026-11-23）
+
+围绕既有自研深度学习模型深度融入噬菌体结构与尾部形态判别流水线，本批次冻结复用了早期部署于相对模型仓库的 `UnifiedJudge V4.3`（1,747,664 参数、基于蛋白操纵子注意力与 `ProstT5` 3D 序列蒸馏特征的 10 类功能判断底座），完成 `T2.2` 双轨 AI 形态分类与概率校准系统全栈上线，并通过严格零泄露交叉验证及 `Suite E`（224 株）只读双轨盲测验收。
+
+### 12.1 架构设计、显存隔离与 Meta-75 Stacking 进化
+1. **双轨深度特征与分类模块**（[ai_morphotype_model.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/ai_morphotype_model.py)）：
+   - **`UnifiedJudge V4.3` 冻结特征提取器（2,916 维）**：仅依赖 Contig 排序后的 ORF 坐标与氨基酸翻译，零 PHROG/Pfam/PTF 依赖运行操纵子注意力前向（`batch_size=16`），聚合 `head_conn_h / tail_h / long_tail_h / global_mean_h / global_max_h` (`800` 维)、`tail_distill / head_distill` (`2048` 维) 与 `func10 / intact / 基因组尺度统计` (`68` 维)，并输出 `deep_tail_prob_max` 与 `deep_head_prob_max`。
+   - **结构化特征编码（67 维）与 `Meta-75` 融合升级**：初期直接拼接高维小折 PCA 深度向量在 341 株科级 CV 表现为 `Macro-F1=0.9341`（弱于纯结构 `Structured-ML=0.9744`）；升级为将经过 1,977 株跨科模型温度校准后的 4 类概率转换为 8 维高信噪比语义摘要（`log_p(4) + entropy(1) + top1_margin(1) + deep_tail_max(1) + deep_head_max(1)`），再与 67 维规则结构化特征拼接为 **`FUSION_META_DIM = 75`** 的 Meta-Fusion 输入，并保留对旧版 2,983 维包的兼容回退。
+   - **双轨推理与第 4 类 3D 复核触发**（[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)、[types.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/types.py)）：
+     - 常规规则有命中时走 `dual_modal_fusion`；当规则引擎陷入 `Incomplete` 且 `length_bp >= 5000` 时自动切换至零 HMM 依赖 `ai_deep_only` 救回轨；
+     - 在 `should_trigger_phold_3d` 中新增第 4 类触发条件 `ai_rule_conflict`（AI 校准置信度 `>= 0.75` 且与规则引擎不一致时触发）；全阶段强制调用 `release_ai_judge_memory()` + `release_gpu_memory()` 清空 PyTorch 显存，严防与 WSL `Phold 3D` 显存叠加溢出。
+2. **离线训练、断点分片与静态类型清理**（[train_ai_morphotype_classifier.py](file:///f:/NCBI%20blast/scripts/train_ai_morphotype_classifier.py)）：
+   - 实现 `deep_chunks/chunk_*.npz`（每 `50` 株分片落盘与 JSONL 断点保护）；全程清零两文件全部 Pyrefly 静态诊断；
+   - 严格使用 `StratifiedGroupKFold(n_splits=5)` 按真实 ICTV Family 隔离交叉验证（含外折剔除验证科/株 + 内折 3 折科隔离 OOF 构造无泄露 Meta-75 特征），最后经 `scipy.optimize.minimize_scalar` 最小化 NLL 完成单参数温度缩放校准，生成权重包 [morphotype_ai_v1.joblib](file:///f:/NCBI%20blast/models/phage_structure/morphotype_ai_v1.joblib)（`1.119 MB`）及元数据 [morphotype_ai_v1_meta.json](file:///f:/NCBI%20blast/models/phage_structure/morphotype_ai_v1_meta.json)。
+
+### 12.2 零泄露训练与 5 折 ICTV 科级隔离交叉验证实测（[t2_2_ai_cv_summary.md](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_ai/t2_2_ai_cv_summary.md)、[t2_2_ai_cv_report.json](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_ai/t2_2_ai_cv_report.json)）
+* **数据隔离核验**：`Suite E` (`224` 株) 与本地跨科语料（`1,930` 株 / `40` ICTV 科）、全特征基准集（`341` 株 / `57` 科组）及合并去重深度并集（`1,977` 株）重叠数严格为 **`0`**；`RTX 4070` GPU 峰值显存 **`501.9 MB`**，单基因组均推理耗时 **`27.57 ms/genome`**。
+* **实验 1（1,930 株 / 40 个 ICTV 科 `AI-Deep-Only` 跨科 5 折 CV）**：
+  - `histgbr`（最优）：`Acc = 74.15%`、`Macro-F1 = 0.7870`、`ECE = 0.1593 -> 0.0528`（`T = 2.104`）、`Brier = 0.3854 -> 0.3330`；在合并 `1,977` 株并集上 5 折 OOF 达 **`Acc = 81.39%`、`Macro-F1 = 0.8512`、`ECE = 0.0347`**（`T = 1.9912`）；
+  - 对比基线：`logreg` (`Acc = 69.22%`, `Macro-F1 = 0.7068`, `ECE = 0.0867`)、`mlp` (`Acc = 64.72%`, `Macro-F1 = 0.6450`, `ECE = 0.0971`)；
+  - 跨科表现最好 Top 5 (`n >= 5`)：*Autotranscriptaviridae* (`100.0%, n=136`)、*Inoviridae* (`100.0%, n=63`)、*Ackermannviridae* (`100.0%, n=55`)、*Kyanoviridae* (`100.0%, n=42`)、*Microviridae* (`100.0%, n=41`)；最难跨科 Bottom 5：*Peduoviridae* (`0.0%, n=88`)、*Orlajensenviridae* (`0.0%, n=6`)、*Lindbergviridae* (`14.6%, n=41`)、*Tectiviridae* (`16.7%, n=12`)、*Hodgkinviridae* (`23.5%, n=17`)。
+* **实验 2（341 株 / 57 个科组同折 5 折 ICTV 科级对比）**：
+
+| 方案 | 分类头 | Acc | Macro-F1 | 校准后 ECE | 校准后 Brier | 备注 |
+|---|---|---:|---:|---:|---:|---|
+| `Rule Engine` | 确定性规则 | `100.00%` | `1.0000` | - | - | `Incomplete = 0` |
+| `AI-Deep-Only` | `logreg` | `83.28%` | `0.8356` | `0.0604` | `0.2720` | 零 HMM / 零 PTF 依赖 |
+| `Structured-ML` | `logreg` | `97.36%` | `0.9744` | `0.0085` | `0.0427` | 仅 67 维规则结构化特征 |
+| `Dual-Modal Fusion AI (Meta-75)` | `logreg` | **`96.19%`** | **`0.9618`** | **`0.0205`** | **`0.0558`** | 温度 `T = 0.8323`，较直接拼接 `0.9341` 提升 `+0.0277` Macro-F1 |
+
+* **实验 3（341 株 HMM 失明压力测试，清空全部 PHROG / PTF / TMP 标注）**：
+  - `Rule Engine` 完全失能退化：`Acc = 0.00%`、`Incomplete = 341/341 (100.0%)`；
+  - `AI-Deep-Only` 在零 HMM 条件下以 `27.57 ms/genome` 救回 **`Acc = 83.28%`、`Macro-F1 = 0.8356`**。
+
+### 12.3 冻结盲测集 `Suite E`（224 株）只读双轨全量评测（[eval_suite_e_ai_dual_track.py](file:///f:/NCBI%20blast/scripts/eval_suite_e_ai_dual_track.py)、[suite_e_ai_dual_track_eval.md](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_ai/suite_e_ai_dual_track_eval.md)）
+在未基于 `Suite E` 微调任何规则或 AI 超参数的严格只读纪律下，同时实测 `FASTA`（裸序列）与 `GBK`（注释基因组）两套真实输入：
+
+| 评估子集 | 轨道 | 样本数 | Acc | Macro-F1 | 校准 ECE / 备注 |
+|---|---|---:|---:|---:|---|
+| `FASTA 全集 (224)` | `Rule Engine` | `224` | `100.00%` | `1.0000` | `Incomplete = 0` |
+| `FASTA 全集 (224)` | `AI-Deep-Only (0-HMM)` | `224` | **`99.55%`** | `0.9955` | `ECE = 0.0456`（仅 `NC_070978` 1 株错判） |
+| `FASTA 全集 (224)` | `Dual-Modal Fusion AI` | `224` | **`100.00%`** | **`1.0000`** | **`ECE = 0.0026`**，规则-AI 一致率 `100.0%` |
+| `GBK 全集 (224)` | `Rule Engine` | `224` | `100.00%` | `1.0000` | `Incomplete = 0` |
+| `GBK 全集 (224)` | `AI-Deep-Only (0-HMM)` | `224` | **`99.55%`** | `0.9955` | `ECE = 0.0533`（仅 `NC_070978` 1 株错判） |
+| `GBK 全集 (224)` | `Dual-Modal Fusion AI` | `224` | **`100.00%`** | **`1.0000`** | **`ECE = 0.0029`**，规则-AI 一致率 `100.0%` |
+| `FASTA post-2025/08 (24)` | `AI-Deep-Only` / `Dual-Modal Fusion` | `24` | **`100.00%`** / **`100.00%`** | `1.0000` | 外部新发表菌株零误差 (`ECE = 0.0566 / 0.0027`) |
+| `GBK post-2025/08 (24)` | `AI-Deep-Only` / `Dual-Modal Fusion` | `24` | **`100.00%`** / **`100.00%`** | `1.0000` | 外部新发表菌株零误差 (`ECE = 0.0742 / 0.0029`) |
+
+* **互补纠偏验证**：`Suite E` 中 `AI-Deep-Only` 唯一错判的 *Grimontviridae* 菌株 `NC_070978`（在 FASTA / GBK 下独立判为 `Myoviridae-like`, `77.6% / 79.1%`）在 `Meta-75` 双模态融合下被结构证据纠偏至 `Podoviridae-like`，实现 `224/224` 零分歧与极低校准误差（`ECE < 0.003`）。
+
+### 12.4 全栈上线、自动化测试与合规校验
+* **后端与前端集成**：完成 [__init__.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/__init__.py) 导出、[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py) 就绪探测（`unified_judge_ready` / `ai_classifier_ready`）及 AI/3D 协同流水线；前端 [types.ts](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/types.ts)、[StructureSetup.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureSetup.vue) 与 [StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue) 已上线 AI 双轨参数开关、`Phold 3D` 策略下拉及“AI 双轨校准概率与规则一致性”可视化卡片。
+* **测试与构建验证**：
+  - 前端：`npx vitest run` **`9 files, 54 passed`**；`npm run build`（`vue-tsc -b && vite build`）`13.52s` 构建通过，0 报错；
+  - 后端：`.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v` **`21 passed in 141.95s`**（含新增 `test_t2_2_unified_judge_ai_classifier_and_blind_rescue` 与 `test_t2_2_ai_rule_conflict_triggers_phold_3d`）；
+  - 合规：全部新增及改动文件通过 `UTF-8` 无 BOM、零 Emoji 及 Python AST 语法校验，无违规项。

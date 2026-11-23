@@ -12,6 +12,8 @@ export interface StructureCapabilities {
   wsl_pyhmmer_ready: boolean
   phold_ready: boolean
   phagetailfinder_ready: boolean
+  unified_judge_ready?: boolean
+  ai_classifier_ready?: boolean
   structural_hmm_cached: boolean
   structural_hmm_path: string
   all_phrogs_available: boolean
@@ -72,6 +74,7 @@ export interface StructureRunForm {
   force_hmm_rescan: boolean
   enable_phold_enhance: boolean
   phold_trigger_mode?: 'auto' | 'always' | 'off'
+  enable_ai_classifier?: boolean
   enable_phagetailfinder: boolean
   ptf_accurate_mode: boolean
 }
@@ -106,6 +109,7 @@ export interface StructureBatchRunPayload {
   force_hmm_rescan: boolean
   enable_phold_enhance: boolean
   phold_trigger_mode?: 'auto' | 'always' | 'off'
+  enable_ai_classifier?: boolean
   enable_phagetailfinder: boolean
   ptf_accurate_mode: boolean
   split_phage_regions?: boolean
@@ -275,6 +279,18 @@ export interface CompletenessAssessment {
   reasons?: string[]
 }
 
+export interface AiMorphotypePrediction {
+  predicted_morphotype: 'Myoviridae-like' | 'Siphoviridae-like' | 'Podoviridae-like' | 'Non-tailed'
+  confidence: number
+  calibrated_probs: Record<string, number>
+  mode: 'dual_modal_fusion' | 'ai_deep_only'
+  model_version: string
+  agreement_with_rules: boolean
+  conflict_note: string
+  deep_tail_prob_max: number
+  deep_head_prob_max: number
+}
+
 export interface ContigStructureResult {
   contig_id: string
   length_bp: number
@@ -287,6 +303,7 @@ export interface ContigStructureResult {
   phold_3d_triggered?: boolean
   phold_3d_trigger_reason?: string
   phold_3d_rescued_orfs?: number
+  ai_prediction?: AiMorphotypePrediction | null
   prediction: MorphotypePrediction
   connector_profile: ConnectorProfile
   module_matrix: StructuralModuleMatrix
