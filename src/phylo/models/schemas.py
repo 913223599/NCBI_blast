@@ -303,7 +303,7 @@ class PhyloJobRecord(BaseModel):
     job_id: str
     title: str
     status: JobStatusType = "pending"
-    resolved_track: Literal["genome", "gene"] = "gene"
+    resolved_track: Literal["genome", "gene", "phage_taxonomy"] = "gene"
     config: PhyloJobConfig
     profile: Optional[SequenceProfile] = None
     stages: List[StageState] = Field(default_factory=list)

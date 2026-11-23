@@ -140,13 +140,13 @@ class PhageDereplicator:
         file_to_acc: Dict[str, str] = {}
         eligible_files: List[str] = []
         short_fallback: Set[str] = set()
-        for acc in unprotected:
+        for idx, acc in enumerate(unprotected, start=1):
             fpath = genome_paths[acc]
             seq_len = sum(len(r.seq) for r in SeqIO.parse(str(fpath), "fasta"))
             if seq_len < min_length:
                 # 保留太短但未被 dRep -l 过滤导致全军覆没的边界情况记入日志
                 short_fallback.add(acc)
-            dst = in_dir / f"{acc}.fasta"
+            dst = in_dir / f"G{idx:04d}.fasta"
             shutil.copyfile(fpath, dst)
             wsl_p = WSLManager.to_wsl_path(str(dst.resolve()))
             eligible_files.append(wsl_p)

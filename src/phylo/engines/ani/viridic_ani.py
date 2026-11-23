@@ -195,6 +195,10 @@ class ViridicAniCalculator:
         shards_dir.mkdir(parents=True, exist_ok=True)
         ckpt_path = work_dir / "ani_checkpoint.json"
 
+        # 建立纯 ASCII 短 ID 映射供外部 blastn/skani/fastANI 安全使用，规避中文/特殊字符路径或 header 干扰
+        sid_to_ascii: Dict[str, str] = {sid: f"G{idx + 1:05d}" for idx, sid in enumerate(labels)}
+        ascii_to_sid: Dict[str, str] = {v: k for k, v in sid_to_ascii.items()}
+
         # 收集序列长度并写入合并 FASTA 供 blastn / skani 使用
         lengths: Dict[str, int] = {}
         combined_fasta = work_dir / "ani_combined_genomes.fasta"
@@ -209,7 +213,7 @@ class ViridicAniCalculator:
                     seq_chunks.append(s)
                 lengths[sid] = total_len
                 merged_seq = "".join(seq_chunks)
-                out_fh.write(f">{sid}\n")
+                out_fh.write(f">{sid_to_ascii[sid]}\n")
                 for pos in range(0, len(merged_seq), 80):
                     out_fh.write(merged_seq[pos : pos + 80] + "\n")
 
@@ -288,7 +292,7 @@ class ViridicAniCalculator:
 
             if b_idx not in completed_batches or not shard_tsv.is_file():
                 query_slice_fa = shards_dir / f"query_batch_{b_idx}.fasta"
-                batch_set = set(batch_ids)
+                batch_set = {sid_to_ascii[sid] for sid in batch_ids}
                 with open(query_slice_fa, "w", encoding="utf-8", newline="\n") as qfh:
                     for rec in SeqIO.parse(str(combined_fasta), "fasta"):
                         if rec.id in batch_set:
@@ -383,7 +387,8 @@ class ViridicAniCalculator:
                         parts = line.rstrip("\n").split("\t")
                         if len(parts) < 8:
                             continue
-                        qid, sid = parts[0], parts[1]
+                        qid = ascii_to_sid.get(parts[0], parts[0])
+                        sid = ascii_to_sid.get(parts[1], parts[1])
                         try:
                             qs, qe = int(parts[2]), int(parts[3])
                             nident, alen = int(parts[6]), int(parts[7])

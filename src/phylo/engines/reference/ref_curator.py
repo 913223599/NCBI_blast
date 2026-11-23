@@ -9,6 +9,7 @@ PhageReferenceCurator - 第 2 步：噬菌体参考序列集策展与断点续�
 5. 支持可选 CheckV (completeness >= 95%) 完整性筛选。
 """
 import csv
+import hashlib
 import json
 import logging
 import re
@@ -34,7 +35,12 @@ SAFE_ACC_RE = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def _safe_acc(acc: str) -> str:
-    return SAFE_ACC_RE.sub("_", (acc or "").strip()) or "unknown"
+    raw = (acc or "").strip()
+    cleaned = SAFE_ACC_RE.sub("_", raw).strip("_")
+    if cleaned != raw or not cleaned:
+        suffix = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:6]
+        return f"{cleaned}_{suffix}" if cleaned else f"seq_{suffix}"
+    return cleaned
 
 
 class PhageReferenceCurator:

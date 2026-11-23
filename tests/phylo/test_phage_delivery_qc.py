@@ -190,3 +190,67 @@ def test_phage_curate_refs_api(tmp_path: Path, monkeypatch):
         assert any(c["role"] == "ictv_rep" for c in cands)
     finally:
         executor.store = orig_store
+
+
+def test_submit_phage_taxonomy_job_with_chinese_filename(tmp_path: Path, monkeypatch):
+    from src.backend.routes import phylo as phylo_route
+    from src.phylo.engines.ani.viridic_ani import ViridicAniCalculator
+    from src.phylo.pipeline.executor import get_phylo_executor
+    from src.phylo.storage.archive_store import PhyloArchiveStore
+
+    store = PhyloArchiveStore(base_dir=tmp_path / "phage_submit_store")
+    executor = get_phylo_executor()
+    orig_store = executor.store
+    executor.store = store
+    monkeypatch.setattr(phylo_route, "get_phylo_store", lambda: store)
+    # 拦截后台计算线程启动，专门验证请求提交与 PhyloJobRecord 校验序列化全链路
+    monkeypatch.setattr(executor, "_run_job_worker", lambda *args, **kwargs: None)
+
+    client = TestClient(app)
+    try:
+        assert client.delete("/api/phylo/workspace").status_code == 200
+        cn_fa = tmp_path / "附件2霍氏肠杆菌噬菌体2基因组序列.fasta"
+        base = "ATGCTAGCTAGCATCGATCGATCGATAGCATCGATCGTAGCTAGCTA" * 80
+        cn_fa.write_text(f">附件2霍氏肠杆菌噬菌体2\n{base}\n", encoding="utf-8", newline="\n")
+        assert client.post("/api/phylo/workspace/add", json={"paths": [str(cn_fa)]}).status_code == 200
+
+        res_job = client.post(
+            "/api/phylo/jobs",
+            json={
+                "track": "phage_taxonomy",
+                "msa": "mafft",
+                "msa_strategy": "linsi",
+                "trim_mode": "kpic",
+                "engine": "iqtree",
+                "model": "MFP",
+                "bootstrap": 1000,
+                "iqtree_bnni": True,
+                "iqtree_alrt": 1000,
+                "iqtree_seed": 42,
+                "marker_mode": "terl",
+                "ani_engine": "viridic_blastn",
+                "phage_scope": {"target_rank": "genus"},
+            },
+        )
+        assert res_job.status_code == 200, res_job.text
+        job = res_job.json()
+        assert job["resolved_track"] == "phage_taxonomy"
+        assert len(job["stages"]) == 8
+        client.post(f"/api/phylo/jobs/{job['job_id']}/cancel")
+
+        # 验证含中文序列 ID 可直接通过 ViridicAniCalculator 计算并返回真实中文标签
+        fa2 = tmp_path / "ref.fasta"
+        fa2.write_text(f">Ref_1\n{base[:3000]}" + "GGGG" * 190 + "\n", encoding="utf-8", newline="\n")
+        calc = ViridicAniCalculator()
+        labels, wg, _af, _det, _v, _cmd = calc.compute_matrix_from_fastas(
+            {"附件2霍氏肠杆菌噬菌体2": cn_fa, "Ref_1": fa2},
+            work_dir=tmp_path / "cn_viridic",
+            engine="viridic_blastn",
+            threads=4,
+        )
+        assert labels == ["附件2霍氏肠杆菌噬菌体2", "Ref_1"]
+        assert wg[0][1] > 70.0
+    finally:
+        with executor._jobs_lock:
+            executor._active_jobs.clear()
+        executor.store = orig_store

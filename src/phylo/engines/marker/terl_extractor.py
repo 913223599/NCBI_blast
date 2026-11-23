@@ -242,15 +242,18 @@ class TerlExtractor:
 
         work_dir.mkdir(parents=True, exist_ok=True)
         merged_orfs = work_dir / "all_predicted_orfs.faa"
-        # 用 sample_id||orf_num 重命名头行确保跨基因组零冲突且可 100% 精准回溯
+        # 用纯 ASCII 短键 S0001__ORF_1 重命名头行确保跨基因组/中文 ID 零冲突且可 100% 精准回溯
         prot_seq_map: Dict[str, str] = {}
+        key_to_sid: Dict[str, str] = {}
         with open(merged_orfs, "w", encoding="utf-8", newline="\n") as out_fh:
-            for sid, faa_path in orf_paths.items():
+            for s_idx, (sid, faa_path) in enumerate(orf_paths.items(), start=1):
+                s_key = f"S{s_idx:04d}"
+                key_to_sid[s_key] = sid
                 for idx, rec in enumerate(SeqIO.parse(str(faa_path), "fasta"), start=1):
                     clean_aa = str(rec.seq).replace("*", "").strip()
                     if len(clean_aa) < self.MIN_TERL_AA_LEN:
                         continue
-                    uid = f"{sid}__ORF_{idx}"
+                    uid = f"{s_key}__ORF_{idx}"
                     prot_seq_map[uid] = clean_aa
                     out_fh.write(f">{uid}\n{clean_aa}\n")
 
@@ -297,7 +300,8 @@ class TerlExtractor:
                     continue
                 if "__ORF_" not in target_uid:
                     continue
-                sid = target_uid.rsplit("__ORF_", 1)[0]
+                s_key = target_uid.rsplit("__ORF_", 1)[0]
+                sid = key_to_sid.get(s_key, s_key)
                 hits_by_sample.setdefault(sid, []).append(
                     (target_uid, query_phrog, evalue, bitscore)
                 )

@@ -155,6 +155,9 @@ async def submit_phylo_job(config: PhyloJobConfig):
     except PhyloError as exc:
         status_code = 409 if exc.code == "JOB_CONFLICT" else 400
         raise HTTPException(status_code=status_code, detail=exc.message) from exc
+    except Exception as exc:
+        logger.exception(f"Submit phylo job unexpected error: {exc}")
+        raise HTTPException(status_code=500, detail=f"提交分析任务失败: {exc}") from exc
 
 
 @router.get("/jobs")
@@ -198,6 +201,9 @@ async def reroot_phylo_job(job_id: str, req: RerootJobRequest):
         return get_phylo_executor().reroot_saved_job(job_id, mode=req.mode, node_name=req.node_name)
     except (InvalidInputError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(f"Reroot phylo job failed ({job_id}): {exc}")
+        raise HTTPException(status_code=500, detail=f"重定根失败: {exc}") from exc
 
 
 @router.get("/jobs/{job_id}/export/{fmt}")
@@ -263,6 +269,9 @@ async def phage_ani_screen(req: PhageAniScreenRequest):
         raise HTTPException(status_code=400, detail=exc.message) from exc
     except PhyloError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
+    except Exception as exc:
+        logger.exception(f"Phage ANI screen failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"ANI 预判失败: {exc}") from exc
 
 
 @router.post("/phage/curate-refs", response_model=List[ReferenceCandidate])
@@ -277,6 +286,9 @@ async def phage_curate_references(req: PhageCurateRefsRequest):
         raise HTTPException(status_code=400, detail=exc.message) from exc
     except PhyloError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
+    except Exception as exc:
+        logger.exception(f"Phage curate refs failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"参考集构建失败: {exc}") from exc
 
 
 @router.get("/jobs/{job_id}/qc", response_model=DeliveryQcReport)
