@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
 
+from .thresholds import CompletenessThresholds, DEFAULT_THRESHOLDS
 from .types import (
     CompletenessAssessment,
     ConnectorProfile,
@@ -41,14 +42,18 @@ def _rev_comp(seq: str) -> str:
     return seq.translate(_REV_COMP)[::-1]
 
 
-def detect_terminal_repeats(dna_seq: str) -> Tuple[bool, int, bool]:
+def detect_terminal_repeats(
+    dna_seq: str,
+    *,
+    thresholds: CompletenessThresholds = DEFAULT_THRESHOLDS.completeness,
+) -> Tuple[bool, int, bool]:
     """
     检测噬菌体基因组 5' 与 3' 端是否存在直接末端重复 (DTR) 或反向末端重复 (ITR)。
     返回: (has_dtr, dtr_length_bp, has_itr)
     """
     seq = (dna_seq or "").strip().upper()
     n = len(seq)
-    if n < 2500:
+    if n < thresholds.min_repeat_seq_bp:
         return False, 0, False
 
     has_dtr = False
@@ -56,8 +61,8 @@ def detect_terminal_repeats(dna_seq: str) -> Tuple[bool, int, bool]:
     has_itr = False
 
     # 1. DTR 检测：在 3' 端末尾搜索与 5' 端首部匹配的 20-mer 种子并向外延展校验
-    seed_len = 20
-    edge_limit = min(15_000, n // 3)
+    seed_len = thresholds.dtr_seed_bp
+    edge_limit = min(thresholds.dtr_edge_limit_bp, n // 3)
     if edge_limit >= 60:
         prefix = seq[:edge_limit]
         suffix = seq[n - edge_limit :]
@@ -66,11 +71,11 @@ def detect_terminal_repeats(dna_seq: str) -> Tuple[bool, int, bool]:
             pos = suffix.rfind(head_seed)
             if pos >= 0:
                 cand_len = edge_limit - pos
-                if 20 <= cand_len <= edge_limit:
+                if seed_len <= cand_len <= edge_limit:
                     a = prefix[:cand_len]
                     b = suffix[pos:]
                     matches = sum(1 for x, y in zip(a, b) if x == y)
-                    if (matches / cand_len) >= 0.95:
+                    if (matches / cand_len) >= thresholds.dtr_min_identity:
                         has_dtr = True
                         dtr_len = cand_len
 
@@ -80,20 +85,20 @@ def detect_terminal_repeats(dna_seq: str) -> Tuple[bool, int, bool]:
                 pos_l = prefix.find(tail_seed)
                 if pos_l >= 0:
                     cand_len = pos_l + seed_len
-                    if 20 <= cand_len <= edge_limit:
+                    if seed_len <= cand_len <= edge_limit:
                         a = prefix[:cand_len]
                         b = suffix[edge_limit - cand_len :]
                         matches = sum(1 for x, y in zip(a, b) if x == y)
-                        if (matches / cand_len) >= 0.95:
+                        if (matches / cand_len) >= thresholds.dtr_min_identity:
                             has_dtr = True
                             dtr_len = cand_len
 
     # 2. ITR 检测：检查首尾 200 bp 是否呈反向互补对称
-    itr_win = min(200, n // 4)
+    itr_win = min(thresholds.itr_window_bp, n // 4)
     if itr_win >= 24:
         p5 = seq[:itr_win]
         rc3 = _rev_comp(seq[n - itr_win :])
-        itr_seed_len = 18
+        itr_seed_len = thresholds.itr_seed_bp
         for start in range(0, min(30, itr_win - itr_seed_len + 1)):
             seed = p5[start : start + itr_seed_len]
             if "N" in seed:
@@ -108,12 +113,14 @@ def detect_terminal_repeats(dna_seq: str) -> Tuple[bool, int, bool]:
 def assess_sparse_gbk_annotation(
     length_bp: int,
     proteins: Sequence[StructureProteinItem],
+    *,
+    thresholds: CompletenessThresholds = DEFAULT_THRESHOLDS.completeness,
 ) -> Tuple[bool, float, int]:
     """
     评估已有 GenBank 注释是否存在严重稀疏遗漏，触发 Pyrodigal 间隙回补。
     返回: (is_sparse, coding_coverage, max_gap_bp)
     """
-    if length_bp < 8000:
+    if length_bp < thresholds.sparse_gbk_min_bp:
         return False, 1.0, 0
     if not proteins:
         return True, 0.0, length_bp
@@ -141,7 +148,9 @@ def assess_sparse_gbk_annotation(
         gaps.append(max(0, merged[i][0] - merged[i - 1][1] - 1))
     max_gap_bp = max(gaps, default=0)
 
-    is_sparse = (coding_cov < 0.48) or (coding_cov < 0.68 and max_gap_bp >= 14_000)
+    is_sparse = (coding_cov < thresholds.sparse_gbk_low_cov) or (
+        coding_cov < thresholds.sparse_gbk_mid_cov and max_gap_bp >= thresholds.sparse_gbk_max_gap_bp
+    )
     return is_sparse, round(coding_cov, 4), max_gap_bp
 
 
@@ -155,25 +164,26 @@ def evaluate_contig_completeness(
     tmp_analyses: Sequence[TmpAnalysisItem],
     ptf_clusters: Optional[Sequence[TailFinderCluster]] = None,
     sparse_rescued_orfs: int = 0,
+    thresholds: CompletenessThresholds = DEFAULT_THRESHOLDS.completeness,
 ) -> CompletenessAssessment:
     """
     综合序列末端重复与结构模块完备性评估当前 Contig 的完整度状态，
     并对 Podoviridae-like 的负向排他判定执行安全门控。
     """
     eff_bp = max(length_bp, len(dna_seq or ""), max((p.end for p in proteins), default=0))
-    has_dtr, dtr_len, has_itr = detect_terminal_repeats(dna_seq) if dna_seq else (False, 0, False)
+    has_dtr, dtr_len, has_itr = detect_terminal_repeats(dna_seq, thresholds=thresholds) if dna_seq else (False, 0, False)
 
     roles = {p.structural_role for p in proteins}
     has_mcp = "MCP" in roles
     has_portal = "PORTAL" in roles
-    has_full_terl = any(p.structural_role == "TERL" and p.length_aa >= 300 for p in proteins)
+    has_full_terl = any(p.structural_role == "TERL" and p.length_aa >= thresholds.terl_full_min_aa for p in proteins)
     has_conn_general = "CONN_GENERAL" in roles
     has_intact_head_packaging = bool(has_mcp and (has_portal or has_full_terl or has_conn_general))
 
     has_podo_pfam_t7 = any(
         p.structural_role != "TTPA_B"
         and (p.ptf_pfam == "PF03906" or "phage_t7_tail" in (p.ptf_pfam_desc or "").lower())
-        and p.ptf_tail_prob >= 0.70
+        and p.ptf_tail_prob >= thresholds.podo_t7_pfam_min_prob
         for p in proteins
     )
     has_podo_positive = bool(
@@ -186,7 +196,7 @@ def evaluate_contig_completeness(
         t
         for t in tmp_analyses
         if t.evidence_kind in ("confirmed_tmp", "merged_split_tmp", "gp29_tail_length", "putative_syntenic_tmp")
-        and t.length_aa >= 350
+        and t.length_aa >= thresholds.valid_long_tmp_min_aa
     ]
     has_long_tail_core = bool({"TSP", "MTP"} & roles) or bool(valid_long_tmps)
 
@@ -220,7 +230,7 @@ def evaluate_contig_completeness(
     allow_negative_podo_inference = bool(
         has_intact_head_packaging
         and not has_truncated_long_tail_remnant
-        and (eff_bp >= 25_000 or has_dtr or has_itr)
+        and (eff_bp >= thresholds.podo_negative_min_bp or has_dtr or has_itr)
     )
 
     has_tail_signal = bool(has_long_tail_core or has_podo_positive or (ptf_clusters and len(ptf_clusters) >= 1))
@@ -233,7 +243,7 @@ def evaluate_contig_completeness(
         status = "complete"
         score = 1.0
     elif (has_intact_head_packaging and (has_tail_signal or allow_negative_podo_inference)) or (
-        has_non_tailed_core and eff_bp >= 2500
+        has_non_tailed_core and eff_bp >= thresholds.min_repeat_seq_bp
     ):
         status = "high_quality"
         score = 0.90

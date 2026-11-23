@@ -14,6 +14,11 @@ import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .completeness_gate import evaluate_contig_completeness
+from .thresholds import (
+    CompletenessThresholds,
+    DEFAULT_THRESHOLDS,
+    MorphotypeClassifierThresholds,
+)
 from .types import (
     CompletenessAssessment,
     ConnectorProfile,
@@ -126,6 +131,8 @@ def classify_morphotype(
     genetic_code_used: int = 11,
     genetic_code_auto_selected: bool = False,
     sparse_rescued_orfs: int = 0,
+    thresholds: MorphotypeClassifierThresholds = DEFAULT_THRESHOLDS.classifier,
+    comp_thresholds: CompletenessThresholds = DEFAULT_THRESHOLDS.completeness,
 ) -> MorphotypePrediction:
     """
     结合尾部核心组件、Virfam 连接器模块、基因组完整度门控与 TMP 标尺蛋白开展可解释形态预测。
@@ -147,6 +154,7 @@ def classify_morphotype(
         tmp_analyses=tmp_analyses,
         ptf_clusters=ptf_clusters,
         sparse_rescued_orfs=sparse_rescued_orfs,
+        thresholds=comp_thresholds,
     )
 
     scores: Dict[str, float] = {
@@ -196,7 +204,7 @@ def classify_morphotype(
     short_p9_atpase = [
         p
         for p in by_role.get("TERL", [])
-        if p.length_aa <= 280 and cp.portal_count == 0
+        if p.length_aa <= thresholds.short_p9_atpase_max_aa and cp.portal_count == 0
     ]
     non_tailed_capsid_phrogs = [
         p
@@ -204,8 +212,8 @@ def classify_morphotype(
         if p.phrog_id in {"phrog_514", "phrog_5863", "phrog_8536", "phrog_4286", "phrog_4419", "phrog_7959"}
     ]
     is_compact_tailless_bg = (
-        est_bp <= 25_000
-        and len(proteins) <= 42
+        est_bp <= thresholds.compact_tailless_max_bp
+        and len(proteins) <= thresholds.compact_tailless_max_orfs
         and cp.portal_count == 0
         and mm.connector_count == 0
         and not has_true_tail_backbone
@@ -220,7 +228,7 @@ def classify_morphotype(
     # ─── 1. 强标志：肌尾 TSP (Tail Sheath) 与 T4 样附件 ───────────────────
     tsp_list = by_role.get("TSP", [])
     if tsp_list:
-        w = 6.5 + 1.5 * min(len(tsp_list) - 1, 2)
+        w = thresholds.tsp_base_weight + 1.5 * min(len(tsp_list) - 1, 2)
         scores["Myoviridae-like"] += w
         evidence.append(
             EvidenceItem(
@@ -271,7 +279,7 @@ def classify_morphotype(
     # ─── 2. 强标志：长尾 MTP + TAP + Dit + Confirmed TMP ────────────────────
     if mtp_list:
         # 肌尾一般使用尾管+尾鞘而不依赖长尾典型 MTP，但若两者同时由远程 HMM 弱命中，主要看 TSP
-        w_s = 3.6 if not tsp_list else 1.0
+        w_s = thresholds.mtp_base_weight if not tsp_list else 1.0
         scores["Siphoviridae-like"] += w_s
         evidence.append(
             EvidenceItem(
@@ -289,7 +297,7 @@ def classify_morphotype(
         if is_n4_like and not mtp_list and not tsp_list:
             w_tap = 0.8
         else:
-            w_tap = 2.0 if not tsp_list else 0.8
+            w_tap = thresholds.tap_base_weight if not tsp_list else 0.8
         scores["Siphoviridae-like"] += w_tap
         if tsp_list:
             scores["Myoviridae-like"] += 0.8
@@ -324,7 +332,8 @@ def classify_morphotype(
     ]
     # N4/Schitoviridae 等家族含 phrog_2120 (~370-445 aa) 为短尾内蛋白通道尺度，不可误当长尾 Sipho 主标尺
     has_real_long_tmp = any(
-        t.length_aa >= 500 or (not is_n4_like and t.length_aa >= 350 and not by_role.get("TTPA_B"))
+        t.length_aa >= thresholds.real_long_tmp_min_aa
+        or (not is_n4_like and t.length_aa >= thresholds.real_long_tmp_non_n4_min_aa and not by_role.get("TTPA_B"))
         for t in confirmed_tmps
     )
     if confirmed_tmps:
@@ -333,7 +342,9 @@ def classify_morphotype(
             w_tmp_s = 0.5
         else:
             # 若存在高度显著的古菌多基板肌尾复合物且缺长尾 MTP，则弱 TMP 不再压过肌尾特征
-            w_tmp_s = (1.6 if (len(bp_myo_list) >= 3 and not mtp_list and best_tmp.length_aa < 400) else 2.8) if not tsp_list else 0.9
+            w_tmp_s = (
+                1.6 if (len(bp_myo_list) >= 3 and not mtp_list and best_tmp.length_aa < 400) else thresholds.tmp_base_weight
+            ) if not tsp_list else 0.9
             scores["Siphoviridae-like"] += w_tmp_s
             if tsp_list:
                 scores["Myoviridae-like"] += 1.0
@@ -444,8 +455,8 @@ def classify_morphotype(
     has_tailed_packaging_chassis = (
         cp.portal_count > 0
         or mm.connector_count > 0
-        or any(p.length_aa >= 300 for p in by_role.get("TERL", []))
-        or est_bp >= 25_000
+        or any(p.length_aa >= comp_thresholds.terl_full_min_aa for p in by_role.get("TERL", []))
+        or est_bp >= comp_thresholds.podo_negative_min_bp
     )
     has_head_core = (
         (by_role.get("PORTAL") or by_role.get("MCP") or by_role.get("TERL"))
@@ -455,7 +466,7 @@ def classify_morphotype(
     has_long_tail_hallmark = bool(tsp_list or mtp_list or has_real_long_tmp)
     if has_head_core and not has_long_tail_hallmark and not has_non_tailed_signal and comp.allow_negative_podo_inference:
         # 若已具备完整 Portal+TerL(>=300aa)+MCP 且存在 TAIL_OTHER / PTF尾部信号 / 裂解完整生活史骨架，确保跨越 Incomplete 阈值识别远缘短尾 (如 CrAss-like)
-        has_terl_full = any(p.length_aa >= 300 for p in by_role.get("TERL", []))
+        has_terl_full = any(p.length_aa >= comp_thresholds.terl_full_min_aa for p in by_role.get("TERL", []))
         has_ptf_or_lysis_ctx = bool(ptf_clusters) or any(
             p.ptf_is_tail and p.ptf_tail_prob >= 0.72 for p in proteins
         ) or (mm.lysis_count > 0 and len(proteins) >= 20)
@@ -463,10 +474,14 @@ def classify_morphotype(
             by_role.get("PORTAL")
             and has_terl_full
             and by_role.get("MCP")
-            and est_bp >= 25_000
+            and est_bp >= comp_thresholds.podo_negative_min_bp
             and (bool(by_role.get("TAIL_OTHER")) or has_ptf_or_lysis_ctx)
         )
-        w_abs = 2.6 if (mm.tail_fiber_rbp_count > 0 or mm.connector_count > 0 or has_complete_head_tail_podo) else 1.8
+        w_abs = (
+            thresholds.podo_negative_strong_weight
+            if (mm.tail_fiber_rbp_count > 0 or mm.connector_count > 0 or has_complete_head_tail_podo)
+            else thresholds.podo_negative_weak_weight
+        )
         scores["Podoviridae-like"] += w_abs
         evidence.append(
             EvidenceItem(
@@ -525,7 +540,7 @@ def classify_morphotype(
     else:
         lifestyle = "Unknown"
 
-    if best_score < 2.2:
+    if best_score < thresholds.incomplete_score_cutoff:
         best_code = "Incomplete"
         conf = 0.25 if best_score > 0.5 else 0.10
         basis = "未检测到足够置信的头部包装蛋白或尾部特征模块，该序列可能为极短 Contig、高度退化前噬菌体残片或宿主区域。"
@@ -538,7 +553,7 @@ def classify_morphotype(
         top_rules = [e.detail for e in sorted([ev for ev in evidence if ev.target_morphotype == best_code], key=lambda x: -x.weight)[:3]]
         basis = "；".join(top_rules) + "。" if top_rules else f"综合结构特征得分最高 ({best_score:.2f})。"
 
-        if best_code != "Non-tailed" and margin < 1.5 and second_score > 2.0:
+        if best_code != "Non-tailed" and margin < thresholds.low_margin_warning_cutoff and second_score > 2.0:
             second_code = [k for k, v in scores.items() if v == second_score][0]
             warnings.append(f"与次高候选形态 ({second_code}) 分差较小 ({best_score:.1f} vs {second_score:.1f})，建议结合全基因注释与 3D 结构增强复核。")
 

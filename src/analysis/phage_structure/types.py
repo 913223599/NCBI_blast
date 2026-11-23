@@ -36,6 +36,10 @@ class StructureRunRequest(BaseModel):
     score_cutoff: float = Field(default=28.0, ge=10.0, le=500.0, description="PyHMMER 最低比特分阈值")
     force_hmm_rescan: bool = Field(default=False, description="即使输入含注释也强制重跑 PHROG HMM 结构扫描")
     enable_phold_enhance: bool = Field(default=False, description="是否对未知长 ORF 启动 Phold 3D 结构折叠补漏")
+    phold_trigger_mode: Literal["auto", "always", "off"] = Field(
+        default="auto",
+        description="Phold 3D 触发策略：auto 仅对低置信/缺失 TMP/大片段 Incomplete 复核；always 强制全量；off 关闭",
+    )
     enable_phagetailfinder: bool = Field(default=True, description="是否运行 PhageTailFinder 双状态 HMM 尾部基因簇预测")
     ptf_accurate_mode: bool = Field(default=False, description="PhageTailFinder 精确模式 (提高未命中 HMM 的保守惩罚)")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="附加上下文元数据")
@@ -65,6 +69,7 @@ class StructureBatchRunRequest(BaseModel):
     score_cutoff: float = Field(default=28.0, ge=10.0, le=500.0)
     force_hmm_rescan: bool = Field(default=False)
     enable_phold_enhance: bool = Field(default=False)
+    phold_trigger_mode: Literal["auto", "always", "off"] = Field(default="auto")
     enable_phagetailfinder: bool = Field(default=True)
     ptf_accurate_mode: bool = Field(default=False)
     split_phage_regions: bool = Field(
@@ -282,6 +287,9 @@ class ContigStructureResult(BaseModel):
     genetic_code_used: int = 11
     genetic_code_auto_selected: bool = False
     completeness: Optional[CompletenessAssessment] = None
+    phold_3d_triggered: bool = False
+    phold_3d_trigger_reason: str = ""
+    phold_3d_rescued_orfs: int = 0
     prediction: MorphotypePrediction
     connector_profile: ConnectorProfile
     module_matrix: StructuralModuleMatrix

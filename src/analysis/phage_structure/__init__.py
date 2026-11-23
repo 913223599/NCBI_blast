@@ -4,7 +4,18 @@
 """
 from __future__ import annotations
 
-from .manager import PhageStructureManager, get_phage_structure_manager
+from .manager import (
+    PhageStructureManager,
+    evaluate_single_contig_structure,
+    get_phage_structure_manager,
+    should_trigger_phold_3d,
+)
+from .thresholds import (
+    DEFAULT_THRESHOLDS,
+    PhageStructureThresholds,
+    list_threshold_keys,
+    override_threshold,
+)
 from .tail_finder_adapter import (
     decode_tail_sequence,
     is_phagetailfinder_ready,
@@ -74,6 +85,12 @@ __all__ = [
     "PhageStructureResult",
     "PhageStructureManager",
     "get_phage_structure_manager",
+    "should_trigger_phold_3d",
+    "evaluate_single_contig_structure",
+    "DEFAULT_THRESHOLDS",
+    "PhageStructureThresholds",
+    "override_threshold",
+    "list_threshold_keys",
     "is_phagetailfinder_ready",
     "decode_tail_sequence",
     "run_phagetailfinder_on_contigs",

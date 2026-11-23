@@ -968,4 +968,141 @@ def test_t1_3_split_tmp_merger_positive_and_negatives() -> None:
     assert find_and_merge_split_tmps([p_mtp, p_tmp_n, p_other_c]) == []
 
 
+def test_m3_genetic_code_table4_high_gc_no_zero_orf() -> None:
+    """
+    验证 M3-前置：非表 11 自动切表与 Pyrodigal 单基因组自训练保持严格一致，
+    高 GC 重编码短片段切换至 Table 4 后绝不落入支原体低 GC bin 导致 0 ORF 空呼出；
+    若极端合成序列非表 11 未呼出有效 ORF 时亦能安全回退至 Table 11。
+    """
+    import warnings
+    import pyrodigal
+    from src.analysis.phage_structure.sequence_annotator import _predict_single_contig_orfs
+    from src.analysis.phage_structure.thresholds import DEFAULT_THRESHOLDS
+
+    lambda_fa = Path(r"F:\Phage data\fasta\NC_001416.1.fasta")
+    seq_lambda = next(iter(parse_input_contigs(fasta_path=str(lambda_fa)).values()))["dna_seq"]
+    # Lambda 前 12 kb (GC~55%，远高于支原体 METAGENOMIC_BINS_4 的低 GC 区间) 按真实阅读框注入 TGA->Trp
+    gf = pyrodigal.GeneFinder(meta=False)
+    gf.train((seq_lambda * 3).encode("ascii"), translation_table=11)
+    arr = list(seq_lambda)
+    for g in gf.find_genes(seq_lambda.encode("ascii")):
+        if (g.end - g.begin + 1) < 450:
+            continue
+        for pos in range(g.begin - 1 + 3, g.end - 3, 3):
+            cod = "".join(arr[pos : pos + 3])
+            if g.strand == 1 and cod == "TGG":
+                arr[pos : pos + 3] = list("TGA")
+            elif g.strand == -1 and cod == "CCA":
+                arr[pos : pos + 3] = list("TCA")
+    high_gc_tga_frag = "".join(arr[:12000])
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _cid, orfs, used_code, switched = _predict_single_contig_orfs(
+            ("high_gc_t4", high_gc_tga_frag, 11, True, DEFAULT_THRESHOLDS.genetic_code)
+        )
+        assert used_code == 4 and switched
+        assert len(orfs) >= 10
+
+        # 真实 Table 4 基因组保持稳定切表与正常 ORF 呼出
+        t4_fa = Path(r"F:\Phage data\fasta\NC_003438.1.fasta")
+        if t4_fa.is_file():
+            seq_t4 = next(iter(parse_input_contigs(fasta_path=str(t4_fa)).values()))["dna_seq"]
+            _cid2, orfs2, code2, sw2 = _predict_single_contig_orfs(
+                ("real_t4", seq_t4, 11, True, DEFAULT_THRESHOLDS.genetic_code)
+            )
+            assert code2 == 4 and sw2 and len(orfs2) >= 5
+
+    stop_warnings = [str(w.message) for w in caught if "STOP codons" in str(w.message)]
+    assert stop_warnings == []
+
+
+def test_t2_1_thresholds_centralized_and_override() -> None:
+    """
+    验证 T2.1：集中阈值数据类不可变，override_threshold 纯函数返回新副本且不污染全局默认值。
+    """
+    import dataclasses
+    from src.analysis.phage_structure.thresholds import (
+        DEFAULT_THRESHOLDS,
+        list_threshold_keys,
+        override_threshold,
+    )
+
+    assert dataclasses.is_dataclass(DEFAULT_THRESHOLDS)
+    orig_val = DEFAULT_THRESHOLDS.tmp.direct_pfam_min_aa
+    assert orig_val == 400
+
+    modified = override_threshold(DEFAULT_THRESHOLDS, "tmp.direct_pfam_min_aa", 480)
+    assert modified is not DEFAULT_THRESHOLDS
+    assert modified.tmp.direct_pfam_min_aa == 480
+    assert DEFAULT_THRESHOLDS.tmp.direct_pfam_min_aa == 400
+
+    keys_map = list_threshold_keys(DEFAULT_THRESHOLDS)
+    assert "hmm.pyhmmer_z" in keys_map and keys_map["hmm.pyhmmer_z"] == 200
+    assert "classifier.phold_incomplete_min_bp" in keys_map
+
+
+def test_t1_4_conditional_phold_trigger_policy() -> None:
+    """
+    验证 T1.4：should_trigger_phold_3d 精准覆盖三类触发条件，并在高置信/极短碎片时严格跳过。
+    """
+    from src.analysis.phage_structure.manager import should_trigger_phold_3d
+    from src.analysis.phage_structure.types import MorphotypePrediction, TmpAnalysisItem
+
+    def _make_pred(code: str, scores: dict) -> MorphotypePrediction:
+        return MorphotypePrediction(
+            morphotype_code=code,  # type: ignore[arg-type]
+            morphotype_label_cn=code,
+            tail_feature_tag="tag",
+            confidence=0.9,
+            class_scores=scores,
+            decision_basis="test",
+        )
+
+    dummy_tmp = TmpAnalysisItem(
+        locus_tag="T1", contig_id="c1", product="TMP", length_aa=900, est_tail_length_nm=130.5
+    )
+
+    # 1. 有尾但缺失 TMP -> 触发 tailed_without_tmp
+    ok1, r1 = should_trigger_phold_3d(
+        _make_pred("Myoviridae-like", {"Myoviridae-like": 8.7, "Siphoviridae-like": 1.0, "Podoviridae-like": 0.0, "Non-tailed": 0.0}),
+        [],
+        280_000,
+    )
+    assert ok1 and r1 == "tailed_without_tmp"
+
+    # 2. 次高分与最高分分差 < 1.5 且次高 > 2.0 -> 触发 low_margin_ambiguous
+    ok2, r2 = should_trigger_phold_3d(
+        _make_pred("Podoviridae-like", {"Podoviridae-like": 3.5, "Siphoviridae-like": 2.6, "Myoviridae-like": 0.0, "Non-tailed": 0.0}),
+        [],
+        35_000,
+    )
+    assert ok2 and r2 == "low_margin_ambiguous"
+
+    # 3. Incomplete 且长度 >= 15 kb -> 触发 incomplete_large_contig
+    ok3, r3 = should_trigger_phold_3d(
+        _make_pred("Incomplete", {"Myoviridae-like": 0.0, "Siphoviridae-like": 0.0, "Podoviridae-like": 0.0, "Non-tailed": 0.0}),
+        [],
+        42_000,
+    )
+    assert ok3 and r3 == "incomplete_large_contig"
+
+    # 4. 高置信长尾且有 TMP -> 不触发 (0额外开销)
+    ok4, r4 = should_trigger_phold_3d(
+        _make_pred("Siphoviridae-like", {"Siphoviridae-like": 9.8, "Podoviridae-like": 0.0, "Myoviridae-like": 0.0, "Non-tailed": 0.0}),
+        [dummy_tmp],
+        48_000,
+    )
+    assert not ok4 and r4 == ""
+
+    # 5. 极短碎片 Incomplete (<15 kb) -> 不触发
+    ok5, r5 = should_trigger_phold_3d(
+        _make_pred("Incomplete", {"Myoviridae-like": 0.0, "Siphoviridae-like": 0.0, "Podoviridae-like": 0.0, "Non-tailed": 0.0}),
+        [],
+        5_000,
+    )
+    assert not ok5 and r5 == ""
+
+
+
 

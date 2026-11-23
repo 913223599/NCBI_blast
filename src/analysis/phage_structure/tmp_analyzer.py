@@ -16,6 +16,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .thresholds import DEFAULT_THRESHOLDS, SplitTmpThresholds, TmpSelectionThresholds
 from .tmp_split_merger import find_and_merge_split_tmps
 from .types import (
     HydrophobicSegment,
@@ -350,6 +351,7 @@ def analyze_single_tmp(
     *,
     evidence_kind: str = "confirmed_tmp",
     merged_loci: Optional[List[str]] = None,
+    thresholds: TmpSelectionThresholds = DEFAULT_THRESHOLDS.tmp,
 ) -> TmpAnalysisItem:
     """对单条 TMP 或候选尺蛋白执行全量化分析。"""
     aa = (protein.translation or "").strip().upper().rstrip("*")
@@ -363,9 +365,9 @@ def analyze_single_tmp(
     tr_pct = round(tr_tot * 100.0 / max(1, L), 2)
     max_p = max((tr.period_aa for tr in tr_list), default=0)
 
-    est_nm = round(L * _TMP_HELM_ALPHA_NM_PER_AA, 1)
-    lo_nm = round(L * _TMP_MIN_NM_PER_AA, 1)
-    hi_nm = round(L * _TMP_MAX_NM_PER_AA, 1)
+    est_nm = round(L * thresholds.helix_nm_per_aa, 1)
+    lo_nm = round(L * thresholds.helix_min_nm_per_aa, 1)
+    hi_nm = round(L * thresholds.helix_max_nm_per_aa, 1)
 
     # 依据文献定性判读
     if evidence_kind == "merged_split_tmp":
@@ -465,6 +467,7 @@ def _inspect_operon_context(
     *,
     contig_length_bp: int = 0,
     window: int = 4,
+    thresholds: TmpSelectionThresholds = DEFAULT_THRESHOLDS.tmp,
 ) -> Dict[str, Any]:
     """
     审计候选蛋白在基因组局部操作子 (±window ORF，兼容窄间距环状边界) 中的结构邻域：
@@ -485,7 +488,7 @@ def _inspect_operon_context(
                 edge_gap = (
                     (sorted_prots[0].start - 1) + max(0, contig_length_bp - sorted_prots[-1].end)
                 )
-                if edge_gap > 3500:
+                if edge_gap > thresholds.circular_edge_max_gap_bp:
                     continue
             else:
                 continue
@@ -519,7 +522,7 @@ def _inspect_operon_context(
                 same_strand_tail_anchors += 1
         if anchor.structural_role in {"TAIL_OTHER", "TAIL_FIBER_RBP"} and same_strand:
             same_strand_minor_tail_anchors += 1
-        if anchor.ptf_is_tail and anchor.ptf_tail_prob >= 0.72 and anchor.length_aa >= 120:
+        if anchor.ptf_is_tail and anchor.ptf_tail_prob >= thresholds.ptf_backbone_prob and anchor.length_aa >= thresholds.ptf_neighbor_min_aa:
             neighbor_ptf_anchors += 1
         if anchor.structural_role in _HEAD_OR_NON_LONGTAIL_ROLES:
             head_internal_anchors += 1
@@ -584,6 +587,8 @@ def select_and_analyze_tmps(
     has_tailed_context: bool = False,
     contig_length_bp: int = 0,
     max_workers: Optional[int] = None,
+    thresholds: TmpSelectionThresholds = DEFAULT_THRESHOLDS.tmp,
+    split_thresholds: SplitTmpThresholds = DEFAULT_THRESHOLDS.split_tmp,
 ) -> List[TmpAnalysisItem]:
     """
     在单个 Contig/基因组蛋白列表中通过「多结构域 HMM/Pfam + 操纵子共线性语境 + 生物物理尺度」
@@ -602,7 +607,9 @@ def select_and_analyze_tmps(
 
     # 客观判断全基因组是否真实编码了长尾/肌尾结构骨架，不轻信孤立未核实 TMP 文本或单点 PTF 溶菌域自证
     ptf_tail_loci_cnt = sum(
-        1 for p in sorted_prots if p.ptf_is_tail and p.ptf_tail_prob >= 0.72 and p.length_aa >= 150
+        1
+        for p in sorted_prots
+        if p.ptf_is_tail and p.ptf_tail_prob >= thresholds.ptf_backbone_prob and p.length_aa >= thresholds.ptf_backbone_min_aa
     )
     has_true_tail_backbone = (
         any(p.structural_role in _CORE_TAIL_TRUNK_ROLES for p in sorted_prots)
@@ -611,15 +618,27 @@ def select_and_analyze_tmps(
     )
 
     contexts: List[Dict[str, Any]] = [
-        _inspect_operon_context(sorted_prots, pos, contig_length_bp=eff_bp)
+        _inspect_operon_context(
+            sorted_prots,
+            pos,
+            contig_length_bp=eff_bp,
+            window=max(1, thresholds.operon_window),
+            thresholds=thresholds,
+        )
         for pos in range(len(sorted_prots))
     ]
     wide_contexts: List[Dict[str, Any]] = [
-        _inspect_operon_context(sorted_prots, pos, contig_length_bp=eff_bp, window=8)
+        _inspect_operon_context(
+            sorted_prots,
+            pos,
+            contig_length_bp=eff_bp,
+            window=max(2, thresholds.wide_operon_window),
+            thresholds=thresholds,
+        )
         for pos in range(len(sorted_prots))
     ]
 
-    split_merged = find_and_merge_split_tmps(sorted_prots)
+    split_merged = find_and_merge_split_tmps(sorted_prots, thresholds=split_thresholds)
     split_consumed_loci: set[str] = {
         loc for mc in split_merged for loc in mc.source_loci
     }
@@ -633,7 +652,7 @@ def select_and_analyze_tmps(
         )
         and not ((p.ptf_pfam.strip().upper() in _CONFOUNDER_PFAMS) or bool(_NON_TAIL_PFAM_DESC_RE.search(p.ptf_pfam_desc or "")))
         and p.structural_role != "BASEPLATE_MYO"
-        and p.length_aa >= 380
+        and p.length_aa >= thresholds.direct_pfam_primary_min_aa
         and not contexts[pos]["immediate_head_sandwich"]
         for pos, p in enumerate(sorted_prots)
         if p.locus_tag not in split_consumed_loci
@@ -665,14 +684,14 @@ def select_and_analyze_tmps(
         is_high_conf_verified_tmp = (
             p.structural_role == "TMP"
             and p.evidence_source in ("pyhmmer_phrog", "phold_3d")
-            and p.hmm_score >= 80.0
+            and p.hmm_score >= thresholds.high_conf_verified_hmm_score
             and ctx["tail_trunk_anchors"] >= 1
             and not primary_pf in _CONFOUNDER_PFAMS
         )
         if has_confounder_pfam and not (has_strong_tmp_pfam and not primary_is_confounder) and not is_high_conf_verified_tmp:
             continue
         if p.structural_role in _STRICT_NON_TMP_ROLES:
-            if not (has_direct_pfam and p.length_aa >= 400 and p.structural_role not in {"MCP", "PORTAL", "TERL", "TERS", "NON_TAIL_ENZYME", "INTEGRASE", "T6SS_CONFOUNDER", "NON_TAILED_MARKER", "TAIL_FIBER_RBP"}):
+            if not (has_direct_pfam and p.length_aa >= thresholds.direct_pfam_min_aa and p.structural_role not in {"MCP", "PORTAL", "TERL", "TERS", "NON_TAIL_ENZYME", "INTEGRASE", "T6SS_CONFOUNDER", "NON_TAILED_MARKER", "TAIL_FIBER_RBP"}):
                 continue
 
         is_unverified = (
@@ -683,8 +702,8 @@ def select_and_analyze_tmps(
         self_authenticating_tmp = (
             p.structural_role == "TMP"
             and not is_unverified
-            and p.hmm_score >= 60.0
-            and p.length_aa >= 650
+            and p.hmm_score >= thresholds.self_auth_hmm_score
+            and p.length_aa >= thresholds.self_auth_min_aa
             and ctx["head_internal_anchors"] == 0
         )
 
@@ -697,7 +716,7 @@ def select_and_analyze_tmps(
             continue
 
         # 路径 1: 拥有权威直接 TMP/PTR/PhageMin_Tail Pfam 结构域的蛋白（最不依赖 PHROG 名称与 GBK 文本）
-        if has_direct_pfam and p.length_aa >= 400:
+        if has_direct_pfam and p.length_aa >= thresholds.direct_pfam_min_aa:
             candidates.append((p, "confirmed_tmp", []))
             chosen_loci.add(p.locus_tag)
             continue
@@ -706,34 +725,38 @@ def select_and_analyze_tmps(
         if p.structural_role == "TMP":
             if is_unverified:
                 # 绝不放行未经序列核实的外部 .gbk 纯字符串声明，除非同链尾部干区明确共线性证实
-                if p.length_aa >= 400 and ctx["same_strand_tail_anchors"] >= 1:
+                if p.length_aa >= thresholds.direct_pfam_min_aa and ctx["same_strand_tail_anchors"] >= 1:
                     candidates.append((p, "putative_syntenic_tmp", []))
                     chosen_loci.add(p.locus_tag)
                 continue
 
             in_tail_operon = ctx["tail_trunk_anchors"] >= 1 or ctx["baseplate_anchors"] >= 1 or ctx["ptf_support"] or self_authenticating_tmp
             # 带有溶菌水解 Pfam（如 PF18013）且缺少直接 TMP 域的中短蛋白 (<650aa) 必须具备真实邻域尾干/邻近 PTF 锚点，严防孤立通道蛋白自证
-            if has_lytic_pfam and p.length_aa < 650 and not in_tail_operon:
+            if has_lytic_pfam and p.length_aa < thresholds.lytic_tmp_min_aa and not in_tail_operon:
                 continue
-            min_sc = 20.0 if in_tail_operon else 30.0
-            min_len = 300 if (ctx["immediate_tap_downstream"] and p.hmm_score >= 60.0) else 380
+            min_sc = thresholds.hmm_tmp_in_operon_min_score if in_tail_operon else thresholds.hmm_tmp_outside_operon_min_score
+            min_len = (
+                thresholds.hmm_tmp_tap_min_aa
+                if (ctx["immediate_tap_downstream"] and p.hmm_score >= thresholds.self_auth_hmm_score)
+                else thresholds.hmm_tmp_default_min_aa
+            )
             if p.length_aa >= 250 and p.hmm_score >= min_sc:
                 # 当基因组附近已存在带权威结构域的主蛋白时，屏蔽 <380 aa 的同源小碎片
                 if p.length_aa < min_len and (has_direct_pfam_primary or not in_tail_operon):
                     continue
-                if p.length_aa >= min_len or (in_tail_operon and p.hmm_score >= 45.0 and not has_direct_pfam_primary):
+                if p.length_aa >= min_len or (in_tail_operon and p.hmm_score >= thresholds.hmm_tmp_short_operon_score and not has_direct_pfam_primary):
                     candidates.append((p, "confirmed_tmp", []))
                     chosen_loci.add(p.locus_tag)
             continue
 
         # 路径 3: 肌尾 T4-gp29 型基板尺蛋白
-        if p.structural_role == "BASEPLATE_MYO" and re.search(r"\btail\s+length\b", p.product, re.I) and p.length_aa >= 350:
+        if p.structural_role == "BASEPLATE_MYO" and re.search(r"\btail\s+length\b", p.product, re.I) and p.length_aa >= thresholds.gp29_min_aa:
             candidates.append((p, "gp29_tail_length", []))
             chosen_loci.add(p.locus_tag)
             continue
 
         # 路径 4: 多结构域融合型溶菌-卷尺蛋白（须具备溶菌水解 Pfam + 较长尺度 + 真实尾干同向语境）
-        if has_lytic_pfam and p.length_aa >= 650 and ctx["same_strand_tail_anchors"] >= 1 and (ctx["tail_trunk_anchors"] >= 1 or ctx["immediate_tap_downstream"] or (ctx["baseplate_anchors"] >= 1 and ctx["ptf_support"])):
+        if has_lytic_pfam and p.length_aa >= thresholds.lytic_tmp_min_aa and ctx["same_strand_tail_anchors"] >= 1 and (ctx["tail_trunk_anchors"] >= 1 or ctx["immediate_tap_downstream"] or (ctx["baseplate_anchors"] >= 1 and ctx["ptf_support"])):
             candidates.append((p, "confirmed_tmp", []))
             chosen_loci.add(p.locus_tag)
 
@@ -754,7 +777,7 @@ def select_and_analyze_tmps(
             # 对确有 MTP/TSP/TTP 核心尾干但局部相隔 5-8 ORF 的放线菌/微杆菌长尾溶菌-TMP 放宽共线邻域支撑
             has_wide_tail_syntax = (
                 has_core_trunk_in_genome
-                and cand.length_aa >= 650
+                and cand.length_aa >= thresholds.lytic_tmp_min_aa
                 and (wctx["same_strand_tail_anchors"] >= 1 and ctx["same_strand_minor_tail_anchors"] >= 1)
             )
             if ctx["same_strand_tail_anchors"] == 0 and not has_wide_tail_syntax:
@@ -775,13 +798,13 @@ def select_and_analyze_tmps(
             is_generic_virion = (
                 cand.structural_role == "HEAD_SCAFFOLD_PROTEASE"
                 and not _HEAD_SPECIFIC_KW_RE.search(cand.product or "")
-                and cand.length_aa >= 650
+                and cand.length_aa >= thresholds.lytic_tmp_min_aa
                 and (ctx["immediate_tap_downstream"] or ctx["tail_trunk_anchors"] >= 1)
             )
             is_yqaj_tap_fusion = (
                 cand.structural_role == "NON_TAIL_ENZYME"
                 and ctx["immediate_tap_downstream"]
-                and cand.length_aa >= 500
+                and cand.length_aa >= thresholds.syntenic_yqaj_min_aa
                 and ctx["baseplate_anchors"] >= 1
                 and ("PF09588" in pfams or "exonuclease" in (cand.product or "").lower())
             )
@@ -792,9 +815,9 @@ def select_and_analyze_tmps(
                 re.search(r"\btail\s+(?:protein\s+with\s+|associated\s+)?lysin\b", cand.product or "", re.I)
             )
             if is_lysin_tail:
-                if cand.length_aa < 650 and "tail" not in (cand.product or "").lower() and not ctx["immediate_tap_downstream"]:
+                if cand.length_aa < thresholds.lytic_tmp_min_aa and "tail" not in (cand.product or "").lower() and not ctx["immediate_tap_downstream"]:
                     continue
-            elif cand.length_aa < 480:
+            elif cand.length_aa < thresholds.syntenic_default_min_aa:
                 continue
 
             score = max(ctx["best_syntax_score"], (wctx["best_syntax_score"] * 0.85 if has_wide_tail_syntax else 0.0))
@@ -814,7 +837,7 @@ def select_and_analyze_tmps(
                 score += 0.8
             score += _biophysical_plausibility(cand.translation)
 
-            if score >= 3.0 and (score > best_score or (score == best_score and best_cand and cand.length_aa > best_cand.length_aa)):
+            if score >= thresholds.syntenic_min_score and (score > best_score or (score == best_score and best_cand and cand.length_aa > best_cand.length_aa)):
                 best_score = score
                 best_cand = cand
 
@@ -828,9 +851,22 @@ def select_and_analyze_tmps(
     workers = max_workers if max_workers is not None else max(1, min(len(candidates), cpu_cnt - 2, 8))
     if len(candidates) > 1 and workers > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            items = list(pool.map(lambda triple: analyze_single_tmp(triple[0], evidence_kind=triple[1], merged_loci=triple[2]), candidates))
+            items = list(
+                pool.map(
+                    lambda triple: analyze_single_tmp(
+                        triple[0],
+                        evidence_kind=triple[1],
+                        merged_loci=triple[2],
+                        thresholds=thresholds,
+                    ),
+                    candidates,
+                )
+            )
     else:
-        items = [analyze_single_tmp(p, evidence_kind=kind, merged_loci=mloci) for p, kind, mloci in candidates]
+        items = [
+            analyze_single_tmp(p, evidence_kind=kind, merged_loci=mloci, thresholds=thresholds)
+            for p, kind, mloci in candidates
+        ]
 
     items.sort(key=lambda x: (-int(x.evidence_kind in ("confirmed_tmp", "merged_split_tmp")), -x.length_aa))
     return items

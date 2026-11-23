@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import FrozenSet, List, Sequence, Set
 
+from .thresholds import DEFAULT_THRESHOLDS, SplitTmpThresholds
 from .types import StructureProteinItem
 
 _DIRECT_TMP_PFAMS: FrozenSet[str] = frozenset({
@@ -77,17 +78,21 @@ def _collect_pfams(protein: StructureProteinItem) -> Set[str]:
     return out
 
 
-def _is_verified_tmp_fragment(protein: StructureProteinItem, pfams: Set[str]) -> bool:
+def _is_verified_tmp_fragment(
+    protein: StructureProteinItem,
+    pfams: Set[str],
+    thresholds: SplitTmpThresholds = DEFAULT_THRESHOLDS.split_tmp,
+) -> bool:
     if protein.structural_role in _EXCLUDED_ROLES:
         return False
-    if not (180 <= protein.length_aa <= 1600):
+    if not (thresholds.frag_min_aa <= protein.length_aa <= thresholds.frag_max_aa):
         return False
     if pfams & _DIRECT_TMP_PFAMS:
         return True
     return (
         protein.structural_role == "TMP"
         and protein.evidence_source in ("pyhmmer_phrog", "phold_3d")
-        and protein.hmm_score >= 60.0
+        and protein.hmm_score >= thresholds.verified_hmm_min_score
     )
 
 
@@ -151,7 +156,11 @@ def _merge_two_fragments(p_left: StructureProteinItem, p_right: StructureProtein
     )
 
 
-def find_and_merge_split_tmps(sorted_prots: Sequence[StructureProteinItem]) -> List[MergedSplitTmpCandidate]:
+def find_and_merge_split_tmps(
+    sorted_prots: Sequence[StructureProteinItem],
+    *,
+    thresholds: SplitTmpThresholds = DEFAULT_THRESHOLDS.split_tmp,
+) -> List[MergedSplitTmpCandidate]:
     """
     扫描按坐标排序的 Contig 蛋白列表，识别并合并相邻移码分裂的 TMP 片段。
     """
@@ -171,12 +180,12 @@ def find_and_merge_split_tmps(sorted_prots: Sequence[StructureProteinItem]) -> L
             continue
 
         gap_bp = p2.start - p1.end - 1
-        if not (-250 <= gap_bp <= 120):
+        if not (thresholds.min_gap_bp <= gap_bp <= thresholds.max_gap_bp):
             continue
 
         pf1 = _collect_pfams(p1)
         pf2 = _collect_pfams(p2)
-        if not (_is_verified_tmp_fragment(p1, pf1) and _is_verified_tmp_fragment(p2, pf2)):
+        if not (_is_verified_tmp_fragment(p1, pf1, thresholds) and _is_verified_tmp_fragment(p2, pf2, thresholds)):
             continue
 
         direct1 = pf1 & _DIRECT_TMP_PFAMS
@@ -185,12 +194,17 @@ def find_and_merge_split_tmps(sorted_prots: Sequence[StructureProteinItem]) -> L
         if not (direct1 or direct2):
             continue
         if direct1 and direct2 and direct1 == direct2 and len(direct1) == 1 and "PF12789" not in direct1:
-            if not (p1.structural_role == "TMP" and p2.structural_role == "TMP" and p1.hmm_score >= 100 and p2.hmm_score >= 100):
+            if not (
+                p1.structural_role == "TMP"
+                and p2.structural_role == "TMP"
+                and p1.hmm_score >= thresholds.same_pfam_high_hmm_score
+                and p2.hmm_score >= thresholds.same_pfam_high_hmm_score
+            ):
                 continue
 
         span_bp = max(p1.end, p2.end) - min(p1.start, p2.start) + 1
         merged_aa_len = (span_bp - 3) // 3
-        if not (600 <= merged_aa_len <= 3500):
+        if not (thresholds.merged_min_aa <= merged_aa_len <= thresholds.merged_max_aa):
             continue
 
         merged = _merge_two_fragments(p1, p2)

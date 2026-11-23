@@ -96,6 +96,13 @@ const filteredProteins = computed(() => {
           >
             {{ activeContig.prediction.morphotype_label_cn }}
           </span>
+          <span
+            v-if="activeContig.phold_3d_triggered"
+            class="time-chip phold-chip"
+            :title="activeContig.phold_3d_trigger_reason || '已触发 Phold 3D 结构复核'"
+          >
+            3D 复核 +{{ activeContig.phold_3d_rescued_orfs ?? 0 }} ORF
+          </span>
           <span class="time-chip">耗时 {{ result.elapsed_sec }} s</span>
         </div>
 
@@ -404,6 +411,13 @@ const filteredProteins = computed(() => {
   color: #475569;
   padding: 3px 8px;
   border-radius: 6px;
+}
+
+.phold-chip {
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+  font-weight: 600;
 }
 
 .tb-actions {

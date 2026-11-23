@@ -71,6 +71,7 @@ export interface StructureRunForm {
   score_cutoff: number
   force_hmm_rescan: boolean
   enable_phold_enhance: boolean
+  phold_trigger_mode?: 'auto' | 'always' | 'off'
   enable_phagetailfinder: boolean
   ptf_accurate_mode: boolean
 }
@@ -104,6 +105,7 @@ export interface StructureBatchRunPayload {
   score_cutoff: number
   force_hmm_rescan: boolean
   enable_phold_enhance: boolean
+  phold_trigger_mode?: 'auto' | 'always' | 'off'
   enable_phagetailfinder: boolean
   ptf_accurate_mode: boolean
   split_phage_regions?: boolean
@@ -282,6 +284,9 @@ export interface ContigStructureResult {
   genetic_code_used?: number
   genetic_code_auto_selected?: boolean
   completeness?: CompletenessAssessment | null
+  phold_3d_triggered?: boolean
+  phold_3d_trigger_reason?: string
+  phold_3d_rescued_orfs?: number
   prediction: MorphotypePrediction
   connector_profile: ConnectorProfile
   module_matrix: StructuralModuleMatrix

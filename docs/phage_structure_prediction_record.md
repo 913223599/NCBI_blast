@@ -274,3 +274,36 @@
 
 * **只读机制诊断保留（待后续阶段决策）**：`NC_015297`（`5.48 kb` 丝状单链 `Inoviridae`）暴露了极端小尺度非 Mollicutes 噬菌体在自动切换至 Table 4 后，`METAGENOMIC_BINS_4` 元基因组模型受训练 bin 稀缺影响可能漏呼短 ORF 的边界现象（本里程碑严格冻结规则，将该现象留作后续 M3 协同优化输入）。
 * **合规自检**：全部 `18` 份新增/修改前后端及文档文件均已通过 `UTF-8` 无 BOM 与零 Emoji 检验。
+
+---
+
+## 11. 阶段 2 / M3 第一批：切表一致性兜底、`T2.1` 阈值敏感性扫描与 `T1.4` 条件 3D 复核（步骤 61）
+
+严格遵守“未完成完整 M3 阶段 `T2.2–T2.4` 前暂不运行 `Suite E` 盲测”原则，本批首先面向 `341` 株去重调参全集（`Suite A + B + C + D`）与 `7` 组条件触发 3D 复核场景落地工程加固与量化审计。
+
+### 11.1 M3-前置：非 Table 11 切表一致性兜底（[sequence_annotator.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/sequence_annotator.py)）
+- 针对 `_predict_single_contig_orfs` 曾对切表 `4` 退回低 GC 支原体 `METAGENOMIC_BINS_4` 导致与 `select_optimal_genetic_code`（`meta=False` 自训练）行为不一致的结构漏洞，调整为仅对 `<100 kb` 标准 Table `11` 使用 `METAGENOMIC_BINS_11`，而对切表 `4 / 15` 与 `>=100 kb` 序列统一启用 `meta=False` 单基因组自训练；并增设空呼出安全保底（若非 Table `11` 呼出 `0` 条有效 `>=25 aa` ORF，自动回退至 Table `11` 重呼）。
+
+### 11.2 T2.1 集中阈值配置化与 `±20%` 全集敏感性扫描（[thresholds.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/thresholds.py)、[sensitivity_phage_structure.py](file:///f:/NCBI%20blast/scripts/sensitivity_phage_structure.py)）
+1. **不可变集中配置**：构建 `PhageStructureThresholds` 不可变数据类及 6 大子配置组（`hmm` / `genetic_code` / `completeness` / `split_tmp` / `tmp` / `classifier`），统一导出 `DEFAULT_THRESHOLDS` 与纯函数覆盖器 `override_threshold`，全面穿透至 [genetic_code_selector.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/genetic_code_selector.py)、[completeness_gate.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/completeness_gate.py)、[tmp_split_merger.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_split_merger.py)、[tmp_analyzer.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_analyzer.py)、[morphotype_classifier.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/morphotype_classifier.py)、[sequence_annotator.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/sequence_annotator.py) 与 [manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)。
+2. **`341` 株全量基准零回归校验**：[sensitivity_report.json](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_sensitivity/sensitivity_report.json)（耗时 `368.86s`）验证默认配置在 `341` 株（含 `41` 株核实 TEM、实际成对定标 `n=39`）保持 **`341 / 341 (100.00%, Macro-F1 = 1.0)`**、有尾 TMP 检出 `188 / 190`、假 TMP `0`、`NC_005178` 合并 **`1185 aa`**、TEM `MAE = 21.653 nm` / `MAPE = 11.297%`。
+3. **`±20%` 单因素扰动核心发现**（报告 [sensitivity_summary.md](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_sensitivity/sensitivity_summary.md)）：
+   - **极高结构稳定性**：在 `24` 项内存缓存扰动中，**`19` 项阈值在 `±20%` 宽幅波动下保持 `100.00% (341/341)` 且 TMP `188/190` 零敏感平台期**（涵盖 `operon_window 3..5`、`wide_operon_window 6..10`、`podo_negative_min_bp 20..30 kb`、`terl_full_min_aa 240..360 aa`、`split_tmp.max_gap_bp 96..144 bp`、`split_tmp.merged_min_aa 480..720 aa` 等全部核心距离与尺寸护栏）；`24` 株实时 PyHMMER 扫描亦验证 `Z ∈ [160, 240]` 与 `score_cutoff ∈ [22.4, 33.6]` 均为 `24/24` 形态与 `12/12` TMP；
+   - **唯二高敏感临界对**：`classifier.podo_negative_strong_weight (2.6)` `-20% -> 2.08` 与 `classifier.incomplete_score_cutoff (2.2)` `+20% -> 2.64` 均触发完全相同的 `10` 株远缘短尾（*Steigviridae* / *Grimontviridae* / *Autographiviridae*）滑入 `Incomplete`（`331/341 = 97.07%`），数学上印证 `2.6` 处于 `[2.2, 3.12]` 安全窗口核心；此外 `hmm.default_score_cutoff` 上调 `+20%` 至 `33.6` 使 `1` 株无尾（`NC_055060`）跌入 `Incomplete`（`340/341`），而 `tmp.direct_pfam_min_aa` (`480 aa`) 与 `tmp.syntenic_yqaj_min_aa` (`600 aa`) 上调 `+20%` 各自仅少召回 `1` 条边缘 TMP（形态仍 `100%`）。
+
+### 11.3 T1.4 条件触发 Phold 3D（ProstT5 + Foldseek）增强复核（[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py)、[benchmark_phold_3d_rescue.py](file:///f:/NCBI%20blast/scripts/benchmark_phold_3d_rescue.py)）
+1. **条件门控架构与上游 Bug 规避**：新增 `phold_trigger_mode`（`auto / always / off`）及 `should_trigger_phold_3d`（精准捕获 `tailed_without_tmp`、`low_margin_ambiguous`、`incomplete_large_contig` 三类情景），严格限制 `--batch_size 1` 与执行前后 CUDA 显存回收（实测并规避了 `phold 1.2.6` 开启 `--omit_probs` 时 `predict_3Di.py:95` 触发 `TypeError: 'NoneType'` 的上游缺陷，改以 `omit_probs=False` 稳定运行），并在 [StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue) 补充 3D 复核角标展示。
+2. **7 场景定向 3D 复核实测（[phold_3d_rescue_report.json](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_phold3d/phold_3d_rescue_report.json)）**：
+
+| 验证场景 | 触发条件 | 形态变化 (`前 -> 后`) | Phold 救回 ORF / 结构域 | TMP 变化 | 额外 3D 耗时 / GPU 空闲显存 (`前->后`) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| `phiKZ` (*Chimalliviridae*) | `tailed_without_tmp` | `Myoviridae-like -> Myoviridae-like (0.99)` | `31` 个（含 `1 MCP, 1 BASEPLATE_MYO, 1 TAIL_OTHER, 21 毒粒蛋白`） | `0 -> 0`（客观无细菌型 TMP） | `66.96s` / `7127 -> 7131 MB` |
+| `PaZh_1` (*Chimalliviridae*) | `tailed_without_tmp` | `Myoviridae-like -> Myoviridae-like (0.99)` | `31` 个（同上） | `0 -> 0`（客观无细菌型 TMP） | `61.54s` / `7131 -> 7137 MB` |
+| `Lambda` / `T4` / `T7` 高置信对照 | 不触发 | 原判不变 (`Siphoviridae / Myoviridae / Podoviridae`) | `0` | `853 aa / 590 aa / None` 不变 | **`0.00s` 零开销** / 显存无波动 |
+| `Lambda` 模拟 HMM 全失明 | `incomplete_large_contig` | **`Incomplete (0.10) -> Siphoviridae-like (0.99)`** | **`24` 个**（含 `TERL, PORTAL, MCP, MTP, TMP, DIT` 等全套骨架） | **`0 -> 1 (853 aa 精确复原)`** | `60.93s` / `7137 -> 7128 MB` |
+| `T7` 模拟 HMM 全失明 | `incomplete_large_contig` | **`Incomplete (0.10) -> Podoviridae-like (0.99)`** | **`14` 个**（含 `MCP, TERL, CONN_GENERAL, INTERNAL_VIRION x2`） | `0 -> 0` | `61.60s` / `7128 -> 7128 MB` |
+
+### 11.4 本批自动化测试与合规验收
+* **前端单元测试与构建**：`npx vitest run` **`9 files, 54 passed in 1.87s`**；`npm run build`（`vue-tsc -b && vite build`）`built in 14.35s`。
+* **后端全量单元测试（`.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v`）**：**`19 passed in 144.61s (0:02:24)`**（含新增 `test_m3_genetic_code_table4_high_gc_no_zero_orf`、`test_t2_1_thresholds_centralized_and_override` 与 `test_t1_4_conditional_phold_trigger_policy`，全量零警告）。
+* **合规审计**：涉及前后端源码、脚本、单测及留档文档全部通过 `UTF-8` 无 BOM 与零 Emoji 校验。

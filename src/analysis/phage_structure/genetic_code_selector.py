@@ -9,9 +9,11 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
 import pyrodigal
+
+from .thresholds import DEFAULT_THRESHOLDS, GeneticCodeThresholds
 
 SUPPORTED_GENETIC_CODES = (11, 4, 15)
 
@@ -24,13 +26,19 @@ METAGENOMIC_BINS_4 = pyrodigal.MetagenomicBins(
 )
 
 
-def _evaluate_table_stats(seq_bytes: bytes, train_bytes: bytes, genetic_code: int) -> Dict[str, Any]:
+def _evaluate_table_stats(
+    seq_bytes: bytes,
+    train_bytes: bytes,
+    genetic_code: int,
+    *,
+    min_orf_bp: int = 75,
+) -> Dict[str, Any]:
     gf = pyrodigal.GeneFinder(meta=False, mask=True)
     gf.train(train_bytes, translation_table=cast(Any, genetic_code))
     genes = gf.find_genes(seq_bytes)
     n_bp = max(1, len(seq_bytes))
 
-    valid_orfs = [g for g in genes if (g.end - g.begin + 1) >= 75]
+    valid_orfs = [g for g in genes if (g.end - g.begin + 1) >= min_orf_bp]
     covered = bytearray(n_bp)
     for g in valid_orfs:
         s0 = max(0, g.begin - 1)
@@ -51,7 +59,8 @@ def select_optimal_genetic_code(
     dna_seq: str,
     *,
     default_code: int = 11,
-    min_seq_bp: int = 1500,
+    min_seq_bp: Optional[int] = None,
+    thresholds: GeneticCodeThresholds = DEFAULT_THRESHOLDS.genetic_code,
 ) -> Tuple[int, bool, Dict[int, Dict[str, Any]]]:
     """
     评估 11 / 4 / 15 号遗传密码表下的 ORF 编码完整性并自动返回最优密码表。
@@ -59,17 +68,24 @@ def select_optimal_genetic_code(
     """
     seq = (dna_seq or "").strip().upper()
     n = len(seq)
-    if n < min_seq_bp:
+    eff_min_bp = thresholds.min_seq_bp if min_seq_bp is None else min_seq_bp
+    if n < eff_min_bp:
         return default_code, False, {}
 
     seq_bytes = seq.encode("ascii", errors="replace")
     # Pyrodigal 单基因组训练要求长度 >= 100 kb 才完全收敛并静默长度告警，短序列经首尾拼接重复满足训练窗口
-    train_bytes = seq_bytes * ((100_000 // n) + 1) if n < 100_000 else seq_bytes
+    train_win = thresholds.train_window_bp
+    train_bytes = seq_bytes * ((train_win // n) + 1) if n < train_win else seq_bytes
 
     stats: Dict[int, Dict[str, Any]] = {}
     for code in SUPPORTED_GENETIC_CODES:
         try:
-            stats[code] = _evaluate_table_stats(seq_bytes, train_bytes, code)
+            stats[code] = _evaluate_table_stats(
+                seq_bytes,
+                train_bytes,
+                code,
+                min_orf_bp=thresholds.min_orf_bp,
+            )
         except Exception:
             continue
 
@@ -87,8 +103,10 @@ def select_optimal_genetic_code(
         cov_gain = sa["cov"] - s11["cov"]
         len_ratio = sa["mean_aa"] / max(1.0, s11["mean_aa"])
         # 严格复合判据：必须观察到 Table 11 下显著编码断裂/低覆盖率，且替代密码表大幅恢复 ORF 平均长度并减少碎裂数
-        has_truncation_evidence = (s11["cov"] < 0.78 and cov_gain >= 0.08) or (cov_gain >= 0.14)
-        if has_truncation_evidence and len_ratio >= 1.45 and sa["orfs"] < s11["orfs"]:
+        has_truncation_evidence = (
+            s11["cov"] < thresholds.low_cov_11_ceiling and cov_gain >= thresholds.min_cov_gain_with_low_11
+        ) or (cov_gain >= thresholds.min_cov_gain_standalone)
+        if has_truncation_evidence and len_ratio >= thresholds.min_mean_aa_ratio and sa["orfs"] < s11["orfs"]:
             sc_val = sa["cov"] * sa["mean_aa"]
             if sc_val > best_score:
                 best_code = alt

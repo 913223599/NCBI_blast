@@ -19,7 +19,7 @@ import shutil
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from starlette.concurrency import run_in_threadpool
 
@@ -50,6 +50,7 @@ from .sequence_annotator import (
 )
 from .tmp_analyzer import select_and_analyze_tmps
 from .tail_finder_adapter import is_phagetailfinder_ready, run_phagetailfinder_on_contigs
+from .thresholds import DEFAULT_THRESHOLDS, MorphotypeClassifierThresholds, PhageStructureThresholds
 from .types import (
     ContigStructureResult,
     MorphotypePrediction,
@@ -60,9 +61,129 @@ from .types import (
     StructureProteinItem,
     StructureRunRequest,
     TailFinderCluster,
+    TmpAnalysisItem,
 )
 
 logger = logging.getLogger("analysis.phage_structure.manager")
+
+
+def should_trigger_phold_3d(
+    pred: MorphotypePrediction,
+    tmps: Sequence[TmpAnalysisItem],
+    length_bp: int,
+    thresholds: MorphotypeClassifierThresholds = DEFAULT_THRESHOLDS.classifier,
+) -> Tuple[bool, str]:
+    """
+    判断单条 Contig 是否需要按条件触发 Phold 3D (ProstT5 + Foldseek) 增强复核：
+    1. tailed_without_tmp：已判为长尾/肌尾，但序列同源未检出任何 TMP；
+    2. low_margin_ambiguous：非 Incomplete 且最高与次高候选分差过小 (且次高 > 2.0)；
+    3. incomplete_large_contig：长度 >= phold_incomplete_min_bp 却因缺少 PHROG 同源落入 Incomplete。
+    """
+    if pred.morphotype_code in ("Myoviridae-like", "Siphoviridae-like") and len(tmps) == 0:
+        return True, "tailed_without_tmp"
+    if pred.morphotype_code != "Incomplete" and pred.class_scores:
+        sorted_vals = sorted(pred.class_scores.values(), reverse=True)
+        if (
+            len(sorted_vals) >= 2
+            and sorted_vals[1] > 2.0
+            and (sorted_vals[0] - sorted_vals[1]) < thresholds.low_margin_warning_cutoff
+        ):
+            return True, "low_margin_ambiguous"
+    if pred.morphotype_code == "Incomplete" and length_bp >= thresholds.phold_incomplete_min_bp:
+        return True, "incomplete_large_contig"
+    return False, ""
+
+
+def evaluate_single_contig_structure(
+    cid: str,
+    info: Dict[str, Any],
+    ptf_cnt: int,
+    ptf_clusters: List[TailFinderCluster],
+    *,
+    default_genetic_code: int = 11,
+    workers: int = 8,
+    thresholds: PhageStructureThresholds = DEFAULT_THRESHOLDS,
+    phold_triggered: bool = False,
+    phold_trigger_reason: str = "",
+    phold_rescued_orfs: int = 0,
+) -> ContigStructureResult:
+    """基于蛋白同源与 PTF 簇结果执行单条 Contig 的 TMP 选尺、完整度评估与形态分类。"""
+    prots: List[StructureProteinItem] = info["proteins"]
+    mm = build_module_matrix(prots)
+    cp = build_connector_profile(prots)
+    verified_tmp_cnt = sum(
+        1
+        for p in prots
+        if p.structural_role == "TMP" and p.evidence_source in ("pyhmmer_phrog", "phold_3d")
+    )
+    has_tail_bg = (
+        (mm.tail_sheath_count + mm.major_tail_count + mm.tail_tube_count + mm.tail_assembly_chaperone_count + verified_tmp_cnt) > 0
+        or mm.baseplate_count >= 2
+        or len(ptf_clusters) >= 1
+    )
+    length_bp = int(info["length_bp"])
+    sparse_rescued = int(info.get("sparse_rescued_orfs") or 0)
+    dna_seq = info.get("dna_seq", "")
+
+    tmps = select_and_analyze_tmps(
+        prots,
+        has_tailed_context=has_tail_bg,
+        contig_length_bp=length_bp,
+        max_workers=workers,
+        thresholds=thresholds.tmp,
+        split_thresholds=thresholds.split_tmp,
+    )
+    comp = evaluate_contig_completeness(
+        dna_seq=dna_seq,
+        length_bp=length_bp,
+        proteins=prots,
+        module_matrix=mm,
+        connector_profile=cp,
+        tmp_analyses=tmps,
+        ptf_clusters=ptf_clusters,
+        sparse_rescued_orfs=sparse_rescued,
+        thresholds=thresholds.completeness,
+    )
+    used_tt = int(info.get("genetic_code_used") or default_genetic_code)
+    auto_tt = bool(info.get("genetic_code_auto_selected") or False)
+    pred = classify_morphotype(
+        prots,
+        tmps,
+        mm,
+        cp,
+        ptf_clusters=ptf_clusters,
+        genome_length_bp=length_bp,
+        dna_seq=dna_seq,
+        completeness=comp,
+        genetic_code_used=used_tt,
+        genetic_code_auto_selected=auto_tt,
+        sparse_rescued_orfs=sparse_rescued,
+        thresholds=thresholds.classifier,
+        comp_thresholds=thresholds.completeness,
+    )
+    effective_tmps = [] if pred.morphotype_code in ("Podoviridae-like", "Non-tailed") else tmps
+    hmm_matched = sum(1 for p in prots if p.hmm_score > 0 or p.phrog_id)
+
+    return ContigStructureResult(
+        contig_id=cid,
+        length_bp=length_bp,
+        gc_percent=float(info["gc_percent"]),
+        total_orfs=len(prots),
+        hmm_matched_orfs=hmm_matched,
+        genetic_code_used=used_tt,
+        genetic_code_auto_selected=auto_tt,
+        completeness=comp,
+        phold_3d_triggered=phold_triggered,
+        phold_3d_trigger_reason=phold_trigger_reason,
+        phold_3d_rescued_orfs=phold_rescued_orfs,
+        prediction=pred,
+        connector_profile=cp,
+        module_matrix=mm,
+        ptf_tail_protein_count=ptf_cnt,
+        ptf_tail_clusters=ptf_clusters,
+        tmp_analyses=effective_tmps,
+        structural_proteins=sorted(prots, key=lambda x: x.start),
+    )
 
 
 class PhageStructureManager:
@@ -315,6 +436,7 @@ class PhageStructureManager:
             "score_cutoff": batch_req.score_cutoff,
             "force_hmm_rescan": batch_req.force_hmm_rescan,
             "enable_phold_enhance": batch_req.enable_phold_enhance,
+            "phold_trigger_mode": batch_req.phold_trigger_mode,
             "enable_phagetailfinder": batch_req.enable_phagetailfinder,
             "ptf_accurate_mode": batch_req.ptf_accurate_mode,
         }
@@ -498,33 +620,22 @@ class PhageStructureManager:
                 workers=workers,
                 force_rescan=req.force_hmm_rescan,
                 verify_annotated=True,
+                hmm_thresholds=DEFAULT_THRESHOLDS.hmm,
                 on_progress=lambda msg: _emit_progress(52, msg),
             )
 
             if self.queue.is_cancelled(task_id):
                 raise RuntimeError("任务已被用户取消")
 
-            if req.enable_phold_enhance:
-                release_gpu_memory()
-                _emit_progress(60, "正在运行 Phold 3D (ProstT5 + Foldseek) 补漏长假定蛋白...")
-                enhance_with_phold_3d(
-                    cmap,
-                    workers=workers,
-                    on_progress=lambda msg: _emit_progress(64, msg),
-                )
-                release_gpu_memory()
-                if self.queue.is_cancelled(task_id):
-                    raise RuntimeError("任务已被用户取消")
-
             ptf_map: Dict[str, tuple[int, List[TailFinderCluster]]] = {}
             if req.enable_phagetailfinder and is_phagetailfinder_ready():
-                _emit_progress(68, f"正在运行 PhageTailFinder 双状态 HMM 尾部基因簇预测 ({workers} 核)...")
+                _emit_progress(62, f"正在运行 PhageTailFinder 双状态 HMM 尾部基因簇预测 ({workers} 核)...")
                 try:
                     ptf_map = run_phagetailfinder_on_contigs(
                         cmap,
                         workers=workers,
                         accurate_mode=req.ptf_accurate_mode,
-                        on_progress=lambda msg: _emit_progress(70, msg),
+                        on_progress=lambda msg: _emit_progress(68, msg),
                     )
                 except Exception as ptf_exc:
                     logger.warning("PhageTailFinder 双状态 HMM 扫描跳过: %s", ptf_exc)
@@ -533,77 +644,72 @@ class PhageStructureManager:
                 raise RuntimeError("任务已被用户取消")
 
             _emit_progress(74, "正在剖析卷尺蛋白 (TMP) polyX/TR 特征并融合 Virfam 连接器判定...")
-            contig_results: List[ContigStructureResult] = []
             contig_seqs: Dict[str, str] = {}
+            eval_by_cid: Dict[str, ContigStructureResult] = {}
 
-            for idx, (cid, info) in enumerate(cmap.items(), start=1):
+            for cid, info in cmap.items():
                 contig_seqs[cid] = info.get("dna_seq", "")
-                prots: List[StructureProteinItem] = info["proteins"]
-                mm = build_module_matrix(prots)
-                cp = build_connector_profile(prots)
                 ptf_cnt, ptf_clusters = ptf_map.get(cid, (0, []))
-                # 仅以实际尾部干线结构核心或可信尾部基因簇判定背景，避免未核实的孤立 TMP 文本误激活共线性捕手
-                verified_tmp_cnt = sum(
-                    1
-                    for p in prots
-                    if p.structural_role == "TMP" and p.evidence_source in ("pyhmmer_phrog", "phold_3d")
+                eval_by_cid[cid] = evaluate_single_contig_structure(
+                    cid,
+                    info,
+                    ptf_cnt,
+                    ptf_clusters,
+                    default_genetic_code=req.genetic_code,
+                    workers=workers,
+                    thresholds=DEFAULT_THRESHOLDS,
                 )
-                has_tail_bg = (
-                    (mm.tail_sheath_count + mm.major_tail_count + mm.tail_tube_count + mm.tail_assembly_chaperone_count + verified_tmp_cnt) > 0
-                    or mm.baseplate_count >= 2
-                    or len(ptf_clusters) >= 1
-                )
-                tmps = select_and_analyze_tmps(
-                    prots,
-                    has_tailed_context=has_tail_bg,
-                    contig_length_bp=int(info["length_bp"]),
-                    max_workers=workers,
-                )
-                comp = evaluate_contig_completeness(
-                    dna_seq=info.get("dna_seq", ""),
-                    length_bp=int(info["length_bp"]),
-                    proteins=prots,
-                    module_matrix=mm,
-                    connector_profile=cp,
-                    tmp_analyses=tmps,
-                    ptf_clusters=ptf_clusters,
-                    sparse_rescued_orfs=int(info.get("sparse_rescued_orfs") or 0),
-                )
-                used_tt = int(info.get("genetic_code_used") or req.genetic_code)
-                auto_tt = bool(info.get("genetic_code_auto_selected") or False)
-                pred = classify_morphotype(
-                    prots,
-                    tmps,
-                    mm,
-                    cp,
-                    ptf_clusters=ptf_clusters,
-                    genome_length_bp=int(info["length_bp"]),
-                    dna_seq=info.get("dna_seq", ""),
-                    completeness=comp,
-                    genetic_code_used=used_tt,
-                    genetic_code_auto_selected=auto_tt,
-                    sparse_rescued_orfs=int(info.get("sparse_rescued_orfs") or 0),
-                )
-                effective_tmps = [] if pred.morphotype_code in ("Podoviridae-like", "Non-tailed") else tmps
 
-                hmm_matched = sum(1 for p in prots if p.hmm_score > 0 or p.phrog_id)
-                c_res = ContigStructureResult(
-                    contig_id=cid,
-                    length_bp=int(info["length_bp"]),
-                    gc_percent=float(info["gc_percent"]),
-                    total_orfs=len(prots),
-                    hmm_matched_orfs=hmm_matched,
-                    genetic_code_used=used_tt,
-                    genetic_code_auto_selected=auto_tt,
-                    completeness=comp,
-                    prediction=pred,
-                    connector_profile=cp,
-                    module_matrix=mm,
-                    ptf_tail_protein_count=ptf_cnt,
-                    ptf_tail_clusters=ptf_clusters,
-                    tmp_analyses=effective_tmps,
-                    structural_proteins=sorted(prots, key=lambda x: x.start),
-                )
+            if req.enable_phold_enhance and req.phold_trigger_mode != "off":
+                triggered_reasons: Dict[str, str] = {}
+                for cid, c_res in eval_by_cid.items():
+                    if req.phold_trigger_mode == "always":
+                        triggered_reasons[cid] = "always_forced"
+                    else:
+                        should_run, reason = should_trigger_phold_3d(
+                            c_res.prediction,
+                            c_res.tmp_analyses,
+                            c_res.length_bp,
+                            thresholds=DEFAULT_THRESHOLDS.classifier,
+                        )
+                        if should_run:
+                            triggered_reasons[cid] = reason
+
+                if triggered_reasons:
+                    release_gpu_memory()
+                    _emit_progress(80, f"正在触发 Phold 3D (ProstT5 + Foldseek) 复核 {len(triggered_reasons)} 条低确定性 Contig...")
+                    rescued_map: Dict[str, int] = {}
+                    enhance_with_phold_3d(
+                        cmap,
+                        workers=workers,
+                        min_aa=DEFAULT_THRESHOLDS.classifier.phold_rescue_min_aa,
+                        target_contigs=list(triggered_reasons.keys()),
+                        batch_size=1,
+                        omit_probs=False,
+                        rescued_by_contig=rescued_map,
+                        on_progress=lambda msg: _emit_progress(83, msg),
+                    )
+                    release_gpu_memory()
+                    if self.queue.is_cancelled(task_id):
+                        raise RuntimeError("任务已被用户取消")
+                    for cid, reason in triggered_reasons.items():
+                        ptf_cnt, ptf_clusters = ptf_map.get(cid, (0, []))
+                        eval_by_cid[cid] = evaluate_single_contig_structure(
+                            cid,
+                            cmap[cid],
+                            ptf_cnt,
+                            ptf_clusters,
+                            default_genetic_code=req.genetic_code,
+                            workers=workers,
+                            thresholds=DEFAULT_THRESHOLDS,
+                            phold_triggered=True,
+                            phold_trigger_reason=reason,
+                            phold_rescued_orfs=rescued_map.get(cid, 0),
+                        )
+
+            contig_results: List[ContigStructureResult] = []
+            for idx, cid in enumerate(cmap.keys(), start=1):
+                c_res = eval_by_cid[cid]
                 contig_results.append(c_res)
                 # 逐 Contig 分片落盘断点保护，防大批量任务 OOM
                 shard_p = chk_dir / f"contig_{idx:03d}.json"

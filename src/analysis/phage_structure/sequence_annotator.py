@@ -39,6 +39,7 @@ from .genetic_code_selector import (
     select_optimal_genetic_code,
 )
 from .phrog_catalog import STRUCTURAL_INDEX_VERSION, classify_structural_role, get_phrog_catalog
+from .thresholds import DEFAULT_THRESHOLDS, GeneticCodeThresholds, HmmScanThresholds
 from .types import StructureProteinItem
 
 logger = logging.getLogger("analysis.phage_structure.annotator")
@@ -361,51 +362,87 @@ def parse_input_contigs(
 
 
 def _predict_single_contig_orfs(
-    args: Tuple[str, str, int, bool]
+    args: Tuple[str, str, int, bool, GeneticCodeThresholds]
 ) -> Tuple[str, List[StructureProteinItem], int, bool]:
-    cid, seq_str, genetic_code, auto_select = args
+    cid, seq_str, genetic_code, auto_select, gc_thresholds = args
     if len(seq_str) < 200:
         return cid, [], genetic_code, False
 
     chosen_code = genetic_code
     auto_switched = False
     if auto_select and genetic_code == 11:
-        chosen_code, auto_switched, _ = select_optimal_genetic_code(seq_str, default_code=genetic_code)
+        chosen_code, auto_switched, _ = select_optimal_genetic_code(
+            seq_str,
+            default_code=genetic_code,
+            thresholds=gc_thresholds,
+        )
 
     seq_bytes = seq_str.encode("ascii", errors="replace")
     n_bp = len(seq_bytes)
-    if n_bp < 100_000 and chosen_code in (11, 4):
-        bins = METAGENOMIC_BINS_11 if chosen_code == 11 else METAGENOMIC_BINS_4
-        gf = pyrodigal.GeneFinder(meta=True, mask=True, metagenomic_bins=bins)
-    else:
-        gf = pyrodigal.GeneFinder(meta=False, mask=True)
-        train_bytes = seq_bytes * ((100_000 // n_bp) + 1) if n_bp < 100_000 else seq_bytes
-        try:
-            gf.train(train_bytes, translation_table=cast(Any, chosen_code))
-        except Exception:
-            gf = pyrodigal.GeneFinder(meta=True, mask=True, metagenomic_bins=METAGENOMIC_BINS_11)
-            chosen_code = 11
-            auto_switched = False
+    train_win = gc_thresholds.train_window_bp
 
-    genes = gf.find_genes(seq_bytes)
-    out: List[StructureProteinItem] = []
-    for idx, g in enumerate(genes, start=1):
-        aa = g.translate(translation_table=cast(Any, chosen_code), include_stop=False)
-        if len(aa) < 25:
-            continue
-        out.append(
-            StructureProteinItem(
-                locus_tag=f"{cid}_ORF_{idx:04d}",
-                contig_id=cid,
-                start=g.begin,
-                end=g.end,
-                strand="+" if g.strand > 0 else "-",
-                length_aa=len(aa),
-                product="hypothetical protein",
-                evidence_source="pyrodigal",
-                translation=aa,
+    def _predict_with_code(code: int) -> List[StructureProteinItem]:
+        # 对标准 Table 11 短 Contig 使用元基因组预训练模型；对切表 Table 4/15 及 >=100 kb 序列
+        # 统一采用单基因组自训练，保证与 select_optimal_genetic_code 评估模型严格一致
+        if code == 11 and n_bp < train_win:
+            gf = pyrodigal.GeneFinder(meta=True, mask=True, metagenomic_bins=METAGENOMIC_BINS_11)
+        else:
+            gf = pyrodigal.GeneFinder(meta=False, mask=True)
+            train_bytes = seq_bytes * ((train_win // n_bp) + 1) if n_bp < train_win else seq_bytes
+            gf.train(train_bytes, translation_table=cast(Any, code))
+
+        genes = gf.find_genes(seq_bytes)
+        out_items: List[StructureProteinItem] = []
+        for idx, g in enumerate(genes, start=1):
+            aa = g.translate(translation_table=cast(Any, code), include_stop=False)
+            if len(aa) < 25:
+                continue
+            out_items.append(
+                StructureProteinItem(
+                    locus_tag=f"{cid}_ORF_{idx:04d}",
+                    contig_id=cid,
+                    start=g.begin,
+                    end=g.end,
+                    strand="+" if g.strand > 0 else "-",
+                    length_aa=len(aa),
+                    product="hypothetical protein",
+                    evidence_source="pyrodigal",
+                    translation=aa,
+                )
             )
-        )
+        return out_items
+
+    try:
+        out = _predict_with_code(chosen_code)
+    except Exception:
+        out = []
+
+    # 若自动切换至非 11 号密码表后未能呼出任何有效 ORF，强制回退至 Table 11 防止空呼出假 Incomplete
+    if not out and chosen_code != 11:
+        chosen_code = 11
+        auto_switched = False
+        try:
+            out = _predict_with_code(11)
+        except Exception:
+            gf_fb = pyrodigal.GeneFinder(meta=True, mask=True, metagenomic_bins=METAGENOMIC_BINS_11)
+            genes_fb = gf_fb.find_genes(seq_bytes)
+            out = [
+                StructureProteinItem(
+                    locus_tag=f"{cid}_ORF_{idx:04d}",
+                    contig_id=cid,
+                    start=g.begin,
+                    end=g.end,
+                    strand="+" if g.strand > 0 else "-",
+                    length_aa=len(aa),
+                    product="hypothetical protein",
+                    evidence_source="pyrodigal",
+                    translation=aa,
+                )
+                for idx, g in enumerate(genes_fb, start=1)
+                for aa in [g.translate(translation_table=cast(Any, 11), include_stop=False)]
+                if len(aa) >= 25
+            ]
+
     return cid, out, chosen_code, auto_switched
 
 
@@ -438,12 +475,13 @@ def predict_missing_orfs_parallel(
     genetic_code: int = 11,
     auto_select_genetic_code: bool = True,
     workers: int = 8,
+    gc_thresholds: GeneticCodeThresholds = DEFAULT_THRESHOLDS.genetic_code,
 ) -> None:
     """
     对尚未拥有蛋白集合的裸核酸 Contig（或稀疏/残缺注释的 .gbk Contig）
     执行自动密码表选择与多核 Pyrodigal 并发 ORF 预测或间隙回补。
     """
-    tasks: List[Tuple[str, str, int, bool]] = []
+    tasks: List[Tuple[str, str, int, bool, GeneticCodeThresholds]] = []
     sparse_targets: set[str] = set()
 
     for cid, info in contig_map.items():
@@ -454,12 +492,12 @@ def predict_missing_orfs_parallel(
         eff_auto = bool(auto_select_genetic_code and gbk_tt is None)
 
         if not prots and dna_seq:
-            tasks.append((cid, dna_seq, req_tt, eff_auto))
+            tasks.append((cid, dna_seq, req_tt, eff_auto, gc_thresholds))
         elif prots and dna_seq and info.get("input_type") == "genbank":
             is_sparse, _, _ = assess_sparse_gbk_annotation(int(info.get("length_bp") or len(dna_seq)), prots)
             if is_sparse:
                 sparse_targets.add(cid)
-                tasks.append((cid, dna_seq, req_tt, eff_auto))
+                tasks.append((cid, dna_seq, req_tt, eff_auto, gc_thresholds))
             else:
                 info["genetic_code_used"] = req_tt
                 info["genetic_code_auto_selected"] = False
@@ -493,24 +531,29 @@ def predict_missing_orfs_parallel(
             info["sparse_rescued_orfs"] = 0
 
 
-def _is_low_complexity_repeat_artifact(aa_seq: str) -> bool:
+def _is_low_complexity_repeat_artifact(
+    aa_seq: str,
+    *,
+    ratio_cutoff: float = DEFAULT_THRESHOLDS.hmm.low_complexity_kmer_ratio,
+) -> bool:
     """识别纯周期人为合成/极端低复杂度重复肽段，防止胶原/纤维类 HMM 出现假性高分漂移。"""
     s = (aa_seq or "").strip().upper().rstrip("*")
     n = len(s)
     if n < 60:
         return False
     kmers = {s[i : i + 4] for i in range(n - 3)}
-    return (len(kmers) / max(1, n - 3)) < 0.20
+    return (len(kmers) / max(1, n - 3)) < ratio_cutoff
 
 
 def scan_proteins_with_pyhmmer(
     contig_map: Dict[str, Dict[str, Any]],
     *,
-    evalue_cutoff: float = 1e-4,
-    score_cutoff: float = 28.0,
+    evalue_cutoff: float = DEFAULT_THRESHOLDS.hmm.default_evalue_cutoff,
+    score_cutoff: float = DEFAULT_THRESHOLDS.hmm.default_score_cutoff,
     workers: int = 12,
     force_rescan: bool = False,
     verify_annotated: bool = True,
+    hmm_thresholds: HmmScanThresholds = DEFAULT_THRESHOLDS.hmm,
     on_progress: Optional[Callable[[str], None]] = None,
 ) -> int:
     """
@@ -556,7 +599,7 @@ def scan_proteins_with_pyhmmer(
             f"with pyhmmer.easel.SequenceFile('{wsl_faa}', digital=True, alphabet=pyhmmer.easel.Alphabet.amino()) as sf: seqs = sf.read_block()\n"
             f"with pyhmmer.plan7.HMMFile('{wsl_hmm}') as hf:\n"
             "  best = {}\n"
-            f"  for top in pyhmmer.hmmsearch(hf, seqs, cpus={max(1, workers)}, E={evalue_cutoff}, Z=200):\n"
+            f"  for top in pyhmmer.hmmsearch(hf, seqs, cpus={max(1, workers)}, E={evalue_cutoff}, Z={hmm_thresholds.pyhmmer_z}):\n"
             "    q = top.query.name.decode() if isinstance(top.query.name, bytes) else str(top.query.name)\n"
             "    for h in top:\n"
             f"      if h.included and h.score >= {score_cutoff}:\n"
@@ -587,8 +630,11 @@ def scan_proteins_with_pyhmmer(
     matched_count = 0
     for qid, p in query_items:
         hit = hits_map.get(qid)
-        is_low_comp = _is_low_complexity_repeat_artifact(p.translation)
-        if not hit or (is_low_comp and hit[1] < 250.0):
+        is_low_comp = _is_low_complexity_repeat_artifact(
+            p.translation,
+            ratio_cutoff=hmm_thresholds.low_complexity_kmer_ratio,
+        )
+        if not hit or (is_low_comp and hit[1] < hmm_thresholds.low_complexity_min_score):
             # 若外部 .gbk / 注解自封了高影响结构角色但未通过独立 HMM 验证，显式标记为未核实文本声称
             if p.evidence_source not in ("pyrodigal", "pyhmmer_phrog", "phold_3d"):
                 p.hmm_score = 0.0
@@ -603,7 +649,7 @@ def scan_proteins_with_pyhmmer(
 
         role_conflict = (ext_role != "OTHER" and hmm_role != "OTHER" and ext_role != hmm_role)
         # 若外部已给出明确结构角色，弱/中等交叉漂移 (<50分) 不强行改写，避免低特异性重复域误盖真注解
-        if role_conflict and sc < 50.0 and not force_rescan:
+        if role_conflict and sc < hmm_thresholds.role_conflict_override_score and not force_rescan:
             if p.evidence_source not in ("pyrodigal", "pyhmmer_phrog", "phold_3d"):
                 p.hmm_score = 0.0
                 p.hmm_evalue = 1.0
@@ -669,30 +715,39 @@ def enhance_with_phold_3d(
     contig_map: Dict[str, Dict[str, Any]],
     *,
     workers: int = 8,
-    min_aa: int = 100,
+    min_aa: int = 200,
+    target_contigs: Optional[Sequence[str]] = None,
+    batch_size: int = 1,
+    omit_probs: bool = False,
+    rescued_by_contig: Optional[Dict[str, int]] = None,
     on_progress: Optional[Callable[[str], None]] = None,
 ) -> int:
     """
-    可选调用 Phold AI (ProstT5 3Di + Foldseek) 对长未知假定蛋白 (>=100 aa) 开展三维构象补漏。
-    严格限制 batch_size=1 并在调用前后清理物理显存，防止溢出。
+    可选调用 Phold AI (ProstT5 3Di + Foldseek) 对长未知假定蛋白开展三维构象补漏。
+    默认仅处理由 `target_contigs` 指定的待复核 Contig，严格限制 batch_size=1，
+    注：phold 1.2.6 在 --omit_probs 下存在 predict_3Di.py:95 空指针上游缺陷，故默认不开启 --omit_probs，
+    并依托调用前后显存清理严控物理显存红线。
     """
     if not check_phold_ready():
         logger.info("Phold 3D 离线环境未完全就绪，跳过三维结构补漏")
         return 0
 
-    candidates: List[Tuple[str, StructureProteinItem]] = []
+    target_set = set(target_contigs) if target_contigs is not None else None
+    candidates: List[Tuple[str, str, StructureProteinItem]] = []
     for cid, info in contig_map.items():
+        if target_set is not None and cid not in target_set:
+            continue
         for p in info["proteins"]:
             is_unknown = bool(_UNANNOTATED_RE.match(p.product or "")) or p.structural_role == "OTHER"
             if is_unknown and p.translation and len(p.translation) >= min_aa:
                 qid = f"{cid}||{p.locus_tag}"
-                candidates.append((qid, p))
+                candidates.append((qid, cid, p))
 
     if not candidates:
         return 0
 
     if on_progress:
-        on_progress(f"正在调用 Phold 3D (ProstT5 + Foldseek) 解析 {len(candidates)} 条长暗物质蛋白...")
+        on_progress(f"正在调用 Phold 3D (ProstT5 + Foldseek) 解析 {len(candidates)} 条待复核暗物质蛋白...")
 
     _cleanup_cuda_cache()
     WSLManager.ensure_project_link()
@@ -707,7 +762,7 @@ def enhance_with_phold_3d(
     updated_count = 0
     try:
         with faa_path.open("w", encoding="utf-8", newline="\n") as fh:
-            for qid, p in candidates:
+            for qid, _cid, p in candidates:
                 fh.write(f">{qid}\n{p.translation}\n")
 
         wsl_faa = WSLManager.to_wsl_path(str(faa_path))
@@ -715,9 +770,10 @@ def enhance_with_phold_3d(
         wsl_cmp = WSLManager.to_wsl_path(str(cmp_dir))
         distro = WSLManager.get_best_distro()
 
+        omit_flag = " --omit_probs" if omit_probs else ""
         cmd_str = (
             "export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 && "
-            f"phold proteins-predict -i '{wsl_faa}' -o '{wsl_pred}' -d '{wsl_db}' -t {max(1, workers)} --batch_size 1 -f && "
+            f"phold proteins-predict -i '{wsl_faa}' -o '{wsl_pred}' -d '{wsl_db}' -t {max(1, workers)} --batch_size {max(1, batch_size)}{omit_flag} -f && "
             f"phold proteins-compare -i '{wsl_faa}' --predictions_dir '{wsl_pred}' -o '{wsl_cmp}' -d '{wsl_db}' -t {max(1, workers)} -f"
         )
         res = subprocess.run(
@@ -763,7 +819,7 @@ def enhance_with_phold_3d(
                     ev = 1.0
                 phold_hits[cds_id] = (ph_raw, func, prod, sc, ev)
 
-        for qid, p in candidates:
+        for qid, cid, p in candidates:
             hit = phold_hits.get(qid)
             if not hit:
                 continue
@@ -781,6 +837,8 @@ def enhance_with_phold_3d(
             p.role_label_cn = role_cn
             p.evidence_source = "phold_3d"
             updated_count += 1
+            if rescued_by_contig is not None:
+                rescued_by_contig[cid] = rescued_by_contig.get(cid, 0) + 1
     except Exception as exc:
         logger.warning("Phold 3D 增强处理异常，已跳过回退至 PHROG HMM 结果: %s", exc)
     finally:
