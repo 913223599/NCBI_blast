@@ -28,6 +28,7 @@ from ...workbench.models.tool_config import ToolConfig
 from ..annotation.db import annotation_db
 from ..phage_finder.db import phage_discovery_db
 from .db import phage_structure_db
+from .completeness_gate import evaluate_contig_completeness
 from .exporter import export_structure_artifacts
 from .morphotype_classifier import (
     build_connector_profile,
@@ -309,6 +310,7 @@ class PhageStructureManager:
         base_kwargs = {
             "threads": batch_req.threads,
             "genetic_code": batch_req.genetic_code,
+            "auto_select_genetic_code": batch_req.auto_select_genetic_code,
             "evalue_cutoff": batch_req.evalue_cutoff,
             "score_cutoff": batch_req.score_cutoff,
             "force_hmm_rescan": batch_req.force_hmm_rescan,
@@ -477,8 +479,13 @@ class PhageStructureManager:
                 raise RuntimeError("任务已被用户取消")
 
             workers = get_safe_workers(req.threads)
-            _emit_progress(22, f"正在并行执行 ORF 基因识别 (Pyrodigal, {workers} 核)...")
-            predict_missing_orfs_parallel(cmap, genetic_code=req.genetic_code, workers=workers)
+            _emit_progress(22, f"正在并行执行 ORF 基因识别与密码表评估 (Pyrodigal, {workers} 核)...")
+            predict_missing_orfs_parallel(
+                cmap,
+                genetic_code=req.genetic_code,
+                auto_select_genetic_code=req.auto_select_genetic_code,
+                workers=workers,
+            )
 
             if self.queue.is_cancelled(task_id):
                 raise RuntimeError("任务已被用户取消")
@@ -552,6 +559,18 @@ class PhageStructureManager:
                     contig_length_bp=int(info["length_bp"]),
                     max_workers=workers,
                 )
+                comp = evaluate_contig_completeness(
+                    dna_seq=info.get("dna_seq", ""),
+                    length_bp=int(info["length_bp"]),
+                    proteins=prots,
+                    module_matrix=mm,
+                    connector_profile=cp,
+                    tmp_analyses=tmps,
+                    ptf_clusters=ptf_clusters,
+                    sparse_rescued_orfs=int(info.get("sparse_rescued_orfs") or 0),
+                )
+                used_tt = int(info.get("genetic_code_used") or req.genetic_code)
+                auto_tt = bool(info.get("genetic_code_auto_selected") or False)
                 pred = classify_morphotype(
                     prots,
                     tmps,
@@ -559,6 +578,11 @@ class PhageStructureManager:
                     cp,
                     ptf_clusters=ptf_clusters,
                     genome_length_bp=int(info["length_bp"]),
+                    dna_seq=info.get("dna_seq", ""),
+                    completeness=comp,
+                    genetic_code_used=used_tt,
+                    genetic_code_auto_selected=auto_tt,
+                    sparse_rescued_orfs=int(info.get("sparse_rescued_orfs") or 0),
                 )
                 effective_tmps = [] if pred.morphotype_code in ("Podoviridae-like", "Non-tailed") else tmps
 
@@ -569,6 +593,9 @@ class PhageStructureManager:
                     gc_percent=float(info["gc_percent"]),
                     total_orfs=len(prots),
                     hmm_matched_orfs=hmm_matched,
+                    genetic_code_used=used_tt,
+                    genetic_code_auto_selected=auto_tt,
+                    completeness=comp,
                     prediction=pred,
                     connector_profile=cp,
                     module_matrix=mm,

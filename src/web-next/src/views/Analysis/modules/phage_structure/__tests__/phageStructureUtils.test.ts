@@ -5,6 +5,7 @@ import {
   countFastaRecords,
   deriveStructureTaskName,
   detectSequenceFormatLabel,
+  formatCompletenessStatus,
   formatGenomeBp,
   formatTailLength,
   getMorphotypeTheme,
@@ -70,5 +71,8 @@ describe('phage_structure utils', () => {
     expect(compactLocusLabel('NODE_1_length_72586_cov_126.271825_CDS_0012', 20)).toContain('CDS_0012')
     expect(compactLocusLabel('SHORT_01', 20)).toBe('SHORT_01')
     expect(countFastaRecords('>seq1\nATGC\n>seq2\nGGGG\n')).toBe(2)
+    expect(formatCompletenessStatus('complete')).toBe('完整闭合')
+    expect(formatCompletenessStatus('partial_or_truncated')).toBe('部分/截断')
+    expect(formatCompletenessStatus('incomplete')).toBe('残缺片段')
   })
 })

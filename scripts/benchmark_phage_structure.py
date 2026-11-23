@@ -294,16 +294,23 @@ def run_batch_pipeline(
                     cp,
                     ptf_clusters=ptf_clusters,
                     genome_length_bp=int(info["length_bp"]),
+                    dna_seq=info.get("dna_seq", ""),
+                    genetic_code_used=int(info.get("genetic_code_used") or 11),
+                    genetic_code_auto_selected=bool(info.get("genetic_code_auto_selected") or False),
+                    sparse_rescued_orfs=int(info.get("sparse_rescued_orfs") or 0),
                 )
                 effective_tmps = [] if pred.morphotype_code in ("Podoviridae-like", "Non-tailed") else tmps
                 primary_tmp = effective_tmps[0] if effective_tmps else None
                 prot_map = {p.locus_tag: p for p in prots}
-                tmp_prot = prot_map.get(primary_tmp.locus_tag) if primary_tmp else None
+                lookup_lt = primary_tmp.merged_loci[0] if (primary_tmp and primary_tmp.merged_loci) else (primary_tmp.locus_tag if primary_tmp else "")
+                tmp_prot = prot_map.get(lookup_lt) if primary_tmp else None
 
                 row_out: Dict[str, Any] = {
                     **item,
                     "length_bp": info["length_bp"],
                     "total_orfs": len(prots),
+                    "genetic_code_used": int(info.get("genetic_code_used") or 11),
+                    "sparse_rescued_orfs": int(info.get("sparse_rescued_orfs") or 0),
                     "predicted": pred.morphotype_code,
                     "confidence": pred.confidence,
                     "class_scores": pred.class_scores,

@@ -319,6 +319,7 @@ def run_fragments_with_checkpoint(
                     cp,
                     ptf_clusters=ptf_cl,
                     genome_length_bp=int(info["length_bp"]),
+                    dna_seq=info.get("dna_seq", ""),
                 )
                 row_out = {
                     **meta,

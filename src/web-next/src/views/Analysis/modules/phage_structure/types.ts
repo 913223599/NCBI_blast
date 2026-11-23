@@ -66,6 +66,7 @@ export interface StructureRunForm {
   selected_contigs: string[]
   threads: number
   genetic_code: number
+  auto_select_genetic_code?: boolean
   evalue_cutoff: number
   score_cutoff: number
   force_hmm_rescan: boolean
@@ -98,6 +99,7 @@ export interface StructureBatchRunPayload {
   }>
   threads?: number
   genetic_code: number
+  auto_select_genetic_code?: boolean
   evalue_cutoff: number
   score_cutoff: number
   force_hmm_rescan: boolean
@@ -139,7 +141,8 @@ export interface TmpAnalysisItem {
   contig_id: string
   product: string
   phrog_id: string
-  evidence_kind: 'confirmed_tmp' | 'gp29_tail_length' | 'putative_syntenic_tmp'
+  evidence_kind: 'confirmed_tmp' | 'merged_split_tmp' | 'gp29_tail_length' | 'putative_syntenic_tmp'
+  merged_loci?: string[]
   confidence: number
   start_bp: number
   end_bp: number
@@ -257,12 +260,28 @@ export interface MorphotypePrediction {
   warnings: string[]
 }
 
+export interface CompletenessAssessment {
+  status: 'complete' | 'high_quality' | 'partial_or_truncated' | 'incomplete'
+  score: number
+  has_dtr?: boolean
+  dtr_length_bp?: number
+  has_itr?: boolean
+  has_intact_head_packaging?: boolean
+  has_truncated_long_tail_remnant?: boolean
+  allow_negative_podo_inference?: boolean
+  sparse_annotation_rescued_orfs?: number
+  reasons?: string[]
+}
+
 export interface ContigStructureResult {
   contig_id: string
   length_bp: number
   gc_percent: number
   total_orfs: number
   hmm_matched_orfs: number
+  genetic_code_used?: number
+  genetic_code_auto_selected?: boolean
+  completeness?: CompletenessAssessment | null
   prediction: MorphotypePrediction
   connector_profile: ConnectorProfile
   module_matrix: StructuralModuleMatrix

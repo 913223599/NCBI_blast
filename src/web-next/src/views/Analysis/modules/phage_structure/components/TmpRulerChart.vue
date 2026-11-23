@@ -105,7 +105,13 @@ function onHoverTR(tr: TandemRepeatUnit): void {
         </div>
         <div class="metric-pill">
           <span class="m-lbl">标尺基因长度</span>
-          <span class="m-val">{{ currentTmp.length_aa }} aa <small>({{ currentTmp.locus_tag }})</small></span>
+          <span class="m-val">
+            {{ currentTmp.length_aa }} aa
+            <small>({{ currentTmp.locus_tag }})</small>
+            <small v-if="currentTmp.evidence_kind === 'merged_split_tmp'" class="split-tag">
+              [移码合并: {{ (currentTmp.merged_loci || []).join(' + ') || 'split_tmp' }}]
+            </small>
+          </span>
         </div>
         <div class="metric-pill">
           <span class="m-lbl">polyX 富集</span>
@@ -294,6 +300,12 @@ h4 {
 .m-val small {
   font-weight: 500;
   color: #64748b;
+}
+
+.m-val small.split-tag {
+  color: #b45309;
+  font-weight: 600;
+  margin-left: 4px;
 }
 
 .ruler-svg-wrap {

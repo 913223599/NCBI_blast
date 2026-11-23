@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { ContigStructureResult, PhageStructureResult, StructureTaskHistoryItem } from '../types'
-import { buildModuleMatrixCards, formatGenomeBp, formatTailLength, getMorphotypeTheme } from '../utils'
+import {
+  buildModuleMatrixCards,
+  formatCompletenessStatus,
+  formatGenomeBp,
+  formatTailLength,
+  getMorphotypeTheme,
+} from '../utils'
 import StructuralOperonTrack from './StructuralOperonTrack.vue'
 import TailMorphotypeDiagram from './TailMorphotypeDiagram.vue'
 import TmpRulerChart from './TmpRulerChart.vue'
@@ -173,7 +179,7 @@ const filteredProteins = computed(() => {
           <div class="k-lbl">基因组与 PHROG 识别率</div>
           <div class="k-val">{{ formatGenomeBp(activeContig.length_bp) }}</div>
           <div class="k-sub">
-            GC {{ activeContig.gc_percent }}% · 结构注释 {{ activeContig.hmm_matched_orfs }} / {{ activeContig.total_orfs }} ORF
+            GC {{ activeContig.gc_percent }}% · 结构注释 {{ activeContig.hmm_matched_orfs }} / {{ activeContig.total_orfs }} ORF · 密码表 Table {{ activeContig.genetic_code_used ?? 11 }}<template v-if="activeContig.completeness"> · 完整度: {{ formatCompletenessStatus(activeContig.completeness.status) }}</template>
           </div>
         </div>
       </div>

@@ -243,3 +243,18 @@ export function countFastaRecords(text: string): number {
   }
   return cnt
 }
+
+export function formatCompletenessStatus(status?: string): string {
+  switch (status) {
+    case 'complete':
+      return '完整闭合'
+    case 'high_quality':
+      return '高质量完整'
+    case 'partial_or_truncated':
+      return '部分/截断'
+    case 'incomplete':
+      return '残缺片段'
+    default:
+      return '默认评估'
+  }
+}

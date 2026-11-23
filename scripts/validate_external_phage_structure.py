@@ -134,11 +134,16 @@ def run_dual_mode_pipeline(
                     cp,
                     ptf_clusters=ptf_clusters,
                     genome_length_bp=int(info["length_bp"]),
+                    dna_seq=info.get("dna_seq", ""),
+                    genetic_code_used=int(info.get("genetic_code_used") or 11),
+                    genetic_code_auto_selected=bool(info.get("genetic_code_auto_selected") or False),
+                    sparse_rescued_orfs=int(info.get("sparse_rescued_orfs") or 0),
                 )
                 effective_tmps = [] if pred.morphotype_code in ("Podoviridae-like", "Non-tailed") else tmps
                 primary_tmp = effective_tmps[0] if effective_tmps else None
                 prot_map = {p.locus_tag: p for p in prots}
-                tmp_prot = prot_map.get(primary_tmp.locus_tag) if primary_tmp else None
+                lookup_lt = primary_tmp.merged_loci[0] if (primary_tmp and primary_tmp.merged_loci) else (primary_tmp.locus_tag if primary_tmp else "")
+                tmp_prot = prot_map.get(lookup_lt) if primary_tmp else None
 
                 unverified_cnt = sum(1 for p in prots if p.evidence_source == "unverified_text")
                 overridden_cnt = sum(
@@ -151,6 +156,8 @@ def run_dual_mode_pipeline(
                     "input_type": info.get("input_type", mode),
                     "length_bp": info["length_bp"],
                     "total_orfs": len(prots),
+                    "genetic_code_used": int(info.get("genetic_code_used") or 11),
+                    "sparse_rescued_orfs": int(info.get("sparse_rescued_orfs") or 0),
                     "unverified_text_cnt": unverified_cnt,
                     "overridden_gbk_cnt": overridden_cnt,
                     "predicted": pred.morphotype_code,
@@ -166,6 +173,7 @@ def run_dual_mode_pipeline(
                             "locus_tag": primary_tmp.locus_tag,
                             "product": primary_tmp.product,
                             "evidence_kind": primary_tmp.evidence_kind,
+                            "merged_loci": list(primary_tmp.merged_loci),
                             "length_aa": primary_tmp.length_aa,
                             "est_tail_length_nm": primary_tmp.est_tail_length_nm,
                             "ptf_pfam": tmp_prot.ptf_pfam if tmp_prot else "",

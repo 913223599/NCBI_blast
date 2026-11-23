@@ -13,7 +13,9 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from .completeness_gate import evaluate_contig_completeness
 from .types import (
+    CompletenessAssessment,
     ConnectorProfile,
     EvidenceItem,
     MorphotypePrediction,
@@ -119,9 +121,14 @@ def classify_morphotype(
     connector_profile: Optional[ConnectorProfile] = None,
     ptf_clusters: Optional[Sequence[TailFinderCluster]] = None,
     genome_length_bp: Optional[int] = None,
+    dna_seq: str = "",
+    completeness: Optional[CompletenessAssessment] = None,
+    genetic_code_used: int = 11,
+    genetic_code_auto_selected: bool = False,
+    sparse_rescued_orfs: int = 0,
 ) -> MorphotypePrediction:
     """
-    结合尾部核心组件、Virfam 连接器模块与 TMP 标尺蛋白开展可解释形态预测。
+    结合尾部核心组件、Virfam 连接器模块、基因组完整度门控与 TMP 标尺蛋白开展可解释形态预测。
     """
     mm = module_matrix or build_module_matrix(proteins)
     cp = connector_profile or build_connector_profile(proteins)
@@ -131,6 +138,16 @@ def classify_morphotype(
         by_role.setdefault(p.structural_role, []).append(p)
 
     est_bp = genome_length_bp or max((p.end for p in proteins), default=0)
+    comp = completeness or evaluate_contig_completeness(
+        dna_seq=dna_seq,
+        length_bp=est_bp,
+        proteins=proteins,
+        module_matrix=mm,
+        connector_profile=cp,
+        tmp_analyses=tmp_analyses,
+        ptf_clusters=ptf_clusters,
+        sparse_rescued_orfs=sparse_rescued_orfs,
+    )
 
     scores: Dict[str, float] = {
         "Myoviridae-like": 0.0,
@@ -300,7 +317,11 @@ def classify_morphotype(
             )
         )
 
-    confirmed_tmps = [t for t in tmp_analyses if t.evidence_kind in ("confirmed_tmp", "gp29_tail_length")]
+    confirmed_tmps = [
+        t
+        for t in tmp_analyses
+        if t.evidence_kind in ("confirmed_tmp", "merged_split_tmp", "gp29_tail_length")
+    ]
     # N4/Schitoviridae 等家族含 phrog_2120 (~370-445 aa) 为短尾内蛋白通道尺度，不可误当长尾 Sipho 主标尺
     has_real_long_tmp = any(
         t.length_aa >= 500 or (not is_n4_like and t.length_aa >= 350 and not by_role.get("TTPA_B"))
@@ -419,7 +440,7 @@ def classify_morphotype(
             )
         )
 
-    # ─── 4. 短尾科“有头无长尾”负向排他辅助（遵循 Virfam/经典判定逻辑） ────────
+    # ─── 4. 短尾科“有头无长尾”负向排他辅助（受完整度与截断门控严格保护） ────────
     has_tailed_packaging_chassis = (
         cp.portal_count > 0
         or mm.connector_count > 0
@@ -432,7 +453,7 @@ def classify_morphotype(
         and has_tailed_packaging_chassis
     )
     has_long_tail_hallmark = bool(tsp_list or mtp_list or has_real_long_tmp)
-    if has_head_core and not has_long_tail_hallmark and not has_non_tailed_signal:
+    if has_head_core and not has_long_tail_hallmark and not has_non_tailed_signal and comp.allow_negative_podo_inference:
         # 若已具备完整 Portal+TerL(>=300aa)+MCP 且存在 TAIL_OTHER / PTF尾部信号 / 裂解完整生活史骨架，确保跨越 Incomplete 阈值识别远缘短尾 (如 CrAss-like)
         has_terl_full = any(p.length_aa >= 300 for p in by_role.get("TERL", []))
         has_ptf_or_lysis_ctx = bool(ptf_clusters) or any(
@@ -452,10 +473,14 @@ def classify_morphotype(
                 rule="HEAD_PRESENT_LONG_TAIL_ABSENT",
                 target_morphotype="Podoviridae-like",
                 weight=w_abs,
-                detail="具备典型有尾包装核心 (Portal/Connector/TerL) 但全面缺失 TSP、MTP 及长 TMP 等尾部结构蛋白",
+                detail="具备完整头部包装核心 (MCP+Portal/TerL) 且无长/肌尾残骸，但全面缺失 TSP、MTP 及长 TMP 等尾部结构蛋白",
                 loci=[p.locus_tag for p in (by_role.get("PORTAL", []) + by_role.get("MCP", []))[:3]],
             )
         )
+    elif has_head_core and not has_long_tail_hallmark and not has_non_tailed_signal and not comp.allow_negative_podo_inference:
+        for reason in comp.reasons:
+            if reason not in warnings:
+                warnings.append(reason)
 
     # ─── 5. 非有尾噬菌体 (丝状/微病毒/ssRNA/脂膜内囊二十面体) 专项识别 ────────
     if nt_list and not has_long_tail_hallmark:
@@ -516,6 +541,15 @@ def classify_morphotype(
         if best_code != "Non-tailed" and margin < 1.5 and second_score > 2.0:
             second_code = [k for k, v in scores.items() if v == second_score][0]
             warnings.append(f"与次高候选形态 ({second_code}) 分差较小 ({best_score:.1f} vs {second_score:.1f})，建议结合全基因注释与 3D 结构增强复核。")
+
+    if genetic_code_used != 11 and genetic_code_auto_selected:
+        warnings.append(
+            f"检测到非标准遗传密码重编码特征，已自动切换至 Translation Table {genetic_code_used} 进行 ORF 预测。"
+        )
+    if sparse_rescued_orfs > 0:
+        warnings.append(
+            f"原始注释存在大段编码空缺，已自动回补 {sparse_rescued_orfs} 个间隙预测 ORF 并联合核实尾部结构。"
+        )
 
     if mm.tail_fiber_rbp_count > 0 and best_code in ("Siphoviridae-like", "Myoviridae-like") and not tmp_analyses:
         warnings.append("虽判定为长/肌尾形态，但未定位到全长卷尺蛋白 (TMP)，可能存在假定蛋白遗漏或基因预测跨距断裂。")

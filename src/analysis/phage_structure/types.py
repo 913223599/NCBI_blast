@@ -31,6 +31,7 @@ class StructureRunRequest(BaseModel):
 
     threads: Optional[int] = Field(default=None, ge=1, le=64, description="并行计算核心数")
     genetic_code: int = Field(default=11, description="遗传密码表 (默认 11，柔膜菌可选 4)")
+    auto_select_genetic_code: bool = Field(default=True, description="是否自动评估 11/4/15 号遗传密码表")
     evalue_cutoff: float = Field(default=1e-4, gt=0.0, le=1.0, description="PyHMMER PHROG E-value 阈值")
     score_cutoff: float = Field(default=28.0, ge=10.0, le=500.0, description="PyHMMER 最低比特分阈值")
     force_hmm_rescan: bool = Field(default=False, description="即使输入含注释也强制重跑 PHROG HMM 结构扫描")
@@ -59,6 +60,7 @@ class StructureBatchRunRequest(BaseModel):
     items: List[StructureBatchItemRequest] = Field(..., min_length=1, description="批量样本条目列表")
     threads: Optional[int] = Field(default=None, ge=1, le=64)
     genetic_code: int = Field(default=11)
+    auto_select_genetic_code: bool = Field(default=True)
     evalue_cutoff: float = Field(default=1e-4, gt=0.0, le=1.0)
     score_cutoff: float = Field(default=28.0, ge=10.0, le=500.0)
     force_hmm_rescan: bool = Field(default=False)
@@ -114,7 +116,8 @@ class TmpAnalysisItem(BaseModel):
     contig_id: str
     product: str
     phrog_id: str = ""
-    evidence_kind: Literal["confirmed_tmp", "gp29_tail_length", "putative_syntenic_tmp"] = "confirmed_tmp"
+    evidence_kind: Literal["confirmed_tmp", "merged_split_tmp", "gp29_tail_length", "putative_syntenic_tmp"] = "confirmed_tmp"
+    merged_loci: List[str] = Field(default_factory=list)
     confidence: float = 0.0
     start_bp: int = 0
     end_bp: int = 0
@@ -253,6 +256,21 @@ class MorphotypePrediction(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class CompletenessAssessment(BaseModel):
+    """基因组与结构模块完整度评估与门控状态。"""
+
+    status: Literal["complete", "high_quality", "partial_or_truncated", "incomplete"] = "complete"
+    score: float = 1.0
+    has_dtr: bool = False
+    dtr_length_bp: int = 0
+    has_itr: bool = False
+    has_intact_head_packaging: bool = False
+    has_truncated_long_tail_remnant: bool = False
+    allow_negative_podo_inference: bool = True
+    sparse_annotation_rescued_orfs: int = 0
+    reasons: List[str] = Field(default_factory=list)
+
+
 class ContigStructureResult(BaseModel):
     """单条 Contig / 前噬菌体区段的结构预测完整剖析结果。"""
 
@@ -261,6 +279,9 @@ class ContigStructureResult(BaseModel):
     gc_percent: float
     total_orfs: int
     hmm_matched_orfs: int
+    genetic_code_used: int = 11
+    genetic_code_auto_selected: bool = False
+    completeness: Optional[CompletenessAssessment] = None
     prediction: MorphotypePrediction
     connector_profile: ConnectorProfile
     module_matrix: StructuralModuleMatrix

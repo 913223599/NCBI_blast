@@ -229,3 +229,48 @@
 
 ### 9.4 阶段 0 全套单元测试验证
 * `.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v`：**`13 passed in 130.56s (0:02:10)`**（新增 `test_tem_truth_table_and_suite_e_disjoint` 校验 `52` 条真值完整性、DOI 合规性及与 Suite E 224 株绝对零重叠），相关产物均通过 `UTF-8` 无 BOM 及零 Emoji 检查。
+
+---
+
+## 10. 阶段 1 / 里程碑 M2：三大机理缺口修补与盲测验证（步骤 60）
+
+本阶段围绕 M1 基线暴露出的三大通用架构缺口（无门控大片段 `Tailed->Podo` 误判 + 稀疏 `.gbk` 注释漏标、Pyrodigal Table 4/11 混用警告与重编码基因组漏检、以及RefSeq 移码拆分 TMP 双格式不一致），在不引入任何特例补丁的前提下完成三大独立机理模块建设及前后端/全脚本穿透。
+
+### 10.1 M2 三大核心机理实现与全链路集成
+1. **T1.1 Contig 完整性门控与稀疏 `.gbk` 自动救回（[completeness_gate.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/completeness_gate.py)、[sequence_annotator.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/sequence_annotator.py)、[morphotype_classifier.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/morphotype_classifier.py)）**：
+   - 实现精准末端重复检测（DTR / ITR）、基因组完整性判定（`allow_negative_podo_inference`）与多维截断尾部残余互斥检查：仅当具备完整头部打包核心（`MCP` 且含 `PORTAL` / `TERL>=300 aa` / `CONN_GENERAL`）、无长尾残余痕迹（如 `Type_1_Sipho_Myo` 连接器、`MTP`、`TTP`、`TAP` 等）且 `length_bp >= 30,000`（或检测到明确 DTR/ITR）时，才允许触发 `HEAD_PRESENT_LONG_TAIL_ABSENT`；否则降级为 `Incomplete`。
+   - 为 `CDS >= 1` 但实际蛋白覆盖率与编码密度严重稀疏的 `.gbk` 写入区间回补机制（`_merge_sparse_gbk_orfs`），在不覆盖原有有效注释坐标的前提下通过 Pyrodigal 自动补齐未注释空白区间 ORF。
+2. **T1.2 遗传密码 11/4/15 自动选择器与 Pyrodigal 混用消除（[genetic_code_selector.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/genetic_code_selector.py)）**：
+   - 将内置 `pyrodigal.METAGENOMIC_BINS` 按翻译表精确拆分为 `METAGENOMIC_BINS_11` 与 `METAGENOMIC_BINS_4`，彻底消除混用表 4 模型调用表 11 的 `STOP codons` 警告。
+   - 新增自适应 `select_optimal_genetic_code`（支持 Table `11 / 4 / 15`），以编码覆盖度增益、平均 ORF 长度拉升比及 ORF 碎裂减少作为严格防漂移判据。
+3. **T1.3 邻接移码拆分 TMP 重建（[tmp_split_merger.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_split_merger.py)、[tmp_analyzer.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/tmp_analyzer.py)）**：
+   - 实现同链相邻或微间隔移码双段 TMP（`PF06791` / `PF09718` 等且严格排除 `TAP`）识别与物理跨度统一度量 `(max_end - min_start + 1 - 3) // 3`，输出统一 `evidence_kind="merged_split_tmp"` 及 `merged_loci`。
+4. **全链路、全基准与前端可视化同步**：扩展 [types.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/types.py)、[manager.py](file:///f:/NCBI%20blast/src/analysis/phage_structure/manager.py) 与全套 4 个验证脚本透传字段，并在前端 [StructureResults.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/StructureResults.vue) 与 [TmpRulerChart.vue](file:///f:/NCBI%20blast/src/web-next/src/views/Analysis/modules/phage_structure/components/TmpRulerChart.vue) 新增基因密码表标签、稀疏注释补救角标、`Incomplete` 状态徽章及拆分合并 TMP 标尺标注。
+
+### 10.2 M2 单元、前端与非盲基准全量验收实测
+* **前端单元测试与生产构建**：`npx vitest run` **`9 files, 54 passed in 2.29s`**；`npm run build` (`vue-tsc -b && vite build`) **`built in 13.13s`**。
+* **后端全量单元测试（`.venv/Scripts/python.exe -m pytest tests/test_phage_structure.py -v`）**：**`16 passed in 142.18s (0:02:22)`**，新增 `test_t1_1_completeness_gate_and_sparse_gbk_rescue`、`test_t1_2_genetic_code_selector_11_4_15`（覆盖 11 组真实/阅读框重编码 Table 4/15 样本及 3 株标准 Table 11 对照，零 `STOP codons` 告警）、`test_t1_3_split_tmp_merger_positive_and_negatives` 全部通过。
+* **T0.3 碎片 Contig 与嵌合前噬菌体复测（`benchmark_fragmented_contigs.py --fresh --per-morph 6`, `193` 样本, `151.81s`）**：
+  - 全 9 个场景（包括 `sliding_30kb`、`sliding_40kb`、`targeted_head_only`、`chimeric_head_truncated`）中的 `Tailed->Podoviridae-like` 误判率全部由 M1 基线最高 `100%` / `15%` 降至 **`0 / 193 (0.00%)`**；
+  - `chimeric_head_truncated (n=2)` 与 `targeted_head_only (n=2)` 实现 **`100.00% Incomplete`** 精准拦截；
+  - `chimeric_full_prophage (12/12)` 与 `targeted_tail_only (11/11)` 保持 **`100.00%`** 精确匹配。
+* **调参集防退化核验（`Suite A + B`, `155.11s`; `Suite C + D`, `396.42s`）**：
+  - **Suite A（120 株跨 24 科）**：**`Accuracy = 1.0 (120/120), Macro-F1 = 1.0`**，完整 `Podoviridae-like` 召回 **`30/30`**；除 `Non-tailed` 类 `NC_001628 (Fiersviridae -> 15)` 与 `NC_003438 (Microviridae -> 4)` 外，**`0` 株有尾噬菌体**发生密码表误切换。
+  - **Suite B（30 株 TEM 金标准）**：形态 **`30/30`**，`verified = 21/22` 检出，**`Pearson r = 0.99`, `MAE(0.145) = 17.5 nm`, `MAPE = 8.65%`**（`<=2500 aa LOOCV MAE = 14.96 nm`），零退化。
+  - **Suite C（160 株跨 38 科）**：FASTA & GBK 均 **`1.0 (160/160, F1 = 1.0)`**，双模式形态一致 **`160/160`**，短尾/非有尾假 TMP **`0/80`**，有尾 TMP 召回 **`80/80`**，`<=5%` 误差尾长一致率 **`1.0`**（精确一致 `150/160 = 93.75%`）。
+  - **Suite D（33 株 NCBI 外部集）**：FASTA & GBK 均 **`1.0 (33/33, F1 = 1.0)`**；`NC_005178 (D3112)` 在 FASTA 与 GBK 双模式下均稳定合并为 `merged_split_tmp` **`1185 aa (171.8 nm)`**，使双格式 **`tmp_exact_aa_count` 跃升至 `33/33 (100%)`**；其余 `A / B / C` 全集 **`0` 例**非预期合并；verified TEM（`18/19`）双模式均 **`r = 0.9422, MAE = 26.5 nm, MAPE = 14.38%`**。
+
+### 10.3 M2 只读盲测对比（Suite E `m1_baseline` vs `m2_mechanism`）
+严格遵守“盲测只读、禁止针对 `Suite E` 反向调参”原则，执行 `run_suite_e_blind.py --milestone m2_mechanism --fresh`（耗时 `424.93s`，报告 [suite_e_m2_mechanism_report.json](file:///f:/NCBI%20blast/results/benchmarks/phage_structure_suite_e/suite_e_m2_mechanism_report.json)）：
+
+| 评估维度 (`Suite E` 冻结 224 株) | `m1_baseline` | `m2_mechanism` | 客观变化说明 |
+| --- | --- | --- | --- |
+| FASTA 四形态准确率 / F1 | `1.0 (224/224)` / `1.0` | `0.9955 (223/224)` / `0.9977` | 唯一变化为 `NC_015297 (Inoviridae, 5475 bp)` 自动切换至 Table 4 后产出 `0` ORF -> `Incomplete`（保留只读诊断） |
+| GBK 四形态准确率 / F1 | `0.9955 (223/224)` / `0.9955` | **`1.0 (224/224)` / `1.0`** | 消除全部误判（原 `NC_052964` 误判修复） |
+| GBK 稀疏注释自动补救案例 | 无补救（`2` 株漏检 TMP） | **`NC_070890` (+170 ORF) / `NC_052964` (+87 ORF)** | 两株极端稀疏 `.gbk` 在纯裸补救后均精准恢复形态与 TMP（`603 aa` / `823 aa`） |
+| GBK 有尾 TMP 召回 / 假 TMP | `110/112` / `0/112` | **`112/112`** / `0/112` | M1 遗留的两例 GBK TMP 漏检全部清零 |
+| 双模式 `<=5%` 误差 / 精确 aa 一致率 | `0.9821` / `215/224 (0.9598)` | **`0.9911`** / **`217/224 (0.9688)`** | 双模式尾长跨格式稳定性进一步收敛 |
+| `post-2025/08` 外部新株 (`24` 株) | FASTA `1.0` / GBK `1.0` | **FASTA `1.0` / GBK `1.0`** | 外部全新样本全对保持 |
+
+* **只读机制诊断保留（待后续阶段决策）**：`NC_015297`（`5.48 kb` 丝状单链 `Inoviridae`）暴露了极端小尺度非 Mollicutes 噬菌体在自动切换至 Table 4 后，`METAGENOMIC_BINS_4` 元基因组模型受训练 bin 稀缺影响可能漏呼短 ORF 的边界现象（本里程碑严格冻结规则，将该现象留作后续 M3 协同优化输入）。
+* **合规自检**：全部 `18` 份新增/修改前后端及文档文件均已通过 `UTF-8` 无 BOM 与零 Emoji 检验。

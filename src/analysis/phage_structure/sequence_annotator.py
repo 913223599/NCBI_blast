@@ -32,6 +32,12 @@ from Bio import SeqIO
 
 from ...assembly.env.wsl_manager import WSLManager
 from ...workbench.models.tool_config import ToolConfig
+from .completeness_gate import assess_sparse_gbk_annotation
+from .genetic_code_selector import (
+    METAGENOMIC_BINS_4,
+    METAGENOMIC_BINS_11,
+    select_optimal_genetic_code,
+)
 from .phrog_catalog import STRUCTURAL_INDEX_VERSION, classify_structural_role, get_phrog_catalog
 from .types import StructureProteinItem
 
@@ -266,6 +272,7 @@ def parse_input_contigs(
         n_bp = len(seq_str)
         gc_pct = round((seq_str.count("G") + seq_str.count("C")) * 100.0 / max(1, n_bp), 2)
         prots = []
+        gbk_transl_table: Optional[int] = None
         if is_gbk:
             cds_idx = 0
             seen_loci: set[str] = set()
@@ -274,6 +281,11 @@ def parse_input_contigs(
                     continue
                 cds_idx += 1
                 q = feat.qualifiers or {}
+                if gbk_transl_table is None and q.get("transl_table"):
+                    try:
+                        gbk_transl_table = int(str(q["transl_table"][0]).strip())
+                    except Exception:
+                        pass
                 lt_raw = str((q.get("locus_tag") or q.get("protein_id") or q.get("gene") or [f"{cid}_CDS_{cds_idx:04d}"])[0]).strip()
                 lt = lt_raw or f"{cid}_CDS_{cds_idx:04d}"
                 if lt in seen_loci:
@@ -291,13 +303,19 @@ def parse_input_contigs(
                     if m_ph:
                         phrog_raw = f"phrog_{m_ph.group(1)}"
 
+                raw_tt = gbk_transl_table or 11
+                if q.get("transl_table"):
+                    try:
+                        raw_tt = int(str(q["transl_table"][0]).strip())
+                    except Exception:
+                        pass
                 aa = str((q.get("translation") or [""])[0]).strip().upper().replace(" ", "").rstrip("*")
                 if not aa and n_bp > 0:
                     try:
-                        aa = str(feat.extract(rec.seq).translate(table=11, to_stop=True)).upper()
+                        aa = str(feat.extract(rec.seq).translate(table=raw_tt, to_stop=True)).upper()
                     except Exception:
                         try:
-                            aa = str(feat.extract(rec.seq).translate(table=11)).split("*")[0].upper()
+                            aa = str(feat.extract(rec.seq).translate(table=raw_tt)).split("*")[0].upper()
                         except Exception:
                             aa = ""
                 if not aa:
@@ -331,6 +349,10 @@ def parse_input_contigs(
             "dna_seq": seq_str,
             "proteins": prots,
             "input_type": input_type,
+            "gbk_transl_table": gbk_transl_table,
+            "genetic_code_used": gbk_transl_table or 11,
+            "genetic_code_auto_selected": False,
+            "sparse_rescued_orfs": 0,
         }
 
     if not out:
@@ -338,24 +360,37 @@ def parse_input_contigs(
     return out
 
 
-def _predict_single_contig_orfs(args: Tuple[str, str, int]) -> Tuple[str, List[StructureProteinItem]]:
-    cid, seq_str, genetic_code = args
+def _predict_single_contig_orfs(
+    args: Tuple[str, str, int, bool]
+) -> Tuple[str, List[StructureProteinItem], int, bool]:
+    cid, seq_str, genetic_code, auto_select = args
     if len(seq_str) < 200:
-        return cid, []
-    is_meta = len(seq_str) < 100_000
-    if is_meta:
-        gf = pyrodigal.GeneFinder(meta=True, mask=True)
+        return cid, [], genetic_code, False
+
+    chosen_code = genetic_code
+    auto_switched = False
+    if auto_select and genetic_code == 11:
+        chosen_code, auto_switched, _ = select_optimal_genetic_code(seq_str, default_code=genetic_code)
+
+    seq_bytes = seq_str.encode("ascii", errors="replace")
+    n_bp = len(seq_bytes)
+    if n_bp < 100_000 and chosen_code in (11, 4):
+        bins = METAGENOMIC_BINS_11 if chosen_code == 11 else METAGENOMIC_BINS_4
+        gf = pyrodigal.GeneFinder(meta=True, mask=True, metagenomic_bins=bins)
     else:
         gf = pyrodigal.GeneFinder(meta=False, mask=True)
+        train_bytes = seq_bytes * ((100_000 // n_bp) + 1) if n_bp < 100_000 else seq_bytes
         try:
-            gf.train(seq_str.encode("ascii", errors="replace"), translation_table=cast(Any, genetic_code))
+            gf.train(train_bytes, translation_table=cast(Any, chosen_code))
         except Exception:
-            gf = pyrodigal.GeneFinder(meta=True, mask=True)
+            gf = pyrodigal.GeneFinder(meta=True, mask=True, metagenomic_bins=METAGENOMIC_BINS_11)
+            chosen_code = 11
+            auto_switched = False
 
-    genes = gf.find_genes(seq_str.encode("ascii", errors="replace"))
+    genes = gf.find_genes(seq_bytes)
     out: List[StructureProteinItem] = []
     for idx, g in enumerate(genes, start=1):
-        aa = g.translate(translation_table=cast(Any, genetic_code), include_stop=False)
+        aa = g.translate(translation_table=cast(Any, chosen_code), include_stop=False)
         if len(aa) < 25:
             continue
         out.append(
@@ -371,33 +406,91 @@ def _predict_single_contig_orfs(args: Tuple[str, str, int]) -> Tuple[str, List[S
                 translation=aa,
             )
         )
-    return cid, out
+    return cid, out, chosen_code, auto_switched
+
+
+def _merge_sparse_gbk_orfs(
+    existing: List[StructureProteinItem],
+    predicted: List[StructureProteinItem],
+) -> Tuple[List[StructureProteinItem], int]:
+    """将 Pyrodigal 预测出的未覆盖空白区间 ORF 回补进稀疏注释的 GenBank 蛋白列表。"""
+    seen_loci = {p.locus_tag for p in existing}
+    added: List[StructureProteinItem] = []
+    for cand in predicted:
+        overlaps_existing = any(
+            max(0, min(cand.end, ex.end) - max(cand.start, ex.start) + 1) >= 60
+            for ex in existing
+        )
+        if not overlaps_existing:
+            lt = cand.locus_tag
+            if lt in seen_loci:
+                lt = f"{lt}_gap"
+            seen_loci.add(lt)
+            cand.locus_tag = lt
+            added.append(cand)
+    merged = sorted(existing + added, key=lambda x: x.start)
+    return merged, len(added)
 
 
 def predict_missing_orfs_parallel(
     contig_map: Dict[str, Dict[str, Any]],
     *,
     genetic_code: int = 11,
+    auto_select_genetic_code: bool = True,
     workers: int = 8,
 ) -> None:
-    """对尚未拥有蛋白集合的裸核酸 Contig 使用多核 Pyrodigal 并发预测 ORF。"""
-    tasks = [
-        (cid, info["dna_seq"], genetic_code)
-        for cid, info in contig_map.items()
-        if not info["proteins"] and info["dna_seq"]
-    ]
+    """
+    对尚未拥有蛋白集合的裸核酸 Contig（或稀疏/残缺注释的 .gbk Contig）
+    执行自动密码表选择与多核 Pyrodigal 并发 ORF 预测或间隙回补。
+    """
+    tasks: List[Tuple[str, str, int, bool]] = []
+    sparse_targets: set[str] = set()
+
+    for cid, info in contig_map.items():
+        prots: List[StructureProteinItem] = info["proteins"]
+        dna_seq = info.get("dna_seq", "")
+        gbk_tt = info.get("gbk_transl_table")
+        req_tt = int(gbk_tt) if gbk_tt in (4, 11, 15) else genetic_code
+        eff_auto = bool(auto_select_genetic_code and gbk_tt is None)
+
+        if not prots and dna_seq:
+            tasks.append((cid, dna_seq, req_tt, eff_auto))
+        elif prots and dna_seq and info.get("input_type") == "genbank":
+            is_sparse, _, _ = assess_sparse_gbk_annotation(int(info.get("length_bp") or len(dna_seq)), prots)
+            if is_sparse:
+                sparse_targets.add(cid)
+                tasks.append((cid, dna_seq, req_tt, eff_auto))
+            else:
+                info["genetic_code_used"] = req_tt
+                info["genetic_code_auto_selected"] = False
+                info["sparse_rescued_orfs"] = 0
+        else:
+            info.setdefault("genetic_code_used", req_tt)
+            info.setdefault("genetic_code_auto_selected", False)
+            info.setdefault("sparse_rescued_orfs", 0)
+
     if not tasks:
         return
 
     safe_w = max(1, min(workers, len(tasks)))
+    results_list: List[Tuple[str, List[StructureProteinItem], int, bool]]
     if len(tasks) > 1 and safe_w > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=safe_w) as pool:
-            for cid, prots in pool.map(_predict_single_contig_orfs, tasks):
-                contig_map[cid]["proteins"] = prots
+            results_list = list(pool.map(_predict_single_contig_orfs, tasks))
     else:
-        for t in tasks:
-            cid, prots = _predict_single_contig_orfs(t)
-            contig_map[cid]["proteins"] = prots
+        results_list = [_predict_single_contig_orfs(t) for t in tasks]
+
+    for cid, pred_prots, used_tt, auto_sw in results_list:
+        info = contig_map[cid]
+        info["genetic_code_used"] = used_tt
+        info["genetic_code_auto_selected"] = auto_sw
+        if cid in sparse_targets:
+            merged, rescued_cnt = _merge_sparse_gbk_orfs(info["proteins"], pred_prots)
+            info["proteins"] = merged
+            info["sparse_rescued_orfs"] = rescued_cnt
+        else:
+            info["proteins"] = pred_prots
+            info["sparse_rescued_orfs"] = 0
 
 
 def _is_low_complexity_repeat_artifact(aa_seq: str) -> bool:

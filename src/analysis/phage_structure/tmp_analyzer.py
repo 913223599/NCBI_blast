@@ -16,6 +16,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .tmp_split_merger import find_and_merge_split_tmps
 from .types import (
     HydrophobicSegment,
     PolyXRegion,
@@ -348,6 +349,7 @@ def analyze_single_tmp(
     protein: StructureProteinItem,
     *,
     evidence_kind: str = "confirmed_tmp",
+    merged_loci: Optional[List[str]] = None,
 ) -> TmpAnalysisItem:
     """对单条 TMP 或候选尺蛋白执行全量化分析。"""
     aa = (protein.translation or "").strip().upper().rstrip("*")
@@ -366,7 +368,14 @@ def analyze_single_tmp(
     hi_nm = round(L * _TMP_MAX_NM_PER_AA, 1)
 
     # 依据文献定性判读
-    if evidence_kind == "gp29_tail_length":
+    if evidence_kind == "merged_split_tmp":
+        loci_desc = ", ".join(merged_loci or [protein.locus_tag])
+        interp = (
+            f"检测到核糖体移码/注释分裂的卷尺蛋白片段（合并自 {loci_desc}），"
+            f"按物理跨度重构全长 {L} aa，理论延伸尾长约 {est_nm} nm ({lo_nm}~{hi_nm} nm)；"
+            f"检出 polyX {px_tot} aa ({px_pct}%)、TR {tr_tot} aa ({tr_pct}%)。"
+        )
+    elif evidence_kind == "gp29_tail_length":
         interp = (
             f"检测到肌尾基板尺蛋白同源基因 ({L} aa)，理论基准伸展长度约 {est_nm} nm "
             f"(经验区间 {lo_nm}~{hi_nm} nm)；检出 polyX {px_tot} aa ({px_pct}%)、TR {tr_tot} aa ({tr_pct}%)。"
@@ -388,13 +397,18 @@ def analyze_single_tmp(
             f"按 α-螺旋标尺估算基础延伸尺度约 {est_nm} nm ({lo_nm}~{hi_nm} nm)。"
         )
 
-    conf = 0.95 if evidence_kind == "confirmed_tmp" else (0.85 if evidence_kind == "gp29_tail_length" else 0.55)
+    conf = (
+        0.95
+        if evidence_kind == "confirmed_tmp"
+        else (0.93 if evidence_kind == "merged_split_tmp" else (0.85 if evidence_kind == "gp29_tail_length" else 0.55))
+    )
     return TmpAnalysisItem(
         locus_tag=protein.locus_tag,
         contig_id=protein.contig_id,
         product=protein.product,
         phrog_id=protein.phrog_id,
         evidence_kind=evidence_kind,  # type: ignore[arg-type]
+        merged_loci=list(merged_loci or []),
         confidence=conf,
         start_bp=protein.start,
         end_bp=protein.end,
@@ -605,8 +619,13 @@ def select_and_analyze_tmps(
         for pos in range(len(sorted_prots))
     ]
 
+    split_merged = find_and_merge_split_tmps(sorted_prots)
+    split_consumed_loci: set[str] = {
+        loc for mc in split_merged for loc in mc.source_loci
+    }
+
     # 先判断 Contig 内是否已存在带有权威直接 TMP Pfam 的全长主蛋白 (>=380 aa)，以防短截断碎片干扰
-    has_direct_pfam_primary = any(
+    has_direct_pfam_primary = bool(split_merged) or any(
         (
             bool(_protein_pfams(p) & (_DIRECT_TMP_PFAMS - {"PF12789"}))
             or p.ptf_pfam.strip().upper() in _DIRECT_TMP_PFAMS
@@ -617,12 +636,20 @@ def select_and_analyze_tmps(
         and p.length_aa >= 380
         and not contexts[pos]["immediate_head_sandwich"]
         for pos, p in enumerate(sorted_prots)
+        if p.locus_tag not in split_consumed_loci
     )
 
-    candidates: List[Tuple[StructureProteinItem, str]] = []
-    chosen_loci: set[str] = set()
+    candidates: List[Tuple[StructureProteinItem, str, List[str]]] = []
+    chosen_loci: set[str] = set(split_consumed_loci)
+
+    for mc in split_merged:
+        if has_true_tail_backbone or has_tailed_context:
+            candidates.append((mc.protein, "merged_split_tmp", list(mc.source_loci)))
+            chosen_loci.add(mc.protein.locus_tag)
 
     for pos, p in enumerate(sorted_prots):
+        if p.locus_tag in split_consumed_loci:
+            continue
         ctx = contexts[pos]
         pfams = _protein_pfams(p)
         primary_pf = (p.ptf_pfam or "").strip().upper()
@@ -671,7 +698,7 @@ def select_and_analyze_tmps(
 
         # 路径 1: 拥有权威直接 TMP/PTR/PhageMin_Tail Pfam 结构域的蛋白（最不依赖 PHROG 名称与 GBK 文本）
         if has_direct_pfam and p.length_aa >= 400:
-            candidates.append((p, "confirmed_tmp"))
+            candidates.append((p, "confirmed_tmp", []))
             chosen_loci.add(p.locus_tag)
             continue
 
@@ -680,7 +707,7 @@ def select_and_analyze_tmps(
             if is_unverified:
                 # 绝不放行未经序列核实的外部 .gbk 纯字符串声明，除非同链尾部干区明确共线性证实
                 if p.length_aa >= 400 and ctx["same_strand_tail_anchors"] >= 1:
-                    candidates.append((p, "putative_syntenic_tmp"))
+                    candidates.append((p, "putative_syntenic_tmp", []))
                     chosen_loci.add(p.locus_tag)
                 continue
 
@@ -695,19 +722,19 @@ def select_and_analyze_tmps(
                 if p.length_aa < min_len and (has_direct_pfam_primary or not in_tail_operon):
                     continue
                 if p.length_aa >= min_len or (in_tail_operon and p.hmm_score >= 45.0 and not has_direct_pfam_primary):
-                    candidates.append((p, "confirmed_tmp"))
+                    candidates.append((p, "confirmed_tmp", []))
                     chosen_loci.add(p.locus_tag)
             continue
 
         # 路径 3: 肌尾 T4-gp29 型基板尺蛋白
         if p.structural_role == "BASEPLATE_MYO" and re.search(r"\btail\s+length\b", p.product, re.I) and p.length_aa >= 350:
-            candidates.append((p, "gp29_tail_length"))
+            candidates.append((p, "gp29_tail_length", []))
             chosen_loci.add(p.locus_tag)
             continue
 
         # 路径 4: 多结构域融合型溶菌-卷尺蛋白（须具备溶菌水解 Pfam + 较长尺度 + 真实尾干同向语境）
         if has_lytic_pfam and p.length_aa >= 650 and ctx["same_strand_tail_anchors"] >= 1 and (ctx["tail_trunk_anchors"] >= 1 or ctx["immediate_tap_downstream"] or (ctx["baseplate_anchors"] >= 1 and ctx["ptf_support"])):
-            candidates.append((p, "confirmed_tmp"))
+            candidates.append((p, "confirmed_tmp", []))
             chosen_loci.add(p.locus_tag)
 
     # 路径 5: 局部共线性操纵子智能补全（仅当确有真实尾干骨架或明确有尾背景却未检出主 TMP 时激活）
@@ -792,7 +819,7 @@ def select_and_analyze_tmps(
                 best_cand = cand
 
         if best_cand is not None:
-            candidates.append((best_cand, "putative_syntenic_tmp"))
+            candidates.append((best_cand, "putative_syntenic_tmp", []))
 
     if not candidates:
         return []
@@ -801,9 +828,9 @@ def select_and_analyze_tmps(
     workers = max_workers if max_workers is not None else max(1, min(len(candidates), cpu_cnt - 2, 8))
     if len(candidates) > 1 and workers > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            items = list(pool.map(lambda pair: analyze_single_tmp(pair[0], evidence_kind=pair[1]), candidates))
+            items = list(pool.map(lambda triple: analyze_single_tmp(triple[0], evidence_kind=triple[1], merged_loci=triple[2]), candidates))
     else:
-        items = [analyze_single_tmp(p, evidence_kind=kind) for p, kind in candidates]
+        items = [analyze_single_tmp(p, evidence_kind=kind, merged_loci=mloci) for p, kind, mloci in candidates]
 
-    items.sort(key=lambda x: (-int(x.evidence_kind == "confirmed_tmp"), -x.length_aa))
+    items.sort(key=lambda x: (-int(x.evidence_kind in ("confirmed_tmp", "merged_split_tmp")), -x.length_aa))
     return items

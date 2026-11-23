@@ -735,3 +735,237 @@ def test_tem_truth_table_and_suite_e_disjoint() -> None:
     assert suite_e_accs.isdisjoint(set(accs))
 
 
+def test_t1_1_completeness_gate_and_sparse_gbk_rescue(tmp_path: Path) -> None:
+    """
+    验证 T1.1：
+    1. 仅含头部核心+Type 1连接器残骸（无长尾主干与正短尾标记）的截断 Contig 严禁误判 Podoviridae-like，应输出 Incomplete；
+    2. 具备完整 Portal+TerL+MCP 且无 Type 1 残骸的远缘完整短尾（CrAss 样）正常判为 Podoviridae-like；
+    3. 稀疏/半截漏标 .gbk（仅保留少数 CDS 且存在 >15 kb 大空缺）经 Pyrodigal 间隙回补后恢复尾部完整识别。
+    """
+    from Bio import SeqIO
+    from src.analysis.phage_structure.completeness_gate import (
+        assess_sparse_gbk_annotation,
+        detect_terminal_repeats,
+    )
+
+    repeat_edge = "ATGCGTAAGCTTAGCTAGGCTAACGTAGCTTACCGATCGTAGCTAGCTAG"
+    fake_genome = repeat_edge + ("A" * 5000) + repeat_edge
+    has_dtr, dtr_len, _ = detect_terminal_repeats(fake_genome)
+    assert has_dtr and dtr_len >= len(repeat_edge)
+
+    truncated_tailed_prots = [
+        StructureProteinItem(
+            locus_tag="TR_POR", contig_id="frag1", start=100, end=1700, strand="+", length_aa=530,
+            product="portal protein", structural_role="PORTAL", hmm_score=320.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 530,
+        ),
+        StructureProteinItem(
+            locus_tag="TR_TERL", contig_id="frag1", start=1750, end=3300, strand="+", length_aa=515,
+            product="terminase large subunit", structural_role="TERL", hmm_score=280.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 515,
+        ),
+        StructureProteinItem(
+            locus_tag="TR_MCP", contig_id="frag1", start=3400, end=4500, strand="+", length_aa=360,
+            product="major head protein", structural_role="MCP", hmm_score=310.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 360,
+        ),
+        StructureProteinItem(
+            locus_tag="TR_AD1", contig_id="frag1", start=4600, end=5100, strand="+", length_aa=160,
+            product="head-tail adaptor Ad1", structural_role="CONN_AD1", hmm_score=140.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 160,
+        ),
+    ]
+    trunc_pred = classify_morphotype(truncated_tailed_prots, [], genome_length_bp=28_000)
+    assert trunc_pred.morphotype_code == "Incomplete"
+    assert any("截断" in w or "短尾" in w for w in trunc_pred.warnings)
+
+    complete_podo_prots = [
+        p for p in truncated_tailed_prots if p.structural_role != "CONN_AD1"
+    ] + [
+        StructureProteinItem(
+            locus_tag="PO_TO", contig_id="frag2", start=6000, end=7200, strand="+", length_aa=390,
+            product="tail protein", structural_role="TAIL_OTHER", hmm_score=150.0,
+            evidence_source="pyhmmer_phrog", translation="M" * 390,
+        ),
+    ]
+    podo_pred = classify_morphotype(complete_podo_prots, [], genome_length_bp=75_000)
+    assert podo_pred.morphotype_code == "Podoviridae-like"
+
+    lambda_gbk = Path(r"F:\Phage data\gbk\NC_001416.1.gbk")
+    if lambda_gbk.is_file():
+        recs = list(SeqIO.parse(str(lambda_gbk), "genbank"))
+        kept = []
+        cds_seen = 0
+        for feat in recs[0].features:
+            if feat.type != "CDS":
+                kept.append(feat)
+            elif cds_seen < 6:
+                kept.append(feat)
+                cds_seen += 1
+        recs[0].features = kept
+        sparse_gbk = tmp_path / "sparse_lambda.gbk"
+        with sparse_gbk.open("w", encoding="utf-8") as fh:
+            SeqIO.write(recs, fh, "genbank")
+
+        cmap = parse_input_contigs(fasta_path=str(sparse_gbk))
+        cid, info = next(iter(cmap.items()))
+        is_sparse, cov, gap = assess_sparse_gbk_annotation(info["length_bp"], info["proteins"])
+        assert is_sparse and cov < 0.30 and gap > 20_000
+        predict_missing_orfs_parallel(cmap, genetic_code=11, workers=4)
+        assert info["sparse_rescued_orfs"] >= 35
+        scan_proteins_with_pyhmmer(cmap, workers=4, verify_annotated=True)
+        tmps = select_and_analyze_tmps(info["proteins"], has_tailed_context=True, contig_length_bp=info["length_bp"])
+        pred = classify_morphotype(
+            info["proteins"],
+            tmps,
+            genome_length_bp=info["length_bp"],
+            dna_seq=info["dna_seq"],
+            sparse_rescued_orfs=info["sparse_rescued_orfs"],
+        )
+        assert pred.morphotype_code == "Siphoviridae-like"
+        assert tmps and tmps[0].length_aa >= 800
+
+
+def test_t1_2_genetic_code_selector_11_4_15() -> None:
+    """
+    验证 T1.2：对 10+ 株重编码样本（Table 4 真实基因组与真实噬菌体基因组按天然阅读框重编码的 Table 4 UGA->Trp / Table 15 UAG->Gln）
+    及多株标准 Table 11 基因组，遗传密码自动选择准确无误且彻底消除 Pyrodigal 混用警告。
+    """
+    import warnings
+    import pyrodigal
+    from src.analysis.phage_structure.genetic_code_selector import select_optimal_genetic_code
+
+    def recode_real_phage(seq_s: str, mode: str, tag_stride: int = 3) -> str:
+        # 基于真实噬菌体基因阅读框将 Trp(TGG/CCA)->TGA/TCA 或 Gln(CAA,CAG/TTG,CTG)->TAG/CTA，保留天然密码子偏置与反链终止分布
+        gf = pyrodigal.GeneFinder(meta=False)
+        tb = (seq_s * ((100_000 // len(seq_s)) + 1)).encode("ascii") if len(seq_s) < 100_000 else seq_s.encode("ascii")
+        gf.train(tb, translation_table=11)
+        genes = [g for g in gf.find_genes(seq_s.encode("ascii")) if (g.end - g.begin + 1) >= 450]
+        arr = list(seq_s)
+        for g in genes:
+            step = 0
+            for pos in range(g.begin - 1 + 3, g.end - 3, 3):
+                cod = "".join(arr[pos : pos + 3])
+                if g.strand == 1:
+                    if mode == "TGA" and cod == "TGG":
+                        arr[pos : pos + 3] = list("TGA")
+                    elif mode == "TAG" and cod in ("CAG", "CAA") and step % tag_stride == 0:
+                        arr[pos : pos + 3] = list("TAG")
+                else:
+                    if mode == "TGA" and cod == "CCA":
+                        arr[pos : pos + 3] = list("TCA")
+                    elif mode == "TAG" and cod in ("CTG", "TTG") and step % tag_stride == 0:
+                        arr[pos : pos + 3] = list("CTA")
+                step += 1
+        return "".join(arr)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        # 1) 真实 Table 4 噬菌体基因组 (2 株)
+        for fn in ("NC_002515.1.fasta", "NC_003438.1.fasta"):
+            fp = Path(r"F:\Phage data\fasta") / fn
+            if fp.is_file():
+                info = next(iter(parse_input_contigs(fasta_path=str(fp)).values()))
+                code, switched, _ = select_optimal_genetic_code(info["dna_seq"])
+                assert code == 4 and switched
+
+        # 2) 基于真实完整噬菌体基因组 (Lambda / T7 / T4片段) 构建完整重编码基因组，并模拟重编码基因组碎片切片 (共 9 株，含真实 Table 4 共 11 株)
+        seq_lambda = next(iter(parse_input_contigs(fasta_path=str(Path(r"F:\Phage data\fasta\NC_001416.1.fasta"))).values()))["dna_seq"]
+        seq_t7 = next(iter(parse_input_contigs(fasta_path=str(Path(r"F:\Phage data\fasta\NC_001604.1.fasta"))).values()))["dna_seq"]
+        seq_t4_60k = next(iter(parse_input_contigs(fasta_path=str(Path(r"F:\Phage data\fasta\NC_000866.4.fasta"))).values()))["dna_seq"][:60000]
+
+        recoded_lambda_4 = recode_real_phage(seq_lambda, "TGA")
+        table4_cases = [
+            recoded_lambda_4,
+            recoded_lambda_4[0:12000],
+            recode_real_phage(seq_t7, "TGA"),
+            recode_real_phage(seq_t4_60k, "TGA"),
+        ]
+        for s4_rec in table4_cases:
+            c4, sw4, _ = select_optimal_genetic_code(s4_rec)
+            assert c4 == 4 and sw4
+
+        recoded_lambda_15 = recode_real_phage(seq_lambda, "TAG", tag_stride=3)
+        table15_cases = [
+            recoded_lambda_15,
+            recoded_lambda_15[12000:24000],
+            recoded_lambda_15[36000:48502],
+            recode_real_phage(seq_t7, "TAG", tag_stride=2),
+            recode_real_phage(seq_t4_60k, "TAG", tag_stride=2),
+        ]
+        for s15_rec in table15_cases:
+            c15, sw15, _ = select_optimal_genetic_code(s15_rec)
+            assert c15 == 15 and sw15
+
+        # 3) 标准 Table 11 噬菌体绝不误漂移且 Pyrodigal 不抛 STOP codon mismatch 警告
+        for std_fn in ("NC_001416.1.fasta", "NC_001604.1.fasta", "NC_001422.1.fasta"):
+            std_cmap = parse_input_contigs(fasta_path=str(Path(r"F:\Phage data\fasta") / std_fn))
+            std_info = next(iter(std_cmap.values()))
+            std_code, std_sw, _ = select_optimal_genetic_code(std_info["dna_seq"])
+            assert std_code == 11 and not std_sw
+
+        lambda_cmap = parse_input_contigs(fasta_path=str(Path(r"F:\Phage data\fasta\NC_001416.1.fasta")))
+        lambda_info = next(iter(lambda_cmap.values()))
+        predict_missing_orfs_parallel(lambda_cmap, genetic_code=11, auto_select_genetic_code=True, workers=2)
+        assert lambda_info["genetic_code_used"] == 11
+
+    stop_warnings = [str(w.message) for w in caught if "STOP codons" in str(w.message)]
+    assert stop_warnings == []
+
+
+def test_t1_3_split_tmp_merger_positive_and_negatives() -> None:
+    """
+    验证 T1.3：
+    1. 正例：D3112 型相邻移码拆分 TMP（PF06791 + PF09718 重叠分裂）精准合并为 merged_split_tmp，消除两端起始差；
+    2. 负例 1：TAP + TMP 相邻绝不误合并；
+    3. 负例 2：间隔 >120 bp 或非 TMP 长蛋白绝不误合并。
+    """
+    from src.analysis.phage_structure.tmp_split_merger import find_and_merge_split_tmps
+
+    # 正例 (D3112 坐标: 25274..26818 与 26767..28833 -> 物理跨度 1185 aa)
+    p_mtp = StructureProteinItem(
+        locus_tag="D_MTP", contig_id="d3112", start=23884, end=24654, strand="+", length_aa=256,
+        product="major tail protein", structural_role="MTP", hmm_score=311.0,
+        evidence_source="pyhmmer_phrog", translation="M" * 256,
+    )
+    p_tap = StructureProteinItem(
+        locus_tag="D_TAP", contig_id="d3112", start=24658, end=25143, strand="+", length_aa=161,
+        product="tail assembly chaperone", structural_role="TAP", hmm_score=194.5,
+        evidence_source="pyhmmer_phrog", translation="M" * 161,
+    )
+    p_tmp_n = StructureProteinItem(
+        locus_tag="D_TMP_N", contig_id="d3112", start=25274, end=26818, strand="+", length_aa=514,
+        product="tail length tape measure protein", structural_role="TMP", hmm_score=407.0,
+        evidence_source="pyhmmer_phrog", ptf_pfam="PF06791", ptf_all_pfams=["PF06791"],
+        ptf_is_tail=True, ptf_tail_prob=0.98, translation="M" * 514,
+    )
+    p_tmp_c = StructureProteinItem(
+        locus_tag="D_TMP_C", contig_id="d3112", start=26767, end=28833, strand="+", length_aa=688,
+        product="tail length tape measure protein", structural_role="TMP", hmm_score=370.3,
+        evidence_source="pyhmmer_phrog", ptf_pfam="PF09718", ptf_all_pfams=["PF09718"],
+        ptf_is_tail=True, ptf_tail_prob=0.99, translation="A" * 688,
+    )
+    merged = find_and_merge_split_tmps([p_mtp, p_tap, p_tmp_n, p_tmp_c])
+    assert len(merged) == 1
+    assert merged[0].protein.length_aa == 1185
+    assert merged[0].source_loci == ["D_TMP_N", "D_TMP_C"]
+
+    tmps = select_and_analyze_tmps([p_mtp, p_tap, p_tmp_n, p_tmp_c], has_tailed_context=True, contig_length_bp=37_611)
+    assert len(tmps) == 1
+    assert tmps[0].evidence_kind == "merged_split_tmp"
+    assert tmps[0].length_aa == 1185
+    assert tmps[0].est_tail_length_nm == round(1185 * 0.145, 1)
+    assert tmps[0].merged_loci == ["D_TMP_N", "D_TMP_C"]
+
+    # 负例 1: TAP 与单一完整 TMP 重叠不得合并 (即便 TAP 被误打上某些域标签，只要 role=TAP 就拒绝)
+    p_tap_large = p_tap.model_copy(update={"length_aa": 210, "end": 25290})
+    assert find_and_merge_split_tmps([p_mtp, p_tap_large, p_tmp_n]) == []
+
+    # 负例 2: 两段间相距超过 120 bp 或非 TMP 角色不合并
+    p_far_c = p_tmp_c.model_copy(update={"start": 27050, "end": 29110})
+    assert find_and_merge_split_tmps([p_mtp, p_tmp_n, p_far_c]) == []
+    p_other_c = p_tmp_c.model_copy(update={"structural_role": "TAIL_FIBER_RBP"})
+    assert find_and_merge_split_tmps([p_mtp, p_tmp_n, p_other_c]) == []
+
+
+
