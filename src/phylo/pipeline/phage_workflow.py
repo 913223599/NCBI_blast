@@ -493,7 +493,7 @@ class PhageTaxonomyWorkflow:
 
             # Step 4A: MSA (MAFFT L-INS-i / E-INS-i / --auto)
             t_msa = time.time()
-            msa_strategy = cfg.msa_strategy if cfg.msa_strategy != "auto" else "linsi"
+            msa_strategy = cfg.msa_strategy
             msa_tool = cfg.msa if cfg.msa != "none" else "mafft"
             stage_fn("msa", "running", 70, f"第 4 步：执行 {msa_tool.upper()} ({msa_strategy}) 蛋白多序列比对...")
             msa_fasta = job_dir / "terl_aligned.fasta"

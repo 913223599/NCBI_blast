@@ -218,3 +218,42 @@ def test_proteome_streaming_sg_upgma_and_checkpoint(tmp_path: Path):
     _collect_depths(root, 0.0)
     assert len(leaf_depths) == n_taxa
     assert max(leaf_depths) - min(leaf_depths) < 1e-4
+
+
+def test_mafft_strategy_auto_downgrade_and_multithread_flags(tmp_path: Path):
+    from src.phylo.engines.msa.aligner import MultiSequenceAligner
+    from src.phylo.runtime.tool_registry import get_tool_registry
+
+    strat_auto, flags_auto, note_auto = MultiSequenceAligner.resolve_mafft_args("auto", 28, seq_count=562)
+    assert strat_auto == "auto"
+    assert note_auto is None
+    assert "--auto" in flags_auto
+    assert flags_auto[-6:] == ["--thread", "28", "--threadtb", "28", "--threadit", "28"]
+
+    strat_down, flags_down, note_down = MultiSequenceAligner.resolve_mafft_args("linsi", 28, seq_count=562)
+    assert strat_down == "auto"
+    assert note_down is not None and "562" in note_down
+    assert "--auto" in flags_down
+
+    strat_keep, flags_keep, note_keep = MultiSequenceAligner.resolve_mafft_args("linsi", 28, seq_count=80)
+    assert strat_keep == "linsi"
+    assert note_keep is None
+    assert "--localpair" in flags_keep and "--maxiterate" in flags_keep
+    assert "--threadtb" in flags_keep and "--threadit" in flags_keep
+
+    reg = get_tool_registry()
+    if reg.get("mafft").available:
+        in_fa = tmp_path / "terl_small.faa"
+        in_fa.write_text(
+            ">S1\nMKTLLVAVGAAK\n>S2\nMKTLIVAVGAAK\n>S3\nMKTLLVAVGSAR\n>S4\nMKTLLISVGAAK\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        aligner = MultiSequenceAligner()
+        out_auto = tmp_path / "aligned_auto.faa"
+        aligner.align(in_fa, out_auto, tool="mafft", strategy="auto", threads=4)
+        assert out_auto.is_file() and ">S1" in out_auto.read_text(encoding="utf-8")
+
+        out_linsi = tmp_path / "aligned_linsi.faa"
+        aligner.align(in_fa, out_linsi, tool="mafft", strategy="linsi", threads=4)
+        assert out_linsi.is_file() and ">S4" in out_linsi.read_text(encoding="utf-8")

@@ -169,7 +169,7 @@ class TerlExtractor:
         self.orf_cache_dir.mkdir(parents=True, exist_ok=True)
         safe_threads = get_safe_cpu_budget(threads)
         # 限制并发进程数防止 WSL 同时派生过多子进程
-        max_workers = max(1, min(safe_threads, 8))
+        max_workers = max(1, min(safe_threads, 16))
 
         from src.assembly.env.wsl_manager import WSLManager
 

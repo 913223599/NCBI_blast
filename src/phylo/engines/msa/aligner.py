@@ -7,7 +7,7 @@ import logging
 import shutil
 import threading
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from ...core.fasta_io import read_fasta_records
 from ...models.errors import InvalidInputError, PhyloCancelledError, PhyloError, ToolUnavailableError
@@ -23,6 +23,7 @@ class MultiSequenceAligner:
     """统一的多序列比对调度器。"""
 
     LONG_SEQ_GUARD_BP = 15_000
+    ITERATIVE_MAX_SEQS = 200
 
     def __init__(
         self,
@@ -93,6 +94,40 @@ class MultiSequenceAligner:
 
         raise InvalidInputError(f"不支持的 MSA 工具: {tool}")
 
+    @classmethod
+    def resolve_mafft_args(
+        cls,
+        strategy: MsaStrategyType,
+        threads: int,
+        seq_count: int = 0,
+        max_seq_len: int = 0,
+    ) -> Tuple[MsaStrategyType, List[str], Optional[str]]:
+        """解析 MAFFT 策略保护与全阶段多线程参数（含 --threadtb/--threadit）。"""
+        effective_strategy: MsaStrategyType = strategy
+        note: Optional[str] = None
+        if max_seq_len >= cls.LONG_SEQ_GUARD_BP and strategy != "fast":
+            effective_strategy = "fast"
+            note = f"[MAFFT] 检测到超长序列 ({max_seq_len} bp)，策略自动降级为 fast (--retree 1) 以避免阻塞。"
+        elif seq_count > cls.ITERATIVE_MAX_SEQS and strategy in ("accurate", "linsi", "einsi"):
+            effective_strategy = "auto"
+            note = (
+                f"[MAFFT] 序列数较多 ({seq_count} 条 > {cls.ITERATIVE_MAX_SEQS})，"
+                f"为避免 {strategy} 迭代耗时激增，策略自动降级为 auto (--auto)。"
+            )
+
+        if effective_strategy == "fast":
+            flags = ["--retree", "1", "--maxiterate", "0"]
+        elif effective_strategy in ("accurate", "linsi"):
+            flags = ["--localpair", "--maxiterate", "1000"]
+        elif effective_strategy == "einsi":
+            flags = ["--genafpair", "--maxiterate", "1000"]
+        else:
+            flags = ["--auto"]
+
+        t_str = str(max(1, threads))
+        flags.extend(["--thread", t_str, "--threadtb", t_str, "--threadit", t_str])
+        return effective_strategy, flags, note
+
     def _run_mafft(
         self,
         runtime: str,
@@ -103,30 +138,34 @@ class MultiSequenceAligner:
         threads: int,
         max_seq_len: int,
     ) -> Path:
-        effective_strategy = strategy
-        if max_seq_len >= self.LONG_SEQ_GUARD_BP and strategy != "fast":
-            effective_strategy = "fast"
-            self._log(
-                f"[MAFFT] 检测到超长序列 ({max_seq_len} bp)，策略自动降级为 fast (--retree 1) 以避免阻塞。"
-            )
+        seq_count = 0
+        with open(input_fasta, "r", encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                if line.startswith(">"):
+                    seq_count += 1
 
-        flags: List[str] = []
-        if effective_strategy == "fast":
-            flags = ["--retree", "1", "--maxiterate", "0"]
-        elif effective_strategy in ("accurate", "linsi"):
-            flags = ["--localpair", "--maxiterate", "1000"]
-        elif effective_strategy == "einsi":
-            flags = ["--genafpair", "--maxiterate", "1000"]
-        else:
-            flags = ["--auto"]
+        effective_strategy, flags, note = self.resolve_mafft_args(
+            strategy=strategy,
+            threads=threads,
+            seq_count=seq_count,
+            max_seq_len=max_seq_len,
+        )
+        if note:
+            self._log(note)
 
-        self._log(f"[MAFFT] 开始执行 ({runtime}), 策略={effective_strategy}, 线程={threads}")
-        if runtime == "wsl":
-            cmd = [tool_path, *flags, "--thread", str(threads), self._to_wsl(input_fasta)]
-            res = self.runner.run_wsl(cmd, stdout_path=output_fasta)
-        else:
-            cmd = [tool_path, *flags, "--thread", str(threads), str(input_fasta.resolve())]
-            res = self.runner.run_native(cmd, stdout_path=output_fasta)
+        self._log(f"[MAFFT] 开始执行 ({runtime}), 策略={effective_strategy}, 序列={seq_count}, 线程={threads}")
+        in_arg = self._to_wsl(input_fasta) if runtime == "wsl" else str(input_fasta.resolve())
+        run_fn = self.runner.run_wsl if runtime == "wsl" else self.runner.run_native
+
+        cmd = [tool_path, *flags, in_arg]
+        res = run_fn(cmd, stdout_path=output_fasta)
+        if res.returncode != 0 and any(tok in res.stderr.lower() for tok in ("threadtb", "threadit", "unknown option")):
+            compat_flags = [
+                arg for idx, arg in enumerate(flags)
+                if arg not in ("--threadtb", "--threadit")
+                and (idx == 0 or flags[idx - 1] not in ("--threadtb", "--threadit"))
+            ]
+            res = run_fn([tool_path, *compat_flags, in_arg], stdout_path=output_fasta)
 
         if res.returncode != 0:
             raise PhyloError(f"MAFFT 执行失败 (exit={res.returncode})", detail=res.stderr[-1000:])
