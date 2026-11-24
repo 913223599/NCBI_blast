@@ -100,13 +100,12 @@ class TreemmerPruner:
                     out_fh.write(merged[pos : pos + 80] + "\n")
 
         mash = MashDistanceEngine(cancel_event=self.cancel_event, on_log=self.on_log)
-        dm_npy = pruner_dir / "guide_mash.npy"
         labels, mat = mash.compute_distance_matrix(
-            combined, pruner_dir, dm_npy, kmer=21, sketch=1000, threads=threads
+            combined, pruner_dir, kmer=21, sketch_size=1000, threads=threads
         )
         nj = NJBioNJEngine(cancel_event=self.cancel_event, on_log=self.on_log)
         guide_nwk = pruner_dir / "guide.nwk"
-        nj.build_from_distance_matrix(labels, mat, guide_nwk, method="bionj")
+        nj.build_from_matrix(labels, mat, guide_nwk, method="bionj")
         nwk_text = guide_nwk.read_text(encoding="utf-8")
 
         # 2. 若外部 Treemmer CLI 可用则调用

@@ -191,7 +191,7 @@ class ProteomeTreeEngine:
         np.save(str(dist_npy), dist_mat)
         NJBioNJEngine.save_distance_csv(labels, dist_mat, dist_csv)
         nj = NJBioNJEngine(cancel_event=self.cancel_event, on_log=self.on_log)
-        nj.build_from_distance_matrix(labels, dist_mat, output_nwk, method="bionj")
+        nj.build_from_matrix(labels, dist_mat, output_nwk, method="bionj")
 
         report = MarkerExtractionReport(
             mode="proteome",

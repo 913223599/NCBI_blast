@@ -39,7 +39,7 @@ def extract_records_from_files(file_paths: List[Path]) -> List[Tuple[str, str]]:
             try:
                 with open(path, "r", encoding="utf-8", errors="replace") as fh:
                     for rec in SeqIO.parse(fh, "fasta"):
-                        seq_id = str(rec.id or "").strip()
+                        seq_id = (rec.id or "").strip()
                         seq = "".join(str(rec.seq or "").split()).upper()
                         if seq_id and seq:
                             file_records.append((seq_id, seq))

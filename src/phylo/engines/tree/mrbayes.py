@@ -136,7 +136,7 @@ class MrBayesEngine:
         def _extract_prob(m: re.Match[str]) -> str:
             try:
                 val = float(m.group(1))
-                pct = int(round(val * 100)) if val <= 1.0 else int(round(val))
+                pct = round(val * 100) if val <= 1.0 else round(val)
                 return f"){pct}"
             except ValueError:
                 return ")"

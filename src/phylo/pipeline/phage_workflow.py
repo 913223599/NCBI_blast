@@ -656,7 +656,7 @@ class PhageTaxonomyWorkflow:
                 delivery_msa_path = job_dir / "trimmed_alignment_named.fasta"
                 with open(delivery_msa_path, "w", encoding="utf-8", newline="\n") as dfh:
                     for r in iter_fasta_records(trimmed_msa_path):
-                        rid = str(r.id or "")
+                        rid = r.id or ""
                         orig_name = s2o.get(rid, rid)
                         dfh.write(f">{orig_name}\n{str(r.seq)}\n")
             else:

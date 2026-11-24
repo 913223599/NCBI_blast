@@ -42,7 +42,7 @@ def encode_alignment(msa_fasta: Path, mol_type: str = "dna") -> Tuple[List[str],
     if len(lengths) != 1:
         raise ValueError(f"MSA 序列长度不一致: {msa_fasta}")
 
-    ids = [str(r.id or "") for r in records]
+    ids = [r.id or "" for r in records]
     n_seqs = len(records)
     first_seq = records[0].seq
     seq_len = len(first_seq) if first_seq is not None else 0

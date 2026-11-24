@@ -90,3 +90,31 @@ def test_distance_matrix_cancel_and_small_workload(tmp_path: Path):
     calc = DistanceMatrixCalculator(use_gpu=True, cancel_event=cancel_ev)
     with pytest.raises(PhyloCancelledError):
         calc.compute(encoded, mol_type="dna", model="k2p")
+
+
+def test_nj_save_distance_csv_and_build_from_matrix(tmp_path: Path):
+    import numpy as np
+
+    labels = ["Phage_A", "Phage_B", "Phage_C", "Outgroup_D"]
+    mat = np.array(
+        [
+            [0.0, 0.1, 0.2, 0.8],
+            [0.1, 0.0, 0.25, 0.85],
+            [0.2, 0.25, 0.0, 0.9],
+            [0.8, 0.85, 0.9, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    csv_path = NJBioNJEngine.save_distance_csv(labels, mat, tmp_path / "proteome_dist.csv")
+    assert csv_path.is_file()
+    lines = csv_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "Taxon,Phage_A,Phage_B,Phage_C,Outgroup_D"
+    assert len(lines) == 5
+
+    out_nwk = NJBioNJEngine().build_from_matrix(
+        labels, mat, tmp_path / "proteome.nwk", method="bionj"
+    )
+    assert out_nwk.is_file()
+    nwk_text = out_nwk.read_text(encoding="utf-8")
+    for lbl in labels:
+        assert lbl in nwk_text

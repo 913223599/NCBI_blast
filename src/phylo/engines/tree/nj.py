@@ -2,6 +2,7 @@
 """
 NJBioNJEngine - 向量化 Neighbor-Joining / BioNJ 构树及分片落盘 Bootstrap 引擎
 """
+import csv
 import logging
 import os
 import threading
@@ -35,7 +36,7 @@ def _node_to_newick(node: _Node, is_root: bool = True) -> str:
     inner = ",".join(_node_to_newick(c, is_root=False) for c in node.children)
     sup = ""
     if not is_root and node.support is not None:
-        sup = str(int(round(node.support)))
+        sup = str(round(node.support))
     if is_root:
         return f"({inner}){sup};"
     return f"({inner}){sup}:{max(0.0, node.length):.6f}"
@@ -110,10 +111,6 @@ def build_tree_from_distance_matrix(
         d_new = lam * (D[i, mask] - len_i) + (1.0 - lam) * (D[j, mask] - len_j)
         d_new = np.maximum(0.0, d_new)
 
-        if use_bionj:
-            v_new = lam * V[i, mask] + (1.0 - lam) * V[j, mask] - lam * (1.0 - lam) * V[i, j]
-            v_new = np.maximum(0.0, v_new)
-
         # 缩减矩阵（保留 mask 部分并在末尾追加新节点）
         rem_nodes = [nodes[idx] for idx in range(r) if mask[idx]]
         rem_nodes.append(merged)
@@ -126,6 +123,8 @@ def build_tree_from_distance_matrix(
         D = D_next
 
         if use_bionj:
+            v_new = lam * V[i, mask] + (1.0 - lam) * V[j, mask] - lam * (1.0 - lam) * V[i, j]
+            v_new = np.maximum(0.0, v_new)
             V_sub = V[np.ix_(mask, mask)]
             V_next = np.zeros((r - 1, r - 1), dtype=np.float64)
             V_next[:-1, :-1] = V_sub
@@ -266,6 +265,17 @@ class NJBioNJEngine:
             except Exception:
                 pass
 
+    @staticmethod
+    def save_distance_csv(ids: List[str], matrix: np.ndarray, csv_path: Path) -> Path:
+        """将演化距离矩阵持久化为标准 UTF-8 CSV 表格。"""
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(csv_path, "w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["Taxon"] + ids)
+            for row_id, row_vals in zip(ids, matrix, strict=True):
+                writer.writerow([row_id] + [f"{float(v):.6f}" for v in row_vals])
+        return csv_path
+
     def build_from_matrix(
         self,
         ids: List[str],
@@ -333,7 +343,7 @@ class NJBioNJEngine:
                     for line in rep_file.read_text(encoding="utf-8", errors="ignore").splitlines()
                     if line.strip()
                 ]
-            remaining = max(0, int(bootstrap) - len(existing_reps))
+            remaining = max(0, bootstrap - len(existing_reps))
             if existing_reps:
                 self._log(f"[{method.upper()}] 检测到历史 Bootstrap 断点: 已完成 {len(existing_reps)}/{bootstrap} 次")
 
