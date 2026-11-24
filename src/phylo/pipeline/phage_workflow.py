@@ -412,9 +412,16 @@ class PhageTaxonomyWorkflow:
         dataset_hash = ref_hasher.hexdigest()
 
         if cfg.marker_mode == "proteome":
-            # 备选全基因组蛋白质组树 (DIAMOND S_G + BioNJ)
+            # 备选全基因组蛋白质组树 (DIAMOND S_G + BioNJ/UPGMA)
             t_m = time.time()
-            stage_fn("marker_extract", "running", 62, "第 3 步 (备选)：计算全基因组共享蛋白质组矩阵 (ViPTree S_G)...")
+            tree_method = scope.proteome_tree_method
+            dist_mode = "one_minus_sg" if tree_method == "upgma" else "log_sg"
+            stage_fn(
+                "marker_extract",
+                "running",
+                62,
+                f"第 3 步 (备选)：计算全基因组共享蛋白质组矩阵 (ViPTree S_G, {tree_method.upper()})...",
+            )
             prot_engine = ProteomeTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
             set_runner(prot_engine)
             dist_npy = job_dir / "proteome_dist.npy"
@@ -426,6 +433,8 @@ class PhageTaxonomyWorkflow:
                 dist_npy=dist_npy,
                 dist_csv=dist_csv,
                 threads=cfg.threads,
+                tree_method=tree_method,
+                distance_mode=dist_mode,
             )
             set_runner(None)
             record.marker_report = marker_report
@@ -433,7 +442,7 @@ class PhageTaxonomyWorkflow:
             stage_fn("marker_extract", "completed", 82, "全基因组蛋白质组树构建完成", elapsed=time.time() - t_m, artifact=str(raw_nwk_path))
             stage_fn("msa", "skipped", 84, "蛋白质组树路径已跳过单基因比对")
             stage_fn("trim", "skipped", 86, "蛋白质组树路径无需 MSA 修剪")
-            stage_fn("tree", "completed", 90, "DIAMOND S_G + BioNJ 建树完成", artifact=str(raw_nwk_path))
+            stage_fn("tree", "completed", 90, f"DIAMOND S_G + {tree_method.upper()} 建树完成", artifact=str(raw_nwk_path))
         else:
             # 标准路径：TerL 提取 -> MAFFT (L-INS-i/E-INS-i) -> ClipKIT (kpic) -> IQ-TREE
             t_m = time.time()

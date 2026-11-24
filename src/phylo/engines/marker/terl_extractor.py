@@ -173,12 +173,9 @@ class TerlExtractor:
 
         from src.assembly.env.wsl_manager import WSLManager
 
-        def _predict_one(sample_id: str, fpath: Path) -> Tuple[str, Path]:
+        def _predict_one(sample_id: str, fpath: Path, sha: str, cached_faa: Path) -> Tuple[str, Path]:
             if self.cancel_event.is_set():
                 raise PhyloCancelledError("ORF 预测已取消")
-            raw_bytes = fpath.read_bytes()
-            sha = hashlib.sha256(raw_bytes).hexdigest()[:24]
-            cached_faa = self.orf_cache_dir / f"{sha}.faa"
             if cached_faa.is_file() and cached_faa.stat().st_size > 10:
                 return sample_id, cached_faa
 
@@ -211,12 +208,37 @@ class TerlExtractor:
             return sample_id, cached_faa
 
         orf_paths: Dict[str, Path] = {}
-        self._log(f"[TerL-ORF] 开始批量预测 {len(genome_fastas)} 株基因组的编码蛋白 (并发={max_workers})...")
+        pending_items: List[Tuple[str, Path, str, Path]] = []
+        for sid, fp in genome_fastas.items():
+            raw_bytes = fp.read_bytes()
+            sha = hashlib.sha256(raw_bytes).hexdigest()[:24]
+            cached_faa = self.orf_cache_dir / f"{sha}.faa"
+            if cached_faa.is_file() and cached_faa.stat().st_size > 10:
+                orf_paths[sid] = cached_faa
+            else:
+                pending_items.append((sid, fp, sha, cached_faa))
+
+        total_n = len(genome_fastas)
+        cached_cnt = len(orf_paths)
+        pending_cnt = len(pending_items)
+        self._log(
+            f"[TerL-ORF] 共 {total_n} 株：命中持久化缓存 {cached_cnt} 株，待预测 {pending_cnt} 株 (并发={max_workers})"
+        )
+        if not pending_items:
+            return orf_paths
+
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futs = [pool.submit(_predict_one, sid, fp) for sid, fp in genome_fastas.items()]
+            futs = [
+                pool.submit(_predict_one, sid, fp, sha, cached_faa)
+                for sid, fp, sha, cached_faa in pending_items
+            ]
+            done_cnt = 0
             for fut in as_completed(futs):
                 sid, faa = fut.result()
                 orf_paths[sid] = faa
+                done_cnt += 1
+                if done_cnt % 20 == 0 or done_cnt == pending_cnt:
+                    self._log(f"[TerL-ORF] ORF 预测进度: {done_cnt}/{pending_cnt}")
         return orf_paths
 
     def extract_terl(

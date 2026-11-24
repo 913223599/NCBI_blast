@@ -41,6 +41,7 @@ export const usePhyloStore = defineStore('phylo', () => {
   const phageScope = reactive<DeliveryScopeConfig>({
     target_rank: 'genus',
     sampling_mode: 'focused',
+    proteome_tree_method: 'bionj',
     ani_species_threshold: 95.0,
     ani_genus_threshold: 70.0,
     ref_max_count: 80,
@@ -470,29 +471,6 @@ export const usePhyloStore = defineStore('phylo', () => {
     }
   }
 
-  function applyMacroRingPreset(targetCount: number = 1000): void {
-    phageScope.sampling_mode = 'macro_family_host'
-    phageScope.target_rank = 'family_order'
-    phageScope.ref_max_count = targetCount
-    phageScope.treemmer_target = targetCount
-    phageScope.derep_ani = 0.95
-    config.marker_mode = 'proteome'
-    appStore.showNotification(
-      `已切换为 ${targetCount} 株宏观环形树预设（全基因组蛋白质组树 + 双色环配置）`,
-      'info'
-    )
-  }
-
-  function applyFocusedGenusPreset(): void {
-    phageScope.sampling_mode = 'focused'
-    phageScope.target_rank = 'genus'
-    phageScope.ref_max_count = 80
-    phageScope.treemmer_target = 80
-    phageScope.derep_ani = 0.9
-    config.marker_mode = 'terl'
-    appStore.showNotification('已恢复为属/种精细树预设（80 株 TerL + ML 树）', 'info')
-  }
-
   async function refreshHistory(): Promise<void> {
     try {
       historyJobs.value = await phyloApi.listJobs(50)
@@ -756,8 +734,6 @@ export const usePhyloStore = defineStore('phylo', () => {
     setReferenceRole,
     setManualOutgroupIds,
     selectOnlyIctvReps,
-    applyMacroRingPreset,
-    applyFocusedGenusPreset,
     startAnalysis,
     startPhageTaxonomyPipeline,
     cancelActiveJob,

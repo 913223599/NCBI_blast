@@ -5,6 +5,7 @@ export type TrimModeType = 'none' | 'gap' | 'kpic' | 'kpic_smart_gap' | 'smart_g
 export type AniEngineType = 'viridic_blastn' | 'fastani' | 'skani' | 'mash'
 export type MarkerModeType = 'terl' | 'proteome'
 export type SamplingModeType = 'focused' | 'macro_family_host'
+export type ProteomeTreeMethodType = 'bionj' | 'upgma'
 export type TreeEngineType = 'bionj' | 'nj' | 'fasttree' | 'iqtree' | 'mrbayes'
 export type JobStatusType = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type StageStatusType = 'pending' | 'running' | 'completed' | 'cached' | 'skipped' | 'failed' | 'cancelled'
@@ -13,6 +14,7 @@ export type WorkbenchMode = 'phage_taxonomy' | 'general'
 export interface DeliveryScopeConfig {
   target_rank: 'species' | 'genus' | 'family_order'
   sampling_mode: SamplingModeType
+  proteome_tree_method: ProteomeTreeMethodType
   ani_species_threshold: number
   ani_genus_threshold: number
   ref_max_count: number

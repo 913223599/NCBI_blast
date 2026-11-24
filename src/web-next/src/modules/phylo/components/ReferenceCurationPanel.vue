@@ -86,22 +86,6 @@ function onRoleChange(acc: string, ev: Event) {
         <span class="tuning-toggle">{{ showTuning ? '收起' : '展开调整' }}</span>
       </div>
       <template v-if="showTuning">
-        <div class="preset-row">
-          <button
-            type="button"
-            class="btn-preset"
-            @click="store.applyMacroRingPreset(1000)"
-          >
-            1000株宏观环形树预设
-          </button>
-          <button
-            type="button"
-            class="btn-preset"
-            @click="store.applyFocusedGenusPreset()"
-          >
-            属种精细树预设 (80株)
-          </button>
-        </div>
         <div class="t-field">
           <label>抽样策略</label>
           <select v-model="store.phageScope.sampling_mode" class="neo-input-sm">
@@ -116,7 +100,7 @@ function onRoleChange(acc: string, ev: Event) {
               type="number"
               v-model.number="store.phageScope.ref_max_count"
               min="5"
-              max="2500"
+              max="5000"
               class="neo-input-sm"
             />
           </div>
@@ -266,9 +250,6 @@ function onRoleChange(acc: string, ev: Event) {
 .neo-input-sm { width: 100%; border: 1px solid #cbd5e1; border-radius: 5px; padding: 4px 6px; font-size: 11px; background: #fff; color: #0f172a; box-sizing: border-box; }
 .btn-reapply { width: 100%; padding: 5px 8px; border: 1px solid #2563eb; border-radius: 5px; background: #eff6ff; color: #1d4ed8; font-size: 11px; font-weight: 700; cursor: pointer; }
 .btn-reapply:disabled { opacity: 0.6; cursor: not-allowed; }
-.preset-row { display: flex; gap: 6px; }
-.btn-preset { flex: 1; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 5px; background: #fff; color: #334155; font-size: 10px; font-weight: 600; cursor: pointer; }
-.btn-preset:hover { border-color: #2563eb; color: #1d4ed8; background: #eff6ff; }
 .btn-load-more { width: 100%; padding: 6px 8px; border: 1px dashed #cbd5e1; border-radius: 6px; background: #f8fafc; color: #2563eb; font-size: 11px; font-weight: 600; cursor: pointer; }
 .ref-desc { font-size: 10px; font-weight: 600; color: #334155; line-height: 1.3; }
 .og-warn { color: #dc2626; }

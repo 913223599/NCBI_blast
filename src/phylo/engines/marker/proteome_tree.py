@@ -7,11 +7,12 @@ ProteomeTreeEngine - 第 3 步备选路径：全基因组蛋白质组树（类 V
   D(A, B) = -ln(max(eps, S_G))
 构建 BioNJ 全基因组蛋白质组系统发育补充树。
 """
+import hashlib
+import json
 import logging
-import math
 import threading
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -57,6 +58,112 @@ class ProteomeTreeEngine:
             except Exception:
                 pass
 
+    @staticmethod
+    def accumulate_blastp_tsv_streaming(
+        tsv_path: Path,
+        idx_map: Dict[str, int],
+    ) -> np.ndarray:
+        """
+        流式聚合 DIAMOND BLASTp TSV 为基因组对总 bitscore 矩阵。
+        DIAMOND 输出按 query 蛋白分组连续排列时只维护单个蛋白的临时字典（O(N) 内存防 OOM）；
+        若输入行出现非连续乱序分组，则自动回退到全表精确累加一次。
+        """
+        n = len(idx_map)
+        score_mat = np.zeros((n, n), dtype=np.float64)
+
+        def _flush_protein(cur_q: Optional[str], cur_best: Dict[int, float]) -> None:
+            if not cur_q or not cur_best:
+                return
+            q_genome = cur_q.rsplit("__P", 1)[0]
+            q_idx = idx_map.get(q_genome)
+            if q_idx is None:
+                return
+            for s_idx, bs in cur_best.items():
+                score_mat[q_idx, s_idx] += bs
+
+        cur_q: Optional[str] = None
+        cur_best: Dict[int, float] = {}
+        seen_prots: set[str] = set()
+        fallback_needed = False
+
+        with open(tsv_path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 3 or "__P" not in parts[0] or "__P" not in parts[1]:
+                    continue
+                q_prot = parts[0]
+                s_genome = parts[1].rsplit("__P", 1)[0]
+                s_idx = idx_map.get(s_genome)
+                if s_idx is None:
+                    continue
+                try:
+                    bs = float(parts[2])
+                except ValueError:
+                    continue
+
+                if cur_q != q_prot:
+                    if cur_q is not None:
+                        _flush_protein(cur_q, cur_best)
+                        seen_prots.add(cur_q)
+                    if q_prot in seen_prots:
+                        fallback_needed = True
+                        break
+                    cur_q = q_prot
+                    cur_best = {}
+
+                if bs > cur_best.get(s_idx, 0.0):
+                    cur_best[s_idx] = bs
+
+        if not fallback_needed:
+            _flush_protein(cur_q, cur_best)
+            return score_mat
+
+        # 非连续乱序回退精确累加
+        score_mat.fill(0.0)
+        best_per_pair: Dict[Tuple[str, int], float] = {}
+        with open(tsv_path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 3 or "__P" not in parts[0] or "__P" not in parts[1]:
+                    continue
+                q_prot = parts[0]
+                s_genome = parts[1].rsplit("__P", 1)[0]
+                s_idx = idx_map.get(s_genome)
+                if s_idx is None:
+                    continue
+                try:
+                    bs = float(parts[2])
+                except ValueError:
+                    continue
+                key = (q_prot, s_idx)
+                if bs > best_per_pair.get(key, 0.0):
+                    best_per_pair[key] = bs
+
+        for (q_prot, s_idx), bs in best_per_pair.items():
+            q_genome = q_prot.rsplit("__P", 1)[0]
+            q_idx = idx_map.get(q_genome)
+            if q_idx is not None:
+                score_mat[q_idx, s_idx] += bs
+        return score_mat
+
+    @staticmethod
+    def compute_sg_distance_matrix(
+        score_mat: np.ndarray,
+        distance_mode: Literal["log_sg", "one_minus_sg"] = "log_sg",
+    ) -> np.ndarray:
+        """向量化计算 ViPTree S_G 相似性并转换为演化距离矩阵。"""
+        mat = np.array(score_mat, dtype=np.float64, copy=False)
+        diag = np.maximum(1e-6, np.diag(mat))
+        sym = 0.5 * (mat + mat.T)
+        denom = np.maximum(1e-12, np.sqrt(np.outer(diag, diag)))
+        sg = np.clip(sym / denom, 1e-6, 1.0)
+        if distance_mode == "one_minus_sg":
+            dist = np.clip(1.0 - sg, 0.0, 1.0)
+        else:
+            dist = np.maximum(0.0, -np.log(sg))
+        np.fill_diagonal(dist, 0.0)
+        return np.asarray(dist, dtype=np.float64)
+
     def build_proteome_tree(
         self,
         genome_fastas: Dict[str, Path],
@@ -65,6 +172,8 @@ class ProteomeTreeEngine:
         dist_npy: Path,
         dist_csv: Path,
         threads: int = 0,
+        tree_method: Literal["bionj", "upgma"] = "bionj",
+        distance_mode: Literal["log_sg", "one_minus_sg"] = "log_sg",
     ) -> Tuple[Path, MarkerExtractionReport]:
         if self.cancel_event.is_set():
             raise PhyloCancelledError("蛋白质组树构建已取消")
@@ -104,101 +213,102 @@ class ProteomeTreeEngine:
                     )
                 )
 
-        from src.assembly.env.wsl_manager import WSLManager
+        # 检查断点矩阵缓存是否命中（相同样本集与 ORF 数量）
+        fp_hasher = hashlib.sha256()
+        for sid in labels:
+            fp_hasher.update(f"{sid}:{orf_counts[sid]}\n".encode("utf-8"))
+        proteome_fp = fp_hasher.hexdigest()
 
-        db_prefix = work_dir / "proteome_dmnd"
-        mk_res = self.runner.run_wsl(
-            [
+        score_ckpt_json = work_dir / "proteome_checkpoint.json"
+        score_mat_npy = work_dir / "proteome_score_mat.npy"
+        score_mat: Optional[np.ndarray] = None
+        if score_ckpt_json.is_file() and score_mat_npy.is_file():
+            try:
+                ckpt_meta = json.loads(score_ckpt_json.read_text(encoding="utf-8"))
+                if ckpt_meta.get("fingerprint") == proteome_fp:
+                    loaded = np.load(str(score_mat_npy))
+                    if loaded.shape == (n, n):
+                        score_mat = np.asarray(loaded, dtype=np.float64)
+                        self._log(f"[ProteomeTree] 命中全基因组得分矩阵断点缓存 ({n}x{n})，跳过重复 BLASTp")
+            except Exception:
+                score_mat = None
+
+        if score_mat is None:
+            from src.assembly.env.wsl_manager import WSLManager
+
+            db_prefix = work_dir / "proteome_dmnd"
+            mk_res = self.runner.run_wsl(
+                [
+                    diamond_desc.path,
+                    "makedb",
+                    "--in",
+                    WSLManager.to_wsl_path(str(combined_faa.resolve())),
+                    "-d",
+                    WSLManager.to_wsl_path(str(db_prefix.resolve())),
+                    "--quiet",
+                ]
+            )
+            if mk_res.returncode != 0:
+                raise PhyloError("DIAMOND makedb 失败", detail=mk_res.stderr[-600:])
+
+            safe_threads = get_safe_cpu_budget(threads)
+            tsv_out = work_dir / "proteome_blastp.tsv"
+            is_large_scale = n >= 200
+            cmd = [
                 diamond_desc.path,
-                "makedb",
-                "--in",
+                "blastp",
+                "-q",
                 WSLManager.to_wsl_path(str(combined_faa.resolve())),
                 "-d",
                 WSLManager.to_wsl_path(str(db_prefix.resolve())),
+                "-o",
+                WSLManager.to_wsl_path(str(tsv_out.resolve())),
+                "--outfmt",
+                "6",
+                "qseqid",
+                "sseqid",
+                "bitscore",
+                "-e",
+                "1e-5",
+                "--threads",
+                str(safe_threads),
+                "--block-size",
+                "2.0",
+                "--max-target-seqs",
+                str(min(2500, max(250, n))) if is_large_scale else str(max(200, n * 4)),
                 "--quiet",
             ]
-        )
-        if mk_res.returncode != 0:
-            raise PhyloError("DIAMOND makedb 失败", detail=mk_res.stderr[-600:])
+            if not is_large_scale:
+                cmd.insert(-1, "--sensitive")
 
-        safe_threads = get_safe_cpu_budget(threads)
-        tsv_out = work_dir / "proteome_blastp.tsv"
-        cmd = [
-            diamond_desc.path,
-            "blastp",
-            "-q",
-            WSLManager.to_wsl_path(str(combined_faa.resolve())),
-            "-d",
-            WSLManager.to_wsl_path(str(db_prefix.resolve())),
-            "-o",
-            WSLManager.to_wsl_path(str(tsv_out.resolve())),
-            "--outfmt",
-            "6",
-            "qseqid",
-            "sseqid",
-            "bitscore",
-            "-e",
-            "1e-5",
-            "--sensitive",
-            "--threads",
-            str(safe_threads),
-            "--max-target-seqs",
-            str(max(200, n * 4)),
-            "--quiet",
-        ]
-        self._log(f"[ProteomeTree] 运行全对全 DIAMOND BLASTp ({n} 株基因组, 线程={safe_threads})")
-        res = self.runner.run_wsl(cmd)
-        if res.returncode != 0 or not tsv_out.is_file():
-            raise PhyloError("DIAMOND BLASTp 失败", detail=res.stderr[-800:])
+            mode_desc = "快速高通量模式" if is_large_scale else "--sensitive"
+            self._log(
+                f"[ProteomeTree] 运行全对全 DIAMOND BLASTp ({n} 株基因组, 线程={safe_threads}, {mode_desc})"
+            )
+            res = self.runner.run_wsl(cmd)
+            if res.returncode != 0 or not tsv_out.is_file():
+                raise PhyloError("DIAMOND BLASTp 失败", detail=res.stderr[-800:])
 
-        # 对每个 (q_protein, target_genome) 取最高 bitscore 再对基因组对求和
-        best_per_pair: Dict[Tuple[str, int], float] = {}
-        with open(tsv_out, "r", encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                parts = line.rstrip("\n").split("\t")
-                if len(parts) < 3 or "__P" not in parts[0] or "__P" not in parts[1]:
-                    continue
-                q_prot = parts[0]
-                s_genome = parts[1].rsplit("__P", 1)[0]
-                s_idx = idx_map.get(s_genome)
-                if s_idx is None:
-                    continue
-                try:
-                    bs = float(parts[2])
-                except ValueError:
-                    continue
-                key = (q_prot, s_idx)
-                if bs > best_per_pair.get(key, 0.0):
-                    best_per_pair[key] = bs
+            score_mat = self.accumulate_blastp_tsv_streaming(tsv_out, idx_map)
+            np.save(str(score_mat_npy), score_mat)
+            score_ckpt_json.write_text(
+                json.dumps({"fingerprint": proteome_fp, "n": n}, ensure_ascii=False),
+                encoding="utf-8",
+            )
 
-        score_mat = np.zeros((n, n), dtype=np.float64)
-        for (q_prot, s_idx), bs in best_per_pair.items():
-            q_genome = q_prot.rsplit("__P", 1)[0]
-            q_idx = idx_map.get(q_genome)
-            if q_idx is not None:
-                score_mat[q_idx, s_idx] += bs
-
-        dist_mat = np.zeros((n, n), dtype=np.float64)
-        for i in range(n):
-            for j in range(i + 1, n):
-                s_ii = max(1e-6, float(score_mat[i, i]))
-                s_jj = max(1e-6, float(score_mat[j, j]))
-                s_ij = 0.5 * (float(score_mat[i, j]) + float(score_mat[j, i]))
-                sg = min(1.0, max(1e-6, s_ij / math.sqrt(s_ii * s_jj)))
-                d = max(0.0, -math.log(sg))
-                dist_mat[i, j] = dist_mat[j, i] = d
+        dist_mat = self.compute_sg_distance_matrix(score_mat, distance_mode=distance_mode)
 
         np.save(str(dist_npy), dist_mat)
         NJBioNJEngine.save_distance_csv(labels, dist_mat, dist_csv)
         nj = NJBioNJEngine(cancel_event=self.cancel_event, on_log=self.on_log)
-        nj.build_from_matrix(labels, dist_mat, output_nwk, method="bionj")
+        nj.build_from_matrix(labels, dist_mat, output_nwk, method=tree_method)
 
         report = MarkerExtractionReport(
             mode="proteome",
             total_genomes=n,
             extracted_count=sum(1 for v in orf_counts.values() if v > 0),
             missing_ids=[k for k, v in orf_counts.items() if v == 0],
-            tool_used="prodigal-gv + DIAMOND BLASTp (ViPTree S_G) + BioNJ",
+            tool_used=f"prodigal-gv + DIAMOND BLASTp (ViPTree S_G) + {tree_method.upper()}",
             tool_version=diamond_desc.version,
             hits=hits_items,
         )

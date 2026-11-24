@@ -135,3 +135,86 @@ def test_iqtree3_report_regex_and_faa_clean_parsing(tmp_path: Path):
         consistent=True,
     )
     assert not any("\u4e00" <= ch <= "\u9fff" for ch in en)
+
+
+def test_proteome_streaming_sg_upgma_and_checkpoint(tmp_path: Path):
+    import numpy as np
+    from src.phylo.engines.marker.proteome_tree import ProteomeTreeEngine
+    from src.phylo.engines.tree.nj import NJBioNJEngine
+    from src.phylo.pipeline.postprocess import parse_newick
+
+    # 1. 验证连续与乱序非连续两种 DIAMOND BLASTp TSV 的流式聚合 100% 一致
+    idx_map = {"G1": 0, "G2": 1, "G3": 2}
+    tsv_sorted = tmp_path / "sorted_blastp.tsv"
+    tsv_sorted.write_text(
+        "\n".join(
+            [
+                "G1__P1\tG1__P1\t200.0",
+                "G1__P1\tG2__P1\t150.0",
+                "G1__P1\tG2__P2\t180.0",
+                "G1__P2\tG1__P2\t100.0",
+                "G2__P1\tG2__P1\t300.0",
+                "G2__P1\tG1__P1\t160.0",
+                "G3__P1\tG3__P1\t250.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    tsv_shuffled = tmp_path / "shuffled_blastp.tsv"
+    tsv_shuffled.write_text(
+        "\n".join(
+            [
+                "G1__P1\tG2__P1\t150.0",
+                "G2__P1\tG2__P1\t300.0",
+                "G1__P1\tG1__P1\t200.0",
+                "G3__P1\tG3__P1\t250.0",
+                "G1__P1\tG2__P2\t180.0",
+                "G2__P1\tG1__P1\t160.0",
+                "G1__P2\tG1__P2\t100.0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    mat_a = ProteomeTreeEngine.accumulate_blastp_tsv_streaming(tsv_sorted, idx_map)
+    mat_b = ProteomeTreeEngine.accumulate_blastp_tsv_streaming(tsv_shuffled, idx_map)
+    assert np.allclose(mat_a, mat_b)
+    assert mat_a[0, 0] == 300.0
+    assert mat_a[0, 1] == 180.0
+    assert mat_a[1, 0] == 160.0
+
+    # 2. 验证 log_sg 与 one_minus_sg 距离矩阵性质
+    dist_log = ProteomeTreeEngine.compute_sg_distance_matrix(mat_a, distance_mode="log_sg")
+    dist_one = ProteomeTreeEngine.compute_sg_distance_matrix(mat_a, distance_mode="one_minus_sg")
+    assert np.allclose(dist_log, dist_log.T)
+    assert np.allclose(dist_one, dist_one.T)
+    assert np.allclose(np.diag(dist_log), 0.0)
+    assert np.allclose(np.diag(dist_one), 0.0)
+    assert 0.0 < dist_one[0, 1] < 1.0
+
+    # 3. 验证 UPGMA 输出严格超度量树（60 株规模所有叶子到根路径长度相等）
+    n_taxa = 60
+    labels = [f"Phage_{i:02d}" for i in range(n_taxa)]
+    rng = np.random.default_rng(7)
+    raw = rng.uniform(0.05, 0.95, size=(n_taxa, n_taxa))
+    sym_dist = 0.5 * (raw + raw.T)
+    np.fill_diagonal(sym_dist, 0.0)
+
+    nwk_path = tmp_path / "upgma_60.nwk"
+    nj = NJBioNJEngine()
+    nj.build_from_matrix(labels, sym_dist, nwk_path, method="upgma")
+    root = parse_newick(nwk_path.read_text(encoding="utf-8"))
+
+    leaf_depths: list[float] = []
+
+    def _collect_depths(node, acc: float) -> None:
+        if node.is_leaf:
+            leaf_depths.append(acc)
+            return
+        for ch in node.children:
+            _collect_depths(ch, acc + max(0.0, float(ch.length or 0.0)))
+
+    _collect_depths(root, 0.0)
+    assert len(leaf_depths) == n_taxa
+    assert max(leaf_depths) - min(leaf_depths) < 1e-4

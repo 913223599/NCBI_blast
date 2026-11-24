@@ -169,6 +169,16 @@ const minSeqRequired = computed(() => (isPhageMode.value ? 1 : 3))
           </div>
         </div>
       </template>
+
+      <template v-else>
+        <div class="form-group">
+          <label>蛋白质组树聚类算法</label>
+          <select v-model="store.phageScope.proteome_tree_method" class="neo-select">
+            <option value="bionj">BioNJ (经典邻接法，-ln(S_G) 进化距离)</option>
+            <option value="upgma">UPGMA (超度量外缘齐平，1 - S_G，适配环形全景图)</option>
+          </select>
+        </div>
+      </template>
     </template>
 
     <!-- 通用进化树模式配置 -->

@@ -42,15 +42,86 @@ def _node_to_newick(node: _Node, is_root: bool = True) -> str:
     return f"({inner}){sup}:{max(0.0, node.length):.6f}"
 
 
+def build_upgma_tree_from_distance_matrix(
+    ids: List[str],
+    dist_matrix: np.ndarray,
+) -> _Node:
+    """
+    向量化 NumPy 实现 UPGMA（超度量算数平均聚类）：
+    保证所有叶节点到根节点的路径高度相等，适合千株级 ViPTree 风格环形外缘齐平可视化。
+    """
+    n = len(ids)
+    if n < 3:
+        raise InvalidInputError(f"距离法构树至少需要 3 条序列，当前仅 {n} 条。")
+
+    D = np.array(dist_matrix, dtype=np.float64, copy=True)
+    D = 0.5 * (D + D.T)
+    D = np.maximum(0.0, D)
+    np.fill_diagonal(D, 0.0)
+
+    nodes: List[_Node] = [_Node(name=sid) for sid in ids]
+    sizes: List[int] = [1] * n
+    heights: List[float] = [0.0] * n
+
+    while len(nodes) > 1:
+        r = len(nodes)
+        Q = D.copy()
+        np.fill_diagonal(Q, np.inf)
+        flat_idx = int(np.argmin(Q))
+        i, j = divmod(flat_idx, r)
+        if i > j:
+            i, j = j, i
+
+        d_ij = float(D[i, j])
+        new_height = max(heights[i], heights[j], 0.5 * d_ij)
+        nodes[i].length = max(0.0, new_height - heights[i])
+        nodes[j].length = max(0.0, new_height - heights[j])
+        merged = _Node(children=[nodes[i], nodes[j]])
+
+        mask = np.ones(r, dtype=bool)
+        mask[i] = False
+        mask[j] = False
+
+        if r == 2:
+            nodes = [merged]
+            break
+
+        w_i = float(sizes[i])
+        w_j = float(sizes[j])
+        d_new = (w_i * D[i, mask] + w_j * D[j, mask]) / (w_i + w_j)
+        d_new = np.maximum(0.0, d_new)
+
+        rem_nodes = [nodes[idx] for idx in range(r) if mask[idx]]
+        rem_nodes.append(merged)
+        rem_sizes = [sizes[idx] for idx in range(r) if mask[idx]]
+        rem_sizes.append(sizes[i] + sizes[j])
+        rem_heights = [heights[idx] for idx in range(r) if mask[idx]]
+        rem_heights.append(new_height)
+
+        D_sub = D[np.ix_(mask, mask)]
+        D_next = np.zeros((r - 1, r - 1), dtype=np.float64)
+        D_next[:-1, :-1] = D_sub
+        D_next[:-1, -1] = d_new
+        D_next[-1, :-1] = d_new
+        D = D_next
+        nodes = rem_nodes
+        sizes = rem_sizes
+        heights = rem_heights
+
+    return nodes[0]
+
+
 def build_tree_from_distance_matrix(
     ids: List[str],
     dist_matrix: np.ndarray,
     method: str = "bionj",
 ) -> _Node:
     """
-    向量化 NumPy 实现 Neighbor-Joining (nj) 与 BioNJ (bionj)。
+    向量化 NumPy 实现 Neighbor-Joining (nj)、BioNJ (bionj) 与 UPGMA (upgma)。
     对极小负枝长做非负钳位，返回树根节点 _Node。
     """
+    if method.lower().strip() == "upgma":
+        return build_upgma_tree_from_distance_matrix(ids, dist_matrix)
     n = len(ids)
     if n < 3:
         raise InvalidInputError(f"距离法构树至少需要 3 条序列，当前仅 {n} 条。")
