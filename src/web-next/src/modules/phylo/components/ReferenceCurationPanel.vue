@@ -110,7 +110,7 @@ function onRoleChange(acc: string, ev: Event) {
               type="number"
               v-model.number="store.phageScope.ictv_reps_per_genus"
               min="1"
-              max="10"
+              max="200"
               class="neo-input-sm"
             />
           </div>
@@ -120,7 +120,7 @@ function onRoleChange(acc: string, ev: Event) {
               type="number"
               v-model.number="store.phageScope.max_target_genera"
               min="1"
-              max="50"
+              max="200"
               class="neo-input-sm"
             />
           </div>
@@ -130,7 +130,7 @@ function onRoleChange(acc: string, ev: Event) {
               type="number"
               v-model.number="store.phageScope.outgroup_count"
               min="0"
-              max="10"
+              max="200"
               class="neo-input-sm"
             />
           </div>

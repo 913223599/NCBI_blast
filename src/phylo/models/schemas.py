@@ -29,18 +29,18 @@ class DeliveryScopeConfig(BaseModel):
     ani_species_threshold: float = Field(default=95.0, ge=85.0, le=99.9)
     ani_genus_threshold: float = Field(default=70.0, ge=50.0, le=90.0)
     ref_max_count: int = Field(default=80, ge=5, le=5000)
-    ictv_reps_per_genus: int = Field(default=3, ge=1, le=10)
-    max_target_genera: int = Field(default=4, ge=1, le=50)
-    outgroup_count: int = Field(default=3, ge=0, le=10)
+    ictv_reps_per_genus: int = Field(default=3, ge=1, le=200)
+    max_target_genera: int = Field(default=4, ge=1, le=200)
+    outgroup_count: int = Field(default=3, ge=0, le=200)
     derep_ani: float = Field(default=0.90, ge=0.70, le=0.995)
     derep_min_len: int = Field(default=20000, ge=1000, le=200000)
     treemmer_target: int = Field(default=80, ge=5, le=5000)
-    treemmer_min_cluster: int = Field(default=25, ge=3, le=200)
+    treemmer_min_cluster: int = Field(default=25, ge=3, le=1000)
     checkv_min_completeness: float = Field(default=95.0, ge=0.0, le=100.0)
     enable_checkv: bool = False
     local_ref_dir: Optional[str] = None
     outgroup_ids: List[str] = Field(default_factory=list)
-    mash_top_k: int = Field(default=40, ge=5, le=200)
+    mash_top_k: int = Field(default=40, ge=5, le=1000)
 
 
 class AniHitRecord(BaseModel):

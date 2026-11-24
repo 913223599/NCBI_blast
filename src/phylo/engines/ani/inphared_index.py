@@ -280,9 +280,11 @@ class InpharedIndex:
                     if added_g >= per_genus or len(selected) >= max_total:
                         break
 
-            # 2. 同科邻近属代表株（每个邻近属 1-2 条）
+            # 2. 同科邻近属代表株（每个邻近属按参数放宽代表上限）
             if len(selected) < max_total:
                 genus_set = {_clean_tax(g) for g in genera if _clean_tax(g)}
+                neighbor_query_limit = max(200, max_total * 4)
+                neighbor_per_genus = max(2, per_genus)
                 for fam in families:
                     f = _clean_tax(fam)
                     if not f:
@@ -292,9 +294,9 @@ class InpharedIndex:
                         SELECT * FROM inphared
                         WHERE family = ? AND genus != '' AND genome_length >= 3000
                         ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC
-                        LIMIT 200
+                        LIMIT ?
                         """,
-                        (f,),
+                        (f, neighbor_query_limit),
                     ).fetchall()
                     per_neighbor_count: Dict[str, int] = {}
                     for row in rows:
@@ -304,7 +306,7 @@ class InpharedIndex:
                         if rec.genus in genus_set:
                             continue
                         c = per_neighbor_count.get(rec.genus, 0)
-                        if c >= 2:
+                        if c >= neighbor_per_genus:
                             continue
                         per_neighbor_count[rec.genus] = c + 1
                         seen.add(rec.accession)
@@ -340,6 +342,7 @@ class InpharedIndex:
         seen: set[str] = set()
 
         with sqlite3.connect(str(self.db_path), timeout=15) as conn:
+            og_pool_limit = max(80, limit * 8)
             # 优先级 A：同科不同属的正式分类 RefSeq 代表
             for fam in fam_list:
                 rows = conn.execute(
@@ -347,9 +350,9 @@ class InpharedIndex:
                     SELECT * FROM inphared
                     WHERE family = ? AND genus != '' AND genome_length >= 10000
                     ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC
-                    LIMIT 80
+                    LIMIT ?
                     """,
-                    (fam,),
+                    (fam, og_pool_limit),
                 ).fetchall()
                 for row in rows:
                     rec = self._row_to_record(row)
@@ -368,9 +371,9 @@ class InpharedIndex:
                     SELECT * FROM inphared
                     WHERE order_name = ? AND family != '' AND genus != '' AND genome_length >= 10000
                     ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC
-                    LIMIT 80
+                    LIMIT ?
                     """,
-                    (ord_name,),
+                    (ord_name, og_pool_limit),
                 ).fetchall()
                 for row in rows:
                     rec = self._row_to_record(row)
@@ -392,11 +395,12 @@ class InpharedIndex:
                 SELECT * FROM inphared
                 WHERE class_name = 'Caudoviricetes' AND genus != '' AND genome_length >= 15000
             """
-            params: List[str] = []
+            params: List[str | int] = []
             if host_kw:
                 query += " AND host NOT LIKE ? "
                 params.append(f"%{host_kw}%")
-            query += " ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC LIMIT 40"
+            query += " ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC LIMIT ?"
+            params.append(og_pool_limit)
             for row in conn.execute(query, params).fetchall():
                 rec = self._row_to_record(row)
                 if rec.accession in excl or rec.accession in seen or rec.genus in genus_excl:

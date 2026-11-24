@@ -147,7 +147,7 @@ class PhageReferenceCurator:
             if ani_result.ambiguous_zone:
                 # 65%-75% 模糊带时扩充至更多邻近属以展示边缘拓扑位置
                 target_genera = list(
-                    ani_result.candidate_genera[: min(12, max(base_genera, base_genera * 2))]
+                    ani_result.candidate_genera[: min(200, max(base_genera, base_genera * 2))]
                 )
             auto_og_pool = list(ani_result.recommended_outgroup_accessions)
 

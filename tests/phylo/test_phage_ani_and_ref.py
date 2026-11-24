@@ -199,6 +199,21 @@ def test_ref_curator_respects_custom_counts_and_manual_outgroups(tmp_path: Path)
     assert len(reps) >= 2
     assert any(c.description for c in reps)
 
+    # 3. 放宽后大参数组合 (ref_max_count=600, ictv_reps_per_genus=20, outgroup_count=20) 正常校验且无 SQL 截断
+    cands_large = curator.curate_candidates(
+        query_records=[("Q1", "ATGCTAGC" * 100)],
+        ani_result=ani,
+        scope=DeliveryScopeConfig(
+            ref_max_count=600,
+            ictv_reps_per_genus=20,
+            max_target_genera=10,
+            outgroup_count=20,
+        ),
+    )
+    ogs_large = [c for c in cands_large if c.role == "outgroup"]
+    assert len(ogs_large) == 20
+    assert len(cands_large) <= 600
+
 
 def test_macro_family_host_sampling_1000_scale(tmp_path: Path):
     import pytest

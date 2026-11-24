@@ -101,7 +101,7 @@ function cellColor(val: number): string {
             type="number"
             v-model.number="store.phageScope.mash_top_k"
             min="5"
-            max="200"
+            max="1000"
             class="neo-input"
           />
         </div>
