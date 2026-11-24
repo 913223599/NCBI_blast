@@ -421,9 +421,10 @@ class PhyloJobExecutor:
         records: List[tuple[str, str]],
         handle: _ActiveJobHandle,
     ) -> None:
-        record = self.store.get_job(job_id)
-        if record is None:
+        loaded_record = self.store.get_job(job_id)
+        if loaded_record is None:
             return
+        record: PhyloJobRecord = loaded_record
         job_dir = Path(record.job_dir)
         ckp = CheckpointManager(job_dir)
         cache = StageCache(self.store.cache_dir)

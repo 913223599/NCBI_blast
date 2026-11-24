@@ -168,7 +168,7 @@ class ProcessRunner:
         pgid_tmp.close()
 
         wsl_pgid_path = self._to_wsl_path(pgid_win_path)
-        quoted_cmd = " ".join(shlex.quote(str(a)) for a in wsl_cmd_args)
+        quoted_cmd = " ".join(shlex.quote(a) for a in wsl_cmd_args)
         stdin_script = (
             f"echo $$ > {shlex.quote(wsl_pgid_path)}\n"
             f'export PATH="/home/administrator/miniforge3/envs/phylo_phage/bin:/usr/local/bin:$PATH"\n'

@@ -20,7 +20,7 @@ def normalize_fasttree_support(newick: str) -> str:
     """将 FastTree 输出的 0~1 SH-like 节点支持率转换为 0~100 百分制，与 IQ-TREE/NJ 统一。"""
     def _repl(match: re.Match[str]) -> str:
         val = float(match.group(1))
-        pct = int(round(val * 100)) if val <= 1.0 else int(round(val))
+        pct = round(val * 100) if val <= 1.0 else round(val)
         return f"){pct}{match.group(2)}"
 
     return re.sub(r"\)(0(?:\.\d+)?|1(?:\.0+)?)([:;])", _repl, newick)

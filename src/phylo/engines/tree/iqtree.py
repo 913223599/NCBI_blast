@@ -109,8 +109,8 @@ class IQTreeEngine:
         safe_threads = get_safe_cpu_budget(threads)
         resolved_model = self.resolve_model(model, mol_type)
 
-        actual_bootstrap = int(bootstrap)
-        actual_alrt = int(alrt)
+        actual_bootstrap = bootstrap
+        actual_alrt = alrt
         if n_seqs < 4:
             if actual_bootstrap > 0 or actual_alrt > 0:
                 self._log("[IQ-TREE] 序列数量不足 4 条，UFBoot 与 SH-aLRT 自动关闭。")

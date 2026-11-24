@@ -31,7 +31,7 @@ def get_safe_cpu_budget(requested: int = 0) -> int:
         if total <= 4:
             return max(1, total - 1)
         return max(1, min(hard_cap, total - DEFAULT_RESERVED_CORES))
-    return max(1, min(int(requested), hard_cap))
+    return max(1, min(requested, hard_cap))
 
 
 class GpuGuard:
@@ -59,8 +59,8 @@ class GpuGuard:
             free_bytes, total_bytes = torch.cuda.mem_get_info(device_idx)
             info["available"] = True
             info["name"] = str(props.name)
-            info["total_vram_mb"] = int(total_bytes // (1024 * 1024))
-            info["free_vram_mb"] = int(free_bytes // (1024 * 1024))
+            info["total_vram_mb"] = total_bytes // (1024 * 1024)
+            info["free_vram_mb"] = free_bytes // (1024 * 1024)
             return info
         except Exception as exc:
             logger.debug(f"CUDA probe unavailable: {exc}")
@@ -89,7 +89,7 @@ class GpuGuard:
         # 或分块广播 (chunk, chunk_col, seq_len) 约 4 bytes/元素，留 4x 安全余量
         bytes_per_row_pair = max(1, n_seqs * 16)
         est_chunk = max(8, budget_bytes // (bytes_per_row_pair * max(1, min(seq_len, 4096))))
-        return max(8, min(n_seqs, int(est_chunk), 512))
+        return max(8, min(n_seqs, est_chunk, 512))
 
     @staticmethod
     def release_vram() -> None:
