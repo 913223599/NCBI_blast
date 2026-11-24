@@ -84,6 +84,29 @@ function cellColor(val: number): string {
         </div>
       </div>
 
+      <div class="form-row">
+        <div class="form-group">
+          <label>参考群总数上限</label>
+          <input
+            type="number"
+            v-model.number="store.phageScope.ref_max_count"
+            min="5"
+            max="500"
+            class="neo-input"
+          />
+        </div>
+        <div class="form-group">
+          <label>INPHARED 初筛 Top K</label>
+          <input
+            type="number"
+            v-model.number="store.phageScope.mash_top_k"
+            min="5"
+            max="200"
+            class="neo-input"
+          />
+        </div>
+      </div>
+
       <div class="form-group">
         <label>可选离线参考库目录</label>
         <input

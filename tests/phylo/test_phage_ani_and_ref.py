@@ -142,3 +142,59 @@ def test_dereplicator_and_treemmer_preserve_protected(tmp_path: Path):
     assert "Query_Phage" in pruned
     assert "Outgroup_Phage" in pruned
     assert len(pruned) == 3
+
+
+def test_ref_curator_respects_custom_counts_and_manual_outgroups(tmp_path: Path):
+    """验证参考群上限、每属代表数、覆盖属数、自动外群数量与手动指定外群均按配置生效。"""
+    from src.phylo.engines.reference.ref_curator import PhageReferenceCurator
+    from src.phylo.models.schemas import AniHitRecord, AniScreenResult, DeliveryScopeConfig
+
+    curator = PhageReferenceCurator(cache_dir=tmp_path / "ref_cache")
+    ani = AniScreenResult(
+        query_ids=["Q1"],
+        top_hits=[
+            AniHitRecord(
+                accession="AY587007",
+                description="Escherichia phage T5",
+                wg_ani=92.0,
+                genus="Tequintavirus",
+                family="Demerecviridae",
+            )
+        ],
+        candidate_genera=["Tequintavirus", "Epseptimavirus", "Sugarlandvirus"],
+        candidate_families=["Demerecviridae"],
+        recommended_outgroup_accessions=["NC_055913"],
+    )
+
+    # 1. outgroup_count=0 且无手动外群时不纳入自动外群
+    cands_no_og = curator.curate_candidates(
+        query_records=[("Q1", "ATGCTAGC" * 100)],
+        ani_result=ani,
+        scope=DeliveryScopeConfig(
+            ref_max_count=20,
+            ictv_reps_per_genus=2,
+            max_target_genera=2,
+            outgroup_count=0,
+        ),
+    )
+    assert [c for c in cands_no_og if c.role == "outgroup"] == []
+
+    # 2. outgroup_count=4 自动从本地 INPHARED 补足外群，且手动外群与受控总数均生效
+    cands_custom = curator.curate_candidates(
+        query_records=[("Q1", "ATGCTAGC" * 100)],
+        ani_result=ani,
+        scope=DeliveryScopeConfig(
+            ref_max_count=25,
+            ictv_reps_per_genus=2,
+            max_target_genera=3,
+            outgroup_count=4,
+            outgroup_ids=["NC_042095"],
+        ),
+    )
+    ogs = [c for c in cands_custom if c.role == "outgroup"]
+    assert any(c.accession == "NC_042095" for c in ogs)
+    assert len(ogs) == 4
+    assert len(cands_custom) <= 25
+    reps = [c for c in cands_custom if c.role == "ictv_rep"]
+    assert len(reps) >= 2
+    assert any(c.description for c in reps)

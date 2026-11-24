@@ -43,6 +43,9 @@ export const usePhyloStore = defineStore('phylo', () => {
     ani_species_threshold: 95.0,
     ani_genus_threshold: 70.0,
     ref_max_count: 80,
+    ictv_reps_per_genus: 3,
+    max_target_genera: 4,
+    outgroup_count: 3,
     derep_ani: 0.9,
     derep_min_len: 20000,
     treemmer_target: 80,
@@ -399,8 +402,6 @@ export const usePhyloStore = defineStore('phylo', () => {
         threads: config.threads,
       })
       aniResult.value = res
-      // 同步推荐外群
-      phageScope.outgroup_ids = [...(res.recommended_outgroup_accessions || [])]
       appStore.showNotification('ANI 全库初筛与 wgANI 矩阵精算完成', 'success')
       await curatePhageReferences()
     } catch (e: unknown) {
@@ -447,6 +448,24 @@ export const usePhyloStore = defineStore('phylo', () => {
       }
     } else {
       phageScope.outgroup_ids = phageScope.outgroup_ids.filter((id) => id !== accession)
+    }
+  }
+
+  function setManualOutgroupIds(rawText: string): void {
+    const tokens = rawText
+      .split(/[\s,;，；]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+    phageScope.outgroup_ids = Array.from(new Set(tokens))
+  }
+
+  function selectOnlyIctvReps(): void {
+    for (const item of referenceCandidates.value) {
+      if (item.role === 'query' || item.role === 'outgroup' || item.role === 'ictv_rep') {
+        item.selected = true
+      } else {
+        item.selected = false
+      }
     }
   }
 
@@ -711,6 +730,8 @@ export const usePhyloStore = defineStore('phylo', () => {
     curatePhageReferences,
     toggleReferenceSelected,
     setReferenceRole,
+    setManualOutgroupIds,
+    selectOnlyIctvReps,
     startAnalysis,
     startPhageTaxonomyPipeline,
     cancelActiveJob,

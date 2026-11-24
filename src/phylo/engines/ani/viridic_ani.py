@@ -726,14 +726,18 @@ class ViridicAniCalculator:
                     "检测到高局部一致度但覆盖度偏低 (AF < 50% & aligned ANI >= 80%) 的近邻，提示可能存在基因组嵌合（mosaicism），请谨慎解读 wgANI 数值。"
                 )
 
-        # 推荐外群
-        outgroup_recs = self.index.find_outgroup_candidates(
-            target_genera=candidate_genera[:3],
-            target_families=candidate_families[:2],
-            target_orders=candidate_orders[:2],
-            host_hint=host_hint,
-            exclude_accessions=[h.accession for h in hits[:15]],
-            limit=3,
+        # 推荐外群（遵循 scope.outgroup_count 可调数量）
+        outgroup_recs = (
+            self.index.find_outgroup_candidates(
+                target_genera=candidate_genera[: max(1, scope.max_target_genera)],
+                target_families=candidate_families[:2],
+                target_orders=candidate_orders[:2],
+                host_hint=host_hint,
+                exclude_accessions=[h.accession for h in hits[:15]],
+                limit=scope.outgroup_count,
+            )
+            if scope.outgroup_count > 0
+            else []
         )
 
         return AniScreenResult(

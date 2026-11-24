@@ -107,6 +107,9 @@ class PhageReferenceCurator:
             )
             seen_acc.add(qid)
 
+        manual_og = list(dict.fromkeys(x.strip() for x in scope.outgroup_ids if x and x.strip()))
+        manual_og_set = set(manual_og)
+
         # 2. 扫描本地自定义离线参考目录 (若有)
         if scope.local_ref_dir:
             local_dir = Path(scope.local_ref_dir)
@@ -124,7 +127,7 @@ class PhageReferenceCurator:
                             ReferenceCandidate(
                                 accession=acc,
                                 name=acc,
-                                role="outgroup" if acc in scope.outgroup_ids else "neighbor",
+                                role="outgroup" if acc in manual_og_set else "neighbor",
                                 source="local_dir",
                                 selected=True,
                                 genome_length=len(rec.seq),
@@ -132,47 +135,71 @@ class PhageReferenceCurator:
                             )
                         )
 
+        # 3. 纳入外群 (优先用户手动指定，再按 outgroup_count 额度自动补足推荐外群)
+        target_genera: List[str] = []
+        target_families: List[str] = []
+        auto_og_pool: List[str] = []
         if ani_result:
-            # 3. 确定核心候选属与邻近科
-            target_genera = list(ani_result.candidate_genera[:4])
+            base_genera = max(1, scope.max_target_genera)
+            target_genera = list(ani_result.candidate_genera[:base_genera])
             target_families = list(ani_result.candidate_families[:2])
             if ani_result.ambiguous_zone:
                 # 65%-75% 模糊带时扩充至更多邻近属以展示边缘拓扑位置
-                target_genera = list(ani_result.candidate_genera[:8])
-
-            # 4. 纳入明确外群 (优先用户指定，其次 ANI 推荐外群)
-            outgroup_accs = list(dict.fromkeys(list(scope.outgroup_ids) + list(ani_result.recommended_outgroup_accessions)))[:3]
-            outgroup_meta = self.index.get_by_accessions(outgroup_accs) if outgroup_accs and self.index.is_available() else {}
-            for og_acc in outgroup_accs:
-                if og_acc in seen_acc:
-                    continue
-                seen_acc.add(og_acc)
-                meta = outgroup_meta.get(og_acc)
-                candidates.append(
-                    ReferenceCandidate(
-                        accession=og_acc,
-                        name=f"{og_acc} ({meta.genus})" if meta and meta.genus else og_acc,
-                        description=meta.description if meta else "",
-                        role="outgroup",
-                        source="inphared_cache" if (self.cache_dir / f"{_safe_acc(og_acc)}.fasta").is_file() else "ncbi_download",
-                        selected=True,
-                        genome_length=meta.genome_length if meta else 0,
-                        gc_content=meta.gc_content if meta else 0.0,
-                        host=meta.host if meta else "",
-                        genus=meta.genus if meta else "",
-                        family=meta.family if meta else "",
-                        order=meta.order_name if meta else "",
-                        is_ictv_classified=bool(meta and meta.is_ictv_classified),
-                    )
+                target_genera = list(
+                    ani_result.candidate_genera[: min(12, max(base_genera, base_genera * 2))]
                 )
+            auto_og_pool = list(ani_result.recommended_outgroup_accessions)
 
-            # 5. 确保每个目标属至少 1-3 条正式 ICTV 代表株
+        need_auto = max(0, scope.outgroup_count - len(manual_og))
+        if need_auto > len(auto_og_pool) and self.index.is_available() and (target_genera or target_families):
+            extra_ogs = self.index.find_outgroup_candidates(
+                target_genera=target_genera[:3],
+                target_families=target_families[:2],
+                exclude_accessions=[h.accession for h in ani_result.top_hits[:15]] + manual_og if ani_result else manual_og,
+                limit=scope.outgroup_count,
+            )
+            for og in extra_ogs:
+                if og.accession not in auto_og_pool:
+                    auto_og_pool.append(og.accession)
+
+        outgroup_accs = list(dict.fromkeys(manual_og + auto_og_pool[:need_auto]))
+        outgroup_meta = (
+            self.index.get_by_accessions(outgroup_accs)
+            if outgroup_accs and self.index.is_available()
+            else {}
+        )
+        for og_acc in outgroup_accs:
+            if og_acc in seen_acc:
+                continue
+            seen_acc.add(og_acc)
+            meta = outgroup_meta.get(og_acc)
+            candidates.append(
+                ReferenceCandidate(
+                    accession=og_acc,
+                    name=f"{og_acc} ({meta.genus})" if meta and meta.genus else og_acc,
+                    description=meta.description if meta else "",
+                    role="outgroup",
+                    source="inphared_cache" if (self.cache_dir / f"{_safe_acc(og_acc)}.fasta").is_file() else "ncbi_download",
+                    selected=True,
+                    genome_length=meta.genome_length if meta else 0,
+                    gc_content=meta.gc_content if meta else 0.0,
+                    host=meta.host if meta else "",
+                    genus=meta.genus if meta else "",
+                    family=meta.family if meta else "",
+                    order=meta.order_name if meta else "",
+                    is_ictv_classified=bool(meta and meta.is_ictv_classified),
+                )
+            )
+
+        if ani_result:
+            # 4. 确保每个目标属按配置纳入 ictv_reps_per_genus 条正式 ICTV 代表株
+            max_rep_total = max(1, scope.ref_max_count - len(candidates)) if scope.ref_max_count < 15 else max(10, int(scope.ref_max_count * 0.7))
             ictv_reps = self.index.find_ictv_representatives(
                 genera=target_genera,
                 families=target_families,
                 exclude_accessions=list(seen_acc),
-                per_genus=3 if scope.target_rank == "genus" else 2,
-                max_total=max(10, scope.ref_max_count // 2),
+                per_genus=scope.ictv_reps_per_genus,
+                max_total=max_rep_total,
             )
             for rep in ictv_reps:
                 if rep.accession in seen_acc or len(candidates) >= scope.ref_max_count:

@@ -14,6 +14,9 @@ export interface DeliveryScopeConfig {
   ani_species_threshold: number
   ani_genus_threshold: number
   ref_max_count: number
+  ictv_reps_per_genus: number
+  max_target_genera: number
+  outgroup_count: number
   derep_ani: number
   derep_min_len: number
   treemmer_target: number
@@ -71,6 +74,7 @@ export interface AniScreenResult {
 export interface ReferenceCandidate {
   accession: string
   name: string
+  description?: string
   role: 'query' | 'ictv_rep' | 'neighbor' | 'outgroup'
   source: 'workspace' | 'inphared_cache' | 'ncbi_download' | 'local_dir'
   selected: boolean

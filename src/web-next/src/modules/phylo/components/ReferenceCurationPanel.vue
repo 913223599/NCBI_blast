@@ -9,6 +9,12 @@ const emit = defineEmits<{
 
 const store = usePhyloStore()
 const filterText = ref('')
+const showTuning = ref(true)
+
+const manualOutgroupText = computed({
+  get: () => store.phageScope.outgroup_ids.join(', '),
+  set: (val: string) => store.setManualOutgroupIds(val),
+})
 
 const selectedList = computed(() => store.referenceCandidates.filter((r) => r.selected))
 const queryCount = computed(() => selectedList.value.filter((r) => r.role === 'query').length)
@@ -21,6 +27,7 @@ const filteredCandidates = computed(() => {
   return store.referenceCandidates.filter(
     (c) =>
       c.accession.toLowerCase().includes(q) ||
+      (c.description || '').toLowerCase().includes(q) ||
       c.genus.toLowerCase().includes(q) ||
       c.family.toLowerCase().includes(q) ||
       c.host.toLowerCase().includes(q)
@@ -57,16 +64,89 @@ function onRoleChange(acc: string, ev: Event) {
       <span :class="{ 'og-warn': outgroupCount === 0 }">
         外群: <b>{{ outgroupCount }}</b>
       </span>
+      <button
+        v-if="store.referenceCandidates.length > 0"
+        class="btn-mini-inline"
+        title="仅保留查询株、外群与 ICTV 代表"
+        @click="store.selectOnlyIctvReps()"
+      >仅留代表</button>
+    </div>
+
+    <!-- 参考群与外群规模可调参数 -->
+    <div class="tuning-box">
+      <div class="tuning-head" @click="showTuning = !showTuning">
+        <span>参考群与外群参数配置</span>
+        <span class="tuning-toggle">{{ showTuning ? '收起' : '展开调整' }}</span>
+      </div>
+      <template v-if="showTuning">
+        <div class="tuning-grid">
+          <div class="t-field">
+            <label>参考群上限</label>
+            <input
+              type="number"
+              v-model.number="store.phageScope.ref_max_count"
+              min="5"
+              max="500"
+              class="neo-input-sm"
+            />
+          </div>
+          <div class="t-field">
+            <label>每属代表数</label>
+            <input
+              type="number"
+              v-model.number="store.phageScope.ictv_reps_per_genus"
+              min="1"
+              max="10"
+              class="neo-input-sm"
+            />
+          </div>
+          <div class="t-field">
+            <label>覆盖属数量</label>
+            <input
+              type="number"
+              v-model.number="store.phageScope.max_target_genera"
+              min="1"
+              max="12"
+              class="neo-input-sm"
+            />
+          </div>
+          <div class="t-field">
+            <label>自动外群数</label>
+            <input
+              type="number"
+              v-model.number="store.phageScope.outgroup_count"
+              min="0"
+              max="10"
+              class="neo-input-sm"
+            />
+          </div>
+        </div>
+        <div class="t-field">
+          <label>手动指定外群登录号 (逗号或空格分隔，可选)</label>
+          <input
+            v-model.lazy="manualOutgroupText"
+            class="neo-input-sm"
+            placeholder="例如: NC_055913, NC_042095"
+          />
+        </div>
+        <button
+          class="btn-reapply"
+          :disabled="store.isCuratingRefs"
+          @click="store.curatePhageReferences()"
+        >
+          {{ store.isCuratingRefs ? '正在按参数组装...' : '按当前参数重新生成参考集' }}
+        </button>
+      </template>
     </div>
 
     <div v-if="outgroupCount === 0 && store.referenceCandidates.length > 0" class="warn-banner">
-      当前未指定外群，建议在下方至少将 1 条同科不同属参考株标为 Outgroup，以确定进化树根方向。
+      当前未指定外群，建议调大「自动外群数」重选，或在下方将至少 1 条同科不同属参考株标为 Outgroup。
     </div>
 
     <input
       v-model="filterText"
       class="neo-input"
-      placeholder="筛选 Accession / 属 / 科 / 宿主..."
+      placeholder="筛选 登录号 / 名称 / 属 / 科 / 宿主..."
     />
 
     <div v-if="filteredCandidates.length === 0" class="empty-box">
@@ -107,6 +187,10 @@ function onRoleChange(acc: string, ev: Event) {
           <span v-else class="query-pill">新测序株</span>
         </div>
 
+        <div v-if="item.description && item.description !== item.accession" class="ref-desc">
+          {{ item.description }}
+        </div>
+
         <div class="ref-meta">
           <span v-if="item.genus">属: {{ item.genus }}</span>
           <span v-if="item.family">科: {{ item.family }}</span>
@@ -133,7 +217,18 @@ function onRoleChange(acc: string, ev: Event) {
 .panel-title { font-size: 14px; font-weight: 700; color: #0f172a; margin: 0; }
 .btn-link { background: none; border: none; color: #2563eb; font-size: 11px; font-weight: 600; cursor: pointer; }
 .hint-text { font-size: 11px; color: #64748b; margin: 0; line-height: 1.4; }
-.stats-bar { display: flex; justify-content: space-between; background: #f1f5f9; padding: 6px 10px; border-radius: 6px; font-size: 11px; color: #334155; }
+.stats-bar { display: flex; justify-content: space-between; align-items: center; background: #f1f5f9; padding: 6px 10px; border-radius: 6px; font-size: 11px; color: #334155; }
+.btn-mini-inline { border: 1px solid #cbd5e1; background: #fff; color: #2563eb; border-radius: 4px; font-size: 10px; font-weight: 600; padding: 1px 6px; cursor: pointer; }
+.tuning-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 7px; padding: 7px 9px; display: flex; flex-direction: column; gap: 6px; }
+.tuning-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: #1e293b; cursor: pointer; }
+.tuning-toggle { font-size: 10px; font-weight: 600; color: #2563eb; }
+.tuning-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.t-field { display: flex; flex-direction: column; gap: 2px; }
+.t-field label { font-size: 10px; font-weight: 600; color: #475569; }
+.neo-input-sm { width: 100%; border: 1px solid #cbd5e1; border-radius: 5px; padding: 4px 6px; font-size: 11px; background: #fff; color: #0f172a; box-sizing: border-box; }
+.btn-reapply { width: 100%; padding: 5px 8px; border: 1px solid #2563eb; border-radius: 5px; background: #eff6ff; color: #1d4ed8; font-size: 11px; font-weight: 700; cursor: pointer; }
+.btn-reapply:disabled { opacity: 0.6; cursor: not-allowed; }
+.ref-desc { font-size: 10px; font-weight: 600; color: #334155; line-height: 1.3; }
 .og-warn { color: #dc2626; }
 .warn-banner { font-size: 11px; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 6px 8px; }
 .neo-input { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 8px; font-size: 12px; box-sizing: border-box; }
