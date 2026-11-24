@@ -51,6 +51,43 @@ export function useAssembly() {
       if (qRes) {
         queueStatus.value = qRes.data || qRes;
       }
+
+      // 将后端最新任务状态与队列快照同步到当前聚焦任务，自愈 queued -> running 竞态倒退
+      if (currentTask.value) {
+        const focusId = activeTaskId.value || currentTask.value.id;
+        const matched = tasks.find(t => t.id === focusId);
+        if (matched) {
+          const curStatus = currentTask.value.status;
+          const isCurTerminal = curStatus === 'completed' || curStatus === 'failed' || curStatus === 'aborted';
+          const isQueueRunningFocus = queueStatus.value?.running_task?.id === matched.id;
+
+          if (!isCurTerminal) {
+            if (matched.status === 'running' || isQueueRunningFocus) {
+              currentTask.value.status = 'running';
+              isRunning.value = true;
+              currentTask.value.progress = Math.max(
+                currentTask.value.progress || 0,
+                matched.progress || 0
+              );
+              if (!currentTask.value.last_step || currentTask.value.last_step.includes('排队')) {
+                currentTask.value.last_step = matched.last_step || '正在运行...';
+              }
+            } else if (
+              matched.status === 'completed' ||
+              matched.status === 'failed' ||
+              matched.status === 'aborted'
+            ) {
+              currentTask.value.status = matched.status;
+              currentTask.value.progress = matched.progress ?? currentTask.value.progress;
+              currentTask.value.last_step = matched.last_step || currentTask.value.last_step;
+              if (matched.results) {
+                currentTask.value.results = { ...(currentTask.value.results || {}), ...matched.results };
+              }
+              isRunning.value = false;
+            }
+          }
+        }
+      }
     } catch (e: any) {
       console.warn('[useAssembly] 获取历史记录或队列失败:', e);
     } finally {
@@ -134,21 +171,37 @@ export function useAssembly() {
       }
 
       const assignedTaskId = res.task_id || res.data?.task_id || taskId;
-      const rawPos = res.queue_position ?? res.data?.queue_position ?? 1;
-      const queuePos = Number(rawPos) > 0 ? Number(rawPos) : 1;
-      const backendIsBusy = Boolean(res.is_busy ?? res.data?.is_busy ?? isQueued);
+      const rawPos = res.queue_position ?? res.data?.queue_position ?? 0;
+      const queuePos = Number(rawPos) > 0 ? Number(rawPos) : 0;
+      const backendIsBusy = Boolean(res.is_busy ?? res.data?.is_busy ?? false);
       const backendStatus = res.status || res.data?.status;
-      const shouldWaitInQueue = backendIsBusy || isQueued || queuePos > 1 || backendStatus === 'queued';
 
-      if (currentTask.value && currentTask.value.id === taskId) {
+      const curStatus = currentTask.value?.id === taskId ? currentTask.value.status : null;
+      const alreadyTerminal =
+        curStatus === 'completed' || curStatus === 'failed' || curStatus === 'aborted';
+      const alreadyAdvancedToRunning =
+        curStatus === 'running' &&
+        ((currentTask.value?.progress || 0) > 0 || queueStatus.value?.running_task?.id === assignedTaskId);
+
+      const shouldWaitInQueue =
+        !alreadyTerminal &&
+        !alreadyAdvancedToRunning &&
+        backendStatus !== 'running' &&
+        (backendIsBusy || queuePos > 1 || (isQueued && backendStatus === 'queued'));
+
+      if (currentTask.value && currentTask.value.id === taskId && !alreadyTerminal) {
         currentTask.value.id = assignedTaskId;
         currentTask.value.queue_position = queuePos;
         currentTask.value.status = shouldWaitInQueue ? 'queued' : 'running';
         if (shouldWaitInQueue) {
-          currentTask.value.last_step = `排队中 (#${queuePos})`;
+          currentTask.value.last_step = `排队中 (#${Math.max(1, queuePos)})`;
+        } else if (!currentTask.value.last_step || currentTask.value.last_step.includes('排队')) {
+          currentTask.value.last_step = '正在启动 NGCS 组装调度...';
         }
       }
-      isRunning.value = !shouldWaitInQueue;
+      if (!alreadyTerminal) {
+        isRunning.value = !shouldWaitInQueue;
+      }
       activeTaskId.value = assignedTaskId;
 
       // 后台静默刷新历史
@@ -324,6 +377,18 @@ export function useAssembly() {
       if (type === 'assembly_log' && data) {
         const { task_id, line } = data;
         if (activeTaskId.value === task_id || (!activeTaskId.value && currentTask.value?.id === task_id)) {
+          // 收到当前任务实时计算日志即可确认已处于运行态，纠偏残留排队态
+          if (currentTask.value && (currentTask.value.status === 'queued' || currentTask.value.status === 'pending')) {
+            currentTask.value.status = 'running';
+            if (!currentTask.value.last_step || currentTask.value.last_step.includes('排队')) {
+              currentTask.value.last_step = '正在运行...';
+            }
+            isRunning.value = true;
+          }
+          const matchedHist = historyTasks.value.find(t => t.id === task_id);
+          if (matchedHist && (matchedHist.status === 'queued' || matchedHist.status === 'pending')) {
+            matchedHist.status = 'running';
+          }
           if (line) {
             consoleLogs.value.push(line);
             // 内存与 DOM 保护：上限 2500 行，超出后批量切除最早 500 行
@@ -383,11 +448,22 @@ export function useAssembly() {
 
     // 智能轮询队列状态 (每 3 秒一次)
     pollingTimer = setInterval(async () => {
-      if (isRunning.value || queueStatus.value?.is_busy || historyTasks.value.some(t => t.status === 'running' || t.status === 'queued')) {
+      const focusStatus = currentTask.value?.status;
+      if (
+        isRunning.value ||
+        focusStatus === 'queued' ||
+        focusStatus === 'pending' ||
+        queueStatus.value?.is_busy ||
+        historyTasks.value.some(t => t.status === 'running' || t.status === 'queued')
+      ) {
         await fetchHistory();
-        if (activeTaskId.value && isRunning.value) {
+        if (activeTaskId.value) {
           const matched = historyTasks.value.find(t => t.id === activeTaskId.value);
-          if (matched && (matched.status === 'completed' || matched.status === 'failed')) {
+          if (
+            matched &&
+            (matched.status === 'completed' || matched.status === 'failed') &&
+            resultData.value?.task_id !== activeTaskId.value
+          ) {
             isRunning.value = false;
             await loadTaskResult(activeTaskId.value);
           }

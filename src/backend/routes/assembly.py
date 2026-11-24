@@ -94,22 +94,23 @@ async def run_assembly_job(payload: Dict[str, Any]):
     was_busy = assembly_queue.current_task_id is not None or assembly_queue.get_queue_size() > 0
     await assembly_queue.add_task(payload)
 
+    is_running_now = assembly_queue.current_task_id == task_id
     waiting_queue = assembly_queue._queue or []
-    queue_pos = next(
+    waiting_pos = next(
         (idx + 1 for idx, item in enumerate(waiting_queue) if item.get("task_id") == task_id),
-        assembly_queue.get_queue_size(),
+        0,
     )
-    is_busy_now = bool(
+    is_busy_now = (not is_running_now) and bool(
         was_busy
         or (assembly_queue.current_task_id is not None and assembly_queue.current_task_id != task_id)
-        or len(waiting_queue) > 1
+        or waiting_pos > 1
     )
     return BioResponse.ok({
-        "message": "Task queued successfully",
+        "message": "Task queued successfully" if is_busy_now else "Task started successfully",
         "task_id": task_id,
-        "status": "queued",
+        "status": "queued" if is_busy_now else "running",
         "is_busy": is_busy_now,
-        "queue_position": max(1, queue_pos),
+        "queue_position": max(1, waiting_pos) if is_busy_now else 0,
     })
 
 

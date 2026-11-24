@@ -72,14 +72,14 @@ class PersistentAssemblyQueue:
         self._is_running = True
         logger.info("[Queue] 串行持久化队列引擎启动中...")
         
-        # 安全重置：将所有处于 running 的任务标记为 aborted
+        # 安全重置：将所有未完结的僵尸任务（running/pending/queued）标记为 aborted
         with sqlite3.connect(assembly_db.DB_PATH) as conn:
             conn.execute(
-                "UPDATE assembly_tasks SET status = 'aborted', updated_at = ? WHERE status = 'running'",
+                "UPDATE assembly_tasks SET status = 'aborted', updated_at = ? WHERE status IN ('running', 'pending', 'queued')",
                 (time.time(),)
             )
             conn.commit()
-        logger.info("[Queue] 任务队列已重置：之前的运行中任务已设为'已中止'，请在历史记录中恢复。")
+        logger.info("[Queue] 任务队列已重置：之前的未完结任务已设为'已中止'，请在历史记录中按需重跑。")
         
         self._worker_task = asyncio.create_task(self._worker_loop())
         await self._broadcast_status()
