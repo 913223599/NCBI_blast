@@ -161,14 +161,24 @@ class ItolBatchClient:
             f"   {ITOL_UPLOAD_PAGE_URL}",
             "第 2 步：在页面中选择解压后的纯文本树文件 tree_itol_ascii.nwk 上传（或直接复制其中内容粘贴到 Tree text）。",
             "   (已自动去除中文字符及斜杠双支持值，保证 100% 通过 iTOL 初始化校验)",
-            "第 3 步：进入进化树界面后，将解压目录 itol/ 下的全部 .txt 注释模板文件拖入页面画布：",
+            "第 3 步：进入进化树界面后，根据分析尺度选择下列任一组合，将解压目录 itol/ 下对应 .txt 拖入页面画布：",
+            "  [方案 A：属/种精细树（约 10-100 株）]",
             "   - itol_branch_colors.txt      (分支着色：Query / Outgroup / ICTV 属)",
             "   - itol_label_colors.txt       (标签字体与 Query 高亮底色)",
-            "   - itol_strip_taxonomy.txt     (外圈 ICTV 分类色带与图例)",
+            "   - itol_strip_taxonomy.txt     (外圈 ICTV 属级分类色带与图例)",
             "   - itol_bars_genome_length.txt (外圈基因组长度条带)",
             "   - itol_bars_gc.txt            (外圈 GC% 条带)",
+            "  [方案 B：宏观环形双色带 + 红星图（类 ViPTree 200-1000+ 株）]",
+            "   * Basic 面板设为 Circular、Arc = 340、Rotation = 95、Labels = Hidden，再依次拖入：",
+            "   - itol_branch_colors_macro.txt (仅高亮 Query 分支，背景树保持纯黑)",
+            "   - itol_strip_family.txt        (内圈 Virus family Top-N + Others 统计色带)",
+            "   - itol_strip_host_group.txt    (外圈 Host group 门级 Top-N + Others 统计色带)",
+            "   - itol_symbol_query_star.txt   (最外侧 Query 红色五角星标记)",
         ]
         if label_display_entries:
+            readme_lines.append(
+                "  [通用展示名称映射（精细树推荐拖入）]"
+            )
             readme_lines.append(
                 "   - itol_labels_display.txt     (自动将登录号/ASCII 键展示为 `实际名称 (登录号)` 及中文原名)"
             )

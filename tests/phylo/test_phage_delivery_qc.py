@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 
 from src.backend.api_server import app
 from src.phylo.delivery.bundle_exporter import DeliveryBundleExporter
+from src.phylo.delivery.host_taxonomy import map_host_to_phylum
+from src.phylo.delivery.itol_client import ItolBatchClient
 from src.phylo.delivery.itol_generator import ItolTemplateGenerator
 from src.phylo.delivery.qc_auditor import PhageDeliveryQcAuditor
 from src.phylo.models.schemas import (
@@ -76,10 +78,15 @@ def test_itol_qc_and_delivery_bundle(tmp_path: Path):
 
     itol_dir = tmp_path / "itol"
     itol_files = ItolTemplateGenerator.generate(cands, itol_dir)
-    assert len(itol_files) == 6
+    assert len(itol_files) == 10
     assert "TREE_COLORS" in (itol_dir / "itol_branch_colors.txt").read_text(encoding="utf-8")
+    assert "TREE_COLORS" in (itol_dir / "itol_branch_colors_macro.txt").read_text(encoding="utf-8")
     assert "DATASET_COLORSTRIP" in (itol_dir / "itol_strip_taxonomy.txt").read_text(encoding="utf-8")
+    assert "Inner ring: Virus family" in (itol_dir / "itol_strip_family.txt").read_text(encoding="utf-8")
+    assert "Outer ring: Host group" in (itol_dir / "itol_strip_host_group.txt").read_text(encoding="utf-8")
+    assert "DATASET_BINARY" in (itol_dir / "itol_symbol_query_star.txt").read_text(encoding="utf-8")
     assert "DATASET_SIMPLEBAR" in (itol_dir / "itol_bars_genome_length.txt").read_text(encoding="utf-8")
+    assert "Host_Group" in (itol_dir / "metadata_table.tsv").read_text(encoding="utf-8")
 
     ani_res = AniScreenResult(
         query_ids=["Query_Phage"],
@@ -144,6 +151,10 @@ def test_itol_qc_and_delivery_bundle(tmp_path: Path):
         names = set(zf.namelist())
         assert {"tree.nwk", "qc_report.md", "qc_report.json", "ani_matrix.csv", "reproduce.sh"}.issubset(names)
         assert "itol/itol_strip_taxonomy.txt" in names
+        assert "itol/itol_strip_family.txt" in names
+        assert "itol/itol_strip_host_group.txt" in names
+        assert "itol/itol_symbol_query_star.txt" in names
+        assert "itol/itol_branch_colors_macro.txt" in names
 
 
 def test_phage_curate_refs_api(tmp_path: Path, monkeypatch):
@@ -254,3 +265,72 @@ def test_submit_phage_taxonomy_job_with_chinese_filename(tmp_path: Path, monkeyp
         with executor._jobs_lock:
             executor._active_jobs.clear()
         executor.store = orig_store
+
+
+def test_macro_itol_rings_host_mapping_and_ascii_sync(tmp_path: Path):
+    assert map_host_to_phylum("Escherichia coli") == "Pseudomonadota"
+    assert map_host_to_phylum("Mycobacterium") == "Actinomycetota"
+    assert map_host_to_phylum("Bacillus") == "Bacillota"
+    assert map_host_to_phylum("Flavobacterium") == "Bacteroidota"
+    assert map_host_to_phylum("Synechococcus") == "Cyanobacteriota"
+    assert map_host_to_phylum("Candidatus Pelagibacter") == "Pseudomonadota"
+    assert map_host_to_phylum("Sulfolobus") == "Archaea"
+    assert map_host_to_phylum("Unspecified") == ""
+    assert map_host_to_phylum("") == ""
+    assert map_host_to_phylum("bajarodmic") == "Others"
+
+    q_name = "测试噬菌体_1号"
+    cands = [
+        ReferenceCandidate(accession=q_name, role="query", source="workspace", host="Escherichia"),
+        ReferenceCandidate(accession="R1", family="Drexlerviridae", host="Escherichia"),
+        ReferenceCandidate(accession="R2", family="Drexlerviridae", host="Klebsiella"),
+        ReferenceCandidate(accession="R3", family="Autographiviridae", host="Mycobacterium"),
+        ReferenceCandidate(accession="R4", family="Schitoviridae", host="Bacillus"),
+        ReferenceCandidate(accession="R5", family="Straboviridae", host="Flavobacterium"),
+        ReferenceCandidate(accession="R6", family="Microviridae", host="bajarodmic"),
+        ReferenceCandidate(accession="R7", family="", host="Unspecified"),
+    ]
+
+    itol_dir = tmp_path / "macro_itol"
+    ItolTemplateGenerator.generate(cands, itol_dir, top_families=2, top_host_groups=2)
+
+    fam_text = (itol_dir / "itol_strip_family.txt").read_text(encoding="utf-8")
+    assert "Drexlerviridae (2)" in fam_text
+    assert "Autographiviridae (1)" in fam_text
+    assert "Others (3)" in fam_text
+    assert "\nR7\t" not in fam_text
+
+    host_text = (itol_dir / "itol_strip_host_group.txt").read_text(encoding="utf-8")
+    assert "Pseudomonadota (3)" in host_text
+    assert "Others (3)" in host_text
+    assert "\nR7\t" not in host_text
+
+    star_text = (itol_dir / "itol_symbol_query_star.txt").read_text(encoding="utf-8")
+    assert "DATASET_BINARY" in star_text
+    star_data = star_text.split("DATA\n", 1)[1].strip().splitlines()
+    assert star_data == [f"{q_name}\t1"]
+
+    macro_branch_text = (itol_dir / "itol_branch_colors_macro.txt").read_text(encoding="utf-8")
+    macro_data = macro_branch_text.split("DATA\n", 1)[1].strip().splitlines()
+    assert macro_data == [f"{q_name}\tbranch\t#dc2626\tnormal\t3"]
+
+    # 验证含中文查询名经 ItolBatchClient 打包后，新模板第 1 列均已自动同步为 ASCII 键
+    nwk = f"(({q_name}:0.05,R1:0.04)99.0/100:0.03,(R2:0.02,R3:0.04):0.06);"
+    bundle = ItolBatchClient.build_itol_upload_bundle(
+        job_dir=tmp_path / "bundle_out",
+        job_id="macro_test",
+        newick=nwk,
+        itol_dir=itol_dir,
+        node_metadata={q_name: {"role": "query"}},
+        label_format="name_acc",
+    )
+    with zipfile.ZipFile(bundle, "r") as zf:
+        bundled_star = zf.read("itol/itol_symbol_query_star.txt").decode("utf-8")
+        bundled_macro_branch = zf.read("itol/itol_branch_colors_macro.txt").decode("utf-8")
+        readme_txt = zf.read("README_iTOL_Upload.txt").decode("utf-8")
+    assert "Phage_01\t1" in bundled_star
+    assert q_name not in bundled_star
+    assert "Phage_01\tbranch\t#dc2626" in bundled_macro_branch
+    assert "itol_strip_family.txt" in readme_txt
+    assert "itol_strip_host_group.txt" in readme_txt
+    assert "itol_symbol_query_star.txt" in readme_txt

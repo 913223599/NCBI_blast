@@ -78,7 +78,7 @@ function cellColor(val: number): string {
             type="number"
             v-model.number="store.phageScope.treemmer_target"
             min="10"
-            max="400"
+            max="2500"
             class="neo-input"
           />
         </div>
@@ -91,7 +91,7 @@ function cellColor(val: number): string {
             type="number"
             v-model.number="store.phageScope.ref_max_count"
             min="5"
-            max="500"
+            max="2500"
             class="neo-input"
           />
         </div>
@@ -105,6 +105,14 @@ function cellColor(val: number): string {
             class="neo-input"
           />
         </div>
+      </div>
+
+      <div class="form-group">
+        <label>参考群抽样策略</label>
+        <select v-model="store.phageScope.sampling_mode" class="neo-select">
+          <option value="focused">精准属/种树（围绕近邻与同科代表）</option>
+          <option value="macro_family_host">宏观全景树（跨病毒科与宿主门分层抽样，适配千株环形图）</option>
+        </select>
       </div>
 
       <div class="form-group">

@@ -55,7 +55,7 @@ def test_clipkit_kpic_and_numpy_fallback(tmp_path: Path):
     out_kpic = tmp_path / "trimmed_kpic.fasta"
     _, stats_cli = AlignmentTrimmer.trim_with_mode(msa, out_kpic, mode="kpic")
     assert out_kpic.is_file()
-    assert int(stats_cli["kept_cols"]) <= int(stats_cli["original_cols"])
+    assert int(str(stats_cli["kept_cols"])) <= int(str(stats_cli["original_cols"]))
     assert "ClipKIT" in str(stats_cli["tool"]) or "KPIC" in str(stats_cli["tool"])
 
     out_np = tmp_path / "trimmed_np.fasta"

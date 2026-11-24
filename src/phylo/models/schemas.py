@@ -12,6 +12,7 @@ MsaStrategyType = Literal["auto", "fast", "accurate", "linsi", "einsi"]
 TrimModeType = Literal["none", "gap", "kpic", "kpic_smart_gap", "smart_gap"]
 AniEngineType = Literal["viridic_blastn", "fastani", "skani", "mash"]
 MarkerModeType = Literal["terl", "proteome"]
+SamplingModeType = Literal["focused", "macro_family_host"]
 TreeEngineType = Literal["nj", "bionj", "fasttree", "iqtree", "mrbayes"]
 JobStatusType = Literal["pending", "running", "completed", "failed", "cancelled"]
 StageStatusType = Literal["pending", "running", "completed", "cached", "skipped", "failed", "cancelled"]
@@ -22,15 +23,16 @@ class DeliveryScopeConfig(BaseModel):
     """第 0 步：噬菌体分类鉴定与交付边界设置。"""
 
     target_rank: Literal["species", "genus", "family_order"] = "genus"
+    sampling_mode: SamplingModeType = "focused"
     ani_species_threshold: float = Field(default=95.0, ge=85.0, le=99.9)
     ani_genus_threshold: float = Field(default=70.0, ge=50.0, le=90.0)
-    ref_max_count: int = Field(default=80, ge=5, le=500)
+    ref_max_count: int = Field(default=80, ge=5, le=2500)
     ictv_reps_per_genus: int = Field(default=3, ge=1, le=10)
-    max_target_genera: int = Field(default=4, ge=1, le=12)
+    max_target_genera: int = Field(default=4, ge=1, le=50)
     outgroup_count: int = Field(default=3, ge=0, le=10)
     derep_ani: float = Field(default=0.90, ge=0.70, le=0.995)
     derep_min_len: int = Field(default=20000, ge=1000, le=200000)
-    treemmer_target: int = Field(default=80, ge=5, le=500)
+    treemmer_target: int = Field(default=80, ge=5, le=2500)
     treemmer_min_cluster: int = Field(default=25, ge=3, le=200)
     checkv_min_completeness: float = Field(default=95.0, ge=0.0, le=100.0)
     enable_checkv: bool = False

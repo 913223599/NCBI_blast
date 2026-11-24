@@ -251,6 +251,46 @@ class PhageReferenceCurator:
                     )
                 )
 
+        # 7. 宏观分层抽样模式：补足跨病毒科 × 跨宿主门千株级背景参考集（无 ANI 结果时同样可用）
+        if (
+            scope.sampling_mode == "macro_family_host"
+            and len(candidates) < scope.ref_max_count
+            and self.index.is_available()
+        ):
+            need_macro = scope.ref_max_count - len(candidates)
+            macro_min_len = max(5000, min(scope.derep_min_len, 15000))
+            macro_recs = self.index.sample_macro_background(
+                target_count=need_macro,
+                exclude_accessions=list(seen_acc),
+                preferred_families=target_families,
+                min_genome_length=macro_min_len,
+            )
+            for rec in macro_recs:
+                if rec.accession in seen_acc or len(candidates) >= scope.ref_max_count:
+                    continue
+                seen_acc.add(rec.accession)
+                candidates.append(
+                    ReferenceCandidate(
+                        accession=rec.accession,
+                        name=f"{rec.accession} ({rec.genus})" if rec.genus else rec.accession,
+                        description=rec.description,
+                        role="ictv_rep" if rec.is_ictv_classified else "neighbor",
+                        source=(
+                            "inphared_cache"
+                            if (self.cache_dir / f"{_safe_acc(rec.accession)}.fasta").is_file()
+                            else "ncbi_download"
+                        ),
+                        selected=True,
+                        genome_length=rec.genome_length,
+                        gc_content=rec.gc_content,
+                        host=rec.host,
+                        genus=rec.genus,
+                        family=rec.family,
+                        order=rec.order_name,
+                        is_ictv_classified=rec.is_ictv_classified,
+                    )
+                )
+
         return candidates
 
     def fetch_genomes(
@@ -259,7 +299,7 @@ class PhageReferenceCurator:
         query_fasta_dir: Path,
         query_records: List[Tuple[str, str]],
         work_dir: Path,
-        batch_size: int = 15,
+        batch_size: int = 20,
     ) -> Tuple[Dict[str, Path], List[str]]:
         """
         将勾选的查询株与参考株全基因组 FASTA 汇总为独立单株文件并落盘至 results/phylo/ref_cache/。
@@ -335,6 +375,12 @@ class PhageReferenceCurator:
                     json.dumps({"failed": sorted(failed_accs)}, ensure_ascii=False),
                     encoding="utf-8",
                 )
+                done_cnt = min(start + batch_size, len(to_download))
+                batch_idx = start // batch_size
+                if len(to_download) <= 40 or batch_idx % 3 == 2 or done_cnt == len(to_download):
+                    self._log(
+                        f"[RefCurator] 下载进度: {done_cnt}/{len(to_download)} (累计就绪 {len(genome_paths)} 株)"
+                    )
                 if start + batch_size < len(to_download):
                     time.sleep(0.4)
 

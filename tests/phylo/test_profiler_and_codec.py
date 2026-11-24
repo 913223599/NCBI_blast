@@ -44,7 +44,7 @@ def test_profiler_track_recommendation():
     assert prof_gene.recommended_track == "gene"
     assert prof_gene.recommended_msa == "mafft"
 
-    genome_records = [
+    genome_records: list[tuple[str, str]] = [
         ("phage1", ("ATGCGTACGT" * 2000)),
         ("phage2", ("ATGCGTACGT" * 1950)),
         ("phage3", ("ATGCGTACGA" * 2050)),
@@ -94,7 +94,7 @@ def test_profiler_multifile_shared_scaffold_header(tmp_path: Path):
 
 def test_deterministic_sanitized_order_independent(tmp_path: Path):
     """乱序输入相同序列集时，content_hash 与短 ID 映射必须完全一致，避免 StageCache 错位。"""
-    recs_a = [
+    recs_a: list[tuple[str, str]] = [
         ("Zebra", "ATGCGTACGT" * 5),
         ("Alpha", "TTGCGTACGT" * 5),
         ("Middle", "GCGCGTACGT" * 5),

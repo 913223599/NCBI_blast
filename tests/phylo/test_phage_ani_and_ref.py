@@ -198,3 +198,70 @@ def test_ref_curator_respects_custom_counts_and_manual_outgroups(tmp_path: Path)
     reps = [c for c in cands_custom if c.role == "ictv_rep"]
     assert len(reps) >= 2
     assert any(c.description for c in reps)
+
+
+def test_macro_family_host_sampling_1000_scale(tmp_path: Path):
+    import pytest
+
+    from src.phylo.delivery.host_taxonomy import map_host_to_phylum
+    from src.phylo.engines.reference.ref_curator import PhageReferenceCurator
+    from src.phylo.models.schemas import AniHitRecord, AniScreenResult, DeliveryScopeConfig
+
+    idx = get_inphared_index()
+    if not idx.is_available():
+        pytest.skip("INPHARED TSV/SQLite database is unavailable")
+
+    curator = PhageReferenceCurator(index=idx, cache_dir=tmp_path / "ref_cache")
+    ani = AniScreenResult(
+        query_ids=["MacroQuery_1"],
+        top_hits=[
+            AniHitRecord(
+                accession="PV620261",
+                wg_ani=78.5,
+                genus="Warsawvirus",
+                family="Autotranscriptaviridae",
+            )
+        ],
+        candidate_genera=["Warsawvirus"],
+        candidate_families=["Autotranscriptaviridae"],
+        recommended_outgroup_accessions=["NC_055913"],
+    )
+
+    cands_1000 = curator.curate_candidates(
+        query_records=[("MacroQuery_1", "ATGCTAGC" * 100)],
+        ani_result=ani,
+        scope=DeliveryScopeConfig(
+            target_rank="family_order",
+            sampling_mode="macro_family_host",
+            ref_max_count=1000,
+            ictv_reps_per_genus=3,
+            max_target_genera=4,
+            outgroup_count=3,
+            outgroup_ids=["NC_042095"],
+            treemmer_target=1000,
+        ),
+    )
+    accs = [c.accession for c in cands_1000]
+    assert len(cands_1000) == 1000
+    assert len(set(accs)) == 1000
+    assert any(c.accession == "MacroQuery_1" and c.role == "query" for c in cands_1000)
+    assert any(c.accession == "NC_042095" and c.role == "outgroup" for c in cands_1000)
+
+    distinct_families = {c.family for c in cands_1000 if c.family}
+    distinct_host_phyla = {map_host_to_phylum(c.host) for c in cands_1000} - {"", "Others"}
+    assert len(distinct_families) >= 5
+    assert len(distinct_host_phyla) >= 4
+
+    # 无 ANI 结果时也应支持直接组装宏观背景参考集
+    cands_no_ani = curator.curate_candidates(
+        query_records=[("MacroQuery_1", "ATGCTAGC" * 100)],
+        ani_result=None,
+        scope=DeliveryScopeConfig(
+            target_rank="family_order",
+            sampling_mode="macro_family_host",
+            ref_max_count=120,
+            outgroup_count=0,
+        ),
+    )
+    assert len(cands_no_ani) == 120
+    assert len({c.accession for c in cands_no_ani}) == 120

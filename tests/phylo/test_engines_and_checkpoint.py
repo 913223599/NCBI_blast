@@ -144,7 +144,7 @@ def test_synthetic_genome_track_a(tmp_path: Path):
         pytest.skip("Mash 不可用")
 
     rng = random.Random(2026)
-    base = [rng.choice("ACGT") for _ in range(20000)]
+    base: list[str] = [rng.choice("ACGT") for _ in range(20000)]
 
     def _mutate(seq_list: list[str], rate: float) -> str:
         out = list(seq_list)
