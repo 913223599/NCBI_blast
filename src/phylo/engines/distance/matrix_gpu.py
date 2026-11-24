@@ -38,13 +38,14 @@ def encode_alignment(msa_fasta: Path, mol_type: str = "dna") -> Tuple[List[str],
     records = read_fasta_records(msa_fasta)
     if not records:
         raise ValueError(f"MSA 文件为空: {msa_fasta}")
-    lengths = {len(r.seq) for r in records}
+    lengths = {len(r.seq) if r.seq is not None else 0 for r in records}
     if len(lengths) != 1:
         raise ValueError(f"MSA 序列长度不一致: {msa_fasta}")
 
-    ids = [r.id for r in records]
+    ids = [str(r.id or "") for r in records]
     n_seqs = len(records)
-    seq_len = len(records[0].seq)
+    first_seq = records[0].seq
+    seq_len = len(first_seq) if first_seq is not None else 0
 
     raw_bytes = np.frombuffer(
         b"".join(str(r.seq).upper().encode("ascii", errors="replace") for r in records),

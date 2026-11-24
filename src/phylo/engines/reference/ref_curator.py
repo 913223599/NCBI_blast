@@ -119,7 +119,8 @@ class PhageReferenceCurator:
                         continue
                     recs = read_fasta_records(fp)
                     for rec in recs:
-                        acc = rec.id.strip() if len(recs) > 1 else fp.stem
+                        raw_id = (rec.id or "").strip()
+                        acc = raw_id if (len(recs) > 1 and raw_id) else fp.stem
                         if acc in seen_acc:
                             continue
                         seen_acc.add(acc)
@@ -130,7 +131,7 @@ class PhageReferenceCurator:
                                 role="outgroup" if acc in manual_og_set else "neighbor",
                                 source="local_dir",
                                 selected=True,
-                                genome_length=len(rec.seq),
+                                genome_length=len(rec.seq) if rec.seq is not None else 0,
                                 local_path=str(fp.resolve()),
                             )
                         )

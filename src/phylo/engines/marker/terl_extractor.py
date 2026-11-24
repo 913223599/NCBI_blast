@@ -184,7 +184,7 @@ class TerlExtractor:
 
             tmp_faa = self.orf_cache_dir / f"{sha}.{threading.get_ident()}.tmp.faa"
             # 如果基因组较短 (< 20kb) 使用 -p meta 模式防止 prodigal 训练集不足报错
-            seq_len = sum(len(r.seq) for r in iter_fasta_records(fpath))
+            seq_len = sum(len(r.seq) if r.seq is not None else 0 for r in iter_fasta_records(fpath))
             mode_flag = "meta" if seq_len < 20000 else "single"
             runner = ProcessRunner(
                 cancel_event=self.cancel_event,

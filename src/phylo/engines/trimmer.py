@@ -33,7 +33,8 @@ def _compute_alignment_stats(fasta_path: Path) -> Tuple[int, int, int, float]:
     if not records:
         return 0, 0, 0, 0.0
     n_seqs = len(records)
-    n_cols = len(records[0].seq)
+    first_seq = records[0].seq
+    n_cols = len(first_seq) if first_seq is not None else 0
     if n_cols == 0:
         return n_seqs, 0, 0, 0.0
 
@@ -71,12 +72,13 @@ class AlignmentTrimmer:
         if not records:
             raise ValueError(f"MSA 文件为空: {input_msa}")
 
-        lengths = {len(r.seq) for r in records}
+        lengths = {len(r.seq) if r.seq is not None else 0 for r in records}
         if len(lengths) != 1:
             raise ValueError(f"输入文件未对齐（序列长度不一致）: {input_msa}")
 
         n_seqs = len(records)
-        n_cols = len(records[0].seq)
+        first_seq = records[0].seq
+        n_cols = len(first_seq) if first_seq is not None else 0
 
         mat = np.frombuffer(
             b"".join(str(r.seq).upper().encode("ascii", errors="replace") for r in records),
@@ -212,7 +214,8 @@ class AlignmentTrimmer:
     ) -> Tuple[Path, int]:
         records = read_fasta_records(input_msa)
         n_seqs = len(records)
-        n_cols = len(records[0].seq)
+        first_seq = records[0].seq
+        n_cols = len(first_seq) if first_seq is not None else 0
         mat = np.frombuffer(
             b"".join(str(r.seq).upper().encode("ascii", errors="replace") for r in records),
             dtype=np.uint8,

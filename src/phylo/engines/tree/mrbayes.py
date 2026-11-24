@@ -61,7 +61,8 @@ class MrBayesEngine:
         nex_file = mb_dir / "analysis.nex"
 
         datatype = "PROTEIN" if mol_type == "protein" else "DNA"
-        nchar = len(records[0].seq)
+        first_seq = records[0].seq
+        nchar = len(first_seq) if first_seq is not None else 0
         samplefreq = max(10, ngen // 200)
         printfreq = max(100, ngen // 20)
 

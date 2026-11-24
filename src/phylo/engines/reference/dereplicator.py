@@ -141,7 +141,7 @@ class PhageDereplicator:
         short_fallback: Set[str] = set()
         for idx, acc in enumerate(unprotected, start=1):
             fpath = genome_paths[acc]
-            seq_len = sum(len(r.seq) for r in iter_fasta_records(fpath))
+            seq_len = sum(len(r.seq) if r.seq is not None else 0 for r in iter_fasta_records(fpath))
             if seq_len < min_length:
                 # 保留太短但未被 dRep -l 过滤导致全军覆没的边界情况记入日志
                 short_fallback.add(acc)

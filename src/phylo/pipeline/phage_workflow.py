@@ -120,7 +120,8 @@ def run_ani_screening(
             if fp.is_file() and fp.suffix.lower() in (".fasta", ".fas", ".fa", ".fna"):
                 recs = read_fasta_records(fp)
                 for rec in recs:
-                    acc = rec.id.strip() if len(recs) > 1 else fp.stem
+                    raw_id = (rec.id or "").strip()
+                    acc = raw_id if (len(recs) > 1 and raw_id) else fp.stem
                     if acc not in {c.accession for c in screen_cands}:
                         screen_cands.append(
                             ReferenceCandidate(
@@ -129,7 +130,7 @@ def run_ani_screening(
                                 role="neighbor",
                                 source="local_dir",
                                 selected=True,
-                                genome_length=len(rec.seq),
+                                genome_length=len(rec.seq) if rec.seq is not None else 0,
                                 local_path=str(fp.resolve()),
                             )
                         )
@@ -655,7 +656,8 @@ class PhageTaxonomyWorkflow:
                 delivery_msa_path = job_dir / "trimmed_alignment_named.fasta"
                 with open(delivery_msa_path, "w", encoding="utf-8", newline="\n") as dfh:
                     for r in iter_fasta_records(trimmed_msa_path):
-                        orig_name = s2o.get(r.id, r.id)
+                        rid = str(r.id or "")
+                        orig_name = s2o.get(rid, rid)
                         dfh.write(f">{orig_name}\n{str(r.seq)}\n")
             else:
                 delivery_msa_path = trimmed_msa_path

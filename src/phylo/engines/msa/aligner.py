@@ -68,7 +68,7 @@ class MultiSequenceAligner:
 
         if tool == "none":
             records = read_fasta_records(input_fasta)
-            lengths = {len(r.seq) for r in records}
+            lengths = {len(r.seq) if r.seq is not None else 0 for r in records}
             if len(lengths) != 1:
                 raise InvalidInputError(
                     "您选择了 [无需比对]，但输入序列长度不一致，无法直接建树，请选择 MAFFT/MUSCLE 比对或切换全基因组 Mash 模式。"
@@ -210,6 +210,6 @@ class MultiSequenceAligner:
         records = read_fasta_records(output_fasta)
         if len(records) < 3:
             raise PhyloError(f"{engine_name} 输出序列不足 3 条。")
-        lengths = {len(r.seq) for r in records}
+        lengths = {len(r.seq) if r.seq is not None else 0 for r in records}
         if len(lengths) != 1:
             raise PhyloError(f"{engine_name} 输出序列长度未对齐，请检查输入数据。")
