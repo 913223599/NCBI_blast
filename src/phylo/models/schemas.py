@@ -15,6 +15,7 @@ MarkerModeType = Literal["terl", "proteome"]
 TreeEngineType = Literal["nj", "bionj", "fasttree", "iqtree", "mrbayes"]
 JobStatusType = Literal["pending", "running", "completed", "failed", "cancelled"]
 StageStatusType = Literal["pending", "running", "completed", "cached", "skipped", "failed", "cancelled"]
+LabelFormatType = Literal["name_acc", "name", "accession"]
 
 
 class DeliveryScopeConfig(BaseModel):
@@ -88,6 +89,7 @@ class ReferenceCandidate(BaseModel):
 
     accession: str
     name: str = ""
+    description: str = ""
     role: Literal["query", "ictv_rep", "neighbor", "outgroup"] = "neighbor"
     source: Literal["workspace", "inphared_cache", "ncbi_download", "local_dir"] = "inphared_cache"
     selected: bool = True
@@ -248,6 +250,7 @@ class PhyloJobConfig(BaseModel):
     marker_mode: MarkerModeType = "terl"
     ani_engine: AniEngineType = "viridic_blastn"
     selected_references: List[ReferenceCandidate] = Field(default_factory=list)
+    precomputed_ani_result: Optional[AniScreenResult] = None
 
 
 class StageState(BaseModel):
@@ -323,3 +326,68 @@ class PhyloJobRecord(BaseModel):
     marker_report: Optional[MarkerExtractionReport] = None
     qc_report: Optional[DeliveryQcReport] = None
     node_metadata: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+
+PublicationLayoutType = Literal["circular", "rectangular"]
+PublicationFormatType = Literal["pdf", "svg", "png"]
+PublicationSupportStyle = Literal["dots", "text", "both", "none"]
+ItolExportFormatType = Literal["pdf", "svg", "png", "eps"]
+ItolDisplayModeType = Literal["rectangular", "circular", "unrooted"]
+
+
+class PublicationFigureRequest(BaseModel):
+    """方案 C：离线本地出版级进化树渲染请求参数。"""
+
+    layout: PublicationLayoutType = "circular"
+    formats: List[PublicationFormatType] = Field(default_factory=lambda: ["pdf", "svg", "png"])
+    dpi: int = Field(default=300, ge=150, le=600)
+    use_branch_lengths: bool = True
+    support_style: PublicationSupportStyle = "dots"
+    show_genus_strip: bool = True
+    show_genome_length: bool = True
+    show_gc_bar: bool = True
+    ladderize: bool = True
+    label_format: LabelFormatType = "name_acc"
+    title: Optional[str] = None
+
+
+class PublicationFigureItem(BaseModel):
+    """单个已生成的出版级图件元信息。"""
+
+    filename: str
+    format: str
+    layout: str
+    size_bytes: int
+    download_url: str
+
+
+class PublicationRenderResponse(BaseModel):
+    """离线出版级渲染结果返回。"""
+
+    job_id: str
+    layout: str
+    figures: List[PublicationFigureItem] = Field(default_factory=list)
+
+
+class ItolPullRequest(BaseModel):
+    """方案 B：从免费官方 iTOL batch_downloader.cgi 拉取出图参数。"""
+
+    tree_id_or_url: str
+    format: ItolExportFormatType = "pdf"
+    display_mode: ItolDisplayModeType = "circular"
+    bootstrap_display: bool = True
+    ignore_branch_length: bool = False
+    datasets_visible: str = ""
+    dpi: int = Field(default=300, ge=150, le=600)
+
+
+class ItolPullResponse(BaseModel):
+    """iTOL 导出拉取完成响应。"""
+
+    job_id: str
+    tree_id: str
+    filename: str
+    format: str
+    size_bytes: int
+    download_url: str
+    itol_tree_url: str

@@ -122,6 +122,7 @@ function startPythonSidecar() {
         env: {
             ...process.env,
             PYTHONPATH: PROJECT_ROOT,
+            PYTHONUTF8: '1',
             PYTHONIOENCODING: 'utf-8',
             PYTHONLEGACYWINDOWSSTDIO: 'utf-8',
             PATH: process.env.PATH

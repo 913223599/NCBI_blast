@@ -28,7 +28,7 @@ def extract_records_from_files(file_paths: List[Path]) -> List[Tuple[str, str]]:
     from Bio import SeqIO
     from src.utils.universal_parser import UniversalParser
 
-    direct_fasta_exts = {".fasta", ".fas", ".fa", ".fna"}
+    direct_fasta_exts = {".fasta", ".fas", ".fa", ".fna", ".faa"}
     per_file_entries: List[Tuple[str, List[Tuple[str, str]]]] = []
 
     for path in file_paths:
@@ -64,7 +64,9 @@ def extract_records_from_files(file_paths: List[Path]) -> List[Tuple[str, str]]:
     for stem, file_records in per_file_entries:
         if len(file_records) == 1:
             seq_id, seq = file_records[0]
-            if seq_id.lower() in stem.lower():
+            low_id = seq_id.lower()
+            is_generic_contig = low_id.startswith(("node_", "contig", "scaffold"))
+            if low_id in stem.lower() or is_generic_contig:
                 records.append((stem, seq))
             elif len(per_file_entries) >= 2 and single_file_id_counts[seq_id] > 1:
                 records.append((f"{stem}_{seq_id}", seq))

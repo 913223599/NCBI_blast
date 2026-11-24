@@ -7,6 +7,7 @@ import type {
   AniScreenResult,
   CapabilitiesResponse,
   DeliveryScopeConfig,
+  NodeMetadata,
   PhyloJobConfig,
   PhyloJobRecord,
   ReferenceCandidate,
@@ -103,6 +104,7 @@ export const usePhyloStore = defineStore('phylo', () => {
     layout: 'rect',
     useBranchLengths: true,
     showLabels: true,
+    labelFormat: 'name_acc',
     showSupport: true,
     supportThreshold: 50,
     fontSize: 13,
@@ -168,6 +170,29 @@ export const usePhyloStore = defineStore('phylo', () => {
     }
   }
 
+  function mergeNodeMetadata(
+    prevMap?: Record<string, NodeMetadata>,
+    nextMap?: Record<string, NodeMetadata>
+  ): Record<string, NodeMetadata> | undefined {
+    if (!prevMap && !nextMap) return undefined
+    const merged: Record<string, NodeMetadata> = {}
+    for (const [k, v] of Object.entries(prevMap || {})) {
+      merged[k] = { ...v }
+    }
+    for (const [k, v] of Object.entries(nextMap || {})) {
+      const cur = merged[k] || {}
+      merged[k] = {
+        ...cur,
+        ...v,
+        description: v.description || cur.description,
+        genus: v.genus || cur.genus,
+        family: v.family || cur.family,
+        host: v.host || cur.host,
+      }
+    }
+    return merged
+  }
+
   function loadNewickIntoViewer(
     newick: string,
     job: PhyloJobRecord | null = null,
@@ -179,8 +204,14 @@ export const usePhyloStore = defineStore('phylo', () => {
       appStore.showNotification('Newick 格式解析失败', 'error')
       return
     }
-    if (job?.node_metadata) {
-      model.applyNodeMetadata(job.node_metadata)
+    const prevSameJobMeta =
+      job && currentJob.value?.job_id === job.job_id ? currentJob.value.node_metadata : undefined
+    const effectiveMeta = mergeNodeMetadata(prevSameJobMeta, job?.node_metadata)
+    if (job && effectiveMeta) {
+      job.node_metadata = effectiveMeta
+    }
+    if (effectiveMeta) {
+      model.applyNodeMetadata(effectiveMeta)
     }
     if (visual.sortMode !== 'original') {
       model.applySorting(visual.sortMode)
@@ -493,6 +524,7 @@ export const usePhyloStore = defineStore('phylo', () => {
         selected_references: referenceCandidates.value.length
           ? referenceCandidates.value.map((r) => ({ ...r }))
           : [],
+        precomputed_ani_result: aniResult.value || null,
       }
       const job = await phyloApi.submitJob(payload)
       if (!terminatedJobIds.has(job.job_id)) {

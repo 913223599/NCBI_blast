@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import requests
-from Bio import SeqIO
 
+from ...core.fasta_io import iter_fasta_records, read_fasta_records
 from ...models.errors import PhyloCancelledError
 from ...models.schemas import AniScreenResult, DeliveryScopeConfig, ReferenceCandidate
 from ...runtime.process_runner import ProcessRunner
@@ -114,7 +114,7 @@ class PhageReferenceCurator:
                 for fp in sorted(local_dir.iterdir()):
                     if not fp.is_file() or fp.suffix.lower() not in (".fasta", ".fas", ".fa", ".fna"):
                         continue
-                    recs = list(SeqIO.parse(str(fp), "fasta"))
+                    recs = read_fasta_records(fp)
                     for rec in recs:
                         acc = rec.id.strip() if len(recs) > 1 else fp.stem
                         if acc in seen_acc:
@@ -152,6 +152,7 @@ class PhageReferenceCurator:
                     ReferenceCandidate(
                         accession=og_acc,
                         name=f"{og_acc} ({meta.genus})" if meta and meta.genus else og_acc,
+                        description=meta.description if meta else "",
                         role="outgroup",
                         source="inphared_cache" if (self.cache_dir / f"{_safe_acc(og_acc)}.fasta").is_file() else "ncbi_download",
                         selected=True,
@@ -181,6 +182,7 @@ class PhageReferenceCurator:
                     ReferenceCandidate(
                         accession=rep.accession,
                         name=f"{rep.accession} ({rep.genus})" if rep.genus else rep.accession,
+                        description=rep.description,
                         role="ictv_rep",
                         source="inphared_cache" if (self.cache_dir / f"{_safe_acc(rep.accession)}.fasta").is_file() else "ncbi_download",
                         selected=True,
@@ -206,6 +208,7 @@ class PhageReferenceCurator:
                     ReferenceCandidate(
                         accession=hit.accession,
                         name=f"{hit.accession} ({hit.genus})" if hit.genus else hit.accession,
+                        description=hit.description,
                         role="ictv_rep" if is_rep else "neighbor",
                         source="inphared_cache" if (self.cache_dir / f"{_safe_acc(hit.accession)}.fasta").is_file() else "ncbi_download",
                         selected=True,
@@ -341,10 +344,14 @@ class PhageReferenceCurator:
         cv_dir = work_dir / "checkv_run"
         cv_dir.mkdir(parents=True, exist_ok=True)
         combined = cv_dir / "refs_for_checkv.fasta"
+        # 为 check_targets 建立纯 ASCII 临时键映射，避免本地中文/特殊字符样本名干扰 CheckV TSV 解析
+        target_to_ascii: Dict[str, str] = {acc: f"CV{idx:04d}" for idx, acc in enumerate(check_targets, start=1)}
+        ascii_to_target: Dict[str, str] = {v: k for k, v in target_to_ascii.items()}
         with open(combined, "w", encoding="utf-8", newline="\n") as out_fh:
             for acc in check_targets:
-                for rec in SeqIO.parse(str(genome_paths[acc]), "fasta"):
-                    out_fh.write(f">{acc}\n{str(rec.seq)}\n")
+                ascii_id = target_to_ascii[acc]
+                for rec in iter_fasta_records(genome_paths[acc]):
+                    out_fh.write(f">{ascii_id}\n{str(rec.seq)}\n")
                     break
 
         safe_threads = get_safe_cpu_budget(threads)
@@ -374,7 +381,8 @@ class PhageReferenceCurator:
                 except ValueError:
                     comp = 0.0
                 if cid:
-                    comp_map[cid] = comp
+                    orig_acc = ascii_to_target.get(cid, cid)
+                    comp_map[orig_acc] = comp
 
         filtered = dict(genome_paths)
         dropped: List[str] = []

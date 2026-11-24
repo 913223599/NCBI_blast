@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { usePhyloStore } from '../stores/usePhyloStore'
 import { phyloApi } from '../api/phyloApi'
+import PublicationExportCard from './PublicationExportCard.vue'
 
 const store = usePhyloStore()
 
@@ -43,6 +44,18 @@ function downloadFormat(fmt: 'newick' | 'distance_csv' | 'report_json' | 'delive
         <input type="checkbox" v-model="store.visual.showLabels" />
         <span>显示样本名称标签</span>
       </label>
+    </div>
+
+    <div class="form-group" v-if="store.visual.showLabels">
+      <label>叶节点标签格式</label>
+      <select v-model="store.visual.labelFormat" class="neo-select">
+        <option value="name_acc">实际名称 (登录号) [发表标准]</option>
+        <option value="name">仅实际名称</option>
+        <option value="accession">仅登录号</option>
+      </select>
+    </div>
+
+    <div class="check-col">
       <label class="chk">
         <input type="checkbox" v-model="store.visual.showSupport" />
         <span>显示内部节点支持率 (支持双支持值)</span>
@@ -116,6 +129,8 @@ function downloadFormat(fmt: 'newick' | 'distance_csv' | 'report_json' | 'delive
         >完整交付 ZIP</button>
       </div>
     </div>
+
+    <PublicationExportCard />
   </div>
 </template>
 

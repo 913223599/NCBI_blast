@@ -131,6 +131,7 @@ export interface DeliveryQcReport {
 
 export interface NodeMetadata {
   role?: 'query' | 'ictv_rep' | 'neighbor' | 'outgroup'
+  description?: string
   genus?: string
   family?: string
   host?: string
@@ -223,6 +224,7 @@ export interface PhyloJobConfig {
   marker_mode: MarkerModeType
   ani_engine: AniEngineType
   selected_references: ReferenceCandidate[]
+  precomputed_ani_result?: AniScreenResult | null
 }
 
 export interface StageState {
@@ -292,11 +294,13 @@ export interface PhyloJobRecord {
 
 export type LayoutMode = 'rect' | 'circular' | 'unrooted'
 export type SortMode = 'original' | 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance'
+export type LabelFormatType = 'name_acc' | 'name' | 'accession'
 
 export interface TreeVisualSettings {
   layout: LayoutMode
   useBranchLengths: boolean
   showLabels: boolean
+  labelFormat: LabelFormatType
   showSupport: boolean
   supportThreshold: number
   fontSize: number
@@ -305,4 +309,58 @@ export interface TreeVisualSettings {
   searchQuery: string
   showMetadataStrips: boolean
   highlightStrongUfboot: boolean
+}
+
+export type PublicationLayoutType = 'circular' | 'rectangular'
+export type PublicationFormatType = 'pdf' | 'svg' | 'png'
+export type PublicationSupportStyle = 'dots' | 'text' | 'both' | 'none'
+export type ItolExportFormatType = 'pdf' | 'svg' | 'png' | 'eps'
+export type ItolDisplayModeType = 'rectangular' | 'circular' | 'unrooted'
+
+export interface PublicationFigureRequest {
+  layout: PublicationLayoutType
+  formats: PublicationFormatType[]
+  dpi: number
+  use_branch_lengths: boolean
+  support_style: PublicationSupportStyle
+  show_genus_strip: boolean
+  show_genome_length: boolean
+  show_gc_bar: boolean
+  ladderize: boolean
+  label_format: LabelFormatType
+  title?: string | null
+}
+
+export interface PublicationFigureItem {
+  filename: string
+  format: string
+  layout: string
+  size_bytes: number
+  download_url: string
+}
+
+export interface PublicationRenderResponse {
+  job_id: string
+  layout: string
+  figures: PublicationFigureItem[]
+}
+
+export interface ItolPullRequest {
+  tree_id_or_url: string
+  format: ItolExportFormatType
+  display_mode: ItolDisplayModeType
+  bootstrap_display: boolean
+  ignore_branch_length: boolean
+  datasets_visible: string
+  dpi: number
+}
+
+export interface ItolPullResponse {
+  job_id: string
+  tree_id: string
+  filename: string
+  format: string
+  size_bytes: number
+  download_url: string
+  itol_tree_url: string
 }

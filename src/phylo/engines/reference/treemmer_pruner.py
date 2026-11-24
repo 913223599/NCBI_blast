@@ -11,6 +11,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set, Tuple
 
+from ...core.fasta_io import iter_fasta_records
 from ...models.schemas import ReferenceCandidate
 from ...runtime.process_runner import ProcessRunner
 from ...runtime.tool_registry import get_tool_registry
@@ -82,17 +83,19 @@ class TreemmerPruner:
         if len(protected) >= target_count:
             target_count = len(protected) + 5
 
-        # 1. 构建快速 Mash + BioNJ 引导树
+        # 1. 构建快速 Mash + BioNJ 引导树（统一使用纯 ASCII 短键避免中文/特殊字符在 Mash/Newick/Treemmer CLI 中截断）
+        acc_to_ascii: Dict[str, str] = {acc: f"TM{idx:04d}" for idx, acc in enumerate(genome_paths, start=1)}
+        ascii_to_acc: Dict[str, str] = {v: k for k, v in acc_to_ascii.items()}
+        protected_ascii: Set[str] = {acc_to_ascii[a] for a in protected if a in acc_to_ascii}
+
         pruner_dir = work_dir / "treemmer_guide"
         pruner_dir.mkdir(parents=True, exist_ok=True)
         combined = pruner_dir / "guide_genomes.fasta"
         with open(combined, "w", encoding="utf-8", newline="\n") as out_fh:
             for acc, fpath in genome_paths.items():
-                from Bio import SeqIO
-
-                seq_parts = [str(r.seq).strip().upper() for r in SeqIO.parse(str(fpath), "fasta")]
+                seq_parts = [str(r.seq).strip().upper() for r in iter_fasta_records(fpath)]
                 merged = "".join(seq_parts)
-                out_fh.write(f">{acc}\n")
+                out_fh.write(f">{acc_to_ascii[acc]}\n")
                 for pos in range(0, len(merged), 80):
                     out_fh.write(merged[pos : pos + 80] + "\n")
 
@@ -109,10 +112,11 @@ class TreemmerPruner:
         # 2. 若外部 Treemmer CLI 可用则调用
         treemmer_desc = self.registry.get("treemmer")
         if treemmer_desc.available:
-            cli_kept = self._try_run_treemmer_cli(
-                treemmer_desc.path, guide_nwk, protected, pruner_dir, target_count
+            cli_kept_ascii = self._try_run_treemmer_cli(
+                treemmer_desc.path, guide_nwk, protected_ascii, pruner_dir, target_count
             )
-            if cli_kept is not None:
+            if cli_kept_ascii is not None:
+                cli_kept = {ascii_to_acc[k] for k in cli_kept_ascii if k in ascii_to_acc}
                 kept = {acc: genome_paths[acc] for acc in genome_paths if acc in cli_kept}
                 for acc, cand in cand_map.items():
                     if acc in genome_paths and acc not in cli_kept:
@@ -125,7 +129,8 @@ class TreemmerPruner:
                 }
 
         # 3. 执行纯 Python 迭代修剪等效算法
-        kept_accs = self.prune_newick_leaves(nwk_text, target_count=target_count, protected=protected)
+        kept_ascii = self.prune_newick_leaves(nwk_text, target_count=target_count, protected=protected_ascii)
+        kept_accs = {ascii_to_acc[k] for k in kept_ascii if k in ascii_to_acc}
         kept = {acc: genome_paths[acc] for acc in genome_paths if acc in kept_accs}
         for acc, cand in cand_map.items():
             if acc in genome_paths and acc not in kept_accs:

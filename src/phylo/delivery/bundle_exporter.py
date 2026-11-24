@@ -29,6 +29,7 @@ class DeliveryBundleExporter:
         treefile_path: Optional[Path],
         itol_dir: Path,
         commands_used: List[str],
+        figures_dir: Optional[Path] = None,
     ) -> Path:
         delivery_dir = job_dir / "delivery"
         delivery_dir.mkdir(parents=True, exist_ok=True)
@@ -142,6 +143,11 @@ class DeliveryBundleExporter:
             for fp in sorted(itol_dir.iterdir()):
                 if fp.is_file():
                     files_to_pack[f"itol/{fp.name}"] = fp
+
+        if figures_dir and figures_dir.is_dir():
+            for fp in sorted(figures_dir.iterdir()):
+                if fp.is_file() and fp.suffix.lower() in (".pdf", ".svg", ".png", ".eps"):
+                    files_to_pack[f"figures/{fp.name}"] = fp
 
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for arc_name, src_path in files_to_pack.items():

@@ -9,8 +9,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional
 
-from Bio import SeqIO
-
+from ...core.fasta_io import read_fasta_records
 from ...models.errors import PhyloCancelledError, PhyloError, ToolUnavailableError
 from ...runtime.process_runner import ProcessRunner
 from ...runtime.resource_guard import get_safe_cpu_budget
@@ -105,7 +104,7 @@ class IQTreeEngine:
         if not desc.available:
             raise ToolUnavailableError("iqtree", f"IQ-TREE 不可用: {desc.notes}")
 
-        records = list(SeqIO.parse(str(msa_fasta), "fasta"))
+        records = read_fasta_records(msa_fasta)
         n_seqs = len(records)
         safe_threads = get_safe_cpu_budget(threads)
         resolved_model = self.resolve_model(model, mol_type)
@@ -198,10 +197,12 @@ class IQTreeEngine:
         iqtree_report = Path(f"{prefix}.iqtree")
         if iqtree_report.is_file():
             rep_text = iqtree_report.read_text(encoding="utf-8", errors="replace")
-            m_best = re.search(r"Best-fit model:\s*([^\s]+)", rep_text)
+            m_best = re.search(
+                r"(?:Best-fit model(?:\s+according to [A-Z]+)?|Model of substitution):\s*([^\s]+)",
+                rep_text,
+            )
             if m_best:
                 self.last_best_model = m_best.group(1).strip()
-                self._log(f"[IQ-TREE] 最佳替换模型: {self.last_best_model}")
             m_bic = re.search(
                 r"Bayesian information criterion \(BIC\) score:\s*([0-9.+\-eE]+)",
                 rep_text,
@@ -211,6 +212,9 @@ class IQTreeEngine:
                     self.last_best_model_bic = round(float(m_bic.group(1)), 2)
                 except ValueError:
                     pass
+            if self.last_best_model:
+                bic_note = f" (BIC={self.last_best_model_bic})" if self.last_best_model_bic is not None else ""
+                self._log(f"[IQ-TREE] 最佳替换模型: {self.last_best_model}{bic_note}")
             m_ll = re.search(
                 r"Log-likelihood of the tree:\s*([0-9.+\-eE]+)",
                 rep_text,

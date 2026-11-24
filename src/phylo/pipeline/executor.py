@@ -781,6 +781,8 @@ class PhyloJobExecutor:
                 self._active_jobs.pop(job_id, None)
 
     def reroot_saved_job(self, job_id: str, mode: str = "midpoint", node_name: Optional[str] = None) -> PhyloJobRecord:
+        from ..delivery.label_formatter import enrich_node_metadata
+
         record = self.store.get_job(job_id)
         if not record or not record.newick:
             raise InvalidInputError(f"未找到可重定根的任务结果: {job_id}")
@@ -791,8 +793,20 @@ class PhyloJobExecutor:
         else:
             raise InvalidInputError("重定根参数无效，需指定 midpoint 或 outgroup + node_name")
 
+        best_model = (record.metrics.best_model if record.metrics else None) or record.artifacts.get("best_model")
+        best_model_bic = (
+            record.metrics.best_model_bic
+            if record.metrics and record.metrics.best_model_bic is not None
+            else record.artifacts.get("best_model_bic")
+        )
         record.newick = updated
-        record.metrics = compute_tree_metrics(updated)
+        record.metrics = compute_tree_metrics(
+            updated,
+            best_model=best_model,
+            best_model_bic=best_model_bic,
+        )
+        if record.node_metadata:
+            record.node_metadata = enrich_node_metadata(record.node_metadata)
         nwk_path = Path(record.job_dir) / "final_tree.nwk"
         if nwk_path.parent.exists():
             nwk_path.write_text(updated + "\n", encoding="utf-8")

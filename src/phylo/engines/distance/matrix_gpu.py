@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
-from Bio import SeqIO
 
+from ...core.fasta_io import read_fasta_records
 from ...models.errors import PhyloCancelledError
 from ...runtime.resource_guard import GpuGuard
 
@@ -35,7 +35,7 @@ EPSILON = 1e-9
 
 def encode_alignment(msa_fasta: Path, mol_type: str = "dna") -> Tuple[List[str], np.ndarray]:
     """将已对齐的 FASTA 文件编码为 (N, L) 整数数组，有效字符为 0..K-1，缺口/未知为 -1。"""
-    records = list(SeqIO.parse(str(msa_fasta), "fasta"))
+    records = read_fasta_records(msa_fasta)
     if not records:
         raise ValueError(f"MSA 文件为空: {msa_fasta}")
     lengths = {len(r.seq) for r in records}

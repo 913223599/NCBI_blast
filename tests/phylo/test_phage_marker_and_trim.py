@@ -87,3 +87,51 @@ def test_dual_support_metrics_and_outgroup_placement():
     m2 = compute_tree_metrics(rerooted)
     assert m2.has_dual_support is True
     assert m2.leaf_count == 4
+
+
+def test_iqtree3_report_regex_and_faa_clean_parsing(tmp_path: Path):
+    import re
+    from src.phylo.core.profiler import extract_records_from_files
+    from src.phylo.delivery.qc_auditor import PhageDeliveryQcAuditor
+    from src.phylo.models.schemas import AniHitRecord
+
+    # 1. IQ-TREE 3.1.1 .iqtree 行格式正则验证
+    rep_sample = (
+        "Best-fit model according to BIC: LG+I+R2\n"
+        "Bayesian information criterion (BIC) score: 15545.4122\n"
+    )
+    m_best = re.search(
+        r"(?:Best-fit model(?:\s+according to [A-Z]+)?|Model of substitution):\s*([^\s]+)",
+        rep_sample,
+    )
+    m_bic = re.search(
+        r"Bayesian information criterion \(BIC\) score:\s*([0-9.+\-eE]+)",
+        rep_sample,
+    )
+    assert m_best is not None and m_best.group(1) == "LG+I+R2"
+    assert m_bic is not None and round(float(m_bic.group(1)), 2) == 15545.41
+
+    # 2. .faa 文件提取不得附加 terl_proteins:: 前缀，且通用 NODE_ 装配头应采用文件名
+    faa = tmp_path / "terl_proteins.faa"
+    faa.write_text(">T5-E1\nMKTLLVAV\n>NC_001\nMKTLIVAV\n", encoding="utf-8")
+    recs = extract_records_from_files([faa])
+    assert [r[0] for r in recs] == ["T5-E1", "NC_001"]
+
+    contig_fa = tmp_path / "附件2霍氏肠杆菌噬菌体2基因组序列.fasta"
+    contig_fa.write_text(">NODE_1_length_72566_cov_126.27\nATGCTAGC\n", encoding="utf-8")
+    recs_cn = extract_records_from_files([contig_fa])
+    assert recs_cn[0][0] == "附件2霍氏肠杆菌噬菌体2基因组序列"
+
+    # 3. 英文学术结论绝不混入中文字符
+    _zh, en = PhageDeliveryQcAuditor._draft_taxonomic_statements(
+        primary_q="T5-E1",
+        ani_top=AniHitRecord(accession="MZ501054", wg_ani=100.0, af_query=100.0, af_ref=100.0, genus="Vequintavirus"),
+        sisters=["NC_001"],
+        sister_genera=["Vequintavirus"],
+        q_alrt=None,
+        q_uf=None,
+        best_model="LG+I+R2",
+        marker_mode="terl",
+        consistent=True,
+    )
+    assert not any("\u4e00" <= ch <= "\u9fff" for ch in en)

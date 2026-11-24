@@ -216,6 +216,7 @@ class ProcessRunner:
 
         env = os.environ.copy()
         env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
         if env_extra:
             env.update(env_extra)
 

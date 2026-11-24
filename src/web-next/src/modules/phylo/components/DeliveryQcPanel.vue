@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useAppStore } from '../../../stores/app'
 import { phyloApi } from '../api/phyloApi'
 import { usePhyloStore } from '../stores/usePhyloStore'
+import PublicationExportCard from './PublicationExportCard.vue'
 
 const emit = defineEmits<{
   (e: 'back-to-refs'): void
@@ -88,6 +89,9 @@ function downloadItol(filename: string) {
         </div>
         <div class="st-text">{{ qc.conclusion_en }}</div>
       </div>
+
+      <!-- 方案 C 离线出版级矢量图 + 方案 B 官方 iTOL 免费联动 -->
+      <PublicationExportCard />
 
       <!-- iTOL 注释模板逐项下载 -->
       <div v-if="qc.itol_files.length" class="itol-box">

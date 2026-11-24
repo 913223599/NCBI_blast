@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-from Bio import SeqIO
 
+from ...core.fasta_io import iter_fasta_records
 from ...models.errors import PhyloCancelledError, PhyloError, ToolUnavailableError
 from ...runtime.process_runner import ProcessRunner
 from ...runtime.resource_guard import get_safe_cpu_budget
@@ -74,7 +74,7 @@ class MashDistanceEngine:
             raise ToolUnavailableError("mash", f"未找到可用的 Mash 工具: {desc.notes}")
 
         safe_threads = get_safe_cpu_budget(threads)
-        ids = [rec.id for rec in SeqIO.parse(str(sanitized_fasta), "fasta")]
+        ids = [rec.id for rec in iter_fasta_records(sanitized_fasta)]
         n_seqs = len(ids)
         if n_seqs < 3:
             raise PhyloError("Mash 至少需要 3 条有效序列。")

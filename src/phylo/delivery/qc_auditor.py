@@ -12,7 +12,6 @@ from ..models.schemas import (
     ReferenceCandidate,
     TreeMetrics,
 )
-from ..pipeline.postprocess import check_outgroup_placement, find_sister_taxa
 
 
 class PhageDeliveryQcAuditor:
@@ -72,6 +71,8 @@ class PhageDeliveryQcAuditor:
             c2_obs = "未指定外群"
             c2_exp = "树中必须包含亲缘较近且明确在目标类群之外的外群，否则拓扑难以定向。"
         else:
+            from ..pipeline.postprocess import check_outgroup_placement
+
             og_ok, og_msg = check_outgroup_placement(newick, outgroups)
             c2_status = "pass" if og_ok else "warn"
             c2_obs = ", ".join(outgroups)
@@ -140,6 +141,8 @@ class PhageDeliveryQcAuditor:
         )
 
         # 检查项 5: 双支持值 (UFBoot >= 95 & SH-aLRT)
+        from ..pipeline.postprocess import find_sister_taxa
+
         primary_q = queries[0] if queries else ""
         sisters, q_alrt, q_uf = find_sister_taxa(newick, primary_q) if primary_q else ([], None, None)
         if metrics.has_dual_support:
@@ -149,11 +152,15 @@ class PhageDeliveryQcAuditor:
                 f"均值 SH-aLRT={metrics.mean_alrt}% / UFBoot={metrics.mean_support}% "
                 f"(UFBoot>=95 节点占比 {metrics.strong_ufboot_ratio}%)"
             )
-            c5_exp = (
-                f"目标株所在分枝双支持值为 SH-aLRT={q_alrt}% / UFBoot={q_uf}% (>=95 强支持)。"
-                if uf_strong
-                else f"已记录双支持值，但目标株所在分枝支持值偏低 (SH-aLRT={q_alrt}% / UFBoot={q_uf}% < 95)，提示该处系统发育信号可能受噬菌体基因嵌合或采样稀疏影响。"
-            )
+            if q_uf is None:
+                c5_exp = "已完整记录全树 SH-aLRT / UFBoot 双支持值（目标株直连分支未带单节点支持率或为二歧基点）。"
+            elif uf_strong:
+                c5_exp = f"目标株所在分枝双支持值为 SH-aLRT={q_alrt}% / UFBoot={q_uf}% (>=95 强支持)。"
+            else:
+                c5_exp = (
+                    f"已记录双支持值，但目标株所在分枝支持值偏低 (SH-aLRT={q_alrt}% / UFBoot={q_uf}% < 95)，"
+                    "提示该处系统发育信号可能受噬菌体基因嵌合或采样稀疏影响。"
+                )
         elif metrics.mean_support is not None:
             c5_status = "warn"
             c5_obs = f"仅单支持值 (均值={metrics.mean_support}%)"
@@ -264,53 +271,58 @@ class PhageDeliveryQcAuditor:
     ) -> tuple[str, str]:
         marker_zh = "大末端酶亚基 (TerL)" if marker_mode == "terl" else "全基因组共享蛋白质组"
         marker_en = "large terminase subunit (TerL)" if marker_mode == "terl" else "whole-proteome shared similarity"
-        sup_txt = (
-            f"SH-aLRT/UFBoot = {q_alrt}/{q_uf}%"
-            if q_alrt is not None and q_uf is not None
-            else (f"UFBoot = {q_uf}%" if q_uf is not None else "高拓扑支持")
-        )
+        if q_alrt is not None and q_uf is not None:
+            sup_txt_zh = f"SH-aLRT/UFBoot = {q_alrt}/{q_uf}%"
+            sup_txt_en = f"SH-aLRT/UFBoot = {q_alrt}/{q_uf}%"
+        elif q_uf is not None:
+            sup_txt_zh = f"UFBoot = {q_uf}%"
+            sup_txt_en = f"UFBoot = {q_uf}%"
+        else:
+            sup_txt_zh = "拓扑关系一致"
+            sup_txt_en = "coherent clade placement"
         model_zh = f"（最优替换模型 {best_model}）" if best_model else ""
         model_en = f" under best-fit model {best_model}" if best_model else ""
 
         if ani_top is None:
-            zh = f"基于 {marker_zh} 系统发育分析{model_zh}，{primary_q} 与参考株 {', '.join(sisters[:2]) or '近邻分支'} 聚为一支（{sup_txt}）。建议结合全基因组 wgANI 数据进一步核定属/种边界。"
-            en = f"Phylogenetic analysis based on {marker_en}{model_en} placed {primary_q} sister to {', '.join(sisters[:2]) or 'nearest references'} ({sup_txt}). Whole-genome ANI comparison is recommended to finalize ICTV genus/species demarcation."
+            zh = f"基于 {marker_zh} 系统发育分析{model_zh}，{primary_q} 与参考株 {', '.join(sisters[:2]) or '近邻分支'} 聚为一支（{sup_txt_zh}）。建议结合全基因组 wgANI 数据进一步核定属/种边界。"
+            en = f"Phylogenetic analysis based on {marker_en}{model_en} placed {primary_q} sister to {', '.join(sisters[:2]) or 'nearest references'} ({sup_txt_en}). Whole-genome ANI comparison is recommended to finalize ICTV genus/species demarcation."
             return zh, en
 
         top_acc = ani_top.accession
         top_wg = ani_top.wg_ani
         top_af = min(ani_top.af_query, ani_top.af_ref)
-        genus_label = ani_top.genus or (sister_genera[0] if sister_genera else "最接近已知属")
+        genus_zh = ani_top.genus or (sister_genera[0] if sister_genera else "最接近已知属")
+        genus_en = ani_top.genus or (sister_genera[0] if sister_genera else "nearest classified genus")
 
         if top_wg >= 95.0:
             zh = (
                 f"基于 ICTV 噬菌体分类标准（同种 wgANI >= 95%），{primary_q} 与参考株 {top_acc}"
                 + (f"（属 {ani_top.genus}）" if ani_top.genus else "")
-                + f" 的全基因组相似性为 {top_wg:.2f}%（最低覆盖度 AF = {top_af:.1f}%），且在基于 {marker_zh} 的最大似然系统发育树{model_zh}中与之紧密聚类（{sup_txt}），建议归类为该已知种的新分离株。"
+                + f" 的全基因组相似性为 {top_wg:.2f}%（最低覆盖度 AF = {top_af:.1f}%），且在基于 {marker_zh} 的最大似然系统发育树{model_zh}中与之紧密聚类（{sup_txt_zh}），建议归类为该已知种的新分离株。"
             )
             en = (
                 f"Following ICTV Caudoviricetes demarcation criteria (>=95% wgANI for species), {primary_q} shares {top_wg:.2f}% intergenomic similarity (min AF = {top_af:.1f}%) with {top_acc}"
                 + (f" (genus {ani_top.genus})" if ani_top.genus else "")
-                + f" and forms a cohesive clade in the {marker_en} ML tree{model_en} ({sup_txt}), supporting assignment as an isolate of the same species."
+                + f" and forms a cohesive clade in the {marker_en} ML tree{model_en} ({sup_txt_en}), supporting assignment as an isolate of the same species."
             )
         elif top_wg >= 70.0:
             amb_note_zh = "（注：该数值接近 70% 属边界，已纳入邻近多属代表辅助界定边缘位置）" if abs(top_wg - 70.0) <= 5.0 else ""
             zh = (
-                f"基于全基因组 wgANI 分析，{primary_q} 与 {genus_label} 属代表 {top_acc} 相似性为 {top_wg:.2f}%（70%-95%，最低覆盖度 AF = {top_af:.1f}%）{amb_note_zh}；"
-                f"同时在基于 {marker_zh} 的系统发育树{model_zh}中稳健聚于该进化枝内（{sup_txt}），提示其为 {genus_label} 属下的候选新种。"
+                f"基于全基因组 wgANI 分析，{primary_q} 与 {genus_zh} 属代表 {top_acc} 相似性为 {top_wg:.2f}%（70%-95%，最低覆盖度 AF = {top_af:.1f}%）{amb_note_zh}；"
+                f"同时在基于 {marker_zh} 的系统发育树{model_zh}中稳健聚于该进化枝内（{sup_txt_zh}），提示其为 {genus_zh} 属下的候选新种。"
             )
             en = (
-                f"Based on whole-genome intergenomic similarity ({top_wg:.2f}%, 70%-95% range; min AF = {top_af:.1f}% against {top_acc}) and coherent clustering in the {marker_en} phylogeny{model_en} ({sup_txt}), "
-                f"{primary_q} is proposed as a candidate novel species within genus {genus_label}."
+                f"Based on whole-genome intergenomic similarity ({top_wg:.2f}%, 70%-95% range; min AF = {top_af:.1f}% against {top_acc}) and coherent clustering in the {marker_en} phylogeny{model_en} ({sup_txt_en}), "
+                f"{primary_q} is proposed as a candidate novel species within genus {genus_en}."
             )
         else:
             zh = (
-                f"基于全基因组 wgANI 分析，{primary_q} 与所有已分类属代表（最近为 {genus_label} 属 {top_acc}，wgANI = {top_wg:.2f}%，AF = {top_af:.1f}%）均低于 ICTV 70% 属级阈值；"
-                f"结合 {marker_zh} 系统发育分析{model_zh}中该基因组形成的独立深分支（{sup_txt}），建议其为候选新属。"
+                f"基于全基因组 wgANI 分析，{primary_q} 与所有已分类属代表（最近为 {genus_zh} 属 {top_acc}，wgANI = {top_wg:.2f}%，AF = {top_af:.1f}%）均低于 ICTV 70% 属级阈值；"
+                f"结合 {marker_zh} 系统发育分析{model_zh}中该基因组形成的独立深分支（{sup_txt_zh}），建议其为候选新属。"
             )
             en = (
                 f"Based on whole-genome intergenomic similarity (<70% ICTV genus threshold against all classified representatives; highest {top_wg:.2f}% with {top_acc}, min AF = {top_af:.1f}%) "
-                f"and the distinct lineage formed in the {marker_en} phylogeny{model_en} ({sup_txt}), {primary_q} is proposed as a representative of a candidate novel genus."
+                f"and the distinct lineage formed in the {marker_en} phylogeny{model_en} ({sup_txt_en}), {primary_q} is proposed as a representative of a candidate novel genus."
             )
 
         if not consistent:

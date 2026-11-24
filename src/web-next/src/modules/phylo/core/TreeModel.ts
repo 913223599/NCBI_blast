@@ -1,4 +1,32 @@
-import type { NodeMetadata, SortMode } from '../types/phylo'
+import type { LabelFormatType, NodeMetadata, SortMode } from '../types/phylo'
+
+const REDUNDANT_DESC_SUFFIX_RE =
+  /(?:,\s*(?:complete|partial)\s+(?:genome|cds|sequence)|\b(?:complete|partial)\s+(?:genome|cds|sequence))\s*\.?$/i
+
+export function cleanPhageDescription(desc?: string): string {
+  const txt = (desc || '').replace(/\s+/g, ' ').trim()
+  if (!txt) return ''
+  return txt.replace(REDUNDANT_DESC_SUFFIX_RE, '').replace(/[,;.\s]+$/, '').trim() || txt
+}
+
+export function formatNodeDisplayLabel(
+  node: Pick<PhyloTreeNode, 'name' | 'meta'>,
+  format: LabelFormatType = 'name_acc'
+): string {
+  const acc = (node.name || '').trim()
+  if (!acc) return 'unnamed'
+  if (format === 'accession' || node.meta?.role === 'query') {
+    return acc
+  }
+  const desc = cleanPhageDescription(node.meta?.description)
+  if (!desc || desc.toLowerCase() === acc.toLowerCase()) {
+    return acc
+  }
+  if (format === 'name') {
+    return desc
+  }
+  return desc.includes(acc) ? desc : `${desc} (${acc})`
+}
 
 const GENUS_PALETTE = [
   '#2563eb',
@@ -99,6 +127,7 @@ export class PhyloTreeModel {
   hasNodeMetadata = false
   maxGenomeLength = 0
   genusColors: Map<string, string> = new Map()
+  private metadataMap: Record<string, NodeMetadata> = {}
 
   parse(newick: string): PhyloTreeNode | null {
     const raw = (newick || '').trim()
@@ -206,6 +235,10 @@ export class PhyloTreeModel {
     this.root = parseNode(null, 0)
     this.collapsedIds.clear()
     this.cladeColors.clear()
+    this.metadataMap = {}
+    this.genusColors.clear()
+    this.hasNodeMetadata = false
+    this.maxGenomeLength = 0
     this.rebuildIndex()
     return this.root
   }
@@ -252,16 +285,19 @@ export class PhyloTreeModel {
     }
 
     walk(this.root, 0, 0, null)
+    if (Object.keys(this.metadataMap).length > 0) {
+      this.bindMetadataToNodes()
+    }
   }
 
-  applyNodeMetadata(metaMap: Record<string, NodeMetadata>): void {
+  private bindMetadataToNodes(): void {
     this.genusColors.clear()
     this.maxGenomeLength = 0
     let matched = 0
     let colorIdx = 0
     const walk = (node: PhyloTreeNode) => {
-      if (node.isLeaf && node.name && metaMap[node.name]) {
-        const m = metaMap[node.name]!
+      if (node.isLeaf && node.name && this.metadataMap[node.name]) {
+        const m = this.metadataMap[node.name]!
         node.meta = m
         matched++
         if (m.genome_length && m.genome_length > this.maxGenomeLength) {
@@ -277,6 +313,11 @@ export class PhyloTreeModel {
     }
     if (this.root) walk(this.root)
     this.hasNodeMetadata = matched > 0
+  }
+
+  applyNodeMetadata(metaMap: Record<string, NodeMetadata>): void {
+    this.metadataMap = { ...metaMap }
+    this.bindMetadataToNodes()
     this.version++
   }
 
@@ -374,18 +415,27 @@ export class PhyloTreeModel {
       const edgeLen = child.branchLength
       const childWasLeaf = child.children.length === 0
       const edgeSup = childWasLeaf ? null : child.support
+      const edgeAlrt = childWasLeaf ? null : child.alrt
+      const edgeUfboot = childWasLeaf ? null : child.ufboot
+      const edgeSupLabel = childWasLeaf ? '' : child.supportLabel
       const edgeName = childWasLeaf ? '' : child.name
       child.children.push(oldP)
       oldP.parent = child
       oldP.branchLength = edgeLen
       if (oldP.children.length > 0) {
         oldP.support = edgeSup
+        oldP.alrt = edgeAlrt
+        oldP.ufboot = edgeUfboot
+        oldP.supportLabel = edgeSupLabel
         oldP.name = edgeName
       }
       child.parent = null
       child.branchLength = 0
       if (!childWasLeaf) {
         child.support = null
+        child.alrt = null
+        child.ufboot = null
+        child.supportLabel = ''
         child.name = ''
       }
     }

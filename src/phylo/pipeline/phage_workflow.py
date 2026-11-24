@@ -19,10 +19,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..core.checkpoint import CheckpointManager, StageCache
+from ..core.fasta_io import iter_fasta_records, read_fasta_records
 from ..core.id_codec import IdCodec
 from ..core.profiler import SequenceProfiler
 from ..delivery.bundle_exporter import DeliveryBundleExporter
 from ..delivery.itol_generator import ItolTemplateGenerator
+from ..delivery.label_formatter import clean_phage_description, enrich_node_metadata
+from ..delivery.publication_renderer import PublicationTreeRenderer
 from ..delivery.qc_auditor import PhageDeliveryQcAuditor
 from ..engines.ani.inphared_index import InpharedRecord
 from ..engines.ani.mash_screener import MashScreener
@@ -43,6 +46,7 @@ from ..models.schemas import (
     DeliveryScopeConfig,
     PhyloJobConfig,
     PhyloJobRecord,
+    PublicationFigureRequest,
     ReferenceCandidate,
 )
 from .postprocess import compute_tree_metrics, reroot_midpoint, reroot_outgroup
@@ -112,11 +116,9 @@ def run_ani_screening(
         )
     # 若提供本地离线参考目录也纳入预判
     if scope.local_ref_dir and Path(scope.local_ref_dir).is_dir():
-        from Bio import SeqIO
-
         for fp in sorted(Path(scope.local_ref_dir).iterdir())[:20]:
             if fp.is_file() and fp.suffix.lower() in (".fasta", ".fas", ".fa", ".fna"):
-                recs = list(SeqIO.parse(str(fp), "fasta"))
+                recs = read_fasta_records(fp)
                 for rec in recs:
                     acc = rec.id.strip() if len(recs) > 1 else fp.stem
                     if acc not in {c.accession for c in screen_cands}:
@@ -236,33 +238,55 @@ class PhageTaxonomyWorkflow:
         norm_queries = [(qid, r[1]) for qid, r in zip(dedup_ids, records, strict=True)]
         commands_used: List[str] = []
 
-        # ─── Stage 1: ANI 快速预判 ──────────────────────────────────────────
+        # ─── Stage 1: ANI 快速预判 (若前端已运行预判且查询集一致则直接复用) ─────
         t1 = time.time()
-        stage_fn("ani_screen", "running", 12, "第 1 步：执行 INPHARED Mash 初筛与 VIRIDIC-wgANI 预判...")
         ani_dir = job_dir / "step1_ani"
-        ani_result = run_ani_screening(
-            query_records=norm_queries,
-            scope=scope,
-            ani_engine=cfg.ani_engine,
-            work_dir=ani_dir,
-            threads=cfg.threads,
-            cancel_event=cancel_ev,
-            on_log=log_fn,
-            set_runner=set_runner,
-        )
-        record.ani_result = ani_result
-        if ani_result.command_preview:
-            commands_used.append(ani_result.command_preview)
         ani_json_path = job_dir / "ani_screen.json"
-        ani_json_path.write_text(
-            json.dumps(ani_result.model_dump(), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        record.artifacts["ani_json"] = str(ani_json_path)
-        log_fn(f"[ANI 结论] {ani_result.summary_call}")
-        for w in ani_result.warnings:
-            log_fn(f"[ANI 提示] {w}")
-        stage_fn("ani_screen", "completed", 25, "ANI 预判完成", elapsed=time.time() - t1, artifact=str(ani_json_path))
+        pre = cfg.precomputed_ani_result
+        if pre is not None and set(pre.query_ids) == set(dedup_ids):
+            ani_result = pre
+            record.ani_result = ani_result
+            if ani_result.command_preview:
+                commands_used.append(ani_result.command_preview)
+            ani_json_path.write_text(
+                json.dumps(ani_result.model_dump(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            record.artifacts["ani_json"] = str(ani_json_path)
+            log_fn("[ANI 复用] 已直接复用第 1 步预判的 Mash + VIRIDIC-wgANI 矩阵，跳过重复全库扫描。")
+            stage_fn(
+                "ani_screen",
+                "cached",
+                25,
+                "已复用第 1 步 ANI 预判结果",
+                cached=True,
+                elapsed=time.time() - t1,
+                artifact=str(ani_json_path),
+            )
+        else:
+            stage_fn("ani_screen", "running", 12, "第 1 步：执行 INPHARED Mash 初筛与 VIRIDIC-wgANI 预判...")
+            ani_result = run_ani_screening(
+                query_records=norm_queries,
+                scope=scope,
+                ani_engine=cfg.ani_engine,
+                work_dir=ani_dir,
+                threads=cfg.threads,
+                cancel_event=cancel_ev,
+                on_log=log_fn,
+                set_runner=set_runner,
+            )
+            record.ani_result = ani_result
+            if ani_result.command_preview:
+                commands_used.append(ani_result.command_preview)
+            ani_json_path.write_text(
+                json.dumps(ani_result.model_dump(), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            record.artifacts["ani_json"] = str(ani_json_path)
+            log_fn(f"[ANI 结论] {ani_result.summary_call}")
+            for w in ani_result.warnings:
+                log_fn(f"[ANI 提示] {w}")
+            stage_fn("ani_screen", "completed", 25, "ANI 预判完成", elapsed=time.time() - t1, artifact=str(ani_json_path))
 
         if cancel_ev.is_set():
             raise PhyloCancelledError("任务在 ANI 预判后已取消")
@@ -441,8 +465,12 @@ class PhageTaxonomyWorkflow:
                 artifact=str(terl_faa),
             )
 
-            # 编解码短 ID 防止外链字符冲突
-            terl_records = SequenceProfiler.profile_files([terl_faa])[1]
+            # 编解码短 ID 防止外链字符冲突（直接读取纯净 FASTA 记录，避免被通用解析器追加文件名前缀）
+            terl_records = [
+                (str(rec.id).strip(), str(rec.seq).strip().upper())
+                for rec in iter_fasta_records(terl_faa)
+                if str(rec.id).strip() and str(rec.seq).strip()
+            ]
             sanitized_terl = job_dir / "sanitized_terl.fasta"
             id_map_path = job_dir / "id_map.json"
             _, codec = SequenceProfiler.write_sanitized_fasta(terl_records, sanitized_terl, id_map_path)
@@ -573,12 +601,13 @@ class PhageTaxonomyWorkflow:
             final_nwk, best_model=best_model, best_model_bic=best_model_bic
         )
 
-        # 生成节点元数据供前端渲染角色/宿主/属色带
+        # 生成节点元数据供前端渲染角色/宿主/属色带与发表级叶节点名称
         node_meta: Dict[str, Dict[str, Any]] = {}
         for c in candidates:
             if c.selected:
                 node_meta[c.accession] = {
                     "role": c.role,
+                    "description": clean_phage_description(c.description),
                     "genus": c.genus,
                     "family": c.family,
                     "host": c.host,
@@ -586,6 +615,7 @@ class PhageTaxonomyWorkflow:
                     "gc_content": c.gc_content,
                     "wg_ani": c.wg_ani,
                 }
+        node_meta = enrich_node_metadata(node_meta)
         record.node_metadata = node_meta
 
         # 生成 iTOL 注释模板文件
@@ -623,14 +653,57 @@ class PhageTaxonomyWorkflow:
             if id_map_file.is_file():
                 s2o = json.loads(id_map_file.read_text(encoding="utf-8"))
                 delivery_msa_path = job_dir / "trimmed_alignment_named.fasta"
-                from Bio import SeqIO
-
                 with open(delivery_msa_path, "w", encoding="utf-8", newline="\n") as dfh:
-                    for r in SeqIO.parse(str(trimmed_msa_path), "fasta"):
+                    for r in iter_fasta_records(trimmed_msa_path):
                         orig_name = s2o.get(r.id, r.id)
                         dfh.write(f">{orig_name}\n{str(r.seq)}\n")
             else:
                 delivery_msa_path = trimmed_msa_path
+
+        # 自动离线生成两套发表级矢量出图 (Circular + Rectangular: PDF/SVG/PNG)
+        figures_dir = job_dir / "figures"
+        pub_items: List[Dict[str, Any]] = []
+        subtitle_parts: List[str] = []
+        if best_model:
+            subtitle_parts.append(
+                f"Model: {best_model}" + (f" (BIC={best_model_bic})" if best_model_bic is not None else "")
+            )
+        if trim_stats and trim_stats.get("kept_cols"):
+            subtitle_parts.append(f"ClipKIT sites: {trim_stats.get('kept_cols')} (PI={trim_stats.get('parsimony_informative_sites', 0)})")
+        fig_subtitle = " | ".join(subtitle_parts)
+
+        for layout_mode in ("circular", "rectangular"):
+            try:
+                out_paths = PublicationTreeRenderer.render(
+                    newick=final_nwk,
+                    node_metadata=node_meta,
+                    out_dir=figures_dir,
+                    request=PublicationFigureRequest(
+                        layout=layout_mode,  # type: ignore[arg-type]
+                        formats=["pdf", "svg", "png"],
+                        dpi=300,
+                        support_style="dots",
+                        title=record.title,
+                    ),
+                    file_prefix="publication",
+                    subtitle=fig_subtitle,
+                )
+                for fp in out_paths:
+                    pub_items.append(
+                        {
+                            "filename": fp.name,
+                            "format": fp.suffix.lstrip(".").lower(),
+                            "layout": layout_mode,
+                            "size_bytes": fp.stat().st_size,
+                            "download_url": f"/api/phylo/jobs/{record.job_id}/export/figure/{fp.name}",
+                        }
+                    )
+            except Exception as exc:
+                log_fn(f"[PublicationFigure] {layout_mode} 离线出图跳过: {exc}")
+
+        if pub_items:
+            record.artifacts["figures_dir"] = str(figures_dir)
+            record.artifacts["publication_figures"] = pub_items
 
         zip_path = DeliveryBundleExporter.write_reports_and_pack(
             job_dir=job_dir,
@@ -644,6 +717,7 @@ class PhageTaxonomyWorkflow:
             treefile_path=treefile_path,
             itol_dir=itol_dir,
             commands_used=commands_used,
+            figures_dir=figures_dir if pub_items else None,
         )
         record.artifacts["delivery_zip"] = str(zip_path)
         record.artifacts["final_nwk"] = str(final_nwk_path)

@@ -16,8 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, List, Optional, Tuple
 
-from Bio import SeqIO
-
+from ...core.fasta_io import iter_fasta_records
 from ...models.errors import PhyloCancelledError, PhyloError, ToolUnavailableError
 from ...models.schemas import MarkerExtractionReport, MarkerHitItem
 from ...runtime.process_runner import ProcessRunner
@@ -185,7 +184,7 @@ class TerlExtractor:
 
             tmp_faa = self.orf_cache_dir / f"{sha}.{threading.get_ident()}.tmp.faa"
             # 如果基因组较短 (< 20kb) 使用 -p meta 模式防止 prodigal 训练集不足报错
-            seq_len = sum(len(r.seq) for r in SeqIO.parse(str(fpath), "fasta"))
+            seq_len = sum(len(r.seq) for r in iter_fasta_records(fpath))
             mode_flag = "meta" if seq_len < 20000 else "single"
             runner = ProcessRunner(
                 cancel_event=self.cancel_event,
@@ -249,7 +248,7 @@ class TerlExtractor:
             for s_idx, (sid, faa_path) in enumerate(orf_paths.items(), start=1):
                 s_key = f"S{s_idx:04d}"
                 key_to_sid[s_key] = sid
-                for idx, rec in enumerate(SeqIO.parse(str(faa_path), "fasta"), start=1):
+                for idx, rec in enumerate(iter_fasta_records(faa_path), start=1):
                     clean_aa = str(rec.seq).replace("*", "").strip()
                     if len(clean_aa) < self.MIN_TERL_AA_LEN:
                         continue

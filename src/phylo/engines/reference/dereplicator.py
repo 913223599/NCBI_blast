@@ -10,8 +10,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
-from Bio import SeqIO
-
+from ...core.fasta_io import iter_fasta_records
 from ...models.errors import PhyloCancelledError
 from ...models.schemas import ReferenceCandidate
 from ...runtime.process_runner import ProcessRunner
@@ -142,7 +141,7 @@ class PhageDereplicator:
         short_fallback: Set[str] = set()
         for idx, acc in enumerate(unprotected, start=1):
             fpath = genome_paths[acc]
-            seq_len = sum(len(r.seq) for r in SeqIO.parse(str(fpath), "fasta"))
+            seq_len = sum(len(r.seq) for r in iter_fasta_records(fpath))
             if seq_len < min_length:
                 # 保留太短但未被 dRep -l 过滤导致全军覆没的边界情况记入日志
                 short_fallback.add(acc)
@@ -158,18 +157,18 @@ class PhageDereplicator:
             drep_bin,
             "dereplicate",
             WSLManager.to_wsl_path(str(out_dir.resolve())),
-            "-ignoreGenomeQuality",
+            "--ignoreGenomeQuality",
             "-l",
             str(effective_min_len),
             "-pa",
             f"{pa_threshold:.2f}",
-            "-SkipSecondary",
+            "--SkipSecondary",
             "-p",
             str(safe_threads),
             "-g",
             *eligible_files,
         ]
-        self._log(f"[dRep] 执行官方去冗余: -l {effective_min_len} -pa {pa_threshold:.2f} -SkipSecondary")
+        self._log(f"[dRep] 执行官方去冗余: -l {effective_min_len} -pa {pa_threshold:.2f} --SkipSecondary")
         res = self.runner.run_wsl(cmd, stream_stdout_to_log=True)
         derep_genomes_dir = out_dir / "dereplicated_genomes"
         if res.returncode != 0 or not derep_genomes_dir.is_dir():

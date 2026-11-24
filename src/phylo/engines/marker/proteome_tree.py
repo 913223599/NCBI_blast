@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-from Bio import SeqIO
 
+from ...core.fasta_io import iter_fasta_records
 from ...models.errors import PhyloCancelledError, PhyloError, ToolUnavailableError
 from ...models.schemas import MarkerExtractionReport, MarkerHitItem
 from ...runtime.process_runner import ProcessRunner
@@ -87,7 +87,7 @@ class ProteomeTreeEngine:
         with open(combined_faa, "w", encoding="utf-8", newline="\n") as out_fh:
             for sid in labels:
                 cnt = 0
-                for idx, rec in enumerate(SeqIO.parse(str(orf_paths[sid]), "fasta"), start=1):
+                for idx, rec in enumerate(iter_fasta_records(orf_paths[sid]), start=1):
                     aa = str(rec.seq).replace("*", "").strip()
                     if len(aa) < 30:
                         continue

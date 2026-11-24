@@ -15,8 +15,8 @@ from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from Bio import SeqIO
 
+from ...core.fasta_io import iter_fasta_records
 from ...models.errors import PhyloCancelledError, PhyloError, ToolUnavailableError
 from ...models.schemas import AniEngineType, AniHitRecord, AniScreenResult, DeliveryScopeConfig
 from ...runtime.process_runner import ProcessRunner
@@ -207,7 +207,7 @@ class ViridicAniCalculator:
                 fpath = genome_fastas[sid]
                 total_len = 0
                 seq_chunks: List[str] = []
-                for rec in SeqIO.parse(str(fpath), "fasta"):
+                for rec in iter_fasta_records(fpath):
                     s = str(rec.seq).strip().upper()
                     total_len += len(s)
                     seq_chunks.append(s)
@@ -294,7 +294,7 @@ class ViridicAniCalculator:
                 query_slice_fa = shards_dir / f"query_batch_{b_idx}.fasta"
                 batch_set = {sid_to_ascii[sid] for sid in batch_ids}
                 with open(query_slice_fa, "w", encoding="utf-8", newline="\n") as qfh:
-                    for rec in SeqIO.parse(str(combined_fasta), "fasta"):
+                    for rec in iter_fasta_records(combined_fasta):
                         if rec.id in batch_set:
                             qfh.write(f">{rec.id}\n{str(rec.seq)}\n")
 

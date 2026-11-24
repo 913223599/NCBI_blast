@@ -46,6 +46,7 @@ watch(
     store.visual.rowSpacing,
     store.visual.fontSize,
     store.visual.showMetadataStrips,
+    store.visual.labelFormat,
   ],
   () => {
     renderTree(true, true)

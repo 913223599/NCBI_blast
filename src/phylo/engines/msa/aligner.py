@@ -9,8 +9,7 @@ import threading
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from Bio import SeqIO
-
+from ...core.fasta_io import read_fasta_records
 from ...models.errors import InvalidInputError, PhyloCancelledError, PhyloError, ToolUnavailableError
 from ...models.schemas import MsaStrategyType, MsaToolType
 from ...runtime.process_runner import ProcessRunner
@@ -68,7 +67,7 @@ class MultiSequenceAligner:
             raise PhyloCancelledError("MSA 阶段开始前任务已取消")
 
         if tool == "none":
-            records = list(SeqIO.parse(str(input_fasta), "fasta"))
+            records = read_fasta_records(input_fasta)
             lengths = {len(r.seq) for r in records}
             if len(lengths) != 1:
                 raise InvalidInputError(
@@ -208,7 +207,7 @@ class MultiSequenceAligner:
     def _verify_msa_output(output_fasta: Path, engine_name: str) -> None:
         if not output_fasta.is_file() or output_fasta.stat().st_size == 0:
             raise PhyloError(f"{engine_name} 未生成有效的比对结果文件。")
-        records = list(SeqIO.parse(str(output_fasta), "fasta"))
+        records = read_fasta_records(output_fasta)
         if len(records) < 3:
             raise PhyloError(f"{engine_name} 输出序列不足 3 条。")
         lengths = {len(r.seq) for r in records}

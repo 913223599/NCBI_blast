@@ -12,6 +12,9 @@ from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 
 from ..broadcaster import broadcaster
+from ...phylo.delivery.itol_client import ITOL_UPLOAD_PAGE_URL, ItolBatchClient
+from ...phylo.delivery.label_formatter import enrich_node_metadata
+from ...phylo.delivery.publication_renderer import PublicationTreeRenderer
 from ...phylo.models.errors import InvalidInputError, PhyloError, ToolUnavailableError
 from ...phylo.models.schemas import (
     AniEngineType,
@@ -19,8 +22,14 @@ from ...phylo.models.schemas import (
     CapabilitiesResponse,
     DeliveryQcReport,
     DeliveryScopeConfig,
+    ItolPullRequest,
+    ItolPullResponse,
+    LabelFormatType,
     PhyloJobConfig,
     PhyloJobRecord,
+    PublicationFigureItem,
+    PublicationFigureRequest,
+    PublicationRenderResponse,
     ReferenceCandidate,
     SequenceProfile,
     WorkspaceInfo,
@@ -163,6 +172,9 @@ async def submit_phylo_job(config: PhyloJobConfig):
 @router.get("/jobs")
 async def list_phylo_jobs(limit: int = Query(default=50, ge=1, le=200)):
     jobs = get_phylo_store().list_jobs(limit=limit)
+    for j in jobs:
+        if j.node_metadata:
+            j.node_metadata = enrich_node_metadata(j.node_metadata)
     return {"jobs": [j.model_dump() for j in jobs]}
 
 
@@ -177,6 +189,8 @@ async def get_phylo_job(job_id: str):
     rec = get_phylo_store().get_job(job_id)
     if not rec:
         raise HTTPException(status_code=404, detail=f"未找到任务: {job_id}")
+    if rec.node_metadata:
+        rec.node_metadata = enrich_node_metadata(rec.node_metadata)
     return rec
 
 
@@ -198,12 +212,75 @@ async def cancel_phylo_job(job_id: str):
 @router.post("/jobs/{job_id}/reroot", response_model=PhyloJobRecord)
 async def reroot_phylo_job(job_id: str, req: RerootJobRequest):
     try:
-        return get_phylo_executor().reroot_saved_job(job_id, mode=req.mode, node_name=req.node_name)
+        rec = get_phylo_executor().reroot_saved_job(job_id, mode=req.mode, node_name=req.node_name)
+        if rec.node_metadata:
+            rec.node_metadata = enrich_node_metadata(rec.node_metadata)
+        return rec
     except (InvalidInputError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception(f"Reroot phylo job failed ({job_id}): {exc}")
         raise HTTPException(status_code=500, detail=f"重定根失败: {exc}") from exc
+
+
+def _resolve_job_dir(rec: PhyloJobRecord) -> Path:
+    store = get_phylo_store()
+    return Path(rec.job_dir) if rec.job_dir else (store.jobs_dir / rec.job_id)
+
+
+@router.get("/jobs/{job_id}/export/itol_newick")
+async def export_itol_ascii_newick(job_id: str):
+    rec = get_phylo_store().get_job(job_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"未找到任务: {job_id}")
+    if not rec.newick:
+        raise HTTPException(status_code=400, detail="当前任务尚未生成进化树 Newick 文件。")
+
+    try:
+        ascii_nwk, _ = ItolBatchClient.sanitize_newick_for_itol(rec.newick)
+    except Exception as exc:
+        logger.exception(f"Sanitize iTOL Newick failed ({job_id}): {exc}")
+        raise HTTPException(status_code=500, detail=f"生成 iTOL 纯 ASCII 树失败: {exc}") from exc
+
+    return PlainTextResponse(
+        content=ascii_nwk,
+        media_type="text/plain; charset=ascii",
+        headers={"Content-Disposition": f'attachment; filename="itol_tree_{job_id}.nwk"'},
+    )
+
+
+@router.get("/jobs/{job_id}/export/itol_bundle")
+async def export_itol_upload_bundle(
+    job_id: str,
+    label_format: LabelFormatType = Query(default="name_acc"),
+):
+    rec = get_phylo_store().get_job(job_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"未找到任务: {job_id}")
+    if not rec.newick:
+        raise HTTPException(status_code=400, detail="当前任务尚未生成进化树 Newick 文件。")
+
+    job_dir = _resolve_job_dir(rec)
+    itol_dir = Path(rec.artifacts.get("itol_dir") or (job_dir / "itol"))
+    enriched_meta = enrich_node_metadata(rec.node_metadata)
+    try:
+        bundle_path = ItolBatchClient.build_itol_upload_bundle(
+            job_dir=job_dir,
+            job_id=job_id,
+            newick=rec.newick,
+            itol_dir=itol_dir,
+            node_metadata=enriched_meta,
+            label_format=label_format,
+        )
+    except Exception as exc:
+        logger.exception(f"Build iTOL upload bundle failed ({job_id}): {exc}")
+        raise HTTPException(status_code=500, detail=f"生成 iTOL 上传包失败: {exc}") from exc
+
+    return Response(
+        content=bundle_path.read_bytes(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{bundle_path.name}"'},
+    )
 
 
 @router.get("/jobs/{job_id}/export/{fmt}")
@@ -318,6 +395,148 @@ async def export_phylo_itol_file(job_id: str, filename: str):
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
     )
+
+
+@router.post("/jobs/{job_id}/render-publication", response_model=PublicationRenderResponse)
+async def render_publication_figure(job_id: str, req: PublicationFigureRequest):
+    store = get_phylo_store()
+    rec = store.get_job(job_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"未找到任务: {job_id}")
+    if not rec.newick:
+        raise HTTPException(status_code=400, detail="当前任务尚未生成有效的 Newick 进化树。")
+
+    job_dir = _resolve_job_dir(rec)
+    figures_dir = job_dir / "figures"
+    subtitle_parts: List[str] = []
+    if rec.metrics and rec.metrics.best_model:
+        bic = rec.metrics.best_model_bic
+        subtitle_parts.append(
+            f"Model: {rec.metrics.best_model}" + (f" (BIC={bic})" if bic is not None else "")
+        )
+    elif rec.qc_report and rec.qc_report.best_model:
+        bic = rec.qc_report.best_model_bic
+        subtitle_parts.append(
+            f"Model: {rec.qc_report.best_model}" + (f" (BIC={bic})" if bic is not None else "")
+        )
+
+    try:
+        out_paths = PublicationTreeRenderer.render(
+            newick=rec.newick,
+            node_metadata=rec.node_metadata,
+            out_dir=figures_dir,
+            request=req,
+            file_prefix="publication",
+            subtitle=" | ".join(subtitle_parts),
+        )
+    except (InvalidInputError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception(f"Render publication figure failed ({job_id}): {exc}")
+        raise HTTPException(status_code=500, detail=f"离线出版级出图失败: {exc}") from exc
+
+    new_items = [
+        PublicationFigureItem(
+            filename=fp.name,
+            format=fp.suffix.lstrip(".").lower(),
+            layout=req.layout,
+            size_bytes=fp.stat().st_size,
+            download_url=f"/api/phylo/jobs/{job_id}/export/figure/{fp.name}",
+        )
+        for fp in out_paths
+    ]
+
+    # 按 filename 合并持久化记录，避免不同布局的成果互相覆盖
+    existing_map = {
+        str(item.get("filename")): item
+        for item in (rec.artifacts.get("publication_figures") or [])
+        if isinstance(item, dict) and item.get("filename")
+    }
+    for it in new_items:
+        existing_map[it.filename] = it.model_dump()
+    rec.artifacts["figures_dir"] = str(figures_dir)
+    rec.artifacts["publication_figures"] = list(existing_map.values())
+    store.save_job(rec)
+
+    return PublicationRenderResponse(job_id=job_id, layout=req.layout, figures=new_items)
+
+
+@router.get("/jobs/{job_id}/export/figure/{filename}")
+async def export_phylo_figure(job_id: str, filename: str):
+    rec = get_phylo_store().get_job(job_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"未找到任务: {job_id}")
+
+    job_dir = _resolve_job_dir(rec)
+    safe_name = Path(filename).name
+    target: Optional[Path] = None
+    for sub in ("figures", "itol_exports"):
+        base_dir = (job_dir / sub).resolve()
+        cand = (base_dir / safe_name).resolve()
+        if cand.is_file() and cand.parent == base_dir:
+            target = cand
+            break
+
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"未找到图件文件: {safe_name}")
+
+    mime_map = {
+        ".pdf": "application/pdf",
+        ".svg": "image/svg+xml; charset=utf-8",
+        ".png": "image/png",
+        ".eps": "application/postscript",
+    }
+    media_type = mime_map.get(target.suffix.lower(), "application/octet-stream")
+    return Response(
+        content=target.read_bytes(),
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
+@router.post("/jobs/{job_id}/itol/pull", response_model=ItolPullResponse)
+async def pull_itol_figure(job_id: str, req: ItolPullRequest):
+    store = get_phylo_store()
+    rec = store.get_job(job_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"未找到任务: {job_id}")
+
+    job_dir = _resolve_job_dir(rec)
+    itol_out_dir = job_dir / "itol_exports"
+    try:
+        tree_id, out_path = ItolBatchClient.export_from_itol(
+            tree_id_or_url=req.tree_id_or_url,
+            out_dir=itol_out_dir,
+            req=req,
+        )
+    except InvalidInputError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except PhyloError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    except Exception as exc:
+        logger.exception(f"Pull iTOL figure failed ({job_id}): {exc}")
+        raise HTTPException(status_code=500, detail=f"从 iTOL 拉取出图失败: {exc}") from exc
+
+    item_dict = {
+        "job_id": job_id,
+        "tree_id": tree_id,
+        "filename": out_path.name,
+        "format": req.format,
+        "size_bytes": out_path.stat().st_size,
+        "download_url": f"/api/phylo/jobs/{job_id}/export/figure/{out_path.name}",
+        "itol_tree_url": f"https://itol.embl.de/tree/{tree_id}",
+    }
+    existing_map = {
+        str(item.get("filename")): item
+        for item in (rec.artifacts.get("itol_exports") or [])
+        if isinstance(item, dict) and item.get("filename")
+    }
+    existing_map[out_path.name] = item_dict
+    rec.artifacts["itol_exports"] = list(existing_map.values())
+    rec.artifacts["itol_upload_page_url"] = ITOL_UPLOAD_PAGE_URL
+    store.save_job(rec)
+
+    return ItolPullResponse(**item_dict)
 
 
 @router.delete("/jobs/{job_id}")

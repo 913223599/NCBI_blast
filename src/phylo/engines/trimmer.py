@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-from Bio import SeqIO
 
+from ..core.fasta_io import read_fasta_records
 from ..models.schemas import TrimModeType
 from ..runtime.process_runner import ProcessRunner
 from ..runtime.tool_registry import get_tool_registry
@@ -29,7 +29,7 @@ _CLIPKIT_MODE_MAP: Dict[str, str] = {
 
 def _compute_alignment_stats(fasta_path: Path) -> Tuple[int, int, int, float]:
     """返回 (n_seqs, n_cols, parsimony_informative_sites, mean_gap_ratio)。"""
-    records = list(SeqIO.parse(str(fasta_path), "fasta"))
+    records = read_fasta_records(fasta_path)
     if not records:
         return 0, 0, 0, 0.0
     n_seqs = len(records)
@@ -67,7 +67,7 @@ class AlignmentTrimmer:
         min_keep_cols: int = 20,
     ) -> Tuple[Path, Dict[str, int]]:
         """经典按最大缺口比例过滤低信息量对齐列（向后兼容接口）。"""
-        records = list(SeqIO.parse(str(input_msa), "fasta"))
+        records = read_fasta_records(input_msa)
         if not records:
             raise ValueError(f"MSA 文件为空: {input_msa}")
 
@@ -210,7 +210,7 @@ class AlignmentTrimmer:
         smart_gap: bool = False,
         min_keep_cols: int = 20,
     ) -> Tuple[Path, int]:
-        records = list(SeqIO.parse(str(input_msa), "fasta"))
+        records = read_fasta_records(input_msa)
         n_seqs = len(records)
         n_cols = len(records[0].seq)
         mat = np.frombuffer(

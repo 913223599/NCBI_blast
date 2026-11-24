@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from ..models.schemas import ReferenceCandidate
+from .label_formatter import clean_phage_description, format_leaf_label
 
 _PALETTE = [
     "#2563eb",
@@ -153,13 +154,31 @@ class ItolTemplateGenerator:
                 fh.write(f"{c.accession}\t{round(c.gc_content or 0.0, 2)}\n")
         created.append(gc_path.name)
 
-        # 6. metadata_table.tsv
+        # 6. itol_labels_display.txt (将参考株登录号显示为 `实际名称 (登录号)` 标准发表标签)
+        labels_path = out_dir / "itol_labels_display.txt"
+        label_lines: List[str] = ["LABELS", "SEPARATOR TAB", "DATA"]
+        has_display_mapping = False
+        for c in rows:
+            disp = format_leaf_label(
+                c.accession,
+                {"role": c.role, "description": c.description},
+                label_format="name_acc",
+            )
+            if disp and disp != c.accession:
+                label_lines.append(f"{c.accession}\t{disp}")
+                has_display_mapping = True
+        if has_display_mapping:
+            labels_path.write_text("\n".join(label_lines) + "\n", encoding="utf-8", newline="\n")
+            created.append(labels_path.name)
+
+        # 7. metadata_table.tsv
         tsv_path = out_dir / "metadata_table.tsv"
         with open(tsv_path, "w", encoding="utf-8", newline="") as fh:
             writer = csv.writer(fh, delimiter="\t")
             writer.writerow(
                 [
                     "Accession",
+                    "Description",
                     "Role",
                     "Source",
                     "Genus",
@@ -176,6 +195,7 @@ class ItolTemplateGenerator:
                 writer.writerow(
                     [
                         c.accession,
+                        clean_phage_description(c.description),
                         c.role,
                         c.source,
                         c.genus,

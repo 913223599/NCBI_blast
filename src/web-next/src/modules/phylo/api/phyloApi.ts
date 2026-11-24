@@ -6,8 +6,13 @@ import type {
   CapabilitiesResponse,
   DeliveryQcReport,
   DeliveryScopeConfig,
+  ItolPullRequest,
+  ItolPullResponse,
+  LabelFormatType,
   PhyloJobConfig,
   PhyloJobRecord,
+  PublicationFigureRequest,
+  PublicationRenderResponse,
   ReferenceCandidate,
   SequenceProfile,
   WorkspaceInfo,
@@ -170,6 +175,43 @@ export const phyloApi = {
 
   getItolFileUrl(jobId: string, filename: string): string {
     return `${API_BASE}/api/phylo/jobs/${encodeURIComponent(jobId)}/export/itol/${encodeURIComponent(filename)}`
+  },
+
+  async renderPublicationFigure(
+    jobId: string,
+    payload: PublicationFigureRequest
+  ): Promise<PublicationRenderResponse> {
+    return checkOk<PublicationRenderResponse>(
+      apiPost(`/api/phylo/jobs/${encodeURIComponent(jobId)}/render-publication`, payload),
+      '离线出版级出图失败'
+    )
+  },
+
+  async pullItolFigure(jobId: string, payload: ItolPullRequest): Promise<ItolPullResponse> {
+    return checkOk<ItolPullResponse>(
+      apiPost(`/api/phylo/jobs/${encodeURIComponent(jobId)}/itol/pull`, payload),
+      '从 iTOL 拉取出图失败'
+    )
+  },
+
+  getFigureUrl(jobId: string, filename: string): string {
+    return `${API_BASE}/api/phylo/jobs/${encodeURIComponent(jobId)}/export/figure/${encodeURIComponent(filename)}`
+  },
+
+  getItolUploadBundleUrl(jobId: string, labelFormat: LabelFormatType = 'name_acc'): string {
+    return `${API_BASE}/api/phylo/jobs/${encodeURIComponent(jobId)}/export/itol_bundle?label_format=${encodeURIComponent(labelFormat)}`
+  },
+
+  getItolNewickUrl(jobId: string): string {
+    return `${API_BASE}/api/phylo/jobs/${encodeURIComponent(jobId)}/export/itol_newick`
+  },
+
+  async fetchItolNewickText(jobId: string): Promise<string> {
+    const resp = await fetch(`${API_BASE}/api/phylo/jobs/${encodeURIComponent(jobId)}/export/itol_newick`)
+    if (!resp.ok) {
+      throw new Error(`获取 iTOL 树文本失败 (HTTP ${resp.status})`)
+    }
+    return resp.text()
   },
 
   subscribeEvents(

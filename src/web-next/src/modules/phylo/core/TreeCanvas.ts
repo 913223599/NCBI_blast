@@ -1,5 +1,5 @@
 import { PhyloTreeLayout, type LayoutBounds } from './TreeLayout'
-import type { PhyloTreeModel, PhyloTreeNode } from './TreeModel'
+import { formatNodeDisplayLabel, type PhyloTreeModel, type PhyloTreeNode } from './TreeModel'
 import type { TreeVisualSettings } from '../types/phylo'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -396,7 +396,11 @@ export class PhyloTreeCanvas {
 
     const walk = (node: PhyloTreeNode) => {
       const isTerminal = node.isLeaf || node.collapsed
-      const isMatch = Boolean(query && node.name.toLowerCase().includes(query))
+      const displayText = node.isLeaf ? formatNodeDisplayLabel(node, settings.labelFormat) : node.name
+      const isMatch = Boolean(
+        query &&
+          (node.name.toLowerCase().includes(query) || displayText.toLowerCase().includes(query))
+      )
       const visible = isMatch || inViewport(node.x, node.y)
 
       if (visible && node.collapsed) {
@@ -432,16 +436,26 @@ export class PhyloTreeCanvas {
         frag.appendChild(dot)
 
         if (settings.showSupport && ufVal !== null && ufVal >= settings.supportThreshold) {
-          const supTxt = document.createElementNS(SVG_NS, 'text')
-          supTxt.setAttribute('x', (node.x - 6).toFixed(2))
-          supTxt.setAttribute('y', (node.y - 5).toFixed(2))
-          supTxt.setAttribute('text-anchor', 'end')
-          supTxt.setAttribute('font-size', `${Math.max(8, settings.fontSize - 3)}`)
-          supTxt.setAttribute('font-family', 'Inter, system-ui, sans-serif')
-          supTxt.setAttribute('fill', isStrongUf ? '#0f766e' : '#475569')
-          if (isStrongUf) supTxt.setAttribute('font-weight', '700')
-          supTxt.textContent = node.supportLabel || String(Math.round(ufVal))
-          frag.appendChild(supTxt)
+          const isCircular = settings.layout === 'circular' || settings.layout === 'unrooted'
+          if (!isCircular || node.radius > 16 || ufVal >= 95) {
+            const supTxt = document.createElementNS(SVG_NS, 'text')
+            if (isCircular) {
+              supTxt.setAttribute('x', node.x.toFixed(2))
+              supTxt.setAttribute('y', (node.y - 6).toFixed(2))
+              supTxt.setAttribute('text-anchor', 'middle')
+              supTxt.setAttribute('font-size', `${Math.max(7, settings.fontSize - 4)}`)
+            } else {
+              supTxt.setAttribute('x', (node.x - 6).toFixed(2))
+              supTxt.setAttribute('y', (node.y - 5).toFixed(2))
+              supTxt.setAttribute('text-anchor', 'end')
+              supTxt.setAttribute('font-size', `${Math.max(8, settings.fontSize - 3)}`)
+            }
+            supTxt.setAttribute('font-family', 'Inter, system-ui, sans-serif')
+            supTxt.setAttribute('fill', isStrongUf ? '#0f766e' : '#475569')
+            if (isStrongUf) supTxt.setAttribute('font-weight', '700')
+            supTxt.textContent = node.supportLabel || String(Math.round(ufVal))
+            frag.appendChild(supTxt)
+          }
         }
       }
 
@@ -476,7 +490,7 @@ export class PhyloTreeCanvas {
           const label = document.createElementNS(SVG_NS, 'text')
           label.textContent = node.collapsed
             ? `[折叠支系: ${node.leafCount} 条]`
-            : node.name || 'unnamed'
+            : displayText
           label.setAttribute('font-size', `${settings.fontSize}`)
           label.setAttribute('font-family', 'Inter, system-ui, sans-serif')
           label.setAttribute('fill', isMatch ? '#dc2626' : labelFill)
@@ -500,7 +514,7 @@ export class PhyloTreeCanvas {
             const lx = node.x + offset
             if (role === 'query') {
               const bgPill = document.createElementNS(SVG_NS, 'rect')
-              const estW = Math.max(48, (node.name || '').length * settings.fontSize * 0.62 + 12)
+              const estW = Math.max(48, displayText.length * settings.fontSize * 0.62 + 12)
               bgPill.setAttribute('x', (lx - 4).toFixed(2))
               bgPill.setAttribute('y', (node.y - settings.fontSize * 0.68).toFixed(2))
               bgPill.setAttribute('width', estW.toFixed(1))

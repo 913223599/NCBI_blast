@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PhyloTreeModel } from '../TreeModel'
+import { formatNodeDisplayLabel, PhyloTreeModel } from '../TreeModel'
 import { PhyloTreeLayout } from '../TreeLayout'
 import type { TreeVisualSettings } from '../../types/phylo'
 
@@ -7,6 +7,7 @@ const DEFAULT_VISUAL: TreeVisualSettings = {
   layout: 'rect',
   useBranchLengths: true,
   showLabels: true,
+  labelFormat: 'name_acc',
   showSupport: true,
   supportThreshold: 50,
   fontSize: 13,
@@ -99,5 +100,59 @@ describe('PhyloCore TreeModel & Layout', () => {
     const longBounds = PhyloTreeLayout.compute(longModel, DEFAULT_VISUAL)
 
     expect(longBounds.maxX).toBeGreaterThan(shortBounds.maxX)
+  })
+
+  it('formats phage display labels across name_acc, name, and accession modes', () => {
+    const refNode = {
+      name: 'AY587007',
+      meta: { role: 'ictv_rep' as const, description: 'Escherichia phage T5, complete genome' },
+    }
+    expect(formatNodeDisplayLabel(refNode, 'name_acc')).toBe('Escherichia phage T5 (AY587007)')
+    expect(formatNodeDisplayLabel(refNode, 'name')).toBe('Escherichia phage T5')
+    expect(formatNodeDisplayLabel(refNode, 'accession')).toBe('AY587007')
+
+    const queryNode = {
+      name: 'T5-E1_asm',
+      meta: { role: 'query' as const, description: 'Should be ignored for queries' },
+    }
+    expect(formatNodeDisplayLabel(queryNode, 'name_acc')).toBe('T5-E1_asm')
+  })
+
+  it('preserves leaf metadata descriptions and dual support values across reroot and sorting', () => {
+    const model = new PhyloTreeModel()
+    model.parse('((Query_Phage:0.02,AY587007:0.03)98.5/100:0.05,(Ref_B:0.1,NC_055913:0.25)91/96:0.1);')
+    model.applyNodeMetadata({
+      Query_Phage: { role: 'query', genome_length: 104500 },
+      AY587007: {
+        role: 'ictv_rep',
+        genus: 'Tequintavirus',
+        description: 'Escherichia phage T5',
+        genome_length: 121750,
+      },
+      Ref_B: {
+        role: 'neighbor',
+        genus: 'Vequintavirus',
+        description: 'Escherichia phage FFH2',
+        genome_length: 139000,
+      },
+      NC_055913: {
+        role: 'outgroup',
+        genus: 'Thalassavirus',
+        description: 'Vibrio phage Gary',
+        genome_length: 128300,
+      },
+    })
+
+    model.rerootMidpoint()
+    model.applySorting('ladder-right')
+    const og = model.leaves.find((l) => l.name === 'NC_055913')!
+    model.rerootOutgroup(og.id)
+
+    const ayLeaf = model.leaves.find((l) => l.name === 'AY587007')!
+    expect(ayLeaf.meta?.description).toBe('Escherichia phage T5')
+    expect(formatNodeDisplayLabel(ayLeaf, 'name_acc')).toBe('Escherichia phage T5 (AY587007)')
+    expect(model.hasNodeMetadata).toBe(true)
+    const dualSupportNodes = Array.from(model.nodesById.values()).filter((n) => !n.isLeaf && n.supportLabel)
+    expect(dualSupportNodes.some((n) => n.supportLabel === '98.5/100' && n.ufboot === 100)).toBe(true)
   })
 })

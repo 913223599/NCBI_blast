@@ -9,8 +9,7 @@ import threading
 from pathlib import Path
 from typing import Callable, Optional
 
-from Bio import SeqIO
-
+from ...core.fasta_io import read_fasta_records
 from ...models.errors import PhyloCancelledError, PhyloError, ToolUnavailableError
 from ...runtime.process_runner import ProcessRunner
 from ...runtime.tool_registry import get_tool_registry
@@ -53,7 +52,7 @@ class MrBayesEngine:
         if not desc.available:
             raise ToolUnavailableError("mrbayes", f"MrBayes 不可用: {desc.notes}")
 
-        records = list(SeqIO.parse(str(msa_fasta), "fasta"))
+        records = read_fasta_records(msa_fasta)
         if len(records) < 4:
             raise PhyloError("MrBayes 贝叶斯分析至少需要 4 条序列。")
 

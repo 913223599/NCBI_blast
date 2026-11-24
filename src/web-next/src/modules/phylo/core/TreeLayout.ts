@@ -1,4 +1,4 @@
-import type { PhyloTreeModel, PhyloTreeNode } from './TreeModel'
+import { formatNodeDisplayLabel, type PhyloTreeModel, type PhyloTreeNode } from './TreeModel'
 import type { TreeVisualSettings } from '../types/phylo'
 
 export interface LayoutBounds {
@@ -64,12 +64,12 @@ export class PhyloTreeLayout {
     let maxChars = 12
     if (settings.showLabels) {
       for (const leaf of model.leaves) {
-        const len = (leaf.name || '').length
+        const len = formatNodeDisplayLabel(leaf, settings.labelFormat).length
         if (len > maxChars) maxChars = len
       }
     }
     const maxLabelWidth = settings.showLabels
-      ? Math.min(480, Math.max(180, Math.ceil(maxChars * settings.fontSize * 0.65) + 40))
+      ? Math.min(580, Math.max(180, Math.ceil(maxChars * settings.fontSize * 0.62) + 40))
       : 40
     const labelEndX = widthTarget + maxLabelWidth
     const stripExtra = settings.showMetadataStrips && model.hasNodeMetadata ? 220 : 0
