@@ -101,18 +101,23 @@ class PersistentAssemblyQueue:
         await self._broadcast_status()
 
     async def _worker_loop(self):
-        """消费者循环 (并发数=1，支持暂停门控)"""
-        queue, new_task_event, resume_event = self._get_queue_parts()
+        """消费者循环 (并发数=1，支持暂停门控与无竞态唤醒)"""
         while True:
+            self._ensure_queue()
+            assert self._new_task_event is not None
+            assert self._resume_event is not None
+
             # 暂停门控：如果队列被暂停，等待 resume 信号
-            await resume_event.wait()
-            
-            if not queue:
-                new_task_event.clear()
-                await new_task_event.wait()
+            await self._resume_event.wait()
+
+            # 始终直接读取 self._queue，禁止循环外缓存局部列表引用
+            if not self._queue:
+                self._new_task_event.clear()
+                if not self._queue:
+                    await self._new_task_event.wait()
                 continue
-                
-            payload = queue.pop(0)
+
+            payload = self._queue.pop(0)
             task_id = payload.get('task_id')
             if not isinstance(task_id, str) or not task_id:
                 continue
@@ -139,38 +144,45 @@ class PersistentAssemblyQueue:
                 logger.info(f"[Queue] 任务生命周期结束: {task_id}")
                 await self._broadcast_status()
 
+    def _schedule_broadcast(self) -> None:
+        """在有运行中事件循环时安全异步调度广播，避免非异步上下文报错。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._broadcast_status())
+
     def remove_task_from_queue(self, task_id: str) -> bool:
-        """从等待队列中移除指定任务"""
+        """从等待队列中移除指定任务（原地切片修改，保持 self._queue 引用不变）"""
         queue, _, _ = self._get_queue_parts()
         initial_len = len(queue)
-        filtered = [p for p in queue if p.get('task_id') != task_id]
-        self._queue = filtered
-        if len(filtered) < initial_len:
+        queue[:] = [p for p in queue if p.get('task_id') != task_id]
+        if len(queue) < initial_len:
             self._queued_ids.discard(task_id)
             # 同步更新数据库状态为 aborted 以防前端闪烁
             assembly_db.update_task_progress(task_id, "ABORTED", 0, "aborted")
-            asyncio.create_task(self._broadcast_status())
+            self._schedule_broadcast()
             return True
         return False
 
     def reorder_queue(self, task_ids: List[str]):
-        """根据传入的 task_id 列表对等待队列进行重排"""
+        """根据传入的 task_id 列表对等待队列进行重排（原地切片修改）"""
         queue, _, _ = self._get_queue_parts()
-        new_queue = []
+        new_queue: List[Dict[str, Any]] = []
         for tid in task_ids:
             for p in queue:
                 if p.get('task_id') == tid:
                     new_queue.append(p)
                     break
-        
+
         # 将传入列表中不存在的其他任务垫底
         existing_tids = {p.get('task_id') for p in new_queue}
         for p in queue:
             if p.get('task_id') not in existing_tids:
                 new_queue.append(p)
-                
-        self._queue = new_queue
-        asyncio.create_task(self._broadcast_status())
+
+        queue[:] = new_queue
+        self._schedule_broadcast()
 
     # ─── 暂停/恢复控制 ────────────────────────────────────
     def pause(self):
@@ -179,7 +191,7 @@ class PersistentAssemblyQueue:
         if not self._paused:
             self._paused = True
             resume_event.clear()
-            logger.info("⏸️ 队列已暂停，新任务将等待恢复后再派发。")
+            logger.info("[Queue] 队列已暂停，新任务将等待恢复后再派发。")
 
     def resume(self):
         """恢复队列派发"""
@@ -187,7 +199,7 @@ class PersistentAssemblyQueue:
         if self._paused:
             self._paused = False
             resume_event.set()
-            logger.info("▶️ 队列已恢复，继续派发任务。")
+            logger.info("[Queue] 队列已恢复，继续派发任务。")
 
     @property
     def is_paused(self) -> bool:
@@ -198,45 +210,96 @@ class PersistentAssemblyQueue:
         return self._current_task_id
 
     # ─── 状态查询与广播 ────────────────────────────────────
+    def get_waiting_ids(self) -> List[str]:
+        """按内存权威排队顺序返回等待中的 task_id 列表。"""
+        if not self._queue:
+            return []
+        return [
+            tid
+            for item in self._queue
+            if isinstance((tid := item.get("task_id")), str) and tid
+        ]
+
+    def get_queue_position(self, task_id: str) -> int:
+        """返回 task_id 在等待队列中的 1-based 位次；正在运行或未排队统一返回 0。"""
+        if not task_id or not self._queue:
+            return 0
+        for idx, item in enumerate(self._queue, start=1):
+            if item.get("task_id") == task_id:
+                return idx
+        return 0
+
+    def get_queue_snapshot(self) -> Dict[str, Any]:
+        """基于内存队列权威顺序与数据库元数据生成统一队列快照（供 REST API 与 WS 共用）。"""
+        db_tasks = {t["id"]: t for t in assembly_db.get_incomplete_tasks()}
+
+        running_item: Optional[Dict[str, Any]] = None
+        if self._current_task_id:
+            meta = db_tasks.get(self._current_task_id) or assembly_db.get_task(self._current_task_id) or {}
+            running_item = {
+                "id": self._current_task_id,
+                "name": meta.get("name", self._current_task_id),
+                "status": "running",
+                "position": 0,
+                "tech": meta.get("tech"),
+                "sample_type": meta.get("sample_type"),
+                "progress": meta.get("progress", 0.0),
+                "last_step": meta.get("last_step", ""),
+            }
+
+        waiting_items: List[Dict[str, Any]] = []
+        for idx, payload in enumerate(self._queue or [], start=1):
+            tid = payload.get("task_id")
+            if not isinstance(tid, str) or not tid or tid == self._current_task_id:
+                continue
+            meta = db_tasks.get(tid) or assembly_db.get_task(tid) or {}
+            waiting_items.append(
+                {
+                    "id": tid,
+                    "name": meta.get("name") or payload.get("name") or tid,
+                    "status": "queued",
+                    "position": idx,
+                    "tech": meta.get("tech") or payload.get("tech"),
+                    "sample_type": meta.get("sample_type") or payload.get("sample_type"),
+                    "progress": meta.get("progress", 0.0),
+                    "last_step": meta.get("last_step", ""),
+                }
+            )
+
+        queue_list: List[Dict[str, Any]] = []
+        if running_item is not None:
+            queue_list.append(running_item)
+        queue_list.extend(waiting_items)
+
+        return {
+            "queue": queue_list,
+            "paused": self._paused,
+            "current_task_id": self._current_task_id,
+            "running_task": running_item,
+            "waiting_count": len(waiting_items),
+            "waiting_tasks": waiting_items,
+            "is_busy": self._current_task_id is not None,
+        }
+
     async def _broadcast_status(self):
         """同步并广播当前队列状态快照"""
         try:
-            snapshot = await self.get_queue_status()
-            running_item = next((t for t in snapshot if t.get("status") == "running"), None)
-            waiting_items = [t for t in snapshot if t.get("status") in ("pending", "queued")]
-            await broadcaster.broadcast("assembly_queue_status", {
-                "queue": snapshot,
-                "paused": self._paused,
-                "current_task_id": self._current_task_id,
-                "running_task": running_item,
-                "waiting_count": len(waiting_items),
-                "waiting_tasks": waiting_items,
-                "is_busy": self._current_task_id is not None,
-            })
+            await broadcaster.broadcast("assembly_queue_status", self.get_queue_snapshot())
         except Exception as e:
             logger.error(f"广播队列状态失败: {e}")
 
     async def get_queue_status(self) -> List[Dict[str, Any]]:
-        """获取当前队列状态快照 (供 REST API 调用)"""
+        """获取当前队列状态快照 (供历史兼容调用)"""
         try:
-            tasks = assembly_db.get_incomplete_tasks()
-            queue_snapshot = []
-            for i, t in enumerate(tasks):
-                queue_snapshot.append({
-                    "id": t["id"],
-                    "name": t["name"],
-                    "status": t["status"],
-                    "position": i + 1,
-                    "tech": t.get("tech"),
-                    "sample_type": t.get("sample_type")
-                })
-            return queue_snapshot
+            snap = self.get_queue_snapshot()
+            return list(snap.get("queue", []))
         except Exception as e:
             logger.error(f"获取队列状态失败: {e}")
             return []
 
     def get_queue_size(self) -> int:
-        if not self._queue: return 0
+        if not self._queue:
+            return 0
         return len(self._queue)
 
 # 全局单例

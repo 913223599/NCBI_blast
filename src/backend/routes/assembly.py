@@ -95,11 +95,7 @@ async def run_assembly_job(payload: Dict[str, Any]):
     await assembly_queue.add_task(payload)
 
     is_running_now = assembly_queue.current_task_id == task_id
-    waiting_queue = assembly_queue._queue or []
-    waiting_pos = next(
-        (idx + 1 for idx, item in enumerate(waiting_queue) if item.get("task_id") == task_id),
-        0,
-    )
+    waiting_pos = assembly_queue.get_queue_position(task_id)
     is_busy_now = (not is_running_now) and bool(
         was_busy
         or (assembly_queue.current_task_id is not None and assembly_queue.current_task_id != task_id)
@@ -195,13 +191,8 @@ async def get_assembly_status(task_id: str):
     if not task:
         return BioResponse.fail("Task not found")
 
-    # 检查是否在队列中排队
-    waiting_tasks = assembly_db.get_queued_tasks()
-    queue_pos = -1
-    for idx, t in enumerate(waiting_tasks):
-        if t['id'] == task_id:
-            queue_pos = idx + 1
-            break
+    # 使用内存权威排队顺序计算位次（正在运行或未排队统一返回 0）
+    queue_pos = assembly_queue.get_queue_position(task_id)
 
     # 解析 JSON 字段
     if task.get('results') and isinstance(task['results'], str):
@@ -592,13 +583,13 @@ async def delete_assembly_task(task_id: str):
 
 @router.get("/queue")
 async def get_assembly_queue_status():
-    """获取当前队列状态"""
-    waiting = assembly_db.get_queued_tasks()
-    running = [t for t in assembly_db.get_incomplete_tasks() if t.get('status') == 'running']
-    
+    """获取当前队列状态（与 WS assembly_queue_status 共享权威快照）"""
+    snap = assembly_queue.get_queue_snapshot()
     return BioResponse.ok({
-        "running_task": running[0] if running else None,
-        "waiting_count": len(waiting),
-        "waiting_tasks": waiting,
-        "is_busy": len(running) > 0
+        "running_task": snap["running_task"],
+        "waiting_count": snap["waiting_count"],
+        "waiting_tasks": snap["waiting_tasks"],
+        "is_busy": snap["is_busy"],
+        "paused": snap["paused"],
+        "current_task_id": snap["current_task_id"],
     })
