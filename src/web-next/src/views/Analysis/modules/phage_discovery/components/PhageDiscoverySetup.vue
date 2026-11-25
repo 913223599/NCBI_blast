@@ -173,12 +173,35 @@ function switchMode(mode: 'upload' | 'paste' | 'assembly'): void {
   }
 }
 
+function getAssemblyTaskId(t: any): string {
+  return String(t?.task_id || t?.id || '')
+}
+
+function formatAssemblyTime(val: unknown): string {
+  if (typeof val === 'number' && Number.isFinite(val)) {
+    const ms = val < 1e12 ? val * 1000 : val
+    const d = new Date(ms)
+    if (!Number.isNaN(d.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+    }
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim()
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      return formatAssemblyTime(Number(trimmed))
+    }
+    return trimmed.slice(0, 16)
+  }
+  return ''
+}
+
 async function loadAssemblyHistory(): Promise<void> {
   isAssemblyLoading.value = true
   try {
     const res = await bridge.get_assembly_history()
-    const list = Array.isArray(res) ? res : res?.history || res?.tasks || []
-    assemblyHistory.value = list.filter((t: any) => t.status === 'completed' || t.contigs_path)
+    const list = Array.isArray(res) ? res : res?.data || res?.history || res?.tasks || []
+    assemblyHistory.value = list.filter((t: any) => t.status === 'completed' || t.contigs_path || t.fasta_path)
   } catch (err) {
     console.error('[PhageDiscoverySetup] 读取拼接历史失败:', err)
   } finally {
@@ -187,20 +210,26 @@ async function loadAssemblyHistory(): Promise<void> {
 }
 
 function onAssemblyTaskSelected(): void {
-  const t = assemblyHistory.value.find((item: any) => item.task_id === selectedAssemblyTask.value)
+  const tid = selectedAssemblyTask.value
+  const t = assemblyHistory.value.find((item: any) => getAssemblyTaskId(item) === tid)
   if (!t) return
-  const candidatePath = t.contigs_path || t.fasta_path || t.output_fasta || ''
+  const candidatePath =
+    t.contigs_path ||
+    t.fasta_path ||
+    t.assembly_fasta ||
+    t.output_fasta ||
+    `results/assembly/${tid}/assemblerstep/assembly_run/assembly.fasta`
   if (candidatePath) {
     form.fasta_path = candidatePath
     form.fasta_content = ''
-    uploadedFileName.value = t.name || t.task_id
+    uploadedFileName.value = t.name || tid
     if (
       !form.task_name ||
       form.task_name === 'PhageDiscovery_Unified' ||
       form.task_name === 'PhageDiscovery_Stage1_2' ||
       form.task_name === 'PhageDiscovery_V42'
     ) {
-      form.task_name = `${t.name || t.task_id}_PhageScan`
+      form.task_name = `${t.name || tid}_PhageScan`
     }
     emit('inspect', { fasta_path: candidatePath })
   }
@@ -457,8 +486,8 @@ onMounted(() => {
           <label class="select-label">选择已组装样本序列:</label>
           <select v-model="selectedAssemblyTask" class="custom-select" @change="onAssemblyTaskSelected">
             <option value="">-- 请选择组装任务 --</option>
-            <option v-for="t in assemblyHistory" :key="t.task_id" :value="t.task_id">
-              [{{ t.sample_type || 'ASSEMBLY' }}] {{ t.name || t.task_id }} ({{ String(t.created_at || '').slice(0, 16) }})
+            <option v-for="t in assemblyHistory" :key="getAssemblyTaskId(t)" :value="getAssemblyTaskId(t)">
+              [{{ t.sample_type || 'ASSEMBLY' }}] {{ t.name || getAssemblyTaskId(t) }}<template v-if="formatAssemblyTime(t.created_at)"> ({{ formatAssemblyTime(t.created_at) }})</template>
             </option>
           </select>
           <div v-if="form.fasta_path" class="selected-path-hint">

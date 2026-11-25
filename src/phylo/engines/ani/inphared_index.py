@@ -9,10 +9,11 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ...delivery.host_taxonomy import map_host_to_phylum
 from ...runtime.tool_registry import get_project_root
+from ....workbench.models.tool_config import ToolConfig
 
 logger = logging.getLogger("phylo.inphared_index")
 
@@ -59,6 +60,56 @@ def _safe_float(val: Optional[str], default: float = 0.0) -> float:
         return default
 
 
+def _resolve_inphared_paths(project_root: Path) -> Tuple[Path, Path]:
+    """动态定位 INPHARED 元数据 TSV 与 Mash 索引，兼容任意日期版本与双层 database 目录。"""
+    db_dir = ToolConfig.get_db_dir("pharokka_db")
+    if not db_dir.is_dir():
+        cand = project_root / "database" / "pharokka_db"
+        if cand.is_dir():
+            db_dir = cand
+
+    default_tsv = db_dir / "9Aug2025_data.tsv"
+    default_msh = db_dir / "9Aug2025_genomes.fa.msh"
+    if not db_dir.is_dir():
+        return default_tsv, default_msh
+
+    tsvs = [
+        p for p in db_dir.glob("*_data.tsv")
+        if p.is_file() and not p.name.startswith("._") and p.stat().st_size > 0
+    ]
+    mshs = [
+        p for p in db_dir.glob("*_genomes.fa.msh")
+        if p.is_file() and not p.name.startswith("._") and p.stat().st_size > 0
+    ]
+
+    tsv_by_prefix = {p.name[: -len("_data.tsv")]: p for p in tsvs}
+    msh_by_prefix = {p.name[: -len("_genomes.fa.msh")]: p for p in mshs}
+    paired_prefixes = sorted(
+        set(tsv_by_prefix.keys()) & set(msh_by_prefix.keys()),
+        key=lambda k: (
+            k == "9Aug2025",
+            msh_by_prefix[k].stat().st_mtime,
+            msh_by_prefix[k].stat().st_size,
+        ),
+        reverse=True,
+    )
+    if paired_prefixes:
+        best_prefix = paired_prefixes[0]
+        return tsv_by_prefix[best_prefix], msh_by_prefix[best_prefix]
+
+    chosen_tsv = (
+        default_tsv
+        if default_tsv.is_file()
+        else (max(tsvs, key=lambda p: (p.stat().st_mtime, p.stat().st_size)) if tsvs else default_tsv)
+    )
+    chosen_msh = (
+        default_msh
+        if default_msh.is_file()
+        else (max(mshs, key=lambda p: (p.stat().st_mtime, p.stat().st_size)) if mshs else default_msh)
+    )
+    return chosen_tsv, chosen_msh
+
+
 class InpharedIndex:
     """INPHARED 37,563+ 噬菌体元数据检索中心。"""
 
@@ -68,8 +119,17 @@ class InpharedIndex:
         db_path: Optional[Path] = None,
     ) -> None:
         root = get_project_root()
-        self.tsv_path = tsv_path or (root / "database" / "pharokka_db" / "9Aug2025_data.tsv")
-        self.msh_path = self.tsv_path.parent / "9Aug2025_genomes.fa.msh"
+        if tsv_path is None:
+            resolved_tsv, resolved_msh = _resolve_inphared_paths(root)
+            self.tsv_path = resolved_tsv
+            self.msh_path = resolved_msh
+        else:
+            self.tsv_path = Path(tsv_path)
+            if self.tsv_path.name.endswith("_data.tsv"):
+                prefix = self.tsv_path.name[: -len("_data.tsv")]
+                self.msh_path = self.tsv_path.parent / f"{prefix}_genomes.fa.msh"
+            else:
+                self.msh_path = self.tsv_path.parent / "9Aug2025_genomes.fa.msh"
         self.db_path = db_path or (root / "results" / "phylo" / "cache" / "inphared_index.db")
         self._lock = threading.Lock()
         self._ready = False

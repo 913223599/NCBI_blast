@@ -56,6 +56,29 @@ const assemblyHistory = ref<any[]>([]);
 const selectedAssemblyTask = ref<string>('');
 const isAssemblyLoading = ref<boolean>(false);
 
+function getAssemblyTaskId(t: any): string {
+  return String(t?.task_id || t?.id || '');
+}
+
+function formatHistoryTime(val: unknown): string {
+  if (typeof val === 'number' && Number.isFinite(val)) {
+    const ms = val < 1e12 ? val * 1000 : val;
+    const d = new Date(ms);
+    if (!Number.isNaN(d.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      return formatHistoryTime(Number(trimmed));
+    }
+    return trimmed.slice(0, 16);
+  }
+  return '';
+}
+
 // 高级参数折叠开关
 const showAdvanced = ref<boolean>(false);
 
@@ -216,8 +239,9 @@ async function fetchAssemblyHistory() {
     } else if (typeof bridge.get_assembly_history === 'function') {
       res = await bridge.get_assembly_history();
     }
-    if (res && res.data) {
-      assemblyHistory.value = (res.data || []).filter((t: any) => 
+    const list = Array.isArray(res) ? res : (res?.data || res?.history || res?.tasks || []);
+    if (Array.isArray(list)) {
+      assemblyHistory.value = list.filter((t: any) => 
         t.status === 'SUCCESS' || t.status === 'completed' || t.status === 'success'
       );
     }
@@ -228,12 +252,27 @@ async function fetchAssemblyHistory() {
   }
 }
 
-function onAssemblyTaskSelected() {
-  const task = assemblyHistory.value.find(t => t.task_id === selectedAssemblyTask.value);
+async function onAssemblyTaskSelected() {
+  const tid = selectedAssemblyTask.value;
+  if (!tid) return;
+  const task = assemblyHistory.value.find(t => getAssemblyTaskId(t) === tid);
   if (task) {
-    // 自动寻找产物 FASTA 路径
-    form.fasta_path = task.assembly_fasta || task.output_fasta || `results/assembly/${task.task_id}/final_assembly.fasta`;
-    form.task_name = `${task.name || task.task_id}_Anno`;
+    let resolvedPath = task.fasta_path || task.assembly_fasta || task.contigs_path || task.output_fasta || '';
+    if (!resolvedPath) {
+      try {
+        const res = await fetch(`/api/assembly/result/${encodeURIComponent(tid)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.fasta_path) {
+            resolvedPath = data.fasta_path;
+          }
+        }
+      } catch {
+        // 忽略结果接口回退错误，使用默认相对路径
+      }
+    }
+    form.fasta_path = resolvedPath || `results/assembly/${tid}/assemblerstep/assembly_run/assembly.fasta`;
+    form.task_name = `${task.name || tid}_Anno`;
     form.sample_type = task.sample_type || 'BACTERIA';
     inspectCurrentFasta();
   }
@@ -420,8 +459,8 @@ onMounted(() => {
           <label class="select-label">选择组装任务产物:</label>
           <select v-model="selectedAssemblyTask" @change="onAssemblyTaskSelected" class="custom-select">
             <option value="">-- 请选择组装任务 --</option>
-            <option v-for="t in assemblyHistory" :key="t.task_id" :value="t.task_id">
-              [{{ t.sample_type }}] {{ t.name || t.task_id }} ({{ t.created_at?.slice(0, 16) }})
+            <option v-for="t in assemblyHistory" :key="getAssemblyTaskId(t)" :value="getAssemblyTaskId(t)">
+              [{{ t.sample_type || 'ASSEMBLY' }}] {{ t.name || getAssemblyTaskId(t) }}<template v-if="formatHistoryTime(t.created_at)"> ({{ formatHistoryTime(t.created_at) }})</template>
             </option>
           </select>
           <div v-if="form.fasta_path" class="selected-path-hint">

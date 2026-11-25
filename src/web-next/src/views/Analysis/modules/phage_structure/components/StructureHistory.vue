@@ -107,7 +107,7 @@ function sourceModeText(mode: string): string {
       </div>
 
       <div v-if="item.status !== 'completed'" class="item-foot">
-        <span>{{ item.created_at?.slice(5, 16) || '' }}</span>
+        <span>{{ typeof item.created_at === 'string' ? item.created_at.slice(5, 16) : '' }}</span>
       </div>
     </div>
   </div>

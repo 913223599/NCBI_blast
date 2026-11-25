@@ -462,3 +462,28 @@ def test_viridic_retains_full_mash_top_k_and_species_priority(tmp_path: Path):
     assert "ACC_22" in accs
     assert any(c.role == "outgroup" for c in cands)
     assert any(c.role == "ictv_rep" and c.accession.startswith("REP_") for c in cands)
+
+
+def test_inphared_index_auto_discovers_dated_files(tmp_path: Path, monkeypatch) -> None:
+    """验证 INPHARED 索引动态发现任意日期文件、跳过 ._ 隐藏文件并兼容双层 database/database 目录。"""
+    from src.phylo.engines.ani import inphared_index as idx_mod
+    from src.workbench.models.tool_config import ToolConfig
+
+    legacy_db_dir = tmp_path / "database" / "database" / "pharokka_db"
+    legacy_db_dir.mkdir(parents=True)
+    # 混入 macOS AppleDouble 隐藏文件与非 9Aug2025 日期库
+    (legacy_db_dir / "._1Jan2026_data.tsv").write_text("junk", encoding="utf-8")
+    (legacy_db_dir / "._1Jan2026_genomes.fa.msh").write_text("junk", encoding="utf-8")
+    tsv_file = legacy_db_dir / "1Jan2026_data.tsv"
+    msh_file = legacy_db_dir / "1Jan2026_genomes.fa.msh"
+    tsv_file.write_text("Accession\tDescription\n", encoding="utf-8")
+    msh_file.write_bytes(b"MASH_INDEX_DATA")
+
+    monkeypatch.setattr(ToolConfig, "DATABASE_ROOT", tmp_path / "database")
+    monkeypatch.setattr(ToolConfig, "LEGACY_DATABASE_ROOT", tmp_path / "database" / "database")
+    monkeypatch.setattr(idx_mod, "get_project_root", lambda: tmp_path)
+
+    idx = InpharedIndex()
+    assert idx.tsv_path == tsv_file
+    assert idx.msh_path == msh_file
+    assert idx.is_available() is True

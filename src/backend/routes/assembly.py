@@ -7,11 +7,8 @@ Assembly API Routes - 基因组拼接后端接口模块 (纯净重构版)
 import asyncio
 import re
 import json
-import os
-import gzip
 import time
 import logging
-from collections import Counter
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 from fastapi import APIRouter, HTTPException
@@ -120,10 +117,12 @@ async def get_assembly_history():
     for t in history:
         res = t.get('results')
         task_id = t['id']
+        t['task_id'] = task_id
         task_dir = AssemblyStorage.get_task_dir(task_id)
-        
+
         # 1. 自动自愈：若任务已完成但指标全 0 或缺失，尝试从产物 assembly.fasta 重建真实指标
         is_completed = t.get('status') == 'completed'
+        asm_fasta: Optional[Path] = None
         is_corrupted = not res or not isinstance(res, dict) or res.get('total_length', 0) <= 0 or res.get('gc_percent', 0.0) <= 0.0 or res.get('n50', 0) <= 0
         if is_completed and is_corrupted:
             asm_fasta = find_assembly_fasta(task_id, task_dir)
@@ -184,6 +183,14 @@ async def get_assembly_history():
                     avg_depth=float(res.get('avg_depth') or 0.0),
                     max_contig_length=int(res.get('max_contig_length') or 0)
                 )
+        if is_completed and not t.get('fasta_path'):
+            if asm_fasta is None:
+                asm_fasta = find_assembly_fasta(task_id, task_dir)
+            if asm_fasta and asm_fasta.exists() and asm_fasta.stat().st_size > 0:
+                resolved_fa = str(asm_fasta)
+                t['fasta_path'] = resolved_fa
+                t['assembly_fasta'] = resolved_fa
+                t['contigs_path'] = resolved_fa
     return BioResponse.ok(history)
 
 
