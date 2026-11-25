@@ -23,7 +23,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
 
@@ -34,7 +33,6 @@ from ...assembly.env.wsl_manager import WSLManager
 from ...workbench.models.tool_config import ToolConfig
 from .completeness_gate import assess_sparse_gbk_annotation
 from .genetic_code_selector import (
-    METAGENOMIC_BINS_4,
     METAGENOMIC_BINS_11,
     select_optimal_genetic_code,
 )
@@ -687,7 +685,7 @@ def check_phold_ready() -> bool:
     distro = WSLManager.get_best_distro()
     try:
         res = subprocess.run(
-            ["wsl", "-d", distro, "bash", "-lc", "which phold"],
+            ["wsl", "-d", distro, "-u", "root", "bash", "-lc", "which phold"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -777,7 +775,7 @@ def enhance_with_phold_3d(
             f"phold proteins-compare -i '{wsl_faa}' --predictions_dir '{wsl_pred}' -o '{wsl_cmp}' -d '{wsl_db}' -t {max(1, workers)} -f"
         )
         res = subprocess.run(
-            ["wsl", "-d", distro, "bash", "-lc", cmd_str],
+            ["wsl", "-d", distro, "-u", "root", "bash", "-lc", cmd_str],
             capture_output=True,
             text=True,
             encoding="utf-8",

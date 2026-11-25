@@ -3,17 +3,19 @@
 Phold AI 蛋白质三维结构感知与折叠增强引擎 (PholdEngine)
 结合 ESMFold 深度学习空间折叠与 Foldseek 结构域比对，专司破解未知与假定蛋白 (hypothetical protein)
 """
-import os
+import asyncio
 import gc
+import json
 import logging
+import subprocess
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 from Bio import SeqIO
 
 from .base import BaseAnnotationEngine
-from ..types import FeatureItem, AnnotationRunRequest
 from ..fuser import AnnotationFuser
-from ..builtin_annotator import BuiltinAnnotator
+from ..types import AnnotationRunRequest, FeatureItem
 
 logger = logging.getLogger("analysis.annotation.engines.phold")
 
@@ -24,6 +26,116 @@ class PholdEngine(BaseAnnotationEngine):
     def __init__(self):
         super().__init__(name="Phold AI")
         self.unavailable_reason: Optional[str] = None
+
+    @staticmethod
+    def _parse_gpu_probe_output(stdout: str) -> Dict[str, Any]:
+        """解析 WSL Phold GPU 运行态探测输出的 JSON 载荷。"""
+        text = (stdout or "").strip()
+        if not text:
+            return {"ok": False, "error": "empty probe output"}
+        for line in reversed(text.splitlines()):
+            candidate = line.strip()
+            if not candidate.startswith("{"):
+                continue
+            try:
+                data = json.loads(candidate)
+                if isinstance(data, dict):
+                    data.setdefault("ok", True)
+                    return data
+            except Exception:
+                continue
+        return {"ok": False, "error": text[:200]}
+
+    @staticmethod
+    def _format_gpu_probe_notice(probe: Dict[str, Any]) -> Tuple[str, str]:
+        """将 WSL Phold GPU 运行态探测结果格式化为 (日志级别, 提示信息)。"""
+        if not probe.get("ok"):
+            err = probe.get("error") or "unknown error"
+            return ("info", f"Phold AI GPU 运行态预检未完成，将按默认环境继续执行 ({err})")
+
+        has_gpu = bool(probe.get("has_wsl_gpu"))
+        kernel_ok = bool(probe.get("kernel_ok"))
+        torch_ver = str(probe.get("torch_version") or "unknown")
+        device_name = str(probe.get("device_name") or "CUDA GPU")
+        py_bin = str(probe.get("python_bin") or "python3")
+
+        if kernel_ok:
+            return (
+                "info",
+                f"Phold AI 已启用 GPU 加速: {device_name} (torch {torch_ver}, python={py_bin})",
+            )
+
+        if has_gpu:
+            detail = str(probe.get("error") or "CUDA 不可用或计算内核不兼容")
+            return (
+                "warning",
+                "检测到 WSL GPU 设备 (/dev/dxg)，但 Phold 当前解释器无法执行 CUDA kernel "
+                f"({py_bin}, torch={torch_ver}, reason={detail})。"
+                "可能安装了 CPU 版 PyTorch、CUDA 架构不匹配 (如 RTX 50 系列需 cu128) 或存在 ~/.local 阴影包，"
+                "请运行 scripts/fix_phold_gpu_wsl.ps1 或 scripts/setup_phold.sh 修复。",
+            )
+
+        return ("info", "当前 WSL 未检测到 GPU 透传，Phold AI 将使用 CPU 模式运行")
+
+    async def _probe_wsl_gpu_runtime(self) -> Dict[str, Any]:
+        """探测 WSL root 上下文中 phold 实际解释器的 GPU 与 CUDA kernel 可用性。"""
+        from ....assembly.env.wsl_manager import WSLManager
+
+        if not WSLManager.is_available():
+            return {"ok": False, "error": "WSL unavailable"}
+
+        distro = WSLManager.get_best_distro()
+        py_one_liner = (
+            "import json,os; "
+            "r={'has_wsl_gpu':os.path.exists('/dev/dxg'),'python_bin':'','torch_version':'','torch_file':'','cuda_version':'','cuda_available':False,'kernel_ok':False,'device_name':'','error':''}; "
+            "import sys; r['python_bin']=sys.executable; "
+            "\ntry:\n"
+            " import torch\n"
+            " r['torch_version']=getattr(torch,'__version__','')\n"
+            " r['torch_file']=getattr(torch,'__file__','')\n"
+            " r['cuda_version']=str(getattr(getattr(torch,'version',None),'cuda','') or '')\n"
+            " r['cuda_available']=bool(torch.cuda.is_available())\n"
+            " if r['cuda_available']:\n"
+            "  r['device_name']=torch.cuda.get_device_name(0)\n"
+            "  _=(torch.zeros(1).cuda()+1).item()\n"
+            "  r['kernel_ok']=True\n"
+            "  torch.cuda.empty_cache()\n"
+            "except Exception as e:\n"
+            " r['error']=str(e)\n"
+            "print(json.dumps(r,ensure_ascii=False))"
+        )
+        # 用单行 base64/heredoc 无引号风险方式执行，避免不同 shell 引号嵌套失效
+        import base64
+
+        encoded_py = base64.b64encode(py_one_liner.encode("utf-8")).decode("ascii")
+        bash_script = (
+            "PHOLD_BIN=$(command -v phold 2>/dev/null || true); "
+            "PY_BIN=''; "
+            "if [ -n \"$PHOLD_BIN\" ] && [ -r \"$PHOLD_BIN\" ]; then "
+            "  SHEBANG=$(head -n 1 \"$PHOLD_BIN\" | sed -n 's/^#![[:space:]]*//p'); "
+            "  case \"$SHEBANG\" in */env\\ *) PY_BIN=$(echo \"$SHEBANG\" | awk '{print $2}') ;; *) PY_BIN=$(echo \"$SHEBANG\" | awk '{print $1}') ;; esac; "
+            "fi; "
+            "[ -x \"$PY_BIN\" ] || PY_BIN=$(command -v python3 || true); "
+            "if [ -z \"$PY_BIN\" ]; then echo '{\"ok\":false,\"error\":\"python3 not found\"}'; exit 0; fi; "
+            f"OUT=$(echo '{encoded_py}' | base64 -d | \"$PY_BIN\" - 2>/dev/null || true); "
+            "if [ -z \"$OUT\" ]; then echo '{\"ok\":false,\"error\":\"probe failed\"}'; else echo \"$OUT\"; fi"
+        )
+        try:
+            res = await asyncio.to_thread(
+                subprocess.run,
+                ["wsl", "-d", distro, "-u", "root", "bash", "-lc", bash_script],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                timeout=15,
+            )
+            probe = self._parse_gpu_probe_output(res.stdout)
+            if not probe.get("ok") and res.stderr:
+                probe["error"] = (res.stderr.strip() or probe.get("error") or "")[:200]
+            return probe
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     async def is_available(self) -> bool:
         from ....assembly.engine.runner import CommandRunner
@@ -103,6 +215,19 @@ class PholdEngine(BaseAnnotationEngine):
         if on_progress:
             on_progress(70, f"正在调度 Phold AI 蛋白质三维结构折叠与空间感知增强 (针对 {unannotated_count} 个假定蛋白)...", None)
 
+        # 显存红线保护：切换至 WSL Phold GPU 引擎前先清理本进程 GPU 缓存
+        self._cleanup_gpu_memory()
+
+        # 预检 WSL 内 phold 实际解释器的 GPU / CUDA kernel 可用性
+        probe = await self._probe_wsl_gpu_runtime()
+        probe_level, probe_msg = self._format_gpu_probe_notice(probe)
+        if probe_level == "warning":
+            logger.warning(probe_msg)
+        else:
+            logger.info(probe_msg)
+        if on_progress:
+            on_progress(72, probe_msg, probe_msg)
+
         # 建立项目根目录的无空格软链接（不再硬编码特定盘符，兼容项目迁移）
         WSLManager.ensure_project_link()
 
@@ -122,16 +247,29 @@ class PholdEngine(BaseAnnotationEngine):
             if not on_progress or not line:
                 return
             clean_l = line.strip()
-            if "createdb" in clean_l or "Foldseek createdb" in clean_l:
+            lower_l = clean_l.lower()
+            if "using device:" in lower_l:
+                if "cuda" in lower_l:
+                    logger.info("Phold 运行设备确认: %s", clean_l)
+                else:
+                    logger.warning("Phold 运行设备回退: %s", clean_l)
+                on_progress(max(current_phold_pct, 60), f"Phold AI 计算设备: {clean_l}", clean_l)
+            elif "no available gpu was found" in lower_l or "prostt5 will be run with cpu only" in lower_l:
+                logger.warning("Phold AI 回退至纯 CPU 执行: %s", clean_l)
+                on_progress(max(current_phold_pct, 60), f"Phold AI 未检测到可用 CUDA，正使用 CPU 执行: {clean_l}", clean_l)
+            elif "cuda out of memory" in lower_l or "outofmemoryerror" in lower_l:
+                logger.error("Phold AI GPU 显存溢出: %s", clean_l)
+                on_progress(current_phold_pct, f"Phold AI GPU 显存不足: {clean_l}", clean_l)
+            elif "createdb" in clean_l or "Foldseek createdb" in clean_l:
                 current_phold_pct = max(current_phold_pct, 25)
                 on_progress(current_phold_pct, "Phold AI [1/4]: 正在构建蛋白质空间特征数据库 (Foldseek)...", clean_l)
-            elif "easy-search" in clean_l or "structure match" in clean_l or "searching" in clean_l.lower():
+            elif "easy-search" in clean_l or "structure match" in clean_l or "searching" in lower_l:
                 current_phold_pct = max(current_phold_pct, 50)
                 on_progress(current_phold_pct, "Phold AI [2/4]: 正在执行 Foldseek 三维构象空间比对...", clean_l)
-            elif "predict" in clean_l or "ESM" in clean_l or "prostt5" in clean_l or "embedding" in clean_l.lower():
+            elif "predict" in clean_l or "ESM" in clean_l or "prostt5" in clean_l or "embedding" in lower_l:
                 current_phold_pct = max(current_phold_pct, 75)
                 on_progress(current_phold_pct, "Phold AI [3/4]: 正在执行深度学习 3D 结构折叠空间感知...", clean_l)
-            elif "topfunction" in clean_l or "merge" in clean_l or "filter" in clean_l.lower():
+            elif "topfunction" in clean_l or "merge" in clean_l or "filter" in lower_l:
                 current_phold_pct = max(current_phold_pct, 95)
                 on_progress(current_phold_pct, "Phold AI [4/4]: 正在筛选最优结构预测并生成增强模型...", clean_l)
             else:
