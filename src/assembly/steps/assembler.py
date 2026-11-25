@@ -69,7 +69,10 @@ class AssemblerStep(BaseAssemblyStep):
 
         ngcs_cli = self._resolve_ngcs_cli()
         if not ngcs_cli.exists():
-            err_msg = f"未找到 NGCS 引擎入口文件: {ngcs_cli}"
+            err_msg = (
+                f"未找到 NGCS 引擎入口文件: {ngcs_cli} "
+                "(可在 config.json 中配置 ngcs_root 或设置环境变量 NGCS_ROOT 指向 NGCS 根目录)"
+            )
             self.logger.error(err_msg)
             self.status = "failed"
             if self.on_progress:

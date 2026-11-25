@@ -7,7 +7,10 @@
 3. 兼容历史任务目录检索。
 """
 
+import ctypes
+import json
 import os
+import string
 import tempfile
 from pathlib import Path
 from typing import List, Optional
@@ -20,17 +23,81 @@ def _is_ascii_no_space(p: Path) -> bool:
     return all(ord(c) < 128 for c in s) and (" " not in s)
 
 
+def _list_windows_drives_win32() -> List[str]:
+    """在 Python <3.12（缺少 os.listdrives）环境下通过 Win32 API 枚举本地逻辑盘符。"""
+    if os.name != "nt":
+        return []
+    try:
+        bitmask = int(ctypes.windll.kernel32.GetLogicalDrives())
+    except Exception:
+        return []
+    drives: List[str] = []
+    for idx, letter in enumerate(string.ascii_uppercase):
+        if (bitmask >> idx) & 1:
+            drives.append(f"{letter}:")
+    return drives
+
+
 def _list_system_drives() -> List[str]:
     """动态枚举系统当前挂载的根卷/盘符，避免硬编码盘符字面量"""
     drives: List[str] = []
     if PROJECT_ROOT.drive:
         drives.append(PROJECT_ROOT.drive.rstrip("\\/"))
     if hasattr(os, "listdrives"):
-        for d in os.listdrives():
-            clean = d.rstrip("\\/")
-            if clean and clean not in drives:
-                drives.append(clean)
+        raw_drives = os.listdrives()
+    else:
+        raw_drives = _list_windows_drives_win32()
+    for d in raw_drives:
+        clean = d.rstrip("\\/")
+        if clean and clean not in drives:
+            drives.append(clean)
     return drives
+
+
+def _load_ngcs_config_entries(config_path: Optional[Path] = None) -> tuple[List[Path], List[Path]]:
+    """从 config.json 读取可选的 NGCS 根目录与 CLI 入口路径配置。"""
+    target = config_path or (PROJECT_ROOT / "config.json")
+    if not target.is_file():
+        return [], []
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        return [], []
+    if not isinstance(data, dict):
+        return [], []
+
+    tool_paths = data.get("tool_paths") if isinstance(data.get("tool_paths"), dict) else {}
+    raw_roots = [
+        data.get("ngcs_root"),
+        tool_paths.get("ngcs_root"),
+    ]
+    raw_clis = [
+        data.get("ngcs_cli_path"),
+        tool_paths.get("ngcs_cli_path"),
+    ]
+
+    root_candidates: List[Path] = []
+    cli_candidates: List[Path] = []
+    for raw in raw_clis:
+        val = str(raw or "").strip()
+        if not val:
+            continue
+        p = Path(val)
+        if not p.is_absolute():
+            p = (PROJECT_ROOT / p).resolve()
+        cli_candidates.append(p)
+        root_candidates.append(p.parent.parent)
+
+    for raw in raw_roots:
+        val = str(raw or "").strip()
+        if not val:
+            continue
+        p = Path(val)
+        if not p.is_absolute():
+            p = (PROJECT_ROOT / p).resolve()
+        root_candidates.append(p)
+
+    return root_candidates, cli_candidates
 
 
 def resolve_ngcs_root(custom_path: Optional[str] = None) -> Path:
@@ -49,9 +116,14 @@ def resolve_ngcs_root(custom_path: Optional[str] = None) -> Path:
     if env_cli:
         candidates.append(Path(env_cli).resolve().parent.parent)
 
-    # 相对路径优先：项目内 vendor/NGCS、同级目录 ../NGCS
+    cfg_roots, _ = _load_ngcs_config_entries()
+    candidates.extend(cfg_roots)
+
+    # 相对路径优先：项目内 vendor/NGCS、tools/NGCS、NGCS 及同级目录 ../NGCS
     candidates.extend([
         PROJECT_ROOT / "vendor" / "NGCS",
+        PROJECT_ROOT / "tools" / "NGCS",
+        PROJECT_ROOT / "NGCS",
         PROJECT_ROOT.parent / "NGCS",
     ])
 
@@ -79,6 +151,14 @@ def resolve_ngcs_cli(custom_cli_path: Optional[str] = None) -> Path:
     env_cli = os.environ.get("NGCS_CLI_PATH")
     if env_cli and Path(env_cli).is_file():
         return Path(env_cli).resolve()
+
+    _, cfg_clis = _load_ngcs_config_entries()
+    for cli_cand in cfg_clis:
+        try:
+            if cli_cand.is_file():
+                return cli_cand.resolve()
+        except OSError:
+            continue
 
     root = resolve_ngcs_root(custom_cli_path)
     return root / "ngcs" / "cli.py"

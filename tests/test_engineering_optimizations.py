@@ -218,3 +218,43 @@ def test_other_tools_modular_schemas_and_clean_imports():
         info = inspect_sangon_order_dir(order_dir, project_root=Path(tmp))
         assert info["order_no"] == "999888"
         assert info["status"] == "pending"
+
+
+def test_assembly_path_resolver_py311_drive_fallback_and_config_json(tmp_path: Path, monkeypatch):
+    """验证 Python <3.12（无 os.listdrives）下的 Win32 盘符回退枚举及 config.json 配置优先命中"""
+    from src.assembly.utils import path_resolver
+
+    monkeypatch.delenv("NGCS_ROOT", raising=False)
+    monkeypatch.delenv("NGCS_CLI_PATH", raising=False)
+
+    # 1. 模拟 Python 3.11（移除 os.listdrives），验证 _list_system_drives 仍能枚举多盘符
+    fake_drive_root = tmp_path / "drive_e"
+    fake_cli = fake_drive_root / "NGCS" / "ngcs" / "cli.py"
+    fake_cli.parent.mkdir(parents=True, exist_ok=True)
+    fake_cli.write_text("# -*- coding: utf-8 -*-\n", encoding="utf-8")
+
+    monkeypatch.delattr(path_resolver.os, "listdrives", raising=False)
+    monkeypatch.setattr(path_resolver, "_list_windows_drives_win32", lambda: ["C:", "D:", "E:"])
+    drives = path_resolver._list_system_drives()
+    assert "E:" in drives and "D:" in drives
+
+    # 2. 验证 config.json 中的 ngcs_root 与 tool_paths.ngcs_cli_path 解析
+    cfg_root = tmp_path / "cfg_root_ngcs"
+    cfg_root_cli = cfg_root / "ngcs" / "cli.py"
+    cfg_root_cli.parent.mkdir(parents=True, exist_ok=True)
+    cfg_root_cli.write_text("# -*- coding: utf-8 -*-\n", encoding="utf-8")
+
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({"ngcs_root": str(cfg_root)}), encoding="utf-8")
+
+    orig_loader = path_resolver._load_ngcs_config_entries
+    monkeypatch.setattr(path_resolver, "_load_ngcs_config_entries", lambda: orig_loader(cfg_file))
+    assert path_resolver.resolve_ngcs_root() == cfg_root.resolve()
+    assert path_resolver.resolve_ngcs_cli() == cfg_root_cli.resolve()
+
+    # tool_paths.ngcs_cli_path 精确命中
+    custom_cli = tmp_path / "tool_ngcs" / "ngcs" / "cli.py"
+    custom_cli.parent.mkdir(parents=True, exist_ok=True)
+    custom_cli.write_text("# -*- coding: utf-8 -*-\n", encoding="utf-8")
+    cfg_file.write_text(json.dumps({"tool_paths": {"ngcs_cli_path": str(custom_cli)}}), encoding="utf-8")
+    assert path_resolver.resolve_ngcs_cli() == custom_cli.resolve()
