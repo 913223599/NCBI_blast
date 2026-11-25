@@ -1,7 +1,12 @@
+<script setup lang="ts">
+import { useI18n } from '../../locales'
+const { t } = useI18n()
+</script>
+
 <template>
   <div class="async-module-error" role="alert">
-    <h3>模块加载失败</h3>
-    <p>无法加载当前功能模块资源，请检查网络连接或稍后重试。</p>
+    <h3>{{ t('common.async_error_title') }}</h3>
+    <p>{{ t('common.async_error_desc') }}</p>
   </div>
 </template>
 

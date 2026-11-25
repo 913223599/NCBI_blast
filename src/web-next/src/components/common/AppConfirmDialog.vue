@@ -10,7 +10,9 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import { shouldSubmitOnEnter } from '../../utils/ime'
+import { useI18n } from '../../locales'
 
+const { t } = useI18n()
 const { activeRequest, settle } = useConfirmDialog()
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const promptInput = ref('')
@@ -110,7 +112,7 @@ onUnmounted(() => {
       <form method="dialog" class="dialog-form">
         <div v-if="activeRequest.mode === 'prompt'" class="dialog-input-group">
           <label for="app-confirm-prompt-input" class="dialog-input-label">
-            {{ activeRequest.inputLabel || '请输入确认内容' }}
+            {{ activeRequest.inputLabel || t('common.prompt_default_label') }}
           </label>
           <input
             id="app-confirm-prompt-input"

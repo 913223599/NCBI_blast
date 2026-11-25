@@ -2,35 +2,48 @@
 /**
  * AppSidebar - 应用侧边栏语义导航（无障碍键盘可达 + 折叠 Tooltip）
  */
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '../../stores/app'
+import { useI18n } from '../../locales'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
+const { t } = useI18n()
 
 interface NavItem {
   id: string
   label: string
   icon: string
   route: string
+  categoryKey: string
   category: string
 }
 
-const navItems: NavItem[] = [
-  { id: 'dashboard', label: '仪表盘', icon: 'dashboard', route: '/', category: '主要' },
-  { id: 'strain', label: '菌毒种库', icon: 'strain', route: '/strain', category: '分析工具' },
-  { id: 'assembly', label: '基因组拼接', icon: 'assembly', route: '/assembly', category: '分析工具' },
-  { id: 'analysis', label: '组装分析', icon: 'analysis', route: '/analysis', category: '分析工具' },
-  { id: 'blast', label: 'BLAST 分析', icon: 'blast', route: '/blast', category: '分析工具' },
-  { id: 'tree', label: '科研绘图工坊', icon: 'tree', route: '/tree', category: '分析工具' },
-  { id: 'other_tools', label: '自动化流水线', icon: 'other_tools', route: '/other-tools', category: '分析工具' },
-  { id: 'settings', label: '设置', icon: 'settings', route: '/settings', category: '系统' },
-  { id: 'help', label: '帮助', icon: 'help', route: '/help', category: '系统' },
-]
+const navItems = computed<NavItem[]>(() => [
+  { id: 'dashboard', label: t('nav.dashboard'), icon: 'dashboard', route: '/', categoryKey: 'main', category: t('nav.cat.main') },
+  { id: 'strain', label: t('nav.strain'), icon: 'strain', route: '/strain', categoryKey: 'tools', category: t('nav.cat.tools') },
+  { id: 'assembly', label: t('nav.assembly'), icon: 'assembly', route: '/assembly', categoryKey: 'tools', category: t('nav.cat.tools') },
+  { id: 'analysis', label: t('nav.analysis'), icon: 'analysis', route: '/analysis', categoryKey: 'tools', category: t('nav.cat.tools') },
+  { id: 'blast', label: t('nav.blast'), icon: 'blast', route: '/blast', categoryKey: 'tools', category: t('nav.cat.tools') },
+  { id: 'tree', label: t('nav.tree'), icon: 'tree', route: '/tree', categoryKey: 'tools', category: t('nav.cat.tools') },
+  { id: 'other_tools', label: t('nav.other_tools'), icon: 'other_tools', route: '/other-tools', categoryKey: 'tools', category: t('nav.cat.tools') },
+  { id: 'settings', label: t('nav.settings'), icon: 'settings', route: '/settings', categoryKey: 'system', category: t('nav.cat.system') },
+  { id: 'help', label: t('nav.help'), icon: 'help', route: '/help', categoryKey: 'system', category: t('nav.cat.system') },
+])
 
-const categories = [...new Set(navItems.map((item) => item.category))]
+const categories = computed(() => {
+  const seen = new Set<string>()
+  const list: Array<{ key: string; label: string }> = []
+  for (const item of navItems.value) {
+    if (!seen.has(item.categoryKey)) {
+      seen.add(item.categoryKey)
+      list.push({ key: item.categoryKey, label: item.category })
+    }
+  }
+  return list
+})
 
 function navigateTo(item: NavItem): void {
   router.push(item.route)
@@ -41,11 +54,11 @@ function isActive(item: NavItem): boolean {
   return route.path === item.route
 }
 
-// 路由直达或浏览器后退时同步顶栏页面标题
+// 路由直达、浏览器后退或切换界面语言时同步顶栏页面标题
 watch(
-  () => route.path,
-  (path) => {
-    const matched = navItems.find((item) => item.route === path)
+  [() => route.path, () => appStore.locale],
+  ([path]) => {
+    const matched = navItems.value.find((item) => item.route === path)
     if (matched) {
       appStore.setPageTitle(matched.label)
     } else if (typeof route.meta?.title === 'string') {
@@ -60,7 +73,7 @@ watch(
   <nav
     class="sidebar"
     :class="{ collapsed: appStore.sidebarCollapsed }"
-    aria-label="主功能导航"
+    :aria-label="t('nav.aria_main')"
   >
     <div class="brand" title="NCBI Bio-Station">
       <div class="logo-container" aria-hidden="true">
@@ -81,10 +94,10 @@ watch(
     </div>
 
     <div class="nav-menu">
-      <template v-for="cat in categories" :key="cat">
-        <div class="nav-category">{{ cat }}</div>
+      <template v-for="cat in categories" :key="cat.key">
+        <div class="nav-category">{{ cat.label }}</div>
         <button
-          v-for="item in navItems.filter((n) => n.category === cat)"
+          v-for="item in navItems.filter((n) => n.categoryKey === cat.key)"
           :key="item.id"
           type="button"
           class="nav-item"
@@ -149,8 +162,8 @@ watch(
       <button
         type="button"
         class="toggle-btn"
-        :title="appStore.sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
-        :aria-label="appStore.sidebarCollapsed ? '展开侧边栏' : '折叠侧边栏'"
+        :title="appStore.sidebarCollapsed ? t('nav.expand_sidebar') : t('nav.collapse_sidebar')"
+        :aria-label="appStore.sidebarCollapsed ? t('nav.expand_sidebar') : t('nav.collapse_sidebar')"
         :aria-expanded="!appStore.sidebarCollapsed"
         @click="appStore.toggleSidebar()"
       >

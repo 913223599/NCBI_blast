@@ -4,7 +4,12 @@
  * 统一封装顶栏标题/副标题、附加动作插槽、数量统计徽章、返回列表按钮、
  * 响应式工具卡片网格与具体工具工作区切换容器，消除跨工作台样板样式重复。
  */
-withDefaults(
+import { computed } from 'vue'
+import { useI18n } from '../../locales'
+
+const { t } = useI18n()
+
+const props = withDefaults(
   defineProps<{
     title: string
     subtitle: string
@@ -16,13 +21,16 @@ withDefaults(
     gridMinWidth?: string
   }>(),
   {
-    statLabel: '可用工具',
+    statLabel: '',
     statValue: '',
-    backLabel: '返回工具列表',
+    backLabel: '',
     accent: 'blue',
     gridMinWidth: '300px',
   }
 )
+
+const resolvedStatLabel = computed(() => props.statLabel || t('common.available_tools'))
+const resolvedBackLabel = computed(() => props.backLabel || t('common.back_to_list'))
 
 const emit = defineEmits<{
   (e: 'back'): void
@@ -42,7 +50,7 @@ const emit = defineEmits<{
 
         <div v-if="!active && statValue !== ''" class="header-stats">
           <div class="stat-badge">
-            <span class="label">{{ statLabel }}</span>
+            <span class="label">{{ resolvedStatLabel }}</span>
             <span class="value">{{ statValue }}</span>
           </div>
         </div>
@@ -50,7 +58,7 @@ const emit = defineEmits<{
         <template v-else-if="active">
           <slot name="header-active-actions" />
           <button type="button" class="back-btn" @click="emit('back')">
-            &larr; {{ backLabel }}
+            &larr; {{ resolvedBackLabel }}
           </button>
         </template>
       </div>

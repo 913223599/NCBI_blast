@@ -146,4 +146,32 @@ describe('Phase 4 科研引文库接线、工作台语义按钮与结构蛋白�
     await items[0]!.trigger('click')
     expect(wrapper.emitted('action')?.[0]).toEqual(['citations'])
   })
+
+  it('Phase 8 Wave 1 双语静态兜底应在切换 en_US 后瞬间生效于框架与主视图', async () => {
+    setActivePinia(createPinia())
+    const { useAppStore } = await import('../../stores/app')
+    const appStore = useAppStore()
+    appStore.setLocale('en_US')
+
+    const HelpView = (await import('../../views/HelpView.vue')).default
+    const CitationsDialog = (await import('../common/CitationsDialog.vue')).default
+    const CommandPaletteDialog = (await import('../common/CommandPaletteDialog.vue')).default
+
+    const helpW = mount(HelpView)
+    await flushPromises()
+    expect(helpW.text()).toContain('Help Center')
+    expect(helpW.text()).toContain('On this page')
+
+    const citW = mount(CitationsDialog, { props: { open: true } })
+    await flushPromises()
+    expect(citW.text()).toContain('Academic Citations & BibTeX Library')
+    expect(citW.text()).toContain('All Modules')
+
+    const palW = mount(CommandPaletteDialog, { props: { open: true } })
+    await flushPromises()
+    expect(palW.text()).toContain('Dashboard Overview')
+    expect(palW.text()).toContain('Quick Actions')
+
+    appStore.setLocale('zh_CN')
+  })
 })

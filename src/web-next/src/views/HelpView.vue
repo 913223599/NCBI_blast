@@ -12,6 +12,9 @@ import {
   type MarkdownHeading,
 } from '../utils/safeHtml'
 import { shouldSubmitOnEnter } from '../utils/ime'
+import { useI18n } from '../locales'
+
+const { t } = useI18n()
 
 interface HelpTopic {
   id: string
@@ -152,35 +155,35 @@ onMounted(async () => {
 
 <template>
   <div class="help-view">
-    <aside class="help-sidebar" aria-label="帮助主题目录">
+    <aside class="help-sidebar" :aria-label="t('help.sidebar_aria')">
       <div class="sidebar-header">
-        <h2>帮助中心</h2>
-        <p class="subtitle">NCBI Bio-Station 使用手册</p>
+        <h2>{{ t('help.title') }}</h2>
+        <p class="subtitle">{{ t('help.subtitle') }}</p>
         <div class="sidebar-search">
           <input
             v-model="searchQuery"
             type="search"
             class="help-search-input"
-            placeholder="筛选帮助主题或分类..."
-            aria-label="筛选帮助主题"
+            :placeholder="t('help.search_placeholder')"
+            :aria-label="t('help.search_aria')"
             @keydown="handleSearchKeydown"
           />
           <button
             v-if="searchQuery"
             type="button"
             class="search-clear-btn"
-            aria-label="清空搜索词"
+            :aria-label="t('help.clear_aria')"
             @click="searchQuery = ''"
           >
-            清空
+            {{ t('help.clear_btn') }}
           </button>
         </div>
       </div>
 
       <div class="topic-list">
-        <div v-if="isLoading" class="loading-hint">正在加载手册目录...</div>
+        <div v-if="isLoading" class="loading-hint">{{ t('help.loading_toc') }}</div>
         <div v-else-if="filteredTopics.length === 0" class="loading-hint">
-          未找到与 "{{ searchQuery }}" 匹配的帮助主题
+          {{ t('help.no_match', { query: searchQuery }) }}
         </div>
         <template v-else>
           <template v-for="cat in visibleCategories" :key="cat">
@@ -201,19 +204,19 @@ onMounted(async () => {
       </div>
     </aside>
 
-    <section class="help-content" aria-label="帮助文档正文">
+    <section class="help-content" :aria-label="t('help.content_aria')">
       <div v-if="!activeTopic" class="empty-state">
         <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
         </svg>
-        <h2>请从左侧选择一个主题开始阅读</h2>
-        <p>您可以查阅 BLAST 配置、数据库管理、参数设置与工作流说明。</p>
+        <h2>{{ t('help.empty_title') }}</h2>
+        <p>{{ t('help.empty_desc') }}</p>
       </div>
-      <div v-else-if="isContentLoading" class="loading-hint">正在读取文档内容...</div>
+      <div v-else-if="isContentLoading" class="loading-hint">{{ t('help.loading_content') }}</div>
       <div v-else class="content-shell">
-        <nav v-if="tocItems.length >= 2" class="toc-bar" aria-label="文档章节目录">
-          <span class="toc-label">本页目录</span>
+        <nav v-if="tocItems.length >= 2" class="toc-bar" :aria-label="t('help.toc_aria')">
+          <span class="toc-label">{{ t('help.toc_label') }}</span>
           <div class="toc-links">
             <button
               v-for="heading in tocItems"

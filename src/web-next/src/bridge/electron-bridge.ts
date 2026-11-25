@@ -577,8 +577,9 @@ const electronBridge = {
     },
 
     // ═══ 配置（通过 HTTP）═══
-    async get_ui_translations(callback?: (res: string) => void) {
-        const result = await apiGet('/api/settings/ui_translations');
+    async get_ui_translations(callback?: (res: string) => void, lang?: string) {
+        const query = lang ? `?lang=${encodeURIComponent(lang)}` : '';
+        const result = await apiGet(`/api/settings/ui_translations${query}`);
         callback?.(JSON.stringify(result));
     },
 

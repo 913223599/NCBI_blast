@@ -8,6 +8,7 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { shouldSubmitOnEnter } from '../../utils/ime'
+import { useI18n } from '../../locales'
 
 export interface PaletteCommand {
   id: string
@@ -29,31 +30,32 @@ const emit = defineEmits<{
   (e: 'action', action: 'citations' | 'toggle-locale' | 'probe-health'): void
 }>()
 
+const { t } = useI18n()
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const query = ref('')
 const activeIndex = ref(0)
 let pressedOutside = false
 
-const commands: PaletteCommand[] = [
-  { id: 'nav-dashboard', label: '仪表盘首页', group: '工作站模块', keywords: 'dashboard home 首页 概览', route: '/' },
-  { id: 'nav-blast', label: 'BLAST 序列比对与多样性', group: '工作站模块', keywords: 'blast 16s 比对 序列 鉴定', route: '/blast' },
-  { id: 'nav-assembly', label: 'NGCS 基因组拼接组装', group: '工作站模块', keywords: 'assembly ngcs 拼接 组装 fastq', route: '/assembly' },
-  { id: 'nav-analysis', label: '组装分析工作台（注释 / 噬菌体 / 泛基因组）', group: '工作站模块', keywords: 'analysis annotation phage structure pangenome sanger viewer 注释 噬菌体', route: '/analysis' },
-  { id: 'nav-tree', label: '科研绘图工坊（系统发育树 / VIRIDIC / 共线性）', group: '工作站模块', keywords: 'tree phylo figure studio viridic lovis4u clinker 绘图 发育树', route: '/tree' },
-  { id: 'nav-strain', label: '菌毒种库与 3D 冻存管理', group: '工作站模块', keywords: 'strain freezer 3d 菌种 冰箱', route: '/strain' },
-  { id: 'nav-other', label: '自动化流水线工具（邮件 / 生工 16S）', group: '工作站模块', keywords: 'other tools mail sangon 邮件 生工 自动化', route: '/other-tools' },
-  { id: 'nav-help', label: '帮助中心与使用手册', group: '工作站模块', keywords: 'help docs manual 帮助 手册', route: '/help' },
-  { id: 'nav-settings', label: '系统设置与更新', group: '工作站模块', keywords: 'settings config update lan 设置 配置 更新', route: '/settings' },
-  { id: 'act-citations', label: '打开学术引用与 BibTeX 工具库', group: '快捷动作', keywords: 'citation bibtex reference doi 引文 文献', action: 'citations' },
-  { id: 'act-locale', label: '切换界面语言 (简体中文 / English)', group: '快捷动作', keywords: 'locale language zh en 语言 中英文', action: 'toggle-locale' },
-  { id: 'act-health', label: '重新检测后端服务与硬件状态', group: '快捷动作', keywords: 'health ping cpu gpu metrics 检测 健康', action: 'probe-health' },
-]
+const commands = computed<PaletteCommand[]>(() => [
+  { id: 'nav-dashboard', label: t('palette.cmd_dashboard'), group: t('palette.group_modules'), keywords: 'dashboard home 首页 概览', route: '/' },
+  { id: 'nav-blast', label: t('palette.cmd_blast'), group: t('palette.group_modules'), keywords: 'blast 16s 比对 序列 鉴定', route: '/blast' },
+  { id: 'nav-assembly', label: t('palette.cmd_assembly'), group: t('palette.group_modules'), keywords: 'assembly ngcs 拼接 组装 fastq', route: '/assembly' },
+  { id: 'nav-analysis', label: t('palette.cmd_analysis'), group: t('palette.group_modules'), keywords: 'analysis annotation phage structure pangenome sanger viewer 注释 噬菌体', route: '/analysis' },
+  { id: 'nav-tree', label: t('palette.cmd_tree'), group: t('palette.group_modules'), keywords: 'tree phylo figure studio viridic lovis4u clinker 绘图 发育树', route: '/tree' },
+  { id: 'nav-strain', label: t('palette.cmd_strain'), group: t('palette.group_modules'), keywords: 'strain freezer 3d 菌种 冰箱', route: '/strain' },
+  { id: 'nav-other', label: t('palette.cmd_other'), group: t('palette.group_modules'), keywords: 'other tools mail sangon 邮件 生工 自动化', route: '/other-tools' },
+  { id: 'nav-help', label: t('palette.cmd_help'), group: t('palette.group_modules'), keywords: 'help docs manual 帮助 手册', route: '/help' },
+  { id: 'nav-settings', label: t('palette.cmd_settings'), group: t('palette.group_modules'), keywords: 'settings config update lan 设置 配置 更新', route: '/settings' },
+  { id: 'act-citations', label: t('palette.cmd_citations'), group: t('palette.group_actions'), keywords: 'citation bibtex reference doi 引文 文献', action: 'citations' },
+  { id: 'act-locale', label: t('palette.cmd_locale'), group: t('palette.group_actions'), keywords: 'locale language zh en 语言 中英文', action: 'toggle-locale' },
+  { id: 'act-health', label: t('palette.cmd_health'), group: t('palette.group_actions'), keywords: 'health ping cpu gpu metrics 检测 健康', action: 'probe-health' },
+])
 
 const filteredCommands = computed<PaletteCommand[]>(() => {
   const q = query.value.trim().toLowerCase()
-  if (!q) return commands
-  return commands.filter(
+  if (!q) return commands.value
+  return commands.value.filter(
     (cmd) =>
       cmd.label.toLowerCase().includes(q) ||
       cmd.group.toLowerCase().includes(q) ||
@@ -181,7 +183,7 @@ onUnmounted(() => {
   >
     <div class="palette-shell">
       <div class="palette-input-row">
-        <span id="command-palette-title" class="sr-only">全局命令与快捷跳转</span>
+        <span id="command-palette-title" class="sr-only">{{ t('palette.title') }}</span>
         <svg class="palette-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -191,16 +193,16 @@ onUnmounted(() => {
           v-model="query"
           type="search"
           class="palette-input"
-          placeholder="输入模块名、关键词或动作（如 BLAST、绘图、引文、设置）..."
-          aria-label="搜索命令或页面"
+          :placeholder="t('palette.placeholder')"
+          :aria-label="t('palette.search_aria')"
           @keydown="handleInputKeydown"
         />
         <kbd class="esc-hint">ESC</kbd>
       </div>
 
-      <div class="palette-list" role="listbox" aria-label="匹配命令列表">
+      <div class="palette-list" role="listbox" :aria-label="t('palette.list_aria')">
         <div v-if="filteredCommands.length === 0" class="palette-empty">
-          未匹配到相关命令或模块
+          {{ t('palette.empty') }}
         </div>
         <button
           v-for="(cmd, idx) in filteredCommands"
@@ -217,9 +219,9 @@ onUnmounted(() => {
       </div>
 
       <footer class="palette-footer">
-        <span>上下方向键选择</span>
-        <span>Enter 确认跳转</span>
-        <span>Ctrl+K 随时唤起</span>
+        <span>{{ t('palette.footer_nav') }}</span>
+        <span>{{ t('palette.footer_enter') }}</span>
+        <span>{{ t('palette.footer_shortcut') }}</span>
       </footer>
     </div>
   </dialog>

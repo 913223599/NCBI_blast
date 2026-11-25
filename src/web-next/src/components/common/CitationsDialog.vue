@@ -7,7 +7,8 @@
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { apiGet } from '../../bridge/electron-bridge'
-import { useAppStore } from '../../stores/app'
+import { notifyUser } from '../../utils/notify'
+import { useI18n } from '../../locales'
 
 export interface CitationItem {
   id: string
@@ -34,23 +35,23 @@ const emit = defineEmits<{
   (e: 'update:open', val: boolean): void
 }>()
 
-const appStore = useAppStore()
+const { t } = useI18n()
 const dialogRef = ref<HTMLDialogElement | null>(null)
 const isLoading = ref(false)
 const citations = ref<CitationItem[]>([])
 const selectedModule = ref<string>(props.defaultModule)
 let pressedOutside = false
 
-const moduleOptions = [
-  { id: 'all', label: '全部模块' },
-  { id: 'figure_studio', label: '科研绘图工坊' },
-  { id: 'phylo', label: '系统发育树' },
-  { id: 'annotation', label: '功能注释' },
-  { id: 'analysis', label: '深度分析' },
-  { id: 'assembly', label: '基因组组装' },
-  { id: 'blast', label: 'BLAST 鉴定' },
-  { id: 'viewer', label: '图谱可视化' },
-]
+const moduleOptions = computed(() => [
+  { id: 'all', label: t('citations.mod_all') },
+  { id: 'figure_studio', label: t('citations.mod_figure_studio') },
+  { id: 'phylo', label: t('citations.mod_phylo') },
+  { id: 'annotation', label: t('citations.mod_annotation') },
+  { id: 'analysis', label: t('citations.mod_analysis') },
+  { id: 'assembly', label: t('citations.mod_assembly') },
+  { id: 'blast', label: t('citations.mod_blast') },
+  { id: 'viewer', label: t('citations.mod_viewer') },
+])
 
 const filteredCitations = computed(() => {
   if (selectedModule.value === 'all') return citations.value
@@ -84,7 +85,7 @@ async function loadCitations(): Promise<void> {
     }
   } catch (err) {
     console.warn('[CitationsDialog] 加载文献库失败:', err)
-    appStore.showNotification('加载学术引文库失败，请检查后端服务状态', 'warning')
+    notifyUser(t('citations.load_failed'), 'warning')
   } finally {
     isLoading.value = false
   }
@@ -93,9 +94,9 @@ async function loadCitations(): Promise<void> {
 async function copyText(text: string, successMsg: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text)
-    appStore.showNotification(successMsg, 'success')
+    notifyUser(successMsg, 'success')
   } catch {
-    appStore.showNotification('剪贴板写入受限，请手动选择复制', 'warning')
+    notifyUser(t('citations.clipboard_failed'), 'warning')
   }
 }
 
@@ -103,14 +104,14 @@ function copyAllPlain(): void {
   const list = filteredCitations.value
   if (!list.length) return
   const text = list.map((item, idx) => `[${idx + 1}] ${formatPlainReference(item)}`).join('\n')
-  void copyText(text, `已复制 ${list.length} 条纯文本参考文献`)
+  void copyText(text, t('citations.copied_plain_all', { count: list.length }))
 }
 
 function copyAllBibtex(): void {
   const list = filteredCitations.value
   if (!list.length) return
   const text = list.map((item) => formatBibtexEntry(item)).join('\n\n')
-  void copyText(text, `已复制 ${list.length} 条 BibTeX 引文`)
+  void copyText(text, t('citations.copied_bibtex_all', { count: list.length }))
 }
 
 function closeDialog(): void {
@@ -205,10 +206,10 @@ onUnmounted(() => {
     <div class="citations-shell">
       <header class="citations-header">
         <div>
-          <h1 id="citations-dialog-title" class="citations-title">学术引用与 BibTeX 工具库</h1>
-          <p class="citations-sub">用于论文 Methods &amp; References 标准致谢，支持按分析模块筛选并一键导出</p>
+          <h1 id="citations-dialog-title" class="citations-title">{{ t('citations.title') }}</h1>
+          <p class="citations-sub">{{ t('citations.subtitle') }}</p>
         </div>
-        <button type="button" class="close-icon-btn" aria-label="关闭学术引用窗口" @click="closeDialog">
+        <button type="button" class="close-icon-btn" :aria-label="t('citations.close_aria')" @click="closeDialog">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
@@ -217,7 +218,7 @@ onUnmounted(() => {
       </header>
 
       <div class="citations-toolbar">
-        <div class="module-tabs" role="tablist" aria-label="按分析模块筛选引文">
+        <div class="module-tabs" role="tablist" :aria-label="t('citations.filter_aria')">
           <button
             v-for="mod in moduleOptions"
             :key="mod.id"
@@ -231,17 +232,17 @@ onUnmounted(() => {
         </div>
         <div class="export-btns">
           <button type="button" class="btn-outline" :disabled="filteredCitations.length === 0" @click="copyAllPlain">
-            复制纯文本 ({{ filteredCitations.length }})
+            {{ t('citations.copy_plain_all', { count: filteredCitations.length }) }}
           </button>
           <button type="button" class="btn-primary" :disabled="filteredCitations.length === 0" @click="copyAllBibtex">
-            复制 BibTeX
+            {{ t('citations.copy_bibtex_all') }}
           </button>
         </div>
       </div>
 
       <div class="citations-body">
-        <div v-if="isLoading" class="state-hint">正在加载标准参考文献库...</div>
-        <div v-else-if="filteredCitations.length === 0" class="state-hint">当前筛选条件下暂无文献条目</div>
+        <div v-if="isLoading" class="state-hint">{{ t('citations.loading') }}</div>
+        <div v-else-if="filteredCitations.length === 0" class="state-hint">{{ t('citations.empty') }}</div>
         <ul v-else class="citation-list">
           <li v-for="item in filteredCitations" :key="item.id" class="citation-card">
             <div class="cit-top">
@@ -254,16 +255,16 @@ onUnmounted(() => {
                 <button
                   type="button"
                   class="mini-btn"
-                  @click="copyText(formatPlainReference(item), `已复制 ${item.name} 参考文献`)"
+                  @click="copyText(formatPlainReference(item), t('citations.copied_item_plain', { name: item.name }))"
                 >
-                  引用
+                  {{ t('citations.btn_cite') }}
                 </button>
                 <button
                   type="button"
                   class="mini-btn"
-                  @click="copyText(formatBibtexEntry(item), `已复制 ${item.name} BibTeX`)"
+                  @click="copyText(formatBibtexEntry(item), t('citations.copied_item_bibtex', { name: item.name }))"
                 >
-                  BibTeX
+                  {{ t('citations.btn_bibtex') }}
                 </button>
               </div>
             </div>

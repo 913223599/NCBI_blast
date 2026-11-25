@@ -20,6 +20,7 @@ export default defineConfig({
         manualChunks(id) {
           const normalized = id.replace(/\\/g, '/')
           if (normalized.includes('/src/stores/strain')) return 'store-strain'
+          if (normalized.includes('/resources/locales/')) return 'locales-bundle'
           if (!normalized.includes('node_modules')) return undefined
           if (normalized.includes('/vue/') || normalized.includes('/vue-router/') || normalized.includes('/pinia/') || normalized.includes('/@vueuse/')) {
             return 'vendor-vue'
@@ -37,6 +38,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    fs: {
+      allow: ['..', '../..'],
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8765',

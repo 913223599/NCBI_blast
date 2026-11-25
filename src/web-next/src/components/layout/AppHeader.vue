@@ -8,6 +8,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '../../stores/app'
 import { useBlastStore } from '../../stores/blast'
 import { apiGet } from '../../bridge/electron-bridge'
+import { useI18n } from '../../locales'
 import CommandPaletteDialog from '../common/CommandPaletteDialog.vue'
 import CitationsDialog from '../common/CitationsDialog.vue'
 
@@ -30,6 +31,7 @@ const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
 const blastStore = useBlastStore()
+const { t } = useI18n()
 
 const apiOnline = ref<'checking' | 'online' | 'offline'>('checking')
 const sysMetrics = ref<SystemMetricsPayload | null>(null)
@@ -64,15 +66,27 @@ const metricsSummary = computed(() => {
 
 const metricsTooltip = computed(() => {
   const m = sysMetrics.value
-  if (!m) return '实时硬件资源监控'
+  if (!m) return t('header.metrics_tooltip_default')
   const lines = [
-    `逻辑核心: ${m.cpu_cores ?? '-'} 核（安全并发预算 ${m.safe_cpu_budget ?? '-'} 线程）`,
+    t('header.metrics_cores', { cores: m.cpu_cores ?? '-', budget: m.safe_cpu_budget ?? '-' }),
   ]
   if (typeof m.memory_used_gb === 'number' && typeof m.memory_total_gb === 'number') {
-    lines.push(`内存: ${m.memory_used_gb} / ${m.memory_total_gb} GB (${m.memory_percent ?? 0}%)`)
+    lines.push(
+      t('header.metrics_mem', {
+        used: m.memory_used_gb,
+        total: m.memory_total_gb,
+        percent: m.memory_percent ?? 0,
+      })
+    )
   }
   if (m.gpu?.available) {
-    lines.push(`GPU: ${m.gpu.name || 'CUDA'}（空闲 ${m.gpu.free_vram_mb ?? 0} / ${m.gpu.total_vram_mb ?? 0} MB）`)
+    lines.push(
+      t('header.metrics_gpu', {
+        name: m.gpu.name || 'CUDA',
+        free: m.gpu.free_vram_mb ?? 0,
+        total: m.gpu.total_vram_mb ?? 0,
+      })
+    )
   }
   return lines.join('\n')
 })
@@ -101,7 +115,10 @@ async function fetchSystemMetrics(): Promise<void> {
 function toggleLocale(): void {
   const next = appStore.locale === 'zh_CN' ? 'en_US' : 'zh_CN'
   appStore.setLocale(next)
-  appStore.showNotification(next === 'zh_CN' ? '界面语言已切换为简体中文' : 'UI language switched to English', 'info')
+  appStore.showNotification(
+    next === 'zh_CN' ? t('header.locale_switched_zh') : t('header.locale_switched_en'),
+    'info'
+  )
 }
 
 function handlePaletteNavigate(path: string, title: string): void {
@@ -152,28 +169,28 @@ onUnmounted(() => {
         v-if="route.path !== '/'"
         type="button"
         class="crumb-home"
-        aria-label="返回仪表盘首页"
+        :aria-label="t('header.aria_home')"
         @click="router.push('/')"
       >
-        首页
+        {{ t('header.home') }}
       </button>
       <span v-if="route.path !== '/'" class="crumb-sep" aria-hidden="true">/</span>
       <span class="page-title">{{ appStore.pageTitle }}</span>
     </div>
 
-    <div class="header-actions" aria-label="工作站全局快捷操作">
+    <div class="header-actions" :aria-label="t('header.aria_actions')">
       <button
         type="button"
         class="header-search-btn"
-        title="打开全局命令面板 (Ctrl+K)"
-        aria-label="打开全局命令面板"
+        :title="t('header.quick_jump_title')"
+        :aria-label="t('header.aria_palette')"
         @click="showCommandPalette = true"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
-        <span>快捷跳转</span>
+        <span>{{ t('header.quick_jump') }}</span>
         <kbd class="kbd-chip">Ctrl+K</kbd>
       </button>
 
@@ -182,7 +199,7 @@ onUnmounted(() => {
         type="button"
         class="header-pill metrics-pill"
         :title="metricsTooltip"
-        aria-label="刷新实时硬件负载"
+        :aria-label="t('header.metrics_aria')"
         @click="fetchSystemMetrics"
       >
         <span>{{ metricsSummary }}</span>
@@ -192,29 +209,29 @@ onUnmounted(() => {
         v-if="runningBlastCount > 0"
         type="button"
         class="header-pill pill-running"
-        title="查看正在执行的 BLAST 任务"
+        :title="t('header.running_tasks_title')"
         @click="router.push('/blast')"
       >
         <span class="dot-pulse" aria-hidden="true"></span>
-        <span>{{ runningBlastCount }} 项运行中</span>
+        <span>{{ t('header.running_tasks_count', { count: runningBlastCount }) }}</span>
       </button>
 
       <button
         type="button"
         class="header-pill"
         :class="`status-${apiOnline}`"
-        title="点击检测本地 FastAPI 计算服务健康状态"
+        :title="t('header.health_title')"
         @click="probeBackendHealth"
       >
         <span class="status-dot" aria-hidden="true"></span>
-        <span>{{ apiOnline === 'online' ? '服务就绪' : apiOnline === 'offline' ? '服务离线' : '检测中' }}</span>
+        <span>{{ apiOnline === 'online' ? t('header.status_online') : apiOnline === 'offline' ? t('header.status_offline') : t('header.status_checking') }}</span>
       </button>
 
       <button
         type="button"
         class="header-icon-btn"
-        title="切换界面语言 (中/EN)"
-        aria-label="切换界面语言"
+        :title="t('header.locale_title')"
+        :aria-label="t('header.locale_aria')"
         @click="toggleLocale"
       >
         {{ appStore.locale === 'zh_CN' ? '中' : 'EN' }}
@@ -223,8 +240,8 @@ onUnmounted(() => {
       <button
         type="button"
         class="header-icon-btn"
-        title="帮助中心"
-        aria-label="打开帮助中心"
+        :title="t('header.help_title')"
+        :aria-label="t('header.help_aria')"
         @click="router.push('/help')"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -237,8 +254,8 @@ onUnmounted(() => {
       <button
         type="button"
         class="header-icon-btn"
-        title="系统设置"
-        aria-label="打开系统设置"
+        :title="t('header.settings_title')"
+        :aria-label="t('header.settings_aria')"
         @click="router.push('/settings')"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">

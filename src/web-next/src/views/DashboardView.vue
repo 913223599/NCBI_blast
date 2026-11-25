@@ -29,48 +29,48 @@ interface ActionCard {
 const actionCards = computed<ActionCard[]>(() => [
   {
     id: 'blast',
-    title: 'BLAST 序列比对与多样性',
-    desc: '本地多核序列比对、一致性分类鉴定与 16S 扩增子混样多样性分析。',
+    title: t('dash.card.blast.title'),
+    desc: t('dash.card.blast.desc'),
     route: '/blast',
     iconType: 'blast',
     gradient: 'linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)',
   },
   {
     id: 'assembly',
-    title: 'NGCS 基因组拼接组装',
-    desc: '支持二/三代测序质控、NGCS 高保真组装、深度覆盖度解析与串行队列调度。',
+    title: t('dash.card.assembly.title'),
+    desc: t('dash.card.assembly.desc'),
     route: '/assembly',
     iconType: 'assembly',
     gradient: 'linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%)',
   },
   {
     id: 'analysis',
-    title: '组装后深度分析工作台',
-    desc: '全基因组功能注释、前噬菌体边界发现、噬菌体尾型结构预测、泛基因组与图谱查看。',
+    title: t('dash.card.analysis.title'),
+    desc: t('dash.card.analysis.desc'),
     route: '/analysis',
     iconType: 'analysis',
     gradient: 'linear-gradient(135deg, #7c3aed 0%, #6366f1 100%)',
   },
   {
     id: 'tree',
-    title: '科研绘图工坊',
-    desc: '系统发育多环树、VIRIDIC 热图、共线性丝带图、核苷酸多样性与宿主谱矩阵出图。',
+    title: t('dash.card.tree.title'),
+    desc: t('dash.card.tree.desc'),
     route: '/tree',
     iconType: 'tree',
     gradient: 'linear-gradient(135deg, #0f766e 0%, #10b981 100%)',
   },
   {
     id: 'strain',
-    title: '菌毒种库与 3D 冻存管理',
-    desc: '本地菌毒种样本资产、冰箱盒位空间拓扑、批量导入与编码检索管理。',
+    title: t('dash.card.strain.title'),
+    desc: t('dash.card.strain.desc'),
     route: '/strain',
     iconType: 'strain',
     gradient: 'linear-gradient(135deg, #ea580c 0%, #f59e0b 100%)',
   },
   {
     id: 'other_tools',
-    title: '自动化流水线工具',
-    desc: '邮件收件自动注释与 Word 报告回传、生工 16S 订单批量抓取比对与导出。',
+    title: t('dash.card.other.title'),
+    desc: t('dash.card.other.desc'),
     route: '/other-tools',
     iconType: 'other_tools',
     gradient: 'linear-gradient(135deg, #475569 0%, #334155 100%)',
@@ -78,10 +78,10 @@ const actionCards = computed<ActionCard[]>(() => [
 ])
 
 const systemMetrics = computed(() => [
-  { label: '平台版本', value: `${APP_NAME} v${APP_VERSION}` },
-  { label: '已入库菌毒种样本', value: `${strainStore.records.length} 条` },
-  { label: '历史 BLAST 任务', value: `${blastStore.tasks.length} 项` },
-  { label: '冻存设备数量', value: `${strainStore.freezers.length} 台` },
+  { label: t('dash.metric.platform_version'), value: `${APP_NAME} v${APP_VERSION}` },
+  { label: t('dash.metric.strain_records'), value: t('dash.unit.records', { count: strainStore.records.length }) },
+  { label: t('dash.metric.blast_tasks'), value: t('dash.unit.tasks', { count: blastStore.tasks.length }) },
+  { label: t('dash.metric.freezers'), value: t('dash.unit.units', { count: strainStore.freezers.length }) },
 ])
 
 function navigateTo(card: ActionCard): void {
@@ -92,10 +92,10 @@ function navigateTo(card: ActionCard): void {
 
 <template>
   <div class="dashboard-view">
-    <section class="welcome-banner" aria-label="工作站概览">
+    <section class="welcome-banner" :aria-label="t('dash.aria_overview')">
       <div class="welcome-left">
-        <h1>NCBI Bio-Station <span class="pro-badge">工作站</span></h1>
-        <p>面向基因组组装、功能注释、噬菌体结构解析、系统发育绘图与菌毒种资产管理的本地一体化生物计算平台</p>
+        <h1>{{ APP_NAME }} <span class="pro-badge">{{ t('dash.badge') }}</span></h1>
+        <p>{{ t('dash.welcome_desc') }}</p>
       </div>
       <div class="welcome-decoration" aria-hidden="true">
         <svg viewBox="0 0 24 24" class="deco-icon">
@@ -105,7 +105,7 @@ function navigateTo(card: ActionCard): void {
     </section>
 
     <section class="dashboard-section" aria-labelledby="dash-quick-heading">
-      <h2 id="dash-quick-heading" class="section-title">{{ t('dash.quick') === 'dash.quick' ? '快速开始' : t('dash.quick') }}</h2>
+      <h2 id="dash-quick-heading" class="section-title">{{ t('dash.quick') }}</h2>
       <div class="cards-grid">
         <button
           v-for="card in actionCards"
@@ -154,7 +154,7 @@ function navigateTo(card: ActionCard): void {
     </section>
 
     <section class="dashboard-section" aria-labelledby="dash-sys-heading">
-      <h2 id="dash-sys-heading" class="section-title">{{ t('dash.sys') === 'dash.sys' ? '工作站实时概览' : t('dash.sys') }}</h2>
+      <h2 id="dash-sys-heading" class="section-title">{{ t('dash.sys') }}</h2>
       <div class="info-grid">
         <div v-for="metric in systemMetrics" :key="metric.label" class="info-card">
           <div class="info-label">{{ metric.label }}</div>

@@ -3,8 +3,9 @@
  * SettingsView - 应用设置容器
  * 遵循单一职责原则，将复杂业务解耦至独立 Panel 组件中
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { APP_NAME, APP_VERSION } from '../utils/appMeta'
+import { useI18n } from '../locales'
 
 // 导入业务面板组件
 import AITranslationPanel from '../components/settings/AITranslationPanel.vue'
@@ -14,15 +15,17 @@ import UserInterfacePanel from '../components/settings/UserInterfacePanel.vue'
 import DictionaryPanel from '../components/settings/DictionaryPanel.vue'
 import UpdatePanel from '../components/settings/UpdatePanel.vue'
 
+const { t } = useI18n()
+
 /* -------- 侧边导航配置 (纯 SVG 图标，全面禁用 Emoji) -------- */
-const panels = [
-  { id: 'ai-translation', label: 'AI & 翻译' },
-  { id: 'local-db', label: '本地数据库' },
-  { id: 'system-params', label: '系统参数' },
-  { id: 'user-interface', label: '界面显示' },
-  { id: 'dictionary', label: '词典管理' },
-  { id: 'update', label: '软件更新' }
-]
+const panels = computed(() => [
+  { id: 'ai-translation', label: t('settings.panel.ai_translation') },
+  { id: 'local-db', label: t('settings.panel.local_db') },
+  { id: 'system-params', label: t('settings.panel.system_params') },
+  { id: 'user-interface', label: t('settings.panel.user_interface') },
+  { id: 'dictionary', label: t('settings.panel.dictionary') },
+  { id: 'update', label: t('settings.panel.update') },
+])
 
 const activePanel = ref('ai-translation')
 </script>
@@ -30,7 +33,7 @@ const activePanel = ref('ai-translation')
 <template>
   <div class="settings-view">
     <!-- 侧边导航 -->
-    <nav class="settings-sidebar" aria-label="系统设置分类">
+    <nav class="settings-sidebar" :aria-label="t('settings.nav_aria')">
       <button
         v-for="panel in panels"
         :key="panel.id"
@@ -79,9 +82,9 @@ const activePanel = ref('ai-translation')
         <span class="nav-label">{{ panel.label }}</span>
       </button>
       <div class="spacer" />
-      <button type="button" class="version-tag" @click="activePanel = 'update'" title="点击进入软件更新">
+      <button type="button" class="version-tag" @click="activePanel = 'update'" :title="t('settings.check_update_title')">
         <span>{{ APP_NAME }} v{{ APP_VERSION }}</span>
-        <span class="check-update-link">检查更新</span>
+        <span class="check-update-link">{{ t('settings.check_update') }}</span>
       </button>
     </nav>
 

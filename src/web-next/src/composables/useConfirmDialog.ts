@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { useI18n } from '../locales'
 
 export interface ConfirmDialogOptions {
   title: string
@@ -39,13 +40,15 @@ function cancelPendingRequest(): void {
 }
 
 export function useConfirmDialog() {
+  const { t } = useI18n()
+
   function confirm(options: ConfirmDialogOptions): Promise<boolean> {
     return new Promise((resolve) => {
       cancelPendingRequest()
       activeRequest.value = {
         mode: 'confirm',
-        confirmText: '确认',
-        cancelText: '取消',
+        confirmText: t('common.confirm'),
+        cancelText: t('common.cancel'),
         danger: false,
         ...options,
         resolve,
@@ -58,10 +61,10 @@ export function useConfirmDialog() {
       cancelPendingRequest()
       activeRequest.value = {
         mode: 'prompt',
-        confirmText: '确认',
-        cancelText: '取消',
+        confirmText: t('common.confirm'),
+        cancelText: t('common.cancel'),
         danger: false,
-        inputLabel: '请输入确认内容',
+        inputLabel: t('common.prompt_default_label'),
         placeholder: '',
         initialValue: '',
         ...options,

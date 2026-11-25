@@ -1,7 +1,12 @@
+<script setup lang="ts">
+import { useI18n } from '../../locales'
+const { t } = useI18n()
+</script>
+
 <template>
   <div class="async-module-loading" role="status" aria-live="polite">
     <div class="spinner" aria-hidden="true"></div>
-    <span>正在按需加载分析模块...</span>
+    <span>{{ t('common.async_loading') }}</span>
   </div>
 </template>
 
