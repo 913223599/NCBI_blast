@@ -53,13 +53,39 @@ else
   rm -rf "$tmp_dir"
 fi
 
-echo "--- [3/5] 安装 Phold (pip, 含 ProstT5 依赖) ---"
+echo "--- [3/5] 安装 Phold (pip, 自动匹配 GPU/CPU PyTorch 与 ProstT5 依赖) ---"
 python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
-# CPU 版 torch 体积更小、无需 CUDA 版本对齐；如需 GPU 推理，改为 torch==<对应 cu 版本>
-if ! python3 -c "import torch" >/dev/null 2>&1; then
-  python3 -m pip install --break-system-packages torch --index-url https://download.pytorch.org/whl/cpu 2>/dev/null \
-    || python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+HAS_WSL_GPU=0
+if [ -e /dev/dxg ] || command -v nvidia-smi >/dev/null 2>&1; then
+  HAS_WSL_GPU=1
 fi
+
+TORCH_CUDA_READY=0
+if python3 -c "import torch; assert torch.cuda.is_available(); _ = torch.zeros(1, device='cuda') + 1; print(torch.__version__, torch.cuda.get_device_name(0))" >/dev/null 2>&1; then
+  TORCH_CUDA_READY=1
+fi
+
+if [ "$HAS_WSL_GPU" -eq 1 ]; then
+  if [ "$TORCH_CUDA_READY" -eq 1 ]; then
+    echo "  已检测到兼容 CUDA 的 PyTorch，跳过重装:"
+    python3 -c "import torch; print('    torch=' + torch.__version__ + ', gpu=' + torch.cuda.get_device_name(0))"
+  else
+    echo "  检测到 WSL GPU，正在部署 PyTorch CUDA 版 (优先 cu128 以适配 RTX 50xx/40xx/30xx)..."
+    python3 -m pip install --break-system-packages --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128 2>/dev/null \
+      || python3 -m pip install --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cu128 \
+      || python3 -m pip install --break-system-packages --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cu124 2>/dev/null \
+      || python3 -m pip install --upgrade --force-reinstall torch --index-url https://download.pytorch.org/whl/cu124 \
+      || python3 -m pip install --break-system-packages torch --index-url https://download.pytorch.org/whl/cpu 2>/dev/null \
+      || python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+  fi
+else
+  if ! python3 -c "import torch" >/dev/null 2>&1; then
+    python3 -m pip install --break-system-packages torch --index-url https://download.pytorch.org/whl/cpu 2>/dev/null \
+      || python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+  fi
+fi
+
 python3 -m pip install --break-system-packages phold 2>/dev/null || python3 -m pip install phold
 hash -r
 echo "  phold -> $(command -v phold || echo '未找到')"
@@ -98,9 +124,23 @@ else
   echo "  [MISS] ProstT5 权重"; missing=$((missing + 1))
 fi
 
+python3 - << 'PY' 2>/dev/null || true
+import torch
+cuda_ok = bool(torch.cuda.is_available())
+gpu_name = torch.cuda.get_device_name(0) if cuda_ok else "CPU"
+kernel_ok = False
+if cuda_ok:
+    try:
+        _ = (torch.zeros(1, device="cuda") + 1).item()
+        kernel_ok = True
+    except Exception:
+        kernel_ok = False
+print(f"  [INFO] torch={torch.__version__} cuda_available={cuda_ok} kernel_ok={kernel_ok} device={gpu_name}")
+PY
+
 if [ "$missing" -eq 0 ]; then
-  echo "✅ Phold 运行环境就绪"
+  echo "[OK] Phold 运行环境就绪"
   exit 0
 fi
-echo "⚠️  仍有 $missing 项缺失，请根据上面的 [MISS] 行补齐后重跑"
+echo "[WARN] 仍有 $missing 项缺失，请根据上面的 [MISS] 行补齐后重跑"
 exit 1
