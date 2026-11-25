@@ -257,7 +257,7 @@ class PhageStructureManager:
             judge_model, _, eff_dev = load_unified_judge_seq_model(project_root=self.project_root)
             for cid in target_cids:
                 c_res = eval_by_cid.get(cid)
-                if c_res is None:
+                if c_res is None or c_res.completeness is None:
                     continue
                 raw_tmps = (cmap.get(cid) or {}).get("_raw_tmps", c_res.tmp_analyses)
                 ai_pred = predict_contig_morphotype_ai(

@@ -20,7 +20,7 @@ import json
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Generator, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -59,8 +59,8 @@ class PortableStandardScaler:
     ) -> None:
         self.mean_ = np.asarray(mean, dtype=np.float64) if mean is not None else None
         self.scale_ = np.asarray(scale, dtype=np.float64) if scale is not None else None
-        self.with_mean = bool(with_mean)
-        self.with_std = bool(with_std)
+        self.with_mean = with_mean
+        self.with_std = with_std
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         arr = np.asarray(X, dtype=np.float64).copy()
@@ -90,7 +90,7 @@ class PortablePCA:
             if explained_variance is not None
             else None
         )
-        self.whiten = bool(whiten)
+        self.whiten = whiten
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         arr = np.asarray(X, dtype=np.float64)
@@ -107,7 +107,7 @@ class PortableColumnTransformer:
 
     def __init__(self, transformers: Sequence[Tuple[str, Any, Tuple[int, int]]]) -> None:
         self.transformers: List[Tuple[str, Any, Tuple[int, int]]] = [
-            (str(name), tr, (int(sl[0]), int(sl[1]))) for name, tr, sl in transformers
+            (name, tr, (sl[0], sl[1])) for name, tr, sl in transformers
         ]
 
     def transform(self, X: np.ndarray) -> np.ndarray:
@@ -169,8 +169,8 @@ class PortableHistGBClassifier:
         classes: Optional[np.ndarray] = None,
     ) -> None:
         self.baseline_prediction = np.asarray(baseline_prediction, dtype=np.float64)
-        self.n_iter = int(n_iter)
-        self.n_trees_per_iteration = int(n_trees_per_iteration)
+        self.n_iter = n_iter
+        self.n_trees_per_iteration = n_trees_per_iteration
         self.tree_offsets = np.asarray(tree_offsets, dtype=np.int64)
         self.feature_idx = np.asarray(feature_idx, dtype=np.int64)
         self.num_threshold = np.asarray(num_threshold, dtype=np.float64)
@@ -255,7 +255,7 @@ class PortablePipeline:
     """纯 NumPy 串联推理管线，接口兼容 sklearn.pipeline.Pipeline。"""
 
     def __init__(self, steps: Sequence[Tuple[str, Any]]) -> None:
-        self.steps: List[Tuple[str, Any]] = [(str(name), step) for name, step in steps]
+        self.steps: List[Tuple[str, Any]] = [(name, step) for name, step in steps]
 
     def transform(self, X: np.ndarray) -> np.ndarray:
         cur = np.asarray(X, dtype=np.float64)
@@ -531,7 +531,7 @@ def has_portable_model_files(joblib_path: Path) -> bool:
 
 
 @contextlib.contextmanager
-def _sklearn_loss_alias_ctx() -> Iterable[None]:
+def _sklearn_loss_alias_ctx() -> Generator[None, None, None]:
     """兼容加载在 sklearn 1.7.x 序列化、将 CyHalfMultinomialLoss 指向顶层 `_loss` 的 joblib。"""
     with _LOSS_ALIAS_LOCK:
         had_loss = "_loss" in sys.modules
@@ -614,7 +614,8 @@ def export_portable_bundle_from_joblib(joblib_path: Path) -> Tuple[Path, Path]:
     tmp_npz = npz_path.with_suffix(".npz.tmp")
     tmp_json = json_path.with_suffix(".json.tmp")
     with tmp_npz.open("wb") as fh:
-        np.savez_compressed(fh, **packer.arrays)
+        savez_fn: Any = np.savez_compressed
+        savez_fn(fh, **packer.arrays)
     tmp_json.write_text(json.dumps(meta_doc, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp_npz.replace(npz_path)
     tmp_json.replace(json_path)
