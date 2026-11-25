@@ -1480,3 +1480,181 @@ def test_t2_2_v2_fine_role_probe_and_fragment_abstention() -> None:
 
 
 
+
+
+def test_load_contigs_from_phage_discovery_prefixed_and_gbk_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证前噬菌体导入兼容 {task_id}_prophages.fasta、DB files['fasta']、历史 prophages.fasta 与 regions/region_N.gbk。"""
+    from Bio.Seq import Seq
+    from Bio.SeqFeature import FeatureLocation, SeqFeature
+    from Bio.SeqRecord import SeqRecord
+    from Bio import SeqIO
+
+    from src.analysis.phage_structure import manager as mgr_mod
+
+    mgr = mgr_mod.PhageStructureManager(project_root=tmp_path)
+    pd_root = tmp_path / "results" / "phage_discovery"
+
+    # 场景 1: 真实导出命名 {task_id}_prophages.fasta + region_index 过滤
+    tid1 = "phage_20261125_000001_aaaaaa"
+    dir1 = pd_root / tid1
+    dir1.mkdir(parents=True)
+    seq1 = ("ATGGCTAGCGATCGATCGAT" * 20)
+    (dir1 / f"{tid1}_prophages.fasta").write_text(
+        f">Phage_001|scaf1:100-500\n{seq1}\n>Phage_002|scaf1:1000-1400\n{seq1}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(mgr_mod.phage_discovery_db, "get_task", lambda _tid: {})
+
+    cmap_all = mgr._load_contigs_from_phage_discovery(tid1)
+    assert len(cmap_all) == 2
+    cmap_r2 = mgr._load_contigs_from_phage_discovery(tid1, region_index=2)
+    assert len(cmap_r2) == 1 and next(iter(cmap_r2.keys())).startswith("Phage_002")
+
+    # 场景 2: DB files["fasta"] 登记相对路径（且即使路径来自迁移前盘符也可同目录文件名回退）
+    tid2 = "phage_20261125_000002_bbbbbb"
+    dir2 = pd_root / tid2
+    dir2.mkdir(parents=True)
+    (dir2 / "custom_export_prophages.fasta").write_text(
+        f">Phage_001|scaf2:1-400\n{seq1}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        mgr_mod.phage_discovery_db,
+        "get_task",
+        lambda _tid: {"files": {"fasta": f"Z:/old_root/results/phage_discovery/{tid2}/custom_export_prophages.fasta"}},
+    )
+    cmap_db = mgr._load_contigs_from_phage_discovery(tid2)
+    assert len(cmap_db) == 1
+
+    # 场景 3: 历史命名 prophages.fasta
+    tid3 = "phage_20261125_000003_cccccc"
+    dir3 = pd_root / tid3
+    dir3.mkdir(parents=True)
+    (dir3 / "prophages.fasta").write_text(f">Phage_001|scaf3:1-400\n{seq1}\n", encoding="utf-8")
+    monkeypatch.setattr(mgr_mod.phage_discovery_db, "get_task", lambda _tid: {})
+    assert len(mgr._load_contigs_from_phage_discovery(tid3)) == 1
+
+    # 场景 4: 仅存在 regions/region_1.gbk 时的 GenBank 兜底
+    tid4 = "phage_20261125_000004_dddddd"
+    reg_dir4 = pd_root / tid4 / "regions"
+    reg_dir4.mkdir(parents=True)
+    rec = SeqRecord(
+        Seq(seq1),
+        id="Phage_001_scaf4",
+        name="Phage_001_scaf4",
+        annotations={"molecule_type": "DNA"},
+    )
+    rec.features.append(
+        SeqFeature(
+            FeatureLocation(0, 300, strand=1),
+            type="CDS",
+            qualifiers={"locus_tag": ["CDS_001"], "product": ["hypothetical protein"]},
+        )
+    )
+    with open(reg_dir4 / "region_1.gbk", "w", encoding="utf-8") as fh:
+        SeqIO.write([rec], fh, "genbank")
+    cmap_gbk = mgr._load_contigs_from_phage_discovery(tid4, region_index=1)
+    assert len(cmap_gbk) == 1
+
+
+def test_portable_ai_runtime_numerical_equivalence() -> None:
+    """验证零 pickle/sklearn 依赖的便携模型与原版 sklearn 模型数值完全等价（含 NaN）。"""
+    import numpy as np
+    from src.analysis.phage_structure.portable_ai_runtime import (
+        get_portable_model_paths,
+        has_portable_model_files,
+        load_portable_ai_bundle,
+        safe_joblib_load,
+    )
+
+    rng = np.random.default_rng(20261125)
+    for ver, deep_dim, meta_dim in [("v2", 3000, 85), ("v1", 2916, 75)]:
+        jp = REPO_ROOT / "models" / "phage_structure" / f"morphotype_ai_{ver}.joblib"
+        if not jp.is_file() or not has_portable_model_files(jp):
+            continue
+        npz_p, json_p = get_portable_model_paths(jp)
+        orig = safe_joblib_load(jp, convert_pipelines=False)
+        port = load_portable_ai_bundle(npz_p, json_p)
+
+        X_deep = rng.normal(0.0, 2.0, size=(120, deep_dim)).astype(np.float32)
+        assert float(np.max(np.abs(
+            orig["deep_only_pipeline"].predict_proba(X_deep)
+            - port["deep_only_pipeline"].predict_proba(X_deep)
+        ))) < 1e-6
+
+        X_prep = orig["deep_only_pipeline"].steps[0][1].transform(X_deep)
+        X_prep_nan = X_prep.copy()
+        X_prep_nan[rng.random(X_prep.shape) < 0.05] = np.nan
+        assert float(np.max(np.abs(
+            orig["deep_only_pipeline"].steps[-1][1].predict_proba(X_prep_nan)
+            - port["deep_only_pipeline"].steps[-1][1].predict_proba(X_prep_nan)
+        ))) < 1e-6
+
+        X_meta = rng.normal(0.0, 1.0, size=(120, meta_dim)).astype(np.float32)
+        assert float(np.max(np.abs(
+            orig["fusion_pipeline"].predict_proba(X_meta)
+            - port["fusion_pipeline"].predict_proba(X_meta)
+        ))) < 1e-6
+
+        if "fine_role_mlp_state_dict" in orig:
+            for k, v in orig["fine_role_mlp_state_dict"].items():
+                assert float((v.cpu() - port["fine_role_mlp_state_dict"][k]).abs().max()) < 1e-6
+
+
+def test_attach_ai_predictions_handles_loader_failure_gracefully(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """验证即使 AI 模型加载抛出异常，_attach_ai_predictions 也不会击穿主分析流水线。"""
+    from src.analysis.phage_structure import manager as mgr_mod
+    from src.analysis.phage_structure.types import (
+        CompletenessAssessment,
+        ConnectorProfile,
+        ContigStructureResult,
+        MorphotypePrediction,
+        StructuralModuleMatrix,
+    )
+
+    mgr = mgr_mod.PhageStructureManager(project_root=tmp_path)
+    monkeypatch.setattr(mgr_mod, "check_ai_classifier_ready", lambda _root=None: True)
+
+    def _boom(**_kwargs):
+        raise ModuleNotFoundError("No module named '_loss'")
+
+    monkeypatch.setattr(mgr_mod, "load_ai_predictor_bundle", _boom)
+
+    dummy_res = ContigStructureResult(
+        contig_id="c1",
+        length_bp=20000,
+        gc_percent=50.0,
+        total_orfs=20,
+        hmm_matched_orfs=5,
+        completeness=CompletenessAssessment(status="complete", score=0.9, reasons=[]),
+        prediction=MorphotypePrediction(
+            morphotype_code="Siphoviridae-like",
+            morphotype_label_cn="长尾噬菌体样",
+            tail_feature_tag="Siphoviridae",
+            confidence=0.85,
+            class_scores={"Siphoviridae-like": 10.0},
+            decision_basis="test",
+        ),
+        connector_profile=ConnectorProfile(),
+        module_matrix=StructuralModuleMatrix(),
+    )
+    eval_map = {"c1": dummy_res}
+    mgr._attach_ai_predictions(eval_map, {"c1": {}}, ["c1"])
+    assert eval_map["c1"].ai_prediction is None
+
+
+def test_safe_joblib_load_registers_loss_alias() -> None:
+    """验证 safe_joblib_load 兼容旧版 _loss 别名加载且不向全局 sys.modules 残留污染。"""
+    import sys
+    from src.analysis.phage_structure.portable_ai_runtime import safe_joblib_load
+
+    jp = REPO_ROOT / "models" / "phage_structure" / "morphotype_ai_v2.joblib"
+    if not jp.is_file():
+        pytest.skip("未找到本地 morphotype_ai_v2.joblib")
+
+    had_loss_before = "_loss" in sys.modules
+    bundle = safe_joblib_load(jp, convert_pipelines=True)
+    assert isinstance(bundle, dict)
+    assert bundle.get("model_version") == "morphotype_ai_v2"
+    if not had_loss_before:
+        assert "_loss" not in sys.modules

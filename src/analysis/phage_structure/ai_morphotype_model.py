@@ -23,6 +23,12 @@ import torch
 import torch.nn as nn
 
 from ...workbench.models.tool_config import ToolConfig
+from .portable_ai_runtime import (
+    get_portable_model_paths,
+    has_portable_model_files,
+    load_portable_ai_bundle,
+    safe_joblib_load,
+)
 from .types import (
     AiMorphotypePrediction,
     CompletenessAssessment,
@@ -106,7 +112,7 @@ def get_ai_model_paths(
     project_root: Optional[Path] = None,
     version: str = "auto",
 ) -> Tuple[Path, Path]:
-    """返回相对工程根目录的 AI 双轨分类器权重路径与元数据路径；auto 模式优先 V2 并平滑回退 V1。"""
+    """返回相对工程根目录的 AI 双轨分类器权重路径与元数据路径；auto 模式优先 V2（含便携权重）并平滑回退 V1。"""
     root = Path(project_root) if project_root else ToolConfig.PROJECT_ROOT
     model_dir = root / "models" / "phage_structure"
     v2_p = model_dir / "morphotype_ai_v2.joblib"
@@ -117,7 +123,7 @@ def get_ai_model_paths(
         return v2_p, v2_m
     if version == "v1":
         return v1_p, v1_m
-    if v2_p.is_file():
+    if v2_p.is_file() or has_portable_model_files(v2_p):
         return v2_p, v2_m
     return v1_p, v1_m
 
@@ -156,9 +162,10 @@ def check_ai_classifier_ready(
     project_root: Optional[Path] = None,
     version: str = "auto",
 ) -> bool:
-    """检查双轨 AI 形态分类权重包与 UnifiedJudge 底座是否均已就绪。"""
+    """检查双轨 AI 形态分类权重包（便携版或 joblib）与 UnifiedJudge 底座是否均已就绪。"""
     joblib_p, _ = get_ai_model_paths(project_root, version=version)
-    return joblib_p.is_file() and check_unified_judge_ready(project_root)
+    has_weights = has_portable_model_files(joblib_p) or joblib_p.is_file()
+    return has_weights and check_unified_judge_ready(project_root)
 
 
 def release_ai_judge_memory() -> None:
@@ -787,22 +794,51 @@ def compute_ece(y_true: Union[Sequence[int], np.ndarray], probs: np.ndarray, *, 
     return round(float(ece), 5)
 
 
+def _load_bundle_from_model_path(joblib_p: Path) -> Optional[Dict[str, Any]]:
+    """优先加载零 sklearn 依赖便携包 (.portable.npz/.json)，缺失时通过 safe_joblib_load 兼容回退。"""
+    if has_portable_model_files(joblib_p):
+        npz_p, json_p = get_portable_model_paths(joblib_p)
+        bundle = load_portable_ai_bundle(npz_p, json_p)
+        if isinstance(bundle, dict):
+            return bundle
+    if joblib_p.is_file():
+        bundle = safe_joblib_load(joblib_p, convert_pipelines=True)
+        if isinstance(bundle, dict):
+            return bundle
+    return None
+
+
 def load_ai_predictor_bundle(
     *,
     project_root: Optional[Path] = None,
     version: str = "auto",
     force_reload: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """按相对路径加载并缓存 Morphotype AI 双轨权重包（优先 V2 并平滑兼容 V1）。"""
+    """按相对路径加载并缓存 Morphotype AI 双轨权重包（优先零依赖便携版并兼容 V2/V1 回退）。"""
     joblib_p, _ = get_ai_model_paths(project_root, version=version)
-    if not joblib_p.is_file():
+    if not (has_portable_model_files(joblib_p) or joblib_p.is_file()):
         return None
     cache_key = str(joblib_p.resolve())
     if cache_key in _AI_PREDICTOR_CACHE and not force_reload:
         return _AI_PREDICTOR_CACHE[cache_key]
-    import joblib
 
-    bundle = joblib.load(joblib_p)
+    try:
+        bundle = _load_bundle_from_model_path(joblib_p)
+    except Exception as exc:
+        logger.warning("加载 AI 分类器权重失败 (%s): %s", joblib_p.name, exc)
+        if version == "auto" and joblib_p.name == "morphotype_ai_v2.joblib":
+            v1_p, _ = get_ai_model_paths(project_root, version="v1")
+            if has_portable_model_files(v1_p) or v1_p.is_file():
+                try:
+                    bundle = _load_bundle_from_model_path(v1_p)
+                except Exception as v1_exc:
+                    logger.warning("回退加载 V1 权重同样失败 (%s): %s", v1_p.name, v1_exc)
+                    return None
+            else:
+                return None
+        else:
+            return None
+
     if not isinstance(bundle, dict):
         return None
     _AI_PREDICTOR_CACHE[cache_key] = bundle

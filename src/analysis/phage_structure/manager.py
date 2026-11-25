@@ -250,10 +250,10 @@ class PhageStructureManager:
         if not target_cids or not check_ai_classifier_ready(self.project_root):
             return
         release_gpu_memory()
-        ai_bundle = load_ai_predictor_bundle(project_root=self.project_root)
-        if ai_bundle is None:
-            return
         try:
+            ai_bundle = load_ai_predictor_bundle(project_root=self.project_root)
+            if ai_bundle is None:
+                return
             judge_model, _, eff_dev = load_unified_judge_seq_model(project_root=self.project_root)
             for cid in target_cids:
                 c_res = eval_by_cid.get(cid)
@@ -401,6 +401,54 @@ class PhageStructureManager:
             raise ValueError(f"注释任务 {anno_task_id} 中未检测到 CDS 编码基因")
         return out
 
+    def _resolve_phage_discovery_sequence_source(
+        self,
+        pd_task_id: str,
+        pd_dir: Path,
+        region_index: Optional[int] = None,
+    ) -> Tuple[Path, bool]:
+        """定位前噬菌体扫描任务导出的 FASTA/GenBank 序列文件，返回 (路径, 是否单区段GBK)。"""
+        candidates: List[Tuple[Path, bool]] = []
+
+        # 1. 优先查 DB 中记录的 files["fasta"]（兼容相对路径及跨盘符迁移后的同目录回退）
+        try:
+            task_row = phage_discovery_db.get_task(pd_task_id) or {}
+            files_map = task_row.get("files") or {}
+            raw_fa = str(files_map.get("fasta") or "").strip()
+            if raw_fa:
+                p_raw = Path(raw_fa)
+                if p_raw.is_absolute():
+                    candidates.append((p_raw, False))
+                else:
+                    candidates.append((self.project_root / p_raw, False))
+                candidates.append((pd_dir / p_raw.name, False))
+        except Exception:
+            pass
+
+        # 2. 标准导出命名 {task_id}_prophages.fasta 与历史 prophages.fasta
+        candidates.append((pd_dir / f"{pd_task_id}_prophages.fasta", False))
+        candidates.append((pd_dir / "prophages.fasta", False))
+        if pd_dir.is_dir():
+            for fa_glob in sorted(pd_dir.glob("*prophages.fasta")):
+                candidates.append((fa_glob, False))
+
+        # 3. GenBank 兜底（单区段 regions/region_{idx}.gbk 或聚合 prophages.gbk）
+        if region_index is not None:
+            candidates.append((pd_dir / "regions" / f"region_{region_index}.gbk", True))
+        candidates.append((pd_dir / f"{pd_task_id}_prophages.gbk", False))
+        candidates.append((pd_dir / "prophages.gbk", False))
+        if pd_dir.is_dir():
+            for gbk_glob in sorted(pd_dir.glob("*prophages.gbk")):
+                candidates.append((gbk_glob, False))
+
+        for cand, is_single_gbk in candidates:
+            if cand.is_file() and cand.stat().st_size > 0:
+                return cand, is_single_gbk
+
+        raise FileNotFoundError(
+            f"前噬菌体扫描任务未导出可用区段序列: 已检查 {pd_dir / f'{pd_task_id}_prophages.fasta'} 及 {pd_dir / 'prophages.fasta'}"
+        )
+
     def _load_contigs_from_phage_discovery(
         self,
         pd_task_id: str,
@@ -408,17 +456,24 @@ class PhageStructureManager:
         selected_contigs: Optional[List[str]] = None,
     ) -> Dict[str, Dict[str, Any]]:
         pd_dir = self.project_root / "results" / "phage_discovery" / pd_task_id
-        fa_p = pd_dir / "prophages.fasta"
-        if not fa_p.is_file():
-            raise FileNotFoundError(f"前噬菌体扫描任务未导出区段序列: {fa_p}")
+        seq_path, is_single_gbk = self._resolve_phage_discovery_sequence_source(
+            pd_task_id,
+            pd_dir,
+            region_index=region_index,
+        )
 
-        cmap = parse_input_contigs(fasta_path=str(fa_p), selected_contigs=selected_contigs)
-        if region_index is not None:
+        cmap = parse_input_contigs(fasta_path=str(seq_path), selected_contigs=selected_contigs)
+        if region_index is not None and not is_single_gbk:
             prefix = f"Phage_{region_index:03d}"
             filtered = {cid: val for cid, val in cmap.items() if cid.startswith(prefix)}
             if not filtered:
                 raise FileNotFoundError(f"任务 {pd_task_id} 中未找到区段 {prefix}")
             return filtered
+        if region_index is not None and is_single_gbk and len(cmap) > 1:
+            prefix = f"Phage_{region_index:03d}"
+            filtered = {cid: val for cid, val in cmap.items() if cid.startswith(prefix)}
+            if filtered:
+                return filtered
         return cmap
 
     def inspect_input(self, req: StructureInspectRequest) -> Dict[str, Any]:
@@ -859,7 +914,7 @@ class PhageStructureManager:
                     "summary": final_res.summary,
                 },
             )
-        except Exception as exc:
+        except Exception:
             if self.queue.is_cancelled(task_id):
                 self.db.mark_cancelled(task_id)
                 await broadcaster.broadcast(
