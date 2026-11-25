@@ -60,8 +60,10 @@ describe('Phase 3 A11y、顶栏信息架构、原生 Dialog 与 IME 安全守卫
     await flushPromises()
 
     expect(wrapper.find('.crumb-home').exists()).toBe(true)
+    expect(wrapper.find('.header-search-btn').exists()).toBe(true)
     expect(wrapper.text()).toContain('服务就绪')
     expect(wrapper.findAll('.header-icon-btn').length).toBeGreaterThanOrEqual(3)
+    wrapper.unmount()
   })
 
   it('AppConfirmDialog 应使用原生 <dialog> 且不含冗余 role="dialog" 或 aria-modal', async () => {

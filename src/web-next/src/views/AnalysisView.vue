@@ -7,6 +7,7 @@
 import { defineAsyncComponent, ref } from 'vue'
 import AsyncModuleLoading from '../components/common/AsyncModuleLoading.vue'
 import AsyncModuleError from '../components/common/AsyncModuleError.vue'
+import WorkbenchHubLayout from '../components/layout/WorkbenchHubLayout.vue'
 import type { StructureInitialPayload } from './Analysis/modules/phage_structure/types'
 
 const asyncOpts = {
@@ -145,215 +146,121 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
 </script>
 
 <template>
-  <div class="analysis-container">
-    <header class="analysis-header">
-      <div class="header-content">
-        <h1>组装分析工作台</h1>
-        <p>基因组功能注释与比较基因组学分析工作台，支持结构与功能注释、前噬菌体边界发现、多样本泛基因组分析、Sanger 测序突变解析及序列图谱可视化。</p>
-      </div>
-      <div class="header-stats" v-if="!activeTool">
-         <div class="stat-badge">
-            <span class="label">可用工具</span>
-            <span class="value">{{ tools.length }}</span>
-         </div>
-      </div>
-      <button v-else class="back-btn" @click="activeTool = null">
-        &larr; 返回工具列表
-      </button>
-    </header>
-
-    <div class="analysis-content">
-      <!-- 紧凑型工具网格 -->
-      <div v-if="!activeTool" class="tools-grid">
-        <button 
-          v-for="tool in tools" 
-          :key="tool.id" 
-          type="button"
-          :class="['tool-card', tool.status]"
-          :disabled="tool.status === 'coming_soon'"
-          @click="selectTool(tool)"
-        >
-          <div class="tool-icon-mini">
-            <!-- 矢量 SVG 图标：严禁 Emoji -->
-            <svg v-if="tool.iconType === 'trace'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2">
-              <path d="M2 20h20" />
-              <path d="M4 20l4-12 4 8 4-14 4 18" />
-              <circle cx="8" cy="8" r="1.5" fill="#10b981" />
-              <circle cx="16" cy="6" r="1.5" fill="#dc2626" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'book'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.2">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-              <line x1="9" y1="7" x2="15" y2="7" />
-              <line x1="9" y1="11" x2="13" y2="11" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'phage'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.1">
-              <polygon points="12 2 19 6 19 13 12 17 5 13 5 6 12 2" />
-              <line x1="12" y1="17" x2="12" y2="22" />
-              <path d="M8 22l4-2 4 2" />
-              <circle cx="12" cy="9.5" r="2.2" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'structure'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.1">
-              <polygon points="12 2 17 5 17 10 12 13 7 10 7 5 12 2" />
-              <rect x="10" y="13" width="4" height="7" rx="1" />
-              <line x1="8" y1="16" x2="16" y2="16" />
-              <line x1="12" y1="20" x2="7" y2="23" />
-              <line x1="12" y1="20" x2="17" y2="23" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'pangenome'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.2">
-              <circle cx="12" cy="12" r="3" />
-              <circle cx="4" cy="12" r="2" />
-              <circle cx="20" cy="12" r="2" />
-              <circle cx="12" cy="4" r="2" />
-              <circle cx="12" cy="20" r="2" />
-              <line x1="6" y1="12" x2="9" y2="12" />
-              <line x1="15" y1="12" x2="18" y2="12" />
-              <line x1="12" y1="6" x2="12" y2="9" />
-              <line x1="12" y1="15" x2="12" y2="18" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'dna'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.2">
-              <path d="M2 15c6.667-6 13.333 0 20-6" />
-              <path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993" />
-              <path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993" />
-              <path d="M17 6l-2.5-2.5" />
-              <path d="M14 8l-4-4" />
-              <path d="M7 18l2.5 2.5" />
-              <path d="M3.5 14.5l.5.5" />
-              <path d="M20 9.5l.5.5" />
-            </svg>
-          </div>
-          <div class="tool-body">
-            <div class="tool-title-row">
-              <h3>{{ tool.title }}</h3>
-              <span :class="['status-tag-mini', tool.status]">{{ tool.status === 'ready' ? '' : tool.status.toUpperCase() }}</span>
-            </div>
-            <p class="tool-desc">{{ tool.description }}</p>
-          </div>
-        </button>
-      </div>
-
-      <!-- 具体工具工作区 -->
-      <div v-else class="tool-workspace">
-        <SangerTraceModule v-if="activeTool === 'sanger_trace'" />
-        <AnnotationModule 
-          v-else-if="activeTool === 'annotation'" 
-          :initial-fasta="annotationInitialFasta"
-          :initial-name="annotationInitialName"
-          :initial-sample-type="annotationInitialSampleType"
-          @open-viewer="handleOpenViewerFromAnnotation" 
-          @open-structure="handleOpenStructureFromAnnotation"
-        />
-        <PhageDiscoveryModule
-          v-else-if="activeTool === 'phage_discovery'"
-          @open-viewer="handleOpenViewerFromAnnotation"
-          @open-annotation="handleOpenAnnotationFromPhage"
-          @open-structure="handleOpenStructureFromPhage"
-        />
-        <PhageStructureModule
-          v-else-if="activeTool === 'phage_structure'"
-          :initial-payload="structureInitialPayload"
-          @open-viewer="handleOpenViewerFromAnnotation"
-        />
-        <PanGenomicsModule v-else-if="activeTool === 'pan_genomics'" />
-        <GenomeViewerModule 
-          v-else-if="activeTool === 'viewer'" 
-          :initial-gbk="viewerInitialGbk"
-          :initial-name="viewerInitialName"
-        />
-        <div v-else class="workspace-placeholder">
-           <h2>{{ tools.find(t => t.id === activeTool)?.title }} 模块开发中</h2>
-           <p>正在拉取 {{ activeTool }} 算法引擎，请稍候...</p>
+  <WorkbenchHubLayout
+    title="组装分析工作台"
+    subtitle="基因组功能注释与比较基因组学分析工作台，支持结构与功能注释、前噬菌体边界发现、多样本泛基因组分析、Sanger 测序突变解析及序列图谱可视化。"
+    :active="Boolean(activeTool)"
+    stat-label="可用工具"
+    :stat-value="tools.length"
+    back-label="返回工具列表"
+    accent="blue"
+    grid-min-width="300px"
+    @back="activeTool = null"
+  >
+    <template #grid>
+      <button
+        v-for="tool in tools"
+        :key="tool.id"
+        type="button"
+        :class="['tool-card', tool.status]"
+        :disabled="tool.status === 'coming_soon'"
+        @click="selectTool(tool)"
+      >
+        <div class="tool-icon-mini">
+          <!-- 矢量 SVG 图标：严禁 Emoji -->
+          <svg v-if="tool.iconType === 'trace'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2">
+            <path d="M2 20h20" />
+            <path d="M4 20l4-12 4 8 4-14 4 18" />
+            <circle cx="8" cy="8" r="1.5" fill="#10b981" />
+            <circle cx="16" cy="6" r="1.5" fill="#dc2626" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'book'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2.2">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            <line x1="9" y1="7" x2="15" y2="7" />
+            <line x1="9" y1="11" x2="13" y2="11" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'phage'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4338ca" stroke-width="2.1">
+            <polygon points="12 2 19 6 19 13 12 17 5 13 5 6 12 2" />
+            <line x1="12" y1="17" x2="12" y2="22" />
+            <path d="M8 22l4-2 4 2" />
+            <circle cx="12" cy="9.5" r="2.2" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'structure'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.1">
+            <polygon points="12 2 17 5 17 10 12 13 7 10 7 5 12 2" />
+            <rect x="10" y="13" width="4" height="7" rx="1" />
+            <line x1="8" y1="16" x2="16" y2="16" />
+            <line x1="12" y1="20" x2="7" y2="23" />
+            <line x1="12" y1="20" x2="17" y2="23" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'pangenome'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.2">
+            <circle cx="12" cy="12" r="3" />
+            <circle cx="4" cy="12" r="2" />
+            <circle cx="20" cy="12" r="2" />
+            <circle cx="12" cy="4" r="2" />
+            <circle cx="12" cy="20" r="2" />
+            <line x1="6" y1="12" x2="9" y2="12" />
+            <line x1="15" y1="12" x2="18" y2="12" />
+            <line x1="12" y1="6" x2="12" y2="9" />
+            <line x1="12" y1="15" x2="12" y2="18" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'dna'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.2">
+            <path d="M2 15c6.667-6 13.333 0 20-6" />
+            <path d="M9 22c1.798-1.998 2.518-3.995 2.807-5.993" />
+            <path d="M15 2c-1.798 1.998-2.518 3.995-2.807 5.993" />
+            <path d="M17 6l-2.5-2.5" />
+            <path d="M14 8l-4-4" />
+            <path d="M7 18l2.5 2.5" />
+            <path d="M3.5 14.5l.5.5" />
+            <path d="M20 9.5l.5.5" />
+          </svg>
         </div>
+        <div class="tool-body">
+          <div class="tool-title-row">
+            <h3>{{ tool.title }}</h3>
+            <span :class="['status-tag-mini', tool.status]">{{ tool.status === 'ready' ? '' : tool.status.toUpperCase() }}</span>
+          </div>
+          <p class="tool-desc">{{ tool.description }}</p>
+        </div>
+      </button>
+    </template>
+
+    <template #workspace>
+      <SangerTraceModule v-if="activeTool === 'sanger_trace'" />
+      <AnnotationModule
+        v-else-if="activeTool === 'annotation'"
+        :initial-fasta="annotationInitialFasta"
+        :initial-name="annotationInitialName"
+        :initial-sample-type="annotationInitialSampleType"
+        @open-viewer="handleOpenViewerFromAnnotation"
+        @open-structure="handleOpenStructureFromAnnotation"
+      />
+      <PhageDiscoveryModule
+        v-else-if="activeTool === 'phage_discovery'"
+        @open-viewer="handleOpenViewerFromAnnotation"
+        @open-annotation="handleOpenAnnotationFromPhage"
+        @open-structure="handleOpenStructureFromPhage"
+      />
+      <PhageStructureModule
+        v-else-if="activeTool === 'phage_structure'"
+        :initial-payload="structureInitialPayload"
+        @open-viewer="handleOpenViewerFromAnnotation"
+      />
+      <PanGenomicsModule v-else-if="activeTool === 'pan_genomics'" />
+      <GenomeViewerModule
+        v-else-if="activeTool === 'viewer'"
+        :initial-gbk="viewerInitialGbk"
+        :initial-name="viewerInitialName"
+      />
+      <div v-else class="workspace-placeholder">
+        <h2>{{ tools.find((t) => t.id === activeTool)?.title }} 模块开发中</h2>
+        <p>正在拉取 {{ activeTool }} 算法引擎，请稍候...</p>
       </div>
-    </div>
-  </div>
+    </template>
+  </WorkbenchHubLayout>
 </template>
 
 <style scoped>
-.analysis-container {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #f8fafc;
-}
-
-.analysis-header {
-  padding: 12px 24px;
-  background: white;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-content h1 {
-  margin: 0;
-  font-size: 18px;
-  color: #1e293b;
-  letter-spacing: -0.5px;
-}
-
-.header-content p {
-  margin: 2px 0 0;
-  color: #64748b;
-  font-size: 12px;
-}
-
-.stat-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: #f1f5f9;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-}
-
-.stat-badge .label {
-  color: #64748b;
-}
-
-.stat-badge .value {
-  color: #2563eb;
-  font-weight: 700;
-}
-
-.back-btn {
-  background: #f1f5f9;
-  border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  color: #475569;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.back-btn:hover {
-  background: #e2e8f0;
-  color: #1e293b;
-}
-
-.analysis-content {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.tools-grid {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 16px;
-  padding: 32px 40px;
-  overflow-y: auto;
-  align-content: start;
-}
-
 .tool-card {
   width: 100%;
   text-align: left;
@@ -437,15 +344,6 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
   opacity: 0.6;
   cursor: not-allowed;
   background: #f8fafc;
-}
-
-.tool-workspace {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  overflow-y: auto;
 }
 
 .workspace-placeholder {

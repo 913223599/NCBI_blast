@@ -8,6 +8,7 @@ import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { useStrainStore } from '../stores/strain'
 import { useBlastStore } from '../stores/blast'
+import { APP_NAME, APP_VERSION } from '../utils/appMeta'
 import { useI18n } from '../locales'
 
 const router = useRouter()
@@ -77,7 +78,7 @@ const actionCards = computed<ActionCard[]>(() => [
 ])
 
 const systemMetrics = computed(() => [
-  { label: '平台名称', value: 'NCBI Bio-Station' },
+  { label: '平台版本', value: `${APP_NAME} v${APP_VERSION}` },
   { label: '已入库菌毒种样本', value: `${strainStore.records.length} 条` },
   { label: '历史 BLAST 任务', value: `${blastStore.tasks.length} 项` },
   { label: '冻存设备数量', value: `${strainStore.freezers.length} 台` },

@@ -31,10 +31,30 @@ vi.mock('../../bridge/electron-bridge', () => ({
   }),
 }))
 
+const getHelpStructureMock = vi.fn().mockResolvedValue([
+  {
+    category: '入门指南',
+    topics: [
+      { id: 'quick_start', title: '快速入门' },
+      { id: 'local_blast', title: '本地 BLAST 比对' },
+    ],
+  },
+  {
+    category: '进阶模块',
+    topics: [{ id: 'figure_studio', title: '科研绘图工坊' }],
+  },
+])
+
+const getHelpContentMock = vi.fn().mockResolvedValue({
+  content: '# 帮助标题\n\n## 第一节 安装配置\n\n正文段落。\n\n## 第二节 常见问题\n\n更多说明。',
+})
+
 vi.mock('../../bridge', () => ({
   getBridge: () => ({
     get_ui_translations: vi.fn((cb: (s: string) => void) => cb('{}')),
     sync_event: { connect: vi.fn() },
+    get_help_structure: getHelpStructureMock,
+    get_help_content: getHelpContentMock,
   }),
   onEvent: () => () => {},
 }))
@@ -75,5 +95,55 @@ describe('Phase 4 科研引文库接线、工作台语义按钮与结构蛋白�
 
     const w3 = mount(OtherToolsView)
     expect(w3.findAll('button.tool-card').length).toBe(2)
+  })
+
+  it('safeHtml 应为 Markdown 标题分配安全锚点并拦截 DOM Clobbering 非法 id', async () => {
+    const { extractMarkdownHeadings, markdownToHtml, safeSetHTML } = await import('../../utils/safeHtml')
+    const md = '# 主标题\n\n```bash\n# 代码块注释不应计入大纲\n```\n\n## 第二章\n\n### 子章节'
+    const headings = extractMarkdownHeadings(md)
+    expect(headings.map((h) => [h.id, h.level, h.text])).toEqual([
+      ['help-sec-1', 1, '主标题'],
+      ['help-sec-2', 2, '第二章'],
+      ['help-sec-3', 3, '子章节'],
+    ])
+
+    const container = document.createElement('div')
+    safeSetHTML(container, `${markdownToHtml(md)}<h2 id="evil-clobber">危险ID</h2>`)
+    expect(container.querySelector('#help-sec-2')?.textContent).toBe('第二章')
+    expect(container.querySelector('#evil-clobber')).toBeNull()
+  })
+
+  it('HelpView 应支持侧栏即时搜索筛选与正文章节大纲 TOC', async () => {
+    const HelpView = (await import('../../views/HelpView.vue')).default
+    const wrapper = mount(HelpView)
+    await flushPromises()
+
+    expect(wrapper.findAll('button.topic-item').length).toBe(3)
+    expect(wrapper.findAll('button.toc-btn').length).toBe(2)
+
+    const searchInput = wrapper.find('input.help-search-input')
+    await searchInput.setValue('绘图')
+    expect(wrapper.findAll('button.topic-item').length).toBe(1)
+    expect(wrapper.find('button.topic-item').text()).toContain('科研绘图工坊')
+  })
+
+  it('CommandPaletteDialog 应基于原生 <dialog> 支持关键词过滤与导航事件触发', async () => {
+    const CommandPaletteDialog = (await import('../common/CommandPaletteDialog.vue')).default
+    const wrapper = mount(CommandPaletteDialog, {
+      props: { open: true },
+    })
+    await flushPromises()
+
+    const dialogEl = wrapper.find('dialog')
+    expect(dialogEl.exists()).toBe(true)
+    expect(dialogEl.attributes('role')).toBeUndefined()
+    expect(dialogEl.attributes('aria-modal')).toBeUndefined()
+
+    const inputEl = wrapper.find('input.palette-input')
+    await inputEl.setValue('引文')
+    const items = wrapper.findAll('button.palette-item')
+    expect(items.length).toBe(1)
+    await items[0]!.trigger('click')
+    expect(wrapper.emitted('action')?.[0]).toEqual(['citations'])
   })
 })

@@ -2,13 +2,15 @@
 import logging
 import json
 import re
-from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter
 
+from ...utils.app_metadata import get_app_metadata
+from ...utils.citations_loader import load_citations_payload
+from ...utils.resource_guard import GpuGuard, get_safe_cpu_budget, get_total_logical_cores
+
 logger = logging.getLogger("api_server")
 router = APIRouter(tags=["Core"])
-_CITATIONS_PATH = Path(__file__).resolve().parent.parent.parent / "resources" / "citations.json"
 
 @router.get("/api/help/structure")
 async def get_help_structure():
@@ -71,24 +73,42 @@ async def open_dir(path: str):
     return {"status": "opened"}
 
 
+@router.get("/api/core/version")
+async def get_app_version_info():
+    """返回应用统一元数据（单一事实源：根目录 version.json）"""
+    return get_app_metadata()
+
+
+@router.get("/api/core/system_metrics")
+async def get_system_metrics():
+    """返回工作站实时硬件微监控指标（CPU、内存、留核安全并发预算与 GPU 显存状态）"""
+    cpu_percent: Optional[float] = None
+    memory_percent: Optional[float] = None
+    memory_used_gb: Optional[float] = None
+    memory_total_gb: Optional[float] = None
+    try:
+        import psutil
+
+        cpu_percent = round(float(psutil.cpu_percent(interval=None)), 1)
+        vm = psutil.virtual_memory()
+        memory_percent = round(float(vm.percent), 1)
+        memory_used_gb = round(float(vm.used) / (1024 ** 3), 2)
+        memory_total_gb = round(float(vm.total) / (1024 ** 3), 2)
+    except Exception as exc:
+        logger.debug("psutil metrics unavailable: %s", exc)
+
+    return {
+        "cpu_percent": cpu_percent,
+        "memory_percent": memory_percent,
+        "memory_used_gb": memory_used_gb,
+        "memory_total_gb": memory_total_gb,
+        "cpu_cores": get_total_logical_cores(),
+        "safe_cpu_budget": get_safe_cpu_budget(),
+        "gpu": GpuGuard.probe(),
+    }
+
+
 @router.get("/api/core/citations")
 async def get_citations(module: Optional[str] = None):
     """返回内置生信工具与科研绘图组件的标准参考文献库（支持按模块筛选）"""
-    if not _CITATIONS_PATH.is_file():
-        return {"schema_version": "1.0", "description": "", "count": 0, "tools": []}
-    try:
-        payload = json.loads(_CITATIONS_PATH.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.error(f"Failed to load citations.json: {exc}")
-        return {"schema_version": "1.0", "description": "", "count": 0, "tools": []}
-
-    tools = payload.get("tools", [])
-    if module and module.strip() and module.strip().lower() != "all":
-        mod_key = module.strip().lower()
-        tools = [item for item in tools if str(item.get("module", "")).lower() == mod_key]
-    return {
-        "schema_version": payload.get("schema_version", "1.0"),
-        "description": payload.get("description", ""),
-        "count": len(tools),
-        "tools": tools,
-    }
+    return load_citations_payload(module=module)

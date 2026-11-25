@@ -131,6 +131,56 @@
       "title": "igv.js: an embeddable JavaScript implementation of the Integrative Genomics Viewer (IGV)",
       "journal": "Bioinformatics",
       "doi": "10.1093/bioinformatics/btac830"
+    },
+    {
+      "id": "phold",
+      "name": "Phold",
+      "module": "annotation",
+      "authors": "Bouras GS, Grigson SR, Mirdita M, Heinzinger M, et al.",
+      "year": 2026,
+      "title": "Protein structure-informed bacteriophage genome annotation with Phold",
+      "journal": "Nucleic Acids Research",
+      "doi": "10.1093/nar/gkaf1448"
+    },
+    {
+      "id": "lovis4u",
+      "name": "LoVis4u",
+      "module": "figure_studio",
+      "authors": "Egorov AA, Atkinson GC.",
+      "year": 2025,
+      "title": "LoVis4u: a locus visualization tool for comparative genomics and coverage profiles",
+      "journal": "NAR Genomics and Bioinformatics",
+      "doi": "10.1093/nargab/lqaf009"
+    },
+    {
+      "id": "mmseqs2",
+      "name": "MMseqs2",
+      "module": "annotation",
+      "authors": "Steinegger M, Soding J.",
+      "year": 2017,
+      "title": "MMseqs2 enables sensitive protein sequence searching for the analysis of massive data sets",
+      "journal": "Nature Biotechnology",
+      "doi": "10.1038/nbt.3988"
+    },
+    {
+      "id": "checkv",
+      "name": "CheckV",
+      "module": "analysis",
+      "authors": "Nayfach S, Camargo AP, Schulz F, et al.",
+      "year": 2021,
+      "title": "CheckV assesses the quality and completeness of metagenome-assembled viral genomes",
+      "journal": "Nature Biotechnology",
+      "doi": "10.1038/s41587-020-00774-7"
+    },
+    {
+      "id": "proksee_cgview",
+      "name": "CGView / Proksee",
+      "module": "viewer",
+      "authors": "Grant JR, Enns E, Marinier E, et al.",
+      "year": 2023,
+      "title": "Proksee: in-depth characterization and visualization of bacterial genomes",
+      "journal": "Nucleic Acids Research",
+      "doi": "10.1093/nar/gkad326"
     }
   ]
 }

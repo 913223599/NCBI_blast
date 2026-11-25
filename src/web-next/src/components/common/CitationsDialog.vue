@@ -46,6 +46,7 @@ const moduleOptions = [
   { id: 'figure_studio', label: '科研绘图工坊' },
   { id: 'phylo', label: '系统发育树' },
   { id: 'annotation', label: '功能注释' },
+  { id: 'analysis', label: '深度分析' },
   { id: 'assembly', label: '基因组组装' },
   { id: 'blast', label: 'BLAST 鉴定' },
   { id: 'viewer', label: '图谱可视化' },
@@ -113,7 +114,12 @@ function copyAllBibtex(): void {
 }
 
 function closeDialog(): void {
-  dialogRef.value?.close('close')
+  const dialog = dialogRef.value
+  if (dialog && typeof dialog.close === 'function') {
+    dialog.close('close')
+  } else {
+    handleDialogClose()
+  }
 }
 
 function handleDialogClose(): void {

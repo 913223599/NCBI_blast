@@ -248,3 +248,32 @@ def test_frontend_i18n_keys_exist_in_zh_and_en_locales():
     missing_zh = sorted(used_keys - zh_keys)
     missing_en = sorted(used_keys - en_keys)
     assert not missing_zh and not missing_en, f"前端引用的翻译键缺失: zh={missing_zh}, en={missing_en}"
+
+
+def test_version_single_source_brand_citations_and_three_types_alignment():
+    import json
+
+    version_meta = json.loads((PROJECT_ROOT / "version.json").read_text(encoding="utf-8"))
+    expected_version = version_meta["version"]
+    assert version_meta["name"] == "NCBI Bio-Station"
+    assert re.match(r"^\d+\.\d+\.\d+", expected_version)
+
+    for pkg_rel in ("package.json", "electron-shell/package.json", "src/web-next/package.json"):
+        pkg = json.loads((PROJECT_ROOT / pkg_rel).read_text(encoding="utf-8"))
+        assert pkg.get("version") == expected_version, f"{pkg_rel} 版本未与 version.json 对齐"
+
+    web_pkg = json.loads((PROJECT_ROOT / "src" / "web-next" / "package.json").read_text(encoding="utf-8"))
+    three_ver = str(web_pkg["dependencies"]["three"]).lstrip("^~")
+    types_three_ver = str(web_pkg["devDependencies"]["@types/three"]).lstrip("^~")
+    assert three_ver.split(".")[:2] == types_three_ver.split(".")[:2], (
+        f"three ({three_ver}) 与 @types/three ({types_three_ver}) 主次版本不一致"
+    )
+
+    main_js = (PROJECT_ROOT / "electron-shell" / "main.js").read_text(encoding="utf-8")
+    assert "NCBI BLAST Pro" not in main_js
+    assert (PROJECT_ROOT / "src" / "web-next" / "src" / "types" / "electron.d.ts").is_file()
+
+    citations = json.loads((PROJECT_ROOT / "src" / "resources" / "citations.json").read_text(encoding="utf-8"))
+    tool_ids = {t["id"] for t in citations.get("tools", [])}
+    assert len(tool_ids) >= 18
+    assert {"phold", "lovis4u", "mmseqs2", "checkv", "proksee_cgview"} <= tool_ids

@@ -4,6 +4,7 @@
  * 遵循单一职责原则，将复杂业务解耦至独立 Panel 组件中
  */
 import { ref } from 'vue'
+import { APP_NAME, APP_VERSION } from '../utils/appMeta'
 
 // 导入业务面板组件
 import AITranslationPanel from '../components/settings/AITranslationPanel.vue'
@@ -79,7 +80,7 @@ const activePanel = ref('ai-translation')
       </button>
       <div class="spacer" />
       <button type="button" class="version-tag" @click="activePanel = 'update'" title="点击进入软件更新">
-        <span>NCBI Bio-Station</span>
+        <span>{{ APP_NAME }} v{{ APP_VERSION }}</span>
         <span class="check-update-link">检查更新</span>
       </button>
     </nav>

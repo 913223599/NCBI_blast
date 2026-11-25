@@ -51,8 +51,29 @@ for (const [level, method] of [['INFO', 'log'], ['WARN', 'warn'], ['ERROR', 'err
     };
 }
 
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+function loadAppMetadata() {
+    const fallback = { name: 'NCBI Bio-Station', version: '2.1.0' };
+    try {
+        const versionPath = path.join(PROJECT_ROOT, 'version.json');
+        if (fs.existsSync(versionPath)) {
+            const parsed = JSON.parse(fs.readFileSync(versionPath, 'utf-8'));
+            return {
+                name: typeof parsed.name === 'string' && parsed.name.trim() ? parsed.name.trim() : fallback.name,
+                version: typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : fallback.version,
+            };
+        }
+    } catch (e) {
+        // 回退默认元信息
+    }
+    return fallback;
+}
+
+const APP_META = loadAppMetadata();
+
 console.log('=======================================');
-console.log('  NCBI BLAST Pro — Electron Shell');
+console.log(`  ${APP_META.name} v${APP_META.version} — Electron Shell`);
 console.log(`  启动于 ${new Date().toLocaleString()}`);
 console.log('=======================================');
 
@@ -72,7 +93,6 @@ app.commandLine.appendSwitch('log-level', '3');
 // 独立运行时会干扰调试端点初始化 (见 electron/electron#27287)，仅自动化测试时才需要。
 
 // ─── 配置常量 ─────────────────────────────────────
-const PROJECT_ROOT = path.resolve(__dirname, '..');
 const PYTHON_EXE = path.join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe');
 const API_SERVER_SCRIPT = path.join(PROJECT_ROOT, 'src', 'backend', 'api_server.py');
 const API_PORT = 8765;

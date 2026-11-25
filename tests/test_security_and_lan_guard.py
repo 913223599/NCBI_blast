@@ -138,3 +138,32 @@ def test_core_citations_endpoint_returns_structured_references():
     body_studio = r_studio.json()
     assert body_studio["count"] >= 2
     assert all(t["module"] == "figure_studio" for t in body_studio["tools"])
+
+
+def test_core_version_system_metrics_and_citations_loader():
+    import json
+    from fastapi.testclient import TestClient
+    from src.backend.api_server import app
+    from src.utils.citations_loader import format_bibtex_entries, format_methods_citations_text
+
+    version_meta = json.loads((PROJECT_ROOT / "version.json").read_text(encoding="utf-8"))
+    client = TestClient(app)
+
+    r_ver = client.get("/api/core/version")
+    assert r_ver.status_code == 200
+    ver_body = r_ver.json()
+    assert ver_body["name"] == version_meta["name"]
+    assert ver_body["version"] == version_meta["version"]
+
+    r_metrics = client.get("/api/core/system_metrics")
+    assert r_metrics.status_code == 200
+    m = r_metrics.json()
+    assert isinstance(m.get("cpu_cores"), int) and m["cpu_cores"] >= 1
+    assert isinstance(m.get("safe_cpu_budget"), int) and 1 <= m["safe_cpu_budget"] <= m["cpu_cores"]
+    assert isinstance(m.get("gpu"), dict) and "available" in m["gpu"]
+
+    methods_txt = format_methods_citations_text(tool_ids=["phold", "lovis4u"])
+    assert "10.1093/nar/gkaf1448" in methods_txt
+    assert "10.1093/nargab/lqaf009" in methods_txt
+    bib_txt = format_bibtex_entries(tool_ids=["checkv"])
+    assert "@article{checkv_2021," in bib_txt

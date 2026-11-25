@@ -7,6 +7,7 @@ import { computed, defineAsyncComponent, ref } from 'vue'
 import AsyncModuleLoading from '../components/common/AsyncModuleLoading.vue'
 import AsyncModuleError from '../components/common/AsyncModuleError.vue'
 import CitationsDialog from '../components/common/CitationsDialog.vue'
+import WorkbenchHubLayout from '../components/layout/WorkbenchHubLayout.vue'
 
 const asyncOpts = {
   loadingComponent: AsyncModuleLoading,
@@ -129,138 +130,115 @@ function selectTool(id: StudioToolId): void {
 </script>
 
 <template>
-  <div class="studio-container">
-    <header class="studio-header">
-      <div class="header-content">
-        <h1>{{ currentToolObj ? currentToolObj.title : '科研绘图工坊' }}</h1>
-        <p>
-          {{
-            currentToolObj
-              ? `${currentToolObj.journalRef} · 均支持出版级矢量 PDF / SVG 与高清 PNG 输出及界面实时缩放预览`
-              : '对标 Nature Microbiology / Nature Communications / NAR 顶刊图型标准的专用出图工具组，直接复用系统内注释与进化分析产物。'
-          }}
-        </p>
-      </div>
-      <div class="header-actions-bar">
-        <button type="button" class="citations-btn" @click="showCitationsDialog = true">
-          学术引用 (BibTeX)
-        </button>
-        <div v-if="!activeTool" class="header-stats">
-          <div class="stat-badge">
-            <span class="label">可用图型</span>
-            <span class="value">{{ tools.length }}</span>
-          </div>
+  <WorkbenchHubLayout
+    :title="currentToolObj ? currentToolObj.title : '科研绘图工坊'"
+    :subtitle="
+      currentToolObj
+        ? `${currentToolObj.journalRef} · 均支持出版级矢量 PDF / SVG 与高清 PNG 输出及界面实时缩放预览`
+        : '对标 Nature Microbiology / Nature Communications / NAR 顶刊图型标准的专用出图工具组，直接复用系统内注释与进化分析产物。'
+    "
+    :active="Boolean(activeTool)"
+    stat-label="可用图型"
+    :stat-value="tools.length"
+    back-label="返回工坊工具组"
+    accent="teal"
+    grid-min-width="310px"
+    @back="activeTool = null"
+  >
+    <template #header-extra>
+      <button type="button" class="citations-btn" @click="showCitationsDialog = true">
+        学术引用 (BibTeX)
+      </button>
+    </template>
+
+    <template #grid>
+      <button
+        v-for="tool in tools"
+        :key="tool.id"
+        type="button"
+        class="tool-card"
+        @click="selectTool(tool.id)"
+      >
+        <div class="tool-icon-mini">
+          <svg v-if="tool.iconType === 'tree'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2.1">
+            <path d="M5 4v16" />
+            <path d="M5 7h7v-2h5" />
+            <path d="M5 7h7v3h5" />
+            <path d="M5 17h6v-2h6" />
+            <path d="M5 17h6v3h6" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'heatmap'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.0">
+            <rect x="3" y="3" width="6" height="6" fill="#bae6fd" />
+            <rect x="9" y="3" width="6" height="6" fill="#0284c7" />
+            <rect x="15" y="3" width="6" height="6" fill="#065f46" />
+            <rect x="3" y="9" width="6" height="6" fill="#fed7aa" />
+            <rect x="9" y="9" width="6" height="6" fill="#0284c7" />
+            <rect x="15" y="9" width="6" height="6" fill="#38bdf8" />
+            <rect x="3" y="15" width="6" height="6" fill="#fb923c" />
+            <rect x="9" y="15" width="6" height="6" fill="#fed7aa" />
+            <rect x="15" y="15" width="6" height="6" fill="#065f46" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'circmap'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.1">
+            <circle cx="12" cy="12" r="9" />
+            <circle cx="12" cy="12" r="5" stroke-dasharray="4 2" />
+            <path d="M12 3a9 9 0 0 1 8.5 6" stroke="#16a34a" stroke-width="2.6" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'synteny'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.0">
+            <path d="M3 6h6l2 2-2 2H3z" />
+            <path d="M13 6h6l2 2-2 2h-6z" />
+            <path d="M3 16h6l2 2-2 2H3z" />
+            <path d="M14 16h5l2 2-2 2h-5z" />
+            <path d="M6 10l0 6M16 10l1 6" stroke="#94a3b8" stroke-width="1.5" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'diversity'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.1">
+            <path d="M2 14h3l2-7 3 9 3-11 2 9h7" />
+            <rect x="3" y="17" width="18" height="3" rx="1" stroke="#334155" />
+          </svg>
+          <svg v-else-if="tool.iconType === 'network'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.1">
+            <circle cx="12" cy="12" r="2.5" fill="#dc2626" stroke="#dc2626" />
+            <circle cx="5" cy="7" r="2" />
+            <circle cx="19" cy="7" r="2" />
+            <circle cx="6" cy="18" r="2" />
+            <circle cx="18" cy="18" r="2" />
+            <path d="M7 8l3 2.5M17 8l-3 2.5M7.5 16.5l3-3M16.5 16.5l-3-3" />
+          </svg>
+          <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.0">
+            <path d="M3 7h3v10H3" />
+            <rect x="9" y="5" width="4" height="4" fill="#6d326d" />
+            <rect x="13" y="5" width="4" height="4" fill="#e8c4c4" />
+            <rect x="17" y="5" width="4" height="4" fill="#f8f6ed" />
+            <rect x="9" y="9" width="4" height="4" fill="#b86b91" />
+            <rect x="13" y="9" width="4" height="4" fill="#6d326d" />
+            <rect x="17" y="9" width="4" height="4" fill="#e8c4c4" />
+            <path d="M11 19v-3h8v3" />
+          </svg>
         </div>
-        <button v-else type="button" class="back-btn" @click="activeTool = null">
-          &larr; 返回工坊工具组
-        </button>
-      </div>
-    </header>
-
-    <div class="studio-content">
-      <!-- 7 大专用科研出图工具组卡片网格 -->
-      <div v-if="!activeTool" class="tools-grid">
-        <button
-          v-for="tool in tools"
-          :key="tool.id"
-          type="button"
-          class="tool-card"
-          @click="selectTool(tool.id)"
-        >
-          <div class="tool-icon-mini">
-            <svg v-if="tool.iconType === 'tree'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0f766e" stroke-width="2.1">
-              <path d="M5 4v16" />
-              <path d="M5 7h7v-2h5" />
-              <path d="M5 7h7v3h5" />
-              <path d="M5 17h6v-2h6" />
-              <path d="M5 17h6v3h6" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'heatmap'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2.0">
-              <rect x="3" y="3" width="6" height="6" fill="#bae6fd" />
-              <rect x="9" y="3" width="6" height="6" fill="#0284c7" />
-              <rect x="15" y="3" width="6" height="6" fill="#065f46" />
-              <rect x="3" y="9" width="6" height="6" fill="#fed7aa" />
-              <rect x="9" y="9" width="6" height="6" fill="#0284c7" />
-              <rect x="15" y="9" width="6" height="6" fill="#38bdf8" />
-              <rect x="3" y="15" width="6" height="6" fill="#fb923c" />
-              <rect x="9" y="15" width="6" height="6" fill="#fed7aa" />
-              <rect x="15" y="15" width="6" height="6" fill="#065f46" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'circmap'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.1">
-              <circle cx="12" cy="12" r="9" />
-              <circle cx="12" cy="12" r="5" stroke-dasharray="4 2" />
-              <path d="M12 3a9 9 0 0 1 8.5 6" stroke="#16a34a" stroke-width="2.6" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'synteny'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.0">
-              <path d="M3 6h6l2 2-2 2H3z" />
-              <path d="M13 6h6l2 2-2 2h-6z" />
-              <path d="M3 16h6l2 2-2 2H3z" />
-              <path d="M14 16h5l2 2-2 2h-5z" />
-              <path d="M6 10l0 6M16 10l1 6" stroke="#94a3b8" stroke-width="1.5" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'diversity'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2.1">
-              <path d="M2 14h3l2-7 3 9 3-11 2 9h7" />
-              <rect x="3" y="17" width="18" height="3" rx="1" stroke="#334155" />
-            </svg>
-            <svg v-else-if="tool.iconType === 'network'" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2.1">
-              <circle cx="12" cy="12" r="2.5" fill="#dc2626" stroke="#dc2626" />
-              <circle cx="5" cy="7" r="2" />
-              <circle cx="19" cy="7" r="2" />
-              <circle cx="6" cy="18" r="2" />
-              <circle cx="18" cy="18" r="2" />
-              <path d="M7 8l3 2.5M17 8l-3 2.5M7.5 16.5l3-3M16.5 16.5l-3-3" />
-            </svg>
-            <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2.0">
-              <path d="M3 7h3v10H3" />
-              <rect x="9" y="5" width="4" height="4" fill="#6d326d" />
-              <rect x="13" y="5" width="4" height="4" fill="#e8c4c4" />
-              <rect x="17" y="5" width="4" height="4" fill="#f8f6ed" />
-              <rect x="9" y="9" width="4" height="4" fill="#b86b91" />
-              <rect x="13" y="9" width="4" height="4" fill="#6d326d" />
-              <rect x="17" y="9" width="4" height="4" fill="#e8c4c4" />
-              <path d="M11 19v-3h8v3" />
-            </svg>
+        <div class="tool-body">
+          <div class="tool-title-row">
+            <h3>{{ tool.title }}</h3>
           </div>
-          <div class="tool-body">
-            <div class="tool-title-row">
-              <h3>{{ tool.title }}</h3>
-            </div>
-            <div class="tool-journal-badge">{{ tool.journalRef }}</div>
-            <p class="tool-desc">{{ tool.description }}</p>
-          </div>
-        </button>
-      </div>
+          <div class="tool-journal-badge">{{ tool.journalRef }}</div>
+          <p class="tool-desc">{{ tool.description }}</p>
+        </div>
+      </button>
+    </template>
 
-      <!-- 选中的专用绘图工作区 -->
-      <div v-else class="tool-workspace">
-        <PhyloWorkbench v-if="activeTool === 'phylo_tree'" />
-        <ViridicHeatmapTool v-else-if="activeTool === 'viridic_heatmap'" />
-        <GenomeMapTool v-else-if="activeTool === 'genome_map'" />
-        <SyntenyRibbonTool v-else-if="activeTool === 'synteny_ribbon'" />
-        <DiversityWindowTool v-else-if="activeTool === 'diversity_window'" />
-        <GeneNetworkTool v-else-if="activeTool === 'gene_network'" />
-        <HostMatrixTool v-else-if="activeTool === 'host_matrix'" />
-      </div>
-    </div>
-    <CitationsDialog v-model:open="showCitationsDialog" default-module="figure_studio" />
-  </div>
+    <template #workspace>
+      <PhyloWorkbench v-if="activeTool === 'phylo_tree'" />
+      <ViridicHeatmapTool v-else-if="activeTool === 'viridic_heatmap'" />
+      <GenomeMapTool v-else-if="activeTool === 'genome_map'" />
+      <SyntenyRibbonTool v-else-if="activeTool === 'synteny_ribbon'" />
+      <DiversityWindowTool v-else-if="activeTool === 'diversity_window'" />
+      <GeneNetworkTool v-else-if="activeTool === 'gene_network'" />
+      <HostMatrixTool v-else-if="activeTool === 'host_matrix'" />
+    </template>
+  </WorkbenchHubLayout>
+  <CitationsDialog v-model:open="showCitationsDialog" default-module="figure_studio" />
 </template>
 
 <style scoped>
-.studio-container { height: 100%; display: flex; flex-direction: column; background: #f8fafc; }
-.studio-header { padding: 12px 24px; background: #fff; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-.header-content h1 { margin: 0; font-size: 18px; color: #1e293b; letter-spacing: -0.4px; }
-.header-content p { margin: 2px 0 0; color: #64748b; font-size: 12px; }
-.header-actions-bar { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .citations-btn { background: #f0fdfa; border: 1px solid #99f6e4; color: #0f766e; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .citations-btn:hover { background: #ccfbf1; }
-.stat-badge { display: flex; align-items: center; gap: 6px; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 12px; }
-.stat-badge .label { color: #64748b; }
-.stat-badge .value { color: #0f766e; font-weight: 700; }
-.back-btn { background: #f1f5f9; border: 1px solid #cbd5e1; padding: 6px 14px; border-radius: 6px; color: #334155; font-size: 12px; font-weight: 600; cursor: pointer; flex-shrink: 0; }
-.back-btn:hover { background: #e2e8f0; color: #0f172a; }
-.studio-content { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.tools-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; padding: 30px 40px; overflow-y: auto; align-content: start; }
 .tool-card { width: 100%; text-align: left; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: flex-start; gap: 15px; }
 .tool-card:hover { border-color: #0f766e; background: #f0fdfa; box-shadow: 0 4px 14px rgba(15, 118, 110, 0.1); transform: translateY(-2px); }
 .tool-icon-mini { width: 44px; height: 44px; background: #f8fafc; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid #e2e8f0; }
@@ -268,5 +246,4 @@ function selectTool(id: StudioToolId): void {
 .tool-title-row h3 { margin: 0 0 4px; font-size: 15px; color: #1e293b; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tool-journal-badge { display: inline-block; font-size: 10px; font-weight: 600; color: #0f766e; background: #ccfbf1; padding: 1px 7px; border-radius: 999px; margin-bottom: 6px; }
 .tool-desc { margin: 0; color: #64748b; font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tool-workspace { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 </style>

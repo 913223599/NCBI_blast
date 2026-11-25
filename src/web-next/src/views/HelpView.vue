@@ -1,11 +1,17 @@
 <script setup lang="ts">
 /**
  * HelpView - 帮助中心页面
- * 双栏布局：左侧主题导航 + 右侧安全 Markdown 渲染区
+ * 双栏布局：左侧支持即时检索的主题导航 + 右侧带章节大纲锚点（TOC）的安全 Markdown 渲染区
  */
-import { ref, onMounted, nextTick } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { getBridge } from '../bridge'
-import { markdownToHtml, safeSetHTML } from '../utils/safeHtml'
+import {
+  extractMarkdownHeadings,
+  markdownToHtml,
+  safeSetHTML,
+  type MarkdownHeading,
+} from '../utils/safeHtml'
+import { shouldSubmitOnEnter } from '../utils/ime'
 
 interface HelpTopic {
   id: string
@@ -19,10 +25,33 @@ interface HelpGroupResponse {
 }
 
 const topics = ref<HelpTopic[]>([])
+const searchQuery = ref('')
 const activeTopic = ref<string>('')
 const isLoading = ref(true)
 const isContentLoading = ref(false)
 const contentBodyRef = ref<HTMLElement | null>(null)
+const contentHeadings = ref<MarkdownHeading[]>([])
+const activeHeadingId = ref<string>('')
+
+const filteredTopics = computed<HelpTopic[]>(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return topics.value
+  return topics.value.filter(
+    (item) =>
+      item.title.toLowerCase().includes(q) ||
+      item.category.toLowerCase().includes(q) ||
+      item.id.toLowerCase().includes(q)
+  )
+})
+
+const visibleCategories = computed<string[]>(() => [
+  ...new Set(filteredTopics.value.map((topicItem) => topicItem.category)),
+])
+
+const tocItems = computed<MarkdownHeading[]>(() => {
+  const sub = contentHeadings.value.filter((h) => h.level >= 2)
+  return sub.length >= 2 ? sub : contentHeadings.value
+})
 
 function normalizeTopics(raw: unknown): HelpTopic[] {
   if (!Array.isArray(raw)) return []
@@ -42,10 +71,30 @@ function normalizeTopics(raw: unknown): HelpTopic[] {
 }
 
 async function renderMarkdownSafely(markdown: string): Promise<void> {
+  contentHeadings.value = extractMarkdownHeadings(markdown)
+  activeHeadingId.value = contentHeadings.value[0]?.id ?? ''
   await nextTick()
   if (!contentBodyRef.value) return
   const html = markdownToHtml(markdown)
   safeSetHTML(contentBodyRef.value, html)
+}
+
+function jumpToHeading(headingId: string): void {
+  activeHeadingId.value = headingId
+  const container = contentBodyRef.value
+  if (!container) return
+  const target = container.querySelector<HTMLElement>(`#${headingId}`)
+  if (target && typeof target.scrollIntoView === 'function') {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
+
+function handleSearchKeydown(event: KeyboardEvent): void {
+  if (!shouldSubmitOnEnter(event)) return
+  if (filteredTopics.value.length > 0) {
+    event.preventDefault()
+    void selectTopic(filteredTopics.value[0]!.id)
+  }
 }
 
 async function loadTopics(): Promise<void> {
@@ -93,10 +142,6 @@ async function selectTopic(topicId: string): Promise<void> {
   }
 }
 
-function getCategories(): string[] {
-  return [...new Set(topics.value.map((topicItem) => topicItem.category))]
-}
-
 onMounted(async () => {
   await loadTopics()
   if (topics.value.length > 0 && !activeTopic.value) {
@@ -111,14 +156,37 @@ onMounted(async () => {
       <div class="sidebar-header">
         <h2>帮助中心</h2>
         <p class="subtitle">NCBI Bio-Station 使用手册</p>
+        <div class="sidebar-search">
+          <input
+            v-model="searchQuery"
+            type="search"
+            class="help-search-input"
+            placeholder="筛选帮助主题或分类..."
+            aria-label="筛选帮助主题"
+            @keydown="handleSearchKeydown"
+          />
+          <button
+            v-if="searchQuery"
+            type="button"
+            class="search-clear-btn"
+            aria-label="清空搜索词"
+            @click="searchQuery = ''"
+          >
+            清空
+          </button>
+        </div>
       </div>
+
       <div class="topic-list">
         <div v-if="isLoading" class="loading-hint">正在加载手册目录...</div>
+        <div v-else-if="filteredTopics.length === 0" class="loading-hint">
+          未找到与 "{{ searchQuery }}" 匹配的帮助主题
+        </div>
         <template v-else>
-          <template v-for="cat in getCategories()" :key="cat">
+          <template v-for="cat in visibleCategories" :key="cat">
             <div class="topic-category">{{ cat }}</div>
             <button
-              v-for="topic in topics.filter((topicItem) => topicItem.category === cat)"
+              v-for="topic in filteredTopics.filter((topicItem) => topicItem.category === cat)"
               :key="topic.id"
               type="button"
               class="topic-item"
@@ -143,7 +211,24 @@ onMounted(async () => {
         <p>您可以查阅 BLAST 配置、数据库管理、参数设置与工作流说明。</p>
       </div>
       <div v-else-if="isContentLoading" class="loading-hint">正在读取文档内容...</div>
-      <article v-else ref="contentBodyRef" class="content-body selectable" />
+      <div v-else class="content-shell">
+        <nav v-if="tocItems.length >= 2" class="toc-bar" aria-label="文档章节目录">
+          <span class="toc-label">本页目录</span>
+          <div class="toc-links">
+            <button
+              v-for="heading in tocItems"
+              :key="heading.id"
+              type="button"
+              class="toc-btn"
+              :class="{ active: activeHeadingId === heading.id, sub: heading.level >= 3 }"
+              @click="jumpToHeading(heading.id)"
+            >
+              {{ heading.text }}
+            </button>
+          </div>
+        </nav>
+        <article ref="contentBodyRef" class="content-body selectable" />
+      </div>
     </section>
   </div>
 </template>
@@ -165,7 +250,7 @@ onMounted(async () => {
 }
 
 .sidebar-header {
-  padding: 20px;
+  padding: 18px 16px 14px;
   border-bottom: 1px solid var(--border-light);
 }
 
@@ -179,6 +264,45 @@ onMounted(async () => {
   font-size: 0.8rem;
   color: var(--text-secondary);
   margin-top: 4px;
+}
+
+.sidebar-search {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  background: #f8fafc;
+  color: var(--text-primary);
+}
+
+.help-search-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  background: #ffffff;
+}
+
+.search-clear-btn {
+  padding: 4px 8px;
+  font-size: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: #f1f5f9;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.search-clear-btn:hover {
+  background: #e2e8f0;
+  color: var(--text-primary);
 }
 
 .topic-list {
@@ -228,7 +352,7 @@ onMounted(async () => {
 .loading-hint {
   text-align: center;
   color: var(--text-secondary);
-  padding: 40px 0;
+  padding: 40px 12px;
   font-size: 0.875rem;
 }
 
@@ -236,6 +360,59 @@ onMounted(async () => {
   flex: 1;
   overflow-y: auto;
   background: var(--bg-card);
+}
+
+.content-shell {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.toc-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(248, 250, 252, 0.96);
+  border-bottom: 1px solid var(--border-color);
+  padding: 10px 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toc-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.toc-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.toc-btn {
+  padding: 3px 9px;
+  font-size: 0.76rem;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.toc-btn.sub {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.toc-btn:hover,
+.toc-btn.active {
+  background: #eff6ff;
+  color: var(--accent-blue);
+  border-color: #93c5fd;
 }
 
 .empty-state {
@@ -263,9 +440,7 @@ onMounted(async () => {
 }
 
 .content-body {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 32px 48px 48px;
+  padding: 28px 48px 48px;
   line-height: 1.75;
   color: var(--text-primary);
   font-size: 0.95rem;
@@ -276,16 +451,20 @@ onMounted(async () => {
   margin-bottom: 16px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--border-color);
+  scroll-margin-top: 64px;
 }
 
 .content-body :deep(h2) {
   font-size: 1.2rem;
   margin: 24px 0 10px;
+  scroll-margin-top: 64px;
 }
 
-.content-body :deep(h3) {
+.content-body :deep(h3),
+.content-body :deep(h4) {
   font-size: 1.02rem;
   margin: 18px 0 8px;
+  scroll-margin-top: 64px;
 }
 
 .content-body :deep(p) {

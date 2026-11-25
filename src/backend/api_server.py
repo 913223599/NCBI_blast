@@ -333,7 +333,15 @@ def _on_blast_result(task_id: str, data: dict):
             logger.debug(f"标注回调失败 (skip): {cb_e}")
 
 # ─── 5. 应用实例化与安全中间件 / 路由挂载 ────────────────
-app = FastAPI(title="NCBI Bio-Station API", lifespan=lifespan)
+from ..utils.app_metadata import get_app_metadata as _get_app_metadata
+
+_APP_META = _get_app_metadata()
+app = FastAPI(
+    title=f"{_APP_META['name']} API",
+    version=_APP_META["version"],
+    description=_APP_META["description"],
+    lifespan=lifespan,
+)
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient", "::ffff:127.0.0.1"})
 

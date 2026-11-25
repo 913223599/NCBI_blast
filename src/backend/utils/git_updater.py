@@ -184,6 +184,8 @@ def get_git_info(project_root: Optional[Path] = None) -> Dict[str, Any]:
     if project_root is None:
         project_root = get_project_root()
         
+    from ...utils.app_metadata import get_app_version
+
     result: Dict[str, Any] = {
         "is_git_repo": False,
         "branch": "master",
@@ -192,7 +194,7 @@ def get_git_info(project_root: Optional[Path] = None) -> Dict[str, Any]:
         "commit_message": "",
         "commit_date": "",
         "remote_url": "",
-        "app_version": "2.1.0",
+        "app_version": get_app_version(),
         "has_uncommitted_changes": False
     }
 

@@ -7,26 +7,7 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
-/** 扩展 Window 接口以支持 Electron 预加载 API */
-declare global {
-    interface Window {
-        electronAPI?: {
-            openFileDialog: (options: any) => Promise<string[] | null>
-            saveFileDialog: (options: any) => Promise<string | null>
-            openExternal: (url: string) => Promise<void>
-            openPath: (dirPath: string) => Promise<void>
-            readFile: (filePath: string) => Promise<string | null>
-            writeFile: (filePath: string, content: string) => Promise<boolean>
-            writeBinaryFile?: (filePath: string, base64Data: string) => Promise<boolean>
-            getApiPort: () => Promise<number>
-            getProjectRoot: () => Promise<string>
-            getPathForFile: (file: File) => string
-            relaunchApp?: () => Promise<boolean>
-        }
-        [key: string]: any
-    }
-}
+// Window.electronAPI 的强类型声明已统一收口于 src/types/electron.d.ts
 
 // 生成当前会话的唯一标识符，用于排除广播回环
 const MY_CLIENT_ID = 'client_' + Math.random().toString(36).substring(2, 10);

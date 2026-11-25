@@ -5,6 +5,12 @@
  * 2. 在不支持的内核中通过浏览器原生 DOMParser 白名单节点净化（零外部依赖，匹配 KEEP_CONTENT: false 语义）
  */
 
+export interface MarkdownHeading {
+  id: string
+  level: number
+  text: string
+}
+
 const ALLOWED_TAGS = new Set([
   'h1', 'h2', 'h3', 'h4', 'p', 'br', 'hr',
   'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
@@ -15,7 +21,13 @@ const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href', 'title', 'target', 'rel']),
   code: new Set(['class']),
   span: new Set(['class']),
+  h1: new Set(['id']),
+  h2: new Set(['id']),
+  h3: new Set(['id']),
+  h4: new Set(['id']),
 }
+
+const SAFE_HEADING_ID_RE = /^help-sec-\d+$/
 
 function isSafeHref(url: string): boolean {
   const trimmed = url.trim().toLowerCase()
@@ -36,6 +48,15 @@ function escapeHtml(raw: string): string {
     .replace(/'/g, '&#39;')
 }
 
+function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .trim()
+}
+
 function renderInlineMarkdown(line: string): string {
   let out = escapeHtml(line)
   out = out.replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -49,6 +70,37 @@ function renderInlineMarkdown(line: string): string {
 }
 
 /**
+ * 提取 Markdown 标题大纲（跳过围栏代码块，与 markdownToHtml 生成的锚点 id 严格一一对应）
+ */
+export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {
+  if (!markdown) return []
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
+  const headings: MarkdownHeading[] = []
+  let inCodeBlock = false
+  let headingIdx = 0
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim()
+    if (trimmed.startsWith('```')) {
+      inCodeBlock = !inCodeBlock
+      continue
+    }
+    if (inCodeBlock) continue
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/)
+    if (heading) {
+      headingIdx += 1
+      headings.push({
+        id: `help-sec-${headingIdx}`,
+        level: heading[1]!.length,
+        text: stripInlineMarkdown(heading[2]!),
+      })
+    }
+  }
+  return headings
+}
+
+/**
  * 将帮助手册 Markdown 转为受控语义 HTML（对内联原始 HTML 先按文本转义后再过白名单净化）
  */
 export function markdownToHtml(markdown: string): string {
@@ -58,6 +110,7 @@ export function markdownToHtml(markdown: string): string {
   let inCodeBlock = false
   let codeLines: string[] = []
   let listType: 'ul' | 'ol' | null = null
+  let headingIdx = 0
 
   const closeList = () => {
     if (listType) {
@@ -98,8 +151,9 @@ export function markdownToHtml(markdown: string): string {
     const heading = trimmed.match(/^(#{1,4})\s+(.+)$/)
     if (heading) {
       closeList()
+      headingIdx += 1
       const level = heading[1]!.length
-      blocks.push(`<h${level}>${renderInlineMarkdown(heading[2]!)}</h${level}>`)
+      blocks.push(`<h${level} id="help-sec-${headingIdx}">${renderInlineMarkdown(heading[2]!)}</h${level}>`)
       continue
     }
 
@@ -164,6 +218,7 @@ function sanitizeNode(node: Node, targetDoc: Document): Node | null {
       const name = attr.name.toLowerCase()
       if (!allowedForTag.has(name)) continue
       if (name === 'href' && !isSafeHref(attr.value)) continue
+      if (name === 'id' && !SAFE_HEADING_ID_RE.test(attr.value)) continue
       cleanEl.setAttribute(name, attr.value)
     }
   }
@@ -186,7 +241,7 @@ export function safeSetHTML(container: HTMLElement, rawHtml: string): void {
     anyEl.setHTML(rawHtml, {
       sanitizer: {
         elements: Array.from(ALLOWED_TAGS),
-        attributes: ['href', 'title', 'target', 'rel', 'class'],
+        attributes: ['href', 'title', 'target', 'rel', 'class', 'id'],
       },
     })
     return
