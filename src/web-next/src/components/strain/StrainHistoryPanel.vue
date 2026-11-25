@@ -18,7 +18,7 @@
       >
         <div class="task-header">
           <div class="task-name">{{ task.fileName }}</div>
-          <button class="task-delete" @click.stop="deleteTask(task.taskId)">✕</button>
+          <button class="task-delete" @click.stop="deleteTask(task.taskId)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
 
         <div class="task-meta">
@@ -50,9 +50,11 @@
 <script setup lang="ts">
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 
 const strain = useStrainStore()
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 
 function selectTask(taskId: string) {
   strain.activeTaskId = taskId
@@ -63,8 +65,14 @@ function deleteTask(taskId: string) {
   appStore.showNotification('已删除导入记录', 'success')
 }
 
-function clearAllTasks() {
-  if (window.confirm('确定要清空所有导入历史吗？')) {
+async function clearAllTasks() {
+  const ok = await confirmDialog.confirm({
+    title: '清空导入历史',
+    message: '确定要清空所有导入历史吗？',
+    confirmText: '全部清空',
+    danger: true,
+  })
+  if (ok) {
     strain.clearTasks()
     appStore.showNotification('已清空导入历史', 'success')
   }

@@ -11,6 +11,9 @@ import MailComposeModal from '../components/MailComposeModal.vue'
 import type { MailDraftPayload, MailComposeSubmitPayload } from '../components/MailComposeModal.vue'
 import type { CleanupOption } from '../components/CleanupDialog.vue'
 import { getJson, postJson, openLocalPath, describeMigration } from '../api'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+
+const confirmDialog = useConfirmDialog()
 
 interface AttachmentItem {
   filename: string
@@ -582,9 +585,15 @@ async function runCleanup(targets: string[], olderThanDays: number | null, names
   }
 }
 
-function deleteOne(target: string, name: string, label: string): void {
-  if (!window.confirm(`确认删除 ${label}？此操作不可恢复。`)) return
-  runCleanup([target], null, [name])
+async function deleteOne(target: string, name: string, label: string): Promise<void> {
+  const ok = await confirmDialog.confirm({
+    title: '删除历史项目',
+    message: `确认删除 ${label}？此操作不可恢复。`,
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (!ok) return
+  await runCleanup([target], null, [name])
 }
 
 async function handleToggleBatchIgnore(batch: BatchItem): Promise<void> {

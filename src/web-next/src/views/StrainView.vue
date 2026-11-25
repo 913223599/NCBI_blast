@@ -7,7 +7,7 @@
     />
 
     <!-- 右侧详情区 -->
-    <main class="strain-content">
+    <section class="strain-content" aria-label="菌毒种库工作区">
       <!-- 顶部工具栏 -->
       <div class="top-toolbar">
         <div class="toolbar-left">
@@ -68,7 +68,7 @@
         <!-- 列表视图（表格） -->
         <StrainListContainer v-if="currentView === 'list'" />
       </div>
-    </main>
+    </section>
 
     <!-- 添加冰箱对话框 -->
     <AddFreezerDialog 
@@ -102,14 +102,19 @@
     <div v-if="showCodeManager" class="code-manager-overlay" @click.self="showCodeManager = false">
       <div class="code-manager-dialog">
         <CodeLookupManager />
-        <button class="code-manager-close" @click="showCodeManager = false">✕</button>
+        <button type="button" class="code-manager-close" aria-label="关闭编码管理" @click="showCodeManager = false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, onActivated, onDeactivated, computed, watch } from 'vue'
 import StrainSidebar from '../components/strain/StrainSidebar.vue'
 import FreezerDetailPanel from '../components/strain/FreezerDetailPanel.vue'
 import StatisticsPanel from '../components/strain/StatisticsPanel.vue'
@@ -223,12 +228,34 @@ function handleKeyboard(e: KeyboardEvent) {
   }
 }
 
-onMounted(() => {
+let isKeyboardBound = false
+
+function bindKeyboardShortcuts() {
+  if (isKeyboardBound) return
   document.addEventListener('keydown', handleKeyboard)
+  isKeyboardBound = true
+}
+
+function unbindKeyboardShortcuts() {
+  if (!isKeyboardBound) return
+  document.removeEventListener('keydown', handleKeyboard)
+  isKeyboardBound = false
+}
+
+onMounted(() => {
+  bindKeyboardShortcuts()
+})
+
+onActivated(() => {
+  bindKeyboardShortcuts()
+})
+
+onDeactivated(() => {
+  unbindKeyboardShortcuts()
 })
 
 onUnmounted(() => {
-  document.removeEventListener('keydown', handleKeyboard)
+  unbindKeyboardShortcuts()
 })
 </script>
 

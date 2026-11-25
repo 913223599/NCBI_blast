@@ -6,9 +6,24 @@
  *   2. 生工 16S 测序结果自动化 BLAST 与导出流程
  * 遵循模块化设计，每个工具为一个独立的子组件，视觉风格对齐 AnalysisView.vue。
  */
-import { ref } from 'vue'
-import MailAutoPipelineModule from './OtherTools/modules/MailAutoPipelineModule.vue'
-import Sangon16SPipelineModule from './OtherTools/modules/Sangon16SPipelineModule.vue'
+import { defineAsyncComponent, ref } from 'vue'
+import AsyncModuleLoading from '../components/common/AsyncModuleLoading.vue'
+import AsyncModuleError from '../components/common/AsyncModuleError.vue'
+
+const asyncOpts = {
+  loadingComponent: AsyncModuleLoading,
+  errorComponent: AsyncModuleError,
+  delay: 150,
+}
+
+const MailAutoPipelineModule = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('./OtherTools/modules/MailAutoPipelineModule.vue'),
+})
+const Sangon16SPipelineModule = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('./OtherTools/modules/Sangon16SPipelineModule.vue'),
+})
 
 interface OtherToolItem {
   id: 'mail_pipeline' | 'sangon_16s'
@@ -77,13 +92,15 @@ function selectTool(tool: OtherToolItem): void {
       </div>
     </header>
 
-    <main class="other-tools-content">
+    <div class="other-tools-content">
       <!-- 紧凑型工具网格（与组装分析工作台视觉规范一致） -->
       <div v-if="!activeTool" class="tools-grid">
-        <div
+        <button
           v-for="tool in tools"
           :key="tool.id"
+          type="button"
           :class="['tool-card', tool.status]"
+          :disabled="tool.status === 'coming_soon'"
           @click="selectTool(tool)"
         >
           <div class="tool-icon-mini">
@@ -131,7 +148,7 @@ function selectTool(tool: OtherToolItem): void {
             </div>
             <p class="tool-desc">{{ tool.description }}</p>
           </div>
-        </div>
+        </button>
       </div>
 
       <!-- 具体工具工作区 -->
@@ -139,7 +156,7 @@ function selectTool(tool: OtherToolItem): void {
         <MailAutoPipelineModule v-if="activeTool === 'mail_pipeline'" />
         <Sangon16SPipelineModule v-else-if="activeTool === 'sangon_16s'" />
       </div>
-    </main>
+    </div>
   </div>
 </template>
 
@@ -263,6 +280,8 @@ function selectTool(tool: OtherToolItem): void {
 }
 
 .tool-card {
+  width: 100%;
+  text-align: left;
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 12px;

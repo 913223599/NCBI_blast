@@ -132,7 +132,7 @@ const activeSimilarityMatrix = computed(() => {
 
 // 自然顺序排序算法
 function naturalSort(ids: string[]): string[] {
-  return [...ids].sort((a, b) => {
+  return ids.toSorted((a, b) => {
     const nameA = props.sampleNames[a] || a
     const nameB = props.sampleNames[b] || b
     return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' })

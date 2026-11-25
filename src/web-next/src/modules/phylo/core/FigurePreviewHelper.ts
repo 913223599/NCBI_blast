@@ -97,7 +97,7 @@ export function groupPublicationFiguresByLayout(
 
   return orderedLayouts.map((layout) => {
     const rawList = buckets.get(layout) ?? []
-    const formats = [...rawList].sort((a, b) => {
+    const formats = rawList.toSorted((a, b) => {
       const fa = FORMAT_ORDER.indexOf(a.format.toLowerCase())
       const fb = FORMAT_ORDER.indexOf(b.format.toLowerCase())
       if (fa >= 0 && fb >= 0) return fa - fb

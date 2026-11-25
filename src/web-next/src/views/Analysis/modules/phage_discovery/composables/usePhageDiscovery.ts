@@ -73,7 +73,7 @@ export function usePhageDiscovery() {
         waitingPosMap.set(w.task_id, typeof w.position === 'number' ? w.position : idx + 1)
       })
     } else {
-      ;(snap.queued || []).forEach((tid, idx) => {
+      ; (snap.queued || []).forEach((tid, idx) => {
         waitingPosMap.set(tid, idx + 1)
       })
     }
@@ -143,7 +143,7 @@ export function usePhageDiscovery() {
       const res = await bridge.get_phage_discovery_history(100)
       historyList.value = Array.isArray(res?.tasks) ? res.tasks : []
       const waitingPosMap = new Map<string, number>()
-      ;(queueStatus.value.queued || []).forEach((tid, idx) => waitingPosMap.set(tid, idx + 1))
+        ; (queueStatus.value.queued || []).forEach((tid, idx) => waitingPosMap.set(tid, idx + 1))
       const runningSet = new Set(queueStatus.value.running || [])
 
       historyList.value.forEach((item) => {
@@ -349,7 +349,7 @@ export function usePhageDiscovery() {
 
   function downloadFile(taskId: string, fileType: 'fasta' | 'tsv' | 'gff3' | 'gbk'): void {
     const url = bridge.get_phage_discovery_download_url(taskId, fileType)
-    window.open(url, '_blank')
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   async function openResultsFolder(taskId: string): Promise<void> {

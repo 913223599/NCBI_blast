@@ -633,7 +633,7 @@ function getFilteredMetadata(metadata: any) {
 
 // 快速翻译元数据键名
 function translateMetadataKey(key: string): string {
-  // 链接到全局词库 (metadata.前缀声明在 d:\NCBI blast\src\resources\locales\zh_CN\metadata.json)
+  // 链接到全局词库 (metadata.前缀声明在 src/resources/locales/zh_CN/metadata.json)
   return t(`metadata.${key}`)
 }
 
@@ -1515,13 +1515,24 @@ function addShelf() {
   padding-right: 4px;
 }
 
-.preview-main-scroll::-webkit-scrollbar {
-  width: 4px;
+.preview-main-scroll {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
 }
 
-.preview-main-scroll::-webkit-scrollbar-thumb {
-  background: #e2e8f0;
-  border-radius: 4px;
+@supports not (scrollbar-color: auto) {
+  .preview-main-scroll {
+    scrollbar-width: auto;
+  }
+
+  .preview-main-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .preview-main-scroll::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
 }
 
 .preview-metadata-section {

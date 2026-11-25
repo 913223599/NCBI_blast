@@ -456,7 +456,6 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     clearSelection,
     recalibrateCounters,
     async clearAll() {
-      const getBridge = (await import('../../bridge')).getBridge;
       const bridge = getBridge()
       await bridge.strain_clear_all()
       records.value = []

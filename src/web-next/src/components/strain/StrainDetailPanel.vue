@@ -4,7 +4,7 @@
       <!-- 头部 -->
       <div class="detail-header">
         <h3 class="detail-title">序列详情</h3>
-        <button class="close-btn" @click="emit('close')">✕</button>
+        <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <!-- 内容 -->
@@ -89,6 +89,7 @@
 <script setup lang="ts">
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 
 interface Props {
   record: any
@@ -99,6 +100,7 @@ const emit = defineEmits(['close'])
 
 const strain = useStrainStore()
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 
 function formatDate(isoString: string): string {
   if (!isoString) return '-'
@@ -122,11 +124,17 @@ function copySequence() {
 
 function handleNCBI() {
   const url = `https://www.ncbi.nlm.nih.gov/nuccore/${props.record.accession}`
-  window.open(url, '_blank')
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-function handleDelete() {
-  if (window.confirm('确定要删除这条记录吗？')) {
+async function handleDelete() {
+  const ok = await confirmDialog.confirm({
+    title: '删除记录',
+    message: '确定要删除这条记录吗？',
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (ok) {
     strain.removeRecord(props.record.id)
     appStore.showNotification('已删除记录', 'success')
     emit('close')

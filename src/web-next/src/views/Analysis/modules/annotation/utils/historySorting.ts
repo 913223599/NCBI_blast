@@ -82,7 +82,7 @@ export function sortAnnotationTasks<T extends { created_at?: string | number }>(
     return Array.isArray(tasks) ? [...tasks] : [];
   }
 
-  return [...tasks].sort((a, b) => {
+  return tasks.toSorted((a, b) => {
     const timeA = parseDate(a.created_at)?.getTime() || 0;
     const timeB = parseDate(b.created_at)?.getTime() || 0;
 

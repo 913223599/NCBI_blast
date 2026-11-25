@@ -10,7 +10,7 @@
           placeholder="搜索样本..."
           @input="handleSearch"
         />
-        <button v-if="searchKeyword" class="clear-btn" @click="clearSearch">✕</button>
+        <button v-if="searchKeyword" class="clear-btn" @click="clearSearch"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>
 
@@ -69,7 +69,7 @@
             {{ getTotalBoxes(freezer) }} 个存储位
           </div>
         </div>
-        <button class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱">✕</button>
+        <button class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>
 
@@ -120,11 +120,13 @@
 import { ref, computed } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import type { StrainRecord } from '../../stores/strain'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 
 const strain = useStrainStore()
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 const codeGen = useCodeGenerator()
 
 const emit = defineEmits(['addFreezer', 'sampleClick'])
@@ -178,11 +180,17 @@ function selectFreezer(id: string) {
   strain.setActiveFreezer(id)
 }
 
-function deleteFreezer(id: string) {
+async function deleteFreezer(id: string) {
   const freezer = strain.freezers.find((f: any) => f.id === id)
   if (!freezer) return
   
-  if (window.confirm(`确定要删除冰箱"${freezer.name}"吗？\n该操作将同时删除冰箱内的所有样本记录。`)) {
+  const ok = await confirmDialog.confirm({
+    title: '删除冰箱',
+    message: `确定要删除冰箱"${freezer.name}"吗？\n该操作将同时删除冰箱内的所有样本记录。`,
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (ok) {
     strain.removeFreezer(id)
     appStore.showNotification('已删除冰箱', 'success')
   }

@@ -1,5 +1,4 @@
 import { initBridge as initElectron, onEvent as electronOnEvent, getClientId } from './electron-bridge';
-import { initBridge as initPyQt } from './pyqt-bridge';
 
 /** 检测当前是否运行在 Electron 环境中 */
 function isElectronEnvironment(): boolean {
@@ -23,19 +22,8 @@ async function initBridge() {
 
     _isInitializing = true;
     try {
-        if (isElectronEnvironment()) {
-            console.log('[Bridge] 检测到 Electron 环境，正在初始化...');
-            _cachedBridge = await initElectron();
-        } else if ((window as any).qt) {
-            console.log('[Bridge] 检测到遗留 PyQt 环境，正在重度初始化...');
-            _cachedBridge = await initPyQt();
-        } else {
-            console.log('[Bridge] 检测到 Web/局域网环境，正在初始化 FastAPI 桥接...');
-            _cachedBridge = await initElectron();
-        }
-        
+        _cachedBridge = await initElectron();
         (window as any).pybridge = _cachedBridge;
-        console.log('[Bridge] 初始化完成，正在触发回调队列...');
         
         _readyCallbacks.forEach(cb => cb(_cachedBridge));
         _readyCallbacks.length = 0;

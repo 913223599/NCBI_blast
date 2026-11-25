@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { getBridge } from '../../../../../bridge/electron-bridge'
+import { notifyUser } from '../../../../../utils/notify'
 import ContigSelector from '../../annotation/components/ContigSelector.vue'
 import type { PhageCapabilities, PhageContigInspectItem, PhageScanForm } from '../types'
 import { formatPhageModelBadge } from '../utils'
@@ -351,11 +352,11 @@ function formatParamsCount(n?: number): string {
 
 function onSubmit(): void {
   if (!form.fasta_path && !form.fasta_content.trim()) {
-    (window as any).app?.showNotification('请先选择或粘贴待扫描的基因组序列', 'warning')
+    notifyUser('请先选择或粘贴待扫描的基因组序列', 'warning')
     return
   }
   if (!activeV42Model.value && !form.custom_model_dir.trim()) {
-    (window as any).app?.showNotification('未检测到本地前噬菌体识别模型权重，请先配置模型目录', 'error')
+    notifyUser('未检测到本地前噬菌体识别模型权重，请先配置模型目录', 'error')
     showPathConfig.value = true
     return
   }

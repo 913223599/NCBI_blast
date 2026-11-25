@@ -231,9 +231,16 @@ onUnmounted(() => {
   color: #ef4444;
 }
 
-/* Scrollbar Style */
-.select-dropdown::-webkit-scrollbar { width: 4px; }
-.select-dropdown::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+/* 标准滚动条（兼容旧 WebKit 回退） */
+.select-dropdown {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+@supports not (scrollbar-color: auto) {
+  .select-dropdown { scrollbar-width: auto; }
+  .select-dropdown::-webkit-scrollbar { width: 6px; }
+  .select-dropdown::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 6px; }
+}
 
 /* Animation */
 .dropdown-fade-enter-active,

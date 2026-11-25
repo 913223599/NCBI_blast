@@ -281,22 +281,23 @@ watch(() => blast.activeTaskId, (newId) => {
   }
 })
 
+function handleCloseDropdown() {
+  openDropdown.value = null
+}
+
 onMounted(() => {
   // 防御性重置
   _isLocked.value = true
   _hasUserInteracted.value = false
   _isOpenInternal.value = false
   detailViewer.closeDialog()
-  
-  document.addEventListener('click', () => { openDropdown.value = null; })
-  
-  // 挂载时立即刷新，并执行两次延时保底以确保跨模块新创建任务已落库
+
+  document.addEventListener('click', handleCloseDropdown)
   refreshTaskList()
-  setTimeout(() => { refreshTaskList(); }, 200)
-  setTimeout(() => { refreshTaskList(); }, 600)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('click', handleCloseDropdown)
   taskManager.cleanup()
 })
 </script>

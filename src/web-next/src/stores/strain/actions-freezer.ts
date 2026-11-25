@@ -1,4 +1,5 @@
 import { getBridge } from '../../bridge'
+import { safeDeepClone } from '../../utils/clone'
 import type { Freezer } from './types'
 
 export function useFreezerActions(state: any) {
@@ -190,8 +191,8 @@ export function useFreezerActions(state: any) {
     
     console.log(`[TopologySync] 同步流水线结束: 成功标记 ${sampleMatchCount} 个样本, 找到 ${boxMatchCount} 个有效冰箱盒`)
 
-    // 3. 核心修复：执行深拷贝强制刷新 UI
-    const deepCloned = JSON.parse(JSON.stringify(target))
+    // 3. 核心修复：安全剥离 Vue Proxy 后执行结构化深拷贝刷新 UI（避免 DataCloneError）
+    const deepCloned = safeDeepClone(target)
     freezers.value = deepCloned
     
     // 4. 安全保护：只有在主动操作时才写库，防止同步引起的广播风暴

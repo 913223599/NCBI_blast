@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { shouldSubmitOnEnter } from '../../../../../utils/ime'
 import type {
   PhageBaseFeature,
   PhageBaseTrackBin,
@@ -38,6 +39,12 @@ const showRejected = ref<boolean>(true)
 const featureSearch = ref<string>('')
 const searchCursor = ref<number>(0)
 const inspectedFeature = ref<PhageBaseFeature | null>(null)
+
+function onFeatureSearchKeydown(event: KeyboardEvent) {
+  if (shouldSubmitOnEnter(event)) {
+    jumpToMatchedFeature(0)
+  }
+}
 const hoverTip = ref<{
   visible: boolean
   x: number
@@ -863,7 +870,7 @@ function onMinimapClick(e: MouseEvent): void {
             type="text"
             class="feat-search-input"
             :placeholder="searchPlaceholder"
-            @keyup.enter="jumpToMatchedFeature(0)"
+            @keydown="onFeatureSearchKeydown"
           />
           <template v-if="matchedFeatureList.length > 0">
             <span class="match-count">{{ (searchCursor % matchedFeatureList.length) + 1 }}/{{ matchedFeatureList.length }}</span>

@@ -3,6 +3,8 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useBlastStore } from '../../stores/blast'
 import { useI18n } from '../../locales'
 import { apiGet, apiDelete } from '../../bridge/electron-bridge'
+import { shouldSubmitOnEnter } from '../../utils/ime'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 
 const props = defineProps<{
   editingTaskId: string | null
@@ -27,6 +29,7 @@ const emit = defineEmits<{
 
 const blast = useBlastStore()
 const { t } = useI18n()
+const confirmDialog = useConfirmDialog()
 const renameInputRef = ref<HTMLInputElement | null>(null)
 
 // 多样性历史状态
@@ -74,7 +77,13 @@ function handleSelectDiversity(task: any) {
 
 async function handleDeleteDiversity(task: any, e: Event) {
   e.stopPropagation()
-  if (!confirm(`确定要彻底删除多样性分析归档 "${task.task_name}" 吗？`)) return
+  const ok = await confirmDialog.confirm({
+    title: '删除多样性分析归档',
+    message: `确定要彻底删除多样性分析归档 "${task.task_name}" 吗？`,
+    confirmText: '彻底删除',
+    danger: true,
+  })
+  if (!ok) return
   try {
     const res = await apiDelete(`/api/diversity/task/${task.task_id}`)
     if (res && res.status === 'deleted') {
@@ -87,7 +96,13 @@ async function handleDeleteDiversity(task: any, e: Event) {
 }
 
 async function handleClearDiversity() {
-  if (!confirm('确定要清空全部多样性历史分析记录吗？此操作将物理删除所有相关 Checkpoint。')) return
+  const ok = await confirmDialog.confirm({
+    title: '清空全部多样性历史',
+    message: '确定要清空全部多样性历史分析记录吗？此操作将物理删除所有相关 Checkpoint。',
+    confirmText: '全部清空',
+    danger: true,
+  })
+  if (!ok) return
   try {
     const res = await apiDelete('/api/diversity/tasks/clear')
     if (res && res.status === 'cleared') {
@@ -117,6 +132,12 @@ onMounted(() => {
   }
 })
 
+function onRenameKeydown(event: KeyboardEvent, task: any) {
+  if (shouldSubmitOnEnter(event)) {
+    emit('commitRename', task)
+  }
+}
+
 defineExpose({
   renameInputRef,
   fetchDiversityTasks
@@ -136,7 +157,10 @@ defineExpose({
         :key="t.task_id" 
         class="task-card" 
         :class="{ active: (currentDiversityTaskId || props.activeDiversityTaskId) === t.task_id }" 
+        role="button"
+        tabindex="0"
         @click="handleSelectDiversity(t)"
+        @keydown.enter.space.prevent="handleSelectDiversity(t)"
       >
         <div class="title" :title="t.task_name">
           <span>{{ t.task_name }}</span>
@@ -169,7 +193,16 @@ defineExpose({
 
     <!-- 模式 B: 单株菌株鉴定历史任务列表 -->
     <div v-else class="history-list">
-      <div v-for="t in blast.tasks" :key="t.taskId" class="task-card" :class="{ active: blast.activeTaskId === t.taskId }" @click="emit('selectTask', t.taskId)">
+      <div
+        v-for="t in blast.tasks"
+        :key="t.taskId"
+        class="task-card"
+        :class="{ active: blast.activeTaskId === t.taskId }"
+        role="button"
+        tabindex="0"
+        @click="emit('selectTask', t.taskId)"
+        @keydown.enter.space.prevent="emit('selectTask', t.taskId)"
+      >
         <div class="title" @dblclick="emit('startRename', t, $event)">
           <span v-if="editingTaskId !== t.taskId">{{ t.fileName }}</span>
           <input 
@@ -179,7 +212,7 @@ defineExpose({
             class="rename-inp" 
             ref="renameInputRef" 
             @blur="emit('commitRename', t)" 
-            @keyup.enter="emit('commitRename', t)" 
+            @keydown="onRenameKeydown($event, t)" 
           />
         </div>
         <div class="meta">

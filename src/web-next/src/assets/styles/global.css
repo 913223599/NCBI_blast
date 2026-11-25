@@ -1,131 +1,170 @@
 /**
- * 全局设计系统 - CSS 变量 & 基础样式
+ * 全局浅色科研设计系统 - CSS Design Tokens & 基础样式
+ * 规范：
+ * 1. 移除旧 PyQt WebEngine 时代的全局 box-shadow/backdrop-filter 暴力覆盖
+ * 2. 允许科研数据与结果文本自由划词复制，仅对按钮/导航等交互控件禁止误选
+ * 3. 提供高对比度 :focus-visible 键盘焦点轮廓与 WCAG 3:1 标准滚动条
  */
 
 :root {
-    /* 色彩系统 */
-    --bg-page: #f1f5f9;
-    --bg-card: #ffffff;
-    --bg-sidebar: #0f172a;
-    --bg-studio: #0f172a;
+  color-scheme: light;
 
-    --text-primary: #1e293b;
-    --text-secondary: #64748b;
-    --text-muted: #94a3b8;
+  /* 浅色科研色彩系统 */
+  --bg-page: #f1f5f9;
+  --bg-surface: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-sidebar: #0f172a;
+  --bg-studio: #0f172a;
 
-    /* 渲染质量增强 */
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
 
-    --accent-blue: #3b82f6;
-    --accent-green: #10b981;
-    --accent-orange: #f59e0b;
-    --accent-red: #ef4444;
+  /* 渲染质量增强 */
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 
-    --border-color: #e2e8f0;
-    --border-light: #f1f5f9;
+  --accent-blue: #2563eb;
+  --accent-green: #10b981;
+  --accent-orange: #f59e0b;
+  --accent-red: #ef4444;
 
-    /* 语义化别名 */
-    --primary-color: var(--accent-blue);
-    --success-color: var(--accent-green);
-    --warning-color: var(--accent-orange);
-    --error-color: var(--accent-red);
+  --border-color: #e2e8f0;
+  --border-light: #f1f5f9;
 
-    /* 圆角 */
-    --radius-sm: 6px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
+  /* 语义化别名 */
+  --primary-color: var(--accent-blue);
+  --success-color: var(--accent-green);
+  --warning-color: var(--accent-orange);
+  --error-color: var(--accent-red);
 
-    /* 阴影 - disabled */
-    --shadow-sm: none;
-    --shadow-md: none;
-    --shadow-lg: none;
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 
-    /* 间距 */
-    --space-xs: 4px;
-    --space-sm: 8px;
-    --space-md: 16px;
-    --space-lg: 24px;
-    --space-xl: 32px;
+  /* 克制的科研级层级阴影 */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 28px rgba(15, 23, 42, 0.14);
+
+  /* 标准滚动条语义变量（满足 WCAG 1.4.11 >= 3:1 非文本对比度） */
+  --scrollbar-thumb: #64748b;
+  --scrollbar-track: #e2e8f0;
+
+  /* 间距 */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
 }
 
 /* 全局重置 */
 *,
 *::before,
 *::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 html,
 body {
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-    color: var(--text-primary);
-    background: var(--bg-page);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-
-    /* 禁用全局文本选取，防止拖拽时选中文字 */
-    user-select: none;
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Inter', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--bg-page);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
 }
 
-/* 允许输入的控件和特定声明区域恢复选取 */
-input, 
-textarea, 
-[contenteditable="true"], 
+/* 允许科研表格、序列、学名、文档等文本自由选取，仅对交互按钮与导航避免拖拽误选 */
+button,
+nav {
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable='true'],
 .selectable,
 pre,
-code {
-    user-select: text;
-    -webkit-user-select: text;
-    -moz-user-select: text;
-    -ms-user-select: text;
+code,
+table {
+  user-select: text;
 }
 
 a {
-    color: var(--accent-blue);
-    text-decoration: none;
+  color: var(--accent-blue);
+  text-decoration: none;
 }
 
 button {
-    cursor: pointer;
-    border: none;
-    outline: none;
-    font: inherit;
+  cursor: pointer;
+  border: none;
+  font: inherit;
 }
 
-/* 滚动条样式 */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+/* 保留无障碍键盘焦点环，避免抹杀焦点可视化 */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
 }
 
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-    background: #d1d5db;
-    border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: #9ca3af;
-}
-
-/* 强制重置 - 去除全局毛玻璃和阴影效果 (解决 WebEngine 渲染卡顿) */
+/* 标准滚动条（含仅在不支持 scrollbar-color 内核下激活的 legacy 回退） */
 * {
-    box-shadow: none !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+
+@supports not (scrollbar-color: auto) {
+  * {
+    scrollbar-width: auto;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
+}
+
+/* 折叠线以下长列表延迟渲染工具类（遵循 defer-rendering-heavy-content 强制配对 contain-intrinsic-size） */
+.deferred-list-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 72px;
+}
+
+/* 中小桌面视口响应式适配（防窄屏挤压溢出） */
+@media (max-width: 1180px) {
+  .tools-grid {
+    padding: 20px 24px;
+    gap: 14px;
+  }
+}
+
+@media (max-width: 900px) {
+  html,
+  body {
+    font-size: 13px;
+  }
+
+  .tools-grid {
+    grid-template-columns: 1fr;
+    padding: 16px;
+  }
 }

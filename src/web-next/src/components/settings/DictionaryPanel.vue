@@ -2,9 +2,11 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { getBridge, onEvent } from '../../bridge'
 import { useAppStore } from '../../stores/app'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import { useVirtualList } from '@vueuse/core'
 
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 
 const dictQuery = ref('')
 const selectedCategory = ref('all')
@@ -178,9 +180,15 @@ function editTerm(item: any) {
   appStore.showNotification(`正在编辑: ${item.english}`, 'info')
 }
 
-function deleteTerm(english: string) {
+async function deleteTerm(english: string) {
   const displayEn = english || '[空文本]'
-  if (!confirm(`确认彻底删除 "${displayEn}"?`)) return
+  const ok = await confirmDialog.confirm({
+    title: '删除词条',
+    message: `确认彻底删除 "${displayEn}"？`,
+    confirmText: '彻底删除',
+    danger: true,
+  })
+  if (!ok) return
   getBridge().delete_dictionary_term(english, (ok: boolean) => { if (ok) loadDictionary() })
 }
 
@@ -221,10 +229,15 @@ function exportDictionaryCSV() {
 
 
 /** NCBI 分类学批量审计优化 */
-function handleTaxonomyAudit() {
+async function handleTaxonomyAudit() {
   const terms = filteredResults.value.filter(t => t.english).map(t => t.english)
   if (terms.length === 0) return
-  if (!confirm(`将对当前显示区域的 ${terms.length} 条记录执行 NCBI 在线校核，这可能需要一些时间。`)) return
+  const ok = await confirmDialog.confirm({
+    title: 'NCBI 在线分类校核',
+    message: `将对当前显示区域的 ${terms.length} 条记录执行 NCBI 在线校核，这可能需要一些时间。`,
+    confirmText: '开始校核',
+  })
+  if (!ok) return
   
   isAuditing.value = true
   getBridge().taxonomy_audit_batch(terms, (res: any) => {

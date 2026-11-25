@@ -42,7 +42,7 @@ const emit = defineEmits<{
             <option value="score">按 Bit-Score (得分)</option>
             <option value="start">按起始位点 (坐标)</option>
           </select>
-          <button class="close-btn" title="关闭" @click="emit('close')">✕</button>
+          <button class="close-btn" title="关闭" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
       </div>
       

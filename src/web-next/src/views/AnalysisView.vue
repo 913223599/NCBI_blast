@@ -4,14 +4,41 @@
  * 职责：提供组装后的深度分析工具集（全场景共线性分析、序列交互式可视化、全基因组功能注释）
  * 遵循模块化设计，每个工具为一个独立的子组件。
  */
-import { ref } from 'vue'
-import GenomeViewerModule from './Analysis/modules/viewer/GenomeViewerModule.vue'
-import AnnotationModule from './Analysis/modules/annotation/AnnotationModule.vue'
-import PhageDiscoveryModule from './Analysis/modules/phage_discovery/PhageDiscoveryModule.vue'
-import PhageStructureModule from './Analysis/modules/phage_structure/PhageStructureModule.vue'
+import { defineAsyncComponent, ref } from 'vue'
+import AsyncModuleLoading from '../components/common/AsyncModuleLoading.vue'
+import AsyncModuleError from '../components/common/AsyncModuleError.vue'
 import type { StructureInitialPayload } from './Analysis/modules/phage_structure/types'
-import PanGenomicsModule from './Analysis/modules/pan_genomics/PanGenomicsModule.vue'
-import SangerTraceModule from './Analysis/modules/sanger_trace/SangerTraceModule.vue'
+
+const asyncOpts = {
+  loadingComponent: AsyncModuleLoading,
+  errorComponent: AsyncModuleError,
+  delay: 150,
+}
+
+const GenomeViewerModule = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('./Analysis/modules/viewer/GenomeViewerModule.vue'),
+})
+const AnnotationModule = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('./Analysis/modules/annotation/AnnotationModule.vue'),
+})
+const PhageDiscoveryModule = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('./Analysis/modules/phage_discovery/PhageDiscoveryModule.vue'),
+})
+const PhageStructureModule = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('./Analysis/modules/phage_structure/PhageStructureModule.vue'),
+})
+const PanGenomicsModule = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('./Analysis/modules/pan_genomics/PanGenomicsModule.vue'),
+})
+const SangerTraceModule = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('./Analysis/modules/sanger_trace/SangerTraceModule.vue'),
+})
 
 interface AnalysisTool {
   id: string;
@@ -135,13 +162,15 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
       </button>
     </header>
 
-    <main class="analysis-content">
+    <div class="analysis-content">
       <!-- 紧凑型工具网格 -->
       <div v-if="!activeTool" class="tools-grid">
-        <div 
+        <button 
           v-for="tool in tools" 
           :key="tool.id" 
+          type="button"
           :class="['tool-card', tool.status]"
+          :disabled="tool.status === 'coming_soon'"
           @click="selectTool(tool)"
         >
           <div class="tool-icon-mini">
@@ -200,7 +229,7 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
             </div>
             <p class="tool-desc">{{ tool.description }}</p>
           </div>
-        </div>
+        </button>
       </div>
 
       <!-- 具体工具工作区 -->
@@ -236,7 +265,7 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
            <p>正在拉取 {{ activeTool }} 算法引擎，请稍候...</p>
         </div>
       </div>
-    </main>
+    </div>
   </div>
 </template>
 
@@ -326,6 +355,8 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
 }
 
 .tool-card {
+  width: 100%;
+  text-align: left;
   background: white;
   border: 1px solid #e2e8f0;
   border-radius: 12px;

@@ -5,7 +5,10 @@
 import { ref, computed } from 'vue';
 import { getBridge } from '../../../../../bridge';
 import { apiPost } from '../../../../../bridge/electron-bridge';
+import { useAppStore } from '../../../../../stores/app';
 import type { AnnotationTaskItem, FeatureItem } from '../types';
+
+const appStore = useAppStore();
 
 const props = defineProps<{
   task: AnnotationTaskItem;
@@ -42,7 +45,7 @@ async function openResultsFolder() {
   }
 
   // 3. 终极兜底提示
-  alert(`结果目录位于: results/annotations/${taskId}`);
+  appStore.showNotification(`结果目录位于: results/annotations/${taskId}`, 'info');
 }
 
 // 筛选与搜索状态
@@ -130,13 +133,13 @@ function toggleExpand(id: string) {
 function copyText(text?: string | null) {
   if (!text) return;
   navigator.clipboard.writeText(text);
-  alert('序列内容已复制到剪贴板');
+  appStore.showNotification('序列内容已复制到剪贴板', 'success');
 }
 
 function handleOpenInViewer() {
   const gbk = props.task.gbk_content || '';
   if (!gbk) {
-    alert('未找到可用的 GenBank 数据，请检查注释产物');
+    appStore.showNotification('未找到可用的 GenBank 数据，请检查注释产物', 'warning');
     return;
   }
   emit('open-in-viewer', gbk, props.task.task_name || props.task.task_id);

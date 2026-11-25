@@ -8,13 +8,14 @@ const appStore = useAppStore()
 </script>
 
 <template>
-  <div class="notification-stack">
+  <div class="notification-stack" role="region" aria-label="系统通知" aria-live="polite">
     <TransitionGroup name="notif">
       <div
         v-for="notif in appStore.notifications"
         :key="notif.id"
         class="notification"
         :class="notif.type"
+        role="status"
       >
         {{ notif.message }}
       </div>

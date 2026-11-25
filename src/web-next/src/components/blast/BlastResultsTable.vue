@@ -126,7 +126,7 @@ function openNcbi(accession: string): void {
   try {
     getBridge().open_external_url(url)
   } catch (e) {
-    window.open(url, '_blank')
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 }
 </script>

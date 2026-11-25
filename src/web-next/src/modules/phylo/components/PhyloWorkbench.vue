@@ -125,12 +125,12 @@ onUnmounted(() => {
         </div>
       </aside>
 
-      <main class="wb-main">
+      <section class="wb-main" aria-label="系统发育进化树工作区">
         <div v-if="store.activeJob" class="wb-banner-slot">
           <JobProgressBanner />
         </div>
         <TreeViewport />
-      </main>
+      </section>
     </div>
   </div>
 </template>

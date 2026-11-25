@@ -153,17 +153,17 @@ function isGroupActive(group: PublicationLayoutGroup): boolean {
 
 function downloadFigureFile(filename: string): void {
   if (!job.value) return
-  window.open(phyloApi.getFigureUrl(job.value.job_id, filename), '_blank')
+  window.open(phyloApi.getFigureUrl(job.value.job_id, filename), '_blank', 'noopener,noreferrer')
 }
 
 function downloadItolBundle(): void {
   if (!job.value) return
-  window.open(phyloApi.getItolUploadBundleUrl(job.value.job_id, pubLabelFormat.value), '_blank')
+  window.open(phyloApi.getItolUploadBundleUrl(job.value.job_id, pubLabelFormat.value), '_blank', 'noopener,noreferrer')
 }
 
 function downloadItolNewick(): void {
   if (!job.value) return
-  window.open(phyloApi.getItolNewickUrl(job.value.job_id), '_blank')
+  window.open(phyloApi.getItolNewickUrl(job.value.job_id), '_blank', 'noopener,noreferrer')
 }
 
 async function copyItolNewickText(): Promise<void> {
@@ -181,7 +181,7 @@ async function copyItolNewickText(): Promise<void> {
 }
 
 function openItolUploadPage(): void {
-  window.open(ITOL_UPLOAD_PAGE_URL, '_blank')
+  window.open(ITOL_UPLOAD_PAGE_URL, '_blank', 'noopener,noreferrer')
 }
 
 async function handlePullFromItol(): Promise<void> {
@@ -209,7 +209,7 @@ async function handlePullFromItol(): Promise<void> {
       appStore.showNotification(`已从官方 iTOL 拉取 ${res.filename}，已在右侧打开预览`, 'success')
     } else {
       appStore.showNotification(`已从官方 iTOL 拉取 ${res.filename}`, 'success')
-      window.open(phyloApi.getFigureUrl(job.value.job_id, res.filename), '_blank')
+      window.open(phyloApi.getFigureUrl(job.value.job_id, res.filename), '_blank', 'noopener,noreferrer')
     }
   } catch (err) {
     appStore.showNotification(`从 iTOL 拉取出图失败: ${String(err)}`, 'error')

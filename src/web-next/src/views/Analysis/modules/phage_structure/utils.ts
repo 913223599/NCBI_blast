@@ -199,12 +199,10 @@ export function buildModuleMatrixCards(matrix: StructuralModuleMatrix): ModuleMa
 }
 
 export function summarizeRoleCounts(proteins: StructureProteinItem[]): Record<string, StructureProteinItem[]> {
-  const grouped: Record<string, StructureProteinItem[]> = {}
-  for (const p of proteins) {
-    if (!grouped[p.structural_role]) grouped[p.structural_role] = []
-    grouped[p.structural_role]!.push(p)
-  }
-  return grouped
+  const grouped = Object.groupBy(proteins, (p) => p.structural_role)
+  return Object.fromEntries(
+    Object.entries(grouped).filter((entry): entry is [string, StructureProteinItem[]] => Array.isArray(entry[1]))
+  )
 }
 
 const SEQ_EXT_RE = /(?:\.(?:fasta|fa|fna|faa|gbk|gb|gbff|genbank|gz))+$/i

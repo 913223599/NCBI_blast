@@ -29,12 +29,14 @@ const activePanel = ref('ai-translation')
 <template>
   <div class="settings-view">
     <!-- 侧边导航 -->
-    <nav class="settings-sidebar">
-      <div
+    <nav class="settings-sidebar" aria-label="系统设置分类">
+      <button
         v-for="panel in panels"
         :key="panel.id"
+        type="button"
         class="settings-nav-item"
         :class="{ active: activePanel === panel.id }"
+        :aria-current="activePanel === panel.id ? 'page' : undefined"
         @click="activePanel = panel.id"
       >
         <span class="nav-icon">
@@ -74,12 +76,12 @@ const activePanel = ref('ai-translation')
           </svg>
         </span>
         <span class="nav-label">{{ panel.label }}</span>
-      </div>
+      </button>
       <div class="spacer" />
-      <div class="version-tag" @click="activePanel = 'update'" title="点击进入软件更新">
-        <span>NCBI BLAST Pro 2.1</span>
+      <button type="button" class="version-tag" @click="activePanel = 'update'" title="点击进入软件更新">
+        <span>NCBI Bio-Station</span>
         <span class="check-update-link">检查更新</span>
-      </div>
+      </button>
     </nav>
 
     <!-- 动态内容区域 -->
@@ -97,8 +99,8 @@ const activePanel = ref('ai-translation')
 <style scoped>
 .settings-view {
   display: flex;
-  height: 100vh;
-  background: #f1f5f9;
+  height: 100%;
+  background: var(--bg-page);
   overflow: hidden;
 }
 
@@ -113,6 +115,9 @@ const activePanel = ref('ai-translation')
 }
 
 .settings-nav-item {
+  width: 100%;
+  background: transparent;
+  text-align: left;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -124,6 +129,12 @@ const activePanel = ref('ai-translation')
   font-weight: 500;
   font-size: 0.9rem;
   transition: all 0.2s;
+}
+
+.settings-nav-item:focus-visible,
+.version-tag:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: -2px;
 }
 
 .settings-nav-item:hover {
@@ -154,6 +165,8 @@ const activePanel = ref('ai-translation')
 .spacer { flex: 1; }
 
 .version-tag {
+  width: 100%;
+  background: transparent;
   font-size: 0.75rem;
   color: #94a3b8;
   padding: 10px;
@@ -174,10 +187,5 @@ const activePanel = ref('ai-translation')
 .check-update-link {
   font-size: 0.7rem;
   color: #3b82f6;
-}
-
-/* 兼容原有全局 CSS 变量 */
-:root {
-  --accent-blue: #2563eb;
 }
 </style>

@@ -3,10 +3,11 @@
  * App.vue - 应用根组件
  * 负责整体布局：侧边栏 + 头部 + 路由视图
  */
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import AppHeader from './components/layout/AppHeader.vue'
 import NotificationStack from './components/common/NotificationStack.vue'
+import AppConfirmDialog from './components/common/AppConfirmDialog.vue'
 import { useAppStore } from './stores/app'
 import { setupBridge, registerGlobalHandler, getBridge, getClientId, onEvent } from './bridge'
 
@@ -23,8 +24,6 @@ onMounted(async () => {
   // 1. 立即定义全局桥接回调，确保 Python 随时可以调用
   const globalApp = {
     handleFileLoaded: async (content: string, type: string, path: string) => {
-      console.log(`[Bridge->App] File Loaded: ${path} (${type})`)
-      
       const currentRoute = window.location.hash
       if (currentRoute.includes('tree')) {
          if (type === 'tree') {
@@ -51,7 +50,6 @@ onMounted(async () => {
       }
     },
     handleFilesDropped: async (paths: string[]) => {
-      console.log('[Bridge->App] Files Dropped:', paths)
       const currentRoute = window.location.hash
       
       if (currentRoute.includes('tree')) {
@@ -102,21 +100,16 @@ onMounted(async () => {
     win.updateLoading = globalApp.updateLoading
   }
 
-  // 1. 全局加载状态控制
-  console.log('[App] 初始化应用...')
-  
     // 2. 初始化桥接 (并强制进行版本/身份检查)
     try {
       const bridge = await setupBridge()
-      console.log('[App] 桥接准备就绪')
       
       const clientId = getClientId();
       if (!clientId || clientId === 'unknown') {
-         alert('检测到系统版本更新，请刷新页面以加载最新安全组件');
+         appStore.showNotification('检测到系统版本更新，请刷新页面以加载最新组件', 'warning');
          window.location.reload();
          return;
       }
-      console.log(`[App] 身份验证成功: ${clientId}`);
 
     // 3. 注册通用事件处理 (使用 onEvent 支持多端监听，防止 Overwrite)
     onEvent((type: any, data: any) => {
@@ -146,35 +139,37 @@ onMounted(async () => {
       }
     })
 
-    // 4. 初始化应用数据
-    console.log('[App] 正在同步后端数据...')
-    
-    // 通知 Python 页面已就绪
+    // 4. 初始化应用数据（首屏翻译与业务数据解耦，避免串行瀑布阻塞交互）
     if (typeof bridge.on_page_ready === 'function') {
       bridge.on_page_ready()
     }
-    
-    // 加载语言 & 翻译
-    console.log('[App] 正在加载语言包...')
+
     await appStore.fetchTranslations()
 
-    // 初始化各个数据库状态
-    console.log('[App] 正在初始化数据库...')
-    await strainStore.initFromDatabase()
-    
-    // 如果有 loadAllHistory 等方法，也应在此调用
-    if (typeof (blastStore as any).loadAllHistory === 'function') {
-      await (blastStore as any).loadAllHistory()
-    }
-
-    console.log('[App] 初始化完成')
-    
-    // 全局禁用默认拖放行为（防止 Electron 意外导航）
-    window.addEventListener('dragover', (e) => e.preventDefault(), false)
-    window.addEventListener('drop', (e) => e.preventDefault(), false)
+    // 并行后台预热菌株库与 BLAST 历史，不阻塞首屏渲染与路由切换
+    void Promise.allSettled([
+      strainStore.initFromDatabase(),
+      typeof (blastStore as any).loadAllHistory === 'function'
+        ? (blastStore as any).loadAllHistory()
+        : Promise.resolve(),
+    ])
   } catch (err) {
     console.error('[App] 初始化链崩溃:', err)
   }
+})
+
+function preventDefaultDrag(e: DragEvent) {
+  e.preventDefault()
+}
+
+onMounted(() => {
+  window.addEventListener('dragover', preventDefaultDrag, false)
+  window.addEventListener('drop', preventDefaultDrag, false)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('dragover', preventDefaultDrag, false)
+  window.removeEventListener('drop', preventDefaultDrag, false)
 })
 </script>
 
@@ -185,13 +180,14 @@ onMounted(async () => {
       <AppHeader />
       <main class="main-content">
         <RouterView v-slot="{ Component }">
-          <KeepAlive>
+          <KeepAlive :max="4" :exclude="['FigureStudioView', 'HelpView']">
             <component :is="Component" />
           </KeepAlive>
         </RouterView>
       </main>
     </div>
     <NotificationStack />
+    <AppConfirmDialog />
   </div>
 </template>
 

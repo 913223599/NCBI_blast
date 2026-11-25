@@ -20,7 +20,7 @@
           <button class="btn-delete" @click="handleDelete">
             删除
           </button>
-          <button class="close-btn" @click="emit('close')">✕</button>
+          <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
       </div>
 
@@ -383,6 +383,7 @@ import { useI18n } from '../../locales'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useSequenceStore } from '../../stores/sequence'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import type { StrainRecord } from '../../stores/strain'
 
 const { t } = useI18n()
@@ -405,6 +406,7 @@ const emit = defineEmits(['close', 'deleted'])
 const strain = useStrainStore()
 const sequenceStore = useSequenceStore()
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 
 const isEditing = ref(false)
 const openDropdown = ref<string | null>(null)
@@ -584,7 +586,13 @@ function handleSave() {
 }
 
 async function handleDelete() {
-  if (confirm(`确定要删除样本"${props.record.name}"吗？`)) {
+  const ok = await confirmDialog.confirm({
+    title: '删除样本',
+    message: `确定要删除样本"${props.record.name}"吗？`,
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (ok) {
     strain.removeRecord(props.record.id)
     appStore.showNotification('样本已删除', 'success')
     emit('deleted')
@@ -670,7 +678,13 @@ async function handleAddGene() {
 }
 
 async function handleDeleteGene(id: string) {
-  if (confirm('确定要从基因数据库中移除此序列吗？')) {
+  const ok = await confirmDialog.confirm({
+    title: '移除关联序列',
+    message: '确定要从基因数据库中移除此序列吗？',
+    confirmText: '确认移除',
+    danger: true,
+  })
+  if (ok) {
     const success = await sequenceStore.deleteSequence(id)
     if (success) {
       loadAssociatedGenes()

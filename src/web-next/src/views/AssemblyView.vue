@@ -116,7 +116,7 @@ async function handleDeleteTask(taskId: string) {
       </aside>
 
       <!-- 2. 右侧主工作区 (严格状态互斥渲染) -->
-      <main class="main-content">
+      <section class="main-content" aria-label="基因组组装工作区">
         <!-- 错误横幅 -->
         <transition name="slide-fade">
           <div v-if="error" class="error-banner">
@@ -168,7 +168,7 @@ async function handleDeleteTask(taskId: string) {
             @open-folder="openFolder(currentTask.id)"
           />
         </section>
-      </main>
+      </section>
     </div>
   </div>
 </template>
@@ -262,18 +262,21 @@ async function handleDeleteTask(taskId: string) {
   gap: 16px;
   box-sizing: border-box;
   position: relative;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
 }
 
-/* 美化全局滚动条 */
-.main-content::-webkit-scrollbar {
-  width: 6px;
-}
-.main-content::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
-}
-.main-content::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+@supports not (scrollbar-color: auto) {
+  .main-content {
+    scrollbar-width: auto;
+  }
+  .main-content::-webkit-scrollbar {
+    width: 6px;
+  }
+  .main-content::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 3px;
+  }
 }
 
 .section-pane {

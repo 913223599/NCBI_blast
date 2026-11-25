@@ -798,21 +798,28 @@ function modalClearAll() {
   align-content: flex-start;
 }
 
-.samples-scroll-pool::-webkit-scrollbar {
-  width: 5px;
+.samples-scroll-pool {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
 }
 
-.samples-scroll-pool::-webkit-scrollbar-track {
-  background: transparent;
-}
+@supports not (scrollbar-color: auto) {
+  .samples-scroll-pool {
+    scrollbar-width: auto;
+  }
 
-.samples-scroll-pool::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
-}
+  .samples-scroll-pool::-webkit-scrollbar {
+    width: 6px;
+  }
 
-.samples-scroll-pool::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  .samples-scroll-pool::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .samples-scroll-pool::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
 }
 
 .pool-chip {

@@ -169,7 +169,7 @@ const decisionEvaluation = computed(() => {
     if (safeMembers.length === 0) return
 
     // B. 在安全株中优选代表株
-    const sortedMembers = [...safeMembers].sort((a, b) => {
+    const sortedMembers = safeMembers.toSorted((a, b) => {
       const da = sampleMap[a]
       const db = sampleMap[b]
       if (da.uniq !== db.uniq) return db.uniq - da.uniq
@@ -1338,21 +1338,28 @@ function handleExportPlanCsv() {
   padding-right: 4px;
 }
 
-.rep-rows-list::-webkit-scrollbar {
-  width: 4px;
+.rep-rows-list {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
 }
 
-.rep-rows-list::-webkit-scrollbar-track {
-  background: transparent;
-}
+@supports not (scrollbar-color: auto) {
+  .rep-rows-list {
+    scrollbar-width: auto;
+  }
 
-.rep-rows-list::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
-}
+  .rep-rows-list::-webkit-scrollbar {
+    width: 6px;
+  }
 
-.rep-rows-list::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  .rep-rows-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .rep-rows-list::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
 }
 
 .rep-step-row {

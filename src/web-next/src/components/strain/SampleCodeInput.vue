@@ -73,7 +73,7 @@
               <div v-if="showAddSource" class="inline-add-form" @click.stop>
                 <input v-model="newSourceCode" class="mini-input" placeholder="编码(2位)" maxlength="2" />
                 <input v-model="newSourceName" class="mini-input grow" placeholder="名称" />
-                <button class="confirm-add-btn" @click.stop="handleAddSource">✓</button>
+                <button class="confirm-add-btn" @click.stop="handleAddSource"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
               </div>
             </div>
           </div>
@@ -146,7 +146,7 @@
               <div v-if="showAddGenus" class="inline-add-form" @click.stop>
                 <input v-model="newGenusName" class="mini-input grow" placeholder="中文名" />
                 <input v-model="newGenusLatin" class="mini-input grow" placeholder="学名(可选)" />
-                <button class="confirm-add-btn" @click.stop="handleAddGenus">✓</button>
+                <button class="confirm-add-btn" @click.stop="handleAddGenus"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
               </div>
             </div>
           </div>
@@ -192,7 +192,7 @@
               <div v-if="showAddSpecies" class="inline-add-form" @click.stop>
                 <input v-model="newSpeciesName" class="mini-input grow" placeholder="中文名" />
                 <input v-model="newSpeciesLatin" class="mini-input grow" placeholder="学名(可选)" />
-                <button class="confirm-add-btn" @click.stop="handleAddSpecies">✓</button>
+                <button class="confirm-add-btn" @click.stop="handleAddSpecies"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
               </div>
             </div>
           </div>

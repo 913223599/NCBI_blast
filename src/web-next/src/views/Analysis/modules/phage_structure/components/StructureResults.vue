@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { ContigStructureResult, PhageStructureResult, StructureTaskHistoryItem } from '../types'
+import { useAppStore } from '../../../../../stores/app'
+import type { ContigStructureResult, PhageStructureResult, StructureProteinItem, StructureTaskHistoryItem } from '../types'
 import {
   buildModuleMatrixCards,
   formatCompletenessStatus,
@@ -24,9 +25,53 @@ const emit = defineEmits<{
   (e: 'open-viewer'): void
 }>()
 
+const appStore = useAppStore()
 const activeContigId = ref<string>('')
 const roleFilter = ref<'ALL' | 'STRUCTURAL'>('STRUCTURAL')
 const searchText = ref<string>('')
+
+function buildProteinFasta(item: StructureProteinItem): string {
+  const header = `>${item.locus_tag} ${item.role_label_cn || item.structural_role} | ${item.product || 'hypothetical protein'} | ${item.length_aa}aa`
+  const seq = (item.translation || '').replace(/\s+/g, '')
+  const lines: string[] = []
+  for (let i = 0; i < seq.length; i += 80) {
+    lines.push(seq.slice(i, i + 80))
+  }
+  return `${header}\n${lines.join('\n')}`
+}
+
+async function copyProteinFasta(item: StructureProteinItem): Promise<void> {
+  if (!item.translation) {
+    appStore.showNotification('该蛋白条目不含氨基酸序列', 'warning')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(buildProteinFasta(item))
+    appStore.showNotification(`已复制 ${item.locus_tag} FASTA（可用于 AlphaFold / ESMFold 3D 建模）`, 'success')
+  } catch {
+    appStore.showNotification('剪贴板写入受限，请尝试导出 FAA 文件', 'warning')
+  }
+}
+
+function exportStructuralProteinsFaa(): void {
+  const items = filteredProteins.value.filter((p) => Boolean(p.translation))
+  if (!items.length) {
+    appStore.showNotification('当前筛选范围内无可导出的氨基酸序列', 'warning')
+    return
+  }
+  const content = items.map(buildProteinFasta).join('\n') + '\n'
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  const safeName = (activeContig.value?.contig_id || props.result?.task_name || 'phage').replace(/[^a-zA-Z0-9._-]/g, '_')
+  link.href = url
+  link.download = `${safeName}_structural_proteins.faa`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+  appStore.showNotification(`已导出 ${items.length} 条结构蛋白 FAA，可用于 AlphaFold / Mol* 3D 结构分析`, 'success')
+}
 
 watch(
   () => props.result?.task_id,
@@ -127,6 +172,7 @@ const filteredProteins = computed(() => {
           >
             图谱查看
           </button>
+          <button type="button" class="act-btn" @click="exportStructuralProteinsFaa">导出结构蛋白 FAA</button>
           <button type="button" class="act-btn" @click="emit('download', 'summary_tsv')">汇总 TSV</button>
           <button type="button" class="act-btn" @click="emit('download', 'features_tsv')">基因 TSV</button>
           <button type="button" class="act-btn" @click="emit('download', 'tmp_tsv')">TMP TSV</button>
@@ -419,6 +465,7 @@ const filteredProteins = computed(() => {
                 <th>PhageTailFinder</th>
                 <th>注释</th>
                 <th>来源</th>
+                <th>3D 建模序列</th>
               </tr>
             </thead>
             <tbody>
@@ -438,6 +485,17 @@ const filteredProteins = computed(() => {
                 </td>
                 <td>{{ p.product }}</td>
                 <td class="mono">{{ p.evidence_source }}</td>
+                <td>
+                  <button
+                    type="button"
+                    class="act-btn"
+                    :disabled="!p.translation"
+                    title="复制氨基酸 FASTA 用于 AlphaFold / ESMFold / Mol* 3D 结构分析"
+                    @click="copyProteinFasta(p)"
+                  >
+                    复制 FASTA
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>

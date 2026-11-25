@@ -37,7 +37,7 @@
     <div v-if="selectedPosition" class="position-info">
       <div class="info-header">
         <h4>选中位置</h4>
-        <button class="close-info-btn" @click="selectedPosition = null">✕</button>
+        <button class="close-info-btn" @click="selectedPosition = null"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
       <div class="info-content">
         <div class="info-row">

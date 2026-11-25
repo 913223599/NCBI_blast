@@ -180,7 +180,7 @@ function onImageError(): void {
 
 function downloadFile(fname: string): void {
   if (!props.result) return
-  window.open(studioApi.getFileUrl(props.result.render_id, fname), '_blank')
+  window.open(studioApi.getFileUrl(props.result.render_id, fname), '_blank', 'noopener,noreferrer')
 }
 
 watch(

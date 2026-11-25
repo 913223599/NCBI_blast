@@ -4,8 +4,11 @@
  */
 import { ref, reactive, watch, onMounted } from 'vue';
 import { getBridge } from '../../../../../bridge';
+import { useAppStore } from '../../../../../stores/app';
 import type { AnnotationRunParams, ContigMetaItem, FastaInspectResult } from '../types';
 import ContigSelector from './ContigSelector.vue';
+
+const appStore = useAppStore();
 
 const props = defineProps<{
   isRunning: boolean;
@@ -220,7 +223,7 @@ async function processFile(file: File) {
       throw new Error(res?.error || '服务器暂存文件失败');
     }
   } catch (err: any) {
-    alert(`文件上传失败: ${err.message}`);
+    appStore.showNotification(`文件上传失败: ${err.message}`, 'error');
     uploadedFileName.value = '';
     form.fasta_path = '';
   } finally {
@@ -284,21 +287,21 @@ async function onSubmit() {
   if (isSubmitting.value || isUploading.value || isInspecting.value) return;
 
   if (inputMode.value === 'upload' && !form.fasta_path) {
-    alert('请先上传或选择 FASTA 文件');
+    appStore.showNotification('请先上传或选择 FASTA 文件', 'warning');
     return;
   }
   if (inputMode.value === 'paste' && (!form.fasta_content || !form.fasta_content.trim())) {
-    alert('请在文本框中粘贴 FASTA 序列');
+    appStore.showNotification('请在文本框中粘贴 FASTA 序列', 'warning');
     return;
   }
   if (inputMode.value === 'assembly' && !form.fasta_path) {
-    alert('请选择一个有效的组装历史任务');
+    appStore.showNotification('请选择一个有效的组装历史任务', 'warning');
     return;
   }
 
   // 检查 Contig 勾选
   if (inspectedContigs.value.length > 1 && selectedContigIds.value.length === 0) {
-    alert('检测到多条 Contig，请在序列列表中至少勾选 1 条序列进行分析');
+    appStore.showNotification('检测到多条 Contig，请在序列列表中至少勾选 1 条序列进行分析', 'warning');
     return;
   }
 

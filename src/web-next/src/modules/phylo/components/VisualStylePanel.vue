@@ -7,7 +7,7 @@ const store = usePhyloStore()
 
 function downloadFormat(fmt: 'newick' | 'distance_csv' | 'report_json' | 'delivery_zip') {
   if (!store.currentJob) return
-  window.open(phyloApi.getExportUrl(store.currentJob.job_id, fmt), '_blank')
+  window.open(phyloApi.getExportUrl(store.currentJob.job_id, fmt), '_blank', 'noopener,noreferrer')
 }
 </script>
 

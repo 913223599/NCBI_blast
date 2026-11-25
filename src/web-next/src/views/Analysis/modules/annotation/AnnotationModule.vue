@@ -155,7 +155,7 @@ function onStartNew() {
       </aside>
 
       <!-- 2. 右侧主工作区 (严格互斥渲染) -->
-      <main class="main-content">
+      <section class="main-content" aria-label="全基因组注释工作区">
         <!-- 错误横幅 -->
         <transition name="slide-fade">
           <div v-if="error" class="error-banner">
@@ -231,7 +231,7 @@ function onStartNew() {
             <button class="retry-btn" @click="onStartNew">重新配置分析</button>
           </div>
         </section>
-      </main>
+      </section>
     </div>
   </div>
 </template>

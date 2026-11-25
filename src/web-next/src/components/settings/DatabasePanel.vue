@@ -2,8 +2,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getBridge, onEvent } from '../../bridge'
 import { useAppStore } from '../../stores/app'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 let eventCleanup: (() => void) | null = null
 
 /* -------- 1. 16S/18S 参考数据库状态 -------- */
@@ -69,7 +71,12 @@ async function refreshTaxStatus() {
 
 async function triggerTaxUpdate() {
   if (taxStatus.value?.building) return
-  if (!confirm('NCBI 物种库更新涉及大量数据下载与解压，建议在网络环境良好时进行，是否继续？')) return
+  const ok = await confirmDialog.confirm({
+    title: '更新 NCBI 物种库',
+    message: 'NCBI 物种库更新涉及大量数据下载与解压，建议在网络环境良好时进行，是否继续？',
+    confirmText: '开始更新',
+  })
+  if (!ok) return
 
   appStore.showNotification('启动 NCBI 物种库增量更新', 'info')
   try {
@@ -147,12 +154,18 @@ const groupedDatabases = computed(() => {
     }))
 })
 
-function triggerUpdate(db: any) {
+async function triggerUpdate(db: any) {
   if (db.type === 'tax') {
-    triggerTaxUpdate()
+    await triggerTaxUpdate()
   } else {
     if (db.installed) {
-      if (!confirm(`【${db.name}】当前已完整就绪。\n\n系统暂未检测到必须的远端版本变更。强制更新将重新下载并构建庞大的数据库文件（可能耗时较长），是否确定要继续覆盖更新？`)) {
+      const ok = await confirmDialog.confirm({
+        title: '确认覆盖更新数据库',
+        message: `【${db.name}】当前已完整就绪。\n\n系统暂未检测到必须的远端版本变更。强制更新将重新下载并构建庞大的数据库文件（可能耗时较长），是否确定要继续覆盖更新？`,
+        confirmText: '强制更新',
+        danger: true,
+      })
+      if (!ok) {
         return
       }
     }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { watch } from 'vue'
+import { useAppStore } from '../../../../stores/app'
 import { usePhageStructure } from './composables/usePhageStructure'
 import type { StructureInitialPayload } from './types'
 import StructureHistory from './components/StructureHistory.vue'
@@ -15,6 +16,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'open-viewer', payload: { gbkText: string; taskName: string }): void
 }>()
+
+const appStore = useAppStore()
 
 const {
   capabilities,
@@ -73,10 +76,10 @@ async function handleOpenViewer(): Promise<void> {
     if (payload.gbkText) {
       emit('open-viewer', payload)
     } else {
-      ;(window as any).app?.showNotification('该任务不包含核酸序列，无法在序列图谱查看', 'warning')
+      appStore.showNotification('该任务不包含核酸序列，无法在序列图谱查看', 'warning')
     }
   } catch (err) {
-    ;(window as any).app?.showNotification(`打开基因组图谱失败: ${String(err)}`, 'error')
+    appStore.showNotification(`打开基因组图谱失败: ${String(err)}`, 'error')
   }
 }
 </script>
@@ -108,7 +111,10 @@ async function handleOpenViewer(): Promise<void> {
         <div
           v-if="queueStatus.running_count > 0 && queueStatus.running_tasks?.[0]"
           class="queue-live-strip"
+          role="button"
+          tabindex="0"
           @click="handleSelectTaskById(queueStatus.running_tasks[0].task_id)"
+          @keydown.enter.space.prevent="handleSelectTaskById(queueStatus.running_tasks[0].task_id)"
         >
           <span class="ql-dot"></span>
           <span class="ql-txt" :title="queueStatus.running_tasks[0].task_name">
@@ -128,7 +134,7 @@ async function handleOpenViewer(): Promise<void> {
       </aside>
 
       <!-- 2. 右侧主内容工作区 -->
-      <main class="main-content">
+      <section class="main-content" aria-label="噬菌体结构预测工作区">
         <div v-if="errorMsg" class="error-banner">
           <span>{{ errorMsg }}</span>
         </div>
@@ -194,7 +200,7 @@ async function handleOpenViewer(): Promise<void> {
           <p>{{ currentTask.error_msg || currentTask.current_step }}</p>
           <button type="button" class="retry-btn" @click="startNewTask">返回重新配置</button>
         </section>
-      </main>
+      </section>
     </div>
   </div>
 </template>

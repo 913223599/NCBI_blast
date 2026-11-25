@@ -268,7 +268,7 @@ function isGroupSelected(group: PublicationLayoutGroup): boolean {
 
 function downloadFile(filename: string): void {
   if (!store.currentJob) return
-  window.open(phyloApi.getFigureUrl(store.currentJob.job_id, filename), '_blank')
+  window.open(phyloApi.getFigureUrl(store.currentJob.job_id, filename), '_blank', 'noopener,noreferrer')
 }
 
 function reloadPreview(): void {

@@ -89,10 +89,12 @@
 <script setup lang="ts">
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import type { StrainRecord } from '../../stores/strain'
 
 const strain = useStrainStore()
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 
 const emit = defineEmits(['view', 'locate', 'export'])
 
@@ -151,8 +153,14 @@ function handleExportSelected() {
   }
 }
 
-function handleDeleteSelected() {
-  if (confirm(`确定要删除选中的 ${strain.selectedCount} 条记录吗？`)) {
+async function handleDeleteSelected() {
+  const ok = await confirmDialog.confirm({
+    title: '批量删除记录',
+    message: `确定要删除选中的 ${strain.selectedCount} 条记录吗？`,
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (ok) {
     strain.selectedRecords.forEach(id => {
       strain.removeRecord(id)
     })

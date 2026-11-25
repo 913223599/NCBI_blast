@@ -57,6 +57,7 @@
 import { ref, computed, reactive } from 'vue'
 import { useStrainStore, type StrainRecord } from '../../../stores/strain'
 import { useAppStore } from '../../../stores/app'
+import { useConfirmDialog } from '../../../composables/useConfirmDialog'
 import StrainListAdvancedSearch from './StrainListAdvancedSearch.vue'
 import StrainListToolbar from './StrainListToolbar.vue'
 import StrainListTable from './StrainListTable.vue'
@@ -64,6 +65,7 @@ import StrainListTable from './StrainListTable.vue'
 const RENDER_LIMIT = 500
 const strainStore = useStrainStore()
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 
 const showAdvancedSearch = ref(false)
 
@@ -97,16 +99,11 @@ const displayedRecords = computed(() => {
 
 // 按 accession 分组，将相同登录号的样本折叠显示
 const groupedRecords = computed(() => {
-  const groupMap: Record<string, StrainRecord[]> = {}
-  
-  for (const record of displayedRecords.value) {
-    const key = record.accession || `no-accession-${record.id}`
-    if (!groupMap[key]) {
-      groupMap[key] = []
-    }
-    groupMap[key].push(record)
-  }
-  
+  const groupMap = Object.groupBy(
+    displayedRecords.value,
+    (record) => record.accession || `no-accession-${record.id}`
+  )
+
   // 转换为数组格式，每个组只保留第一条记录作为代表
   const result: Array<{ representative: StrainRecord; duplicates: StrainRecord[] }> = []
   for (const records of Object.values(groupMap)) {
@@ -166,16 +163,28 @@ function handleViewDetail(record: any) {
   strainStore.setActiveRecord(record)
 }
 
-function handleDeleteRow(id: string) {
-  if (window.confirm('确定要删除这条记录吗？')) {
+async function handleDeleteRow(id: string) {
+  const ok = await confirmDialog.confirm({
+    title: '删除记录',
+    message: '确定要删除这条记录吗？',
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (ok) {
     strainStore.removeRecord(id)
     appStore.showNotification('已删除记录', 'success')
   }
 }
 
-function handleDeleteSelected() {
+async function handleDeleteSelected() {
   const count = strainStore.selectedCount
-  if (window.confirm(`确定要批量删除选中的 ${count} 条记录吗？`)) {
+  const ok = await confirmDialog.confirm({
+    title: '批量删除记录',
+    message: `确定要批量删除选中的 ${count} 条记录吗？`,
+    confirmText: '批量删除',
+    danger: true,
+  })
+  if (ok) {
     const ids = Array.from(strainStore.selectedRecords)
     strainStore.removeRecordsBatch(ids)
     appStore.showNotification(`已批量删除 ${count} 条记录`, 'success')

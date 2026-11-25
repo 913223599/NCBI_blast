@@ -10,11 +10,13 @@
 import { ref } from 'vue'
 import { useBlastStore, type BlastHit } from '../stores/blast'
 import { useAppStore } from '../stores/app'
+import { useConfirmDialog } from './useConfirmDialog'
 import { getBridge } from '../bridge'
 
 export function useBlastResultHandler() {
   const blast = useBlastStore()
   const appStore = useAppStore()
+  const confirmDialog = useConfirmDialog()
   const isTranslating = ref(false)
 
   /**
@@ -148,8 +150,14 @@ export function useBlastResultHandler() {
     ).length
     
     if (untranslatedCount > 0) {
-      const confirmMsg = `存在 ${untranslatedCount} 条未翻译的物种条目。是否翻译后再导出？\n\n点击"确定"进行批量翻译，点击"取消"将直接导出当前结果（保留空白的翻译列）。`
-      if (window.confirm(confirmMsg)) {
+      const confirmMsg = `存在 ${untranslatedCount} 条未翻译的物种条目。是否翻译后再导出？\n\n点击“翻译并导出”执行批量翻译，点击“直接导出”将保留空白的翻译列。`
+      const shouldTranslate = await confirmDialog.confirm({
+        title: '批量翻译提醒',
+        message: confirmMsg,
+        confirmText: '翻译并导出',
+        cancelText: '直接导出',
+      })
+      if (shouldTranslate) {
         await translateAll()
         
         if (blast.results.filter(h => h.speciesName && !h.translatedName).length > 0) {

@@ -3,7 +3,7 @@
     <div class="dialog-content">
       <div class="dialog-header">
         <h3 class="dialog-title">添加 -80°C 冰箱</h3>
-        <button class="close-btn" @click="emit('close')">✕</button>
+        <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div class="dialog-body">
@@ -174,7 +174,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 
@@ -220,12 +220,17 @@ function selectBoxSize(value: '9x9' | '10x10' | 'custom') {
   isOpen.value = false
 }
 
-// 全局点击关闭下拉框
-if (typeof document !== 'undefined') {
-  document.addEventListener('click', () => {
-    isOpen.value = false
-  })
+function closeDropdownOnOutsideClick() {
+  isOpen.value = false
 }
+
+onMounted(() => {
+  document.addEventListener('click', closeDropdownOnOutsideClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeDropdownOnOutsideClick)
+})
 
 const canSubmit = computed(() => {
   return form.value.name.trim().length > 0

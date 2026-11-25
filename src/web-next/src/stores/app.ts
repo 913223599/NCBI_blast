@@ -65,7 +65,6 @@ export const useAppStore = defineStore('app', () => {
                     if (res && res !== 'null') {
                         try {
                             translations.value = JSON.parse(res)
-                            console.log('[AppStore] 界面翻译加载完成')
                         } catch (e) {
                             console.error("Failed to parse loaded translations", e)
                         }
@@ -92,7 +91,6 @@ export const useAppStore = defineStore('app', () => {
             if (syncTimer) clearTimeout(syncTimer);
             syncTimer = setTimeout(() => {
                 if (data.module === 'dictionary' || data.module === 'dictionaries' || data.module === 'config' || data.module === 'all') {
-                    console.log('[AppStore] 收到远程词库/配置更新，同步中...');
                     fetchTranslations();
                 }
                 syncTimer = null;

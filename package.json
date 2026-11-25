@@ -1,13 +1,11 @@
 {
     "name": "ncbi-blast-root",
-    "version": "1.0.0",
+    "version": "2.1.0",
     "private": true,
     "scripts": {
         "dev": "npm run dev --prefix src/web-next",
         "build": "npm run build --prefix src/web-next",
-        "preview": "npm run preview --prefix src/web-next"
-    },
-    "dependencies": {
-        "exceljs": "^4.4.0"
+        "preview": "npm run preview --prefix src/web-next",
+        "test": "npm run test --prefix src/web-next -- --run"
     }
 }

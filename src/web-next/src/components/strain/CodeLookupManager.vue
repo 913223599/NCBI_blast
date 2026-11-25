@@ -81,7 +81,7 @@
                     class="node-action-btn delete" 
                     @click.stop="handleDeleteGenus(genus.fullPath)"
                     title="删除此分类条目"
-                  >✕</button>
+                  ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                   <button
                     class="node-action-btn toggle"
                     :class="{ disabled: !genus.enabled }"
@@ -119,7 +119,7 @@
                         class="node-action-btn delete"
                         @click.stop="handleDeleteSpecies(species.fullPath)"
                         title="删除此分类条目"
-                      >✕</button>
+                      ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                       <button
                         class="node-action-btn toggle"
                         :class="{ disabled: !species.enabled }"
@@ -139,8 +139,8 @@
                   <div v-else class="add-inline">
                     <input v-model="addFormName" class="add-input" placeholder="中文名" />
                     <input v-model="addFormLatin" class="add-input" placeholder="学名(可选)" />
-                    <button class="confirm-btn" @click="confirmAddSpecies(catCode, genus.code)">✓</button>
-                    <button class="cancel-btn" @click="addingAt = ''">✕</button>
+                    <button class="confirm-btn" @click="confirmAddSpecies(catCode, genus.code)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+                    <button class="cancel-btn" @click="addingAt = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                   </div>
                 </div>
               </div>
@@ -156,8 +156,8 @@
               <div v-else class="add-inline">
                 <input v-model="addFormName" class="add-input" placeholder="中文名" />
                 <input v-model="addFormLatin" class="add-input" placeholder="学名(可选)" />
-                <button class="confirm-btn" @click="confirmAddGenus(catCode)">✓</button>
-                <button class="cancel-btn" @click="addingAt = ''">✕</button>
+                <button class="confirm-btn" @click="confirmAddGenus(catCode)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+                <button class="cancel-btn" @click="addingAt = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
               </div>
             </div>
           </div>
@@ -195,7 +195,7 @@
                 class="node-action-btn delete"
                 title="删除"
                 @click="handleDeleteSource(source.code)"
-              >✕</button>
+              ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
           </template>
           <template v-else>
@@ -203,8 +203,8 @@
             <input v-model="editSrcName" class="edit-input grow" placeholder="名称" />
             <input v-model="editSrcDesc" class="edit-input grow" placeholder="备注" />
             <div class="source-actions">
-              <button class="confirm-btn small" @click="confirmEditSource">✓</button>
-              <button class="cancel-btn small" @click="editingSourceCode = ''">✕</button>
+              <button class="confirm-btn small" @click="confirmEditSource"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+              <button class="cancel-btn small" @click="editingSourceCode = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
           </template>
         </div>
@@ -319,7 +319,7 @@
             <h3>手动修正分类名称</h3>
             <p>修正编码 {{ editingEntry?.code }} 对应的层级名称信息</p>
           </div>
-          <button class="btn-close-sm" @click="isEditModalOpen = false">✕</button>
+          <button class="btn-close-sm" @click="isEditModalOpen = false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         
         <div class="edit-form">
@@ -351,6 +351,7 @@ import { useCodeLookup } from '../../composables/useCodeLookup'
 
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
 
 const codeGen = useCodeGenerator()
 const { 
@@ -360,6 +361,7 @@ const {
 } = useCodeLookup()
 const strain = useStrainStore()
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 
 /* ========== 标签页 ========== */
 const activeTab = ref<'lookup' | 'source' | 'search' | 'maintenance'>('lookup')
@@ -465,8 +467,14 @@ function confirmAddSpecies(catCode: string, genusCode: string): void {
 
 /* ========== 删除 / 切换 ========== */
 
-function handleDeleteGenus(fullPath: string): void {
-  if (confirm('删除此属将同时删除其下所有种，确认？')) {
+async function handleDeleteGenus(fullPath: string): Promise<void> {
+  const ok = await confirmDialog.confirm({
+    title: '删除属分类',
+    message: '删除此属将同时删除其下所有种，确认继续？',
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (ok) {
     codeGen.lookup.removeLookupEntry(fullPath)
   }
 }
@@ -552,8 +560,13 @@ function handleSearch(): void {
 
 /* ========== 维护操作 ========== */
 
-function handleRecalibrate(): void {
-  if (confirm('确认执行重校准？这会修复跳号问题，不会影响已有样本数据。')) {
+async function handleRecalibrate(): Promise<void> {
+  const ok = await confirmDialog.confirm({
+    title: '流水号重校准',
+    message: '确认执行重校准？这会修复跳号问题，不会影响已有样本数据。',
+    confirmText: '开始重校准',
+  })
+  if (ok) {
     strain.recalibrateCounters()
     appStore.showNotification('流水号重校准完成', 'success')
   }
@@ -582,7 +595,12 @@ async function handleTranslateEntry(fullPath: string) {
 }
 
 async function handleTranslateAll() {
-  if (confirm('确认对所有未翻译(即中文名与学名相同或为空)的词条进行批量 AI 翻译？')) {
+  const ok = await confirmDialog.confirm({
+    title: '批量 AI 翻译',
+    message: '确认对所有未翻译(即中文名与学名相同或为空)的词条进行批量 AI 翻译？',
+    confirmText: '开始翻译',
+  })
+  if (ok) {
     isTranslating.value = true
     try {
       await codeGen.lookup.translateAllEntries()
@@ -599,7 +617,12 @@ async function handleTranslateAll() {
 const isAuditing = ref(false)
 
 async function handleTaxonomyAudit() {
-  if (confirm('确认与本地 NCBI 数据库比对校核所有未验证词条的层级正确性？')) {
+  const ok = await confirmDialog.confirm({
+    title: 'NCBI 分类层级校核',
+    message: '确认与本地 NCBI 数据库比对校核所有未验证词条的层级正确性？',
+    confirmText: '开始校核',
+  })
+  if (ok) {
     isAuditing.value = true
     try {
       const res = await codeGen.lookup.auditWithNCBI()

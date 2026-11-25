@@ -4,7 +4,7 @@
       <!-- 头部 -->
       <div class="import-header">
         <h3 class="title">批量导入样本</h3>
-        <button class="close-btn" @click="emit('close')">✕</button>
+        <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div class="import-body">
@@ -142,7 +142,7 @@
                   <span class="file-name-label">待导入:</span>
                   <span class="file-name">{{ file.name }}</span>
                 </div>
-                <button class="remove-btn" @click="removeFile(idx)" title="移除">✕</button>
+                <button class="remove-btn" @click="removeFile(idx)" title="移除"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
               </div>
             </div>
           </div>

@@ -1209,17 +1209,24 @@ const filteredLegendSampleIds = computed(() => {
   gap: 6px;
 }
 
-.legend-scroll-wrap::-webkit-scrollbar {
-  width: 5px;
+.legend-scroll-wrap {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
 }
 
-.legend-scroll-wrap::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
-}
+@supports not (scrollbar-color: auto) {
+  .legend-scroll-wrap {
+    scrollbar-width: auto;
+  }
 
-.legend-scroll-wrap::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  .legend-scroll-wrap::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .legend-scroll-wrap::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
 }
 
 .legend-section-title {

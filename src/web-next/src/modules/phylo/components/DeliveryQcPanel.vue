@@ -25,12 +25,12 @@ async function copyText(txt: string, label: string) {
 
 function downloadDeliveryZip() {
   if (!store.currentJob) return
-  window.open(phyloApi.getExportUrl(store.currentJob.job_id, 'delivery_zip'), '_blank')
+  window.open(phyloApi.getExportUrl(store.currentJob.job_id, 'delivery_zip'), '_blank', 'noopener,noreferrer')
 }
 
 function downloadItol(filename: string) {
   if (!store.currentJob) return
-  window.open(phyloApi.getItolFileUrl(store.currentJob.job_id, filename), '_blank')
+  window.open(phyloApi.getItolFileUrl(store.currentJob.job_id, filename), '_blank', 'noopener,noreferrer')
 }
 </script>
 

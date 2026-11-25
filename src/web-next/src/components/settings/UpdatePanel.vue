@@ -190,7 +190,7 @@ function openRemoteUrl() {
   if ((window as any).electronAPI?.openExternal) {
     (window as any).electronAPI.openExternal(cleanUrl)
   } else {
-    window.open(cleanUrl, '_blank')
+    window.open(cleanUrl, '_blank', 'noopener,noreferrer')
   }
 }
 

@@ -4,6 +4,7 @@
  * 显示完整路径；修改保存后由父组件调用后端完成迁移。
  */
 import { ref, watch } from 'vue'
+import { shouldSubmitOnEnter } from '../../../utils/ime'
 
 const props = defineProps<{
   label: string
@@ -44,6 +45,16 @@ function submit(): void {
   emit('save', v)
   editing.value = false
 }
+function handleInputKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    cancelEdit()
+    return
+  }
+  if (shouldSubmitOnEnter(event)) {
+    event.preventDefault()
+    submit()
+  }
+}
 </script>
 
 <template>
@@ -51,13 +62,13 @@ function submit(): void {
     <div class="path-label">{{ label }}</div>
     <div v-if="!editing" class="path-row">
       <code class="path-text" :title="path">{{ path || '-' }}</code>
-      <button class="pf-btn" :disabled="busy" @click="startEdit">修改</button>
-      <button class="pf-btn" :disabled="!path" @click="emit('open', path)">打开</button>
+      <button type="button" class="pf-btn" :disabled="busy" @click="startEdit">修改</button>
+      <button type="button" class="pf-btn" :disabled="!path" @click="emit('open', path)">打开</button>
     </div>
     <div v-else class="path-row">
-      <input v-model="draft" class="path-input" type="text" @keyup.enter="submit" @keyup.esc="cancelEdit" />
-      <button class="pf-btn primary" :disabled="busy" @click="submit">{{ saveLabel || '保存并迁移' }}</button>
-      <button class="pf-btn" @click="cancelEdit">取消</button>
+      <input v-model="draft" class="path-input" type="text" @keydown="handleInputKeydown" />
+      <button type="button" class="pf-btn primary" :disabled="busy" @click="submit">{{ saveLabel || '保存并迁移' }}</button>
+      <button type="button" class="pf-btn" @click="cancelEdit">取消</button>
     </div>
     <div v-if="editing" class="path-hint">{{ hint || '保存后旧目录中的数据将自动迁移到新目录，同名文件不覆盖。' }}</div>
   </div>

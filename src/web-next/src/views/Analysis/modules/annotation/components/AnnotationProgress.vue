@@ -3,6 +3,9 @@
  * AnnotationProgress - 注释执行实时进度与日志终端面板
  */
 import { ref, watch, nextTick } from 'vue';
+import { useAppStore } from '../../../../../stores/app';
+
+const appStore = useAppStore();
 
 const props = defineProps<{
   progress: number;
@@ -30,7 +33,7 @@ watch(() => props.logs.length, () => {
 function copyLogs() {
   const text = props.logs.join('\n');
   navigator.clipboard.writeText(text);
-  alert('控制台日志已复制到剪贴板');
+  appStore.showNotification('控制台日志已复制到剪贴板', 'success');
 }
 </script>
 

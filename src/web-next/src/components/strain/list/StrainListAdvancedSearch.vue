@@ -6,7 +6,7 @@
         <h3>高级筛选器</h3>
         <div class="match-badge" v-if="stats">{{ stats.total }} 结果</div>
       </div>
-      <button class="btn-close-circle" @click="emit('close')">✕</button>
+      <button class="btn-close-circle" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
 
     <!-- 可滚动主体 -->
@@ -182,10 +182,17 @@ function handleExportFiltered() {
   gap: 20px;
 }
 
-/* 滚动条美化 */
-.scrollable-area::-webkit-scrollbar { width: 5px; }
-.scrollable-area::-webkit-scrollbar-track { background: transparent; }
-.scrollable-area::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 3px; }
+/* 标准滚动条（兼容旧 WebKit 回退） */
+.scrollable-area {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: thin;
+}
+@supports not (scrollbar-color: auto) {
+  .scrollable-area { scrollbar-width: auto; }
+  .scrollable-area::-webkit-scrollbar { width: 6px; }
+  .scrollable-area::-webkit-scrollbar-track { background: transparent; }
+  .scrollable-area::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+}
 
 .compact-section { padding: 12px; border-radius: 10px; }
 .pink-mode { background: #fdf2f8; border: 1px solid #fce7f3; }

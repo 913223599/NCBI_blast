@@ -99,7 +99,7 @@ function getPhaseClass(threshold: number, progress: number) {
           :class="getPhaseClass(p.threshold, task.progress || 0)"
         >
           <div class="phase-dot">
-            <span v-if="(task.progress || 0) >= p.threshold">✓</span>
+            <span v-if="(task.progress || 0) >= p.threshold"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></span>
             <span v-else>{{ p.id }}</span>
           </div>
           <span class="phase-name">{{ p.name }}</span>

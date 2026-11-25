@@ -125,6 +125,14 @@ const eventHandlers: EventHandler[] = [];
 /** WebSocket 单例 */
 let wsConnection: WebSocket | null = null;
 let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let wsHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopWsHeartbeat(): void {
+    if (wsHeartbeatTimer) {
+        clearInterval(wsHeartbeatTimer);
+        wsHeartbeatTimer = null;
+    }
+}
 
 const WS_RECONNECT_INTERVAL_MS = 3000;
 const WS_HEARTBEAT_INTERVAL_MS = 15000;
@@ -160,8 +168,8 @@ function connectWebSocket(): void {
 
     wsConnection.onopen = () => {
         console.log('[ElectronBridge] WebSocket 已连接');
-        // 启动心跳
-        setInterval(() => {
+        stopWsHeartbeat();
+        wsHeartbeatTimer = setInterval(() => {
             if (wsConnection?.readyState === WebSocket.OPEN) {
                 wsConnection.send('ping');
             }
@@ -208,6 +216,7 @@ function connectWebSocket(): void {
 
     wsConnection.onclose = () => {
         console.log('[ElectronBridge] WebSocket 连接断开，将自动重连...');
+        stopWsHeartbeat();
         wsConnection = null;
         wsReconnectTimer = setTimeout(connectWebSocket, WS_RECONNECT_INTERVAL_MS);
     };
@@ -703,13 +712,15 @@ const electronBridge = {
         if (window.handleBridgeEvent) {
             window.handleBridgeEvent('help_structure', result);
         }
+        return result;
     },
 
     async get_help_content(topicId: string) {
-        const result = await apiGet(`/api/help/content/${topicId}`);
+        const result = await apiGet(`/api/help/content/${encodeURIComponent(topicId)}`);
         if (window.handleBridgeEvent) {
             window.handleBridgeEvent('help_content', result);
         }
+        return result;
     },
 
     async sync_taxonomy(speciesName: string, callback?: (res: any) => void) {

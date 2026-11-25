@@ -85,7 +85,7 @@ export class PhyloTreeCanvas {
   mount(container: HTMLElement): void {
     this.dispose()
     this.container = container
-    this.container.innerHTML = ''
+    this.container.replaceChildren()
     this.container.style.position = 'relative'
     this.container.style.overflow = 'hidden'
     this.container.style.userSelect = 'none'
@@ -220,7 +220,7 @@ export class PhyloTreeCanvas {
     this.model = null
     this.bounds = null
     if (this.rootGroup) {
-      while (this.rootGroup.firstChild) this.rootGroup.removeChild(this.rootGroup.firstChild)
+      this.rootGroup.replaceChildren()
     }
     if (this.ctx && this.canvas) {
       this.ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -320,7 +320,7 @@ export class PhyloTreeCanvas {
 
   private redraw(): void {
     if (!this.model || !this.settings || !this.rootGroup || !this.model.root) return
-    while (this.rootGroup.firstChild) this.rootGroup.removeChild(this.rootGroup.firstChild)
+    this.rootGroup.replaceChildren()
     if (this.ctx && this.canvas) {
       this.ctx.setTransform(1, 0, 0, 1, 0, 0)
       this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
@@ -1178,7 +1178,7 @@ export class PhyloTreeCanvas {
     }
     window.removeEventListener('mousemove', this.handleMouseMove)
     window.removeEventListener('mouseup', this.handleMouseUp)
-    if (this.container) this.container.innerHTML = ''
+    if (this.container) this.container.replaceChildren()
     this.svg = null
     this.rootGroup = null
     this.canvas = null

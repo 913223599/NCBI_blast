@@ -3,14 +3,45 @@
  * FigureStudioView - 科研绘图工坊统一工具组工作台
  * 将系统发育树构建与多环出版出图，以及六大噬菌体顶刊核心图型整合为模块化卡片工具组。
  */
-import { computed, ref } from 'vue'
-import PhyloWorkbench from '../modules/phylo/components/PhyloWorkbench.vue'
-import DiversityWindowTool from '../modules/figure_studio/components/DiversityWindowTool.vue'
-import GeneNetworkTool from '../modules/figure_studio/components/GeneNetworkTool.vue'
-import GenomeMapTool from '../modules/figure_studio/components/GenomeMapTool.vue'
-import HostMatrixTool from '../modules/figure_studio/components/HostMatrixTool.vue'
-import SyntenyRibbonTool from '../modules/figure_studio/components/SyntenyRibbonTool.vue'
-import ViridicHeatmapTool from '../modules/figure_studio/components/ViridicHeatmapTool.vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
+import AsyncModuleLoading from '../components/common/AsyncModuleLoading.vue'
+import AsyncModuleError from '../components/common/AsyncModuleError.vue'
+import CitationsDialog from '../components/common/CitationsDialog.vue'
+
+const asyncOpts = {
+  loadingComponent: AsyncModuleLoading,
+  errorComponent: AsyncModuleError,
+  delay: 150,
+}
+
+const PhyloWorkbench = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('../modules/phylo/components/PhyloWorkbench.vue'),
+})
+const DiversityWindowTool = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('../modules/figure_studio/components/DiversityWindowTool.vue'),
+})
+const GeneNetworkTool = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('../modules/figure_studio/components/GeneNetworkTool.vue'),
+})
+const GenomeMapTool = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('../modules/figure_studio/components/GenomeMapTool.vue'),
+})
+const HostMatrixTool = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('../modules/figure_studio/components/HostMatrixTool.vue'),
+})
+const SyntenyRibbonTool = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('../modules/figure_studio/components/SyntenyRibbonTool.vue'),
+})
+const ViridicHeatmapTool = defineAsyncComponent({
+  ...asyncOpts,
+  loader: () => import('../modules/figure_studio/components/ViridicHeatmapTool.vue'),
+})
 
 type StudioToolId =
   | 'phylo_tree'
@@ -89,6 +120,7 @@ const tools: StudioToolCard[] = [
 ]
 
 const activeTool = ref<StudioToolId | null>(null)
+const showCitationsDialog = ref(false)
 const currentToolObj = computed(() => tools.find((t) => t.id === activeTool.value) ?? null)
 
 function selectTool(id: StudioToolId): void {
@@ -109,23 +141,29 @@ function selectTool(id: StudioToolId): void {
           }}
         </p>
       </div>
-      <div v-if="!activeTool" class="header-stats">
-        <div class="stat-badge">
-          <span class="label">可用图型</span>
-          <span class="value">{{ tools.length }}</span>
+      <div class="header-actions-bar">
+        <button type="button" class="citations-btn" @click="showCitationsDialog = true">
+          学术引用 (BibTeX)
+        </button>
+        <div v-if="!activeTool" class="header-stats">
+          <div class="stat-badge">
+            <span class="label">可用图型</span>
+            <span class="value">{{ tools.length }}</span>
+          </div>
         </div>
+        <button v-else type="button" class="back-btn" @click="activeTool = null">
+          &larr; 返回工坊工具组
+        </button>
       </div>
-      <button v-else class="back-btn" @click="activeTool = null">
-        &larr; 返回工坊工具组
-      </button>
     </header>
 
-    <main class="studio-content">
+    <div class="studio-content">
       <!-- 7 大专用科研出图工具组卡片网格 -->
       <div v-if="!activeTool" class="tools-grid">
-        <div
+        <button
           v-for="tool in tools"
           :key="tool.id"
+          type="button"
           class="tool-card"
           @click="selectTool(tool.id)"
         >
@@ -190,7 +228,7 @@ function selectTool(id: StudioToolId): void {
             <div class="tool-journal-badge">{{ tool.journalRef }}</div>
             <p class="tool-desc">{{ tool.description }}</p>
           </div>
-        </div>
+        </button>
       </div>
 
       <!-- 选中的专用绘图工作区 -->
@@ -203,7 +241,8 @@ function selectTool(id: StudioToolId): void {
         <GeneNetworkTool v-else-if="activeTool === 'gene_network'" />
         <HostMatrixTool v-else-if="activeTool === 'host_matrix'" />
       </div>
-    </main>
+    </div>
+    <CitationsDialog v-model:open="showCitationsDialog" default-module="figure_studio" />
   </div>
 </template>
 
@@ -212,6 +251,9 @@ function selectTool(id: StudioToolId): void {
 .studio-header { padding: 12px 24px; background: #fff; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .header-content h1 { margin: 0; font-size: 18px; color: #1e293b; letter-spacing: -0.4px; }
 .header-content p { margin: 2px 0 0; color: #64748b; font-size: 12px; }
+.header-actions-bar { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.citations-btn { background: #f0fdfa; border: 1px solid #99f6e4; color: #0f766e; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.citations-btn:hover { background: #ccfbf1; }
 .stat-badge { display: flex; align-items: center; gap: 6px; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 12px; }
 .stat-badge .label { color: #64748b; }
 .stat-badge .value { color: #0f766e; font-weight: 700; }
@@ -219,7 +261,7 @@ function selectTool(id: StudioToolId): void {
 .back-btn:hover { background: #e2e8f0; color: #0f172a; }
 .studio-content { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .tools-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 16px; padding: 30px 40px; overflow-y: auto; align-content: start; }
-.tool-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: flex-start; gap: 15px; }
+.tool-card { width: 100%; text-align: left; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: flex-start; gap: 15px; }
 .tool-card:hover { border-color: #0f766e; background: #f0fdfa; box-shadow: 0 4px 14px rgba(15, 118, 110, 0.1); transform: translateY(-2px); }
 .tool-icon-mini { width: 44px; height: 44px; background: #f8fafc; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border: 1px solid #e2e8f0; }
 .tool-body { flex: 1; min-width: 0; }

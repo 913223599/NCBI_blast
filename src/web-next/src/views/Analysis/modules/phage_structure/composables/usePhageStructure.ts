@@ -1,5 +1,6 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getBridge, onEvent } from '../../../../../bridge/electron-bridge'
+import { notifyUser } from '../../../../../utils/notify'
 import type {
   PhageStructureResult,
   StructureBatchRunPayload,
@@ -279,7 +280,7 @@ export function usePhageStructure() {
       currentTask.value = created
       currentResult.value = null
       appendLog(`已将 ${res.batch_count} 个结构与尾部形态预测任务按序加入后台排队队列`)
-      ;(window as any).app?.showNotification?.(
+      notifyUser(
         `已批量导入 ${res.batch_count} 个预测任务到队列，系统将自动依次执行`,
         'success'
       )
@@ -339,7 +340,7 @@ export function usePhageStructure() {
     fileType: 'json' | 'summary_tsv' | 'features_tsv' | 'tmp_tsv' | 'gbk'
   ): void {
     const url = bridge.get_phage_structure_download_url(taskId, fileType)
-    window.open(url, '_blank')
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   async function openResultsFolder(taskId: string): Promise<void> {

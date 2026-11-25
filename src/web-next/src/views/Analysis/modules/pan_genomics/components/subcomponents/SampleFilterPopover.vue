@@ -26,7 +26,7 @@ const emit = defineEmits<{
 const searchKeyword = ref('')
 
 function naturalSort(ids: string[]): string[] {
-  return [...ids].sort((a, b) => {
+  return ids.toSorted((a, b) => {
     const nameA = props.sampleNames[a] || a
     const nameB = props.sampleNames[b] || b
     return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' })

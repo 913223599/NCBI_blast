@@ -19,7 +19,7 @@
         
         // 初始化
         init: function(translations = {}) {
-            console.log('🔧 TooltipFix: 初始化开始');
+            console.log('[INFO] TooltipFix: 初始化开始');
             this.translations = translations;
             
             // 创建tooltip元素
@@ -28,7 +28,7 @@
             // 绑定事件
             this.bindEvents();
             
-            console.log('✅ TooltipFix: 初始化完成');
+            console.log('[OK] TooltipFix: 初始化完成');
             return this;
         },
         
@@ -63,7 +63,7 @@
             `;
             
             document.body.appendChild(this.tooltipElement);
-            console.log('🔧 TooltipFix: tooltip元素创建完成');
+            console.log('[INFO] TooltipFix: tooltip元素创建完成');
             return this.tooltipElement;
         },
         
@@ -90,7 +90,7 @@
                 document.addEventListener(eventType, () => this.hide(), true);
             });
             
-            console.log('🔧 TooltipFix: 事件绑定完成');
+            console.log('[INFO] TooltipFix: 事件绑定完成');
         },
         
         // 鼠标进入处理
@@ -153,7 +153,7 @@
             // 计算位置
             this.positionTooltip(element);
             
-            console.log('🔧 TooltipFix: 显示tooltip -', content.substring(0, 30) + '...');
+            console.log('[INFO] TooltipFix: 显示tooltip -', content.substring(0, 30) + '...');
         },
         
         // 隐藏tooltip
@@ -166,7 +166,7 @@
             }
             
             this.currentTarget = null;
-            console.log('🔧 TooltipFix: 隐藏tooltip');
+            console.log('[INFO] TooltipFix: 隐藏tooltip');
         },
         
         // 定位tooltip
@@ -211,13 +211,13 @@
         // 更新翻译
         updateTranslations: function(newTranslations) {
             this.translations = { ...this.translations, ...newTranslations };
-            console.log('🔧 TooltipFix: 翻译字典已更新');
+            console.log('[INFO] TooltipFix: 翻译字典已更新');
         },
         
         // 更新配置
         updateConfig: function(newConfig) {
             this.config = { ...this.config, ...newConfig };
-            console.log('🔧 TooltipFix: 配置已更新');
+            console.log('[INFO] TooltipFix: 配置已更新');
         },
         
         // 销毁
@@ -233,7 +233,7 @@
             this.currentTarget = null;
             this.translations = {};
             
-            console.log('🔧 TooltipFix: 实例已销毁');
+            console.log('[INFO] TooltipFix: 实例已销毁');
         }
     };
     
@@ -259,11 +259,11 @@
     window.HelpTooltipManager = HelpTooltipManagerFix;
     window.TooltipFix = TooltipFix;
     
-    console.log('🔧 Tooltip修复版本已加载');
+    console.log('[INFO] Tooltip修复版本已加载');
     
     // 如果检测到原有的tooltip系统，提供迁移帮助
     if (window.__helpTooltipManager) {
-        console.log('🔧 检测到原有tooltip实例，可以安全替换');
+        console.log('[INFO] 检测到原有tooltip实例，可以安全替换');
     }
     
 })();

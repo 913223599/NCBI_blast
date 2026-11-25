@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { notifyUser } from '../../../../utils/notify'
 import { usePhageDiscovery } from './composables/usePhageDiscovery'
 import type { PhageContigOverlayData } from './types'
 import PhageDiscoveryHistory from './components/PhageDiscoveryHistory.vue'
@@ -107,10 +108,10 @@ async function handleOpenViewer(regionIndex: number): Promise<void> {
     if (payload.gbkText) {
       emit('open-viewer', payload)
     } else {
-      ;(window as any).app?.showNotification('未能获取到该区段的 GenBank 序列文件', 'warning')
+      notifyUser('未能获取到该区段的 GenBank 序列文件', 'warning')
     }
   } catch (err) {
-    ;(window as any).app?.showNotification(`打开图谱失败: ${String(err)}`, 'error')
+    notifyUser(`打开图谱失败: ${String(err)}`, 'error')
   }
 }
 
@@ -121,10 +122,10 @@ async function handleOpenOverlayViewer(contigId: string): Promise<void> {
     if (payload.gbkText) {
       emit('open-viewer', payload)
     } else {
-      ;(window as any).app?.showNotification('未能生成全基因组叠图 GenBank 文本', 'warning')
+      notifyUser('未能生成全基因组叠图 GenBank 文本', 'warning')
     }
   } catch (err) {
-    ;(window as any).app?.showNotification(`打开全基因组叠图失败: ${String(err)}`, 'error')
+    notifyUser(`打开全基因组叠图失败: ${String(err)}`, 'error')
   }
 }
 
@@ -139,10 +140,10 @@ async function handleOpenAnnotation(regionIndex?: number): Promise<void> {
         sampleType: 'PHAGE',
       })
     } else {
-      ;(window as any).app?.showNotification('未检测到可用于注释的 FASTA 序列', 'warning')
+      notifyUser('未检测到可用于注释的 FASTA 序列', 'warning')
     }
   } catch (err) {
-    ;(window as any).app?.showNotification(`跳转注释工作台失败: ${String(err)}`, 'error')
+    notifyUser(`跳转注释工作台失败: ${String(err)}`, 'error')
   }
 }
 
@@ -197,7 +198,7 @@ function handleOpenStructure(regionIndex?: number): void {
       </aside>
 
       <!-- 2. 右侧主内容区域 -->
-      <main class="main-content">
+      <section class="main-content" aria-label="前噬菌体发现工作区">
         <div v-if="errorMsg" class="error-banner">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10" />
@@ -280,7 +281,7 @@ function handleOpenStructure(regionIndex?: number): void {
             <button type="button" class="retry-btn" @click="startNewTask">返回新建扫描</button>
           </div>
         </section>
-      </main>
+      </section>
     </div>
   </div>
 </template>

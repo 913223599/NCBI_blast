@@ -1,32 +1,32 @@
 <template>
   <header class="strain-toolbar">
     <div class="toolbar-left">
-      <div
+      <button
+        type="button"
         class="tool-btn"
         :class="{ active: activePanel === 'import' && isSidebarOpen }"
         @click="togglePanel('import')"
       >
-        <span class="icon"></span>
         <span class="label">数据导入</span>
-      </div>
+      </button>
       <div class="tool-divider"></div>
-      <div
+      <button
+        type="button"
         class="tool-btn"
         :class="{ active: activePanel === 'filter' && isSidebarOpen }"
         @click="togglePanel('filter')"
       >
-        <span class="icon"></span>
         <span class="label">高级筛选</span>
-      </div>
+      </button>
       <div class="tool-divider"></div>
-      <div
+      <button
+        type="button"
         class="tool-btn"
         :class="{ active: activePanel === 'history' && isSidebarOpen }"
         @click="togglePanel('history')"
       >
-        <span class="icon"></span>
         <span class="label">导入历史</span>
-      </div>
+      </button>
     </div>
 
     <div class="toolbar-right">
@@ -54,10 +54,12 @@
 import { inject } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
-import { getBridge } from '../../bridge/pyqt-bridge'
+import { useConfirmDialog } from '../../composables/useConfirmDialog'
+import { getBridge } from '../../bridge'
 
 const strain = useStrainStore()
 const appStore = useAppStore()
+const confirmDialog = useConfirmDialog()
 
 // 从父组件注入状态
 const activePanel = inject('activePanel') as any
@@ -90,16 +92,21 @@ function handleExport() {
   }
 }
 
-function handleClear() {
-  const input = window.prompt(
-    '此操作将永久清空所有菌毒种库数据且不可撤销！\n\n如确认操作，请在下方输入 DELETE 后点击确定：'
-  )
+async function handleClear() {
+  const input = await confirmDialog.prompt({
+    title: '永久清空菌毒种库',
+    message: '此操作将永久清空所有菌毒种库数据且不可撤销！\n请在下方输入 DELETE 后点击确认清空：',
+    inputLabel: '安全确认口令',
+    placeholder: '请输入 DELETE',
+    confirmText: '确认清空',
+    danger: true,
+  })
   if (input === null) return // 用户取消
   if (input.trim().toUpperCase() !== 'DELETE') {
     appStore.showNotification('校验码不匹配，操作已取消', 'warning')
     return
   }
-  strain.clearAll()
+  await strain.clearAll()
   appStore.showNotification('已清空所有数据', 'success')
 }
 </script>
