@@ -14,6 +14,7 @@ import json
 import shutil
 import subprocess
 import logging
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -179,6 +180,118 @@ def run_git_cmd(args: List[str], cwd: Optional[Path] = None, timeout: int = 30) 
         env=env,
     )
 
+def _resolve_git_dir(project_root: Path) -> Optional[Path]:
+    """解析当前仓库的 .git 目录路径（兼容相对路径返回）。"""
+    try:
+        res = run_git_cmd(["rev-parse", "--git-dir"], cwd=project_root, timeout=5)
+        if res.returncode != 0 or not res.stdout.strip():
+            return None
+        raw = Path(res.stdout.strip())
+        return raw if raw.is_absolute() else (project_root / raw).resolve()
+    except Exception:
+        return None
+
+
+def _detect_in_progress_op(project_root: Path) -> Optional[str]:
+    """检测仓库当前是否处于未完成 rebase / merge / cherry-pick 状态。"""
+    git_dir = _resolve_git_dir(project_root)
+    if git_dir is None or not git_dir.exists():
+        return None
+    if (git_dir / "rebase-merge").exists() or (git_dir / "rebase-apply").exists():
+        return "rebase"
+    if (git_dir / "MERGE_HEAD").exists():
+        return "merge"
+    if (git_dir / "CHERRY_PICK_HEAD").exists():
+        return "cherry-pick"
+    return None
+
+
+def _get_unmerged_files(project_root: Path) -> List[str]:
+    """获取当前索引中所有未合并冲突文件路径列表（按字典序去重）。"""
+    try:
+        res = run_git_cmd(["diff", "--name-only", "--diff-filter=U"], cwd=project_root, timeout=10)
+        if res.returncode != 0 or not res.stdout.strip():
+            return []
+        return sorted({line.strip() for line in res.stdout.splitlines() if line.strip()})
+    except Exception:
+        return []
+
+
+def _get_stash_top_ref(project_root: Path) -> str:
+    """返回 refs/stash 顶部提交哈希；若无 stash 返回空字符串。"""
+    try:
+        res = run_git_cmd(["rev-parse", "-q", "--verify", "refs/stash"], cwd=project_root, timeout=5)
+        return res.stdout.strip() if res.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _abort_in_progress_op(project_root: Path, logs: List[str]) -> None:
+    """安全中止正在进行的 rebase / merge / cherry-pick 状态。"""
+    op = _detect_in_progress_op(project_root)
+    if not op:
+        return
+    cmd_map = {
+        "rebase": ["rebase", "--abort"],
+        "merge": ["merge", "--abort"],
+        "cherry-pick": ["cherry-pick", "--abort"],
+    }
+    abort_args = cmd_map.get(op)
+    if not abort_args:
+        return
+    logs.append(f"正在中止未完成的 Git {op} 状态 (git {' '.join(abort_args)})...")
+    res = run_git_cmd(abort_args, cwd=project_root, timeout=15)
+    if res.returncode == 0:
+        logs.append(f"已中止未完成的 {op} 状态。")
+    else:
+        err_txt = (res.stderr or res.stdout or "").strip()
+        logs.append(f"中止 {op} 返回告警: {err_txt}")
+
+
+def _backup_and_reset_conflicts(
+    project_root: Path,
+    conflict_files: List[str],
+    logs: List[str],
+) -> Optional[Path]:
+    """将冲突文件按相对路径原样备份到 results/git_update_backups/ 后清理未合并索引。"""
+    backup_dir: Optional[Path] = None
+    existing_targets: List[Path] = []
+    for rel in conflict_files:
+        cand = (project_root / rel).resolve()
+        try:
+            cand.relative_to(project_root.resolve())
+        except ValueError:
+            continue
+        if cand.is_file():
+            existing_targets.append(cand)
+
+    if existing_targets:
+        backup_dir = project_root / "results" / "git_update_backups" / time.strftime("%Y%m%d_%H%M%S")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        for src_file in existing_targets:
+            rel_path = src_file.relative_to(project_root.resolve())
+            dst_file = backup_dir / rel_path
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dst_file)
+        logs.append(f"已将 {len(existing_targets)} 个冲突文件备份至: {backup_dir}")
+
+    _abort_in_progress_op(project_root, logs)
+
+    logs.append("正在重置未合并的索引条目 (git reset --merge)...")
+    reset_res = run_git_cmd(["reset", "--merge"], cwd=project_root, timeout=15)
+    if reset_res.returncode != 0:
+        err_txt = (reset_res.stderr or reset_res.stdout or "").strip()
+        logs.append(f"git reset --merge 返回告警: {err_txt}")
+
+    remaining = _get_unmerged_files(project_root)
+    if remaining:
+        logs.append(f"检测到仍有 {len(remaining)} 个索引未解除合并，正在强制恢复为 HEAD 状态...")
+        run_git_cmd(["reset", "HEAD", "--"] + remaining, cwd=project_root, timeout=15)
+        run_git_cmd(["checkout", "-f", "HEAD", "--"] + remaining, cwd=project_root, timeout=15)
+
+    return backup_dir
+
+
 def get_git_info(project_root: Optional[Path] = None) -> Dict[str, Any]:
     """获取本地 Git 仓库版本与分支元数据"""
     if project_root is None:
@@ -195,7 +308,10 @@ def get_git_info(project_root: Optional[Path] = None) -> Dict[str, Any]:
         "commit_date": "",
         "remote_url": "",
         "app_version": get_app_version(),
-        "has_uncommitted_changes": False
+        "has_uncommitted_changes": False,
+        "has_conflicts": False,
+        "conflict_files": [],
+        "in_progress_op": None,
     }
 
     if not is_git_available():
@@ -243,10 +359,16 @@ def get_git_info(project_root: Optional[Path] = None) -> Dict[str, Any]:
         if remote_res.returncode == 0:
             result["remote_url"] = remote_res.stdout.strip()
 
-        # 6. 未提交更改检测
+        # 6. 未提交更改与冲突检测
         status_res = run_git_cmd(["status", "--porcelain"], cwd=project_root, timeout=5)
         if status_res.returncode == 0:
             result["has_uncommitted_changes"] = bool(status_res.stdout.strip())
+
+        conflict_files = _get_unmerged_files(project_root)
+        in_progress_op = _detect_in_progress_op(project_root)
+        result["conflict_files"] = conflict_files
+        result["in_progress_op"] = in_progress_op
+        result["has_conflicts"] = bool(conflict_files or in_progress_op)
 
     except Exception as exc:
         logger.error("获取 Git 信息异常: %s", exc)
@@ -371,8 +493,13 @@ def check_remote_update(project_root: Optional[Path] = None, timeout: int = 35) 
             "current_info": info
         }
 
-def pull_remote_update(project_root: Optional[Path] = None, auto_stash: bool = True, timeout: int = 60) -> Dict[str, Any]:
-    """拉取 GitHub 远端最新代码并合并 (git pull --rebase)"""
+def pull_remote_update(
+    project_root: Optional[Path] = None,
+    auto_stash: bool = True,
+    resolve_conflicts: bool = False,
+    timeout: int = 60,
+) -> Dict[str, Any]:
+    """拉取 GitHub 远端最新代码并合并 (git pull --rebase)，支持冲突检测、备份清理与安全回退。"""
     if project_root is None:
         project_root = get_project_root()
 
@@ -382,30 +509,87 @@ def pull_remote_update(project_root: Optional[Path] = None, auto_stash: bool = T
             "success": False,
             "message": info.get("error", "非有效 Git 仓库"),
             "logs": [],
-            "need_restart": False
+            "need_restart": False,
+            "has_conflicts": False,
+            "conflict_files": [],
         }
 
     branch = info.get("branch") or "master"
     logs: List[str] = []
     stashed = False
+    backup_dir: Optional[Path] = None
 
     try:
+        # 0. 前置未合并冲突 / 半途 rebase 检测与自愈清理
+        if info.get("has_conflicts"):
+            conflict_files: List[str] = list(info.get("conflict_files") or [])
+            in_prog = info.get("in_progress_op")
+            if not resolve_conflicts:
+                logs.append(
+                    f"[警告] 检测到仓库存在未解决的冲突状态 (in_progress={in_prog or 'none'}, 冲突文件={len(conflict_files)} 个):"
+                )
+                for cf in conflict_files:
+                    logs.append(f"  - {cf}")
+                logs.append("请点击“备份冲突文件并清理后更新”，将先备份上述冲突文件并重置索引再拉取更新。")
+                return {
+                    "success": False,
+                    "message": "检测到未合并冲突文件，请先清理冲突后再更新",
+                    "logs": logs,
+                    "need_restart": False,
+                    "has_conflicts": True,
+                    "conflict_files": conflict_files,
+                }
+
+            logs.append("[步骤 0/4] 检测到未合并冲突，正在执行备份并安全清理冲突现场...")
+            backup_dir = _backup_and_reset_conflicts(project_root, conflict_files, logs)
+            info = get_git_info(project_root)
+            if info.get("has_conflicts"):
+                rem = list(info.get("conflict_files") or [])
+                logs.append("[错误] 自动清理冲突后仍有未合并文件，请检查仓库文件权限或磁盘占用。")
+                return {
+                    "success": False,
+                    "message": "冲突清理未完全成功，请检查文件占用后重试",
+                    "logs": logs,
+                    "need_restart": False,
+                    "has_conflicts": True,
+                    "conflict_files": rem,
+                    "backup_dir": str(backup_dir) if backup_dir else None,
+                }
+            logs.append("冲突现场清理完成，继续执行更新流程。")
+
         # 1. 检测本地工作区是否包含未提交改动
         if info.get("has_uncommitted_changes"):
             if auto_stash:
                 logs.append("[步骤 1/4] 检测到工作区有本地修改，正在自动暂存 (git stash)...")
-                stash_res = run_git_cmd(["stash", "push", "-m", "auto-stash-before-update"], cwd=project_root, timeout=10)
-                if stash_res.returncode == 0:
+                stash_before = _get_stash_top_ref(project_root)
+                stash_res = run_git_cmd(["stash", "push", "-m", "auto-stash-before-update"], cwd=project_root, timeout=15)
+                stash_out = ((stash_res.stdout or "") + "\n" + (stash_res.stderr or "")).strip()
+                if stash_res.returncode != 0:
+                    logs.append("[错误] 自动暂存失败，已终止更新以防止破坏工作区: " + stash_out)
+                    rem_conflicts = _get_unmerged_files(project_root)
+                    return {
+                        "success": False,
+                        "message": "自动暂存本地修改失败，请先处理工作区状态或使用冲突自愈",
+                        "logs": logs,
+                        "need_restart": False,
+                        "has_conflicts": bool(rem_conflicts or _detect_in_progress_op(project_root)),
+                        "conflict_files": rem_conflicts,
+                    }
+                stash_after = _get_stash_top_ref(project_root)
+                if "No local changes to save" in stash_out or stash_after == stash_before:
+                    stashed = False
+                    logs.append("工作区仅含未追踪文件，无需新建 stash。")
+                else:
                     stashed = True
                     logs.append("已成功暂存本地工作区修改。")
-                else:
-                    logs.append("暂存修改失败，将尝试直接合并: " + stash_res.stderr.strip())
             else:
                 return {
                     "success": False,
                     "message": "本地工作区存在未提交修改，请先提交或开启暂存保护后再更新",
                     "logs": ["本地工作区存在修改，操作已取消。"],
-                    "need_restart": False
+                    "need_restart": False,
+                    "has_conflicts": False,
+                    "conflict_files": [],
                 }
         else:
             logs.append("[步骤 1/4] 本地工作区整洁，准备拉取远程更新...")
@@ -413,32 +597,51 @@ def pull_remote_update(project_root: Optional[Path] = None, auto_stash: bool = T
         # 2. 执行拉取更新 (git pull --rebase origin <branch>)
         logs.append(f"[步骤 2/4] 正在从 origin/{branch} 拉取更新代码...")
         pull_res = run_git_cmd(["pull", "--rebase", "origin", branch], cwd=project_root, timeout=timeout)
-        
+
         pull_output = pull_res.stdout.strip()
         if pull_res.stderr.strip():
-            pull_output += "\n" + pull_res.stderr.strip()
-        logs.append(pull_output)
+            pull_output = (pull_output + "\n" + pull_res.stderr.strip()).strip()
+        if pull_output:
+            logs.append(pull_output)
 
         if pull_res.returncode != 0:
-            logs.append("[错误] git pull 发生冲突或网络错误。")
+            logs.append("[错误] git pull --rebase 发生冲突或网络错误，正在清理未完成变基状态...")
+            _abort_in_progress_op(project_root, logs)
+            if _get_unmerged_files(project_root):
+                run_git_cmd(["reset", "--merge"], cwd=project_root, timeout=15)
+
             if stashed:
                 logs.append("正在尝试恢复已暂存的修改 (git stash pop)...")
-                run_git_cmd(["stash", "pop"], cwd=project_root, timeout=10)
+                pop_err_res = run_git_cmd(["stash", "pop"], cwd=project_root, timeout=15)
+                if pop_err_res.returncode != 0:
+                    if _get_unmerged_files(project_root):
+                        run_git_cmd(["reset", "--merge"], cwd=project_root, timeout=15)
+                    logs.append("恢复暂存时存在冲突，已还原工作区并完整保留暂存 (git stash list 可查看)。")
             return {
                 "success": False,
-                "message": "拉取远程代码失败，请检查网络或冲突详情",
+                "message": "拉取远程代码失败，已自动回退半途变基状态，请检查网络或本地提交冲突",
                 "logs": logs,
-                "need_restart": False
+                "need_restart": False,
+                "has_conflicts": False,
+                "conflict_files": [],
             }
 
-        # 3. 如果之前暂存过，尝试恢复暂存
+        # 3. 如果之前暂存过，尝试恢复暂存；若 pop 冲突则自动回退至干净更新态以免卡死仓库
         if stashed:
             logs.append("[步骤 3/4] 正在恢复本地暂存修改 (git stash pop)...")
-            pop_res = run_git_cmd(["stash", "pop"], cwd=project_root, timeout=10)
+            pop_res = run_git_cmd(["stash", "pop"], cwd=project_root, timeout=15)
             if pop_res.returncode == 0:
                 logs.append("本地暂存修改恢复成功。")
             else:
-                logs.append("恢复暂存时发生告警，请在 Git 中手动检查 stash: " + pop_res.stderr.strip())
+                pop_err = ((pop_res.stdout or "") + "\n" + (pop_res.stderr or "")).strip()
+                pop_conflicts = _get_unmerged_files(project_root)
+                if pop_conflicts:
+                    logs.append("[告警] 本地暂存修改与新版代码发生冲突，已自动重置冲突以免仓库卡死，原修改仍保留在 git stash 中:")
+                    for cf in pop_conflicts:
+                        logs.append(f"  - {cf}")
+                    run_git_cmd(["reset", "--merge"], cwd=project_root, timeout=15)
+                else:
+                    logs.append("恢复暂存时发生告警，请在 Git 中手动检查 stash: " + pop_err)
         else:
             logs.append("[步骤 3/4] 验证代码一致性完成。")
 
@@ -446,13 +649,18 @@ def pull_remote_update(project_root: Optional[Path] = None, auto_stash: bool = T
         latest_info = get_git_info(project_root)
         logs.append(f"[步骤 4/4] 更新完成！当前版本已推进至 Commit: {latest_info.get('commit_hash')}")
 
-        return {
+        resp: Dict[str, Any] = {
             "success": True,
             "message": "代码拉取成功，请重启应用以使新功能生效！",
             "logs": logs,
             "latest_commit": latest_info.get("commit_hash"),
-            "need_restart": True
+            "need_restart": True,
+            "has_conflicts": False,
+            "conflict_files": [],
         }
+        if backup_dir is not None:
+            resp["backup_dir"] = str(backup_dir)
+        return resp
 
     except subprocess.TimeoutExpired:
         logs.append(f"[错误] 拉取更新超时 ({timeout}秒)，请检查网络连接")
@@ -460,7 +668,9 @@ def pull_remote_update(project_root: Optional[Path] = None, auto_stash: bool = T
             "success": False,
             "message": "拉取更新操作超时",
             "logs": logs,
-            "need_restart": False
+            "need_restart": False,
+            "has_conflicts": False,
+            "conflict_files": [],
         }
     except Exception as exc:
         logger.error("拉取更新异常: %s", exc)
@@ -469,5 +679,7 @@ def pull_remote_update(project_root: Optional[Path] = None, auto_stash: bool = T
             "success": False,
             "message": str(exc),
             "logs": logs,
-            "need_restart": False
+            "need_restart": False,
+            "has_conflicts": False,
+            "conflict_files": [],
         }

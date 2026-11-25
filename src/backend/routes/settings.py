@@ -144,6 +144,7 @@ async def save_lan_share(req: LanShareRequest):
 
 class PullUpdateRequest(BaseModel):
     auto_stash: bool = True
+    resolve_conflicts: bool = False
 
 @router.get("/api/settings/update/status")
 async def get_update_status():
@@ -164,7 +165,11 @@ async def pull_update(req: PullUpdateRequest):
     """从 GitHub 拉取更新并合并到本地分支"""
     from starlette.concurrency import run_in_threadpool
     from ..utils.git_updater import pull_remote_update
-    return await run_in_threadpool(pull_remote_update, auto_stash=req.auto_stash)
+    return await run_in_threadpool(
+        pull_remote_update,
+        auto_stash=req.auto_stash,
+        resolve_conflicts=req.resolve_conflicts,
+    )
 
 
 # ─── 无头浏览器环境检查与自修复 ─────────────────────────

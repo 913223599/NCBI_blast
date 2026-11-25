@@ -8,7 +8,7 @@
  * 3. 展现待更新提交日志与终端执行流；
  * 4. 协同 Electron 主进程安全触发应用自动重启。
  */
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { apiGet, apiPost } from '../../bridge/electron-bridge'
 import { useAppStore } from '../../stores/app'
 
@@ -24,6 +24,9 @@ interface GitInfo {
   remote_url: string
   app_version: string
   has_uncommitted_changes: boolean
+  has_conflicts?: boolean
+  conflict_files?: string[]
+  in_progress_op?: string | null
   error?: string
 }
 
@@ -60,6 +63,10 @@ const autoStash = ref(true)
 const pullLogs = ref<string[]>([])
 const pullError = ref<string | null>(null)
 const pullSuccess = ref(false)
+const conflictFiles = ref<string[]>([])
+const hasConflicts = computed(
+  () => Boolean(currentInfo.value?.has_conflicts || conflictFiles.value.length > 0)
+)
 
 // 重启提示对话框
 const showRestartModal = ref(false)
@@ -70,11 +77,8 @@ async function loadStatus() {
   isLoadingInfo.value = true
   try {
     const res = await apiGet('/api/settings/update/status')
-    if (res && res.is_git_repo) {
-      currentInfo.value = res
-    } else {
-      currentInfo.value = res
-    }
+    currentInfo.value = res
+    conflictFiles.value = Array.isArray(res?.conflict_files) ? res.conflict_files : []
   } catch (err) {
     console.error('获取更新状态异常:', err)
   } finally {
@@ -128,29 +132,38 @@ async function handleCheckUpdate() {
 }
 
 /** 拉取更新代码 */
-async function handlePullUpdate() {
+async function handlePullUpdate(resolveConflicts = false) {
   if (isPulling.value) return
   isPulling.value = true
-  pullLogs.value = ['正在启动更新任务...']
+  pullLogs.value = [resolveConflicts ? '正在备份冲突文件并重置索引后更新...' : '正在启动更新任务...']
   pullError.value = null
   pullSuccess.value = false
 
   try {
     const res = await apiPost('/api/settings/update/pull', {
-      auto_stash: autoStash.value
+      auto_stash: autoStash.value,
+      resolve_conflicts: resolveConflicts
     })
 
     if (res && res.logs && Array.isArray(res.logs)) {
       pullLogs.value = res.logs
     }
 
+    if (Array.isArray(res?.conflict_files)) {
+      conflictFiles.value = res.conflict_files
+    }
+
     if (res && res.success) {
+      conflictFiles.value = []
       pullSuccess.value = true
       showRestartModal.value = true
       appStore.showNotification('代码已成功更新！请重启应用以生效。', 'success')
       await loadStatus()
     } else {
       pullError.value = res?.message || '拉取更新失败'
+      if (res?.has_conflicts) {
+        await loadStatus()
+      }
       appStore.showNotification(pullError.value || '更新失败', 'error')
     }
   } catch (err: any) {
@@ -267,9 +280,35 @@ onMounted(() => {
           <span class="link-tag">打开 GitHub</span>
         </div>
 
-        <div class="workspace-tag" :class="{ 'has-mod': currentInfo?.has_uncommitted_changes }">
+        <div class="workspace-tag" :class="{ 'has-conflict': hasConflicts, 'has-mod': !hasConflicts && currentInfo?.has_uncommitted_changes }">
           <span class="ws-dot"></span>
-          <span>{{ currentInfo?.has_uncommitted_changes ? '工作区有本地修改 (已支持自动暂存保护)' : '本地工作区干净整洁' }}</span>
+          <span v-if="hasConflicts">检测到 {{ conflictFiles.length || currentInfo?.conflict_files?.length || 1 }} 个未合并冲突文件</span>
+          <span v-else>{{ currentInfo?.has_uncommitted_changes ? '工作区有本地修改 (已支持自动暂存保护)' : '本地工作区干净整洁' }}</span>
+        </div>
+      </div>
+
+      <!-- 冲突检测与一键备份自愈提示 -->
+      <div v-if="hasConflicts" class="banner banner-error mt-16 conflict-banner">
+        <div class="banner-body">
+          <h4>检测到未完成的 Git 合并或冲突文件</h4>
+          <p class="banner-desc">
+            存在未合并索引时 `git stash` 与 `git pull` 会被拒绝；可先自动备份冲突文件至 `results/git_update_backups/` 并重置索引后再完成拉取。
+          </p>
+          <ul v-if="(conflictFiles.length || currentInfo?.conflict_files?.length)" class="conflict-file-list">
+            <li v-for="cf in (conflictFiles.length ? conflictFiles : (currentInfo?.conflict_files || []))" :key="cf">
+              <code>{{ cf }}</code>
+            </li>
+          </ul>
+          <div class="conflict-actions">
+            <button
+              class="p-btn btn-recover-conflict"
+              :disabled="isPulling"
+              @click="() => handlePullUpdate(true)"
+            >
+              <span v-if="isPulling" class="spinner white"></span>
+              <span>{{ isPulling ? '正在备份清理并更新...' : '备份冲突文件并清理后更新' }}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -360,7 +399,7 @@ onMounted(() => {
           <button
             class="p-btn btn-pull-now"
             :disabled="isPulling"
-            @click="handlePullUpdate"
+            @click="() => handlePullUpdate(false)"
           >
             <span v-if="isPulling" class="spinner white"></span>
             <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
@@ -639,6 +678,53 @@ onMounted(() => {
 
 .workspace-tag.has-mod .ws-dot {
   background: #d97706;
+}
+
+.workspace-tag.has-conflict {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.workspace-tag.has-conflict .ws-dot {
+  background: #dc2626;
+}
+
+.conflict-banner {
+  margin-top: 14px;
+}
+
+.conflict-file-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 0.8rem;
+  color: #7f1d1d;
+}
+
+.conflict-actions {
+  margin-top: 12px;
+}
+
+.btn-recover-conflict {
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-recover-conflict:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.btn-recover-conflict:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* 操作卡片 */
