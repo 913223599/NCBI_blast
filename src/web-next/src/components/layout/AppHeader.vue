@@ -19,11 +19,17 @@ interface SystemMetricsPayload {
   memory_total_gb?: number | null
   cpu_cores?: number
   safe_cpu_budget?: number
+  sampled_at?: number
   gpu?: {
     available?: boolean
     name?: string
+    utilization_percent?: number | null
+    used_vram_mb?: number
     total_vram_mb?: number
     free_vram_mb?: number
+    vram_percent?: number | null
+    temperature_c?: number | null
+    source?: string
   }
 }
 
@@ -38,6 +44,7 @@ const sysMetrics = ref<SystemMetricsPayload | null>(null)
 const showCommandPalette = ref(false)
 const showCitationsDialog = ref(false)
 let metricsTimer: ReturnType<typeof setInterval> | null = null
+let isFetchingMetrics = false
 
 const runningBlastCount = computed(() =>
   blastStore.tasks.filter((t) => t.status === 'running' || t.status === 'queued').length
@@ -49,6 +56,19 @@ const hasMetrics = computed(
     (typeof sysMetrics.value.cpu_percent === 'number' || typeof sysMetrics.value.memory_percent === 'number')
 )
 
+const metricsLoadLevel = computed<'normal' | 'busy' | 'high'>(() => {
+  const m = sysMetrics.value
+  if (!m) return 'normal'
+  const peak = Math.max(
+    typeof m.cpu_percent === 'number' ? m.cpu_percent : 0,
+    typeof m.memory_percent === 'number' ? m.memory_percent : 0,
+    typeof m.gpu?.utilization_percent === 'number' ? m.gpu.utilization_percent : 0
+  )
+  if (peak >= 85) return 'high'
+  if (peak >= 65) return 'busy'
+  return 'normal'
+})
+
 const metricsSummary = computed(() => {
   if (!sysMetrics.value) return ''
   const parts: string[] = []
@@ -58,8 +78,15 @@ const metricsSummary = computed(() => {
   if (typeof sysMetrics.value.memory_percent === 'number') {
     parts.push(`RAM ${Math.round(sysMetrics.value.memory_percent)}%`)
   }
-  if (sysMetrics.value.gpu?.available) {
-    parts.push('GPU')
+  const gpu = sysMetrics.value.gpu
+  if (gpu?.available) {
+    if (typeof gpu.utilization_percent === 'number') {
+      parts.push(`GPU ${Math.round(gpu.utilization_percent)}%`)
+    } else if (typeof gpu.vram_percent === 'number') {
+      parts.push(`VRAM ${Math.round(gpu.vram_percent)}%`)
+    } else {
+      parts.push('GPU')
+    }
   }
   return parts.join(' · ')
 })
@@ -67,9 +94,20 @@ const metricsSummary = computed(() => {
 const metricsTooltip = computed(() => {
   const m = sysMetrics.value
   if (!m) return t('header.metrics_tooltip_default')
-  const lines = [
-    t('header.metrics_cores', { cores: m.cpu_cores ?? '-', budget: m.safe_cpu_budget ?? '-' }),
-  ]
+  const lines: string[] = []
+  if (typeof m.cpu_percent === 'number') {
+    lines.push(
+      t('header.metrics_cpu', {
+        percent: Math.round(m.cpu_percent),
+        cores: m.cpu_cores ?? '-',
+        budget: m.safe_cpu_budget ?? '-',
+      })
+    )
+  } else {
+    lines.push(
+      t('header.metrics_cores', { cores: m.cpu_cores ?? '-', budget: m.safe_cpu_budget ?? '-' })
+    )
+  }
   if (typeof m.memory_used_gb === 'number' && typeof m.memory_total_gb === 'number') {
     lines.push(
       t('header.metrics_mem', {
@@ -80,13 +118,25 @@ const metricsTooltip = computed(() => {
     )
   }
   if (m.gpu?.available) {
-    lines.push(
-      t('header.metrics_gpu', {
-        name: m.gpu.name || 'CUDA',
-        free: m.gpu.free_vram_mb ?? 0,
-        total: m.gpu.total_vram_mb ?? 0,
-      })
-    )
+    if (typeof m.gpu.utilization_percent === 'number') {
+      lines.push(
+        t('header.metrics_gpu_detail', {
+          name: m.gpu.name || 'CUDA',
+          util: Math.round(m.gpu.utilization_percent),
+          used: m.gpu.used_vram_mb ?? 0,
+          total: m.gpu.total_vram_mb ?? 0,
+          temp: m.gpu.temperature_c ?? '-',
+        })
+      )
+    } else {
+      lines.push(
+        t('header.metrics_gpu', {
+          name: m.gpu.name || 'CUDA',
+          free: m.gpu.free_vram_mb ?? 0,
+          total: m.gpu.total_vram_mb ?? 0,
+        })
+      )
+    }
   }
   return lines.join('\n')
 })
@@ -101,14 +151,25 @@ async function probeBackendHealth(): Promise<void> {
   }
 }
 
-async function fetchSystemMetrics(): Promise<void> {
+async function fetchSystemMetrics(force = false): Promise<void> {
+  if (isFetchingMetrics) return
+  isFetchingMetrics = true
   try {
-    const res = await apiGet('/api/core/system_metrics')
+    const endpoint = force ? '/api/core/system_metrics?force=true' : '/api/core/system_metrics'
+    const res = await apiGet(endpoint)
     if (res && (typeof res.cpu_percent === 'number' || typeof res.memory_percent === 'number')) {
       sysMetrics.value = res
     }
   } catch {
     // 离线或单测环境静默跳过，不打断界面
+  } finally {
+    isFetchingMetrics = false
+  }
+}
+
+function handleVisibilityChange(): void {
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+    void fetchSystemMetrics(true)
   }
 }
 
@@ -133,7 +194,7 @@ function handlePaletteAction(action: 'citations' | 'toggle-locale' | 'probe-heal
     toggleLocale()
   } else if (action === 'probe-health') {
     void probeBackendHealth()
-    void fetchSystemMetrics()
+    void fetchSystemMetrics(true)
   }
 }
 
@@ -146,15 +207,22 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
 
 onMounted(() => {
   void probeBackendHealth()
-  void fetchSystemMetrics()
+  void fetchSystemMetrics(true)
   window.addEventListener('keydown', handleGlobalKeydown)
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+  }
   metricsTimer = setInterval(() => {
-    void fetchSystemMetrics()
-  }, 15000)
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    void fetchSystemMetrics(false)
+  }, 3000)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }
   if (metricsTimer !== null) {
     clearInterval(metricsTimer)
     metricsTimer = null
@@ -198,9 +266,10 @@ onUnmounted(() => {
         v-if="hasMetrics"
         type="button"
         class="header-pill metrics-pill"
+        :class="`metrics-${metricsLoadLevel}`"
         :title="metricsTooltip"
         :aria-label="t('header.metrics_aria')"
-        @click="fetchSystemMetrics"
+        @click="() => fetchSystemMetrics(true)"
       >
         <span>{{ metricsSummary }}</span>
       </button>
@@ -380,6 +449,18 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
   background: #f8fafc;
   color: #334155;
+}
+
+.metrics-pill.metrics-busy {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.metrics-pill.metrics-high {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
 }
 
 .pill-running {

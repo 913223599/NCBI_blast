@@ -4,10 +4,11 @@ import json
 import re
 from typing import Optional
 from fastapi import APIRouter
+from starlette.concurrency import run_in_threadpool
 
 from ...utils.app_metadata import get_app_metadata
 from ...utils.citations_loader import load_citations_payload
-from ...utils.resource_guard import GpuGuard, get_safe_cpu_budget, get_total_logical_cores
+from ...utils.system_monitor import collect_system_metrics
 
 logger = logging.getLogger("api_server")
 router = APIRouter(tags=["Core"])
@@ -80,32 +81,9 @@ async def get_app_version_info():
 
 
 @router.get("/api/core/system_metrics")
-async def get_system_metrics():
-    """返回工作站实时硬件微监控指标（CPU、内存、留核安全并发预算与 GPU 显存状态）"""
-    cpu_percent: Optional[float] = None
-    memory_percent: Optional[float] = None
-    memory_used_gb: Optional[float] = None
-    memory_total_gb: Optional[float] = None
-    try:
-        import psutil
-
-        cpu_percent = round(float(psutil.cpu_percent(interval=None)), 1)
-        vm = psutil.virtual_memory()
-        memory_percent = round(float(vm.percent), 1)
-        memory_used_gb = round(float(vm.used) / (1024 ** 3), 2)
-        memory_total_gb = round(float(vm.total) / (1024 ** 3), 2)
-    except Exception as exc:
-        logger.debug("psutil metrics unavailable: %s", exc)
-
-    return {
-        "cpu_percent": cpu_percent,
-        "memory_percent": memory_percent,
-        "memory_used_gb": memory_used_gb,
-        "memory_total_gb": memory_total_gb,
-        "cpu_cores": get_total_logical_cores(),
-        "safe_cpu_budget": get_safe_cpu_budget(),
-        "gpu": GpuGuard.probe(),
-    }
+async def get_system_metrics(force: bool = False):
+    """返回工作站实时硬件微监控指标（CPU、内存、留核安全并发预算与 GPU 算力/显存/温度状态）"""
+    return await run_in_threadpool(collect_system_metrics, force=force)
 
 
 @router.get("/api/core/citations")
