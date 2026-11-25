@@ -300,4 +300,4 @@ class BlastEngine:
                 if not header or not header.strip(): return False
                 data_line = f.readline()
                 return bool(data_line and data_line.strip())
-        except: return False
+        except Exception: return False

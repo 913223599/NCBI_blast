@@ -1,4 +1,5 @@
-import sqlite3, json
+import sqlite3
+import json
 
 conn = sqlite3.connect('database/strain.db')
 row = conn.execute('SELECT value FROM sys_config WHERE key="codeLookup"').fetchone()

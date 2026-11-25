@@ -17,7 +17,7 @@ from __future__ import annotations
 import concurrent.futures
 import gc
 import json
-import os
+from ...utils.resource_guard import get_safe_cpu_budget
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -65,9 +65,7 @@ ALL_UNIFIED_EXPERTS: Tuple[str, ...] = ("boundary", "gray_rescue", "defense_func
 
 def _resolve_safe_workers(requested: int) -> int:
     """保留部分 CPU 核心防止长时间满载导致主机卡死。"""
-    cpu_cnt = os.cpu_count() or 4
-    safe_cap = max(1, cpu_cnt - 2)
-    return max(1, min(requested, safe_cap))
+    return get_safe_cpu_budget(requested=requested, reserve_cores=2)
 
 
 def _release_accelerator_memory() -> None:

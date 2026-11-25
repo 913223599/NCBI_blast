@@ -4,12 +4,10 @@ Sanger 测序色谱峰图分析与解峰路由接口 (Sanger Trace & Peak Deconv
 """
 
 import os
-import io
-import json
 import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, UploadFile, File, Form
 from pydantic import BaseModel
 
 from ..utils.sanger_deconv_engine import SangerDeconvEngine
@@ -139,7 +137,7 @@ async def upload_and_analyze(
                 if os.path.exists(tmp_path):
                     try:
                         os.remove(tmp_path)
-                    except:
+                    except Exception:
                         pass
         elif ext in ('.ab1', '.abi'):
             res = SangerDeconvEngine.parse_single_ab1_bytes(content, filename=fname, trim_q=trim_threshold)

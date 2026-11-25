@@ -3,13 +3,13 @@
 clusterer.py - 基于倒排索引、GPU张量与并查集 (Union-Find) 的极速正交同源聚类器
 保证同源判定逻辑与生物学规则 100% 绝对等价，同时利用 K-mer 倒排索引、长度分桶与多核并行获得极限加速。
 """
-import os
 import concurrent.futures
 from typing import Dict, List, Any, Tuple, Set, Optional
 from collections import defaultdict
 
 from .fast_matcher import get_kmers, fast_seq_identity
 from .gpu_accelerator import GPUSequenceMatcher
+from ...utils.resource_guard import get_safe_cpu_budget
 from .types import OrthologGroup, OrthologGeneItem
 from ..annotation.fuser import AnnotationFuser
 
@@ -45,12 +45,8 @@ class ParallelOrthologClusterer:
     """多核与 GPU 混合加速正交同源聚类引擎"""
 
     def __init__(self, max_workers: Optional[int] = None):
-        cpu_cnt = os.cpu_count() or 4
-        if max_workers and max_workers > 0:
-            self.max_workers = min(max_workers, max(1, cpu_cnt - 2))
-        else:
-            # 默认保留 2 个核心防止主机卡死
-            self.max_workers = max(1, min(cpu_cnt - 2, 30))
+        # 默认保留核心防止主机卡死，上限 30 核心
+        self.max_workers = get_safe_cpu_budget(requested=max_workers or 0, reserve_cores=2, max_cap=30)
         self.gpu_matcher = GPUSequenceMatcher()
 
     def cluster(

@@ -6,7 +6,7 @@ BLAST结果转换模块
 
 import csv
 from pathlib import Path
-from typing import Iterator, Iterable, Dict, Any
+from typing import Iterable, Dict, Any
 
 from src.blast.parser import BlastXmlParser
 

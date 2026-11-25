@@ -5,7 +5,7 @@
 """
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional, Tuple, Callable
 
 from .base import BaseAnnotationEngine
 from ..types import FeatureItem, AnnotationRunRequest

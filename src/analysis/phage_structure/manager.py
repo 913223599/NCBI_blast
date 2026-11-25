@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
+from ...utils.resource_guard import get_total_logical_cores
 import secrets
 import shutil
 import time
@@ -225,7 +225,7 @@ class PhageStructureManager:
         struct_hmm = resolve_structural_hmm_path()
         all_hmm = resolve_all_phrogs_hmm_path()
         wsl_pyhmmer = check_wsl_pyhmmer_ready()
-        cpu_cores = os.cpu_count() or 4
+        cpu_cores = get_total_logical_cores()
         return {
             "ready": wsl_pyhmmer and (struct_hmm is not None or all_hmm is not None),
             "wsl_pyhmmer_ready": wsl_pyhmmer,

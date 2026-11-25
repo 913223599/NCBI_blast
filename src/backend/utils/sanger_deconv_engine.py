@@ -13,12 +13,11 @@ Sanger 测序色谱峰图质量分析与智能解峰引擎 (Sanger Trace & Peak 
 import os
 import re
 import io
-import time
 import zipfile
 import logging
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Tuple
 from Bio.SeqIO import AbiIO
 
 logger = logging.getLogger("api_server")
@@ -206,7 +205,7 @@ class SangerDeconvEngine:
             })
             alleles.append({
                 "allele_id": "Allele_B",
-                "label": f"单倍型 B (移码错位副链还原)",
+                "label": "单倍型 B (移码错位副链还原)",
                 "sequence": allele_b,
                 "length": len(allele_b),
                 "type": "indel_secondary"

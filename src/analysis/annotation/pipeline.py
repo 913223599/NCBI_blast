@@ -4,17 +4,14 @@
 支持多引擎流式级联与互补补全 (Multi-Engine Streaming Waterfall Pipeline)
 按流水线顺序流式处理各引擎，逐层漏斗式补充前序引擎未能注释的部分。
 """
-import os
-import re
 import json
-import shutil
-import asyncio
 import logging
+from ...utils.resource_guard import get_safe_cpu_budget
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from Bio import SeqIO
 
-from .types import AnnotationRunRequest, FeatureItem, AnnotationSummary, SafetyAuditResult
+from .types import AnnotationRunRequest, FeatureItem
 from .builtin_annotator import BuiltinAnnotator
 from .fuser import AnnotationFuser
 from .engines import (
@@ -93,8 +90,7 @@ class AnnotationPipeline:
             input_fasta = self._prepare_input_fasta(req)
             
             # 2. 计算系统可用多核线程 (保留核心防卡死)
-            sys_cores = os.cpu_count() or 4
-            allocated_threads = req.threads or max(1, sys_cores - 1)
+            allocated_threads = get_safe_cpu_budget(requested=req.threads or 0, reserve_cores=2)
             
             prefix = req.prefix or "ANNO"
             primary_engine_choice = (req.engine or "auto").lower()

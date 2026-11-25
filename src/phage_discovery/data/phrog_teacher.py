@@ -11,8 +11,8 @@ from __future__ import annotations
 import concurrent.futures
 import csv
 import logging
-import os
 import re
+from ...utils.resource_guard import get_safe_cpu_budget
 import subprocess
 import tempfile
 import uuid
@@ -119,8 +119,7 @@ def run_batch_phrog_mmseqs(
     if not db_path.exists():
         raise FileNotFoundError(f"PHROGs profile 库不存在: {db_path}")
 
-    cpu_cnt = os.cpu_count() or 4
-    n_threads = threads if threads is not None else max(1, cpu_cnt - 2)
+    n_threads = get_safe_cpu_budget(requested=threads or 0, reserve_cores=2)
     db_wsl = to_wsl_path(db_path)
     best_all: Dict[str, Tuple[float, str, float, float]] = {}
 
@@ -157,7 +156,10 @@ def run_batch_phrog_mmseqs(
                     ],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     check=False,
+                    timeout=3600,
                 )
                 if proc.returncode != 0:
                     raise RuntimeError(f"WSL mmseqs easy-search 失败 (rc={proc.returncode}): {proc.stderr[-600:]}")
@@ -169,7 +171,7 @@ def run_batch_phrog_mmseqs(
                     if prev is None or val[0] > prev[0]:
                         best_all[qid] = val
             finally:
-                subprocess.run(["wsl", "rm", "-rf", wsl_tmp], capture_output=True, check=False)
+                subprocess.run(["wsl", "rm", "-rf", wsl_tmp], capture_output=True, check=False, timeout=60)
                 q_fa.unlink(missing_ok=True)
                 out_tsv.unlink(missing_ok=True)
 
@@ -236,8 +238,7 @@ def enrich_semantic_targets_with_phrog(
             "clean_labels": clean_labels,
         }
 
-    cpu_cnt = os.cpu_count() or 4
-    n_workers = workers if workers is not None else max(1, cpu_cnt - 2)
+    n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
     contig_orfs: Dict[str, List[Tuple[int, int, str]]] = {}
     items = list(unique_contigs.items())
     if n_workers > 1 and len(items) > 4:

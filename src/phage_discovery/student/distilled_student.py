@@ -14,7 +14,7 @@
 import argparse
 import json
 import logging
-import os
+from ...utils.resource_guard import get_safe_cpu_budget
 import time
 from datetime import datetime
 from pathlib import Path
@@ -156,7 +156,7 @@ def compute_group_oof_xgb_probs(
     gkf = GroupKFold(n_splits=k)
     oof = np.zeros(len(labels), dtype=np.float32)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    cpu_cnt = os.cpu_count() or 4
+    safe_jobs = get_safe_cpu_budget(reserve_cores=2)
 
     for tr_idx, va_idx in gkf.split(cast(Any, features), labels, groups=contig_ids):
         y_fold = labels[tr_idx]
@@ -176,7 +176,7 @@ def compute_group_oof_xgb_probs(
             reg_lambda=2.0,
             tree_method="hist",
             device=device,
-            n_jobs=max(1, cpu_cnt - 2),
+            n_jobs=safe_jobs,
         )
         clf.fit(features[tr_idx], y_fold, sample_weight=w, verbose=False)
         clf.set_params(device="cpu")

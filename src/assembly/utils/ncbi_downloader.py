@@ -1,12 +1,9 @@
 
-import os
 import logging
 import shutil
-import urllib.request
-import ssl
 import re
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 from ..engine.runner import CommandRunner
 from ..env.wsl_manager import WSLManager
 

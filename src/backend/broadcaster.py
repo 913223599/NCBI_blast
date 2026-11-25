@@ -3,8 +3,8 @@ import json
 import logging
 import threading
 import time
-from typing import List, Dict, Any, Optional
-from fastapi import WebSocket, WebSocketDisconnect
+from typing import Dict, Any, Optional
+from fastapi import WebSocket
 from .utils.json_encoder import BioJsonEncoder
 
 logger = logging.getLogger("broadcaster")
@@ -102,7 +102,6 @@ class EventBroadcaster:
             "data": data or {},
             "timestamp": time.time()
         }
-        from .utils.json_encoder import BioJsonEncoder
         message = json.dumps(payload, ensure_ascii=False, cls=BioJsonEncoder)
         
         targets = []

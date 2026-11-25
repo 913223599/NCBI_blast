@@ -13,7 +13,7 @@
 import concurrent.futures
 import hashlib
 import logging
-import os
+from ..resource_guard import get_safe_cpu_budget, get_total_logical_cores
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -405,14 +405,17 @@ def validate_dataset_parallel(
     if not all_accessions:
         return []
 
-    cpu_cnt = os.cpu_count() or 4
-    safe_workers = max_workers if max_workers is not None else max(1, min(cpu_cnt - 2, 16))
+    safe_workers = get_safe_cpu_budget(
+        requested=max_workers or 0, reserve_cores=2, max_cap=16 if max_workers is None else None
+    )
     tasks = [
         (acc, str(fasta_dir / f"{acc}.fasta"), str(gbk_dir / f"{acc}.gbk"), min_length_bp)
         for acc in all_accessions
     ]
 
-    logger.info(f"启动多核并行校验: 共 {len(tasks)} 株样本, 并发进程数={safe_workers} (总核心={cpu_cnt})")
+    logger.info(
+        f"启动多核并行校验: 共 {len(tasks)} 株样本, 并发进程数={safe_workers} (总核心={get_total_logical_cores()})"
+    )
     results: List[PhageRecordValidation] = []
     if safe_workers == 1 or len(tasks) < 8:
         results = [validate_single_pair(t) for t in tasks]

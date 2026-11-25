@@ -3,7 +3,6 @@
 rrnDB 16S rRNA 基因拷贝数 (Gene Copy Number, GCN) 归一化服务
 数据源：Ribosomal RNA Operon Database (rrnDB)
 """
-import os
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional

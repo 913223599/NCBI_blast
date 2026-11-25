@@ -22,7 +22,7 @@ class CondaInstaller:
         if self.installer_path.exists():
             return True
             
-        self.logger.info(f"正在从官网下载 Miniconda 安装程序...")
+        self.logger.info("正在从官网下载 Miniconda 安装程序...")
         try:
             # 记录上一次打印的百分比，避免重复输出
             self._last_pct = -1
@@ -47,7 +47,7 @@ class CondaInstaller:
              self.logger.info("清理已存在的异常安装目录...")
              try:
                  shutil.rmtree(str(self.install_dir))
-             except:
+             except Exception:
                  pass
 
         self.logger.info(f"正在进行静默安装至: {self.install_dir}")

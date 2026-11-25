@@ -1,10 +1,8 @@
 import logging
 import time
-import json
-import asyncio
 from fastapi import APIRouter, Header
 from pydantic import BaseModel
-from typing import Any, Optional, List
+from typing import Any, Optional
 from ..broadcaster import broadcaster
 
 logger = logging.getLogger("api_server")
@@ -58,7 +56,7 @@ async def strain_load_all():
     
     # 强制防抖保护
     if now - _last_load_time < _LOAD_DEBOUNCE_MS:
-        logger.warning(f"[FlowControl] 请求过频且无快照，拦截以防止IO风暴")
+        logger.warning("[FlowControl] 请求过频且无快照，拦截以防止IO风暴")
         return {"freezers": [], "records": [], "status": "throttled"}
 
     try:

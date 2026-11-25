@@ -4,7 +4,6 @@
 """
 import sqlite3
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional

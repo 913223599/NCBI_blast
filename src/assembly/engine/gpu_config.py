@@ -1,6 +1,5 @@
 
 import subprocess
-import shutil
 import os
 import logging
 from typing import Dict, Any, Optional
@@ -24,7 +23,7 @@ class GPUConfigManager:
             # 尝试调用 nvidia-smi 
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader"],
-                capture_output=True, encoding='utf-8', errors='ignore', check=True
+                capture_output=True, encoding='utf-8', errors='ignore', check=True, timeout=15
             )
             info = result.stdout.strip().split(",")
             if info:

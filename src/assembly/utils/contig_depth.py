@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import subprocess
+from ...utils.resource_guard import get_safe_cpu_budget
 import tempfile
 from collections import defaultdict
 from pathlib import Path
@@ -40,11 +41,7 @@ def _to_wsl_path(path_str: str) -> str:
 
 def _get_safe_threads(threads: Optional[int] = None) -> int:
     """至少保留 2 个 CPU 核心防止主机卡死"""
-    total_cpus = os.cpu_count() or 4
-    safe_cap = max(1, total_cpus - 2) if total_cpus > 2 else 1
-    if threads is not None and threads > 0:
-        return max(1, min(int(threads), safe_cap))
-    return safe_cap
+    return get_safe_cpu_budget(requested=int(threads) if threads is not None and threads > 0 else 0, reserve_cores=2)
 
 
 def _valid_file(path_candidate: Optional[Any]) -> Optional[Path]:

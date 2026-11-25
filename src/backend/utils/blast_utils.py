@@ -1,10 +1,8 @@
 
-import os
 import csv
 import logging
 import re
 from pathlib import Path
-from collections import Counter
 from typing import Optional
 
 logger = logging.getLogger("api_server")
@@ -235,7 +233,7 @@ def select_consensus_hit(hits: list) -> Optional[dict]:
     # 1. 提取绝对最高相似度基准
     try:
         first_sim = float(str(hits[0].get('similarity', '0')).replace('%', ''))
-    except:
+    except Exception:
         first_sim = 0.0
 
     max_search_depth = min(len(hits), 25)
@@ -261,7 +259,7 @@ def select_consensus_hit(hits: list) -> Optional[dict]:
         
         try:
             curr_sim = float(str(hit.get('similarity', '0')).replace('%', ''))
-        except:
+        except Exception:
             curr_sim = 0.0
             
         if curr_sim < sim_threshold:

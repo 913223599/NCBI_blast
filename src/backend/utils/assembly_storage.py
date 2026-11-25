@@ -50,5 +50,5 @@ class AssemblyStorage:
         """将绝对路径转换为相对于项目根目录的路径（用于前端显示）"""
         try:
             return os.path.relpath(absolute_path, os.getcwd())
-        except:
+        except Exception:
             return absolute_path

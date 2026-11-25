@@ -1,10 +1,9 @@
-import os
 import io
 import zipfile
 import gzip
 import logging
 from pathlib import Path
-from typing import Dict, Any, Generator, Optional, List
+from typing import Dict, Any, Generator, Optional
 from Bio import SeqIO
 
 logger = logging.getLogger(__name__)
@@ -105,7 +104,7 @@ class UniversalParser:
                 with open(file_path, 'r', encoding=enc) as f:
                     text = f.read()
                     break
-            except:
+            except Exception:
                 continue
         
         if text:
@@ -123,7 +122,7 @@ class UniversalParser:
                 if record.seq:
                     found_any = True
                     yield cls._format_record(record, display_name)
-        except:
+        except Exception:
             pass
             
         # 2. 如果 FASTA 没读到，尝试作为单条纯文本序列解析 (仅包含 A-Z)
@@ -174,6 +173,6 @@ class UniversalParser:
         for enc in cls.TEXT_ENCODINGS:
             try:
                 return content.decode(enc)
-            except:
+            except Exception:
                 continue
         return content.decode('utf-8', errors='replace')

@@ -11,7 +11,7 @@ Expert A：基因组结构与宿主偏倚表格专家（XGBoost，CUDA 优先，
 import argparse
 import json
 import logging
-import os
+from ...utils.resource_guard import get_safe_cpu_budget
 import time
 from datetime import datetime
 from pathlib import Path
@@ -122,7 +122,7 @@ def train_expert_a(
     x_va, y_va = va["features"][keep_va], va["labels"][keep_va].astype(np.int32)
 
     device = _select_device()
-    cpu_cnt = os.cpu_count() or 4
+    safe_jobs = get_safe_cpu_budget(requested=n_jobs or 0, reserve_cores=2)
     model = xgb.XGBClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -136,7 +136,7 @@ def train_expert_a(
         device=device,
         eval_metric="aucpr",
         early_stopping_rounds=early_stopping_rounds,
-        n_jobs=n_jobs if n_jobs is not None else max(1, cpu_cnt - 2),
+        n_jobs=safe_jobs,
     )
 
     t0 = time.perf_counter()

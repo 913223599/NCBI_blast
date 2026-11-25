@@ -3,7 +3,7 @@
 fast_matcher.py - 极速氨基酸序列相似度比对与 K-mer 剪枝加速器
 基于整型编码 K-mer 集合过滤、长度动态剪枝与 C 扩展 PairwiseAligner 对齐，全面释放 CPU 多核算力。
 """
-from typing import Set, Optional, Tuple, Dict
+from typing import Set, Optional, Dict
 import functools
 import threading
 from Bio.Align import PairwiseAligner

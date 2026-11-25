@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+from ...utils.resource_guard import get_safe_cpu_budget
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -63,8 +63,7 @@ def extract_contig_orfs_pyrodigal(
     if not items:
         return {}
 
-    cpu_cnt = os.cpu_count() or 8
-    max_w = workers if workers is not None else max(1, min(16, cpu_cnt - 4))
+    max_w = get_safe_cpu_budget(requested=workers or 0, reserve_cores=4, max_cap=16 if workers is None else None)
     out: Dict[str, List[Tuple[int, int, int, str]]] = {}
     if max_w <= 1 or len(items) == 1:
         for it in items:

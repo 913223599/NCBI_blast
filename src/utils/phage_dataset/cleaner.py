@@ -13,7 +13,7 @@ import argparse
 import csv
 import json
 import logging
-import os
+from ..resource_guard import get_safe_cpu_budget
 import re
 import sqlite3
 import subprocess
@@ -364,8 +364,7 @@ def scan_and_mask_negative_prophages(
     if not neg_sqlite.exists():
         return {"skipped": True, "reason": f"未找到负样本索引 {neg_sqlite}"}
 
-    cpu_cnt = os.cpu_count() or 4
-    worker_threads = threads if threads is not None else max(1, cpu_cnt - 2)
+    worker_threads = get_safe_cpu_budget(requested=threads or 0, reserve_cores=2)
 
     targets, cds_clusters = _collect_negative_targets_and_cds_clusters(
         neg_sqlite, neg_root, categories

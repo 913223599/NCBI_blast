@@ -10,7 +10,7 @@
 """
 import concurrent.futures
 import logging
-import os
+from ...utils.resource_guard import get_safe_cpu_budget
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -452,8 +452,7 @@ class GenomeScanner:
         self.blast_db = Path(blast_db) if blast_db else None
         self.blastp_bin = blastp_bin
         self.gate_config = gate_config or ProteinGateConfig(enabled=(blast_db is not None))
-        cpu_cnt = os.cpu_count() or 4
-        self.workers = workers if workers is not None else max(1, cpu_cnt - 2)
+        self.workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
 
         if device is not None:
             self.device = torch.device(device)

@@ -10,7 +10,7 @@
 """
 import concurrent.futures
 import logging
-import os
+from ..resource_guard import get_safe_cpu_budget
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -279,8 +279,9 @@ def validate_negative_dataset_parallel(
     if not all_accessions:
         return []
 
-    cpu_cnt = os.cpu_count() or 4
-    safe_workers = max_workers if max_workers is not None else max(1, min(cpu_cnt - 2, 16))
+    safe_workers = get_safe_cpu_budget(
+        requested=max_workers or 0, reserve_cores=2, max_cap=16 if max_workers is None else None
+    )
     tasks = [
         (acc, str(fasta_dir / f"{acc}.fasta"), str(gbk_dir / f"{acc}.gbk"), min_length_bp)
         for acc in all_accessions

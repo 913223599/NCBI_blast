@@ -11,6 +11,7 @@ import sys
 import gzip
 import json
 import logging
+from ...utils.resource_guard import get_safe_cpu_budget
 import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -58,8 +59,7 @@ class AssemblerStep(BaseAssemblyStep):
 
         self.status = "running"
         params = self.context.config.get("params", {})
-        cpu_count = os.cpu_count() or 8
-        optimal_threads = params.get("threads") or max(1, cpu_count - 2)
+        optimal_threads = get_safe_cpu_budget(requested=params.get("threads") or 0, reserve_cores=2)
         threads_str = str(optimal_threads)
 
         tech = (self.context.config.get("tech") or "ILLUMINA").upper()

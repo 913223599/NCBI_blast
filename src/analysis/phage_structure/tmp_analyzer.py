@@ -12,11 +12,11 @@
 from __future__ import annotations
 
 import concurrent.futures
-import os
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .thresholds import DEFAULT_THRESHOLDS, SplitTmpThresholds, TmpSelectionThresholds
+from ...utils.resource_guard import get_safe_cpu_budget
 from .tmp_split_merger import find_and_merge_split_tmps
 from .types import (
     HydrophobicSegment,
@@ -686,7 +686,7 @@ def select_and_analyze_tmps(
             and p.evidence_source in ("pyhmmer_phrog", "phold_3d")
             and p.hmm_score >= thresholds.high_conf_verified_hmm_score
             and ctx["tail_trunk_anchors"] >= 1
-            and not primary_pf in _CONFOUNDER_PFAMS
+            and primary_pf not in _CONFOUNDER_PFAMS
         )
         if has_confounder_pfam and not (has_strong_tmp_pfam and not primary_is_confounder) and not is_high_conf_verified_tmp:
             continue
@@ -847,8 +847,11 @@ def select_and_analyze_tmps(
     if not candidates:
         return []
 
-    cpu_cnt = os.cpu_count() or 4
-    workers = max_workers if max_workers is not None else max(1, min(len(candidates), cpu_cnt - 2, 8))
+    workers = (
+        max_workers
+        if max_workers is not None
+        else get_safe_cpu_budget(requested=0, reserve_cores=2, max_cap=min(len(candidates), 8))
+    )
     if len(candidates) > 1 and workers > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             items = list(

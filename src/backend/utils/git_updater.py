@@ -10,7 +10,6 @@ git_updater.py - 软件更新服务模块
 """
 
 import os
-import sys
 import json
 import shutil
 import subprocess

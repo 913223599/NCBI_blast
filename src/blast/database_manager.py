@@ -62,11 +62,14 @@ class DatabaseManager:
         ]
 
         try:
-            result = subprocess.run(
+            subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                check=True
+                encoding="utf-8",
+                errors="replace",
+                check=True,
+                timeout=1800,
             )
             return True, f"数据库创建成功: {out_name}"
         except subprocess.CalledProcessError as e:

@@ -127,10 +127,10 @@ class AssemblyDB:
             for r in rows:
                 if r.get('config') and isinstance(r['config'], str):
                     try: r['config'] = json.loads(r['config'])
-                    except: pass
+                    except Exception: pass
                 if r.get('results') and isinstance(r['results'], str):
                     try: r['results'] = json.loads(r['results'])
-                    except: pass
+                    except Exception: pass
             return rows
 
     def delete_task(self, task_id: str):

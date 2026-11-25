@@ -3,11 +3,9 @@
 Prodigal 极速 CDS 预测引擎 (ProdigalEngine)
 利用非监督机器学习与核糖体结合位点识别算法进行高精度原核/病毒 CDS 定位
 """
-import os
-import shutil
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional, Tuple, Callable
 from Bio import SeqIO
 
 from .base import BaseAnnotationEngine

@@ -2,7 +2,7 @@ import urllib.request
 import urllib.parse
 import json
 import logging
-from typing import List, Optional
+from typing import List
 
 logger = logging.getLogger(__name__)
 

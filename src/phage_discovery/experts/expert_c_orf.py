@@ -14,7 +14,7 @@ import concurrent.futures
 import gc
 import json
 import logging
-import os
+from ...utils.resource_guard import get_safe_cpu_budget
 import tempfile
 import time
 from datetime import datetime
@@ -115,7 +115,7 @@ def _assemble_contig_orf_tokens(
                 in_win = [(gs, ge, f_strand, gc_fb, _encode_protein_22(aa_seq), extra_fb)]
 
         mat = np.zeros((MAX_ORFS_PER_WIN, orf_dim), dtype=np.float32)
-        for ti, (gs, ge, strand, gc, aa_vec, extra_vec) in enumerate(in_win):
+        for ti, (gs, ge, strand, orf_gc, aa_vec, extra_vec) in enumerate(in_win):
             glen = max(1, ge - gs)
             prev_end = in_win[ti - 1][1] if ti > 0 else ws
             gap = gs - prev_end
@@ -123,8 +123,8 @@ def _assemble_contig_orf_tokens(
             topo = np.array([
                 float(np.log1p(glen)),
                 float(strand),
-                gc,
-                gc - ctx_gc,
+                orf_gc,
+                orf_gc - ctx_gc,
                 float(np.log1p(max(0, gap))),
                 float(np.log1p(overlap)),
                 (gs - ws) / float(wlen),
@@ -270,8 +270,7 @@ def extract_orf_tensors_for_part(
         for cid, seq in iter_fasta(fasta_path)
         if cid in by_contig
     ]
-    cpu_cnt = os.cpu_count() or 4
-    n_workers = workers if workers is not None else max(1, cpu_cnt - 2)
+    n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
 
     if n_workers > 1 and len(tasks) > 1:
         with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as ex:

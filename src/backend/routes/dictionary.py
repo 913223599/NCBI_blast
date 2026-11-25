@@ -1,8 +1,7 @@
 
 import logging
 import threading
-import sqlite3
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List
 from ..broadcaster import broadcaster
@@ -10,7 +9,6 @@ from ..broadcaster import broadcaster
 logger = logging.getLogger("api_server")
 router = APIRouter(tags=["Dictionary"])
 
-from ...utils.taxonomy_provider import get_taxonomy_provider
 
 # ─── 模型定义 ─────────────────────────────────────────
 

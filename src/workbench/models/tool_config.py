@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from ...utils.resource_guard import get_safe_cpu_budget
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger("ToolConfig")
@@ -199,7 +200,7 @@ class ToolConfig:
             return False
 
     # Performance
-    MAX_THREADS = max(1, (os.cpu_count() or 4) - 1)
+    MAX_THREADS = get_safe_cpu_budget(reserve_cores=2)
 
     # Initialize environment for vendor tools
     @classmethod

@@ -2,9 +2,8 @@ import asyncio
 import re
 import logging
 import time
-import shlex
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Callable, Union
+from typing import List, Optional, Dict, Callable, Union
 
 class CommandRunner:
     """
@@ -39,7 +38,7 @@ class CommandRunner:
         执行命令并持续监控输出 (支持 WSL 自动转换与智能路由)
         """
         if getattr(self, 'is_aborted', False):
-            self.logger.warning(f" 任务已终止，拒绝执行后续命令")
+            self.logger.warning(" 任务已终止，拒绝执行后续命令")
             return -99
 
         # ==========================================

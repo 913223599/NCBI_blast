@@ -87,7 +87,9 @@ class NcbiTreeToolWrapper:
             ]
             
             # 注意：mds 工具可能输出到 stdout
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True, timeout=600
+            )
             
             # 3. 解析输出
             # mds 输出 CSV 格式到 stdout: ObjName, Mult, PC_1, PC_2 ...

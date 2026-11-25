@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
+from ..utils.resource_guard import get_total_logical_cores
 
 from Bio.Blast import NCBIXML
 from ..workbench.models.tool_config import ToolConfig
@@ -22,7 +23,7 @@ def compute_local_blast_resource_plan(
     计算本地 BLAST 的 (最大并发子进程数, 单进程线程数)。
     严格遵守系统核心保留规则（Rule 8），确保 max_concurrent * threads <= cpu_cnt - reserved。
     """
-    cpu_cnt = max(1, cpu_count if cpu_count is not None else (os.cpu_count() or 4))
+    cpu_cnt = max(1, cpu_count if cpu_count is not None else get_total_logical_cores())
     if cpu_cnt >= 12:
         reserved = 4
     elif cpu_cnt >= 4:
@@ -74,7 +75,7 @@ class LocalBlastExecutor:
         print("方法一：使用NCBI提供的工具")
         print(f"  update_blastdb.pl --decompress {db_name}")
         print("方法二：从NCBI网站下载")
-        print(f"  https://ftp.ncbi.nih.gov/blast/db/")
+        print("  https://ftp.ncbi.nih.gov/blast/db/")
 
     def execute_local_blast(self, sequence_file, output_file, max_hits=50, program=None, num_threads=None):
         """执行本地BLAST搜索，支持 blastn/blastp 等多种程序并开启多核并行加速"""
@@ -156,9 +157,12 @@ class LocalBlastExecutor:
                     shell=True,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     check=True,
                     env=env,
-                    creationflags=creationflags
+                    creationflags=creationflags,
+                    timeout=3600,
                 )
             
             if not Path(output_file).exists():

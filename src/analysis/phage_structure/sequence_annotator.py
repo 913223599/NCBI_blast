@@ -16,6 +16,7 @@ import csv
 import gc
 import gzip
 import io
+from ...utils.resource_guard import get_safe_cpu_budget
 import json
 import logging
 import os
@@ -52,11 +53,9 @@ _MANIFEST_NAME = "structural_phrogs.manifest.json"
 
 
 def get_safe_workers(requested: Optional[int] = None) -> int:
-    cpu_cnt = os.cpu_count() or 4
-    safe_max = max(1, cpu_cnt - 2)
     if requested and requested > 0:
-        return min(requested, safe_max)
-    return min(14, safe_max)
+        return get_safe_cpu_budget(requested=requested, reserve_cores=2)
+    return get_safe_cpu_budget(requested=0, reserve_cores=2, max_cap=14)
 
 
 def resolve_structural_hmm_path() -> Optional[Path]:

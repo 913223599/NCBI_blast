@@ -7,7 +7,6 @@
 3. 修正属名漏字、误翻或混杂
 """
 
-import re
 from typing import Tuple, Optional
 from .taxonomy_kb import TaxonomyKnowledgeBase
 

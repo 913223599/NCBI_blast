@@ -8,20 +8,17 @@
 4. 生成详细维护报告与差异审计
 """
 
-import os
-import sys
 import time
 import json
 import shutil
 import sqlite3
 import logging
 from pathlib import Path
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional
 
 from .term_cleaner import TermCleaner
 from .genus_aligner import GenusAligner
 from .epithet_corrector import EpithetCorrector
-from .taxonomy_kb import TaxonomyKnowledgeBase
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)

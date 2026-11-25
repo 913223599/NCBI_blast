@@ -431,32 +431,22 @@ def resolve_protein_gate_resources(
 
 
 def get_safe_workers(requested: Optional[int] = None) -> int:
-    """动态计算多核安全并发数，强制保留至少 2 个核心防止桌面主机卡死。"""
-    cpu_cnt = os.cpu_count() or 4
-    safe_cap = max(1, cpu_cnt - 2)
-    if requested is not None and requested > 0:
-        return max(1, min(requested, safe_cap))
-    return safe_cap
+    """动态计算多核安全并发数，委托全局资源守卫强制保留核心防止桌面主机卡死。"""
+    from ...utils.resource_guard import get_safe_cpu_budget
+
+    return get_safe_cpu_budget(requested=requested or 0, reserve_cores=2)
 
 
 def detect_compute_environment() -> Dict[str, Any]:
-    """探测当前 GPU/CUDA 与 CPU 安全线程配置及显存容量信息。"""
-    cpu_cnt = os.cpu_count() or 4
+    """探测当前 GPU/CUDA 与 CPU 安全线程配置及显存容量信息（复用全局 GpuGuard）。"""
+    from ...utils.resource_guard import GpuGuard, get_total_logical_cores
+
+    cpu_cnt = get_total_logical_cores()
     safe_workers = get_safe_workers()
-    cuda_available = False
-    gpu_name = ""
-    gpu_vram_gb = 0.0
-
-    try:
-        import torch
-
-        cuda_available = torch.cuda.is_available()
-        if cuda_available:
-            props = torch.cuda.get_device_properties(0)
-            gpu_name = str(props.name)
-            gpu_vram_gb = round(float(props.total_memory) / (1024.0 ** 3), 2)
-    except Exception:
-        cuda_available = False
+    gpu_info = GpuGuard.probe()
+    cuda_available = bool(gpu_info.get("available"))
+    gpu_name = str(gpu_info.get("name") or "")
+    gpu_vram_gb = round(float(gpu_info.get("total_vram_mb") or 0) / 1024.0, 2) if cuda_available else 0.0
 
     return {
         "cpu_cores": cpu_cnt,

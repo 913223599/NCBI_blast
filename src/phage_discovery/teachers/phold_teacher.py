@@ -13,6 +13,7 @@ import gzip
 import io
 import logging
 import os
+from ...utils.resource_guard import get_safe_cpu_budget
 import pickle
 import shlex
 import subprocess
@@ -148,8 +149,7 @@ def run_phold_batch_wsl(
         raise FileNotFoundError(f"phold_db 目录不存在: {resolved_db}")
     wsl_db = to_wsl_path(resolved_db)
 
-    cpu_cnt = os.cpu_count() or 8
-    n_threads = int(threads) if threads is not None else max(1, cpu_cnt - 4)
+    n_threads = get_safe_cpu_budget(requested=int(threads) if threads is not None else 0, reserve_cores=4)
     stage = f"/tmp/phold_stage_{os.getpid()}_{int(time.time() * 1000)}"
 
     # 按长度降序预排序后再写入 FASTA（配合 phold 内部 max_residues=5000 进一步降低 padding 与显存波动）
@@ -194,6 +194,7 @@ def run_phold_batch_wsl(
             capture_output=True,
             text=True,
             encoding="utf-8",
+            timeout=60,
         )
 
 

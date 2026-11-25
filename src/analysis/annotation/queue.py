@@ -7,8 +7,6 @@
 3. 状态广播：基于 WebSocket 实时广播队列快照 (排队序号、运行状态)
 4. 资源守卫：执行前后主动触发 GPU 显存回收与 CPU 核心保护
 """
-import os
-import time
 import asyncio
 import logging
 from typing import Dict, Any, Callable, Awaitable, List, Optional, Set

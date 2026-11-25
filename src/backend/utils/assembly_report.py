@@ -7,10 +7,9 @@ assembly_report.py - 基因组拼接报告数据解析器
 import csv
 import json
 import logging
-import math
 import re
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger("api_server")
 
@@ -411,7 +410,7 @@ class AssemblyReportParser:
             
             tree_png = anno_dir / "phage_plot" / "phage_phylogeny.png"
             if tree_png.exists():
-                result["phylogeny_map"] = f"phageannotationstep/phage_plot/phage_phylogeny.png"
+                result["phylogeny_map"] = "phageannotationstep/phage_plot/phage_phylogeny.png"
 
         return result
 

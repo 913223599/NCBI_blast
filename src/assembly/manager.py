@@ -4,12 +4,10 @@ AssemblyManager - 纯净版基因组组装管理器
 全面收敛于 NGCS (Neural Genome Coordinate System) 组装引擎，提供高保真基因组拼接与指标解析服务。
 """
 
-import os
 import time
 import logging
-import asyncio
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 from .core.base import PipelineContext
 from .steps.assembler import AssemblerStep

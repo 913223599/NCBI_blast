@@ -3,10 +3,9 @@
 Pharokka 噬菌体专用全特征注释引擎 (PharokkaEngine)
 结合 PHROGs 噬菌体特异性模型、tRNA-scan、MinCED CRISPR 探测与末端基因识别
 """
-import os
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional, Tuple, Callable
 from Bio import SeqIO
 
 from .base import BaseAnnotationEngine

@@ -179,6 +179,6 @@ class BaseAssemblyStep(abc.ABC):
                 self.context.data["system_total_memory_gb"] = gb
                 _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb
                 return gb
-        except: pass
+        except Exception: pass
         _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb or 16.0
         return _CACHED_SYSTEM_TOTAL_MEMORY_GB

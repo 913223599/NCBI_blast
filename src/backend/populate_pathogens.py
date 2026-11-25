@@ -1,7 +1,5 @@
-import os
 import sys
 import logging
-import json
 from pathlib import Path
 
 # 设置日志
@@ -15,7 +13,6 @@ if str(project_root) not in sys.path:
 
 from src.utils.taxonomy_provider import get_taxonomy_provider
 from src.utils.taxonomy_sync_service import get_taxonomy_sync_service
-from src.backend.strain_db import get_strain_db_manager
 
 # 1. 定义常见病原菌属列表
 PATHOGENIC_GENERA = [

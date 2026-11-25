@@ -42,13 +42,14 @@ class RotationChecker:
             cmd = ["wsl", "-d", "Ubuntu", "-u", "root", "minimap2", "-x", "asm5", "--cs", wsl_doubled, wsl_seq2]
             
             with open(paf_out, 'w', encoding='utf-8') as out_f:
-                process = subprocess.run(
+                subprocess.run(
                     cmd, 
                     stdout=out_f, 
                     stderr=subprocess.PIPE, 
                     check=True, 
                     encoding='utf-8', 
-                    errors='ignore'
+                    errors='ignore',
+                    timeout=1800
                 )
         except Exception as e:
             return {"success": False, "error": f"Minimap2 execution failed: {e}"}

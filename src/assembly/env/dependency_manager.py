@@ -3,10 +3,8 @@ import subprocess
 import shutil
 import logging
 import asyncio
-from typing import List, Dict, Optional
+from typing import Dict
 
-import asyncio
-from typing import List, Dict, Optional
 from .conda_resolver import CondaResolver
 
 from .wsl_manager import WSLManager
@@ -31,7 +29,7 @@ class DependencyManager:
                 cmd = ["wsl", "-d", "Ubuntu", "-u", "root", "which", tool_name]
                 res = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore', timeout=5)
                 return res.returncode == 0
-            except:
+            except Exception:
                 pass
         return False
 
@@ -78,7 +76,7 @@ class DependencyManager:
                     stderr=asyncio.subprocess.PIPE
                 )
                 await process.communicate()
-        except:
+        except Exception:
             # 如果是旧版 conda 可能没有 tos 命令，忽略错误继续
             pass
 

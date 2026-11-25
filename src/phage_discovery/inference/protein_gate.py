@@ -9,8 +9,8 @@
 3. 针对极端高 GC（>=67%）OOD 假阳性施加强蛋白证据拦截，同时对正常 GC 高置信暗物质噬菌体保留保守豁免通路。
 """
 import logging
-import os
 import re
+from ...utils.resource_guard import get_safe_cpu_budget
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -161,8 +161,7 @@ def _run_batch_blastp(
         return {}
 
     db_dir, db_name = _resolve_blast_db(blast_db)
-    cpu_cnt = os.cpu_count() or 4
-    n_threads = threads if threads is not None else max(1, cpu_cnt - 2)
+    n_threads = get_safe_cpu_budget(requested=threads or 0, reserve_cores=2)
 
     best_hits: Dict[str, Tuple[float, str]] = {}
     with tempfile.TemporaryDirectory(prefix="phage_pgate_") as tmpdir:
@@ -200,6 +199,7 @@ def _run_batch_blastp(
             encoding="utf-8",
             errors="replace",
             check=False,
+            timeout=1800,
         )
         if proc.returncode != 0:
             raise RuntimeError(f"blastp 执行失败 (exit={proc.returncode}): {proc.stderr.strip()}")

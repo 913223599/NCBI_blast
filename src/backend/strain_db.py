@@ -30,7 +30,7 @@ class StrainDBManager:
         if self._conn_cache:
             try:
                 self._conn_cache.close()
-            except:
+            except Exception:
                 pass
             finally:
                 self._conn_cache = None
@@ -479,14 +479,14 @@ class StrainDBManager:
                             engine = params.get("engine", "NJ").upper()
                             model = params.get("model", "JC").upper()
                             algorithm = f"{msa} / {engine} ({model})"
-                        except: pass
+                        except Exception: pass
                     
                     # 尝试从 manifest 恢复指纹
                     manifest_file = s_dir / "sequence_manifest.json"
                     if manifest_file.exists():
                         try:
                             id_to_hash = json.loads(manifest_file.read_text(encoding='utf-8'))
-                        except: pass
+                        except Exception: pass
                     
                     # 如果没有 manifest 但有 FASTA，手动生成指纹
                     if not id_to_hash and fasta and fasta.exists():
@@ -517,7 +517,7 @@ class StrainDBManager:
                         "time": int(mtime * 1000)
                     }
                     history_map[p_id].append(items_data)
-                except: continue
+                except Exception: continue
         
         if not history_map: return
         

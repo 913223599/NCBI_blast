@@ -16,11 +16,12 @@ import shutil
 import tempfile
 import subprocess
 import logging
+from ...utils.resource_guard import get_safe_cpu_budget
 import concurrent.futures
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 
-from .fast_matcher import fast_seq_identity, get_kmers
+from .fast_matcher import fast_seq_identity
 
 logger = logging.getLogger("pan_genomics.ani_calculator")
 
@@ -71,6 +72,27 @@ class OrthoANICalculator:
             logger.warning("未探测到本地 NCBI BLASTN，OrthoANI 将自适应平滑启用纯 Python/C 备用对齐器")
 
     @staticmethod
+    def _is_runnable_blastn(binary_path: str) -> bool:
+        """探测 blastn 可执行文件在当前操作系统下是否确实可运行（排除 WinError 216 等异构二进制）。"""
+        if not binary_path or not os.path.exists(binary_path):
+            return False
+        if os.name == "nt" and Path(binary_path).suffix.lower() not in {".exe", ".bat", ".cmd"}:
+            return False
+        try:
+            proc = subprocess.run(
+                [binary_path, "-version"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                check=False,
+            )
+            return proc.returncode == 0
+        except OSError:
+            return False
+
+    @staticmethod
     def _resolve_blastn_binary() -> Optional[str]:
         """
         多层级智能定位 NCBI BLASTN 可执行文件:
@@ -78,10 +100,12 @@ class OrthoANICalculator:
         2. 项目内置打包发布目录 (dist/NCBI_BLAST_GUI/_internal/bin) 与 vendor 目录
         3. 常见操作系统独立安装目录 (C/D/E 盘 Program Files/NCBI/blast-*)
         """
+        candidates: List[str] = []
+
         # 1. 优先检查系统 PATH
         p_path = shutil.which("blastn")
         if p_path:
-            return p_path
+            candidates.append(p_path)
 
         # 2. 检查项目工程内置打包目录与工具箱
         root = Path(__file__).resolve().parent.parent.parent.parent
@@ -93,7 +117,7 @@ class OrthoANICalculator:
         ]
         for candidate in internal_candidates:
             if candidate.exists() and os.access(str(candidate), os.R_OK):
-                return str(candidate)
+                candidates.append(str(candidate))
 
         # 3. 扫描 Windows 常见独立安装目录
         search_patterns = [
@@ -103,18 +127,22 @@ class OrthoANICalculator:
             r"C:\Program Files (x86)\NCBI\blast-*\bin\blastn.exe",
         ]
         for pat in search_patterns:
-            matches = glob.glob(pat)
-            if matches and os.path.exists(matches[0]):
-                return matches[0]
+            candidates.extend(glob.glob(pat))
+
+        seen = set()
+        for cand in candidates:
+            norm = os.path.normcase(os.path.abspath(cand))
+            if norm in seen:
+                continue
+            seen.add(norm)
+            if OrthoANICalculator._is_runnable_blastn(cand):
+                return cand
 
         return None
 
     def _get_safe_workers(self, user_threads: Optional[int] = None) -> int:
         """动态计算安全并发线程数 (保留 2 核心防卡死，上限 30 核心)"""
-        cpu_cnt = os.cpu_count() or 4
-        if user_threads and user_threads > 0:
-            return min(user_threads, max(1, cpu_cnt - 2))
-        return max(1, min(cpu_cnt - 2, 30))
+        return get_safe_cpu_budget(requested=user_threads or 0, reserve_cores=2, max_cap=30)
 
     def slice_genome(self, sample_id: str, dna_seq: str) -> List[SliceItem]:
         """将全长基因组 DNA 严格切分为无重叠 1020 bp 切片窗口"""
@@ -232,7 +260,9 @@ class OrthoANICalculator:
 
         def run_blast(cmd):
             try:
-                res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                res = subprocess.run(
+                    cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=True, timeout=1800
+                )
                 return res.stdout
             except Exception as e:
                 logger.warning(f"BLASTN 比对异常: {e}")

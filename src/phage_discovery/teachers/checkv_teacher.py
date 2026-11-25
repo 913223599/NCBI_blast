@@ -13,6 +13,7 @@ import csv
 import json
 import logging
 import os
+from ...utils.resource_guard import get_safe_cpu_budget
 import shlex
 import subprocess
 import time
@@ -43,8 +44,7 @@ def run_checkv_end_to_end(
     db = db_dir or os.environ.get("CHECKV_DB", "")
     if not db:
         raise ValueError("未提供 CheckV 数据库路径（参数 db_dir 或环境变量 CHECKV_DB）")
-    cpu_cnt = os.cpu_count() or 4
-    n_threads = threads if threads is not None else max(1, cpu_cnt - 2)
+    n_threads = get_safe_cpu_budget(requested=threads or 0, reserve_cores=2)
 
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)

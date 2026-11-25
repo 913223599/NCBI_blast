@@ -37,6 +37,8 @@ class Minimap2Engine(BaseEngine):
                 ["wsl", "-d", "Ubuntu", "-u", "root", self.tool_name, "--version"],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10
             )
             return result.returncode == 0

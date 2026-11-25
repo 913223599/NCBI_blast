@@ -146,9 +146,12 @@ class ToolRegistry:
             self._wsl_distro = ""
             return discovered
 
-        # 动态扫描 PATH、用户 miniforge3/envs/phylo_phage 与 /opt 嵌套 bin 目录，禁止写死版本号路径
+        # 动态扫描 PATH、用户 miniforge3/envs/phylo_phage 与 /opt 嵌套 bin 目录，禁止写死个人用户名或版本号路径
         probe_script = r"""
-export PATH="$HOME/miniforge3/envs/phylo_phage/bin:/home/administrator/miniforge3/envs/phylo_phage/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+for _p in "$HOME/miniforge3/envs/phylo_phage/bin" /home/*/miniforge3/envs/phylo_phage/bin /opt/*/envs/phylo_phage/bin /usr/local/bin /usr/bin /bin; do
+  [ -d "$_p" ] && PATH="$_p:$PATH"
+done
+export PATH
 find_tool() {
   for cand in "$@"; do
     p=$(command -v "$cand" 2>/dev/null || true)

@@ -2,7 +2,7 @@
 """
 功能注释数据模型定义
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from pydantic import BaseModel, Field
 
 

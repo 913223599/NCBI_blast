@@ -2,7 +2,7 @@
 import os
 import subprocess
 from pathlib import Path
-from typing import Optional, List
+from typing import List
 
 class WSLManager:
     """
@@ -15,7 +15,7 @@ class WSLManager:
             # 尝试获取 WSL 发行版列表
             res = subprocess.run(["wsl", "--list", "--quiet"], capture_output=True, timeout=5)
             return res.returncode == 0
-        except:
+        except Exception:
             return False
 
     @classmethod
@@ -39,7 +39,7 @@ class WSLManager:
                 # 注意: Python 3.11 的 f-string 表达式内不允许出现反斜杠，需先转换
                 relative_posix = str(relative).replace("\\", "/")
                 return f"/ncbi_blast_link/{relative_posix}"
-        except:
+        except Exception:
             pass
 
         # 2. 如果不在项目目录下，使用标准 /mnt 转换
@@ -67,7 +67,7 @@ class WSLManager:
             distro = cls.get_best_distro()
             cmd = ["wsl", "-d", distro, "-u", "root", "ln", "-sfT", target, link]
             subprocess.run(cmd, capture_output=True, timeout=5)
-        except:
+        except Exception:
             pass
 
     @classmethod

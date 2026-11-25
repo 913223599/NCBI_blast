@@ -4,7 +4,7 @@ import re
 import gzip
 import zipfile
 from pathlib import Path
-from typing import Tuple, Optional, Dict, Any, List, Callable, Union
+from typing import Optional, List, Callable, Union
 
 class AssemblyFileHandler:
     """
@@ -131,7 +131,7 @@ class AssemblyFileHandler:
                 on_progress(100.0, "测序数据聚合完成")
             return True
 
-        except Exception as e:
+        except Exception:
             if tmp_p.exists():
                 try:
                     tmp_p.unlink()

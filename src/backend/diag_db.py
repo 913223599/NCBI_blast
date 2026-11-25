@@ -44,7 +44,7 @@ def analyze_db():
                 meta = json.loads(row[3])
                 keys = list(meta.keys())
                 print(f"   Keys in metadata: {keys[:10]}{'...' if len(keys) > 10 else ''}")
-            except:
+            except Exception:
                 print("   [!] Metadata is not valid JSON")
 
         conn.close()

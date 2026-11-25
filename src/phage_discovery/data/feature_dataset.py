@@ -15,7 +15,7 @@ import concurrent.futures
 import csv
 import json
 import logging
-import os
+from ...utils.resource_guard import get_safe_cpu_budget
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -119,8 +119,7 @@ def build_split_features(
     manifest = json.loads((bench_root / "benchmark_manifest.json").read_text(encoding="utf-8"))
     info = manifest["splits"][split_name]
 
-    cpu_cnt = os.cpu_count() or 4
-    n_workers = workers if workers is not None else max(1, cpu_cnt - 2)
+    n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
     summary: Dict[str, Any] = {"split": split_name}
 
     # 1. 独立窗口部分
@@ -194,8 +193,7 @@ def build_extra_chimera_features(
     """将额外嵌合体/真实前噬菌体基因组序列提取为特征分片 npz（如 CheckV 挖掘数据集）。"""
     out_path = Path(out_npz).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    cpu_cnt = os.cpu_count() or 4
-    n_workers = workers if workers is not None else max(1, cpu_cnt - 2)
+    n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
 
     if overwrite or not out_path.exists():
         regions: Dict[str, List[Tuple[int, int]]] = defaultdict(list)

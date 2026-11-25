@@ -6,7 +6,7 @@
 """
 import re
 import logging
-from typing import Dict, List, Any, Optional, Tuple, Set
+from typing import Dict, List, Any, Optional, Tuple
 
 from .types import FeatureItem, AnnotationSummary
 

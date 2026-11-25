@@ -66,7 +66,7 @@ class FileHandler:
                 if hasattr(result_handle, 'seek'):
                     try:
                         result_handle.seek(0)
-                    except:
+                    except Exception:
                         pass
                 shutil.copyfileobj(result_handle, out_handle)
         except Exception as e:

@@ -1,4 +1,3 @@
-import os
 import sys
 import logging
 from pathlib import Path
@@ -69,7 +68,7 @@ def prefill_code_lookup():
     raw_lookup = final_data.get('codeLookup', {})
     entries = raw_lookup.get('entries', []) if isinstance(raw_lookup, dict) else []
     
-    logging.info(f"Successfully finished updating code lookup.")
+    logging.info("Successfully finished updating code lookup.")
     logging.info(f"Generated {len(entries)} robust hierarchical records based entirely on ETE4 taxonomy relationships!")
 
 if __name__ == "__main__":

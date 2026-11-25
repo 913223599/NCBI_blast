@@ -1,7 +1,7 @@
 import os
 import logging
 from Bio import SeqIO
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 logger = logging.getLogger("api_server")
 

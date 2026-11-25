@@ -68,7 +68,7 @@ class QwenTranslator:
                 return config_manager.get_supported_model_keys()
             else:
                 return config_manager.get_supported_models()
-        except Exception as e:
+        except Exception:
             # 如果配置管理器不可用，返回默认值
             default_models = {
                 'qwen-plus': '通义千问-Plus',
@@ -161,7 +161,7 @@ class QwenTranslator:
         
         if QwenTranslator._has_arrearage:
             import logging
-            logging.getLogger(__name__).warning(f"[DEBUG] _has_arrearage is TRUE! Skipping network.")
+            logging.getLogger(__name__).warning("[DEBUG] _has_arrearage is TRUE! Skipping network.")
             return text
 
         import logging
@@ -199,7 +199,7 @@ class QwenTranslator:
             if 'Arrearage' in err_msg or 'overdue-payment' in err_msg or 'FreeTierOnly' in err_msg or 'free tier' in err_msg.lower():
                 if not QwenTranslator._has_arrearage:
                     QwenTranslator._has_arrearage = True
-                    logger.error(f"[严重错误] AI 翻译账户欠费或免费额度已耗尽，已进入静默模式。")
+                    logger.error("[严重错误] AI 翻译账户欠费或免费额度已耗尽，已进入静默模式。")
                     if QwenTranslator._on_arrearage_callback:
                         QwenTranslator._on_arrearage_callback()
                 return text
@@ -254,7 +254,7 @@ class QwenTranslator:
         
         if QwenTranslator._has_arrearage:
             import logging
-            logging.getLogger(__name__).warning(f"[DEBUG] _has_arrearage is TRUE! Skipping batch network request.")
+            logging.getLogger(__name__).warning("[DEBUG] _has_arrearage is TRUE! Skipping batch network request.")
             return texts
 
         try:
@@ -301,7 +301,7 @@ class QwenTranslator:
             if 'Arrearage' in err_msg or 'overdue-payment' in err_msg or 'FreeTierOnly' in err_msg or 'free tier' in err_msg.lower():
                 if not QwenTranslator._has_arrearage:
                     QwenTranslator._has_arrearage = True
-                    logger.error(f"[严重错误] 批量AI翻译账户欠费或免费额度已耗尽，已进入静默模式。")
+                    logger.error("[严重错误] 批量AI翻译账户欠费或免费额度已耗尽，已进入静默模式。")
                     if QwenTranslator._on_arrearage_callback:
                         QwenTranslator._on_arrearage_callback()
 

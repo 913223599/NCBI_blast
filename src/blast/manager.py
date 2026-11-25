@@ -647,7 +647,7 @@ class BlastManager:
                     try:
                         parsed_params = json.loads(t['params'])
                         t['task_name'] = parsed_params.get('task_name')
-                    except:
+                    except Exception:
                         pass
                 elif isinstance(t.get('params'), dict):
                     t['task_name'] = t['params'].get('task_name')

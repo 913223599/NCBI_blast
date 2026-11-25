@@ -27,7 +27,7 @@ class TranslationDataManager:
         if self._get_count() > 0:
             return
 
-        print(f"\n[!] 检测到新环境，正在将预置词库同步到 SQLite 数据库...", flush=True)
+        print("\n[!] 检测到新环境，正在将预置词库同步到 SQLite 数据库...", flush=True)
 
         csv_files = [
             self.project_root / "translation_data.csv",

@@ -171,7 +171,9 @@ class ProcessRunner:
         quoted_cmd = " ".join(shlex.quote(a) for a in wsl_cmd_args)
         stdin_script = (
             f"echo $$ > {shlex.quote(wsl_pgid_path)}\n"
-            f'export PATH="/home/administrator/miniforge3/envs/phylo_phage/bin:/usr/local/bin:$PATH"\n'
+            'for _p in "$HOME/miniforge3/envs/phylo_phage/bin" /home/*/miniforge3/envs/phylo_phage/bin /opt/*/envs/phylo_phage/bin /usr/local/bin; do '
+            '[ -d "$_p" ] && PATH="$_p:$PATH"; done\n'
+            'export PATH\n'
             f"exec {quoted_cmd}\n"
         ).encode("utf-8")
         full_cmd = [

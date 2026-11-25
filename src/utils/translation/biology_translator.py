@@ -81,7 +81,7 @@ class BiologyTranslator:
                     pure_name = match.group(1).strip()
                     try:
                         pct_val = int(match.group(2))
-                    except:
+                    except Exception:
                         pct_val = 100
                     
                     # 翻译纯名称 (允许递归，但会被全匹配缓存拦截)
@@ -178,7 +178,7 @@ class BiologyTranslator:
                                 # 2. 调用术语提取深度学习分析（如有）
                                 try:
                                     self.term_extractor.extract_and_store_key_terms(text, ai_result)
-                                except:
+                                except Exception:
                                     pass
                         
                         # 移除原先带有的 [AI] 前缀，保证界面的清洁度和词库的标准性
@@ -297,7 +297,7 @@ class BiologyTranslator:
                                         lineage = tax_provider.get_lineage_details(pure_text)
                                         if not lineage:
                                             is_valid = False
-                                    except: pass
+                                    except Exception: pass
                                 
                                 if is_valid:
                                     self.translation_data_manager.add_translation(
@@ -305,7 +305,7 @@ class BiologyTranslator:
                                     )
                                     try:
                                         self.term_extractor.extract_and_store_key_terms(pure_text, ai_res)
-                                    except:
+                                    except Exception:
                                         pass
             except Exception as e:
                 import logging

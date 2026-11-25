@@ -10,6 +10,7 @@ import ctypes
 import hashlib
 import json
 import os
+from ...utils.resource_guard import get_total_logical_cores
 import shutil
 import subprocess
 import tempfile
@@ -69,7 +70,7 @@ def compute_parallel_plan(
     严格遵守核心保留原则：主机逻辑核 >= 12 时保留 4 核，>= 4 时保留 2 核，防止主机卡死；
     同时充分利用多核并行加速。
     """
-    total_cpus = max(1, cpu_count if cpu_count is not None else (os.cpu_count() or 4))
+    total_cpus = max(1, cpu_count if cpu_count is not None else get_total_logical_cores())
     if total_cpus >= 12:
         reserved = 4
     elif total_cpus >= 4:
@@ -359,6 +360,7 @@ def _run_single_shard(
             encoding="utf-8",
             errors="replace",
             check=False,
+            timeout=600,
         )
         if mk_proc.returncode != 0:
             raise RuntimeError(
@@ -397,6 +399,7 @@ def _run_single_shard(
             encoding="utf-8",
             errors="replace",
             check=False,
+            timeout=1800,
         )
         if bl_proc.returncode != 0:
             raise RuntimeError(

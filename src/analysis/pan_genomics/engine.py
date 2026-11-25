@@ -10,6 +10,7 @@ import re
 import json
 import uuid
 import logging
+from ...utils.resource_guard import get_safe_cpu_budget
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple, Set
@@ -23,7 +24,6 @@ from .types import (
     PanGenomicsResult,
     PanGenomicsSummary,
     OrthologGroup,
-    OrthologGeneItem,
     LifestyleItem,
     TailProteinItem,
     LysisProteinItem
@@ -48,12 +48,8 @@ class PanGenomicsEngine:
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_max_workers(self, user_threads: Optional[int] = None) -> int:
-        """动态计算安全并发线程数 (保留 2 个核心防止卡死)"""
-        cpu_cnt = os.cpu_count() or 4
-        if user_threads and user_threads > 0:
-            return min(user_threads, max(1, cpu_cnt - 2))
-        # 默认使用 (cpu_count - 2) 核心，上限 30 核心
-        return max(1, min(cpu_cnt - 2, 30))
+        """动态计算安全并发线程数 (保留 2 个核心防止卡死，上限 30 核心)"""
+        return get_safe_cpu_budget(requested=user_threads or 0, reserve_cores=2, max_cap=30)
 
     def _save_checkpoint(self, task_id: str, step_name: str, payload: Dict[str, Any]) -> None:
         """分片落盘与断点保护 (Checkpoint)，防止内存长期囤积与 OOM"""

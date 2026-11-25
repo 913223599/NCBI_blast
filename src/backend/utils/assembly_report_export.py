@@ -242,7 +242,7 @@ class ReportExporter:
                 if n >= 1_000_000: return f"{n / 1_000_000:.2f}M"
                 if n >= 1_000: return f"{n / 1_000:.1f}K"
                 return str(n)
-            except: return "0"
+            except Exception: return "0"
 
         def fmt_bp(n):
             if not n: return "0 bp"
@@ -251,7 +251,7 @@ class ReportExporter:
                 if n >= 1_000_000: return f"{n / 1_000_000:.2f} Mbp"
                 if n >= 1_000: return f"{n / 1_000:.1f} Kbp"
                 return f"{n} bp"
-            except: return "0 bp"
+            except Exception: return "0 bp"
 
         def fmt_pct(v):
             if v is None or v == 0: return "0.00%"

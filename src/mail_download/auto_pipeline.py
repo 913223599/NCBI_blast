@@ -41,7 +41,7 @@ from src.mail_download.batch_state import (
     collect_pending_batches,
     mark_batch_pipeline_state,
 )
-from src.mail_download.config import DEFAULT_ATTACHMENT_EXTS, load_config
+from src.mail_download.config import load_config
 from src.mail_download.downloader import AttachmentSaver
 from src.mail_download.fetcher import MailFetcher
 from src.mail_download.packer import ResultPacker, DEFAULT_PRODUCT_GLOBS

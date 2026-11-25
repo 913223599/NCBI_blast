@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import pickle
+from ...utils.resource_guard import get_safe_cpu_budget
 import shlex
 import subprocess
 import time
@@ -109,8 +110,7 @@ def run_pyhmmer_batch_wsl(
     if not wsl_specs:
         return {}
 
-    cpu_cnt = os.cpu_count() or 8
-    n_cpus = int(cpus) if cpus is not None else max(1, cpu_cnt - 4)
+    n_cpus = get_safe_cpu_budget(requested=int(cpus) if cpus is not None else 0, reserve_cores=4)
 
     # 使用 Windows 临时文件传入 WSL 暂存区避免命令行过长及空格问题
     stage = f"/tmp/pyhmmer_stage_{os.getpid()}_{int(time.time() * 1000)}"
@@ -217,6 +217,7 @@ with open(os.path.join(stage, "hits.json"), "w", encoding="utf-8") as out_fh:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            timeout=60,
         )
 
 

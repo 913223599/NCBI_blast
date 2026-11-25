@@ -3,7 +3,6 @@
 16S 扩增子混样多样性多工作表 Excel 导出构建器
 100% 还原界面显示内容，并丰富下游生信与科研作图数据
 """
-import os
 import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -66,12 +65,12 @@ def build_rich_diversity_excel(
         if "/" in freq_raw:
             try:
                 cov_cnt = int(freq_raw.split("/")[0])
-            except:
+            except Exception:
                 cov_cnt = 0
         else:
             try:
                 cov_cnt = int(freq_raw)
-            except:
+            except Exception:
                 cov_cnt = 0
                 
         cov_pct = round((cov_cnt / total_samples_cnt * 100), 1) if total_samples_cnt > 0 else 0.0

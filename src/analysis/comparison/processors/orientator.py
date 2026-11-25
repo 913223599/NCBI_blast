@@ -42,7 +42,7 @@ class SequenceOrientator:
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True,
-                encoding='utf-8', errors='replace', check=True
+                encoding='utf-8', errors='replace', check=True, timeout=1800
             )
             strands = result.stdout.strip().split('\n')
 
@@ -63,7 +63,7 @@ class SequenceOrientator:
                 "wsl", "-d", self.wsl_distro, "-u", "root", "bash", "-c",
                 f"seqtk seq -r '{w_query}' > '{w_flipped}'"
             ]
-            subprocess.run(flip_cmd, check=True)
+            subprocess.run(flip_cmd, check=True, timeout=600)
             return flipped_path, True
 
         except Exception as e:

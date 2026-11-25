@@ -2,10 +2,9 @@
 """
 Prokka 标准全特征注释引擎 (ProkkaEngine)
 """
-import os
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional, Tuple, Callable
 from Bio import SeqIO
 
 from .base import BaseAnnotationEngine

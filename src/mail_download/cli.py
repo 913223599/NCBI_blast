@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from src.mail_download.config import PROJECT_ROOT, load_config, dump_example
+from src.mail_download.config import load_config, dump_example
 from src.mail_download.downloader import AttachmentSaver
 from src.mail_download.fetcher import MailFetcher
 from src.mail_download.packer import ResultPacker

@@ -2,13 +2,12 @@
 import os
 import logging
 import gc
-import json
 import time
 import zipfile
 import shutil
 import re
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, List, Any
 from Bio.Blast import NCBIXML

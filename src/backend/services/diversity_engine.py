@@ -8,9 +8,9 @@ import os
 import gc
 import json
 import gzip
-import io
 import time
 import math
+from ...utils.resource_guard import get_safe_cpu_budget, get_total_logical_cores
 import shutil
 import zipfile
 import logging
@@ -315,9 +315,9 @@ class DiversityEngine:
             # 3. 对待处理样本按 Worker 划分为并行分片 (Chunk)，实现高吞吐多核并行 (规则 7 & 8)
             if pending_samples:
                 # 动态计算安全核心数与并行 Worker 配比 (规则 8: 适当保留 CPU 核心数防止主机卡死)
-                cpu_total = os.cpu_count() or 4
+                cpu_total = get_total_logical_cores()
                 reserved_cores = 4 if cpu_total > 8 else 2
-                usable_cores = max(2, cpu_total - reserved_cores)
+                usable_cores = max(2, get_safe_cpu_budget(reserve_cores=reserved_cores))
 
                 qc_filter = FastqQCFilter(
                     min_len=min_len,
@@ -522,8 +522,11 @@ class DiversityEngine:
                         cwd=str(db_dir),
                         capture_output=True,
                         text=True,
+                        encoding="utf-8",
+                        errors="replace",
                         env=env,
-                        creationflags=creationflags
+                        creationflags=creationflags,
+                        timeout=3600,
                     )
                     if proc.returncode != 0:
                         raise RuntimeError(f"Chunk {c_id} BLAST 执行失败: {proc.stderr}")
@@ -923,13 +926,21 @@ class DiversityEngine:
         return res
 
     def _get_blastn_path(self) -> Path:
-        cand = Path(r"D:\Program Files\NCBI\blast-2.16.0+\bin\blastn.exe")
-        if cand.exists():
-            return cand
+        try:
+            from ...workbench.models.tool_config import ToolConfig
+            exe = ToolConfig.get_blast_exe("blastn")
+            if exe and Path(exe).exists():
+                return Path(exe)
+        except Exception:
+            pass
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        local_cand = project_root / "tools" / "ncbi_dist" / "bin" / ("blastn.exe" if os.name == "nt" else "blastn")
+        if local_cand.exists():
+            return local_cand
         which = shutil.which("blastn")
         if which:
             return Path(which)
-        return cand
+        return local_cand
 
     def _natural_keys(self, text: str):
         return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', text)]

@@ -4,7 +4,7 @@
 """
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional, Tuple, Callable
 from ..types import FeatureItem, AnnotationRunRequest
 
 

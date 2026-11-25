@@ -3,13 +3,11 @@
 生物安全性审计与抗防御系统扫描引擎 (DeepSafetyAuditor)
 集成 CARD (耐药基因 AMR)、VFDB (毒力因子 VF)、Anti-CRISPR (Acr) 与防御逃逸扫描
 """
-import os
 import csv
-import shutil
 import logging
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 
 from ...workbench.models.tool_config import ToolConfig
 

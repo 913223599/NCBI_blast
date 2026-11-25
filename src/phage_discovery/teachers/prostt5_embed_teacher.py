@@ -177,7 +177,14 @@ torch.cuda.empty_cache()
 
     try:
         cmd = ["wsl", "-d", "Ubuntu", "-e", "bash", "-lc", f"python3 {shlex.quote(wsl_worker)}"]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_sec)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_sec,
+        )
         if proc.returncode != 0:
             raise RuntimeError(f"WSL ProstT5 提取失败 (exit={proc.returncode}):\n{proc.stderr[-1000:]}")
 

@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from .taxonomy_provider import get_taxonomy_provider
 from ..backend.strain_db import get_strain_db_manager
 from .translation.translation_data_manager import get_translation_data_manager
@@ -202,7 +202,7 @@ class TaxonomySyncService:
         try:
             from ..backend.routes.strains import invalidate_cache
             invalidate_cache()
-        except: pass
+        except Exception: pass
         
         return {
             "success": True,

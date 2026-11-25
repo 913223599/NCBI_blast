@@ -12,7 +12,7 @@ import concurrent.futures
 import csv
 import json
 import logging
-import os
+from ...utils.resource_guard import get_safe_cpu_budget
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -232,8 +232,7 @@ def run_composition_baseline(
     chim_truth = Path(split_info["chimeras"]["truth_tsv"])
     chim_contigs = Path(split_info["chimeras"]["contigs_tsv"])
 
-    cpu_cnt = os.cpu_count() or 4
-    workers = threads if threads is not None else max(1, cpu_cnt - 2)
+    workers = get_safe_cpu_budget(requested=threads or 0, reserve_cores=2)
 
     # 1. 窗口级基线评测（分批多核并发）
     t0 = time.perf_counter()

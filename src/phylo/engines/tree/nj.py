@@ -4,7 +4,6 @@ NJBioNJEngine - 向量化 Neighbor-Joining / BioNJ 构树及分片落盘 Bootstr
 """
 import csv
 import logging
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -631,7 +630,7 @@ class NJBioNJEngine:
         main_root = build_tree_from_distance_matrix(ids, main_dist, method=method, use_gpu=use_gpu)
 
         if bootstrap > 0 and n_seqs >= 4:
-            safe_threads = min(get_safe_cpu_budget(threads), max(1, os.cpu_count() or 4))
+            safe_threads = get_safe_cpu_budget(threads)
             rep_file = work_dir / "bootstrap_replicates.nwk"
             existing_reps: List[str] = []
             if rep_file.exists():

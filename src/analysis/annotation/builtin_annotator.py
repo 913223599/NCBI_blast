@@ -3,12 +3,9 @@
 纯 Python 高性能内置基因组特征预测与功能注释器 (BuiltinAnnotator)
 无需依赖外部 Linux 命令行工具，提供 100% 可用、高精度的 ORF 预测、蛋白翻译、RNA 检测与标准 GBK/GFF 生成。
 """
-import re
-import os
 import math
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio.SeqFeature import SeqFeature, FeatureLocation, ExactPosition

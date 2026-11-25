@@ -15,8 +15,8 @@ V4 离线蛋白语义软标签标注、训练集净化与高难短板样本挖�
 import concurrent.futures
 import json
 import logging
-import os
 import re
+from ...utils.resource_guard import get_safe_cpu_budget
 import shutil
 import sqlite3
 import subprocess
@@ -93,8 +93,7 @@ def run_batch_diamond_blastp(
     if not db_path.exists():
         raise FileNotFoundError(f"DIAMOND 数据库不存在: {db_path}")
 
-    cpu_cnt = os.cpu_count() or 4
-    n_threads = threads if threads is not None else max(1, cpu_cnt - 2)
+    n_threads = get_safe_cpu_budget(requested=threads or 0, reserve_cores=2)
     best_hits: Dict[str, Tuple[float, str]] = {}
 
     with tempfile.TemporaryDirectory(prefix="phage_v4_dmnd_") as tmpdir:
@@ -131,7 +130,9 @@ def run_batch_diamond_blastp(
             "--sensitive",
             "--quiet",
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, timeout=3600
+        )
         if proc.returncode != 0:
             raise RuntimeError(f"WSL diamond blastp 失败 (exit={proc.returncode}): {proc.stderr.strip()}")
 
@@ -307,8 +308,7 @@ def mine_hard_transposase_and_archaeal_windows(
             fh.write(f">{cid}\n{seq}\n")
     tmp_fa.replace(out_fasta)
 
-    cpu_cnt = os.cpu_count() or 4
-    n_workers = workers if workers is not None else max(1, cpu_cnt - 2)
+    n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
     feats_l, lbl_l, ov_l, sub_l, cid_l, st_l, ed_l = [], [], [], [], [], [], []
 
     def _collect(item: Dict[str, Any]):
@@ -384,8 +384,7 @@ def annotate_train_semantics_with_diamond(
         part_arrays[pname] = arrs
         part_npz_paths[pname] = npz_path
 
-    cpu_cnt = os.cpu_count() or 4
-    n_workers = workers if workers is not None else max(1, cpu_cnt - 2)
+    n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
     contig_orfs: Dict[str, List[Tuple[int, int, str]]] = {}
     items = list(unique_contigs.items())
     if n_workers > 1 and len(items) > 4:

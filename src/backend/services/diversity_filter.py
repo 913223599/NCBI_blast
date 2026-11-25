@@ -5,7 +5,7 @@
 并重新校正生态学 Alpha 多样性指标。
 """
 import math
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Optional
 
 
 class DiversityNoiseFilter:

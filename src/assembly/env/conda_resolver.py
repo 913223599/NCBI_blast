@@ -3,7 +3,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 
 class CondaResolver:
     """
@@ -27,7 +27,7 @@ class CondaResolver:
                 # 尝试运行 conda --version
                 res = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=5, encoding='utf-8', errors='ignore')
                 return res.returncode == 0
-            except:
+            except Exception:
                 return False
 
         # 1. 检查 PATH

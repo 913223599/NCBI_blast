@@ -13,7 +13,7 @@ import concurrent.futures
 import csv
 import json
 import logging
-import os
+from ..resource_guard import get_safe_cpu_budget
 import re
 import sqlite3
 import sys
@@ -421,8 +421,9 @@ def preprocess_phage_dataset(
         except Exception:
             completed_shards = {}
 
-    cpu_cnt = os.cpu_count() or 4
-    safe_workers = max_workers if max_workers is not None else max(1, min(cpu_cnt - 2, 16))
+    safe_workers = get_safe_cpu_budget(
+        requested=max_workers or 0, reserve_cores=2, max_cap=16 if max_workers is None else None
+    )
     logger.info(f"启动正样本训练集预处理: 共 {len(tasks)} 株, 分片大小={shard_size}, 并发进程={safe_workers}")
 
     summary_records: List[Dict[str, Any]] = []

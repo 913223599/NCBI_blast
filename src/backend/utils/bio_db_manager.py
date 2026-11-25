@@ -19,7 +19,7 @@ def build_wsl_script_command(script_name: str) -> Optional[str]:
     构造在 WSL 中执行部署脚本的完整命令。
 
     发行版名称从 WSLManager 动态探测（不再写死 "Ubuntu"）；项目路径带空格时保持引号，
-    避免 `wsl bash /mnt/d/NCBI blast/...` 被截断。
+    避免 `wsl bash /mnt/<drive>/<project_root>/...` 被截断。
     """
     import re
     from ...assembly.env.wsl_manager import WSLManager
@@ -194,7 +194,7 @@ class SilvaDatabase(BioDatabase):
         for f in self.base_dir.glob(f"{output_name}.n*"):
             try:
                 f.unlink()
-            except:
+            except Exception:
                 pass
 
         # 构造无空格威胁的命令
@@ -502,6 +502,7 @@ class CardDatabase(BioDatabase):
                         [tool_path, "-in", f_faa.name, "-dbtype", "prot", "-title", "CARD Resistome", "-out", "card_protein"],
                         cwd=str(self.base_dir),
                         check=True,
+                        timeout=1800,
                     )
 
             await asyncio.to_thread(_extract_and_build)

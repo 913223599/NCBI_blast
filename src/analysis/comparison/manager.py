@@ -5,7 +5,6 @@
 """
 
 import sqlite3
-import json
 import logging
 import shutil
 from pathlib import Path

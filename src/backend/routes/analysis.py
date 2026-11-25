@@ -5,7 +5,6 @@ from typing import List, Optional
 import os
 import logging
 from pathlib import Path
-from src.analysis.sequence_utils import RotationChecker
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 logger = logging.getLogger("api.analysis")

@@ -1,7 +1,7 @@
 
 import abc
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 class AssemblyStep(abc.ABC):
     """

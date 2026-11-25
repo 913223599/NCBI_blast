@@ -192,24 +192,28 @@ def configure_pip_mirror():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=30,
         )
         subprocess.run(
             [sys.executable, "-m", "pip", "config", "set", "global.extra-index-url", FALLBACK_INDEX_URL],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=30,
         )
         subprocess.run(
             [sys.executable, "-m", "pip", "config", "set", "global.trusted-host", PRIMARY_TRUSTED_HOST],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=30,
         )
         subprocess.run(
             [sys.executable, "-m", "pip", "config", "set", "global.timeout", "120"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
+            timeout=30,
         )
     except Exception as e:
         print(f"[警告] 配置 pip 镜像源时出错: {e}")
@@ -310,7 +314,7 @@ def _run_installer(cmd: list, project_root: Path, quiet: bool = False) -> bool:
         env.setdefault("UV_LINK_MODE", "copy")
     output = subprocess.DEVNULL if quiet else None
     try:
-        return subprocess.run(cmd, check=False, env=env, stdout=output, stderr=output).returncode == 0
+        return subprocess.run(cmd, check=False, env=env, stdout=output, stderr=output, timeout=1800).returncode == 0
     except Exception as e:
         print(f"[警告] 执行依赖安装命令失败: {e}")
         return False
