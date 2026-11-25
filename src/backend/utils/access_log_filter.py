@@ -19,6 +19,13 @@ DEFAULT_QUIET_POLLING_PATHS: frozenset[str] = frozenset(
     }
 )
 
+NOISY_THIRD_PARTY_LOGGERS: tuple[str, ...] = (
+    "fontTools",
+    "fontTools.subset",
+    "fontTools.ttLib",
+    "matplotlib.font_manager",
+)
+
 _ACCESS_MSG_RE = re.compile(
     r'"GET\s+([^\s?"]+)(?:\?[^\s"]*)?\s+HTTP/[^"]+"\s+(\d{3})\b'
 )
@@ -83,3 +90,9 @@ def install_uvicorn_access_filter(
     access_filter = QuietPollingAccessFilter(quiet_paths=quiet_paths)
     target_logger.addFilter(access_filter)
     return access_filter
+
+
+def silence_noisy_third_party_loggers(level: int = logging.WARNING) -> None:
+    """将易产生控制台刷屏的第三方字体/子集化库日志级别调整为 WARNING。"""
+    for logger_name in NOISY_THIRD_PARTY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(level)

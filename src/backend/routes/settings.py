@@ -98,13 +98,14 @@ async def get_ui_language():
     return {"language": get_ui_translator().get_language()}
 
 @router.get("/api/settings/ui_translations")
-async def get_ui_translations(lang: Optional[str] = None):
+async def get_ui_translations(lang: Optional[str] = None, reload: bool = False):
     from ...utils.ui_translation_manager import get_ui_translator
     translator = get_ui_translator()
     locales_path = getattr(translator, "locales_path", "")
     target_lang = lang if lang in ("zh_CN", "en_US") else translator.get_language()
-    logger.info(f"UI 翻译请求: 语种={target_lang}, 路径={locales_path}")
-    translator.load_all_translations()
+    logger.debug(f"UI 翻译请求: 语种={target_lang}, 路径={locales_path}")
+    if reload or not getattr(translator, "translations", None):
+        translator.load_all_translations()
     if hasattr(translator, "translations") and isinstance(translator.translations, dict) and target_lang in translator.translations:
         return translator.translations.get(target_lang, {})
     return translator.get_all_translations_for_current_lang()

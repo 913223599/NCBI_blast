@@ -238,8 +238,16 @@ function startPythonSidecar() {
     });
 
     proc.stderr.on('data', (data) => {
-        const msg = data.toString().trim();
-        if (msg) console.log(`[Python:ERR] ${msg}`);
+        const lines = data.toString().split(/\r?\n/);
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) continue;
+            if (/^INFO:\s/.test(line)) {
+                console.log(`[Python] ${line}`);
+            } else {
+                console.log(`[Python:ERR] ${line}`);
+            }
+        }
     });
 
     proc.on('exit', (code) => {

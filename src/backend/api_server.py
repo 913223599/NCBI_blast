@@ -24,8 +24,6 @@ import json
 import logging
 import os
 import re
-import psutil
-import time
 import logging.handlers
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -54,7 +52,10 @@ os.environ["XDG_CONFIG_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
 os.environ["XDG_CACHE_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
 
 from .broadcaster import broadcaster  # noqa: E402
-from .utils.access_log_filter import install_uvicorn_access_filter  # noqa: E402
+from .utils.access_log_filter import (  # noqa: E402
+    install_uvicorn_access_filter,
+    silence_noisy_third_party_loggers,
+)
 from .utils.blast_utils import parse_blast_csv, select_consensus_hit  # noqa: E402
 
 # ─── 3. 日志配置 ────────────────────────────────────────
@@ -66,6 +67,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("api_server")
 install_uvicorn_access_filter()
+silence_noisy_third_party_loggers()
 
 # ─── Windows asyncio 稳定性补丁 ────────────────────────
 if sys.platform.startswith("win"):
@@ -104,40 +106,15 @@ if sys.platform.startswith("win"):
 
 print(">>> Python API Server Process Started", flush=True)
 
-# ─── 资源监控 ─────────────────────────────────────────
-process = psutil.Process(os.getpid())
-_last_resource_log = 0
-_RESOURCE_LOG_INTERVAL = 5  # 每5秒记录一次
-
-def log_resources(force=False):
-    """记录全系统的 CPU 和内存使用情况 (反映整机真实压力)"""
-    global _last_resource_log
-    now = time.time()
-    
-    if not force and (now - _last_resource_log) < _RESOURCE_LOG_INTERVAL:
-        return
-    
-    _last_resource_log = now
-    
-    try:
-        # 获取全系统 CPU 利用率
-        sys_cpu = psutil.cpu_percent(interval=None)
-        
-        # 获取全系统内存状态
-        vm = psutil.virtual_memory()
-        used_gb = vm.used / (1024 ** 3)
-        total_gb = vm.total / (1024 ** 3)
-        
-        # 按照标准日志格式输出
-        logger.info(f"[Hardware] CPU利用率: {sys_cpu:.1f}% | 内存利用率: {used_gb:.2f} GB / {total_gb:.2f} GB")
-    except Exception as e:
-        logger.debug(f"资源监控失败: {e}")
+# ─── 资源监控 (已模块化抽离至 src/utils/system_monitor.py) ──
+from ..utils.system_monitor import log_resources  # noqa: E402, F401
 
 # ─── 4. 生命周期管理 ────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用启动与清理钩子"""
     install_uvicorn_access_filter()
+    silence_noisy_third_party_loggers()
     logger.info("Bio-Station API 启动中...")
     
     # A. 预热翻译词库 (Sqlite 缓存)

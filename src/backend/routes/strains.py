@@ -44,7 +44,7 @@ async def strain_load_all():
     3. 始终附带 total_count 供前端准确显示。
     """
     from ...backend.strain_db import get_strain_db_manager
-    from ..api_server import log_resources
+    from ...utils.system_monitor import log_resources
     
     global _last_load_time, _cached_data
     now = time.time() * 1000

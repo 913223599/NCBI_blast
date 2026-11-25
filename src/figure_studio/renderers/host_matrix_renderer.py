@@ -15,7 +15,13 @@ from matplotlib.patches import Patch, Rectangle
 from scipy.cluster.hierarchy import dendrogram, leaves_list, linkage
 
 from ..models import HostMatrixRenderRequest
-from ..palette import apply_journal_rcparams, draw_text, get_journal_palette, save_publication_figure
+from ..palette import (
+    apply_journal_rcparams,
+    draw_suptitle,
+    draw_text,
+    get_journal_palette,
+    save_publication_figure,
+)
 
 _HEAT_CMAP = LinearSegmentedColormap.from_list(
     "host_lvt",
@@ -209,7 +215,7 @@ def _draw_sparse_specificity(
     ax_leg.legend(handles=handles, loc="upper left", frameon=False, fontsize=7.8, title="Morphotype / Group", title_fontsize=8.4)
 
     if req.title:
-        fig.suptitle(req.title, fontsize=10.5, fontweight="bold", color="#0f172a", y=0.975)
+        draw_suptitle(fig, req.title, fontsize=10.5, fontweight="bold", color="#0f172a", y=0.975)
     fig.subplots_adjust(left=0.14, right=0.98, top=0.91, bottom=0.18)
     return fig
 

@@ -25,6 +25,38 @@ _CACHED_METRICS: Optional[Dict[str, Any]] = None
 _CACHED_AT: float = 0.0
 _DEFAULT_TTL_SEC = 2.0
 
+_RESOURCE_LOG_LOCK = threading.Lock()
+_LAST_RESOURCE_LOG_AT: float = 0.0
+_RESOURCE_LOG_INTERVAL_SEC = 5.0
+
+
+def log_resources(force: bool = False, logger_name: str = "api_server") -> None:
+    """记录全系统的 CPU 与内存使用情况（带时间节流与线程安全保护）。"""
+    global _LAST_RESOURCE_LOG_AT
+    now = time.monotonic()
+    with _RESOURCE_LOG_LOCK:
+        if (
+            not force
+            and _LAST_RESOURCE_LOG_AT > 0.0
+            and (now - _LAST_RESOURCE_LOG_AT) < _RESOURCE_LOG_INTERVAL_SEC
+        ):
+            return
+        _LAST_RESOURCE_LOG_AT = now
+
+    target_logger = logging.getLogger(logger_name)
+    try:
+        import psutil
+
+        sys_cpu = psutil.cpu_percent(interval=None)
+        vm = psutil.virtual_memory()
+        used_gb = vm.used / (1024 ** 3)
+        total_gb = vm.total / (1024 ** 3)
+        target_logger.info(
+            f"[Hardware] CPU利用率: {sys_cpu:.1f}% | 内存利用率: {used_gb:.2f} GB / {total_gb:.2f} GB"
+        )
+    except Exception as exc:
+        target_logger.debug("资源监控失败: %s", exc)
+
 
 def reset_metrics_cache() -> None:
     """清空监控缓存（主要用于单元测试隔离）。"""
