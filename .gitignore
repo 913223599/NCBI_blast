@@ -108,10 +108,6 @@ quast/quast_libs/barrnap/build/*.aln
 /archive/
 /test_data/
 /test/
-scripts/*.png
-scripts/__pycache__/
-!/scripts/README.md
-!/scripts/verify_all.ps1
 validation_audit_res.json
 *_results*.csv
 *.csv
@@ -245,6 +241,8 @@ src/test_shm.py
 !/scripts/run_suite_e_blind.py
 !/scripts/benchmark_fragmented_contigs.py
 !/scripts/verify_label_display_mode.js
+!/scripts/README.md
+!/scripts/verify_all.ps1
 .lingma/rules/
 
 # ------------------------------------------------------------------------------
