@@ -167,3 +167,50 @@ def test_core_version_system_metrics_and_citations_loader():
     assert "10.1093/nargab/lqaf009" in methods_txt
     bib_txt = format_bibtex_entries(tool_ids=["checkv"])
     assert "@article{checkv_2021," in bib_txt
+
+
+def test_electron_dev_runner_forwards_stdout_stderr_and_exit_code():
+    import json
+    import os
+    import shutil
+    import subprocess
+
+    runner_path = PROJECT_ROOT / "electron-shell" / "dev-runner.js"
+    pkg_path = PROJECT_ROOT / "electron-shell" / "package.json"
+    assert runner_path.is_file()
+    pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+    assert "dev-runner.js" in str(pkg.get("scripts", {}).get("dev", ""))
+
+    node_exe = shutil.which("node")
+    if not node_exe:
+        pytest.skip("系统未安装 node，跳过 dev-runner 进程转发实测")
+
+    env = os.environ.copy()
+    env["ELECTRON_DEV_RUNNER_BINARY"] = node_exe
+
+    ok_res = subprocess.run(
+        [
+            node_exe,
+            str(runner_path),
+            "-e",
+            "console.log('RUNNER_OUT_OK'); console.error('RUNNER_ERR_OK'); process.exit(0);",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=15,
+        env=env,
+    )
+    assert ok_res.returncode == 0
+    assert "RUNNER_OUT_OK" in ok_res.stdout
+    assert "RUNNER_ERR_OK" in ok_res.stderr
+
+    fail_res = subprocess.run(
+        [node_exe, str(runner_path), "-e", "process.exit(7);"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=15,
+        env=env,
+    )
+    assert fail_res.returncode == 7
