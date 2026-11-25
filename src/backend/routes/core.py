@@ -2,11 +2,13 @@
 import logging
 import json
 import re
-from fastapi import APIRouter, HTTPException
-from ..broadcaster import broadcaster
+from pathlib import Path
+from typing import Optional
+from fastapi import APIRouter
 
 logger = logging.getLogger("api_server")
 router = APIRouter(tags=["Core"])
+_CITATIONS_PATH = Path(__file__).resolve().parent.parent.parent / "resources" / "citations.json"
 
 @router.get("/api/help/structure")
 async def get_help_structure():
@@ -67,3 +69,26 @@ async def open_dir(path: str):
     from ...blast.manager import get_blast_manager
     get_blast_manager().open_directory(path)
     return {"status": "opened"}
+
+
+@router.get("/api/core/citations")
+async def get_citations(module: Optional[str] = None):
+    """返回内置生信工具与科研绘图组件的标准参考文献库（支持按模块筛选）"""
+    if not _CITATIONS_PATH.is_file():
+        return {"schema_version": "1.0", "description": "", "count": 0, "tools": []}
+    try:
+        payload = json.loads(_CITATIONS_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.error(f"Failed to load citations.json: {exc}")
+        return {"schema_version": "1.0", "description": "", "count": 0, "tools": []}
+
+    tools = payload.get("tools", [])
+    if module and module.strip() and module.strip().lower() != "all":
+        mod_key = module.strip().lower()
+        tools = [item for item in tools if str(item.get("module", "")).lower() == mod_key]
+    return {
+        "schema_version": payload.get("schema_version", "1.0"),
+        "description": payload.get("description", ""),
+        "count": len(tools),
+        "tools": tools,
+    }

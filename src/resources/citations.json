@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "description": "NCBI Bio-Station 集成生物信息学工具与可视化组件标准参考文献库（用于科研绘图工坊与分析报告 Methods & References 引用生成）",
+  "tools": [
+    {
+      "id": "blast_plus",
+      "name": "NCBI BLAST+",
+      "module": "blast",
+      "authors": "Camacho C, Coulouris G, Avagyan V, et al.",
+      "year": 2009,
+      "title": "BLAST+: architecture and applications",
+      "journal": "BMC Bioinformatics",
+      "doi": "10.1186/1471-2105-10-421"
+    },
+    {
+      "id": "fastp",
+      "name": "fastp",
+      "module": "assembly",
+      "authors": "Chen S, Zhou Y, Chen Y, Gu J.",
+      "year": 2018,
+      "title": "fastp: an ultra-fast all-in-one FASTQ preprocessor",
+      "journal": "Bioinformatics",
+      "doi": "10.1093/bioinformatics/bty560"
+    },
+    {
+      "id": "quast",
+      "name": "QUAST",
+      "module": "assembly",
+      "authors": "Gurevich A, Saveliev V, Vyahhi N, Tesler G.",
+      "year": 2013,
+      "title": "QUAST: quality assessment tool for genome assemblies",
+      "journal": "Bioinformatics",
+      "doi": "10.1093/bioinformatics/btt086"
+    },
+    {
+      "id": "prokka",
+      "name": "Prokka",
+      "module": "annotation",
+      "authors": "Seemann T.",
+      "year": 2014,
+      "title": "Prokka: rapid prokaryotic genome annotation",
+      "journal": "Bioinformatics",
+      "doi": "10.1093/bioinformatics/btu153"
+    },
+    {
+      "id": "pharokka",
+      "name": "Pharokka",
+      "module": "annotation",
+      "authors": "Bouras G, Nepal R, Houtak G, Psaltis AJ, Wormald PJ, Vreugde S.",
+      "year": 2023,
+      "title": "Pharokka: a fast scalable bacteriophage annotation tool",
+      "journal": "Bioinformatics",
+      "doi": "10.1093/bioinformatics/btac776"
+    },
+    {
+      "id": "prodigal",
+      "name": "Prodigal",
+      "module": "annotation",
+      "authors": "Hyatt D, Chen GL, Locascio PF, Land ML, Larimer FW, Hauser LJ.",
+      "year": 2010,
+      "title": "Prodigal: prokaryotic gene recognition and translation initiation site identification",
+      "journal": "BMC Bioinformatics",
+      "doi": "10.1186/1471-2105-11-119"
+    },
+    {
+      "id": "mafft",
+      "name": "MAFFT",
+      "module": "phylo",
+      "authors": "Katoh K, Standley DM.",
+      "year": 2013,
+      "title": "MAFFT multiple sequence alignment software version 7: improvements in performance and usability",
+      "journal": "Molecular Biology and Evolution",
+      "doi": "10.1093/molbev/mst010"
+    },
+    {
+      "id": "iqtree2",
+      "name": "IQ-TREE 2",
+      "module": "phylo",
+      "authors": "Minh BQ, Schmidt HA, Chernomor O, et al.",
+      "year": 2020,
+      "title": "IQ-TREE 2: New Models and Efficient Methods for Phylogenetic Inference in the Genomic Era",
+      "journal": "Molecular Biology and Evolution",
+      "doi": "10.1093/molbev/msaa015"
+    },
+    {
+      "id": "fasttree",
+      "name": "FastTree 2",
+      "module": "phylo",
+      "authors": "Price MN, Dehal PS, Arkin AP.",
+      "year": 2010,
+      "title": "FastTree 2 -- Approximately Maximum-Likelihood Trees for Large Alignments",
+      "journal": "PLOS ONE",
+      "doi": "10.1371/journal.pone.0009490"
+    },
+    {
+      "id": "viridic",
+      "name": "VIRIDIC",
+      "module": "figure_studio",
+      "authors": "Moraru C, Varsani A, Kropinski AM.",
+      "year": 2020,
+      "title": "VIRIDIC-A Novel Tool to Calculate the Intergenomic Similarities of Prokaryote-Infecting Viruses",
+      "journal": "Viruses",
+      "doi": "10.3390/v12111268"
+    },
+    {
+      "id": "clinker",
+      "name": "clinker",
+      "module": "figure_studio",
+      "authors": "Gilchrist CLM, Chooi YH.",
+      "year": 2021,
+      "title": "clinker & clustermap.js: automatic generation of gene cluster comparison figures",
+      "journal": "Bioinformatics",
+      "doi": "10.1093/bioinformatics/btab007"
+    },
+    {
+      "id": "vcontact2",
+      "name": "vConTACT2",
+      "module": "figure_studio",
+      "authors": "Bin Jang H, Bolduc B, Zablocki O, et al.",
+      "year": 2019,
+      "title": "Taxonomic assignment of uncultivated prokaryotic virus genomes is enabled by gene-sharing networks",
+      "journal": "Nature Biotechnology",
+      "doi": "10.1038/s41587-019-0100-8"
+    },
+    {
+      "id": "igvjs",
+      "name": "IGV.js",
+      "module": "viewer",
+      "authors": "Robinson JT, Thorvaldsdottir H, Turner D, Mesirov JP.",
+      "year": 2023,
+      "title": "igv.js: an embeddable JavaScript implementation of the Integrative Genomics Viewer (IGV)",
+      "journal": "Bioinformatics",
+      "doi": "10.1093/bioinformatics/btac830"
+    }
+  ]
+}

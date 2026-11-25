@@ -82,6 +82,88 @@ const IS_DEV = process.argv.includes('--dev');
 // ─── 状态变量 ─────────────────────────────────────
 let pythonProcess = null;
 let mainWindow = null;
+let isQuitting = false;
+
+// IPC 安全校验与路径授权白名单
+const ALLOWED_DEV_ORIGINS = new Set([
+    `http://localhost:${VITE_PORT}`,
+    `http://127.0.0.1:${VITE_PORT}`,
+    `http://localhost:${API_PORT}`,
+    `http://127.0.0.1:${API_PORT}`,
+]);
+const approvedReadPaths = new Set();
+const approvedWritePaths = new Set();
+const SENSITIVE_BASENAMES = new Set([
+    '.mail_auth',
+    '.mail_smtp_auth',
+    '.sangon_auth',
+    '.env',
+    'config.json',
+    'mail_config.json',
+    'sangon_16s_config.json',
+]);
+const ALLOWED_WRITE_SUBDIRS = ['results', 'reports', 'data', 'temp'];
+
+function validateSender(frame) {
+    if (!frame) return false;
+    const origin = frame.origin || '';
+    if (ALLOWED_DEV_ORIGINS.has(origin)) return true;
+    const url = frame.url || '';
+    if (!IS_DEV && url.startsWith('file://')) {
+        const expectedPrefix = `file:///${path.join(PROJECT_ROOT, 'src', 'web-next', 'dist').replace(/\\/g, '/').toLowerCase()}`;
+        const normalizedUrl = decodeURIComponent(url).replace(/\\/g, '/').toLowerCase();
+        if (normalizedUrl.startsWith(expectedPrefix)) return true;
+    }
+    console.warn(`[Electron:Security] 拦截未授权 IPC 来源: origin=${origin}, url=${url}`);
+    return false;
+}
+
+function isAllowedExternalUrl(rawUrl) {
+    if (typeof rawUrl !== 'string' || !rawUrl.trim()) return false;
+    try {
+        const parsed = new URL(rawUrl);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+function normalizeResolvedPath(targetPath) {
+    if (typeof targetPath !== 'string' || !targetPath.trim() || targetPath.includes('\0')) {
+        return null;
+    }
+    return path.resolve(targetPath);
+}
+
+function isInsideDir(targetPath, baseDir) {
+    const rel = path.relative(path.resolve(baseDir), path.resolve(targetPath));
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+function isSensitiveFile(resolvedPath) {
+    const base = path.basename(resolvedPath).toLowerCase();
+    if (SENSITIVE_BASENAMES.has(base)) return true;
+    const lowered = resolvedPath.toLowerCase();
+    return lowered.includes(`${path.sep}.ssh${path.sep}`) || lowered.includes(`${path.sep}.git${path.sep}`);
+}
+
+function isSafeReadPath(targetPath) {
+    const resolved = normalizeResolvedPath(targetPath);
+    if (!resolved || isSensitiveFile(resolved)) return false;
+    if (approvedReadPaths.has(resolved.toLowerCase())) return true;
+    // 允许工作区内非敏感文件与用户主动拖入的普通数据文件（排除敏感凭证与系统关键目录）
+    if (isInsideDir(resolved, PROJECT_ROOT)) return true;
+    const winDir = (process.env.SystemRoot || 'C:\\Windows').toLowerCase();
+    if (resolved.toLowerCase().startsWith(winDir)) return false;
+    return true;
+}
+
+function isSafeWritePath(targetPath) {
+    const resolved = normalizeResolvedPath(targetPath);
+    if (!resolved || isSensitiveFile(resolved)) return false;
+    if (approvedWritePaths.has(resolved.toLowerCase())) return true;
+    return ALLOWED_WRITE_SUBDIRS.some((sub) => isInsideDir(resolved, path.join(PROJECT_ROOT, sub)));
+}
 
 // ─── Python Sidecar 管理 ──────────────────────────
 
@@ -160,7 +242,7 @@ function waitForPythonReady(maxRetries = 60, intervalMs = 500) {
         const check = () => {
             if (isResolved) return;
             attempt++;
-            const request = http.get(`http://127.0.0.1:${API_PORT}/docs`, (res) => {
+            const request = http.get(`http://127.0.0.1:${API_PORT}/api/health`, (res) => {
                 if (res.statusCode === 200) {
                     if (!isResolved) {
                         isResolved = true;
@@ -200,26 +282,30 @@ function waitForPythonReady(maxRetries = 60, intervalMs = 500) {
 
 function stopPythonSidecar() {
     if (pythonProcess) {
-        console.log('[Electron] 正在响应生命周期事件，停止 Python Sidecar...');
-        pythonProcess.kill('SIGTERM');
-        
-        // 强力物理关断：如果存在运行中的 WSL，动态检测并关闭运行中的发行版
-        // 注意：这能解决 Python 未能安全退出导致 WSL 挂起的问题
+        const targetProc = pythonProcess;
+        const targetPid = targetProc.pid;
+        pythonProcess = null;
+        console.log(`[Electron] 正在响应生命周期事件，停止 Python Sidecar (PID=${targetPid})...`);
         try {
-            const { execSync } = require('child_process');
-            const rawDistros = execSync('wsl --list --running --quiet', { stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf16le');
-            const runningDistros = rawDistros.split(/\r?\n/).map(s => s.replace(/\0/g, '').trim()).filter(Boolean);
-            for (const distro of runningDistros) {
-                console.log(`[Electron] 正在强制清理 WSL (${distro}) 分发版...`);
-                execSync(`wsl --terminate "${distro}"`, { stdio: 'ignore' });
-            }
+            targetProc.kill('SIGTERM');
         } catch (e) {
-            // 忽略错误（说明可能已经关闭）
+            // 忽略信号发送异常
         }
 
+        // 不再无差别执行全机 wsl --terminate（避免误杀用户本机其他 WSL 环境），
+        // 交由 Python lifespan 优雅清理本项目关联资源，并在超时后仅强制终止自身子进程树。
         setTimeout(() => {
-            if (pythonProcess && !pythonProcess.killed) {
-                pythonProcess.kill('SIGKILL');
+            if (targetProc && !targetProc.killed && targetPid) {
+                try {
+                    if (process.platform === 'win32') {
+                        const { execSync } = require('child_process');
+                        execSync(`taskkill /T /F /PID ${targetPid}`, { stdio: 'ignore' });
+                    } else {
+                        targetProc.kill('SIGKILL');
+                    }
+                } catch (e) {
+                    // 进程已退出
+                }
             }
         }, 1500);
     }
@@ -235,15 +321,48 @@ function createWindow() {
             height: 800,
             minWidth: 1024,
             minHeight: 720,
-            title: 'NCBI BLAST 专业版 | 工作台',
-            backgroundColor: '#0f172a',
+            title: 'NCBI Bio-Station | 生物序列分析工作站',
+            backgroundColor: '#f1f5f9',
             show: false,
             webPreferences: {
                 preload: path.join(__dirname, 'preload.js'),
                 contextIsolation: true,
                 nodeIntegration: false,
+                sandbox: true,
                 backgroundThrottling: false,
             }
+        });
+
+        // 注入 Content-Security-Policy 响应头（按开发/生产环境收口）
+        const cspDirectives = IS_DEV
+            ? [
+                "default-src 'self'",
+                `script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:${VITE_PORT} http://127.0.0.1:${VITE_PORT}`,
+                "style-src 'self' 'unsafe-inline'",
+                `connect-src 'self' http://127.0.0.1:${API_PORT} ws://127.0.0.1:${API_PORT} http://localhost:${API_PORT} ws://localhost:${API_PORT} http://localhost:${VITE_PORT} ws://localhost:${VITE_PORT}`,
+                `img-src 'self' data: blob: http://127.0.0.1:${API_PORT} http://localhost:${API_PORT}`,
+                "font-src 'self' data:",
+                "worker-src 'self' blob:",
+                "object-src 'none'",
+            ].join('; ')
+            : [
+                "default-src 'self'",
+                "script-src 'self' 'unsafe-inline'",
+                "style-src 'self' 'unsafe-inline'",
+                `connect-src 'self' http://127.0.0.1:${API_PORT} ws://127.0.0.1:${API_PORT} http://localhost:${API_PORT} ws://localhost:${API_PORT}`,
+                `img-src 'self' data: blob: http://127.0.0.1:${API_PORT} http://localhost:${API_PORT}`,
+                "font-src 'self' data:",
+                "worker-src 'self' blob:",
+                "object-src 'none'",
+            ].join('; ');
+
+        mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+            callback({
+                responseHeaders: {
+                    ...details.responseHeaders,
+                    'Content-Security-Policy': [cspDirectives],
+                },
+            });
         });
 
         const frontendUrl = IS_DEV
@@ -276,9 +395,9 @@ function createWindow() {
             console.error(`[Electron] 前端加载失败 (${errorCode} ${errorDescription}): ${validatedURL}`);
         });
 
-        // 拦截所有新窗口创建请求（例如 window.open），防止出现白屏空白子窗口
+        // 拦截所有新窗口创建请求（例如 window.open），仅允许 http/https 协议外链
         mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-            if (url.startsWith('http:') || url.startsWith('https:')) {
+            if (isAllowedExternalUrl(url)) {
                 shell.openExternal(url);
             }
             return { action: 'deny' };
@@ -325,42 +444,88 @@ function createWindow() {
 
 // ─── IPC 处理器 ──────────────────────────────────
 
-ipcMain.handle('dialog:openFile', async (_event, options) => {
+ipcMain.handle('dialog:openFile', async (event, options = {}) => {
+    if (!validateSender(event.senderFrame)) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
         title: options.title || '打开文件',
         filters: options.filters || [{ name: 'All Files', extensions: ['*'] }],
         properties: options.properties || ['openFile']
     });
-    return result.canceled ? null : result.filePaths;
+    if (result.canceled) return null;
+    for (const p of result.filePaths || []) {
+        const resolved = normalizeResolvedPath(p);
+        if (resolved) approvedReadPaths.add(resolved.toLowerCase());
+    }
+    return result.filePaths;
 });
 
-ipcMain.handle('dialog:saveFile', async (_event, options) => {
+ipcMain.handle('dialog:saveFile', async (event, options = {}) => {
+    if (!validateSender(event.senderFrame)) return null;
     const result = await dialog.showSaveDialog(mainWindow, {
         title: options.title || '保存文件',
         defaultPath: options.defaultPath || '',
         filters: options.filters || [{ name: 'All Files', extensions: ['*'] }]
     });
-    return result.canceled ? null : result.filePath;
+    if (result.canceled || !result.filePath) return null;
+    const resolved = normalizeResolvedPath(result.filePath);
+    if (resolved) approvedWritePaths.add(resolved.toLowerCase());
+    return result.filePath;
 });
 
-ipcMain.handle('shell:openExternal', async (_event, url) => shell.openExternal(url));
-ipcMain.handle('shell:openPath', async (_event, dirPath) => shell.openPath(dirPath));
-
-ipcMain.handle('fs:readFile', async (_event, filePath) => {
-    const fs = require('fs');
-    try { return fs.readFileSync(filePath, 'utf-8'); } catch { return null; }
+ipcMain.handle('shell:openExternal', async (event, url) => {
+    if (!validateSender(event.senderFrame)) return false;
+    if (!isAllowedExternalUrl(url)) {
+        console.warn(`[Electron:Security] 拦截非法外部协议 URL: ${String(url)}`);
+        return false;
+    }
+    await shell.openExternal(url);
+    return true;
 });
 
-ipcMain.handle('fs:writeFile', async (_event, filePath, content) => {
-    const fs = require('fs');
-    try { fs.writeFileSync(filePath, content, 'utf-8'); return true; } catch { return false; }
+ipcMain.handle('shell:openPath', async (event, dirPath) => {
+    if (!validateSender(event.senderFrame)) return 'unauthorized';
+    const resolved = normalizeResolvedPath(dirPath);
+    if (!resolved || isSensitiveFile(resolved)) return 'forbidden';
+    return shell.openPath(resolved);
 });
 
-ipcMain.handle('fs:writeBinaryFile', async (_event, filePath, base64Data) => {
-    const fs = require('fs');
+ipcMain.handle('fs:readFile', async (event, filePath) => {
+    if (!validateSender(event.senderFrame)) return null;
+    if (!isSafeReadPath(filePath)) {
+        console.warn(`[Electron:Security] 拦截受限文件读取请求: ${String(filePath)}`);
+        return null;
+    }
+    try {
+        return await fs.promises.readFile(path.resolve(filePath), 'utf-8');
+    } catch {
+        return null;
+    }
+});
+
+ipcMain.handle('fs:writeFile', async (event, filePath, content) => {
+    if (!validateSender(event.senderFrame)) return false;
+    if (!isSafeWritePath(filePath)) {
+        console.warn(`[Electron:Security] 拦截未授权文件写入请求: ${String(filePath)}`);
+        return false;
+    }
+    try {
+        await fs.promises.writeFile(path.resolve(filePath), String(content ?? ''), 'utf-8');
+        return true;
+    } catch (err) {
+        console.error('[Electron] 写入文本文件失败:', err);
+        return false;
+    }
+});
+
+ipcMain.handle('fs:writeBinaryFile', async (event, filePath, base64Data) => {
+    if (!validateSender(event.senderFrame)) return false;
+    if (!isSafeWritePath(filePath)) {
+        console.warn(`[Electron:Security] 拦截未授权二进制写入请求: ${String(filePath)}`);
+        return false;
+    }
     try {
         const buffer = Buffer.from(base64Data, 'base64');
-        fs.writeFileSync(filePath, buffer);
+        await fs.promises.writeFile(path.resolve(filePath), buffer);
         return true;
     } catch (err) {
         console.error('[Electron] 写入二进制文件失败:', err);
@@ -368,11 +533,13 @@ ipcMain.handle('fs:writeBinaryFile', async (_event, filePath, base64Data) => {
     }
 });
 
-ipcMain.handle('app:getApiPort', () => API_PORT);
-ipcMain.handle('app:getProjectRoot', () => PROJECT_ROOT);
+ipcMain.handle('app:getApiPort', (event) => (validateSender(event.senderFrame) ? API_PORT : null));
+ipcMain.handle('app:getProjectRoot', (event) => (validateSender(event.senderFrame) ? PROJECT_ROOT : null));
 
-ipcMain.handle('app:relaunch', async () => {
+ipcMain.handle('app:relaunch', async (event) => {
+    if (!validateSender(event.senderFrame)) return false;
     console.log('[Electron] 收到应用重启请求，正在切断 Sidecar 并重启...');
+    isQuitting = true;
     try {
         stopPythonSidecar();
     } catch (err) {
@@ -402,6 +569,7 @@ app.whenReady().then(async () => {
             } catch (e) {
                 // 忽略对话框失败
             }
+            isQuitting = true;
             stopPythonSidecar();
             app.exit(1);
             return;
@@ -410,26 +578,23 @@ app.whenReady().then(async () => {
         createWindow();
     } catch (err) {
         console.error('[Electron] 启动过程发生未捕获异常:', err);
+        isQuitting = true;
         app.exit(1);
     }
 });
 
-// 窗口全部关闭时的退出行为必须显式声明：
-// 若该事件未注册，Electron 会在“所有窗口关闭”后静默退出（退出码 0），
-// 看起来就像应用启动后立刻消失，且没有任何日志。
 app.on('window-all-closed', () => {
     console.log('[Electron] window-all-closed 事件触发，窗口已全部关闭');
     if (process.platform !== 'darwin') {
+        isQuitting = true;
         stopPythonSidecar();
         app.quit();
     }
 });
 
-app.on('before-quit', (event) => {
-    if (mainWindow === null) {
-        console.log('[Electron] 拦截到一个过早的 before-quit 信号');
-        event.preventDefault();
-        return;
+app.on('before-quit', () => {
+    if (!isQuitting) {
+        isQuitting = true;
     }
     console.log('[Electron] before-quit 事件触发');
     stopPythonSidecar();

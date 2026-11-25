@@ -2,12 +2,10 @@
 """
 功能注释 API 路由 (FastAPI)
 """
-import os
 import logging
-from pathlib import Path
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, PlainTextResponse
+from typing import Dict, Any
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from src.analysis.annotation.types import AnnotationRunRequest, FastaInspectRequest
 from src.analysis.annotation.manager import get_annotation_manager
@@ -122,23 +120,37 @@ async def delete_annotation_task(task_id: str):
 async def open_annotation_folder(task_id: str):
     """在系统资源管理器中打开并高亮定位注释结果目录"""
     import subprocess
+    import sys
+
+    clean_id = (task_id or "").strip()
+    if not clean_id or any(sep in clean_id for sep in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail=f"非法的任务 ID: {task_id}")
+
     manager = get_annotation_manager()
-    task_dir = manager.results_dir / task_id
+    results_root = manager.results_dir.resolve()
+    task_dir = (results_root / clean_id).resolve()
+    if not task_dir.is_relative_to(results_root):
+        raise HTTPException(status_code=400, detail=f"非法的任务目录路径: {task_id}")
     if not task_dir.exists():
-        raise HTTPException(status_code=404, detail=f"注释结果目录不存在: {task_id}")
+        raise HTTPException(status_code=404, detail=f"注释结果目录不存在: {clean_id}")
 
     try:
-        gbk_file = task_dir / f"{task_id}.gbk"
+        gbk_file = task_dir / f"{clean_id}.gbk"
         if not gbk_file.exists():
             gbk_candidates = list(task_dir.glob("*.gbk"))
             if gbk_candidates:
                 gbk_file = gbk_candidates[0]
-        
-        if gbk_file.exists():
-            subprocess.Popen(f'explorer /select,"{str(gbk_file.resolve())}"', shell=True)
+
+        if sys.platform == "win32":
+            if gbk_file.exists():
+                subprocess.Popen(["explorer.exe", f"/select,{gbk_file.resolve()}"])
+            else:
+                subprocess.Popen(["explorer.exe", str(task_dir)])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(task_dir)])
         else:
-            subprocess.Popen(f'explorer "{str(task_dir.resolve())}"', shell=True)
-        return {"success": True, "message": "已在系统资源管理器中定位产物", "path": str(task_dir.resolve())}
+            subprocess.Popen(["xdg-open", str(task_dir)])
+        return {"success": True, "message": "已在系统资源管理器中定位产物", "path": str(task_dir)}
     except Exception as e:
         logger.warning(f"打开资源管理器失败: {e}")
         return {"success": False, "error": str(e)}

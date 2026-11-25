@@ -4,9 +4,11 @@
 """
 
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+_VALID_TOPIC_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 
 class HelpManager:
     """
@@ -54,7 +56,7 @@ class HelpManager:
         Returns:
             list: [{"category": str, "topics": [{"id": str, "title": str}, ...]}, ...]
         """
-        return [
+        raw_structure = [
             {
                 "category": "入门指南",
                 "topics": [
@@ -62,35 +64,55 @@ class HelpManager:
                 ]
             },
             {
-                "category": "核心功能",
+                "category": "核心分析流程",
                 "topics": [
-                    {"id": "local_blast", "title": "本地 BLAST"},
-                    {"id": "elastic_blast", "title": "Elastic BLAST 云服务"},
-                    {"id": "database_manager", "title": "数据库管理"},
-                    {"id": "history", "title": "任务历史"},
+                    {"id": "local_blast", "title": "本地 BLAST 与比对"},
+                    {"id": "genome_assembly", "title": "NGCS 基因组拼接"},
+                    {"id": "analysis_workbench", "title": "组装后深度分析"},
+                    {"id": "figure_studio", "title": "科研绘图工坊"},
+                    {"id": "strain_bank", "title": "菌毒种库与冻存管理"},
+                    {"id": "automation_pipelines", "title": "自动化流水线"},
                 ]
             },
             {
-                "category": "高级设置",
+                "category": "数据与系统设置",
                 "topics": [
+                    {"id": "database_manager", "title": "数据库管理"},
+                    {"id": "history", "title": "任务历史"},
                     {"id": "settings", "title": "参数设置"},
                     {"id": "translation_debugger", "title": "翻译调试器"},
                 ]
             }
         ]
+        # 仅返回物理文件存在的帮助主题，避免无效空条目
+        available = set(self.get_help_topics())
+        filtered = []
+        for group in raw_structure:
+            valid_topics = [t for t in group["topics"] if t["id"] in available]
+            if valid_topics:
+                filtered.append({"category": group["category"], "topics": valid_topics})
+        return filtered
 
     def get_help_content(self, topic_id):
         """
         获取指定主题的帮助内容
         
         Args:
-            topic_id (str): 主题ID（通常是文件名，如 'elastic_blast'）
+            topic_id (str): 主题ID（通常是文件名，如 'quick_start'）
             
         Returns:
-            str: Markdown 格式的帮助内容，如果未找到则返回错误提示
+            str: Markdown 格式的帮助内容，如果非法或未找到则返回错误提示
         """
-        file_path = self.help_dir / f"{topic_id}.md"
-        
+        if not isinstance(topic_id, str) or not _VALID_TOPIC_ID_RE.match(topic_id):
+            logger.warning("拒绝非法帮助主题标识请求: %r", topic_id)
+            return "# 错误\n\n非法的帮助主题标识。"
+
+        help_root = self.help_dir.resolve()
+        file_path = (help_root / f"{topic_id}.md").resolve()
+        if not file_path.is_relative_to(help_root):
+            logger.warning("拦截帮助文档路径穿越尝试: %r", topic_id)
+            return "# 错误\n\n非法的帮助文档路径。"
+
         if not file_path.exists():
             logger.warning(f"帮助文件未找到: {file_path}")
             return f"# 错误\n\n未找到主题 '{topic_id}' 的帮助文档。"

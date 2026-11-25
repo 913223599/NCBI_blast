@@ -11,10 +11,8 @@ from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import pandas as pd
 
 from ..services.diversity_engine import get_diversity_engine
-from ..services.rrndb_service import get_rrndb_service
 
 logger = logging.getLogger("api_server")
 router = APIRouter(prefix="/diversity", tags=["Amplicon Diversity"])
@@ -152,20 +150,27 @@ async def export_excel_get(task_id: str):
 
 
 async def _handle_export_excel(task_id: str, groups: Optional[List[Dict[str, Any]]], translations: Optional[Dict[str, str]]):
-    data = get_diversity_engine().get_task_results(task_id)
+    clean_id = (task_id or "").strip()
+    if not clean_id or any(sep in clean_id for sep in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail=f"非法的任务 ID: {task_id}")
+
+    data = get_diversity_engine().get_task_results(clean_id)
     if not data:
         raise HTTPException(status_code=404, detail="未找到分析结果")
 
     engine = get_diversity_engine()
-    task_dir = Path(engine.results_root) / task_id
-    excel_path = task_dir / f"16S_Diversity_Report_{task_id}.xlsx"
+    results_root = Path(engine.results_root).resolve()
+    task_dir = (results_root / clean_id).resolve()
+    if not task_dir.is_relative_to(results_root):
+        raise HTTPException(status_code=400, detail=f"非法的任务目录路径: {task_id}")
+    excel_path = task_dir / f"16S_Diversity_Report_{clean_id}.xlsx"
 
     from ..services.diversity_excel_exporter import build_rich_diversity_excel
     build_rich_diversity_excel(data, excel_path, custom_groups=groups, translations=translations)
 
     return FileResponse(
         path=str(excel_path),
-        filename=f"16S_Diversity_Report_{task_id}.xlsx",
+        filename=f"16S_Diversity_Report_{clean_id}.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 

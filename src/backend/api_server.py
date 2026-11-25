@@ -92,7 +92,7 @@ if sys.platform.startswith("win"):
         try:
             from src.assembly.env.wsl_manager import WSLManager
             WSLManager.shutdown_distro()
-        except: pass
+        except Exception: pass
         sys.exit(0)
         
     signal.signal(signal.SIGTERM, handle_exit)
@@ -151,16 +151,28 @@ async def lifespan(app: FastAPI):
     except Exception as eb:
         logger.error(f"BLAST 引擎启动失败: {eb}")
 
+    # 托管后台异步任务引用，防止被 GC 静默回收并在退出时优雅取消
+    bg_tasks: set[asyncio.Task] = set()
+
+    def _spawn_bg_task(coro, label: str):
+        task = asyncio.create_task(coro)
+        bg_tasks.add(task)
+        task.add_done_callback(bg_tasks.discard)
+        logger.debug(f"[INIT] 已托管后台任务: {label}")
+        return task
+
+    app.state.bg_tasks = bg_tasks
+
     # B2. 初始化组装任务队列工作线程 (持久化串行队列)
     from .routes.assembly import execute_assembly_pipeline
     from .utils.persistent_queue import persistent_queue
-    asyncio.create_task(persistent_queue.start_workers(execute_assembly_pipeline))
+    _spawn_bg_task(persistent_queue.start_workers(execute_assembly_pipeline), "assembly_queue")
     logger.info("Assembly 持久化串行队列引擎已启动 (max_workers=1)")
 
     # B3. 初始化功能注释任务队列调度工作者
     try:
         from src.analysis.annotation.manager import get_annotation_manager
-        asyncio.create_task(get_annotation_manager().initialize_queue_worker())
+        _spawn_bg_task(get_annotation_manager().initialize_queue_worker(), "annotation_queue")
         logger.info("[INIT] Annotation 持久化任务队列引擎已启动 (max_workers=1)")
     except Exception as ea:
         logger.error(f"Annotation 队列引擎启动失败: {ea}")
@@ -168,7 +180,7 @@ async def lifespan(app: FastAPI):
     # B4. 初始化前噬菌体发现 (V4.2) 队列调度工作者
     try:
         from src.analysis.phage_finder.manager import get_phage_discovery_manager
-        asyncio.create_task(get_phage_discovery_manager().initialize_queue_worker())
+        _spawn_bg_task(get_phage_discovery_manager().initialize_queue_worker(), "phage_discovery_queue")
         logger.info("[INIT] PhageDiscovery (V4.2) 队列引擎已启动 (max_workers=1)")
     except Exception as ep:
         logger.error(f"PhageDiscovery 队列引擎启动失败: {ep}")
@@ -176,7 +188,7 @@ async def lifespan(app: FastAPI):
     # B5. 初始化噬菌体结构与尾部形态预测队列调度工作者
     try:
         from src.analysis.phage_structure.manager import get_phage_structure_manager
-        asyncio.create_task(get_phage_structure_manager().initialize_queue_worker())
+        _spawn_bg_task(get_phage_structure_manager().initialize_queue_worker(), "phage_structure_queue")
         logger.info("[INIT] PhageStructure 结构预测队列引擎已启动 (max_workers=1)")
     except Exception as eps:
         logger.error(f"PhageStructure 队列引擎启动失败: {eps}")
@@ -251,11 +263,19 @@ async def lifespan(app: FastAPI):
                 except Exception as exc_bg:
                     logger.error(f"[HeadlessBrowser] 后台自修复异常: {exc_bg}")
 
-            asyncio.create_task(_bg_heal_browser())
+            _spawn_bg_task(_bg_heal_browser(), "headless_browser_heal")
     except Exception as hb_exc:
         logger.warning(f"[HeadlessBrowser] 启动检查异常（不影响主服务启动）: {hb_exc}")
 
     yield
+
+    # 取消仍在运行的后台协程，防止进程挂起
+    for task in list(bg_tasks):
+        if not task.done():
+            task.cancel()
+    if bg_tasks:
+        await asyncio.gather(*bg_tasks, return_exceptions=True)
+        bg_tasks.clear()
 
     # C. 退出清理
     try:
@@ -312,8 +332,85 @@ def _on_blast_result(task_id: str, data: dict):
         except Exception as cb_e:
             logger.debug(f"标注回调失败 (skip): {cb_e}")
 
-# ─── 5. 应用实例化与路由挂载 ────────────────────────────
+# ─── 5. 应用实例化与安全中间件 / 路由挂载 ────────────────
 app = FastAPI(title="NCBI Bio-Station API", lifespan=lifespan)
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient", "::ffff:127.0.0.1"})
+
+_ALLOWED_LOCAL_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8765",
+    "http://127.0.0.1:8765",
+    "null",  # Electron 生产模式 file:// 加载时的 Origin
+]
+
+# 仅放行本机回环及标准 RFC1918 私有局域网来源，拒绝公网恶意站点跨域访问
+_PRIVATE_LAN_ORIGIN_REGEX = (
+    r"^https?://("
+    r"localhost|127\.0\.0\.1"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r"|192\.168\.\d{1,3}\.\d{1,3}"
+    r")(:\d+)?$"
+)
+
+
+def _is_lan_share_enabled() -> bool:
+    try:
+        from ..utils.config_manager import get_config_manager
+        return bool(get_config_manager().get_config_value("lan_share", False))
+    except Exception:
+        return False
+
+
+def _extract_client_host(scope: dict) -> str:
+    client = scope.get("client")
+    if isinstance(client, (tuple, list)) and client:
+        return str(client[0] or "").strip().lower()
+    return ""
+
+
+def is_client_ip_allowed(client_host: str, lan_share_enabled: bool) -> bool:
+    """当 lan_share 关闭时，仅允许本机回环地址访问 API 与静态资源。"""
+    if lan_share_enabled:
+        return True
+    normalized = (client_host or "").strip().lower()
+    if normalized in _LOOPBACK_HOSTS:
+        return True
+    return normalized.startswith("127.")
+
+
+class LanAccessGuardMiddleware:
+    """纯 ASGI 局域网访问隔离守卫（保持 0.0.0.0 动态切换，不重启服务即可生效）。"""
+
+    def __init__(self, asgi_app):
+        self.app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        scope_type = scope.get("type")
+        if scope_type in {"http", "websocket"}:
+            client_host = _extract_client_host(scope)
+            if not is_client_ip_allowed(client_host, _is_lan_share_enabled()):
+                if scope_type == "http":
+                    body = json.dumps(
+                        {"detail": "LAN Share is disabled. Remote access denied."},
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                    await send({
+                        "type": "http.response.start",
+                        "status": 403,
+                        "headers": [
+                            (b"content-type", b"application/json; charset=utf-8"),
+                            (b"content-length", str(len(body)).encode("ascii")),
+                        ],
+                    })
+                    await send({"type": "http.response.body", "body": body})
+                    return
+                await send({"type": "websocket.close", "code": 1008})
+                return
+        await self.app(scope, receive, send)
+
 
 # 初始化局域网共享管理 (暂不 setup，等待业务路由注册完成)
 lan_mgr = None
@@ -323,13 +420,22 @@ try:
 except Exception as e:
     logger.error(f"局域网共享模块初始化失败: {e}")
 
+# 遵循 FastAPI CORS 安全规范：显式白名单 + 私有网段正则，且不开启通配 credentials
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_ALLOWED_LOCAL_ORIGINS,
+    allow_origin_regex=_PRIVATE_LAN_ORIGIN_REGEX,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Client-ID", "Authorization", "Accept"],
 )
+app.add_middleware(LanAccessGuardMiddleware)
+
+
+@app.get("/api/health", tags=["Core"])
+async def api_health():
+    """轻量级健康检查端点，供 Electron Sidecar 快速探活。"""
+    return {"status": "ok", "service": "ncbi-bio-station"}
 
 # 动态载入分散在各路由模块的接口
 from .routes import blast, strains, dictionary, phylo, figure_studio, settings, core, common, taxonomy

@@ -8,6 +8,29 @@ from fastapi.responses import FileResponse
 
 logger = logging.getLogger("lan_share")
 
+
+def resolve_safe_dist_file(dist_path: Path, full_path: str) -> Optional[Path]:
+    """
+    安全解析静态分发目录内的目标文件路径，彻底阻断路径穿越攻击（如 ../../config.json）。
+    仅当目标真实路径严格位于 dist_path 目录内部且为普通文件时返回其绝对路径。
+    """
+    if not full_path or "\x00" in full_path:
+        return None
+    normalized = full_path.replace("\\", "/").lstrip("/")
+    if not normalized or normalized.startswith("/") or ".." in Path(normalized).parts:
+        return None
+    try:
+        dist_root = dist_path.resolve()
+        candidate = (dist_root / normalized).resolve()
+        if not candidate.is_relative_to(dist_root):
+            return None
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    except Exception:
+        return None
+    return None
+
+
 class LanShareManager:
     """
     局域网共享管理模块
@@ -58,11 +81,14 @@ class LanShareManager:
                 
             if full_path.startswith("api/") or full_path.startswith("ws"):
                 raise HTTPException(status_code=404, detail="API or WS Not Found")
-            
-            file_path = self.dist_path / full_path
-            if file_path.exists() and file_path.is_file():
-                return FileResponse(str(file_path))
-            
+
+            if "\x00" in full_path or ".." in Path(full_path.replace("\\", "/")).parts:
+                raise HTTPException(status_code=403, detail="Forbidden path traversal")
+
+            safe_file = resolve_safe_dist_file(self.dist_path, full_path)
+            if safe_file is not None:
+                return FileResponse(str(safe_file))
+
             index_path = self.dist_path / "index.html"
             if index_path.exists():
                 return FileResponse(str(index_path))

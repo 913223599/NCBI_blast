@@ -207,10 +207,10 @@ async def get_assembly_status(task_id: str):
     # 解析 JSON 字段
     if task.get('results') and isinstance(task['results'], str):
         try: task['results'] = json.loads(task['results'])
-        except: pass
+        except Exception: pass
     if task.get('config') and isinstance(task['config'], str):
         try: task['config'] = json.loads(task['config'])
-        except: pass
+        except Exception: pass
 
     task['queue_position'] = queue_pos
     return BioResponse.ok(task)
@@ -663,7 +663,11 @@ async def download_single_contig(task_id: str, contig_name: str):
 @router.post("/open-folder/{task_id}")
 async def open_task_folder(task_id: str):
     """在系统资源管理器中高亮定位组装产物所在目录"""
-    task_dir = AssemblyStorage.get_task_dir(task_id)
+    clean_id = (task_id or "").strip()
+    if not clean_id or any(sep in clean_id for sep in ("/", "\\", "..")):
+        raise HTTPException(status_code=400, detail=f"非法的任务 ID: {task_id}")
+
+    task_dir = AssemblyStorage.get_task_dir(clean_id).resolve()
     run_dir = task_dir / "assembly_run"
     target_dir = run_dir if run_dir.exists() else task_dir
     
@@ -678,12 +682,19 @@ async def open_task_folder(task_id: str):
         return BioResponse.fail("产物目录不存在")
 
     import subprocess
+    import sys
+
     asm_fasta = target_dir / "assembly.fasta"
     try:
-        if asm_fasta.exists():
-            subprocess.Popen(f'explorer /select,"{str(asm_fasta.resolve())}"', shell=True)
+        if sys.platform == "win32":
+            if asm_fasta.exists():
+                subprocess.Popen(["explorer.exe", f"/select,{asm_fasta.resolve()}"])
+            else:
+                subprocess.Popen(["explorer.exe", str(target_dir.resolve())])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(target_dir.resolve())])
         else:
-            subprocess.Popen(f'explorer "{str(target_dir.resolve())}"', shell=True)
+            subprocess.Popen(["xdg-open", str(target_dir.resolve())])
         return BioResponse.ok({"message": "已打开产物目录", "path": str(target_dir)})
     except Exception as e:
         return BioResponse.fail(f"打开目录失败: {e}")
