@@ -110,6 +110,8 @@ quast/quast_libs/barrnap/build/*.aln
 /test/
 scripts/*.png
 scripts/__pycache__/
+!/scripts/README.md
+!/scripts/verify_all.ps1
 validation_audit_res.json
 *_results*.csv
 *.csv
