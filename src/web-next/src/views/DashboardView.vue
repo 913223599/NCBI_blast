@@ -7,14 +7,12 @@ import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { useStrainStore } from '../stores/strain'
-import { useBlastStore } from '../stores/blast'
 import { APP_NAME, APP_VERSION } from '../utils/appMeta'
 import { useI18n } from '../locales'
 
 const router = useRouter()
 const appStore = useAppStore()
 const strainStore = useStrainStore()
-const blastStore = useBlastStore()
 const { t } = useI18n()
 
 interface ActionCard {
@@ -80,7 +78,6 @@ const actionCards = computed<ActionCard[]>(() => [
 const systemMetrics = computed(() => [
   { label: t('dash.metric.platform_version'), value: `${APP_NAME} v${APP_VERSION}` },
   { label: t('dash.metric.strain_records'), value: t('dash.unit.records', { count: strainStore.records.length }) },
-  { label: t('dash.metric.blast_tasks'), value: t('dash.unit.tasks', { count: blastStore.tasks.length }) },
   { label: t('dash.metric.freezers'), value: t('dash.unit.units', { count: strainStore.freezers.length }) },
 ])
 

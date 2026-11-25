@@ -108,10 +108,8 @@
   "dash.card.other.desc": "邮件收件自动注释与 Word 报告回传、生工 16S 订单批量抓取比对与导出。",
   "dash.metric.platform_version": "平台版本",
   "dash.metric.strain_records": "已入库菌毒种样本",
-  "dash.metric.blast_tasks": "历史 BLAST 任务",
   "dash.metric.freezers": "冻存设备数量",
   "dash.unit.records": "{count} 条",
-  "dash.unit.tasks": "{count} 项",
   "dash.unit.units": "{count} 台",
 
   "help.sidebar_aria": "帮助主题目录",

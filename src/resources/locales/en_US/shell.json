@@ -108,10 +108,8 @@
   "dash.card.other.desc": "Automated mail intake to annotation Word report reply, plus Sangon 16S batch BLAST and CSV export.",
   "dash.metric.platform_version": "Platform Version",
   "dash.metric.strain_records": "Cataloged Strains",
-  "dash.metric.blast_tasks": "BLAST History Tasks",
   "dash.metric.freezers": "Cryo Freezers",
   "dash.unit.records": "{count} records",
-  "dash.unit.tasks": "{count} tasks",
   "dash.unit.units": "{count} units",
 
   "help.sidebar_aria": "Help Topics Directory",
