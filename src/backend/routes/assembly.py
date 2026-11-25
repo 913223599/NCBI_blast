@@ -4,6 +4,7 @@ Assembly API Routes - 基因组拼接后端接口模块 (纯净重构版)
 提供任务提交、队列调度、实时进度遥测、指标查询与产物导出接口。
 """
 
+import asyncio
 import re
 import json
 import os
@@ -22,9 +23,11 @@ from ..utils.assembly_storage import AssemblyStorage
 from ..utils.persistent_queue import persistent_queue as assembly_queue
 from ..utils.assembly_db import assembly_db
 from ...assembly.manager import AssemblyManager
+from ...assembly.utils.contig_depth import backfill_manifest_contig_depths
 from ...assembly.utils.path_resolver import get_candidate_safe_work_dirs
 
 logger = logging.getLogger("Assembly.Routes")
+_DEPTH_BACKFILL_LOCKS: Dict[str, asyncio.Lock] = {}
 
 # 全局管理器单例
 _project_root = Path(__file__).resolve().parent.parent.parent.parent
@@ -310,9 +313,16 @@ def parse_assembly_fasta_metrics(asm_fasta: Path, task_dir: Optional[Path] = Non
     avg_gc = round(sum(c["gc_percent"] * c["length"] for c in contigs) / safe_total_len, 2)
     avg_depth = round(sum(c["depth"] * c["length"] for c in contigs) / safe_total_len, 1)
 
-    # 深度容错补全：若 Header 未显式包含深度，尝试从 fastp.json 过滤后碱基推算
+    # 深度容错补全：若 Header 未显式包含深度，尝试从 fastp.json 过滤后碱基推算全局平均深度
+    # 严禁将同一个全局平均深度广播覆盖到多条独立 Contig 上，仅单片段组装允许直接继承
     if avg_depth <= 0.0 and task_dir:
-        for s_dir in [task_dir / "assemblerstep" / "assembly_run", task_dir / "assembly_run", task_dir]:
+        search_fastp_dirs = [
+            task_dir / "assemblerstep" / "assembly_run",
+            task_dir / "assembly_run",
+            task_dir,
+            *get_candidate_safe_work_dirs(task_dir.name),
+        ]
+        for s_dir in search_fastp_dirs:
             fj_path = s_dir / "qc" / "fastp.json"
             if not fj_path.exists():
                 fj_path = s_dir / "fastp.json"
@@ -322,8 +332,8 @@ def parse_assembly_fasta_metrics(asm_fasta: Path, task_dir: Optional[Path] = Non
                         cb = json.load(fj).get("summary", {}).get("after_filtering", {}).get("total_bases", 0)
                         if cb > 0 and total_len > 0:
                             avg_depth = round(cb / safe_total_len, 1)
-                            for c in contigs:
-                                if c["depth"] <= 0.0: c["depth"] = avg_depth
+                            if len(contigs) == 1 and contigs[0]["depth"] <= 0.0:
+                                contigs[0]["depth"] = avg_depth
                             break
                 except Exception:
                     pass
@@ -338,6 +348,40 @@ def parse_assembly_fasta_metrics(asm_fasta: Path, task_dir: Optional[Path] = Non
         "max_contig_length": contigs[0]["length"] if contigs else 0
     }
     return stats, contigs
+
+
+def _extract_contig_depth(c: Dict[str, Any]) -> Optional[float]:
+    """从 manifest contig 条目中安全提取显式声明的测序深度（兼容 depth / mean_depth / coverage）"""
+    for key in ("depth", "mean_depth", "coverage"):
+        val = c.get(key)
+        if val is not None:
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _read_fastp_total_bases(task_id: str, task_dir: Path) -> int:
+    search_dirs = [
+        task_dir / "assemblerstep" / "assembly_run",
+        task_dir / "assembly_run",
+        task_dir,
+        *get_candidate_safe_work_dirs(task_id),
+    ]
+    for s_dir in search_dirs:
+        fj_path = s_dir / "qc" / "fastp.json"
+        if not fj_path.exists():
+            fj_path = s_dir / "fastp.json"
+        if fj_path.exists():
+            try:
+                with open(fj_path, "r", encoding="utf-8") as fj:
+                    cb = json.load(fj).get("summary", {}).get("after_filtering", {}).get("total_bases", 0)
+                    if cb and int(cb) > 0:
+                        return int(cb)
+            except Exception:
+                continue
+    return 0
 
 
 @router.get("/result/{task_id}")
@@ -367,12 +411,14 @@ async def get_assembly_result(task_id: str):
     ]
 
     manifest_data = None
+    manifest_path: Optional[Path] = None
     for s_dir in search_dirs:
         mf_path = s_dir / "assembly_manifest.json"
         if mf_path.exists() and mf_path.stat().st_size > 0:
             try:
                 with open(mf_path, "r", encoding="utf-8") as mf:
                     manifest_data = json.load(mf)
+                    manifest_path = mf_path
                     break
             except Exception:
                 pass
@@ -393,24 +439,45 @@ async def get_assembly_result(task_id: str):
             for c in raw_c_list:
                 c_len = c.get("length", 0)
                 ratio = round((c_len / float(tot_bp) * 100.0), 1) if tot_bp > 0 else 0.0
+                raw_d = _extract_contig_depth(c)
+                d_val = round(raw_d, 1) if raw_d is not None else 0.0
+                d_header = f" depth={d_val}x" if d_val > 0 else ""
+                gc_val = c.get("gc") if c.get("gc") is not None else c.get("gc_percent", 0.0)
+                circ_val = bool(c.get("circular", c.get("is_circular", False)))
                 contig_list.append({
                     "name": c.get("name"),
-                    "header": f"{c.get('name')} length={c_len} depth={c.get('depth', stats['avg_depth'])}x",
+                    "header": f"{c.get('name')} length={c_len}{d_header}",
                     "length": c_len,
-                    "gc_percent": c.get("gc", 0.0),
-                    "depth": round(float(c.get("depth") or stats["avg_depth"]), 1),
-                    "is_circular": bool(c.get("circular", False)),
+                    "gc_percent": gc_val,
+                    "depth": d_val,
+                    "is_circular": circ_val,
                     "length_ratio": ratio,
                     "sequence": c.get("sequence", "")
                 })
 
-    # 2. 互补融合与深度解析：若 Manifest 缺少 contigs 明细或缺少 N50/GC 指标，无缝解析 FASTA 补全
-    need_fasta_parse = (len(contig_list) == 0 or stats.get("n50", 0) <= 0 or stats.get("gc_percent", 0.0) <= 0.0)
+    # 2. 互补融合与深度解析：若 Manifest 缺少 contigs 明细、N50/GC 或序列文本，无缝解析 FASTA 补全
+    need_fasta_parse = (
+        len(contig_list) == 0
+        or stats.get("n50", 0) <= 0
+        or stats.get("gc_percent", 0.0) <= 0.0
+        or any(not c.get("sequence") for c in contig_list)
+    )
     if need_fasta_parse and fasta_exists and asm_fasta:
         f_stats, f_contigs = parse_assembly_fasta_metrics(asm_fasta, task_dir)
         if f_stats.get("total_length", 0) > 0:
             if len(contig_list) == 0:
                 contig_list = f_contigs
+            else:
+                f_by_name = {fc["name"]: fc for fc in f_contigs if fc.get("name")}
+                for c in contig_list:
+                    fc = f_by_name.get(c.get("name"))
+                    if fc:
+                        if not c.get("sequence"):
+                            c["sequence"] = fc.get("sequence", "")
+                        if not c.get("gc_percent"):
+                            c["gc_percent"] = fc.get("gc_percent", 0.0)
+                        if c.get("depth", 0.0) <= 0.0 and fc.get("depth", 0.0) > 0.0:
+                            c["depth"] = fc["depth"]
             if stats.get("total_length", 0) <= 0:
                 stats["total_length"] = f_stats["total_length"]
             if stats.get("contigs", 0) <= 0:
@@ -425,6 +492,71 @@ async def get_assembly_result(task_id: str):
                 stats["avg_depth"] = f_stats["avg_depth"]
             if stats.get("max_contig_length", 0) <= 0:
                 stats["max_contig_length"] = f_stats["max_contig_length"]
+
+    # 2.5 多片段缺失独立深度时，异步回溯计算各 Contig 真实测序深度并原子写入 Manifest 缓存
+    if (
+        len(contig_list) > 1
+        and all(float(c.get("depth", 0.0)) <= 0.0 for c in contig_list)
+        and fasta_exists
+        and asm_fasta is not None
+    ):
+        task_config = task.get("config")
+        if isinstance(task_config, str):
+            try:
+                task_config = json.loads(task_config)
+            except Exception:
+                task_config = None
+        fastp_bases = _read_fastp_total_bases(task_id, task_dir)
+        lock = _DEPTH_BACKFILL_LOCKS.setdefault(task_id, asyncio.Lock())
+        async with lock:
+            target_mf_path = manifest_path or (asm_fasta.parent / "assembly_manifest.json")
+            backfilled = None
+            if target_mf_path.exists() and target_mf_path.stat().st_size > 0:
+                try:
+                    with open(target_mf_path, "r", encoding="utf-8") as mf_check:
+                        mf_latest = json.load(mf_check)
+                    if mf_latest.get("contigs") and any(
+                        (_extract_contig_depth(item) or 0.0) > 0.0 for item in mf_latest["contigs"]
+                    ):
+                        backfilled = (
+                            {
+                                item["name"]: round(float(_extract_contig_depth(item) or 0.0), 1)
+                                for item in mf_latest["contigs"]
+                                if item.get("name")
+                            },
+                            mf_latest.get("depth_source", "manifest"),
+                        )
+                except Exception:
+                    pass
+            if backfilled is None:
+                backfilled = await asyncio.to_thread(
+                    backfill_manifest_contig_depths,
+                    task_id,
+                    task_dir,
+                    asm_fasta,
+                    contig_list,
+                    target_mf_path,
+                    manifest_data,
+                    task_config if isinstance(task_config, dict) else None,
+                    fastp_bases,
+                )
+            if backfilled:
+                depth_map, _source = backfilled
+                for c in contig_list:
+                    cname = c.get("name")
+                    if cname and cname in depth_map:
+                        d_val = round(float(depth_map[cname]), 1)
+                        c["depth"] = d_val
+                        if d_val > 0 and "depth=" not in str(c.get("header", "")):
+                            c["header"] = f"{c.get('header', cname)} depth={d_val}x"
+                tot_len_sum = sum(int(c.get("length", 0)) for c in contig_list)
+                if tot_len_sum > 0:
+                    weighted_d = round(
+                        sum(float(c.get("depth", 0.0)) * int(c.get("length", 0)) for c in contig_list) / tot_len_sum,
+                        1,
+                    )
+                    if weighted_d > 0.0:
+                        stats["avg_depth"] = weighted_d
 
     # 3. 排序与数据库状态同步 (安全防御：仅当解析出有效指标且非全 0 时才更新数据库)
     contig_list.sort(key=lambda x: x["length"], reverse=True)

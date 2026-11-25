@@ -290,11 +290,18 @@ async function downloadContig(c: ContigDetailItem) {
                   :class="{
                     'depth-high': c.depth >= 100,
                     'depth-mid': c.depth >= 30 && c.depth < 100,
-                    'depth-low': c.depth < 30
+                    'depth-low': c.depth > 0 && c.depth < 30,
+                    'depth-unknown': !(c.depth > 0)
                   }"
-                  :title="c.depth >= 100 ? '高测序深度 (主染色体/核心靶序列)' : (c.depth < 30 ? '低测序深度 (背景杂质/宿主残余)' : '中等测序深度')"
+                  :title="c.depth >= 100
+                    ? '高测序深度 (主染色体/核心靶序列)'
+                    : (c.depth >= 30
+                      ? '中等测序深度'
+                      : (c.depth > 0
+                        ? '低测序深度 (背景杂质/宿主残余)'
+                        : (stats.avg_depth > 0 ? `未获取到单片段独立深度 (全局平均 ${stats.avg_depth.toFixed(1)}x)` : '未获取到单片段测序深度')))"
                 >
-                  {{ c.depth > 0 ? c.depth.toFixed(1) : '-' }}x
+                  {{ c.depth > 0 ? `${c.depth.toFixed(1)}x` : '-' }}
                 </span>
               </td>
               <td class="col-topo">
@@ -710,6 +717,12 @@ async function downloadContig(c: ContigDetailItem) {
 .depth-low {
   color: #64748b;
   background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.depth-unknown {
+  color: #94a3b8;
+  background: #f8fafc;
   border: 1px solid #e2e8f0;
 }
 
