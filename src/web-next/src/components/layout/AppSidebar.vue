@@ -24,7 +24,7 @@ const navItems: NavItem[] = [
   { id: 'assembly', label: '基因组拼接', icon: 'assembly', route: '/assembly', category: '分析工具' },
   { id: 'analysis', label: '组装分析', icon: 'analysis', route: '/analysis', category: '分析工具' },
   { id: 'blast', label: 'BLAST 分析', icon: 'blast', route: '/blast', category: '分析工具' },
-  { id: 'tree', label: '进化树', icon: 'tree', route: '/tree', category: '分析工具' },
+  { id: 'tree', label: '科研绘图', icon: 'tree', route: '/tree', category: '分析工具' },
   { id: 'other_tools', label: '其他功能', icon: 'other_tools', route: '/other-tools', category: '分析工具' },
   { id: 'settings', label: '设置', icon: 'settings', route: '/settings', category: '系统' },
   { id: 'help', label: '帮助', icon: 'help', route: '/help', category: '系统' }

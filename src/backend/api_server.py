@@ -1,4 +1,4 @@
-
+# -*- coding: utf-8 -*-
 """
 api_server.py — NCBI Bio-Station 入口 (V2.0 模块化版本)
 --------------------------------------------------
@@ -332,13 +332,14 @@ app.add_middleware(
 )
 
 # 动态载入分散在各路由模块的接口
-from .routes import blast, strains, dictionary, phylo, settings, core, common, taxonomy
+from .routes import blast, strains, dictionary, phylo, figure_studio, settings, core, common, taxonomy
 
 app.include_router(common.router)
 app.include_router(blast.router)
 app.include_router(strains.router)
 app.include_router(dictionary.router)
 app.include_router(phylo.router)
+app.include_router(figure_studio.router)
 app.include_router(settings.router)
 app.include_router(taxonomy.router)
 app.include_router(core.router)
