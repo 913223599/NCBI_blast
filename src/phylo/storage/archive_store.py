@@ -3,15 +3,17 @@
 PhyloArchiveStore - 独立 SQLite 元数据仓库与物理工作区管理
 完全独立于旧版 tree_history 与 tree_results 目录。
 """
+import inspect
 import logging
 import os
 import shutil
 import sqlite3
 import stat
 import threading
+import time
 import zipfile
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from ..models.schemas import PhyloJobRecord, WorkspaceFileItem
 from ..runtime.tool_registry import get_project_root
@@ -34,19 +36,43 @@ def _force_remove_file(path: Path) -> None:
     path.unlink()
 
 
-def _rmtree_readonly(path: Path) -> None:
-    """递归删除目录，自动处理其中的只读文件。"""
-    if not path.exists():
-        return
+def _rmtree_supports_onexc() -> bool:
+    """判断当前运行时的 shutil.rmtree 是否支持 onexc 参数 (Python 3.12+)。"""
+    try:
+        return "onexc" in inspect.signature(shutil.rmtree).parameters
+    except Exception:
+        return False
 
-    def _on_exc(func, target_path, _exc):
+
+def _rmtree_readonly(path: Path, retries: int = 3, retry_delay: float = 0.15) -> bool:
+    """递归删除目录，兼容 Python <3.12 (onerror) 与 >=3.12 (onexc)，并容忍短暂句柄占用。"""
+    if not path.exists():
+        return True
+
+    def _on_error(func: Any, target_path: str, _exc: Any) -> None:
         try:
             os.chmod(target_path, stat.S_IWRITE | stat.S_IREAD)
             func(target_path)
         except OSError as exc:
             logger.warning(f"强制清理失败 ({target_path}): {exc}")
 
-    shutil.rmtree(path, onexc=_on_exc)
+    for attempt in range(max(1, retries)):
+        try:
+            if _rmtree_supports_onexc():
+                shutil.rmtree(path, onexc=_on_error)
+            else:
+                shutil.rmtree(path, onerror=_on_error)  # type: ignore[call-arg]
+            if not path.exists():
+                return True
+        except OSError as exc:
+            logger.warning(f"删除目录尝试 {attempt + 1}/{retries} 失败 ({path}): {exc}")
+        if attempt < retries - 1 and path.exists():
+            time.sleep(retry_delay)
+
+    if path.exists():
+        logger.warning(f"目录清理未能完全完成，已忽略残留 ({path})")
+        return False
+    return True
 
 
 class PhyloArchiveStore:

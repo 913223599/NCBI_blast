@@ -545,8 +545,11 @@ async def pull_itol_figure(job_id: str, req: ItolPullRequest):
 
 @router.delete("/jobs/{job_id}")
 async def delete_phylo_job(job_id: str):
-    # 若任务仍在运行则先取消
-    get_phylo_executor().cancel_job(job_id)
+    # 若任务仍在运行则先取消并短暂等待句柄释放，避免阻断后续清理
+    try:
+        get_phylo_executor().cancel_job(job_id, wait_timeout=1.5)
+    except Exception as exc:
+        logger.warning(f"删除任务前取消执行失败 ({job_id}): {exc}")
     deleted = get_phylo_store().delete_job(job_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"未找到任务: {job_id}")

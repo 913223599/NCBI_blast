@@ -344,7 +344,7 @@ class PhyloJobExecutor:
         worker.start()
         return record
 
-    def cancel_job(self, job_id: str) -> bool:
+    def cancel_job(self, job_id: str, wait_timeout: float = 0.0) -> bool:
         with self._jobs_lock:
             handle = self._active_jobs.get(job_id)
             runner = handle.active_runner if handle is not None else None
@@ -365,6 +365,13 @@ class PhyloJobExecutor:
                 runner.terminate_active()
             except Exception as exc:
                 logger.debug(f"terminate_active error: {exc}")
+        if (
+            wait_timeout > 0
+            and handle.thread is not None
+            and handle.thread is not threading.current_thread()
+            and handle.thread.is_alive()
+        ):
+            handle.thread.join(timeout=wait_timeout)
         return True
 
     def _build_initial_stages(self, resolved_track: str, config: PhyloJobConfig) -> List[StageState]:

@@ -31,6 +31,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # ─── 0. Windows 控制台 UTF‑8 支持 ───────────────────────
 # import sys, io
@@ -428,7 +429,41 @@ try:
 except Exception as e:
     logger.error(f"局域网共享模块初始化失败: {e}")
 
+class UnhandledExceptionJsonMiddleware:
+    """将未捕获异常在 CORSMiddleware 内层转为标准 500 JSON，防止裸 500 丢失 CORS 响应头。"""
+
+    def __init__(self, asgi_app):
+        self.app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        response_started = False
+
+        async def _guarded_send(message):
+            nonlocal response_started
+            if message.get("type") == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, _guarded_send)
+        except Exception as exc:
+            if response_started:
+                raise
+            method = scope.get("method", "")
+            path = scope.get("path", "")
+            logger.exception(f"未捕获接口异常 [{method} {path}]: {exc}")
+            resp = JSONResponse(
+                status_code=500,
+                content={"detail": f"服务器内部错误: {exc}"},
+            )
+            await resp(scope, receive, send)
+
+
 # 遵循 FastAPI CORS 安全规范：显式白名单 + 私有网段正则，且不开启通配 credentials
+app.add_middleware(UnhandledExceptionJsonMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_LOCAL_ORIGINS,

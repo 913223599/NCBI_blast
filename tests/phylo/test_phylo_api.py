@@ -173,3 +173,123 @@ def test_recover_interrupted_jobs(tmp_path: Path):
     assert reloaded is not None
     assert reloaded.status == "failed"
     assert "重启" in (reloaded.error or "")
+
+
+def test_rmtree_readonly_compatible_with_python311_onerror(tmp_path: Path, monkeypatch):
+    import os
+    import shutil
+    import stat
+
+    from src.phylo.models.schemas import PhyloJobConfig, PhyloJobRecord
+    from src.phylo.storage import archive_store
+
+    real_rmtree = shutil.rmtree
+
+    def py311_rmtree(path, ignore_errors=False, onerror=None):
+        return real_rmtree(path, ignore_errors=ignore_errors, onerror=onerror)
+
+    monkeypatch.setattr(archive_store.shutil, "rmtree", py311_rmtree)
+
+    store = PhyloArchiveStore(base_dir=tmp_path / "py311_store")
+    job_id = "phylo_261125_200946_940705"
+    job_dir = store.jobs_dir / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    ro_file = job_dir / "readonly.txt"
+    ro_file.write_text("locked", encoding="utf-8")
+    os.chmod(ro_file, stat.S_IREAD)
+
+    store.save_job(
+        PhyloJobRecord(
+            job_id=job_id,
+            title="Py311CompatJob",
+            status="failed",
+            resolved_track="gene",
+            config=PhyloJobConfig(),
+            created_at=time.time(),
+            job_dir=str(job_dir),
+        )
+    )
+
+    executor = get_phylo_executor()
+    orig_store = executor.store
+    executor.store = store
+    monkeypatch.setattr(phylo_route, "get_phylo_store", lambda: store)
+    app = FastAPI()
+    app.include_router(phylo_route.router)
+    client = TestClient(app)
+
+    try:
+        res = client.delete(f"/api/phylo/jobs/{job_id}")
+        assert res.status_code == 200
+        assert res.json() == {"success": True, "job_id": job_id}
+        assert not job_dir.exists()
+        assert store.get_job(job_id) is None
+    finally:
+        executor.store = orig_store
+        if ro_file.exists():
+            os.chmod(ro_file, stat.S_IWRITE | stat.S_IREAD)
+
+
+def test_delete_job_tolerates_locked_directory_without_500(tmp_path: Path, monkeypatch):
+    from src.phylo.models.schemas import PhyloJobConfig, PhyloJobRecord
+    from src.phylo.storage import archive_store
+
+    def always_locked_rmtree(path, **kwargs):
+        raise PermissionError(32, "simulated file handle busy", str(path))
+
+    monkeypatch.setattr(archive_store.shutil, "rmtree", always_locked_rmtree)
+    monkeypatch.setattr(archive_store.time, "sleep", lambda _sec: None)
+
+    store = PhyloArchiveStore(base_dir=tmp_path / "locked_store")
+    job_id = "phylo_locked_001"
+    job_dir = store.jobs_dir / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "job.log").write_text("busy", encoding="utf-8")
+    store.save_job(
+        PhyloJobRecord(
+            job_id=job_id,
+            title="LockedJob",
+            status="failed",
+            resolved_track="gene",
+            config=PhyloJobConfig(),
+            created_at=time.time(),
+            job_dir=str(job_dir),
+        )
+    )
+
+    executor = get_phylo_executor()
+    orig_store = executor.store
+    executor.store = store
+    monkeypatch.setattr(phylo_route, "get_phylo_store", lambda: store)
+    app = FastAPI()
+    app.include_router(phylo_route.router)
+    client = TestClient(app)
+
+    try:
+        res = client.delete(f"/api/phylo/jobs/{job_id}")
+        assert res.status_code == 200
+        assert res.json()["success"] is True
+        assert store.get_job(job_id) is None
+    finally:
+        executor.store = orig_store
+
+
+def test_unhandled_500_preserves_cors_header():
+    from src.backend import api_server
+
+    route_path = "/api/_test/force-unhandled-500"
+
+    async def boom():
+        raise RuntimeError("simulated unhandled crash")
+
+    api_server.app.add_api_route(route_path, boom, methods=["DELETE"])
+    added_route = api_server.app.router.routes[-1]
+    client = TestClient(api_server.app, raise_server_exceptions=False)
+    try:
+        res = client.delete(route_path, headers={"Origin": "http://localhost:5173"})
+        assert res.status_code == 500
+        assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
+        body = res.json()
+        assert "detail" in body and "simulated unhandled crash" in body["detail"]
+    finally:
+        api_server.app.router.routes.remove(added_route)

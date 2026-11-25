@@ -87,8 +87,30 @@ export async function apiDelete(endpoint: string): Promise<any> {
             method: 'DELETE',
             headers: { 'X-Client-ID': MY_CLIENT_ID }
         });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return await response.json();
+        if (!response.ok) {
+            let detail = '';
+            try {
+                const ct = response.headers.get('content-type') || '';
+                if (ct.includes('application/json')) {
+                    const errJson = await response.json();
+                    detail = String(errJson?.detail || errJson?.error || errJson?.message || '');
+                } else {
+                    detail = (await response.text()).trim();
+                }
+            } catch {
+                detail = '';
+            }
+            return {
+                success: false,
+                error: detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}`,
+                status: response.status
+            };
+        }
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            return await response.json();
+        }
+        return { success: true };
     } catch (err) {
         console.error(`[ElectronBridge] DELETE ${endpoint} 失败:`, err);
         return { success: false, error: String(err) };
