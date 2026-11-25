@@ -79,7 +79,7 @@ class Minimap2Engine(BaseEngine):
             # 执行并捕获输出
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             with open(output_path, 'w', encoding='utf-8') as out_f:
-                process = subprocess.run(
+                subprocess.run(
                     cmd,
                     stdout=out_f,
                     stderr=subprocess.PIPE,

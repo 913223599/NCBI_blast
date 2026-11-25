@@ -172,7 +172,8 @@ class CommandRunner:
 
     def _process_line(self, line: str, is_stderr: bool, on_output: Optional[Callable]):
         line = line.strip()
-        if not line: return
+        if not line:
+            return
         
         if on_output:
             on_output(line)

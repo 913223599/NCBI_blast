@@ -163,7 +163,7 @@ class BaseAssemblyStep(abc.ABC):
                     out_sys = []
                     await self.runner.run_command(
                         ["bash", "-c", "systeminfo.exe | grep 'Total Physical Memory'"], 
-                        on_output=lambda l: out_sys.append(l), silence_errors=True
+                        on_output=lambda line: out_sys.append(line), silence_errors=True
                     )
                     for s_line in out_sys:
                         # 格式示例: Total Physical Memory:     49,152 MB
@@ -179,6 +179,7 @@ class BaseAssemblyStep(abc.ABC):
                 self.context.data["system_total_memory_gb"] = gb
                 _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb
                 return gb
-        except Exception: pass
+        except Exception:
+            pass
         _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb or 16.0
         return _CACHED_SYSTEM_TOTAL_MEMORY_GB

@@ -95,7 +95,8 @@ class BlastExecutor:
 
         for key, ncbi_key in param_map.items():
             if key in kwargs:
-                if key == 'filter': continue
+                if key == 'filter':
+                    continue
                 blast_params[ncbi_key] = kwargs[key]
 
         threads = kwargs.get('threads')
@@ -138,8 +139,10 @@ class BlastExecutor:
                     finally:
                         for p in [tmp_in, tmp_out]:
                             try:
-                                if os.path.exists(p): os.unlink(p)
-                            except Exception: pass
+                                if os.path.exists(p):
+                                    os.unlink(p)
+                            except Exception:
+                                pass
                 else:
                     logging.warning(f"[PhageScope] 本地库索引未就绪: {ps_index}")
 
@@ -185,8 +188,10 @@ class BlastExecutor:
                     finally:
                         for p in [tmp_in, tmp_out]:
                             try:
-                                if os.path.exists(p): os.unlink(p)
-                            except Exception: pass
+                                if os.path.exists(p):
+                                    os.unlink(p)
+                            except Exception:
+                                pass
             
             # 回退到原有的 NCBI 联机比对逻辑 (仅在联机请求前进行限速等待)
             delay_before_request()

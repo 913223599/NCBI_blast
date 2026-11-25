@@ -10,9 +10,9 @@ project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.utils.translation.translation_data_manager import get_translation_data_manager
-from src.utils.taxonomy_provider import get_taxonomy_provider
-from src.utils.translation.google_free_translator import GoogleFreeTranslator
+from src.utils.translation.translation_data_manager import get_translation_data_manager  # noqa: E402
+from src.utils.taxonomy_provider import get_taxonomy_provider  # noqa: E402
+from src.utils.translation.google_free_translator import GoogleFreeTranslator  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

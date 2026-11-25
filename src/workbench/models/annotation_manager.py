@@ -52,7 +52,8 @@ class AnnotationManager:
     def get_annotations_by_hashes(self, hashes: List[str]) -> Dict[str, str]:
         """Fetch labels using content hashes."""
         results = {}
-        if not hashes: return results
+        if not hashes:
+            return results
         
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -81,13 +82,15 @@ class AnnotationManager:
 
     def full_sync_from_disk(self) -> int:
         """Discovers existing results on disk and syncs them to the DB."""
-        if not self.db_path.parent.exists(): return 0
+        if not self.db_path.parent.exists():
+            return 0
         
         count = 0
         try:
             # 扫描 results/ 目录下的所有文件夹
             for task_dir in self.db_path.parent.iterdir():
-                if not task_dir.is_dir() or task_dir.name == "__pycache__": continue
+                if not task_dir.is_dir() or task_dir.name == "__pycache__":
+                    continue
                 
                 # 每个任务文件夹下应该有一个汇总文件或单序列 CSV
                 for csv_file in task_dir.glob("*.csv"):
@@ -103,7 +106,8 @@ class AnnotationManager:
 
     def batch_update_from_blast(self, task_id: str):
         """Helper to sync from completed BLAST task, extracting hashes from the audit log."""
-        if not self.blast_db_path.exists(): return
+        if not self.blast_db_path.exists():
+            return
         
         try:
             with sqlite3.connect(self.blast_db_path) as conn:

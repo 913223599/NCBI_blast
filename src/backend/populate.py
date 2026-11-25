@@ -9,9 +9,9 @@ project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.utils.taxonomy_provider import get_taxonomy_provider
-from src.utils.taxonomy_sync_service import get_taxonomy_sync_service
-from src.backend.strain_db import get_strain_db_manager
+from src.utils.taxonomy_provider import get_taxonomy_provider  # noqa: E402
+from src.utils.taxonomy_sync_service import get_taxonomy_sync_service  # noqa: E402
+from src.backend.strain_db import get_strain_db_manager  # noqa: E402
 
 def prefill_code_lookup():
     tax_provider = get_taxonomy_provider()

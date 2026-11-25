@@ -35,12 +35,11 @@ class TranslationDataManager:
         ]
         
         total_files = sum(1 for f in csv_files if f.exists())
-        if total_files == 0: return
+        if total_files == 0:
+            return
 
         processed_files = 0
         migrated_count = 0
-        from .term_extractor import TermExtractor
-        extractor = TermExtractor()
 
         for csv_file in csv_files:
             if csv_file.exists():
@@ -542,7 +541,8 @@ class TranslationDataManager:
 
     def delete_translation_entry(self, english: str) -> bool:
         """安全删除词条并清理缓存"""
-        if not english: return False
+        if not english:
+            return False
         try:
             with self._lock:
                 cursor = self._conn.cursor()
@@ -558,7 +558,8 @@ class TranslationDataManager:
 
     def verify_translation_entry(self, english: str) -> bool:
         """验证词条并同步更新缓存"""
-        if not english: return False
+        if not english:
+            return False
         try:
             with self._lock:
                 cursor = self._conn.cursor()

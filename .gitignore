@@ -108,6 +108,8 @@ quast/quast_libs/barrnap/build/*.aln
 /archive/
 /test_data/
 /test/
+scripts/*.png
+scripts/__pycache__/
 validation_audit_res.json
 *_results*.csv
 *.csv

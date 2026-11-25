@@ -49,7 +49,8 @@ class NcbiTreeToolWrapper:
             
         # 3. 检查系统 PATH
         path = shutil.which(name)
-        if path: return path
+        if path:
+            return path
         
         return None
 

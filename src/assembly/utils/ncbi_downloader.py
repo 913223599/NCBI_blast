@@ -55,7 +55,8 @@ class NCBIDownloader:
         for acc in accessions:
             if acc not in unique_accs:
                 unique_accs.append(acc)
-            if len(unique_accs) >= limit: break
+            if len(unique_accs) >= limit:
+                break
 
         # 2. 执行下载
         zip_file = target_dir / "genomes_bundle.zip"
@@ -83,13 +84,15 @@ class NCBIDownloader:
         # 3. 提取与合并
         self.logger.info("正在提取并同步联合库...")
         extract_dir = target_dir / "extracted_tmp"
-        if extract_dir.exists(): shutil.rmtree(extract_dir)
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
         extract_dir.mkdir(parents=True)
         
         await runner.run_command(["unzip", "-o", WSLManager.to_wsl_path(str(zip_file)), "-d", WSLManager.to_wsl_path(str(extract_dir))])
         
         fna_paths = list(extract_dir.glob("**/ncbi_dataset/data/GC*/*.fna"))
-        if not fna_paths: fna_paths = list(extract_dir.glob("**/*.fna"))
+        if not fna_paths:
+            fna_paths = list(extract_dir.glob("**/*.fna"))
 
         if fna_paths:
             with open(merged_fasta, "wb") as f_out:

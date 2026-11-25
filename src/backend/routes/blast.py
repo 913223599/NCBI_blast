@@ -151,12 +151,14 @@ async def process_blast_files(req: ProcessBlastFilesRequest):
     try:
         for p_str in req.paths:
             src_path = Path(p_str)
-            if not src_path.exists(): continue
+            if not src_path.exists():
+                continue
             if src_path.suffix.lower() == '.zip':
                 with zipfile.ZipFile(src_path, 'r') as zf:
                     m_map = {}
                     for name in zf.namelist():
-                        if name.endswith('/') or '__MACOSX' in name: continue
+                        if name.endswith('/') or '__MACOSX' in name:
+                            continue
                         m_path = Path(name)
                         if m_path.suffix.lower() in valid_exts:
                             stem = m_path.stem.lower()
@@ -165,7 +167,8 @@ async def process_blast_files(req: ProcessBlastFilesRequest):
                                 m_map[stem] = (prio, name)
                     for _, (_, name) in m_map.items():
                         target = session_dir / Path(name).name
-                        with zf.open(name) as s, open(target, 'wb') as t: shutil.copyfileobj(s, t)
+                        with zf.open(name) as s, open(target, 'wb') as t:
+                            shutil.copyfileobj(s, t)
                         input_paths.append(str(target.resolve()))
             else:
                 input_paths.append(str(src_path.resolve()))
@@ -174,7 +177,8 @@ async def process_blast_files(req: ProcessBlastFilesRequest):
         for p in input_paths:
             obj = Path(p)
             stem, prio = obj.stem.lower(), priority_cfg.get(obj.suffix.lower(), 0)
-            if stem not in final_map or prio > final_map[stem][0]: final_map[stem] = (prio, p)
+            if stem not in final_map or prio > final_map[stem][0]:
+                final_map[stem] = (prio, p)
                 
         return {"success": True, "paths": [v[1] for v in final_map.values()]}
     except Exception as exc:
@@ -225,19 +229,22 @@ async def batch_blast_from_tree(req: TreeBatchBlastRequest):
         full_path = results_dir / req.source_rel_path
         if not full_path.exists():
             matches = list(results_dir.rglob(Path(req.source_rel_path).name))
-            if not matches: return {"status": "error", "error": "找不到源文件"}
+            if not matches:
+                return {"status": "error", "error": "找不到源文件"}
             full_path = matches[0]
 
         target_file = full_path
         if full_path.is_dir():
             fasta_files = [f for f in full_path.rglob("*") if f.suffix.lower() in ('.fasta', '.fa', '.seq', '.txt') and "aligned" not in f.name.lower()]
-            if not fasta_files: return {"status": "error", "error": "未找到原始序列"}
+            if not fasta_files:
+                return {"status": "error", "error": "未找到原始序列"}
             target_file = fasta_files[0]
 
         sid_set = {sid for sid in req.seq_ids} | {sid.replace(' ', '_') for sid in req.seq_ids} | {sid.replace('_', ' ') for sid in req.seq_ids}
         queries = [f">{rec.id}\n{str(rec.seq)}" for rec in SeqIO.parse(target_file, "fasta") if rec.id.strip() in sid_set or rec.id.strip().replace('_', ' ') in sid_set]
 
-        if not queries: return {"status": "error", "error": "未找到匹配序列"}
+        if not queries:
+            return {"status": "error", "error": "未找到匹配序列"}
         
         task_id = get_blast_manager().create_task({"query": "\n".join(queries), "program": "auto", "database": "nt", "task_name": f"Identify_{len(queries)}_Seqs_From_Tree"})
         return {"status": "started", "task_id": task_id}

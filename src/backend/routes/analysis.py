@@ -6,11 +6,12 @@ import os
 import logging
 from pathlib import Path
 
-router = APIRouter(prefix="/analysis", tags=["analysis"])
-logger = logging.getLogger("api.analysis")
-
 from src.backend.analysis_db import db as adb
 from src.analysis.manager import AnalysisManager
+from src.analysis.comparison.pipeline import ComparisonPipeline
+
+router = APIRouter(prefix="/analysis", tags=["analysis"])
+logger = logging.getLogger("api.analysis")
 
 class AlignmentRequest(BaseModel):
     mode: str = "pairwise" 
@@ -60,7 +61,6 @@ async def start_alignment(req: AlignmentRequest):
         logger.error(f"Analysis task failed: {str(e)}")
         return {"success": False, "error": str(e)}
 
-from src.analysis.comparison.pipeline import ComparisonPipeline
 
 class ComparisonRequest(BaseModel):
     ref: str

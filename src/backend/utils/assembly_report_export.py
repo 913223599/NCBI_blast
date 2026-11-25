@@ -194,7 +194,6 @@ class ReportExporter:
         if host_hits:
             match_rows = []
             for i, hit in enumerate(host_hits, 1):
-                sim_val = hit.get("similarity", "0%")
                 desc = hit.get("description", "Unknown Organism")
                 acc = hit.get("accession", "N/A")
                 dist = hit.get("distance", "--")
@@ -236,25 +235,34 @@ class ReportExporter:
 
         # ─── 格式化辅助函数 ───
         def fmt_reads(n):
-            if not n: return "0"
+            if not n:
+                return "0"
             try:
                 n = int(n)
-                if n >= 1_000_000: return f"{n / 1_000_000:.2f}M"
-                if n >= 1_000: return f"{n / 1_000:.1f}K"
+                if n >= 1_000_000:
+                    return f"{n / 1_000_000:.2f}M"
+                if n >= 1_000:
+                    return f"{n / 1_000:.1f}K"
                 return str(n)
-            except Exception: return "0"
+            except Exception:
+                return "0"
 
         def fmt_bp(n):
-            if not n: return "0 bp"
+            if not n:
+                return "0 bp"
             try:
                 n = int(n)
-                if n >= 1_000_000: return f"{n / 1_000_000:.2f} Mbp"
-                if n >= 1_000: return f"{n / 1_000:.1f} Kbp"
+                if n >= 1_000_000:
+                    return f"{n / 1_000_000:.2f} Mbp"
+                if n >= 1_000:
+                    return f"{n / 1_000:.1f} Kbp"
                 return f"{n} bp"
-            except Exception: return "0 bp"
+            except Exception:
+                return "0 bp"
 
         def fmt_pct(v):
-            if v is None or v == 0: return "0.00%"
+            if v is None or v == 0:
+                return "0.00%"
             try:
                 return f"{float(v) * 100:.2f}%"
             except (ValueError, TypeError):
@@ -265,7 +273,8 @@ class ReportExporter:
         func_rows_html = ""
         for fc in sorted(func_counts, key=lambda x: -x.get("count", 0)):
             name = fc.get("name", "")
-            if name == "CDS": continue
+            if name == "CDS":
+                continue
             count = fc.get("count", 0)
             pct_val = round(count / len(cds_genes) * 100, 1) if cds_genes else 0
             func_rows_html += f"<tr><td>{self._safe_escape(name)}</td><td>{count}</td><td>{pct_val}%</td></tr>\n"

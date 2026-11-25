@@ -22,7 +22,8 @@ class AnalysisManager:
         """模式2：参考基因组模式 (1 vs N)"""
         results = []
         for i, query in enumerate(other_paths):
-            if ref_path == query: continue
+            if ref_path == query:
+                continue
             
             task_id = f"REF_Q{i+1}"
             task_dir = os.path.join(base_dir, task_id)

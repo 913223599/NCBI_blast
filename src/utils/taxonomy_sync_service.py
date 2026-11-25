@@ -89,19 +89,7 @@ class TaxonomySyncService:
             if not lineage:
                 return {"success": False, "reason": "Taxonomy lookup failed"}
 
-        # 2. Add to translation DB using LocalTaxonomy
-        # Mapping ETE4/NCBI ranks to our dictionary categories
-        rank_to_cat = {
-            'superkingdom': 'kingdom',
-            'kingdom': 'kingdom',
-            'phylum': 'phylum',
-            'class': 'class_rank',
-            'order': 'order',
-            'family': 'family',
-            'genus': 'genus',
-            'species': 'species'
-        }
-        
+        # 2. 词库维护边界说明
         # 注意：不再自动向翻译词库写入假翻译（中英相同）。
         # 词库是中英对照字典，只应通过以下途径添加：
         #   1. 用户在"设置-词典管理"手动录入
@@ -202,7 +190,8 @@ class TaxonomySyncService:
         try:
             from ..backend.routes.strains import invalidate_cache
             invalidate_cache()
-        except Exception: pass
+        except Exception:
+            pass
         
         return {
             "success": True,

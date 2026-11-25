@@ -539,7 +539,8 @@ class DiversityEngine:
                                 parts = line.strip().split("\t")
                                 if len(parts) >= 9:
                                     qid = parts[0]
-                                    if "__" not in qid: continue
+                                    if "__" not in qid:
+                                        continue
                                     sname, raw_rid = qid.split("__", 1)
                                     bitscore = float(parts[7])
                                     pident = float(parts[2])
@@ -606,8 +607,10 @@ class DiversityEngine:
                             )
 
                     # 释放本分片临时文件以防 OOM
-                    if c_fa.exists(): c_fa.unlink()
-                    if c_out.exists(): c_out.unlink()
+                    if c_fa.exists():
+                        c_fa.unlink()
+                    if c_out.exists():
+                        c_out.unlink()
                     gc.collect()
                     logger.info(f"[DiversityEngine] Chunk {c_id} 比对完毕并释放临时磁盘资源")
                     return local_best_hits
@@ -779,7 +782,8 @@ class DiversityEngine:
         with open_fn(fq_path, "rt", encoding="utf-8", errors="ignore") as f:
             while True:
                 h = f.readline()
-                if not h: break
+                if not h:
+                    break
                 seq = f.readline().strip()
                 f.readline() # +
                 f.readline() # qual

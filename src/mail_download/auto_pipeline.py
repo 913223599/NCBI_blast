@@ -35,17 +35,17 @@ if str(PROJECT_ROOT) not in sys.path:
 # 注释引擎（AnnotationPipeline 等）延迟导入：仅在有新附件需要处理时才加载，
 # 避免“无新附件”的例行检查被引擎/WSL 探测拖慢（此前的瓶颈：顶层 import
 # 触发 WSL 探测约 30s+）。轻量模块保持顶层导入。
-from src.mail_download.batch_state import (
+from src.mail_download.batch_state import (  # noqa: E402
     clean_task_stem,
     collect_batch_fastas,
     collect_pending_batches,
     mark_batch_pipeline_state,
 )
-from src.mail_download.config import load_config
-from src.mail_download.downloader import AttachmentSaver
-from src.mail_download.fetcher import MailFetcher
-from src.mail_download.packer import ResultPacker, DEFAULT_PRODUCT_GLOBS
-from src.mail_download.sender import MailSender
+from src.mail_download.config import load_config  # noqa: E402
+from src.mail_download.downloader import AttachmentSaver  # noqa: E402
+from src.mail_download.fetcher import MailFetcher  # noqa: E402
+from src.mail_download.packer import ResultPacker, DEFAULT_PRODUCT_GLOBS  # noqa: E402
+from src.mail_download.sender import MailSender  # noqa: E402
 
 logger = logging.getLogger("mail_download.auto_pipeline")
 

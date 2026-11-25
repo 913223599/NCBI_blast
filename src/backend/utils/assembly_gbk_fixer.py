@@ -30,7 +30,8 @@ class GBKAnnotationBackfiller:
         if "PHAGESCOPE" in title.upper() or "|" not in title:
             # 如果是 PhageScope 结果，通常已经是功能分类名，直接修剪两侧即可
             res = re.sub(r'\[PHAGESCOPE_[^\]]+\]', '', title).strip()
-            if res: return res[:100]
+            if res:
+                return res[:100]
 
         # --- 原始 NCBI NR 清洗逻辑 (仅作为回退方案) ---
         # 1. 移除末尾方括号及其中的物种名 (e.g. [Vibrio phage...])

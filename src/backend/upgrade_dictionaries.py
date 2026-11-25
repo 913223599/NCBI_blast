@@ -11,10 +11,10 @@ project_root = Path(__file__).resolve().parents[2]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from src.utils.taxonomy_provider import get_taxonomy_provider
-from src.utils.taxonomy_sync_service import get_taxonomy_sync_service
-from src.utils.translation.translation_data_manager import get_translation_data_manager
-from src.backend.strain_db import get_strain_db_manager
+from src.utils.taxonomy_provider import get_taxonomy_provider  # noqa: E402
+from src.utils.taxonomy_sync_service import get_taxonomy_sync_service  # noqa: E402
+from src.utils.translation.translation_data_manager import get_translation_data_manager  # noqa: E402
+from src.backend.strain_db import get_strain_db_manager  # noqa: E402
 
 def upgrade_all():
     logging.info("Starting Bulk Dictionary and Encoding Database Upgrade...")

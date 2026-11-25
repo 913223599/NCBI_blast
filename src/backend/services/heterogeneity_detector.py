@@ -136,7 +136,6 @@ class OperonHeterogeneityDetector:
 
         # 生物学拷贝数一致性评估
         gcn_diff = abs(fitted_sum - known_median)
-        gcn_consistent = gcn_diff <= 2.5 or (fitted_sum <= known_median + 2)
 
         score = 0
         evidence_points = []

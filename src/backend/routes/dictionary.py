@@ -75,7 +75,8 @@ async def search_dictionary(query: str, proofread_mode: bool = False):
     try:
         translator = get_global_biology_translator()
         data_mgr = translator.translation_data_manager
-        if not data_mgr: return []
+        if not data_mgr:
+            return []
         # Fallback to general search with limit
         return data_mgr.get_dictionary_all(query=query, proofread_mode=proofread_mode, limit=500)
     except Exception as exc:

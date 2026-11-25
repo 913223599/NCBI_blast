@@ -8,10 +8,9 @@ from typing import Dict, Any, Optional, List
 import time
 from datetime import datetime
 from ...workbench.models.tool_config import ToolConfig
+from .compat import get_short_path_name
 
 logger = logging.getLogger("api_server")
-
-from .compat import get_short_path_name
 
 
 def build_wsl_script_command(script_name: str) -> Optional[str]:
@@ -237,7 +236,6 @@ class Ncbi16SDatabase(BioDatabase):
         if not download_url:
             raise ValueError(f"No download URL configured for {self.db_id}")
         target_gz = self.base_dir / "16S_ribosomal_RNA.tar.gz"
-        expected_md5 = self.config.get("version_md5", "32557aa0b65998ee65064999ae802705")
 
         try:
             # 下载与校验逻辑 (在后台线程池中运行以防止阻塞 asyncio 事件循环)
@@ -410,7 +408,8 @@ class FastaProtDatabase(BioDatabase):
                     with open(target_fasta, 'wb') as f_out:
                         while True:
                             chunk = f_in.read(1024 * 1024)
-                            if not chunk: break
+                            if not chunk:
+                                break
                             f_out.write(chunk)
 
             await asyncio.to_thread(_extract)
@@ -494,7 +493,8 @@ class CardDatabase(BioDatabase):
                 f_faa = self.base_dir / "protein_fasta.fasta"
                 if not f_faa.exists():
                     f_cand = list(self.base_dir.glob("*protein*.fasta"))
-                    if f_cand: f_faa = f_cand[0]
+                    if f_cand:
+                        f_faa = f_cand[0]
 
                 if f_faa.exists():
                     tool_path = get_short_path_name(str(ToolConfig.get_tool_path("makeblastdb")))
@@ -604,7 +604,8 @@ class BioDbManager:
         source_dir = ToolConfig.DATABASE_ROOT / "16S"
         target_dir = source_dir / "ncbi"
         
-        if not source_dir.exists(): return
+        if not source_dir.exists():
+            return
         
         # 识别散落的文件 (16S_ribosomal_RNA.*)
         scattered_files = list(source_dir.glob("16S_ribosomal_RNA*"))
@@ -614,8 +615,10 @@ class BioDbManager:
             for f in scattered_files:
                 try:
                     dest = target_dir / f.name
-                    if dest.exists(): f.unlink()
-                    else: f.rename(dest)
+                    if dest.exists():
+                        f.unlink()
+                    else:
+                        f.rename(dest)
                 except Exception as e:
                     logger.error(f"迁移文件 {f.name} 失败: {e}")
 

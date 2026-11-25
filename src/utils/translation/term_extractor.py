@@ -74,7 +74,8 @@ class TermExtractor:
                         category = row.get('category', '').strip()
                         chinese = row.get('chinese', '').strip()
                         
-                        if not term: continue
+                        if not term:
+                            continue
                         
                         if term not in self._predefined_terms_cache:
                             self._predefined_terms_cache[term] = []
@@ -489,7 +490,8 @@ class TermExtractor:
                     # 批量检查感兴趣的列
                     for col, category in [('基因类型', 'gene'), ('序列类型', 'sequence'), ('菌株', 'strain')]:
                         val = row.get(col, '').strip()
-                        if not val: continue
+                        if not val:
+                            continue
                         
                         # 如果是菌株，可能需要特殊处理（移除编码）
                         term_to_save = val

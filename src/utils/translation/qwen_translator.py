@@ -145,12 +145,6 @@ class QwenTranslator:
 
 """.strip()
         
-        # 设置翻译选项
-        translation_options = {
-            "source_lang": source_lang,
-            "target_lang": target_lang
-        }
-        
         # 定义消息参数，使用正确的ChatCompletionMessageParam类型
         messages: List[ChatCompletionMessageParam] = [
             {
@@ -232,8 +226,10 @@ class QwenTranslator:
         """
         [ULTRA-FAST] 真正的批量翻译：通过一个 Prompt 翻译多个词条
         """
-        if not texts: return []
-        if len(texts) == 1: return [self.translate_text(texts[0])]
+        if not texts:
+            return []
+        if len(texts) == 1:
+            return [self.translate_text(texts[0])]
 
         # 构造批量翻译提示词
         texts_input = "\n".join([f"{i+1}. {txt}" for i, txt in enumerate(texts)])

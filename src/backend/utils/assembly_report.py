@@ -167,7 +167,6 @@ class AssemblyReportParser:
 
         contigs = []
         gc_total, at_total = 0, 0
-        depth_values = []
 
         try:
             with open(fasta, "r", encoding="utf-8") as f:

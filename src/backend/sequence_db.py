@@ -49,7 +49,6 @@ class SequenceDBManager:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            sid = seq_data.get('id')
             metadata = json.dumps(seq_data.get('metadata', {}))
             now = datetime.now().isoformat()
             

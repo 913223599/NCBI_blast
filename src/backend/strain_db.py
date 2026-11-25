@@ -436,13 +436,16 @@ class StrainDBManager:
         import os
         import hashlib
         results_dir = self.db_path.parent.parent / "results" / "tree_results"
-        if not results_dir.exists(): return
+        if not results_dir.exists():
+            return
         
         history_map = {}
         for p_dir in results_dir.iterdir():
-            if not p_dir.is_dir(): continue
+            if not p_dir.is_dir():
+                continue
             p_id = p_dir.name
-            if p_id not in history_map: history_map[p_id] = []
+            if p_id not in history_map:
+                history_map[p_id] = []
             # 预提取：尝试在父文件夹找通用的 FASTA (针对同一比对任务的不同构树 Session)
             parent_fasta = None
             for ext in ("*.fasta", "*.fa", "*.seq", "*.fna"):
@@ -452,9 +455,11 @@ class StrainDBManager:
                     break
 
             for s_dir in p_dir.iterdir():
-                if not s_dir.is_dir(): continue
+                if not s_dir.is_dir():
+                    continue
                 nwk = next(s_dir.glob("*.nwk"), None)
-                if not nwk: continue
+                if not nwk:
+                    continue
                 
                 # 优先在 session 目录找，找不到用父目录的
                 fasta = None
@@ -463,7 +468,8 @@ class StrainDBManager:
                     if f_list:
                         fasta = f_list[0]
                         break
-                if not fasta: fasta = parent_fasta
+                if not fasta:
+                    fasta = parent_fasta
                 
                 try:
                     mtime = s_dir.stat().st_mtime
@@ -479,14 +485,16 @@ class StrainDBManager:
                             engine = params.get("engine", "NJ").upper()
                             model = params.get("model", "JC").upper()
                             algorithm = f"{msa} / {engine} ({model})"
-                        except Exception: pass
+                        except Exception:
+                            pass
                     
                     # 尝试从 manifest 恢复指纹
                     manifest_file = s_dir / "sequence_manifest.json"
                     if manifest_file.exists():
                         try:
                             id_to_hash = json.loads(manifest_file.read_text(encoding='utf-8'))
-                        except Exception: pass
+                        except Exception:
+                            pass
                     
                     # 如果没有 manifest 但有 FASTA，手动生成指纹
                     if not id_to_hash and fasta and fasta.exists():
@@ -495,7 +503,8 @@ class StrainDBManager:
                             content = fasta.read_text(encoding='utf-8', errors='ignore')
                             sections = content.split('>')
                             for sec in sections:
-                                if not sec.strip(): continue
+                                if not sec.strip():
+                                    continue
                                 lines = sec.split('\n')
                                 header = lines[0].strip()
                                 seq_id = header.split()[0].replace("'", "").replace('"', '').strip()
@@ -517,15 +526,18 @@ class StrainDBManager:
                         "time": int(mtime * 1000)
                     }
                     history_map[p_id].append(items_data)
-                except Exception: continue
+                except Exception:
+                    continue
         
-        if not history_map: return
+        if not history_map:
+            return
         
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             for p_id, items in history_map.items():
-                if not items: continue
+                if not items:
+                    continue
                 items.sort(key=lambda x: x['time'], reverse=True)
                 logical_id = re.sub(r'^Tree_\d+_\d+_', '', p_id)
                 display_name = logical_id.replace(".fasta", "").replace(".seq", "")

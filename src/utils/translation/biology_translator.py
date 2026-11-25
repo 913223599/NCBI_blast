@@ -297,7 +297,8 @@ class BiologyTranslator:
                                         lineage = tax_provider.get_lineage_details(pure_text)
                                         if not lineage:
                                             is_valid = False
-                                    except Exception: pass
+                                    except Exception:
+                                        pass
                                 
                                 if is_valid:
                                     self.translation_data_manager.add_translation(

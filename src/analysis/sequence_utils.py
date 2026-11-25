@@ -22,7 +22,7 @@ class RotationChecker:
             with open(seq1_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
                 header = lines[0].strip()
-                seq_data = "".join([l.strip() for l in lines[1:]])
+                seq_data = "".join([line.strip() for line in lines[1:]])
                 # 记录原始长度用于后续百分比计算
                 origin_len = len(seq_data)
                 doubled_seq = seq_data + seq_data
@@ -71,7 +71,8 @@ class RotationChecker:
         with open(paf_path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
                 parts = line.split('\t')
-                if len(parts) < 12: continue
+                if len(parts) < 12:
+                    continue
                 
                 # PAF columns: 0:qname, 1:qlen, 2:qstart, 3:qend, 4:strand, 5:tname, 6:tlen, 7:tstart, 8:tend, 9:nmatch, 10:nblock, 11:mapq
                 q_len = int(parts[1])

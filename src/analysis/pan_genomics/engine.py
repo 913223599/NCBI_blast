@@ -770,8 +770,8 @@ class PanGenomicsEngine:
         sample_names: Dict[str, str]
     ) -> Dict[str, Any]:
         """AI/规则驱动的多样本比较基因组学科研综合评估报告"""
-        lytic_cnt = sum(1 for l in lifestyles if l.lifestyle == "Lytic")
-        temp_cnt = sum(1 for l in lifestyles if l.lifestyle == "Temperate")
+        lytic_cnt = sum(1 for item in lifestyles if item.lifestyle == "Lytic")
+        temp_cnt = sum(1 for item in lifestyles if item.lifestyle == "Temperate")
         total_acr = sum(v.get("acr_count", 0) for v in arms_race_matrix.values())
 
         report_summary = (

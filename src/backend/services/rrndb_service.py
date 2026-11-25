@@ -37,7 +37,7 @@ class RrnDBService:
 
         try:
             with open(self.db_path, "r", encoding="utf-8") as f:
-                header = f.readline().strip().split("\t")
+                f.readline()
                 for line in f:
                     parts = line.strip().split("\t")
                     if len(parts) >= 9:

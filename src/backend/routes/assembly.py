@@ -206,11 +206,15 @@ async def get_assembly_status(task_id: str):
 
     # 解析 JSON 字段
     if task.get('results') and isinstance(task['results'], str):
-        try: task['results'] = json.loads(task['results'])
-        except Exception: pass
+        try:
+            task['results'] = json.loads(task['results'])
+        except Exception:
+            pass
     if task.get('config') and isinstance(task['config'], str):
-        try: task['config'] = json.loads(task['config'])
-        except Exception: pass
+        try:
+            task['config'] = json.loads(task['config'])
+        except Exception:
+            pass
 
     task['queue_position'] = queue_pos
     return BioResponse.ok(task)
@@ -250,10 +254,12 @@ def parse_assembly_fasta_metrics(asm_fasta: Path, task_dir: Optional[Path] = Non
 
     def flush_c(h_str: str, s_parts: List[str]):
         nonlocal total_len
-        if not h_str or not s_parts: return
+        if not h_str or not s_parts:
+            return
         seq_str = "".join(s_parts)
         s_len = len(seq_str)
-        if s_len == 0: return
+        if s_len == 0:
+            return
         h_l = h_str.lower()
         c_n = h_str.split()[0].lstrip(">")
 
@@ -289,12 +295,14 @@ def parse_assembly_fasta_metrics(asm_fasta: Path, task_dir: Optional[Path] = Non
             for line in f:
                 l_str = line.strip()
                 if l_str.startswith(">"):
-                    if cur_h: flush_c(cur_h, cur_seq)
+                    if cur_h:
+                        flush_c(cur_h, cur_seq)
                     cur_h = l_str
                     cur_seq = []
                 else:
                     cur_seq.append(l_str)
-            if cur_h: flush_c(cur_h, cur_seq)
+            if cur_h:
+                flush_c(cur_h, cur_seq)
     except Exception as err:
         logger.warning(f"读取 FASTA 失败 ({asm_fasta}): {err}")
         return {}, []

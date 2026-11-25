@@ -51,7 +51,8 @@ class CondaResolver:
             ]
             
             for root in roots:
-                if not root or not root.exists(): continue
+                if not root or not root.exists():
+                    continue
                 for p_suffix in cls.DEFAULT_WINDOWS_PATHS:
                     full_path = root / p_suffix
                     if full_path.exists() and is_valid(str(full_path)):

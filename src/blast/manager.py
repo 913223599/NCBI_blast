@@ -312,8 +312,10 @@ class BlastManager:
                 
             t.progress = t_data['progress']
             t.error = t_data['error']
-            if t_data['start_time']: t.start_time = datetime.fromisoformat(t_data['start_time'])
-            if t_data['end_time']: t.end_time = datetime.fromisoformat(t_data['end_time'])
+            if t_data['start_time']:
+                t.start_time = datetime.fromisoformat(t_data['start_time'])
+            if t_data['end_time']:
+                t.end_time = datetime.fromisoformat(t_data['end_time'])
             
             self.tasks[t.task_id] = t
 
@@ -437,8 +439,10 @@ class BlastManager:
                     p = Path(f_path)
                     parent = str(p.parent)
                     stem = p.stem.lower()
-                    if parent not in dir_groups: dir_groups[parent] = {}
-                    if stem not in dir_groups[parent]: dir_groups[parent][stem] = []
+                    if parent not in dir_groups:
+                        dir_groups[parent] = {}
+                    if stem not in dir_groups[parent]:
+                        dir_groups[parent][stem] = []
                     dir_groups[parent][stem].append(f_path)
                 
                 for parent, stems in dir_groups.items():
@@ -452,7 +456,8 @@ class BlastManager:
 
                 # 执行读取
                 for f_path in target_files:
-                    if f_path in processed_paths: continue
+                    if f_path in processed_paths:
+                        continue
                     try:
                         count_in_file = 0
                         for seq in fh.read_fasta_file_iter(f_path):

@@ -397,7 +397,6 @@ class AssemblerStep(BaseAssemblyStep):
             search_dirs.append(work_dir)
 
         # 1. 权威首选：直接读取 NGCS 拼接引擎生成的 assembly_manifest.json
-        manifest_loaded = False
         for s_dir in search_dirs:
             manifest_file = s_dir / "assembly_manifest.json"
             if manifest_file.exists():
@@ -413,7 +412,6 @@ class AssemblerStep(BaseAssemblyStep):
                             stats["max_contig_length"] = int(m_data.get("max_contig_length") or 0)
                             stats["gc_percent"] = float(m_data.get("gc_percent") or 0.0)
                             stats["is_circular"] = bool(m_data.get("is_circular", False))
-                            manifest_loaded = True
                             # 只有当关键指标全部齐全且有效时才直接返回
                             if stats["n50"] > 0 and stats["gc_percent"] > 0.0 and stats["avg_depth"] > 0.0:
                                 return stats
@@ -480,10 +478,10 @@ class AssemblerStep(BaseAssemblyStep):
                 if stats["n50"] <= 0:
                     half_len = fasta_total_len / 2.0
                     cum_len = 0
-                    for l in contig_lengths:
-                        cum_len += l
+                    for contig_len in contig_lengths:
+                        cum_len += contig_len
                         if cum_len >= half_len:
-                            stats["n50"] = l
+                            stats["n50"] = contig_len
                             break
                 safe_len = max(1, int(stats.get("total_length", 0) or fasta_total_len or 1))
                 if has_explicit_depth and total_depth_mass > 0:

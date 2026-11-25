@@ -90,7 +90,8 @@ class BlastEngine:
 
     def detect_type(self, sequence: str) -> str:
         seq = "".join(sequence.split()).upper()
-        if not seq: return 'nucleotide'
+        if not seq:
+            return 'nucleotide'
         sample = seq[:100]
         n_count = sum(1 for c in sample if c in self.NUCLEOTIDE_CHARS)
         p_count = sum(1 for c in sample if c in self.PROTEIN_CHARS)
@@ -142,13 +143,15 @@ class BlastEngine:
         for seq in to_process:
             seq_len = len(seq.get('sequence', ''))
             if len(current_batch) >= batch_size or (current_char_count + seq_len) > self.BATCH_CHAR_LIMIT:
-                if current_batch: batches.append(current_batch)
+                if current_batch:
+                    batches.append(current_batch)
                 current_batch = [seq]
                 current_char_count = seq_len
             else:
                 current_batch.append(seq)
                 current_char_count += seq_len
-        if current_batch: batches.append(current_batch)
+        if current_batch:
+            batches.append(current_batch)
 
         # 并发控制：调用方显式指定 max_workers 时优先尊重（限制上限 4），否则默认 4 路并发兼顾远程 NCBI 吞吐
         configured_workers = self.settings.get('max_workers')
@@ -160,11 +163,13 @@ class BlastEngine:
         try:
             futures = []
             for batch in batches:
-                if self._cancel_flag.is_set(): break
+                if self._cancel_flag.is_set():
+                    break
                 futures.append(executor.submit(self._process_batch, batch))
             
             for future in as_completed(futures):
-                if self._cancel_flag.is_set(): break
+                if self._cancel_flag.is_set():
+                    break
                 
                 try:
                     batch_results = future.result()
@@ -182,7 +187,8 @@ class BlastEngine:
 
     def _process_batch(self, batch_seqs: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         self._check_pause()
-        if self._cancel_flag.is_set(): return []
+        if self._cancel_flag.is_set():
+            return []
 
         results = []
         multi_fasta = ""
@@ -195,15 +201,19 @@ class BlastEngine:
         prog = ('blastp' if detected_type == 'protein' else 'blastn') if auto_prog == 'auto' else auto_prog
         db = self.settings.get('database')
         
-        if prog == 'blastp' and db == 'nt' and auto_prog == 'auto': db = 'nr'
-        elif prog == 'blastn' and db == 'nr' and auto_prog == 'auto': db = 'nt'
-        if not db: db = 'nr' if 'p' in prog else 'nt'
+        if prog == 'blastp' and db == 'nt' and auto_prog == 'auto':
+            db = 'nr'
+        elif prog == 'blastn' and db == 'nr' and auto_prog == 'auto':
+            db = 'nt'
+        if not db:
+            db = 'nr' if 'p' in prog else 'nt'
 
         try:
             exec_params = {k: v for k, v in self.settings.items() if k in ['evalue', 'word_size', 'hitlist_size', 'matrix_name', 'filter', 'gap_open', 'gap_extend']}
             if prog in ['blastn', 'megablast']:
                 for k in ['matrix_name', 'gap_open', 'gap_extend']:
-                    if k in exec_params: del exec_params[k]
+                    if k in exec_params:
+                        del exec_params[k]
 
             start_t = time.time()
             handle = self.executor.execute_with_retry(
@@ -215,7 +225,8 @@ class BlastEngine:
                 **exec_params
             )
             
-            if not handle: return []
+            if not handle:
+                return []
 
             xml_content = handle.read()
             handle.close()
@@ -247,7 +258,8 @@ class BlastEngine:
             avg_time = elapsed / len(batch_seqs)
             
             for i, record in enumerate(records):
-                if i >= len(batch_seqs): break
+                if i >= len(batch_seqs):
+                    break
                 
                 orig_seq = batch_seqs[i]
                 sid = orig_seq.get('id', 'unknown')
@@ -293,11 +305,14 @@ class BlastEngine:
             return [{"sequence_id": s.get('id'), "status": "error", "error": str(e)} for s in batch_seqs]
 
     def _verify_result_integrity(self, csv_path: Path) -> bool:
-        if not csv_path.exists() or csv_path.stat().st_size == 0: return False
+        if not csv_path.exists() or csv_path.stat().st_size == 0:
+            return False
         try:
             with open(csv_path, 'r', encoding='utf-8-sig') as f:
                 header = f.readline()
-                if not header or not header.strip(): return False
+                if not header or not header.strip():
+                    return False
                 data_line = f.readline()
                 return bool(data_line and data_line.strip())
-        except Exception: return False
+        except Exception:
+            return False

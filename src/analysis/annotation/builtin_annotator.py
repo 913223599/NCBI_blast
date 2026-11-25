@@ -247,7 +247,6 @@ class BuiltinAnnotator:
 
         # 遍历每条 Contig 进行预测
         locus_idx = 1
-        gbk_records: List[SeqRecord] = []
 
         for c_idx, record in enumerate(records):
             contig_id = record.id

@@ -45,7 +45,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # ─── 2. 核心环境初始化 ───────────────────────────────
-from ..workbench.models.tool_config import ToolConfig
+from ..workbench.models.tool_config import ToolConfig  # noqa: E402
 ToolConfig.initialize_env()
 
 # 环境变量重定向：强制将 ETE4 数据库重定向到自定义目录
@@ -53,8 +53,8 @@ os.environ["XDG_DATA_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
 os.environ["XDG_CONFIG_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
 os.environ["XDG_CACHE_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
 
-from .broadcaster import broadcaster
-from .utils.blast_utils import parse_blast_csv, select_consensus_hit
+from .broadcaster import broadcaster  # noqa: E402
+from .utils.blast_utils import parse_blast_csv, select_consensus_hit  # noqa: E402
 
 # ─── 3. 日志配置 ────────────────────────────────────────
 logging.basicConfig(
@@ -93,7 +93,8 @@ if sys.platform.startswith("win"):
         try:
             from src.assembly.env.wsl_manager import WSLManager
             WSLManager.shutdown_distro()
-        except Exception: pass
+        except Exception:
+            pass
         sys.exit(0)
         
     signal.signal(signal.SIGTERM, handle_exit)
@@ -334,7 +335,7 @@ def _on_blast_result(task_id: str, data: dict):
             logger.debug(f"标注回调失败 (skip): {cb_e}")
 
 # ─── 5. 应用实例化与安全中间件 / 路由挂载 ────────────────
-from ..utils.app_metadata import get_app_metadata as _get_app_metadata
+from ..utils.app_metadata import get_app_metadata as _get_app_metadata  # noqa: E402
 
 _APP_META = _get_app_metadata()
 app = FastAPI(
@@ -481,7 +482,7 @@ async def api_health():
     return {"status": "ok", "service": "ncbi-bio-station"}
 
 # 动态载入分散在各路由模块的接口
-from .routes import blast, strains, dictionary, phylo, figure_studio, settings, core, common, taxonomy
+from .routes import blast, strains, dictionary, phylo, figure_studio, settings, core, common, taxonomy  # noqa: E402
 
 app.include_router(common.router)
 app.include_router(blast.router)
@@ -494,7 +495,7 @@ app.include_router(taxonomy.router)
 app.include_router(core.router)
 
 # 注册基因组拼接与数据库管理路由
-from .routes import assembly, database, analysis, annotation, phage_discovery, phage_structure, pan_genomics, sanger_trace, diversity, other_tools
+from .routes import assembly, database, analysis, annotation, phage_discovery, phage_structure, pan_genomics, sanger_trace, diversity, other_tools  # noqa: E402
 app.include_router(assembly.router, prefix="/api")
 app.include_router(database.router, prefix="/api")
 app.include_router(analysis.router, prefix="/api")
@@ -524,7 +525,7 @@ except Exception as e:
     logger.error(f"局域网共享路由延迟加载失败: {e}")
 
 # 开放组装与报告产物的静态资源展示
-from fastapi.staticfiles import StaticFiles
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 results_dir = PROJECT_ROOT / "results"
 results_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/static_results", StaticFiles(directory=str(results_dir)), name="results")

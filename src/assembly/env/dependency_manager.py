@@ -21,7 +21,8 @@ class DependencyManager:
 
     def check_tool_installed(self, tool_name: str) -> bool:
         """检查工具是否就绪（支持本地或 WSL 穿透检查）"""
-        if shutil.which(tool_name): return True
+        if shutil.which(tool_name):
+            return True
         
         if self.is_wsl:
             try:
