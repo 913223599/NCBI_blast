@@ -683,3 +683,104 @@ def pull_remote_update(
             "has_conflicts": False,
             "conflict_files": [],
         }
+
+
+def _parse_porcelain_status(porcelain_text: str) -> List[Dict[str, str]]:
+    """逐行解析 git status --porcelain=v1 输出，保留首位空格避免误判工作区修改。"""
+    entries: List[Dict[str, str]] = []
+    for raw_line in (porcelain_text or "").splitlines():
+        if len(raw_line) < 4:
+            continue
+        xy = raw_line[:2]
+        x, y = xy[0], xy[1]
+        path = raw_line[3:].strip()
+        if not path:
+            continue
+
+        if "U" in xy or xy in ("AA", "DD"):
+            category = "unmerged"
+        elif xy == "??":
+            category = "untracked"
+        elif x != " " and y == " ":
+            category = "staged"
+        else:
+            category = "modified"
+
+        entries.append(
+            {
+                "code": xy,
+                "index_status": x,
+                "worktree_status": y,
+                "path": path,
+                "category": category,
+            }
+        )
+    return entries
+
+
+def get_git_workspace_details(
+    project_root: Optional[Path] = None,
+    max_items: int = 200,
+) -> Dict[str, Any]:
+    """只读返回当前 Git 工作区未提交改动、未合并冲突、diff 摘要与 stash 列表明细。"""
+    if project_root is None:
+        project_root = get_project_root()
+
+    info = get_git_info(project_root)
+    counts: Dict[str, int] = {
+        "unmerged": 0,
+        "staged": 0,
+        "modified": 0,
+        "untracked": 0,
+        "total": 0,
+    }
+    if not info.get("is_git_repo"):
+        return {
+            **info,
+            "counts": counts,
+            "entries": [],
+            "truncated": False,
+            "diff_stat": "",
+            "staged_diff_stat": "",
+            "stash_list": [],
+        }
+
+    status_res = run_git_cmd(["status", "--porcelain=v1", "-uall"], cwd=project_root, timeout=15)
+    all_entries = _parse_porcelain_status(status_res.stdout if status_res.returncode == 0 else "")
+    for item in all_entries:
+        cat = item["category"]
+        if cat in counts:
+            counts[cat] += 1
+    counts["total"] = len(all_entries)
+
+    safe_limit = max(1, int(max_items))
+    truncated = len(all_entries) > safe_limit
+    entries = all_entries[:safe_limit]
+
+    diff_stat_res = run_git_cmd(["diff", "--stat"], cwd=project_root, timeout=15)
+    staged_stat_res = run_git_cmd(["diff", "--cached", "--stat"], cwd=project_root, timeout=15)
+    stash_res = run_git_cmd(["stash", "list", "-n", "10"], cwd=project_root, timeout=10)
+
+    stash_list = (
+        [line.strip() for line in stash_res.stdout.splitlines() if line.strip()]
+        if stash_res.returncode == 0 and stash_res.stdout
+        else []
+    )
+
+    return {
+        "is_git_repo": True,
+        "branch": info.get("branch", ""),
+        "commit_hash": info.get("commit_hash", ""),
+        "commit_message": info.get("commit_message", ""),
+        "commit_date": info.get("commit_date", ""),
+        "has_uncommitted_changes": info.get("has_uncommitted_changes", False),
+        "has_conflicts": info.get("has_conflicts", False),
+        "in_progress_op": info.get("in_progress_op"),
+        "conflict_files": info.get("conflict_files", []),
+        "counts": counts,
+        "entries": entries,
+        "truncated": truncated,
+        "diff_stat": diff_stat_res.stdout.strip() if diff_stat_res.returncode == 0 else "",
+        "staged_diff_stat": staged_stat_res.stdout.strip() if staged_stat_res.returncode == 0 else "",
+        "stash_list": stash_list,
+    }
