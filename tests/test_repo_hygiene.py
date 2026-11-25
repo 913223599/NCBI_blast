@@ -1,0 +1,250 @@
+# -*- coding: utf-8 -*-
+"""
+阶段 0/1 仓库工程规范守护测试（规则 0 / 规则 2 / 规则 11）
+用于持续防止 Emoji 符号、个人盘符绝对路径硬编码及缺失 UTF-8 编码声明的回归。
+"""
+import re
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+EMOJI_PATTERN = re.compile(
+    r"[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E0-\U0001F1FF]"
+)
+
+# 仅针对个人开发机专属硬编码路径（不误伤 Windows 通用候选目录如 Program Files\Git）
+PERSONAL_HARDCODED_PATH_PATTERN = re.compile(
+    r"(?i)(?:"
+    r"[def]:[/\\]ncbi\s*blast"
+    r"|f:/__pyrefly_virtual__"
+    r"|e:/ngcs"
+    r"|/mnt/[df]/ncbi\s*blast"
+    r"|/home/administrator/"
+    r"|d:\\program\s+files\\ncbi\\blast-2\.16\.0\+"
+    r"|c:/users/administrator/"
+    r")"
+)
+
+
+def _iter_core_source_files():
+    targets = [
+        PROJECT_ROOT / "src" / "resources" / "locales",
+        PROJECT_ROOT / "src" / "modules",
+        PROJECT_ROOT / "src" / "web-next" / "src",
+        PROJECT_ROOT / "electron-shell",
+        PROJECT_ROOT / "docs",
+    ]
+    exts = {".py", ".vue", ".ts", ".js", ".css", ".json", ".md"}
+    skip = {"node_modules", "dist", "__pycache__"}
+    for base in targets:
+        if not base.exists():
+            continue
+        for p in base.rglob("*"):
+            if any(part in skip for part in p.parts):
+                continue
+            if p.is_file() and p.suffix.lower() in exts and p.name != "package-lock.json":
+                yield p
+
+
+def test_rule0_no_emoji_in_core_code_and_locales():
+    violations = []
+    extra_files = [
+        PROJECT_ROOT / "scripts" / "setup_pharokka.sh",
+        PROJECT_ROOT / "scripts" / "verify_label_display_mode.js",
+        PROJECT_ROOT / "README.md",
+    ]
+    all_files = list(_iter_core_source_files()) + [p for p in extra_files if p.exists()]
+    for p in all_files:
+        text = p.read_text(encoding="utf-8", errors="replace")
+        matches = EMOJI_PATTERN.findall(text)
+        if matches:
+            codes = sorted({f"U+{ord(c):04X}" for c in matches})
+            violations.append(f"{p.relative_to(PROJECT_ROOT)} -> {codes}")
+
+    assert not violations, "发现违反规则 0 的 Emoji/符号文件:\n" + "\n".join(violations[:20])
+
+
+def test_rule2_no_personal_hardcoded_paths_in_core_files():
+    checked_files = [
+        PROJECT_ROOT / "pyrightconfig.json",
+        PROJECT_ROOT / ".vscode" / "settings.json",
+        PROJECT_ROOT / "run_auto_pipeline.bat",
+        PROJECT_ROOT / "build_release.py",
+        PROJECT_ROOT / "src" / "backend" / "services" / "diversity_engine.py",
+        PROJECT_ROOT / "src" / "backend" / "utils" / "bio_db_manager.py",
+        PROJECT_ROOT / "src" / "phylo" / "runtime" / "process_runner.py",
+        PROJECT_ROOT / "src" / "phylo" / "runtime" / "tool_registry.py",
+        PROJECT_ROOT / "src" / "web-next" / "src" / "components" / "strain" / "FreezerDetailPanel.vue",
+        PROJECT_ROOT / "scripts" / "setup_phold.sh",
+        PROJECT_ROOT / "scripts" / "setup_pharokka.sh",
+        PROJECT_ROOT / "scripts" / "fix_minced.sh",
+        PROJECT_ROOT / "scripts" / "inspect_sangon_mail.py",
+        PROJECT_ROOT / "scripts" / "process_user_downloads.py",
+    ]
+    scripts_dir = PROJECT_ROOT / "scripts"
+    if scripts_dir.exists():
+        for pattern in ("export_gui_format_*.py", "run_16s_blast*.py", "translate_and_export*.py"):
+            checked_files.extend(sorted(scripts_dir.glob(pattern)))
+    violations = []
+    for p in checked_files:
+        if not p.exists():
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for idx, line in enumerate(text.splitlines(), 1):
+            if PERSONAL_HARDCODED_PATH_PATTERN.search(line):
+                violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {line.strip()[:90]}")
+
+    assert not violations, "发现违反规则 2 的个人机器硬编码绝对路径:\n" + "\n".join(violations)
+
+
+def test_legacy_pyqt_bridge_and_misplaced_web_root_files_removed():
+    assert not (PROJECT_ROOT / "src" / "web-next" / "src" / "bridge" / "pyqt-bridge.ts").exists()
+    assert not (PROJECT_ROOT / "src" / "web-next" / "verify_label_display_mode.js").exists()
+    assert not (PROJECT_ROOT / "src" / "web-next" / "LABEL_DISPLAY_MODE_FIX_REPORT.md").exists()
+    assert (PROJECT_ROOT / "scripts" / "verify_label_display_mode.js").is_file()
+    assert (PROJECT_ROOT / "docs" / "archive" / "label_display_mode_fix_report.md").is_file()
+
+
+def test_rule11_src_python_files_utf8_clean():
+    import ast
+
+    enc_gbk_re = re.compile(
+        r"(?i)(?:encoding\s*=\s*['\"](?:gbk|cp936|gb2312|gb18030)['\"]"
+        r"|\.(?:decode|encode)\s*\(\s*['\"](?:gbk|cp936|gb2312|gb18030)['\"])"
+    )
+    violations = []
+    for p in (PROJECT_ROOT / "src").rglob("*.py"):
+        if "__pycache__" in p.parts:
+            continue
+        raw = p.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            violations.append(f"{p.relative_to(PROJECT_ROOT)}: 存在 UTF-8 BOM")
+            continue
+        text = raw.decode("utf-8")
+        for idx, line in enumerate(text.splitlines(), 1):
+            if enc_gbk_re.search(line):
+                violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: 禁止使用 GBK/CP936 编码")
+        try:
+            tree = ast.parse(text)
+        except SyntaxError as exc:
+            violations.append(f"{p.relative_to(PROJECT_ROOT)}: 语法错误 {exc}")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not (isinstance(node.func, ast.Name) and node.func.id == "open"):
+                continue
+            kw_map = {kw.arg: kw.value for kw in node.keywords if kw.arg}
+            if "encoding" in kw_map:
+                continue
+            # 检查 mode 是否为二进制模式（如 'rb'/'wb'/'ab'）
+            mode_node = kw_map.get("mode") or (node.args[1] if len(node.args) >= 2 else None)
+            if isinstance(mode_node, ast.Constant) and isinstance(mode_node.value, str) and "b" in mode_node.value:
+                continue
+            violations.append(f"{p.relative_to(PROJECT_ROOT)}:{node.lineno}: 文本 open() 缺失 encoding='utf-8'")
+
+    assert not violations, "发现违反规则 11 的编码问题:\n" + "\n".join(violations[:20])
+
+
+def test_locales_zh_en_keys_fully_aligned():
+    import json
+
+    zh_dir = PROJECT_ROOT / "src" / "resources" / "locales" / "zh_CN"
+    en_dir = PROJECT_ROOT / "src" / "resources" / "locales" / "en_US"
+    zh_files = {p.name for p in zh_dir.glob("*.json")}
+    en_files = {p.name for p in en_dir.glob("*.json")}
+    assert zh_files == en_files
+
+    diffs = []
+    for fname in sorted(zh_files):
+        zh_keys = set(json.loads((zh_dir / fname).read_text(encoding="utf-8")).keys())
+        en_keys = set(json.loads((en_dir / fname).read_text(encoding="utf-8")).keys())
+        missing_en = sorted(zh_keys - en_keys)
+        missing_zh = sorted(en_keys - zh_keys)
+        if missing_en or missing_zh:
+            diffs.append(f"{fname}: missing_en={missing_en[:5]}, missing_zh={missing_zh[:5]}")
+    assert not diffs, "中英文词典键不一致:\n" + "\n".join(diffs)
+
+
+def test_readme_license_help_and_citations_integrity():
+    import json
+    from src.utils.help_manager import get_help_manager
+
+    assert (PROJECT_ROOT / "LICENSE").is_file()
+    assert (PROJECT_ROOT / "docs" / "INDEX.md").is_file()
+
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "TailwindCSS" not in readme
+    assert "Phylotree.js" not in readme
+    assert "src/analysis/protein_compare" not in readme
+
+    citations = json.loads((PROJECT_ROOT / "src" / "resources" / "citations.json").read_text(encoding="utf-8"))
+    assert len(citations.get("tools", [])) >= 10
+
+    help_mgr = get_help_manager()
+    structure = help_mgr.get_help_structure()
+    total_topics = sum(len(g["topics"]) for g in structure)
+    assert total_topics >= 10
+    for group in structure:
+        for topic in group["topics"]:
+            md_path = PROJECT_ROOT / "resources" / "help" / f"{topic['id']}.md"
+            assert md_path.is_file(), f"帮助目录引用了缺失文件: {md_path}"
+
+
+def test_subprocess_text_calls_specify_utf8_and_routes_forbid_shell_true():
+    import ast
+
+    enc_violations = []
+    for base in (PROJECT_ROOT / "src", PROJECT_ROOT / "scripts"):
+        if not base.exists():
+            continue
+        for p in base.rglob("*.py"):
+            if "__pycache__" in p.parts:
+                continue
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                    continue
+                if (
+                    node.func.attr in {"run", "Popen", "check_output"}
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "subprocess"
+                ):
+                    kw_map = {kw.arg: kw.value for kw in node.keywords if kw.arg}
+                    tv = kw_map.get("text") or kw_map.get("universal_newlines")
+                    if isinstance(tv, ast.Constant) and tv.value is True and "encoding" not in kw_map:
+                        enc_violations.append(f"{p.relative_to(PROJECT_ROOT)}:{node.lineno}")
+    assert not enc_violations, "发现 subprocess(text=True) 缺失 encoding='utf-8':\n" + "\n".join(enc_violations)
+
+    shell_violations = []
+    for p in (PROJECT_ROOT / "src" / "backend" / "routes").rglob("*.py"):
+        if "__pycache__" in p.parts:
+            continue
+        text = p.read_text(encoding="utf-8")
+        if "shell=True" in text:
+            shell_violations.append(str(p.relative_to(PROJECT_ROOT)))
+    assert not shell_violations, "后端路由禁止使用 shell=True:\n" + "\n".join(shell_violations)
+
+
+def test_frontend_i18n_keys_exist_in_zh_and_en_locales():
+    import json
+
+    zh_keys = set()
+    en_keys = set()
+    for p in (PROJECT_ROOT / "src" / "resources" / "locales" / "zh_CN").glob("*.json"):
+        zh_keys.update(json.loads(p.read_text(encoding="utf-8")).keys())
+    for p in (PROJECT_ROOT / "src" / "resources" / "locales" / "en_US").glob("*.json"):
+        en_keys.update(json.loads(p.read_text(encoding="utf-8")).keys())
+
+    used_keys = set()
+    web_src = PROJECT_ROOT / "src" / "web-next" / "src"
+    for p in web_src.rglob("*"):
+        if "__tests__" in p.parts or p.suffix not in {".vue", ".ts"}:
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for m in re.findall(r"(?<![.\w$])t\(\s*['\"]([a-zA-Z0-9_.-]+)['\"]", text):
+            used_keys.add(m)
+
+    missing_zh = sorted(used_keys - zh_keys)
+    missing_en = sorted(used_keys - en_keys)
+    assert not missing_zh and not missing_en, f"前端引用的翻译键缺失: zh={missing_zh}, en={missing_en}"

@@ -52,7 +52,9 @@ def build_swissprot():
     if source_fasta.exists():
         print("[Swiss-Prot] 正在构建 BLAST 蛋白质索引 (swissprot)...")
         cmd = [get_makeblastdb_cmd(), "-in", "source.fasta", "-dbtype", "prot", "-title", "UniProtKB/Swiss-Prot", "-out", "swissprot"]
-        res = subprocess.run(cmd, cwd=str(sp_dir), capture_output=True, text=True)
+        res = subprocess.run(
+            cmd, cwd=str(sp_dir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800
+        )
         if res.returncode == 0:
             print("[Swiss-Prot] 索引构建成功，数据库已就绪！")
         else:
@@ -86,7 +88,9 @@ def build_vfdb():
     if source_fasta.exists():
         print("[VFDB] 正在构建 BLAST 毒力因子索引 (vfdb)...")
         cmd = [get_makeblastdb_cmd(), "-in", "source.fasta", "-dbtype", "prot", "-title", "VFDB Virulence Factors", "-out", "vfdb"]
-        res = subprocess.run(cmd, cwd=str(vf_dir), capture_output=True, text=True)
+        res = subprocess.run(
+            cmd, cwd=str(vf_dir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800
+        )
         if res.returncode == 0:
             print("[VFDB] 索引构建成功，数据库已就绪！")
         else:
@@ -119,7 +123,9 @@ def build_card():
     if f_faa.exists():
         print(f"[CARD] 正在为 {f_faa.name} 构建耐药基因索引 (card_protein)...")
         cmd = [get_makeblastdb_cmd(), "-in", f_faa.name, "-dbtype", "prot", "-title", "CARD Resistome", "-out", "card_protein"]
-        res = subprocess.run(cmd, cwd=str(card_dir), capture_output=True, text=True)
+        res = subprocess.run(
+            cmd, cwd=str(card_dir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800
+        )
         if res.returncode == 0:
             print("[CARD] 索引构建成功，数据库已就绪！")
         else:

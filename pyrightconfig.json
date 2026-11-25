@@ -3,8 +3,7 @@
         "**/node_modules",
         "**/__pycache__",
         ".venv",
-        "**/__pyrefly_virtual__/**",
-        "F:/__pyrefly_virtual__/**"
+        "**/__pyrefly_virtual__/**"
     ],
     "venvPath": ".",
     "venv": ".venv",
@@ -20,8 +19,7 @@
         ".",
         "./src",
         "./vendor/ete4",
-        "./vendor/ete4/ete4",
-        "E:/NGCS"
+        "./vendor/ete4/ete4"
     ],
     "reportMissingImports": "warning",
     "reportMissingTypeStubs": "none",

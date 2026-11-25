@@ -160,6 +160,7 @@ dist-ssr/
 # ------------------------------------------------------------------------------
 /logs/
 *.log
+*.log.*
 debug_output.txt
 jumbo_log*.txt
 *_help.txt
@@ -239,6 +240,7 @@ src/test_shm.py
 !/scripts/validate_external_phage_structure.py
 !/scripts/run_suite_e_blind.py
 !/scripts/benchmark_fragmented_contigs.py
+!/scripts/verify_label_display_mode.js
 .lingma/rules/
 
 # ------------------------------------------------------------------------------

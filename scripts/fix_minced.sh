@@ -7,5 +7,10 @@ wget https://github.com/ctSkennerton/minced/releases/download/0.4.2/minced.jar -
 printf '#!/bin/bash\njava -jar /usr/local/bin/minced.jar "$@"\n' > /usr/local/bin/minced
 chmod +x /usr/local/bin/minced
 
-echo "--- 依赖已全部就绪！启动 Pharokka 终极注释任务... ---"
-python3 /usr/local/bin/pharokka.py -i "/mnt/f/NCBI blast/results/assembly/AS_1776452382749/assemblerstep/unicycler_run/assembly.fasta" -o "/mnt/f/NCBI blast/results/assembly/AS_1776452382749/phageannotationstep/pharokka_res" -d /opt/pharokka_db -t 8 -f
+echo "--- 依赖已全部就绪！ ---"
+if [ -n "$1" ] && [ -n "$2" ]; then
+  echo "--- 启动 Pharokka 注释任务: input=$1 output=$2 ---"
+  python3 /usr/local/bin/pharokka.py -i "$1" -o "$2" -d "${PHAROKKA_DB:-/opt/pharokka_db}" -t "${PHAROKKA_THREADS:-8}" -f
+else
+  echo "用法（可选触发测试）: bash scripts/fix_minced.sh <input_fasta> <output_dir>"
+fi

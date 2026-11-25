@@ -1,6 +1,6 @@
 #!/bin/bash
 # Phold AI 运行环境部署（WSL / Ubuntu，复用已下载的 phold_db，不重复下载结构库与 ProstT5 权重）
-# 用法: wsl -d Ubuntu -u root bash "/mnt/d/NCBI blast/scripts/setup_phold.sh"
+# 用法: wsl -d Ubuntu -u root bash "<project_root_in_wsl>/scripts/setup_phold.sh"
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

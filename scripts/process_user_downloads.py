@@ -12,7 +12,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_ROOT = PROJECT_ROOT / "database"
-DOWNLOAD_DIR = Path("C:/Users/Administrator/Downloads")
+DOWNLOAD_DIR = Path.home() / "Downloads"
 
 def get_makeblastdb_cmd():
     for candidate in [

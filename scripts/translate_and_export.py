@@ -3,13 +3,13 @@
 import sys, os, csv, re
 from pathlib import Path
 
-PROJECT_ROOT = Path(r"F:\NCBI blast")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 os.chdir(PROJECT_ROOT)
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.translation.blast_result_translator import get_blast_result_translator
 
-reports_dir = Path(r"F:\NCBI blast\results\blast\20261021_2140612440_16s\reports")
+reports_dir = PROJECT_ROOT / r"results\blast\20261021_2140612440_16s\reports"
 out_dir = Path(r"G:\测序数据\生工16s\20261021_2140612440\BLAST结果")
 out_dir.mkdir(parents=True, exist_ok=True)
 

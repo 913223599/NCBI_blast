@@ -5,6 +5,7 @@ NCBI BLAST GUI 工业级构建脚本 (Industrial Build Script)
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -34,13 +35,15 @@ def sync_assets():
         (PROJECT_ROOT / "resources", "resources"),  # 顶级资源目录 (帮助文档)
     ]
     
-    # 检测 BLAST 路径
+    # 检测 BLAST 路径（优先项目内嵌，其次环境变量与系统 PATH）
     local_bin = PROJECT_ROOT / "tools" / "ncbi_dist" / "bin"
-    global_bin = Path(r"D:\Program Files\NCBI\blast-2.16.0+\bin")
-    
+    env_blast_bin = Path(os.environ["BLAST_BIN_DIR"]) if os.environ.get("BLAST_BIN_DIR") else None
+    which_blastn = shutil.which("blastn")
+    global_bin = env_blast_bin or (Path(which_blastn).parent if which_blastn else None)
+
     if (local_bin / "blastn.exe").exists():
         sync_jobs.append((local_bin, "bin"))
-    elif global_bin.exists():
+    elif global_bin and global_bin.exists():
         print(f"  - Using global BLAST from: {global_bin}")
         sync_jobs.append((global_bin, "bin"))
     

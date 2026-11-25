@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pharokka 运行环境部署（WSL / Ubuntu，复用已下载的 database 库，不重新下载 10GB 数据）
-# 用法: wsl -d Ubuntu -u root bash "/mnt/d/NCBI blast/scripts/setup_pharokka.sh"
+# 用法: wsl -d Ubuntu -u root bash "<project_root_in_wsl>/scripts/setup_pharokka.sh"
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -93,8 +93,8 @@ for f in all_phrogs.h3m phrog_annot_v4.tsv CARD.dbtype vfdb.dbtype; do
 done
 
 if [ "$missing" -eq 0 ]; then
-  echo "✅ Pharokka 运行环境就绪"
+  echo "[OK] Pharokka 运行环境就绪"
   exit 0
 fi
-echo "⚠️  仍有 $missing 项缺失，请根据上面的 [MISS] 行补齐后重跑"
+echo "[WARN] 仍有 $missing 项缺失，请根据上面的 [MISS] 行补齐后重跑"
 exit 1
