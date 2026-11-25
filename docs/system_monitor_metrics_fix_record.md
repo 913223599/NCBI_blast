@@ -39,3 +39,27 @@
 - `uvx --from ruff==0.17.6 ruff check src` 与本地 `ruff check`：**All checks passed!**。
 - 本机实测 `collect_system_metrics(force=True)`：`RTX 4070 Laptop GPU`、`utilization_percent: 5.0`、`used_vram_mb: 1495`、`total_vram_mb: 8188`、`temperature_c: 61`、`source: "nvidia-smi"`。
 - 前端 `npx vue-tsc --noEmit`：**0 errors**；`npx vitest run`：**14 test files / 62 tests passed**。
+
+---
+
+## 4. 消除监控轮询访问日志刷屏与 5 秒节奏优化
+
+### 4.1 异常现象
+前端顶栏硬件微监控胶囊以 3 秒轮询 `/api/core/system_metrics` 后，Uvicorn 默认访问日志将每次 `GET /api/core/system_metrics HTTP/1.1" 200 OK` 输出至运行控制台，造成视觉刷屏并掩盖真实业务分析日志。
+
+### 4.2 优化策略与改动文件
+1. **新增单一职责的访问日志过滤器**（[src/backend/utils/access_log_filter.py](../src/backend/utils/access_log_filter.py)）：
+   - 实现 `QuietPollingAccessFilter(logging.Filter)` 与幂等挂载函数 `install_uvicorn_access_filter()`。
+   - 仅静默 `DEFAULT_QUIET_POLLING_PATHS`（`/api/core/system_metrics`、`/api/health`）中状态码为 `HTTP 200` 的 `GET` 访问日志（兼容带查询参数如 `?force=true`）。
+   - 严格保留上述接口的非 `200` 异常响应（`4xx`/`5xx`）、非 `GET` 请求以及所有业务路由日志，保证故障排查可观测性。
+2. **接入生命周期启动与日志初始化**（[src/backend/api_server.py](../src/backend/api_server.py)）：
+   - 在日志配置初始化阶段及 `lifespan(app)` 启动入口均幂等调用 `install_uvicorn_access_filter()`，确保即使 `uvicorn.run()` 执行内部 `LOGGING_CONFIG` 重置后过滤器仍稳定生效。
+3. **优化采样与轮询节奏**：
+   - [src/web-next/src/components/layout/AppHeader.vue](../src/web-next/src/components/layout/AppHeader.vue)：定义 `METRICS_POLL_INTERVAL_MS = 5000`（5 秒），兼顾监控平滑度与低频开销，同时保留后台标签页暂停、切回立即刷新与点击胶囊强制 `?force=true` 刷新。
+   - [src/utils/system_monitor.py](../src/utils/system_monitor.py)：将 `_DEFAULT_TTL_SEC` 从 `1.5s` 微调至 `2.0s`。
+
+### 4.3 复测验证结果
+- 新增单测 `test_quiet_polling_access_filter_suppresses_200_metrics_only` 与 `test_install_uvicorn_access_filter_is_idempotent`（[tests/test_system_monitor.py](../tests/test_system_monitor.py)）。
+- `.venv\Scripts\python.exe -m pytest tests/test_system_monitor.py tests/test_repo_hygiene.py tests/test_security_and_lan_guard.py tests/test_resource_guard_and_hygiene_p2.py -q`：**31 passed in 9.29s**。
+- `uvx --from ruff==0.17.6 ruff check src tests/test_system_monitor.py`：**All checks passed!**。
+- 前端 `npx vue-tsc --noEmit`：**0 errors**；`npx vitest run`：**14 test files / 62 tests passed**。

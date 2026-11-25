@@ -23,7 +23,7 @@ logger = logging.getLogger("utils.system_monitor")
 _CACHE_LOCK = threading.Lock()
 _CACHED_METRICS: Optional[Dict[str, Any]] = None
 _CACHED_AT: float = 0.0
-_DEFAULT_TTL_SEC = 1.5
+_DEFAULT_TTL_SEC = 2.0
 
 
 def reset_metrics_cache() -> None:

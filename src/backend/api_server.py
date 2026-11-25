@@ -54,6 +54,7 @@ os.environ["XDG_CONFIG_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
 os.environ["XDG_CACHE_HOME"] = str(PROJECT_ROOT / "database" / "taxonomy")
 
 from .broadcaster import broadcaster  # noqa: E402
+from .utils.access_log_filter import install_uvicorn_access_filter  # noqa: E402
 from .utils.blast_utils import parse_blast_csv, select_consensus_hit  # noqa: E402
 
 # ─── 3. 日志配置 ────────────────────────────────────────
@@ -64,6 +65,7 @@ logging.basicConfig(
     stream=sys.stdout
 )
 logger = logging.getLogger("api_server")
+install_uvicorn_access_filter()
 
 # ─── Windows asyncio 稳定性补丁 ────────────────────────
 if sys.platform.startswith("win"):
@@ -135,6 +137,7 @@ def log_resources(force=False):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用启动与清理钩子"""
+    install_uvicorn_access_filter()
     logger.info("Bio-Station API 启动中...")
     
     # A. 预热翻译词库 (Sqlite 缓存)

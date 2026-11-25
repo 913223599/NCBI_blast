@@ -39,6 +39,8 @@ const appStore = useAppStore()
 const blastStore = useBlastStore()
 const { t } = useI18n()
 
+const METRICS_POLL_INTERVAL_MS = 5000
+
 const apiOnline = ref<'checking' | 'online' | 'offline'>('checking')
 const sysMetrics = ref<SystemMetricsPayload | null>(null)
 const showCommandPalette = ref(false)
@@ -215,7 +217,7 @@ onMounted(() => {
   metricsTimer = setInterval(() => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
     void fetchSystemMetrics(false)
-  }, 3000)
+  }, METRICS_POLL_INTERVAL_MS)
 })
 
 onUnmounted(() => {
