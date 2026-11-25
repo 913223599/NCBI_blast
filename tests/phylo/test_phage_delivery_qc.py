@@ -78,7 +78,8 @@ def test_itol_qc_and_delivery_bundle(tmp_path: Path):
 
     itol_dir = tmp_path / "itol"
     itol_files = ItolTemplateGenerator.generate(cands, itol_dir)
-    assert len(itol_files) == 10
+    assert len(itol_files) == 11
+    assert "TREE_COLORS" in (itol_dir / "itol_clade_ranges.txt").read_text(encoding="utf-8")
     assert "TREE_COLORS" in (itol_dir / "itol_branch_colors.txt").read_text(encoding="utf-8")
     assert "TREE_COLORS" in (itol_dir / "itol_branch_colors_macro.txt").read_text(encoding="utf-8")
     assert "DATASET_COLORSTRIP" in (itol_dir / "itol_strip_taxonomy.txt").read_text(encoding="utf-8")

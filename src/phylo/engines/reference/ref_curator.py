@@ -193,63 +193,81 @@ class PhageReferenceCurator:
             )
 
         if ani_result:
-            # 4. 确保每个目标属按配置纳入 ictv_reps_per_genus 条正式 ICTV 代表株
-            max_rep_total = max(1, scope.ref_max_count - len(candidates)) if scope.ref_max_count < 15 else max(10, int(scope.ref_max_count * 0.7))
-            ictv_reps = self.index.find_ictv_representatives(
-                genera=target_genera,
-                families=target_families,
-                exclude_accessions=list(seen_acc),
-                per_genus=scope.ictv_reps_per_genus,
-                max_total=max_rep_total,
-            )
-            for rep in ictv_reps:
-                if rep.accession in seen_acc or len(candidates) >= scope.ref_max_count:
-                    continue
-                seen_acc.add(rep.accession)
-                candidates.append(
-                    ReferenceCandidate(
-                        accession=rep.accession,
-                        name=f"{rep.accession} ({rep.genus})" if rep.genus else rep.accession,
-                        description=rep.description,
-                        role="ictv_rep",
-                        source="inphared_cache" if (self.cache_dir / f"{_safe_acc(rep.accession)}.fasta").is_file() else "ncbi_download",
-                        selected=True,
-                        genome_length=rep.genome_length,
-                        gc_content=rep.gc_content,
-                        host=rep.host,
-                        genus=rep.genus,
-                        family=rep.family,
-                        order=rep.order_name,
-                        is_ictv_classified=rep.is_ictv_classified,
-                    )
+            def _append_ictv_reps(per_genus_limit: int, max_rep_cap: int) -> None:
+                if len(candidates) >= scope.ref_max_count or max_rep_cap <= 0 or per_genus_limit <= 0:
+                    return
+                ictv_reps = self.index.find_ictv_representatives(
+                    genera=target_genera,
+                    families=target_families,
+                    exclude_accessions=list(seen_acc),
+                    per_genus=per_genus_limit,
+                    max_total=max_rep_cap,
                 )
+                for rep in ictv_reps:
+                    if rep.accession in seen_acc or len(candidates) >= scope.ref_max_count:
+                        continue
+                    seen_acc.add(rep.accession)
+                    candidates.append(
+                        ReferenceCandidate(
+                            accession=rep.accession,
+                            name=f"{rep.accession} ({rep.genus})" if rep.genus else rep.accession,
+                            description=rep.description,
+                            role="ictv_rep",
+                            source="inphared_cache" if (self.cache_dir / f"{_safe_acc(rep.accession)}.fasta").is_file() else "ncbi_download",
+                            selected=True,
+                            genome_length=rep.genome_length,
+                            gc_content=rep.gc_content,
+                            host=rep.host,
+                            genus=rep.genus,
+                            family=rep.family,
+                            order=rep.order_name,
+                            is_ictv_classified=rep.is_ictv_classified,
+                        )
+                    )
 
-            # 6. 补充第 1 步 Top ANI 相似近邻（确保不重复、不超过 ref_max_count）
-            for hit in ani_result.top_hits:
-                if len(candidates) >= scope.ref_max_count:
-                    break
-                if hit.accession in seen_acc:
-                    continue
-                seen_acc.add(hit.accession)
-                is_rep = bool(hit.genus)
-                candidates.append(
-                    ReferenceCandidate(
-                        accession=hit.accession,
-                        name=f"{hit.accession} ({hit.genus})" if hit.genus else hit.accession,
-                        description=hit.description,
-                        role="ictv_rep" if is_rep else "neighbor",
-                        source="inphared_cache" if (self.cache_dir / f"{_safe_acc(hit.accession)}.fasta").is_file() else "ncbi_download",
-                        selected=True,
-                        genome_length=hit.genome_length,
-                        gc_content=hit.gc_content,
-                        host=hit.host,
-                        genus=hit.genus,
-                        family=hit.family,
-                        order=hit.order,
-                        wg_ani=hit.wg_ani if hit.wg_ani > 0 else hit.mash_ani,
-                        is_ictv_classified=is_rep,
+            def _append_top_hits() -> None:
+                for hit in ani_result.top_hits:
+                    if len(candidates) >= scope.ref_max_count:
+                        break
+                    if hit.accession in seen_acc:
+                        continue
+                    seen_acc.add(hit.accession)
+                    is_rep = bool(hit.genus)
+                    candidates.append(
+                        ReferenceCandidate(
+                            accession=hit.accession,
+                            name=f"{hit.accession} ({hit.genus})" if hit.genus else hit.accession,
+                            description=hit.description,
+                            role="ictv_rep" if is_rep else "neighbor",
+                            source="inphared_cache" if (self.cache_dir / f"{_safe_acc(hit.accession)}.fasta").is_file() else "ncbi_download",
+                            selected=True,
+                            genome_length=hit.genome_length,
+                            gc_content=hit.gc_content,
+                            host=hit.host,
+                            genus=hit.genus,
+                            family=hit.family,
+                            order=hit.order,
+                            wg_ani=hit.wg_ani if hit.wg_ani > 0 else hit.mash_ani,
+                            is_ictv_classified=is_rep,
+                        )
                     )
+
+            if scope.target_rank == "species":
+                # 种内精细分辨模式：先确保目标属有轻量 ICTV 核心锚点，随后优先倾斜配额给高相似同种与近缘株
+                anchor_cap = max(2, int(scope.ref_max_count * 0.25))
+                _append_ictv_reps(min(scope.ictv_reps_per_genus, 2), anchor_cap)
+                _append_top_hits()
+                remaining = scope.ref_max_count - len(candidates)
+                if remaining > 0:
+                    _append_ictv_reps(scope.ictv_reps_per_genus, remaining)
+            else:
+                max_rep_total = (
+                    max(1, scope.ref_max_count - len(candidates))
+                    if scope.ref_max_count < 15
+                    else max(10, int(scope.ref_max_count * 0.7))
                 )
+                _append_ictv_reps(scope.ictv_reps_per_genus, max_rep_total)
+                _append_top_hits()
 
         # 7. 宏观分层抽样模式：补足跨病毒科 × 跨宿主门千株级背景参考集（无 ANI 结果时同样可用）
         if (

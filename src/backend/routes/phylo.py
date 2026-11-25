@@ -462,7 +462,7 @@ async def render_publication_figure(job_id: str, req: PublicationFigureRequest):
 
 
 @router.get("/jobs/{job_id}/export/figure/{filename}")
-async def export_phylo_figure(job_id: str, filename: str):
+async def export_phylo_figure(job_id: str, filename: str, inline: bool = False):
     rec = get_phylo_store().get_job(job_id)
     if not rec:
         raise HTTPException(status_code=404, detail=f"未找到任务: {job_id}")
@@ -487,10 +487,14 @@ async def export_phylo_figure(job_id: str, filename: str):
         ".eps": "application/postscript",
     }
     media_type = mime_map.get(target.suffix.lower(), "application/octet-stream")
+    disposition = "inline" if inline else "attachment"
     return Response(
         content=target.read_bytes(),
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{safe_name}"',
+            "Cache-Control": "no-store",
+        },
     )
 
 

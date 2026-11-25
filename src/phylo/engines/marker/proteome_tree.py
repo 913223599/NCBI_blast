@@ -174,6 +174,7 @@ class ProteomeTreeEngine:
         threads: int = 0,
         tree_method: Literal["bionj", "upgma"] = "bionj",
         distance_mode: Literal["log_sg", "one_minus_sg"] = "log_sg",
+        use_gpu: bool = True,
     ) -> Tuple[Path, MarkerExtractionReport]:
         if self.cancel_event.is_set():
             raise PhyloCancelledError("蛋白质组树构建已取消")
@@ -301,7 +302,7 @@ class ProteomeTreeEngine:
         np.save(str(dist_npy), dist_mat)
         NJBioNJEngine.save_distance_csv(labels, dist_mat, dist_csv)
         nj = NJBioNJEngine(cancel_event=self.cancel_event, on_log=self.on_log)
-        nj.build_from_matrix(labels, dist_mat, output_nwk, method=tree_method)
+        nj.build_from_matrix(labels, dist_mat, output_nwk, method=tree_method, use_gpu=use_gpu)
 
         report = MarkerExtractionReport(
             mode="proteome",

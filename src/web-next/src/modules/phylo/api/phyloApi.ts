@@ -1,5 +1,6 @@
 import { API_BASE, apiDelete, apiGet, apiPost } from '../../../bridge/electron-bridge'
 import { onEvent } from '../../../bridge'
+import { buildFigureUrlQuery, type FigureUrlOptions } from '../core/FigurePreviewHelper'
 import type {
   AniEngineType,
   AniScreenResult,
@@ -194,8 +195,9 @@ export const phyloApi = {
     )
   },
 
-  getFigureUrl(jobId: string, filename: string): string {
-    return `${API_BASE}/api/phylo/jobs/${encodeURIComponent(jobId)}/export/figure/${encodeURIComponent(filename)}`
+  getFigureUrl(jobId: string, filename: string, options?: FigureUrlOptions): string {
+    const query = buildFigureUrlQuery(options)
+    return `${API_BASE}/api/phylo/jobs/${encodeURIComponent(jobId)}/export/figure/${encodeURIComponent(filename)}${query}`
   },
 
   getItolUploadBundleUrl(jobId: string, labelFormat: LabelFormatType = 'name_acc'): string {

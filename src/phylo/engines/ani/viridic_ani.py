@@ -670,13 +670,59 @@ class ViridicAniCalculator:
                 )
             )
 
-        hits.sort(key=lambda h: (h.wg_ani, h.mash_ani or 0.0), reverse=True)
+        # 补充保留已进入 Mash Top-K 但尚未进精算矩阵的其余近邻，供第 2 步高密度同种/近缘种筛选使用
+        covered_accs = set(matrix_labels) | set(query_ids)
+        for acc, (mash_d, mash_ani, meta) in mash_hits_map.items():
+            if acc in covered_accs:
+                continue
+            covered_accs.add(acc)
+            est_ani = float(mash_ani or 0.0)
+            call, _ = classify_ictv_threshold(
+                est_ani,
+                est_ani,
+                100.0,
+                100.0,
+                species_threshold=scope.ani_species_threshold,
+                genus_threshold=scope.ani_genus_threshold,
+            )
+            hits.append(
+                AniHitRecord(
+                    accession=acc,
+                    description=meta.description if meta else acc,
+                    mash_distance=mash_d,
+                    mash_ani=mash_ani,
+                    wg_ani=0.0,
+                    aligned_ani=0.0,
+                    af_query=0.0,
+                    af_ref=0.0,
+                    genome_length=meta.genome_length if meta else 0,
+                    gc_content=meta.gc_content if meta else 0.0,
+                    host=meta.host if meta else "",
+                    genus=meta.genus if meta else "",
+                    subfamily=meta.subfamily if meta else "",
+                    family=meta.family if meta else "",
+                    order=meta.order_name if meta else "",
+                    class_name=meta.class_name if meta else "",
+                    realm=meta.realm if meta else "",
+                    classification_call=call,  # type: ignore[arg-type]
+                    mosaic_warning=False,
+                )
+            )
+
+        hits.sort(
+            key=lambda h: (
+                1 if h.wg_ani > 0 else 0,
+                h.wg_ani if h.wg_ani > 0 else (h.mash_ani or 0.0),
+                h.mash_ani or 0.0,
+            ),
+            reverse=True,
+        )
 
         candidate_genera: List[str] = []
         candidate_families: List[str] = []
         candidate_orders: List[str] = []
         host_hint = ""
-        for h in hits[:15]:
+        for h in hits[:30]:
             if h.genus and h.genus not in candidate_genera:
                 candidate_genera.append(h.genus)
             if h.family and h.family not in candidate_families:

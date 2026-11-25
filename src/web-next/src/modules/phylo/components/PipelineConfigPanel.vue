@@ -54,6 +54,16 @@ watch(
 const cpuSafeMax = computed(() => store.capabilities?.cpu_safe_max || 16)
 const cpuDefault = computed(() => store.capabilities?.cpu_default || 12)
 const minSeqRequired = computed(() => (isPhageMode.value ? 1 : 3))
+
+function formatModelLabel(model: string): string {
+  if (molType.value === 'protein' && model === 'MFP') {
+    return 'MFP (核心蛋白快速集 · 推荐)'
+  }
+  if (model === 'MFP_FULL') {
+    return 'MFP_FULL (全量 1232 模型 · 极慢)'
+  }
+  return model
+}
 </script>
 
 <template>
@@ -71,6 +81,9 @@ const minSeqRequired = computed(() => (isPhageMode.value ? 1 : 3))
         CUDA: {{ store.capabilities.gpu_name }} ({{ store.capabilities.gpu_free_vram_mb }} MB 空闲)
       </span>
       <span v-else class="gpu-off">CUDA 不可用 (自动走多核 NumPy)</span>
+      <span v-if="store.capabilities.gpu_available" class="gpu-scope">
+        GPU 适用范围：演化距离矩阵与大规模 BioNJ/NJ/UPGMA 聚类 (>=64 株)；IQ-TREE / FastTree / MAFFT 为多核 CPU 引擎
+      </span>
     </div>
 
     <div class="form-group">
@@ -127,7 +140,7 @@ const minSeqRequired = computed(() => (isPhageMode.value ? 1 : 3))
           <div class="form-group">
             <label>替换模型 (ModelFinder)</label>
             <select v-model="store.config.model" class="neo-select">
-              <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+              <option v-for="m in availableModels" :key="m" :value="m">{{ formatModelLabel(m) }}</option>
             </select>
           </div>
         </div>
@@ -265,7 +278,7 @@ const minSeqRequired = computed(() => (isPhageMode.value ? 1 : 3))
       <div class="form-group" v-if="!isGenomeTrack">
         <label>替换模型 (Model)</label>
         <select v-model="store.config.model" class="neo-select">
-          <option v-for="m in availableModels" :key="m" :value="m">{{ m }}</option>
+          <option v-for="m in availableModels" :key="m" :value="m">{{ formatModelLabel(m) }}</option>
         </select>
       </div>
 
@@ -296,9 +309,9 @@ const minSeqRequired = computed(() => (isPhageMode.value ? 1 : 3))
     </div>
 
     <div class="check-row">
-      <label class="chk" v-if="!isPhageMode">
+      <label class="chk" v-if="!isPhageMode || store.config.marker_mode === 'proteome'">
         <input type="checkbox" v-model="store.config.use_gpu" :disabled="!store.capabilities?.gpu_available" />
-        <span>PyTorch CUDA 加速距离计算</span>
+        <span>PyTorch CUDA 加速距离矩阵与大规模聚类</span>
       </label>
       <label class="chk">
         <input type="checkbox" v-model="store.config.use_cache" />
@@ -345,6 +358,7 @@ const minSeqRequired = computed(() => (isPhageMode.value ? 1 : 3))
 .hw-banner { display: flex; flex-direction: column; gap: 2px; font-size: 11px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 10px; color: #334155; }
 .gpu-on { color: #15803d; font-weight: 600; }
 .gpu-off { color: #64748b; }
+.gpu-scope { font-size: 10px; color: #475569; line-height: 1.35; }
 .card-sub { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 7px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 .track-tip { font-size: 11px; color: #1e40af; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 7px 9px; line-height: 1.4; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

@@ -69,7 +69,10 @@ function cellColor(val: number): string {
           <label>去冗余 ANI 阈值</label>
           <select v-model.number="store.phageScope.derep_ani" class="neo-select">
             <option :value="0.9">90% ANI (dRep 标准)</option>
-            <option :value="0.95">95% ANI (种级合并)</option>
+            <option :value="0.95">95% ANI (种级合并，保留不同近缘种)</option>
+            <option :value="0.98">98% ANI (亚种级，保留同种多株系)</option>
+            <option :value="0.99">99% ANI (株系级，仅合并极高重复)</option>
+            <option :value="1">不去冗余 (全保留同种与近缘株)</option>
           </select>
         </div>
         <div class="form-group">
@@ -159,7 +162,7 @@ function cellColor(val: number): string {
         </div>
         <div class="hit-list">
           <div
-            v-for="hit in store.aniResult.top_hits.slice(0, 10)"
+            v-for="hit in store.aniResult.top_hits.slice(0, 20)"
             :key="hit.accession"
             class="hit-row"
           >
@@ -173,8 +176,13 @@ function cellColor(val: number): string {
               </span>
             </div>
             <div class="hit-meta">
-              <span>wgANI: <b>{{ hit.wg_ani.toFixed(1) }}%</b></span>
-              <span>AF: {{ Math.min(hit.af_query, hit.af_ref).toFixed(0) }}%</span>
+              <template v-if="hit.wg_ani > 0">
+                <span>wgANI: <b>{{ hit.wg_ani.toFixed(1) }}%</b></span>
+                <span>AF: {{ Math.min(hit.af_query, hit.af_ref).toFixed(0) }}%</span>
+              </template>
+              <span v-else-if="hit.mash_ani !== null">
+                Mash ANI: <b>{{ hit.mash_ani.toFixed(1) }}%</b> (初筛近邻)
+              </span>
               <span v-if="hit.genus">属: {{ hit.genus }}</span>
               <span v-if="hit.mosaic_warning" class="mosaic-tag">嵌合提示</span>
             </div>

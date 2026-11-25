@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from ..core.checkpoint import CheckpointManager, StageCache
+from ..core.eta_estimator import PhyloEtaEstimator
 from ..core.id_codec import IdCodec
 from ..core.profiler import SequenceProfiler
 from ..engines.distance.mash import MashDistanceEngine
@@ -57,6 +58,8 @@ class _ActiveJobHandle:
         self.cancel_event = cancel_event
         self.active_runner: Any = None
         self.thread: Optional[threading.Thread] = None
+        self.live_record: Optional[PhyloJobRecord] = None
+        self.lock = threading.Lock()
 
 
 class PhyloJobExecutor:
@@ -175,8 +178,8 @@ class PhyloJobExecutor:
                 max_bootstrap=5000,
                 bootstrap_step=500,
                 models_dna=["MFP", "JC", "K2P", "HKY", "GTR+G"],
-                models_protein=["MFP", "JTT+G", "LG+G", "WAG+G"],
-                notes="支持 ModelFinder 自动选模；UFBoot 开启时最低 1000 次",
+                models_protein=["MFP", "MFP_FULL", "LG+G", "JTT+G", "WAG+G"],
+                notes="蛋白 MFP 默认使用核心快速集 (LG/WAG/JTT/Q.pfam/VT, -cmax 4)；可选 MFP_FULL 全量测试；UFBoot 最低 1000 次",
             ),
             "mrbayes": EngineCapabilities(
                 engine="mrbayes",
@@ -215,9 +218,20 @@ class PhyloJobExecutor:
 
     def get_active_jobs(self) -> List[PhyloJobRecord]:
         with self._jobs_lock:
-            active_ids = list(self._active_jobs.keys())
+            items = list(self._active_jobs.items())
         out: List[PhyloJobRecord] = []
-        for jid in active_ids:
+        now_ts = time.time()
+        for jid, handle in items:
+            live_copy: Optional[PhyloJobRecord] = None
+            with handle.lock:
+                if handle.live_record is not None:
+                    live_copy = handle.live_record.model_copy(deep=True)
+                    base_ts = live_copy.started_at or live_copy.created_at
+                    if base_ts > 0:
+                        live_copy.elapsed_sec = round(max(0.0, now_ts - base_ts), 2)
+            if live_copy is not None:
+                out.append(live_copy)
+                continue
             rec = self.store.get_job(jid)
             if rec:
                 out.append(rec)
@@ -431,14 +445,27 @@ class PhyloJobExecutor:
         start_ts = time.time()
         record.status = "running"
         record.started_at = start_ts
+        with handle.lock:
+            handle.live_record = record
         self.store.save_job(record)
 
         log_path = job_dir / "job.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fh = open(log_path, "a", encoding="utf-8", newline="\n")
         log_write_lock = threading.Lock()
+        eta_lock = threading.Lock()
+        eta_estimator = PhyloEtaEstimator(start_ts=start_ts)
+        last_eta_emit_ts = 0.0
+
+        def _clear_eta_fields() -> None:
+            with handle.lock:
+                record.eta_seconds = None
+                record.eta_updated_at = None
+                record.substage_label = ""
+                record.rate_text = ""
 
         def _log(msg: str) -> None:
+            nonlocal last_eta_emit_ts
             line = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
             with log_write_lock:
                 if not log_fh.closed:
@@ -446,21 +473,58 @@ class PhyloJobExecutor:
                     log_fh.flush()
             self._emit("phylo_log", {"job_id": job_id, "line": line})
 
+            emit_payload: Optional[Dict[str, Any]] = None
+            with eta_lock:
+                changed, snap = eta_estimator.on_log(msg)
+                if changed:
+                    now_ts = time.time()
+                    with handle.lock:
+                        prev_has_eta = record.eta_seconds is not None
+                        prev_sub = record.substage_label
+                        record.eta_seconds = snap.eta_seconds
+                        record.eta_updated_at = snap.eta_updated_at
+                        record.substage_label = snap.substage_label
+                        record.rate_text = snap.rate_text
+                    next_has_eta = snap.eta_seconds is not None
+                    sub_changed = prev_sub != snap.substage_label
+                    eta_toggled = prev_has_eta != next_has_eta
+                    if sub_changed or eta_toggled or (now_ts - last_eta_emit_ts >= 0.8):
+                        last_eta_emit_ts = now_ts
+                        emit_payload = {
+                            "job_id": job_id,
+                            "eta_seconds": snap.eta_seconds,
+                            "eta_updated_at": snap.eta_updated_at,
+                            "substage_label": snap.substage_label,
+                            "rate_text": snap.rate_text,
+                            "substage_done": snap.substage_done,
+                            "substage_total": snap.substage_total,
+                            "confidence": snap.confidence,
+                        }
+            if emit_payload is not None:
+                self._emit("phylo_eta", emit_payload)
+
         def _stage_update(name: str, status: str, progress: int, msg: str, cached: bool = False, elapsed: float = 0.0, artifact: Optional[str] = None) -> None:
-            for st in record.stages:
-                if st.name == name:
-                    st.status = status  # type: ignore[assignment]
-                    st.progress = progress
-                    st.cached = cached
-                    st.elapsed_sec = round(elapsed, 3)
-                    st.message = msg
-                    st.artifact_path = artifact
-                    ckp.update_stage(st)
-                    break
-            record.current_stage = name
-            record.progress = progress
-            record.message = msg
-            record.elapsed_sec = round(time.time() - start_ts, 2)
+            with handle.lock:
+                for st in record.stages:
+                    if st.name == name:
+                        st.status = status  # type: ignore[assignment]
+                        st.progress = progress
+                        st.cached = cached
+                        st.elapsed_sec = round(elapsed, 3)
+                        st.message = msg
+                        st.artifact_path = artifact
+                        ckp.update_stage(st)
+                        break
+                record.current_stage = name
+                record.progress = progress
+                record.message = msg
+                record.elapsed_sec = round(time.time() - start_ts, 2)
+                with eta_lock:
+                    snap = eta_estimator.on_stage(name, status, progress)
+                    record.eta_seconds = snap.eta_seconds
+                    record.eta_updated_at = snap.eta_updated_at
+                    record.substage_label = snap.substage_label
+                    record.rate_text = snap.rate_text
             self.store.save_job(record)
             self._emit(
                 "phylo_stage",
@@ -472,6 +536,10 @@ class PhyloJobExecutor:
                     "cached": cached,
                     "message": msg,
                     "elapsed_sec": record.elapsed_sec,
+                    "eta_seconds": snap.eta_seconds,
+                    "eta_updated_at": snap.eta_updated_at,
+                    "substage_label": snap.substage_label,
+                    "rate_text": snap.rate_text,
                     "stages": [s.model_dump() for s in record.stages],
                 },
             )
@@ -496,6 +564,7 @@ class PhyloJobExecutor:
                 record.status = "completed"
                 record.finished_at = time.time()
                 record.elapsed_sec = round(record.finished_at - start_ts, 2)
+                _clear_eta_fields()
                 self.store.save_job(record)
                 leaf_cnt = record.metrics.leaf_count if record.metrics else 0
                 _log(f"噬菌体分类鉴定流水线完成，共 {leaf_cnt} 个叶节点，总耗时 {record.elapsed_sec:.2f}s")
@@ -583,7 +652,7 @@ class PhyloJobExecutor:
                 tree_method = "nj" if cfg.engine == "nj" else "bionj"
                 _stage_update("tree", "running", 75, f"基于 Mash 距离矩阵构建 {tree_method.upper()} 树...")
                 nj_engine = NJBioNJEngine(cancel_event=cancel_ev, on_log=_log)
-                nj_engine.build_from_matrix(ids, dist_mat, raw_nwk_path, method=tree_method)
+                nj_engine.build_from_matrix(ids, dist_mat, raw_nwk_path, method=tree_method, use_gpu=cfg.use_gpu)
                 _stage_update("tree", "completed", 88, f"{tree_method.upper()} 构树完成", elapsed=time.time() - t_tree, artifact=str(raw_nwk_path))
 
             # 2B. Track B: 经典比对构树模式
@@ -733,6 +802,7 @@ class PhyloJobExecutor:
             record.status = "completed"
             record.finished_at = time.time()
             record.elapsed_sec = round(record.finished_at - start_ts, 2)
+            _clear_eta_fields()
             _stage_update("postprocess", "completed", 100, "分析完成", elapsed=time.time() - t_post, artifact=str(final_nwk_path))
 
             _log(f"任务完成，共 {metrics.leaf_count} 个叶节点，总耗时 {record.elapsed_sec:.2f}s")
@@ -743,6 +813,7 @@ class PhyloJobExecutor:
             record.finished_at = time.time()
             record.elapsed_sec = round(record.finished_at - start_ts, 2)
             record.message = exc.message
+            _clear_eta_fields()
             for st in record.stages:
                 if st.status == "running":
                     st.status = "cancelled"
@@ -762,6 +833,7 @@ class PhyloJobExecutor:
             record.finished_at = time.time()
             record.elapsed_sec = round(record.finished_at - start_ts, 2)
             record.message = f"失败: {err_msg}"
+            _clear_eta_fields()
             for st in record.stages:
                 if st.status == "running":
                     st.status = "failed"
@@ -778,6 +850,8 @@ class PhyloJobExecutor:
                 except Exception:
                     pass
             GpuGuard.release_vram()
+            with handle.lock:
+                handle.live_record = None
             with self._jobs_lock:
                 self._active_jobs.pop(job_id, None)
 

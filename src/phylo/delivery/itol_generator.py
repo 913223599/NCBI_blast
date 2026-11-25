@@ -21,27 +21,17 @@ from typing import Dict, List, Tuple
 from ..models.schemas import ReferenceCandidate
 from .host_taxonomy import get_host_group_color, map_host_to_phylum
 from .label_formatter import clean_phage_description, format_leaf_label
+from .publication_palettes import PALETTES
 
-_PALETTE = [
-    "#2563eb",
-    "#059669",
-    "#7c3aed",
-    "#d97706",
-    "#0891b2",
-    "#db2777",
-    "#4f46e5",
-    "#65a30d",
-    "#0d9488",
-    "#9333ea",
-]
+_PALETTE = list(PALETTES["nature"].taxon_colors)
 
 _FAMILY_PALETTE = [
-    "#d946ef",
-    "#f97316",
-    "#3b82f6",
-    "#84cc16",
-    "#06b6d4",
-    "#ec4899",
+    "#3C5488",
+    "#00A087",
+    "#E64B35",
+    "#4DBBD5",
+    "#F39B7F",
+    "#8491B4",
 ]
 
 _EMPTY_TAX_TOKENS = frozenset({"", "unclassified", "unknown", "na", "n/a", "none", "nan", "-"})
@@ -343,7 +333,17 @@ class ItolTemplateGenerator:
             labels_path.write_text("\n".join(label_lines) + "\n", encoding="utf-8", newline="\n")
             created.append(labels_path.name)
 
-        # 11. metadata_table.tsv
+        # 11. itol_clade_ranges.txt (已知属单系背景范围高亮)
+        range_path = out_dir / "itol_clade_ranges.txt"
+        range_lines: List[str] = ["TREE_COLORS", "SEPARATOR TAB", "DATA"]
+        for c in rows:
+            g = (c.genus or "").strip()
+            if c.role != "outgroup" and g and g in genus_colors:
+                range_lines.append(f"{c.accession}\trange\t{genus_colors[g]}\t{g}")
+        range_path.write_text("\n".join(range_lines) + "\n", encoding="utf-8", newline="\n")
+        created.append(range_path.name)
+
+        # 12. metadata_table.tsv
         tsv_path = out_dir / "metadata_table.tsv"
         with open(tsv_path, "w", encoding="utf-8", newline="") as fh:
             writer = csv.writer(fh, delimiter="\t")

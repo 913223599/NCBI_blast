@@ -9,15 +9,18 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import numpy as np
 
 from ...models.errors import InvalidInputError, PhyloCancelledError
-from ...runtime.resource_guard import get_safe_cpu_budget
+from ...runtime.resource_guard import GpuGuard, get_safe_cpu_budget
 from ..distance.matrix_gpu import DistanceMatrixCalculator, encode_alignment
 
 logger = logging.getLogger("phylo.nj")
+
+GPU_TREE_MIN_TAXA = 64
+GPU_TREE_MIN_FREE_VRAM_MB = 512
 
 
 @dataclass
@@ -42,17 +45,224 @@ def _node_to_newick(node: _Node, is_root: bool = True) -> str:
     return f"({inner}){sup}:{max(0.0, node.length):.6f}"
 
 
+def should_use_cuda_for_tree(n: int, use_gpu: bool) -> bool:
+    """判定当前矩阵规模与空闲显存是否适合启用 PyTorch CUDA 聚类加速。"""
+    if not use_gpu or n < GPU_TREE_MIN_TAXA:
+        return False
+    gpu_info = GpuGuard.probe()
+    if not gpu_info.get("available"):
+        return False
+    free_vram_mb = int(gpu_info.get("free_vram_mb", 0))
+    if free_vram_mb < GPU_TREE_MIN_FREE_VRAM_MB:
+        return False
+    est_bytes = 3 * 8 * n * n + n * n
+    budget_bytes = int(free_vram_mb * 0.4 * 1024 * 1024)
+    return est_bytes <= budget_bytes
+
+
+def _build_upgma_tree_cuda(ids: List[str], dist_matrix: np.ndarray) -> _Node:
+    """PyTorch CUDA 原地槽位复用加速 UPGMA 超度量聚类。"""
+    import torch
+
+    n = len(ids)
+    if n < 3:
+        raise InvalidInputError(f"距离法构树至少需要 3 条序列，当前仅 {n} 条。")
+
+    D_np = np.array(dist_matrix, dtype=np.float64, copy=True)
+    D_np = 0.5 * (D_np + D_np.T)
+    D_np = np.maximum(0.0, D_np)
+    np.fill_diagonal(D_np, np.inf)
+
+    nodes: List[_Node] = [_Node(name=sid) for sid in ids]
+    sizes: List[int] = [1] * n
+    heights: List[float] = [0.0] * n
+
+    device = torch.device("cuda")
+    D: Any = None
+    active: Any = None
+    rem: Any = None
+    d_new: Any = None
+
+    try:
+        with torch.no_grad():
+            D = torch.from_numpy(D_np).to(device=device, dtype=torch.float64)
+            active = torch.ones(n, dtype=torch.bool, device=device)
+
+            for step in range(n - 1):
+                flat_idx = int(torch.argmin(D).item())
+                i, j = divmod(flat_idx, n)
+                if i > j:
+                    i, j = j, i
+
+                d_ij = float(D[i, j].item())
+                new_height = max(heights[i], heights[j], 0.5 * d_ij)
+                nodes[i].length = max(0.0, new_height - heights[i])
+                nodes[j].length = max(0.0, new_height - heights[j])
+                merged = _Node(children=[nodes[i], nodes[j]])
+
+                w_i = float(sizes[i])
+                w_j = float(sizes[j])
+                nodes[i] = merged
+                sizes[i] = sizes[i] + sizes[j]
+                heights[i] = new_height
+                active[j] = False
+
+                if step < n - 2:
+                    rem = active.clone()
+                    rem[i] = False
+                    d_new = torch.clamp((w_i * D[i, rem] + w_j * D[j, rem]) / (w_i + w_j), min=0.0)
+                    D[i, :] = float("inf")
+                    D[:, i] = float("inf")
+                    D[i, rem] = d_new
+                    D[rem, i] = d_new
+                    D[j, :] = float("inf")
+                    D[:, j] = float("inf")
+
+            root_idx = int(torch.nonzero(active, as_tuple=False).flatten()[0].item())
+            return nodes[root_idx]
+    finally:
+        del D, active, rem, d_new
+        GpuGuard.release_vram()
+
+
+def _build_nj_bionj_tree_cuda(
+    ids: List[str],
+    dist_matrix: np.ndarray,
+    use_bionj: bool,
+) -> _Node:
+    """PyTorch CUDA 原地槽位复用加速 Neighbor-Joining / BioNJ 聚类。"""
+    import torch
+
+    n = len(ids)
+    if n < 3:
+        raise InvalidInputError(f"距离法构树至少需要 3 条序列，当前仅 {n} 条。")
+
+    D_np = np.array(dist_matrix, dtype=np.float64, copy=True)
+    D_np = 0.5 * (D_np + D_np.T)
+    np.fill_diagonal(D_np, 0.0)
+
+    nodes: List[_Node] = [_Node(name=sid) for sid in ids]
+    device = torch.device("cuda")
+    D: Any = None
+    V: Any = None
+    Q: Any = None
+    row_sums: Any = None
+    active: Any = None
+    invalid_mask: Any = None
+    rem: Any = None
+    d_new: Any = None
+    v_new: Any = None
+
+    try:
+        with torch.no_grad():
+            D = torch.from_numpy(D_np).to(device=device, dtype=torch.float64)
+            V = D.clone() if use_bionj else None
+            active = torch.ones(n, dtype=torch.bool, device=device)
+            invalid_mask = torch.eye(n, dtype=torch.bool, device=device)
+            active_count = n
+
+            while active_count > 3:
+                row_sums = D.sum(dim=1)
+                Q = (active_count - 2) * D - row_sums.unsqueeze(1) - row_sums.unsqueeze(0)
+                Q.masked_fill_(invalid_mask, float("inf"))
+
+                flat_idx = int(torch.argmin(Q).item())
+                i, j = divmod(flat_idx, n)
+                if i > j:
+                    i, j = j, i
+
+                d_ij = float(D[i, j].item())
+                rs_i = float(row_sums[i].item())
+                rs_j = float(row_sums[j].item())
+                if abs(d_ij) < 1e-12:
+                    len_i = 0.0
+                    len_j = 0.0
+                else:
+                    len_i = 0.5 * d_ij + (rs_i - rs_j) / (2.0 * (active_count - 2))
+                    len_j = d_ij - len_i
+
+                len_i = max(0.0, len_i)
+                len_j = max(0.0, len_j)
+
+                node_i = nodes[i]
+                node_j = nodes[j]
+                node_i.length = len_i
+                node_j.length = len_j
+                nodes[i] = _Node(children=[node_i, node_j])
+
+                active[j] = False
+                rem = active.clone()
+                rem[i] = False
+
+                v_ij = 0.0
+                if V is not None:
+                    v_ij = float(V[i, j].item())
+                    if v_ij <= 1e-12:
+                        lam = 0.5
+                    else:
+                        v_diff = float((V[j, rem] - V[i, rem]).sum().item())
+                        lam = max(0.0, min(1.0, 0.5 + v_diff / (2.0 * (active_count - 2) * v_ij)))
+                else:
+                    lam = 0.5
+
+                d_new = torch.clamp(lam * (D[i, rem] - len_i) + (1.0 - lam) * (D[j, rem] - len_j), min=0.0)
+                D[i, :] = 0.0
+                D[:, i] = 0.0
+                D[j, :] = 0.0
+                D[:, j] = 0.0
+                D[i, rem] = d_new
+                D[rem, i] = d_new
+
+                if V is not None:
+                    v_new = torch.clamp(
+                        lam * V[i, rem] + (1.0 - lam) * V[j, rem] - lam * (1.0 - lam) * v_ij,
+                        min=0.0,
+                    )
+                    V[i, :] = 0.0
+                    V[:, i] = 0.0
+                    V[j, :] = 0.0
+                    V[:, j] = 0.0
+                    V[i, rem] = v_new
+                    V[rem, i] = v_new
+
+                invalid_mask[j, :] = True
+                invalid_mask[:, j] = True
+                active_count -= 1
+
+            rem_indices = [int(x) for x in torch.nonzero(active, as_tuple=False).flatten().tolist()]
+            a, b, c = rem_indices[0], rem_indices[1], rem_indices[2]
+            d_ab = float(D[a, b].item())
+            d_ac = float(D[a, c].item())
+            d_bc = float(D[b, c].item())
+            nodes[a].length = max(0.0, 0.5 * (d_ab + d_ac - d_bc))
+            nodes[b].length = max(0.0, 0.5 * (d_ab + d_bc - d_ac))
+            nodes[c].length = max(0.0, 0.5 * (d_ac + d_bc - d_ab))
+            return _Node(children=[nodes[a], nodes[b], nodes[c]])
+    finally:
+        del D, V, Q, row_sums, active, invalid_mask, rem, d_new, v_new
+        GpuGuard.release_vram()
+
+
 def build_upgma_tree_from_distance_matrix(
     ids: List[str],
     dist_matrix: np.ndarray,
+    use_gpu: bool = False,
 ) -> _Node:
     """
-    向量化 NumPy 实现 UPGMA（超度量算数平均聚类）：
+    向量化实现 UPGMA（超度量算数平均聚类）：
+    当满足显存与规模条件且 use_gpu=True 时启用 PyTorch CUDA 加速，否则走 NumPy CPU。
     保证所有叶节点到根节点的路径高度相等，适合千株级 ViPTree 风格环形外缘齐平可视化。
     """
     n = len(ids)
     if n < 3:
         raise InvalidInputError(f"距离法构树至少需要 3 条序列，当前仅 {n} 条。")
+
+    if should_use_cuda_for_tree(n, use_gpu):
+        try:
+            return _build_upgma_tree_cuda(ids, dist_matrix)
+        except Exception as exc:
+            logger.warning(f"CUDA UPGMA 聚类回退至 NumPy CPU 引擎: {exc}")
+            GpuGuard.release_vram()
 
     D = np.array(dist_matrix, dtype=np.float64, copy=True)
     D = 0.5 * (D + D.T)
@@ -115,23 +325,33 @@ def build_tree_from_distance_matrix(
     ids: List[str],
     dist_matrix: np.ndarray,
     method: str = "bionj",
+    use_gpu: bool = False,
 ) -> _Node:
     """
-    向量化 NumPy 实现 Neighbor-Joining (nj)、BioNJ (bionj) 与 UPGMA (upgma)。
+    向量化实现 Neighbor-Joining (nj)、BioNJ (bionj) 与 UPGMA (upgma)。
+    大规模矩阵在 use_gpu=True 且显存充裕时自动使用 PyTorch CUDA 加速。
     对极小负枝长做非负钳位，返回树根节点 _Node。
     """
-    if method.lower().strip() == "upgma":
-        return build_upgma_tree_from_distance_matrix(ids, dist_matrix)
+    norm_method = method.lower().strip()
+    if norm_method == "upgma":
+        return build_upgma_tree_from_distance_matrix(ids, dist_matrix, use_gpu=use_gpu)
     n = len(ids)
     if n < 3:
         raise InvalidInputError(f"距离法构树至少需要 3 条序列，当前仅 {n} 条。")
+
+    use_bionj = norm_method == "bionj"
+    if should_use_cuda_for_tree(n, use_gpu):
+        try:
+            return _build_nj_bionj_tree_cuda(ids, dist_matrix, use_bionj=use_bionj)
+        except Exception as exc:
+            logger.warning(f"CUDA {norm_method.upper()} 聚类回退至 NumPy CPU 引擎: {exc}")
+            GpuGuard.release_vram()
 
     D = np.array(dist_matrix, dtype=np.float64, copy=True)
     D = 0.5 * (D + D.T)
     np.fill_diagonal(D, 0.0)
     V = D.copy()  # BioNJ 初始方差等于距离矩阵
 
-    use_bionj = method.lower().strip() == "bionj"
     nodes: List[_Node] = [_Node(name=sid) for sid in ids]
 
     while len(nodes) > 3:
@@ -353,10 +573,14 @@ class NJBioNJEngine:
         matrix: np.ndarray,
         output_nwk: Path,
         method: str = "bionj",
+        use_gpu: bool = False,
     ) -> Path:
         if self.cancel_event.is_set():
             raise PhyloCancelledError("NJ/BioNJ 建树前任务已取消")
-        root = build_tree_from_distance_matrix(ids, matrix, method=method)
+        will_cuda = should_use_cuda_for_tree(len(ids), use_gpu)
+        cluster_backend = "PyTorch CUDA" if will_cuda else "NumPy CPU"
+        self._log(f"[{method.upper()}] 矩阵聚类引擎: {cluster_backend} (N={len(ids)})")
+        root = build_tree_from_distance_matrix(ids, matrix, method=method, use_gpu=use_gpu)
         nwk = _node_to_newick(root, is_root=True)
         output_nwk.parent.mkdir(parents=True, exist_ok=True)
         output_nwk.write_text(nwk + "\n", encoding="utf-8")
@@ -402,7 +626,9 @@ class NJBioNJEngine:
             dist_matrix_npy.parent.mkdir(parents=True, exist_ok=True)
             np.save(str(dist_matrix_npy), main_dist)
 
-        main_root = build_tree_from_distance_matrix(ids, main_dist, method=method)
+        will_tree_cuda = should_use_cuda_for_tree(n_seqs, use_gpu)
+        self._log(f"[{method.upper()}] 主树矩阵聚类引擎: {'PyTorch CUDA' if will_tree_cuda else 'NumPy CPU'} (N={n_seqs})")
+        main_root = build_tree_from_distance_matrix(ids, main_dist, method=method, use_gpu=use_gpu)
 
         if bootstrap > 0 and n_seqs >= 4:
             safe_threads = min(get_safe_cpu_budget(threads), max(1, os.cpu_count() or 4))

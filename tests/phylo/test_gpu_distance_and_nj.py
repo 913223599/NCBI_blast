@@ -118,3 +118,65 @@ def test_nj_save_distance_csv_and_build_from_matrix(tmp_path: Path):
     nwk_text = out_nwk.read_text(encoding="utf-8")
     for lbl in labels:
         assert lbl in nwk_text
+
+
+def test_cuda_tree_clustering_matches_cpu_nj_bionj_upgma(tmp_path: Path):
+    from src.phylo.engines.tree.nj import (
+        _parse_newick_leaves_splits,
+        should_use_cuda_for_tree,
+    )
+    from src.phylo.pipeline.postprocess import parse_newick
+    from src.phylo.runtime.resource_guard import GpuGuard
+
+    n = 80
+    labels = [f"T{i:03d}" for i in range(n)]
+    rng = np.random.default_rng(2026)
+    coords = rng.normal(size=(n, 8))
+    diff = coords[:, None, :] - coords[None, :, :]
+    sym_dist = np.sqrt((diff * diff).sum(axis=-1))
+    np.fill_diagonal(sym_dist, 0.0)
+
+    assert should_use_cuda_for_tree(20, True) is False
+    gpu_info = GpuGuard.probe()
+    if gpu_info["available"] and gpu_info["free_vram_mb"] >= 512:
+        assert should_use_cuda_for_tree(n, True) is True
+
+    bit_by_id = {name: (1 << idx) for idx, name in enumerate(labels)}
+    full_mask = (1 << n) - 1
+    engine = NJBioNJEngine()
+
+    for method in ("bionj", "nj", "upgma"):
+        cpu_nwk_path = tmp_path / f"{method}_cpu.nwk"
+        gpu_nwk_path = tmp_path / f"{method}_gpu.nwk"
+        engine.build_from_matrix(labels, sym_dist, cpu_nwk_path, method=method, use_gpu=False)
+        engine.build_from_matrix(labels, sym_dist, gpu_nwk_path, method=method, use_gpu=True)
+
+        cpu_nwk = cpu_nwk_path.read_text(encoding="utf-8").strip()
+        gpu_nwk = gpu_nwk_path.read_text(encoding="utf-8").strip()
+
+        cpu_splits = _parse_newick_leaves_splits(cpu_nwk, bit_by_id, full_mask)
+        gpu_splits = _parse_newick_leaves_splits(gpu_nwk, bit_by_id, full_mask)
+        assert cpu_splits == gpu_splits
+
+        m_cpu = compute_tree_metrics(cpu_nwk)
+        m_gpu = compute_tree_metrics(gpu_nwk)
+        assert m_cpu.leaf_count == n
+        assert m_gpu.leaf_count == n
+        assert m_cpu.total_branch_length is not None
+        assert m_gpu.total_branch_length is not None
+        assert abs(m_cpu.total_branch_length - m_gpu.total_branch_length) < 1e-4
+
+        if method == "upgma":
+            root = parse_newick(gpu_nwk)
+            depths: list[float] = []
+
+            def _collect(node, acc: float, out_depths: list[float]) -> None:
+                if node.is_leaf:
+                    out_depths.append(acc)
+                    return
+                for ch in node.children:
+                    _collect(ch, acc + max(0.0, float(ch.length or 0.0)), out_depths)
+
+            _collect(root, 0.0, depths)
+            assert len(depths) == n
+            assert max(depths) - min(depths) < 1e-4

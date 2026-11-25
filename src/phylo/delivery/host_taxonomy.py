@@ -6,20 +6,20 @@
 from typing import Dict, Optional
 
 HOST_GROUP_COLORS: Dict[str, str] = {
-    "Pseudomonadota": "#43a047",
-    "Actinomycetota": "#5b9aa9",
-    "Bacillota": "#6d28d9",
-    "Bacteroidota": "#a1882f",
-    "Cyanobacteriota": "#9d3c63",
-    "Campylobacterota": "#d97706",
-    "Mycoplasmatota": "#0d9488",
-    "Fusobacteriota": "#e11d48",
-    "Spirochaetota": "#db2777",
-    "Chlamydiota": "#7c3aed",
-    "Deinococcota": "#0284c7",
-    "Verrucomicrobiota": "#65a30d",
-    "Archaea": "#475569",
-    "Others": "#6b7280",
+    "Pseudomonadota": "#4C956C",
+    "Actinomycetota": "#577590",
+    "Bacillota": "#7B6D8D",
+    "Bacteroidota": "#C08552",
+    "Cyanobacteriota": "#2A9D8F",
+    "Campylobacterota": "#D4A373",
+    "Mycoplasmatota": "#457B9D",
+    "Fusobacteriota": "#B56576",
+    "Spirochaetota": "#9A6B99",
+    "Chlamydiota": "#6D597A",
+    "Deinococcota": "#4A7C9B",
+    "Verrucomicrobiota": "#6B9080",
+    "Archaea": "#6C757D",
+    "Others": "#CBD5E1",
 }
 
 _UNKNOWN_TOKENS = frozenset(

@@ -280,3 +280,185 @@ def test_macro_family_host_sampling_1000_scale(tmp_path: Path):
     )
     assert len(cands_no_ani) == 120
     assert len({c.accession for c in cands_no_ani}) == 120
+
+
+def test_dereplicator_disabled_and_high_ani_thresholds(tmp_path: Path):
+    """验证 98%/99% 高阈值去冗余与 100%(pa=1.0) 关闭去冗余完整保留同种多株系。"""
+    from src.phylo.models.schemas import DeliveryScopeConfig
+
+    assert DeliveryScopeConfig(derep_ani=0.98).derep_ani == 0.98
+    assert DeliveryScopeConfig(derep_ani=0.99).derep_ani == 0.99
+    assert DeliveryScopeConfig(derep_ani=1.0).derep_ani == 1.0
+
+    genomes = {}
+    cands = []
+    specs = [
+        ("Query_Phage", "query", "Tequintavirus", True),
+        ("Ref_1", "ictv_rep", "Tequintavirus", True),
+        ("Ref_2", "neighbor", "Tequintavirus", False),
+        ("Ref_3", "neighbor", "Tequintavirus", False),
+        ("Outgroup_Phage", "outgroup", "OutGenus", True),
+    ]
+    for idx, (acc, role, genus, is_ictv) in enumerate(specs):
+        p = tmp_path / f"{acc}.fasta"
+        p.write_text(f">{acc}\n" + ("ATGC" * 500) + "\n", encoding="utf-8")
+        genomes[acc] = p
+        cands.append(
+            ReferenceCandidate(
+                accession=acc,
+                role=role,  # type: ignore[arg-type]
+                genus=genus,
+                genome_length=120000 - idx * 500,
+                is_ictv_classified=is_ictv,
+            )
+        )
+
+    labels = [s[0] for s in specs]
+    mat = [[100.0 if i == j else 20.0 for j in range(5)] for i in range(5)]
+    # Ref_1 vs Ref_2: 96.0% (同种不同株系); Ref_2 vs Ref_3: 99.2% (极高度重复)
+    mat[1][2] = mat[2][1] = 96.0
+    mat[1][3] = mat[3][1] = 95.8
+    mat[2][3] = mat[3][2] = 99.2
+
+    derep = PhageDereplicator()
+    # 1. pa_threshold=1.0 时关闭去冗余，全部 5 条保留
+    kept_all, stats_all = derep.dereplicate(
+        genome_paths=genomes,
+        candidates=cands,
+        work_dir=tmp_path / "derep_off",
+        pa_threshold=1.0,
+        min_length=1000,
+        ani_matrix=(labels, mat),
+    )
+    assert len(kept_all) == 5
+    assert int(stats_all["removed"]) == 0
+    assert "disabled" in str(stats_all["tool"]).lower()
+
+    # 2. pa_threshold=0.98 时保留 96.0% 同种近缘 Ref_2，仅剔除 99.2% 极高重复 Ref_3
+    kept_98, stats_98 = derep._fallback_ani_cluster(
+        genome_paths=genomes,
+        protected={"Query_Phage", "Outgroup_Phage", "Ref_1"},
+        cand_map={c.accession: c for c in cands},
+        pa_threshold=0.98,
+        min_length=1000,
+        ani_matrix=(labels, mat),
+    )
+    assert {"Query_Phage", "Outgroup_Phage", "Ref_1", "Ref_2"}.issubset(set(kept_98.keys()))
+    assert "Ref_3" not in kept_98
+    assert int(stats_98["after"]) == 4
+
+
+def test_viridic_retains_full_mash_top_k_and_species_priority(tmp_path: Path):
+    """验证 build_screen_result 全量透传 Mash Top-K 且 species 模式下优先填充同种/近缘高相似株。"""
+    from unittest.mock import MagicMock
+
+    from src.phylo.engines.ani.inphared_index import InpharedRecord
+    from src.phylo.engines.reference.ref_curator import PhageReferenceCurator
+    from src.phylo.models.schemas import DeliveryScopeConfig
+
+    mock_index = MagicMock()
+    mock_index.is_available.return_value = True
+
+    mash_map = {}
+    for i in range(1, 26):
+        acc = f"ACC_{i:02d}"
+        ani_val = round(98.5 - (i - 1) * 0.9, 2)
+        dist = round(1.0 - ani_val / 100.0, 4)
+        # 一半是已知属 Tequintavirus，一半是未划分 ICTV 属的同种/高近缘株
+        genus_name = "Tequintavirus" if i % 2 == 1 else ""
+        rec = InpharedRecord(
+            accession=acc,
+            description=f"Escherichia phage test_{i:02d}",
+            genome_length=118000,
+            gc_content=39.5,
+            host="Escherichia",
+            genus=genus_name,
+            family="Demerecviridae",
+            order_name="",
+        )
+        mash_map[acc] = (dist, ani_val, rec)
+
+    og_recs = [
+        InpharedRecord(accession="OG_01", genus="OutGenus", family="Demerecviridae", genome_length=110000),
+        InpharedRecord(accession="OG_02", genus="OutGenus", family="Demerecviridae", genome_length=111000),
+    ]
+    ictv_reps = [
+        InpharedRecord(
+            accession=f"REP_{j:02d}",
+            description=f"ICTV Rep {j:02d}",
+            genus="Tequintavirus",
+            family="Demerecviridae",
+            genome_length=120000,
+        )
+        for j in range(1, 15)
+    ]
+    mock_index.get_by_accessions.side_effect = lambda accs: {
+        r.accession: r for r in og_recs if r.accession in accs
+    }
+    mock_index.find_outgroup_candidates.return_value = og_recs
+    mock_index.find_ictv_representatives.side_effect = (
+        lambda genera, families, exclude_accessions=(), per_genus=3, max_total=60: [
+            r for r in ictv_reps if r.accession not in set(exclude_accessions)
+        ][: min(per_genus, max_total)]
+    )
+
+    calc = ViridicAniCalculator(index=mock_index)
+    # 仅前 2 条进 VIRIDIC 精算矩阵，其余 23 条来自 Mash Top-K 初筛
+    labels = ["Q1", "ACC_01", "ACC_02"]
+    wgani_mat = [
+        [100.0, 97.6, 95.8],
+        [97.6, 100.0, 96.0],
+        [95.8, 96.0, 100.0],
+    ]
+    af_mat = [
+        [100.0, 96.0, 94.0],
+        [96.0, 100.0, 95.0],
+        [94.0, 95.0, 100.0],
+    ]
+    pair_details = {
+        ("Q1", "ACC_01"): (97.6, 98.1, 96.0, 95.5),
+        ("Q1", "ACC_02"): (95.8, 96.5, 94.0, 93.0),
+    }
+    scope = DeliveryScopeConfig(
+        target_rank="species",
+        sampling_mode="focused",
+        ref_max_count=30,
+        ictv_reps_per_genus=10,
+        max_target_genera=3,
+        outgroup_count=2,
+        mash_top_k=25,
+    )
+    res = calc.build_screen_result(
+        query_ids=["Q1"],
+        mash_hits_map=mash_map,
+        matrix_labels=labels,
+        wgani_matrix=wgani_mat,
+        af_matrix=af_mat,
+        pair_details=pair_details,
+        scope=scope,
+        engine_used="viridic_blastn",
+        engine_version="2.15",
+        command_preview="blastn",
+    )
+
+    assert len(res.top_hits) == 25
+    assert res.top_hits[0].accession == "ACC_01"
+    assert res.top_hits[0].wg_ani == 97.6
+    assert res.top_hits[1].accession == "ACC_02"
+    assert res.top_hits[2].wg_ani == 0.0
+    assert (res.top_hits[2].mash_ani or 0.0) > 95.0
+    assert "97.60%" in res.summary_call
+
+    curator = PhageReferenceCurator(index=mock_index, cache_dir=tmp_path / "ref_cache")
+    cands = curator.curate_candidates(
+        query_records=[("Q1", "ATGCTAGC" * 100)],
+        ani_result=res,
+        scope=scope,
+    )
+    accs = {c.accession for c in cands}
+    # 应容纳绝大多数 top_hits（含未命名属近邻 ACC_02, ACC_04...），同时保留 query/外群/ICTV锚点
+    matched_hits = [acc for acc in accs if acc.startswith("ACC_")]
+    assert len(matched_hits) >= 20
+    assert "ACC_22" in accs
+    assert any(c.role == "outgroup" for c in cands)
+    assert any(c.role == "ictv_rep" and c.accession.startswith("REP_") for c in cands)

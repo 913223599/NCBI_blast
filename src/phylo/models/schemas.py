@@ -32,7 +32,7 @@ class DeliveryScopeConfig(BaseModel):
     ictv_reps_per_genus: int = Field(default=3, ge=1, le=200)
     max_target_genera: int = Field(default=4, ge=1, le=200)
     outgroup_count: int = Field(default=3, ge=0, le=200)
-    derep_ani: float = Field(default=0.90, ge=0.70, le=0.995)
+    derep_ani: float = Field(default=0.90, ge=0.70, le=1.0)
     derep_min_len: int = Field(default=20000, ge=1000, le=200000)
     treemmer_target: int = Field(default=80, ge=5, le=5000)
     treemmer_min_cluster: int = Field(default=25, ge=3, le=1000)
@@ -325,6 +325,10 @@ class PhyloJobRecord(BaseModel):
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
     elapsed_sec: float = 0.0
+    eta_seconds: Optional[float] = None
+    eta_updated_at: Optional[float] = None
+    substage_label: str = ""
+    rate_text: str = ""
     newick: Optional[str] = None
     metrics: Optional[TreeMetrics] = None
     job_dir: str = ""
@@ -335,9 +339,13 @@ class PhyloJobRecord(BaseModel):
     node_metadata: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
 
-PublicationLayoutType = Literal["circular", "rectangular"]
+PublicationLayoutType = Literal["circular", "half_circular", "rectangular", "composite"]
 PublicationFormatType = Literal["pdf", "svg", "png"]
 PublicationSupportStyle = Literal["dots", "text", "both", "none"]
+PublicationPaletteType = Literal["nature", "lancet", "okabe_ito", "monochrome"]
+JournalWidthPresetType = Literal["auto", "single_col", "double_col"]
+LabelDensityType = Literal["auto", "all", "smart_query"]
+CladeShadingModeType = Literal["query_clade", "all_clades", "none"]
 ItolExportFormatType = Literal["pdf", "svg", "png", "eps"]
 ItolDisplayModeType = Literal["rectangular", "circular", "unrooted"]
 
@@ -351,8 +359,18 @@ class PublicationFigureRequest(BaseModel):
     use_branch_lengths: bool = True
     support_style: PublicationSupportStyle = "dots"
     show_genus_strip: bool = True
+    show_host_strip: bool = True
     show_genome_length: bool = True
     show_gc_bar: bool = True
+    show_clade_shading: bool = True
+    clade_shading_mode: CladeShadingModeType = "query_clade"
+    show_query_star: bool = True
+    palette: PublicationPaletteType = "nature"
+    journal_width: JournalWidthPresetType = "auto"
+    label_density: LabelDensityType = "auto"
+    top_genera_limit: int = Field(default=10, ge=4, le=20)
+    subtree_max_leaves: int = Field(default=32, ge=10, le=80)
+    show_figure_title: bool = False
     ladderize: bool = True
     label_format: LabelFormatType = "name_acc"
     title: Optional[str] = None

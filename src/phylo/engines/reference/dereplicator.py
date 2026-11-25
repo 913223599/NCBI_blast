@@ -65,6 +65,15 @@ class PhageDereplicator:
         if self.cancel_event.is_set():
             raise PhyloCancelledError("去冗余阶段已取消")
 
+        if pa_threshold >= 1.0:
+            self._log("[Derep] 已关闭去冗余 (pa>=1.00)，完整保留全部选定同种与近缘参考株。")
+            return dict(genome_paths), {
+                "before": len(genome_paths),
+                "after": len(genome_paths),
+                "removed": 0,
+                "tool": "disabled (keep all selected strains)",
+            }
+
         cand_map = {c.accession: c for c in candidates}
         # 查询株和指定外群受到硬性保护，绝不作为冗余被删除
         protected: Set[str] = {

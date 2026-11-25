@@ -14,6 +14,48 @@ const liveElapsed = computed(() => {
   return Math.max(job.elapsed_sec || 0, nowSec.value - base)
 })
 
+const etaDisplay = computed<{ text: string; pending: boolean }>(() => {
+  const job = store.activeJob
+  const hasSubstage = Boolean(job?.substage_label)
+  if (!job || job.eta_seconds === null || job.eta_seconds === undefined || job.eta_seconds <= 0) {
+    return {
+      text: hasSubstage ? '当前步骤 评估中...' : '预计剩余 评估中...',
+      pending: true,
+    }
+  }
+  const updatedAt = job.eta_updated_at ?? nowSec.value
+  const drift = Math.max(0, nowSec.value - updatedAt)
+  const remaining = job.eta_seconds - drift
+  if (remaining <= 0) {
+    return {
+      text: '当前步骤 重新评估中...',
+      pending: true,
+    }
+  }
+  const prefix = hasSubstage ? '当前步骤剩余 ' : '预计剩余 '
+  if (remaining < 1) {
+    return {
+      text: `${prefix}< 1s`,
+      pending: false,
+    }
+  }
+  return {
+    text: `${prefix}${formatDuration(remaining)}`,
+    pending: false,
+  }
+})
+
+function formatDuration(sec: number): string {
+  const s = Math.max(0, Math.round(sec))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const remS = s % 60
+  if (m < 60) return remS > 0 ? `${m}m ${remS}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  const remM = m % 60
+  return remM > 0 ? `${h}h ${remM}m` : `${h}h`
+}
+
 onMounted(() => {
   timerId = setInterval(() => {
     if (store.activeJob) {
@@ -37,7 +79,18 @@ onUnmounted(() => {
         <span class="pulse-dot"></span>
         <div>
           <div class="job-title">{{ store.activeJob.title }}</div>
-          <div class="job-msg">{{ store.activeJob.message }} ({{ liveElapsed.toFixed(1) }}s)</div>
+          <div class="job-msg">
+            <span>{{ store.activeJob.message }}</span>
+            <span class="time-pill">已耗时 {{ formatDuration(liveElapsed) }}</span>
+            <span class="eta-pill" :class="{ 'eta-pending': etaDisplay.pending }">
+              {{ etaDisplay.text }}
+            </span>
+            <span v-if="store.activeJob.substage_label || store.activeJob.rate_text" class="rate-pill">
+              {{ store.activeJob.substage_label }}
+              <template v-if="store.activeJob.substage_label && store.activeJob.rate_text"> · </template>
+              {{ store.activeJob.rate_text }}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -82,7 +135,11 @@ onUnmounted(() => {
 .pulse-dot { width: 10px; height: 10px; border-radius: 50%; background: #2563eb; animation: pulse 1.2s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
 .job-title { font-size: 13px; font-weight: 700; color: #0f172a; }
-.job-msg { font-size: 11px; color: #475569; }
+.job-msg { font-size: 11px; color: #475569; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.time-pill { background: #f1f5f9; color: #334155; padding: 1px 6px; border-radius: 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.eta-pill { background: #dbeafe; color: #1d4ed8; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.eta-pill.eta-pending { background: #f1f5f9; color: #64748b; font-weight: 500; }
+.rate-pill { background: #ecfdf5; color: #047857; padding: 1px 6px; border-radius: 4px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .banner-actions { display: flex; gap: 8px; }
 .btn-log { padding: 5px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; color: #334155; font-size: 11px; font-weight: 600; cursor: pointer; }
 .btn-cancel { padding: 5px 12px; border: none; border-radius: 6px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }

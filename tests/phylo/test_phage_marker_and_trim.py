@@ -257,3 +257,67 @@ def test_mafft_strategy_auto_downgrade_and_multithread_flags(tmp_path: Path):
         out_linsi = tmp_path / "aligned_linsi.faa"
         aligner.align(in_fa, out_linsi, tool="mafft", strategy="linsi", threads=4)
         assert out_linsi.is_file() and ">S4" in out_linsi.read_text(encoding="utf-8")
+
+
+def test_iqtree_protein_fast_mset_and_full_mfp_flags(tmp_path: Path):
+    from src.phylo.engines.tree.iqtree import (
+        IQTreeEngine,
+        PROTEIN_FAST_CMAX,
+        PROTEIN_FAST_MSET,
+    )
+    from src.phylo.pipeline.executor import PhyloJobExecutor
+    from src.phylo.runtime.tool_registry import get_tool_registry
+
+    m_fast, flags_fast, note_fast = IQTreeEngine.resolve_model_flags("MFP", "protein")
+    assert m_fast == "MFP"
+    assert flags_fast == ["-mset", PROTEIN_FAST_MSET, "-cmax", str(PROTEIN_FAST_CMAX)]
+    assert note_fast is not None
+
+    m_auto, flags_auto, _ = IQTreeEngine.resolve_model_flags("auto", "protein")
+    assert m_auto == "MFP"
+    assert flags_auto == ["-mset", PROTEIN_FAST_MSET, "-cmax", str(PROTEIN_FAST_CMAX)]
+
+    m_full, flags_full, _ = IQTreeEngine.resolve_model_flags("MFP_FULL", "protein")
+    assert m_full == "MFP"
+    assert flags_full == []
+
+    m_lg, flags_lg, _ = IQTreeEngine.resolve_model_flags("LG+G", "protein")
+    assert m_lg == "LG+G"
+    assert flags_lg == []
+
+    m_dna, flags_dna, _ = IQTreeEngine.resolve_model_flags("MFP", "dna")
+    assert m_dna == "MFP"
+    assert flags_dna == []
+
+    caps = PhyloJobExecutor().get_capabilities()
+    assert "MFP" in caps.engines["iqtree"].models_protein
+    assert "MFP_FULL" in caps.engines["iqtree"].models_protein
+
+    if get_tool_registry().get("iqtree").available:
+        faa = tmp_path / "terl_smoke.faa"
+        faa.write_text(
+            ">S1\nMKTLLVAVGAAKDRSTVWYQMFGHIKLNPQ\n"
+            ">S2\nMKTLIVAVGAAKDRSTVWYQMFGHIKLNPQ\n"
+            ">S3\nMKTLVVAAGSAKDRSSVWYQLFGHVKLNPQ\n"
+            ">S4\nMRTLIISAGSARDKTSVWYQLYGHLKLNPE\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        out_nwk = tmp_path / "iqtree_smoke.nwk"
+        iq = IQTreeEngine()
+        iq.build(
+            msa_fasta=faa,
+            output_nwk=out_nwk,
+            work_dir=tmp_path,
+            mol_type="protein",
+            model="MFP",
+            bootstrap=0,
+            alrt=0,
+            threads=4,
+            seed=42,
+        )
+        assert f"-mset {PROTEIN_FAST_MSET} -cmax {PROTEIN_FAST_CMAX}" in iq.last_command
+        assert out_nwk.is_file()
+        assert iq.last_best_model is not None and len(iq.last_best_model) > 0
+        metrics = compute_tree_metrics(out_nwk.read_text(encoding="utf-8"))
+        assert metrics.leaf_count == 4

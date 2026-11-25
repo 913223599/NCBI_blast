@@ -35,14 +35,32 @@ function downloadFormat(fmt: 'newick' | 'distance_csv' | 'report_json' | 'delive
       </select>
     </div>
 
+    <div class="form-group">
+      <label>科研期刊配色主题</label>
+      <select v-model="store.visual.journalTheme" class="neo-select">
+        <option value="nature">Nature (NPG) 学术经典</option>
+        <option value="lancet">The Lancet 柳叶刀配色</option>
+        <option value="okabe_ito">Okabe-Ito (色盲绝对安全)</option>
+        <option value="monochrome">MBE 黑白极简印刷风</option>
+      </select>
+    </div>
+
     <div class="check-col">
       <label class="chk">
         <input type="checkbox" v-model="store.visual.useBranchLengths" />
         <span>按真实演化距离绘制枝长</span>
       </label>
+      <label class="chk" v-if="store.visual.useBranchLengths && store.visual.layout !== 'unrooted'">
+        <input type="checkbox" v-model="store.visual.alignTipLabels" />
+        <span>对齐叶标签并显示虚线引导线</span>
+      </label>
       <label class="chk">
         <input type="checkbox" v-model="store.visual.showLabels" />
         <span>显示样本名称标签</span>
+      </label>
+      <label class="chk" v-if="store.visual.showLabels">
+        <input type="checkbox" v-model="store.visual.italicizeTaxa" />
+        <span>拉丁分类学属名自动斜体</span>
       </label>
     </div>
 
@@ -62,11 +80,19 @@ function downloadFormat(fmt: 'newick' | 'distance_csv' | 'report_json' | 'delive
       </label>
       <label class="chk">
         <input type="checkbox" v-model="store.visual.highlightStrongUfboot" />
-        <span>UFBoot &gt;= 95 强支持节点深青实心标</span>
+        <span>UFBoot &gt;= 95 实心黑点 / 其余空心点</span>
       </label>
-      <label class="chk" v-if="store.visual.layout === 'rect'">
+      <label class="chk" v-if="store.visual.layout !== 'unrooted'">
+        <input type="checkbox" v-model="store.visual.showCladeShading" />
+        <span>单系支系柔和背景阴影 (Clade Shading)</span>
+      </label>
+      <label class="chk" v-if="store.visual.layout !== 'unrooted'">
         <input type="checkbox" v-model="store.visual.showMetadataStrips" />
-        <span>显示右侧外圈条带 (ICTV 属 / 基因组大小)</span>
+        <span>显示外圈分类轨道 (Genus / Host / Size)</span>
+      </label>
+      <label class="chk" v-if="store.visual.layout === 'circular'">
+        <input type="checkbox" v-model="store.visual.smartLabelCull" />
+        <span>大规模环形树精简背景标签 (放大自动恢复)</span>
       </label>
     </div>
 

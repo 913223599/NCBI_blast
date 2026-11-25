@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Tuple
 
 from ...core.fasta_io import read_fasta_records
 from ...models.errors import PhyloCancelledError, PhyloError, ToolUnavailableError
@@ -18,6 +18,8 @@ from ...runtime.tool_registry import get_tool_registry
 logger = logging.getLogger("phylo.iqtree")
 
 UFBOOT_MIN_REPLICATES = 1000
+PROTEIN_FAST_MSET = "LG,WAG,JTT,Q.pfam,VT"
+PROTEIN_FAST_CMAX = 4
 
 MODEL_ALIAS_DNA = {
     "auto": "MFP",
@@ -34,6 +36,7 @@ MODEL_ALIAS_DNA = {
 MODEL_ALIAS_PROT = {
     "auto": "MFP",
     "mfp": "MFP",
+    "mfp_full": "MFP_FULL",
     "jtt": "JTT+G",
     "jtt+g": "JTT+G",
     "lg": "LG+G",
@@ -83,6 +86,21 @@ class IQTreeEngine:
         table = MODEL_ALIAS_PROT if mol_type == "protein" else MODEL_ALIAS_DNA
         return table.get(key, model.strip() or "MFP")
 
+    @staticmethod
+    def resolve_model_flags(model: str, mol_type: str) -> Tuple[str, List[str], Optional[str]]:
+        """解析模型名称及 ModelFinder 收窄参数；蛋白 MFP 默认聚焦核心通用模型集以大幅提速。"""
+        key = (model or "auto").strip().lower()
+        if mol_type == "protein":
+            if key in ("auto", "mfp"):
+                return (
+                    "MFP",
+                    ["-mset", PROTEIN_FAST_MSET, "-cmax", str(PROTEIN_FAST_CMAX)],
+                    f"核心蛋白快速集 {PROTEIN_FAST_MSET}, cmax={PROTEIN_FAST_CMAX}",
+                )
+            if key == "mfp_full":
+                return ("MFP", [], "全量 ModelFinder 蛋白模型")
+        return (IQTreeEngine.resolve_model(model, mol_type), [], None)
+
     def build(
         self,
         msa_fasta: Path,
@@ -107,7 +125,7 @@ class IQTreeEngine:
         records = read_fasta_records(msa_fasta)
         n_seqs = len(records)
         safe_threads = get_safe_cpu_budget(threads)
-        resolved_model = self.resolve_model(model, mol_type)
+        resolved_model, model_flags, model_note = self.resolve_model_flags(model, mol_type)
 
         actual_bootstrap = bootstrap
         actual_alrt = alrt
@@ -136,11 +154,12 @@ class IQTreeEngine:
         thread_flag = "-nt" if is_v1 else "-T"
         seqtype_flag = "AA" if mol_type == "protein" else "DNA"
 
+        note_suffix = f" ({model_note})" if model_note else ""
         self._log(
-            f"[IQ-TREE] 启动推断 ({desc.runtime}), 模型={resolved_model}, UFBoot={actual_bootstrap}, SH-aLRT={actual_alrt}, 线程={safe_threads}"
+            f"[IQ-TREE] 启动推断 ({desc.runtime}), 模型={resolved_model}{note_suffix}, UFBoot={actual_bootstrap}, SH-aLRT={actual_alrt}, 线程={safe_threads}"
         )
 
-        extra_flags: list[str] = []
+        extra_flags: List[str] = list(model_flags)
         if actual_bootstrap >= UFBOOT_MIN_REPLICATES:
             extra_flags.extend(["-B", str(actual_bootstrap)])
             if bnni:

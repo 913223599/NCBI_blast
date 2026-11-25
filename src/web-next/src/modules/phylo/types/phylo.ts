@@ -290,6 +290,10 @@ export interface PhyloJobRecord {
   started_at: number | null
   finished_at: number | null
   elapsed_sec: number
+  eta_seconds?: number | null
+  eta_updated_at?: number | null
+  substage_label?: string
+  rate_text?: string
   newick: string | null
   metrics: TreeMetrics | null
   job_dir: string
@@ -303,6 +307,10 @@ export interface PhyloJobRecord {
 export type LayoutMode = 'rect' | 'circular' | 'unrooted'
 export type SortMode = 'original' | 'ladder-right' | 'ladder-left' | 'taxonomic' | 'distance'
 export type LabelFormatType = 'name_acc' | 'name' | 'accession'
+export type JournalPaletteType = 'nature' | 'lancet' | 'okabe_ito' | 'monochrome'
+export type JournalWidthPresetType = 'auto' | 'single_col' | 'double_col'
+export type LabelDensityType = 'auto' | 'all' | 'smart_query'
+export type CladeShadingModeType = 'query_clade' | 'all_clades' | 'none'
 
 export interface TreeVisualSettings {
   layout: LayoutMode
@@ -317,9 +325,14 @@ export interface TreeVisualSettings {
   searchQuery: string
   showMetadataStrips: boolean
   highlightStrongUfboot: boolean
+  journalTheme: JournalPaletteType
+  alignTipLabels: boolean
+  showCladeShading: boolean
+  italicizeTaxa: boolean
+  smartLabelCull: boolean
 }
 
-export type PublicationLayoutType = 'circular' | 'rectangular'
+export type PublicationLayoutType = 'circular' | 'half_circular' | 'rectangular' | 'composite'
 export type PublicationFormatType = 'pdf' | 'svg' | 'png'
 export type PublicationSupportStyle = 'dots' | 'text' | 'both' | 'none'
 export type ItolExportFormatType = 'pdf' | 'svg' | 'png' | 'eps'
@@ -332,8 +345,18 @@ export interface PublicationFigureRequest {
   use_branch_lengths: boolean
   support_style: PublicationSupportStyle
   show_genus_strip: boolean
+  show_host_strip?: boolean
   show_genome_length: boolean
   show_gc_bar: boolean
+  show_clade_shading?: boolean
+  clade_shading_mode?: CladeShadingModeType
+  show_query_star?: boolean
+  palette?: JournalPaletteType
+  journal_width?: JournalWidthPresetType
+  label_density?: LabelDensityType
+  top_genera_limit?: number
+  subtree_max_leaves?: number
+  show_figure_title?: boolean
   ladderize: boolean
   label_format: LabelFormatType
   title?: string | null

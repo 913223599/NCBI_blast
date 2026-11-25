@@ -49,9 +49,16 @@ from ..models.schemas import (
     PublicationFigureRequest,
     ReferenceCandidate,
 )
-from .postprocess import compute_tree_metrics, reroot_midpoint, reroot_outgroup
+from .postprocess import compute_tree_metrics, extract_leaf_names, reroot_midpoint, reroot_outgroup
 
 logger = logging.getLogger("phylo.phage_workflow")
+
+
+def _select_publication_layouts(leaf_count: int) -> Tuple[str, ...]:
+    """根据真实叶节点数决定自动离线渲染的发表级布局组合。"""
+    if leaf_count > 60:
+        return ("composite", "circular", "rectangular")
+    return ("circular", "rectangular")
 
 
 def _write_query_multifasta(records: List[Tuple[str, str]], dest: Path) -> Path:
@@ -435,6 +442,7 @@ class PhageTaxonomyWorkflow:
                 threads=cfg.threads,
                 tree_method=tree_method,
                 distance_mode=dist_mode,
+                use_gpu=cfg.use_gpu,
             )
             set_runner(None)
             record.marker_report = marker_report
@@ -538,10 +546,12 @@ class PhageTaxonomyWorkflow:
             )
             stage_fn("trim", "completed", 82, f"比对修剪完成 ({trim_stats['kept_cols']} 列)", elapsed=time.time() - t_trim, artifact=str(trimmed_msa_path))
 
-            # Step 5: IQ-TREE 发表级推断 (-m MFP -B 1000 -bnni -alrt 1000 --seed 42)
+            # Step 5: IQ-TREE 发表级推断
             t_tree = time.time()
-            stage_fn("tree", "running", 86, "第 5 步：运行 IQ-TREE 最大似然推断 (-m MFP -B 1000 -bnni -alrt 1000)...")
+            ufboot = cfg.bootstrap if cfg.bootstrap >= 1000 or cfg.bootstrap == 0 else 1000
+            iq_model = cfg.model if cfg.model and cfg.model.lower() not in ("jc69", "k2p", "p-distance") else "MFP"
             if cfg.engine == "fasttree":
+                stage_fn("tree", "running", 86, "第 5 步：运行 FastTree 近似最大似然推断...")
                 ft = FastTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
                 set_runner(ft)
                 ft.build(
@@ -553,10 +563,15 @@ class PhageTaxonomyWorkflow:
                 )
                 set_runner(None)
             else:
+                model_hint = "MFP 核心蛋白快速集" if iq_model.strip().lower() in ("auto", "mfp") else iq_model
+                stage_fn(
+                    "tree",
+                    "running",
+                    86,
+                    f"第 5 步：运行 IQ-TREE 最大似然推断 (-m {model_hint} -B {ufboot} -alrt {cfg.iqtree_alrt})...",
+                )
                 iq = IQTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
                 set_runner(iq)
-                ufboot = cfg.bootstrap if cfg.bootstrap >= 1000 or cfg.bootstrap == 0 else 1000
-                iq_model = cfg.model if cfg.model and cfg.model.lower() not in ("jc69", "k2p", "p-distance") else "MFP"
                 iq.build(
                     msa_fasta=trimmed_msa_path,
                     output_nwk=raw_nwk_path,
@@ -628,12 +643,15 @@ class PhageTaxonomyWorkflow:
         node_meta = enrich_node_metadata(node_meta)
         record.node_metadata = node_meta
 
+        # 精确提取树中真实叶节点名称，避免子串误匹配并供 iTOL 与自动出图复用
+        leaf_names = extract_leaf_names(final_nwk)
+
         # 生成 iTOL 注释模板文件
         itol_dir = job_dir / "itol"
         itol_files = ItolTemplateGenerator.generate(
             candidates=candidates,
             out_dir=itol_dir,
-            leaf_names=[c.accession for c in candidates if c.selected and c.accession in final_nwk],
+            leaf_names=leaf_names,
         )
         record.artifacts["itol_dir"] = str(itol_dir)
         record.artifacts["itol_files"] = itol_files
@@ -671,7 +689,7 @@ class PhageTaxonomyWorkflow:
             else:
                 delivery_msa_path = trimmed_msa_path
 
-        # 自动离线生成两套发表级矢量出图 (Circular + Rectangular: PDF/SVG/PNG)
+        # 自动离线生成发表级矢量出图 (Circular + Rectangular；超过 60 叶自动追加 Composite)
         figures_dir = job_dir / "figures"
         pub_items: List[Dict[str, Any]] = []
         subtitle_parts: List[str] = []
@@ -683,7 +701,8 @@ class PhageTaxonomyWorkflow:
             subtitle_parts.append(f"ClipKIT sites: {trim_stats.get('kept_cols')} (PI={trim_stats.get('parsimony_informative_sites', 0)})")
         fig_subtitle = " | ".join(subtitle_parts)
 
-        for layout_mode in ("circular", "rectangular"):
+        layouts_to_render = _select_publication_layouts(len(leaf_names))
+        for layout_mode in layouts_to_render:
             try:
                 out_paths = PublicationTreeRenderer.render(
                     newick=final_nwk,

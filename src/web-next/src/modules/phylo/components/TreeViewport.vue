@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { PhyloTreeCanvas } from '../core/TreeCanvas'
 import { TreeExporter } from '../core/TreeExporter'
 import type { PhyloTreeNode } from '../core/TreeModel'
 import { usePhyloStore } from '../stores/usePhyloStore'
 import { useAppStore } from '../../../stores/app'
+import PublicationFigurePreview from './PublicationFigurePreview.vue'
 
 const store = usePhyloStore()
 const appStore = useAppStore()
@@ -39,6 +40,14 @@ watch(() => store.treeRevision, () => {
   renderTree(true, true)
 })
 
+watch(() => store.viewportMode, (mode) => {
+  if (mode === 'interactive' && store.hasTree) {
+    nextTick(() => {
+      renderTree(false, false)
+    })
+  }
+})
+
 watch(
   () => [
     store.visual.layout,
@@ -47,6 +56,11 @@ watch(
     store.visual.fontSize,
     store.visual.showMetadataStrips,
     store.visual.labelFormat,
+    store.visual.journalTheme,
+    store.visual.alignTipLabels,
+    store.visual.showCladeShading,
+    store.visual.italicizeTaxa,
+    store.visual.smartLabelCull,
   ],
   () => {
     renderTree(true, true)
@@ -153,15 +167,46 @@ function handleExportNewick() {
   <div class="viewport-wrap" @click="closeContextMenu">
     <!-- 顶部悬浮画布工具栏 -->
     <div class="viewport-toolbar">
-      <div class="search-box">
-        <input
-          v-model="store.visual.searchQuery"
-          class="search-input"
-          placeholder="搜索样本 ID 高亮..."
-        />
+      <div class="toolbar-left">
+        <div class="mode-switch">
+          <button
+            class="mode-tab"
+            :class="{ active: store.viewportMode === 'interactive' }"
+            @click="store.closeFigurePreview()"
+          >
+            交互式拓扑树
+          </button>
+          <button
+            class="mode-tab"
+            :class="{ active: store.viewportMode === 'publication' }"
+            :disabled="!store.hasGeneratedFigures"
+            :title="
+              store.hasGeneratedFigures
+                ? '查看本地渲染或 iTOL 导出的出版级图件'
+                : '请先在左侧「出版级导出」面板生成图件'
+            "
+            @click="store.openFigurePreview()"
+          >
+            出版级成图预览
+            <span
+              v-if="store.hasGeneratedFigures"
+              class="mode-badge"
+            >
+              {{ store.availablePublicationFigures.length + store.availableItolExports.length }}
+            </span>
+          </button>
+        </div>
+
+        <div v-if="store.viewportMode === 'interactive'" class="search-box">
+          <input
+            v-model="store.visual.searchQuery"
+            class="search-input"
+            placeholder="搜索样本 ID 高亮..."
+          />
+        </div>
       </div>
 
-      <div class="toolbar-actions">
+      <div v-if="store.viewportMode === 'interactive'" class="toolbar-actions">
         <button class="tb-btn" :disabled="!store.hasTree" @click="canvas.zoomBy(1.2)">放大</button>
         <button class="tb-btn" :disabled="!store.hasTree" @click="canvas.zoomBy(0.83)">缩小</button>
         <button class="tb-btn" :disabled="!store.hasTree" @click="canvas.fitView()">适应窗口</button>
@@ -170,13 +215,19 @@ function handleExportNewick() {
         <button class="tb-btn" :disabled="!store.hasTree" @click="handleExportPng">高清 PNG</button>
         <button class="tb-btn" :disabled="!store.hasTree" @click="handleExportNewick">Newick</button>
       </div>
+      <div v-else class="toolbar-mode-hint">
+        正在预览出版级成图，可切换上方「交互式拓扑树」继续编辑节点
+      </div>
     </div>
 
-    <!-- 画布容器 -->
-    <div ref="hostRef" class="canvas-host"></div>
+    <!-- 画布容器（使用 v-show 保留 PhyloTreeCanvas 实例与缩放状态） -->
+    <div v-show="store.viewportMode === 'interactive'" ref="hostRef" class="canvas-host"></div>
+
+    <!-- 出版级成图交互预览组件 -->
+    <PublicationFigurePreview v-if="store.viewportMode === 'publication'" />
 
     <!-- 空状态指引 -->
-    <div v-if="!store.hasTree" class="empty-canvas">
+    <div v-if="!store.hasTree && store.viewportMode === 'interactive'" class="empty-canvas">
       <div class="empty-card">
         <div class="empty-title">PhyloCore 系统发育工作台</div>
         <div class="empty-desc">
@@ -218,6 +269,13 @@ function handleExportNewick() {
 <style scoped>
 .viewport-wrap { position: relative; flex: 1; height: 100%; background: #ffffff; display: flex; flex-direction: column; overflow: hidden; }
 .viewport-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; gap: 12px; flex-wrap: wrap; }
+.toolbar-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mode-switch { display: inline-flex; padding: 2px; border-radius: 7px; background: #e2e8f0; gap: 2px; }
+.mode-tab { display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent; color: #475569; padding: 4px 10px; border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.mode-tab.active { background: #ffffff; color: #0f172a; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
+.mode-tab:disabled { opacity: 0.45; cursor: not-allowed; }
+.mode-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: #0f766e; color: #ffffff; font-size: 10px; font-weight: 700; }
+.toolbar-mode-hint { font-size: 11px; color: #64748b; }
 .search-input { border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 10px; font-size: 12px; width: 210px; background: #fff; }
 .toolbar-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .tb-btn { padding: 5px 10px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; color: #334155; font-size: 11px; font-weight: 600; cursor: pointer; }

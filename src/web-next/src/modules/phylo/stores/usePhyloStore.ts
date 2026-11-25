@@ -2,14 +2,17 @@ import { computed, markRaw, reactive, ref, shallowRef } from 'vue'
 import { defineStore } from 'pinia'
 import { useAppStore } from '../../../stores/app'
 import { phyloApi } from '../api/phyloApi'
+import { groupPublicationFiguresByLayout } from '../core/FigurePreviewHelper'
 import { PhyloTreeModel } from '../core/TreeModel'
 import type {
   AniScreenResult,
   CapabilitiesResponse,
   DeliveryScopeConfig,
+  ItolPullResponse,
   NodeMetadata,
   PhyloJobConfig,
   PhyloJobRecord,
+  PublicationFigureItem,
   ReferenceCandidate,
   SequenceProfile,
   StageState,
@@ -105,19 +108,29 @@ export const usePhyloStore = defineStore('phylo', () => {
   const treeModel = shallowRef<PhyloTreeModel>(markRaw(new PhyloTreeModel()))
   const treeRevision = ref(0)
 
+  // 主视口预览模式：交互式拓扑树 vs 出版级成图预览
+  const viewportMode = ref<'interactive' | 'publication'>('interactive')
+  const previewFigureFilename = ref<string | null>(null)
+  const figurePreviewVersion = ref<number>(Date.now())
+
   const visual = reactive<TreeVisualSettings>({
     layout: 'rect',
     useBranchLengths: true,
     showLabels: true,
     labelFormat: 'name_acc',
     showSupport: true,
-    supportThreshold: 50,
+    supportThreshold: 80,
     fontSize: 13,
     rowSpacing: 26,
     sortMode: 'original',
     searchQuery: '',
     showMetadataStrips: true,
     highlightStrongUfboot: true,
+    journalTheme: 'nature',
+    alignTipLabels: true,
+    showCladeShading: true,
+    italicizeTaxa: true,
+    smartLabelCull: true,
   })
 
   let unsubscribeEvents: (() => void) | null = null
@@ -137,6 +150,62 @@ export const usePhyloStore = defineStore('phylo', () => {
   })
 
   const hasTree = computed(() => Boolean(rawNewick.value && treeModel.value.root))
+
+  const availablePublicationFigures = computed<PublicationFigureItem[]>(() => {
+    const raw = currentJob.value?.artifacts?.publication_figures
+    return Array.isArray(raw) ? (raw as PublicationFigureItem[]) : []
+  })
+
+  const availableItolExports = computed<ItolPullResponse[]>(() => {
+    const raw = currentJob.value?.artifacts?.itol_exports
+    return Array.isArray(raw) ? (raw as ItolPullResponse[]) : []
+  })
+
+  const hasGeneratedFigures = computed(
+    () => availablePublicationFigures.value.length > 0 || availableItolExports.value.length > 0
+  )
+
+  function refreshFigurePreviewVersion(): void {
+    figurePreviewVersion.value = Date.now()
+  }
+
+  function openFigurePreview(filename?: string | null, bumpVersion = false): void {
+    if (bumpVersion) {
+      refreshFigurePreviewVersion()
+    }
+    let target: string | null = filename && filename.trim() ? filename.trim() : null
+    if (target) {
+      const allNames = new Set<string>([
+        ...availablePublicationFigures.value.map((f) => f.filename),
+        ...availableItolExports.value.map((f) => f.filename),
+      ])
+      if (allNames.size > 0 && !allNames.has(target)) {
+        target = null
+      }
+    }
+    if (!target) {
+      const cur = previewFigureFilename.value
+      const curValid =
+        Boolean(cur) &&
+        (availablePublicationFigures.value.some((f) => f.filename === cur) ||
+          availableItolExports.value.some((f) => f.filename === cur))
+      if (curValid && cur) {
+        target = cur
+      } else {
+        const groups = groupPublicationFiguresByLayout(availablePublicationFigures.value)
+        target =
+          groups[0]?.preferredPreview?.filename ?? availableItolExports.value[0]?.filename ?? null
+      }
+    }
+    if (target) {
+      previewFigureFilename.value = target
+      viewportMode.value = 'publication'
+    }
+  }
+
+  function closeFigurePreview(): void {
+    viewportMode.value = 'interactive'
+  }
 
   function applyRecommendedDefaults(prof: SequenceProfile | null): void {
     if (!prof || prof.sequence_count === 0) return
@@ -209,6 +278,12 @@ export const usePhyloStore = defineStore('phylo', () => {
       appStore.showNotification('Newick 格式解析失败', 'error')
       return
     }
+    const prevJobId = currentJob.value?.job_id ?? null
+    const nextJobId = job?.job_id ?? null
+    if (nextJobId !== prevJobId) {
+      viewportMode.value = 'interactive'
+      previewFigureFilename.value = null
+    }
     const prevSameJobMeta =
       job && currentJob.value?.job_id === job.job_id ? currentJob.value.node_metadata : undefined
     const effectiveMeta = mergeNodeMetadata(prevSameJobMeta, job?.node_metadata)
@@ -218,6 +293,7 @@ export const usePhyloStore = defineStore('phylo', () => {
     if (effectiveMeta) {
       model.applyNodeMetadata(effectiveMeta)
     }
+    model.applyJournalTheme(visual.journalTheme)
     if (visual.sortMode !== 'original') {
       model.applySorting(visual.sortMode)
     }
@@ -586,6 +662,8 @@ export const usePhyloStore = defineStore('phylo', () => {
         rawNewick.value = ''
         treeModel.value = markRaw(new PhyloTreeModel())
         treeRevision.value++
+        viewportMode.value = 'interactive'
+        previewFigureFilename.value = null
       }
       appStore.showNotification('已删除任务记录与归档文件', 'info')
     } catch (e: unknown) {
@@ -618,8 +696,25 @@ export const usePhyloStore = defineStore('phylo', () => {
       }
       return
     }
+    if (eventType === 'phylo_eta') {
+      if (activeJob.value && activeJob.value.job_id === jid) {
+        const rawEta = data.eta_seconds
+        activeJob.value = {
+          ...activeJob.value,
+          eta_seconds: typeof rawEta === 'number' ? rawEta : null,
+          eta_updated_at:
+            typeof data.eta_updated_at === 'number'
+              ? data.eta_updated_at
+              : activeJob.value.eta_updated_at ?? null,
+          substage_label: String(data.substage_label || ''),
+          rate_text: String(data.rate_text || ''),
+        }
+      }
+      return
+    }
     if (eventType === 'phylo_stage') {
       if (activeJob.value && activeJob.value.job_id === jid) {
+        const hasEta = 'eta_seconds' in data
         activeJob.value = {
           ...activeJob.value,
           status: 'running',
@@ -627,6 +722,21 @@ export const usePhyloStore = defineStore('phylo', () => {
           progress: Number(data.progress ?? activeJob.value.progress),
           message: String(data.message || ''),
           elapsed_sec: Number(data.elapsed_sec ?? activeJob.value.elapsed_sec),
+          eta_seconds: hasEta
+            ? typeof data.eta_seconds === 'number'
+              ? data.eta_seconds
+              : null
+            : activeJob.value.eta_seconds ?? null,
+          eta_updated_at:
+            typeof data.eta_updated_at === 'number'
+              ? data.eta_updated_at
+              : activeJob.value.eta_updated_at ?? null,
+          substage_label:
+            'substage_label' in data
+              ? String(data.substage_label || '')
+              : activeJob.value.substage_label || '',
+          rate_text:
+            'rate_text' in data ? String(data.rate_text || '') : activeJob.value.rate_text || '',
           stages: (data.stages as StageState[]) || activeJob.value.stages,
         }
       }
@@ -720,8 +830,17 @@ export const usePhyloStore = defineStore('phylo', () => {
     treeRevision,
     hasTree,
     visual,
+    viewportMode,
+    previewFigureFilename,
+    figurePreviewVersion,
+    availablePublicationFigures,
+    availableItolExports,
+    hasGeneratedFigures,
     init,
     dispose,
+    refreshFigurePreviewVersion,
+    openFigurePreview,
+    closeFigurePreview,
     refreshCapabilities,
     refreshWorkspace,
     importFiles,

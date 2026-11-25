@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { formatNodeDisplayLabel, PhyloTreeModel } from '../TreeModel'
 import { PhyloTreeLayout } from '../TreeLayout'
+import {
+  buildStarPolygonPoints,
+  buildTopGenusColorMap,
+  computeNiceScaleValue,
+  detectMonophyleticClades,
+  isFormalTaxonName,
+  JOURNAL_THEMES,
+  mapHostToPhylum,
+  splitTaxonomicLabelSegments,
+} from '../JournalTheme'
 import type { TreeVisualSettings } from '../../types/phylo'
 
 const DEFAULT_VISUAL: TreeVisualSettings = {
@@ -16,6 +26,11 @@ const DEFAULT_VISUAL: TreeVisualSettings = {
   searchQuery: '',
   showMetadataStrips: true,
   highlightStrongUfboot: true,
+  journalTheme: 'nature',
+  alignTipLabels: true,
+  showCladeShading: true,
+  italicizeTaxa: true,
+  smartLabelCull: true,
 }
 
 describe('PhyloCore TreeModel & Layout', () => {
@@ -154,5 +169,58 @@ describe('PhyloCore TreeModel & Layout', () => {
     expect(model.hasNodeMetadata).toBe(true)
     const dualSupportNodes = Array.from(model.nodesById.values()).filter((n) => !n.isLeaf && n.supportLabel)
     expect(dualSupportNodes.some((n) => n.supportLabel === '98.5/100' && n.ufboot === 100)).toBe(true)
+  })
+
+  it('provides publication journal palettes, italic taxon splitting, nice scales, and clade detection', () => {
+    expect(Object.keys(JOURNAL_THEMES)).toEqual(['nature', 'lancet', 'okabe_ito', 'monochrome'])
+    expect(computeNiceScaleValue(0.0024)).toBe(0.002)
+    expect(computeNiceScaleValue(0.14)).toBe(0.1)
+    expect(computeNiceScaleValue(0.16)).toBe(0.2)
+    expect(mapHostToPhylum('Escherichia coli K12')).toBe('Pseudomonadota')
+    expect(mapHostToPhylum('Mycobacterium smegmatis')).toBe('Actinomycetota')
+    expect(isFormalTaxonName('Tequintavirus')).toBe(true)
+    expect(isFormalTaxonName('Unclassified')).toBe(false)
+
+    expect(splitTaxonomicLabelSegments('Escherichia phage T5 (AY587007)')).toEqual([
+      { text: 'Escherichia', italic: true },
+      { text: ' phage T5 (AY587007)', italic: false },
+    ])
+    expect(splitTaxonomicLabelSegments('测试中文噬菌体01')).toEqual([
+      { text: '测试中文噬菌体01', italic: false },
+    ])
+
+    const starPts = buildStarPolygonPoints(10, 10, 6, 2.5)
+    expect(starPts.split(' ').length).toBe(10)
+
+    const model = new PhyloTreeModel()
+    model.parse('((Q1:0.01,(R1:0.02,R2:0.02)99:0.01)96:0.03,OG:0.2);')
+    model.applyNodeMetadata({
+      Q1: { role: 'query', host: 'Escherichia' },
+      R1: { role: 'ictv_rep', genus: 'Tequintavirus', host: 'Escherichia' },
+      R2: { role: 'neighbor', genus: 'Tequintavirus', host: 'Salmonella' },
+      OG: { role: 'outgroup', genus: 'Thalassavirus', host: 'Vibrio' },
+    })
+    const clades = detectMonophyleticClades(model.root!, model.leaves, model.genusColors)
+    expect(clades.length).toBe(1)
+    expect(clades[0]!.taxonName).toBe('Tequintavirus')
+    expect(clades[0]!.leafStartIdx).toBe(0)
+    expect(clades[0]!.leafEndIdx).toBe(2)
+
+    const manyLeaves = Array.from({ length: 16 }, (_, idx) => ({
+      name: `L${idx}`,
+      meta: { role: idx === 0 ? ('query' as const) : ('neighbor' as const), genus: `Genus${idx}` },
+    }))
+    const topMap = buildTopGenusColorMap(manyLeaves as any, 'nature', 6)
+    expect(topMap.genusColors.size).toBe(6)
+    expect(new Set(topMap.genusColors.values()).size).toBe(6)
+    expect(topMap.otherGenera.size).toBe(10)
+
+    // 仅在 genusColors 映射表中的属才生成单系背景阴影，未配色属不涂灰
+    const filteredClades = detectMonophyleticClades(
+      model.root!,
+      model.leaves,
+      new Map<string, string>()
+    )
+    expect(filteredClades.length).toBe(0)
   })
 })

@@ -1,4 +1,5 @@
-import type { LabelFormatType, NodeMetadata, SortMode } from '../types/phylo'
+import type { JournalPaletteType, LabelFormatType, NodeMetadata, SortMode } from '../types/phylo'
+import { buildTopGenusColorMap, JOURNAL_THEMES, mapHostToPhylum } from './JournalTheme'
 
 const REDUNDANT_DESC_SUFFIX_RE =
   /(?:,\s*(?:complete|partial)\s+(?:genome|cds|sequence)|\b(?:complete|partial)\s+(?:genome|cds|sequence))\s*\.?$/i
@@ -28,18 +29,7 @@ export function formatNodeDisplayLabel(
   return desc.includes(acc) ? desc : `${desc} (${acc})`
 }
 
-const GENUS_PALETTE = [
-  '#2563eb',
-  '#059669',
-  '#7c3aed',
-  '#d97706',
-  '#0891b2',
-  '#db2777',
-  '#4f46e5',
-  '#65a30d',
-  '#0d9488',
-  '#9333ea',
-]
+const GENUS_PALETTE = JOURNAL_THEMES.nature.taxonColors
 
 export interface PhyloTreeNode {
   id: string
@@ -125,9 +115,12 @@ export class PhyloTreeModel {
   cladeColors: Map<string, string> = new Map()
   collapsedIds: Set<string> = new Set()
   hasNodeMetadata = false
+  hasHostMetadata = false
   maxGenomeLength = 0
   genusColors: Map<string, string> = new Map()
+  otherGenera: Set<string> = new Set()
   private metadataMap: Record<string, NodeMetadata> = {}
+  private paletteTheme: JournalPaletteType = 'nature'
 
   parse(newick: string): PhyloTreeNode | null {
     const raw = (newick || '').trim()
@@ -238,6 +231,7 @@ export class PhyloTreeModel {
     this.metadataMap = {}
     this.genusColors.clear()
     this.hasNodeMetadata = false
+    this.hasHostMetadata = false
     this.maxGenomeLength = 0
     this.rebuildIndex()
     return this.root
@@ -292,9 +286,10 @@ export class PhyloTreeModel {
 
   private bindMetadataToNodes(): void {
     this.genusColors.clear()
+    this.otherGenera.clear()
     this.maxGenomeLength = 0
+    this.hasHostMetadata = false
     let matched = 0
-    let colorIdx = 0
     const walk = (node: PhyloTreeNode) => {
       if (node.isLeaf && node.name && this.metadataMap[node.name]) {
         const m = this.metadataMap[node.name]!
@@ -303,16 +298,26 @@ export class PhyloTreeModel {
         if (m.genome_length && m.genome_length > this.maxGenomeLength) {
           this.maxGenomeLength = m.genome_length
         }
-        const g = (m.genus || '').trim()
-        if (g && !this.genusColors.has(g)) {
-          this.genusColors.set(g, GENUS_PALETTE[colorIdx % GENUS_PALETTE.length]!)
-          colorIdx++
+        if (mapHostToPhylum(m.host)) {
+          this.hasHostMetadata = true
         }
       }
       for (const c of node.children) walk(c)
     }
     if (this.root) walk(this.root)
+    const { genusColors, otherGenera } = buildTopGenusColorMap(this.leaves, this.paletteTheme, 12)
+    this.genusColors = genusColors
+    this.otherGenera = otherGenera
     this.hasNodeMetadata = matched > 0
+  }
+
+  applyJournalTheme(theme: JournalPaletteType): void {
+    if (this.paletteTheme === theme) return
+    this.paletteTheme = theme
+    if (Object.keys(this.metadataMap).length > 0) {
+      this.bindMetadataToNodes()
+      this.version++
+    }
   }
 
   applyNodeMetadata(metaMap: Record<string, NodeMetadata>): void {

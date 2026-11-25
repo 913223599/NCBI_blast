@@ -126,6 +126,12 @@ def _all_nodes(root: PhyloNode) -> List[PhyloNode]:
     return res
 
 
+def extract_leaf_names(newick: str) -> List[str]:
+    """从 Newick 字符串精确提取所有叶节点名称（按遍历顺序）。"""
+    root = parse_newick(newick)
+    return [n.name for n in _all_nodes(root) if n.is_leaf and n.name]
+
+
 def _farthest_from(start: PhyloNode) -> Tuple[PhyloNode, float, Dict[int, PhyloNode]]:
     """无向树 BFS/DFS 求距 start 最远节点，并记录父指针映射用于回溯路径。"""
     visited: set[int] = {id(start)}

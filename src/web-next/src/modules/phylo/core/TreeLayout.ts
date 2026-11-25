@@ -8,6 +8,8 @@ export interface LayoutBounds {
   maxY: number
   scaleUnitsPerPx: number
   labelEndX?: number
+  tipAlignX?: number
+  outerRadius?: number
 }
 
 export class PhyloTreeLayout {
@@ -72,15 +74,23 @@ export class PhyloTreeLayout {
       ? Math.min(580, Math.max(180, Math.ceil(maxChars * settings.fontSize * 0.62) + 40))
       : 40
     const labelEndX = widthTarget + maxLabelWidth
-    const stripExtra = settings.showMetadataStrips && model.hasNodeMetadata ? 220 : 0
+    const stripExtra =
+      settings.showMetadataStrips && model.hasNodeMetadata
+        ? model.hasHostMetadata
+          ? 275
+          : 230
+        : settings.showCladeShading && model.hasNodeMetadata
+          ? 90
+          : 0
 
     return {
       minX: -20,
       maxX: labelEndX + stripExtra,
-      minY: -20,
-      maxY: Math.max(120, (leafRow - 1) * rowStep + 40),
+      minY: -26,
+      maxY: Math.max(120, (leafRow - 1) * rowStep + 48),
       scaleUnitsPerPx: maxVal / widthTarget,
       labelEndX,
+      tipAlignX: widthTarget,
     }
   }
 
@@ -115,13 +125,35 @@ export class PhyloTreeLayout {
     }
 
     assignPolar(root)
-    const bound = baseRadius + 200
+
+    let maxChars = 10
+    const isMacroCircular = Boolean(settings.smartLabelCull && visibleLeaves > 90)
+    if (settings.showLabels && !isMacroCircular) {
+      for (const leaf of model.leaves) {
+        const len = formatNodeDisplayLabel(leaf, settings.labelFormat).length
+        if (len > maxChars) maxChars = len
+      }
+    }
+    const labelSpace = settings.showLabels
+      ? isMacroCircular
+        ? 44
+        : Math.min(340, Math.max(110, Math.ceil(maxChars * settings.fontSize * 0.56) + 24))
+      : 30
+    const ringSpace =
+      settings.showMetadataStrips && model.hasNodeMetadata
+        ? model.hasHostMetadata
+          ? 84
+          : 54
+        : 0
+    const calloutSpace = isMacroCircular ? 130 : 48
+    const bound = baseRadius + labelSpace + ringSpace + calloutSpace
     return {
       minX: -bound,
       maxX: bound,
       minY: -bound,
       maxY: bound,
       scaleUnitsPerPx: maxVal / baseRadius,
+      outerRadius: baseRadius,
     }
   }
 

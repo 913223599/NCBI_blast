@@ -238,11 +238,29 @@ def test_publication_and_itol_routes(tmp_path: Path, monkeypatch: pytest.MonkeyP
     pub_data = r_pub.json()
     assert len(pub_data["figures"]) == 2
 
-    # 2. 图件文件下载接口
-    svg_name = pub_data["figures"][0]["filename"]
+    # 2. 图件文件下载与内联预览接口
+    svg_fig = next(f for f in pub_data["figures"] if f["format"] == "svg")
+    png_fig = next(f for f in pub_data["figures"] if f["format"] == "png")
+    svg_name = svg_fig["filename"]
+    png_name = png_fig["filename"]
+
     r_dl = client.get(f"/api/phylo/jobs/{job_id}/export/figure/{svg_name}")
     assert r_dl.status_code == 200
+    assert r_dl.headers.get("content-disposition", "").startswith("attachment;")
+    assert "no-store" in r_dl.headers.get("cache-control", "").lower()
     assert b"<svg" in r_dl.content.lower()
+
+    r_inline = client.get(f"/api/phylo/jobs/{job_id}/export/figure/{svg_name}?inline=1")
+    assert r_inline.status_code == 200
+    assert r_inline.headers.get("content-disposition", "").startswith("inline;")
+    assert "no-store" in r_inline.headers.get("cache-control", "").lower()
+    assert b"<svg" in r_inline.content.lower()
+
+    r_png_inline = client.get(f"/api/phylo/jobs/{job_id}/export/figure/{png_name}?inline=1")
+    assert r_png_inline.status_code == 200
+    assert r_png_inline.headers.get("content-type", "").startswith("image/png")
+    assert r_png_inline.headers.get("content-disposition", "").startswith("inline;")
+    assert "no-store" in r_png_inline.headers.get("cache-control", "").lower()
 
     # 3. iTOL 纯 ASCII Newick 接口 & 上传包下载接口
     r_nwk = client.get(f"/api/phylo/jobs/{job_id}/export/itol_newick")
