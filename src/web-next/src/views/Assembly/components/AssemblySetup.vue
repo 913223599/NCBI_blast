@@ -460,8 +460,7 @@ async function onStartAssembly() {
           <!-- 槽位 1: R1 卡片 -->
           <div class="file-slot-card" :class="{ 'is-empty-slot': !r1File }">
             <div class="slot-badge r1-badge">
-              {{ tech === 'HYBRID' ? '短读长 R1 (正向端)' : (tech === 'ILLUMINA' ? 'Read 1 (正向端 / Forward)' : '长读长数据 (Long
-              Reads) ') }}
+              {{ tech === 'HYBRID' ? '短读长 R1 (正向端)' : (tech === 'ILLUMINA' ? 'Read 1 (正向端 / Forward)' : '长读长数据 (Long Reads)') }}
             </div>
             <div v-if="r1File" class="slot-info">
               <span class="file-name" :title="r1File.path">{{ r1File.name }}</span>

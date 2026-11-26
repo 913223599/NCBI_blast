@@ -63,7 +63,7 @@ function getBridge(): BridgeInstance {
       },
       apply(_target, _thisArg, args: unknown[]) {
         const propPath = path.join('.')
-        log.warn(`[Bridge Pending] 异步队列化调用: ${propPath}`)
+        log.debug(`[Bridge Pending] 异步队列化调用: ${propPath}`)
 
         // 将调用推入就绪队列
         _readyCallbacks.push((bridge) => {
