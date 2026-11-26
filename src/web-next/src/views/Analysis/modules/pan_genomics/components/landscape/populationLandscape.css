@@ -1,0 +1,1106 @@
+.workspace-population-landscape {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.phylogenomic-chord-canvas {
+  width: 100%;
+  min-height: 680px;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* 样本可见性工具条 */
+.sample-visibility-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  position: relative;
+}
+
+.sample-count-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.sample-count-pill.has-hidden {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.hidden-badge {
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  border: 1px solid #fde68a;
+}
+
+.sample-filter-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-sample-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.btn-sample-action:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.btn-show-all {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+
+.btn-show-all:hover {
+  background: #dbeafe;
+}
+
+.btn-focus-pair {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+}
+
+.btn-focus-pair:hover {
+  background: #dcfce7;
+}
+
+/* 样本单元格小眼睛 */
+.sample-name-cell-inner {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.btn-sample-eye {
+  background: transparent;
+  border: none;
+  padding: 2px;
+  margin: 0;
+  cursor: pointer;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.btn-sample-eye:hover {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.sample-title-txt {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sample-title-txt:hover {
+  color: #2563eb;
+}
+
+/* 旗舰组合面板 */
+.academic-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 1. 顶层主标题与全局视图控制带 */
+.panel-header-deck {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 6px;
+}
+
+.deck-title-area {
+  display: flex;
+  align-items: center;
+}
+
+.title-main-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.panel-tag-pill {
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+.panel-heading-text {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.matrix-scope-badge {
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid #dbeafe;
+}
+
+.deck-actions-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.control-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  margin-right: 4px;
+}
+
+/* 分段选择器 */
+.segmented-density-control {
+  display: flex;
+  align-items: center;
+}
+
+.seg-pills {
+  display: flex;
+  background: #f1f5f9;
+  padding: 2px;
+  border-radius: 6px;
+  gap: 2px;
+}
+
+.seg-btn {
+  background: transparent;
+  border: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #64748b;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.seg-btn:hover {
+  color: #0f172a;
+}
+
+.seg-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.seg-btn.btn-ultra.active {
+  color: #d97706;
+}
+
+.modern-select {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.modern-select:hover {
+  border-color: #94a3b8;
+  background: #ffffff;
+}
+
+.modern-select.select-cat {
+  max-width: 170px;
+}
+
+.btn-legend-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #475569;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-legend-toggle:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.btn-legend-toggle.active {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.export-figure-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.btn-export-fig {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #1d4ed8;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-export-fig:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
+.btn-export-fig:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-export-svg {
+  padding: 3px 7px;
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+.btn-export-svg:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+/* 2. 统一操作带 */
+.matrix-ribbon-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 5px 10px;
+  flex-wrap: wrap;
+}
+
+.ribbon-left-filters,
+.ribbon-right-tracks {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ribbon-group-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.ribbon-pills {
+  display: flex;
+  gap: 3px;
+  background: #e2e8f0;
+  padding: 2px;
+  border-radius: 5px;
+}
+
+.r-pill {
+  background: transparent;
+  border: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.r-pill:hover {
+  color: #0f172a;
+}
+
+.r-pill.active {
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.r-pill-amber.active {
+  color: #d97706;
+}
+
+.r-pill-blue.active {
+  color: #2563eb;
+}
+
+.filter-divider {
+  width: 1px;
+  height: 14px;
+  background: #cbd5e1;
+}
+
+/* 轨道开关 */
+.track-check-pills {
+  display: flex;
+  gap: 4px;
+}
+
+.trk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.trk-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.trk-pill:hover {
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.trk-pill.active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.trk-pill.active .trk-dot {
+  background: #2563eb;
+}
+
+/* 3. 精炼学术图注条 */
+.academic-legend-deck {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 5px 12px;
+  flex-wrap: wrap;
+}
+
+.leg-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.leg-col-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #475569;
+  white-space: nowrap;
+}
+
+.leg-items-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.leg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.leg-chip i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  font-style: normal;
+}
+
+.matrix-metric-switcher {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  border-radius: 5px;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid #e2e8f0;
+}
+
+.btn-metric-toggle {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-metric-toggle:hover {
+  color: #1e293b;
+}
+
+.btn-metric-toggle.active {
+  background: #ffffff;
+  color: #1d4ed8;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.ani-heat-swatch-list {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.heat-chip {
+  font-size: 8.5px;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+.swatch-sq {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 1.5px;
+}
+
+.swatch-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+/* 一体化画板表格与吸顶/冻结列 */
+.phylogenomic-composite-canvas {
+  max-height: 72vh;
+  overflow-x: auto;
+  overflow-y: auto;
+  border: 1px solid #f1f5f9;
+  border-radius: 6px;
+  position: relative;
+}
+
+.composite-evidence-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.composite-evidence-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #f8fafc;
+  padding: 5px 4px;
+  font-size: 10px;
+  color: #64748b;
+  border-bottom: 1.5px solid #cbd5e1;
+  vertical-align: bottom;
+}
+
+/* 冻结列 */
+.th-sticky-left-1 {
+  position: sticky;
+  left: 0;
+  z-index: 25;
+  background: #f8fafc !important;
+}
+
+.td-tree-col.th-sticky-left-1 {
+  position: sticky;
+  left: 0;
+  z-index: 15;
+  background: #ffffff !important;
+}
+
+.th-sticky-left-2 {
+  position: sticky;
+  left: 60px;
+  z-index: 25;
+  background: #f8fafc !important;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+}
+
+.td-sample-name-col.th-sticky-left-2 {
+  position: sticky;
+  left: 60px;
+  z-index: 15;
+  background: #ffffff !important;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+}
+
+.td-sample-name-col.th-sticky-left-1 {
+  position: sticky;
+  left: 0;
+  z-index: 15;
+  background: #ffffff !important;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+}
+
+.th-tree {
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.th-sample-name {
+  width: 170px;
+  min-width: 170px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.th-meta {
+  width: 64px;
+  min-width: 64px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  padding: 5px 2px;
+}
+
+.th-ani-col {
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  text-align: center;
+  padding: 4px 0;
+  box-sizing: border-box;
+}
+
+.th-rot-label {
+  font-size: 8px;
+  font-weight: 700;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 24px;
+}
+
+.th-active-pair .th-rot-label {
+  color: #2563eb;
+}
+
+.th-genefamily-title {
+  text-align: left;
+  border-left: 2px solid #e2e8f0;
+  padding-left: 10px;
+}
+
+.gene-matrix-header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.gene-matrix-title-txt {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+/* 表体单元格与行高规范 */
+.composite-row {
+  border-bottom: 1px solid #f1f5f9;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  box-sizing: border-box;
+}
+
+.composite-row:hover {
+  background: #f8fafc;
+}
+
+.row-pair-selected {
+  background: #eff6ff;
+}
+
+.td-tree-col {
+  width: 60px;
+  min-width: 60px;
+  max-width: 60px;
+  text-align: center;
+  vertical-align: top;
+  padding: 0;
+  margin: 0;
+  position: relative;
+  box-sizing: border-box;
+  height: 100%;
+}
+
+.td-sample-name-col {
+  width: 170px;
+  min-width: 170px;
+  font-size: 10.5px;
+  color: #334155;
+  padding: 0 6px;
+  height: 24px;
+  line-height: 24px;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.td-meta-col {
+  width: 64px;
+  min-width: 64px;
+  text-align: center;
+  padding: 0 2px;
+  height: 24px;
+  box-sizing: border-box;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.meta-badge {
+  font-size: 7.5px;
+  font-weight: 800;
+  color: #ffffff;
+  padding: 1px 3.5px;
+  border-radius: 2px;
+  line-height: 1;
+}
+
+.bg-lytic { background: #10b981; }
+.bg-safe { background: #0284c7; }
+.bg-temperate { background: #f59e0b; }
+.bg-risk { background: #f43f5e; }
+
+.td-ani-val-cell {
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  line-height: 24px;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 8px;
+  font-weight: 700;
+  border: 0.5px solid #ffffff;
+  padding: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  aspect-ratio: 1 / 1;
+  transition: transform 0.1s ease;
+  white-space: nowrap;
+  letter-spacing: -0.4px;
+}
+
+.td-ani-val-cell.cell-ani-na {
+  color: #94a3b8 !important;
+  font-weight: 600;
+  background-color: #f8fafc;
+}
+
+.td-ani-val-cell:hover {
+  outline: 1.5px solid #1d4ed8;
+  outline-offset: -1px;
+  z-index: 5;
+  filter: brightness(1.08);
+}
+
+.cell-pair-highlight {
+  outline: 2px solid #ef4444;
+  outline-offset: -1px;
+  z-index: 4;
+}
+
+/* 基因方块 */
+.td-cluster-block {
+  width: 5px !important;
+  min-width: 5px !important;
+  max-width: 5px !important;
+  height: 24px;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box;
+  text-align: center;
+  vertical-align: middle;
+  border-left: 0.5px solid #f8fafc;
+}
+
+/* 零响应式开销的 GPU 硬件加速十字准星垂直导轨 */
+.crosshair-vertical-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  height: 100%;
+  pointer-events: none;
+  background-color: rgba(37, 99, 235, 0.12);
+  z-index: 10;
+  border-left: 0.5px solid rgba(37, 99, 235, 0.4);
+  border-right: 0.5px solid rgba(37, 99, 235, 0.4);
+  box-sizing: border-box;
+}
+
+.th-elastic-spacer,
+.td-elastic-spacer {
+  width: auto !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.gene-present-square {
+  width: 3.5px;
+  height: 16px;
+  border-radius: 1px;
+  margin: 0 auto;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: filter 0.1s ease, box-shadow 0.1s ease;
+}
+
+.gene-present-square:hover {
+  filter: brightness(1.2);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.35);
+  transform: scale(1.1);
+  z-index: 10;
+}
+
+/* 等长保守 */
+.gene-present-square.sq-conserved {
+  height: 16px;
+  border-radius: 1px;
+  opacity: 1.0;
+}
+
+/* 缺失截短变异 */
+.gene-present-square.sq-truncated {
+  height: 16px;
+  border-radius: 1px;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.6) 0,
+    rgba(255, 255, 255, 0.6) 1.5px,
+    transparent 1.5px,
+    transparent 3px
+  );
+  border: 0.5px dashed rgba(0, 0, 0, 0.3);
+}
+
+/* 插入延长变异 */
+.gene-present-square.sq-extended {
+  height: 18px;
+  border-radius: 1.5px;
+  border-top: 1.5px solid #0f172a;
+  border-bottom: 1.5px solid #0f172a;
+}
+
+.gene-absent-dot {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background-color: #cbd5e1;
+  margin: 0 auto;
+  opacity: 0.6;
+}
+
+/* 图注形状示例 */
+.sq-legend-conserved {
+  background-color: #0284c7;
+}
+
+.sq-legend-truncated {
+  background-color: #0284c7;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.6) 0,
+    rgba(255, 255, 255, 0.6) 1.5px,
+    transparent 1.5px,
+    transparent 3px
+  );
+  border: 0.5px dashed rgba(0, 0, 0, 0.3);
+}
+
+.sq-legend-extended {
+  background-color: #0284c7;
+  border-top: 1.5px solid #0f172a;
+  border-bottom: 1.5px solid #0f172a;
+}
+
+/* 悬停信息提示条 */
+.cluster-hover-info-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  padding: 5px 12px;
+  font-size: 11px;
+  color: #334155;
+  min-height: 28px;
+  box-sizing: border-box;
+}
+
+.cluster-hover-info-strip.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.strip-placeholder-txt {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.chip-cat {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #ffffff;
+  padding: 1.5px 6px;
+  border-radius: 3px;
+}
+
+.strip-prod-txt {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.hover-sample-tag {
+  color: #2563eb;
+  font-size: 10.5px;
+}
+
+.text-slate {
+  color: #64748b;
+}
+
+/* 多密度档位动态样式 */
+.density-spacious .composite-row {
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+}
+.density-spacious .td-sample-name-col,
+.density-spacious .td-meta-col,
+.density-spacious .td-cluster-block {
+  height: 36px;
+  line-height: 36px;
+}
+.density-spacious .th-ani-col,
+.density-spacious .td-ani-val-cell {
+  width: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  line-height: 36px !important;
+}
+.density-spacious .th-rot-label {
+  max-width: 36px;
+  font-size: 9px;
+}
+.density-spacious .gene-present-square {
+  height: 24px;
+}
+.density-spacious .gene-present-square.sq-conserved,
+.density-spacious .gene-present-square.sq-truncated {
+  height: 24px;
+}
+.density-spacious .gene-present-square.sq-extended {
+  height: 28px;
+}
+
+.density-compact .composite-row {
+  height: 17px;
+  min-height: 17px;
+  max-height: 17px;
+}
+.density-compact .td-sample-name-col,
+.density-compact .td-meta-col,
+.density-compact .td-cluster-block {
+  height: 17px;
+  line-height: 17px;
+  font-size: 9.5px;
+}
+.density-compact .th-ani-col,
+.density-compact .td-ani-val-cell {
+  width: 17px !important;
+  min-width: 17px !important;
+  max-width: 17px !important;
+  height: 17px !important;
+  min-height: 17px !important;
+  max-height: 17px !important;
+  line-height: 17px !important;
+  font-size: 7.5px;
+}
+.density-compact .th-rot-label {
+  max-width: 17px;
+  font-size: 7px;
+}
+.density-compact .gene-present-square {
+  height: 12px;
+}
+.density-compact .gene-present-square.sq-conserved,
+.density-compact .gene-present-square.sq-truncated {
+  height: 12px;
+}
+.density-compact .gene-present-square.sq-extended {
+  height: 14px;
+}
+
+.density-ultra .composite-row {
+  height: 11px;
+  min-height: 11px;
+  max-height: 11px;
+}
+.density-ultra .td-sample-name-col,
+.density-ultra .td-meta-col,
+.density-ultra .td-cluster-block {
+  height: 11px;
+  line-height: 11px;
+  font-size: 8px;
+  padding: 0 2px;
+}
+.density-ultra .th-ani-col,
+.density-ultra .td-ani-val-cell {
+  width: 11px !important;
+  min-width: 11px !important;
+  max-width: 11px !important;
+  height: 11px !important;
+  min-height: 11px !important;
+  max-height: 11px !important;
+  line-height: 11px !important;
+  font-size: 6.5px;
+  padding: 0;
+}
+.density-ultra .th-rot-label {
+  max-width: 11px;
+}
+.density-ultra .gene-present-square {
+  height: 8px;
+  width: 2.5px;
+}
+.density-ultra .gene-present-square.sq-conserved,
+.density-ultra .gene-present-square.sq-truncated {
+  height: 8px;
+}
+.density-ultra .gene-present-square.sq-extended {
+  height: 10px;
+}
