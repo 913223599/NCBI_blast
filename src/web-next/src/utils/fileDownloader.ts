@@ -133,7 +133,9 @@ export async function downloadFileFromBlob(
     setTimeout(() => {
       try {
         URL.revokeObjectURL(blobUrl);
-      } catch {}
+      } catch (revokeErr) {
+        log.debug('释放 Blob URL 失败:', revokeErr);
+      }
     }, 60000);
 
     return { success: true };

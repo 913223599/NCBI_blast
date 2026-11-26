@@ -96,11 +96,14 @@ function onEvent(handler: EventHandler): () => void {
 
   // 如果桥接没好，先存起来
   let cleanup: (() => void) | null = null
+  let disposed = false
   _readyCallbacks.push(() => {
+    if (disposed) return
     cleanup = electronOnEvent(handler)
   })
 
   return () => {
+    disposed = true
     if (cleanup) cleanup()
   }
 }

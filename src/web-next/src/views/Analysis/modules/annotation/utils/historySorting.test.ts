@@ -6,7 +6,7 @@ import {
   parseDate, 
   formatDisplayTime, 
   sortAnnotationTasks
-} from './historySorting.ts';
+} from './historySorting';
 
 describe('historySorting 模块测试', () => {
   describe('parseDate 日期解析', () => {

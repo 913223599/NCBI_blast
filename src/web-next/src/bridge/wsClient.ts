@@ -2,13 +2,12 @@
  * WebSocket 实时事件通道与信号槽管理
  * 负责断线重连、心跳定时清理及全局事件分发。
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { WS_URL } from './httpClient'
 import { createLogger } from '../utils/logger'
 
 const wsLog = createLogger('ElectronBridge:WS')
 
-export type EventHandler = (eventType: string, data: any) => void
+export type EventHandler = (eventType: string, data: unknown) => void
 
 const eventHandlers: EventHandler[] = []
 let wsConnection: WebSocket | null = null
@@ -27,14 +26,32 @@ function stopWsHeartbeat(): void {
 
 /** 轻量信号订阅器 */
 export class BridgeSignal {
-  private handlers: Array<(...args: any[]) => void> = []
+  private handlers: Array<(...args: never[]) => void> = []
 
-  connect(handler: (...args: any[]) => void): void {
-    this.handlers.push(handler)
+  connect(handler: (...args: never[]) => void): () => void {
+    if (!this.handlers.includes(handler)) {
+      this.handlers.push(handler)
+    }
+    return () => {
+      this.disconnect(handler)
+    }
   }
 
-  emit(...args: any[]): void {
-    for (const h of this.handlers) h(...args)
+  disconnect(handler: (...args: never[]) => void): void {
+    const idx = this.handlers.indexOf(handler)
+    if (idx >= 0) {
+      this.handlers.splice(idx, 1)
+    }
+  }
+
+  clear(): void {
+    this.handlers.length = 0
+  }
+
+  emit(...args: unknown[]): void {
+    for (const h of [...this.handlers]) {
+      ;(h as (...callArgs: unknown[]) => void)(...args)
+    }
   }
 }
 
@@ -74,17 +91,13 @@ export function connectWebSocket(): void {
       const msg = JSON.parse(raw)
       if (msg.type === 'pong') return
 
-      for (const handler of eventHandlers) {
+      for (const handler of [...eventHandlers]) {
         handler(msg.type, msg.data)
       }
 
       if (msg.type === 'data_updated') {
         bridgeSignals.sync_event.emit(msg.data)
-      } else if (msg.type === 'single_result_update') {
-        bridgeSignals.blast_event.emit(msg.type, JSON.stringify(msg.data))
-      }
-
-      if (msg.type === 'recall_result') {
+      } else if (msg.type === 'recall_result') {
         bridgeSignals.recall_event.emit(msg.data.success, msg.data.message || msg.data.recalled_name)
       } else if (
         ['translation_done', 'single_result_update', 'task_progress', 'batch_translation_result'].includes(msg.type)

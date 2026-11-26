@@ -2,7 +2,9 @@
 import { ref, onMounted } from 'vue'
 import { getBridge } from '../../bridge'
 import { useAppStore } from '../../stores/app'
+import { createLogger } from '../../utils/logger'
 
+const logger = createLogger('AITranslationPanel')
 const appStore = useAppStore()
 
 const apiKey = ref('')
@@ -25,7 +27,9 @@ function loadAISettings() {
           else if (models.length > 0) selectedModel.value = models[0].key
         })
       }
-    } catch (e) { }
+    } catch (e) {
+      logger.warn('解析 AI 模型列表失败:', e)
+    }
   })
 }
 

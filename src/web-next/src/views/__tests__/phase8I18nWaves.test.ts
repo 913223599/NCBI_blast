@@ -20,6 +20,7 @@ describe('Phase 8 Wave 2-4 全站核心业务视图中英双语即时切换测�
     vi.spyOn(studioApi, 'getSources').mockResolvedValue({
       phylo_jobs: [],
       annotation_tasks: [],
+      sample_presets: [],
     })
   })
 

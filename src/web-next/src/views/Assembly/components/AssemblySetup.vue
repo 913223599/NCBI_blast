@@ -6,6 +6,13 @@ import { ref, computed } from 'vue';
 import { getBridge } from '../../../bridge';
 import { useI18n } from '../../../locales';
 import type { AssemblyRunParams } from '../types';
+import {
+  extractCleanSampleName,
+  inferTechAndType,
+  type SampleBioType,
+  type SequencingTech,
+  type AssemblyMode,
+} from '../utils/sampleInference';
 import { createLogger } from '../../../utils/logger'
 const logger = createLogger('AssemblySetup')
 
@@ -22,9 +29,9 @@ const emit = defineEmits<{
 
 // 基础参数
 const taskName = ref<string>(`Assembly_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`);
-const sampleType = ref<'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME'>('BACTERIA');
-const tech = ref<'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' | 'HYBRID'>('ILLUMINA');
-const mode = ref<'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained' | 'hybrid'>('isolate');
+const sampleType = ref<SampleBioType>('BACTERIA');
+const tech = ref<SequencingTech>('ILLUMINA');
+const mode = ref<AssemblyMode>('isolate');
 const threads = ref<number>(Math.max(2, (navigator.hardwareConcurrency || 8) - 2));
 
 const showAdvanced = ref<boolean>(false);
@@ -59,63 +66,6 @@ const canSubmit = computed(() => {
   }
   return !!r1File.value;
 });
-
-// 核心函数：深度剥离扩展名与读长修饰词，提取纯净样本名
-function extractCleanSampleName(filename: string): string {
-  let name = filename;
-  // 1. 循环剥离连续已知扩展名
-  while (true) {
-    const nextName = name.replace(/\.(fastq|fq|fasta|fa|fna|gz|tar|ab1|txt|bz2|zip)$/i, '');
-    if (nextName === name) break;
-    name = nextName;
-  }
-  // 2. 循环剥离末尾读长修饰与清洗标记
-  while (true) {
-    const nextName = name.replace(/[._-](R1|R2|1|2|read1|read2|forward|reverse|clean|raw|filtered|trimmed|val_1|val_2|subsample|pass|paired|ont|nanopore|hifi|pacbio|mgi|illumina|ngs)$/i, '');
-    if (nextName === name) break;
-    name = nextName;
-  }
-  return name.trim() || filename;
-}
-
-// 智能分析测序技术平台与生物类型
-function inferTechAndType(files: Array<{ name: string }>, r1Name: string, r2Name?: string, lrName?: string) {
-  const combinedNames = [r1Name, r2Name || '', lrName || '', ...files.map(f => f.name)].join(' ').toLowerCase();
-
-  // 1. 测序技术平台推断
-  let detectedTech: 'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' | 'HYBRID' = 'ILLUMINA';
-  const hasLongReads = combinedNames.includes('ont') || combinedNames.includes('nanopore') || combinedNames.includes('hifi') || combinedNames.includes('pacbio') || combinedNames.includes('minion') || combinedNames.includes('promethion') || combinedNames.includes('gridion') || combinedNames.includes('dorado') || combinedNames.includes('guppy') || combinedNames.includes('_lr') || combinedNames.includes('.lr.');
-  const hasShortReads = combinedNames.includes('illumina') || combinedNames.includes('mgi') || combinedNames.includes('_1.') || combinedNames.includes('_2.') || combinedNames.includes('_r1') || combinedNames.includes('_r2') || combinedNames.includes('read1') || combinedNames.includes('read2') || combinedNames.includes('forward') || combinedNames.includes('reverse');
-
-  if (lrName || (hasLongReads && hasShortReads) || (files.length >= 3 && hasLongReads)) {
-    detectedTech = 'HYBRID';
-  } else if (combinedNames.includes('hifi') || combinedNames.includes('pacbio') || combinedNames.includes('ccs') || combinedNames.includes('sequel') || combinedNames.includes('revio')) {
-    detectedTech = 'PACBIO_HIFI';
-  } else if (hasLongReads) {
-    detectedTech = 'NANOPORE';
-  } else if (files.length >= 2 || r2Name || hasShortReads) {
-    detectedTech = 'ILLUMINA';
-  } else if (combinedNames.endsWith('.zip') || combinedNames.includes('.zip')) {
-    detectedTech = 'NANOPORE';
-  }
-
-  // 2. 样本生物类型推断
-  let detectedSampleType: 'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME' = 'BACTERIA';
-  let detectedMode: 'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained' | 'hybrid' = detectedTech === 'HYBRID' ? 'hybrid' : 'isolate';
-
-  if (combinedNames.includes('phage') || combinedNames.includes('bacteriophage') || combinedNames.includes('噬菌体') || combinedNames.includes('phi')) {
-    detectedSampleType = 'PHAGE';
-    detectedMode = detectedTech === 'HYBRID' ? 'hybrid' : 'isolate';
-  } else if (combinedNames.includes('virus') || combinedNames.includes('viral') || combinedNames.includes('病毒')) {
-    detectedSampleType = 'VIRUS';
-    detectedMode = detectedTech === 'HYBRID' ? 'hybrid' : 'isolate';
-  } else if (combinedNames.includes('meta') || combinedNames.includes('metagenome') || combinedNames.includes('宏基因组') || combinedNames.includes('microbiome') || combinedNames.includes('env')) {
-    detectedSampleType = 'METAGENOME';
-    detectedMode = detectedTech === 'HYBRID' ? 'hybrid' : 'metagenome';
-  }
-
-  return { detectedTech, detectedSampleType, detectedMode };
-}
 
 // 处理文件拖拽放置
 async function handleFileDrop(e: DragEvent) {

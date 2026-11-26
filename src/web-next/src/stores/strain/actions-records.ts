@@ -333,7 +333,9 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       if (record) {
         try {
           getBridge().db_save_record(record)
-        } catch (e) {}
+        } catch (e) {
+          logger.error('保存菌株记录到后端失败:', e)
+        }
       }
       
       applyFilters()
@@ -348,7 +350,9 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     if (activeRecord.value?.id === id) activeRecord.value = null
     try {
       getBridge().db_delete_record(id)
-    } catch (e) {}
+    } catch (e) {
+      logger.error('删除菌株记录失败:', e)
+    }
     applyFilters()
   }
 
@@ -362,7 +366,9 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     })
     try {
       getBridge().db_delete_records_batch(ids)
-    } catch (e) {}
+    } catch (e) {
+      logger.error('批量删除菌株记录失败:', e)
+    }
 
     applyFilters()
   }

@@ -219,9 +219,9 @@ export const phyloApi = {
   subscribeEvents(
     handler: (eventType: string, data: Record<string, unknown>) => void
   ): () => void {
-    return onEvent((eventType: string, data: Record<string, unknown>) => {
-      if (eventType.startsWith('phylo_')) {
-        handler(eventType, data)
+    return onEvent((eventType: string, data: unknown) => {
+      if (eventType.startsWith('phylo_') && data && typeof data === 'object') {
+        handler(eventType, data as Record<string, unknown>)
       }
     })
   },

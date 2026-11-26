@@ -100,16 +100,22 @@ async function refreshTaxStatus() {
     // 如果正在构建中，启动轮询
     if (result?.building && !taxPollTimer) {
       taxPollTimer = setInterval(async () => {
-        const updated = (await getBridge().taxonomy_status()) as TaxonomyDbStatus | null
-        taxStatus.value = updated
-        if (!updated?.building) {
-          if (taxPollTimer) clearInterval(taxPollTimer)
-          taxPollTimer = null
-          loadBioDatabases() // 刷新相关数据
+        try {
+          const updated = (await getBridge().taxonomy_status()) as TaxonomyDbStatus | null
+          taxStatus.value = updated
+          if (!updated?.building) {
+            if (taxPollTimer) clearInterval(taxPollTimer)
+            taxPollTimer = null
+            loadBioDatabases() // 刷新相关数据
+          }
+        } catch (pollErr) {
+          logger.warn('轮询 NCBI 物种库状态失败:', pollErr)
         }
       }, 2000)
     }
-  } catch (e) { }
+  } catch (e) {
+    logger.warn('获取 NCBI 物种库状态失败:', e)
+  }
 }
 
 async function triggerTaxUpdate() {
@@ -236,11 +242,13 @@ onMounted(() => {
 
   // 订阅广播事件
   eventCleanup = onEvent((type, data) => {
-    if (type === 'db_update_event' && data.db_id) {
-      dbUpdates.value[data.db_id] = data
-      if (data.status === 'success') {
+    if (type === 'db_update_event' && data && typeof data === 'object' && 'db_id' in data) {
+      const progress = data as DbUpdateProgress
+      if (!progress.db_id) return
+      dbUpdates.value[progress.db_id] = progress
+      if (progress.status === 'success') {
         loadBioDatabases()
-        appStore.showNotification(`${data.db_id} 更新完成`, 'success')
+        appStore.showNotification(`${progress.db_id} 更新完成`, 'success')
       }
     }
   })
