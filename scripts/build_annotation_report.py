@@ -10,7 +10,7 @@
 - 每张数据表下方标注数据来源文件，正文引用锚点稳定（方法描述 m1-m5 措辞固定）。
 
 用法示例：
-  python build_report.py --data "F:\\NCBI blast\\results\\annotations\\ANNO_5A8C0B32_RE2" \
+  python scripts/build_annotation_report.py --data "results/annotations/ANNO_5A8C0B32_RE2" \
       --out "噬菌体基因组注释报告_ANNO_5A8C0B32_RE2.docx" \
       --extra-notes "原始数据中的 scaffold_2 短片段已手动去除，不纳入本次分析"
 """

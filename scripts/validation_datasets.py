@@ -257,7 +257,7 @@ def _sample_unseen_local_stratified(
     excluded_accs: Set[str],
 ) -> List[Dict[str, object]]:
     """
-    从 F:\\Phage data 本地配对库中按扩展 ICTV 科轮转 + 宿主分散抽取分层未测样本，
+    从本地配对库（PHAGE_DATA_ROOT）中按扩展 ICTV 科轮转 + 宿主分散抽取分层未测样本，
     严格保证与 excluded_accs 零交集。
     """
     local_fasta = {p.stem.split(".")[0]: p for p in LOCAL_FASTA_DIR.glob("*.fasta")}

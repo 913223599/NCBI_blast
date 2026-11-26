@@ -1,0 +1,22 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+norecursedirs = [
+    ".git",
+    ".venv",
+    "archive",
+    "data",
+    "database",
+    "dist",
+    "electron-shell",
+    "models",
+    "node_modules",
+    "quast",
+    "results",
+    "scratch",
+    "test_data",
+    "third_party",
+    "tools",
+    "vendor",
+]
+addopts = "-ra"

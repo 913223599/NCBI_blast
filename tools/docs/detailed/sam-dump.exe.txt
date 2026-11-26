@@ -1,4 +1,0 @@
-Tool: sam-dump.exe
-========================================
-
-No help available.

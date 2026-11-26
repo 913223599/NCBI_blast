@@ -1,4 +1,0 @@
-Tool: blast2cons.exe
-========================================
-
-No help available.

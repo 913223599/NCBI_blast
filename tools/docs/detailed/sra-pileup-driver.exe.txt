@@ -1,4 +1,0 @@
-Tool: sra-pileup-driver.exe
-========================================
-
-No help available.

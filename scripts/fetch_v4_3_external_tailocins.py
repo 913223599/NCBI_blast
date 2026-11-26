@@ -2,7 +2,7 @@
 """
 从公开 NCBI RefSeq / GenBank 拉取跨属非同源 Tailocin / Diffocin / PVC / Afp / eCIS / ICE 硬负样本基因座，
 并执行严格的“菌株黑名单 + Gold-8/Unseen/Test 双向氨基酸 5-mer 同源去重 + 无衣壳/末端酶校验”，
-确保零数据泄露后输出至 F:\\Phage data\\training\\v4_3_external\\。
+确保零数据泄露后输出至外部训练目录（可通过 --out-dir 或 PHAGE_DATA_ROOT 指定）。
 """
 from __future__ import annotations
 

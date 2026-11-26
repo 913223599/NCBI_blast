@@ -245,6 +245,8 @@ src/test_shm.py
 !/scripts/README.md
 !/scripts/verify_all.ps1
 !/scripts/sync_version.mjs
+!/scripts/maintenance/
+!/scripts/maintenance/*.py
 .lingma/rules/
 
 # ------------------------------------------------------------------------------
@@ -264,11 +266,14 @@ ehthumbs.db
 $RECYCLE.BIN/
 
 # ------------------------------------------------------------------------------
-# 11. 预编译二进制工具与压缩包
+# 11. 预编译二进制工具、第三方外置源码库与压缩包
 # ------------------------------------------------------------------------------
 vendor/
+quast/
 tools/mafft/
 tools/ncbi_dist/
+tools/datasets
+tools/docs/
 tools/iqtree3_win/
 tools/iqtree_new/
 tools/miniconda/

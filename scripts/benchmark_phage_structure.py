@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import os
 import statistics
 import sys
 import time
@@ -38,8 +39,9 @@ from src.analysis.phage_structure.sequence_annotator import (  # noqa: E402
 from src.analysis.phage_structure.tail_finder_adapter import run_phagetailfinder_on_contigs  # noqa: E402
 from src.analysis.phage_structure.tmp_analyzer import select_and_analyze_tmps  # noqa: E402
 
-LOCAL_FASTA_DIR = Path(r"F:\Phage data\fasta")
-BENCH_DIR = Path(r"F:\Phage data\benchmarks\phage_structure")
+PHAGE_DATA_ROOT = Path(os.environ.get("PHAGE_DATA_ROOT", str(PROJECT_ROOT / "data" / "phage_data")))
+LOCAL_FASTA_DIR = PHAGE_DATA_ROOT / "fasta"
+BENCH_DIR = PHAGE_DATA_ROOT / "benchmarks" / "phage_structure"
 TEM_FASTA_DIR = BENCH_DIR / "tem_refs"
 RESULTS_DIR = PROJECT_ROOT / "results" / "benchmarks" / "phage_structure"
 TEM_TRUTH_TSV = PROJECT_ROOT / "tests" / "fixtures" / "phage_structure" / "tem_truth.tsv"
@@ -168,7 +170,7 @@ def ensure_fasta_for_acc(acc_base: str, local_index: Dict[str, Path]) -> Optiona
 
 
 def sample_120_ictv_genomes(local_index: Dict[str, Path], per_class: int = 30) -> List[Dict[str, str]]:
-    """从 INPHARED x 本地 F:\\Phage data\\fasta 严格分层轮转抽取 120 株（每科/每宿主充分分散）。"""
+    """从 INPHARED x 本地 PHAGE_DATA_ROOT/fasta 严格分层轮转抽取 120 株（每科/每宿主充分分散）。"""
     inphared_tsv = PROJECT_ROOT / "database" / "pharokka_db" / "9Aug2025_data.tsv"
     pools: Dict[str, Dict[str, List[Dict[str, str]]]] = defaultdict(lambda: defaultdict(list))
 
