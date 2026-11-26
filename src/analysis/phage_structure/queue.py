@@ -10,27 +10,14 @@
 from __future__ import annotations
 
 import asyncio
-import gc
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from ...backend.broadcaster import broadcaster
+from ...core.broadcaster import broadcaster
+from ...core.task_db import release_gpu_memory
 from .db import PhageStructureDB, phage_structure_db
 
 logger = logging.getLogger("analysis.phage_structure.queue")
-
-
-def release_gpu_memory() -> None:
-    gc.collect()
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            if hasattr(torch.cuda, "ipc_collect"):
-                torch.cuda.ipc_collect()
-    except Exception:
-        pass
 
 
 class PhageStructureQueue:

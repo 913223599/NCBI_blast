@@ -564,9 +564,9 @@ class BlastManager:
             if auto_task_id:
                 try:
                     self.logger.info(f"[AutoBackfill] 触发自动回填任务: {auto_task_id}")
-                    from src.backend.utils.assembly_storage import AssemblyStorage
-                    from src.backend.utils.assembly_gbk_fixer import GBKAnnotationBackfiller
-                    from src.backend.utils.blast_utils import parse_blast_csv
+                    from src.core.assembly_storage import AssemblyStorage
+                    from src.core.assembly_gbk_fixer import GBKAnnotationBackfiller
+                    from src.core.blast_utils import parse_blast_csv
                     
                     # 1. 搜集所有 Hit 结果
                     hits_to_backfill = {}

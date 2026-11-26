@@ -12,8 +12,8 @@ from typing import Dict, Any, Optional
 from .core.base import PipelineContext
 from .steps.assembler import AssemblerStep
 from .utils.file_handler import AssemblyFileHandler
-from src.backend.broadcaster import broadcaster
-from src.backend.utils.assembly_db import assembly_db
+from src.core.broadcaster import broadcaster
+from src.core.assembly_db import assembly_db
 
 
 class AssemblyManager:

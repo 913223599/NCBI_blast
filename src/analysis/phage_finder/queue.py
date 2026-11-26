@@ -6,28 +6,14 @@
 支持服务重启后的断点自愈、运行前/后 CUDA 显存回收与 WebSocket 实时队列广播。
 """
 import asyncio
-import gc
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from ...backend.broadcaster import broadcaster
+from ...core.broadcaster import broadcaster
+from ...core.task_db import release_gpu_memory
 from .db import PhageDiscoveryDB, phage_discovery_db
 
 logger = logging.getLogger("PhageDiscoveryQueue")
-
-
-def release_gpu_memory() -> None:
-    """在推理前后强制回收 Python 对象与 CUDA 显存缓存，防止显存溢出至共享内存。"""
-    gc.collect()
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            if hasattr(torch.cuda, "ipc_collect"):
-                torch.cuda.ipc_collect()
-    except Exception:
-        pass
 
 
 class PhageDiscoveryQueue:

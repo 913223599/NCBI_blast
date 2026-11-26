@@ -146,10 +146,11 @@ class BlastExecutor:
                 else:
                     logging.warning(f"[PhageScope] 本地库索引未就绪: {ps_index}")
 
-            # 优先检查是否为已部署的本地生物数据库 (16S/18S)
-            from ..backend.utils.bio_db_manager import bio_db_manager
-            
-            if database in bio_db_manager.dbs:
+            # 优先检查是否为已部署的本地生物数据库 (16S/18S)，经由 core 服务注册表解耦 backend 反向依赖
+            from ..core.service_registry import get_bio_db_manager
+
+            bio_db_manager = get_bio_db_manager()
+            if bio_db_manager is not None and database in bio_db_manager.dbs:
                 db_obj = bio_db_manager.dbs[database]
                 if db_obj.get_status().get('installed'):
                     db_ver = db_obj.config.get("version", "latest")

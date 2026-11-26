@@ -1,31 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-前噬菌体发现任务 SQLite 持久化层 (WAL 模式)
+前噬菌体发现任务 SQLite 持久化层（继承 src.core.task_db.BaseTaskDB，WAL 模式）
 """
+from __future__ import annotations
+
 import json
 import sqlite3
 from contextlib import closing
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from ...core.task_db import BaseTaskDB
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-class PhageDiscoveryDB:
+class PhageDiscoveryDB(BaseTaskDB):
     """持久化管理前噬菌体扫描任务元信息、队列状态与产物索引。"""
 
-    def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = Path(db_path) if db_path is not None else (PROJECT_ROOT / "database" / "phage_discovery.db")
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_db()
+    table_name = "phage_scan_tasks"
+    id_column = "task_id"
+    json_columns = ("summary_json", "files_json")
+    pop_json_columns = True
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        return conn
+    def __init__(self, db_path: Optional[Path] = None):
+        resolved = Path(db_path) if db_path is not None else (PROJECT_ROOT / "database" / "phage_discovery.db")
+        super().__init__(resolved)
 
     def _init_db(self) -> None:
         with closing(self._connect()) as conn:
@@ -64,7 +64,7 @@ class PhageDiscoveryDB:
         apply_protein_gate: bool,
         status: str = "queued",
     ) -> bool:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = self._now_str()
         with closing(self._connect()) as conn:
             conn.execute(
                 """
@@ -90,21 +90,6 @@ class PhageDiscoveryDB:
             conn.commit()
         return True
 
-    def update_progress(self, task_id: str, progress: int, current_step: str, status: str = "running") -> None:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with closing(self._connect()) as conn:
-            conn.execute(
-                """
-                UPDATE phage_scan_tasks
-                SET progress = ?, current_step = ?,
-                    status = CASE WHEN status IN ('completed', 'failed', 'cancelled') THEN status ELSE ? END,
-                    updated_at = ?
-                WHERE task_id = ?
-                """,
-                (progress, current_step, status, now_str, task_id),
-            )
-            conn.commit()
-
     def mark_completed(
         self,
         task_id: str,
@@ -114,7 +99,7 @@ class PhageDiscoveryDB:
         model_version: Optional[str] = None,
         device_used: Optional[str] = None,
     ) -> None:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = self._now_str()
         with closing(self._connect()) as conn:
             conn.execute(
                 """
@@ -143,75 +128,22 @@ class PhageDiscoveryDB:
             conn.commit()
 
     def mark_failed(self, task_id: str, error_msg: str) -> None:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with closing(self._connect()) as conn:
-            conn.execute(
-                """
-                UPDATE phage_scan_tasks
-                SET status = 'failed', error_msg = ?, current_step = '扫描执行失败', updated_at = ?
-                WHERE task_id = ?
-                """,
-                (error_msg, now_str, task_id),
-            )
-            conn.commit()
+        self._mark_failed_with_step(task_id, error_msg, "扫描执行失败")
 
     def mark_cancelled(self, task_id: str) -> None:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with closing(self._connect()) as conn:
-            conn.execute(
-                """
-                UPDATE phage_scan_tasks
-                SET status = 'cancelled', current_step = '任务已取消', updated_at = ?
-                WHERE task_id = ?
-                """,
-                (now_str, task_id),
-            )
-            conn.commit()
+        self._mark_cancelled_with_step(task_id, "任务已取消")
 
     def reset_interrupted_tasks(self, exclude_task_ids: Optional[List[str]] = None) -> None:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        excludes = [tid for tid in (exclude_task_ids or []) if tid]
-        with closing(self._connect()) as conn:
-            if excludes:
-                placeholders = ",".join("?" for _ in excludes)
-                conn.execute(
-                    f"""
-                    UPDATE phage_scan_tasks
-                    SET status = 'cancelled', current_step = '服务重启中断，任务已自动安全重置', updated_at = ?
-                    WHERE status IN ('running', 'queued') AND task_id NOT IN ({placeholders})
-                    """,
-                    [now_str, *excludes],
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE phage_scan_tasks
-                    SET status = 'cancelled', current_step = '服务重启中断，任务已自动安全重置', updated_at = ?
-                    WHERE status IN ('running', 'queued')
-                    """,
-                    (now_str,),
-                )
-            conn.commit()
+        self._reset_interrupted_with_statuses(
+            statuses=("running", "queued"),
+            step_label="服务重启中断，任务已自动安全重置",
+            exclude_task_ids=exclude_task_ids,
+        )
 
-    def _row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:
-        d = dict(row)
-        for key in ("summary_json", "files_json"):
-            raw = d.pop(key, None) or "{}"
-            target_key = key.replace("_json", "")
-            try:
-                d[target_key] = json.loads(raw)
-            except Exception:
-                d[target_key] = {}
-        d["apply_protein_gate"] = bool(d.get("apply_protein_gate", 0))
-        return d
-
-    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
-        with closing(self._connect()) as conn:
-            row = conn.execute(
-                "SELECT * FROM phage_scan_tasks WHERE task_id = ?",
-                (task_id,),
-            ).fetchone()
-            return self._row_to_dict(row) if row else None
+    def _deserialize_row(self, row: sqlite3.Row) -> Dict[str, Any]:
+        data = super()._deserialize_row(row)
+        data["apply_protein_gate"] = bool(data.get("apply_protein_gate", 0))
+        return data
 
     def list_tasks(self, limit: int = 200) -> List[Dict[str, Any]]:
         with closing(self._connect()) as conn:
@@ -219,13 +151,7 @@ class PhageDiscoveryDB:
                 "SELECT * FROM phage_scan_tasks ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-            return [self._row_to_dict(r) for r in rows]
-
-    def delete_task(self, task_id: str) -> None:
-        with closing(self._connect()) as conn:
-            conn.execute("DELETE FROM phage_scan_tasks WHERE task_id = ?", (task_id,))
-            conn.commit()
+            return [self._deserialize_row(r) for r in rows]
 
 
 phage_discovery_db = PhageDiscoveryDB()
-

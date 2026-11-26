@@ -12,7 +12,7 @@ from ..utils.resource_guard import get_total_logical_cores
 
 from Bio.Blast import NCBIXML
 from ..workbench.models.tool_config import ToolConfig
-from ..backend.utils.compat import get_short_path_name
+from ..core.compat import get_short_path_name
 
 
 def compute_local_blast_resource_plan(

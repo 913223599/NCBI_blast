@@ -623,5 +623,9 @@ class BioDbManager:
     def list_all_status(self) -> List[Dict[str, Any]]:
         return [db.get_status() for db in self.dbs.values()]
 
-# 全局单例
+# 全局单例（同步注册至 src/core 服务注册表，供 blast 等领域引擎无循环调用）
 bio_db_manager = BioDbManager()
+
+from ...core.service_registry import register_bio_db_manager  # noqa: E402
+
+register_bio_db_manager(bio_db_manager)

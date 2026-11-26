@@ -12,7 +12,8 @@ import logging
 from typing import Dict, Any, Callable, Awaitable, List, Optional, Set
 
 from .db import annotation_db
-from ...backend.broadcaster import broadcaster
+from ...core.broadcaster import broadcaster
+from ...core.task_db import release_gpu_memory
 
 logger = logging.getLogger("analysis.annotation.queue")
 
@@ -56,13 +57,7 @@ class AnnotationQueue:
 
     def _clean_gpu_cache(self):
         """安全回收 GPU 显存，防止混合计算库显存溢出"""
-        try:
-            import torch  # type: ignore
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.ipc_collect()
-        except Exception:
-            pass
+        release_gpu_memory()
 
     async def start_workers(self, processor_func: Callable[[Dict[str, Any]], Awaitable[None]]):
         """
