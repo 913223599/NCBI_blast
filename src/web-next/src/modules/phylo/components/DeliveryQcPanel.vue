@@ -51,7 +51,7 @@ function downloadItol(filename: string) {
             <span v-if="qc.best_model_bic !== null"> | BIC: {{ qc.best_model_bic }}</span>
           </div>
         </div>
-        <button class="btn-zip" @click="downloadDeliveryZip()">打包交付 ZIP</button>
+        <button type="button" class="btn-zip" @click="downloadDeliveryZip()">打包交付 ZIP</button>
       </div>
 
       <!-- 6 项交付前质检清单 -->
@@ -68,6 +68,7 @@ function downloadItol(filename: string) {
 
       <!-- 如果 ANI 与树冲突或存在警告，支持一键退回调整参考集 -->
       <button
+        type="button"
         v-if="!qc.ani_tree_consistent || qc.overall_status !== 'pass'"
         class="btn-recheck"
         @click="emit('back-to-refs')"
@@ -79,13 +80,13 @@ function downloadItol(filename: string) {
       <div class="statement-box">
         <div class="st-head">
           <span>ICTV 规范分类结论草稿 (中文)</span>
-          <button class="btn-mini" @click="copyText(qc.conclusion_zh, '中文结论')">复制</button>
+          <button type="button" class="btn-mini" @click="copyText(qc.conclusion_zh, '中文结论')">复制</button>
         </div>
         <div class="st-text">{{ qc.conclusion_zh }}</div>
 
         <div class="st-head" style="margin-top: 8px">
           <span>Manuscript Statement (English)</span>
-          <button class="btn-mini" @click="copyText(qc.conclusion_en, '英文结论')">Copy</button>
+          <button type="button" class="btn-mini" @click="copyText(qc.conclusion_en, '英文结论')">Copy</button>
         </div>
         <div class="st-text">{{ qc.conclusion_en }}</div>
       </div>
@@ -100,6 +101,7 @@ function downloadItol(filename: string) {
         </div>
         <div class="itol-grid">
           <button
+            type="button"
             v-for="fname in qc.itol_files"
             :key="fname"
             class="btn-itol"

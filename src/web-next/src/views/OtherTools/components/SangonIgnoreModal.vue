@@ -71,7 +71,7 @@ function handleSaveKeywords(): void {
     <div class="modal-card wide">
       <div class="modal-header">
         <h3>跳过与忽略规则配置</h3>
-        <button class="close-btn" @click="emit('close')">&times;</button>
+        <button type="button" class="close-btn" @click="emit('close')">&times;</button>
       </div>
 
       <div class="modal-body">
@@ -97,6 +97,7 @@ function handleSaveKeywords(): void {
                 class="text-input"
               />
               <button
+                type="button"
                 class="btn-primary"
                 :disabled="busy || !batchOrderInput.trim()"
                 @click="handleBatchAdd"
@@ -134,6 +135,7 @@ function handleSaveKeywords(): void {
                   <td class="muted">{{ item.ignored_at || '-' }}</td>
                   <td>
                     <button
+                      type="button"
                       class="btn-mini"
                       :disabled="busy"
                       @click="emit('unignore', item.order_no)"
@@ -160,7 +162,7 @@ function handleSaveKeywords(): void {
               placeholder="已发货, 物流, 快递, 发票, 对账, 付款"
               class="text-input"
             />
-            <button class="btn-outline" :disabled="busy" @click="handleSaveKeywords">
+            <button type="button" class="btn-outline" :disabled="busy" @click="handleSaveKeywords">
               保存关键词
             </button>
           </div>
@@ -168,7 +170,7 @@ function handleSaveKeywords(): void {
       </div>
 
       <div class="modal-footer">
-        <button class="btn-outline" @click="emit('close')">关闭</button>
+        <button type="button" class="btn-outline" @click="emit('close')">关闭</button>
       </div>
     </div>
   </div>

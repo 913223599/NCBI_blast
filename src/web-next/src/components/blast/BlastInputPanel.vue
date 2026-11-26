@@ -5,6 +5,8 @@ import { useAppStore } from '../../stores/app'
 import { getBridge, apiPost } from '../../bridge/electron-bridge'
 import { useI18n } from '../../locales'
 import UniversalUpload from '../common/UniversalUpload.vue'
+import { createLogger } from '../../utils/logger'
+const logger = createLogger('BlastInputPanel')
 
 const blast = useBlastStore()
 const appStore = useAppStore()
@@ -35,7 +37,7 @@ async function onUploadSuccess(filePaths: string[]) {
         appStore.showNotification(`检测到测序交付包 (包含 ${detectRes.fastq_count} 个样本)，可切换至“多样性鉴定”开启 rrnDB 校正！`, 'info')
       }
     } catch (e) {
-      console.warn('Package detection error:', e)
+      logger.warn('Package detection error:', e)
     }
   }
 
@@ -88,7 +90,7 @@ function getDisplayName(fullPath: string) {
   <div class="panel-section">
     <!-- 单株鉴定 vs 多样性鉴定 模式切换开关 -->
     <div class="analysis-mode-selector">
-      <button 
+      <button type="button" 
         class="mode-switch-btn" 
         :class="{ active: blast.analysisTarget === 'isolate' }" 
         @click="blast.setAnalysisTarget('isolate')"
@@ -99,7 +101,7 @@ function getDisplayName(fullPath: string) {
         </svg>
         <span>{{ t('blast.mode.isolate') }}</span>
       </button>
-      <button 
+      <button type="button" 
         class="mode-switch-btn" 
         :class="{ active: blast.analysisTarget === 'diversity' }" 
         @click="blast.setAnalysisTarget('diversity')"
@@ -116,8 +118,8 @@ function getDisplayName(fullPath: string) {
     <div v-if="blast.analysisTarget === 'isolate'">
       <h3 class="section-title">{{ t('blast.input.title') }}</h3>
       <div class="mode-tabs-neo">
-        <button class="mode-tab" :class="{ active: blast.inputMode === 'file' }" @click="blast.switchInputMode('file')">{{ t('blast.input.file') }}</button>
-        <button class="mode-tab" :class="{ active: blast.inputMode === 'text' }" @click="blast.switchInputMode('text')">{{ t('blast.input.text') }}</button>
+        <button type="button" class="mode-tab" :class="{ active: blast.inputMode === 'file' }" @click="blast.switchInputMode('file')">{{ t('blast.input.file') }}</button>
+        <button type="button" class="mode-tab" :class="{ active: blast.inputMode === 'text' }" @click="blast.switchInputMode('text')">{{ t('blast.input.text') }}</button>
       </div>
       
       <div v-if="blast.inputMode === 'file'" class="file-area">
@@ -130,7 +132,7 @@ function getDisplayName(fullPath: string) {
         <div class="file-list-neo">
            <div v-for="f in blast.files" :key="f" class="file-item-neo">
              <span class="name" :title="f">{{ getDisplayName(f) }}</span>
-             <button class="del" @click="blast.removeFile(f)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+             <button type="button" class="del" @click="blast.removeFile(f)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
            </div>
         </div>
       </div>
@@ -173,7 +175,7 @@ function getDisplayName(fullPath: string) {
           包含 <strong>{{ detectedPackageInfo?.fastq_count || '多' }} 个</strong> 独立采样点位的原始 Reads，采用多核并行与分片落盘保护。
         </div>
 
-        <button class="btn-open-diversity-board" @click="emit('openDiversityModal', detectedZip || undefined)">
+        <button type="button" class="btn-open-diversity-board" @click="emit('openDiversityModal', detectedZip || undefined)">
           <span>已载入，在右侧看板查看分析</span>
           <svg class="arrow-svg" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/>
@@ -182,7 +184,7 @@ function getDisplayName(fullPath: string) {
       </div>
 
       <div v-else class="empty-diversity-hint">
-        <button class="btn-open-diversity-board secondary" @click="emit('openDiversityModal', undefined, true)">
+        <button type="button" class="btn-open-diversity-board secondary" @click="emit('openDiversityModal', undefined, true)">
           <span>在右侧看板查看历史多样性归档</span>
         </button>
       </div>

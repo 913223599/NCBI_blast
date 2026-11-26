@@ -9,7 +9,7 @@
             <p class="dialog-subtitle">修改冰箱名称、型号和存取位置</p>
           </div>
         </div>
-        <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div class="dialog-body">
@@ -58,8 +58,8 @@
       </div>
 
       <div class="dialog-footer">
-        <button class="btn-cancel" @click="emit('close')">取消</button>
-        <button class="btn-confirm" @click="handleConfirm" :disabled="!canSubmit">
+        <button type="button" class="btn-cancel" @click="emit('close')">取消</button>
+        <button type="button" class="btn-confirm" @click="handleConfirm" :disabled="!canSubmit">
           保存修改
         </button>
       </div>

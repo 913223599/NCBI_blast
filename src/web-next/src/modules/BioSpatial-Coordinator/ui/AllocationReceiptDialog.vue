@@ -98,7 +98,7 @@ const stats = computed(() => {
             <span class="subtitle">已依据[种属分区]算法完成存储规划</span>
           </div>
         </div>
-        <button class="close-x" @click="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="close-x" @click="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div class="receipt-body">
@@ -136,11 +136,11 @@ const stats = computed(() => {
       <div class="receipt-footer">
         <div class="sign-hint">请保存 [发放清单] 以备实验记录，点击 [确认入库] 完成流程。</div>
         <div class="action-group">
-          <button class="btn-cancel" @click="close">取消</button>
-          <button class="btn-print" @click="handleExportManifest">
+          <button type="button" class="btn-cancel" @click="close">取消</button>
+          <button type="button" class="btn-print" @click="handleExportManifest">
             导出发放清单
           </button>
-          <button class="btn-submit" @click="handleConfirm">
+          <button type="button" class="btn-submit" @click="handleConfirm">
             确认入库
           </button>
         </div>

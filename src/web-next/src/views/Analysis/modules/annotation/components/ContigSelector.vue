@@ -216,7 +216,7 @@ function formatNumber(num: number): string {
           placeholder="搜索 Contig ID / 描述..." 
           class="search-input"
         />
-        <button v-if="searchQuery" class="clear-search" @click="searchQuery = ''">×</button>
+        <button type="button" v-if="searchQuery" class="clear-search" @click="searchQuery = ''">×</button>
       </div>
     </div>
 

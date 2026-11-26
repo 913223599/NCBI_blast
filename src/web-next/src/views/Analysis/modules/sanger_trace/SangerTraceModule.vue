@@ -12,6 +12,8 @@ import { resolveApiUrl } from '../../../../utils/fileDownloader';
 import type { SampleDeconvResult, BatchAnalysisResponse } from './types';
 import TraceChromatogramViewer from './components/TraceChromatogramViewer.vue';
 import DeconvResultsTable from './components/DeconvResultsTable.vue';
+import { createLogger } from '../../../../utils/logger'
+const logger = createLogger('SangerTraceModule')
 
 const appStore = useAppStore();
 const blastStore = useBlastStore();
@@ -62,7 +64,7 @@ async function handleDrop(e: DragEvent) {
   // 1. 尝试提取所有本地路径 (Electron 桌面端)
   const localPaths: string[] = [];
   for (const f of files) {
-    const p = bridge.get_path_for_file?.(f) || (f as any).path;
+    const p = bridge.get_path_for_file?.(f) || (f as File & { path?: string }).path;
     if (p) {
       localPaths.push(p);
     }
@@ -88,6 +90,10 @@ const stats = computed(() => {
   return { total, indels, mixed, clean, totalDiffs };
 });
 
+function getErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // 触发文件选择 (Electron 对话框或 Web 文件)
 async function triggerFileImport() {
   const bridge = getBridge();
@@ -97,8 +103,8 @@ async function triggerFileImport() {
       if (paths && paths.length > 0) {
         await analyzeFilePaths(paths);
       }
-    } catch (err: any) {
-      console.warn('Native file load fallback:', err);
+    } catch (err: unknown) {
+      logger.warn('Native file load fallback:', err);
     }
   } else {
     // 浏览器环境兜底 input
@@ -106,8 +112,9 @@ async function triggerFileImport() {
     input.type = 'file';
     input.multiple = true;
     input.accept = '.ab1,.abi,.zip';
-    input.onchange = async (e: any) => {
-      const files: File[] = Array.from(e.target.files || []);
+    input.onchange = async (e: Event) => {
+      const target = e.target as HTMLInputElement | null;
+      const files: File[] = Array.from(target?.files || []);
       if (files.length > 0) {
         await uploadFiles(files);
       }
@@ -142,9 +149,9 @@ async function analyzeFilePaths(paths: string[]) {
     } else {
       appStore.showNotification(res?.error || '解析失败', 'error');
     }
-  } catch (err: any) {
-    console.error('Analyze paths error:', err);
-    appStore.showNotification(`解析失败: ${err.message}`, 'error');
+  } catch (err: unknown) {
+    logger.error('Analyze paths error:', err);
+    appStore.showNotification(`解析失败: ${getErrorMessage(err)}`, 'error');
   } finally {
     isLoading.value = false;
   }
@@ -173,8 +180,8 @@ async function uploadFiles(files: File[]) {
       selectedSample.value = samples.value[0] || null;
     }
     appStore.showNotification(`成功上传并解析 ${files.length} 个文件`, 'success');
-  } catch (err: any) {
-    appStore.showNotification(`上传失败: ${err.message}`, 'error');
+  } catch (err: unknown) {
+    appStore.showNotification(`上传失败: ${getErrorMessage(err)}`, 'error');
   } finally {
     isLoading.value = false;
   }
@@ -191,8 +198,8 @@ async function handleExportFasta(selectedSamples: SampleDeconvResult[], mode: st
       await bridge.save_file?.(res.fasta_text, filename);
       appStore.showNotification(`已成功导出 ${res.count} 条解峰序列`, 'success');
     }
-  } catch (err: any) {
-    appStore.showNotification(`导出失败: ${err.message}`, 'error');
+  } catch (err: unknown) {
+    appStore.showNotification(`导出失败: ${getErrorMessage(err)}`, 'error');
   }
 }
 
@@ -257,8 +264,8 @@ async function handleSendToBlast(selectedSamples: SampleDeconvResult[]) {
     } else {
       appStore.showNotification(res?.error || '创建 BLAST 任务失败', 'error');
     }
-  } catch (err: any) {
-    appStore.showNotification(`提交失败: ${err.message}`, 'error');
+  } catch (err: unknown) {
+    appStore.showNotification(`提交失败: ${getErrorMessage(err)}`, 'error');
   } finally {
     isLoading.value = false;
   }
@@ -302,7 +309,7 @@ async function handleSendToBlast(selectedSamples: SampleDeconvResult[]) {
           <span class="label">质量裁剪 Q:</span>
           <input type="number" v-model.number="trimThreshold" min="10" max="40" class="input-num" />
         </div>
-        <button class="btn-import-traces" @click="triggerFileImport" :disabled="isLoading">
+        <button type="button" class="btn-import-traces" @click="triggerFileImport" :disabled="isLoading">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="17 8 12 3 7 8" />
@@ -358,7 +365,7 @@ async function handleSendToBlast(selectedSamples: SampleDeconvResult[]) {
         </div>
 
         <div class="header-ctrl-actions">
-          <button 
+          <button type="button" 
             class="btn-toggle-trace" 
             @click="toggleTraceCollapse"
             :title="isTraceCollapsed ? '展开色谱峰图' : '收起色谱峰图'"
@@ -366,7 +373,7 @@ async function handleSendToBlast(selectedSamples: SampleDeconvResult[]) {
             <span v-if="isTraceCollapsed">▼ 展开峰图</span>
             <span v-else>▲ 收起峰图</span>
           </button>
-          <button 
+          <button type="button" 
             class="btn-close-trace" 
             @click="selectedSample = null"
             title="关闭当前峰图查看"
@@ -395,7 +402,7 @@ async function handleSendToBlast(selectedSamples: SampleDeconvResult[]) {
       </div>
       <h3>点击或拖拽上传 Sanger 测序原始文件 (.ab1 / .zip)</h3>
       <p>系统将自动解析四通道原始荧光信号、诊断双峰成因、执行 InDel 相位位移减法解卷积并输出纯净序列</p>
-      <button class="btn-select-file">选择 AB1 文件或 ZIP 压缩包</button>
+      <button type="button" class="btn-select-file">选择 AB1 文件或 ZIP 压缩包</button>
     </div>
 
     <!-- 下方结果列表 -->

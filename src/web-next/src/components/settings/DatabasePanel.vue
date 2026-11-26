@@ -3,27 +3,70 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getBridge, onEvent } from '../../bridge'
 import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
+import { createLogger } from '../../utils/logger'
+const logger = createLogger('DatabasePanel')
 
 const appStore = useAppStore()
 const confirmDialog = useConfirmDialog()
 let eventCleanup: (() => void) | null = null
 
+interface BioDatabaseItem {
+  db_id: string
+  name: string
+  version: string
+  category?: string
+  size_mb?: number
+  last_modified?: string
+  installed: boolean
+  path?: string
+  url?: string
+}
+
+interface DbUpdateProgress {
+  db_id?: string
+  status?: string
+  progress?: number
+  message?: string
+}
+
+interface TaxonomyDbStatus {
+  ready?: boolean
+  building?: boolean
+  fileSizeMB?: number
+  lastModified?: string
+}
+
+interface UnifiedDbCardItem {
+  id: string
+  name: string
+  version: string
+  size_mb: number
+  last_modified: string
+  installed: boolean
+  path: string
+  url?: string
+  type: 'bio' | 'tax'
+  building: boolean
+  progress: number
+  message: string
+}
+
 /* -------- 1. 16S/18S 参考数据库状态 -------- */
-const bioDatabases = ref<any[]>([])
+const bioDatabases = ref<BioDatabaseItem[]>([])
 const loadingBioDbs = ref(false)
-const dbUpdates = ref<Record<string, any>>({})
+const dbUpdates = ref<Record<string, DbUpdateProgress>>({})
 
 async function loadBioDatabases() {
   loadingBioDbs.value = true
   try {
     const res = await getBridge().get_all_db_status()
     if (res && res.success) {
-      bioDatabases.value = Array.isArray(res.data) ? res.data : []
+      bioDatabases.value = Array.isArray(res.data) ? (res.data as BioDatabaseItem[]) : []
     } else {
       appStore.showNotification('无法获取数据库状态', 'error')
     }
   } catch (err) {
-    console.error('Failed to load databases:', err)
+    logger.error('Failed to load databases:', err)
   } finally {
     loadingBioDbs.value = false
   }
@@ -46,21 +89,21 @@ async function triggerBioDbUpdate(dbId: string) {
 }
 
 /* -------- 2. NCBI 物种库状态 -------- */
-const taxStatus = ref<any>(null)
-let taxPollTimer: any = null
+const taxStatus = ref<TaxonomyDbStatus | null>(null)
+let taxPollTimer: ReturnType<typeof setInterval> | null = null
 
 async function refreshTaxStatus() {
   try {
-    const result = await getBridge().taxonomy_status()
+    const result = (await getBridge().taxonomy_status()) as TaxonomyDbStatus | null
     taxStatus.value = result
 
     // 如果正在构建中，启动轮询
     if (result?.building && !taxPollTimer) {
       taxPollTimer = setInterval(async () => {
-        const updated = await getBridge().taxonomy_status()
+        const updated = (await getBridge().taxonomy_status()) as TaxonomyDbStatus | null
         taxStatus.value = updated
         if (!updated?.building) {
-          clearInterval(taxPollTimer)
+          if (taxPollTimer) clearInterval(taxPollTimer)
           taxPollTimer = null
           loadBioDatabases() // 刷新相关数据
         }
@@ -88,7 +131,7 @@ async function triggerTaxUpdate() {
 }
 
 const groupedDatabases = computed(() => {
-  const groups: Record<string, any[]> = {}
+  const groups: Record<string, UnifiedDbCardItem[]> = {}
 
   // 1. 常规生物学数据库 (16S, PhageScope等)
   for (const db of bioDatabases.value) {
@@ -120,10 +163,10 @@ const groupedDatabases = computed(() => {
       version: 'Latest',
       size_mb: taxStatus.value.fileSizeMB || 0,
       last_modified: taxStatus.value.lastModified || '未知',
-      installed: taxStatus.value.ready,
+      installed: Boolean(taxStatus.value.ready),
       path: 'database/ncbi_taxonomy',
       type: 'tax',
-      building: taxStatus.value.building,
+      building: Boolean(taxStatus.value.building),
       progress: taxStatus.value.building ? 50 : 0,
       message: taxStatus.value.building ? '正在后台构建/同步中...' : ''
     })
@@ -154,7 +197,7 @@ const groupedDatabases = computed(() => {
     }))
 })
 
-async function triggerUpdate(db: any) {
+async function triggerUpdate(db: UnifiedDbCardItem) {
   if (db.type === 'tax') {
     await triggerTaxUpdate()
   } else {
@@ -217,7 +260,8 @@ onUnmounted(() => {
           <h2>生物分析数据库管理</h2>
           <p class="desc">集中管理各个分析流水线所需的数据库版本与状态。</p>
         </div>
-        <button class="p-btn p-btn-outline" @click="refreshAll" style="font-size: 0.8rem; padding: 6px 12px;">
+        <button type="button" class="p-btn p-btn-outline" @click="refreshAll"
+          style="font-size: 0.8rem; padding: 6px 12px;">
           全局刷新</button>
       </div>
     </header>
@@ -258,11 +302,8 @@ onUnmounted(() => {
 
             <!-- Right: Actions -->
             <div class="db-action-col">
-              <button 
-                v-if="db.url !== 'local_only' && db.url !== 'none'"
-                class="p-btn p-btn-primary" 
-                :disabled="db.building" 
-                @click="triggerUpdate(db)">
+              <button type="button" v-if="db.url !== 'local_only' && db.url !== 'none'" class="p-btn p-btn-primary"
+                :disabled="db.building" @click="triggerUpdate(db)">
                 {{ db.installed ? '检查更新' : '一键部署' }}
               </button>
             </div>

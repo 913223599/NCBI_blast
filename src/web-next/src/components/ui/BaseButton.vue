@@ -31,7 +31,7 @@ const classes = computed(() => {
 </script>
 
 <template>
-  <button :class="classes" :disabled="disabled || loading" @click="emit('click', $event)">
+  <button type="button" :class="classes" :disabled="disabled || loading" @click="emit('click', $event)">
     <span v-if="loading" class="spinner"></span>
     <span v-else-if="icon" class="icon">{{ icon }}</span>
     <span class="content">

@@ -6,6 +6,8 @@ import { ref, computed } from 'vue';
 import { getBridge } from '../../../bridge';
 import { useI18n } from '../../../locales';
 import type { AssemblyRunParams } from '../types';
+import { createLogger } from '../../../utils/logger'
+const logger = createLogger('AssemblySetup')
 
 const { t } = useI18n();
 
@@ -19,7 +21,7 @@ const emit = defineEmits<{
 }>();
 
 // 基础参数
-const taskName = ref<string>(`Assembly_${new Date().toISOString().slice(0,10).replace(/-/g,'')}`);
+const taskName = ref<string>(`Assembly_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`);
 const sampleType = ref<'BACTERIA' | 'PHAGE' | 'VIRUS' | 'METAGENOME'>('BACTERIA');
 const tech = ref<'ILLUMINA' | 'NANOPORE' | 'PACBIO_HIFI' | 'HYBRID'>('ILLUMINA');
 const mode = ref<'isolate' | 'metagenome' | 'metagenome_deep' | 'unconstrained' | 'hybrid'>('isolate');
@@ -35,10 +37,16 @@ const enableQC = ref<boolean>(true);
 // 提交防抖加锁状态
 const isSubmitting = ref<boolean>(false);
 
+interface FileSlotItem {
+  name: string;
+  path: string;
+  size?: number;
+}
+
 // 测序文件状态 (支持二代短读长双端 R1/R2 与三代长读长 Long Reads)
-const r1File = ref<{ name: string; path: string; size?: number } | null>(null);
-const r2File = ref<{ name: string; path: string; size?: number } | null>(null);
-const longReadsFile = ref<{ name: string; path: string; size?: number } | null>(null);
+const r1File = ref<FileSlotItem | null>(null);
+const r2File = ref<FileSlotItem | null>(null);
+const longReadsFile = ref<FileSlotItem | null>(null);
 const activeSlotTarget = ref<'all' | 'r1' | 'r2' | 'lr'>('all');
 const isDragging = ref<boolean>(false);
 const autoDetectedSummary = ref<string | null>(null);
@@ -71,7 +79,7 @@ function extractCleanSampleName(filename: string): string {
 }
 
 // 智能分析测序技术平台与生物类型
-function inferTechAndType(files: File[], r1Name: string, r2Name?: string, lrName?: string) {
+function inferTechAndType(files: Array<{ name: string }>, r1Name: string, r2Name?: string, lrName?: string) {
   const combinedNames = [r1Name, r2Name || '', lrName || '', ...files.map(f => f.name)].join(' ').toLowerCase();
 
   // 1. 测序技术平台推断
@@ -113,7 +121,7 @@ function inferTechAndType(files: File[], r1Name: string, r2Name?: string, lrName
 async function handleFileDrop(e: DragEvent) {
   isDragging.value = false;
   if (!e.dataTransfer || !e.dataTransfer.files || e.dataTransfer.files.length === 0) return;
-  
+
   const files = Array.from(e.dataTransfer.files);
   await processIncomingFiles(files);
 }
@@ -126,7 +134,7 @@ function openSlotPicker(slot: 'all' | 'r1' | 'r2' | 'lr' = 'all') {
 
 // 通过点击上传区域
 async function handleDropzoneClick() {
-  const isElectron = !!(window as any).electronAPI;
+  const isElectron = !!window.electronAPI;
   if (isElectron) {
     try {
       const bridge = getBridge();
@@ -136,7 +144,7 @@ async function handleDropzoneClick() {
         return;
       }
     } catch (e) {
-      console.warn('原生对话框调用失败，回退至 input 选择:', e);
+      logger.warn('原生对话框调用失败，回退至 input 选择:', e);
     }
   }
   document.getElementById('assembly-file-input')?.click();
@@ -146,7 +154,7 @@ async function handleDropzoneClick() {
 async function handleFileSelect(e: Event) {
   const target = e.target as HTMLInputElement;
   if (!target || !target.files || target.files.length === 0) return;
-  
+
   const files = Array.from(target.files);
   await processIncomingFiles(files);
   target.value = '';
@@ -158,7 +166,7 @@ async function resolveFileItem(file: File): Promise<{ name: string; path: string
   const size = file.size;
 
   // 1. Electron 桌面端原生获取真实路径
-  const localPath = (window as any).electronAPI?.getPathForFile?.(file) || (file as any).path || '';
+  const localPath = window.electronAPI?.getPathForFile?.(file) || (file as File & { path?: string }).path || '';
   if (localPath && (localPath.includes('/') || localPath.includes('\\'))) {
     return { name, path: localPath, size };
   }
@@ -171,7 +179,7 @@ async function resolveFileItem(file: File): Promise<{ name: string; path: string
       return { name, path: res.path, size };
     }
   } catch (err) {
-    console.error('上传测序文件失败:', err);
+    logger.error('上传测序文件失败:', err);
   }
 
   return { name, path: localPath || name, size };
@@ -242,24 +250,24 @@ function assignFileSlots(items: Array<{ name: string; path: string; size: number
     const cleanName = extractCleanSampleName(f.name);
     taskName.value = `${cleanName}_asm`;
 
-    const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType([{ name: f.name } as any], f.name);
+    const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType([{ name: f.name }], f.name);
     tech.value = detectedTech;
     sampleType.value = detectedSampleType;
     mode.value = detectedMode;
 
-    const techLabel = detectedTech === 'HYBRID' 
-      ? '二代+三代混合组装 (Hybrid)' 
-      : (detectedTech === 'ILLUMINA' 
-          ? '二代短读长 (Illumina/MGI)' 
-          : (detectedTech === 'NANOPORE' ? '三代长读长 (Nanopore ONT)' : '三代 PacBio HiFi'));
+    const techLabel = detectedTech === 'HYBRID'
+      ? '二代+三代混合组装 (Hybrid)'
+      : (detectedTech === 'ILLUMINA'
+        ? '二代短读长 (Illumina/MGI)'
+        : (detectedTech === 'NANOPORE' ? '三代长读长 (Nanopore ONT)' : '三代 PacBio HiFi'));
     autoDetectedSummary.value = `已智能识别为: ${techLabel} · 样本名: ${cleanName} · 类型: ${detectedSampleType}`;
     return;
   }
 
   // 3. 多文件智能匹配: 尝试分类 R1 / R2 / Long Reads
-  let foundR1: any = null;
-  let foundR2: any = null;
-  let foundLR: any = null;
+  let foundR1: FileSlotItem | null = null;
+  let foundR2: FileSlotItem | null = null;
+  let foundLR: FileSlotItem | null = null;
 
   for (const f of items) {
     if (!f) continue;
@@ -267,11 +275,11 @@ function assignFileSlots(items: Array<{ name: string; path: string; size: number
 
     const isLR = name.includes('ont') || name.includes('nanopore') || name.includes('pacbio') || name.includes('hifi') || name.includes('long') || name.includes('.lr.') || name.includes('_lr');
     const isR1 = name.includes('_r1') || name.includes('.r1.') || name.includes('_1.') || name.includes('.1.') ||
-                 name.endsWith('_1.fq.gz') || name.endsWith('_1.fastq.gz') || name.endsWith('_1.fq') || name.endsWith('_1.fastq') ||
-                 name.includes('read1') || name.includes('forward');
+      name.endsWith('_1.fq.gz') || name.endsWith('_1.fastq.gz') || name.endsWith('_1.fq') || name.endsWith('_1.fastq') ||
+      name.includes('read1') || name.includes('forward');
     const isR2 = name.includes('_r2') || name.includes('.r2.') || name.includes('_2.') || name.includes('.2.') ||
-                 name.endsWith('_2.fq.gz') || name.endsWith('_2.fastq.gz') || name.endsWith('_2.fq') || name.endsWith('_2.fastq') ||
-                 name.includes('read2') || name.includes('reverse');
+      name.endsWith('_2.fq.gz') || name.endsWith('_2.fastq.gz') || name.endsWith('_2.fq') || name.endsWith('_2.fastq') ||
+      name.includes('read2') || name.includes('reverse');
 
     if (isLR && !foundLR) {
       foundLR = f;
@@ -286,7 +294,7 @@ function assignFileSlots(items: Array<{ name: string; path: string; size: number
 
   if (foundLR || tech.value === 'HYBRID' || items.length >= 3) {
     // 激活混合组装模式
-    longReadsFile.value = foundLR || (unassigned.length > 0 && !foundR2 ? unassigned.pop() : null);
+    longReadsFile.value = foundLR || (unassigned.length > 0 && !foundR2 ? (unassigned.pop() ?? null) : null);
     r1File.value = foundR1 || unassigned.shift() || null;
     r2File.value = foundR2 || unassigned.shift() || null;
 
@@ -314,7 +322,7 @@ function assignFileSlots(items: Array<{ name: string; path: string; size: number
     taskName.value = `${cleanName}_asm`;
 
     const { detectedTech, detectedSampleType, detectedMode } = inferTechAndType(
-      items.map(f => ({ name: f.name } as any)),
+      items.map(f => ({ name: f.name })),
       r1File.value?.name || '',
       r2File.value?.name,
       longReadsFile.value?.name
@@ -325,19 +333,19 @@ function assignFileSlots(items: Array<{ name: string; path: string; size: number
 
     const techLabel = detectedTech === 'HYBRID'
       ? '二代+三代混合组装 (Hybrid Assembly)'
-      : (detectedTech === 'ILLUMINA' 
-          ? '二代短读长双端 (Illumina / MGI NGS)' 
-          : (detectedTech === 'NANOPORE' ? '三代长读长 (Nanopore ONT)' : '三代 PacBio HiFi'));
+      : (detectedTech === 'ILLUMINA'
+        ? '二代短读长双端 (Illumina / MGI NGS)'
+        : (detectedTech === 'NANOPORE' ? '三代长读长 (Nanopore ONT)' : '三代 PacBio HiFi'));
     autoDetectedSummary.value = `已智能识别为: ${techLabel} · 样本名: ${cleanName} · 类型: ${detectedSampleType}`;
   }
 }
 
-function clearR1() { 
-  r1File.value = null; 
+function clearR1() {
+  r1File.value = null;
   if (!r2File.value && !longReadsFile.value) autoDetectedSummary.value = null;
 }
-function clearR2() { 
-  r2File.value = null; 
+function clearR2() {
+  r2File.value = null;
 }
 function clearLongReads() {
   longReadsFile.value = null;
@@ -370,7 +378,7 @@ function resetForm() {
   r2File.value = null;
   longReadsFile.value = null;
   autoDetectedSummary.value = null;
-  taskName.value = `Assembly_${new Date().toISOString().slice(0,10).replace(/-/g,'')}`;
+  taskName.value = `Assembly_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
   isSubmitting.value = false;
 }
 
@@ -427,21 +435,10 @@ async function onStartAssembly() {
     </div>
 
     <!-- 上传区域 -->
-    <div 
-      class="upload-dropzone" 
-      :class="{ 'is-dragging': isDragging, 'has-files': r1File || longReadsFile }"
-      @dragover.prevent="isDragging = true"
-      @dragleave.prevent="isDragging = false"
-      @drop.prevent="handleFileDrop"
-    >
-      <input 
-        id="assembly-file-input" 
-        type="file" 
-        multiple 
-        accept=".fastq,.fq,.gz,.fasta,.fa,.fna,.zip" 
-        class="hidden-file-input" 
-        @change="handleFileSelect"
-      />
+    <div class="upload-dropzone" :class="{ 'is-dragging': isDragging, 'has-files': r1File || longReadsFile }"
+      @dragover.prevent="isDragging = true" @dragleave.prevent="isDragging = false" @drop.prevent="handleFileDrop">
+      <input id="assembly-file-input" type="file" multiple accept=".fastq,.fq,.gz,.fasta,.fa,.fna,.zip"
+        class="hidden-file-input" @change="handleFileSelect" />
 
       <!-- 未选择文件时的空状态 -->
       <div v-if="!r1File && !longReadsFile" class="dropzone-empty" @click="handleDropzoneClick">
@@ -452,7 +449,8 @@ async function onStartAssembly() {
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
         </div>
-        <p class="primary-hint">{{ t('assembly.setup.drop_prefix') }} <span class="click-link">{{ t('assembly.setup.drop_link') }}</span></p>
+        <p class="primary-hint">{{ t('assembly.setup.drop_prefix') }} <span class="click-link">{{
+          t('assembly.setup.drop_link') }}</span></p>
         <p class="secondary-hint">{{ t('assembly.setup.drop_desc') }}</p>
       </div>
 
@@ -462,7 +460,8 @@ async function onStartAssembly() {
           <!-- 槽位 1: R1 卡片 -->
           <div class="file-slot-card" :class="{ 'is-empty-slot': !r1File }">
             <div class="slot-badge r1-badge">
-              {{ tech === 'HYBRID' ? '短读长 R1 (正向端)' : (tech === 'ILLUMINA' ? 'Read 1 (正向端 / Forward)' : '长读长数据 (Long Reads)') }}
+              {{ tech === 'HYBRID' ? '短读长 R1 (正向端)' : (tech === 'ILLUMINA' ? 'Read 1 (正向端 / Forward)' : '长读长数据 (Long
+              Reads) ') }}
             </div>
             <div v-if="r1File" class="slot-info">
               <span class="file-name" :title="r1File.path">{{ r1File.name }}</span>
@@ -471,11 +470,12 @@ async function onStartAssembly() {
             <div v-else class="slot-empty-hint" @click.stop="openSlotPicker('r1')">
               <span>+ 选择或拖入 {{ tech === 'HYBRID' ? '短读长 R1 文件' : '测序文件' }}</span>
             </div>
-            <button v-if="r1File" class="remove-btn" @click.stop="clearR1" title="移除该文件">×</button>
+            <button type="button" v-if="r1File" class="remove-btn" @click.stop="clearR1" title="移除该文件">×</button>
           </div>
 
           <!-- 槽位 2: R2 卡片 (在 ILLUMINA 或 HYBRID 模式下显示) -->
-          <div v-if="tech === 'ILLUMINA' || tech === 'HYBRID'" class="file-slot-card" :class="{ 'is-empty-slot': !r2File }">
+          <div v-if="tech === 'ILLUMINA' || tech === 'HYBRID'" class="file-slot-card"
+            :class="{ 'is-empty-slot': !r2File }">
             <div class="slot-badge r2-badge">
               {{ tech === 'HYBRID' ? '短读长 R2 (反向端)' : 'Read 2 (反向端 / Reverse)' }}
             </div>
@@ -486,7 +486,7 @@ async function onStartAssembly() {
             <div v-else class="slot-empty-hint" @click.stop="openSlotPicker('r2')">
               <span>+ 选择或拖入 R2 双端文件</span>
             </div>
-            <button v-if="r2File" class="remove-btn" @click.stop="clearR2" title="移除该文件">×</button>
+            <button type="button" v-if="r2File" class="remove-btn" @click.stop="clearR2" title="移除该文件">×</button>
           </div>
 
           <!-- 槽位 3: 长读长卡片 (在 HYBRID 模式下显示) -->
@@ -499,7 +499,8 @@ async function onStartAssembly() {
             <div v-else class="slot-empty-hint" @click.stop="openSlotPicker('lr')">
               <span>+ 选择或拖入三代长读长文件</span>
             </div>
-            <button v-if="longReadsFile" class="remove-btn" @click.stop="clearLongReads" title="移除该文件">×</button>
+            <button type="button" v-if="longReadsFile" class="remove-btn" @click.stop="clearLongReads"
+              title="移除该文件">×</button>
           </div>
         </div>
 
@@ -512,7 +513,7 @@ async function onStartAssembly() {
         </div>
 
         <div class="replace-actions">
-          <button class="text-btn" @click="handleDropzoneClick">
+          <button type="button" class="text-btn" @click="handleDropzoneClick">
             {{ t('assembly.setup.reselect') }}
           </button>
         </div>
@@ -524,12 +525,8 @@ async function onStartAssembly() {
       <!-- 任务名称 -->
       <div class="form-group">
         <label class="form-label">{{ t('assembly.setup.task_name') }}</label>
-        <input 
-          v-model="taskName" 
-          type="text" 
-          class="form-input" 
-          :placeholder="t('assembly.setup.task_name_placeholder')"
-        />
+        <input v-model="taskName" type="text" class="form-input"
+          :placeholder="t('assembly.setup.task_name_placeholder')" />
       </div>
 
       <!-- 测序平台 -->
@@ -569,13 +566,7 @@ async function onStartAssembly() {
       <!-- 线程数 -->
       <div class="form-group">
         <label class="form-label">{{ t('assembly.setup.threads') }}</label>
-        <input 
-          v-model.number="threads" 
-          type="number" 
-          min="1" 
-          max="64" 
-          class="form-input"
-        />
+        <input v-model.number="threads" type="number" min="1" max="64" class="form-input" />
       </div>
     </div>
 
@@ -585,7 +576,8 @@ async function onStartAssembly() {
         <div class="adv-left">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
           <span class="adv-title">{{ t('assembly.setup.advanced_title') }}</span>
         </div>
@@ -596,57 +588,32 @@ async function onStartAssembly() {
         <!-- 最小 Contig 长度 -->
         <div class="form-group">
           <label class="form-label">{{ t('assembly.setup.min_contig') }}</label>
-          <input 
-            v-model.number="minContigLength" 
-            type="number" 
-            min="100" 
-            step="100" 
-            class="form-input" 
-            placeholder="默认: 500"
-          />
+          <input v-model.number="minContigLength" type="number" min="100" step="100" class="form-input"
+            placeholder="默认: 500" />
           <span class="field-hint">过滤短于此长度的碎片 (--min-contig-len)</span>
         </div>
 
         <!-- 气泡去重相似度阈值 -->
         <div class="form-group">
           <label class="form-label">气泡冗余去重相似度阈值 (可选)</label>
-          <input 
-            v-model.number="minContainmentIdentity" 
-            type="number" 
-            min="0.5" 
-            max="1.0" 
-            step="0.01" 
-            class="form-input" 
-            placeholder="默认留空: 自动适配 (ONT 0.85, 二代 0.92~0.98)"
-          />
+          <input v-model.number="minContainmentIdentity" type="number" min="0.5" max="1.0" step="0.01"
+            class="form-input" placeholder="默认留空: 自动适配 (ONT 0.85, 二代 0.92~0.98)" />
           <span class="field-hint">留空时由引擎根据测序平台自适应物理噪声 (--min-containment-identity)</span>
         </div>
 
         <!-- 长读长最小长度过滤 -->
         <div v-if="tech !== 'ILLUMINA'" class="form-group">
           <label class="form-label">长读长过滤最小长度 (bp)</label>
-          <input 
-            v-model.number="minReadLength" 
-            type="number" 
-            min="200" 
-            step="100" 
-            class="form-input" 
-            placeholder="默认: 1000"
-          />
+          <input v-model.number="minReadLength" type="number" min="200" step="100" class="form-input"
+            placeholder="默认: 1000" />
           <span class="field-hint">过滤超短读长 (--min-len)</span>
         </div>
 
         <!-- 最大读取 Reads 上限 -->
         <div class="form-group">
           <label class="form-label">最大读取 Reads 数量 (可选)</label>
-          <input 
-            v-model.number="maxReads" 
-            type="number" 
-            min="10000" 
-            step="50000" 
-            class="form-input" 
-            placeholder="默认留空 (使用全量测序数据)"
-          />
+          <input v-model.number="maxReads" type="number" min="10000" step="50000" class="form-input"
+            placeholder="默认留空 (使用全量测序数据)" />
           <span class="field-hint">留空为全量分析；填数值将截断 Reads 以供快速测试 (--max-reads)</span>
         </div>
 
@@ -670,13 +637,10 @@ async function onStartAssembly() {
         </span>
       </div>
 
-      <button 
-        class="submit-btn" 
-        :class="{ 'is-busy-mode': isBusy }"
-        :disabled="!canSubmit || isSubmitting" 
-        @click="onStartAssembly"
-      >
-        <svg v-if="isSubmitting" class="spin-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <button type="button" class="submit-btn" :class="{ 'is-busy-mode': isBusy }"
+        :disabled="!canSubmit || isSubmitting" @click="onStartAssembly">
+        <svg v-if="isSubmitting" class="spin-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2.5">
           <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12" />
         </svg>
         <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -701,11 +665,13 @@ async function onStartAssembly() {
   align-items: center;
   gap: 8px;
 }
+
 .main-title {
   font-size: 1.15rem;
   font-weight: 700;
   color: #0f172a;
 }
+
 .sub-title {
   font-size: 0.8rem;
   color: #64748b;
@@ -721,10 +687,13 @@ async function onStartAssembly() {
   transition: all 0.2s ease;
   cursor: pointer;
 }
-.upload-dropzone:hover, .upload-dropzone.is-dragging {
+
+.upload-dropzone:hover,
+.upload-dropzone.is-dragging {
   border-color: #3b82f6;
   background: #eff6ff;
 }
+
 .upload-dropzone.has-files {
   cursor: default;
   padding: 16px;
@@ -733,7 +702,9 @@ async function onStartAssembly() {
   background: #ffffff;
 }
 
-.hidden-file-input { display: none; }
+.hidden-file-input {
+  display: none;
+}
 
 .dropzone-empty {
   display: flex;
@@ -741,6 +712,7 @@ async function onStartAssembly() {
   align-items: center;
   gap: 8px;
 }
+
 .icon-circle {
   width: 52px;
   height: 52px;
@@ -750,15 +722,18 @@ async function onStartAssembly() {
   align-items: center;
   justify-content: center;
 }
+
 .primary-hint {
   font-size: 0.9rem;
   font-weight: 600;
   color: #1e293b;
 }
+
 .click-link {
   color: #2563eb;
   text-decoration: underline;
 }
+
 .secondary-hint {
   font-size: 0.75rem;
   color: #94a3b8;
@@ -769,6 +744,7 @@ async function onStartAssembly() {
   flex-direction: column;
   gap: 12px;
 }
+
 .file-slots-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -786,11 +762,13 @@ async function onStartAssembly() {
   gap: 4px;
   text-align: left;
 }
+
 .file-slot-card.is-empty-slot {
   border-style: dashed;
   cursor: pointer;
   background: transparent;
 }
+
 .slot-badge {
   font-size: 0.65rem;
   font-weight: 700;
@@ -798,9 +776,21 @@ async function onStartAssembly() {
   border-radius: 3px;
   align-self: flex-start;
 }
-.r1-badge { background: #dbeafe; color: #1e40af; }
-.r2-badge { background: #e0e7ff; color: #3730a3; }
-.lr-badge { background: #f3e8ff; color: #7e22ce; }
+
+.r1-badge {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.r2-badge {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.lr-badge {
+  background: #f3e8ff;
+  color: #7e22ce;
+}
 
 .slot-info {
   display: flex;
@@ -808,6 +798,7 @@ async function onStartAssembly() {
   justify-content: space-between;
   gap: 8px;
 }
+
 .file-name {
   font-size: 0.8rem;
   font-weight: 600;
@@ -816,16 +807,19 @@ async function onStartAssembly() {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .file-size {
   font-size: 0.7rem;
   color: #64748b;
   white-space: nowrap;
 }
+
 .slot-empty-hint {
   font-size: 0.75rem;
   color: #94a3b8;
   padding: 6px 0;
 }
+
 .remove-btn {
   position: absolute;
   top: 6px;
@@ -837,7 +831,10 @@ async function onStartAssembly() {
   cursor: pointer;
   line-height: 1;
 }
-.remove-btn:hover { color: #ef4444; }
+
+.remove-btn:hover {
+  color: #ef4444;
+}
 
 .auto-detected-banner {
   background: #eff6ff;
@@ -856,6 +853,7 @@ async function onStartAssembly() {
   display: flex;
   justify-content: flex-end;
 }
+
 .text-btn {
   background: none;
   border: none;
@@ -863,7 +861,10 @@ async function onStartAssembly() {
   color: #2563eb;
   cursor: pointer;
 }
-.text-btn:hover { text-decoration: underline; }
+
+.text-btn:hover {
+  text-decoration: underline;
+}
 
 .form-grid {
   display: grid;
@@ -874,17 +875,21 @@ async function onStartAssembly() {
   border-radius: 12px;
   padding: 20px;
 }
+
 .form-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
+
 .form-label {
   font-size: 0.78rem;
   font-weight: 600;
   color: #475569;
 }
-.form-input, .form-select {
+
+.form-input,
+.form-select {
   height: 38px;
   padding: 0 12px;
   border: 1px solid #cbd5e1;
@@ -895,9 +900,11 @@ async function onStartAssembly() {
   outline: none;
   transition: border-color 0.2s;
 }
-.form-input:focus, .form-select:focus {
+
+.form-input:focus,
+.form-select:focus {
   border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
 }
 
 .advanced-panel-wrapper {
@@ -906,6 +913,7 @@ async function onStartAssembly() {
   border-radius: 12px;
   overflow: hidden;
 }
+
 .advanced-toggle {
   display: flex;
   align-items: center;
@@ -916,24 +924,29 @@ async function onStartAssembly() {
   user-select: none;
   transition: background 0.2s;
 }
+
 .advanced-toggle:hover {
   background: #f1f5f9;
 }
+
 .adv-left {
   display: flex;
   align-items: center;
   gap: 8px;
   color: #334155;
 }
+
 .adv-title {
   font-size: 0.82rem;
   font-weight: 600;
 }
+
 .adv-arrow {
   font-size: 0.75rem;
   color: #94a3b8;
   transition: transform 0.2s;
 }
+
 .adv-arrow.is-open {
   transform: rotate(180deg);
 }
@@ -945,6 +958,7 @@ async function onStartAssembly() {
   padding: 18px;
   border-top: 1px solid #f1f5f9;
 }
+
 .field-hint {
   font-size: 0.68rem;
   color: #94a3b8;
@@ -953,6 +967,7 @@ async function onStartAssembly() {
 .checkbox-group {
   justify-content: center;
 }
+
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -962,6 +977,7 @@ async function onStartAssembly() {
   color: #334155;
   cursor: pointer;
 }
+
 .form-checkbox {
   width: 16px;
   height: 16px;
@@ -988,6 +1004,7 @@ async function onStartAssembly() {
   padding: 4px 10px;
   border-radius: 20px;
 }
+
 .busy-dot {
   width: 6px;
   height: 6px;
@@ -1009,18 +1026,23 @@ async function onStartAssembly() {
   display: flex;
   align-items: center;
   gap: 8px;
-  box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
   transition: all 0.2s;
 }
+
 .submit-btn:hover:not(:disabled) {
   background: linear-gradient(135deg, #1d4ed8, #1e40af);
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(37,99,235,0.35);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
 }
+
 .submit-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   box-shadow: none;
 }
-.spin-icon { animation: spin 1s linear infinite; }
+
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
 </style>

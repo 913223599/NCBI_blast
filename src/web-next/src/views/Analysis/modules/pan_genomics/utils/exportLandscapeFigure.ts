@@ -9,6 +9,28 @@
  * 5. 支持出版级超清 PNG（2x Retina 超采样）与无限缩放矢量 SVG 格式无损导出。
  */
 import { FUNCTIONAL_CATEGORIES } from '../../viewer/utils/render'
+import type {
+  ClusteringTreeNodeLike,
+  OrthologCluster,
+  PhageLifestyleEntry,
+} from '../types'
+
+interface ExportFigureDimensions {
+  totalWidth: number
+  totalHeight: number
+  paddingX: number
+  paddingY: number
+  headerHeight: number
+  legendHeight: number
+  tableHeaderHeight: number
+  rowHeight: number
+  treeColWidth: number
+  sampleNameColWidth: number
+  metaColWidth: number
+  aniColWidth: number
+  geneColWidth: number
+  barWidth: number
+}
 
 export interface ExportFigureOptions {
   title: string
@@ -16,10 +38,10 @@ export interface ExportFigureOptions {
   visibleSampleIds: string[]
   orderedSampleIds: string[]
   sampleNames: Record<string, string>
-  sortedGeneClusters: any[]
+  sortedGeneClusters: OrthologCluster[]
   aniMatrix?: Record<string, Record<string, number | null>>
-  lifestyles?: any[]
-  treeRoot?: any
+  lifestyles?: PhageLifestyleEntry[]
+  treeRoot?: ClusteringTreeNodeLike | null
   sortOrder?: 'natural' | 'cluster'
   isPhylogenyTrackVisible: boolean
   isMetadataTrackVisible: boolean
@@ -62,7 +84,7 @@ interface PrunedNode {
  */
 function computeExportTreeLayout(params: {
   visibleSampleIds: string[]
-  treeRoot?: any
+  treeRoot?: ClusteringTreeNodeLike | null
   sortOrder?: 'natural' | 'cluster'
   similarityMatrix?: Record<string, Record<string, number | null>>
   startX: number
@@ -101,7 +123,7 @@ function computeExportTreeLayout(params: {
   if (treeRoot && sortOrder !== 'natural') {
     const visibleSet = new Set(ids)
 
-    function prune(node: any): PrunedNode | null {
+    function prune(node: ClusteringTreeNodeLike | null | undefined): PrunedNode | null {
       if (!node) return null
       const isLeafNode = !node.left && !node.right
       if (isLeafNode) {
@@ -609,7 +631,7 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
 
     // 3. 元数据列 (生活周期、生物安全、抗 CRISPR)
     if (isMetadataTrackVisible) {
-      const lifeInfo = lifestyles.find((l: any) => l.sample_id === rowId)
+      const lifeInfo = lifestyles.find((l: PhageLifestyleEntry) => l.sample_id === rowId)
       const isLytic = lifeInfo?.lifestyle?.toLowerCase() === 'lytic'
       const isSafe = lifeInfo?.is_safe_for_therapy !== false
 
@@ -750,7 +772,7 @@ export async function exportCompleteFigure(options: ExportFigureOptions): Promis
 /**
  * 辅助构建 SVG 矢量 XML 文本 (高密度柱状条矢量版)
  */
-function buildFigureSvg(options: ExportFigureOptions, dims: any): string {
+function buildFigureSvg(options: ExportFigureOptions, dims: ExportFigureDimensions): string {
   const {
     title,
     visibleSampleIds,
@@ -863,7 +885,7 @@ function buildFigureSvg(options: ExportFigureOptions, dims: any): string {
 
     // 元数据
     if (isMetadataTrackVisible) {
-      const life = lifestyles.find((l: any) => l.sample_id === rowId)
+      const life = lifestyles.find((l: PhageLifestyleEntry) => l.sample_id === rowId)
       const isLytic = life?.lifestyle?.toLowerCase() === 'lytic'
       const isSafe = life?.is_safe_for_therapy !== false
 

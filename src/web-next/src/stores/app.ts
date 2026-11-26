@@ -6,6 +6,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getBridge } from '../bridge'
 import type { AppLocale } from '../locales'
+import { createLogger } from '../utils/logger'
+const logger = createLogger('app')
 
 function readInitialLocale(): AppLocale {
   try {
@@ -109,7 +111,7 @@ export const useAppStore = defineStore('app', () => {
                 translationsLocale.value = requestedLang
               }
             } catch (e) {
-              console.error('Failed to parse loaded translations', e)
+              logger.error('Failed to parse loaded translations', e)
             }
           }
           resolve()

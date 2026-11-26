@@ -52,6 +52,7 @@ function onRoleChange(acc: string, ev: Event) {
     <div class="panel-header">
       <h3 class="panel-title">第 2 步：参考序列集与外群</h3>
       <button
+        type="button"
         class="btn-link"
         :disabled="store.isCuratingRefs"
         @click="store.curatePhageReferences()"
@@ -72,6 +73,7 @@ function onRoleChange(acc: string, ev: Event) {
         外群: <b>{{ outgroupCount }}</b>
       </span>
       <button
+        type="button"
         v-if="store.referenceCandidates.length > 0"
         class="btn-mini-inline"
         title="仅保留查询株、外群与 ICTV 代表"
@@ -144,6 +146,7 @@ function onRoleChange(acc: string, ev: Event) {
           />
         </div>
         <button
+          type="button"
           class="btn-reapply"
           :disabled="store.isCuratingRefs"
           @click="store.curatePhageReferences()"
@@ -224,6 +227,7 @@ function onRoleChange(acc: string, ev: Event) {
     </div>
 
     <button
+      type="button"
       class="btn-next"
       :disabled="selectedList.length === 0"
       @click="emit('next-step')"

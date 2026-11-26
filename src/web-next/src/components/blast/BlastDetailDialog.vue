@@ -18,7 +18,7 @@ const emit = defineEmits<{
       <div class="dialog-container">
         <div class="dialog-header">
           <h3>{{ title }} - 全部比对结果 ({{ data.length }} 条)</h3>
-          <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <button type="button" class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         <div class="dialog-body scroll-v">
           <table v-if="data.length > 0" class="detail-table">
@@ -53,7 +53,7 @@ const emit = defineEmits<{
           </div>
         </div>
         <div class="dialog-footer">
-          <button class="btn-primary" @click="emit('close')">确认</button>
+          <button type="button" class="btn-primary" @click="emit('close')">确认</button>
         </div>
       </div>
     </div>

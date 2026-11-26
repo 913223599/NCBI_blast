@@ -10,18 +10,31 @@
  */
 import { ref, computed } from 'vue'
 import { inferCategoryFromText } from '../../viewer/utils/render'
+import type { OrthologCluster, PanGenomicsProteinEntry } from '../types'
+
+interface SyntenyGeneItem {
+  locus_tag: string
+  product?: string
+  start: number
+  end: number
+  strand: string
+  category: string
+  role?: string
+  color: string
+  [key: string]: unknown
+}
 
 const props = defineProps<{
-  clusters: any[]
-  tailProteins?: any[]
-  lysisProteins?: any[]
+  clusters: OrthologCluster[]
+  tailProteins?: PanGenomicsProteinEntry[]
+  lysisProteins?: PanGenomicsProteinEntry[]
   lysisMatrix?: Record<string, Record<string, number>>
   sampleNames: Record<string, string>
   selectedPair: [string, string] | null
 }>()
 
 const activeHotspot = ref<'tail' | 'lysis' | 'defense'>('tail')
-const hoveredGene = ref<any | null>(null)
+const hoveredGene = ref<SyntenyGeneItem | null>(null)
 const trackScope = ref<'pair' | 'all'>('pair')
 
 // 待展示的样本 ID 列表
@@ -36,10 +49,10 @@ import { getCatColor, inferClusterCategory } from '../utils/pangenomeVariants'
 
 // 提取各样本的全基因组基因列表
 const sampleGeneTracks = computed(() => {
-  const tracks: Record<string, any[]> = {}
-  
+  const tracks: Record<string, SyntenyGeneItem[]> = {}
+
   activeSampleIds.value.forEach(sid => {
-    const genes: any[] = []
+    const genes: SyntenyGeneItem[] = []
 
     // 整合 lysis 蛋白
     props.lysisProteins?.filter(lp => lp.sample_id === sid).forEach((lp, idx) => {
@@ -73,12 +86,13 @@ const sampleGeneTracks = computed(() => {
 
     // 整合来自 clusters 的其他基因
     props.clusters?.forEach((c, cIdx) => {
-      const g = c.presence_map?.[sid]
+      const rawG = c.presence_map?.[sid]
+      const g = rawG && typeof rawG === 'object' ? rawG : null
       if (g && !genes.some(exist => exist.locus_tag === g.locus_tag)) {
         const estStart = 2000 + (cIdx * 750)
         const cat = inferCategoryFromText(g.product, g.notes) || inferClusterCategory(c)
         genes.push({
-          locus_tag: g.locus_tag,
+          locus_tag: g.locus_tag || c.group_id || `CDS_${cIdx}`,
           product: g.product,
           start: g.start || estStart,
           end: g.end || (estStart + (g.length_aa || 200) * 3),
@@ -133,13 +147,13 @@ const hotspotZoomData = computed(() => {
       desc: '负责识别细菌表面 LPS / OmpA 受体的主尾丝与侧尾丝基因簇，是噬菌体宿主谱决定的核心开关。',
       identity: '100% Conserved (同源保守)',
       pairGenes1: (props.tailProteins?.filter(t => t.sample_id === s1) || []).map((t, idx) => ({
-        name: t.product || `Tail_ORF_${idx+1}`,
+        name: t.product || `Tail_ORF_${idx + 1}`,
         locus: t.locus_tag,
         color: '#f59e0b',
         strand: '+'
       })),
       pairGenes2: (props.tailProteins?.filter(t => t.sample_id === s2) || []).map((t, idx) => ({
-        name: t.product || `Tail_ORF_${idx+1}`,
+        name: t.product || `Tail_ORF_${idx + 1}`,
         locus: t.locus_tag,
         color: '#f59e0b',
         strand: '+'
@@ -193,39 +207,27 @@ const hotspotZoomData = computed(() => {
       <div class="track-toolbar">
         <div class="scope-group">
           <label>展示范围:</label>
-          <button 
-            :class="['btn-toggle', { active: trackScope === 'pair' }]"
-            @click="trackScope = 'pair'"
-            :disabled="!selectedPair"
-          >
+          <button type="button" :class="['btn-toggle', { active: trackScope === 'pair' }]" @click="trackScope = 'pair'"
+            :disabled="!selectedPair">
             当前选定样本对 (Pair)
           </button>
-          <button 
-            :class="['btn-toggle', { active: trackScope === 'all' }]"
-            @click="trackScope = 'all'"
-          >
+          <button type="button" :class="['btn-toggle', { active: trackScope === 'all' }]" @click="trackScope = 'all'">
             全部样本 (Cohort)
           </button>
         </div>
 
         <div class="hotspot-group">
           <label>聚焦机制区 (Hotspot):</label>
-          <button 
-            :class="['btn-hotspot', { active: activeHotspot === 'tail' }]"
-            @click="activeHotspot = 'tail'"
-          >
+          <button type="button" :class="['btn-hotspot', { active: activeHotspot === 'tail' }]"
+            @click="activeHotspot = 'tail'">
             尾丝受体结合区 (Tail)
           </button>
-          <button 
-            :class="['btn-hotspot', { active: activeHotspot === 'lysis' }]"
-            @click="activeHotspot = 'lysis'"
-          >
+          <button type="button" :class="['btn-hotspot', { active: activeHotspot === 'lysis' }]"
+            @click="activeHotspot = 'lysis'">
             内溶素裂解系统 (Lysis)
           </button>
-          <button 
-            :class="['btn-hotspot', { active: activeHotspot === 'defense' }]"
-            @click="activeHotspot = 'defense'"
-          >
+          <button type="button" :class="['btn-hotspot', { active: activeHotspot === 'defense' }]"
+            @click="activeHotspot = 'defense'">
             攻防岛 (Acr / Defense)
           </button>
         </div>
@@ -241,11 +243,7 @@ const hotspotZoomData = computed(() => {
       </div>
 
       <div class="synteny-tracks-box">
-        <div 
-          v-for="sid in activeSampleIds" 
-          :key="'synteny-track-' + sid"
-          class="synteny-sample-track"
-        >
+        <div v-for="sid in activeSampleIds" :key="'synteny-track-' + sid" class="synteny-sample-track">
           <div class="synteny-name-col">
             <strong>{{ sampleNames[sid] }}</strong>
             <small>{{ (sampleGeneTracks[sid] || []).length }} CDS</small>
@@ -257,30 +255,20 @@ const hotspotZoomData = computed(() => {
               <line x1="10" y1="24" x2="890" y2="24" stroke="#cbd5e1" stroke-width="2.5" />
 
               <!-- 基因色块多边形 -->
-              <polygon
-                v-for="(g, gIdx) in sampleGeneTracks[sid]"
-                :key="gIdx"
-                :points="`
+              <polygon v-for="(g, gIdx) in sampleGeneTracks[sid]" :key="gIdx" :points="`
                   ${10 + (g.start / maxGenomeLength) * 880},14 
                   ${10 + ((g.end - 150) / maxGenomeLength) * 880},14 
                   ${10 + (g.end / maxGenomeLength) * 880},24 
                   ${10 + ((g.end - 150) / maxGenomeLength) * 880},34 
                   ${10 + (g.start / maxGenomeLength) * 880},34
-                `"
-                :fill="g.color"
-                class="gene-poly-block"
-                @mouseenter="hoveredGene = g"
-                @mouseleave="hoveredGene = null"
-              >
+                `" :fill="g.color" class="gene-poly-block" @mouseenter="hoveredGene = g"
+                @mouseleave="hoveredGene = null">
                 <title>{{ g.locus_tag }}: {{ g.product }} ({{ g.start }}..{{ g.end }} bp)</title>
               </polygon>
 
               <!-- Hotspot 变异高亮区方框 -->
-              <rect 
-                x="590" y="6" width="180" height="36" 
-                fill="#f59e0b" fill-opacity="0.12" 
-                stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3"
-              />
+              <rect x="590" y="6" width="180" height="36" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b"
+                stroke-width="1.5" stroke-dasharray="3 3" />
             </svg>
           </div>
         </div>
@@ -296,17 +284,10 @@ const hotspotZoomData = computed(() => {
       </div>
 
       <div class="density-bars-strip">
-        <div 
-          v-for="(bin, bIdx) in divergenceSignalBins" 
-          :key="bIdx"
-          class="density-bin-col"
-          :class="{ 'bin-hotspot-active': bin.val >= 0.15 }"
-        >
+        <div v-for="(bin, bIdx) in divergenceSignalBins" :key="bIdx" class="density-bin-col"
+          :class="{ 'bin-hotspot-active': bin.val >= 0.15 }">
           <div class="bin-bar-track">
-            <div 
-              class="bin-bar-fill" 
-              :style="{ height: (bin.val * 240) + 'px', backgroundColor: bin.color }"
-            ></div>
+            <div class="bin-bar-fill" :style="{ height: (bin.val * 240) + 'px', backgroundColor: bin.color }"></div>
           </div>
           <span class="bin-lbl-pos">{{ bin.pos }}</span>
           <span class="bin-lbl-name">{{ bin.label }}</span>
@@ -332,12 +313,8 @@ const hotspotZoomData = computed(() => {
         <div class="zoom-sample-row">
           <span class="zoom-sname-tag">{{ sampleNames[activeSampleIds[0] || ''] }}</span>
           <div class="zoom-genes-strip">
-            <div 
-              v-for="(g, idx) in hotspotZoomData.pairGenes1" 
-              :key="'z1-' + idx"
-              class="zoom-arrow-gene"
-              :style="{ backgroundColor: g.color }"
-            >
+            <div v-for="(g, idx) in hotspotZoomData.pairGenes1" :key="'z1-' + idx" class="zoom-arrow-gene"
+              :style="{ backgroundColor: g.color }">
               <strong>{{ g.name }}</strong>
               <small>{{ g.locus }}</small>
             </div>
@@ -353,12 +330,8 @@ const hotspotZoomData = computed(() => {
         <div class="zoom-sample-row">
           <span class="zoom-sname-tag">{{ sampleNames[activeSampleIds[1] || activeSampleIds[0] || ''] }}</span>
           <div class="zoom-genes-strip">
-            <div 
-              v-for="(g, idx) in hotspotZoomData.pairGenes2" 
-              :key="'z2-' + idx"
-              class="zoom-arrow-gene"
-              :style="{ backgroundColor: g.color }"
-            >
+            <div v-for="(g, idx) in hotspotZoomData.pairGenes2" :key="'z2-' + idx" class="zoom-arrow-gene"
+              :style="{ backgroundColor: g.color }">
               <strong>{{ g.name }}</strong>
               <small>{{ g.locus }}</small>
             </div>
@@ -486,8 +459,13 @@ const hotspotZoomData = computed(() => {
   border-radius: 3px;
 }
 
-.bg-amber { background: #d97706; }
-.bg-emerald { background: #059669; }
+.bg-amber {
+  background: #d97706;
+}
+
+.bg-emerald {
+  background: #059669;
+}
 
 .layer-header h4 {
   margin: 0;

@@ -336,7 +336,7 @@ async function handlePullFromItol(): Promise<void> {
         </label>
       </div>
 
-      <button class="btn-primary" :disabled="pubLoading" @click="handleRenderPublication">
+      <button type="button" class="btn-primary" :disabled="pubLoading" @click="handleRenderPublication">
         {{ pubLoading ? '正在渲染 PDF / SVG / PNG...' : '一键生成出版级 PDF / SVG / PNG' }}
       </button>
 
@@ -350,6 +350,7 @@ async function handlePullFromItol(): Promise<void> {
           <div class="fig-group-head">
             <span class="fig-group-title">{{ grp.label }}</span>
             <button
+              type="button"
               v-if="grp.preferredPreview"
               class="btn-preview-sm"
               @click="previewFigure(grp.preferredPreview.filename)"
@@ -374,6 +375,7 @@ async function handlePullFromItol(): Promise<void> {
 
           <div class="fig-dl-row">
             <button
+              type="button"
               v-for="fig in grp.formats"
               :key="fig.filename"
               class="btn-fmt-dl"
@@ -398,10 +400,10 @@ async function handlePullFromItol(): Promise<void> {
       </div>
 
       <div class="btn-pair">
-        <button class="btn-sec" @click="copyItolNewickText">复制 iTOL 树文本 (纯ASCII)</button>
-        <button class="btn-sec" @click="downloadItolNewick">下载 iTOL 树 (.nwk)</button>
-        <button class="btn-sec" @click="downloadItolBundle">下载注释包 (.zip)</button>
-        <button class="btn-sec" @click="openItolUploadPage">打开 iTOL 上传页</button>
+        <button type="button" class="btn-sec" @click="copyItolNewickText">复制 iTOL 树文本 (纯ASCII)</button>
+        <button type="button" class="btn-sec" @click="downloadItolNewick">下载 iTOL 树 (.nwk)</button>
+        <button type="button" class="btn-sec" @click="downloadItolBundle">下载注释包 (.zip)</button>
+        <button type="button" class="btn-sec" @click="openItolUploadPage">打开 iTOL 上传页</button>
       </div>
 
       <input
@@ -436,7 +438,7 @@ async function handlePullFromItol(): Promise<void> {
         <span>在 iTOL 导出图中显示支持率</span>
       </label>
 
-      <button class="btn-itol-pull" :disabled="itolLoading" @click="handlePullFromItol">
+      <button type="button" class="btn-itol-pull" :disabled="itolLoading" @click="handlePullFromItol">
         {{ itolLoading ? '正在连接 iTOL 导出成图...' : '从 iTOL 自动拉取出图' }}
       </button>
 
@@ -451,6 +453,7 @@ async function handlePullFromItol(): Promise<void> {
           </span>
           <div class="itol-export-actions">
             <button
+              type="button"
               v-if="isImagePreviewFormat(item.format) || isPdfPreviewFormat(item.format)"
               class="btn-preview-sm"
               @click="previewFigure(item.filename)"
@@ -458,6 +461,7 @@ async function handlePullFromItol(): Promise<void> {
               预览
             </button>
             <button
+              type="button"
               class="btn-fmt-dl"
               @click="downloadFigureFile(item.filename)"
             >

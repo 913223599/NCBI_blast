@@ -4,13 +4,28 @@
  */
 import { inferCategoryFromText, isHypotheticalName, FUNCTIONAL_CATEGORIES } from "./render";
 
-export function parseGenBank(text: string) {
+export interface GenomeFeature {
+  type: string;
+  start: number;
+  end: number;
+  strand: "+" | "-";
+  qualifiers: Record<string, string>;
+  name: string;
+  locus_tag: string;
+  gene: string;
+  product: string;
+  note: string;
+  category: string;
+  translation: string;
+}
+
+export function parseGenBank(text: string): { sequence: string; features: GenomeFeature[] } {
   const lines = text.split("\n");
-  const resultFeatures: any[] = [];
+  const resultFeatures: GenomeFeature[] = [];
   let currentSeq = "";
   let inFeatures = false;
   let inOrigin = false;
-  let currentFeat: any = null;
+  let currentFeat: GenomeFeature | null = null;
   let currentKey = "";
 
   for (let line of lines) {
@@ -108,8 +123,8 @@ export function parseGenBank(text: string) {
  * - 覆盖整条序列（无宿主侧翼）的贯穿标注直接剔除，防止覆盖正链全部 ORF
  * - 含宿主侧翼的区段标注升级为 prophage_region，走半透明跨链包络层渲染
  */
-function normalizeLegacyOverlayFeatures(features: any[], seqLen: number): any[] {
-  const cleaned: any[] = [];
+function normalizeLegacyOverlayFeatures(features: GenomeFeature[], seqLen: number): GenomeFeature[] {
+  const cleaned: GenomeFeature[] = [];
   for (const feat of features) {
     const fType = (feat.type || "").toLowerCase();
     const note = feat.note || "";
@@ -147,7 +162,7 @@ function isValidFeatureType(type?: string): boolean {
   return !["source", "assembly_gap", "gap"].includes(t);
 }
 
-function finalizeFeature(feat: any) {
+function finalizeFeature(feat: GenomeFeature) {
   const q = feat.qualifiers || {};
   feat.locus_tag = q.locus_tag || q.ID || "";
   feat.gene = q.gene || q.Name || "";
@@ -183,7 +198,7 @@ function finalizeFeature(feat: any) {
   }
 }
 
-export function parseFasta(text: string) {
+export function parseFasta(text: string): { sequence: string; features: GenomeFeature[] } {
   const lines = text.split("\n");
   let seq = "";
   for (let line of lines) {

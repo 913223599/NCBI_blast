@@ -7,6 +7,8 @@ import { getBridge } from '../../../../../bridge';
 import { useAppStore } from '../../../../../stores/app';
 import type { AnnotationRunParams, ContigMetaItem, FastaInspectResult } from '../types';
 import ContigSelector from './ContigSelector.vue';
+import { createLogger } from '../../../../../utils/logger'
+const logger = createLogger('AnnotationSetup')
 
 const appStore = useAppStore();
 
@@ -54,12 +56,25 @@ const inspectGc = ref<number>(0);
 const isInspecting = ref<boolean>(false);
 const selectedContigIds = ref<string[]>([]);
 
+interface AssemblyHistoryItem {
+  task_id?: string;
+  id?: string;
+  name?: string;
+  status?: string;
+  sample_type?: 'PHAGE' | 'BACTERIA' | 'VIRUS' | 'GENERAL';
+  fasta_path?: string;
+  assembly_fasta?: string;
+  contigs_path?: string;
+  output_fasta?: string;
+  created_at?: string | number;
+}
+
 // 组装历史列表 (从拼接管线导入)
-const assemblyHistory = ref<any[]>([]);
+const assemblyHistory = ref<AssemblyHistoryItem[]>([]);
 const selectedAssemblyTask = ref<string>('');
 const isAssemblyLoading = ref<boolean>(false);
 
-function getAssemblyTaskId(t: any): string {
+function getAssemblyTaskId(t: AssemblyHistoryItem): string {
   return String(t?.task_id || t?.id || '');
 }
 
@@ -147,7 +162,7 @@ async function inspectCurrentFasta() {
       selectedContigIds.value = [];
     }
   } catch (e) {
-    console.warn('[AnnotationSetup] 预检查 FASTA 异常:', e);
+    logger.warn('[AnnotationSetup] 预检查 FASTA 异常:', e);
     inspectedContigs.value = [];
     selectedContigIds.value = [];
   } finally {
@@ -161,7 +176,7 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 // 处理选择文件触发 (区分 Electron 原生对话框与 Web Input)
 async function handleUploadClick() {
   const bridge = getBridge();
-  const isElectron = !!(window as any).electronAPI;
+  const isElectron = !!window.electronAPI;
   
   if (isElectron) {
     const paths = await bridge.request_file_load('fasta', false);
@@ -185,11 +200,12 @@ function setLocalFilePath(filePath: string) {
 }
 
 // 处理 HTML input 选择文件
-async function handleFileSelected(e: any) {
-  const file = e.target?.files?.[0];
-  if (!file) return;
+async function handleFileSelected(e: Event) {
+  const input = e.target as HTMLInputElement | null;
+  const file = input?.files?.[0];
+  if (!file || !input) return;
   await processFile(file);
-  e.target.value = '';
+  input.value = '';
 }
 
 // 处理拖拽文件
@@ -207,7 +223,7 @@ async function processFile(file: File) {
   uploadedFileName.value = baseName;
 
   // 1. Electron 桌面端环境：直接获取物理绝对路径
-  const localPath = bridge.get_path_for_file?.(file) || (file as any).path || '';
+  const localPath = bridge.get_path_for_file?.(file) || (file as File & { path?: string }).path || '';
   if (localPath) {
     setLocalFilePath(localPath);
     return;
@@ -222,8 +238,9 @@ async function processFile(file: File) {
     } else {
       throw new Error(res?.error || '服务器暂存文件失败');
     }
-  } catch (err: any) {
-    appStore.showNotification(`文件上传失败: ${err.message}`, 'error');
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    appStore.showNotification(`文件上传失败: ${msg}`, 'error');
     uploadedFileName.value = '';
     form.fasta_path = '';
   } finally {
@@ -236,20 +253,23 @@ async function fetchAssemblyHistory() {
   isAssemblyLoading.value = true;
   try {
     const bridge = getBridge();
-    let res: any = null;
+    let res: unknown = null;
     if (typeof bridge.fetchAssemblyHistory === 'function') {
       res = await bridge.fetchAssemblyHistory();
     } else if (typeof bridge.get_assembly_history === 'function') {
       res = await bridge.get_assembly_history();
     }
-    const list = Array.isArray(res) ? res : (res?.data || res?.history || res?.tasks || []);
+    const resObj = (res && typeof res === 'object' ? res : null) as
+      | { data?: unknown; history?: unknown; tasks?: unknown }
+      | null;
+    const list = Array.isArray(res) ? res : (resObj?.data || resObj?.history || resObj?.tasks || []);
     if (Array.isArray(list)) {
-      assemblyHistory.value = list.filter((t: any) => 
-        t.status === 'SUCCESS' || t.status === 'completed' || t.status === 'success'
+      assemblyHistory.value = (list as AssemblyHistoryItem[]).filter(
+        (t) => t.status === 'SUCCESS' || t.status === 'completed' || t.status === 'success'
       );
     }
   } catch (e) {
-    console.warn('[AnnotationSetup] 获取组装历史失败:', e);
+    logger.warn('[AnnotationSetup] 获取组装历史失败:', e);
   } finally {
     isAssemblyLoading.value = false;
   }

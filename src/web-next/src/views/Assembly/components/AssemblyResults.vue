@@ -169,13 +169,13 @@ async function downloadContig(c: ContigDetailItem) {
       </div>
 
       <div class="header-right">
-        <button class="btn-secondary" @click="emit('openFolder')" :title="t('assembly.results.open_folder_title')">
+        <button type="button" class="btn-secondary" @click="emit('openFolder')" :title="t('assembly.results.open_folder_title')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
           <span>{{ t('assembly.results.open_folder') }}</span>
         </button>
-        <button class="btn-primary" @click="emit('download')">
+        <button type="button" class="btn-primary" @click="emit('download')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="7 10 12 15 17 10" />
@@ -312,7 +312,7 @@ async function downloadContig(c: ContigDetailItem) {
               </td>
               <td class="col-actions">
                 <div class="action-btn-group">
-                  <button 
+                  <button type="button" 
                     class="act-btn" 
                     :class="{ 'is-copied': copiedName === c.name }"
                     @click="copyContig(c)" 
@@ -324,7 +324,7 @@ async function downloadContig(c: ContigDetailItem) {
                     </svg>
                     <span>{{ copiedName === c.name ? '已复制' : '复制' }}</span>
                   </button>
-                  <button 
+                  <button type="button" 
                     class="act-btn icon-only" 
                     @click="downloadContig(c)" 
                     title="单独下载该片段 FASTA"
@@ -347,7 +347,7 @@ async function downloadContig(c: ContigDetailItem) {
     <div v-if="result?.fasta_path" class="compact-path-strip">
       <span class="path-title">产物文件:</span>
       <span class="path-value" :title="result.fasta_path">{{ result.fasta_path }}</span>
-      <button class="btn-copy" @click="copyFastaPath" title="复制文件路径">
+      <button type="button" class="btn-copy" @click="copyFastaPath" title="复制文件路径">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />

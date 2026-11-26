@@ -1,7 +1,6 @@
 /**
  * 桥接域模块：本地文件 IPC、BLAST 任务调度、本地数据库、翻译与词典管理
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { apiDelete, apiGet, apiPost } from '../httpClient'
 import { createLogger } from '../../utils/logger'
 
@@ -12,7 +11,7 @@ export const filesAndBlastDomain = {
     const electron = window.electronAPI
     if (!electron) {
       log.warn('当前处于非 Electron 环境，无法调用原生文件对话框。')
-      ;(window as any).app?.showNotification('局域网模式暂不支持直接读取本地文件，请使用上传逻辑', 'warning')
+      window.app?.showNotification?.('局域网模式暂不支持直接读取本地文件，请使用上传逻辑', 'warning')
       return null
     }
 
@@ -332,7 +331,7 @@ export const filesAndBlastDomain = {
     callback?.(JSON.stringify(result))
   },
 
-  async get_dictionary_stats(callback?: (res: any) => void) {
+  async get_dictionary_stats(callback?: (res: Record<string, unknown>) => void) {
     const result = await apiGet('/api/dictionary/stats')
     callback?.(result)
     return result

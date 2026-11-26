@@ -224,21 +224,21 @@ function getAlignmentBlocks(hsp: HSP | null | undefined, blockSize = 60) {
 
       <!-- 视图模式切换器 -->
       <div class="view-switch-tabs">
-        <button 
+        <button type="button" 
           class="tab-btn" 
           :class="{ active: activeView === 'fingerprint' }"
           @click="activeView = 'fingerprint'"
         >
           突变指纹图谱
         </button>
-        <button 
+        <button type="button" 
           class="tab-btn" 
           :class="{ active: activeView === 'coverage' }"
           @click="activeView = 'coverage'"
         >
           全长覆盖度
         </button>
-        <button 
+        <button type="button" 
           class="tab-btn" 
           :class="{ active: activeView === 'spectrum' }"
           @click="activeView = 'spectrum'"
@@ -458,7 +458,7 @@ function getAlignmentBlocks(hsp: HSP | null | undefined, blockSize = 60) {
           <span class="dot"></span>
           <span>比对碱基逐位对齐详情: #{{ (expandedHitIndex ?? 0) + 1 }} - {{ simplifyTitle(currentExpandedHit.title) }}</span>
         </div>
-        <button class="close-detail-btn" @click="expandedHitIndex = null">收起</button>
+        <button type="button" class="close-detail-btn" @click="expandedHitIndex = null">收起</button>
       </div>
 
       <div class="alignment-blocks-container scroll-v">

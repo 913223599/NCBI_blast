@@ -2,7 +2,7 @@
   <aside class="freezer-sidebar">
     <div class="sidebar-header">
       <h3 class="sidebar-title">保藏管理</h3>
-      <button class="btn-add-freezer" @click="emit('addFreezer')">
+      <button type="button" class="btn-add-freezer" @click="emit('addFreezer')">
         <span class="icon">+</span>
         <span>添加冰箱</span>
       </button>
@@ -39,7 +39,7 @@
             {{ getTotalBoxes(freezer) }} 个存储位
           </div>
         </div>
-        <button class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>
   </aside>

@@ -9,6 +9,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { apiGet } from '../../bridge/electron-bridge'
 import { notifyUser } from '../../utils/notify'
 import { useI18n } from '../../locales'
+import { createLogger } from '../../utils/logger'
+const logger = createLogger('CitationsDialog')
 
 export interface CitationItem {
   id: string
@@ -84,7 +86,7 @@ async function loadCitations(): Promise<void> {
       citations.value = res.tools
     }
   } catch (err) {
-    console.warn('[CitationsDialog] 加载文献库失败:', err)
+    logger.warn('[CitationsDialog] 加载文献库失败:', err)
     notifyUser(t('citations.load_failed'), 'warning')
   } finally {
     isLoading.value = false

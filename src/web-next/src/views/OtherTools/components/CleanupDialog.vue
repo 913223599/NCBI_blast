@@ -53,7 +53,7 @@ function confirm(): void {
     <div class="cd-card">
       <div class="cd-header">
         <h3>{{ title }}</h3>
-        <button class="cd-close" @click="emit('close')">&times;</button>
+        <button type="button" class="cd-close" @click="emit('close')">&times;</button>
       </div>
       <div class="cd-body">
         <p v-if="subtitle" class="cd-sub">{{ subtitle }}</p>
@@ -72,8 +72,8 @@ function confirm(): void {
         <div v-if="hasDanger" class="cd-warn">所选项包含不可恢复的删除操作，请确认。</div>
       </div>
       <div class="cd-footer">
-        <button class="cd-btn" @click="emit('close')">取消</button>
-        <button class="cd-btn danger" :disabled="busy || !selected.length" @click="confirm">
+        <button type="button" class="cd-btn" @click="emit('close')">取消</button>
+        <button type="button" class="cd-btn danger" :disabled="busy || !selected.length" @click="confirm">
           {{ busy ? '清理中...' : '确认清理' }}
         </button>
       </div>

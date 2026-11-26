@@ -3,6 +3,7 @@
  * 提供全基因组同源基因家族众数长度计算、微观变异类型判别、氨基酸差异分析及分类归一化。
  */
 import { FUNCTIONAL_CATEGORIES, inferCategoryFromText, isHypotheticalName } from '../../viewer/utils/render'
+import type { GenePresenceEntry, OrthologCluster } from '../types'
 
 export interface ClusterVariantInfo {
   type: 'conserved' | 'truncated' | 'extended' | 'absent'
@@ -90,7 +91,7 @@ export function normalizeCategoryName(raw?: string): string {
   return CATEGORY_ALIAS_MAP[key] || raw
 }
 
-export function inferClusterCategory(c: any): string {
+export function inferClusterCategory(c: OrthologCluster | null | undefined): string {
   if (!c) return 'Hypothetical'
 
   const prod = c.representative_product || c.representative_annotation?.product || c.cluster_name || ''
@@ -126,10 +127,10 @@ export function getCatColor(cat: string): string {
   return '#94a3b8'
 }
 
-export function getClusterConsensusLen(c: any): number {
+export function getClusterConsensusLen(c: OrthologCluster | null | undefined): number {
   if (!c?.presence_map) return 0
   const lens: number[] = Object.values(c.presence_map)
-    .map((m: any) => Number(m?.length_aa || 0))
+    .map((m) => (m && typeof m === 'object' ? Number((m as GenePresenceEntry).length_aa || 0) : 0))
     .filter((l: number) => l > 0)
   if (lens.length === 0) return 0
 
@@ -147,13 +148,13 @@ export function getClusterConsensusLen(c: any): number {
 }
 
 export function getClusterVariantInfo(
-  c: any,
+  c: OrthologCluster,
   rowId: string,
   precalculatedConsensusLen?: number,
   precalculatedCategory?: string
 ): ClusterVariantInfo {
-  const item = c.presence_map?.[rowId]
-  if (!item) {
+  const rawItem = c.presence_map?.[rowId]
+  if (!rawItem) {
     return {
       type: 'absent',
       className: '',
@@ -162,6 +163,7 @@ export function getClusterVariantInfo(
       variantLabel: '缺失'
     }
   }
+  const item: GenePresenceEntry = typeof rawItem === 'object' ? rawItem : {}
 
   const consensusLen = precalculatedConsensusLen ?? (c._consensusLen ?? getClusterConsensusLen(c))
   const len = Number(item.length_aa || 0)
@@ -210,13 +212,19 @@ export function getClusterVariantInfo(
   }
 }
 
-export function getAminoAcidVariation(cluster: any, sid: string, baselineSid: string): AminoAcidVariationResult {
+export function getAminoAcidVariation(
+  cluster: OrthologCluster | null | undefined,
+  sid: string,
+  baselineSid: string
+): AminoAcidVariationResult {
   if (!cluster) {
     return { type: 'absent', badgeText: '缺失', badgeClass: 'var-absent', diffDetail: '—', lengthDelta: 0 }
   }
 
-  const item = cluster.presence_map?.[sid]
-  const baseItem = cluster.presence_map?.[baselineSid]
+  const rawItem = cluster.presence_map?.[sid]
+  const rawBaseItem = cluster.presence_map?.[baselineSid]
+  const item: GenePresenceEntry | null = rawItem && typeof rawItem === 'object' ? rawItem : null
+  const baseItem: GenePresenceEntry | null = rawBaseItem && typeof rawBaseItem === 'object' ? rawBaseItem : null
 
   // 1. 参考样本自身
   if (sid === baselineSid) {

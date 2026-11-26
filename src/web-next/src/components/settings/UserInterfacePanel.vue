@@ -35,7 +35,7 @@ onMounted(() => {
       </div>
       
       <div style="text-align: right; margin-top: 32px;">
-        <button class="p-btn p-btn-primary" @click="saveLanguage">应用语言偏好</button>
+        <button type="button" class="p-btn p-btn-primary" @click="saveLanguage">应用语言偏好</button>
       </div>
     </div>
   </div>

@@ -3,6 +3,17 @@
  * 负责受体分型聚类、代表株/协同株/冗余株/安全剔除分流、KPI 汇总、二维散点映射及 CSV 导出
  */
 import { ref, computed } from 'vue'
+import type { ArmsRaceEntry, OrthologCluster, PhageLifestyleEntry } from '../../types'
+
+interface SampleEvaluationSummary {
+  sid: string
+  name: string
+  lifestyle: string
+  isSafe: boolean
+  acrCnt: number
+  uniq: number
+  total: number
+}
 
 export interface DeRedundancySample {
   sample_id: string
@@ -40,9 +51,9 @@ export interface CocktailDeRedundancyProps {
   aniMatrix: Record<string, Record<string, number | null>>
   tailMatrix?: Record<string, Record<string, number>>
   lysisMatrix?: Record<string, Record<string, number>>
-  clusters?: any[]
-  lifestyles?: any[]
-  armsRaceMatrix?: Record<string, any>
+  clusters?: OrthologCluster[]
+  lifestyles?: PhageLifestyleEntry[]
+  armsRaceMatrix?: Record<string, ArmsRaceEntry>
   sampleNames: Record<string, string>
   selectedPair: [string, string] | null
 }
@@ -68,20 +79,20 @@ export function useCocktailDeRedundancy(
     const ids = sampleIds.value
     if (ids.length === 0) return { samples: [], optimalSet: [], clusters: [], total: 0 }
 
-    const sampleMap: Record<string, any> = {}
+    const sampleMap: Record<string, SampleEvaluationSummary> = {}
     ids.forEach(sid => {
-      const life = props.lifestyles?.find((l: any) => l.sample_id === sid)
+      const life = props.lifestyles?.find((l: PhageLifestyleEntry) => l.sample_id === sid)
       const isSafe = life
         ? life.lifestyle === 'Lytic' &&
-          !life.has_toxin &&
-          !life.has_integrase &&
-          life.is_safe_for_therapy !== false
+        !life.has_toxin &&
+        !life.has_integrase &&
+        life.is_safe_for_therapy !== false
         : true
       const acrCnt = props.armsRaceMatrix?.[sid]?.acr_count || 0
 
       let uniq = 0
       let total = 0
-      props.clusters?.forEach((c: any) => {
+      props.clusters?.forEach((c: OrthologCluster) => {
         if (c.presence_map?.[sid]) {
           total++
           const occup = Object.values(c.presence_map).filter(Boolean).length
@@ -127,13 +138,15 @@ export function useCocktailDeRedundancy(
       const clusterNum = cIdx + 1
       const receptorTag = `受体谱系 #${clusterNum}`
 
-      const safeMembers = clusterMembers.filter(sid => sampleMap[sid].isSafe)
-      const unsafeMembers = clusterMembers.filter(sid => !sampleMap[sid].isSafe)
+      const safeMembers = clusterMembers.filter(sid => Boolean(sampleMap[sid]?.isSafe))
+      const unsafeMembers = clusterMembers.filter(sid => !sampleMap[sid]?.isSafe)
 
       unsafeMembers.forEach(sid => {
+        const info = sampleMap[sid]
+        if (!info) return
         results.push({
           sample_id: sid,
-          sample_name: sampleMap[sid].name,
+          sample_name: info.name,
           decision: 'REJECT',
           decision_label: '安全剔除',
           role: '安全风险',
@@ -143,11 +156,11 @@ export function useCocktailDeRedundancy(
           tail_to_rep: 0,
           receptor_divergence: 0,
           confidence: 96,
-          lifestyle: sampleMap[sid].lifestyle,
+          lifestyle: info.lifestyle,
           is_safe: false,
-          acr_count: sampleMap[sid].acrCnt,
-          unique_genes: sampleMap[sid].uniq,
-          total_genes: sampleMap[sid].total,
+          acr_count: info.acrCnt,
+          unique_genes: info.uniq,
+          total_genes: info.total,
           evidence_chips: ['[警示] 检出关键溶原整合元件', '安全筛查: 未通过 (Temperate/Risk)'],
           detailed_reasons: {
             genome_ani: '不适用 (安全性否决)',
@@ -163,18 +176,20 @@ export function useCocktailDeRedundancy(
       const sortedMembers = safeMembers.toSorted((a, b) => {
         const da = sampleMap[a]
         const db = sampleMap[b]
+        if (!da || !db) return 0
         if (da.uniq !== db.uniq) return db.uniq - da.uniq
         return db.total - da.total
       })
 
       const repId = sortedMembers[0]
-      if (!repId) return
+      const repInfo = repId ? sampleMap[repId] : undefined
+      if (!repId || !repInfo) return
 
       optimalSetIds.push(repId)
 
       results.push({
         sample_id: repId,
-        sample_name: sampleMap[repId].name,
+        sample_name: repInfo.name,
         decision: 'KEEP',
         decision_label: '核心保留',
         role: '核心骨干',
@@ -184,30 +199,31 @@ export function useCocktailDeRedundancy(
         tail_to_rep: 100,
         receptor_divergence: 0,
         confidence: 95,
-        lifestyle: sampleMap[repId].lifestyle,
+        lifestyle: repInfo.lifestyle,
         is_safe: true,
-        acr_count: sampleMap[repId].acrCnt,
-        unique_genes: sampleMap[repId].uniq,
-        total_genes: sampleMap[repId].total,
+        acr_count: repInfo.acrCnt,
+        unique_genes: repInfo.uniq,
+        total_genes: repInfo.total,
         evidence_chips: [
           '独立核心骨干代表株',
           `${receptorTag} (100% 覆盖)`,
-          `Acr 防御: ${sampleMap[repId].acrCnt}`,
+          `Acr 防御: ${repInfo.acrCnt}`,
         ],
         detailed_reasons: {
           genome_ani: '100% (自身基准)',
           receptor_mechanism: `${receptorTag} 骨干受体`,
           coverage: `代表谱系 #${clusterNum} 全受体覆盖`,
           unique_signals:
-            sampleMap[repId].uniq > 0
-              ? `检出 ${sampleMap[repId].uniq} 个独有特征家族`
+            repInfo.uniq > 0
+              ? `检出 ${repInfo.uniq} 个独有特征家族`
               : '高质量完整组装序列',
         },
       })
 
       for (let i = 1; i < sortedMembers.length; i++) {
         const sid = sortedMembers[i]
-        if (!sid) continue
+        const info = sid ? sampleMap[sid] : undefined
+        if (!sid || !info) continue
         const aniToRep = props.aniMatrix?.[sid]?.[repId] ?? 0
         const tailToRep = props.tailMatrix?.[sid]?.[repId] ?? 100
         const divergence = Math.max(0, 100 - tailToRep)
@@ -215,23 +231,23 @@ export function useCocktailDeRedundancy(
         if (aniToRep >= 98.0 && tailToRep >= 98.0) {
           results.push({
             sample_id: sid,
-            sample_name: sampleMap[sid].name,
+            sample_name: info.name,
             decision: 'REDUNDANT',
             decision_label: '建议冗存',
             role: '冗余同质',
             cluster_id: clusterNum,
             receptor_label: receptorTag,
             redundant_with: repId,
-            redundant_with_name: sampleMap[repId].name,
+            redundant_with_name: repInfo.name,
             ani_to_rep: aniToRep,
             tail_to_rep: tailToRep,
             receptor_divergence: divergence,
             confidence: 92,
-            lifestyle: sampleMap[sid].lifestyle,
+            lifestyle: info.lifestyle,
             is_safe: true,
-            acr_count: sampleMap[sid].acrCnt,
-            unique_genes: sampleMap[sid].uniq,
-            total_genes: sampleMap[sid].total,
+            acr_count: info.acrCnt,
+            unique_genes: info.uniq,
+            total_genes: info.total,
             evidence_chips: [
               `与代表株 ANI ${aniToRep.toFixed(1)}%`,
               '机制: 完全一致',
@@ -240,33 +256,33 @@ export function useCocktailDeRedundancy(
             detailed_reasons: {
               genome_ani: `与代表株 ANI ${aniToRep.toFixed(1)}% (同质化克隆)`,
               receptor_mechanism: `尾丝一致性 ${tailToRep.toFixed(1)}% (相同受体机制)`,
-              coverage: `已由骨干株【${sampleMap[repId].name}】100% 覆盖`,
+              coverage: `已由骨干株【${repInfo.name}】100% 覆盖`,
               unique_signals: '未检出有意义的受体漂移或额外攻防元件',
             },
           })
         } else {
           results.push({
             sample_id: sid,
-            sample_name: sampleMap[sid].name,
+            sample_name: info.name,
             decision: 'SYNERGISTIC',
             decision_label: '协同备选',
             role: '协同变异',
             cluster_id: clusterNum,
             receptor_label: receptorTag,
             redundant_with: repId,
-            redundant_with_name: sampleMap[repId].name,
+            redundant_with_name: repInfo.name,
             ani_to_rep: aniToRep,
             tail_to_rep: tailToRep,
             receptor_divergence: divergence,
             confidence: 88,
-            lifestyle: sampleMap[sid].lifestyle,
+            lifestyle: info.lifestyle,
             is_safe: true,
-            acr_count: sampleMap[sid].acrCnt,
-            unique_genes: sampleMap[sid].uniq,
-            total_genes: sampleMap[sid].total,
+            acr_count: info.acrCnt,
+            unique_genes: info.uniq,
+            total_genes: info.total,
             evidence_chips: [
               `受体漂移度: ${divergence.toFixed(1)}%`,
-              `Acr: ${sampleMap[sid].acrCnt}`,
+              `Acr: ${info.acrCnt}`,
               '突变逃逸互补株',
             ],
             detailed_reasons: {

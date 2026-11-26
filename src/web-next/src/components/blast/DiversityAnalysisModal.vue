@@ -1,11 +1,19 @@
 <script setup lang="ts">
 /**
- * DiversityAnalysisModal.vue - 16S 扩增子混样多样性还原与 rrnDB 拷贝数归一化分析面板（薄视图外壳）
- * 核心状态、轮询、分组聚合与导出逻辑已拆离至 ./diversity/useDiversityModal.ts
+ * DiversityAnalysisModal.vue - 16S 扩增子混样多样性还原与 rrnDB 拷贝数归一化分析面板（薄编排外壳）
+ * 核心状态机见 ./diversity/useDiversityModal.ts；
+ * 各视图区块已拆解至 ./diversity/{DiversityChartTab,DiversityTaxaTab,DiversityMatrixTab,DiversityGroupModal,DiversityHistoryDrawer}.vue。
  */
+import { reactive } from 'vue'
 import UniversalUpload from '../common/UniversalUpload.vue'
 import { useI18n } from '../../locales'
 import { useDiversityModal } from './diversity/useDiversityModal'
+import DiversityChartTab from './diversity/DiversityChartTab.vue'
+import DiversityTaxaTab from './diversity/DiversityTaxaTab.vue'
+import DiversityMatrixTab from './diversity/DiversityMatrixTab.vue'
+import DiversityGroupModal from './diversity/DiversityGroupModal.vue'
+import DiversityHistoryDrawer from './diversity/DiversityHistoryDrawer.vue'
+
 export type { SampleGroupDef } from './diversity/diversityHelpers'
 
 const { t } = useI18n()
@@ -29,45 +37,37 @@ const emit = defineEmits<{
   (e: 'taskChanged', taskId: string): void
 }>()
 
-const {
-  activeTab, abundanceMode, currentFilePath, detectedPackage, isGroupView,
-  showGroupModal, groupChunkSize, sampleGroups, taxaSearchQuery, showHistoryDrawer, historyTasks,
-  isLoadingHistory, isRunning, taskId, progress, currentStep, currentSample, processedReads,
-  totalReads, processedSamples, totalSamples, results, topTaxaCount, tooltip,
-  isTranslating, detailSearchQuery, detailViewMode, topTaxaList, allSampleNames,
-  unassignedSamples, activeSamples, stackedBarData, confirmedSpeciesCount, filteredTaxaOverview,
-  filteredActiveSamples, formatTime, formatReadsCount, getStatusLabel, formatPct, isNoiseTaxon,
-  toggleHistoryDrawer, selectHistoryTask, deleteHistoryTask, clearAllHistory, resetToNewAnalysis,
-  close, handleUploadSuccess, startAnalysis, fetchHistoryTasks, getTaxonColor, addGroup,
-  removeGroup, generateConsecutiveGroups, parseSamplePattern, setChunkSizeAndGenerate, clearAllGroups, getRealTaxonRank,
-  showSegmentTooltip, hideTooltip, translateAllTaxa, getTaxonZh, exportExcel, toggleSampleCollapse,
-  expandAllSamples, collapseAllSamples, isSampleCollapsed, getDominantTaxon,
-} = useDiversityModal(props, emit)
+const modal = useDiversityModal(props, emit)
+const state = reactive(modal)
+
+function applyGroupRules() {
+  state.isGroupView = true
+  state.showGroupModal = false
+}
 
 defineExpose({
-  toggleHistoryDrawer,
-  startAnalysis,
-  resetToNewAnalysis,
-  selectHistoryTask,
-  fetchHistoryTasks,
-  taskId,
-  results,
+  toggleHistoryDrawer: modal.toggleHistoryDrawer,
+  startAnalysis: modal.startAnalysis,
+  resetToNewAnalysis: modal.resetToNewAnalysis,
+  selectHistoryTask: modal.selectHistoryTask,
+  fetchHistoryTasks: modal.fetchHistoryTasks,
+  taskId: modal.taskId,
+  results: modal.results,
 })
 </script>
 
 <template>
-  <div 
-    v-if="embedded || modelValue" 
-    :class="[embedded ? 'diversity-embedded-container' : 'modal-overlay']" 
-    @click.self="!embedded && close()"
+  <div
+    v-if="embedded || modelValue"
+    :class="[embedded ? 'diversity-embedded-container' : 'modal-overlay']"
+    @click.self="!embedded && modal.close()"
   >
     <div class="modal-container-neo" :class="{ 'is-embedded': embedded }">
-      <!-- 头部 -->
       <div class="modal-header-neo">
         <div class="header-left">
           <div class="icon-wrap">
             <svg class="header-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7c3 0 5 5 8 5s5-5 8-5M4 17c3 0 5-5 8-5s5 5 8 5M7 8.5v7M17 8.5v7"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7c3 0 5 5 8 5s5-5 8-5M4 17c3 0 5-5 8-5s5 5 8 5M7 8.5v7M17 8.5v7" />
             </svg>
           </div>
           <div>
@@ -76,112 +76,124 @@ defineExpose({
           </div>
         </div>
         <div class="header-right">
-          <!-- 新建分析按钮 -->
-          <button type="button" v-if="results && !isRunning" class="btn-tool-neo" @click="resetToNewAnalysis" :title="t('blast.diversity_modal.new_title')">
+          <button
+            type="button"
+            v-if="state.results && !state.isRunning"
+            class="btn-tool-neo"
+            @click="modal.resetToNewAnalysis()"
+            :title="t('blast.diversity_modal.new_title')"
+          >
             <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
             </svg>
             <span>{{ t('blast.diversity_modal.new_btn') }}</span>
           </button>
 
-          <!-- 历史记录按钮 -->
-          <button type="button" class="btn-tool-neo" :class="{ active: showHistoryDrawer }" @click="toggleHistoryDrawer" :title="t('blast.diversity_modal.history_title')">
+          <button
+            type="button"
+            class="btn-tool-neo"
+            :class="{ active: state.showHistoryDrawer }"
+            @click="modal.toggleHistoryDrawer()"
+            :title="t('blast.diversity_modal.history_title')"
+          >
             <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <circle cx="12" cy="12" r="9" stroke-width="2"/>
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 3"/>
+              <circle cx="12" cy="12" r="9" stroke-width="2" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 3" />
             </svg>
-            <span>{{ t('blast.diversity_modal.history_btn', { count: historyTasks.length }) }}</span>
+            <span>{{ t('blast.diversity_modal.history_btn', { count: state.historyTasks.length }) }}</span>
           </button>
 
-          <!-- 词条翻译按钮 (和原版 BLAST 一致) -->
-          <button 
+          <button
             type="button"
-            v-if="results && !isRunning" 
-            class="btn-tool-neo" 
-            :class="{ 'is-loading': isTranslating }" 
-            @click="translateAllTaxa" 
+            v-if="state.results && !state.isRunning"
+            class="btn-tool-neo"
+            :class="{ 'is-loading': state.isTranslating }"
+            @click="modal.translateAllTaxa()"
             :title="t('blast.diversity_modal.translate_title')"
           >
-            <svg class="btn-icon-svg" :class="{ 'spin-anim': isTranslating }" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/>
+            <svg class="btn-icon-svg" :class="{ 'spin-anim': state.isTranslating }" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
             </svg>
-            <span>{{ isTranslating ? t('blast.diversity_modal.translating') : t('blast.diversity_modal.translate_btn') }}</span>
+            <span>{{ state.isTranslating ? t('blast.diversity_modal.translating') : t('blast.diversity_modal.translate_btn') }}</span>
           </button>
 
-          <button type="button" v-if="results" class="btn-export-neo" @click="exportExcel">
+          <button type="button" v-if="state.results" class="btn-export-neo" @click="modal.exportExcel()">
             <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             <span>{{ t('blast.diversity_modal.export_excel') }}</span>
           </button>
 
-          <!-- 浮窗模式下提供关闭按钮 -->
-          <button type="button" v-if="!embedded" class="btn-close-neo" @click="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <button type="button" v-if="!embedded" class="btn-close-neo" @click="modal.close()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
       </div>
 
       <!-- 载入与控制区 -->
-      <div v-if="!results && !isRunning" class="import-section-neo">
+      <div v-if="!state.results && !state.isRunning" class="import-section-neo">
         <div class="upload-box-wrapper">
-          <UniversalUpload 
+          <UniversalUpload
             type="fasta"
             accept=".zip,.fastq,.fastq.gz"
             :label="t('blast.diversity_modal.upload_label')"
-            @success="handleUploadSuccess"
+            @success="modal.handleUploadSuccess"
           />
         </div>
 
-        <div v-if="detectedPackage" class="detect-badge-card">
+        <div v-if="state.detectedPackage" class="detect-badge-card">
           <div class="badge-status-tag">{{ t('blast.diversity_modal.detected_badge') }}</div>
           <div class="detect-info">
-            <span class="name">{{ detectedPackage.file_name }}</span>
+            <span class="name">{{ state.detectedPackage.file_name }}</span>
             <span class="desc">
-              {{ t('blast.diversity_modal.detected_desc', { count: detectedPackage.fastq_count }) }}
+              {{ t('blast.diversity_modal.detected_desc', { count: state.detectedPackage.fastq_count }) }}
             </span>
           </div>
-          <button type="button" class="btn-start-action" @click="startAnalysis">
+          <button type="button" class="btn-start-action" @click="modal.startAnalysis()">
             {{ t('blast.diversity_modal.start_now') }}
           </button>
         </div>
-        <div v-else-if="currentFilePath" class="fallback-launch">
-          <button type="button" class="btn-start-action" @click="startAnalysis">
+        <div v-else-if="state.currentFilePath" class="fallback-launch">
+          <button type="button" class="btn-start-action" @click="modal.startAnalysis()">
             {{ t('blast.diversity_modal.start_file') }}
           </button>
         </div>
 
-        <!-- 首页快捷历史记录卡片区 (类似单样本查询) -->
-        <div v-if="!detectedPackage && historyTasks.length > 0" class="recent-history-section">
+        <div v-if="!state.detectedPackage && state.historyTasks.length > 0" class="recent-history-section">
           <div class="recent-header">
             <span class="recent-title">{{ t('blast.diversity_modal.recent_title') }}</span>
-            <button type="button" class="recent-all-btn" @click="showHistoryDrawer = true">
-              {{ t('blast.diversity_modal.view_all_history', { count: historyTasks.length }) }}
+            <button type="button" class="recent-all-btn" @click="state.showHistoryDrawer = true">
+              {{ t('blast.diversity_modal.view_all_history', { count: state.historyTasks.length }) }}
             </button>
           </div>
           <div class="recent-task-grid">
-            <div 
-              v-for="task in historyTasks.slice(0, 3)" 
-              :key="task.task_id" 
+            <div
+              v-for="task in state.historyTasks.slice(0, 3)"
+              :key="task.task_id"
               class="recent-task-item"
               role="button"
               tabindex="0"
-              @click="selectHistoryTask(task)"
-              @keydown.enter.prevent="selectHistoryTask(task)"
-              @keydown.space.prevent="selectHistoryTask(task)"
+              @click="modal.selectHistoryTask(task)"
+              @keydown.enter.prevent="modal.selectHistoryTask(task)"
+              @keydown.space.prevent="modal.selectHistoryTask(task)"
             >
               <div class="recent-item-top">
                 <span class="item-name" :title="task.task_name">{{ task.task_name }}</span>
-                <span class="item-status" :class="task.status">{{ getStatusLabel(task.status) }}</span>
+                <span class="item-status" :class="task.status">{{ modal.getStatusLabel(task.status) }}</span>
               </div>
               <div class="recent-item-meta">
-                <span>{{ formatTime(task.completed_at || task.created_at) }}</span>
-                <span>{{ task.total_samples }} · {{ formatReadsCount(task.total_reads) }} Reads</span>
+                <span>{{ modal.formatTime(task.completed_at || task.created_at) }}</span>
+                <span>{{ task.total_samples }} · {{ modal.formatReadsCount(task.total_reads) }} Reads</span>
               </div>
               <div class="recent-item-actions">
-                <button 
+                <button
                   type="button"
-                  class="btn-item-del" 
+                  class="btn-item-del"
                   :title="t('blast.diversity_modal.delete_task_title')"
-                  @click.stop="deleteHistoryTask(task, $event)"
+                  @click.stop="modal.deleteHistoryTask(task, $event)"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -193,8 +205,8 @@ defineExpose({
         </div>
       </div>
 
-      <!-- 运行进度展示 (多核比对 xx/xx 进度) -->
-      <div v-if="isRunning" class="progress-section-neo">
+      <!-- 运行进度展示 -->
+      <div v-if="state.isRunning" class="progress-section-neo">
         <div class="progress-card-neo">
           <div class="pulse-icon-svg">
             <svg class="exec-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -202,31 +214,28 @@ defineExpose({
             </svg>
           </div>
           <div class="progress-info">
-            <div class="step-text">{{ currentStep }}</div>
-            <div class="sample-hint" v-if="currentSample">
-              正在处理点位: <strong>{{ currentSample }}</strong>
+            <div class="step-text">{{ state.currentStep }}</div>
+            <div class="sample-hint" v-if="state.currentSample">
+              正在处理点位: <strong>{{ state.currentSample }}</strong>
             </div>
           </div>
           <div class="progress-bar-wrap">
-            <div class="bar-fill" :style="{ width: `${progress}%` }"></div>
+            <div class="bar-fill" :style="{ width: `${state.progress}%` }"></div>
           </div>
-          
-          <!-- xx/xx 比对进度与百分比清晰看板 -->
           <div class="progress-meta-row">
-            <div class="progress-percent-val">{{ progress }}%</div>
-            <div class="progress-counter-badge" v-if="totalReads > 0">
+            <div class="progress-percent-val">{{ state.progress }}%</div>
+            <div class="progress-counter-badge" v-if="state.totalReads > 0">
               <span class="counter-label">序列比对:</span>
-              <span class="counter-num">{{ processedReads.toLocaleString() }} / {{ totalReads.toLocaleString() }} Reads</span>
+              <span class="counter-num">{{ state.processedReads.toLocaleString() }} / {{ state.totalReads.toLocaleString() }} Reads</span>
             </div>
-            <div class="progress-counter-badge samples-badge" v-if="totalSamples > 0">
+            <div class="progress-counter-badge samples-badge" v-if="state.totalSamples > 0">
               <span class="counter-label">样本点位:</span>
-              <span class="counter-num">{{ processedSamples }} / {{ totalSamples }}</span>
+              <span class="counter-num">{{ state.processedSamples }} / {{ state.totalSamples }}</span>
             </div>
           </div>
-
           <div class="checkpoint-tip">
             <svg class="shield-svg" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clip-rule="evenodd"/>
+              <path fill-rule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clip-rule="evenodd" />
             </svg>
             <span>分片落盘与断点保护 (Checkpoint) 生效中，防止大规模数据 OOM 崩溃</span>
           </div>
@@ -234,79 +243,84 @@ defineExpose({
       </div>
 
       <!-- 分析结果面板 -->
-      <div v-if="results" class="results-dashboard-neo">
-        <!-- 统计核心条目与样本合并控制栏 -->
+      <div v-if="state.results" class="results-dashboard-neo">
         <div class="stats-overview-bar">
           <div class="stat-pill-group">
             <div class="stat-pill stat-pill-primary">
-              <span class="label">{{ isGroupView ? '当前展示分组:' : '测序点位数:' }}</span>
-              <span class="val">{{ activeSamples.length }} {{ isGroupView ? '个聚合组' : '个采样点' }}</span>
-              <span v-if="isGroupView" class="sub-label">(覆盖 {{ results?.total_samples || 0 }} 个测序点)</span>
+              <span class="label">{{ state.isGroupView ? '当前展示分组:' : '测序点位数:' }}</span>
+              <span class="val">{{ state.activeSamples.length }} {{ state.isGroupView ? '个聚合组' : '个采样点' }}</span>
+              <span v-if="state.isGroupView" class="sub-label">(覆盖 {{ state.results?.total_samples || 0 }} 个测序点)</span>
             </div>
             <div class="stat-pill">
               <span class="label">有效 Reads:</span>
-              <span class="val">{{ (results?.total_classified_reads ?? results?.total_reads ?? 0).toLocaleString() }} 条</span>
+              <span class="val">{{ (state.results?.total_classified_reads ?? state.results?.total_reads ?? 0).toLocaleString() }} 条</span>
             </div>
             <div class="stat-pill">
               <span class="label">确证菌种:</span>
-              <span class="val">{{ confirmedSpeciesCount }} 种</span>
+              <span class="val">{{ state.confirmedSpeciesCount }} 种</span>
             </div>
             <div class="stat-pill pill-rrndb" title="基于 rrnDB v5.10 消除 16S 多拷贝菌株的丰度假阳性放大，还原真实细胞丰度">
               <svg class="pill-shield-svg" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clip-rule="evenodd"/>
+                <path fill-rule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clip-rule="evenodd" />
               </svg>
               <span class="label">校正状态:</span>
               <span class="val">rrnDB v5.10 已归一化</span>
             </div>
-            <div v-if="results?.qc_summary" class="stat-pill pill-qc" :title="`前置质控过滤: 原始 ${results.qc_summary.total_raw_reads} 条，剔除 ${results.qc_summary.total_dropped_reads} 条异常读段 (读长/质量值未达标)`">
+            <div
+              v-if="state.results?.qc_summary"
+              class="stat-pill pill-qc"
+              :title="`前置质控过滤: 原始 ${state.results.qc_summary.total_raw_reads} 条，剔除 ${state.results.qc_summary.total_dropped_reads} 条异常读段 (读长/质量值未达标)`"
+            >
               <svg class="pill-shield-svg" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
               </svg>
               <span class="label">测序质控 (QC):</span>
-              <span class="val">{{ results.qc_summary.overall_pass_rate_pct }}% 通过</span>
+              <span class="val">{{ state.results.qc_summary.overall_pass_rate_pct }}% 通过</span>
             </div>
           </div>
 
-          <!-- 样本合并与分组控制区 -->
           <div class="group-control-bar">
-            <button 
-              class="group-toggle-btn" 
-              :class="{ active: isGroupView }"
-              @click="isGroupView = !isGroupView"
-              :title="isGroupView ? '点击切换回原始各个采样点位视图' : '点击按规则合并点位（如 1-5 为一组）'"
+            <button
+              type="button"
+              class="group-toggle-btn"
+              :class="{ active: state.isGroupView }"
+              @click="state.isGroupView = !state.isGroupView"
+              :title="state.isGroupView ? '点击切换回原始各个采样点位视图' : '点击按规则合并点位（如 1-5 为一组）'"
             >
               <svg class="group-svg" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
               </svg>
-              <span>{{ isGroupView ? '分组聚合模式 (已启用)' : '合并样本点位' }}</span>
-              <span v-if="isGroupView" class="btn-group-counter">{{ activeSamples.length }} 组</span>
+              <span>{{ state.isGroupView ? '分组聚合模式 (已启用)' : '合并样本点位' }}</span>
+              <span v-if="state.isGroupView" class="btn-group-counter">{{ state.activeSamples.length }} 组</span>
             </button>
-            <button 
-              class="group-config-btn" 
-              @click="showGroupModal = true"
+            <button
+              type="button"
+              class="group-config-btn"
+              @click="state.showGroupModal = true"
               title="配置合并分组规则 (例如 1-5 合并为对照组，6-9 合并为实验组)"
             >
               <svg class="group-svg" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
               </svg>
-              <span>分组规则 ({{ sampleGroups.length }})</span>
+              <span>分组规则 ({{ state.sampleGroups.length }})</span>
             </button>
           </div>
 
-          <!-- 模式切换开关 -->
           <div class="abundance-mode-toggle">
-            <button 
-              class="toggle-btn" 
-              :class="{ active: abundanceMode === 'norm' }"
-              @click="abundanceMode = 'norm'"
+            <button
+              type="button"
+              class="toggle-btn"
+              :class="{ active: state.abundanceMode === 'norm' }"
+              @click="state.abundanceMode = 'norm'"
               title="消除 16S 基因拷贝数偏好，真实还原微生物细胞相对丰度"
             >
               rrnDB 拷贝数归一化丰度
             </button>
-            <button 
-              class="toggle-btn" 
-              :class="{ active: abundanceMode === 'raw' }"
-              @click="abundanceMode = 'raw'"
+            <button
+              type="button"
+              class="toggle-btn"
+              :class="{ active: state.abundanceMode === 'raw' }"
+              @click="state.abundanceMode = 'raw'"
               title="原始测序下机 Reads 物理计数占比"
             >
               原始 Reads 占比
@@ -314,826 +328,129 @@ defineExpose({
           </div>
         </div>
 
-        <!-- 精简导航：聚焦物种构成、排行榜与明细 -->
         <div class="sub-tabs-neo">
-          <button class="tab-item" :class="{ active: activeTab === 'chart' }" @click="activeTab = 'chart'">
+          <button type="button" class="tab-item" :class="{ active: state.activeTab === 'chart' }" @click="state.activeTab = 'chart'">
             <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
             <span>物种丰度分布图</span>
           </button>
-          <button class="tab-item" :class="{ active: activeTab === 'taxa' }" @click="activeTab = 'taxa'">
+          <button type="button" class="tab-item" :class="{ active: state.activeTab === 'taxa' }" @click="state.activeTab = 'taxa'">
             <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
             <span>检出物种总览与排行榜 (有什么菌)</span>
           </button>
-          <button class="tab-item" :class="{ active: activeTab === 'matrix' }" @click="activeTab = 'matrix'">
+          <button type="button" class="tab-item" :class="{ active: state.activeTab === 'matrix' }" @click="state.activeTab = 'matrix'">
             <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 4h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18m-9-4v8m-7 4h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             <span>样本 / 分组明细大表</span>
           </button>
         </div>
 
-        <!-- TAB 1: 物种丰度分布图 (由 activeSamples 动态驱动，支持合并视图) -->
-        <div v-show="activeTab === 'chart'" class="tab-content-neo scroll-y">
-          <div class="chart-container-card">
-            <!-- 视图状态提示栏 -->
-            <div class="chart-status-banner" v-if="isGroupView">
-              <span class="banner-tag">合并模式已生效</span>
-              <span class="banner-desc">
-                已将随机采样点位合并汇总为 {{ activeSamples.length }} 个样本/组，各组内序列 Reads 已重新按 rrnDB GCN 拷贝数精准归一化
-              </span>
-            </div>
+        <DiversityChartTab
+          v-show="state.activeTab === 'chart'"
+          :is-group-view="state.isGroupView"
+          :active-sample-count="state.activeSamples.length"
+          :top-taxa-count="state.topTaxaCount"
+          :top-taxa-list="state.topTaxaList"
+          :stacked-bar-data="state.stackedBarData"
+          :get-taxon-color="modal.getTaxonColor"
+          @update:top-taxa-count="state.topTaxaCount = $event"
+          @show-tooltip="modal.showSegmentTooltip"
+          @hide-tooltip="modal.hideTooltip"
+        />
 
-            <!-- 动态物种展示筛选条 -->
-            <div class="chart-top-bar">
-              <div class="top-taxa-selector">
-                <span class="selector-lbl">物种展示模式:</span>
-                <div class="selector-btn-group">
-                  <button class="selector-btn" :class="{ active: topTaxaCount === 10 }" @click="topTaxaCount = 10">Top 10</button>
-                  <button class="selector-btn" :class="{ active: topTaxaCount === 15 }" @click="topTaxaCount = 15">Top 15</button>
-                  <button class="selector-btn" :class="{ active: topTaxaCount === 20 }" @click="topTaxaCount = 20">Top 20</button>
-                  <button class="selector-btn" :class="{ active: topTaxaCount >= 900 }" @click="topTaxaCount = 999">全部物种 (All)</button>
-                </div>
-              </div>
-            </div>
+        <DiversityTaxaTab
+          v-show="state.activeTab === 'taxa'"
+          :taxa-search-query="state.taxaSearchQuery"
+          :confirmed-species-count="state.confirmedSpeciesCount"
+          :filtered-taxa-overview="state.filteredTaxaOverview"
+          :is-noise-taxon="modal.isNoiseTaxon"
+          :get-real-taxon-rank="modal.getRealTaxonRank"
+          :get-taxon-color="modal.getTaxonColor"
+          :get-taxon-zh="modal.getTaxonZh"
+          @update:taxa-search-query="state.taxaSearchQuery = $event"
+          @export-excel="modal.exportExcel()"
+        />
 
-            <div class="chart-legend-wrap">
-              <div 
-                v-for="taxon in topTaxaList" 
-                :key="taxon" 
-                class="legend-badge"
-              >
-                <span class="dot" :style="{ background: getTaxonColor(taxon) }"></span>
-                <span class="text">{{ taxon }}</span>
-              </div>
-              <div v-if="topTaxaCount < 900" class="legend-badge badge-minor" title="非前列的真实低丰度长尾微生物合集，可切换‘全部物种’展开">
-                <span class="dot" style="background: #94a3b8"></span>
-                <span class="text">长尾微量物种 (Minor Taxa)</span>
-              </div>
-              <div class="legend-badge badge-noise" title="单/双 Reads 孤儿伪物种与随机测序噪声，经质控过滤器隔离">
-                <span class="dot" style="background: #475569"></span>
-                <span class="text">低频测序噪声 (已质控过滤)</span>
-              </div>
-            </div>
-
-            <!-- 图表解读辅助提示 -->
-            <div class="chart-guide-tip">
-              <span class="guide-tag">图表说明</span>
-              <span class="guide-txt">
-                每个柱状条代表独立测序点位或合并组的 100% 相对丰度构成。图例圆点颜色与明细表物种颜色严格联动。
-              </span>
-            </div>
-
-            <!-- SVG 堆叠柱状图 -->
-            <div class="svg-scroll-container">
-              <svg :width="Math.max(800, stackedBarData.length * 48 + 120)" height="360" class="stacked-bar-svg">
-                <!-- 背景网格刻度 -->
-                <line x1="50" y1="30" x2="100%" y2="30" stroke="#f1f5f9" stroke-dasharray="4,4" />
-                <line x1="50" y1="95" x2="100%" y2="95" stroke="#f1f5f9" stroke-dasharray="4,4" />
-                <line x1="50" y1="160" x2="100%" y2="160" stroke="#f1f5f9" stroke-dasharray="4,4" />
-                <line x1="50" y1="225" x2="100%" y2="225" stroke="#f1f5f9" stroke-dasharray="4,4" />
-                <line x1="50" y1="290" x2="100%" y2="290" stroke="#cbd5e1" />
-
-                <!-- Y 轴标签 -->
-                <text x="42" y="34" text-anchor="end" class="axis-txt">100%</text>
-                <text x="42" y="99" text-anchor="end" class="axis-txt">75%</text>
-                <text x="42" y="164" text-anchor="end" class="axis-txt">50%</text>
-                <text x="42" y="229" text-anchor="end" class="axis-txt">25%</text>
-                <text x="42" y="294" text-anchor="end" class="axis-txt">0%</text>
-
-                <!-- 样本柱体 -->
-                <g v-for="(sample, idx) in stackedBarData" :key="sample.sampleName" :transform="`translate(${65 + idx * 46}, 0)`">
-                  <g v-for="seg in sample.segments" :key="seg.taxon">
-                    <rect 
-                      :y="290 - (seg.yTop / 100 * 260)"
-                      :height="(seg.pct / 100 * 260)"
-                      width="32"
-                      :fill="seg.color"
-                      rx="3"
-                      class="bar-seg"
-                      @mousemove="showSegmentTooltip($event, seg, sample.sampleName)"
-                      @mouseleave="hideTooltip"
-                    />
-                  </g>
-                  <!-- 分组合并标记 -->
-                  <rect 
-                    v-if="sample.isGroup" 
-                    x="2" 
-                    y="294" 
-                    width="28" 
-                    height="4" 
-                    rx="2" 
-                    fill="#3b82f6" 
-                  />
-                  <!-- X 轴样本名 -->
-                  <text 
-                    x="16" 
-                    y="312" 
-                    text-anchor="end" 
-                    transform="rotate(-40, 16, 312)" 
-                    class="sample-x-label"
-                    :class="{ 'label-group': sample.isGroup }"
-                  >
-                    {{ sample.sampleName }}
-                  </text>
-                </g>
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        <!-- TAB 2: 检出物种总览与排行榜 (回答“到底有什么菌，各自多少”) -->
-        <div v-show="activeTab === 'taxa'" class="tab-content-neo scroll-y">
-          <div class="taxa-overview-card">
-            <!-- 顶部过滤与操作栏 -->
-            <div class="taxa-toolbar">
-              <div class="taxa-search-box">
-                <svg class="search-svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
-                </svg>
-                <input 
-                  type="text" 
-                  v-model="taxaSearchQuery" 
-                  placeholder="搜索检出菌种或属名 (如 Pseudomonas、Bacillus...)" 
-                  class="taxa-search-input"
-                />
-                <button v-if="taxaSearchQuery" class="clear-search-btn" @click="taxaSearchQuery = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-              </div>
-
-              <div class="taxa-toolbar-right">
-                <span class="taxa-count-tag">
-                  共计确证 <strong>{{ confirmedSpeciesCount }}</strong> 种有效微生物
-                  <span v-if="taxaSearchQuery"> (检索匹配 {{ filteredTaxaOverview.length }} 项)</span>
-                </span>
-                <button class="btn-export-excel" @click="exportExcel">
-                  <svg viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" />
-                  </svg>
-                  <span>导出 Excel 报表</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- 物种总览与排行榜表格 -->
-            <table class="neo-data-table taxa-table">
-              <thead>
-                <tr>
-                  <th style="width: 60px;">排名</th>
-                  <th>物种拉丁学名 (Taxon)</th>
-                  <th style="width: 130px;">16S 拷贝数 (GCN)</th>
-                  <th style="width: 120px;">总检出 Reads</th>
-                  <th style="width: 240px;">总体校正相对丰度</th>
-                  <th style="width: 120px;">原始占比</th>
-                  <th style="width: 150px;">点位检出覆盖率</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr 
-                  v-for="t in filteredTaxaOverview" 
-                  :key="t.taxon" 
-                  class="taxa-row"
-                  :class="{ 'taxa-row-noise': isNoiseTaxon(t.taxon) }"
-                >
-                  <td class="text-center font-bold">
-                    <span 
-                      v-if="!isNoiseTaxon(t.taxon)" 
-                      class="rank-badge" 
-                      :class="Number(getRealTaxonRank(t.taxon)) <= 3 ? `rank-${getRealTaxonRank(t.taxon)}` : 'rank-normal'"
-                    >
-                      {{ getRealTaxonRank(t.taxon) }}
-                    </span>
-                    <span 
-                      v-else 
-                      class="rank-badge rank-noise" 
-                      title="低频测序噪声与孤儿读段本底合集，不占用有效物种排名"
-                    >
-                      -
-                    </span>
-                  </td>
-                  <td>
-                    <div class="taxon-name-wrap">
-                      <span class="taxon-latin-name">{{ t.taxon }}</span>
-                      <span v-if="getTaxonZh(t.taxon)" class="taxon-zh-badge">{{ getTaxonZh(t.taxon) }}</span>
-                      <template v-if="!isNoiseTaxon(t.taxon)">
-                        <span class="top-tag" v-if="getRealTaxonRank(t.taxon) === 1">绝对优势种</span>
-                        <span class="top-sub-tag" v-else-if="Number(getRealTaxonRank(t.taxon)) <= 3">主要优势种</span>
-                      </template>
-                      <template v-else>
-                        <span class="noise-tag">低频测序噪声</span>
-                      </template>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="gcn-cell">
-                      <span class="gcn-val">{{ t.gcn_mean || 1.0 }}</span>
-                      <span class="badge-match" :class="t.gcn_matched !== false ? 'match-ok' : 'match-fallback'">
-                        {{ t.gcn_rank || 'species' }}
-                      </span>
-                    </div>
-                  </td>
-                  <td class="mono font-bold">{{ (t.raw_count ?? t.total_raw_count ?? 0).toLocaleString() }}</td>
-                  <td>
-                    <div class="abundance-progress-wrap">
-                      <div class="progress-bar-bg">
-                        <div 
-                          class="progress-bar-fill" 
-                          :style="{ width: `${Math.min(100, Math.max(t.norm_pct ?? t.overall_norm_pct ?? 0, 2))}%`, background: getTaxonColor(t.taxon) }"
-                        ></div>
-                      </div>
-                      <span class="progress-val-txt">{{ t.norm_pct ?? t.overall_norm_pct ?? 0 }}%</span>
-                    </div>
-                  </td>
-                  <td class="mono text-muted">{{ t.raw_pct ?? t.overall_raw_pct ?? 0 }}%</td>
-                  <td>
-                    <div class="sample-coverage-tag">
-                      <span class="cov-num">{{ t.sample_frequency ? `${t.sample_frequency} 点位` : `${t.sample_count || 0} 点位` }}</span>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- TAB 3: 样本 / 分组明细大表 (带防混分块卡片、微型丰度条、物种颜色关联与精准格式化) -->
-        <div v-show="activeTab === 'matrix'" class="tab-content-neo scroll-y">
-          <!-- 明细表专属多功能工具栏 -->
-          <div class="matrix-toolbar-card">
-            <div class="matrix-toolbar-left">
-              <!-- 样本/物种搜索框 -->
-              <div class="matrix-search-box">
-                <svg class="search-svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/>
-                </svg>
-                <input 
-                  type="text" 
-                  v-model="detailSearchQuery" 
-                  class="matrix-search-input"
-                  placeholder="快速定位点位 (如 -1)、分组名或特定菌种 (如 Vibrio)..."
-                />
-                <button v-if="detailSearchQuery" class="clear-search-btn" @click="detailSearchQuery = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-              </div>
-
-              <!-- 统计快照 -->
-              <div class="matrix-stat-hint">
-                <span>展示 <strong>{{ filteredActiveSamples.length }}</strong> / {{ activeSamples.length }} 个{{ isGroupView ? '样本组' : '采样点位' }}</span>
-                <span class="hint-sep">·</span>
-                <span class="hint-desc">{{ abundanceMode === 'norm' ? '当前指标: rrnDB 拷贝数校正后细胞相对丰度' : '当前指标: 原始测序 Reads 物理占比' }}</span>
-              </div>
-            </div>
-
-            <div class="matrix-toolbar-right">
-              <!-- 展开 / 折叠全部 (卡片模式下生效) -->
-              <div v-if="detailViewMode === 'cards'" class="card-expand-actions">
-                <button class="btn-ghost-action" @click="expandAllSamples" title="展开所有样本卡片">
-                  全部展开
-                </button>
-                <button class="btn-ghost-action" @click="collapseAllSamples" title="折叠所有样本卡片">
-                  全部折叠
-                </button>
-              </div>
-
-              <!-- 视图布局切换器 -->
-              <div class="detail-mode-segmented">
-                <button 
-                  class="segment-btn" 
-                  :class="{ active: detailViewMode === 'cards' }" 
-                  @click="detailViewMode = 'cards'"
-                  title="卡片分组视图：每个点位独立卡片容器，彻底防止串行看混（推荐）"
-                >
-                  <svg class="segment-svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
-                  </svg>
-                  <span>分组卡片 (推荐防混)</span>
-                </button>
-                <button 
-                  class="segment-btn" 
-                  :class="{ active: detailViewMode === 'table' }" 
-                  @click="detailViewMode = 'table'"
-                  title="连续大表视图：保留紧凑跨点位通览对比"
-                >
-                  <svg class="segment-svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/>
-                  </svg>
-                  <span>紧凑大表</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 模式 A: 卡片分组视图 (每个点位独立卡片，绝不会看混) -->
-          <div v-if="detailViewMode === 'cards'" class="sample-cards-list">
-            <div 
-              v-for="s in filteredActiveSamples" 
-              :key="s.sample_name" 
-              class="sample-card-item"
-              :class="{ 'is-collapsed': isSampleCollapsed(s.sample_name) }"
-            >
-              <!-- 卡片头部 (样本信息、统计胶囊、主要优势菌摘要、折叠箭头) -->
-              <div class="sample-card-header" @click="toggleSampleCollapse(s.sample_name)">
-                <div class="header-sample-identity">
-                  <div class="sample-badge-primary" :class="{ 'is-group': s.is_group }">
-                    <span class="badge-role">{{ s.is_group ? '合并组' : '采样点位' }}</span>
-                    <span class="badge-name mono">{{ s.sample_name }}</span>
-                  </div>
-                  <div v-if="s.is_group && s.member_samples" class="group-members-pill">
-                    <span class="pill-title">聚合点位 ({{ s.member_samples.length }}个):</span>
-                    <span v-for="m in s.member_samples.slice(0, 6)" :key="m" class="pill-chip">{{ m }}</span>
-                    <span v-if="s.member_samples.length > 6" class="pill-chip-more">...等 {{ s.member_samples.length }} 点</span>
-                  </div>
-                </div>
-
-                <!-- 样本指标胶囊 -->
-                <div class="header-meta-chips">
-                  <div class="meta-chip chip-reads">
-                    <span class="chip-k">有效 Reads:</span>
-                    <span class="chip-v mono">{{ (s.total_reads || 0).toLocaleString() }}</span>
-                  </div>
-                  <div class="meta-chip chip-taxa">
-                    <span class="chip-k">检出物种:</span>
-                    <span class="chip-v">{{ s.norm_result?.details?.length || 0 }} 种</span>
-                  </div>
-                  <div class="meta-chip chip-dominant" v-if="getDominantTaxon(s)">
-                    <span class="chip-k">主导优势菌:</span>
-                    <span class="dominant-dot" :style="{ background: getTaxonColor(getDominantTaxon(s)!.taxon) }"></span>
-                    <span class="chip-v italic">{{ getDominantTaxon(s)!.taxon }}</span>
-                    <span v-if="getTaxonZh(getDominantTaxon(s)!.taxon)" class="chip-zh-sub font-bold">({{ getTaxonZh(getDominantTaxon(s)!.taxon) }})</span>
-                    <span class="chip-pct">({{ formatPct(getDominantTaxon(s)!.pct) }}%)</span>
-                  </div>
-                </div>
-
-                <!-- 折叠/展开指示 -->
-                <div class="collapse-toggle-btn">
-                  <span class="toggle-txt">{{ isSampleCollapsed(s.sample_name) ? '展开明细' : '收起' }}</span>
-                  <svg 
-                    class="chevron-svg" 
-                    :class="{ 'rotated': isSampleCollapsed(s.sample_name) }" 
-                    viewBox="0 0 20 20" 
-                    fill="currentColor"
-                  >
-                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                  </svg>
-                </div>
-              </div>
-
-              <!-- 卡片表格明细 (可折叠) -->
-              <div v-show="!isSampleCollapsed(s.sample_name)" class="sample-card-body">
-                <table class="card-detail-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 34%;">检出物种名称</th>
-                      <th style="width: 13%;">Reads 计数</th>
-                      <th style="width: 13%;">原始占比 (%)</th>
-                      <th style="width: 15%;">16S 拷贝数 (GCN)</th>
-                      <th style="width: 25%;">rrnDB 校正后占比 (%)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr 
-                      v-for="(d, idx) in s.norm_result?.details || []" 
-                      :key="d.taxon"
-                      :class="{ 'row-noise': isNoiseTaxon(d.taxon), 'row-dominant': idx === 0 && !isNoiseTaxon(d.taxon) && (d.norm_pct >= 30) }"
-                    >
-                      <!-- 物种名 -->
-                      <td>
-                        <div class="taxa-cell-flex">
-                          <span 
-                            class="taxa-color-dot" 
-                            :style="{ background: isNoiseTaxon(d.taxon) ? '#cbd5e1' : getTaxonColor(d.taxon) }"
-                          ></span>
-                          <span 
-                            class="taxa-name-txt" 
-                            :class="{ 'taxa-latin': !isNoiseTaxon(d.taxon), 'taxa-noise-txt': isNoiseTaxon(d.taxon) }"
-                          >
-                            {{ d.taxon }}
-                          </span>
-                          <span v-if="getTaxonZh(d.taxon)" class="taxa-zh-badge">
-                            {{ getTaxonZh(d.taxon) }}
-                          </span>
-                          <span 
-                            v-if="idx === 0 && !isNoiseTaxon(d.taxon) && (d.norm_pct >= 30)" 
-                            class="tag-dominant-star"
-                            title="该样本中丰度第一的主要优势菌群"
-                          >
-                            主要优势
-                          </span>
-                          <span 
-                            v-else-if="isNoiseTaxon(d.taxon)" 
-                            class="tag-noise-badge"
-                            title="丰度低于 1% 的极低频 Reads 过滤合并，排除测序假阳性"
-                          >
-                            噪声过滤合集
-                          </span>
-                        </div>
-                      </td>
-                      <!-- Reads 计数 -->
-                      <td class="mono font-semibold">{{ (d.raw_count || 0).toLocaleString() }}</td>
-                      <!-- 原始占比 -->
-                      <td class="mono text-muted">{{ formatPct(d.raw_pct) }}%</td>
-                      <!-- GCN 拷贝数 -->
-                      <td>
-                        <div class="gcn-cell-wrap">
-                          <span class="gcn-num mono"><strong>{{ d.gcn_mean }}</strong></span>
-                          <span class="badge-match-mini" :class="d.gcn_matched ? 'match-ok' : 'match-fallback'">
-                            {{ d.gcn_rank === 'species' ? '种级匹配' : (d.gcn_rank === 'genus' ? '属级回退' : '默认基准') }}
-                          </span>
-                        </div>
-                      </td>
-                      <!-- 校正后占比 (配备微型彩色丰度条与粗体数据) -->
-                      <td>
-                        <div class="norm-bar-cell">
-                          <div class="mini-bar-track">
-                            <div 
-                              class="mini-bar-fill" 
-                              :style="{ 
-                                width: `${Math.min(100, Math.max(Number(d.norm_pct || 0), 1.5))}%`, 
-                                background: isNoiseTaxon(d.taxon) ? '#94a3b8' : getTaxonColor(d.taxon) 
-                              }"
-                            ></div>
-                          </div>
-                          <span class="norm-pct-val mono">{{ formatPct(d.norm_pct) }}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <!-- 空状态 -->
-            <div v-if="filteredActiveSamples.length === 0" class="empty-search-card">
-              <p>未找到匹配 "{{ detailSearchQuery }}" 的采样点位或物种</p>
-              <button class="btn-clear-filter" @click="detailSearchQuery = ''">清除搜索条件</button>
-            </div>
-          </div>
-
-          <!-- 模式 B: 紧凑全览大表 (加强分割线与斑马纹，百分比格式化与丰度条) -->
-          <div v-else class="matrix-card">
-            <table class="neo-data-table enhanced-matrix-table">
-              <thead>
-                <tr>
-                  <th style="width: 220px;">样本 / 合并组</th>
-                  <th>检出物种名称</th>
-                  <th>Reads 计数</th>
-                  <th>原始占比 (%)</th>
-                  <th>16S 拷贝数 (GCN)</th>
-                  <th>匹配级别</th>
-                  <th>rrnDB 校正后占比 (%)</th>
-                </tr>
-              </thead>
-              <tbody>
-                <template v-for="s in filteredActiveSamples" :key="s.sample_name">
-                  <tr 
-                    v-for="(d, idx) in s.norm_result?.details || []" 
-                    :key="d.taxon"
-                    :class="{ 
-                      'sample-start-row': idx === 0, 
-                      'row-noise': isNoiseTaxon(d.taxon),
-                      'row-dominant-subtle': idx === 0 && !isNoiseTaxon(d.taxon) && (d.norm_pct >= 30)
-                    }"
-                  >
-                    <!-- 样本合并跨行单元格 (卡片化背景) -->
-                    <td v-if="idx === 0" :rowspan="s.norm_result?.details.length" class="align-top sample-grouped-col">
-                      <div class="sample-info-block-neo">
-                        <div class="sample-title-badge" :class="{ 'is-group': s.is_group }">
-                          <span class="title-text mono">{{ s.sample_name }}</span>
-                          <span v-if="s.is_group" class="group-flag">合并组</span>
-                        </div>
-                        <div v-if="s.is_group && s.member_samples" class="member-samples-preview">
-                          <span class="preview-label">包含点位 ({{ s.member_samples.length }}个):</span>
-                          <div class="member-chips-inline">
-                            <span v-for="m in s.member_samples.slice(0, 6)" :key="m" class="sub-chip">{{ m }}</span>
-                            <span v-if="s.member_samples.length > 6" class="sub-chip-more">+{{ s.member_samples.length - 6 }}</span>
-                          </div>
-                        </div>
-                        <div class="sample-meta-stat">
-                          <span class="stat-reads">总 Reads: <strong>{{ (s.total_reads || 0).toLocaleString() }}</strong></span>
-                          <span class="stat-taxa">检出物种: {{ s.norm_result?.details.length || 0 }} 种</span>
-                        </div>
-                      </div>
-                    </td>
-
-                    <!-- 检出物种 -->
-                    <td>
-                      <div class="taxa-cell-flex">
-                        <span 
-                          class="taxa-color-dot" 
-                          :style="{ background: isNoiseTaxon(d.taxon) ? '#cbd5e1' : getTaxonColor(d.taxon) }"
-                        ></span>
-                        <span 
-                          class="taxa-name-txt" 
-                          :class="{ 'taxa-latin': !isNoiseTaxon(d.taxon), 'taxa-noise-txt': isNoiseTaxon(d.taxon) }"
-                        >
-                          {{ d.taxon }}
-                        </span>
-                        <span v-if="getTaxonZh(d.taxon)" class="taxa-zh-badge">
-                          {{ getTaxonZh(d.taxon) }}
-                        </span>
-                        <span 
-                          v-if="idx === 0 && !isNoiseTaxon(d.taxon) && (d.norm_pct >= 30)" 
-                          class="tag-dominant-star"
-                        >
-                          优势
-                        </span>
-                        <span 
-                          v-else-if="isNoiseTaxon(d.taxon)" 
-                          class="tag-noise-badge"
-                        >
-                          噪声
-                        </span>
-                      </div>
-                    </td>
-
-                    <td class="mono font-semibold">{{ (d.raw_count || 0).toLocaleString() }}</td>
-                    <td class="mono text-muted">{{ formatPct(d.raw_pct) }}%</td>
-                    <td><strong>{{ d.gcn_mean }}</strong></td>
-                    <td>
-                      <span class="badge-match" :class="d.gcn_matched ? 'match-ok' : 'match-fallback'">
-                        {{ d.gcn_rank === 'species' ? '种级' : (d.gcn_rank === 'genus' ? '属级' : '基准') }}
-                      </span>
-                    </td>
-                    <td>
-                      <div class="norm-bar-cell">
-                        <div class="mini-bar-track">
-                          <div 
-                            class="mini-bar-fill" 
-                            :style="{ 
-                              width: `${Math.min(100, Math.max(Number(d.norm_pct || 0), 1.5))}%`, 
-                              background: isNoiseTaxon(d.taxon) ? '#94a3b8' : getTaxonColor(d.taxon) 
-                            }"
-                          ></div>
-                        </div>
-                        <span class="norm-pct-val mono font-bold">{{ formatPct(d.norm_pct) }}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <DiversityMatrixTab
+          v-show="state.activeTab === 'matrix'"
+          :detail-search-query="state.detailSearchQuery"
+          :detail-view-mode="state.detailViewMode"
+          :is-group-view="state.isGroupView"
+          :abundance-mode="state.abundanceMode"
+          :active-sample-count="state.activeSamples.length"
+          :filtered-active-samples="state.filteredActiveSamples"
+          :is-sample-collapsed="modal.isSampleCollapsed"
+          :get-dominant-taxon="modal.getDominantTaxon"
+          :get-taxon-color="modal.getTaxonColor"
+          :get-taxon-zh="modal.getTaxonZh"
+          :is-noise-taxon="modal.isNoiseTaxon"
+          :format-pct="modal.formatPct"
+          @update:detail-search-query="state.detailSearchQuery = $event"
+          @update:detail-view-mode="state.detailViewMode = $event"
+          @toggle-sample-collapse="modal.toggleSampleCollapse"
+          @expand-all-samples="modal.expandAllSamples()"
+          @collapse-all-samples="modal.collapseAllSamples()"
+        />
       </div>
 
-      <!-- 分组配置模态弹窗 (支持 1-5, 6-9 等点位合并规则) -->
-      <transition name="drawer-fade">
-        <div v-if="showGroupModal" class="group-modal-backdrop" @click.self="showGroupModal = false">
-          <div class="group-modal-card">
-            <div class="group-modal-header">
-              <div class="header-title-wrap">
-                <svg class="header-icon-svg" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
-                </svg>
-                <div>
-                  <h3 class="modal-h3">样本点位合并与分组规则</h3>
-                  <p class="modal-sub">
-                    将多个随机采样点位合并为一个样本组进行分析，Reads 自动累加并重新执行 rrnDB 归一化校正
-                  </p>
-                </div>
-              </div>
-              <button class="btn-modal-close" @click="showGroupModal = false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-            </div>
+      <DiversityGroupModal
+        :visible="state.showGroupModal"
+        :group-chunk-size="state.groupChunkSize"
+        :all-sample-names="state.allSampleNames"
+        :sample-groups="state.sampleGroups"
+        :unassigned-samples="state.unassignedSamples"
+        :parse-sample-pattern="modal.parseSamplePattern"
+        @close="state.showGroupModal = false"
+        @apply="applyGroupRules"
+        @update:group-chunk-size="state.groupChunkSize = $event"
+        @generate-consecutive-groups="modal.generateConsecutiveGroups"
+        @set-chunk-size-and-generate="modal.setChunkSizeAndGenerate"
+        @add-group="modal.addGroup()"
+        @remove-group="modal.removeGroup"
+        @clear-all-groups="modal.clearAllGroups()"
+      />
 
-            <div class="group-modal-body scroll-y">
-              <!-- 连续 X 个一组自动切分 与 手动分组控制面板 -->
-              <div class="group-config-control-panel">
-                <!-- 连续 X 个一组功能区 -->
-                <div class="chunk-generator-section">
-                  <div class="generator-header">
-                    <span class="section-title">连续分组模式 (连续 X 个一组)</span>
-                    <span class="section-desc">根据采样编号顺序，按设定跨度自动将所有点位切分为连续的分组</span>
-                  </div>
-                  <div class="generator-toolbar">
-                    <div class="chunk-input-wrap">
-                      <span class="chunk-label">每连续</span>
-                      <input 
-                        type="number" 
-                        v-model.number="groupChunkSize" 
-                        min="1" 
-                        :max="Math.max(1, allSampleNames.length)"
-                        class="chunk-num-input"
-                      />
-                      <span class="chunk-unit">个点位为一组</span>
-                    </div>
-                    <button class="btn-gen-chunk" @click="generateConsecutiveGroups(groupChunkSize)">
-                      自动生成分组
-                    </button>
-                    <!-- 快捷预设跨度芯片 -->
-                    <div class="quick-preset-chips">
-                      <button 
-                        v-for="s in [2, 3, 4, 5, 8]" 
-                        :key="s" 
-                        class="btn-preset-chip"
-                        :class="{ active: groupChunkSize === s }"
-                        @click="setChunkSizeAndGenerate(s)"
-                      >
-                        {{ s }}个一组
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- 手动分组控制区 -->
-                <div class="manual-group-section">
-                  <div class="manual-header">
-                    <span class="section-title">手动分组模式</span>
-                    <span class="section-desc">自由添加/删除分组，支持自定义输入任意点位范围（如 1-5、6-9、1,3,5）</span>
-                  </div>
-                  <div class="manual-toolbar">
-                    <button class="btn-sub-action primary" @click="addGroup">+ 新增自定义合并组</button>
-                    <button class="btn-sub-action" @click="clearAllGroups" v-if="sampleGroups.length > 0">清空所有规则</button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 分组规则卡片列表 -->
-              <div class="group-rules-list">
-                <div v-if="sampleGroups.length === 0" class="empty-rules-hint">
-                  当前暂无合并分组规则。您可以选择上方的连续分组模式一键生成，或点击“+ 新增自定义合并组”手动创建。
-                </div>
-                <div 
-                  v-for="grp in sampleGroups" 
-                  :key="grp.id"
-                  class="group-rule-card"
-                >
-                  <div class="rule-inputs-row">
-                    <div class="input-field-group">
-                      <label class="field-label">组名称</label>
-                      <input 
-                        type="text" 
-                        v-model="grp.name" 
-                        placeholder="例如：对照组 (Control)" 
-                        class="rule-input"
-                      />
-                    </div>
-                    <div class="input-field-group flex-2">
-                      <label class="field-label">点位范围 / 匹配规则</label>
-                      <input 
-                        type="text" 
-                        v-model="grp.pattern" 
-                        placeholder="例如：1-5 或 1,2,3,4,5" 
-                        class="rule-input"
-                      />
-                    </div>
-                    <button 
-                      class="btn-del-group" 
-                      @click="removeGroup(grp.id)"
-                      title="删除此分组"
-                    >
-                      <svg viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
-                      </svg>
-                    </button>
-                  </div>
-
-                  <!-- 实时匹配点位预览 -->
-                  <div class="match-preview-box">
-                    <span class="preview-title">
-                      匹配结果: 
-                      <strong>{{ parseSamplePattern(grp.pattern, allSampleNames).length }}</strong> 个点位
-                    </span>
-                    <div class="match-chips-wrap">
-                      <span 
-                        v-for="sName in parseSamplePattern(grp.pattern, allSampleNames)" 
-                        :key="sName"
-                        class="preview-sample-chip"
-                      >
-                        {{ sName }}
-                      </span>
-                      <span 
-                        v-if="parseSamplePattern(grp.pattern, allSampleNames).length === 0" 
-                        class="empty-match-hint"
-                      >
-                        暂无匹配到的点位 (请检查输入规则)
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 未分组点位状态提示 -->
-              <div class="unassigned-status-banner">
-                <span class="label">未分组的独立点位 (共 {{ unassignedSamples.length }} 个):</span>
-                <div class="unassigned-chips">
-                  <span v-for="s in unassignedSamples.slice(0, 15)" :key="s" class="unassigned-chip">{{ s }}</span>
-                  <span v-if="unassignedSamples.length > 15" class="unassigned-chip-more">...等 {{ unassignedSamples.length }} 个</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 弹窗底部操作按钮 -->
-            <div class="group-modal-footer">
-              <button class="btn-cancel" @click="showGroupModal = false">关闭</button>
-              <button 
-                class="btn-apply-group" 
-                @click="isGroupView = true; showGroupModal = false"
-              >
-                应用规则并开启合并视图
-              </button>
-            </div>
-          </div>
-        </div>
-      </transition>
-
-
-      <!-- 浮动 Tooltip -->
-      <div 
-        v-if="tooltip.visible" 
+      <div
+        v-if="state.tooltip.visible"
         class="floating-tooltip"
-        :style="{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }"
+        :style="{ left: `${state.tooltip.x}px`, top: `${state.tooltip.y}px` }"
       >
-        <div class="tt-sample">{{ tooltip.sample }}</div>
-        <div class="tt-taxon">{{ tooltip.taxon }}</div>
+        <div class="tt-sample">{{ state.tooltip.sample }}</div>
+        <div class="tt-taxon">{{ state.tooltip.taxon }}</div>
         <div class="tt-divider"></div>
         <div class="tt-row">
           <span>原始 Reads:</span>
-          <strong>{{ tooltip.rawCount }} 条 ({{ tooltip.rawPct }}%)</strong>
+          <strong>{{ state.tooltip.rawCount }} 条 ({{ state.tooltip.rawPct }}%)</strong>
         </div>
         <div class="tt-row">
           <span>16S 基因拷贝数 (GCN):</span>
-          <strong>{{ tooltip.gcn }}</strong>
+          <strong>{{ state.tooltip.gcn }}</strong>
         </div>
         <div class="tt-row tt-highlight">
           <span>rrnDB 校正相对丰度:</span>
-          <strong>{{ tooltip.normPct }}%</strong>
+          <strong>{{ state.tooltip.normPct }}%</strong>
         </div>
       </div>
-      <!-- 历史记录右侧滑入抽屉 (和单样本查询体验高度对齐) -->
-      <transition name="drawer-fade">
-        <div v-if="showHistoryDrawer" class="history-drawer-backdrop" @click.self="showHistoryDrawer = false">
-          <div class="history-drawer-neo">
-            <div class="drawer-header-neo">
-              <div class="drawer-title-group">
-                <div class="drawer-icon-wrap">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                    <circle cx="12" cy="12" r="9" stroke-width="2"/>
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 3"/>
-                  </svg>
-                </div>
-                <div>
-                  <h3 class="drawer-title">历史多样性分析任务</h3>
-                  <span class="drawer-subtitle">共 {{ historyTasks.length }} 条分析归档</span>
-                </div>
-              </div>
-              <button class="btn-drawer-close" @click="showHistoryDrawer = false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-            </div>
 
-            <!-- 任务列表容器 -->
-            <div class="drawer-list-wrap scroll-v">
-              <div v-if="isLoadingHistory" class="drawer-empty-hint">
-                <span>正在同步历史分析记录...</span>
-              </div>
-              <div v-else-if="historyTasks.length === 0" class="drawer-empty-hint">
-                <span>暂无已归档的历史分析记录</span>
-              </div>
-              <div v-else class="drawer-task-list">
-                <div 
-                  v-for="t in historyTasks" 
-                  :key="t.task_id"
-                  class="drawer-task-card"
-                  :class="{ active: taskId === t.task_id }"
-                  @click="selectHistoryTask(t)"
-                >
-                  <div class="card-top-row">
-                    <span class="task-file-title" :title="t.task_name">{{ t.task_name }}</span>
-                    <span class="task-status-tag" :class="t.status">{{ getStatusLabel(t.status) }}</span>
-                  </div>
-                  <div class="card-time-row">
-                    {{ formatTime(t.completed_at || t.created_at) }}
-                  </div>
-                  <div class="card-stats-row">
-                    <span class="stat-pill">{{ t.total_samples }} 点位</span>
-                    <span class="stat-pill">{{ formatReadsCount(t.total_reads) }} Reads</span>
-                    <span v-if="t.species_count" class="stat-pill highlight">{{ t.species_count }} 物种</span>
-                  </div>
-                  <div class="card-action-bar">
-                    <button 
-                      class="btn-card-del"
-                      title="彻底删除此任务"
-                      @click.stop="deleteHistoryTask(t, $event)"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 抽屉底栏: 清空全部历史 -->
-            <div v-if="historyTasks.length > 0" class="drawer-footer-neo">
-              <button class="btn-clear-history-warn" @click="clearAllHistory">
-                清空全部历史记录
-              </button>
-            </div>
-          </div>
-        </div>
-      </transition>
+      <DiversityHistoryDrawer
+        :visible="state.showHistoryDrawer"
+        :is-loading-history="state.isLoadingHistory"
+        :history-tasks="state.historyTasks"
+        :active-task-id="state.taskId"
+        :format-time="modal.formatTime"
+        :format-reads-count="modal.formatReadsCount"
+        :get-status-label="modal.getStatusLabel"
+        @close="state.showHistoryDrawer = false"
+        @select-task="modal.selectHistoryTask"
+        @delete-task="modal.deleteHistoryTask"
+        @clear-all-history="modal.clearAllHistory()"
+      />
     </div>
   </div>
 </template>
 
-<style scoped src="./diversity/diversity-modal.css"></style>
+<style scoped src="./diversity/styles/shell.css"></style>

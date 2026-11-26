@@ -26,9 +26,9 @@
         />
       </div>
       <div class="control-buttons">
-        <button class="ctrl-btn" @click="resetView">重置视图</button>
-        <button class="ctrl-btn" @click="toggleAutoRotate">
-          {{ autoRotate ? '⏸ 停止旋转' : '▶ 自动旋转' }}
+        <button type="button" class="ctrl-btn" @click="resetView">重置视图</button>
+        <button type="button" class="ctrl-btn" @click="toggleAutoRotate">
+          {{ autoRotate ? '停止旋转' : '自动旋转' }}
         </button>
       </div>
     </div>
@@ -37,7 +37,7 @@
     <div v-if="selectedPosition" class="position-info">
       <div class="info-header">
         <h4>选中位置</h4>
-        <button class="close-info-btn" @click="selectedPosition = null"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="close-info-btn" @click="selectedPosition = null"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
       <div class="info-content">
         <div class="info-row">
@@ -57,6 +57,7 @@
       </div>
       <div class="info-actions">
         <button
+          type="button"
           v-if="!selectedPosition.occupied"
           class="action-btn primary"
           @click="handleAddSample"
@@ -64,6 +65,7 @@
           录入样本
         </button>
         <button
+          type="button"
           v-else
           class="action-btn"
           @click="handleViewSample"
@@ -83,9 +85,35 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import type * as ThreeTypes from 'three'
+import type { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
-import type { StrainRecord } from '../../stores/strain'
+import type {
+  FreezerBox,
+  FreezerCabinet,
+  FreezerDrawer,
+  FreezerShelf,
+  StrainRecord,
+} from '../../stores/strain'
+import { createLogger } from '../../utils/logger'
+
+const logger = createLogger('Freezer3DView')
+
+interface FreezerObjectUserData {
+  type: 'box' | 'position'
+  freezerId: string
+  shelfId: string
+  cabinetId: string
+  drawerId: string
+  boxId: string
+  path: string
+  position?: string
+  occupied?: boolean
+  sampleId?: string
+}
+
+type ClickableMesh = ThreeTypes.Mesh<ThreeTypes.BoxGeometry, ThreeTypes.MeshPhongMaterial>
 
 const strain = useStrainStore()
 const appStore = useAppStore()
@@ -100,18 +128,18 @@ const selectedPosition = ref<{
   path: string
   occupied: boolean
   sample?: StrainRecord
-  positionData?: any
+  positionData?: FreezerObjectUserData
 } | null>(null)
 
 // Three.js 相关变量
-let scene: any = null
-let camera: any = null
-let renderer: any = null
-let controls: any = null
+let scene: ThreeTypes.Scene | null = null
+let camera: ThreeTypes.PerspectiveCamera | null = null
+let renderer: ThreeTypes.WebGLRenderer | null = null
+let controls: OrbitControls | null = null
 let animationId: number | null = null
-let raycaster: any = null
-let mouse: any = null
-let clickableObjects: any[] = []
+let raycaster: ThreeTypes.Raycaster | null = null
+let mouse: ThreeTypes.Vector2 | null = null
+let clickableObjects: ClickableMesh[] = []
 
 async function initThreeJS() {
   try {
@@ -168,32 +196,33 @@ async function initThreeJS() {
 
     loading.value = false
     animate()
-  } catch (error) {
-    console.error('Failed to load Three.js:', error)
+  } catch (error: unknown) {
+    logger.error('Failed to load Three.js:', error)
     appStore.showNotification('3D 视图加载失败，请检查网络连接', 'error')
     loading.value = false
   }
 }
 
-function createFreezerModel(THREE: any) {
-  if (!strain.activeFreezer) return
+function createFreezerModel(THREE: typeof ThreeTypes) {
+  if (!strain.activeFreezer || !scene) return
 
   const freezer = strain.activeFreezer
-  let yOffset = 0
+  const activeScene = scene
+  const yOffset = 0
 
   // 遍历层创建模型
-  freezer.shelves.forEach((shelf: any, shelfIndex: number) => {
-    shelf.cabinets.forEach((cabinet: any, cabinetIndex: number) => {
-      cabinet.drawers.forEach((drawer: any, drawerIndex: number) => {
-        drawer.boxes.forEach((box: any, boxIndex: number) => {
+  freezer.shelves.forEach((shelf: FreezerShelf, shelfIndex: number) => {
+    shelf.cabinets.forEach((cabinet: FreezerCabinet, cabinetIndex: number) => {
+      cabinet.drawers.forEach((drawer: FreezerDrawer, drawerIndex: number) => {
+        drawer.boxes.forEach((box: FreezerBox, boxIndex: number) => {
           // 创建冻存盒
           const boxGeometry = new THREE.BoxGeometry(1.5, 0.3, 1.5)
           const boxMaterial = new THREE.MeshPhongMaterial({
             color: 0x94a3b8,
             transparent: true,
-            opacity: 0.8
+            opacity: 0.8,
           })
-          const boxMesh = new THREE.Mesh(boxGeometry, boxMaterial)
+          const boxMesh: ClickableMesh = new THREE.Mesh(boxGeometry, boxMaterial)
 
           // 位置计算
           const xOffset = cabinetIndex * 2 + boxIndex * 0.5
@@ -208,14 +237,14 @@ function createFreezerModel(THREE: any) {
             cabinetId: cabinet.id,
             drawerId: drawer.id,
             boxId: box.id,
-            path: `${freezer.name} > ${shelf.name} > ${cabinet.name} > ${drawer.name} > ${box.name}`
-          }
+            path: `${freezer.name} > ${shelf.name} > ${cabinet.name} > ${drawer.name} > ${box.name}`,
+          } satisfies FreezerObjectUserData
 
-          scene.add(boxMesh)
+          activeScene.add(boxMesh)
           clickableObjects.push(boxMesh)
 
           // 创建存储位网格
-          box.positions.forEach((pos: any, posIndex: number) => {
+          box.positions.forEach((pos, posIndex: number) => {
             const posSize = 0.12
             const cols = box.cols
             const row = Math.floor(posIndex / cols)
@@ -225,9 +254,9 @@ function createFreezerModel(THREE: any) {
             const posMaterial = new THREE.MeshPhongMaterial({
               color: pos.occupied ? 0xef4444 : 0x10b981,
               emissive: pos.occupied ? 0x7f1d1d : 0x065f46,
-              emissiveIntensity: 0.2
+              emissiveIntensity: 0.2,
             })
-            const posMesh = new THREE.Mesh(posGeometry, posMaterial)
+            const posMesh: ClickableMesh = new THREE.Mesh(posGeometry, posMaterial)
 
             const posX = xOffset + (col - box.cols / 2) * 0.15
             const posZ = zOffset + (row - box.rows / 2) * 0.15
@@ -244,10 +273,10 @@ function createFreezerModel(THREE: any) {
               position: pos.label,
               occupied: pos.occupied,
               sampleId: pos.sampleId,
-              path: `${freezer.name} > ${shelf.name} > ${cabinet.name} > ${drawer.name} > ${box.name} > ${pos.label}`
-            }
+              path: `${freezer.name} > ${shelf.name} > ${cabinet.name} > ${drawer.name} > ${box.name} > ${pos.label}`,
+            } satisfies FreezerObjectUserData
 
-            scene.add(posMesh)
+            activeScene.add(posMesh)
             clickableObjects.push(posMesh)
           })
         })
@@ -257,7 +286,7 @@ function createFreezerModel(THREE: any) {
 }
 
 function handleCanvasClick(event: MouseEvent) {
-  if (!canvasContainer.value) return
+  if (!canvasContainer.value || !raycaster || !mouse || !camera) return
 
   const rect = canvasContainer.value.getBoundingClientRect()
   mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
@@ -267,23 +296,25 @@ function handleCanvasClick(event: MouseEvent) {
   const intersects = raycaster.intersectObjects(clickableObjects)
 
   if (intersects.length > 0) {
-    const object = intersects[0].object
-    const data = object.userData
+    const hit = intersects[0]
+    if (!hit) return
+    const object = hit.object as ClickableMesh
+    const data = object.userData as FreezerObjectUserData
 
     if (data.type === 'position') {
       const sample = data.sampleId
-        ? strain.records.find(r => r.id === data.sampleId)
+        ? strain.records.find((r) => r.id === data.sampleId)
         : null
 
       selectedPosition.value = {
         path: data.path,
-        occupied: data.occupied,
-        sample: sample || undefined
+        occupied: Boolean(data.occupied),
+        sample: sample || undefined,
       }
 
       // 高亮选中的位置
-      clickableObjects.forEach(obj => {
-        if (obj.userData.type === 'position') {
+      clickableObjects.forEach((obj) => {
+        if ((obj.userData as FreezerObjectUserData).type === 'position') {
           obj.material.emissiveIntensity = 0.2
         }
       })

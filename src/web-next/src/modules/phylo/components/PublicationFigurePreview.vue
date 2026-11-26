@@ -312,6 +312,7 @@ onUnmounted(() => {
     <div class="pub-subbar">
       <div class="subbar-left">
         <button
+          type="button"
           v-for="grp in layoutGroups"
           :key="grp.layout"
           class="pill-btn"
@@ -321,6 +322,7 @@ onUnmounted(() => {
           {{ grp.label }}
         </button>
         <button
+          type="button"
           v-for="item in itolExports"
           :key="item.filename"
           class="pill-btn itol-pill"
@@ -335,6 +337,7 @@ onUnmounted(() => {
           <span class="sub-sep"></span>
           <div class="fmt-switch" title="切换预览渲染源">
             <button
+              type="button"
               v-if="activeTarget.group.previewPng"
               class="fmt-btn"
               :class="{ active: activeTarget.filename === activeTarget.group.previewPng.filename }"
@@ -343,6 +346,7 @@ onUnmounted(() => {
               PNG
             </button>
             <button
+              type="button"
               v-if="activeTarget.group.previewSvg"
               class="fmt-btn"
               :class="{ active: activeTarget.filename === activeTarget.group.previewSvg.filename }"
@@ -356,16 +360,17 @@ onUnmounted(() => {
 
       <div class="subbar-right">
         <template v-if="isImageTarget">
-          <button class="tb-btn" :disabled="isLoading" @click="zoomByCenter(0.83)">缩小</button>
+          <button type="button" class="tb-btn" :disabled="isLoading" @click="zoomByCenter(0.83)">缩小</button>
           <span class="zoom-readout">{{ zoomPercent }}%</span>
-          <button class="tb-btn" :disabled="isLoading" @click="zoomByCenter(1.2)">放大</button>
-          <button class="tb-btn" :disabled="isLoading" @click="fitToStage">适应窗口</button>
-          <button class="tb-btn" :disabled="isLoading" @click="zoomToActual">100%</button>
+          <button type="button" class="tb-btn" :disabled="isLoading" @click="zoomByCenter(1.2)">放大</button>
+          <button type="button" class="tb-btn" :disabled="isLoading" @click="fitToStage">适应窗口</button>
+          <button type="button" class="tb-btn" :disabled="isLoading" @click="zoomToActual">100%</button>
           <span class="sub-sep"></span>
         </template>
 
         <template v-if="activeTarget?.group">
           <button
+            type="button"
             v-for="fmt in activeTarget.group.formats"
             :key="fmt.filename"
             class="tb-btn dl-btn"
@@ -376,6 +381,7 @@ onUnmounted(() => {
           </button>
         </template>
         <button
+          type="button"
           v-else-if="activeTarget"
           class="tb-btn dl-btn"
           @click="downloadFile(activeTarget.filename)"
@@ -383,7 +389,7 @@ onUnmounted(() => {
           下载 {{ activeTarget.format.toUpperCase() }}
         </button>
 
-        <button class="tb-btn back-btn" @click="store.closeFigurePreview()">返回交互树</button>
+        <button type="button" class="tb-btn back-btn" @click="store.closeFigurePreview()">返回交互树</button>
       </div>
     </div>
 
@@ -420,7 +426,7 @@ onUnmounted(() => {
         <div v-if="loadError" class="stage-overlay">
           <div class="overlay-card error-card">
             <div class="err-title">{{ loadError }}</div>
-            <button class="tb-btn" @click="reloadPreview">重试加载</button>
+            <button type="button" class="tb-btn" @click="reloadPreview">重试加载</button>
           </div>
         </div>
       </template>
@@ -436,7 +442,7 @@ onUnmounted(() => {
       <div v-else class="stage-overlay">
         <div class="overlay-card">
           <div class="err-title">当前格式 ({{ activeTarget.format.toUpperCase() }}) 暂不支持网页内直接预览</div>
-          <button class="tb-btn dl-btn" @click="downloadFile(activeTarget.filename)">
+          <button type="button" class="tb-btn dl-btn" @click="downloadFile(activeTarget.filename)">
             立即下载查看 ({{ activeTarget.filename }})
           </button>
         </div>

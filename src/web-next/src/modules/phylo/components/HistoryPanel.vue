@@ -26,7 +26,7 @@ function statusLabel(status: string): string {
   <div class="phylo-panel">
     <div class="panel-header">
       <h3 class="panel-title">分析历史记录 ({{ store.historyJobs.length }})</h3>
-      <button class="btn-link" @click="store.refreshHistory()">刷新</button>
+      <button type="button" class="btn-link" @click="store.refreshHistory()">刷新</button>
     </div>
 
     <div v-if="store.historyJobs.length === 0" class="empty-hint">
@@ -58,8 +58,8 @@ function statusLabel(status: string): string {
         <div class="h-footer">
           <span class="h-time">{{ new Date(job.created_at * 1000).toLocaleString() }}</span>
           <div class="h-actions" @click.stop>
-            <button class="btn-mini" @click="store.applyConfigFromJob(job)">复用参数</button>
-            <button class="btn-mini danger" @click="store.deleteHistoryJob(job.job_id)">删除</button>
+            <button type="button" class="btn-mini" @click="store.applyConfigFromJob(job)">复用参数</button>
+            <button type="button" class="btn-mini danger" @click="store.deleteHistoryJob(job.job_id)">删除</button>
           </div>
         </div>
       </div>

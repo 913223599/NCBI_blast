@@ -59,7 +59,7 @@ const {
           </svg>
           算法决策置信度: <b>高 (94%)</b>
         </span>
-        <button class="btn-export-csv" @click="handleExportPlanCsv">
+        <button type="button" class="btn-export-csv" @click="handleExportPlanCsv">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="7 10 12 15 17 10" />
@@ -346,19 +346,19 @@ const {
       <!-- 表格头部过滤器与搜索 -->
       <div class="table-action-header">
         <div class="filter-pill-tabs">
-          <button :class="['pill-tab', { active: statusFilter === 'ALL' }]" @click="statusFilter = 'ALL'">
+          <button type="button" :class="['pill-tab', { active: statusFilter === 'ALL' }]" @click="statusFilter = 'ALL'">
             全部样本 ({{ kpis.total }})
           </button>
-          <button :class="['pill-tab', 'tab-keep', { active: statusFilter === 'KEEP' }]" @click="statusFilter = 'KEEP'">
+          <button type="button" :class="['pill-tab', 'tab-keep', { active: statusFilter === 'KEEP' }]" @click="statusFilter = 'KEEP'">
             <span class="status-dot dot-emerald"></span> 核心保留 ({{ kpis.core }})
           </button>
-          <button :class="['pill-tab', 'tab-review', { active: statusFilter === 'SYNERGISTIC' }]" @click="statusFilter = 'SYNERGISTIC'">
+          <button type="button" :class="['pill-tab', 'tab-review', { active: statusFilter === 'SYNERGISTIC' }]" @click="statusFilter = 'SYNERGISTIC'">
             <span class="status-dot dot-sky"></span> 协同备选 ({{ kpis.syn }})
           </button>
-          <button :class="['pill-tab', 'tab-red', { active: statusFilter === 'REDUNDANT' }]" @click="statusFilter = 'REDUNDANT'">
+          <button type="button" :class="['pill-tab', 'tab-red', { active: statusFilter === 'REDUNDANT' }]" @click="statusFilter = 'REDUNDANT'">
             <span class="status-dot dot-amber"></span> 建议冗存 ({{ kpis.red }})
           </button>
-          <button :class="['pill-tab', 'tab-reject', { active: statusFilter === 'REJECT' }]" @click="statusFilter = 'REJECT'" v-if="kpis.reject > 0">
+          <button type="button" :class="['pill-tab', 'tab-reject', { active: statusFilter === 'REJECT' }]" @click="statusFilter = 'REJECT'" v-if="kpis.reject > 0">
             <span class="status-dot dot-rose"></span> 安全剔除 ({{ kpis.reject }})
           </button>
         </div>
@@ -464,7 +464,7 @@ const {
               <!-- 8. 操作图标 -->
               <td style="text-align: center;" @click.stop>
                 <div class="row-action-icons">
-                  <button 
+                  <button type="button" 
                     class="btn-icon" 
                     @click="openDrawer(item)" 
                     title="查看科学证据抽屉"
@@ -475,7 +475,7 @@ const {
                     </svg>
                   </button>
 
-                  <button 
+                  <button type="button" 
                     v-if="item.redundant_with"
                     class="btn-icon btn-icon-compare" 
                     @click="handleCompare(item.sample_id, item.redundant_with!)"
@@ -508,7 +508,7 @@ const {
             </span>
             <h4>{{ selectedDrawerSample.sample_name }}</h4>
           </div>
-          <button class="btn-close-drawer" @click="closeDrawer">&times;</button>
+          <button type="button" class="btn-close-drawer" @click="closeDrawer">&times;</button>
         </div>
 
         <div class="drawer-body">
@@ -613,14 +613,14 @@ const {
 
         <!-- 抽屉底部动作 -->
         <div class="drawer-footer">
-          <button 
+          <button type="button" 
             v-if="selectedDrawerSample.redundant_with" 
             class="btn-drawer-compare"
             @click="handleCompare(selectedDrawerSample.sample_id, selectedDrawerSample.redundant_with!)"
           >
             与代表株进行两两比对 &rarr;
           </button>
-          <button class="btn-drawer-close" @click="closeDrawer">关闭抽屉</button>
+          <button type="button" class="btn-drawer-close" @click="closeDrawer">关闭抽屉</button>
         </div>
       </div>
     </div>

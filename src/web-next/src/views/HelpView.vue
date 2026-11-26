@@ -13,6 +13,8 @@ import {
 } from '../utils/safeHtml'
 import { shouldSubmitOnEnter } from '../utils/ime'
 import { useI18n } from '../locales'
+import { createLogger } from '../utils/logger'
+const logger = createLogger('HelpView')
 
 const { t } = useI18n()
 
@@ -110,7 +112,7 @@ async function loadTopics(): Promise<void> {
       return
     }
   } catch (error) {
-    console.warn('[Help] 加载帮助目录失败，回退默认索引:', error)
+    logger.warn('[Help] 加载帮助目录失败，回退默认索引:', error)
   } finally {
     isLoading.value = false
   }
@@ -139,7 +141,7 @@ async function selectTopic(topicId: string): Promise<void> {
     isContentLoading.value = false
     await renderMarkdownSafely(rawContent)
   } catch (error) {
-    console.warn('[Help] 加载帮助正文失败:', error)
+    logger.warn('[Help] 加载帮助正文失败:', error)
     isContentLoading.value = false
     await renderMarkdownSafely('# 加载失败\n\n暂时无法读取该帮助文档，请确认本地后端服务已启动。')
   }

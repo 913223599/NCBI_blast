@@ -95,6 +95,7 @@ const {
 
             <div class="sample-filter-btn-group">
               <button
+                type="button"
                 v-if="hiddenSampleIds.size > 0"
                 class="btn-sample-action btn-show-all"
                 @click="showAllSamples"
@@ -104,6 +105,7 @@ const {
               </button>
 
               <button
+                type="button"
                 v-if="selectedPair && visibleSampleIds.length > 2"
                 class="btn-sample-action btn-focus-pair"
                 @click="focusOnlyPair"
@@ -136,6 +138,7 @@ const {
             <span class="control-label">视图:</span>
             <div class="seg-pills">
               <button
+                type="button"
                 class="seg-btn"
                 :class="{ active: viewMode === 'matrix' }"
                 @click="viewMode = 'matrix'"
@@ -144,6 +147,7 @@ const {
                 同源矩阵
               </button>
               <button
+                type="button"
                 class="seg-btn"
                 :class="{ active: viewMode === 'chord' }"
                 @click="viewMode = 'chord'"
@@ -159,6 +163,7 @@ const {
             <span class="control-label">排序:</span>
             <div class="seg-pills">
               <button
+                type="button"
                 class="seg-btn"
                 :class="{ active: sampleSortOrder === 'natural' }"
                 @click="sampleSortOrder = 'natural'"
@@ -167,6 +172,7 @@ const {
                 自然顺序
               </button>
               <button
+                type="button"
                 class="seg-btn"
                 :class="{ active: sampleSortOrder === 'cluster' }"
                 @click="sampleSortOrder = 'cluster'"
@@ -182,6 +188,7 @@ const {
             <span class="control-label">密度:</span>
             <div class="seg-pills">
               <button
+                type="button"
                 class="seg-btn btn-spacious"
                 :class="{ active: displayDensity === 'spacious' }"
                 @click="displayDensity = 'spacious'"
@@ -190,6 +197,7 @@ const {
                 宽松
               </button>
               <button
+                type="button"
                 class="seg-btn"
                 :class="{ active: displayDensity === 'comfortable' }"
                 @click="displayDensity = 'comfortable'"
@@ -198,6 +206,7 @@ const {
                 舒适
               </button>
               <button
+                type="button"
                 class="seg-btn"
                 :class="{ active: displayDensity === 'compact' }"
                 @click="displayDensity = 'compact'"
@@ -206,6 +215,7 @@ const {
                 紧凑
               </button>
               <button
+                type="button"
                 class="seg-btn btn-ultra"
                 :class="{ active: displayDensity === 'ultra' }"
                 @click="displayDensity = 'ultra'"
@@ -218,6 +228,7 @@ const {
 
           <!-- 图注收折按钮 -->
           <button
+            type="button"
             class="btn-legend-toggle"
             :class="{ active: !isLegendCollapsed }"
             @click="isLegendCollapsed = !isLegendCollapsed"
@@ -235,6 +246,7 @@ const {
           <!-- 整体完整导出图表按钮组 -->
           <div class="export-figure-group">
             <button
+              type="button"
               class="btn-export-fig"
               :disabled="isExporting"
               @click="handleExportFigure('png')"
@@ -248,6 +260,7 @@ const {
               {{ isExporting ? '导出中...' : '导出图表 (PNG)' }}
             </button>
             <button
+              type="button"
               class="btn-export-fig btn-export-svg"
               :disabled="isExporting"
               @click="handleExportFigure('svg')"
@@ -267,6 +280,7 @@ const {
             <span class="ribbon-group-label">CDS 分区:</span>
             <div class="ribbon-pills">
               <button
+                type="button"
                 class="r-pill"
                 :class="{ active: genePartitionFilter === 'ALL' }"
                 @click="genePartitionFilter = 'ALL'"
@@ -274,6 +288,7 @@ const {
                 全部 ({{ clusters?.length || 0 }})
               </button>
               <button
+                type="button"
                 class="r-pill r-pill-amber"
                 :class="{ active: genePartitionFilter === 'VARIABLE' }"
                 @click="genePartitionFilter = 'VARIABLE'"
@@ -282,6 +297,7 @@ const {
                 差异 ({{ (clusters?.length || 0) - Number(pangenomePartition.core) }})
               </button>
               <button
+                type="button"
                 class="r-pill r-pill-blue"
                 :class="{ active: genePartitionFilter === 'CORE' }"
                 @click="genePartitionFilter = 'CORE'"
@@ -290,6 +306,7 @@ const {
                 核心基因 ({{ pangenomePartition.core }})
               </button>
               <button
+                type="button"
                 class="r-pill"
                 :class="{ active: genePartitionFilter === 'UNIQUE' }"
                 @click="genePartitionFilter = 'UNIQUE'"
@@ -318,6 +335,7 @@ const {
           <span class="ribbon-group-label">显示轨道:</span>
           <div class="track-check-pills">
             <button
+              type="button"
               class="trk-pill"
               :class="{ active: isPhylogenyTrackVisible }"
               @click="isPhylogenyTrackVisible = !isPhylogenyTrackVisible"
@@ -326,6 +344,7 @@ const {
               <span class="trk-dot"></span> 进化树
             </button>
             <button
+              type="button"
               class="trk-pill"
               :class="{ active: isMetadataTrackVisible }"
               @click="isMetadataTrackVisible = !isMetadataTrackVisible"
@@ -334,6 +353,7 @@ const {
               <span class="trk-dot"></span> 样本特征
             </button>
             <button
+              type="button"
               class="trk-pill"
               :class="{ active: isAniTrackVisible }"
               @click="isAniTrackVisible = !isAniTrackVisible"
@@ -342,6 +362,7 @@ const {
               <span class="trk-dot"></span> ANI 矩阵
             </button>
             <button
+              type="button"
               class="trk-pill"
               :class="{ active: isGeneMatrixTrackVisible }"
               @click="isGeneMatrixTrackVisible = !isGeneMatrixTrackVisible"
@@ -378,6 +399,7 @@ const {
           <!-- 矩阵度量维度切换控制器 (核酸 ANI vs CDS 基因功能谱) -->
           <div class="matrix-metric-switcher">
             <button
+              type="button"
               class="btn-metric-toggle"
               :class="{ active: currentMatrixMode === 'ani' }"
               @click="currentMatrixMode = 'ani'"
@@ -386,6 +408,7 @@ const {
               全基因组 ANI (核酸)
             </button>
             <button
+              type="button"
               class="btn-metric-toggle"
               :class="{ active: currentMatrixMode === 'cds_jaccard' }"
               @click="currentMatrixMode = 'cds_jaccard'"
@@ -496,6 +519,7 @@ const {
               >
                 <div class="sample-name-cell-inner">
                   <button
+                    type="button"
                     class="btn-sample-eye"
                     @click.stop="toggleSampleVisibility(rowId)"
                     title="暂时隐藏该样本"
@@ -569,9 +593,9 @@ const {
                   <div
                     v-if="c.presence_map?.[rowId]"
                     class="gene-present-square"
-                    :class="c._variantMap[rowId].className"
-                    :style="c._variantMap[rowId].style"
-                    :title="c._variantMap[rowId].title"
+                    :class="c._variantMap[rowId]?.className"
+                    :style="c._variantMap[rowId]?.style"
+                    :title="c._variantMap[rowId]?.title"
                   ></div>
                   <div v-else class="gene-absent-dot" title="该样本缺失此 CDS"></div>
                 </td>
@@ -603,7 +627,7 @@ const {
       <!-- 悬停基因家族信息提示条 (固定高度状态栏) -->
       <div v-if="viewMode === 'matrix'" class="cluster-hover-info-strip" :class="{ active: !!hoveredGeneCluster }">
         <template v-if="hoveredGeneCluster">
-          <span class="chip-cat" :style="{ backgroundColor: getCatColor(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category) }">
+          <span class="chip-cat" :style="{ backgroundColor: getCatColor(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category || 'Hypothetical') }">
             {{ getCategoryChinese(hoveredGeneCluster.cluster?._inferredCategory || hoveredGeneCluster.cluster?.category) }}
           </span>
           <strong>{{ hoveredGeneCluster.cluster?.group_id }}</strong>:

@@ -6,11 +6,14 @@ import {
   normalizeCategoryName,
 } from '../utils/pangenomeVariants'
 
+import type { GenePresenceEntry } from '../types'
+
 export interface ChordClusterItem {
+  group_id?: string
   cluster_id?: string
   product?: string
   category?: string
-  presence_map?: Record<string, boolean | number | string | null | undefined>
+  presence_map?: Record<string, GenePresenceEntry | boolean | number | string | null | undefined>
   [key: string]: unknown
 }
 

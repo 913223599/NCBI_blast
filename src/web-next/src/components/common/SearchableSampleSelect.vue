@@ -220,7 +220,7 @@ onUnmounted(() => {
               placeholder="搜索样本名称 / ID / 类型..." 
               @click.stop
             />
-            <button 
+            <button type="button" 
               v-if="searchQuery" 
               class="clear-search-btn" 
               @click.stop="searchQuery = ''"
@@ -315,7 +315,7 @@ onUnmounted(() => {
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <p>未找到匹配的样本记录</p>
-            <button v-if="searchQuery" class="reset-search-btn" @click.stop="searchQuery = ''">
+            <button type="button" v-if="searchQuery" class="reset-search-btn" @click.stop="searchQuery = ''">
               清除搜索条件
             </button>
           </div>

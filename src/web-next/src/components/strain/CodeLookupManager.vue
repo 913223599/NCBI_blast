@@ -7,22 +7,22 @@
         <h3>编码对照表管理</h3>
       </div>
       <div class="header-actions">
-        <button class="action-btn" :class="{ active: activeTab === 'lookup' }" @click="activeTab = 'lookup'">
+        <button type="button" class="action-btn" :class="{ active: activeTab === 'lookup' }" @click="activeTab = 'lookup'">
           分类
         </button>
-        <button class="action-btn" :class="{ active: activeTab === 'source' }" @click="activeTab = 'source'">
+        <button type="button" class="action-btn" :class="{ active: activeTab === 'source' }" @click="activeTab = 'source'">
           来源
         </button>
-        <button class="action-btn" :class="{ active: activeTab === 'search' }" @click="activeTab = 'search'">
+        <button type="button" class="action-btn" :class="{ active: activeTab === 'search' }" @click="activeTab = 'search'">
           反查
         </button>
-        <button class="action-btn" :class="{ active: activeTab === 'maintenance' }" @click="activeTab = 'maintenance'">
+        <button type="button" class="action-btn" :class="{ active: activeTab === 'maintenance' }" @click="activeTab = 'maintenance'">
           维护
         </button>
-        <button class="action-btn secondary" @click="handleTranslateAll" :disabled="isTranslating">
+        <button type="button" class="action-btn secondary" @click="handleTranslateAll" :disabled="isTranslating">
           {{ isTranslating ? '正在翻译...' : '全量翻译' }}
         </button>
-        <button class="action-btn secondary" @click="handleTaxonomyAudit" :disabled="isAuditing">
+        <button type="button" class="action-btn secondary" @click="handleTaxonomyAudit" :disabled="isAuditing">
           {{ isAuditing ? '正在校核...' : 'NCBI校核' }}
         </button>
       </div>
@@ -69,20 +69,21 @@
                 </div>
                 <div class="row-actions">
                   <span class="child-count-pill">{{ getSpeciesList(catCode, genus.code).length }} 种</span>
-                  <button 
+                  <button type="button" 
                     v-if="genus.latinName && !hasChinese(genus.name)"
                     class="node-action-btn translate"
                     @click.stop="handleTranslateEntry(genus.fullPath)"
                     title="AI 智能翻译"
                   >译</button>
-                  <button class="node-action-btn edit" @click.stop="startEdit(genus)" title="手动修正名称">编辑</button>
-                  <button 
+                  <button type="button" class="node-action-btn edit" @click.stop="startEdit(genus)" title="手动修正名称">编辑</button>
+                  <button type="button" 
                     v-if="!genus.isBuiltin"
                     class="node-action-btn delete" 
                     @click.stop="handleDeleteGenus(genus.fullPath)"
                     title="删除此分类条目"
                   ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                   <button
+                    type="button"
                     class="node-action-btn toggle"
                     :class="{ disabled: !genus.enabled }"
                     @click.stop="handleToggleGenus(genus.fullPath)"
@@ -107,20 +108,22 @@
                       <span v-if="species.latinName" class="node-latin">{{ species.latinName }}</span>
                     </div>
                     <div class="row-actions">
-                      <button 
+                      <button type="button" 
                         v-if="species.latinName && !hasChinese(species.name)"
                         class="node-action-btn translate"
                         title="自动翻译"
                         @click.stop="handleTranslateEntry(species.fullPath)"
                       >译</button>
-                      <button class="node-action-btn edit" @click.stop="startEdit(species)" title="手动修正名称">编辑</button>
+                      <button type="button" class="node-action-btn edit" @click.stop="startEdit(species)" title="手动修正名称">编辑</button>
                       <button
+                        type="button"
                         v-if="!species.isBuiltin"
                         class="node-action-btn delete"
                         @click.stop="handleDeleteSpecies(species.fullPath)"
                         title="删除此分类条目"
                       ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                       <button
+                        type="button"
                         class="node-action-btn toggle"
                         :class="{ disabled: !species.enabled }"
                         @click.stop="handleToggleSpecies(species.fullPath)"
@@ -132,6 +135,7 @@
                 <!-- 种级新增 -->
                 <div class="add-row">
                   <button
+                    type="button"
                     v-if="addingAt !== genus.fullPath"
                     class="add-row-btn"
                     @click="startAddSpecies(genus.fullPath)"
@@ -139,8 +143,8 @@
                   <div v-else class="add-inline">
                     <input v-model="addFormName" class="add-input" placeholder="中文名" />
                     <input v-model="addFormLatin" class="add-input" placeholder="学名(可选)" />
-                    <button class="confirm-btn" @click="confirmAddSpecies(catCode, genus.code)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
-                    <button class="cancel-btn" @click="addingAt = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    <button type="button" class="confirm-btn" @click="confirmAddSpecies(catCode, genus.code)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+                    <button type="button" class="cancel-btn" @click="addingAt = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                   </div>
                 </div>
               </div>
@@ -149,6 +153,7 @@
             <!-- 属级新增 -->
             <div class="add-row">
               <button
+                type="button"
                 v-if="addingAt !== catCode"
                 class="add-row-btn"
                 @click="startAddGenus(catCode)"
@@ -156,8 +161,8 @@
               <div v-else class="add-inline">
                 <input v-model="addFormName" class="add-input" placeholder="中文名" />
                 <input v-model="addFormLatin" class="add-input" placeholder="学名(可选)" />
-                <button class="confirm-btn" @click="confirmAddGenus(catCode)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
-                <button class="cancel-btn" @click="addingAt = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                <button type="button" class="confirm-btn" @click="confirmAddGenus(catCode)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+                <button type="button" class="cancel-btn" @click="addingAt = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
               </div>
             </div>
           </div>
@@ -180,17 +185,20 @@
             <span v-if="source.description" class="source-desc">{{ source.description }}</span>
             <div class="source-actions">
               <button
+                type="button"
                 class="node-action-btn toggle"
                 title="启用/禁用"
                 :class="{ disabled: !source.enabled }"
                 @click="handleToggleSource(source.code)"
               >{{ source.enabled ? '●' : '○' }}</button>
               <button
+                type="button"
                 class="node-action-btn edit"
                 title="编辑"
                 @click="startEditSource(source)"
               >编</button>
               <button
+                type="button"
                 v-if="!source.isBuiltin"
                 class="node-action-btn delete"
                 title="删除"
@@ -203,8 +211,8 @@
             <input v-model="editSrcName" class="edit-input grow" placeholder="名称" />
             <input v-model="editSrcDesc" class="edit-input grow" placeholder="备注" />
             <div class="source-actions">
-              <button class="confirm-btn small" @click="confirmEditSource"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
-              <button class="cancel-btn small" @click="editingSourceCode = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+              <button type="button" class="confirm-btn small" @click="confirmEditSource"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+              <button type="button" class="cancel-btn small" @click="editingSourceCode = ''"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
           </template>
         </div>
@@ -221,7 +229,7 @@
           <input v-model="newSrcCode" class="add-input small" placeholder="编码(2位)" maxlength="2" />
           <input v-model="newSrcName" class="add-input" placeholder="名称" />
           <input v-model="newSrcDesc" class="add-input" placeholder="备注(可选)" />
-          <button class="confirm-btn" @click="handleAddSourceEntry">+ 添加</button>
+          <button type="button" class="confirm-btn" @click="handleAddSourceEntry">+ 添加</button>
         </div>
       </div>
     </div>
@@ -290,7 +298,7 @@
           用于修复由于误操作、系统取消或报错导致的“跳号”问题。
         </p>
         <div class="card-actions">
-          <button class="maintenance-btn primary" @click="handleRecalibrate">
+          <button type="button" class="maintenance-btn primary" @click="handleRecalibrate">
             立即重校准
           </button>
         </div>
@@ -305,7 +313,7 @@
           删除没有任何样本关联的过期或错误的流水号记录。
         </p>
         <div class="card-actions">
-          <button class="maintenance-btn secondary" @click="handleClearUnusedCounters">
+          <button type="button" class="maintenance-btn secondary" @click="handleClearUnusedCounters">
             清理
           </button>
         </div>
@@ -319,7 +327,7 @@
             <h3>手动修正分类名称</h3>
             <p>修正编码 {{ editingEntry?.code }} 对应的层级名称信息</p>
           </div>
-          <button class="btn-close-sm" @click="isEditModalOpen = false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <button type="button" class="btn-close-sm" @click="isEditModalOpen = false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
         
         <div class="edit-form">
@@ -334,8 +342,8 @@
         </div>
 
         <div class="modal-footer">
-          <button class="btn-glass" @click="isEditModalOpen = false">取消</button>
-          <button class="btn-premium" @click="saveManualEdit">确认修改并在全局应用</button>
+          <button type="button" class="btn-glass" @click="isEditModalOpen = false">取消</button>
+          <button type="button" class="btn-premium" @click="saveManualEdit">确认修改并在全局应用</button>
         </div>
       </div>
     </div>

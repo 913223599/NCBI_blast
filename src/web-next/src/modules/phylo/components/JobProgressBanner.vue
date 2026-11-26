@@ -95,10 +95,11 @@ onUnmounted(() => {
       </div>
 
       <div class="banner-actions">
-        <button class="btn-log" @click="showLogs = !showLogs">
+        <button type="button" class="btn-log" @click="showLogs = !showLogs">
           {{ showLogs ? '收起日志' : `实时日志 (${store.liveLogs.length})` }}
         </button>
         <button
+          type="button"
           class="btn-cancel"
           :disabled="store.isCancelling"
           @click="store.cancelActiveJob()"

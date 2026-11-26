@@ -112,8 +112,8 @@ function downloadFormat(fmt: 'newick' | 'distance_csv' | 'report_json' | 'delive
     </div>
 
     <div class="btn-grid">
-      <button class="btn-sec" :disabled="!store.hasTree" @click="store.rerootMidpoint()">中点定根</button>
-      <button class="btn-sec" :disabled="!store.hasTree" @click="store.resetTopology()">还原原始拓扑</button>
+      <button type="button" class="btn-sec" :disabled="!store.hasTree" @click="store.rerootMidpoint()">中点定根</button>
+      <button type="button" class="btn-sec" :disabled="!store.hasTree" @click="store.resetTopology()">还原原始拓扑</button>
     </div>
 
     <div v-if="store.currentJob?.metrics" class="metrics-card">
@@ -141,14 +141,16 @@ function downloadFormat(fmt: 'newick' | 'distance_csv' | 'report_json' | 'delive
     <div v-if="store.currentJob" class="export-group">
       <div class="m-title">后端归档数据导出</div>
       <div class="btn-grid">
-        <button class="btn-sec" @click="downloadFormat('newick')">导出 Newick</button>
-        <button class="btn-sec" @click="downloadFormat('report_json')">导出报告 JSON</button>
+        <button type="button" class="btn-sec" @click="downloadFormat('newick')">导出 Newick</button>
+        <button type="button" class="btn-sec" @click="downloadFormat('report_json')">导出报告 JSON</button>
         <button
+          type="button"
           v-if="store.currentJob.artifacts?.distance_csv"
           class="btn-sec"
           @click="downloadFormat('distance_csv')"
         >导出距离矩阵 CSV</button>
         <button
+          type="button"
           v-if="store.currentJob.artifacts?.delivery_zip"
           class="btn-sec"
           @click="downloadFormat('delivery_zip')"

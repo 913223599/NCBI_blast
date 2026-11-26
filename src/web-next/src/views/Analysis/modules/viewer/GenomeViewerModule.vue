@@ -36,13 +36,13 @@
 
       <div class="toolbar-center" v-if="sequenceLength > 0">
         <div class="view-mode-tabs">
-          <button :class="{ active: viewMode === 'circular' }" @click="viewMode = 'circular'">
+          <button type="button" :class="{ active: viewMode === 'circular' }" @click="viewMode = 'circular'">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10" /><path d="M12 2a10 10 0 0 1 10 10" />
             </svg>
             环形图谱 (Circular)
           </button>
-          <button :class="{ active: viewMode === 'linear' }" @click="viewMode = 'linear'">
+          <button type="button" :class="{ active: viewMode === 'linear' }" @click="viewMode = 'linear'">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" />
             </svg>
@@ -54,25 +54,25 @@
       <div class="toolbar-right">
         <!-- 轨道开关菜单组 -->
         <div class="track-toggle-group" v-if="sequenceLength > 0">
-          <button class="track-btn" :class="{ active: showGC }" @click="showGC = !showGC" title="GC 含量与 GC 偏斜双环轨迹">
+          <button type="button" class="track-btn" :class="{ active: showGC }" @click="showGC = !showGC" title="GC 含量与 GC 偏斜双环轨迹">
             <span class="toggle-dot gc-dot"></span>
             GC 曲线 (Content & Skew)
           </button>
-          <button class="track-btn" :class="{ active: showEnzymes }" @click="showEnzymes = !showEnzymes" title="常用内切酶识别位点">
+          <button type="button" class="track-btn" :class="{ active: showEnzymes }" @click="showEnzymes = !showEnzymes" title="常用内切酶识别位点">
             内切酶位点
           </button>
-          <button class="track-btn" :class="{ active: showPositions }" @click="showPositions = !showPositions" title="刻度坐标数值">
+          <button type="button" class="track-btn" :class="{ active: showPositions }" @click="showPositions = !showPositions" title="刻度坐标数值">
             坐标标尺
           </button>
         </div>
 
-        <button v-if="sequenceLength > 0" class="export-btn primary" @click="exportImage('png')">
+        <button type="button" v-if="sequenceLength > 0" class="export-btn primary" @click="exportImage('png')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M16 10l-4 4m0 0l-4-4m4 4V4" />
           </svg>
           导出图片
         </button>
-        <button v-if="sequenceLength > 0" class="export-btn secondary" @click="exportImage('svg')" title="导出 Adobe Illustrator 可编辑矢量图">
+        <button type="button" v-if="sequenceLength > 0" class="export-btn secondary" @click="exportImage('svg')" title="导出 Adobe Illustrator 可编辑矢量图">
           SVG 矢量图
         </button>
       </div>
@@ -95,7 +95,7 @@
               <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
             <input type="text" v-model="searchQuery" placeholder="搜索基因名 / 产物 / Locus..." />
-            <button v-if="searchQuery" class="clear-btn" @click="searchQuery = ''">×</button>
+            <button type="button" v-if="searchQuery" class="clear-btn" @click="searchQuery = ''">×</button>
           </div>
 
           <div class="filter-selectors">
@@ -107,9 +107,9 @@
             </select>
 
             <div class="strand-toggle">
-              <button :class="{ active: strandFilter === 'ALL' }" @click="strandFilter = 'ALL'">全</button>
-              <button :class="{ active: strandFilter === '+' }" @click="strandFilter = '+'">+ 正链</button>
-              <button :class="{ active: strandFilter === '-' }" @click="strandFilter = '-'">- 负链</button>
+              <button type="button" :class="{ active: strandFilter === 'ALL' }" @click="strandFilter = 'ALL'">全</button>
+              <button type="button" :class="{ active: strandFilter === '+' }" @click="strandFilter = '+'">+ 正链</button>
+              <button type="button" :class="{ active: strandFilter === '-' }" @click="strandFilter = '-'">- 负链</button>
             </div>
           </div>
         </div>
@@ -404,7 +404,7 @@
           <div class="floating-legend" v-if="sequenceLength > 0">
             <div class="legend-header">
               <span>功能大类图例 (点击高亮聚焦)</span>
-              <button v-if="highlightedCategory" class="reset-legend-btn" @click="highlightedCategory = ''">清除高亮</button>
+              <button type="button" v-if="highlightedCategory" class="reset-legend-btn" @click="highlightedCategory = ''">清除高亮</button>
             </div>
             <div class="legend-items">
               <div 
@@ -457,13 +457,13 @@
 
           <!-- 6. 视口操控悬浮工具组 (Zoom & Reset) -->
           <div class="viewport-controls">
-            <button @click="zoomIn" title="放大 (+)">
+            <button type="button" @click="zoomIn" title="放大 (+)">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
             </button>
-            <button @click="zoomOut" title="缩小 (-)">
+            <button type="button" @click="zoomOut" title="缩小 (-)">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
             </button>
-            <button @click="resetView" title="重置视图与居中">
+            <button type="button" @click="resetView" title="重置视图与居中">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
             </button>
           </div>
@@ -478,7 +478,7 @@
                   {{ selectedFeature.type === 'prophage_region' ? '预测前噬菌体区段' : selectedFeature.category }}
                 </span>
               </div>
-              <button class="drawer-close" @click="selectedFeature = null">×</button>
+              <button type="button" class="drawer-close" @click="selectedFeature = null">×</button>
             </div>
 
             <div class="drawer-body">
@@ -512,11 +512,11 @@
             </div>
 
             <div class="drawer-actions">
-              <button @click="copySequence" class="act-btn">
+              <button type="button" @click="copySequence" class="act-btn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 {{ selectedFeature.type === 'prophage_region' ? '复制区段核酸序列' : '复制核酸 CDS' }}
               </button>
-              <button @click="copyTranslation" class="act-btn" v-if="selectedFeature.type !== 'prophage_region' && (selectedFeature.translation || rawSequence)">
+              <button type="button" @click="copyTranslation" class="act-btn" v-if="selectedFeature.type !== 'prophage_region' && (selectedFeature.translation || rawSequence)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                 复制蛋白翻译序列
               </button>

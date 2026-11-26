@@ -2,6 +2,8 @@
  * 其他功能工作台通用请求工具
  */
 import { resolveApiUrl } from '../../utils/fileDownloader'
+import { createLogger } from '../../utils/logger'
+const logger = createLogger('api')
 
 export async function getJson<T = any>(path: string): Promise<T> {
   const resp = await fetch(resolveApiUrl(path))
@@ -28,7 +30,7 @@ export async function openLocalPath(pathStr: string): Promise<void> {
   try {
     await postJson('/api/other_tools/open_path', { path: pathStr })
   } catch (err) {
-    console.error(err)
+    logger.error(err)
   }
 }
 

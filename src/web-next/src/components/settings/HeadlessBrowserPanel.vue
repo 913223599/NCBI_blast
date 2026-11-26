@@ -171,6 +171,7 @@ onMounted(() => {
 
     <div class="hb-actions">
       <button
+        type="button"
         class="p-btn p-btn-secondary"
         :disabled="loading || repairing"
         @click="loadBrowserEnv(false)"
@@ -178,6 +179,7 @@ onMounted(() => {
         {{ loading ? '检测中...' : '刷新状态' }}
       </button>
       <button
+        type="button"
         class="p-btn p-btn-primary"
         :disabled="loading || repairing"
         @click="handleRepair(true)"

@@ -1,5 +1,24 @@
 import { useStrainStore } from '../stores/strain'
 import { getBridge } from '../bridge'
+import { createLogger } from '../utils/logger'
+const logger = createLogger('useTaxonomySync')
+
+export interface TaxonomySyncResult {
+  success?: boolean
+  codeCategory: string
+  codeGenus?: string
+  codeSpecies?: string
+  speciesName: string
+  [key: string]: unknown
+}
+
+interface TaxonomicSelections {
+  category: string
+  source: string
+  passage: number
+  genus?: string
+  species?: string
+}
 
 /**
  * 专门负责处理样本录入过程中的物种名称识别、编号库匹配以及后端分类同步
@@ -21,7 +40,7 @@ export function useTaxonomySync() {
     
     if (!genusPart || !speciesPart) return null
     
-    const selections: any = {
+    const selections: TaxonomicSelections = {
       category: '1', 
       source: '01',   
       passage: 0
@@ -61,7 +80,7 @@ export function useTaxonomySync() {
         consensus: `${genusPart} ${cleanSpecies}`.trim()
       }
     } catch (e) {
-      console.warn('[TaxonomySync] Match failed:', e)
+      logger.warn('[TaxonomySync] Match failed:', e)
       return null
     }
   }
@@ -69,9 +88,9 @@ export function useTaxonomySync() {
   /**
    * 执行后端分类数据库同步
    */
-  async function syncTaxonomyToBackend(queryName: string) {
+  async function syncTaxonomyToBackend(queryName: string): Promise<TaxonomySyncResult | null> {
     return new Promise((resolve) => {
-      getBridge().sync_taxonomy?.(queryName, (res: any) => {
+      getBridge().sync_taxonomy?.(queryName, (res: TaxonomySyncResult | null | undefined) => {
         if (res && res.success) {
           strain.initFromDatabase()
           resolve(res)

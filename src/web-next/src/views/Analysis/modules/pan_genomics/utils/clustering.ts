@@ -7,6 +7,8 @@
  * 3. 严格二叉树拓扑构建与单调叶序展开 (Ordered IDs)
  */
 
+import type { OrthologCluster } from '../types'
+
 export interface ClusteringTreeNode {
   id: string
   leaves: string[]
@@ -25,7 +27,7 @@ export interface HierarchicalClusteringResult {
  */
 export function computeCdsJaccardMatrix(
   sampleIds: string[],
-  clusters: any[]
+  clusters: OrthologCluster[]
 ): {
   matrix: Record<string, Record<string, number | null>>
   mat: Record<string, Record<string, number | null>>
@@ -46,10 +48,11 @@ export function computeCdsJaccardMatrix(
 
   if (clusters && clusters.length > 0) {
     clusters.forEach(c => {
-      if (c && c.presence_map) {
+      if (c && c.presence_map && c.group_id) {
+        const gid = c.group_id
         Object.entries(c.presence_map).forEach(([sid, val]) => {
           if (val && sampleSets[sid]) {
-            sampleSets[sid].add(c.group_id)
+            sampleSets[sid].add(gid)
           }
         })
       }

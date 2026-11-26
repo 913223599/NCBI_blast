@@ -9,17 +9,18 @@
  * 3. 底层分层证据堆栈 (Layered Evidence Stack) ↔ 科研行动决策引擎 (Action Recommendation Engine)
  */
 import { computed } from 'vue'
+import type { ArmsRaceEntry, OrthologCluster, PhageLifestyleEntry } from '../types'
 
 const props = defineProps<{
-  lifestyles: any[]
-  armsRaceMatrix?: Record<string, any>
+  lifestyles: PhageLifestyleEntry[]
+  armsRaceMatrix?: Record<string, ArmsRaceEntry>
   tailMatrix?: Record<string, Record<string, number>>
   lysisMatrix?: Record<string, Record<string, number>>
   aniMatrix?: Record<string, Record<string, number | null>>
-  clusters?: any[]
-  amgGenes?: any[]
+  clusters?: OrthologCluster[]
+  amgGenes?: Array<Record<string, unknown>>
   amgPathwayDistributions?: Record<string, Record<string, number>>
-  scientificSynthesisReport?: any
+  scientificSynthesisReport?: Record<string, unknown> | null
   sampleNames: Record<string, string>
   selectedPair: [string, string] | null
 }>()
@@ -195,7 +196,7 @@ const pairwiseComparison = computed(() => {
                 </span>
               </td>
               <td>
-                <button 
+                <button type="button" 
                   class="btn-select-sample"
                   @click="emit('select-sample', l.sample_id)"
                 >

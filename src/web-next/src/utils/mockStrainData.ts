@@ -111,7 +111,7 @@ export function seedMockData(strainStore: any, codeGen: any) {
   // 查找一个可用的空槽位
   const freezer = strainStore.freezers[0]
   if (!freezer) {
-    console.warn('请先创建一个冰箱后再填充测试数据')
+    _log.warn('请先创建一个冰箱后再填充测试数据')
     return
   }
   
@@ -177,7 +177,7 @@ export function seedMockData(strainStore: any, codeGen: any) {
         true, record.id
       )
     } catch (e) {
-      console.error('填充测试样本失败:', e)
+      _log.error('填充测试样本失败:', e)
     }
   })
   

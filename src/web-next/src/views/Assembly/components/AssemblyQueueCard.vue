@@ -52,8 +52,8 @@ const emit = defineEmits<{
 
       <!-- 操作按钮 -->
       <div class="queue-actions">
-        <button class="btn-cancel" @click="emit('cancel')">取消排队</button>
-        <button class="btn-new" @click="emit('start-new')">创建其他任务</button>
+        <button type="button" class="btn-cancel" @click="emit('cancel')">取消排队</button>
+        <button type="button" class="btn-new" @click="emit('start-new')">创建其他任务</button>
       </div>
     </div>
   </div>

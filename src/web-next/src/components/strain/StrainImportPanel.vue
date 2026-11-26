@@ -4,13 +4,13 @@
 
     <!-- 导入模式切换 -->
     <div class="mode-tabs">
-      <button class="mode-tab" :class="{ active: strain.inputMode === 'file' }" @click="strain.switchInputMode('file')">
+      <button type="button" class="mode-tab" :class="{ active: strain.inputMode === 'file' }" @click="strain.switchInputMode('file')">
         文件上传
       </button>
-      <button class="mode-tab" :class="{ active: strain.inputMode === 'text' }" @click="strain.switchInputMode('text')">
+      <button type="button" class="mode-tab" :class="{ active: strain.inputMode === 'text' }" @click="strain.switchInputMode('text')">
         文本输入
       </button>
-      <button class="mode-tab" :class="{ active: strain.inputMode === 'ncbi' }" @click="strain.switchInputMode('ncbi')">
+      <button type="button" class="mode-tab" :class="{ active: strain.inputMode === 'ncbi' }" @click="strain.switchInputMode('ncbi')">
         NCBI下载
       </button>
     </div>
@@ -25,7 +25,7 @@
     <div v-if="strain.inputMode === 'text'" class="input-section">
       <textarea v-model="strain.importText" class="sequence-input"
         placeholder="粘贴FASTA格式序列...&#10;&#10;>Sequence1&#10;ATCGATCGATCG&#10;&#10;>Sequence2&#10;GCTAGCTAGCTA" />
-      <button class="btn-primary" @click="handleImportText" :disabled="!strain.importText.trim()">
+      <button type="button" class="btn-primary" @click="handleImportText" :disabled="!strain.importText.trim()">
         导入序列
       </button>
     </div>
@@ -41,7 +41,7 @@
         <textarea v-model="ncbiBatchAccessions" class="sequence-input"
           placeholder="NC_045512.2&#10;MN908947.3&#10;MT019530.1" rows="6" />
       </div>
-      <button class="btn-primary" @click="handleNCBIDownload" :disabled="!canDownloadNCBI">
+      <button type="button" class="btn-primary" @click="handleNCBIDownload" :disabled="!canDownloadNCBI">
         从NCBI下载
       </button>
     </div>

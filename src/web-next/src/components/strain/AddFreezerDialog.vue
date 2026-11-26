@@ -3,7 +3,7 @@
     <div class="dialog-content">
       <div class="dialog-header">
         <h3 class="dialog-title">添加 -80°C 冰箱</h3>
-        <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <div class="dialog-body">
@@ -121,7 +121,7 @@
                           :key="option.value"
                           class="opt"
                           :class="{ selected: defaultBoxSize === option.value }"
-                          @click.stop="selectBoxSize(option.value as any)"
+                          @click.stop="selectBoxSize(option.value)"
                         >
                           {{ option.label }}
                         </div>
@@ -164,8 +164,8 @@
       </div>
 
       <div class="dialog-footer">
-        <button class="btn-cancel" @click="emit('close')">取消</button>
-        <button class="btn-confirm" @click="handleConfirm" :disabled="!canSubmit">
+        <button type="button" class="btn-cancel" @click="emit('close')">取消</button>
+        <button type="button" class="btn-confirm" @click="handleConfirm" :disabled="!canSubmit">
           确认添加
         </button>
       </div>
@@ -200,7 +200,7 @@ const customBoxCols = ref(9)
 // 下拉框状态
 const isOpen = ref(false)
 
-const BOX_SIZE_OPTIONS = [
+const BOX_SIZE_OPTIONS: Array<{ value: '9x9' | '10x10' | 'custom'; label: string }> = [
   { value: '9x9', label: '9 × 9 (81位)' },
   { value: '10x10', label: '10 × 10 (100位)' },
   { value: 'custom', label: '自定义' }
@@ -268,17 +268,23 @@ function handleConfirm() {
 
   const { rows, cols } = getBoxDimensions()
   
+  type FreezerShelves = Parameters<typeof strain.addFreezer>[0]['shelves']
+  type FreezerShelfItem = FreezerShelves[number]
+  type FreezerCabinetItem = FreezerShelfItem['cabinets'][number]
+  type FreezerDrawerItem = FreezerCabinetItem['drawers'][number]
+  type FreezerBoxItem = FreezerDrawerItem['boxes'][number]
+
   // 创建冰箱结构
-  const shelves: any[] = []
+  const shelves: FreezerShelves = []
   for (let s = 1; s <= shelvesCount.value; s++) {
-    const cabinets: any[] = []
+    const cabinets: FreezerCabinetItem[] = []
     for (let c = 1; c <= cabinetsPerShelf.value; c++) {
-      const drawers: any[] = []
+      const drawers: FreezerDrawerItem[] = []
       for (let d = 1; d <= drawersPerCabinet.value; d++) {
-        const boxes: any[] = []
+        const boxes: FreezerBoxItem[] = []
         // 每个抽屉可以放置多个冻存盒
         for (let b = 1; b <= boxesPerDrawer.value; b++) {
-          const box: any = {
+          const box: FreezerBoxItem = {
             id: `box_${s}_${c}_${d}_${b}`,
             name: `Box-${String(s).padStart(2, '0')}-${String(c).padStart(2, '0')}-${String(d).padStart(2, '0')}-${String(b).padStart(2, '0')}`,
             rows,

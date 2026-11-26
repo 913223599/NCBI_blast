@@ -52,6 +52,7 @@ const searchableSamples = computed(() => {
 <template>
   <div class="sample-dropdown-wrapper">
     <button
+      type="button"
       class="btn-sample-action btn-filter-dropdown"
       :class="{ active: isOpen }"
       @click="emit('update:isOpen', !isOpen)"
@@ -77,10 +78,10 @@ const searchableSamples = computed(() => {
           @click.stop
         />
         <div class="sd-quick-actions">
-          <button class="btn-sd-quick" @click.stop="emit('show-all')" title="勾选所有样本">全选</button>
-          <button class="btn-sd-quick" @click.stop="emit('invert-selection')" title="反转勾选状态">反选</button>
-          <button class="btn-sd-quick" @click.stop="emit('clear-all')" title="仅保留首株，取消其余勾选">全不选</button>
-          <button class="btn-sd-close" @click.stop="emit('update:isOpen', false)">×</button>
+          <button type="button" class="btn-sd-quick" @click.stop="emit('show-all')" title="勾选所有样本">全选</button>
+          <button type="button" class="btn-sd-quick" @click.stop="emit('invert-selection')" title="反转勾选状态">反选</button>
+          <button type="button" class="btn-sd-quick" @click.stop="emit('clear-all')" title="仅保留首株，取消其余勾选">全不选</button>
+          <button type="button" class="btn-sd-close" @click.stop="emit('update:isOpen', false)">×</button>
         </div>
       </div>
 
@@ -94,7 +95,7 @@ const searchableSamples = computed(() => {
         >
           <input type="checkbox" :checked="s.visible" @click.stop="emit('toggle-sample', s.id)" />
           <span class="sd-name" :title="s.name">{{ s.name }}</span>
-          <button class="btn-sd-only" @click.stop="emit('focus-single', s.id)" title="仅看这一株">
+          <button type="button" class="btn-sd-only" @click.stop="emit('focus-single', s.id)" title="仅看这一株">
             仅看
           </button>
         </div>

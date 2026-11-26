@@ -16,6 +16,14 @@ import WorkspacePopulationLandscape from './components/WorkspacePopulationLandsc
 import WorkspaceCocktailDeRedundancy from './components/WorkspaceCocktailDeRedundancy.vue'
 import WorkspaceGenomeArchitecture from './components/WorkspaceGenomeArchitecture.vue'
 import WorkspaceBiologicalInterpretation from './components/WorkspaceBiologicalInterpretation.vue'
+import type {
+  OrthologCluster,
+  PanGenomicsAnalysisResult,
+  PanGenomicsSampleApiItem,
+  PhageLifestyleEntry,
+} from './types'
+import { createLogger } from '../../../../utils/logger'
+const logger = createLogger('PanGenomicsModule')
 
 const availableSamples = ref<BatchSampleItem[]>([])
 const selectedSamples = ref<BatchSampleItem[]>([])
@@ -27,7 +35,7 @@ const identityThreshold = ref<number>(0.5)
 const activeWorkspace = ref<string>('population')
 
 // 计算分析结果
-const analysisResult = ref<any | null>(null)
+const analysisResult = ref<PanGenomicsAnalysisResult | null>(null)
 
 // 全局持久化对比上下文状态 (Global Persistent Comparison Context)
 const selectedPair = ref<[string, string] | null>(null)
@@ -53,7 +61,7 @@ const pairSummary = computed(() => {
   if (analysisResult.value.clusters?.length) {
     let shared = 0
     let union = 0
-    analysisResult.value.clusters.forEach((c: any) => {
+    analysisResult.value.clusters.forEach((c: OrthologCluster) => {
       const has1 = !!c.presence_map?.[s1]
       const has2 = !!c.presence_map?.[s2]
       if (has1 && has2) shared++
@@ -75,8 +83,8 @@ const pairSummary = computed(() => {
     receptorClass = 'c-amber'
   }
 
-  const life1 = analysisResult.value.lifestyles?.find((l: any) => l.sample_id === s1)
-  const life2 = analysisResult.value.lifestyles?.find((l: any) => l.sample_id === s2)
+  const life1 = analysisResult.value.lifestyles?.find((l: PhageLifestyleEntry) => l.sample_id === s1)
+  const life2 = analysisResult.value.lifestyles?.find((l: PhageLifestyleEntry) => l.sample_id === s2)
   const isSafe = (life1?.is_safe_for_therapy !== false) && (life2?.is_safe_for_therapy !== false)
   const safetyStatus = isSafe ? '安全兼容 (裂解型)' : '含潜在风险标记'
 
@@ -100,7 +108,7 @@ async function loadAvailableSamples() {
     const bridge = getBridge()
     const res = await bridge.get_pan_genomics_samples()
     if (res?.success && Array.isArray(res.data)) {
-      availableSamples.value = res.data.map((item: any) => ({
+      availableSamples.value = (res.data as PanGenomicsSampleApiItem[]).map((item) => ({
         sample_id: item.sample_id,
         sample_name: item.sample_name,
         source_type: 'task',
@@ -115,8 +123,8 @@ async function loadAvailableSamples() {
         selectedSamples.value = availableSamples.value.slice(0, 5)
       }
     }
-  } catch (err: any) {
-    console.error('加载样本列表失败:', err)
+  } catch (err: unknown) {
+    logger.error('加载样本列表失败:', err)
   } finally {
     isLoadingSamples.value = false
   }
@@ -146,8 +154,8 @@ async function handleImportExternal() {
         selectedSamples.value.push(newSample)
       }
     }
-  } catch (err: any) {
-    console.error('导入外部文件失败:', err)
+  } catch (err: unknown) {
+    logger.error('导入外部文件失败:', err)
   }
 }
 
@@ -192,8 +200,9 @@ async function handleRunPanGenomics() {
     } else {
       errorMessage.value = res?.message || '计算引擎未返回有效分析数据'
     }
-  } catch (err: any) {
-    errorMessage.value = `分析计算异常: ${err?.message || err}`
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    errorMessage.value = `分析计算异常: ${msg}`
   } finally {
     isRunning.value = false
   }
@@ -298,7 +307,7 @@ onMounted(() => {
         </span>
       </div>
       <div class="context-right">
-        <button class="btn-quick-pair" @click="handleSelectDefaultPair">快速选择默认样本对</button>
+        <button type="button" class="btn-quick-pair" @click="handleSelectDefaultPair">快速选择默认样本对</button>
       </div>
     </div>
 
@@ -319,8 +328,8 @@ onMounted(() => {
         </div>
       </div>
       <div class="context-right">
-        <button class="btn-cycle-pair" @click="handleCyclePair" title="轮换至下一对样本">切换对比对</button>
-        <button class="btn-clear-pair" @click="selectedPair = null">清除聚焦</button>
+        <button type="button" class="btn-cycle-pair" @click="handleCyclePair" title="轮换至下一对样本">切换对比对</button>
+        <button type="button" class="btn-clear-pair" @click="selectedPair = null">清除聚焦</button>
       </div>
     </div>
 
@@ -329,28 +338,28 @@ onMounted(() => {
       <!-- 4 大核心 Workspace 导航栏 -->
       <div class="workspaces-nav-bar">
         <div class="workspaces-list">
-          <button 
+          <button type="button" 
             :class="['ws-tab-btn', { active: activeWorkspace === 'population' }]" 
             @click="activeWorkspace = 'population'"
           >
             <span class="step-num">Q1</span>
             <span class="ws-name">群体演化与同源矩阵 (Population)</span>
           </button>
-          <button 
+          <button type="button" 
             :class="['ws-tab-btn', { active: activeWorkspace === 'pangenome' }]" 
             @click="activeWorkspace = 'pangenome'"
           >
             <span class="step-num">Q2</span>
             <span class="ws-name">基因组去冗余与代表株优选 (De-redundancy)</span>
           </button>
-          <button 
+          <button type="button" 
             :class="['ws-tab-btn', { active: activeWorkspace === 'genome' }]" 
             @click="activeWorkspace = 'genome'"
           >
             <span class="step-num">Q3</span>
             <span class="ws-name">基因组空间共线性 (Synteny)</span>
           </button>
-          <button 
+          <button type="button" 
             :class="['ws-tab-btn', { active: activeWorkspace === 'biological' }]" 
             @click="activeWorkspace = 'biological'"
           >
@@ -359,7 +368,7 @@ onMounted(() => {
           </button>
         </div>
 
-        <button class="btn-export-csv" @click="handleExportCsv">
+        <button type="button" class="btn-export-csv" @click="handleExportCsv">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="7 10 12 15 17 10" />

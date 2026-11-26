@@ -6,7 +6,7 @@
         <h3>高级筛选器</h3>
         <div class="match-badge" v-if="stats">{{ stats.total }} 结果</div>
       </div>
-      <button class="btn-close-circle" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <button type="button" class="btn-close-circle" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
 
     <!-- 可滚动主体 -->
@@ -68,10 +68,10 @@
 
     <!-- 固定底部操作 -->
     <div class="sidebar-footer">
-      <button class="btn-action-primary" @click="handleExportFiltered" :disabled="!stats || stats.total === 0">
+      <button type="button" class="btn-action-primary" @click="handleExportFiltered" :disabled="!stats || stats.total === 0">
         导出当前结果 ({{ stats?.total || 0 }})
       </button>
-      <button class="btn-action-ghost" @click="resetFilters">全部重置</button>
+      <button type="button" class="btn-action-ghost" @click="resetFilters">全部重置</button>
     </div>
   </div>
 </template>

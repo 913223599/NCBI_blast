@@ -87,7 +87,7 @@ onMounted(() => {
 
       <div style="display: flex; justify-content: flex-end; align-items: center; gap: 16px;">
         <span v-if="saveStatus" :style="{ color: '#10b981', fontSize: '0.85rem' }">{{ saveStatus.message }}</span>
-        <button class="p-btn p-btn-primary" @click="saveApiSettings">保存配置</button>
+        <button type="button" class="p-btn p-btn-primary" @click="saveApiSettings">保存配置</button>
       </div>
     </div>
 
@@ -102,14 +102,14 @@ onMounted(() => {
              <div class="name">{{ m.name }}</div>
              <div class="key">{{ m.key }}</div>
           </div>
-          <button class="btn-del" @click="deleteModel(m.key)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <button type="button" class="btn-del" @click="deleteModel(m.key)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
       </div>
 
       <div class="add-box">
         <input v-model="newModelKey" class="p-input" placeholder="模型标识 (Key)" style="flex: 1" />
         <input v-model="newModelName" class="p-input" placeholder="显示名称 (Name)" style="flex: 1" />
-        <button class="p-btn p-btn-outline" @click="addModel">添加模型</button>
+        <button type="button" class="p-btn p-btn-outline" @click="addModel">添加模型</button>
       </div>
     </div>
   </div>

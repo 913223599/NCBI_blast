@@ -234,6 +234,7 @@
             <!-- 冻存盒标签页 -->
             <div class="box-tabs">
               <button
+                type="button"
                 v-for="box in (selectedDrawer.boxes || [])"
                 :key="box.id"
                 class="box-tab"

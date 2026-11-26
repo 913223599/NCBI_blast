@@ -102,7 +102,7 @@ function handleRepairBrowser(): void {
     <div class="modal-card">
       <div class="modal-header">
         <h3>生工官网账号与无头浏览器配置</h3>
-        <button class="close-btn" @click="emit('close')">&times;</button>
+        <button type="button" class="close-btn" @click="emit('close')">&times;</button>
       </div>
 
       <div class="modal-body">
@@ -113,6 +113,7 @@ function handleRepairBrowser(): void {
             密码状态：{{ authMeta.password_ready ? `已配置 (${authMeta.password_masked})` : '未配置' }}
           </span>
           <button
+            type="button"
             v-if="authMeta.password_ready"
             class="btn-mini danger"
             :disabled="busy"
@@ -216,6 +217,7 @@ function handleRepairBrowser(): void {
 
           <div class="browser-env-foot">
             <button
+              type="button"
               class="btn-mini primary"
               :disabled="busy || repairingBrowser"
               @click="handleRepairBrowser"
@@ -227,8 +229,9 @@ function handleRepairBrowser(): void {
       </div>
 
       <div class="modal-footer">
-        <button class="btn-outline" @click="emit('close')">取消</button>
+        <button type="button" class="btn-outline" @click="emit('close')">取消</button>
         <button
+          type="button"
           class="btn-primary"
           :disabled="busy || !accountInput.trim() || (!authMeta.password_ready && !passwordInput.trim())"
           @click="handleSubmit"

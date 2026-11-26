@@ -8,6 +8,8 @@ import PhageDiscoveryProgress from './components/PhageDiscoveryProgress.vue'
 import PhageDiscoveryQueueCard from './components/PhageDiscoveryQueueCard.vue'
 import PhageDiscoveryResults from './components/PhageDiscoveryResults.vue'
 import PhageDiscoverySetup from './components/PhageDiscoverySetup.vue'
+import { createLogger } from '../../../../utils/logger'
+const logger = createLogger('PhageDiscoveryModule')
 
 const emit = defineEmits<{
   (e: 'open-viewer', payload: { gbkText: string; taskName: string }): void
@@ -82,7 +84,7 @@ async function loadOverlayForContig(contigId?: string): Promise<void> {
       overlayData.value = data
     }
   } catch (err) {
-    console.warn('[PhageDiscovery] 加载 Contig 叠图分片失败:', err)
+    logger.warn('[PhageDiscovery] 加载 Contig 叠图分片失败:', err)
   } finally {
     if (activeOverlayRequestKey === cacheKey) {
       isOverlayLoading.value = false

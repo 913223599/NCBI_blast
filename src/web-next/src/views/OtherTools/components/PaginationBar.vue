@@ -76,12 +76,13 @@ function handleSizeChange(ev: Event): void {
       </label>
 
       <div class="pg-buttons">
-        <button class="pg-btn" :disabled="loading || safePage <= 1" @click="goPage(1)">首页</button>
-        <button class="pg-btn" :disabled="loading || safePage <= 1" @click="goPage(safePage - 1)">上一页</button>
+        <button type="button" class="pg-btn" :disabled="loading || safePage <= 1" @click="goPage(1)">首页</button>
+        <button type="button" class="pg-btn" :disabled="loading || safePage <= 1" @click="goPage(safePage - 1)">上一页</button>
 
         <template v-for="(item, idx) in visiblePages" :key="idx">
           <span v-if="item === '...'" class="pg-ellipsis">...</span>
           <button
+            type="button"
             v-else
             :class="['pg-btn', { active: item === safePage }]"
             :disabled="loading"
@@ -91,8 +92,8 @@ function handleSizeChange(ev: Event): void {
           </button>
         </template>
 
-        <button class="pg-btn" :disabled="loading || safePage >= totalPages" @click="goPage(safePage + 1)">下一页</button>
-        <button class="pg-btn" :disabled="loading || safePage >= totalPages" @click="goPage(totalPages)">末页</button>
+        <button type="button" class="pg-btn" :disabled="loading || safePage >= totalPages" @click="goPage(safePage + 1)">下一页</button>
+        <button type="button" class="pg-btn" :disabled="loading || safePage >= totalPages" @click="goPage(totalPages)">末页</button>
       </div>
     </div>
   </div>

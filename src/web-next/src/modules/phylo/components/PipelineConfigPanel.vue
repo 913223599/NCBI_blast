@@ -72,7 +72,7 @@ function formatModelLabel(model: string): string {
       <h3 class="panel-title">
         {{ isPhageMode ? '第 3-5 步：标志基因、比对与建树' : '分析管线配置' }}
       </h3>
-      <button class="btn-link" @click="store.refreshCapabilities(true)">重检工具</button>
+      <button type="button" class="btn-link" @click="store.refreshCapabilities(true)">重检工具</button>
     </div>
 
     <div v-if="store.capabilities" class="hw-banner">
@@ -325,6 +325,7 @@ function formatModelLabel(model: string): string {
 
     <div class="action-bar">
       <button
+        type="button"
         v-if="!store.isRunning"
         class="btn-start"
         :disabled="store.isSubmitting || !store.profile || store.profile.sequence_count < minSeqRequired"
@@ -339,6 +340,7 @@ function formatModelLabel(model: string): string {
         }}
       </button>
       <button
+        type="button"
         v-else
         class="btn-stop"
         :disabled="store.isCancelling"

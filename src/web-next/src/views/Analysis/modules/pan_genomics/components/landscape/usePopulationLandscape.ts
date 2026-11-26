@@ -17,19 +17,27 @@ import {
   type HierarchicalClusteringResult,
 } from '../../utils/clustering'
 import { exportCompleteFigure } from '../../utils/exportLandscapeFigure'
+import type {
+  ArmsRaceEntry,
+  EnrichedOrthologCluster,
+  OrthologCluster,
+  PhageLifestyleEntry,
+} from '../../types'
+import { createLogger } from '../../../../../../utils/logger'
+const logger = createLogger('usePopulationLandscape')
 
 export interface PopulationLandscapeProps {
   aniMatrix: Record<string, Record<string, number | null>>
   afMatrix?: Record<string, Record<string, number>>
   aniTaxonomyMatrix?: Record<string, Record<string, string>>
   aniMetricType?: string
-  aniClustering?: any
+  aniClustering?: HierarchicalClusteringResult | null
   sampleNames: Record<string, string>
   tailMatrix?: Record<string, Record<string, number>>
   lysisMatrix?: Record<string, Record<string, number>>
-  clusters?: any[]
-  lifestyles?: any[]
-  armsRaceMatrix?: Record<string, any>
+  clusters?: OrthologCluster[]
+  lifestyles?: PhageLifestyleEntry[]
+  armsRaceMatrix?: Record<string, ArmsRaceEntry>
   selectedPair: [string, string] | null
 }
 
@@ -54,8 +62,8 @@ export function usePopulationLandscape(
     emit('select-pair', pair)
   }
 
-  const hoveredGeneCluster = ref<{ cluster: any; rowId: string; variant: ClusterVariantInfo } | null>(null)
-  const selectedGeneCluster = ref<any | null>(null)
+  const hoveredGeneCluster = ref<{ cluster: EnrichedOrthologCluster; rowId: string; variant: ClusterVariantInfo } | null>(null)
+  const selectedGeneCluster = ref<OrthologCluster | null>(null)
   const geneCategoryFilter = ref<string>('ALL')
   const genePartitionFilter = ref<'ALL' | 'VARIABLE' | 'CORE' | 'UNIQUE'>('ALL')
 
@@ -64,14 +72,17 @@ export function usePopulationLandscape(
   const crosshairLeft = ref(0)
   const crosshairWidth = ref(5)
 
-  function handleClusterMouseEnter(e: MouseEvent, c: any, rowId: string) {
+  function handleClusterMouseEnter(e: MouseEvent, c: EnrichedOrthologCluster, rowId: string) {
     const target = e.currentTarget as HTMLElement
     if (target) {
       crosshairLeft.value = target.offsetLeft
       crosshairWidth.value = target.offsetWidth || 5
       crosshairVisible.value = true
     }
-    hoveredGeneCluster.value = { cluster: c, rowId, variant: c._variantMap[rowId] }
+    const variant = c._variantMap[rowId]
+    if (variant) {
+      hoveredGeneCluster.value = { cluster: c, rowId, variant }
+    }
   }
 
   function handleClusterMouseLeave() {
@@ -209,7 +220,7 @@ export function usePopulationLandscape(
     hiddenSampleIds.value = newSet
   }
 
-  function openClusterDrawer(c: any) {
+  function openClusterDrawer(c: OrthologCluster) {
     selectedGeneCluster.value = c
   }
 
@@ -471,7 +482,7 @@ export function usePopulationLandscape(
         format,
       })
     } catch (err) {
-      console.error('导出图表失败:', err)
+      logger.error('导出图表失败:', err)
     } finally {
       isExporting.value = false
     }

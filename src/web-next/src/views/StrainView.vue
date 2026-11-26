@@ -12,6 +12,7 @@
       <div class="top-toolbar">
         <div class="toolbar-left">
           <button
+            type="button"
             class="toolbar-btn"
             :class="{ active: currentView === 'freezer' }"
             @click="currentView = 'freezer'"
@@ -19,6 +20,7 @@
             {{ t('strain.toolbar.freezer_view') }}
           </button>
           <button
+            type="button"
             class="toolbar-btn"
             :class="{ active: currentView === 'stats' }"
             @click="currentView = 'stats'"
@@ -26,6 +28,7 @@
             {{ t('strain.toolbar.stats_view') }}
           </button>
           <button
+            type="button"
             class="toolbar-btn"
             :class="{ active: currentView === 'list' }"
             @click="currentView = 'list'"
@@ -36,6 +39,7 @@
           <div class="toolbar-divider"></div>
 
           <button
+            type="button"
             class="toolbar-btn action-btn"
             @click="showBatchImport = true"
           >
@@ -43,6 +47,7 @@
           </button>
 
           <button
+            type="button"
             class="toolbar-btn action-btn"
             @click="showCodeManager = true"
           >

@@ -17,7 +17,7 @@
 
     <div class="toolbar-right">
       <div class="action-group">
-        <button 
+        <button type="button" 
           class="btn-action danger" 
           @click="emit('deleteSelected')" 
           :disabled="selectedCount === 0"
@@ -25,7 +25,7 @@
           <span class="icon">删除</span>
           <span>批量删除</span>
         </button>
-        <button 
+        <button type="button" 
           class="btn-action primary" 
           @click="emit('exportSelected')" 
           :disabled="selectedCount === 0"
@@ -37,7 +37,7 @@
       
       <div class="divider"></div>
       
-      <button 
+      <button type="button" 
         class="btn-action filter-toggle" 
         :class="{ active: showAdvancedSearch }"
         @click="emit('toggleSearch')"

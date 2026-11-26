@@ -10,7 +10,12 @@
             <p class="dialog-subtitle">{{ positionPath }}</p>
           </div>
         </div>
-        <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
+            aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg></button>
       </div>
 
       <div class="dialog-body">
@@ -22,10 +27,7 @@
             <!-- 样本编号 -->
             <div class="form-section">
               <h4 class="section-label">{{ t('strain.label.code') }}</h4>
-              <SampleCodeInput 
-                :initial-selections="initialCategorySelections"
-                @update="handleCodeUpdate" 
-              />
+              <SampleCodeInput :initial-selections="initialCategorySelections" @update="handleCodeUpdate" />
             </div>
 
             <!-- 样本核心标识 -->
@@ -49,7 +51,8 @@
                       <span class="arrow">▾</span>
                     </div>
                     <div v-if="openDropdown === 'sequenceType'" class="select-dropdown">
-                      <div v-for="opt in SEQUENCE_TYPE_OPTIONS" :key="opt.value" class="select-option" @click.stop="handleDropdownSelect('sequenceType', opt.value)">
+                      <div v-for="opt in SEQUENCE_TYPE_OPTIONS" :key="opt.value" class="select-option"
+                        @click.stop="handleDropdownSelect('sequenceType', opt.value)">
                         {{ opt.label }}
                       </div>
                     </div>
@@ -91,7 +94,7 @@
               <h3>暂无业务元数据</h3>
               <p>请先在左侧选择 <strong>大类 (A)</strong> 或样本类型</p>
             </div>
-            
+
             <template v-else>
               <div class="form-section">
                 <div class="section-header-flex">
@@ -107,12 +110,8 @@
               </div>
 
               <!-- 4. 序列录入子模块 (已拆分) -->
-              <SequenceEntryPanel 
-                v-model="form.sequence"
-                v-model:sync-enabled="syncToGeneDB"
-                v-model:gene-seq-type="geneInfo.seqType"
-                v-model:gene-title="geneInfo.title"
-              />
+              <SequenceEntryPanel v-model="form.sequence" v-model:sync-enabled="syncToGeneDB"
+                v-model:gene-seq-type="geneInfo.seqType" v-model:gene-title="geneInfo.title" />
             </template>
           </div>
         </div>
@@ -123,17 +122,17 @@
         <div class="aliquot-control" v-if="canSubmit && (!selectedPositions || selectedPositions.length <= 1)">
           <label>分装管数：</label>
           <div class="number-input">
-            <button @click="aliquotCount > 1 && aliquotCount--" class="num-btn">-</button>
+            <button type="button" @click="aliquotCount > 1 && aliquotCount--" class="num-btn">-</button>
             <input v-model.number="aliquotCount" type="number" class="num-text" />
-            <button @click="aliquotCount < 100 && aliquotCount++" class="num-btn">+</button>
+            <button type="button" @click="aliquotCount < 100 && aliquotCount++" class="num-btn">+</button>
           </div>
         </div>
         <div class="batch-hint" v-else-if="selectedPositions && selectedPositions.length > 1">
           已选中 <strong>{{ selectedPositions.length }}</strong> 个孔位批量录入
         </div>
         <div class="footer-actions">
-          <button class="btn-cancel" @click="emit('close')">取消</button>
-          <button class="btn-confirm" @click="handleConfirm" :disabled="!canSubmit">确认录入</button>
+          <button type="button" class="btn-cancel" @click="emit('close')">取消</button>
+          <button type="button" class="btn-confirm" @click="handleConfirm" :disabled="!canSubmit">确认录入</button>
         </div>
       </div>
     </div>
@@ -148,6 +147,7 @@ import { useAppStore } from '../../stores/app'
 import { useSequenceStore } from '../../stores/sequence'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 import { useTaxonomySync } from '../../composables/useTaxonomySync'
+import type { CodeGenerationRequest } from '../../types/codeSystem'
 
 // 子组件
 import SamplePositionBanner from './SamplePositionBanner.vue'
@@ -160,6 +160,8 @@ import ProteinForm from './forms/ProteinForm.vue'
 import CellForm from './forms/CellForm.vue'
 import PhageForm from './forms/PhageForm.vue'
 import SampleCodeInput from './SampleCodeInput.vue'
+import { createLogger } from '../../utils/logger'
+const logger = createLogger('SampleEntryDialog')
 
 interface Props {
   freezerId: string; shelfId: string; cabinetId: string; drawerId: string; boxId: string;
@@ -175,18 +177,38 @@ const sequenceStore = useSequenceStore()
 const codeGen = useCodeGenerator()
 const { attemptTaxonomicMatch, syncTaxonomyToBackend } = useTaxonomySync()
 
+interface InitialCategorySelections {
+  category?: string
+  genus?: string
+  species?: string
+}
+
+interface SampleCodeUpdatePayload {
+  sampleCode: string
+  codeCategory: string
+  codeGenus?: string
+  codeSpecies?: string
+  generationRequest?: CodeGenerationRequest | null
+}
+
 const form = ref({
   name: '', accession: '', species: '', strain: '', sampleType: '' as SampleCategory | '',
   sequenceType: 'DNA' as 'DNA' | 'RNA' | 'Protein', sequence: '', source: '', host: '', country: '', collectionDate: '',
   sampleCode: '', codeSource: '', codeCategory: '', codeGenus: '', codeSpecies: '', codePassage: 0, codeSerial: 0,
-  metadata: { storageDate: new Date().toISOString().split('T')[0], biosafetyLevel: 'BSL-1' } as Record<string, any>
+  metadata: { storageDate: new Date().toISOString().split('T')[0], biosafetyLevel: 'BSL-1' } as Record<string, unknown>
 })
 
 const aliquotCount = ref(1); const syncToGeneDB = ref(false); const geneInfo = ref({ seqType: '16S', title: '' })
-const initialCategorySelections = ref<any>(null); const openDropdown = ref<string | null>(null); const pendingRequest = ref<any>(null)
+const initialCategorySelections = ref<InitialCategorySelections | undefined>(undefined)
+const openDropdown = ref<string | null>(null)
+const pendingRequest = ref<CodeGenerationRequest | null>(null)
 
 // 常量定义
-const SEQUENCE_TYPE_OPTIONS = [{ value: 'DNA', label: 'DNA (核酸)' }, { value: 'RNA', label: 'RNA (核酸)' }, { value: 'Protein', label: 'Protein (蛋白)' }]
+const SEQUENCE_TYPE_OPTIONS = [
+  { value: 'DNA', label: 'DNA (核酸)' },
+  { value: 'RNA', label: 'RNA (核酸)' },
+  { value: 'Protein', label: 'Protein (蛋白)' },
+] as const
 const CATEGORY_CODE_TO_SAMPLE_TYPE: Record<string, SampleCategory> = { '1': 'Bacteria', '2': 'Virus', '3': 'Phage', '4': 'Fungi', '5': 'Plasmid', '6': 'CellLine', '7': 'GenomicDNA', '8': 'Protein', '9': 'Other' }
 
 // 逻辑计算
@@ -202,40 +224,36 @@ onMounted(async () => {
   if (strain.pendingBlastDraft) {
     const draft = strain.consumePendingBlastDraft()
     if (!draft) return
-    
+
     // 异步同步物种到后端
     if (draft.species) {
-      const syncRes: any = await syncTaxonomyToBackend(draft.species)
+      const syncRes = await syncTaxonomyToBackend(draft.species)
       if (syncRes) {
-        initialCategorySelections.value = { 
-          category: syncRes.codeCategory, 
-          genus: syncRes.codeGenus, 
-          species: syncRes.codeSpecies 
+        initialCategorySelections.value = {
+          category: syncRes.codeCategory,
+          genus: syncRes.codeGenus,
+          species: syncRes.codeSpecies
         }
-        form.value.name = syncRes.speciesName; 
+        form.value.name = syncRes.speciesName
         form.value.species = syncRes.speciesName
-        
+
         // 关键修复：同步成功后，必须立即触发一次数据联动，否则 sampleType 为空导致无法提交
         handleCodeUpdate({
           sampleCode: '', // 初始占空，等待 SampleCodeInput 接管
           codeCategory: syncRes.codeCategory,
           codeGenus: syncRes.codeGenus,
           codeSpecies: syncRes.codeSpecies,
-          generationRequest: {
-            category: syncRes.codeCategory,
-            genus: syncRes.codeGenus,
-            species: syncRes.codeSpecies
-          }
+          generationRequest: null,
         })
       }
     }
 
     const match = attemptTaxonomicMatch(draft.species); const consensus = match?.consensus || draft.species
-    
+
     // 深度合并草稿信息，确保 BLAST 的 identity, evalue 等 metadata 不丢失
-    Object.assign(form.value, { 
-      name: form.value.name || consensus, 
-      species: form.value.species || consensus, 
+    Object.assign(form.value, {
+      name: form.value.name || consensus,
+      species: form.value.species || consensus,
       sequence: draft.sequence || '',
       accession: draft.accession || form.value.accession,
       strain: draft.strain || '',
@@ -244,7 +262,7 @@ onMounted(async () => {
         ...(draft.metadata || {})
       }
     })
-    
+
     if (form.value.sequence) { syncToGeneDB.value = true; geneInfo.value.title = `${consensus}_16S` }
   }
 })
@@ -260,7 +278,7 @@ function getDynamicForm() {
   return null
 }
 
-function handleCodeUpdate(data: any) {
+function handleCodeUpdate(data: SampleCodeUpdatePayload) {
   form.value.accession = data.sampleCode; pendingRequest.value = data.generationRequest || null
   const inferred = CATEGORY_CODE_TO_SAMPLE_TYPE[data.codeCategory]; if (inferred) form.value.sampleType = inferred
   const res = codeGen.resolve(data.sampleCode)
@@ -281,9 +299,10 @@ function handleConfirm() {
       const code = codeGen.commit(pendingRequest.value)
       form.value.sampleCode = code
       form.value.accession = code
-    } catch (err: any) {
-      console.error('[SampleEntryDialog] 编码提交失败:', err)
-      appStore.showNotification(`入库失败: ${err.message}`, 'error')
+    } catch (err: unknown) {
+      logger.error('[SampleEntryDialog] 编码提交失败:', err)
+      const msg = err instanceof Error ? err.message : String(err)
+      appStore.showNotification(`入库失败: ${msg}`, 'error')
       return
     }
   }
@@ -300,9 +319,9 @@ function handleConfirm() {
   const c = s?.cabinets.find(c => c.id === props.cabinetId)
   const d = c?.drawers.find(d => d.id === props.drawerId)
   const box = d?.boxes.find(b => b.id === props.boxId)
-  
+
   if (!box || !box.positions) return
-  
+
   const targetPositions = props.selectedPositions && props.selectedPositions.length > 1 ? [...props.selectedPositions] : []
   if (targetPositions.length === 0) {
     let idx = box.positions.findIndex(p => p.label === props.position)
@@ -318,37 +337,40 @@ function handleConfirm() {
 
   // 1. 先准备记录并生成本地 ID (以便同步关联序列)
   const generateUUID = () => {
-    if (typeof crypto !== 'undefined' && (crypto as any).randomUUID) return (crypto as any).randomUUID();
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
     });
   }
-  
-  const records = targetPositions.map(pos => ({ 
-    ...form.value, 
-    id: generateUUID(), 
-    freezerId: props.freezerId, 
-    shelfId: props.shelfId, 
-    cabinetId: props.cabinetId, 
-    drawerId: props.drawerId, 
-    boxId: props.boxId, 
-    position: pos 
+
+  const records = targetPositions.map(pos => ({
+    ...form.value,
+    sampleType: (form.value.sampleType || 'Other') as SampleCategory,
+    id: generateUUID(),
+    freezerId: props.freezerId,
+    shelfId: props.shelfId,
+    cabinetId: props.cabinetId,
+    drawerId: props.drawerId,
+    boxId: props.boxId,
+    position: pos
   }))
-  
+
   // 2. 提交到库
   strain.addRecords(records)
-  
+
   // 3. 处理序列同步 (增加显式首条记录校验)
   const firstRecord = records[0]
   if (firstRecord && syncToGeneDB.value && form.value.sequence) {
-    sequenceStore.saveSequence({ 
+    sequenceStore.saveSequence({
       sampleId: firstRecord.id, // 现在 TS 可以确认 firstRecord 存在
-      sampleCode: form.value.sampleCode || form.value.accession, 
-      seqType: geneInfo.value.seqType, 
-      title: geneInfo.value.title || form.value.name, 
-      sequence: form.value.sequence, 
+      sampleCode: form.value.sampleCode || form.value.accession,
+      seqType: geneInfo.value.seqType,
+      title: geneInfo.value.title || form.value.name,
+      sequence: form.value.sequence,
       seqLen: form.value.sequence.length,
       metadata: { autoSynced: true, syncedAt: new Date().toISOString() }
     })
@@ -366,38 +388,204 @@ function handleConfirm() {
 
 // 基础 UI 下拉控制逻辑保留在容器
 function toggleDropdown(n: string) { openDropdown.value = openDropdown.value === n ? null : n }
-function handleDropdownSelect(f: string, v: string) { (form.value as any)[f] = v; openDropdown.value = null }
+function handleDropdownSelect(f: 'sequenceType', v: 'DNA' | 'RNA' | 'Protein') { form.value[f] = v; openDropdown.value = null }
 function getSampleTypeLabel() { return form.value.sampleType || '等待识别...' }
 function getSequenceTypeLabel() { return SEQUENCE_TYPE_OPTIONS.find(o => o.value === form.value.sequenceType)?.label || 'DNA' }
 </script>
 
 <style scoped>
 /* 仅保留局部布局样式，详细表单样式已由子组件继承 */
-.dialog-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 9999; }
-.dialog-content { background: white; border-radius: 16px; width: 1000px; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); }
-.dialog-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid #e2e8f0; }
-.header-left { display: flex; align-items: center; gap: 12px; }
-.icon-wrapper { width: 40px; height: 40px; background: #eff6ff; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; }
-.dialog-title { font-size: 1.1rem; font-weight: 800; margin: 0; }
-.dialog-body { flex: 1; overflow-y: auto; }
-.dialog-layout { display: flex; }
-.layout-left { flex: 1; padding: 24px; border-right: 1px solid #e2e8f0; }
-.layout-right { flex: 1.2; padding: 24px; background: #f8fafc; }
-.form-section { margin-bottom: 24px; }
-.section-label { font-size: 0.85rem; font-weight: 700; color: #64748b; margin-bottom: 16px; }
-.form-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.text-input { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
-.custom-select { position: relative; cursor: pointer; }
-.select-trigger { padding: 10px 14px; border: 1px solid #e2e8f0; border-radius: 8px; display: flex; justify-content: space-between; }
-.select-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 8px; z-index: 100; }
-.select-option { padding: 10px 14px; cursor: pointer; }
-.select-option:hover { background: #f1f5f9; }
-.read-only-field { padding: 10px 14px; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; color: #64748b; }
-.dialog-footer { display: flex; justify-content: space-between; padding: 16px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; }
-.btn-confirm { background: #2563eb; color: white; border: none; padding: 10px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; }
-.btn-cancel { background: white; border: 1px solid #e2e8f0; padding: 10px 24px; border-radius: 8px; cursor: pointer; }
-.number-input { display: flex; border: 1px solid #cbd5e1; border-radius: 6px; }
-.num-btn { width: 28px; height: 28px; border: none; background: #f1f5f9; cursor: pointer; }
-.num-text { width: 40px; text-align: center; border: none; }
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.dialog-content {
+  background: white;
+  border-radius: 16px;
+  width: 1000px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.icon-wrapper {
+  width: 40px;
+  height: 40px;
+  background: #eff6ff;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+}
+
+.dialog-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  margin: 0;
+}
+
+.dialog-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.dialog-layout {
+  display: flex;
+}
+
+.layout-left {
+  flex: 1;
+  padding: 24px;
+  border-right: 1px solid #e2e8f0;
+}
+
+.layout-right {
+  flex: 1.2;
+  padding: 24px;
+  background: #f8fafc;
+}
+
+.form-section {
+  margin-bottom: 24px;
+}
+
+.section-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.text-input {
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.custom-select {
+  position: relative;
+  cursor: pointer;
+}
+
+.select-trigger {
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  z-index: 100;
+}
+
+.select-option {
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.select-option:hover {
+  background: #f1f5f9;
+}
+
+.read-only-field {
+  padding: 10px 14px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #64748b;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.btn-confirm {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn-cancel {
+  background: white;
+  border: 1px solid #e2e8f0;
+  padding: 10px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.number-input {
+  display: flex;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+
+.num-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f1f5f9;
+  cursor: pointer;
+}
+
+.num-text {
+  width: 40px;
+  text-align: center;
+  border: none;
+}
 </style>

@@ -37,6 +37,7 @@ export interface DiversityHistoryTask {
   progress?: number
   total_samples: number
   total_reads: number
+  species_count?: number
   created_at?: number
   completed_at?: number
   [key: string]: unknown
@@ -48,6 +49,8 @@ export interface DiversityTaxonDetail {
   raw_pct: number
   norm_pct: number
   gcn_mean: number
+  gcn_rank?: string
+  gcn_matched?: boolean
   gcn_match_level?: string
   is_noise?: boolean
   [key: string]: unknown
@@ -56,12 +59,16 @@ export interface DiversityTaxonDetail {
 export interface DiversityTaxonOverviewItem {
   taxon: string
   raw_count?: number
+  total_raw_count?: number
   raw_pct?: number
   norm_pct?: number
   overall_raw_pct?: number
   overall_norm_pct?: number
   gcn_mean?: number
+  gcn_rank?: string
+  gcn_matched?: boolean
   sample_count?: number
+  sample_frequency?: number
   is_noise?: boolean
   [key: string]: unknown
 }
@@ -69,9 +76,12 @@ export interface DiversityTaxonOverviewItem {
 export interface DiversitySampleItem {
   sample_name: string
   total_reads: number
+  classified_reads?: number
   is_group?: boolean
   member_samples?: string[]
   norm_result?: {
+    total_raw?: number
+    total_norm?: number
     details?: DiversityTaxonDetail[]
     [key: string]: unknown
   }

@@ -78,7 +78,7 @@ function getStatusText(item: AnnotationTaskItem) {
     <div class="history-toolbar">
       <span class="history-count">共 {{ tasks.length }} 条记录</span>
       <div class="toolbar-actions">
-        <button 
+        <button type="button" 
           class="sort-toggle-btn" 
           :title="sortOrder === 'asc' ? '当前：发生顺序（最早在上），点击切换为最新优先' : '当前：最新优先（最新在上），点击切换为发生顺序'"
           @click="toggleSortOrder"
@@ -91,7 +91,7 @@ function getStatusText(item: AnnotationTaskItem) {
           </svg>
           <span>{{ sortOrder === 'asc' ? '发生先后' : '最新优先' }}</span>
         </button>
-        <button class="refresh-btn" @click="emit('refresh')" title="刷新列表">
+        <button type="button" class="refresh-btn" @click="emit('refresh')" title="刷新列表">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
           </svg>
@@ -149,7 +149,7 @@ function getStatusText(item: AnnotationTaskItem) {
           <span>GC: {{ item.summary.gc_content }}%</span>
         </div>
 
-        <button 
+        <button type="button" 
           class="delete-btn" 
           @click.stop="emit('delete', item.task_id)" 
           title="删除该记录"

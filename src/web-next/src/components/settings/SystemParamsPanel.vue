@@ -56,13 +56,13 @@ onMounted(() => loadLanShareInfo())
           <label>当前专用访问地址</label>
           <div class="url-box">
             <code>http://{{ lanShareInfo.ip }}:{{ lanShareInfo.port }}</code>
-            <button class="p-btn p-btn-primary btn-sm" @click="copyToClipboard(`http://${lanShareInfo.ip}:${lanShareInfo.port}`)">复制</button>
+            <button type="button" class="p-btn p-btn-primary btn-sm" @click="copyToClipboard(`http://${lanShareInfo.ip}:${lanShareInfo.port}`)">复制</button>
           </div>
         </div>
       </div>
 
       <div class="footer-actions mt-24" style="text-align: right;">
-        <button class="p-btn p-btn-primary" @click="saveLanSettings">应用系统更改</button>
+        <button type="button" class="p-btn p-btn-primary" @click="saveLanSettings">应用系统更改</button>
       </div>
     </div>
 

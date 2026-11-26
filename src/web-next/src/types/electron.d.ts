@@ -49,7 +49,10 @@ export interface ElectronAPI {
 declare global {
   interface Window {
     electronAPI?: ElectronAPI
-    [key: string]: any
+    handleBridgeEvent?: (event: string, payload?: unknown) => void
+    app?: {
+      showNotification?: (message: string, type?: string) => void
+    }
   }
 }
 

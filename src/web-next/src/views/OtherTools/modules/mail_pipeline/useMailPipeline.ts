@@ -2,7 +2,6 @@
  * useMailPipeline - 邮件收件 -> 注释 -> Word 报告 -> SMTP 回传全流程状态机
  * 从 MailAutoPipelineModule.vue 拆解而出，封装轮询、收件、配置迁移、发信预览与清理逻辑。
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { MailComposeSubmitPayload, MailDraftPayload } from '../../components/MailComposeModal.vue'
 import type { CleanupOption } from '../../components/CleanupDialog.vue'
@@ -21,6 +20,25 @@ import {
 } from './mailTypes'
 
 const API = '/api/other_tools/mail_pipeline'
+
+export interface MailPipelineRuntime {
+  running: boolean
+  started_at: string | null
+  finished_at: string | null
+  last_exit_code: number | null
+  last_command: string
+  last_output: string
+  current_stage: string
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const msg = (err as { message?: unknown }).message
+    if (typeof msg === 'string' && msg) return msg
+  }
+  return String(err)
+}
 
 export function useMailPipeline() {
   const confirmDialog = useConfirmDialog()
@@ -106,7 +124,7 @@ export function useMailPipeline() {
   })
   const authForm = ref({ imap: '', smtp: '', clearSmtp: false })
 
-  const runtime = ref<any>({
+  const runtime = ref<MailPipelineRuntime>({
     running: false,
     started_at: null,
     finished_at: null,
@@ -202,8 +220,8 @@ export function useMailPipeline() {
     errorMessage.value = ''
   }
 
-  function setError(err: any): void {
-    errorMessage.value = err?.message || String(err)
+  function setError(err: unknown): void {
+    errorMessage.value = getErrorMessage(err)
     actionMessage.value = ''
   }
 
@@ -259,8 +277,8 @@ export function useMailPipeline() {
           )
         }
       }
-    } catch (err: any) {
-      errorMessage.value = `加载失败: ${err.message || err}`
+    } catch (err: unknown) {
+      errorMessage.value = `加载失败: ${getErrorMessage(err)}`
     }
   }
 
@@ -326,7 +344,7 @@ export function useMailPipeline() {
     const modeTip = mode === 'self' ? '（完成后发给自己测试）' : mode === 'none' ? '（仅注释打包，不发信）' : ''
     setInfo(`启动流水线${modeTip}...`)
     try {
-      const payload: Record<string, any> = {
+      const payload: Record<string, unknown> = {
         since_days: runOptions.value.since_days,
         no_send: mode === 'none',
         subject_prefix: runOptions.value.subject_prefix,
@@ -360,7 +378,7 @@ export function useMailPipeline() {
     const mode = overrideMode || batchRunForm.value.sendMode
     const batchName = batchRunForm.value.batchName
     if (!batchName) return
-    const payload: Record<string, any> = {
+    const payload: Record<string, unknown> = {
       annotate_only_batch: batchName,
       no_send: mode === 'only_pack',
       force_send: mode === 'custom',
@@ -390,7 +408,7 @@ export function useMailPipeline() {
     }
   }
 
-  function buildConfigPayload(overrides: Record<string, any> = {}): Record<string, any> {
+  function buildConfigPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     const whitelist = configForm.value.sender_whitelist_str.split(',').map((s) => s.trim()).filter(Boolean)
     return { ...configForm.value, sender_whitelist: whitelist, migrate: true, ...overrides }
   }

@@ -133,7 +133,7 @@ function onStartNew() {
               排队中 {{ queueStatus.waiting_count }}
             </span>
           </div>
-          <button class="new-task-btn" @click="onStartNew" title="新建注释任务">
+          <button type="button" class="new-task-btn" @click="onStartNew" title="新建注释任务">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
@@ -228,7 +228,7 @@ function onStartNew() {
             </div>
             <h3>任务状态: {{ currentTask.status === 'failed' ? '分析失败' : '已取消' }}</h3>
             <p>{{ currentTask.error_msg || currentTask.current_step }}</p>
-            <button class="retry-btn" @click="onStartNew">重新配置分析</button>
+            <button type="button" class="retry-btn" @click="onStartNew">重新配置分析</button>
           </div>
         </section>
       </section>

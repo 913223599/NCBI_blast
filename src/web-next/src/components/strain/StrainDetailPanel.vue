@@ -4,7 +4,7 @@
       <!-- 头部 -->
       <div class="detail-header">
         <h3 class="detail-title">序列详情</h3>
-        <button class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="close-btn" @click="emit('close')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
 
       <!-- 内容 -->
@@ -67,7 +67,7 @@
             <pre class="sequence-text">{{ record.sequence }}</pre>
             <div class="sequence-stats">
               <span>长度: {{ record.sequence.length }} bp</span>
-              <button class="btn-copy" @click="copySequence">复制序列</button>
+              <button type="button" class="btn-copy" @click="copySequence">复制序列</button>
             </div>
           </div>
         </div>
@@ -75,10 +75,10 @@
 
       <!-- 底部操作 -->
       <div class="detail-footer">
-        <button class="btn-secondary" @click="handleNCBI">
+        <button type="button" class="btn-secondary" @click="handleNCBI">
           在NCBI查看
         </button>
-        <button class="btn-danger" @click="handleDelete">
+        <button type="button" class="btn-danger" @click="handleDelete">
           删除此记录
         </button>
       </div>

@@ -2,12 +2,13 @@
  * useGenomeViewer - 基因组环形/线性序列图谱视口、解析、过滤、轨迹与导出状态管理
  * 从 GenomeViewerModule.vue 拆解而出，聚焦计算与交互逻辑。
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { computed, ref, watch } from 'vue'
-import { parseGenBank, parseFasta } from './utils/parser'
+import { parseGenBank, parseFasta, type GenomeFeature } from './utils/parser'
 import { calculateGC, calculateEnzymes } from './utils/calculations'
 import { formatTickLabel, polarToCartesian } from './utils/render'
 import { extractFeatureSequence, translateDNA } from './utils/sequence'
+import { createLogger } from '../../../../utils/logger'
+const logger = createLogger('useGenomeViewer')
 
 export interface GenomeViewerProps {
   initialGbk?: string
@@ -26,7 +27,7 @@ export function useGenomeViewer(props: GenomeViewerProps) {
   const fileName = ref('')
   const sequenceLength = ref(0)
   const rawSequence = ref('')
-  const features = ref<any[]>([])
+  const features = ref<GenomeFeature[]>([])
   const viewMode = ref<'circular' | 'linear'>('circular')
   const isComputing = ref(false)
   const toastMessage = ref('')
@@ -35,8 +36,8 @@ export function useGenomeViewer(props: GenomeViewerProps) {
   const selectedCategoryFilter = ref('ALL')
   const strandFilter = ref('ALL')
   const highlightedCategory = ref('')
-  const selectedFeature = ref<any>(null)
-  const hoverFeature = ref<any>(null)
+  const selectedFeature = ref<GenomeFeature | null>(null)
+  const hoverFeature = ref<GenomeFeature | null>(null)
 
   const showGC = ref(true)
   const showEnzymes = ref(false)
@@ -75,11 +76,11 @@ export function useGenomeViewer(props: GenomeViewerProps) {
   })
 
   const prophageOverlayFeatures = computed(() =>
-    features.value.filter((f: any) => f.type === 'prophage_region')
+    features.value.filter((f: GenomeFeature) => f.type === 'prophage_region')
   )
 
   const baseTrackFeatures = computed(() =>
-    features.value.filter((f: any) => f.type !== 'prophage_region')
+    features.value.filter((f: GenomeFeature) => f.type !== 'prophage_region')
   )
 
   const categoryCounts = computed(() => {
@@ -91,7 +92,7 @@ export function useGenomeViewer(props: GenomeViewerProps) {
     return counts
   })
 
-  function matchesSearchAndFilter(f: any): boolean {
+  function matchesSearchAndFilter(f: GenomeFeature): boolean {
     if (searchQuery.value) {
       const q = searchQuery.value.toLowerCase()
       const matchName = (f.name || '').toLowerCase().includes(q)
@@ -109,7 +110,7 @@ export function useGenomeViewer(props: GenomeViewerProps) {
     return true
   }
 
-  function isFeatureDimmed(f: any): boolean {
+  function isFeatureDimmed(f: GenomeFeature): boolean {
     if (selectedFeature.value) {
       if (selectedFeature.value.type === 'prophage_region') {
         return !(f.start >= selectedFeature.value.start && f.end <= selectedFeature.value.end)
@@ -210,7 +211,7 @@ export function useGenomeViewer(props: GenomeViewerProps) {
     return ticks
   })
 
-  function selectFeature(feat: any) {
+  function selectFeature(feat: GenomeFeature) {
     selectedFeature.value = feat
   }
 
@@ -292,7 +293,7 @@ export function useGenomeViewer(props: GenomeViewerProps) {
         fileName.value = name
         resetView()
       } catch (err) {
-        console.error('解析序列失败:', err)
+        logger.error('解析序列失败:', err)
       } finally {
         isComputing.value = false
       }

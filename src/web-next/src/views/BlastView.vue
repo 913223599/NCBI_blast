@@ -4,7 +4,7 @@
  * 采用组件化重构，遵循单一职责原则。
  */
 import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { useBlastStore } from '../stores/blast'
+import { useBlastStore, type BlastTask } from '../stores/blast'
 import { useAppStore } from '../stores/app'
 import { getBridge } from '../bridge'
 import { useI18n } from '../locales'
@@ -20,6 +20,8 @@ import BlastResultsTable from '../components/blast/BlastResultsTable.vue'
 import BlastVisualModal from '../components/blast/BlastVisualModal.vue'
 import BlastDetailDialog from '../components/blast/BlastDetailDialog.vue'
 import DiversityAnalysisModal from '../components/blast/DiversityAnalysisModal.vue'
+import { createLogger } from '../utils/logger'
+const logger = createLogger('BlastView')
 
 const blast = useBlastStore()
 const appStore = useAppStore()
@@ -31,9 +33,9 @@ const resultHandler = useBlastResultHandler()
 const { isTranslating, fetchTaskResults, exportResults, translateAll } = resultHandler
 
 const detailViewer = useBlastDetailViewer()
-const { 
-  showAllHitsDialog, 
-  allHitsData, 
+const {
+  showAllHitsDialog,
+  allHitsData,
   currentQueryTitle,
   _isLocked,
   _hasUserInteracted,
@@ -46,18 +48,18 @@ const isSidebarOpen = ref(true)
 const openDropdown = ref<string | null>(null)
 const editingTaskId = ref<string | null>(null)
 const editName = ref('')
-const historyPanelRef = ref<any>(null)
+const historyPanelRef = ref<InstanceType<typeof BlastHistoryPanel> | null>(null)
 
 /* -------- 可视化状态 -------- */
 const showVisualModal = ref(false)
-const visualData = ref<any>(null)
+const visualData = ref<Record<string, unknown> | null>(null)
 const visualLoading = ref(false)
 const visualSortMode = ref('evalue')
 const currentXmlPath = ref('')
 const currentVisQueryTitle = ref('')
 
 /* -------- 16S 扩增子混样多样性状态 -------- */
-const diversityPanelRef = ref<any>(null)
+const diversityPanelRef = ref<InstanceType<typeof DiversityAnalysisModal> | null>(null)
 const diversityInitialPath = ref<string>('')
 const activeDiversityTaskId = ref<string>('')
 
@@ -71,7 +73,11 @@ function openDiversityWithFile(path?: string, openHistory?: boolean) {
   }
 }
 
-function handleSelectDiversityTask(task: any) {
+type DiversityTaskPayload = Parameters<
+  NonNullable<InstanceType<typeof DiversityAnalysisModal>['selectHistoryTask']>
+>[0]
+
+function handleSelectDiversityTask(task: DiversityTaskPayload) {
   activeDiversityTaskId.value = task.task_id
   blast.setAnalysisTarget('diversity')
   diversityPanelRef.value?.selectHistoryTask?.(task)
@@ -81,7 +87,7 @@ function handleDiversityTaskChanged(tid: string) {
   activeDiversityTaskId.value = tid
 }
 
-function showAlignmentMap(hit: any) {
+function showAlignmentMap(hit: { xmlFile?: string; queryTitle?: string }) {
   if (!hit.xmlFile) {
     appStore.showNotification('该结果没有可用的原始比对数据', 'warning')
     return
@@ -90,16 +96,16 @@ function showAlignmentMap(hit: any) {
   visualLoading.value = true
   currentXmlPath.value = hit.xmlFile
   currentVisQueryTitle.value = hit.queryTitle || ''
-  visualData.value = null 
+  visualData.value = null
   fetchVisualData()
 }
 
 function fetchVisualData() {
   visualLoading.value = true
   getBridge().get_alignment_visualization_data(
-    currentXmlPath.value, 
-    visualSortMode.value, 
-    currentVisQueryTitle.value, 
+    currentXmlPath.value,
+    visualSortMode.value,
+    currentVisQueryTitle.value,
     (resStr: string) => {
       visualLoading.value = false
       try {
@@ -134,7 +140,7 @@ function launchBlast(): void {
     appStore.showNotification('请先选择序列文件或粘贴序列', 'warning')
     return
   }
-  
+
   try {
     const generatedTaskName = getFormattedTimestamp()
     const payload = JSON.stringify({
@@ -203,14 +209,14 @@ function getFormattedTimestamp(date: string | Date = new Date()) {
 }
 
 /* -------- 历史操作中转 -------- */
-function startRename(task: any, event: Event) {
+function startRename(task: BlastTask, event: Event) {
   event.stopPropagation()
   editingTaskId.value = task.taskId
   editName.value = task.fileName
   setTimeout(() => { historyPanelRef.value?.renameInputRef?.focus(); historyPanelRef.value?.renameInputRef?.select(); }, 50)
 }
 
-function commitRename(task: any) {
+function commitRename(task: BlastTask) {
   if (editingTaskId.value === task.taskId) {
     const trimmed = editName.value.trim()
     if (trimmed && trimmed !== task.fileName) {
@@ -267,11 +273,11 @@ function refreshTaskList(autoSelectTargetId?: string) {
           })
         }
       } catch (e) {
-        console.error('Failed to parse tasks:', e)
+        logger.error('Failed to parse tasks:', e)
       }
     })
   } catch (e) {
-    console.error('Failed to get tasks:', e)
+    logger.error('Failed to get tasks:', e)
   }
 }
 
@@ -307,36 +313,37 @@ onUnmounted(() => {
     <!-- 顶部工具栏 -->
     <div class="blast-toolbar-top">
       <div class="tool-items">
-        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }" @click="toggleSideTool('input')">
+        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }"
+          @click="toggleSideTool('input')">
           <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
           </svg>
           <span class="label">{{ t('blast.nav.input') }}</span>
         </button>
         <div class="tool-divider"></div>
-        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'params' && isSidebarOpen }" @click="toggleSideTool('params')">
+        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'params' && isSidebarOpen }"
+          @click="toggleSideTool('params')">
           <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-            <circle cx="12" cy="12" r="3" stroke-width="2"/>
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+            <circle cx="12" cy="12" r="3" stroke-width="2" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
           </svg>
           <span class="label">{{ t('blast.nav.params') }}</span>
         </button>
         <div class="tool-divider"></div>
-        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'history' && isSidebarOpen }" @click="toggleSideTool('history')">
+        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'history' && isSidebarOpen }"
+          @click="toggleSideTool('history')">
           <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-            <circle cx="12" cy="12" r="9" stroke-width="2"/>
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 3"/>
+            <circle cx="12" cy="12" r="9" stroke-width="2" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 3" />
           </svg>
           <span class="label">{{ t('blast.nav.history') }}</span>
         </button>
       </div>
       <div class="toolbar-actions">
-        <button 
-          type="button"
-          class="btn-primary-run" 
-          @click="launchBlast" 
-          :disabled="blast.analysisTarget === 'isolate' && !blast.hasInput"
-        >
+        <button type="button" class="btn-primary-run" @click="launchBlast"
+          :disabled="blast.analysisTarget === 'isolate' && !blast.hasInput">
           {{ blast.analysisTarget === 'diversity' ? t('blast.btn.run_diversity') : t('blast.btn.run') }}
         </button>
       </div>
@@ -346,132 +353,200 @@ onUnmounted(() => {
       <!-- 动态侧边栏 -->
       <div class="blast-sidebar" :class="{ collapsed: !isSidebarOpen }">
         <div class="sidebar-content scroll-v">
-          <BlastInputPanel 
-            v-show="activeSideTool === 'input'" 
-            @open-diversity-modal="openDiversityWithFile"
-          />
-          
-          <BlastParamsPanel 
-            v-show="activeSideTool === 'params'" 
-            :open-dropdown="openDropdown"
-            @toggle-dropdown="(id) => openDropdown = openDropdown === id ? null : id"
-            @select-option="(id, val) => {
+          <BlastInputPanel v-show="activeSideTool === 'input'" @open-diversity-modal="openDiversityWithFile" />
+
+          <BlastParamsPanel v-show="activeSideTool === 'params'" :open-dropdown="openDropdown"
+            @toggle-dropdown="(id) => openDropdown = openDropdown === id ? null : id" @select-option="(id, val) => {
               if (id === 'program') blast.params.program = val
               else if (id === 'database') blast.params.database = val
               else if (id === 'matrix') blast.params.matrix = val
               openDropdown = null
-            }"
-          />
-          
-          <BlastHistoryPanel 
-            v-show="activeSideTool === 'history'" 
-            ref="historyPanelRef"
-            :editing-task-id="editingTaskId"
-            :active-diversity-task-id="activeDiversityTaskId"
-            v-model:edit-name="editName"
-            @select-task="selectTask"
-            @start-rename="startRename"
-            @commit-rename="commitRename"
-            @pause-task="(id) => taskManager.pauseTask(id)"
+            }" />
+
+          <BlastHistoryPanel v-show="activeSideTool === 'history'" ref="historyPanelRef"
+            :editing-task-id="editingTaskId" :active-diversity-task-id="activeDiversityTaskId"
+            v-model:edit-name="editName" @select-task="selectTask" @start-rename="startRename"
+            @commit-rename="commitRename" @pause-task="(id) => taskManager.pauseTask(id)"
             @resume-task="(id) => taskManager.resumeTask(id, (tid) => taskManager.startPolling(tid, fetchTaskResults))"
-            @stop-task="(id) => taskManager.stopTask(id)"
-            @delete-task="(id) => taskManager.deleteTask(id)"
-            @clear-history="() => taskManager.clearAllHistory()"
-            @select-diversity-task="handleSelectDiversityTask"
+            @stop-task="(id) => taskManager.stopTask(id)" @delete-task="(id) => taskManager.deleteTask(id)"
+            @clear-history="() => taskManager.clearAllHistory()" @select-diversity-task="handleSelectDiversityTask"
             @delete-diversity-task="(id) => { if (activeDiversityTaskId === id) activeDiversityTaskId = '' }"
-            @clear-diversity-history="() => { activeDiversityTaskId = '' }"
-          />
+            @clear-diversity-history="() => { activeDiversityTaskId = '' }" />
         </div>
-        <button
-          type="button"
-          class="sidebar-collapse-toggle"
-          :aria-expanded="isSidebarOpen"
-          aria-label="Toggle BLAST sidebar"
-          @click="isSidebarOpen = !isSidebarOpen"
-        >
-           {{ isSidebarOpen ? '◀' : '▶' }}
+        <button type="button" class="sidebar-collapse-toggle" :aria-expanded="isSidebarOpen"
+          aria-label="Toggle BLAST sidebar" @click="isSidebarOpen = !isSidebarOpen">
+          {{ isSidebarOpen ? '◀' : '▶' }}
         </button>
       </div>
 
       <!-- 结果主区域: 单株鉴定结果 vs 16S多样性分析结果 (内嵌无缝切换，不再单开浮窗) -->
-      <BlastResultsTable 
-        v-if="blast.analysisTarget === 'isolate'"
-        :is-translating="isTranslating"
-        @view-all-hits="detailViewer.viewAllHits"
-        @show-alignment-map="showAlignmentMap"
-        @translate-all="translateAll"
-        @export-results="exportResults"
-      />
+      <BlastResultsTable v-if="blast.analysisTarget === 'isolate'" :is-translating="isTranslating"
+        @view-all-hits="detailViewer.viewAllHits" @show-alignment-map="showAlignmentMap" @translate-all="translateAll"
+        @export-results="exportResults" />
 
-      <DiversityAnalysisModal 
-        v-else-if="blast.analysisTarget === 'diversity'"
-        ref="diversityPanelRef"
-        :embedded="true"
-        :initial-file-path="diversityInitialPath"
-        @switch-to-isolate="blast.setAnalysisTarget('isolate')"
-        @task-changed="handleDiversityTaskChanged"
-      />
+      <DiversityAnalysisModal v-else-if="blast.analysisTarget === 'diversity'" ref="diversityPanelRef" :embedded="true"
+        :initial-file-path="diversityInitialPath" @switch-to-isolate="blast.setAnalysisTarget('isolate')"
+        @task-changed="handleDiversityTaskChanged" />
     </div>
 
     <!-- 弹窗组件 -->
-    <BlastVisualModal 
-      :show="showVisualModal"
-      :loading="visualLoading"
-      :data="visualData"
-      v-model:sort-mode="visualSortMode"
-      @fetch-data="fetchVisualData"
-      @close="showVisualModal = false"
-    />
+    <BlastVisualModal :show="showVisualModal" :loading="visualLoading" :data="visualData"
+      v-model:sort-mode="visualSortMode" @fetch-data="fetchVisualData" @close="showVisualModal = false" />
 
-    <BlastDetailDialog 
-      :show="showAllHitsDialog && !!currentQueryTitle"
-      :title="currentQueryTitle || ''"
-      :data="allHitsData"
-      @close="detailViewer.closeDialog"
-    />
+    <BlastDetailDialog :show="showAllHitsDialog && !!currentQueryTitle" :title="currentQueryTitle || ''"
+      :data="allHitsData" @close="detailViewer.closeDialog" />
   </div>
 </template>
 
 <style scoped>
-.blast-workspace-container { display: flex; flex-direction: column; height: 100%; background: white; overflow: hidden; }
-.blast-toolbar-top { height: 60px; background: white; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 100; }
-.tool-items { display: flex; align-items: center; gap: 8px; }
-.tool-btn { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border: none; background: transparent; cursor: pointer; border-radius: 10px; color: #64748b; font-weight: 600; font-size: 0.82rem; transition: all 0.2s; }
-.tool-btn:hover { background: #f8fafc; color: #1e293b; }
-.tool-btn.active { color: #2563eb; background: #eff6ff; }
-.tool-svg { width: 17px; height: 17px; stroke-width: 2; flex-shrink: 0; }
-.tool-divider { width: 1px; height: 24px; background: #e2e8f0; margin: 0 10px; }
-.btn-primary-run { background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; padding: 10px 24px; border-radius: 10px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; border: none; cursor: pointer; }
-.btn-primary-run:hover:not(:disabled) { transform: translateY(-1px); }
-.btn-primary-run:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.blast-main-area { flex: 1; display: flex; overflow: hidden; background: #f8fafc; }
-.blast-sidebar { 
-  width: auto; 
-  background: transparent; 
-  display: flex; 
-  flex-direction: column; 
-  position: relative; 
-  z-index: 5; 
+.blast-workspace-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: white;
+  overflow: hidden;
 }
-.blast-sidebar.collapsed { width: 0; }
-.sidebar-content { 
-  flex: 1; 
-  overflow-y: auto; 
+
+.blast-toolbar-top {
+  height: 60px;
+  background: white;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  z-index: 100;
+}
+
+.tool-items {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 10px;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.82rem;
+  transition: all 0.2s;
+}
+
+.tool-btn:hover {
+  background: #f8fafc;
+  color: #1e293b;
+}
+
+.tool-btn.active {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.tool-svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 2;
+  flex-shrink: 0;
+}
+
+.tool-divider {
+  width: 1px;
+  height: 24px;
+  background: #e2e8f0;
+  margin: 0 10px;
+}
+
+.btn-primary-run {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: white;
+  padding: 10px 24px;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-primary-run:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-primary-run:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.blast-main-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.blast-sidebar {
+  width: auto;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 5;
+}
+
+.blast-sidebar.collapsed {
+  width: 0;
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
   overflow-x: hidden;
-  padding: 20px; 
-  width: 360px; 
-  box-sizing: border-box; 
+  padding: 20px;
+  width: 360px;
+  box-sizing: border-box;
   background: white;
   border-right: 1px solid #e2e8f0;
   transition: width 0.3s ease, padding 0.3s ease, opacity 0.2s;
 }
+
 .collapsed .sidebar-content {
   width: 0;
   padding: 0;
   opacity: 0;
   border-right: none;
 }
-.sidebar-collapse-toggle { position: absolute; right: -12px; top: 50%; transform: translateY(-50%); width: 24px; height: 48px; background: white; border: 1px solid #e2e8f0; border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; font-size: 0.7rem; color: #94a3b8; box-shadow: 2px 0 8px rgba(0,0,0,0.05); }
-.sidebar-collapse-toggle:hover { color: #2563eb; background: #f8fafc; }
+
+.sidebar-collapse-toggle {
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 48px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 10;
+  font-size: 0.7rem;
+  color: #94a3b8;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+}
+
+.sidebar-collapse-toggle:hover {
+  color: #2563eb;
+  background: #f8fafc;
+}
 </style>

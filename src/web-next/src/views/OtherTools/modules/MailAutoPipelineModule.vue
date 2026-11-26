@@ -153,19 +153,19 @@ const {
     <div v-if="errorMessage" class="alert-banner error">{{ errorMessage }}</div>
 
     <div class="sub-tabs-bar">
-      <button :class="['sub-tab-btn', { active: activeSubTab === 'batches' }]" @click="activeSubTab = 'batches'">
+      <button type="button" :class="['sub-tab-btn', { active: activeSubTab === 'batches' }]" @click="activeSubTab = 'batches'">
         收件批次 ({{ batches.length }}<template v-if="pendingBatchesCount > 0"> · 待处理 {{ pendingBatchesCount }}</template><template v-if="ignoredBatchesCount > 0"> · 已跳过 {{ ignoredBatchesCount }}</template>)
       </button>
-      <button :class="['sub-tab-btn', { active: activeSubTab === 'inbox' }]" @click="openInboxTab">
+      <button type="button" :class="['sub-tab-btn', { active: activeSubTab === 'inbox' }]" @click="openInboxTab">
         收件箱邮件{{ inboxLoaded ? ` (${inboxStats.total})` : '' }}
       </button>
-      <button :class="['sub-tab-btn', { active: activeSubTab === 'outbound' }]" @click="activeSubTab = 'outbound'">
+      <button type="button" :class="['sub-tab-btn', { active: activeSubTab === 'outbound' }]" @click="activeSubTab = 'outbound'">
         报告与回传包 ({{ outboundPackages.length }})
       </button>
-      <button :class="['sub-tab-btn', { active: activeSubTab === 'processed' }]" @click="activeSubTab = 'processed'">
+      <button type="button" :class="['sub-tab-btn', { active: activeSubTab === 'processed' }]" @click="activeSubTab = 'processed'">
         去重记录 ({{ processedCount }})
       </button>
-      <button :class="['sub-tab-btn', { active: activeSubTab === 'logs' }]" @click="activeSubTab = 'logs'">
+      <button type="button" :class="['sub-tab-btn', { active: activeSubTab === 'logs' }]" @click="activeSubTab = 'logs'">
         日志
       </button>
     </div>
@@ -209,6 +209,7 @@ const {
             </td>
             <td class="actions-cell">
               <button
+                type="button"
                 class="btn-mini primary"
                 @click="openBatchRunModal(b)"
                 :disabled="runtime.running || b.pipeline_status === 'running' || Boolean(b.ignored || b.pipeline_status === 'ignored')"
@@ -216,14 +217,15 @@ const {
                 重跑
               </button>
               <button
+                type="button"
                 class="btn-mini"
                 @click="handleToggleBatchIgnore(b)"
                 :disabled="busy || runtime.running || b.pipeline_status === 'running'"
               >
                 {{ (b.ignored || b.pipeline_status === 'ignored') ? '恢复' : '跳过' }}
               </button>
-              <button class="btn-mini" @click="openLocalPath(b.batch_path)">打开</button>
-              <button class="btn-mini danger" @click="deleteOne('batches', b.batch_name, b.batch_name)" :disabled="runtime.running">删除</button>
+              <button type="button" class="btn-mini" @click="openLocalPath(b.batch_path)">打开</button>
+              <button type="button" class="btn-mini danger" @click="deleteOne('batches', b.batch_name, b.batch_name)" :disabled="runtime.running">删除</button>
             </td>
           </tr>
           <tr v-if="batches.length === 0">
@@ -257,7 +259,7 @@ const {
             <template v-if="inboxStats.processedSkipped > 0"> · 已隐藏已处理/无新附件 {{ inboxStats.processedSkipped }} 封</template>
           </span>
         </div>
-        <button class="btn-secondary" :disabled="inboxLoading" @click="loadInboxMails(1)">
+        <button type="button" class="btn-secondary" :disabled="inboxLoading" @click="loadInboxMails(1)">
           {{ inboxLoading ? '拉取中...' : '拉取收件箱' }}
         </button>
       </div>
@@ -306,7 +308,7 @@ const {
                 <span>
                   当前时间窗内暂无含未处理附件的新邮件（已过滤 {{ inboxStats.processedSkipped }} 封已处理或无匹配附件邮件）
                 </span>
-                <button class="btn-mini primary inline-action-btn" @click="showAllInboxMails">显示全部邮件</button>
+                <button type="button" class="btn-mini primary inline-action-btn" @click="showAllInboxMails">显示全部邮件</button>
               </template>
               <span v-else>当前时间窗与筛选条件下暂无邮件</span>
             </td>
@@ -347,9 +349,9 @@ const {
               <td>{{ pkg.size_kb }} KB</td>
               <td>{{ pkg.pack_time }}</td>
               <td class="actions-cell">
-                <button class="btn-mini primary" @click="openPkgSendModal(pkg)" :disabled="runtime.running">发信</button>
-                <button class="btn-mini" @click="openLocalPath(pkg.zip_path)">定位</button>
-                <button class="btn-mini danger" @click="deleteOne('outbound', pkg.task_id, pkg.zip_name)" :disabled="runtime.running">删除</button>
+                <button type="button" class="btn-mini primary" @click="openPkgSendModal(pkg)" :disabled="runtime.running">发信</button>
+                <button type="button" class="btn-mini" @click="openLocalPath(pkg.zip_path)">定位</button>
+                <button type="button" class="btn-mini danger" @click="deleteOne('outbound', pkg.task_id, pkg.zip_name)" :disabled="runtime.running">删除</button>
               </td>
             </tr>
             <tr v-if="outboundPackages.length === 0">
@@ -383,8 +385,8 @@ const {
               <td>{{ doc.size_kb }} KB</td>
               <td>{{ doc.mtime }}</td>
               <td class="actions-cell">
-                <button class="btn-mini" @click="openLocalPath(doc.path)">定位</button>
-                <button class="btn-mini danger" @click="deleteOne('docx', doc.name, doc.name)" :disabled="runtime.running">删除</button>
+                <button type="button" class="btn-mini" @click="openLocalPath(doc.path)">定位</button>
+                <button type="button" class="btn-mini danger" @click="deleteOne('docx', doc.name, doc.name)" :disabled="runtime.running">删除</button>
               </td>
             </tr>
             <tr v-if="docxReports.length === 0">
@@ -428,7 +430,7 @@ const {
             </td>
             <td>{{ item.first_seen }}</td>
             <td class="actions-cell">
-              <button class="btn-mini danger" @click="deleteOne('index', item.sha256, `${item.filename} 的去重记录`)" :disabled="runtime.running">移除</button>
+              <button type="button" class="btn-mini danger" @click="deleteOne('index', item.sha256, `${item.filename} 的去重记录`)" :disabled="runtime.running">移除</button>
             </td>
           </tr>
           <tr v-if="processedItems.length === 0">
@@ -460,7 +462,7 @@ const {
       <div class="modal-card">
         <div class="modal-header">
           <h3>邮箱配置</h3>
-          <button class="close-btn" @click="showConfigModal = false">&times;</button>
+          <button type="button" class="close-btn" @click="showConfigModal = false">&times;</button>
         </div>
         <div class="modal-body">
           <div class="form-grid">
@@ -494,8 +496,8 @@ const {
           <p class="form-note">邮箱 Key 独立保存在本机 .mail_auth 文件中，不写入配置文件；修改输入/输出目录后已有数据自动迁移至新目录。</p>
         </div>
         <div class="modal-footer">
-          <button class="btn-outline" @click="showConfigModal = false">取消</button>
-          <button class="btn-primary" :disabled="busy" @click="handleSaveConfig">{{ busy ? '保存中...' : '保存' }}</button>
+          <button type="button" class="btn-outline" @click="showConfigModal = false">取消</button>
+          <button type="button" class="btn-primary" :disabled="busy" @click="handleSaveConfig">{{ busy ? '保存中...' : '保存' }}</button>
         </div>
       </div>
     </div>
@@ -505,7 +507,7 @@ const {
       <div class="modal-card narrow">
         <div class="modal-header">
           <h3>邮箱授权码</h3>
-          <button class="close-btn" @click="showAuthModal = false">&times;</button>
+          <button type="button" class="close-btn" @click="showAuthModal = false">&times;</button>
         </div>
         <div class="modal-body">
           <div class="auth-block">
@@ -533,8 +535,8 @@ const {
           <p class="form-note">授权码只保存在本机密钥文件中，不写入 mail_config.json，不提交到 Git。</p>
         </div>
         <div class="modal-footer">
-          <button class="btn-outline" @click="showAuthModal = false">取消</button>
-          <button class="btn-primary" @click="handleSaveAuth">保存</button>
+          <button type="button" class="btn-outline" @click="showAuthModal = false">取消</button>
+          <button type="button" class="btn-primary" @click="handleSaveAuth">保存</button>
         </div>
       </div>
     </div>
@@ -565,7 +567,7 @@ const {
       <div class="modal-card narrow">
         <div class="modal-header">
           <h3>批次重跑注释与回传</h3>
-          <button class="close-btn" @click="showBatchRunModal = false">&times;</button>
+          <button type="button" class="close-btn" @click="showBatchRunModal = false">&times;</button>
         </div>
         <div class="modal-body">
           <div class="auth-block">
@@ -604,11 +606,11 @@ const {
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn-outline" @click="showBatchRunModal = false">取消</button>
-          <button class="btn-secondary" :disabled="runtime.running" @click="confirmBatchRun('self')">
+          <button type="button" class="btn-outline" @click="showBatchRunModal = false">取消</button>
+          <button type="button" class="btn-secondary" :disabled="runtime.running" @click="confirmBatchRun('self')">
             重跑并发给自己
           </button>
-          <button class="btn-primary" :disabled="runtime.running" @click="confirmBatchRun()">
+          <button type="button" class="btn-primary" :disabled="runtime.running" @click="confirmBatchRun()">
             开始重跑
           </button>
         </div>

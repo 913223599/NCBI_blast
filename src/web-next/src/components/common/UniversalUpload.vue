@@ -80,7 +80,7 @@ async function processFiles(files: File[]) {
  */
 async function handleClick() {
   const bridge = getBridge()
-  const isElectron = !!(window as any).electronAPI
+  const isElectron = !!window.electronAPI
   
   if (isElectron) {
     // Electron 环境使用原生对话框，并处理返回的路径

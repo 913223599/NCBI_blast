@@ -134,6 +134,7 @@ function cellColor(val: number): string {
     </div>
 
     <button
+      type="button"
       class="btn-primary"
       :disabled="store.isScreeningAni || !store.profile || store.profile.sequence_count < 1"
       @click="store.runPhageAniScreen()"
@@ -226,7 +227,7 @@ function cellColor(val: number): string {
         </div>
       </div>
 
-      <button class="btn-next" @click="emit('next-step')">
+      <button type="button" class="btn-next" @click="emit('next-step')">
         进入第 2 步：审阅参考集与外群 ({{ store.referenceCandidates.length }} 条)
       </button>
     </template>

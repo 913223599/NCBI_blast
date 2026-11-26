@@ -39,10 +39,10 @@
         <span class="stat-value highlight">{{ strain.selectedCount }}</span>
       </div>
       <div class="toolbar-actions">
-        <button class="btn-secondary" @click="handleExport" :disabled="strain.selectedCount === 0">
+        <button type="button" class="btn-secondary" @click="handleExport" :disabled="strain.selectedCount === 0">
           导出
         </button>
-        <button class="btn-danger" @click="handleClear" :disabled="!strain.hasData">
+        <button type="button" class="btn-danger" @click="handleClear" :disabled="!strain.hasData">
           清空
         </button>
       </div>
@@ -56,6 +56,8 @@ import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import { getBridge } from '../../bridge'
+import { createLogger } from '../../utils/logger'
+const logger = createLogger('StrainToolbar')
 
 const strain = useStrainStore()
 const appStore = useAppStore()
@@ -87,7 +89,7 @@ function handleExport() {
       appStore.showNotification(`已导出 ${strain.selectedCount} 条记录`, 'success')
     }
   } catch (error) {
-    console.error('[Strain] Export failed:', error)
+    logger.error('[Strain] Export failed:', error)
     appStore.showNotification('导出失败', 'error')
   }
 }

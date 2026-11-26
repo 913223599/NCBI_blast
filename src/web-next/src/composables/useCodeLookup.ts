@@ -17,6 +17,8 @@ import {
   DEFAULT_CODE_CONFIG,
 } from '../data/builtinCodes'
 import { getBridge } from '../bridge'
+import { createLogger } from '../utils/logger'
+const logger = createLogger('useCodeLookup')
 
 /** 3位字母编码的正则（大写 A-Z） */
 const CODE_PATTERN = /^[A-Z]{3}$/
@@ -412,10 +414,19 @@ export function useCodeLookup() {
     const latinNames = entriesToAudit.map((e) => e.latinName!)
     
     return new Promise<{ success: boolean; count: number }>((resolve) => {
-      bridge.taxonomy_audit_batch(latinNames, (res: any) => {
+      interface AuditItem {
+        name: string
+        valid?: boolean
+        rank?: string
+      }
+      interface AuditResponse {
+        success?: boolean
+        results?: AuditItem[]
+      }
+      bridge.taxonomy_audit_batch(latinNames, (res: AuditResponse) => {
         if (res.success && res.results) {
           let correctedCount = 0
-          res.results.forEach((resItem: any) => {
+          res.results.forEach((resItem: AuditItem) => {
             if (!resItem.valid) return
 
             // 寻找对应的内存词条
@@ -430,12 +441,12 @@ export function useCodeLookup() {
             
             if (isGenus && targetEntry.level === 3) {
               // 错误：属被存成了种。标记为错误并记录 correctRank
-              console.warn(`[Audit] Mismatch: ${resItem.name} is a GENUS but stored as SPECIES.`);
-              (targetEntry as any).errorRank = 'genus'
+              logger.warn(`[Audit] Mismatch: ${resItem.name} is a GENUS but stored as SPECIES.`);
+              (targetEntry as CodeLookupEntry & { errorRank?: 'genus' | 'species' }).errorRank = 'genus'
             } else if (isSpecies && targetEntry.level === 2) {
               // 错误：种被存成了属
-              console.warn(`[Audit] Mismatch: ${resItem.name} is a SPECIES but stored as GENUS.`);
-              (targetEntry as any).errorRank = 'species'
+              logger.warn(`[Audit] Mismatch: ${resItem.name} is a SPECIES but stored as GENUS.`);
+              (targetEntry as CodeLookupEntry & { errorRank?: 'genus' | 'species' }).errorRank = 'species'
             } else {
               // 校验成功，打上标记，下次不再比对
               targetEntry.verified = true

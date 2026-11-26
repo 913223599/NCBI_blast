@@ -122,10 +122,10 @@
 
     <!-- 导出按钮 -->
     <div class="export-section">
-      <button class="btn-export" @click="handleExportStats">
+      <button type="button" class="btn-export" @click="handleExportStats">
         导出统计报告
       </button>
-      <button class="btn-export" @click="handleExportConfig">
+      <button type="button" class="btn-export" @click="handleExportConfig">
         导出冰箱配置
       </button>
     </div>

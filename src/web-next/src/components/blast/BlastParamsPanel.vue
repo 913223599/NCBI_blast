@@ -3,21 +3,28 @@ import { ref, onMounted } from 'vue'
 import { getBridge } from '../../bridge'
 import { useBlastStore } from '../../stores/blast'
 import { useI18n } from '../../locales'
+import { createLogger } from '../../utils/logger'
+const logger = createLogger('BlastParamsPanel')
 
 const props = defineProps<{
   openDropdown: string | null
 }>()
 
+interface BlastDbOption {
+  value: string
+  label: string
+}
+
 const emit = defineEmits<{
   (e: 'toggleDropdown', id: string, event: Event): void
-  (e: 'selectOption', id: string, value: any): void
+  (e: 'selectOption', id: string, value: string): void
 }>()
 
 const blast = useBlastStore()
 const { t } = useI18n()
 
 /* -------- 数据常量与状态 -------- */
-const dbOptions = ref<{ nucleotide: any[], protein: any[] }>({
+const dbOptions = ref<{ nucleotide: BlastDbOption[]; protein: BlastDbOption[] }>({
   nucleotide: [
     { value: 'nt', label: 'nt - 全球核酸库' },
     { value: 'refseq_rna', label: 'refseq_rna - 参考 RNA' },
@@ -35,18 +42,18 @@ async function fetchDatabases() {
     if (Array.isArray(res)) {
        // 将本地库加入列表
        res.forEach(db => {
-         const opt = { value: db.name, label: db.display_name || db.name }
+         const opt: BlastDbOption = { value: db.name, label: db.display_name || db.name }
          if (db.type === 'prot') {
-            if (!dbOptions.value.protein.find((o: any) => o.value === opt.value))
+            if (!dbOptions.value.protein.find((o) => o.value === opt.value))
               dbOptions.value.protein.push(opt)
          } else {
-            if (!dbOptions.value.nucleotide.find((o: any) => o.value === opt.value))
+            if (!dbOptions.value.nucleotide.find((o) => o.value === opt.value))
               dbOptions.value.nucleotide.push(opt)
          }
        })
     }
   } catch (e) {
-    console.error('Failed to fetch blast databases', e)
+    logger.error('Failed to fetch blast databases', e)
   }
 }
 

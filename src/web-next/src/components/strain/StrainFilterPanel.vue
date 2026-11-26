@@ -91,7 +91,7 @@
 
     <!-- 操作按钮 -->
     <div class="filter-actions">
-      <button class="btn-reset" @click="handleReset">重置筛选</button>
+      <button type="button" class="btn-reset" @click="handleReset">重置筛选</button>
     </div>
 
     <!-- 筛选结果统计 -->

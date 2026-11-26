@@ -5,6 +5,8 @@
  */
 import { ref, computed } from 'vue';
 import type { SampleDeconvResult, DiagnosisCategory } from '../types';
+import { createLogger } from '../../../../../utils/logger'
+const logger = createLogger('DeconvResultsTable')
 
 const props = defineProps<{
   samples: SampleDeconvResult[];
@@ -158,7 +160,7 @@ async function copySeq(text: string) {
     copySuccess.value = true;
     setTimeout(() => { copySuccess.value = false; }, 2000);
   } catch (e) {
-    console.error('Copy failed:', e);
+    logger.error('Copy failed:', e);
   }
 }
 </script>
@@ -176,14 +178,14 @@ async function copySeq(text: string) {
         />
 
         <div class="category-filters">
-          <button 
+          <button type="button" 
             class="filter-pill" 
             :class="{ active: filterCategory === 'ALL' && !hideCleanSingle }"
             @click="hideCleanSingle = false; selectByCategory('ALL')"
           >
             全部 ({{ samples.length }})
           </button>
-          <button 
+          <button type="button" 
             class="filter-pill pill-double" 
             :class="{ active: filterCategory === 'ONLY_DOUBLE' || hideCleanSingle }"
             @click="hideCleanSingle = false; selectByCategory('ONLY_DOUBLE')"
@@ -191,28 +193,28 @@ async function copySeq(text: string) {
           >
             过滤单峰 / 仅双峰 ({{ samples.filter(s => s.diagnosis?.category !== 'CLEAN_SINGLE').length }})
           </button>
-          <button 
+          <button type="button" 
             class="filter-pill pill-indel" 
             :class="{ active: filterCategory === 'HETERO_INDEL' && !hideCleanSingle }"
             @click="hideCleanSingle = false; selectByCategory('HETERO_INDEL')"
           >
             InDel 移码 ({{ samples.filter(s => s.diagnosis?.category === 'HETERO_INDEL').length }})
           </button>
-          <button 
+          <button type="button" 
             class="filter-pill pill-mixed" 
             :class="{ active: filterCategory === 'MIXED_TEMPLATE' && !hideCleanSingle }"
             @click="hideCleanSingle = false; selectByCategory('MIXED_TEMPLATE')"
           >
             复合模板/双峰 ({{ samples.filter(s => s.diagnosis?.category === 'MIXED_TEMPLATE').length }})
           </button>
-          <button 
+          <button type="button" 
             class="filter-pill pill-snp" 
             :class="{ active: filterCategory === 'PARTIAL_POLYMORPHISM' && !hideCleanSingle }"
             @click="hideCleanSingle = false; selectByCategory('PARTIAL_POLYMORPHISM')"
           >
             局部杂合 ({{ samples.filter(s => s.diagnosis?.category === 'PARTIAL_POLYMORPHISM').length }})
           </button>
-          <button 
+          <button type="button" 
             class="filter-pill pill-clean" 
             :class="{ active: filterCategory === 'CLEAN_SINGLE' && !hideCleanSingle }"
             @click="hideCleanSingle = false; selectByCategory('CLEAN_SINGLE')"
@@ -224,14 +226,14 @@ async function copySeq(text: string) {
 
       <div class="right-actions">
         <span class="selection-count">已选 {{ checkedSamplesList.length }} 项</span>
-        <button 
+        <button type="button" 
           class="btn-action-primary" 
           :disabled="checkedSamplesList.length === 0"
           @click="emit('sendToBlast', checkedSamplesList)"
         >
           一键送入 BLAST 分析
         </button>
-        <button 
+        <button type="button" 
           class="btn-action-secondary" 
           :disabled="checkedSamplesList.length === 0"
           @click="emit('exportFasta', checkedSamplesList, 'alleles')"
@@ -324,7 +326,7 @@ async function copySeq(text: string) {
                 >
                   <span class="allele-name">{{ a.label }}:</span>
                   <span class="allele-len">{{ a.length }} bp</span>
-                  <button 
+                  <button type="button" 
                     class="btn-copy-chip" 
                     title="复制序列"
                     @click="copySeq(a.sequence)"
@@ -335,7 +337,7 @@ async function copySeq(text: string) {
               </div>
             </td>
             <td class="col-center" @click.stop>
-              <button 
+              <button type="button" 
                 class="btn-view-trace" 
                 @click="emit('selectSample', s)"
               >
@@ -366,9 +368,9 @@ async function copySeq(text: string) {
         </select>
         
         <div v-if="pageSize > 0 && totalPages > 1" class="page-nav">
-          <button :disabled="currentPage <= 1" @click="currentPage--" class="btn-page">上一页</button>
+          <button type="button" :disabled="currentPage <= 1" @click="currentPage--" class="btn-page">上一页</button>
           <span class="cur-page">{{ currentPage }} / {{ totalPages }}</span>
-          <button :disabled="currentPage >= totalPages" @click="currentPage++" class="btn-page">下一页</button>
+          <button type="button" :disabled="currentPage >= totalPages" @click="currentPage++" class="btn-page">下一页</button>
         </div>
       </div>
     </div>

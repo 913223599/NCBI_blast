@@ -166,12 +166,12 @@ const {
         <div class="sub-path-item">
           <span class="sp-label">当前订单输入目录:</span>
           <code class="sp-code">{{ selectedOrder.order_path }}\原始压缩包</code>
-          <button class="btn-mini" @click="openLocalPath(selectedOrder.order_path + '\\原始压缩包')">打开</button>
+          <button type="button" class="btn-mini" @click="openLocalPath(selectedOrder.order_path + '\\原始压缩包')">打开</button>
         </div>
         <div class="sub-path-item">
           <span class="sp-label">当前订单输出目录:</span>
           <code class="sp-code">{{ selectedOrder.order_path }}\BLAST结果</code>
-          <button class="btn-mini" @click="openLocalPath(selectedOrder.order_path + '\\BLAST结果')">打开</button>
+          <button type="button" class="btn-mini" @click="openLocalPath(selectedOrder.order_path + '\\BLAST结果')">打开</button>
         </div>
       </div>
     </div>
@@ -179,10 +179,11 @@ const {
     <!-- 精简操作栏 -->
     <div class="control-bar">
       <div class="control-left">
-        <button class="btn-secondary" @click="handleCheckNewOrders" :disabled="scanningMail || runtime.running">
+        <button type="button" class="btn-secondary" @click="handleCheckNewOrders" :disabled="scanningMail || runtime.running">
           {{ scanningMail ? '正在检查...' : '检查新订单' }}
         </button>
         <button
+          type="button"
           class="btn-download"
           @click="handleAutoDownloadOrders([])"
           :disabled="runtime.running || targetDownloadCount === 0"
@@ -201,6 +202,7 @@ const {
           }}
         </button>
         <button
+          type="button"
           class="btn-primary"
           @click="handleRunPipeline([])"
           :disabled="runtime.running || (orderFilter !== 'ignored' && checkedOrderNames.length === 0 && runnableOrdersCount === 0) || (orderFilter === 'ignored' && runnableOrdersCount === 0)"
@@ -222,6 +224,7 @@ const {
           待下载压缩包 {{ awaitingDownloadCount }} 个
         </span>
         <button
+          type="button"
           v-if="checkedOrderNames.length > 0 && orderFilter !== 'ignored'"
           class="btn-outline"
           :disabled="busy || runtime.running"
@@ -230,6 +233,7 @@ const {
           批量忽略 ({{ checkedOrderNames.length }})
         </button>
         <button
+          type="button"
           v-else-if="checkedOrderNames.length > 0 && orderFilter === 'ignored'"
           class="btn-outline highlight-claim"
           :disabled="busy || runtime.running"
@@ -243,6 +247,7 @@ const {
 
       <div class="control-right">
         <button
+          type="button"
           v-if="runtimeLogsList.length > 0"
           class="btn-outline"
           :class="{ 'active-trigger': showLogs }"
@@ -250,26 +255,27 @@ const {
         >
           {{ showLogs ? '收起日志' : `运行日志 (${runtimeLogsList.length})` }}
         </button>
-        <button class="btn-outline" @click="loadOverview" :disabled="scanningMail">刷新</button>
+        <button type="button" class="btn-outline" @click="loadOverview" :disabled="scanningMail">刷新</button>
         <PopoverMenu align="right" :width="250">
           <template #trigger="{ open }">
-            <button class="btn-outline" :class="{ 'active-trigger': open || activeAdvancedTags.length > 0 || ignoredOrdersCount > 0 }">
+            <button type="button" class="btn-outline" :class="{ 'active-trigger': open || activeAdvancedTags.length > 0 || ignoredOrdersCount > 0 }">
               更多与设置 ▾
             </button>
           </template>
           <template #default="{ close }">
             <div class="menu-section">
-              <button class="menu-item" @click="close(); openSangonAuthEditor()">
+              <button type="button" class="menu-item" @click="close(); openSangonAuthEditor()">
                 {{ sangonAuth.password_ready ? `生工账号配置 (${sangonAuth.account || '已配置'})` : '生工账号配置 (未配置)...' }}
               </button>
-              <button class="menu-item" @click="close(); openSangonAuthEditor()">
+              <button type="button" class="menu-item" @click="close(); openSangonAuthEditor()">
                 无头浏览器自检与修复 ({{ browserEnvShortLabel }})...
               </button>
-              <button class="menu-item" @click="close(); openAuthEditor()">邮箱 Key 配置</button>
-              <button class="menu-item" @click="close(); showIgnoreModal = true">
+              <button type="button" class="menu-item" @click="close(); openAuthEditor()">邮箱 Key 配置</button>
+              <button type="button" class="menu-item" @click="close(); showIgnoreModal = true">
                 跳过与忽略规则{{ ignoredOrdersCount > 0 ? ` (${ignoredOrdersCount})` : '...' }}
               </button>
               <button
+                type="button"
                 class="menu-item"
                 :disabled="busy || runtime.running"
                 @click="close(); handleImportDownloads(false)"
@@ -277,6 +283,7 @@ const {
                 扫描并认领浏览器下载包
               </button>
               <button
+                type="button"
                 class="menu-item danger"
                 :disabled="runtime.running"
                 @click="close(); openCleanupModal()"
@@ -323,13 +330,14 @@ const {
       </div>
       <div class="browser-warn-actions">
         <button
+          type="button"
           class="btn-mini primary"
           :disabled="repairingBrowser || runtime.running"
           @click="handleRepairBrowser()"
         >
           {{ repairingBrowser ? '自修复中...' : '一键自修复浏览器' }}
         </button>
-        <button class="btn-mini" @click="openSangonAuthEditor()">环境设置</button>
+        <button type="button" class="btn-mini" @click="openSangonAuthEditor()">环境设置</button>
       </div>
     </div>
 
@@ -344,7 +352,7 @@ const {
             最近结束于 {{ runtime.finished_at }}
           </span>
         </div>
-        <button class="btn-mini" @click="showLogs = false">收起</button>
+        <button type="button" class="btn-mini" @click="showLogs = false">收起</button>
       </div>
       <pre class="sangon-log-console">{{ runtimeLogsList.join('\n') }}</pre>
     </div>
@@ -356,6 +364,7 @@ const {
           <h4>订单列表</h4>
           <div class="seg-group">
             <button
+              type="button"
               v-for="tab in orderFilterTabs"
               :key="tab.key"
               :class="['seg-btn', { active: orderFilter === tab.key }]"
@@ -436,6 +445,7 @@ const {
               <!-- 已忽略订单展示恢复入口，其它订单按阶段提供唯一主操作 -->
               <template v-if="ord.ignored">
                 <button
+                  type="button"
                   class="btn-mini primary"
                   :disabled="busy"
                   @click="handleIgnoreOrders([ord.order_no || ord.dir_name], false)"
@@ -445,6 +455,7 @@ const {
               </template>
               <template v-else-if="ord.status === 'pending'">
                 <button
+                  type="button"
                   v-if="ord.download_zip_ready"
                   class="btn-mini primary"
                   :disabled="busy || runtime.running"
@@ -454,6 +465,7 @@ const {
                   认领下载包
                 </button>
                 <button
+                  type="button"
                   v-else-if="ord.download_url || ord.cx_order_id"
                   class="btn-mini primary"
                   :disabled="busy || runtime.running"
@@ -465,6 +477,7 @@ const {
                 <template v-else>
                   <span class="missing-zip-tip" title="目录内无原始压缩包且未识别到生工下载页链接">缺压缩包</span>
                   <button
+                    type="button"
                     class="btn-mini"
                     :disabled="busy || runtime.running"
                     title="若为已发货通知或无需比对订单，可点击全局忽略并移入已忽略标签"
@@ -476,12 +489,13 @@ const {
               </template>
 
               <template v-else-if="ord.status === 'completed'">
-                <button class="btn-mini primary" @click="selectOrderAndLoadResults(ord)">预览</button>
-                <button class="btn-mini" @click="openSendResultModal(ord)">发信</button>
+                <button type="button" class="btn-mini primary" @click="selectOrderAndLoadResults(ord)">预览</button>
+                <button type="button" class="btn-mini" @click="openSendResultModal(ord)">发信</button>
               </template>
 
               <template v-else>
                 <button
+                  type="button"
                   class="btn-mini primary"
                   :disabled="runtime.running"
                   @click="handleRunPipeline([ord.dir_name])"
@@ -493,12 +507,13 @@ const {
               <!-- 次要操作收敛至行尾“更多”浮层 -->
               <PopoverMenu align="right" :width="190">
                 <template #trigger>
-                  <button class="btn-mini">更多 ▾</button>
+                  <button type="button" class="btn-mini">更多 ▾</button>
                 </template>
                 <template #default="{ close }">
                   <div class="menu-section">
                     <template v-if="!ord.ignored">
                       <button
+                        type="button"
                         v-if="ord.status === 'pending' && ord.zip_count === 0 && Boolean(ord.download_url || ord.cx_order_id)"
                         class="menu-item"
                         :disabled="busy || runtime.running"
@@ -507,6 +522,7 @@ const {
                         仅自动下载此订单
                       </button>
                       <button
+                        type="button"
                         v-if="ord.status === 'pending' && ord.zip_count === 0 && Boolean(ord.download_url || ord.cx_order_id)"
                         class="menu-item"
                         :disabled="busy || runtime.running"
@@ -515,6 +531,7 @@ const {
                         自动下载并比对
                       </button>
                       <button
+                        type="button"
                         class="menu-item"
                         :disabled="runtime.running"
                         @click="close(); handleRunPipeline([ord.dir_name])"
@@ -522,6 +539,7 @@ const {
                         {{ ord.status === 'completed' ? '重新运行比对' : '立即运行此订单' }}
                       </button>
                       <button
+                        type="button"
                         v-if="ord.download_zip_ready"
                         class="menu-item"
                         :disabled="busy || runtime.running"
@@ -540,10 +558,11 @@ const {
                         打开生工下载页（手动）
                       </a>
                     </template>
-                    <button class="menu-item" @click="close(); openLocalPath(ord.order_path)">
+                    <button type="button" class="menu-item" @click="close(); openLocalPath(ord.order_path)">
                       打开本地文件夹
                     </button>
                     <button
+                      type="button"
                       v-if="!ord.ignored"
                       class="menu-item"
                       :disabled="busy || runtime.running"
@@ -552,6 +571,7 @@ const {
                       忽略此订单（全局跳过）
                     </button>
                     <button
+                      type="button"
                       v-else
                       class="menu-item"
                       :disabled="busy"
@@ -560,6 +580,7 @@ const {
                       取消忽略并恢复显示
                     </button>
                     <button
+                      type="button"
                       class="menu-item danger"
                       :disabled="runtime.running"
                       @click="close(); openCleanupModal([ord.dir_name])"
@@ -575,19 +596,19 @@ const {
             <td colspan="9" class="empty-cell">
               <template v-if="orderFilter === 'ignored'">
                 <span>暂无已忽略的订单条目</span>
-                <button v-if="activeOrders.length > 0" class="btn-mini primary inline-action-btn" @click="orderFilter = 'all'">
+                <button type="button" v-if="activeOrders.length > 0" class="btn-mini primary inline-action-btn" @click="orderFilter = 'all'">
                   返回有效订单 ({{ activeOrders.length }})
                 </button>
               </template>
               <template v-else-if="activeOrders.length > 0 && orderFilter !== 'all'">
                 <span>当前阶段下暂无订单</span>
-                <button class="btn-mini primary inline-action-btn" @click="orderFilter = 'all'">
+                <button type="button" class="btn-mini primary inline-action-btn" @click="orderFilter = 'all'">
                   查看全部 ({{ activeOrders.length }})
                 </button>
               </template>
               <template v-else-if="ignoredOrders.length > 0">
                 <span>当前有效订单为空（另有 {{ ignoredOrders.length }} 个订单已全局忽略）</span>
-                <button class="btn-mini primary inline-action-btn" @click="orderFilter = 'ignored'">
+                <button type="button" class="btn-mini primary inline-action-btn" @click="orderFilter = 'ignored'">
                   查看已忽略 ({{ ignoredOrders.length }})
                 </button>
               </template>
@@ -627,10 +648,10 @@ const {
         </h4>
         <div class="preview-tools">
           <input v-model="searchKeyword" type="text" placeholder="搜索序列号、物种名、访问号..." class="search-input" />
-          <button v-if="selectedOrder.has_result_csv" class="btn-outline" @click="openSendResultModal(selectedOrder)">
+          <button type="button" v-if="selectedOrder.has_result_csv" class="btn-outline" @click="openSendResultModal(selectedOrder)">
             发送结果邮件
           </button>
-          <button v-if="selectedOrder.result_csv_path" class="btn-outline" @click="openLocalPath(selectedOrder.result_csv_path)">
+          <button type="button" v-if="selectedOrder.result_csv_path" class="btn-outline" @click="openLocalPath(selectedOrder.result_csv_path)">
             定位 CSV
           </button>
         </div>
@@ -667,7 +688,7 @@ const {
       <div class="modal-card">
         <div class="modal-header">
           <h3>邮箱 Key（IMAP 授权码）</h3>
-          <button class="close-btn" @click="showAuthModal = false">&times;</button>
+          <button type="button" class="close-btn" @click="showAuthModal = false">&times;</button>
         </div>
         <div class="modal-body">
           <div class="auth-row">
@@ -677,8 +698,8 @@ const {
           <div v-if="imapFile" class="auth-file">保存位置: {{ imapFile }}</div>
         </div>
         <div class="modal-footer">
-          <button class="btn-outline" @click="showAuthModal = false">取消</button>
-          <button class="btn-primary" :disabled="busy" @click="saveImapAuth">保存</button>
+          <button type="button" class="btn-outline" @click="showAuthModal = false">取消</button>
+          <button type="button" class="btn-primary" :disabled="busy" @click="saveImapAuth">保存</button>
         </div>
       </div>
     </div>

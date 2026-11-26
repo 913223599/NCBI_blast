@@ -170,6 +170,7 @@ function handleExportNewick() {
       <div class="toolbar-left">
         <div class="mode-switch">
           <button
+            type="button"
             class="mode-tab"
             :class="{ active: store.viewportMode === 'interactive' }"
             @click="store.closeFigurePreview()"
@@ -177,6 +178,7 @@ function handleExportNewick() {
             交互式拓扑树
           </button>
           <button
+            type="button"
             class="mode-tab"
             :class="{ active: store.viewportMode === 'publication' }"
             :disabled="!store.hasGeneratedFigures"
@@ -207,13 +209,13 @@ function handleExportNewick() {
       </div>
 
       <div v-if="store.viewportMode === 'interactive'" class="toolbar-actions">
-        <button class="tb-btn" :disabled="!store.hasTree" @click="canvas.zoomBy(1.2)">放大</button>
-        <button class="tb-btn" :disabled="!store.hasTree" @click="canvas.zoomBy(0.83)">缩小</button>
-        <button class="tb-btn" :disabled="!store.hasTree" @click="canvas.fitView()">适应窗口</button>
+        <button type="button" class="tb-btn" :disabled="!store.hasTree" @click="canvas.zoomBy(1.2)">放大</button>
+        <button type="button" class="tb-btn" :disabled="!store.hasTree" @click="canvas.zoomBy(0.83)">缩小</button>
+        <button type="button" class="tb-btn" :disabled="!store.hasTree" @click="canvas.fitView()">适应窗口</button>
         <span class="tb-sep"></span>
-        <button class="tb-btn" :disabled="!store.hasTree" @click="handleExportSvg">SVG</button>
-        <button class="tb-btn" :disabled="!store.hasTree" @click="handleExportPng">高清 PNG</button>
-        <button class="tb-btn" :disabled="!store.hasTree" @click="handleExportNewick">Newick</button>
+        <button type="button" class="tb-btn" :disabled="!store.hasTree" @click="handleExportSvg">SVG</button>
+        <button type="button" class="tb-btn" :disabled="!store.hasTree" @click="handleExportPng">高清 PNG</button>
+        <button type="button" class="tb-btn" :disabled="!store.hasTree" @click="handleExportNewick">Newick</button>
       </div>
       <div v-else class="toolbar-mode-hint">
         正在预览出版级成图，可切换上方「交互式拓扑树」继续编辑节点
@@ -249,18 +251,18 @@ function handleExportNewick() {
       <div v-if="contextMenu.node.support !== null" class="nm-info">
         支持率: {{ contextMenu.node.support }}% | 枝长: {{ contextMenu.node.branchLength.toFixed(5) }}
       </div>
-      <button v-if="contextMenu.node.isLeaf" class="nm-item" @click="handleOutgroup">设为外群并重定根</button>
-      <button v-if="!contextMenu.node.isLeaf" class="nm-item" @click="handleToggleCollapse">
+      <button type="button" v-if="contextMenu.node.isLeaf" class="nm-item" @click="handleOutgroup">设为外群并重定根</button>
+      <button type="button" v-if="!contextMenu.node.isLeaf" class="nm-item" @click="handleToggleCollapse">
         {{ contextMenu.node.collapsed ? '展开此支系' : '折叠此支系' }}
       </button>
-      <button v-if="contextMenu.node.name" class="nm-item" @click="handleCopyId">复制节点名称</button>
+      <button type="button" v-if="contextMenu.node.name" class="nm-item" @click="handleCopyId">复制节点名称</button>
       <div class="nm-colors">
         <span>标记颜色:</span>
-        <button class="clr-dot" style="background:#2563eb" @click="handleColorClade('#2563eb')"></button>
-        <button class="clr-dot" style="background:#dc2626" @click="handleColorClade('#dc2626')"></button>
-        <button class="clr-dot" style="background:#16a34a" @click="handleColorClade('#16a34a')"></button>
-        <button class="clr-dot" style="background:#d97706" @click="handleColorClade('#d97706')"></button>
-        <button class="clr-clear" @click="handleColorClade(null)">清除</button>
+        <button type="button" class="clr-dot" style="background:#2563eb" @click="handleColorClade('#2563eb')"></button>
+        <button type="button" class="clr-dot" style="background:#dc2626" @click="handleColorClade('#dc2626')"></button>
+        <button type="button" class="clr-dot" style="background:#16a34a" @click="handleColorClade('#16a34a')"></button>
+        <button type="button" class="clr-dot" style="background:#d97706" @click="handleColorClade('#d97706')"></button>
+        <button type="button" class="clr-clear" @click="handleColorClade(null)">清除</button>
       </div>
     </div>
   </div>

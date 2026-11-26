@@ -7,7 +7,7 @@
         <span class="result-count">{{ strain.filteredCount }} 条记录</span>
       </div>
       <div class="header-actions">
-        <button class="btn-export" @click="handleExport" :disabled="strain.filteredCount === 0">
+        <button type="button" class="btn-export" @click="handleExport" :disabled="strain.filteredCount === 0">
           导出
         </button>
       </div>
@@ -68,8 +68,8 @@
 
         <!-- 操作按钮 -->
         <div class="card-actions" @click.stop>
-          <button class="action-btn" @click="handleView(record)" title="查看详情">查看</button>
-          <button class="action-btn" @click="handleLocate(record)" title="定位位置">定位</button>
+          <button type="button" class="action-btn" @click="handleView(record)" title="查看详情">查看</button>
+          <button type="button" class="action-btn" @click="handleLocate(record)" title="定位位置">定位</button>
         </div>
       </div>
     </div>
@@ -78,9 +78,9 @@
     <div v-if="strain.selectedCount > 0" class="selection-bar">
       <span class="selection-info">已选择 {{ strain.selectedCount }} 项</span>
       <div class="selection-actions">
-        <button class="btn-action" @click="handleExportSelected">导出选中</button>
-        <button class="btn-action btn-delete" @click="handleDeleteSelected">删除选中</button>
-        <button class="btn-action" @click="strain.clearSelection">取消选择</button>
+        <button type="button" class="btn-action" @click="handleExportSelected">导出选中</button>
+        <button type="button" class="btn-action btn-delete" @click="handleDeleteSelected">删除选中</button>
+        <button type="button" class="btn-action" @click="strain.clearSelection">取消选择</button>
       </div>
     </div>
   </div>

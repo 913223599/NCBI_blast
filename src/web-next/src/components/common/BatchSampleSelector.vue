@@ -266,7 +266,7 @@ function modalClearAll() {
               placeholder="搜索样本名称 / ID / CDS 数量..." 
               class="pool-search-input"
             />
-            <button v-if="searchQuery" class="btn-clear-search" @click="searchQuery = ''">&times;</button>
+            <button type="button" v-if="searchQuery" class="btn-clear-search" @click="searchQuery = ''">&times;</button>
           </div>
 
           <!-- 分类与已选状态复合筛选器 -->
@@ -382,7 +382,7 @@ function modalClearAll() {
         <div v-if="filteredSamples.length === 0" class="empty-pool-state">
           <p v-if="selectedCategory === 'selected'">当前暂未勾选任何分析样本，请切换至“全部”或点击上方样本胶囊进行挑选</p>
           <p v-else>未找到符合条件的样本</p>
-          <button v-if="searchQuery" class="btn-reset-filter" @click="searchQuery = ''">清除搜索词</button>
+          <button type="button" v-if="searchQuery" class="btn-reset-filter" @click="searchQuery = ''">清除搜索词</button>
         </div>
       </div>
     </div>

@@ -10,9 +10,9 @@
           placeholder="搜索样本名称、Accession、物种..."
           @input="handleSearch"
         />
-        <button v-if="localFilters.keyword" class="clear-btn" @click="clearKeyword"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" v-if="localFilters.keyword" class="clear-btn" @click="clearKeyword"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
-      <button class="filter-toggle-btn" @click="showAdvanced = !showAdvanced">
+      <button type="button" class="filter-toggle-btn" @click="showAdvanced = !showAdvanced">
         <span class="filter-icon"></span>
         <span>高级筛选</span>
         <span class="arrow" :class="{ open: showAdvanced }">▼</span>
@@ -80,7 +80,7 @@
       </div>
 
       <div class="filter-actions">
-        <button class="btn-reset" @click="resetFilters">
+        <button type="button" class="btn-reset" @click="resetFilters">
           重置筛选
         </button>
         <span class="result-count">

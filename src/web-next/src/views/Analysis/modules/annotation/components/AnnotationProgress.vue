@@ -50,7 +50,7 @@ function copyLogs() {
       <div class="header-right">
         <span class="pct-badge" :class="{ completed: progress >= 100 }">{{ progress }}%</span>
         
-        <button 
+        <button type="button" 
           v-if="progress >= 100" 
           class="view-result-btn" 
           @click="emit('view-results')" 
@@ -62,7 +62,7 @@ function copyLogs() {
           查看分析结果
         </button>
 
-        <button 
+        <button type="button" 
           v-else 
           class="cancel-btn" 
           @click="emit('cancel')" 
@@ -94,7 +94,7 @@ function copyLogs() {
           </svg>
           <span>实时日志终端 [Task: {{ taskId }}]</span>
         </div>
-        <button class="copy-log-btn" @click="copyLogs">复制日志</button>
+        <button type="button" class="copy-log-btn" @click="copyLogs">复制日志</button>
       </div>
       <div class="log-scroll-area" ref="logContainerRef">
         <div v-if="logs.length === 0" class="log-empty">等待日志输出...</div>

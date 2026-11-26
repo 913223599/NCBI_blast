@@ -69,7 +69,7 @@ function getBridge(): typeof electronBridge {
 
 /** 注册全局回调（兼容历史全局事件钩子） */
 function registerGlobalHandler(name: string, handler: (...args: unknown[]) => void): void {
-  window[name] = handler
+  ;(window as unknown as Record<string, unknown>)[name] = handler
 }
 
 export {

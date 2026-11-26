@@ -30,7 +30,7 @@ function formatSize(bytes: number): string {
   <div class="phylo-panel">
     <div class="panel-header">
       <h3 class="panel-title">数据采集与序列画像</h3>
-      <button class="btn-link" @click="showPasteBox = !showPasteBox">
+      <button type="button" class="btn-link" @click="showPasteBox = !showPasteBox">
         {{ showPasteBox ? '关闭文本导入' : '粘贴 FASTA' }}
       </button>
     </div>
@@ -51,15 +51,16 @@ function formatSize(bytes: number): string {
         placeholder=">Seq1&#10;ATGCGTACGT..."
       ></textarea>
       <div class="paste-actions">
-        <button class="btn-primary-sm" :disabled="store.isImporting" @click="submitPaste">保存至工作区</button>
+        <button type="button" class="btn-primary-sm" :disabled="store.isImporting" @click="submitPaste">保存至工作区</button>
       </div>
     </div>
 
     <div class="sub-header">
       <span>工作区文件 ({{ store.workspaceFiles.length }})</span>
       <div class="sub-actions">
-        <button class="btn-link" @click="store.refreshWorkspace()">刷新</button>
+        <button type="button" class="btn-link" @click="store.refreshWorkspace()">刷新</button>
         <button
+          type="button"
           v-if="store.workspaceFiles.length > 0"
           class="btn-link danger"
           @click="store.clearWorkspace()"
@@ -75,7 +76,7 @@ function formatSize(bytes: number): string {
         <span class="file-ext">{{ file.ext.replace('.', '').toUpperCase() }}</span>
         <span class="file-name" :title="file.name">{{ file.name }}</span>
         <span class="file-size">{{ formatSize(file.size) }}</span>
-        <button class="btn-icon-del" title="移除" @click="store.removeWorkspaceFile(file.name)">x</button>
+        <button type="button" class="btn-icon-del" title="移除" @click="store.removeWorkspaceFile(file.name)">x</button>
       </div>
     </div>
 

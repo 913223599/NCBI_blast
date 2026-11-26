@@ -127,6 +127,7 @@ defineExpose({
       </div>
       <div class="header-right" @click.stop>
         <button
+          type="button"
           v-if="expanded"
           class="btn-mini"
           :disabled="scanning || busy"
@@ -134,7 +135,7 @@ defineExpose({
         >
           {{ scanning ? '同步中...' : '重新同步邮件' }}
         </button>
-        <button class="btn-mini" @click="handleToggle">
+        <button type="button" class="btn-mini" @click="handleToggle">
           {{ expanded ? '收起' : '展开查看' }}
         </button>
       </div>
@@ -144,6 +145,7 @@ defineExpose({
       <div class="filter-bar">
         <div class="seg-group">
           <button
+            type="button"
             v-for="tab in filterTabs"
             :key="tab.key"
             :class="['seg-btn', { active: activeFilter === tab.key }]"
@@ -186,6 +188,7 @@ defineExpose({
             </td>
             <td class="actions-cell">
               <button
+                type="button"
                 v-if="!m.dir_ready && m.dir_name && m.dedup_status !== 'non_sequencing' && m.dedup_status !== 'ignored'"
                 class="btn-mini primary"
                 :disabled="busy"
@@ -203,6 +206,7 @@ defineExpose({
                 打开下载页
               </a>
               <button
+                type="button"
                 v-if="m.order_no && m.dedup_status !== 'non_sequencing'"
                 class="btn-mini"
                 :disabled="busy"
@@ -218,7 +222,7 @@ defineExpose({
               <span v-if="scanning">正在同步生工通知邮件...</span>
               <template v-else-if="hasScanned && activeFilter !== 'all'">
                 <span>当前分类下无邮件记录</span>
-                <button class="btn-mini primary inline-btn" @click="activeFilter = 'all'">查看全部 ({{ mails.length }})</button>
+                <button type="button" class="btn-mini primary inline-btn" @click="activeFilter = 'all'">查看全部 ({{ mails.length }})</button>
               </template>
               <span v-else>暂无生工通知邮件记录</span>
             </td>

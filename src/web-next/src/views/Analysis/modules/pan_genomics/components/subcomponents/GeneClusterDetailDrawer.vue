@@ -61,7 +61,7 @@ watch(
             </option>
           </select>
         </div>
-        <button class="btn-close-drawer" @click="emit('close')">关闭</button>
+        <button type="button" class="btn-close-drawer" @click="emit('close')">关闭</button>
       </div>
     </div>
 

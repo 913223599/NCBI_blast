@@ -60,8 +60,49 @@ const loadedMeta = ref<{
   cached: boolean
 } | null>(null)
 
-let viewerInstance: any = null
-let cached3Dmol: any = null
+interface ThreeDMolAtom {
+  b?: number
+}
+
+interface ThreeDMolStyleOptions {
+  color?: string
+  colorscheme?: string
+  colorfunc?: (atom: ThreeDMolAtom) => string
+  thickness?: number
+  radius?: number
+  scale?: number
+}
+
+interface ThreeDMolStyleSpec {
+  cartoon?: ThreeDMolStyleOptions
+  stick?: ThreeDMolStyleOptions
+  sphere?: ThreeDMolStyleOptions
+  line?: ThreeDMolStyleOptions
+}
+
+interface ThreeDMolViewerInstance {
+  spin: (axis: string | false) => void
+  clear: () => void
+  removeAllSurfaces: () => void
+  setStyle: (sel: Record<string, unknown>, style: ThreeDMolStyleSpec) => void
+  addStyle: (sel: Record<string, unknown>, style: ThreeDMolStyleSpec) => void
+  addSurface: (type: unknown, style: Record<string, unknown>) => void
+  addModel: (data: string, format: string) => void
+  zoomTo: () => void
+  render: () => void
+  pngURI?: () => string
+}
+
+interface ThreeDMolLib {
+  createViewer: (
+    element: HTMLElement,
+    config?: Record<string, unknown>
+  ) => ThreeDMolViewerInstance
+  SurfaceType?: { VDW: unknown }
+}
+
+let viewerInstance: ThreeDMolViewerInstance | null = null
+let cached3Dmol: ThreeDMolLib | null = null
 let currentContent = ''
 let pressedOutside = false
 
@@ -82,13 +123,15 @@ const subtitleText = computed(() => {
   return parts.join(' · ') || '支持本地 .pdb/.cif、AlphaFold DB 与 RCSB PDB 交互式渲染'
 })
 
-async function ensure3Dmol(): Promise<any> {
+async function ensure3Dmol(): Promise<ThreeDMolLib> {
   if (cached3Dmol) return cached3Dmol
-  const mod: any = await import('3dmol')
-  const lib = mod?.createViewer ? mod : (mod?.default || (globalThis as any).$3Dmol)
-  if (!lib || typeof lib.createViewer !== 'function') {
+  const mod = (await import('3dmol')) as Partial<ThreeDMolLib> & { default?: Partial<ThreeDMolLib> }
+  const globalLib = (globalThis as { $3Dmol?: Partial<ThreeDMolLib> }).$3Dmol
+  const candidate = mod?.createViewer ? mod : (mod?.default || globalLib)
+  if (!candidate || typeof candidate.createViewer !== 'function') {
     throw new Error('3Dmol 渲染引擎初始化失败')
   }
+  const lib = candidate as ThreeDMolLib
   cached3Dmol = lib
   return lib
 }
@@ -112,14 +155,14 @@ async function applyStyleAndRender(): Promise<void> {
   if (!viewerInstance || !currentContent) return
   try {
     viewerInstance.removeAllSurfaces()
-    const baseColorSpec: Record<string, any> =
+    const baseColorSpec: ThreeDMolStyleOptions =
       colorScheme.value === 'plddt'
-        ? { colorfunc: (atom: any) => plddtColorHex(Number(atom?.b ?? 0)) }
+        ? { colorfunc: (atom: ThreeDMolAtom) => plddtColorHex(Number(atom?.b ?? 0)) }
         : colorScheme.value === 'ss'
           ? { colorscheme: 'ssPyMOL' }
           : { color: 'spectrum' }
 
-    const styleObj: Record<string, any> = {}
+    const styleObj: ThreeDMolStyleSpec = {}
     if (renderStyle.value === 'cartoon') {
       styleObj.cartoon = { ...baseColorSpec, thickness: 0.45 }
     } else if (renderStyle.value === 'stick') {

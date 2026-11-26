@@ -237,7 +237,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
   }
 
   /** 批量添加样本记录 (带 Promise 支持，用于链式保存) */
-  function addRecords(recordsToAdd: any[]): Promise<boolean> {
+  function addRecords(recordsToAdd: Array<Partial<StrainRecord>>): Promise<boolean> {
     if (!recordsToAdd.length) return Promise.resolve(true)
     
     const now = new Date().toISOString()
@@ -418,7 +418,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
   }
 
   function selectAll() {
-    filteredRecords.value.forEach((r: any) => selectedRecords.value.add(r.id))
+    filteredRecords.value.forEach((r: StrainRecord) => selectedRecords.value.add(r.id))
   }
 
   function clearSelection() {
@@ -427,7 +427,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
 
   function recalibrateCounters() {
     const maxSerials: Record<string, number> = {}
-    records.value.forEach((record: any) => {
+    records.value.forEach((record: StrainRecord) => {
       if (record.codeCategory && record.codeGenus && record.codeSpecies && record.codeSerial) {
         const key = `${record.codeCategory}${record.codeGenus}${record.codeSpecies}`
         const serial = Number(record.codeSerial)

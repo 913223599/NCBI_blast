@@ -4,7 +4,7 @@
       <!-- 头部 -->
       <div class="wb-dialog-header">
         <h3 class="title">批量导入样本</h3>
-        <button class="close-btn" @click="emit('close')">
+        <button type="button" class="close-btn" @click="emit('close')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
@@ -37,6 +37,7 @@
           <h4 class="section-label">导入模式</h4>
           <div class="mode-selector">
             <button
+              type="button"
               class="mode-btn"
               :class="{ active: importMode === 'auto' }"
               @click="importMode = 'auto'"
@@ -48,6 +49,7 @@
               </div>
             </button>
             <button
+              type="button"
               class="mode-btn"
               :class="{ active: importMode === 'manual' }"
               @click="importMode = 'manual'"
@@ -114,13 +116,13 @@
             <div class="template-selector">
               <span class="template-label">下载模板:</span>
               <div class="template-btns">
-                <button class="t-btn" @click="downloadTemplate('Bacteria')">微生物/细菌</button>
-                <button class="t-btn" @click="downloadTemplate('Fungi')">真菌</button>
-                <button class="t-btn" @click="downloadTemplate('Phage')">噬菌体</button>
-                <button class="t-btn" @click="downloadTemplate('Virus')">病毒</button>
-                <button class="t-btn" @click="downloadTemplate('Plasmid')">质粒/载体</button>
-                <button class="t-btn" @click="downloadTemplate('CellLine')">细胞系</button>
-                <button class="t-btn" @click="downloadTemplate('General')">通用</button>
+                <button type="button" class="t-btn" @click="downloadTemplate('Bacteria')">微生物/细菌</button>
+                <button type="button" class="t-btn" @click="downloadTemplate('Fungi')">真菌</button>
+                <button type="button" class="t-btn" @click="downloadTemplate('Phage')">噬菌体</button>
+                <button type="button" class="t-btn" @click="downloadTemplate('Virus')">病毒</button>
+                <button type="button" class="t-btn" @click="downloadTemplate('Plasmid')">质粒/载体</button>
+                <button type="button" class="t-btn" @click="downloadTemplate('CellLine')">细胞系</button>
+                <button type="button" class="t-btn" @click="downloadTemplate('General')">通用</button>
               </div>
             </div>
           </div>
@@ -145,7 +147,7 @@
                   <span class="file-name-label">待导入:</span>
                   <span class="file-name">{{ file.name }}</span>
                 </div>
-                <button class="remove-btn" title="移除" @click="removeFile(idx)">
+                <button type="button" class="remove-btn" title="移除" @click="removeFile(idx)">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <line x1="18" y1="6" x2="6" y2="18" />
                     <line x1="6" y1="6" x2="18" y2="18" />
@@ -191,8 +193,9 @@
 
       <!-- 底部按钮 -->
       <div class="wb-dialog-footer">
-        <button class="wb-btn-outline btn-cancel" @click="emit('close')">取消</button>
+        <button type="button" class="wb-btn-outline btn-cancel" @click="emit('close')">取消</button>
         <button
+          type="button"
           class="wb-btn-primary btn-confirm"
           :disabled="!canImport || importing"
           @click="handleImport"

@@ -11,6 +11,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { apiGet, apiPost } from '../../bridge/electron-bridge'
 import { useAppStore } from '../../stores/app'
+import { createLogger } from '../../utils/logger'
+const logger = createLogger('UpdatePanel')
 
 const appStore = useAppStore()
 
@@ -80,7 +82,7 @@ async function loadStatus() {
     currentInfo.value = res
     conflictFiles.value = Array.isArray(res?.conflict_files) ? res.conflict_files : []
   } catch (err) {
-    console.error('获取更新状态异常:', err)
+    logger.error('获取更新状态异常:', err)
   } finally {
     isLoadingInfo.value = false
   }
@@ -122,9 +124,9 @@ async function handleCheckUpdate() {
       }
       appStore.showNotification(checkResult.value.error || '连接 GitHub 失败，请检查网络或代理', 'warning')
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     checkResult.value.checked = true
-    checkResult.value.error = String(err?.message || err)
+    checkResult.value.error = err instanceof Error ? err.message : String(err)
     appStore.showNotification('检查更新发生异常', 'error')
   } finally {
     isChecking.value = false
@@ -166,8 +168,8 @@ async function handlePullUpdate(resolveConflicts = false) {
       }
       appStore.showNotification(pullError.value || '更新失败', 'error')
     }
-  } catch (err: any) {
-    pullError.value = String(err?.message || err)
+  } catch (err: unknown) {
+    pullError.value = err instanceof Error ? err.message : String(err)
     pullLogs.value.push(`[异常] ${pullError.value}`)
     appStore.showNotification('执行更新时发生网络或系统错误', 'error')
   } finally {
@@ -181,8 +183,8 @@ async function handleRelaunchApp() {
   appStore.showNotification('正在安全重启应用...', 'info')
 
   try {
-    if ((window as any).electronAPI?.relaunchApp) {
-      await (window as any).electronAPI.relaunchApp()
+    if (window.electronAPI?.relaunchApp) {
+      await window.electronAPI.relaunchApp()
     } else {
       // 浏览器环境提示并自动刷新
       setTimeout(() => {
@@ -190,7 +192,7 @@ async function handleRelaunchApp() {
       }, 1200)
     }
   } catch (err) {
-    console.error('重启应用异常:', err)
+    logger.error('重启应用异常:', err)
     isRelaunching.value = false
     appStore.showNotification('自动重启受阻，请手动关闭并重新打开程序', 'warning')
   }
@@ -200,8 +202,8 @@ function openRemoteUrl() {
   const url = currentInfo.value?.remote_url
   if (!url) return
   const cleanUrl = url.replace(/\.git$/, '')
-  if ((window as any).electronAPI?.openExternal) {
-    (window as any).electronAPI.openExternal(cleanUrl)
+  if (window.electronAPI?.openExternal) {
+    window.electronAPI.openExternal(cleanUrl)
   } else {
     window.open(cleanUrl, '_blank', 'noopener,noreferrer')
   }
@@ -301,6 +303,7 @@ onMounted(() => {
           </ul>
           <div class="conflict-actions">
             <button
+              type="button"
               class="p-btn btn-recover-conflict"
               :disabled="isPulling"
               @click="() => handlePullUpdate(true)"
@@ -321,6 +324,7 @@ onMounted(() => {
           <p class="desc-sm">向 GitHub origin/master 发起查询，检测是否有未经拉取的特性提交。</p>
         </div>
         <button
+          type="button"
           class="p-btn p-btn-primary btn-check"
           :disabled="isChecking || isPulling"
           @click="handleCheckUpdate"
@@ -397,6 +401,7 @@ onMounted(() => {
         </div>
         <div class="deck-right">
           <button
+            type="button"
             class="p-btn btn-pull-now"
             :disabled="isPulling"
             @click="() => handlePullUpdate(false)"
@@ -456,10 +461,10 @@ onMounted(() => {
         </div>
 
         <div class="modal-footer">
-          <button class="p-btn p-btn-outline" @click="showRestartModal = false" :disabled="isRelaunching">
+          <button type="button" class="p-btn p-btn-outline" @click="showRestartModal = false" :disabled="isRelaunching">
             稍后手动重启
           </button>
-          <button class="p-btn p-btn-primary btn-relaunch" @click="handleRelaunchApp" :disabled="isRelaunching">
+          <button type="button" class="p-btn p-btn-primary btn-relaunch" @click="handleRelaunchApp" :disabled="isRelaunching">
             <span v-if="isRelaunching" class="spinner white"></span>
             <span>{{ isRelaunching ? '正在关闭并唤醒...' : '立即重启应用' }}</span>
           </button>
