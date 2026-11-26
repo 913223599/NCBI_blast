@@ -103,7 +103,7 @@ def test_assembler_step_zip_integration():
         ctx = PipelineContext("test_zip_job", tmp_path, {"tech": "NANOPORE", "sample_type": "BACTERIA"})
         ctx.update("r1", zip_file)
 
-        step = AssemblerStep(ctx)
+        AssemblerStep(ctx)
         # 验证 AssemblyFileHandler 能够正确支持该文件
         r1_val = ctx.get("r1")
         assert r1_val is not None

@@ -8,7 +8,6 @@ FASTQ 测序质量控制与长度过滤服务单元测试
 4. 质控统计指标 (QC Metrics) 计算与断点兼容
 """
 import unittest
-import io
 from pathlib import Path
 import sys
 
@@ -16,7 +15,7 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.backend.services.fastq_qc_service import FastqQCFilter, FastqQCReport
+from src.backend.services.fastq_qc_service import FastqQCFilter
 
 
 class TestFastqQCService(unittest.TestCase):

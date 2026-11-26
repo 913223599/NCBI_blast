@@ -18,7 +18,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.assembly.utils.contig_depth import (
     _estimate_depths_kmer,
-    backfill_manifest_contig_depths,
     clear_depth_cache,
     estimate_contig_depths,
 )

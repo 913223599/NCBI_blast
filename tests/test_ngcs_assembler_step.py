@@ -4,11 +4,9 @@ test_ngcs_assembler_step.py - NGCS 组装步骤单元与集成测试
 验证 AssemblerStep 全面接入 NGCS 引擎后的短读长双端与长读长单分子组装功能。
 """
 
-import os
 import sys
 import gzip
 import random
-import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -64,7 +62,7 @@ class TestNGCSAssemblerStep(unittest.IsolatedAsyncioTestCase):
             work_dir = Path(td)
             r1 = work_dir / "sample_R1.fq.gz"
             r2 = work_dir / "sample_R2.fq.gz"
-            ref_genome = self._generate_synthetic_pe_reads(r1, r2, genome_len=4000)
+            self._generate_synthetic_pe_reads(r1, r2, genome_len=4000)
 
             config = {
                 "tech": "ILLUMINA",

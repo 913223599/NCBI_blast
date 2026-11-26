@@ -13,7 +13,7 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.backend.services.fastq_qc_service import FastqQCFilter, FastqQCReport
+from src.backend.services.fastq_qc_service import FastqQCFilter
 from src.backend.services.diversity_filter import DiversityNoiseFilter
 
 

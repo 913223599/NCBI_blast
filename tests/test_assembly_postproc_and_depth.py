@@ -10,10 +10,7 @@ test_assembly_postproc_and_depth.py - 基因组组装后处理去冗余与深度
 5. 验证环状分子拓扑标记 (circular=true) 在后处理与指标解析中被完整继承。
 """
 
-import os
 import sys
-import gzip
-import json
 import random
 import tempfile
 import unittest

@@ -95,7 +95,6 @@ class EnhancedPostProcessorPrototype:
         probe_sizes = [250, 120, 60, 30]
         best_overlap = 0
         best_fused = ""
-        best_error = 1.0
 
         for p_sz in probe_sizes:
             if LB < p_sz or LA < p_sz:

@@ -12,7 +12,6 @@ test_auto_return_workflow.py - 噬菌体基因组注释"自动回传"工作流�
 """
 import asyncio
 import json
-import os
 import random
 import sys
 import tempfile
@@ -220,8 +219,8 @@ class TestWorkflowArtifacts(unittest.TestCase):
         cds = self._cds_count()
         faa_lines = Path(self.files["faa"]).read_text(encoding="utf-8").splitlines()
         ffn_lines = Path(self.files["ffn"]).read_text(encoding="utf-8").splitlines()
-        self.assertEqual(sum(1 for l in faa_lines if l.startswith(">")), cds)
-        self.assertEqual(sum(1 for l in ffn_lines if l.startswith(">")), cds)
+        self.assertEqual(sum(1 for line in faa_lines if line.startswith(">")), cds)
+        self.assertEqual(sum(1 for line in ffn_lines if line.startswith(">")), cds)
 
 
 class TestWorkflowClassification(unittest.TestCase):

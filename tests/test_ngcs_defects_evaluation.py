@@ -10,7 +10,6 @@ NGCS 组装引擎长读长缺陷基准评估测试套件 (Defects Baseline Evalu
 
 import unittest
 import sys
-import os
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -95,7 +94,7 @@ class TestNGCSCurrentDefectsEvaluation(unittest.TestCase):
         ovlp_len, fused = self.processor.find_dovetail_overlap(seqA, seqB, min_ovlp=50)
 
         print("\n--- [Defect 2 Baseline Evaluation] ---")
-        print(f"真实物理重叠长度: 480 bp (含 3% 噪声)")
+        print("真实物理重叠长度: 480 bp (含 3% 噪声)")
         print(f"当前生产代码 find_dovetail_overlap 识别结果: overlap={ovlp_len}, fused_len={len(fused)}")
 
         # 基线断言：当前默认 0 容错，导致 Dovetail 识别失败
@@ -122,7 +121,7 @@ class TestNGCSCurrentDefectsEvaluation(unittest.TestCase):
         trimmed_seq, is_circ, period = trim_circular_wrap(concatenated_seq, min_period=300, min_overhang=50)
 
         print("\n--- [Defect 3 Baseline Evaluation] ---")
-        print(f"原始环状序列包含首尾 DTR (600 bp 重叠)")
+        print("原始环状序列包含首尾 DTR (600 bp 重叠)")
         print(f"当前 trim_circular_wrap 识别结果: is_circular={is_circ}, trimmed_len={len(trimmed_seq)}, period={period}")
 
         # 基线断言：当前代码丢失环化

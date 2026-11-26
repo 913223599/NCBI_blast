@@ -11,7 +11,6 @@ import json
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -267,7 +266,7 @@ class TestFetchEndToEnd(unittest.TestCase):
         fake = FakeIMAP(mails)
         cfg = MailConfig(sender_whitelist=["yssw_service@163.com"], batch_size=100)
         fetcher = MailFetcher(cfg, conn_factory=lambda: fake)
-        result = fetcher.fetch()
+        fetcher.fetch()
         header_calls = [c for c in fake.fetch_calls if "HEADER.FIELDS" in c]
         self.assertEqual(len(header_calls), 3)  # 250 封分 3 批
 
@@ -278,7 +277,7 @@ class TestCli(unittest.TestCase):
     def test_example_template(self):
         """--example 生成配置模板"""
         from src.mail_download.cli import main
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory():
             rc = main(["--example"])
             self.assertEqual(rc, 0)
             p = PROJECT_ROOT / "mail_config.example.json"
@@ -362,9 +361,6 @@ class TestCrossRunDedup(unittest.TestCase):
 
     def test_cli_reports_skipped(self):
         """CLI 输出含已处理跳过计数"""
-        from src.mail_download.cli import main
-        import io
-        from contextlib import redirect_stdout
 
         with tempfile.TemporaryDirectory() as td:
             # 直接驱动 saver 验证统计字段

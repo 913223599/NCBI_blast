@@ -3,11 +3,9 @@
 泛基因组分析引擎单元测试 (test_pan_genomics_engine.py)
 """
 import unittest
-from pathlib import Path
 from src.analysis.pan_genomics.types import (
     SampleInputItem,
-    PanGenomicsRunRequest,
-    PanGenomicsResult
+    PanGenomicsRunRequest
 )
 from src.analysis.pan_genomics.engine import PanGenomicsEngine
 
@@ -89,8 +87,8 @@ class TestPanGenomicsEngine(unittest.TestCase):
         self.assertEqual(capsid_cluster.sample_count, 3)
 
         # 2. 验证生活史分型
-        alpha_life = next(l for l in res.lifestyles if l.sample_id == "SAMPLE_A")
-        beta_life = next(l for l in res.lifestyles if l.sample_id == "SAMPLE_B")
+        alpha_life = next(item for item in res.lifestyles if item.sample_id == "SAMPLE_A")
+        beta_life = next(item for item in res.lifestyles if item.sample_id == "SAMPLE_B")
 
         self.assertEqual(alpha_life.lifestyle, "Lytic")
         self.assertTrue(alpha_life.is_safe_for_therapy)

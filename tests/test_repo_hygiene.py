@@ -29,7 +29,6 @@ PERSONAL_HARDCODED_PATH_PATTERN = re.compile(
 def _iter_core_source_files():
     targets = [
         PROJECT_ROOT / "src" / "resources" / "locales",
-        PROJECT_ROOT / "src" / "modules",
         PROJECT_ROOT / "src" / "web-next" / "src",
         PROJECT_ROOT / "electron-shell",
         PROJECT_ROOT / "docs",
@@ -82,14 +81,27 @@ def test_rule2_no_personal_hardcoded_paths_in_core_files():
         PROJECT_ROOT / "scripts" / "process_user_downloads.py",
     ]
     scripts_dir = PROJECT_ROOT / "scripts"
+    tracked_script_py_files = []
     if scripts_dir.exists():
-        for pattern in ("export_gui_format_*.py", "run_16s_blast*.py", "translate_and_export*.py"):
-            checked_files.extend(sorted(scripts_dir.glob(pattern)))
-    # 全量扫描 src/**/*.py，杜绝白名单盲区漏检个人盘符路径
+        import subprocess
+
+        try:
+            out = subprocess.check_output(
+                ["git", "-c", "core.quotepath=false", "ls-files", "scripts/*.py", "scripts/**/*.py"],
+                cwd=PROJECT_ROOT,
+                text=True,
+                encoding="utf-8",
+            )
+            tracked_script_py_files = sorted(
+                PROJECT_ROOT / rel.strip() for rel in out.splitlines() if rel.strip()
+            )
+        except Exception:
+            tracked_script_py_files = sorted(scripts_dir.rglob("*.py"))
+    # 全量扫描 src/**/*.py 与受 Git 跟踪的 scripts/**/*.py，杜绝白名单盲区漏检个人盘符路径
     src_py_files = sorted(
         p for p in (PROJECT_ROOT / "src").rglob("*.py") if "__pycache__" not in p.parts
     )
-    all_checked = list(dict.fromkeys([*checked_files, *src_py_files]))
+    all_checked = list(dict.fromkeys([*checked_files, *src_py_files, *tracked_script_py_files]))
     drive_pattern = re.compile(r"(?i)(?<![A-Za-z0-9_])([C-Z]:[\\/][^\s\"'<>|]{2,})")
     # 允许通用的 Windows 系统/标准软件安装目录探测（禁止个人盘符/业务数据盘符）
     system_probe_re = re.compile(r"(?i)^[C-E]:[\\/](?:Windows\b|Program Files(?:\s*\(x86\))?(?:[\\/'\"\s]|$))")
@@ -105,7 +117,7 @@ def test_rule2_no_personal_hardcoded_paths_in_core_files():
             if PERSONAL_HARDCODED_PATH_PATTERN.search(line):
                 violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:90]}")
                 continue
-            if p.suffix == ".py" and "src" in p.parts:
+            if p.suffix == ".py" and ("src" in p.parts or "scripts" in p.parts):
                 for m in drive_pattern.finditer(line):
                     if not system_probe_re.match(line[m.start(1):]):
                         violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:90]}")
@@ -131,9 +143,12 @@ def test_no_raw_extractall_in_src():
 
 
 def test_frontend_production_no_raw_console_log():
-    """前端生产源码禁用散落 console.log，统一使用 src/web-next/src/utils/logger.ts。"""
+    """前端生产源码禁用散落 console.* 与 (window as any)，统一使用 logger.ts 与 electron.d.ts。"""
     web_src = PROJECT_ROOT / "src" / "web-next" / "src"
-    violations = []
+    console_violations = []
+    window_any_violations = []
+    console_re = re.compile(r"\bconsole\.(?:log|warn|error|debug|info)\s*\(")
+    window_any_re = re.compile(r"\(\s*window\s+as\s+any\s*\)")
     for p in sorted(web_src.rglob("*")):
         if not p.is_file() or p.suffix not in (".ts", ".vue"):
             continue
@@ -144,9 +159,14 @@ def test_frontend_production_no_raw_console_log():
             stripped = line.strip()
             if stripped.startswith(("//", "*")):
                 continue
-            if re.search(r"\bconsole\.log\(", line):
-                violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:80]}")
-    assert not violations, "发现未收敛至 logger.ts 的前端 console.log:\n" + "\n".join(violations)
+            if console_re.search(line):
+                console_violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:80]}")
+            if window_any_re.search(line):
+                window_any_violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:80]}")
+    assert not console_violations, "发现未收敛至 logger.ts 的前端裸 console.*:\n" + "\n".join(console_violations)
+    assert not window_any_violations, "发现未收敛至 types/electron.d.ts 的 (window as any):\n" + "\n".join(
+        window_any_violations
+    )
 
 
 def test_legacy_pyqt_bridge_and_misplaced_web_root_files_removed():
@@ -329,3 +349,93 @@ def test_version_single_source_brand_citations_and_three_types_alignment():
     tool_ids = {t["id"] for t in citations.get("tools", [])}
     assert len(tool_ids) >= 18
     assert {"phold", "lovis4u", "mmseqs2", "checkv", "proksee_cgview"} <= tool_ids
+
+
+def test_dead_zombie_modules_and_backend_maintenance_scripts_cleaned():
+    """防止已清理的零引用僵尸模块与生产包运维脚本回流。"""
+    assert not (PROJECT_ROOT / "src" / "modules" / "tooltip").exists()
+    assert not (PROJECT_ROOT / "src" / "web-next" / "src" / "modules" / "AssemblyCoordinator").exists()
+    assert not (PROJECT_ROOT / "src" / "workbench" / "pipelines").exists()
+    assert not (PROJECT_ROOT / "src" / "workbench" / "wrappers").exists()
+    for legacy_script in (
+        "cleanup_translations.py",
+        "diag_db.py",
+        "fully_restore_config.py",
+        "populate.py",
+        "populate_pathogens.py",
+        "restore_sources.py",
+        "upgrade_dictionaries.py",
+    ):
+        assert not (PROJECT_ROOT / "src" / "backend" / legacy_script).exists()
+        assert (PROJECT_ROOT / "scripts" / "maintenance" / legacy_script).is_file()
+
+
+def test_no_large_binaries_or_third_party_quast_tracked_in_git():
+    """规则 15：严禁将第三方 quast 源码库、tools/ncbi_dist 或预编译二进制纳入 Git 跟踪。"""
+    import subprocess
+
+    out = subprocess.check_output(
+        ["git", "-c", "core.quotepath=false", "ls-files"],
+        cwd=PROJECT_ROOT,
+        text=True,
+        encoding="utf-8",
+    )
+    tracked = [line.strip() for line in out.splitlines() if line.strip()]
+    forbidden_prefixes = ("quast/", "tools/ncbi_dist/", "tools/datasets", "tools/docs/")
+    forbidden_exts = (".exe", ".dll", ".a", ".so", ".dylib")
+
+    bad = [
+        f
+        for f in tracked
+        if f.startswith(forbidden_prefixes) or f.lower().endswith(forbidden_exts)
+    ]
+    assert not bad, "发现违反规则 15 的受跟踪二进制或外置第三方库:\n" + "\n".join(bad[:20])
+
+
+def test_frontend_vue_buttons_specify_type():
+    """防止 Vue 模板中的 <button> 遗漏显式 type 属性（避免表单内意外 submit）。"""
+    web_src = PROJECT_ROOT / "src" / "web-next" / "src"
+    has_type_re = re.compile(r"(?:^|\s)(?::|v-bind:)?type\s*=", re.IGNORECASE)
+    violations = []
+
+    for p in sorted(web_src.rglob("*.vue")):
+        if "__tests__" in p.parts:
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        start_m = re.search(r"<template(?:\s[^>]*)?>", text)
+        end_idx = text.rfind("</template>")
+        if not start_m or end_idx == -1:
+            continue
+        tpl = text[start_m.end():end_idx]
+        tpl_base = start_m.end()
+        i = 0
+        n = len(tpl)
+        while i < n:
+            if tpl.startswith("<!--", i):
+                end_c = tpl.find("-->", i + 4)
+                i = n if end_c == -1 else end_c + 3
+                continue
+            if tpl[i] == "<":
+                m_btn = re.match(r"<button(?=[\s/>])", tpl[i:], re.IGNORECASE)
+                if m_btn:
+                    j = i + m_btn.end()
+                    quote = None
+                    while j < n:
+                        ch = tpl[j]
+                        if quote:
+                            if ch == quote:
+                                quote = None
+                        elif ch in ('"', "'"):
+                            quote = ch
+                        elif ch == ">":
+                            break
+                        j += 1
+                    tag_text = tpl[i : j + 1]
+                    if not has_type_re.search(tag_text):
+                        ln = text[: tpl_base + i].count("\n") + 1
+                        violations.append(f"{p.relative_to(PROJECT_ROOT)}:{ln}: {tag_text[:80]}")
+                    i = j + 1
+                    continue
+            i += 1
+
+    assert not violations, "发现缺失 type 属性的 Vue <button>:\n" + "\n".join(violations[:20])

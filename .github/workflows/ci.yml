@@ -22,10 +22,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff pytest fastapi httpx pydantic psutil biopython python-multipart python-docx matplotlib
 
-      - name: Ruff static check (src/ + tracked scripts/*.py)
+      - name: Ruff static check (src/ + tests/ + tracked scripts/**/*.py)
         run: |
-          ruff check src
-          mapfile -t tracked_scripts < <(git ls-files 'scripts/*.py')
+          ruff check src tests
+          mapfile -t tracked_scripts < <(git ls-files 'scripts/*.py' 'scripts/**/*.py')
           if [ "${#tracked_scripts[@]}" -gt 0 ]; then
             ruff check "${tracked_scripts[@]}"
           fi
@@ -45,6 +45,33 @@ jobs:
           tests/test_publication_renderer_layouts.py
           tests/test_phage_discovery_split_imports.py
           tests/test_phase7_structure_3d_and_docx_citations.py
+          tests/test_assembly_report_export.py
+          tests/test_train_v4_config.py
+          tests/test_annotation_pipeline_stages.py
+          tests/test_static_safety_guards.py
+          tests/test_annotation_fixes.py
+          tests/test_assembly_contig_depth.py
+          tests/test_assembly_queue.py
+          tests/test_assembly_queue_state.py
+          tests/test_assembly_streaming_logs.py
+          tests/test_assembly_zip_handler.py
+          tests/test_auto_return_workflow.py
+          tests/test_database_cleaner.py
+          tests/test_diversity_qc_integration.py
+          tests/test_fastq_qc_service.py
+          tests/test_hybrid_assembly.py
+          tests/test_mail_download.py
+          tests/test_mail_send.py
+          tests/test_phage_workflow_postprocess.py
+          tests/test_phold_gpu_diagnostics.py
+          tests/test_remote_executor.py
+          tests/test_remote_log_diagnostics_fixes.py
+          tests/test_system_monitor.py
+          tests/phylo/test_eta_estimator.py
+          tests/phylo/test_profiler_and_codec.py
+          tests/phylo/test_publication_and_itol_client.py
+          tests/phylo/test_utf8_fasta_safety.py
+          tests/figure_studio/test_figure_studio_renderers.py
           -q
 
   frontend-and-electron:

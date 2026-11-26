@@ -2,8 +2,6 @@
 """
 Test streaming log broadcasting in AssemblerStep.
 """
-import pytest
-from unittest.mock import MagicMock
 from pathlib import Path
 import tempfile
 

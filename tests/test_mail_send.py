@@ -621,11 +621,12 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
             orig_anno_dir = ap_mod.ANNOTATIONS_DIR
             ap_mod.ANNOTATIONS_DIR = anno_dir
             try:
-                fake_fetch_cls = lambda _cfg: type(
-                    "Fetcher",
-                    (),
-                    {"fetch": lambda self, since_days=None: SimpleNamespace(connection_error=None, scanned=5, matched=[])},
-                )()
+                def fake_fetch_cls(_cfg):
+                    return type(
+                        "Fetcher",
+                        (),
+                        {"fetch": lambda self, since_days=None: SimpleNamespace(connection_error=None, scanned=5, matched=[])},
+                    )()
                 with patch.object(ap_mod, "MailFetcher", side_effect=fake_fetch_cls), \
                      patch.object(ap_mod, "_annotate", side_effect=fake_annotate), \
                      patch.object(ap_mod, "_build_report", side_effect=lambda out_dir, tid, *_: out_dir / "ANNO_12A_注释报告.docx"):
@@ -698,11 +699,12 @@ class TestAutoPipelineAndScheduler(unittest.TestCase):
             ap_mod.ANNOTATIONS_DIR = anno_dir
             ap_mod.MailSender.__init__ = _make_fake_init(orig_init, fake)
             try:
-                fake_fetch_cls = lambda _cfg: type(
-                    "Fetcher",
-                    (),
-                    {"fetch": lambda self, since_days=None: SimpleNamespace(connection_error=None, scanned=1, matched=[])},
-                )()
+                def fake_fetch_cls(_cfg):
+                    return type(
+                        "Fetcher",
+                        (),
+                        {"fetch": lambda self, since_days=None: SimpleNamespace(connection_error=None, scanned=1, matched=[])},
+                    )()
                 with patch.object(ap_mod, "MailFetcher", side_effect=fake_fetch_cls), \
                      patch.object(ap_mod, "_annotate", side_effect=fake_annotate), \
                      patch.object(ap_mod, "_build_report", side_effect=lambda out_dir, *_: out_dir / "ANNO_R_注释报告.docx"):
