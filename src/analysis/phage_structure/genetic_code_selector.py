@@ -47,6 +47,8 @@ def _evaluate_table_stats(
     *,
     min_orf_bp: int = 75,
 ) -> Dict[str, Any]:
+    if pyrodigal is None:
+        raise RuntimeError("pyrodigal 未安装，无法评估遗传密码子统计")
     gf = pyrodigal.GeneFinder(meta=False, mask=True)
     gf.train(train_bytes, translation_table=cast(Any, genetic_code))
     genes = gf.find_genes(seq_bytes)

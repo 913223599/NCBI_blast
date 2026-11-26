@@ -12,8 +12,8 @@ select = [
 ]
 
 [lint.mccabe]
-# 阶梯式复杂度红线：先封死所有 >51 的新增高复杂度函数，随后续迭代持续下压
-max-complexity = 51
+# 阶梯式复杂度红线：已从 51 下压至 40，随后续迭代持续压低至 <= 25
+max-complexity = 40
 
 [lint.per-file-ignores]
 "scripts/*.py" = ["E402", "C901", "S310", "RUF012", "B007", "SIM114", "PERF102"]

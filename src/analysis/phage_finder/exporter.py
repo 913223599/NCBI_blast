@@ -291,6 +291,8 @@ def _extract_orfs_in_slice(seq_slice: str) -> List[Dict[str, Any]]:
     """使用 Pyrodigal meta 模式快速预测片段内的 ORF 列表 (1-based 坐标)。"""
     if len(seq_slice) < 90:
         return []
+    if pyrodigal is None:
+        raise RuntimeError("pyrodigal 未安装，无法执行 ORF 预测")
     finder = pyrodigal.GeneFinder(meta=True)
     genes = finder.find_genes(seq_slice.encode("ascii", errors="ignore"))
     orfs: List[Dict[str, Any]] = []

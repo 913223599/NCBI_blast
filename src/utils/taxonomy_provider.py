@@ -374,3 +374,13 @@ def get_taxonomy_provider() -> TaxonomyProvider:
     if _provider is None:
         _provider = TaxonomyProvider()
     return _provider
+
+
+def _resolve_taxa_db_path_from_provider() -> Optional[str]:
+    provider = get_taxonomy_provider()
+    return provider.db_path if provider.is_ready else None
+
+
+from ..core.service_registry import register_taxonomy_db_path_resolver  # noqa: E402
+
+register_taxonomy_db_path_resolver(_resolve_taxa_db_path_from_provider)

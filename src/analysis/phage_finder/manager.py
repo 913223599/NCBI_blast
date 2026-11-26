@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from starlette.concurrency import run_in_threadpool
 
-from ...backend.broadcaster import broadcaster
+from ...core.broadcaster import broadcaster
 from ...phage_discovery.inference.judge_region_refiner import load_judge_ensemble_bundle
 from ...phage_discovery.inference.protein_gate import evaluate_regions_with_protein_gate
 from ...phage_discovery.inference.scanner import GenomeScanner, ScanResult
@@ -373,7 +373,7 @@ class PhageDiscoveryManager:
                             unified_res.regions,
                             blast_db=blast_db_path,
                             blastp_bin=blastp_bin,
-                            workers=workers,
+                            threads=workers,
                         )
 
                     scan_result = ScanResult(

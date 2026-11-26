@@ -4,8 +4,6 @@ import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 from ..engine.runner import CommandRunner
-import logging
-_s110_logger = logging.getLogger(__name__)
 
 # 全局模块级物理内存缓存，避免跨任务重复探测
 _CACHED_SYSTEM_TOTAL_MEMORY_GB = None
@@ -114,7 +112,7 @@ class BaseAssemblyStep(abc.ABC):
         if _CACHED_SYSTEM_TOTAL_MEMORY_GB is not None:
             return _CACHED_SYSTEM_TOTAL_MEMORY_GB
 
-        gb = 16.0
+        gb: Optional[float] = None
         try:
             # 优先从 context 获取 (缓存)
             if "system_total_memory_gb" in self.context.data:
@@ -147,7 +145,7 @@ class BaseAssemblyStep(abc.ABC):
                 def collect(line): out.append(line)
                 await self.runner.run_command(
                     ["grep", "MemTotal", "/proc/meminfo"],
-                    is_shell=True, on_output=collect
+                    on_output=collect
                 )
                 for line in out:
                     if "MemTotal" in line:
@@ -181,7 +179,7 @@ class BaseAssemblyStep(abc.ABC):
                 self.context.data["system_total_memory_gb"] = gb
                 _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb
                 return gb
-        except Exception as _exc:
-            _s110_logger.debug("BaseAssemblyStep.get_total_memory_gb 忽略非致命异常: %s", _exc)
+        except Exception as exc:
+            self.logger.debug("探测系统物理内存失败，回退默认 16GB: %s", exc)
         _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb or 16.0
         return _CACHED_SYSTEM_TOTAL_MEMORY_GB

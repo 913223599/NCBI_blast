@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from typing import Optional, List, Callable, Union
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class AssemblyFileHandler:
     """
@@ -137,8 +137,8 @@ class AssemblyFileHandler:
             if tmp_p.exists():
                 try:
                     tmp_p.unlink()
-                except Exception as _exc:
-                    _s110_logger.debug("AssemblyFileHandler.extract_and_merge_zip_fastq 忽略非致命异常: %s", _exc)
+                except Exception as exc:
+                    logger.debug("清理临时 FASTQ 文件失败 (%s): %s", tmp_p, exc)
             return False
 
     @staticmethod

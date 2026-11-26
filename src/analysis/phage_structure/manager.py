@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from starlette.concurrency import run_in_threadpool
 
-from ...backend.broadcaster import broadcaster
+from ...core.broadcaster import broadcaster
 from ...workbench.models.tool_config import ToolConfig
 from ..annotation.db import annotation_db
 from ..phage_finder.db import phage_discovery_db

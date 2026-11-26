@@ -18,12 +18,12 @@ def test_global_resource_guard_reserves_cores():
 
     assert get_safe_cpu_budget is phylo_budget
 
-    with patch("src.utils.resource_guard.os.cpu_count", return_value=16):
+    with patch("src.core.resource_guard.os.cpu_count", return_value=16):
         assert get_safe_cpu_budget(0) == 12
         assert get_safe_cpu_budget(16) == 14
         assert get_safe_cpu_budget(4) == 4
 
-    with patch("src.utils.resource_guard.os.cpu_count", return_value=4):
+    with patch("src.core.resource_guard.os.cpu_count", return_value=4):
         assert get_safe_cpu_budget(0) == 3
         assert get_safe_cpu_budget(4) == 2
 
@@ -73,7 +73,10 @@ def test_all_subprocess_run_have_explicit_timeout():
 
 def test_cpu_count_centralized_through_resource_guard():
     violations = []
-    allowed = {PROJECT_ROOT / "src" / "utils" / "resource_guard.py"}
+    allowed = {
+        PROJECT_ROOT / "src" / "core" / "resource_guard.py",
+        PROJECT_ROOT / "src" / "utils" / "resource_guard.py",
+    }
     for p in (PROJECT_ROOT / "src").rglob("*.py"):
         if "__pycache__" in p.parts or p in allowed:
             continue

@@ -1,25 +1,28 @@
 import os
 import logging
 import asyncio
+import re
 import subprocess
 import urllib.request
 from typing import ClassVar, Dict, Any, Optional, List
 import time
 from datetime import datetime
+from ...core.http_guard import validate_http_url
 from ...workbench.models.tool_config import ToolConfig
 from .compat import get_short_path_name
 
 logger = logging.getLogger("api_server")
 
+_SAFE_SCRIPT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
-def build_wsl_script_command(script_name: str) -> Optional[str]:
-    """
-    构造在 WSL 中执行部署脚本的完整命令。
 
-    发行版名称从 WSLManager 动态探测（不再写死 "Ubuntu"）；项目路径带空格时保持引号，
-    避免 `wsl bash /mnt/<drive>/<project_root>/...` 被截断。
+def build_wsl_script_argv(script_name: str) -> Optional[List[str]]:
     """
-    import re
+    构造在 WSL 中执行部署脚本的安全参数列表（避免拼接 shell 字符串）。
+    """
+    if not _SAFE_SCRIPT_NAME_RE.match(script_name or "") or ".." in script_name:
+        raise ValueError(f"非法脚本名称: {script_name!r}")
+
     from ...assembly.env.wsl_manager import WSLManager
 
     project_root = str(ToolConfig.PROJECT_ROOT).replace('\\', '/')
@@ -28,6 +31,17 @@ def build_wsl_script_command(script_name: str) -> Optional[str]:
         return None
     distro = WSLManager.get_best_distro()
     mnt_path = f"/mnt/{m.group(1).lower()}/{m.group(2)}/scripts/{script_name}"
+    return ["wsl", "-d", distro, "-u", "root", "bash", mnt_path]
+
+
+def build_wsl_script_command(script_name: str) -> Optional[str]:
+    """
+    兼容旧调用：构造在 WSL 中执行部署脚本的完整命令字符串。
+    """
+    argv = build_wsl_script_argv(script_name)
+    if not argv:
+        return None
+    distro, mnt_path = argv[2], argv[6]
     return f'wsl -d "{distro}" -u root bash "{mnt_path}"'
 
 class BioDatabase:
@@ -136,14 +150,15 @@ class SilvaDatabase(BioDatabase):
         download_url = self.config.get("url")
         if not download_url:
             raise ValueError(f"No download URL configured for {self.db_id}")
+        safe_url = validate_http_url(str(download_url))
 
         try:
             target_gz = self.base_dir / "download.fasta.gz"
             target_fasta = self.base_dir / "source.fasta"
 
             # 1. 下载 (在后台线程池中运行以防止阻塞 asyncio 事件循环)
-            logger.info(f">>> [Download] 开始载入 {self.name}: {download_url}")
-            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_gz)
+            logger.info(f">>> [Download] 开始载入 {self.name}: {safe_url}")
+            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_gz)
             
             # 2. 解压 (在后台线程池中运行)
             def _extract_gz():
@@ -195,13 +210,23 @@ class SilvaDatabase(BioDatabase):
             except Exception as _exc:
                 logger.debug("SilvaDatabase.build_index 忽略非致命异常: %s", _exc)
 
-        # 构造无空格威胁的命令
-        cmd_str = f'"{tool_path}" -in "source.fasta" -dbtype {db_type} -title "{self.name} {db_ver}" -out "{output_name}"'
-        
-        logger.info(f"执行构建索引 (CWD 短路径: {short_base_dir}): {cmd_str}")
-        
-        process = await asyncio.create_subprocess_shell(
-            cmd_str,
+        # 构造安全参数列表，避免经由 shell 解析
+        cmd_args = [
+            tool_path,
+            "-in",
+            "source.fasta",
+            "-dbtype",
+            db_type,
+            "-title",
+            f"{self.name} {db_ver}",
+            "-out",
+            output_name,
+        ]
+
+        logger.info(f"执行构建索引 (CWD 短路径: {short_base_dir}): {' '.join(cmd_args)}")
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd_args,
             cwd=short_base_dir,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
@@ -234,12 +259,13 @@ class Ncbi16SDatabase(BioDatabase):
         download_url = self.config.get("url")
         if not download_url:
             raise ValueError(f"No download URL configured for {self.db_id}")
+        safe_url = validate_http_url(str(download_url))
         target_gz = self.base_dir / "16S_ribosomal_RNA.tar.gz"
 
         try:
             # 下载与校验逻辑 (在后台线程池中运行以防止阻塞 asyncio 事件循环)
             logger.info(">>> [NCBI] 正在同步 16S 官方库...")
-            await asyncio.to_thread(urllib.request.urlretrieve, download_url, str(target_gz) + ".tmp")
+            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, str(target_gz) + ".tmp")
             
             # (简写校验步骤...)
             os.replace(str(target_gz) + ".tmp", target_gz)
@@ -313,14 +339,14 @@ class PharokkaDatabase(BioDatabase):
                 logger.error(self.last_error)
                 return False
 
-            cmd = build_wsl_script_command("setup_pharokka.sh")
-            if not cmd:
+            argv = build_wsl_script_argv("setup_pharokka.sh")
+            if not argv:
                 self.last_error = "无法解析项目在 WSL 中的挂载路径"
                 logger.error(self.last_error)
                 return False
 
-            logger.info(f">>> [Pharokka] 启动底层部署脚本: {cmd}")
-            proc = await asyncio.create_subprocess_shell(cmd)
+            logger.info(f">>> [Pharokka] 启动底层部署脚本: {' '.join(argv)}")
+            proc = await asyncio.create_subprocess_exec(*argv)
             await proc.communicate()
             
             if proc.returncode == 0:
@@ -352,14 +378,14 @@ class PholdDatabase(BioDatabase):
                 logger.error(self.last_error)
                 return False
 
-            cmd = build_wsl_script_command("setup_phold.sh")
-            if not cmd:
+            argv = build_wsl_script_argv("setup_phold.sh")
+            if not argv:
                 self.last_error = "无法解析项目在 WSL 中的挂载路径"
                 logger.error(self.last_error)
                 return False
 
-            logger.info(f">>> [Phold] 启动底层部署脚本: {cmd}")
-            proc = await asyncio.create_subprocess_shell(cmd)
+            logger.info(f">>> [Phold] 启动底层部署脚本: {' '.join(argv)}")
+            proc = await asyncio.create_subprocess_exec(*argv)
             await proc.communicate()
             
             if proc.returncode == 0:
@@ -397,8 +423,9 @@ class FastaProtDatabase(BioDatabase):
             target_fasta = self.base_dir / "source.fasta"
             prefix = self.config.get("index_prefix", self.db_id)
 
-            logger.info(f">>> [{self.name}] 开始下载: {download_url}")
-            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_gz)
+            safe_url = validate_http_url(str(download_url))
+            logger.info(f">>> [{self.name}] 开始下载: {safe_url}")
+            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_gz)
 
             # 解压
             def _extract():
@@ -416,11 +443,11 @@ class FastaProtDatabase(BioDatabase):
             # 构建 BLAST 蛋白索引
             tool_path = get_short_path_name(str(ToolConfig.get_tool_path("makeblastdb")))
             short_base_dir = get_short_path_name(str(self.base_dir))
-            cmd_str = f'"{tool_path}" -in "source.fasta" -dbtype prot -title "{self.name}" -out "{prefix}"'
+            cmd_args = [tool_path, "-in", "source.fasta", "-dbtype", "prot", "-title", str(self.name), "-out", str(prefix)]
 
-            logger.info(f"[{self.name}] 构建蛋白索引: {cmd_str}")
-            proc = await asyncio.create_subprocess_shell(
-                cmd_str, cwd=short_base_dir,
+            logger.info(f"[{self.name}] 构建蛋白索引: {' '.join(cmd_args)}")
+            proc = await asyncio.create_subprocess_exec(
+                *cmd_args, cwd=short_base_dir,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             await proc.communicate()
@@ -450,9 +477,10 @@ class DefenseFinderDatabase(BioDatabase):
             download_url = self.config.get("url")
             if not isinstance(download_url, str) or not download_url:
                 raise ValueError("DefenseFinder 缺少有效的下载 URL")
+            safe_url = validate_http_url(download_url)
             target_tar = self.base_dir / "defense_finder_models.tar.gz"
             logger.info(">>> [DefenseFinder] 开始同步模型库...")
-            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
+            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_tar)
 
             def _extract():
                 from ...utils.archive_guard import safe_extract_tar
@@ -479,10 +507,10 @@ class CardDatabase(BioDatabase):
 
     async def update_database(self):
         try:
-            download_url = "https://card.mcmaster.ca/latest/data"
+            safe_url = validate_http_url("https://card.mcmaster.ca/latest/data")
             target_tar = self.base_dir / "card_data.tar.bz2"
             logger.info(">>> [CARD] 正在同步耐药数据库...")
-            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
+            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_tar)
 
             def _extract_and_build():
                 from ...utils.archive_guard import safe_extract_tar
@@ -527,9 +555,10 @@ class CddPfamDatabase(BioDatabase):
             download_url = self.config.get("url")
             if not isinstance(download_url, str) or not download_url:
                 raise ValueError("CDD/Pfam 缺少有效的下载 URL")
+            safe_url = validate_http_url(download_url)
             target_tar = self.base_dir / "cdd.tar.gz"
             logger.info(">>> [CDD/Pfam] 正在同步保守结构域数据库...")
-            await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
+            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_tar)
 
             def _extract():
                 from ...utils.archive_guard import safe_extract_tar

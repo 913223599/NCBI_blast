@@ -361,188 +361,194 @@ class BlastManager:
         
         return task_id
 
+    def _migrate_extracted_files(self, files: List[str], seq_storage: Path) -> List[str]:
+        """将分拣暂存区文件归位至当前任务的专属存储目录。"""
+        final_file_paths: List[str] = []
+        for f_path in files:
+            p = Path(f_path)
+            if "extracted" not in p.parts:
+                final_file_paths.append(f_path)
+                continue
+            dest_path = seq_storage / p.name
+            try:
+                if dest_path.exists():
+                    dest_path = seq_storage / f"{p.stem}_{int(time.time())}{p.suffix}"
+                shutil.move(str(p), str(dest_path))
+                final_file_paths.append(str(dest_path))
+            except Exception as e:
+                self.logger.warning(f"Failed to migrate extracted file {p.name}: {e}. Using original path.")
+                final_file_paths.append(f_path)
+        return final_file_paths
+
+    def _collect_sequences_from_paths(self, fh: Any, path_list: List[str]) -> List[Dict[str, Any]]:
+        """从文件或目录列表提取并按优先级去重序列。"""
+        all_extracted_files: List[str] = []
+        for p_str in path_list:
+            p = Path(p_str).resolve()
+            if p.is_dir():
+                all_extracted_files.extend([str(sf) for sf in p.rglob('*') if sf.is_file()])
+            elif p.is_file():
+                all_extracted_files.append(str(p))
+
+        priority_map = {
+            '.fasta': 10, '.fas': 10, '.fa': 10, '.fna': 10,
+            '.seq': 8,
+            '.txt': 5,
+            '.ab1': 3, '.abi': 3,
+            '.nwk': 1, '.newick': 1
+        }
+        dir_groups: Dict[str, Dict[str, List[str]]] = {}
+        for f_path in all_extracted_files:
+            p = Path(f_path)
+            parent = str(p.parent)
+            stem = p.stem.lower()
+            dir_groups.setdefault(parent, {}).setdefault(stem, []).append(f_path)
+
+        target_files: List[str] = []
+        for stems in dir_groups.values():
+            for paths in stems.values():
+                if len(paths) > 1:
+                    paths.sort(key=lambda x: priority_map.get(Path(x).suffix.lower(), 0), reverse=True)
+                target_files.append(paths[0])
+
+        sequences: List[Dict[str, Any]] = []
+        processed_paths = set()
+        for f_path in target_files:
+            if f_path in processed_paths:
+                continue
+            try:
+                count_in_file = 0
+                for seq in fh.read_fasta_file_iter(f_path):
+                    sequences.append(seq)
+                    count_in_file += 1
+                processed_paths.add(f_path)
+                self.logger.debug(f"从 {f_path} 提取了 {count_in_file} 条序列")
+            except Exception as e:
+                self.logger.warning(f"无法从文件 {f_path} 提取序列: {e}")
+        return sequences
+
+    def _parse_manual_query_sequences(self, query_text: str) -> List[Dict[str, Any]]:
+        """解析手动输入的 FASTA 或裸序列。"""
+        text = query_text.strip()
+        if not text:
+            return []
+        if not text.startswith(">"):
+            return [{"id": "Manual_Input", "sequence": text}]
+        import io
+        from Bio import SeqIO
+        try:
+            return [{"id": rec.id, "sequence": str(rec.seq)} for rec in SeqIO.parse(io.StringIO(text), "fasta")]
+        except Exception as e:
+            self.logger.warning(f"Failed to parse query_text as Multi-FASTA: {e}")
+            return [{"id": "Manual_Input", "sequence": text}]
+
+    def _populate_pending_placeholders(self, task: BlastTask, sequences: List[Dict[str, Any]]) -> None:
+        """单事务批量落盘占位结果并通知监听者，使 UI 秒级展示序列列表。"""
+        existing_results = {r.get('sequence_id') for r in self.store.get_results(task.task_id)}
+        pending_batch = []
+        for seq in sequences:
+            seq_id = seq.get('id', 'unknown')
+            if seq_id not in existing_results:
+                pending_batch.append((seq_id, {"sequence_id": seq_id, "status": "pending"}))
+        if not pending_batch:
+            return
+        self.store.save_results_batch(task.task_id, pending_batch)
+        if not self.result_listeners:
+            return
+        for _, pending_data in pending_batch:
+            for cb in self.result_listeners:
+                try:
+                    cb(task.task_id, pending_data)
+                except Exception as exc:
+                    self.logger.warning("Pending 占位回调执行失败 (task=%s): %s", task.task_id, exc)
+
+    def _run_auto_backfill(self, task: BlastTask, auto_task_id: str) -> None:
+        """任务完成后尝试将最佳命中自动回填到关联的 GBK 注释文件。"""
+        try:
+            self.logger.info(f"[AutoBackfill] 触发自动回填任务: {auto_task_id}")
+            from src.core.assembly_gbk_fixer import GBKAnnotationBackfiller
+            from src.core.assembly_storage import AssemblyStorage
+            from src.core.blast_utils import parse_blast_csv
+
+            hits_to_backfill = {}
+            for res in self.get_task_results(task.task_id):
+                csv_file = res.get('csv_file')
+                if csv_file and os.path.exists(csv_file):
+                    top_hits = parse_blast_csv(csv_file, limit=1)
+                    if top_hits:
+                        best = top_hits[0]
+                        hits_to_backfill[res['sequence_id']] = {
+                            "product": best.get('stitle', 'hypothetical protein'),
+                            "evalue": best.get('evalue', 'N/A'),
+                            "accession": best.get('saccession', 'N/A')
+                        }
+            if not hits_to_backfill:
+                return
+
+            task_dir = AssemblyStorage.get_task_dir(auto_task_id)
+            anno_dir = task_dir / "phageannotationstep"
+            phold_gbk = anno_dir / "phold_res" / "phold.gbk"
+            pharokka_gbk = anno_dir / "pharokka_res" / "PHAGE.gbk"
+            base_gbk = phold_gbk if phold_gbk.exists() else pharokka_gbk
+            if base_gbk and base_gbk.exists():
+                GBKAnnotationBackfiller(base_gbk).apply_blast_hits(hits_to_backfill)
+                self.logger.info(f"[AutoBackfill] 自动回填完成，更新了 {len(hits_to_backfill)} 个蛋白注释。")
+            else:
+                self.logger.warning(f"[AutoBackfill] 跳过自动回填: 未找到基础 GBK 文件: {anno_dir}")
+        except Exception as eb:
+            self.logger.error(f"[AutoBackfill] 自动回填异常: {eb}", exc_info=True)
+
     def _run_task(self, task: BlastTask):
         """Internal execution loop using the new Pipe Engine."""
         try:
             task.transition_to(TaskStatus.RUNNING)
             self.store.save_task(task)
 
-            # [FIX] 设置任务独立的序列存储目录，将分拣文件归位，便于按任务管理和清理
             task_dir = self.results_dir / task.task_id
             seq_storage = task_dir / "sequences"
             seq_storage.mkdir(parents=True, exist_ok=True)
 
-            # Setup Sequences
             from src.utils.file_handler import FileHandler
-            import shutil
             fh = FileHandler()
-            sequences = []
-            
-            # 处理选中的文件
-            final_file_paths = []
-            for f_path in task.params.get("files", []):
-                p = Path(f_path)
-                # 识别是否属于“分拣暂存区”的文件
-                if "extracted" in p.parts:
-                    # 将分拣出的临时文件迁移到当前任务的专属目录
-                    dest_path = seq_storage / p.name
-                    try:
-                        # 如果目标已存在（可能有同名文件），增加后缀防止覆盖
-                        if dest_path.exists():
-                           dest_path = seq_storage / f"{p.stem}_{int(time.time())}{p.suffix}"
-                        shutil.move(str(p), str(dest_path))
-                        final_file_paths.append(str(dest_path))
-                    except Exception as e:
-                        self.logger.warning(f"Failed to migrate extracted file {p.name}: {e}. Using original path.")
-                        final_file_paths.append(f_path)
-                else:
-                    final_file_paths.append(f_path)
-            # 更新 Task Params 中的文件路径，确保持久化后的 params.json 指向归位后的文件
+            final_file_paths = self._migrate_extracted_files(task.params.get("files", []), seq_storage)
             task.params["files"] = final_file_paths
 
-            # 提取序列内容
-            # 提取序列内容
-            def collect_sequences(path_list):
-                # 预处理：按路径去重，并处理目录
-                target_files = []
-                # 记录已添加的绝对路径，防止重复处理同一文件
-                processed_paths = set()
-                
-                # 内部整理函数
-                def get_all_files(ps):
-                    files = []
-                    for p_str in ps:
-                        p = Path(p_str).resolve()
-                        if p.is_dir():
-                            # 递归扫描目录
-                            files.extend([str(sf) for sf in p.rglob('*') if sf.is_file()])
-                        elif p.is_file():
-                            files.append(str(p))
-                    return files
-
-                all_extracted_files = get_all_files(path_list)
-                
-                # 统一优先级映射：数值越大优先级越高 (与 api_server.py 对齐)
-                priority_map = {
-                    '.fasta': 10, '.fas': 10, '.fa': 10, '.fna': 10,
-                    '.seq': 8,
-                    '.txt': 5,
-                    '.ab1': 3, '.abi': 3,
-                    '.nwk': 1, '.newick': 1
-                }
-                
-                # 改进的去重：仅对同一目录下的同名文件进行格式优选 (e.g. sample.seq vs sample.ab1)
-                # 而不同目录下的同名文件 (e.g. a/1.seq vs b/1.seq) 应该全部保留
-                dir_groups = {} # parent_dir -> { stem -> [full_paths] }
-                
-                for f_path in all_extracted_files:
-                    p = Path(f_path)
-                    parent = str(p.parent)
-                    stem = p.stem.lower()
-                    if parent not in dir_groups:
-                        dir_groups[parent] = {}
-                    if stem not in dir_groups[parent]:
-                        dir_groups[parent][stem] = []
-                    dir_groups[parent][stem].append(f_path)
-                
-                for stems in dir_groups.values():
-                    for paths in stems.values():
-                        if len(paths) == 1:
-                            target_files.append(paths[0])
-                        else:
-                            # [FIX] 与 api_server 对齐，使用 reverse=True 配合 大值优先
-                            paths.sort(key=lambda x: priority_map.get(Path(x).suffix.lower(), 0), reverse=True)
-                            target_files.append(paths[0])
-
-                # 执行读取
-                for f_path in target_files:
-                    if f_path in processed_paths:
-                        continue
-                    try:
-                        count_in_file = 0
-                        for seq in fh.read_fasta_file_iter(f_path):
-                            sequences.append(seq)
-                            count_in_file += 1
-                        processed_paths.add(f_path)
-                        self.logger.debug(f"从 {f_path} 提取了 {count_in_file} 条序列")
-                    except Exception as e:
-                        self.logger.warning(f"无法从文件 {f_path} 提取序列: {e}")
-
-            collect_sequences(final_file_paths)
-           
-            # Extract from query text (Support Multi-FASTA parse)
-            query_text = task.params.get("query", "").strip()
-            if query_text:
-                if query_text.startswith(">"):
-                    import io
-                    from Bio import SeqIO
-                    try:
-                        for rec in SeqIO.parse(io.StringIO(query_text), "fasta"):
-                            sequences.append({"id": rec.id, "sequence": str(rec.seq)})
-                    except Exception as e:
-                        self.logger.warning(f"Failed to parse query_text as Multi-FASTA: {e}")
-                        sequences.append({"id": "Manual_Input", "sequence": query_text})
-                else:
-                    sequences.append({"id": "Manual_Input", "sequence": query_text})
-
+            sequences = self._collect_sequences_from_paths(fh, final_file_paths)
+            sequences.extend(self._parse_manual_query_sequences(task.params.get("query", "")))
             if not sequences:
                 raise ValueError("没有检测到有效序列")
 
-            # Initialize Engine
             engine = BlastEngine(task.task_id, task.params)
-            task.engine = engine # Track for cancellation
+            task.engine = engine
 
-            # Pre-populate placeholders so UI shows the entire list instantly (单事务批量落盘)
-            existing_results = {r.get('sequence_id') for r in self.store.get_results(task.task_id)}
-            pending_batch = []
-            for seq in sequences:
-                seq_id = seq.get('id', 'unknown')
-                if seq_id not in existing_results:
-                    pending_data = {
-                        "sequence_id": seq_id,
-                        "status": "pending"
-                    }
-                    pending_batch.append((seq_id, pending_data))
-
-            if pending_batch:
-                self.store.save_results_batch(task.task_id, pending_batch)
-                if self.result_listeners:
-                    for _, pending_data in pending_batch:
-                        for cb in self.result_listeners:
-                            try:
-                                cb(task.task_id, pending_data)
-                            except Exception as _exc:
-                                logger.debug("BlastManager._run_task 忽略非致命异常: %s", _exc)
+            self._populate_pending_placeholders(task, sequences)
 
             seq_lookup: Dict[str, str] = {}
             for s in sequences:
                 sid = s.get('id')
-                if sid and sid not in seq_lookup:
-                    seq_lookup[sid] = s.get('sequence')
+                seq_val = s.get('sequence')
+                if sid and isinstance(seq_val, str) and sid not in seq_lookup:
+                    seq_lookup[sid] = seq_val
             max_in_memory_results = 500
 
             def on_progress(comp, total, info):
-                new_prog = int(comp/total * 100)
-                # Prevent progress bar rollback during breakpoint resuming (cached tasks loading)
+                new_prog = int(comp / total * 100)
                 if new_prog >= getattr(task, 'progress', 0) or comp == total:
                     task.progress = new_prog
                     self.store.save_task(task)
 
             def on_result(data):
-                # 为了支持一键入库，将原始序列内容回填到结果对象中并落盘 (O(1) 哈希查找，同名 ID 首条优先)
                 seq_id = data.get('sequence_id')
-                if seq_id:
-                    original_seq = seq_lookup.get(seq_id)
+                if seq_id and seq_id in seq_lookup:
+                    original_seq = seq_lookup[seq_id]
                     if original_seq:
                         data['raw_sequence'] = original_seq
 
-                # 分片落盘至 SQLite；内存列表严格封顶在 500 条以内以防大批量任务 OOM
                 self.store.save_result(task.task_id, data.get('sequence_id', '?'), data)
                 task.result_count += 1
                 if len(task.results) < max_in_memory_results:
                     task.results.append(data)
 
-                # Notify active listeners (for real-time UI streaming)
                 for callback in self.result_listeners:
                     try:
                         callback(task.task_id, data)
@@ -551,61 +557,19 @@ class BlastManager:
 
             engine.progress_callback = on_progress
             engine.result_callback = on_result
-            
-            # Run
             engine.run(sequences)
 
-            # Cleanup
             task.transition_to(TaskStatus.COMPLETED)
             self.store.save_task(task)
 
-            # 自动回填逻辑 (GBK/PHAGE 注释回填)
             auto_task_id = task.params.get("auto_backfill_task_id")
             if auto_task_id:
-                try:
-                    self.logger.info(f"[AutoBackfill] 触发自动回填任务: {auto_task_id}")
-                    from src.core.assembly_storage import AssemblyStorage
-                    from src.core.assembly_gbk_fixer import GBKAnnotationBackfiller
-                    from src.core.blast_utils import parse_blast_csv
-                    
-                    # 1. 搜集所有 Hit 结果
-                    hits_to_backfill = {}
-                    task_results = self.get_task_results(task.task_id)
-                    for res in task_results:
-                        csv_file = res.get('csv_file')
-                        if csv_file and os.path.exists(csv_file):
-                            top_hits = parse_blast_csv(csv_file, limit=1)
-                            if top_hits:
-                                best = top_hits[0]
-                                # 保持与 apply_blast_hits 预期的格式一致
-                                hits_to_backfill[res['sequence_id']] = {
-                                    "product": best.get('stitle', 'hypothetical protein'),
-                                    "evalue": best.get('evalue', 'N/A'),
-                                    "accession": best.get('saccession', 'N/A')
-                                }
-                    
-                    if hits_to_backfill:
-                        # 2. 定位 GBK 文件并应用
-                        task_dir = AssemblyStorage.get_task_dir(auto_task_id)
-                        anno_dir = task_dir / "phageannotationstep"
-                        phold_gbk = anno_dir / "phold_res" / "phold.gbk"
-                        pharokka_gbk = anno_dir / "pharokka_res" / "PHAGE.gbk"
-                        base_gbk = phold_gbk if phold_gbk.exists() else pharokka_gbk
-                        
-                        if base_gbk and base_gbk.exists():
-                            fixer = GBKAnnotationBackfiller(base_gbk)
-                            fixer.apply_blast_hits(hits_to_backfill)
-                            self.logger.info(f"[AutoBackfill] 自动回填完成，更新了 {len(hits_to_backfill)} 个蛋白注释。")
-                        else:
-                            self.logger.warning(f"[AutoBackfill] 跳过自动回填: 未找到基础 GBK 文件: {anno_dir}")
-                except Exception as eb:
-                    self.logger.error(f"[AutoBackfill] 自动回填异常: {eb}", exc_info=True)
+                self._run_auto_backfill(task, auto_task_id)
 
         except Exception as e:
             self.logger.error(f"Task {task.task_id} failed: {e}", exc_info=True)
-            # 只有非 Cancelled 的才置为 Failed
             if task.status != TaskStatus.CANCELLED:
-                 task.transition_to(TaskStatus.FAILED, error_msg=str(e))
+                task.transition_to(TaskStatus.FAILED, error_msg=str(e))
             self.store.save_task(task)
 
     def stop_task(self, task_id: str):

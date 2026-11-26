@@ -12,7 +12,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from src.utils.taxonomy_provider import get_taxonomy_provider  # noqa: E402
-from src.utils.taxonomy_sync_service import get_taxonomy_sync_service  # noqa: E402
+from src.backend.services.taxonomy_sync_service import get_taxonomy_sync_service  # noqa: E402
 
 # 1. 定义常见病原菌属列表
 PATHOGENIC_GENERA = [

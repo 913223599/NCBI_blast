@@ -6,6 +6,7 @@
 import logging
 import re
 from pathlib import Path
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 _VALID_TOPIC_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -56,7 +57,7 @@ class HelpManager:
         Returns:
             list: [{"category": str, "topics": [{"id": str, "title": str}, ...]}, ...]
         """
-        raw_structure = [
+        raw_structure: List[Dict[str, Any]] = [
             {
                 "category": "入门指南",
                 "topics": [

@@ -18,7 +18,7 @@ from scipy.spatial.distance import squareform
 from ..models import ViridicRenderRequest
 from ..palette import apply_journal_rcparams, draw_suptitle, draw_text, get_journal_palette, save_publication_figure
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _SIM_CMAP_NATURE = LinearSegmentedColormap.from_list(
     "viridic_sim",
@@ -70,8 +70,8 @@ def _reorder_data(
                 [lengths[i] for i in order],
                 None,
             )
-        except Exception as _exc:
-            _s110_logger.debug("_reorder_data 忽略非致命异常: %s", _exc)
+        except Exception as exc:
+            logger.debug("VIRIDIC 矩阵聚类重排失败，保留原始顺序: %s", exc)
 
     dist = np.clip(100.0 - 0.5 * (wg + wg.T), 0.0, 100.0)
     np.fill_diagonal(dist, 0.0)

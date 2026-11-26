@@ -1,10 +1,11 @@
 import asyncio
+import os
 import re
 import logging
+import shlex
 import time
 from pathlib import Path
 from typing import List, Optional, Dict, Callable, Union
-_s110_logger = logging.getLogger(__name__)
 
 class CommandRunner:
     """
@@ -15,6 +16,7 @@ class CommandRunner:
         self.step_name = step_name
         self.logger = logger or logging.getLogger(f"Assembly.{step_name}")
         self.is_wsl = is_wsl
+        self.is_aborted: bool = False
         self.current_process: Optional[asyncio.subprocess.Process] = None
 
     def terminate(self):
@@ -42,70 +44,55 @@ class CommandRunner:
             self.logger.warning(" 任务已终止，拒绝执行后续命令")
             return -99
 
+        if is_shell:
+            self.logger.warning("CommandRunner.run_command(is_shell=True) 已废弃，将按安全参数列表模式执行")
+
         # ==========================================
         # 1. 参数清洗与路径转换
         # ==========================================
-        final_cmd_args = []
+        raw_args: List[str]
         if isinstance(cmd, list):
-            for arg in cmd:
-                arg_str = arg.replace('\\', '/') if isinstance(arg, str) else str(arg).replace('\\', '/')
-                if self.is_wsl and not arg_str.startswith(("http", "ftp")) and re.match(r'^[A-Za-z]:/', arg_str):
-                    from ..env.wsl_manager import WSLManager
-                    final_cmd_args.append(WSLManager.to_wsl_path(arg_str))
-                else:
-                    final_cmd_args.append(arg_str)
+            raw_args = [str(arg) for arg in cmd]
         else:
-            # 字符串模式直接透传，信任调用者已经处理好路径或使用相对路径
-            final_cmd_args = [cmd]
+            raw_args = shlex.split(str(cmd), posix=(self.is_wsl or os.name != "nt"))
+
+        final_cmd_args: List[str] = []
+        for arg_raw in raw_args:
+            arg_str = arg_raw.replace('\\', '/')
+            if self.is_wsl and not arg_str.startswith(("http", "ftp")) and re.match(r'^[A-Za-z]:/', arg_str):
+                from ..env.wsl_manager import WSLManager
+                final_cmd_args.append(WSLManager.to_wsl_path(arg_str))
+            else:
+                final_cmd_args.append(arg_str)
 
         # ==========================================
-        # 2. 跨平台执行指令构建
+        # 2. 跨平台执行指令构建 (统一 argv，禁用 shell 解析)
         # ==========================================
         if self.is_wsl:
             from ..env.wsl_manager import WSLManager
             distro = WSLManager.get_best_distro()
-            if is_shell:
-                shell_str = " ".join([str(c) for c in final_cmd_args])
-                cmd_to_exec = ["wsl", "-d", distro, "-u", "root", "bash", "-c", shell_str]
-                use_shell = False 
-            else:
-                cmd_to_exec = ["wsl", "-d", distro, "-u", "root"] + [str(c) for c in final_cmd_args]
-                use_shell = False
-            cwd_to_exec = None 
+            cmd_to_exec = ["wsl", "-d", distro, "-u", "root", *final_cmd_args]
+            cwd_to_exec = None
         else:
-            if is_shell:
-                cmd_to_exec = " ".join([str(c) for c in final_cmd_args])
-                use_shell = True
-            else:
-                cmd_to_exec = final_cmd_args
-                use_shell = False
+            cmd_to_exec = final_cmd_args
             cwd_to_exec = str(cwd) if cwd else None
 
         # ==========================================
         # 3. 异步进程监控与执行
         # ==========================================
         start_time = time.time()
-        display_cmd = cmd_to_exec if isinstance(cmd_to_exec, str) else " ".join(cmd_to_exec)
+        display_cmd = " ".join(cmd_to_exec)
         timeout_desc = f"{timeout/3600:.1f}h" if timeout else "无限制"
         self.logger.info(f"开始执行 (超时: {timeout_desc}): {display_cmd}")
 
         try:
-            if use_shell:
-                process = await asyncio.create_subprocess_shell(
-                    str(cmd_to_exec),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd_to_exec,
-                    env=env
-                )
-            else:
-                process = await asyncio.create_subprocess_exec(
-                    *cmd_to_exec,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=cwd_to_exec,
-                    env=env
-                )
+            process = await asyncio.create_subprocess_exec(
+                *cmd_to_exec,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd_to_exec,
+                env=env
+            )
             
             self.current_process = process
 
@@ -140,8 +127,8 @@ class CommandRunner:
                         read_stream(process.stdout, False),
                         read_stream(process.stderr, True)
                     )
-                except Exception as _exc:
-                    _s110_logger.debug("CommandRunner.run_command._run 忽略非致命异常: %s", _exc)
+                except Exception as exc:
+                    self.logger.warning("读取子进程输出流发生异常: %s", exc)
                 return await process.wait()
 
             try:
@@ -153,8 +140,8 @@ class CommandRunner:
                     await asyncio.sleep(1)
                     if process.returncode is None:
                         process.kill()
-                except Exception as _exc:
-                    _s110_logger.debug("CommandRunner.run_command 忽略非致命异常: %s", _exc)
+                except Exception as exc:
+                    self.logger.debug("超时终止子进程时忽略已退出状态: %s", exc)
                 return -9
 
             self.current_process = None

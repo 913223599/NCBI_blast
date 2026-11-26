@@ -45,35 +45,10 @@ if TYPE_CHECKING:
     from ..pipeline.postprocess import PhyloNode
 
 
-def _draw_rectangular_on_axes(
-    ax_tree: plt.Axes,
-    strip_axes: Dict[str, plt.Axes],
-    root: "PhyloNode",
-    leaves: List["PhyloNode"],
-    node_metadata: Dict[str, Dict[str, Any]],
-    display_labels: Dict[str, str],
-    taxon_colors: Dict[str, str],
-    other_taxa: Set[str],
-    rank_field: str,
-    leaf_phylum: Dict[str, str],
-    phylum_colors: Dict[str, str],
-    clades: List[MonophyleticClade],
-    palette: JournalPalette,
-    req: PublicationFigureRequest,
-    max_len_kb: float,
-    gc_range: Tuple[float, float],
-    panel_label: Optional[str] = None,
-) -> None:
-    """在指定矩形树 Axes 及右侧轨道 Axes 上绘制高清矩形进化树。"""
+def _assign_rectangular_y_positions(root: "PhyloNode", leaves: List["PhyloNode"]) -> Dict[int, float]:
+    """为矩形进化树的所有节点分配自顶向下的 Y 坐标。"""
     n_leaves = len(leaves)
-    depths = _compute_node_depths(root, req.use_branch_lengths)
-    max_depth = max(depths.values()) or 1.0
-    lw_scale = _resolve_lw_scale(req.journal_width)
-    dense_mode = n_leaves > 45
-
-    y_pos: Dict[int, float] = {}
-    for idx, lf in enumerate(leaves):
-        y_pos[id(lf)] = float(n_leaves - 1 - idx)
+    y_pos: Dict[int, float] = {id(lf): float(n_leaves - 1 - idx) for idx, lf in enumerate(leaves)}
 
     def _assign_y(node: "PhyloNode") -> float:
         if node.is_leaf:
@@ -84,50 +59,70 @@ def _draw_rectangular_on_axes(
         return val
 
     _assign_y(root)
+    return y_pos
 
-    max_chars = max((len(display_labels.get(lf.name, lf.name)) for lf in leaves), default=12)
-    label_pad = max_depth * 0.032
-    right_margin = max_depth * max(0.45, min(2.05, max_chars * 0.024))
-    label_font = 6.2 if dense_mode else max(6.4, min(8.2, 240.0 / max(24, n_leaves)))
-    if req.journal_width == "single_col":
-        label_font = max(5.2, label_font * 0.88)
 
-    # 1. 单系支系柔和背景阴影（仅专属有色分类，绝不画脏灰条）
-    if req.show_clade_shading and clades:
-        shade_right = max_depth + label_pad + right_margin * 0.94
-        for cl in clades:
-            x_left = max(0.0, depths[id(cl.node)] - max_depth * 0.006)
-            y_top = float(n_leaves - 1 - cl.leaf_start_idx) + 0.42
-            y_bot = float(n_leaves - 1 - cl.leaf_end_idx) - 0.42
-            ax_tree.add_patch(
-                Rectangle(
-                    (x_left, y_bot),
-                    shade_right - x_left,
-                    y_top - y_bot,
-                    facecolor=cl.color,
-                    alpha=palette.clade_alpha,
-                    edgecolor="none",
-                    zorder=0.6,
-                )
+def _draw_clade_shading(
+    ax_tree: plt.Axes,
+    clades: List[MonophyleticClade],
+    depths: Dict[int, float],
+    max_depth: float,
+    label_pad: float,
+    right_margin: float,
+    n_leaves: int,
+    has_strip_axes: bool,
+    palette: JournalPalette,
+    lw_scale: float,
+    label_font: float,
+) -> None:
+    """绘制单系支系柔和背景阴影及无轨道时的右侧支系括号标签。"""
+    shade_right = max_depth + label_pad + right_margin * 0.94
+    for cl in clades:
+        x_left = max(0.0, depths[id(cl.node)] - max_depth * 0.006)
+        y_top = float(n_leaves - 1 - cl.leaf_start_idx) + 0.42
+        y_bot = float(n_leaves - 1 - cl.leaf_end_idx) - 0.42
+        ax_tree.add_patch(
+            Rectangle(
+                (x_left, y_bot),
+                shade_right - x_left,
+                y_top - y_bot,
+                facecolor=cl.color,
+                alpha=palette.clade_alpha,
+                edgecolor="none",
+                zorder=0.6,
             )
-            if not strip_axes:
-                bx = shade_right + max_depth * 0.015
-                ax_tree.plot([bx, bx], [y_bot + 0.06, y_top - 0.06], color=cl.color, linewidth=1.3 * lw_scale, zorder=3)
-                _draw_text(
-                    ax_tree,
-                    bx + max_depth * 0.015,
-                    (y_top + y_bot) * 0.5,
-                    cl.taxon_name,
-                    fontsize=max(5.8, label_font * 0.9),
-                    fontstyle="italic" if is_formal_taxon_name(cl.taxon_name) else "normal",
-                    fontweight="bold",
-                    color=cl.color,
-                    va="center",
-                    ha="left",
-                    zorder=5,
-                )
+        )
+        if not has_strip_axes:
+            bx = shade_right + max_depth * 0.015
+            ax_tree.plot([bx, bx], [y_bot + 0.06, y_top - 0.06], color=cl.color, linewidth=1.3 * lw_scale, zorder=3)
+            _draw_text(
+                ax_tree,
+                bx + max_depth * 0.015,
+                (y_top + y_bot) * 0.5,
+                cl.taxon_name,
+                fontsize=max(5.8, label_font * 0.9),
+                fontstyle="italic" if is_formal_taxon_name(cl.taxon_name) else "normal",
+                fontweight="bold",
+                color=cl.color,
+                va="center",
+                ha="left",
+                zorder=5,
+            )
 
-    # 2. 主树分支线段
+
+def _draw_rectangular_branches(
+    ax_tree: plt.Axes,
+    root: "PhyloNode",
+    depths: Dict[int, float],
+    y_pos: Dict[int, float],
+    node_metadata: Dict[str, Dict[str, Any]],
+    taxon_colors: Dict[str, str],
+    other_taxa: Set[str],
+    palette: JournalPalette,
+    lw_scale: float,
+    rank_field: str,
+) -> None:
+    """收集并批量绘制矩形进化树主分支线段。"""
     segments: List[List[Tuple[float, float]]] = []
     seg_cols: List[str] = []
     seg_lws: List[float] = []
@@ -160,7 +155,25 @@ def _draw_rectangular_on_axes(
             )
         )
 
-    # 3. 叶节点点线对齐与去贴纸标签
+
+def _draw_rectangular_leaf_tips(
+    ax_tree: plt.Axes,
+    leaves: List["PhyloNode"],
+    depths: Dict[int, float],
+    y_pos: Dict[int, float],
+    max_depth: float,
+    label_pad: float,
+    label_font: float,
+    display_labels: Dict[str, str],
+    node_metadata: Dict[str, Dict[str, Any]],
+    taxon_colors: Dict[str, str],
+    other_taxa: Set[str],
+    palette: JournalPalette,
+    lw_scale: float,
+    rank_field: str,
+    show_query_star: bool,
+) -> None:
+    """绘制叶节点虚线对齐、Query 星标及叶标签文字。"""
     for lf in leaves:
         x_tip = depths[id(lf)]
         y_tip = y_pos[id(lf)]
@@ -177,7 +190,7 @@ def _draw_rectangular_on_axes(
                 linestyle=":",
                 zorder=1,
             )
-        if role == "query" and req.show_query_star:
+        if role == "query" and show_query_star:
             ax_tree.scatter(
                 [x_tip],
                 [y_tip],
@@ -188,7 +201,6 @@ def _draw_rectangular_on_axes(
                 linewidth=0.35,
                 zorder=6,
             )
-
         _draw_text(
             ax_tree,
             max_depth + label_pad,
@@ -202,173 +214,158 @@ def _draw_rectangular_on_axes(
             zorder=5,
         )
 
-    # 4. 内部节点支持率（非密集模式直接显示 >= 70% 支持率数值与精细圆点）
-    if req.support_style != "none":
-        dot_s_strong = 10.0 if dense_mode else 12.0 * lw_scale
-        dot_s_mod = 8.0 if dense_mode else 10.0 * lw_scale
 
-        def _draw_sup(node: "PhyloNode") -> None:
-            if not node.is_leaf and node is not root:
-                txt, uf_val = _format_support_text(node.name)
-                xn = depths[id(node)]
-                yn = y_pos[id(node)]
-                if uf_val is not None and req.support_style in ("dots", "both"):
-                    if uf_val >= 95.0:
-                        ax_tree.scatter(
-                            [xn],
-                            [yn],
-                            s=dot_s_strong,
-                            facecolor=palette.strong_dot_color,
-                            edgecolor="white",
-                            linewidth=0.4,
-                            zorder=6,
-                        )
-                    elif uf_val >= 80.0:
-                        ax_tree.scatter(
-                            [xn],
-                            [yn],
-                            s=dot_s_mod,
-                            facecolor="#ffffff",
-                            edgecolor=palette.moderate_dot_edge,
-                            linewidth=0.75,
-                            zorder=6,
-                        )
-                if txt and (
-                    req.support_style in ("text", "both")
-                    or (not dense_mode and uf_val is not None and uf_val >= 70.0)
-                ):
-                    _draw_text(
-                        ax_tree,
-                        xn - max_depth * 0.010,
-                        yn + 0.14,
-                        txt,
-                        fontsize=max(4.8, label_font * 0.72),
-                        color="#1e293b" if (uf_val or 0) >= 95.0 else "#64748b",
-                        ha="right",
-                        va="bottom",
-                        zorder=7,
+def _draw_support_values(
+    ax_tree: plt.Axes,
+    root: "PhyloNode",
+    depths: Dict[int, float],
+    y_pos: Dict[int, float],
+    max_depth: float,
+    label_font: float,
+    dense_mode: bool,
+    lw_scale: float,
+    palette: JournalPalette,
+    support_style: str,
+) -> None:
+    """绘制内部节点支持率圆点与数值标注。"""
+    dot_s_strong = 10.0 if dense_mode else 12.0 * lw_scale
+    dot_s_mod = 8.0 if dense_mode else 10.0 * lw_scale
+
+    def _draw_sup(node: "PhyloNode") -> None:
+        if not node.is_leaf and node is not root:
+            txt, uf_val = _format_support_text(node.name)
+            xn = depths[id(node)]
+            yn = y_pos[id(node)]
+            if uf_val is not None and support_style in ("dots", "both"):
+                if uf_val >= 95.0:
+                    ax_tree.scatter(
+                        [xn], [yn], s=dot_s_strong, facecolor=palette.strong_dot_color,
+                        edgecolor="white", linewidth=0.4, zorder=6,
                     )
-            for ch in node.children:
-                _draw_sup(ch)
-
-        _draw_sup(root)
-
-    extra_bracket = max_depth * 0.14 if (req.show_clade_shading and clades and not strip_axes) else 0.0
-    ax_tree.set_xlim(-max_depth * 0.04, max_depth + label_pad + right_margin + extra_bracket)
-    y_min_lim = -1.15
-    y_max_lim = n_leaves - 0.15
-    ax_tree.set_ylim(y_min_lim, y_max_lim)
-    ax_tree.axis("off")
-
-    if panel_label:
-        _draw_text(
-            ax_tree,
-            -max_depth * 0.035,
-            y_max_lim - 0.05,
-            panel_label,
-            fontsize=13.5,
-            fontweight="bold",
-            color="#0f172a",
-            ha="left",
-            va="top",
-            zorder=10,
-        )
-
-    if req.use_branch_lengths and max_depth > 0:
-        sb_val, sb_text = compute_nice_scale_bar(max_depth)
-        ax_tree.plot([0.0, sb_val], [-0.68, -0.68], color="#0f172a", linewidth=1.2 * lw_scale)
-        ax_tree.plot([0.0, 0.0], [-0.80, -0.56], color="#0f172a", linewidth=0.95 * lw_scale)
-        ax_tree.plot([sb_val, sb_val], [-0.80, -0.56], color="#0f172a", linewidth=0.95 * lw_scale)
-        _draw_text(
-            ax_tree,
-            sb_val * 0.5,
-            -0.44,
-            f"{sb_text} substitutions/site",
-            fontsize=6.8,
-            ha="center",
-            color="#334155",
-        )
-
-    latin_font = resolve_latin_font()
-
-    # 5. 右侧轨道：非密集模式下合并垂直属色条 + 直接标注斜体属名
-    if "taxon" in strip_axes:
-        ax_s = strip_axes["taxon"]
-        ax_s.set_ylim(y_min_lim, y_max_lim)
-        ax_s.axis("off")
-        rank_hdr = "Family" if rank_field == "family" else "Genus"
-        if not dense_mode:
-            ax_s.set_xlim(0, 1.85)
-            ax_s.set_title(rank_hdr, fontsize=7.5, fontweight="bold", fontfamily=latin_font, color="#0f172a", pad=4, loc="left")
-
-            def _leaf_label_key(lf: "PhyloNode") -> Tuple[str, str]:
-                meta = node_metadata.get(lf.name, {})
-                role = str(meta.get("role") or "").lower()
-                if role == "query":
-                    return "Query", palette.query_color
-                if role == "outgroup":
-                    return "Outgroup", palette.outgroup_color
-                t_val = str(meta.get(rank_field) or "").strip()
-                if t_val in taxon_colors:
-                    return t_val, taxon_colors[t_val]
-                if t_val in other_taxa:
-                    return t_val, _OTHER_TAXON_COLOR
-                return "Unclassified", _UNCLASSIFIED_LIGHT_COLOR
-
-            runs: List[Tuple[int, int, str, str]] = []
-            for idx, lf in enumerate(leaves):
-                t_lbl, t_col = _leaf_label_key(lf)
-                if runs and runs[-1][2] == t_lbl and runs[-1][3] == t_col:
-                    prev_s, _, _, _ = runs[-1]
-                    runs[-1] = (prev_s, idx, t_lbl, t_col)
-                else:
-                    runs.append((idx, idx, t_lbl, t_col))
-
-            for s_idx, e_idx, t_lbl, t_col in runs:
-                y_top_bar = y_pos[id(leaves[s_idx])] + 0.38
-                y_bot_bar = y_pos[id(leaves[e_idx])] - 0.38
-                ax_s.add_patch(
-                    Rectangle(
-                        (0.02, y_bot_bar),
-                        0.15,
-                        y_top_bar - y_bot_bar,
-                        facecolor=t_col,
-                        edgecolor="white",
-                        linewidth=0.35,
+                elif uf_val >= 80.0:
+                    ax_tree.scatter(
+                        [xn], [yn], s=dot_s_mod, facecolor="#ffffff",
+                        edgecolor=palette.moderate_dot_edge, linewidth=0.75, zorder=6,
                     )
-                )
-                is_italic = is_formal_taxon_name(t_lbl)
+            if txt and (
+                support_style in ("text", "both")
+                or (not dense_mode and uf_val is not None and uf_val >= 70.0)
+            ):
                 _draw_text(
-                    ax_s,
-                    0.23,
-                    (y_top_bar + y_bot_bar) * 0.5,
-                    t_lbl,
-                    fontsize=max(5.6, label_font * 0.88),
-                    fontstyle="italic" if is_italic else "normal",
-                    fontweight="bold" if t_lbl == "Query" else "normal",
-                    color=palette.query_text_color if t_lbl == "Query" else ("#64748b" if t_lbl in ("Unclassified", "Outgroup") else "#1e293b"),
-                    va="center",
-                    ha="left",
+                    ax_tree,
+                    xn - max_depth * 0.010,
+                    yn + 0.14,
+                    txt,
+                    fontsize=max(4.8, label_font * 0.72),
+                    color="#1e293b" if (uf_val or 0) >= 95.0 else "#64748b",
+                    ha="right",
+                    va="bottom",
+                    zorder=7,
                 )
+        for ch in node.children:
+            _draw_sup(ch)
+
+    _draw_sup(root)
+
+
+def _draw_taxon_strip(
+    ax_s: plt.Axes,
+    leaves: List["PhyloNode"],
+    y_pos: Dict[int, float],
+    node_metadata: Dict[str, Dict[str, Any]],
+    taxon_colors: Dict[str, str],
+    other_taxa: Set[str],
+    rank_field: str,
+    palette: JournalPalette,
+    latin_font: str,
+    label_font: float,
+    dense_mode: bool,
+    y_min_lim: float,
+    y_max_lim: float,
+) -> None:
+    """绘制分类单元（属/科）右侧色条轨道。"""
+    ax_s.set_ylim(y_min_lim, y_max_lim)
+    ax_s.axis("off")
+    rank_hdr = "Family" if rank_field == "family" else "Genus"
+
+    def _leaf_label_key(lf: "PhyloNode") -> Tuple[str, str]:
+        meta = node_metadata.get(lf.name, {})
+        role = str(meta.get("role") or "").lower()
+        if role == "query":
+            return "Query", palette.query_color
+        if role == "outgroup":
+            return "Outgroup", palette.outgroup_color
+        t_val = str(meta.get(rank_field) or "").strip()
+        if t_val in taxon_colors:
+            return t_val, taxon_colors[t_val]
+        if t_val in other_taxa:
+            return t_val, _OTHER_TAXON_COLOR
+        return "Unclassified", _UNCLASSIFIED_LIGHT_COLOR
+
+    if dense_mode:
+        ax_s.set_xlim(0, 1)
+        ax_s.set_title(rank_hdr, fontsize=7.5, fontweight="bold", fontfamily=latin_font, color="#0f172a", pad=4)
+        for lf in leaves:
+            y_tip = y_pos[id(lf)]
+            _, col = _leaf_label_key(lf)
+            ax_s.add_patch(Rectangle((0.08, y_tip - 0.36), 0.84, 0.72, facecolor=col, edgecolor="white", linewidth=0.25))
+        return
+
+    ax_s.set_xlim(0, 1.85)
+    ax_s.set_title(rank_hdr, fontsize=7.5, fontweight="bold", fontfamily=latin_font, color="#0f172a", pad=4, loc="left")
+    runs: List[Tuple[int, int, str, str]] = []
+    for idx, lf in enumerate(leaves):
+        t_lbl, t_col = _leaf_label_key(lf)
+        if runs and runs[-1][2] == t_lbl and runs[-1][3] == t_col:
+            runs[-1] = (runs[-1][0], idx, t_lbl, t_col)
         else:
-            ax_s.set_xlim(0, 1)
-            ax_s.set_title(rank_hdr, fontsize=7.5, fontweight="bold", fontfamily=latin_font, color="#0f172a", pad=4)
-            for lf in leaves:
-                y_tip = y_pos[id(lf)]
-                meta = node_metadata.get(lf.name, {})
-                role = str(meta.get("role") or "").lower()
-                t_val = str(meta.get(rank_field) or "").strip()
-                if role == "query":
-                    col = palette.query_color
-                elif role == "outgroup":
-                    col = palette.outgroup_color
-                elif t_val in taxon_colors:
-                    col = taxon_colors[t_val]
-                elif t_val in other_taxa:
-                    col = _OTHER_TAXON_COLOR
-                else:
-                    col = _UNCLASSIFIED_LIGHT_COLOR
-                ax_s.add_patch(Rectangle((0.08, y_tip - 0.36), 0.84, 0.72, facecolor=col, edgecolor="white", linewidth=0.25))
+            runs.append((idx, idx, t_lbl, t_col))
+
+    for s_idx, e_idx, t_lbl, t_col in runs:
+        y_top_bar = y_pos[id(leaves[s_idx])] + 0.38
+        y_bot_bar = y_pos[id(leaves[e_idx])] - 0.38
+        ax_s.add_patch(
+            Rectangle((0.02, y_bot_bar), 0.15, y_top_bar - y_bot_bar, facecolor=t_col, edgecolor="white", linewidth=0.35)
+        )
+        _draw_text(
+            ax_s,
+            0.23,
+            (y_top_bar + y_bot_bar) * 0.5,
+            t_lbl,
+            fontsize=max(5.6, label_font * 0.88),
+            fontstyle="italic" if is_formal_taxon_name(t_lbl) else "normal",
+            fontweight="bold" if t_lbl == "Query" else "normal",
+            color=palette.query_text_color if t_lbl == "Query" else ("#64748b" if t_lbl in ("Unclassified", "Outgroup") else "#1e293b"),
+            va="center",
+            ha="left",
+        )
+
+
+def _draw_metadata_strips(
+    strip_axes: Dict[str, plt.Axes],
+    leaves: List["PhyloNode"],
+    y_pos: Dict[int, float],
+    node_metadata: Dict[str, Dict[str, Any]],
+    taxon_colors: Dict[str, str],
+    other_taxa: Set[str],
+    rank_field: str,
+    leaf_phylum: Dict[str, str],
+    phylum_colors: Dict[str, str],
+    palette: JournalPalette,
+    latin_font: str,
+    label_font: float,
+    dense_mode: bool,
+    max_len_kb: float,
+    gc_range: Tuple[float, float],
+    y_min_lim: float,
+    y_max_lim: float,
+) -> None:
+    """绘制矩形进化树右侧辅助属性轨道（Taxon / Host / GC / Size）。"""
+    if "taxon" in strip_axes:
+        _draw_taxon_strip(
+            strip_axes["taxon"], leaves, y_pos, node_metadata, taxon_colors, other_taxa,
+            rank_field, palette, latin_font, label_font, dense_mode, y_min_lim, y_max_lim,
+        )
 
     if "host" in strip_axes:
         ax_h = strip_axes["host"]
@@ -399,15 +396,7 @@ def _draw_rectangular_on_axes(
                 Rectangle((0.08, y_tip - 0.34), 0.56 if not dense_mode else 0.84, 0.68, facecolor=col_hex, edgecolor="white", linewidth=0.25 if dense_mode else 0.4)
             )
             if not dense_mode and gc > 0:
-                _draw_text(
-                    ax_g,
-                    0.72,
-                    y_tip,
-                    f"{gc:.1f}%",
-                    fontsize=max(4.8, label_font * 0.72),
-                    va="center",
-                    color="#334155",
-                )
+                _draw_text(ax_g, 0.72, y_tip, f"{gc:.1f}%", fontsize=max(4.8, label_font * 0.72), va="center", color="#334155")
 
     if "size" in strip_axes:
         ax_l = strip_axes["size"]
@@ -422,18 +411,89 @@ def _draw_rectangular_on_axes(
             ax_l.add_patch(Rectangle((0.0, y_tip - 0.26), max_len_kb, 0.52, facecolor="#f8fafc", edgecolor="none", zorder=0.5))
             ax_l.barh(y_tip, kb, height=0.52, color=palette.size_bar_color, edgecolor="none", zorder=2)
             if not dense_mode and kb > 0:
-                _draw_text(
-                    ax_l,
-                    kb + max_len_kb * 0.04,
-                    y_tip,
-                    f"{kb:.1f}",
-                    fontsize=max(4.8, label_font * 0.72),
-                    va="center",
-                    color="#334155",
-                )
+                _draw_text(ax_l, kb + max_len_kb * 0.04, y_tip, f"{kb:.1f}", fontsize=max(4.8, label_font * 0.72), va="center", color="#334155")
         ax_l.plot([0.0, max_len_kb], [-0.62, -0.62], color="#94a3b8", linewidth=0.7)
         _draw_text(ax_l, 0.0, -0.95, "0", fontsize=5.6, ha="left", color="#64748b")
         _draw_text(ax_l, max_len_kb, -0.95, f"{max_len_kb:.0f}", fontsize=5.6, ha="center", color="#64748b")
+
+
+def _draw_rectangular_on_axes(
+    ax_tree: plt.Axes,
+    strip_axes: Dict[str, plt.Axes],
+    root: "PhyloNode",
+    leaves: List["PhyloNode"],
+    node_metadata: Dict[str, Dict[str, Any]],
+    display_labels: Dict[str, str],
+    taxon_colors: Dict[str, str],
+    other_taxa: Set[str],
+    rank_field: str,
+    leaf_phylum: Dict[str, str],
+    phylum_colors: Dict[str, str],
+    clades: List[MonophyleticClade],
+    palette: JournalPalette,
+    req: PublicationFigureRequest,
+    max_len_kb: float,
+    gc_range: Tuple[float, float],
+    panel_label: Optional[str] = None,
+) -> None:
+    """在指定矩形树 Axes 及右侧轨道 Axes 上绘制高清矩形进化树。"""
+    n_leaves = len(leaves)
+    depths = _compute_node_depths(root, req.use_branch_lengths)
+    max_depth = max(depths.values()) or 1.0
+    lw_scale = _resolve_lw_scale(req.journal_width)
+    dense_mode = n_leaves > 45
+    y_pos = _assign_rectangular_y_positions(root, leaves)
+
+    max_chars = max((len(display_labels.get(lf.name, lf.name)) for lf in leaves), default=12)
+    label_pad = max_depth * 0.032
+    right_margin = max_depth * max(0.45, min(2.05, max_chars * 0.024))
+    label_font = 6.2 if dense_mode else max(6.4, min(8.2, 240.0 / max(24, n_leaves)))
+    if req.journal_width == "single_col":
+        label_font = max(5.2, label_font * 0.88)
+
+    if req.show_clade_shading and clades:
+        _draw_clade_shading(
+            ax_tree, clades, depths, max_depth, label_pad, right_margin,
+            n_leaves, bool(strip_axes), palette, lw_scale, label_font,
+        )
+
+    _draw_rectangular_branches(
+        ax_tree, root, depths, y_pos, node_metadata, taxon_colors, other_taxa, palette, lw_scale, rank_field
+    )
+    _draw_rectangular_leaf_tips(
+        ax_tree, leaves, depths, y_pos, max_depth, label_pad, label_font, display_labels,
+        node_metadata, taxon_colors, other_taxa, palette, lw_scale, rank_field, req.show_query_star,
+    )
+    if req.support_style != "none":
+        _draw_support_values(
+            ax_tree, root, depths, y_pos, max_depth, label_font, dense_mode, lw_scale, palette, req.support_style
+        )
+
+    extra_bracket = max_depth * 0.14 if (req.show_clade_shading and clades and not strip_axes) else 0.0
+    ax_tree.set_xlim(-max_depth * 0.04, max_depth + label_pad + right_margin + extra_bracket)
+    y_min_lim = -1.15
+    y_max_lim = n_leaves - 0.15
+    ax_tree.set_ylim(y_min_lim, y_max_lim)
+    ax_tree.axis("off")
+
+    if panel_label:
+        _draw_text(
+            ax_tree, -max_depth * 0.035, y_max_lim - 0.05, panel_label,
+            fontsize=13.5, fontweight="bold", color="#0f172a", ha="left", va="top", zorder=10,
+        )
+
+    if req.use_branch_lengths and max_depth > 0:
+        sb_val, sb_text = compute_nice_scale_bar(max_depth)
+        ax_tree.plot([0.0, sb_val], [-0.68, -0.68], color="#0f172a", linewidth=1.2 * lw_scale)
+        ax_tree.plot([0.0, 0.0], [-0.80, -0.56], color="#0f172a", linewidth=0.95 * lw_scale)
+        ax_tree.plot([sb_val, sb_val], [-0.80, -0.56], color="#0f172a", linewidth=0.95 * lw_scale)
+        _draw_text(ax_tree, sb_val * 0.5, -0.44, f"{sb_text} substitutions/site", fontsize=6.8, ha="center", color="#334155")
+
+    _draw_metadata_strips(
+        strip_axes, leaves, y_pos, node_metadata, taxon_colors, other_taxa, rank_field,
+        leaf_phylum, phylum_colors, palette, resolve_latin_font(), label_font, dense_mode,
+        max_len_kb, gc_range, y_min_lim, y_max_lim,
+    )
 
 
 def _render_rectangular(

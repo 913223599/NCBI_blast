@@ -368,6 +368,9 @@ def _predict_single_contig_orfs(
     cid, seq_str, genetic_code, auto_select, gc_thresholds = args
     if len(seq_str) < 200:
         return cid, [], genetic_code, False
+    if pyrodigal is None:
+        raise RuntimeError("pyrodigal 未安装，无法执行单 Contig ORF 预测")
+    pyrodigal_mod = pyrodigal
 
     chosen_code = genetic_code
     auto_switched = False
@@ -386,9 +389,9 @@ def _predict_single_contig_orfs(
         # 对标准 Table 11 短 Contig 使用元基因组预训练模型；对切表 Table 4/15 及 >=100 kb 序列
         # 统一采用单基因组自训练，保证与 select_optimal_genetic_code 评估模型严格一致
         if code == 11 and n_bp < train_win:
-            gf = pyrodigal.GeneFinder(meta=True, mask=True, metagenomic_bins=METAGENOMIC_BINS_11)
+            gf = pyrodigal_mod.GeneFinder(meta=True, mask=True, metagenomic_bins=METAGENOMIC_BINS_11)
         else:
-            gf = pyrodigal.GeneFinder(meta=False, mask=True)
+            gf = pyrodigal_mod.GeneFinder(meta=False, mask=True)
             train_bytes = seq_bytes * ((train_win // n_bp) + 1) if n_bp < train_win else seq_bytes
             gf.train(train_bytes, translation_table=cast(Any, code))
 
@@ -425,7 +428,7 @@ def _predict_single_contig_orfs(
         try:
             out = _predict_with_code(11)
         except Exception:
-            gf_fb = pyrodigal.GeneFinder(meta=True, mask=True, metagenomic_bins=METAGENOMIC_BINS_11)
+            gf_fb = pyrodigal_mod.GeneFinder(meta=True, mask=True, metagenomic_bins=METAGENOMIC_BINS_11)
             genes_fb = gf_fb.find_genes(seq_bytes)
             out = [
                 StructureProteinItem(

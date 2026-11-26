@@ -67,7 +67,11 @@ jobs:
           tests/test_remote_executor.py
           tests/test_remote_log_diagnostics_fixes.py
           tests/test_system_monitor.py
+          tests/test_ortho_ani.py
+          tests/test_pan_genomics_engine.py
+          tests/test_protein_fasta_search.py
           tests/phylo/test_eta_estimator.py
+          tests/phylo/test_process_runner_cancel.py
           tests/phylo/test_profiler_and_codec.py
           tests/phylo/test_publication_and_itol_client.py
           tests/phylo/test_utf8_fasta_safety.py

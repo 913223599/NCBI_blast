@@ -214,3 +214,23 @@ def test_electron_dev_runner_forwards_stdout_stderr_and_exit_code():
         env=env,
     )
     assert fail_res.returncode == 7
+
+
+def test_api_server_import_has_no_stdout_or_signal_side_effects():
+    import subprocess
+    import sys
+
+    from src.backend.api_server import install_process_runtime_hooks
+
+    assert callable(install_process_runtime_hooks)
+
+    res = subprocess.run(
+        [sys.executable, "-c", "import src.backend.api_server as m; assert callable(m.install_process_runtime_hooks)"],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "Python API Server Process Started" not in res.stdout

@@ -251,13 +251,14 @@ def build_distilled_student_v4(
             e_dna = self.dna_proj(torch.cat([mean_pool, max_pool], dim=-1))
             return e_dna, h2
 
-        def _forward_backbone(
+        def _forward_backbone_impl(
             self,
             dna,
             tab,
             lengths=None,
             orf_tokens=None,
             orf_counts=None,
+            *,
             return_orf_seq: bool = False,
         ):
             bsz, _, max_seq = dna.shape
@@ -287,8 +288,25 @@ def build_distilled_student_v4(
                 e_tab * (1.0 + weights[:, 2:3]),
             ], dim=-1)
             h_fused = self.fusion_mlp(gated)
-            if return_orf_seq:
-                return h_seq, h_fused, h_orf_seq
+            return h_seq, h_fused, h_orf_seq
+
+        def _forward_backbone(
+            self,
+            dna,
+            tab,
+            lengths=None,
+            orf_tokens=None,
+            orf_counts=None,
+        ):
+            """保持向后兼容的 2 元组主干接口（供 v4_sub_head 等外部调用方解包）。"""
+            h_seq, h_fused, _ = self._forward_backbone_impl(
+                dna,
+                tab,
+                lengths=lengths,
+                orf_tokens=orf_tokens,
+                orf_counts=orf_counts,
+                return_orf_seq=False,
+            )
             return h_seq, h_fused
 
         def forward(
@@ -301,25 +319,14 @@ def build_distilled_student_v4(
             return_aux: bool = False,
         ):
             need_orf_seq = self.func_dim > 0 and return_aux
-            if need_orf_seq:
-                h_seq, h_fused, h_orf_seq = self._forward_backbone(
-                    dna,
-                    tab,
-                    lengths=lengths,
-                    orf_tokens=orf_tokens,
-                    orf_counts=orf_counts,
-                    return_orf_seq=True,
-                )
-            else:
-                h_seq, h_fused = self._forward_backbone(
-                    dna,
-                    tab,
-                    lengths=lengths,
-                    orf_tokens=orf_tokens,
-                    orf_counts=orf_counts,
-                    return_orf_seq=False,
-                )
-                h_orf_seq = None
+            h_seq, h_fused, h_orf_seq = self._forward_backbone_impl(
+                dna,
+                tab,
+                lengths=lengths,
+                orf_tokens=orf_tokens,
+                orf_counts=orf_counts,
+                return_orf_seq=need_orf_seq,
+            )
 
             sem_logits = self.sem_head(h_fused)
             win_logit = self.win_head(torch.cat([h_fused, torch.sigmoid(sem_logits)], dim=-1)).squeeze(-1)

@@ -17,7 +17,7 @@ from ..phylo.runtime.tool_registry import get_project_root
 from ..phylo.storage.archive_store import PhyloArchiveStore
 from .models import GenomeFeatureItem, ParsedGenomeInput, StudioFigureFile, StudioHistoryItem
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def get_studio_root_dir() -> Path:
@@ -149,8 +149,8 @@ def list_available_sources() -> Dict[str, Any]:
                     "created_at": job.created_at,
                 }
             )
-    except Exception as _exc:
-        _s110_logger.debug("list_available_sources 忽略非致命异常: %s", _exc)
+    except Exception as exc:
+        logger.warning("读取进化树任务数据源失败: %s", exc)
 
     annotation_tasks: List[Dict[str, Any]] = []
     try:
@@ -168,8 +168,8 @@ def list_available_sources() -> Dict[str, Any]:
                     "created_at": t.get("created_at", ""),
                 }
             )
-    except Exception as _exc:
-        _s110_logger.debug("list_available_sources 忽略非致命异常: %s", _exc)
+    except Exception as exc:
+        logger.warning("读取进化树任务数据源失败: %s", exc)
 
     return {
         "phylo_jobs": phylo_jobs,
@@ -377,8 +377,8 @@ def list_render_history(limit: int = 30) -> List[StudioHistoryItem]:
                     figures=[StudioFigureFile(**f) for f in (data.get("figures") or [])],
                 )
             )
-        except Exception as _exc:
-            _s110_logger.debug("读取 FigureStudio 元数据文件跳过损坏条目: %s", _exc)
+        except Exception as exc:
+            logger.warning("读取 FigureStudio 元数据文件跳过损坏条目: %s", exc)
             continue
     items.sort(key=lambda x: x.created_at, reverse=True)
     return items[:limit]

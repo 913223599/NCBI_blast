@@ -12,7 +12,7 @@ from .schemas import SANGON_CSV_HEADERS
 from ...utils.blast_utils import parse_blast_csv, select_consensus_hit
 from ....utils.translation.biology_translator import get_global_biology_translator
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent.parent
 
@@ -59,8 +59,8 @@ def inspect_sangon_order_dir(order_dir: Path, project_root: Path = PROJECT_ROOT)
                             no_hits += 1
                         else:
                             with_hits += 1
-        except Exception as _exc:
-            _s110_logger.debug("inspect_sangon_order_dir 忽略非致命异常: %s", _exc)
+        except Exception as exc:
+            logger.warning("读取生工订单结果 CSV 失败 (%s): %s", csv_file, exc)
 
     task_id = f"{order_dir.name}_16s"
     blast_reports_dir = project_root / "results" / "blast" / task_id / "reports"

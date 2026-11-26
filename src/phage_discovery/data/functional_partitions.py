@@ -379,9 +379,7 @@ def classify_protein_to_functional_partitions(
         is_func_known = False
     else:
         # 普通宿主蛋白：若只是 hypothetical protein 但非噬菌体同源，对 P0..P8 均为明确阴性
-        is_func_known = True if not _UNKNOWN_PATTERN.search(combined_desc) or bool(gbk_clean) else True
-        if not any_func_active and not is_phage_ortholog:
-            is_func_known = True
+        is_func_known = True
 
     # 5. 生成高特异度 4 维语义向量 [phage_hallmark, integrase, transposase, tail_lysis]
     sem4_vec = np.zeros(4, dtype=np.float32)

@@ -8,7 +8,7 @@ import platform
 import sys
 from typing import List, Optional, Tuple
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class EnvironmentChecker:
@@ -56,8 +56,8 @@ class EnvironmentChecker:
                 d_str = str(detected_dir)
                 if d_str not in search_path:
                     search_path = d_str + os.pathsep + search_path
-        except Exception as _exc:
-            _s110_logger.debug("EnvironmentChecker.check_blast_executables 忽略非致命异常: %s", _exc)
+        except Exception as exc:
+            logger.debug("通过 ToolConfig 补充 BLAST PATH 失败: %s", exc)
 
         blast_commands = ['blastn', 'blastp', 'blastx', 'tblastn', 'makeblastdb']
         found_commands = [cmd for cmd in blast_commands if shutil.which(cmd, path=search_path)]

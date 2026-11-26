@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from Bio import SeqIO
 
-from ...backend.broadcaster import broadcaster
+from ...core.broadcaster import broadcaster
 from ...utils.resource_guard import get_safe_cpu_budget
 from .builtin_annotator import BuiltinAnnotator
 from .db import annotation_db

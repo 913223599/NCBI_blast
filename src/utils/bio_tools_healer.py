@@ -22,7 +22,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 EXTERNAL_BINARY_SOURCES: Dict[str, Dict[str, Any]] = {
     "iqtree.exe": {
@@ -61,8 +61,8 @@ def _find_site_packages_dir() -> Optional[Path]:
     try:
         for sp in site.getsitepackages():
             candidates.append(Path(sp))
-    except Exception as _exc:
-        _s110_logger.debug("_find_site_packages_dir 忽略非致命异常: %s", _exc)
+    except Exception as exc:
+        logger.debug("获取 site.getsitepackages() 失败: %s", exc)
     # 3. 兜底使用未经 resolve() 的 sys.executable 上两级目录
     exe_root = Path(sys.executable).parent.parent
     candidates.append(exe_root / "Lib" / "site-packages")
@@ -494,8 +494,8 @@ def inspect_wsl_and_gpu_capabilities() -> Dict[str, Any]:
                     if "=" in line:
                         k, v = line.split("=", 1)
                         wsl_tools[k.strip()] = v.strip() == "1"
-        except Exception as _exc:
-            _s110_logger.debug("inspect_wsl_and_gpu_capabilities 忽略非致命异常: %s", _exc)
+        except Exception as exc:
+            logger.debug("探测 WSL 生物信息工具状态失败: %s", exc)
 
     torch_installed = False
     cuda_available = False
@@ -510,8 +510,8 @@ def inspect_wsl_and_gpu_capabilities() -> Dict[str, Any]:
             cuda_available = bool(hasattr(torch_mod, "cuda") and torch_mod.cuda.is_available())
             if cuda_available:
                 gpu_name = str(torch_mod.cuda.get_device_name(0))
-    except Exception as _exc:
-        _s110_logger.debug("inspect_wsl_and_gpu_capabilities 忽略非致命异常: %s", _exc)
+    except Exception as exc:
+        logger.debug("探测 PyTorch GPU 环境失败: %s", exc)
 
     return {
         "wsl_available": wsl_available,

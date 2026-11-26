@@ -170,7 +170,6 @@ def check_ai_classifier_ready(
 
 def release_ai_judge_memory() -> None:
     """释放缓存的 PyTorch UnifiedJudge 与细粒度角色解码器显存，切换引擎前强制调用。"""
-    global _JUDGE_RUNTIME_CACHE, _FINE_MLP_CACHE
     _JUDGE_RUNTIME_CACHE.clear()
     _FINE_MLP_CACHE.clear()
     gc.collect()

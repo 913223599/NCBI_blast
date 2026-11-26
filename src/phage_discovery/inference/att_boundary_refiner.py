@@ -233,6 +233,173 @@ def _extend_dr_match(
     return ll, lr, rr, mm
 
 
+def _collect_orf_guard_intervals(
+    orfs: Sequence[Tuple[int, int, int, str]],
+    sc: Optional[Mapping[str, np.ndarray]],
+    ls0: int,
+    re0: int,
+) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]], List[Tuple[int, int]], List[Tuple[int, int]]]:
+    """收集左右过渡区邻近的整合酶、核心保护 CDS、噬菌体 CDS 与明确宿主基因区间。"""
+    integrase_intervals: List[Tuple[int, int]] = []
+    protected_core_intervals: List[Tuple[int, int]] = []
+    phage_cds_intervals: List[Tuple[int, int]] = []
+    clear_host_intervals: List[Tuple[int, int]] = []
+
+    if not (orfs and sc is not None and len(sc.get("phage_probs", ())) == len(orfs)):
+        return integrase_intervals, protected_core_intervals, phage_cds_intervals, clear_host_intervals
+
+    ph = sc["phage_probs"]
+    f10 = sc["func10_probs"]
+    for idx, (gs, ge, _, _) in enumerate(orfs):
+        if ge < ls0 - 200 or gs > re0 + 200:
+            continue
+        p_val = float(ph[idx])
+        p4 = float(f10[idx, 4])
+        p9 = float(f10[idx, 9])
+        core_max = float(np.max(f10[idx, :5]))
+        if p4 >= 0.40 and p_val >= 0.45:
+            integrase_intervals.append((gs, ge))
+        if p9 < 0.65:
+            if p_val >= 0.60 or core_max >= 0.45:
+                protected_core_intervals.append((gs, ge))
+            if p_val >= 0.45:
+                phage_cds_intervals.append((gs, ge))
+        if (p_val < 0.22 and p4 < 0.22 and core_max < 0.25) or (p9 >= 0.62 and p_val < 0.40):
+            clear_host_intervals.append((gs, ge))
+    return integrase_intervals, protected_core_intervals, phage_cds_intervals, clear_host_intervals
+
+
+def _violates_att_biological_guards(
+    cand_s: int,
+    cand_e: int,
+    reg_start: int,
+    reg_end: int,
+    protected_core: Sequence[Tuple[int, int]],
+    clear_host: Sequence[Tuple[int, int]],
+) -> bool:
+    """检查候选整合边界是否切入核心蛋白或跨越外部明确宿主基因。"""
+    for cs, ce in protected_core:
+        if reg_start <= 0.5 * (cs + ce) <= reg_end:
+            if cand_s > cs + 18 or cand_e < ce - 18:
+                return True
+        if cs + 22 < cand_s < ce - 22 or cs + 22 < cand_e < ce - 22:
+            return True
+    if cand_s < reg_start:
+        for hs, he in clear_host:
+            if he <= reg_start + 20 and hs >= cand_s - 20:
+                return True
+    if cand_e > reg_end:
+        for hs, he in clear_host:
+            if hs >= reg_end - 20 and he <= cand_e + 20:
+                return True
+    return False
+
+
+def _att_integrase_proximity(
+    pos_l: int,
+    pos_r: int,
+    integrases: Sequence[Tuple[int, int]],
+) -> float:
+    """计算候选 attL/attR 到邻近高置信整合酶的接近度加分。"""
+    best = 0.0
+    for is0, ie0 in integrases:
+        dmin = min(abs(pos_l - is0), abs(pos_l - ie0), abs(pos_r - is0), abs(pos_r - ie0))
+        if dmin <= 1200:
+            best = max(best, 1.0 - float(dmin) / 1500.0)
+    return best
+
+
+def _build_right_flank_seed_index(seq: str, rs0: int, re0: int, k_seed: int) -> Dict[str, List[int]]:
+    """对右侧过渡区序列建立 k-mer 种子倒排索引。"""
+    r_seq = seq[rs0:re0]
+    r_index: Dict[str, List[int]] = defaultdict(list)
+    for j in range(0, len(r_seq) - k_seed + 1):
+        sub = r_seq[j : j + k_seed]
+        if "N" not in sub:
+            r_index[sub].append(rs0 + j)
+    return r_index
+
+
+def _search_dr_hit_for_region(
+    seq: str,
+    reg: PredictedRegion,
+    ls0: int,
+    le0: int,
+    rs0: int,
+    re0: int,
+    *,
+    integrase_intervals: Sequence[Tuple[int, int]],
+    protected_core_intervals: Sequence[Tuple[int, int]],
+    phage_cds_intervals: Sequence[Tuple[int, int]],
+    clear_host_intervals: Sequence[Tuple[int, int]],
+    min_exact_len: int,
+    min_mm1_len: int,
+    max_dr_len: int,
+    k_seed: int,
+) -> Optional[AttAlignmentHit]:
+    """在单区段左右翼检索最优直接重复 (attL/attR) 配对。"""
+    r_index = _build_right_flank_seed_index(seq, rs0, re0, k_seed)
+    l_seq = seq[ls0:le0]
+    seen_pairs = set()
+    best_score = -1.0
+    best_hit: Optional[AttAlignmentHit] = None
+
+    for i in range(0, len(l_seq) - k_seed + 1):
+        r_locs = r_index.get(l_seq[i : i + k_seed])
+        if not r_locs:
+            continue
+        l_seed = ls0 + i
+        for r_seed in r_locs:
+            for allow_mm in (0, 1):
+                ll, lr, rr, mm = _extend_dr_match(
+                    seq, l_seed, r_seed, k_seed, ls0, le0, rs0, re0,
+                    allow_mm=allow_mm, max_dr_len=max_dr_len,
+                )
+                ext = lr - ll
+                if (mm == 0 and ext < min_exact_len) or (mm == 1 and ext < min_mm1_len):
+                    continue
+                cand_s, cand_e = ll, rr + ext
+                if cand_e - cand_s < 3000 or (cand_s, cand_e) in seen_pairs:
+                    continue
+                seen_pairs.add((cand_s, cand_e))
+
+                dr_seq = seq[ll:lr]
+                if _shannon_entropy(dr_seq) < 1.55 or _has_simple_tandem_repeat(dr_seq):
+                    continue
+                if _violates_att_biological_guards(
+                    cand_s, cand_e, reg.start_bp, reg.end_bp, protected_core_intervals, clear_host_intervals
+                ):
+                    continue
+
+                ig_bonus = _att_integrase_proximity(cand_s, cand_e, integrase_intervals)
+                both_intergenic = (
+                    not any(gs + 12 < cand_s < ge - 12 for gs, ge in phage_cds_intervals)
+                    and not any(gs + 12 < cand_e < ge - 12 for gs, ge in phage_cds_intervals)
+                )
+                req_len = (14 if (ig_bonus > 0.1 and both_intergenic) else 16) if mm == 0 else (18 if ig_bonus > 0.1 else 21)
+                if ext < req_len:
+                    continue
+
+                inter_bonus = 1.5 if both_intergenic else 0.0
+                dist_pen = (abs(cand_s - reg.start_bp) + abs(cand_e - reg.end_bp)) / 1800.0
+                score = float(ext - 4 * mm) + 3.0 * ig_bonus + inter_bonus - 1.8 * dist_pen
+                if score > best_score:
+                    best_score = score
+                    best_hit = AttAlignmentHit(
+                        contig_id=reg.contig_id,
+                        old_start_bp=reg.start_bp,
+                        old_end_bp=reg.end_bp,
+                        new_start_bp=cand_s,
+                        new_end_bp=cand_e,
+                        dr_len_bp=ext,
+                        mismatches=mm,
+                        near_integrase=ig_bonus > 0.1,
+                        both_intergenic=both_intergenic,
+                        dr_seq=dr_seq,
+                    )
+    return best_hit
+
+
 def refine_regions_with_att_sites(
     regions: Sequence[PredictedRegion],
     contig_seqs: Mapping[str, str],
@@ -265,162 +432,33 @@ def refine_regions_with_att_sites(
             continue
         seq = raw_seq.upper()
         seq_len = len(seq)
-        orfs = orfs_by_contig.get(cid, ())
-        sc = scored_by_contig.get(cid)
 
-        ls0 = max(0, reg.start_bp - flank_pad_bp)
-        le0 = min(seq_len, reg.start_bp + flank_pad_bp)
-        rs0 = max(0, reg.end_bp - flank_pad_bp)
-        re0 = min(seq_len, reg.end_bp + flank_pad_bp)
+        ls0, le0 = max(0, reg.start_bp - flank_pad_bp), min(seq_len, reg.start_bp + flank_pad_bp)
+        rs0, re0 = max(0, reg.end_bp - flank_pad_bp), min(seq_len, reg.end_bp + flank_pad_bp)
         if le0 <= ls0 + 20 or re0 <= rs0 + 20 or le0 >= rs0:
             out.append(reg)
             continue
 
-        integrase_intervals: List[Tuple[int, int]] = []
-        protected_core_intervals: List[Tuple[int, int]] = []
-        phage_cds_intervals: List[Tuple[int, int]] = []
-        clear_host_intervals: List[Tuple[int, int]] = []
+        integrase_intervals, protected_core_intervals, phage_cds_intervals, clear_host_intervals = (
+            _collect_orf_guard_intervals(orfs_by_contig.get(cid, ()), scored_by_contig.get(cid), ls0, re0)
+        )
 
-        if orfs and sc is not None and len(sc.get("phage_probs", ())) == len(orfs):
-            ph = sc["phage_probs"]
-            f10 = sc["func10_probs"]
-            for idx, (gs, ge, _, _) in enumerate(orfs):
-                if ge < ls0 - 200 or gs > re0 + 200:
-                    continue
-                p_val = float(ph[idx])
-                p4 = float(f10[idx, 4])
-                p9 = float(f10[idx, 9])
-                core_max = float(np.max(f10[idx, :5]))
-                if p4 >= 0.40 and p_val >= 0.45:
-                    integrase_intervals.append((gs, ge))
-                if p9 < 0.65:
-                    if p_val >= 0.60 or core_max >= 0.45:
-                        protected_core_intervals.append((gs, ge))
-                    if p_val >= 0.45:
-                        phage_cds_intervals.append((gs, ge))
-                if (p_val < 0.22 and p4 < 0.22 and core_max < 0.25) or (p9 >= 0.62 and p_val < 0.40):
-                    clear_host_intervals.append((gs, ge))
-
-        def _violates_biological_guards(
-            cand_s: int,
-            cand_e: int,
-            *,
-            _protected=protected_core_intervals,
-            _clear_host=clear_host_intervals,
-            _reg_start: int = reg.start_bp,
-            _reg_end: int = reg.end_bp,
-        ) -> bool:
-            for cs, ce in _protected:
-                if _reg_start <= 0.5 * (cs + ce) <= _reg_end:
-                    if cand_s > cs + 18 or cand_e < ce - 18:
-                        return True
-                if cs + 22 < cand_s < ce - 22 or cs + 22 < cand_e < ce - 22:
-                    return True
-
-            # 防越宿主向外盲扩：不允许跨过边界外侧已明确判定的宿主完整基因
-            if cand_s < _reg_start:
-                for hs, he in _clear_host:
-                    if he <= _reg_start + 20 and hs >= cand_s - 20:
-                        return True
-            if cand_e > _reg_end:
-                for hs, he in _clear_host:
-                    if hs >= _reg_end - 20 and he <= cand_e + 20:
-                        return True
-            return False
-
-        def _integrase_proximity(
-            pos_l: int,
-            pos_r: int,
-            *,
-            _integrases=integrase_intervals,
-        ) -> float:
-            best = 0.0
-            for is0, ie0 in _integrases:
-                dmin = min(abs(pos_l - is0), abs(pos_l - ie0), abs(pos_r - is0), abs(pos_r - ie0))
-                if dmin <= 1200:
-                    best = max(best, 1.0 - float(dmin) / 1500.0)
-            return best
-
-        def _is_intergenic(pos: int, *, _cds=phage_cds_intervals) -> bool:
-            return not any(gs + 12 < pos < ge - 12 for gs, ge in _cds)
-
-        r_seq = seq[rs0:re0]
-        r_index: Dict[str, List[int]] = defaultdict(list)
-        for j in range(0, len(r_seq) - k_seed + 1):
-            sub = r_seq[j : j + k_seed]
-            if "N" in sub:
-                continue
-            r_index[sub].append(rs0 + j)
-
-        l_seq = seq[ls0:le0]
-        seen_pairs = set()
-        best_score = -1.0
-        best_hit: Optional[AttAlignmentHit] = None
-
-        for i in range(0, len(l_seq) - k_seed + 1):
-            seed = l_seq[i : i + k_seed]
-            r_locs = r_index.get(seed)
-            if not r_locs:
-                continue
-            l_seed = ls0 + i
-            for r_seed in r_locs:
-                for allow_mm in (0, 1):
-                    ll, lr, rr, mm = _extend_dr_match(
-                        seq,
-                        l_seed,
-                        r_seed,
-                        k_seed,
-                        ls0,
-                        le0,
-                        rs0,
-                        re0,
-                        allow_mm=allow_mm,
-                        max_dr_len=max_dr_len,
-                    )
-                    ext = lr - ll
-                    if mm == 0 and ext < min_exact_len:
-                        continue
-                    if mm == 1 and ext < min_mm1_len:
-                        continue
-                    cand_s, cand_e = ll, rr + ext
-                    if cand_e - cand_s < 3000 or (cand_s, cand_e) in seen_pairs:
-                        continue
-                    seen_pairs.add((cand_s, cand_e))
-
-                    dr_seq = seq[ll:lr]
-                    if _shannon_entropy(dr_seq) < 1.55 or _has_simple_tandem_repeat(dr_seq):
-                        continue
-                    if _violates_biological_guards(cand_s, cand_e):
-                        continue
-
-                    ig_bonus = _integrase_proximity(cand_s, cand_e)
-                    both_intergenic = _is_intergenic(cand_s) and _is_intergenic(cand_e)
-                    if mm == 0:
-                        req_len = 14 if (ig_bonus > 0.1 and both_intergenic) else 16
-                        if ext < req_len:
-                            continue
-                    else:
-                        req_mm1 = 18 if ig_bonus > 0.1 else 21
-                        if ext < req_mm1:
-                            continue
-
-                    inter_bonus = 1.5 if both_intergenic else 0.0
-                    dist_pen = (abs(cand_s - reg.start_bp) + abs(cand_e - reg.end_bp)) / 1800.0
-                    score = float(ext - 4 * mm) + 3.0 * ig_bonus + inter_bonus - 1.8 * dist_pen
-                    if score > best_score:
-                        best_score = score
-                        best_hit = AttAlignmentHit(
-                            contig_id=cid,
-                            old_start_bp=reg.start_bp,
-                            old_end_bp=reg.end_bp,
-                            new_start_bp=cand_s,
-                            new_end_bp=cand_e,
-                            dr_len_bp=ext,
-                            mismatches=mm,
-                            near_integrase=ig_bonus > 0.1,
-                            both_intergenic=both_intergenic,
-                            dr_seq=dr_seq,
-                        )
+        best_hit = _search_dr_hit_for_region(
+            seq,
+            reg,
+            ls0,
+            le0,
+            rs0,
+            re0,
+            integrase_intervals=integrase_intervals,
+            protected_core_intervals=protected_core_intervals,
+            phage_cds_intervals=phage_cds_intervals,
+            clear_host_intervals=clear_host_intervals,
+            min_exact_len=min_exact_len,
+            min_mm1_len=min_mm1_len,
+            max_dr_len=max_dr_len,
+            k_seed=k_seed,
+        )
 
         if best_hit is None and enable_trna_short_dr:
             best_hit = _search_trna_short_att_hit(
@@ -432,28 +470,31 @@ def refine_regions_with_att_sites(
                 rs0,
                 re0,
                 integrase_intervals,
-                _violates_biological_guards,
-                _integrase_proximity,
-                _is_intergenic,
+                lambda cs, ce, _rs=reg.start_bp, _re=reg.end_bp, _pc=protected_core_intervals, _ch=clear_host_intervals: (
+                    _violates_att_biological_guards(cs, ce, _rs, _re, _pc, _ch)
+                ),
+                lambda pl, pr, _ig=integrase_intervals: _att_integrase_proximity(pl, pr, _ig),
+                lambda pos, _cds=phage_cds_intervals: not any(gs + 12 < pos < ge - 12 for gs, ge in _cds),
             )
 
-        if best_hit is not None:
-            if best_hit.new_start_bp != reg.start_bp or best_hit.new_end_bp != reg.end_bp:
-                aligned_cnt += 1
-            if details_out is not None:
-                details_out[f"{cid}:{best_hit.new_start_bp}-{best_hit.new_end_bp}"] = best_hit
-            out.append(
-                PredictedRegion(
-                    contig_id=cid,
-                    start_bp=best_hit.new_start_bp,
-                    end_bp=best_hit.new_end_bp,
-                    peak_score=reg.peak_score,
-                    mean_score=reg.mean_score,
-                    window_count=reg.window_count,
-                )
-            )
-        else:
+        if best_hit is None:
             out.append(reg)
+            continue
+
+        if best_hit.new_start_bp != reg.start_bp or best_hit.new_end_bp != reg.end_bp:
+            aligned_cnt += 1
+        if details_out is not None:
+            details_out[f"{cid}:{best_hit.new_start_bp}-{best_hit.new_end_bp}"] = best_hit
+        out.append(
+            PredictedRegion(
+                contig_id=cid,
+                start_bp=best_hit.new_start_bp,
+                end_bp=best_hit.new_end_bp,
+                peak_score=reg.peak_score,
+                mean_score=reg.mean_score,
+                window_count=reg.window_count,
+            )
+        )
 
     return out, aligned_cnt
 

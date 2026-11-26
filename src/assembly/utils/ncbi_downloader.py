@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Optional
 from ..engine.runner import CommandRunner
 from ..env.wsl_manager import WSLManager
-_s110_logger = logging.getLogger(__name__)
 
 class NCBIDownloader:
     """
@@ -40,12 +39,12 @@ class NCBIDownloader:
         raw_out = []
         def capture_raw(line): raw_out.append(line)
         
-        # 避开 --format json，使用最默认的输出
+        # 避开 --format json，使用最默认的输出；直接传递参数列表避免 shell 引号拼接注入
         search_cmd = [
-            "datasets", "summary", "genome", "taxon", f"'{species_query}'", "--reference"
+            "datasets", "summary", "genome", "taxon", species_query, "--reference"
         ]
-        
-        await runner.run_command(search_cmd, is_shell=True, on_output=capture_raw)
+
+        await runner.run_command(search_cmd, on_output=capture_raw)
         
         # 使用正则表达式暴力抓取 GCF_ 或 GCA_ 开头的接入号
         full_text = "".join(raw_out)
@@ -72,11 +71,11 @@ class NCBIDownloader:
             # 最后的倔强：如果连 ID 都抓不到，直接尝试最简单的 taxon 下载
             self.logger.warning("未抓取到特定 ID，尝试全量拉取代表性基因组...")
             download_cmd = [
-                "datasets", "download", "genome", "taxon", f"'{species_query}'",
+                "datasets", "download", "genome", "taxon", species_query,
                 "--reference", "--include", "genome", "--filename", WSLManager.to_wsl_path(str(zip_file))
             ]
 
-        ret = await runner.run_command(download_cmd, is_shell=True)
+        ret = await runner.run_command(download_cmd)
         
         if ret != 0 or not zip_file.exists():
             self.logger.error(" NCBI 所有下载尝试均已失败。")
@@ -124,8 +123,8 @@ class NCBIDownloader:
                 existing = json.loads(metadata_file.read_text(encoding="utf-8"))
                 if existing.get("taxid"):
                     return
-            except Exception as _exc:
-                _s110_logger.debug("NCBIDownloader._resolve_and_save_taxid 忽略非致命异常: %s", _exc)
+            except Exception as exc:
+                self.logger.debug("读取已有 metadata.json 失败，将重新查询 TaxID: %s", exc)
         
         self.logger.info(f" 正在查询 {species_name} 的真实 NCBI TaxID...")
         
@@ -134,8 +133,8 @@ class NCBIDownloader:
         
         # 使用 datasets summary taxonomy 查询 TaxID
         await runner.run_command(
-            ["datasets", "summary", "taxonomy", "taxon", f"'{species_name}'"],
-            is_shell=True, on_output=capture
+            ["datasets", "summary", "taxonomy", "taxon", species_name],
+            on_output=capture
         )
         
         full_text = "".join(raw_out)

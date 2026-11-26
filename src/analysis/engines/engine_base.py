@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field, asdict
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,8 +79,8 @@ class BaseAlignmentEngine(ABC):
             linux_path = WSLManager.to_wsl_path(str(path.absolute()))
             if linux_path:
                 return linux_path
-        except Exception as _exc:
-            _s110_logger.debug("BaseAlignmentEngine.to_wsl_path 忽略非致命异常: %s", _exc)
+        except Exception as exc:
+            logger.debug("WSL 路径转换失败，回退原始路径: %s", exc)
 
         # 降级方案：标准 /mnt 驱动器解析
         p_str = str(path.absolute()).replace('\\', '/')

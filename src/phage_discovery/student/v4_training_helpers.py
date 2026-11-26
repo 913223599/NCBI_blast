@@ -254,7 +254,8 @@ def setup_v4_model_and_optimizer(
             raise FileNotFoundError(f"热启动权重文件不存在: {init_path}")
         init_sd = torch.load(init_path, map_location="cpu", weights_only=True)
         if (
-            "feat_mean" in init_sd
+            isinstance(init_sd, dict)
+            and "feat_mean" in init_sd
             and "feat_std" in init_sd
             and tuple(init_sd["feat_mean"].shape) == tuple(feat_mean.shape)
         ):

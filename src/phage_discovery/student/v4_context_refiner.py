@@ -120,7 +120,7 @@ def _predict_v4_all(
     out_orf_phage = np.zeros((n, MAX_ORFS_PER_WIN), dtype=np.float32) if (return_orf_preds and func_dim > 0) else None
     out_orf_func = np.zeros((n, MAX_ORFS_PER_WIN, func_dim), dtype=np.float32) if (return_orf_preds and func_dim > 0) else None
     if n == 0:
-        res_empty = {
+        res_empty: Dict[str, np.ndarray] = {
             "win_logits": out_win_logit,
             "win_probs": out_win_prob,
             "sub_probs": out_sub_prob,
@@ -181,7 +181,7 @@ def _predict_v4_all(
                 of_mean = (torch.sigmoid(r1["orf_func_logits"].float()) + torch.sigmoid(r2["orf_func_logits"].float())) * 0.5
                 out_orf_func[sl] = of_mean.cpu().numpy()
 
-    res_out = {
+    res_out: Dict[str, np.ndarray] = {
         "win_logits": out_win_logit,
         "win_probs": out_win_prob,
         "sub_probs": out_sub_prob,

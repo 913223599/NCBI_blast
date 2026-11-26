@@ -20,7 +20,7 @@ import importlib.util
 from pathlib import Path
 from typing import Optional
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # 强制控制台输出使用 UTF-8 编码，防止 Windows 控制台编码不一致
 if hasattr(sys.stdout, "reconfigure"):
@@ -397,8 +397,8 @@ def main():
             print(f"[信息] GPU 加速就绪 (CUDA: {cap.get('gpu_name')})。")
         elif cap.get("torch_installed"):
             print("[信息] PyTorch 已就绪（CPU 计算模式）。")
-    except Exception as _exc:
-        _s110_logger.debug("main 忽略非致命异常: %s", _exc)
+    except Exception as exc:
+        logger.debug("探测 WSL 与 GPU 环境汇总信息失败: %s", exc)
 
     print("---------------------------------------------------")
     print("[2/4] 正在校验 Python 运行依赖与配置国内镜像源...")

@@ -91,15 +91,12 @@ def canonicalize_species_name(species: str) -> str:
         return _canonical_species_cache[s_clean]
         
     try:
-        try:
-            from src.utils.taxonomy_provider import get_taxonomy_provider
-        except ImportError:
-            from ...utils.taxonomy_provider import get_taxonomy_provider
+        from .service_registry import resolve_taxonomy_db_path
 
-        provider = get_taxonomy_provider()
-        if provider.is_ready:
+        db_path = resolve_taxonomy_db_path()
+        if db_path:
             import sqlite3
-            with sqlite3.connect(provider.db_path) as conn:
+            with sqlite3.connect(db_path) as conn:
                 cur = conn.cursor()
                 
                 # 辅助函数：如果查到了一个 taxid，且其 rank 不是 'species'，向上寻找物种级主节点

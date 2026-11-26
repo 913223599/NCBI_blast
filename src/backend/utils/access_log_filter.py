@@ -59,7 +59,8 @@ class QuietPollingAccessFilter(logging.Filter):
             full_path = str(args[2]).strip()
             base_path = full_path.split("?", 1)[0]
             try:
-                status_code = int(args[4])
+                raw_status = args[4]
+                status_code = int(raw_status) if isinstance(raw_status, (int, str)) else None
             except (TypeError, ValueError):
                 status_code = None
 

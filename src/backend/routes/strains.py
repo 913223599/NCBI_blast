@@ -171,7 +171,7 @@ async def load_sequences_by_sample(sample_id: str):
 
 @router.post("/api/taxonomy/sync")
 async def sync_taxonomy(req: TaxonomySyncRequest):
-    from ...utils.taxonomy_sync_service import get_taxonomy_sync_service
+    from ..services.taxonomy_sync_service import get_taxonomy_sync_service
     return get_taxonomy_sync_service().sync_taxonomy_from_name(req.species_name)
 
 @router.post("/api/strains/import_paths")

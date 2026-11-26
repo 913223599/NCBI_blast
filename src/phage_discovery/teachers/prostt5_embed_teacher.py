@@ -227,8 +227,14 @@ def run_chunked_prostt5_embedding(
 
     total = len(aa_items)
     n_chunks = (total + chunk_size - 1) // chunk_size if total > 0 else 0
+    state: Dict[str, Any] = {
+        "done_chunks": done_chunks,
+        "chunk_size": chunk_size,
+        "total_items": total,
+        "embs": embs,
+    }
     if done_chunks >= n_chunks:
-        return {"done_chunks": done_chunks, "chunk_size": chunk_size, "total_items": total, "embs": embs}
+        return state
 
     t0 = time.perf_counter()
     for ci in range(done_chunks, n_chunks):

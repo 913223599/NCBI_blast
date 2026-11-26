@@ -6,36 +6,44 @@ api_server.py — NCBI Bio-Station 入口 (V2.0 模块化版本)
 底层解析工具迁移至 src/backend/utils/blast_utils.py (含解析缓存)。
  WebSocket 广播已由 src/backend/broadcaster.py 统一管理。
 """
-import sys
-import platform
-import collections
-
-# ─── 紧急补丁：修复 Windows WMI/CMD 卡死导致的 platform 模块挂起 ───
-if sys.platform.startswith("win"):
-    platform.system = lambda: "Windows"
-    platform.machine = lambda: "AMD64"
-    platform.release = lambda: "10"
-    platform.version = lambda: "10.0.19041"
-    uname_result = collections.namedtuple("uname_result", ["system", "node", "release", "version", "machine", "processor"])
-    platform.uname = lambda: uname_result("Windows", "Node", "10", "10.0.19041", "AMD64", "AMD64")  # type: ignore
-
 import asyncio
+import collections
 import json
 import logging
-import os
-import re
 import logging.handlers
-from pathlib import Path
+import os
+import platform
+import re
+import signal
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# ─── 0. Windows 控制台 UTF‑8 支持 ───────────────────────
-# import sys, io
-# if sys.platform.startswith("win"):
-#     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-#     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+_platform_patched = False
+_asyncio_filters_installed = False
+_runtime_hooks_installed = False
+
+
+def _apply_windows_platform_patch() -> None:
+    """幂等补丁：修复 Windows WMI/CMD 卡死导致的 platform 模块挂起。"""
+    global _platform_patched
+    if _platform_patched or not sys.platform.startswith("win"):
+        return
+    platform.system = lambda: "Windows"
+    platform.machine = lambda: "AMD64"
+    platform.release = lambda: "10"
+    platform.version = lambda: "10.0.19041"
+    uname_result = collections.namedtuple(
+        "uname_result", ["system", "node", "release", "version", "machine", "processor"]
+    )
+    platform.uname = lambda: uname_result("Windows", "Node", "10", "10.0.19041", "AMD64", "AMD64")  # type: ignore
+    _platform_patched = True
+
+
+_apply_windows_platform_patch()
 
 # ─── 1. 项目根目录初始化 (必须保留) ────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -69,42 +77,57 @@ logger = logging.getLogger("api_server")
 install_uvicorn_access_filter()
 silence_noisy_third_party_loggers()
 
-# ─── Windows asyncio 稳定性补丁 ────────────────────────
-if sys.platform.startswith("win"):
-    # 抑制 proactor_events.py 中的已知断言错误
-    # 该错误是 asyncio 内部 Bug，通常不影响业务逻辑但会产生大量冗余日志
+
+def _install_windows_asyncio_log_filters() -> None:
+    """幂等安装 Windows asyncio/websockets 已知噪音日志过滤器。"""
+    global _asyncio_filters_installed
+    if _asyncio_filters_installed or not sys.platform.startswith("win"):
+        return
+
     class AsyncioAssertionFilter(logging.Filter):
         def filter(self, record):
             return "assert f is self._write_fut" not in record.getMessage()
-            
+
     class WebsocketsTransferFilter(logging.Filter):
         def filter(self, record):
             if record.exc_info:
-                exc_type, exc_value, exc_tb = record.exc_info
+                _, exc_value, _ = record.exc_info
                 if isinstance(exc_value, OSError) and getattr(exc_value, 'winerror', None) == 121:
                     return False
             return True
-    
+
     logging.getLogger("asyncio").addFilter(AsyncioAssertionFilter())
     logging.getLogger("websockets.server").addFilter(WebsocketsTransferFilter())
     logging.getLogger("websockets.protocol").addFilter(WebsocketsTransferFilter())
-    logger.info("[Config] 已应用 Windows asyncio 稳定性补丁 (日志过滤)")
-    
-    # ─── 信号处理加速退出 (针对 Electron 生命周期优化) ───
-    import signal
-    def handle_exit(sig, frame):
-        logger.info(f"接收到信号 {sig}，正在强制清理 WSL 环境...")
-        try:
-            from src.assembly.env.wsl_manager import WSLManager
-            WSLManager.shutdown_distro()
-        except Exception as _exc:
-            logger.debug("handle_exit 忽略非致命异常: %s", _exc)
-        sys.exit(0)
-        
-    signal.signal(signal.SIGTERM, handle_exit)
-    signal.signal(signal.SIGINT, handle_exit)
+    _asyncio_filters_installed = True
 
-print(">>> Python API Server Process Started", flush=True)
+
+def install_process_runtime_hooks() -> None:
+    """
+    显式安装服务端运行时钩子（信号处理、Windows asyncio 过滤器与进程启动标记）。
+    仅在真正启动服务时调用，避免单纯 import api_server 时污染 stdout 或劫持调用方信号。
+    """
+    global _runtime_hooks_installed
+    _apply_windows_platform_patch()
+    _install_windows_asyncio_log_filters()
+    if _runtime_hooks_installed:
+        return
+    if sys.platform.startswith("win"):
+        def handle_exit(sig, _frame):
+            logger.info(f"接收到信号 {sig}，正在强制清理 WSL 环境...")
+            try:
+                from src.assembly.env.wsl_manager import WSLManager
+                WSLManager.shutdown_distro()
+            except Exception as _exc:
+                logger.debug("handle_exit 忽略非致命异常: %s", _exc)
+            sys.exit(0)
+
+        signal.signal(signal.SIGTERM, handle_exit)
+        signal.signal(signal.SIGINT, handle_exit)
+        logger.info("[Config] 已应用 Windows asyncio 稳定性补丁与退出信号钩子")
+
+    logger.info(">>> Python API Server Process Ready")
+    _runtime_hooks_installed = True
 
 # ─── 资源监控 (已模块化抽离至 src/utils/system_monitor.py) ──
 from ..utils.system_monitor import log_resources  # noqa: E402, F401
@@ -529,6 +552,7 @@ async def websocket_endpoint(websocket: WebSocket):
 def start_server(host="0.0.0.0", port=8765):
     """启动 FastAPI 后端服务"""
     import uvicorn
+    install_process_runtime_hooks()
     # 监听 host 以支持局域网共享访问
     logger.info(f"[START] 正在启动 API 服务器: http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")

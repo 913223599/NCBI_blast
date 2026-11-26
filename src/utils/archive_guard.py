@@ -14,7 +14,10 @@ import stat
 import tarfile
 import zipfile
 from pathlib import Path
-from typing import Union
+from typing import Any, Literal, Union, cast
+
+TarReadMode = Literal["r", "r:*", "r:", "r:gz", "r:bz2", "r:xz"]
+_ALLOWED_TAR_READ_MODES = frozenset({"r", "r:*", "r:", "r:gz", "r:bz2", "r:xz"})
 
 
 def _ensure_within_directory(base_dir: Path, target_path: Path, member_name: str) -> Path:
@@ -59,9 +62,11 @@ def safe_extract_zip(zip_source: Union[Path, str, zipfile.ZipFile], dest_dir: Un
 def safe_extract_tar(
     tar_source: Union[Path, str, tarfile.TarFile],
     dest_dir: Union[Path, str],
-    mode: str = "r:*",
+    mode: TarReadMode = "r:*",
 ) -> Path:
     """安全解压 TAR/TAR.GZ/TAR.BZ2 归档至目标目录，严防 Tar-Slip 与设备文件/链接逃逸。"""
+    if mode not in _ALLOWED_TAR_READ_MODES:
+        raise ValueError(f"不支持的 TAR 只读模式: {mode!r}")
     dest = Path(dest_dir).resolve()
     dest.mkdir(parents=True, exist_ok=True)
 
@@ -91,6 +96,6 @@ def safe_extract_tar(
     if isinstance(tar_source, tarfile.TarFile):
         _validate_and_extract(tar_source)
     else:
-        with tarfile.open(tar_source, mode) as tf:
+        with tarfile.open(tar_source, cast(Any, mode)) as tf:
             _validate_and_extract(tf)
     return dest

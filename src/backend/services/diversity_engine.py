@@ -891,7 +891,7 @@ class DiversityEngine:
         try:
             from ...workbench.models.tool_config import ToolConfig
 
-            exe = ToolConfig.get_blast_exe("blastn")
+            exe = ToolConfig.resolve_bio_tool("blastn")
             if exe and Path(exe).exists():
                 return Path(exe)
         except Exception as exc:

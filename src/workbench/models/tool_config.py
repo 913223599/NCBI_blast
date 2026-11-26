@@ -4,7 +4,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from ...utils.resource_guard import get_safe_cpu_budget
+from ...core.resource_guard import get_safe_cpu_budget
 from typing import ClassVar, Dict, Any, Optional
 
 logger = logging.getLogger("ToolConfig")

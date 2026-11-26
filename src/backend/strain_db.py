@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class StrainDBManager:
@@ -31,8 +31,8 @@ class StrainDBManager:
         if self._conn_cache:
             try:
                 self._conn_cache.close()
-            except Exception as _exc:
-                _s110_logger.debug("StrainDBManager._close_connection 忽略非致命异常: %s", _exc)
+            except Exception as exc:
+                self.logger.debug("关闭 StrainDB 缓存连接失败: %s", exc)
             finally:
                 self._conn_cache = None
 
@@ -486,16 +486,16 @@ class StrainDBManager:
                             engine = params.get("engine", "NJ").upper()
                             model = params.get("model", "JC").upper()
                             algorithm = f"{msa} / {engine} ({model})"
-                        except Exception as _exc:
-                            _s110_logger.debug("StrainDBManager._reconstruct_from_fs 忽略非致命异常: %s", _exc)
+                        except Exception as exc:
+                            self.logger.debug("读取历史进化树任务参数 metadata.json 失败 (%s): %s", params_file, exc)
                     
                     # 尝试从 manifest 恢复指纹
                     manifest_file = s_dir / "sequence_manifest.json"
                     if manifest_file.exists():
                         try:
                             id_to_hash = json.loads(manifest_file.read_text(encoding='utf-8'))
-                        except Exception as _exc:
-                            _s110_logger.debug("StrainDBManager._reconstruct_from_fs 忽略非致命异常: %s", _exc)
+                        except Exception as exc:
+                            self.logger.debug("读取历史进化树 manifest.json 失败 (%s): %s", manifest_file, exc)
                     
                     # 如果没有 manifest 但有 FASTA，手动生成指纹
                     if not id_to_hash and fasta and fasta.exists():
@@ -527,8 +527,8 @@ class StrainDBManager:
                         "time": int(mtime * 1000)
                     }
                     history_map[p_id].append(items_data)
-                except Exception as _exc:
-                    _s110_logger.debug("解析菌株历史任务条目跳过异常记录: %s", _exc)
+                except Exception as exc:
+                    self.logger.warning("解析菌株历史任务条目跳过异常记录: %s", exc)
                     continue
         
         if not history_map:

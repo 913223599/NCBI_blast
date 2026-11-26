@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from ....mail_download.sender import sanitize_zip_filename
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def parse_email_addresses(raw: Optional[Union[str, List[str]]]) -> List[str]:
@@ -159,14 +159,14 @@ def build_package_send_draft(
                         file_names.append(str(entry["name"]))
                     elif isinstance(entry, str):
                         file_names.append(entry)
-        except Exception as _exc:
-            _s110_logger.debug("build_package_send_draft 忽略非致命异常: %s", _exc)
+        except Exception as exc:
+            logger.debug("读取清单 manifest 文件清单失败，回退扫描 ZIP 内容 (%s): %s", manifest_path, exc)
     if not file_names:
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
                 file_names = list(zf.namelist())
-        except Exception as _exc:
-            _s110_logger.debug("build_package_send_draft 忽略非致命异常: %s", _exc)
+        except Exception as exc:
+            logger.warning("读取邮件附件压缩包文件列表失败 (%s): %s", zip_path, exc)
 
     docx_names = [n for n in file_names if n.lower().endswith(".docx")]
     subject = f"噬菌体注释结果回传 - {task_id}"

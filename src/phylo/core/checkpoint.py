@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from ..models.schemas import StageState
 import logging
-_s110_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def _atomic_write_text(target: Path, content: str) -> None:
@@ -38,8 +38,8 @@ class CheckpointManager:
                 loaded = json.loads(self.checkpoint_file.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict):
                     self.data = loaded
-            except Exception as _exc:
-                _s110_logger.debug("CheckpointManager.__init__ 忽略非致命异常: %s", _exc)
+            except Exception as exc:
+                logger.warning("读取进化树 Checkpoint 文件失败，将从头初始化 (%s): %s", self.checkpoint_file, exc)
 
     def update_stage(self, stage: StageState) -> None:
         self.data.setdefault("stages", {})[stage.name] = stage.model_dump()
