@@ -6,6 +6,7 @@
  * - 支持：当前任务本地 .pdb/.cif、AlphaFold DB (UniProt ID)、RCSB PDB (4位ID)、本地文件上传、离线示例结构
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from '../../../../../locales'
 import { shouldSubmitOnEnter } from '../../../../../utils/ime'
 import {
   DEMO_HELIX_PDB,
@@ -64,11 +65,13 @@ let cached3Dmol: any = null
 let currentContent = ''
 let pressedOutside = false
 
+const { t } = useI18n()
+
 const titleText = computed(() => {
   if (props.context?.locusTag) {
-    return `3D 蛋白结构检视 · ${props.context.locusTag}`
+    return `${t('structure3d.dialog_title')} · ${props.context.locusTag}`
   }
-  return '3D 蛋白结构检视工作台'
+  return t('structure3d.dialog_title')
 })
 
 const subtitleText = computed(() => {
@@ -427,7 +430,7 @@ onBeforeUnmount(() => {
       </div>
       <form method="dialog">
         <button type="submit" value="close" class="p3d-close-btn" aria-label="关闭 3D 结构检视窗">
-          关闭
+          {{ t('structure3d.close_btn') }}
         </button>
       </form>
     </header>

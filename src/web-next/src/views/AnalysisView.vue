@@ -4,7 +4,8 @@
  * 职责：提供组装后的深度分析工具集（全场景共线性分析、序列交互式可视化、全基因组功能注释）
  * 遵循模块化设计，每个工具为一个独立的子组件。
  */
-import { defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
+import { useI18n } from '../locales'
 import AsyncModuleLoading from '../components/common/AsyncModuleLoading.vue'
 import AsyncModuleError from '../components/common/AsyncModuleError.vue'
 import WorkbenchHubLayout from '../components/layout/WorkbenchHubLayout.vue'
@@ -49,46 +50,48 @@ interface AnalysisTool {
   status: 'ready' | 'beta' | 'coming_soon';
 }
 
-const tools = ref<AnalysisTool[]>([
+const { t } = useI18n()
+
+const tools = computed<AnalysisTool[]>(() => [
   { 
     id: 'sanger_trace', 
-    title: 'Sanger 测序峰图分析与突变检测', 
-    description: '解析 AB1 测序色谱荧光信号，检测单核苷酸变异 (SNV) 与 InDel 移码重叠峰，支持双单倍型位移解卷积分离与主序列提取。', 
+    title: t('analysis.tool.sanger_trace.title'), 
+    description: t('analysis.tool.sanger_trace.desc'), 
     iconType: 'trace',
     status: 'ready'
   },
   { 
     id: 'annotation', 
-    title: '全基因组结构与功能注释', 
-    description: '基于 Prokka 与 Pharokka 流程进行 CDS、tRNA 及 rRNA 基因预测与功能注释，生成标准注释文件并支持图谱可视化联动。', 
+    title: t('analysis.tool.annotation.title'), 
+    description: t('analysis.tool.annotation.desc'), 
     iconType: 'book',
     status: 'ready'
   },
   { 
     id: 'phage_discovery', 
-    title: '前噬菌体与噬菌体智能发现', 
-    description: '基于 Stage 1.2 与 200bp SubBinRefiner 边界精修模型，从宿主全基因组或拼接 Contigs 中精准分割前噬菌体区域，支持可选蛋白门控验证与联动注释。', 
+    title: t('analysis.tool.phage_discovery.title'), 
+    description: t('analysis.tool.phage_discovery.desc'), 
     iconType: 'phage',
     status: 'ready'
   },
   {
     id: 'phage_structure',
-    title: '噬菌体结构与尾部形态预测',
-    description: '综合识别尾鞘 TSP、MTP、TAP、TTPA/B 与 Virfam 连接器模块区分肌尾/长尾/短尾/非有尾，并定量解析卷尺蛋白 (TMP) polyX 与串联重复标尺。',
+    title: t('analysis.tool.phage_structure.title'),
+    description: t('analysis.tool.phage_structure.desc'),
     iconType: 'structure',
     status: 'ready'
   },
   { 
     id: 'pan_genomics', 
-    title: '多样本泛基因组比较分析', 
-    description: '基于直系同源基因聚类构建核心基因组与特异基因组，解析同源家族得失、受体结合蛋白多态性及溶源/安全性特征。', 
+    title: t('analysis.tool.pan_genomics.title'), 
+    description: t('analysis.tool.pan_genomics.desc'), 
     iconType: 'pangenome',
     status: 'ready'
   },
   { 
     id: 'viewer', 
-    title: '基因组序列图谱可视化', 
-    description: '提供交互式序列与基因特征图谱查看器，支持环形 (Circular) 与线性 (Linear) 双模式，兼容 GenBank 及 GFF3 格式。', 
+    title: t('analysis.tool.viewer.title'), 
+    description: t('analysis.tool.viewer.desc'), 
     iconType: 'dna',
     status: 'ready'
   }
@@ -147,12 +150,12 @@ function handleOpenStructureFromPhage(payload: { taskId: string; taskName: strin
 
 <template>
   <WorkbenchHubLayout
-    title="组装分析工作台"
-    subtitle="基因组功能注释与比较基因组学分析工作台，支持结构与功能注释、前噬菌体边界发现、多样本泛基因组分析、Sanger 测序突变解析及序列图谱可视化。"
+    :title="t('analysis.hub.title')"
+    :subtitle="t('analysis.hub.subtitle')"
     :active="Boolean(activeTool)"
-    stat-label="可用工具"
+    :stat-label="t('analysis.hub.stat_label')"
     :stat-value="tools.length"
-    back-label="返回工具列表"
+    :back-label="t('analysis.hub.back_label')"
     accent="blue"
     grid-min-width="300px"
     @back="activeTool = null"

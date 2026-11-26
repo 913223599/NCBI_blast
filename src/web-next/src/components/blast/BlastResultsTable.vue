@@ -151,7 +151,7 @@ function openNcbi(accession: string): void {
             <th>{{ t('blast.res.id') }}</th>
             <th>{{ t('blast.res.eval') }}</th>
             <th>NCBI</th>
-            <th>操作</th>
+            <th>{{ t('blast.res.actions') }}</th>
           </tr>
         </thead>
         <tbody>

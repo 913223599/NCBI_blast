@@ -4,8 +4,11 @@
  */
 import { ref, computed } from 'vue';
 import { API_BASE } from '../../../bridge/electron-bridge';
+import { useI18n } from '../../../locales';
 import { downloadFileFromUrl, downloadFileFromText } from '../../../utils/fileDownloader';
 import type { AssemblyResultData, AssemblyTaskItem, ContigDetailItem } from '../types';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   task: AssemblyTaskItem;
@@ -148,30 +151,30 @@ async function downloadContig(c: ContigDetailItem) {
         <div class="header-info">
           <div class="title-line">
             <h2 class="task-title">{{ task.name }}</h2>
-            <span class="pill-success">组装完成</span>
+            <span class="pill-success">{{ t('assembly.results.completed') }}</span>
             <span v-if="stats.is_circular" class="pill-circular">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                 <circle cx="12" cy="12" r="10" />
               </svg>
-              环状完整拓扑
+              {{ t('assembly.results.circular') }}
             </span>
           </div>
           <div class="meta-line">
-            <span>平台: <b>{{ task.tech || 'NGS' }}</b></span>
+            <span>{{ t('assembly.results.platform') }}: <b>{{ task.tech || 'NGS' }}</b></span>
             <span class="dot">·</span>
-            <span>类型: <b>{{ task.sample_type || 'BACTERIA' }}</b></span>
+            <span>{{ t('assembly.results.type') }}: <b>{{ task.sample_type || 'BACTERIA' }}</b></span>
             <span class="dot">·</span>
-            <span>耗时: <b>{{ task.duration_seconds ? `${Math.round(task.duration_seconds)}s` : '完成' }}</b></span>
+            <span>{{ t('assembly.results.duration') }}: <b>{{ task.duration_seconds ? `${Math.round(task.duration_seconds)}s` : t('assembly.results.done') }}</b></span>
           </div>
         </div>
       </div>
 
       <div class="header-right">
-        <button class="btn-secondary" @click="emit('openFolder')" title="在文件管理器中定位产物所在目录">
+        <button class="btn-secondary" @click="emit('openFolder')" :title="t('assembly.results.open_folder_title')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           </svg>
-          <span>打开所在目录</span>
+          <span>{{ t('assembly.results.open_folder') }}</span>
         </button>
         <button class="btn-primary" @click="emit('download')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -179,7 +182,7 @@ async function downloadContig(c: ContigDetailItem) {
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
-          <span>下载 FASTA</span>
+          <span>{{ t('assembly.results.download_fasta') }}</span>
         </button>
       </div>
     </div>
@@ -188,7 +191,7 @@ async function downloadContig(c: ContigDetailItem) {
     <div class="compact-metrics-grid">
       <!-- 1. Contigs 数量 -->
       <div class="c-metric-card border-blue">
-        <span class="c-label">Contigs 数量</span>
+        <span class="c-label">{{ t('assembly.results.metric.contigs') }}</span>
         <div class="c-val-box">
           <span class="c-val">{{ stats.contigs || 1 }}</span>
           <span class="c-unit">片段</span>
@@ -198,7 +201,7 @@ async function downloadContig(c: ContigDetailItem) {
 
       <!-- 2. 基因组总长度 -->
       <div class="c-metric-card border-emerald">
-        <span class="c-label">基因组总长度</span>
+        <span class="c-label">{{ t('assembly.results.metric.total_len') }}</span>
         <div class="c-val-box">
           <span class="c-val">{{ formatNumber(stats.total_length) }}</span>
           <span class="c-unit">bp</span>
@@ -208,7 +211,7 @@ async function downloadContig(c: ContigDetailItem) {
 
       <!-- 3. 最长 Contig 长度 -->
       <div class="c-metric-card border-cyan">
-        <span class="c-label">最长 Contig 长度</span>
+        <span class="c-label">{{ t('assembly.results.metric.max_contig') }}</span>
         <div class="c-val-box">
           <span class="c-val">{{ formatNumber(stats.max_contig_length) }}</span>
           <span class="c-unit">bp</span>
@@ -218,7 +221,7 @@ async function downloadContig(c: ContigDetailItem) {
 
       <!-- 4. N50 连续性 -->
       <div class="c-metric-card border-purple">
-        <span class="c-label">N50 连续性指标</span>
+        <span class="c-label">{{ t('assembly.results.metric.n50') }}</span>
         <div class="c-val-box">
           <span class="c-val">{{ formatNumber(stats.n50) }}</span>
           <span class="c-unit">bp</span>
@@ -228,7 +231,7 @@ async function downloadContig(c: ContigDetailItem) {
 
       <!-- 5. GC 含量 -->
       <div class="c-metric-card border-amber">
-        <span class="c-label">GC 含量</span>
+        <span class="c-label">{{ t('assembly.results.metric.gc') }}</span>
         <div class="c-val-box">
           <span class="c-val">{{ stats.gc_percent || 0 }}</span>
           <span class="c-unit">%</span>
@@ -249,8 +252,8 @@ async function downloadContig(c: ContigDetailItem) {
             <line x1="3" y1="12" x2="3.01" y2="12"></line>
             <line x1="3" y1="18" x2="3.01" y2="18"></line>
           </svg>
-          <span>Contig 片段明细</span>
-          <span class="count-badge">共 {{ contigList.length }} 个片段</span>
+          <span>{{ t('assembly.results.table_title') }}</span>
+          <span class="count-badge">{{ t('assembly.results.table_count', { count: contigList.length }) }}</span>
         </div>
       </div>
 
@@ -258,12 +261,12 @@ async function downloadContig(c: ContigDetailItem) {
         <table class="contigs-table">
           <thead>
             <tr>
-              <th style="width: 22%;">片段名称</th>
-              <th style="width: 28%;">长度 (bp) / 占比</th>
-              <th style="width: 14%;">GC 含量</th>
-              <th style="width: 14%;">测序深度</th>
-              <th style="width: 12%;">拓扑结构</th>
-              <th style="width: 10%; text-align: right;">操作</th>
+              <th style="width: 22%;">{{ t('assembly.results.col.name') }}</th>
+              <th style="width: 28%;">{{ t('assembly.results.col.length') }}</th>
+              <th style="width: 14%;">{{ t('assembly.results.col.gc') }}</th>
+              <th style="width: 14%;">{{ t('assembly.results.col.depth') }}</th>
+              <th style="width: 12%;">{{ t('assembly.results.col.topo') }}</th>
+              <th style="width: 10%; text-align: right;">{{ t('assembly.results.col.actions') }}</th>
             </tr>
           </thead>
           <tbody>

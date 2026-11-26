@@ -4,6 +4,7 @@
  * 将系统发育树构建与多环出版出图，以及六大噬菌体顶刊核心图型整合为模块化卡片工具组。
  */
 import { computed, defineAsyncComponent, ref } from 'vue'
+import { useI18n } from '../locales'
 import AsyncModuleLoading from '../components/common/AsyncModuleLoading.vue'
 import AsyncModuleError from '../components/common/AsyncModuleError.vue'
 import CitationsDialog from '../components/common/CitationsDialog.vue'
@@ -61,68 +62,63 @@ interface StudioToolCard {
   iconType: 'tree' | 'heatmap' | 'circmap' | 'synteny' | 'diversity' | 'network' | 'matrix'
 }
 
-const tools: StudioToolCard[] = [
+const { t } = useI18n()
+
+const tools = computed<StudioToolCard[]>(() => [
   {
     id: 'phylo_tree',
-    title: '系统发育树构建与多环出版出图',
+    title: t('studio.tool.phylo_tree.title'),
     journalRef: 'Nature Micro / Nat Commun / iTOL',
-    description:
-      '全套 TerL / 蛋白质组构树科研流水线，支持环形多环、180 度半圆宽幅树、复合双拼论文图 (a+b)、矩形多轨及实时缩放大图预览。',
+    description: t('studio.tool.phylo_tree.desc'),
     iconType: 'tree',
   },
   {
     id: 'viridic_heatmap',
-    title: 'VIRIDIC 双向相似性与 ANI 矩阵',
+    title: t('studio.tool.viridic_heatmap.title'),
     journalRef: 'Viruses (VIRIDIC) / Nat Commun',
-    description:
-      '生成 ICTV 标准双三角全基因组相似性热图（右上相似度 + 左下对齐覆盖度/长度比 + 顶部长度柱图）及树-热图联动下三角 ANI 矩阵。',
+    description: t('studio.tool.viridic_heatmap.desc'),
     iconType: 'heatmap',
   },
   {
     id: 'genome_map',
-    title: '单株全基因组功能圈图与多轨图',
+    title: t('studio.tool.genome_map.title'),
     journalRef: 'CGView / Proksee / LoVis4u',
-    description:
-      '一键接入已完成的 Pharokka/Prokka 注释任务或 GBK 文件，输出带正负链 CDS、PHROGs 功能色、GC Content 与 GC Skew 的论文 Figure 1 图谱。',
+    description: t('studio.tool.genome_map.desc'),
     iconType: 'circmap',
   },
   {
     id: 'synteny_ribbon',
-    title: '比较基因组共线性丝带图',
+    title: t('studio.tool.synteny_ribbon.title'),
     journalRef: 'NAR LoVis4u (2025) / clinker',
-    description:
-      '内置多线程蛋白同源对齐，支持 LoVis4u 去噪高亮风格与 clinker 贝塞尔曲线丝带风格，直观揭示尾丝变异、缺失岛及抗防御基因。',
+    description: t('studio.tool.synteny_ribbon.desc'),
     iconType: 'synteny',
   },
   {
     id: 'diversity_window',
-    title: '同种多株系核苷酸多样性 (Pi) 热点图',
+    title: t('studio.tool.diversity_window.title'),
     journalRef: 'Nature Communications (2024)',
-    description:
-      '专门放大高相似度同种与近缘株内部演化信号，用滑窗 Pi 曲线与基因内部蓝→黄→红热图定量定位高变受体/蛋白热点并附对照表。',
+    description: t('studio.tool.diversity_window.desc'),
     iconType: 'diversity',
   },
   {
     id: 'gene_network',
-    title: '蛋白基因共享网络与构成华夫格图',
+    title: t('studio.tool.gene_network.title'),
     journalRef: 'Nat Biotech vConTACT2 / Nat Commun',
-    description:
-      '基于力导向图揭示水平基因转移与嵌合噬菌体网状亲缘关系，自动网格化底部孤立小簇并在右侧附带 10x10 类别占比华夫格图。',
+    description: t('studio.tool.gene_network.desc'),
     iconType: 'network',
   },
   {
     id: 'host_matrix',
-    title: '双树联动宿主谱与特异性矩阵',
+    title: t('studio.tool.host_matrix.title'),
     journalRef: 'Nature Commun DepoCatalog / EOP',
-    description:
-      '支持宿主聚类树 + 噬菌体树双边联动连续热图及对角化血清型-解聚酶/裂解活性稀疏矩阵，快速支撑噬菌体疗法与鸡尾酒配伍发表。',
+    description: t('studio.tool.host_matrix.desc'),
     iconType: 'matrix',
   },
-]
+])
 
 const activeTool = ref<StudioToolId | null>(null)
 const showCitationsDialog = ref(false)
-const currentToolObj = computed(() => tools.find((t) => t.id === activeTool.value) ?? null)
+const currentToolObj = computed(() => tools.value.find((tItem) => tItem.id === activeTool.value) ?? null)
 
 function selectTool(id: StudioToolId): void {
   activeTool.value = id
@@ -131,23 +127,23 @@ function selectTool(id: StudioToolId): void {
 
 <template>
   <WorkbenchHubLayout
-    :title="currentToolObj ? currentToolObj.title : '科研绘图工坊'"
+    :title="currentToolObj ? currentToolObj.title : t('studio.hub.title')"
     :subtitle="
       currentToolObj
-        ? `${currentToolObj.journalRef} · 均支持出版级矢量 PDF / SVG 与高清 PNG 输出及界面实时缩放预览`
-        : '对标 Nature Microbiology / Nature Communications / NAR 顶刊图型标准的专用出图工具组，直接复用系统内注释与进化分析产物。'
+        ? `${currentToolObj.journalRef} · ${t('studio.hub.tool_subtitle_suffix')}`
+        : t('studio.hub.subtitle')
     "
     :active="Boolean(activeTool)"
-    stat-label="可用图型"
+    :stat-label="t('studio.hub.stat_label')"
     :stat-value="tools.length"
-    back-label="返回工坊工具组"
+    :back-label="t('studio.hub.back_label')"
     accent="teal"
     grid-min-width="310px"
     @back="activeTool = null"
   >
     <template #header-extra>
       <button type="button" class="citations-btn" @click="showCitationsDialog = true">
-        学术引用 (BibTeX)
+        {{ t('studio.hub.citations_btn') }}
       </button>
     </template>
 

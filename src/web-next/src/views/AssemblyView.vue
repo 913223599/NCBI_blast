@@ -4,6 +4,7 @@
  * 采用 侧边栏-主内容 桌面端双栏架构，全面对接 NGCS 引擎
  */
 import { ref, onMounted } from 'vue';
+import { useI18n } from '../locales';
 import { useAssembly } from './Assembly/composables/useAssembly';
 import AssemblyHistory from './Assembly/components/AssemblyHistory.vue';
 import AssemblySetup from './Assembly/components/AssemblySetup.vue';
@@ -33,6 +34,7 @@ const {
 } = useAssembly();
 
 // 是否显式处于“新建任务表单”模式
+const { t } = useI18n();
 const showSetupForm = ref<boolean>(false);
 
 onMounted(async () => {
@@ -89,17 +91,17 @@ async function handleDeleteTask(taskId: string) {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
               <path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
             </svg>
-            <span>拼接历史记录</span>
-            <span v-if="queueStatus && queueStatus.waiting_count > 0" class="queue-counter-tag" :title="`当前有 ${queueStatus.waiting_count} 个任务在排队`">
-              排队中 {{ queueStatus.waiting_count }}
+            <span>{{ t('assembly.sidebar.title') }}</span>
+            <span v-if="queueStatus && queueStatus.waiting_count > 0" class="queue-counter-tag" :title="t('assembly.sidebar.queued_title', { count: queueStatus.waiting_count })">
+              {{ t('assembly.sidebar.queued', { count: queueStatus.waiting_count }) }}
             </span>
           </div>
-          <button class="new-task-btn" @click="onStartNew" title="新建拼接任务">
+          <button class="new-task-btn" @click="onStartNew" :title="t('assembly.sidebar.new_title')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            新建
+            {{ t('assembly.sidebar.new_btn') }}
           </button>
         </div>
 
@@ -116,7 +118,7 @@ async function handleDeleteTask(taskId: string) {
       </aside>
 
       <!-- 2. 右侧主工作区 (严格状态互斥渲染) -->
-      <section class="main-content" aria-label="基因组组装工作区">
+      <section class="main-content" :aria-label="t('assembly.workspace_aria')">
         <!-- 错误横幅 -->
         <transition name="slide-fade">
           <div v-if="error" class="error-banner">

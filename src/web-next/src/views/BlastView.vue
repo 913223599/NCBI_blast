@@ -336,7 +336,7 @@ onUnmounted(() => {
           @click="launchBlast" 
           :disabled="blast.analysisTarget === 'isolate' && !blast.hasInput"
         >
-          {{ blast.analysisTarget === 'diversity' ? '执行多样性比对' : t('blast.btn.run') }}
+          {{ blast.analysisTarget === 'diversity' ? t('blast.btn.run_diversity') : t('blast.btn.run') }}
         </button>
       </div>
     </div>

@@ -97,7 +97,7 @@ function getDisplayName(fullPath: string) {
           <circle cx="12" cy="12" r="8" stroke-width="2"/>
           <path d="M12 8v8M8 12h8" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <span>单株鉴定</span>
+        <span>{{ t('blast.mode.isolate') }}</span>
       </button>
       <button 
         class="mode-switch-btn" 
@@ -108,7 +108,7 @@ function getDisplayName(fullPath: string) {
           <path d="M4 6c4 0 6 6 10 6s6-6 10-6M4 18c4 0 6-6 10-6s6 6 10 6" stroke-width="2" stroke-linecap="round"/>
           <path d="M8 8.5v7M16 8.5v7" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <span>多样性鉴定</span>
+        <span>{{ t('blast.mode.diversity') }}</span>
       </button>
     </div>
 
@@ -141,17 +141,17 @@ function getDisplayName(fullPath: string) {
     <div v-else class="diversity-input-container">
       <div class="diversity-header-box">
         <div class="div-title-row">
-          <span class="div-badge">16S 混样专研</span>
-          <span class="div-rrndb-tag">rrnDB v5.10 拷贝数校正</span>
+          <span class="div-badge">{{ t('blast.diversity.badge') }}</span>
+          <span class="div-rrndb-tag">{{ t('blast.diversity.rrndb_tag') }}</span>
         </div>
-        <p class="div-tip">专用于未分菌纯化样本、环境混样与多采样重复点位，直接分类单分子 Reads 并消除 16S 拷贝数偏差。</p>
+        <p class="div-tip">{{ t('blast.diversity.tip') }}</p>
       </div>
 
       <div class="diversity-upload-box">
         <UniversalUpload 
           type="fasta"
           accept=".zip,.fastq,.fastq.gz,.fasta,.fa"
-          label="拖入生工测序交付压缩包 (ZIP) 或 FASTQ 读长"
+          :label="t('blast.diversity.drop')"
           @success="onDiversityUploadSuccess"
         />
       </div>

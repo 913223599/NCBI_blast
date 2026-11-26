@@ -7,7 +7,7 @@
     />
 
     <!-- 右侧详情区 -->
-    <section class="strain-content" aria-label="菌毒种库工作区">
+    <section class="strain-content" :aria-label="t('strain.workspace_aria')">
       <!-- 顶部工具栏 -->
       <div class="top-toolbar">
         <div class="toolbar-left">
@@ -16,21 +16,21 @@
             :class="{ active: currentView === 'freezer' }"
             @click="currentView = 'freezer'"
           >
-            平铺视图
+            {{ t('strain.toolbar.freezer_view') }}
           </button>
           <button
             class="toolbar-btn"
             :class="{ active: currentView === 'stats' }"
             @click="currentView = 'stats'"
           >
-            统计分析
+            {{ t('strain.toolbar.stats_view') }}
           </button>
           <button
             class="toolbar-btn"
             :class="{ active: currentView === 'list' }"
             @click="currentView = 'list'"
           >
-            列表视图
+            {{ t('strain.toolbar.list_view') }}
           </button>
 
           <div class="toolbar-divider"></div>
@@ -39,18 +39,18 @@
             class="toolbar-btn action-btn"
             @click="showBatchImport = true"
           >
-            批量导入
+            {{ t('strain.toolbar.batch_import') }}
           </button>
 
           <button
             class="toolbar-btn action-btn"
             @click="showCodeManager = true"
           >
-            编码管理
+            {{ t('strain.toolbar.code_manager') }}
           </button>
         </div>
         <div class="toolbar-right">
-          <span class="shortcuts-hint">Ctrl+N: 添加冰箱 | Ctrl+I: 批量导入 | Ctrl+H: 帮助</span>
+          <span class="shortcuts-hint">{{ t('strain.toolbar.shortcuts_hint') }}</span>
         </div>
       </div>
 
@@ -102,7 +102,7 @@
     <div v-if="showCodeManager" class="code-manager-overlay" @click.self="showCodeManager = false">
       <div class="code-manager-dialog">
         <CodeLookupManager />
-        <button type="button" class="code-manager-close" aria-label="关闭编码管理" @click="showCodeManager = false">
+        <button type="button" class="code-manager-close" :aria-label="t('strain.code_manager.close_aria')" @click="showCodeManager = false">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
@@ -115,6 +115,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, onActivated, onDeactivated, computed, watch } from 'vue'
+import { useI18n } from '../locales'
 import StrainSidebar from '../components/strain/StrainSidebar.vue'
 import FreezerDetailPanel from '../components/strain/FreezerDetailPanel.vue'
 import StatisticsPanel from '../components/strain/StatisticsPanel.vue'
@@ -128,6 +129,7 @@ import { useStrainStore } from '../stores/strain'
 import type { StrainRecord } from '../stores/strain'
 
 const strain = useStrainStore()
+const { t } = useI18n()
 const showAddDialog = ref(false)
 const showBatchImport = ref(false)
 const showShortcutsHelp = ref(false)

@@ -4,7 +4,10 @@
  */
 import { ref, computed } from 'vue';
 import { getBridge } from '../../../bridge';
+import { useI18n } from '../../../locales';
 import type { AssemblyRunParams } from '../types';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   isRunning: boolean;
@@ -418,9 +421,9 @@ async function onStartAssembly() {
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.2">
           <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
         </svg>
-        <span class="main-title">基因组组装配置 (NGCS Engine)</span>
+        <span class="main-title">{{ t('assembly.setup.title') }}</span>
       </div>
-      <p class="sub-title">基于神经网络坐标系统 (NGCS) 的高保真从头组装，支持二代短读长残差流与三代长读长连续谱流形。</p>
+      <p class="sub-title">{{ t('assembly.setup.subtitle') }}</p>
     </div>
 
     <!-- 上传区域 -->
@@ -449,8 +452,8 @@ async function onStartAssembly() {
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
         </div>
-        <p class="primary-hint">拖拽测序数据文件至此处，或 <span class="click-link">点击选择文件</span></p>
-        <p class="secondary-hint">支持二代双端 FASTQ (R1/R2)、三代长读长 FASTQ (.fq.gz, .fastq)、二代+三代混合测序及 ZIP 测序归档包 (.zip)</p>
+        <p class="primary-hint">{{ t('assembly.setup.drop_prefix') }} <span class="click-link">{{ t('assembly.setup.drop_link') }}</span></p>
+        <p class="secondary-hint">{{ t('assembly.setup.drop_desc') }}</p>
       </div>
 
       <!-- 已选择文件时的卡片展示 -->
@@ -510,7 +513,7 @@ async function onStartAssembly() {
 
         <div class="replace-actions">
           <button class="text-btn" @click="handleDropzoneClick">
-            重新选择或添加文件
+            {{ t('assembly.setup.reselect') }}
           </button>
         </div>
       </div>
@@ -520,18 +523,18 @@ async function onStartAssembly() {
     <div class="form-grid">
       <!-- 任务名称 -->
       <div class="form-group">
-        <label class="form-label">任务名称</label>
+        <label class="form-label">{{ t('assembly.setup.task_name') }}</label>
         <input 
           v-model="taskName" 
           type="text" 
           class="form-input" 
-          placeholder="例如: Sample_01_Assembly"
+          :placeholder="t('assembly.setup.task_name_placeholder')"
         />
       </div>
 
       <!-- 测序平台 -->
       <div class="form-group">
-        <label class="form-label">测序技术平台</label>
+        <label class="form-label">{{ t('assembly.setup.tech') }}</label>
         <select v-model="tech" class="form-select" @change="onTechChange">
           <option value="ILLUMINA">二代短读长双端 (Illumina / MGI NGS)</option>
           <option value="NANOPORE">三代长读长 (Oxford Nanopore ONT)</option>
@@ -542,7 +545,7 @@ async function onStartAssembly() {
 
       <!-- 样本生物类型 -->
       <div class="form-group">
-        <label class="form-label">样本生物类型</label>
+        <label class="form-label">{{ t('assembly.setup.sample_type') }}</label>
         <select v-model="sampleType" class="form-select">
           <option value="BACTERIA">细菌 (Bacteria / Archaea)</option>
           <option value="PHAGE">噬菌体 (Bacteriophage)</option>
@@ -553,7 +556,7 @@ async function onStartAssembly() {
 
       <!-- NGCS 原生组装模式 -->
       <div class="form-group">
-        <label class="form-label">NGCS 组装模式</label>
+        <label class="form-label">{{ t('assembly.setup.mode') }}</label>
         <select v-model="mode" class="form-select" @change="onModeChange">
           <option value="isolate">单菌分离株模式 (Isolate - 高深度单菌精修)</option>
           <option value="metagenome">宏基因组模式 (Metagenome - 复杂多丰度群落)</option>
@@ -565,7 +568,7 @@ async function onStartAssembly() {
 
       <!-- 线程数 -->
       <div class="form-group">
-        <label class="form-label">并行计算线程数</label>
+        <label class="form-label">{{ t('assembly.setup.threads') }}</label>
         <input 
           v-model.number="threads" 
           type="number" 
@@ -584,7 +587,7 @@ async function onStartAssembly() {
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
-          <span class="adv-title">NGCS 高级算法与产物过滤参数</span>
+          <span class="adv-title">{{ t('assembly.setup.advanced_title') }}</span>
         </div>
         <span class="adv-arrow" :class="{ 'is-open': showAdvanced }">▼</span>
       </div>
@@ -592,7 +595,7 @@ async function onStartAssembly() {
       <div v-show="showAdvanced" class="advanced-form-grid">
         <!-- 最小 Contig 长度 -->
         <div class="form-group">
-          <label class="form-label">最小 Contig 产物长度 (bp)</label>
+          <label class="form-label">{{ t('assembly.setup.min_contig') }}</label>
           <input 
             v-model.number="minContigLength" 
             type="number" 
@@ -651,7 +654,7 @@ async function onStartAssembly() {
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
             <input v-model="enableQC" type="checkbox" class="form-checkbox" />
-            <span>启用 Fastp 自动接头修剪与低质量过滤</span>
+            <span>{{ t('assembly.setup.enable_qc') }}</span>
           </label>
           <span class="field-hint">如已在上游完成严格质控可取消勾选以提升速度</span>
         </div>
@@ -663,7 +666,7 @@ async function onStartAssembly() {
       <div class="status-tip">
         <span v-if="isBusy" class="busy-pill">
           <span class="busy-dot"></span>
-          当前引擎有任务正在运行，新任务将进入排队队列
+          {{ t('assembly.setup.busy_hint') }}
         </span>
       </div>
 

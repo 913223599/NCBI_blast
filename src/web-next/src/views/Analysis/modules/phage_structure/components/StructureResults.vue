@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useAppStore } from '../../../../../stores/app'
+import { useI18n } from '../../../../../locales'
 import type { ContigStructureResult, PhageStructureResult, StructureProteinItem, StructureTaskHistoryItem } from '../types'
 import {
   buildModuleMatrixCards,
@@ -29,6 +30,7 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const { t } = useI18n()
 const activeContigId = ref<string>('')
 const roleFilter = ref<'ALL' | 'STRUCTURAL'>('STRUCTURAL')
 const searchText = ref<string>('')
@@ -187,7 +189,7 @@ const filteredProteins = computed(() => {
           >
             图谱查看
           </button>
-          <button type="button" class="act-btn" @click="open3DViewerForProtein()">3D 结构预览</button>
+          <button type="button" class="act-btn" @click="open3DViewerForProtein()">{{ t('structure3d.open_btn') }}</button>
           <button type="button" class="act-btn" @click="exportStructuralProteinsFaa">导出结构蛋白 FAA</button>
           <button type="button" class="act-btn" @click="emit('download', 'summary_tsv')">汇总 TSV</button>
           <button type="button" class="act-btn" @click="emit('download', 'features_tsv')">基因 TSV</button>
@@ -518,7 +520,7 @@ const filteredProteins = computed(() => {
                       title="在交互式 3D 结构检视窗查看蛋白结构或加载 PDB/AlphaFold"
                       @click="open3DViewerForProtein(p)"
                     >
-                      3D 预览
+                      {{ t('structure3d.row_btn') }}
                     </button>
                   </div>
                 </td>

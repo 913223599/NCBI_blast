@@ -6,7 +6,8 @@
  *   2. 生工 16S 测序结果自动化 BLAST 与导出流程
  * 遵循模块化设计，每个工具为一个独立的子组件，视觉风格对齐 AnalysisView.vue。
  */
-import { defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
+import { useI18n } from '../locales'
 import AsyncModuleLoading from '../components/common/AsyncModuleLoading.vue'
 import AsyncModuleError from '../components/common/AsyncModuleError.vue'
 import WorkbenchHubLayout from '../components/layout/WorkbenchHubLayout.vue'
@@ -35,18 +36,20 @@ interface OtherToolItem {
   badgeText?: string
 }
 
-const tools = ref<OtherToolItem[]>([
+const { t } = useI18n()
+
+const tools = computed<OtherToolItem[]>(() => [
   {
     id: 'mail_pipeline',
-    title: '邮件自动收件 → 注释 → Word 报告 → SMTP 回传',
-    description: '接收邮件中的 FASTA 附件，完成基因组注释与 Word 报告生成，打包后邮件回传。',
+    title: t('other.tool.mail_pipeline.title'),
+    description: t('other.tool.mail_pipeline.desc'),
     iconType: 'mail_pipeline',
     status: 'ready'
   },
   {
     id: 'sangon_16s',
-    title: '生工 16S 测序结果自动化 BLAST 与导出流程',
-    description: '扫描生工通知邮件建立订单目录，解压提取 *.1.fasta 执行 16S BLAST 比对并导出 CSV。',
+    title: t('other.tool.sangon_16s.title'),
+    description: t('other.tool.sangon_16s.desc'),
     iconType: 'sangon_16s',
     status: 'ready'
   }
@@ -62,12 +65,12 @@ function selectTool(tool: OtherToolItem): void {
 
 <template>
   <WorkbenchHubLayout
-    title="其他功能"
-    subtitle="邮件自动注释回传与生工 16S 测序自动比对导出。"
+    :title="t('other.hub.title')"
+    :subtitle="t('other.hub.subtitle')"
     :active="Boolean(activeTool)"
-    stat-label="工具数"
+    :stat-label="t('other.hub.stat_label')"
     :stat-value="tools.length"
-    back-label="返回工具列表"
+    :back-label="t('other.hub.back_label')"
     accent="blue"
     grid-min-width="420px"
     @back="activeTool = null"
@@ -82,7 +85,7 @@ function selectTool(tool: OtherToolItem): void {
           :class="{ active: activeTool === item.id }"
           @click="activeTool = item.id"
         >
-          {{ item.id === 'mail_pipeline' ? '邮件注释回传' : '生工 16S 比对' }}
+          {{ item.id === 'mail_pipeline' ? t('other.tab.mail_pipeline') : t('other.tab.sangon_16s') }}
         </button>
       </div>
     </template>
