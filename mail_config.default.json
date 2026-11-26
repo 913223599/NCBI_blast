@@ -1,9 +1,9 @@
 {
   "imap_server": "imap.qq.com",
   "imap_port": 993,
-  "account": "913223599@qq.com",
+  "account": "your_account@example.com",
   "auth_code_env": "YS_MAIL_AUTH_CODE",
-  "sender_whitelist": ["yssw_service@163.com"],
+  "sender_whitelist": ["sender@example.com"],
   "subject_keywords": [],
   "attachment_exts": [".fasta", ".fa", ".fna", ".fas", ".fsa", ".seq", ".txt"],
   "max_attach_size_mb": 200,
@@ -13,9 +13,9 @@
   "on_download_cmd": null,
   "smtp_server": "smtp.qq.com",
   "smtp_port": 465,
-  "smtp_account": "913223599@qq.com",
+  "smtp_account": "your_account@example.com",
   "smtp_auth_code_env": "YS_MAIL_AUTH_CODE",
-  "smtp_display_name": "元昇生物注释服务",
-  "reply_to": "yssw_service@163.com",
+  "smtp_display_name": "NCBI Bio-Station Annotation Service",
+  "reply_to": "reply@example.com",
   "send_dir": "results/email_sends"
 }

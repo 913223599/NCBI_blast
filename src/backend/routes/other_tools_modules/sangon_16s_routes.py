@@ -124,10 +124,10 @@ def _execute_sangon_dirs_pipeline(
                 )
 
         if not fastas and zip_dir.exists():
+            from ....utils.archive_guard import safe_extract_zip
             for zf_path in sorted(zip_dir.glob("*.zip")):
                 ot._append_sangon_log(f"正在解压原始压缩包: {zf_path.name} -> 原始数据/")
-                with zipfile.ZipFile(zf_path, "r") as zf:
-                    zf.extractall(raw_dir)
+                safe_extract_zip(zf_path, raw_dir)
             fastas = sorted([p for p in raw_dir.rglob("*.1.fasta") if "haplotype" not in p.name.lower()])
 
         if not fastas:

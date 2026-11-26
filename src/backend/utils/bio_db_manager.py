@@ -2,7 +2,6 @@ import os
 import logging
 import asyncio
 import subprocess
-import tarfile
 import urllib.request
 from typing import Dict, Any, Optional, List
 import time
@@ -245,10 +244,10 @@ class Ncbi16SDatabase(BioDatabase):
             # (简写校验步骤...)
             os.replace(str(target_gz) + ".tmp", target_gz)
             
-            # 提取 tar 压缩文件 (在后台线程池中运行)
+            # 提取 tar 压缩文件 (在后台线程池中运行，强制防 Tar-Slip 安全校验)
             def _extract_tar():
-                with tarfile.open(target_gz) as t:
-                    t.extractall(path=self.base_dir)
+                from ...utils.archive_guard import safe_extract_tar
+                safe_extract_tar(target_gz, self.base_dir)
             
             await asyncio.to_thread(_extract_tar)
             
@@ -456,8 +455,8 @@ class DefenseFinderDatabase(BioDatabase):
             await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
 
             def _extract():
-                with tarfile.open(target_tar) as t:
-                    t.extractall(path=self.base_dir)
+                from ...utils.archive_guard import safe_extract_tar
+                safe_extract_tar(target_tar, self.base_dir)
 
             await asyncio.to_thread(_extract)
             current_version = f"v1.3-{datetime.now().strftime('%Y-%m')}"
@@ -486,9 +485,8 @@ class CardDatabase(BioDatabase):
             await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
 
             def _extract_and_build():
-                import tarfile
-                with tarfile.open(target_tar, "r:bz2") as t:
-                    t.extractall(path=self.base_dir)
+                from ...utils.archive_guard import safe_extract_tar
+                safe_extract_tar(target_tar, self.base_dir, mode="r:bz2")
                 # 寻找 protein_fasta 蛋白序列
                 f_faa = self.base_dir / "protein_fasta.fasta"
                 if not f_faa.exists():
@@ -534,8 +532,8 @@ class CddPfamDatabase(BioDatabase):
             await asyncio.to_thread(urllib.request.urlretrieve, download_url, target_tar)
 
             def _extract():
-                with tarfile.open(target_tar) as t:
-                    t.extractall(path=self.base_dir)
+                from ...utils.archive_guard import safe_extract_tar
+                safe_extract_tar(target_tar, self.base_dir)
 
             await asyncio.to_thread(_extract)
             current_version = f"v3.21-{datetime.now().strftime('%Y-%m')}"

@@ -20,7 +20,6 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
-import zipfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -228,8 +227,8 @@ def default_external_binary_downloader(tool_key: str, dest_path: Path) -> bool:
 
             extract_dir = tmp_root / "extracted"
             extract_dir.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(dl_path, "r") as zf:
-                zf.extractall(extract_dir)
+            from .archive_guard import safe_extract_zip
+            safe_extract_zip(dl_path, extract_dir)
 
             pattern = str(spec.get("pattern", "")).lower()
             prefer = str(spec.get("prefer", "")).lower()

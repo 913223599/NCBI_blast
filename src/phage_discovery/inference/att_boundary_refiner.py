@@ -301,35 +301,48 @@ def refine_regions_with_att_sites(
                 if (p_val < 0.22 and p4 < 0.22 and core_max < 0.25) or (p9 >= 0.62 and p_val < 0.40):
                     clear_host_intervals.append((gs, ge))
 
-        def _violates_biological_guards(cand_s: int, cand_e: int) -> bool:
-            for cs, ce in protected_core_intervals:
-                if reg.start_bp <= 0.5 * (cs + ce) <= reg.end_bp:
+        def _violates_biological_guards(
+            cand_s: int,
+            cand_e: int,
+            *,
+            _protected=protected_core_intervals,
+            _clear_host=clear_host_intervals,
+            _reg_start: int = reg.start_bp,
+            _reg_end: int = reg.end_bp,
+        ) -> bool:
+            for cs, ce in _protected:
+                if _reg_start <= 0.5 * (cs + ce) <= _reg_end:
                     if cand_s > cs + 18 or cand_e < ce - 18:
                         return True
                 if cs + 22 < cand_s < ce - 22 or cs + 22 < cand_e < ce - 22:
                     return True
 
             # 防越宿主向外盲扩：不允许跨过边界外侧已明确判定的宿主完整基因
-            if cand_s < reg.start_bp:
-                for hs, he in clear_host_intervals:
-                    if he <= reg.start_bp + 20 and hs >= cand_s - 20:
+            if cand_s < _reg_start:
+                for hs, he in _clear_host:
+                    if he <= _reg_start + 20 and hs >= cand_s - 20:
                         return True
-            if cand_e > reg.end_bp:
-                for hs, he in clear_host_intervals:
-                    if hs >= reg.end_bp - 20 and he <= cand_e + 20:
+            if cand_e > _reg_end:
+                for hs, he in _clear_host:
+                    if hs >= _reg_end - 20 and he <= cand_e + 20:
                         return True
             return False
 
-        def _integrase_proximity(pos_l: int, pos_r: int) -> float:
+        def _integrase_proximity(
+            pos_l: int,
+            pos_r: int,
+            *,
+            _integrases=integrase_intervals,
+        ) -> float:
             best = 0.0
-            for is0, ie0 in integrase_intervals:
+            for is0, ie0 in _integrases:
                 dmin = min(abs(pos_l - is0), abs(pos_l - ie0), abs(pos_r - is0), abs(pos_r - ie0))
                 if dmin <= 1200:
                     best = max(best, 1.0 - float(dmin) / 1500.0)
             return best
 
-        def _is_intergenic(pos: int) -> bool:
-            return not any(gs + 12 < pos < ge - 12 for gs, ge in phage_cds_intervals)
+        def _is_intergenic(pos: int, *, _cds=phage_cds_intervals) -> bool:
+            return not any(gs + 12 < pos < ge - 12 for gs, ge in _cds)
 
         r_seq = seq[rs0:re0]
         r_index: Dict[str, List[int]] = defaultdict(list)

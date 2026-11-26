@@ -20,16 +20,26 @@ jobs:
       - name: Install Python test & lint tooling
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pytest fastapi httpx pydantic psutil biopython python-multipart
+          pip install ruff pytest fastapi httpx pydantic psutil biopython python-multipart python-docx matplotlib
 
       - name: Ruff static check
         run: ruff check src
 
-      - name: Core hygiene & security guard tests
+      - name: Core hygiene, security & offline regression suites
         env:
           PYTHONPATH: "."
           PYTHONUTF8: "1"
-        run: python -m pytest tests/test_repo_hygiene.py tests/test_security_and_lan_guard.py tests/test_resource_guard_and_hygiene_p2.py -q
+        run: >
+          python -m pytest
+          tests/test_repo_hygiene.py
+          tests/test_security_and_lan_guard.py
+          tests/test_resource_guard_and_hygiene_p2.py
+          tests/test_archive_guard.py
+          tests/test_other_tools_api.py
+          tests/test_publication_renderer_layouts.py
+          tests/test_phage_discovery_split_imports.py
+          tests/test_phase7_structure_3d_and_docx_citations.py
+          -q
 
   frontend-and-electron:
     name: Frontend Vitest, TypeCheck & Build

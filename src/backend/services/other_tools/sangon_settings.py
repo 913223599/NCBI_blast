@@ -13,8 +13,8 @@ from .secret_store import mask_secret, read_secret, resolve_secret_path, write_s
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 SANGON_CONFIG_PATH = PROJECT_ROOT / "sangon_16s_config.json"
 
-# 首次使用时的默认配置（可在界面或配置文件中覆盖并持久化）
-DEFAULT_SANGON_ROOT = r"G:\测序数据\生工16s"
+# 首次使用时的默认配置（相对项目根目录，可在界面或配置文件中覆盖并持久化）
+DEFAULT_SANGON_ROOT = str(PROJECT_ROOT / "results" / "sangon_16s")
 DEFAULT_DOWNLOADS_DIR = str(Path.home() / "Downloads")
 DEFAULT_IGNORE_SUBJECT_KEYWORDS: List[str] = ["已发货", "物流", "快递", "发票", "对账", "付款"]
 DEFAULT_SANGON_PASSWORD_FILE = ".sangon_auth"

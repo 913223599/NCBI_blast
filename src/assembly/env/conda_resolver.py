@@ -41,13 +41,13 @@ class CondaResolver:
         if internal_conda.exists() and is_valid(str(internal_conda)):
             return str(internal_conda)
 
-        # 3. 针对 Windows 进行深度搜索
+        # 3. 针对 Windows 进行深度搜索（全部基于环境变量，避免硬编码盘符）
         if os.name == 'nt':
             roots = [
                 Path(os.environ.get("USERPROFILE") or Path.home()),
-                Path("C:/ProgramData"),
-                Path("D:/"),
-                Path(os.environ.get("LOCALAPPDATA", ""))
+                Path(os.environ.get("PROGRAMDATA", "")),
+                Path(os.environ.get("LOCALAPPDATA", "")),
+                Path(os.environ.get("SYSTEMDRIVE", "") + "/"),
             ]
             
             for root in roots:

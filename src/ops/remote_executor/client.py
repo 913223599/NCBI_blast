@@ -158,7 +158,7 @@ class RemoteOpsClient:
         if not ssh_exe:
             return {}, "本机未找到 ssh 可执行文件"
         if not self.target.remote_dir.strip():
-            return {}, "ssh 模式必须指定 --remote-dir (例如 'D:\\NCBI blast')"
+            return {}, "ssh 模式必须指定 --remote-dir（远端项目工作目录路径）"
 
         dest = f"{self.target.user}@{self.target.host}" if self.target.user else self.target.host
         quoted_dir = shlex.quote(self.target.remote_dir)

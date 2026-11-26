@@ -85,16 +85,49 @@ def test_rule2_no_personal_hardcoded_paths_in_core_files():
     if scripts_dir.exists():
         for pattern in ("export_gui_format_*.py", "run_16s_blast*.py", "translate_and_export*.py"):
             checked_files.extend(sorted(scripts_dir.glob(pattern)))
+    # 全量扫描 src/**/*.py，杜绝白名单盲区漏检个人盘符路径
+    src_py_files = sorted(
+        p for p in (PROJECT_ROOT / "src").rglob("*.py") if "__pycache__" not in p.parts
+    )
+    all_checked = list(dict.fromkeys([*checked_files, *src_py_files]))
+    drive_pattern = re.compile(r"(?i)(?<![A-Za-z0-9_])([C-Z]:[\\/][^\s\"'<>|]{2,})")
+    # 允许通用的 Windows 系统/标准软件安装目录探测（禁止个人盘符/业务数据盘符）
+    system_probe_re = re.compile(r"(?i)^[C-E]:[\\/](?:Windows\b|Program Files(?:\s*\(x86\))?(?:[\\/'\"\s]|$))")
     violations = []
-    for p in checked_files:
+    for p in all_checked:
         if not p.exists():
             continue
         text = p.read_text(encoding="utf-8", errors="replace")
         for idx, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
             if PERSONAL_HARDCODED_PATH_PATTERN.search(line):
-                violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {line.strip()[:90]}")
+                violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:90]}")
+                continue
+            if p.suffix == ".py" and "src" in p.parts:
+                for m in drive_pattern.finditer(line):
+                    if not system_probe_re.match(line[m.start(1):]):
+                        violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:90]}")
+                        break
 
     assert not violations, "发现违反规则 2 的个人机器硬编码绝对路径:\n" + "\n".join(violations)
+
+
+def test_no_raw_extractall_in_src():
+    """除 archive_guard.py 内部实现外，src/ 禁止直接调用未受控的 extractall()。"""
+    violations = []
+    for p in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        if "__pycache__" in p.parts or p.name == "archive_guard.py":
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for idx, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if ".extractall(" in line:
+                violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:90]}")
+    assert not violations, "发现未经过 archive_guard 的直接 extractall() 调用:\n" + "\n".join(violations)
 
 
 def test_legacy_pyqt_bridge_and_misplaced_web_root_files_removed():

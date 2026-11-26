@@ -118,16 +118,16 @@ class LocalBlastExecutor:
             requested_threads=num_threads
         )
 
-        # 构建BLAST命令行参数 (相对于 CWD)
+        # 构建 BLAST 参数列表 (直接传 argv 列表避免 shell=True 注入风险)
         blast_cmd = [
-            f'"{bin_path}"',
-            "-query", f'"{short_in}"',
-            "-db", f'"{db_name}"',
-            "-out", f'"{short_out}"',
+            str(bin_path),
+            "-query", str(short_in),
+            "-db", str(db_name),
+            "-out", str(short_out),
             "-outfmt", "5",
             "-max_target_seqs", str(max_hits),
             "-evalue", "10.0",
-            "-num_threads", str(num_threads)
+            "-num_threads", str(num_threads),
         ]
 
         # 核酸单样本鉴定优先启用 megablast 超高速算法 (提速 5~10x)
@@ -135,7 +135,7 @@ class LocalBlastExecutor:
         if "blastn" in prog_str or "megablast" in prog_str:
             blast_cmd.extend(["-task", "megablast"])
 
-        cmd_str = " ".join(blast_cmd)
+        cmd_preview = " ".join(blast_cmd)
 
         # 优化 OpenMP 调度策略并使用常规优先级 + 无弹窗标志，避免重负载下桌面交互掉帧
         env = os.environ.copy()
@@ -146,15 +146,14 @@ class LocalBlastExecutor:
         try:
             print(
                 f"[LocalBLAST] 执行本地多核比对 (并发上限: {max_concurrent}, "
-                f"线程: {num_threads}, CWD: {short_db_dir}): {cmd_str}"
+                f"线程: {num_threads}, CWD: {short_db_dir}): {cmd_preview}"
             )
             
             with _local_blast_semaphore:
-                # 关键：在 Windows 下必须在无空格的 CWD 中运行或使用 shell=True 配合引号
                 subprocess.run(
-                    cmd_str,
+                    blast_cmd,
                     cwd=short_db_dir,
-                    shell=True,
+                    shell=False,
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
