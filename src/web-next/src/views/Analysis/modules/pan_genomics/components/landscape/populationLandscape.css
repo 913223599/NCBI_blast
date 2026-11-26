@@ -609,41 +609,41 @@
 }
 
 /* 冻结列 */
-.th-sticky-left-1 {
+.academic-composite-table .th-sticky-left-1 {
   position: sticky;
   left: 0;
   z-index: 25;
-  background: #f8fafc !important;
+  background: #f8fafc;
 }
 
-.td-tree-col.th-sticky-left-1 {
+.academic-composite-table .td-tree-col.th-sticky-left-1 {
   position: sticky;
   left: 0;
   z-index: 15;
-  background: #ffffff !important;
+  background: #ffffff;
 }
 
-.th-sticky-left-2 {
+.academic-composite-table .th-sticky-left-2 {
   position: sticky;
   left: 60px;
   z-index: 25;
-  background: #f8fafc !important;
+  background: #f8fafc;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
 }
 
-.td-sample-name-col.th-sticky-left-2 {
+.academic-composite-table .td-sample-name-col.th-sticky-left-2 {
   position: sticky;
   left: 60px;
   z-index: 15;
-  background: #ffffff !important;
+  background: #ffffff;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
 }
 
-.td-sample-name-col.th-sticky-left-1 {
+.academic-composite-table .td-sample-name-col.th-sticky-left-1 {
   position: sticky;
   left: 0;
   z-index: 15;
-  background: #ffffff !important;
+  background: #ffffff;
   box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
 }
 
@@ -808,8 +808,8 @@
   letter-spacing: -0.4px;
 }
 
-.td-ani-val-cell.cell-ani-na {
-  color: #94a3b8 !important;
+.academic-composite-table .td-ani-val-cell.cell-ani-na {
+  color: #94a3b8;
   font-weight: 600;
   background-color: #f8fafc;
 }
@@ -828,13 +828,13 @@
 }
 
 /* 基因方块 */
-.td-cluster-block {
-  width: 5px !important;
-  min-width: 5px !important;
-  max-width: 5px !important;
+.academic-composite-table .td-cluster-block {
+  width: 5px;
+  min-width: 5px;
+  max-width: 5px;
   height: 24px;
-  padding: 0 !important;
-  margin: 0 !important;
+  padding: 0;
+  margin: 0;
   box-sizing: border-box;
   text-align: center;
   vertical-align: middle;
@@ -855,14 +855,14 @@
   box-sizing: border-box;
 }
 
-.th-elastic-spacer,
-.td-elastic-spacer {
-  width: auto !important;
-  min-width: 0 !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  border: none !important;
-  background: transparent !important;
+.academic-composite-table .th-elastic-spacer,
+.academic-composite-table .td-elastic-spacer {
+  width: auto;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
 }
 
 .gene-present-square {
@@ -1002,15 +1002,15 @@
   height: 36px;
   line-height: 36px;
 }
-.density-spacious .th-ani-col,
-.density-spacious .td-ani-val-cell {
-  width: 36px !important;
-  min-width: 36px !important;
-  max-width: 36px !important;
-  height: 36px !important;
-  min-height: 36px !important;
-  max-height: 36px !important;
-  line-height: 36px !important;
+.density-spacious .academic-composite-table .th-ani-col,
+.density-spacious .academic-composite-table .td-ani-val-cell {
+  width: 36px;
+  min-width: 36px;
+  max-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  line-height: 36px;
 }
 .density-spacious .th-rot-label {
   max-width: 36px;
@@ -1039,15 +1039,15 @@
   line-height: 17px;
   font-size: 9.5px;
 }
-.density-compact .th-ani-col,
-.density-compact .td-ani-val-cell {
-  width: 17px !important;
-  min-width: 17px !important;
-  max-width: 17px !important;
-  height: 17px !important;
-  min-height: 17px !important;
-  max-height: 17px !important;
-  line-height: 17px !important;
+.density-compact .academic-composite-table .th-ani-col,
+.density-compact .academic-composite-table .td-ani-val-cell {
+  width: 17px;
+  min-width: 17px;
+  max-width: 17px;
+  height: 17px;
+  min-height: 17px;
+  max-height: 17px;
+  line-height: 17px;
   font-size: 7.5px;
 }
 .density-compact .th-rot-label {
@@ -1078,15 +1078,15 @@
   font-size: 8px;
   padding: 0 2px;
 }
-.density-ultra .th-ani-col,
-.density-ultra .td-ani-val-cell {
-  width: 11px !important;
-  min-width: 11px !important;
-  max-width: 11px !important;
-  height: 11px !important;
-  min-height: 11px !important;
-  max-height: 11px !important;
-  line-height: 11px !important;
+.density-ultra .academic-composite-table .th-ani-col,
+.density-ultra .academic-composite-table .td-ani-val-cell {
+  width: 11px;
+  min-width: 11px;
+  max-width: 11px;
+  height: 11px;
+  min-height: 11px;
+  max-height: 11px;
+  line-height: 11px;
   font-size: 6.5px;
   padding: 0;
 }

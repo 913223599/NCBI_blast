@@ -157,15 +157,27 @@ function openNcbi(accession: string): void {
         <tbody>
           <tr v-for="(h, idx) in blast.results" :key="h.queryTitle + idx" class="blast-row-neo" :class="{ 'translating-pulse': h.isTranslating }">
             <td class="mono">{{ h.queryTitle }}</td>
-            <td class="detail-cell-neo" @click="handleRowTranslate(h)">
+            <td
+              class="detail-cell-neo"
+              role="button"
+              tabindex="0"
+              @click="handleRowTranslate(h)"
+              @keydown.enter.prevent="handleRowTranslate(h)"
+              @keydown.space.prevent="handleRowTranslate(h)"
+            >
               <div class="sp">
                 <TranslateSplicer :original="h.speciesName" :translated="h.translatedName" :showOriginal="h.showOriginal" />
               </div>
               <div class="st">{{ h.genusStrain }}</div>
               <div class="gs">{{ h.geneSource }}</div>
-              <div v-if="h.csvFile" class="view-all-link" @click.stop="emit('viewAllHits', h.csvFile, h.queryTitle)">
+              <button
+                v-if="h.csvFile"
+                type="button"
+                class="view-all-link"
+                @click.stop="emit('viewAllHits', h.csvFile, h.queryTitle)"
+              >
                 {{ t('blast.res.view_all') }} ({{ h.csvFile ? '更多' : '0' }}) →
-              </div>
+              </button>
             </td>
             <td>
               <div v-if="h.status === 'pending'" class="pending-spinner">
@@ -225,12 +237,17 @@ th { text-align: left; padding: 12px 16px; background: #f8fafc; color: #64748b; 
 td { padding: 16px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
 
 .blast-row-neo:hover { background: #f8fafc; }
+/* 仅对首折之外的长结果列表行启用延迟渲染，避免影响首屏内容绘制 */
+.blast-row-neo:nth-child(n + 16) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 92px;
+}
 .mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 0.8rem; color: #475569; }
 
 .detail-cell-neo .sp { font-weight: 700; color: #111827; margin-bottom: 4px; }
 .detail-cell-neo .st { font-size: 0.8rem; color: #2563eb; margin-bottom: 2px; }
 .detail-cell-neo .gs { font-size: 0.75rem; color: #64748b; }
-.view-all-link { margin-top: 8px; font-size: 0.75rem; color: #2563eb; cursor: pointer; font-weight: 600; }
+.view-all-link { margin-top: 8px; padding: 0; border: none; background: transparent; font-size: 0.75rem; color: #2563eb; cursor: pointer; font-weight: 600; display: inline-block; text-align: left; }
 .view-all-link:hover { text-decoration: underline; }
 
 .id-val { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 0.95rem; }

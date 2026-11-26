@@ -70,7 +70,7 @@ class FileHandler:
                         pass
                 shutil.copyfileobj(result_handle, out_handle)
         except Exception as e:
-            raise RuntimeError(f"Failed to save result file to {output_file}: {e}")
+            raise RuntimeError(f"Failed to save result file to {output_file}: {e}") from e
     
     def validate_file_exists(self, file_path: str) -> bool:
         """检查物理文件是否存在"""

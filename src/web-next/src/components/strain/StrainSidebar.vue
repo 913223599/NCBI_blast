@@ -547,6 +547,12 @@ function getTotalBoxes(freezer: any): number {
   transform: translateX(2px);
 }
 
+/* 仅对非首折长样本列表卡启用离屏延迟渲染 */
+.sample-card:nth-child(n + 14) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 94px;
+}
+
 .sample-icon {
   font-size: 1.5rem;
   flex-shrink: 0;

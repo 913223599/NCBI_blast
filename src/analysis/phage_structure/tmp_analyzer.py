@@ -581,6 +581,231 @@ def _inspect_operon_context(
     }
 
 
+_STRICT_EXEMPT_BLOCKED_ROLES = {
+    "MCP",
+    "PORTAL",
+    "TERL",
+    "TERS",
+    "NON_TAIL_ENZYME",
+    "INTEGRASE",
+    "T6SS_CONFOUNDER",
+    "NON_TAILED_MARKER",
+    "TAIL_FIBER_RBP",
+}
+
+
+def _has_direct_pfam_primary_tmp(
+    sorted_prots: Sequence[StructureProteinItem],
+    contexts: Sequence[Dict[str, Any]],
+    split_consumed_loci: set[str],
+    has_split_merged: bool,
+    thresholds: TmpSelectionThresholds,
+) -> bool:
+    """判断 Contig 内是否已存在带有权威直接 TMP Pfam 的全长主蛋白 (>=380 aa)。"""
+    if has_split_merged:
+        return True
+    for pos, p in enumerate(sorted_prots):
+        if p.locus_tag in split_consumed_loci:
+            continue
+        primary_pf = p.ptf_pfam.strip().upper()
+        has_dir = (
+            bool(_protein_pfams(p) & (_DIRECT_TMP_PFAMS - {"PF12789"}))
+            or primary_pf in _DIRECT_TMP_PFAMS
+            or bool(_TMP_PFAM_DESC_RE.search(p.ptf_pfam_desc or ""))
+        )
+        is_conf = primary_pf in _CONFOUNDER_PFAMS or bool(_NON_TAIL_PFAM_DESC_RE.search(p.ptf_pfam_desc or ""))
+        if (
+            has_dir
+            and not is_conf
+            and p.structural_role != "BASEPLATE_MYO"
+            and p.length_aa >= thresholds.direct_pfam_primary_min_aa
+            and not contexts[pos]["immediate_head_sandwich"]
+        ):
+            return True
+    return False
+
+
+def _evaluate_direct_tmp_candidate(
+    p: StructureProteinItem,
+    ctx: Dict[str, Any],
+    *,
+    has_true_tail_backbone: bool,
+    has_direct_pfam_primary: bool,
+    thresholds: TmpSelectionThresholds,
+) -> Optional[str]:
+    """评估单个蛋白是否命中路径 1-4（直接 Pfam / HMM 实证 / gp29 / 溶菌融合），返回证据类型或 None。"""
+    pfams = _protein_pfams(p)
+    primary_pf = (p.ptf_pfam or "").strip().upper()
+    primary_is_confounder = (primary_pf in _CONFOUNDER_PFAMS) or bool(_NON_TAIL_PFAM_DESC_RE.search(p.ptf_pfam_desc or ""))
+    has_strong_tmp_pfam = bool(pfams & (_DIRECT_TMP_PFAMS - {"PF12789"})) or bool(_TMP_PFAM_DESC_RE.search(p.ptf_pfam_desc or ""))
+    has_direct_pfam = has_strong_tmp_pfam or (
+        "PF12789" in pfams and not primary_is_confounder and p.structural_role != "BASEPLATE_MYO"
+    )
+    has_lytic_pfam = bool(pfams & _LYTIC_TMP_PFAMS) or bool(_LYTIC_TMP_PFAM_RE.search(p.ptf_pfam_desc or ""))
+    has_confounder_pfam = primary_is_confounder or bool(pfams & _CONFOUNDER_PFAMS)
+
+    is_high_conf_verified_tmp = (
+        p.structural_role == "TMP"
+        and p.evidence_source in ("pyhmmer_phrog", "phold_3d")
+        and p.hmm_score >= thresholds.high_conf_verified_hmm_score
+        and ctx["tail_trunk_anchors"] >= 1
+        and primary_pf not in _CONFOUNDER_PFAMS
+    )
+    if has_confounder_pfam and not (has_strong_tmp_pfam and not primary_is_confounder) and not is_high_conf_verified_tmp:
+        return None
+    if p.structural_role in _STRICT_NON_TMP_ROLES:
+        if not (has_direct_pfam and p.length_aa >= thresholds.direct_pfam_min_aa and p.structural_role not in _STRICT_EXEMPT_BLOCKED_ROLES):
+            return None
+
+    is_unverified = (
+        p.evidence_source in _UNVERIFIED_SOURCES
+        or (p.hmm_score <= 0.0 and not has_direct_pfam and p.evidence_source in {"genbank", "annotation", "faa_header", "pyrodigal"})
+    )
+    self_authenticating_tmp = (
+        p.structural_role == "TMP"
+        and not is_unverified
+        and p.hmm_score >= thresholds.self_auth_hmm_score
+        and p.length_aa >= thresholds.self_auth_min_aa
+        and ctx["head_internal_anchors"] == 0
+    )
+
+    # 操纵子语境硬性否决
+    if ctx["immediate_head_sandwich"] and not has_direct_pfam:
+        return None
+    if not has_true_tail_backbone and ctx["tail_trunk_anchors"] == 0 and not has_direct_pfam and not self_authenticating_tmp:
+        return None
+    if not has_direct_pfam and not self_authenticating_tmp and ctx["head_internal_anchors"] >= 2 and ctx["tail_trunk_anchors"] == 0 and ctx["baseplate_anchors"] == 0:
+        return None
+
+    # 路径 1: 拥有权威直接 TMP/PTR/PhageMin_Tail Pfam 结构域
+    if has_direct_pfam and p.length_aa >= thresholds.direct_pfam_min_aa:
+        return "confirmed_tmp"
+
+    # 路径 2: PHROG HMM / 标注为 TMP 的蛋白
+    if p.structural_role == "TMP":
+        if is_unverified:
+            if p.length_aa >= thresholds.direct_pfam_min_aa and ctx["same_strand_tail_anchors"] >= 1:
+                return "putative_syntenic_tmp"
+            return None
+        in_tail_operon = ctx["tail_trunk_anchors"] >= 1 or ctx["baseplate_anchors"] >= 1 or ctx["ptf_support"] or self_authenticating_tmp
+        if has_lytic_pfam and p.length_aa < thresholds.lytic_tmp_min_aa and not in_tail_operon:
+            return None
+        min_sc = thresholds.hmm_tmp_in_operon_min_score if in_tail_operon else thresholds.hmm_tmp_outside_operon_min_score
+        min_len = (
+            thresholds.hmm_tmp_tap_min_aa
+            if (ctx["immediate_tap_downstream"] and p.hmm_score >= thresholds.self_auth_hmm_score)
+            else thresholds.hmm_tmp_default_min_aa
+        )
+        if p.length_aa >= 250 and p.hmm_score >= min_sc:
+            if p.length_aa < min_len and (has_direct_pfam_primary or not in_tail_operon):
+                return None
+            if p.length_aa >= min_len or (in_tail_operon and p.hmm_score >= thresholds.hmm_tmp_short_operon_score and not has_direct_pfam_primary):
+                return "confirmed_tmp"
+        return None
+
+    # 路径 3: 肌尾 T4-gp29 型基板尺蛋白
+    if p.structural_role == "BASEPLATE_MYO" and re.search(r"\btail\s+length\b", p.product, re.I) and p.length_aa >= thresholds.gp29_min_aa:
+        return "gp29_tail_length"
+
+    # 路径 4: 多结构域融合型溶菌-卷尺蛋白
+    if (
+        has_lytic_pfam
+        and p.length_aa >= thresholds.lytic_tmp_min_aa
+        and ctx["same_strand_tail_anchors"] >= 1
+        and (ctx["tail_trunk_anchors"] >= 1 or ctx["immediate_tap_downstream"] or (ctx["baseplate_anchors"] >= 1 and ctx["ptf_support"]))
+    ):
+        return "confirmed_tmp"
+
+    return None
+
+
+def _find_syntenic_tmp_candidate(
+    sorted_prots: Sequence[StructureProteinItem],
+    contexts: Sequence[Dict[str, Any]],
+    wide_contexts: Sequence[Dict[str, Any]],
+    chosen_loci: set[str],
+    thresholds: TmpSelectionThresholds,
+) -> Optional[StructureProteinItem]:
+    """路径 5：局部共线性操纵子智能补全，遴选最优共线候选 TMP。"""
+    has_core_trunk_in_genome = any(p.structural_role in {"TSP", "TTP", "MTP"} for p in sorted_prots)
+    best_cand: Optional[StructureProteinItem] = None
+    best_score = -1.0
+
+    for pos, cand in enumerate(sorted_prots):
+        if cand.locus_tag in chosen_loci or not cand.translation:
+            continue
+        ctx = contexts[pos]
+        wctx = wide_contexts[pos]
+        has_wide_tail_syntax = (
+            has_core_trunk_in_genome
+            and cand.length_aa >= thresholds.lytic_tmp_min_aa
+            and (wctx["same_strand_tail_anchors"] >= 1 and ctx["same_strand_minor_tail_anchors"] >= 1)
+        )
+        if ctx["same_strand_tail_anchors"] == 0 and not has_wide_tail_syntax:
+            continue
+        if ctx["immediate_head_sandwich"] or (
+            ctx["same_strand_head_anchors"] >= 1
+            and ctx["tail_trunk_anchors"] == 0
+            and not ctx["ptf_support"]
+            and not has_wide_tail_syntax
+        ):
+            continue
+
+        pfams = _protein_pfams(cand)
+        if (pfams & _CONFOUNDER_PFAMS) or _NON_TAIL_PFAM_DESC_RE.search(cand.ptf_pfam_desc or ""):
+            continue
+
+        is_generic_virion = (
+            cand.structural_role == "HEAD_SCAFFOLD_PROTEASE"
+            and not _HEAD_SPECIFIC_KW_RE.search(cand.product or "")
+            and cand.length_aa >= thresholds.lytic_tmp_min_aa
+            and (ctx["immediate_tap_downstream"] or ctx["tail_trunk_anchors"] >= 1)
+        )
+        is_yqaj_tap_fusion = (
+            cand.structural_role == "NON_TAIL_ENZYME"
+            and ctx["immediate_tap_downstream"]
+            and cand.length_aa >= thresholds.syntenic_yqaj_min_aa
+            and ctx["baseplate_anchors"] >= 1
+            and ("PF09588" in pfams or "exonuclease" in (cand.product or "").lower())
+        )
+        if cand.structural_role not in {"OTHER", "TAIL_OTHER", "LYSIS"} and not is_generic_virion and not is_yqaj_tap_fusion:
+            continue
+
+        is_lysin_tail = cand.structural_role == "LYSIS" or bool(
+            re.search(r"\btail\s+(?:protein\s+with\s+|associated\s+)?lysin\b", cand.product or "", re.I)
+        )
+        if is_lysin_tail:
+            if cand.length_aa < thresholds.lytic_tmp_min_aa and "tail" not in (cand.product or "").lower() and not ctx["immediate_tap_downstream"]:
+                continue
+        elif cand.length_aa < thresholds.syntenic_default_min_aa:
+            continue
+
+        score = max(ctx["best_syntax_score"], (wctx["best_syntax_score"] * 0.85 if has_wide_tail_syntax else 0.0))
+        if has_wide_tail_syntax and ctx["same_strand_minor_tail_anchors"] >= 1:
+            score += 1.2 * min(ctx["same_strand_minor_tail_anchors"], 2)
+        if cand.structural_role == "TAIL_OTHER":
+            score += 1.8
+        if (is_generic_virion or is_yqaj_tap_fusion) and ctx["immediate_tap_downstream"]:
+            score += 2.2
+        if is_lysin_tail and cand.length_aa >= 700:
+            score += 1.6
+        if bool(pfams & _LYTIC_TMP_PFAMS) or _LYTIC_TMP_PFAM_RE.search(cand.ptf_pfam_desc or ""):
+            score += 1.5
+        if cand.ptf_is_tail or cand.ptf_tail_prob >= 0.40:
+            score += 1.8
+        if cand.length_aa >= 580:
+            score += 0.8
+        score += _biophysical_plausibility(cand.translation)
+
+        if score >= thresholds.syntenic_min_score and (
+            score > best_score or (score == best_score and best_cand and cand.length_aa > best_cand.length_aa)
+        ):
+            best_score = score
+            best_cand = cand
+
+    return best_cand
+
+
 def select_and_analyze_tmps(
     proteins: Sequence[StructureProteinItem],
     *,
@@ -592,11 +817,7 @@ def select_and_analyze_tmps(
 ) -> List[TmpAnalysisItem]:
     """
     在单个 Contig/基因组蛋白列表中通过「多结构域 HMM/Pfam + 操纵子共线性语境 + 生物物理尺度」
-    统一验证并剖析所有真实 TMP 或 gp29 尺蛋白：
-    1. 彻底解除对外部 GenBank/FAA 文本标签的盲从，未核实文本且缺域/缺尾干语境一律拦截；
-    2. 结合全量 Pfam 多结构域识别（包含 PF06791/PF09718/PF06120/PF10145/PF12789 及融合溶菌域），
-       精准区分真实 TMP 与归巢内切酶/脂肪酶/DUF4815/头模块内部通道蛋白；
-    3. 当出现纯头部包装三明治（如 MCP-候选-PORTAL 且无核心长尾干）时自动基于上下文否定，不依赖硬编码 PHROG 补丁。
+    统一验证并剖析所有真实 TMP 或 gp29 尺蛋白。
     """
     sorted_prots = sorted(proteins, key=lambda x: x.start)
     if not sorted_prots:
@@ -605,7 +826,6 @@ def select_and_analyze_tmps(
     max_end_bp = max((p.end for p in sorted_prots), default=0)
     eff_bp = max(contig_length_bp, max_end_bp)
 
-    # 客观判断全基因组是否真实编码了长尾/肌尾结构骨架，不轻信孤立未核实 TMP 文本或单点 PTF 溶菌域自证
     ptf_tail_loci_cnt = sum(
         1
         for p in sorted_prots
@@ -619,43 +839,22 @@ def select_and_analyze_tmps(
 
     contexts: List[Dict[str, Any]] = [
         _inspect_operon_context(
-            sorted_prots,
-            pos,
-            contig_length_bp=eff_bp,
-            window=max(1, thresholds.operon_window),
-            thresholds=thresholds,
+            sorted_prots, pos, contig_length_bp=eff_bp, window=max(1, thresholds.operon_window), thresholds=thresholds
         )
         for pos in range(len(sorted_prots))
     ]
     wide_contexts: List[Dict[str, Any]] = [
         _inspect_operon_context(
-            sorted_prots,
-            pos,
-            contig_length_bp=eff_bp,
-            window=max(2, thresholds.wide_operon_window),
-            thresholds=thresholds,
+            sorted_prots, pos, contig_length_bp=eff_bp, window=max(2, thresholds.wide_operon_window), thresholds=thresholds
         )
         for pos in range(len(sorted_prots))
     ]
 
     split_merged = find_and_merge_split_tmps(sorted_prots, thresholds=split_thresholds)
-    split_consumed_loci: set[str] = {
-        loc for mc in split_merged for loc in mc.source_loci
-    }
+    split_consumed_loci: set[str] = {loc for mc in split_merged for loc in mc.source_loci}
 
-    # 先判断 Contig 内是否已存在带有权威直接 TMP Pfam 的全长主蛋白 (>=380 aa)，以防短截断碎片干扰
-    has_direct_pfam_primary = bool(split_merged) or any(
-        (
-            bool(_protein_pfams(p) & (_DIRECT_TMP_PFAMS - {"PF12789"}))
-            or p.ptf_pfam.strip().upper() in _DIRECT_TMP_PFAMS
-            or bool(_TMP_PFAM_DESC_RE.search(p.ptf_pfam_desc or ""))
-        )
-        and not ((p.ptf_pfam.strip().upper() in _CONFOUNDER_PFAMS) or bool(_NON_TAIL_PFAM_DESC_RE.search(p.ptf_pfam_desc or "")))
-        and p.structural_role != "BASEPLATE_MYO"
-        and p.length_aa >= thresholds.direct_pfam_primary_min_aa
-        and not contexts[pos]["immediate_head_sandwich"]
-        for pos, p in enumerate(sorted_prots)
-        if p.locus_tag not in split_consumed_loci
+    has_direct_pfam_primary = _has_direct_pfam_primary_tmp(
+        sorted_prots, contexts, split_consumed_loci, bool(split_merged), thresholds
     )
 
     candidates: List[Tuple[StructureProteinItem, str, List[str]]] = []
@@ -669,178 +868,22 @@ def select_and_analyze_tmps(
     for pos, p in enumerate(sorted_prots):
         if p.locus_tag in split_consumed_loci:
             continue
-        ctx = contexts[pos]
-        pfams = _protein_pfams(p)
-        primary_pf = (p.ptf_pfam or "").strip().upper()
-        primary_is_confounder = (primary_pf in _CONFOUNDER_PFAMS) or bool(_NON_TAIL_PFAM_DESC_RE.search(p.ptf_pfam_desc or ""))
-        # 核心直接 TMP 域：若主域就是明确的非尾/尾纤维冲突域（如 PF03406），则不允许尾端微弱 PTR 域将其强行升格
-        has_strong_tmp_pfam = bool(pfams & (_DIRECT_TMP_PFAMS - {"PF12789"})) or bool(_TMP_PFAM_DESC_RE.search(p.ptf_pfam_desc or ""))
-        has_direct_pfam = has_strong_tmp_pfam or (
-            "PF12789" in pfams and not primary_is_confounder and p.structural_role != "BASEPLATE_MYO"
+        evidence_kind = _evaluate_direct_tmp_candidate(
+            p,
+            contexts[pos],
+            has_true_tail_backbone=has_true_tail_backbone,
+            has_direct_pfam_primary=has_direct_pfam_primary,
+            thresholds=thresholds,
         )
-        has_lytic_pfam = bool(pfams & _LYTIC_TMP_PFAMS) or bool(_LYTIC_TMP_PFAM_RE.search(p.ptf_pfam_desc or ""))
-        has_confounder_pfam = primary_is_confounder or bool(pfams & _CONFOUNDER_PFAMS)
-
-        is_high_conf_verified_tmp = (
-            p.structural_role == "TMP"
-            and p.evidence_source in ("pyhmmer_phrog", "phold_3d")
-            and p.hmm_score >= thresholds.high_conf_verified_hmm_score
-            and ctx["tail_trunk_anchors"] >= 1
-            and primary_pf not in _CONFOUNDER_PFAMS
-        )
-        if has_confounder_pfam and not (has_strong_tmp_pfam and not primary_is_confounder) and not is_high_conf_verified_tmp:
-            continue
-        if p.structural_role in _STRICT_NON_TMP_ROLES:
-            if not (has_direct_pfam and p.length_aa >= thresholds.direct_pfam_min_aa and p.structural_role not in {"MCP", "PORTAL", "TERL", "TERS", "NON_TAIL_ENZYME", "INTEGRASE", "T6SS_CONFOUNDER", "NON_TAILED_MARKER", "TAIL_FIBER_RBP"}):
-                continue
-
-        is_unverified = (
-            p.evidence_source in _UNVERIFIED_SOURCES
-            or (p.hmm_score <= 0.0 and not has_direct_pfam and p.evidence_source in {"genbank", "annotation", "faa_header", "pyrodigal"})
-        )
-        # 远缘极端嗜热/巨型噬菌体 TMP 自证豁免（如 Thermus P74-26 5006aa sc=11604）：极高分+超长+无任何头部邻接
-        self_authenticating_tmp = (
-            p.structural_role == "TMP"
-            and not is_unverified
-            and p.hmm_score >= thresholds.self_auth_hmm_score
-            and p.length_aa >= thresholds.self_auth_min_aa
-            and ctx["head_internal_anchors"] == 0
-        )
-
-        # 操纵子语境硬性否决：纯头部夹心或完全无长尾骨架的孤立非典型区段
-        if ctx["immediate_head_sandwich"] and not has_direct_pfam:
-            continue
-        if not has_true_tail_backbone and ctx["tail_trunk_anchors"] == 0 and not has_direct_pfam and not self_authenticating_tmp:
-            continue
-        if not has_direct_pfam and not self_authenticating_tmp and ctx["head_internal_anchors"] >= 2 and ctx["tail_trunk_anchors"] == 0 and ctx["baseplate_anchors"] == 0:
-            continue
-
-        # 路径 1: 拥有权威直接 TMP/PTR/PhageMin_Tail Pfam 结构域的蛋白（最不依赖 PHROG 名称与 GBK 文本）
-        if has_direct_pfam and p.length_aa >= thresholds.direct_pfam_min_aa:
-            candidates.append((p, "confirmed_tmp", []))
-            chosen_loci.add(p.locus_tag)
-            continue
-
-        # 路径 2: PHROG HMM / 标注为 TMP 的蛋白，必须通过 HMM 实证 + 尾操纵子语境 + 最小长度校验
-        if p.structural_role == "TMP":
-            if is_unverified:
-                # 绝不放行未经序列核实的外部 .gbk 纯字符串声明，除非同链尾部干区明确共线性证实
-                if p.length_aa >= thresholds.direct_pfam_min_aa and ctx["same_strand_tail_anchors"] >= 1:
-                    candidates.append((p, "putative_syntenic_tmp", []))
-                    chosen_loci.add(p.locus_tag)
-                continue
-
-            in_tail_operon = ctx["tail_trunk_anchors"] >= 1 or ctx["baseplate_anchors"] >= 1 or ctx["ptf_support"] or self_authenticating_tmp
-            # 带有溶菌水解 Pfam（如 PF18013）且缺少直接 TMP 域的中短蛋白 (<650aa) 必须具备真实邻域尾干/邻近 PTF 锚点，严防孤立通道蛋白自证
-            if has_lytic_pfam and p.length_aa < thresholds.lytic_tmp_min_aa and not in_tail_operon:
-                continue
-            min_sc = thresholds.hmm_tmp_in_operon_min_score if in_tail_operon else thresholds.hmm_tmp_outside_operon_min_score
-            min_len = (
-                thresholds.hmm_tmp_tap_min_aa
-                if (ctx["immediate_tap_downstream"] and p.hmm_score >= thresholds.self_auth_hmm_score)
-                else thresholds.hmm_tmp_default_min_aa
-            )
-            if p.length_aa >= 250 and p.hmm_score >= min_sc:
-                # 当基因组附近已存在带权威结构域的主蛋白时，屏蔽 <380 aa 的同源小碎片
-                if p.length_aa < min_len and (has_direct_pfam_primary or not in_tail_operon):
-                    continue
-                if p.length_aa >= min_len or (in_tail_operon and p.hmm_score >= thresholds.hmm_tmp_short_operon_score and not has_direct_pfam_primary):
-                    candidates.append((p, "confirmed_tmp", []))
-                    chosen_loci.add(p.locus_tag)
-            continue
-
-        # 路径 3: 肌尾 T4-gp29 型基板尺蛋白
-        if p.structural_role == "BASEPLATE_MYO" and re.search(r"\btail\s+length\b", p.product, re.I) and p.length_aa >= thresholds.gp29_min_aa:
-            candidates.append((p, "gp29_tail_length", []))
-            chosen_loci.add(p.locus_tag)
-            continue
-
-        # 路径 4: 多结构域融合型溶菌-卷尺蛋白（须具备溶菌水解 Pfam + 较长尺度 + 真实尾干同向语境）
-        if has_lytic_pfam and p.length_aa >= thresholds.lytic_tmp_min_aa and ctx["same_strand_tail_anchors"] >= 1 and (ctx["tail_trunk_anchors"] >= 1 or ctx["immediate_tap_downstream"] or (ctx["baseplate_anchors"] >= 1 and ctx["ptf_support"])):
-            candidates.append((p, "confirmed_tmp", []))
+        if evidence_kind is not None:
+            candidates.append((p, evidence_kind, []))
             chosen_loci.add(p.locus_tag)
 
-    # 路径 5: 局部共线性操纵子智能补全（仅当确有真实尾干骨架或明确有尾背景却未检出主 TMP 时激活）
     allow_syntenic = has_true_tail_backbone or (
         has_tailed_context and any(p.structural_role not in _HEAD_OR_NON_LONGTAIL_ROLES and p.structural_role != "TMP" for p in sorted_prots)
     )
     if not candidates and allow_syntenic:
-        has_core_trunk_in_genome = any(p.structural_role in {"TSP", "TTP", "MTP"} for p in sorted_prots)
-        best_cand: Optional[StructureProteinItem] = None
-        best_score = -1.0
-
-        for pos, cand in enumerate(sorted_prots):
-            if cand.locus_tag in chosen_loci or not cand.translation:
-                continue
-            ctx = contexts[pos]
-            wctx = wide_contexts[pos]
-            # 对确有 MTP/TSP/TTP 核心尾干但局部相隔 5-8 ORF 的放线菌/微杆菌长尾溶菌-TMP 放宽共线邻域支撑
-            has_wide_tail_syntax = (
-                has_core_trunk_in_genome
-                and cand.length_aa >= thresholds.lytic_tmp_min_aa
-                and (wctx["same_strand_tail_anchors"] >= 1 and ctx["same_strand_minor_tail_anchors"] >= 1)
-            )
-            if ctx["same_strand_tail_anchors"] == 0 and not has_wide_tail_syntax:
-                continue
-            if ctx["immediate_head_sandwich"] or (
-                ctx["same_strand_head_anchors"] >= 1
-                and ctx["tail_trunk_anchors"] == 0
-                and not ctx["ptf_support"]
-                and not has_wide_tail_syntax
-            ):
-                continue
-
-            pfams = _protein_pfams(cand)
-            if (pfams & _CONFOUNDER_PFAMS) or _NON_TAIL_PFAM_DESC_RE.search(cand.ptf_pfam_desc or ""):
-                continue
-
-            # 兼容被 PHROG 宽泛标为 "virion structural protein" 或 N端带 YqaJ(PF09588) 却严格坐落在 TAP->+1 且邻接基板的长 TMP（如 Chaseviridae）
-            is_generic_virion = (
-                cand.structural_role == "HEAD_SCAFFOLD_PROTEASE"
-                and not _HEAD_SPECIFIC_KW_RE.search(cand.product or "")
-                and cand.length_aa >= thresholds.lytic_tmp_min_aa
-                and (ctx["immediate_tap_downstream"] or ctx["tail_trunk_anchors"] >= 1)
-            )
-            is_yqaj_tap_fusion = (
-                cand.structural_role == "NON_TAIL_ENZYME"
-                and ctx["immediate_tap_downstream"]
-                and cand.length_aa >= thresholds.syntenic_yqaj_min_aa
-                and ctx["baseplate_anchors"] >= 1
-                and ("PF09588" in pfams or "exonuclease" in (cand.product or "").lower())
-            )
-            if cand.structural_role not in {"OTHER", "TAIL_OTHER", "LYSIS"} and not is_generic_virion and not is_yqaj_tap_fusion:
-                continue
-
-            is_lysin_tail = cand.structural_role == "LYSIS" or bool(
-                re.search(r"\btail\s+(?:protein\s+with\s+|associated\s+)?lysin\b", cand.product or "", re.I)
-            )
-            if is_lysin_tail:
-                if cand.length_aa < thresholds.lytic_tmp_min_aa and "tail" not in (cand.product or "").lower() and not ctx["immediate_tap_downstream"]:
-                    continue
-            elif cand.length_aa < thresholds.syntenic_default_min_aa:
-                continue
-
-            score = max(ctx["best_syntax_score"], (wctx["best_syntax_score"] * 0.85 if has_wide_tail_syntax else 0.0))
-            if has_wide_tail_syntax and ctx["same_strand_minor_tail_anchors"] >= 1:
-                score += 1.2 * min(ctx["same_strand_minor_tail_anchors"], 2)
-            if cand.structural_role == "TAIL_OTHER":
-                score += 1.8
-            if (is_generic_virion or is_yqaj_tap_fusion) and ctx["immediate_tap_downstream"]:
-                score += 2.2
-            if is_lysin_tail and cand.length_aa >= 700:
-                score += 1.6
-            if bool(pfams & _LYTIC_TMP_PFAMS) or _LYTIC_TMP_PFAM_RE.search(cand.ptf_pfam_desc or ""):
-                score += 1.5
-            if cand.ptf_is_tail or cand.ptf_tail_prob >= 0.40:
-                score += 1.8
-            if cand.length_aa >= 580:
-                score += 0.8
-            score += _biophysical_plausibility(cand.translation)
-
-            if score >= thresholds.syntenic_min_score and (score > best_score or (score == best_score and best_cand and cand.length_aa > best_cand.length_aa)):
-                best_score = score
-                best_cand = cand
-
+        best_cand = _find_syntenic_tmp_candidate(sorted_prots, contexts, wide_contexts, chosen_loci, thresholds)
         if best_cand is not None:
             candidates.append((best_cand, "putative_syntenic_tmp", []))
 

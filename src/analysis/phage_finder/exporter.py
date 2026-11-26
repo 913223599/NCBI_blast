@@ -16,7 +16,10 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
-import pyrodigal
+try:
+    import pyrodigal
+except ImportError:
+    pyrodigal = None  # type: ignore[assignment]
 
 from ...phage_discovery.inference.protein_gate import RegionGateResult
 from ...phage_discovery.inference.scanner import PredictedRegion, ScanResult

@@ -11,18 +11,29 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple, cast
 
-import pyrodigal
+try:
+    import pyrodigal
+except ImportError:
+    pyrodigal = None  # type: ignore[assignment]
 
 from .thresholds import DEFAULT_THRESHOLDS, GeneticCodeThresholds
 
 SUPPORTED_GENETIC_CODES = (11, 4, 15)
 
 # 预按翻译表拆分内置元基因组训练模型，防止 meta=True 时用 table=11 翻译 table=4 模型触发警告
-METAGENOMIC_BINS_11 = pyrodigal.MetagenomicBins(
-    [b for b in pyrodigal.METAGENOMIC_BINS if b.training_info.translation_table == 11]
+METAGENOMIC_BINS_11 = (
+    pyrodigal.MetagenomicBins(
+        [b for b in pyrodigal.METAGENOMIC_BINS if b.training_info.translation_table == 11]
+    )
+    if pyrodigal is not None
+    else None
 )
-METAGENOMIC_BINS_4 = pyrodigal.MetagenomicBins(
-    [b for b in pyrodigal.METAGENOMIC_BINS if b.training_info.translation_table == 4]
+METAGENOMIC_BINS_4 = (
+    pyrodigal.MetagenomicBins(
+        [b for b in pyrodigal.METAGENOMIC_BINS if b.training_info.translation_table == 4]
+    )
+    if pyrodigal is not None
+    else None
 )
 
 

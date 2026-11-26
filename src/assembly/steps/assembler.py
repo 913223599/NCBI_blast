@@ -149,16 +149,16 @@ class AssemblerStep(BaseAssemblyStep):
             if dst_p.exists():
                 try:
                     dst_p.unlink()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    self.logger.debug("移除旧安全中转文件失败 (%s): %s", dst_p, exc)
 
             # 优先尝试硬链接 (同盘符 0 内存 0 耗时)
             try:
                 os.link(src_p, dst_p)
                 self.logger.info(f"建立安全硬链接: {src_p.name} -> {dst_p}")
                 return str(dst_p)
-            except Exception:
-                pass
+            except Exception as exc:
+                self.logger.debug("建立硬链接失败，将回退到安全复制 (%s): %s", src_p.name, exc)
 
             # 跨盘符时流式快速复制
             self.logger.info(f"跨盘符安全数据中转: {src_p.name} -> {dst_p}")
@@ -518,8 +518,8 @@ class AssemblerStep(BaseAssemblyStep):
                                         break
                             if t_bases > 0:
                                 stats["avg_depth"] = round(t_bases / safe_len, 1)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            self.logger.debug("采样估算 FASTQ 测序深度失败 (%s): %s", tfq, exc)
 
             return stats
         except Exception as e:
@@ -535,8 +535,8 @@ class AssemblerStep(BaseAssemblyStep):
                     data = json.load(f)
                     if data.get("total_contigs", 0) == 0:
                         return "测序深度过低或有效 Reads 不足，未能提取到有效 Contig"
-            except Exception:
-                pass
+            except Exception as exc:
+                self.logger.debug("读取失败诊断 manifest 异常 (%s): %s", manifest_file, exc)
 
         # 检查日志
         log_candidates = list(out_dir.glob("*.log"))
@@ -547,7 +547,7 @@ class AssemblerStep(BaseAssemblyStep):
                     return "硬件内存空间不足，请调小可用线程数"
                 if "Insufficient read depth" in content or "too few reads" in content:
                     return "测序深度过低或数据清洗过度"
-            except Exception:
-                pass
+            except Exception as exc:
+                self.logger.debug("读取组装日志文件异常 (%s): %s", log_f, exc)
 
         return "组装过程未生成有效 FASTA 文件，请检查原始数据质量或测序深度"

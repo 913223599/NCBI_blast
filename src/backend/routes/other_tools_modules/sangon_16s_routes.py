@@ -343,7 +343,7 @@ async def get_sangon_order_results(order_dir_name: str, sangon_root: Optional[st
                         item[h] = r[idx] if idx < len(r) else ""
                     rows.append(item)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"读取 CSV 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"读取 CSV 失败: {e}") from e
 
     return {
         "status": "success",
@@ -381,9 +381,9 @@ async def scan_sangon_notification_mails(
         res = await asyncio.to_thread(_do_scan)
         return {"status": "success", **res}
     except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"扫描生工邮件失败: {e}")
+        raise HTTPException(status_code=500, detail=f"扫描生工邮件失败: {e}") from e
 
 
 @sangon_router.post("/sangon_16s/init_order")
@@ -404,9 +404,9 @@ async def init_sangon_order_directory(req: SangonInitOrderRequest):
         )
         return {"status": "success", **res}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"初始化订单目录失败: {e}")
+        raise HTTPException(status_code=500, detail=f"初始化订单目录失败: {e}") from e
 
 
 @sangon_router.post("/sangon_16s/run_pipeline")
@@ -808,9 +808,9 @@ async def send_sangon_order_result_mail(req: SangonSendResultRequest):
     try:
         res, draft, final = await asyncio.to_thread(_do_send_16s)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"发送 16S 结果邮件异常: {e}")
+        raise HTTPException(status_code=500, detail=f"发送 16S 结果邮件异常: {e}") from e
 
     if not res.ok:
         raise HTTPException(status_code=400, detail=f"发送失败 ({res.stage}): {res.error}")
@@ -857,9 +857,9 @@ async def update_sangon_settings(req: SangonSettingsRequest):
             else:
                 new_root.mkdir(parents=True, exist_ok=True)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except OSError as e:
-            raise HTTPException(status_code=500, detail=f"目录迁移失败: {e}")
+            raise HTTPException(status_code=500, detail=f"目录迁移失败: {e}") from e
         to_save["sangon_root"] = str(new_root)
 
     if req.downloads_dir is not None:

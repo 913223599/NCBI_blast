@@ -39,83 +39,22 @@ if TYPE_CHECKING:
     from ..pipeline.postprocess import PhyloNode
 
 
-def _draw_circular_on_axes(
+def _draw_scale_and_clade_layers(
     ax: plt.Axes,
-    root: "PhyloNode",
-    leaves: List["PhyloNode"],
-    node_metadata: Dict[str, Dict[str, Any]],
-    display_labels: Dict[str, str],
-    taxon_colors: Dict[str, str],
-    other_taxa: Set[str],
-    rank_field: str,
-    leaf_phylum: Dict[str, str],
-    phylum_colors: Dict[str, str],
     clades: List[MonophyleticClade],
+    norm_r: Dict[int, float],
     palette: JournalPalette,
     req: PublicationFigureRequest,
-    max_len_kb: float,
-    gc_range: Tuple[float, float],
-    force_macro: bool = False,
-    highlight_names: Optional[Set[str]] = None,
-    panel_label: Optional[str] = None,
-    semicircle: bool = False,
+    *,
+    n_leaves: int,
+    max_depth: float,
+    inner_hole_r: float,
+    tree_span_r: float,
+    ring_start_r: float,
+    start_deg: float,
+    span_deg: float,
 ) -> None:
-    """在指定极坐标投影 Axes 上绘制科研期刊级环形（或 180 度半圆扇形）多环进化树。"""
-    n_leaves = len(leaves)
-    depths = _compute_node_depths(root, req.use_branch_lengths)
-    max_depth = max(depths.values()) or 1.0
-    lw_scale = _resolve_lw_scale(req.journal_width)
-    if n_leaves > 150:
-        lw_scale *= 0.76
-
-    macro_mode = force_macro or (req.label_density == "smart_query") or (
-        req.label_density == "auto" and n_leaves > 80
-    )
-
-    if semicircle:
-        start_deg = 4.0
-        span_deg = 172.0
-    else:
-        gap_deg = 30.0 if n_leaves >= 10 else 20.0
-        start_deg = gap_deg * 0.5
-        span_deg = 360.0 - gap_deg
-    angles: Dict[int, float] = {}
-    for idx, leaf in enumerate(leaves):
-        deg = start_deg + (idx + 0.5) * (span_deg / max(1, n_leaves))
-        angles[id(leaf)] = math.radians(deg)
-
-    def _assign_internal_angles(node: "PhyloNode") -> float:
-        if node.is_leaf:
-            return angles[id(node)]
-        child_angs = [_assign_internal_angles(ch) for ch in node.children]
-        mean_ang = sum(child_angs) / len(child_angs)
-        angles[id(node)] = mean_ang
-        return mean_ang
-
-    _assign_internal_angles(root)
-
-    # 中空圆心设计，舒展深层分支结构
-    inner_hole_r = 0.14 if n_leaves > 40 else 0.05
-    tree_r = 1.0
-    tree_span_r = tree_r - inner_hole_r
-    norm_r: Dict[int, float] = {
-        nid: inner_hole_r + (d / max_depth) * tree_span_r for nid, d in depths.items()
-    }
-    tip_r = 1.012
-
-    max_label_chars = max((len(display_labels.get(lf.name, lf.name)) for lf in leaves), default=10)
-    base_font = 205.0 / max(24, n_leaves)
-    if req.journal_width == "single_col":
-        base_font *= 0.86
-    label_font = max(4.6, min(8.0, base_font))
-
-    if macro_mode:
-        ring_start_r = tip_r + 0.025
-    else:
-        label_radial_span = min(0.84, max(0.22, max_label_chars * label_font * 0.0021))
-        ring_start_r = tip_r + 0.04 + label_radial_span
-
-    # 0. 同心演化距离参考虚线圆（iTOL Internal Tree Scale Rings）
+    """绘制同心演化距离参考虚线圆与单系支系柔和阴影扇区。"""
     if req.use_branch_lengths and max_depth > 0 and n_leaves > 24:
         for frac in (0.33, 0.67):
             r_ring = inner_hole_r + frac * tree_span_r
@@ -134,7 +73,6 @@ def _draw_circular_on_axes(
                 )
             )
 
-    # 1. 单系支系柔和背景阴影扇区（仅绘制专属有色分类群，不为 Others 涂脏灰）
     if req.show_clade_shading and clades:
         deg_step = span_deg / max(1, n_leaves)
         for cl in clades:
@@ -157,7 +95,28 @@ def _draw_circular_on_axes(
                     )
                 )
 
-    # 2. 极坐标树枝（query_clade 模式下主干保持干练沉稳深炭黑；all_clades 下对单系科着柔和科色）
+
+def _draw_polar_branches_and_leaves(
+    ax: plt.Axes,
+    root: "PhyloNode",
+    leaves: List["PhyloNode"],
+    angles: Dict[int, float],
+    norm_r: Dict[int, float],
+    node_metadata: Dict[str, Dict[str, Any]],
+    display_labels: Dict[str, str],
+    taxon_colors: Dict[str, str],
+    other_taxa: Set[str],
+    rank_field: str,
+    palette: JournalPalette,
+    req: PublicationFigureRequest,
+    *,
+    lw_scale: float,
+    macro_mode: bool,
+    tip_r: float,
+    ring_start_r: float,
+    label_font: float,
+) -> List[Tuple["PhyloNode", float, float]]:
+    """绘制极坐标树枝、叶端引导线、Query 星标及微观模式叶标签，返回 Query 叶子几何信息。"""
     eff_clade_mode = _resolve_effective_clade_mode(req)
     color_mono = macro_mode and eff_clade_mode == "all_clades"
     segments: List[List[Tuple[float, float]]] = []
@@ -211,7 +170,6 @@ def _draw_circular_on_axes(
             )
         )
 
-    # 3. 轻柔叶端引导细线直连外环 + 精细标签
     guide_segments: List[List[Tuple[float, float]]] = []
     query_leaves_info: List[Tuple["PhyloNode", float, float]] = []
     for lf in leaves:
@@ -286,64 +244,91 @@ def _draw_circular_on_axes(
                 zorder=1,
             )
         )
+    return query_leaves_info
 
-    # 4. 内部节点分级支持率点
-    if req.support_style != "none":
-        dot_s_strong = 6.5 if n_leaves > 120 else 15.0 * lw_scale
-        dot_s_mod = 5.2 if n_leaves > 120 else 12.5 * lw_scale
-        dot_edge_w = 0.25 if n_leaves > 120 else 0.45
-        mod_edge_w = 0.55 if n_leaves > 120 else 0.85
 
-        def _draw_support(node: "PhyloNode") -> None:
-            if not node.is_leaf and node is not root:
-                txt, uf_val = _format_support_text(node.name)
-                r_n = norm_r[id(node)]
-                ang = angles[id(node)]
-                nx, ny = r_n * math.cos(ang), r_n * math.sin(ang)
-                if uf_val is not None and req.support_style in ("dots", "both"):
-                    if uf_val >= 95.0:
-                        ax.scatter(
-                            [nx],
-                            [ny],
-                            s=dot_s_strong,
-                            facecolor=palette.strong_dot_color,
-                            edgecolor="white",
-                            linewidth=dot_edge_w,
-                            zorder=6,
-                        )
-                    elif uf_val >= 80.0:
-                        ax.scatter(
-                            [nx],
-                            [ny],
-                            s=dot_s_mod,
-                            facecolor="#ffffff",
-                            edgecolor=palette.moderate_dot_edge,
-                            linewidth=mod_edge_w,
-                            zorder=6,
-                        )
-                if not macro_mode and txt and req.support_style in ("text", "both"):
-                    deg = math.degrees(ang) % 360.0
-                    flip = 90.0 < deg < 270.0
-                    rot = deg + 180.0 if flip else deg
-                    _draw_text(
-                        ax,
-                        (r_n - 0.02) * math.cos(ang),
-                        (r_n - 0.02) * math.sin(ang),
-                        txt,
-                        fontsize=max(4.2, label_font * 0.70),
-                        color="#0f172a" if (uf_val or 0) >= 95.0 else "#475569",
-                        rotation=rot,
-                        rotation_mode="anchor",
-                        ha="center",
-                        va="bottom",
-                        zorder=7,
+def _draw_support_markers(
+    ax: plt.Axes,
+    root: "PhyloNode",
+    angles: Dict[int, float],
+    norm_r: Dict[int, float],
+    palette: JournalPalette,
+    req: PublicationFigureRequest,
+    *,
+    n_leaves: int,
+    lw_scale: float,
+    macro_mode: bool,
+    label_font: float,
+) -> None:
+    """绘制内部节点分级支持率圆点与数值文本。"""
+    if req.support_style == "none":
+        return
+    dot_s_strong = 6.5 if n_leaves > 120 else 15.0 * lw_scale
+    dot_s_mod = 5.2 if n_leaves > 120 else 12.5 * lw_scale
+    dot_edge_w = 0.25 if n_leaves > 120 else 0.45
+    mod_edge_w = 0.55 if n_leaves > 120 else 0.85
+
+    def _draw_support(node: "PhyloNode") -> None:
+        if not node.is_leaf and node is not root:
+            txt, uf_val = _format_support_text(node.name)
+            r_n = norm_r[id(node)]
+            ang = angles[id(node)]
+            nx, ny = r_n * math.cos(ang), r_n * math.sin(ang)
+            if uf_val is not None and req.support_style in ("dots", "both"):
+                if uf_val >= 95.0:
+                    ax.scatter(
+                        [nx], [ny], s=dot_s_strong, facecolor=palette.strong_dot_color,
+                        edgecolor="white", linewidth=dot_edge_w, zorder=6,
                     )
-            for ch in node.children:
-                _draw_support(ch)
+                elif uf_val >= 80.0:
+                    ax.scatter(
+                        [nx], [ny], s=dot_s_mod, facecolor="#ffffff",
+                        edgecolor=palette.moderate_dot_edge, linewidth=mod_edge_w, zorder=6,
+                    )
+            if not macro_mode and txt and req.support_style in ("text", "both"):
+                deg = math.degrees(ang) % 360.0
+                flip = 90.0 < deg < 270.0
+                rot = deg + 180.0 if flip else deg
+                _draw_text(
+                    ax,
+                    (r_n - 0.02) * math.cos(ang),
+                    (r_n - 0.02) * math.sin(ang),
+                    txt,
+                    fontsize=max(4.2, label_font * 0.70),
+                    color="#0f172a" if (uf_val or 0) >= 95.0 else "#475569",
+                    rotation=rot,
+                    rotation_mode="anchor",
+                    ha="center",
+                    va="bottom",
+                    zorder=7,
+                )
+        for ch in node.children:
+            _draw_support(ch)
 
-        _draw_support(root)
+    _draw_support(root)
 
-    # 5. 四层同心环轨道 (Family/Genus -> Host -> GC% Heatmap -> Size)
+
+def _draw_concentric_rings(
+    ax: plt.Axes,
+    leaves: List["PhyloNode"],
+    angles: Dict[int, float],
+    node_metadata: Dict[str, Dict[str, Any]],
+    taxon_colors: Dict[str, str],
+    other_taxa: Set[str],
+    rank_field: str,
+    leaf_phylum: Dict[str, str],
+    phylum_colors: Dict[str, str],
+    palette: JournalPalette,
+    req: PublicationFigureRequest,
+    *,
+    ring_start_r: float,
+    start_deg: float,
+    span_deg: float,
+    max_len_kb: float,
+    gc_range: Tuple[float, float],
+) -> Tuple[float, float, List[Tuple[float, str, str]]]:
+    """绘制四层同心环轨道 (Family/Genus -> Host -> GC% -> Size) 与右侧零交叉阶梯折线轨道名。"""
+    n_leaves = len(leaves)
     ring_r = ring_start_r
     half_ang_deg = (span_deg / max(1, n_leaves)) * (0.50 if n_leaves > 100 else 0.45)
     wedge_ec = "none" if n_leaves > 100 else "white"
@@ -370,15 +355,8 @@ def _draw_circular_on_axes(
                 col = _UNCLASSIFIED_LIGHT_COLOR
             ax.add_patch(
                 Wedge(
-                    (0.0, 0.0),
-                    ring_r + w,
-                    deg - half_ang_deg,
-                    deg + half_ang_deg,
-                    width=w,
-                    facecolor=col,
-                    edgecolor=wedge_ec,
-                    linewidth=wedge_lw,
-                    zorder=3,
+                    (0.0, 0.0), ring_r + w, deg - half_ang_deg, deg + half_ang_deg,
+                    width=w, facecolor=col, edgecolor=wedge_ec, linewidth=wedge_lw, zorder=3,
                 )
             )
         ring_mid_specs.append((ring_r + w * 0.5, "Family" if rank_field == "family" else "Genus", "#0f172a"))
@@ -392,15 +370,8 @@ def _draw_circular_on_axes(
             col = phylum_colors.get(phylum, _UNCLASSIFIED_LIGHT_COLOR) if phylum else "#f8fafc"
             ax.add_patch(
                 Wedge(
-                    (0.0, 0.0),
-                    ring_r + w,
-                    deg - half_ang_deg,
-                    deg + half_ang_deg,
-                    width=w,
-                    facecolor=col,
-                    edgecolor=wedge_ec,
-                    linewidth=wedge_lw,
-                    zorder=3,
+                    (0.0, 0.0), ring_r + w, deg - half_ang_deg, deg + half_ang_deg,
+                    width=w, facecolor=col, edgecolor=wedge_ec, linewidth=wedge_lw, zorder=3,
                 )
             )
         ring_mid_specs.append((ring_r + w * 0.5, "Host", "#334155"))
@@ -415,15 +386,8 @@ def _draw_circular_on_axes(
             col_hex = gc_value_to_hex(gc, gc_low, gc_high, palette.name)
             ax.add_patch(
                 Wedge(
-                    (0.0, 0.0),
-                    ring_r + w,
-                    deg - half_ang_deg,
-                    deg + half_ang_deg,
-                    width=w,
-                    facecolor=col_hex,
-                    edgecolor=wedge_ec,
-                    linewidth=wedge_lw,
-                    zorder=3,
+                    (0.0, 0.0), ring_r + w, deg - half_ang_deg, deg + half_ang_deg,
+                    width=w, facecolor=col_hex, edgecolor=wedge_ec, linewidth=wedge_lw, zorder=3,
                 )
             )
         ring_mid_specs.append((ring_r + w * 0.5, "GC%", "#2171B5" if palette.name != "monochrome" else "#374151"))
@@ -431,33 +395,19 @@ def _draw_circular_on_axes(
 
     if has_meta and req.show_genome_length:
         w_max = 0.115
-        # 去除厚重灰框，仅留纤细基线圆弧与 50% 参考虚线圆弧
         ax.add_patch(
             Arc(
-                (0.0, 0.0),
-                ring_r * 2,
-                ring_r * 2,
-                angle=0,
-                theta1=start_deg,
-                theta2=start_deg + span_deg,
-                edgecolor="#94a3b8",
-                linewidth=0.5,
-                zorder=2.5,
+                (0.0, 0.0), ring_r * 2, ring_r * 2, angle=0,
+                theta1=start_deg, theta2=start_deg + span_deg,
+                edgecolor="#94a3b8", linewidth=0.5, zorder=2.5,
             )
         )
         mid_r = ring_r + w_max * 0.5
         ax.add_patch(
             Arc(
-                (0.0, 0.0),
-                mid_r * 2,
-                mid_r * 2,
-                angle=0,
-                theta1=start_deg,
-                theta2=start_deg + span_deg,
-                edgecolor="#cbd5e1",
-                linewidth=0.45,
-                linestyle="--",
-                zorder=2.5,
+                (0.0, 0.0), mid_r * 2, mid_r * 2, angle=0,
+                theta1=start_deg, theta2=start_deg + span_deg,
+                edgecolor="#cbd5e1", linewidth=0.45, linestyle="--", zorder=2.5,
             )
         )
         for lf in leaves:
@@ -466,20 +416,13 @@ def _draw_circular_on_axes(
             bar_w = max(0.006, (kb / max_len_kb) * w_max)
             ax.add_patch(
                 Wedge(
-                    (0.0, 0.0),
-                    ring_r + bar_w,
-                    deg - half_ang_deg * 0.85,
-                    deg + half_ang_deg * 0.85,
-                    width=bar_w,
-                    facecolor=palette.size_bar_color,
-                    edgecolor="none",
-                    zorder=3,
+                    (0.0, 0.0), ring_r + bar_w, deg - half_ang_deg * 0.85, deg + half_ang_deg * 0.85,
+                    width=bar_w, facecolor=palette.size_bar_color, edgecolor="none", zorder=3,
                 )
             )
         ring_mid_specs.append((ring_r + w_max * 0.45, f"Size ({max_len_kb:.0f}kb)", palette.size_bar_color))
         ring_r += w_max + 0.016
 
-    # 右侧开口处采用严格零交叉的正交 L 形阶梯折线 + 环端微锚点 + 水平精排轨道名
     x_label_col = ring_r + 0.11
     if ring_mid_specs:
         ring_radii = [spec[0] for spec in ring_mid_specs]
@@ -490,24 +433,36 @@ def _draw_circular_on_axes(
             ax.plot(xs, ys, color="#64748b", linewidth=0.58, solid_joinstyle="miter", zorder=7)
             ax.scatter([xs[0]], [ys[0]], s=5.0, facecolor="#475569", edgecolor="none", zorder=8)
             _draw_text(
-                ax,
-                x_label_col,
-                ys[-1],
-                r_title,
-                fontsize=5.9,
-                fontweight="bold",
-                color=r_col,
-                ha="left",
-                va="center",
-                zorder=8,
+                ax, x_label_col, ys[-1], r_title,
+                fontsize=5.9, fontweight="bold", color=r_col, ha="left", va="center", zorder=8,
             )
 
-    # 6. Panel b 局部聚焦扇区标识弧线 + Clade b 标注
+    return ring_r, x_label_col, ring_mid_specs
+
+
+def _draw_focus_arc_and_query_callouts(
+    ax: plt.Axes,
+    leaves: List["PhyloNode"],
+    angles: Dict[int, float],
+    display_labels: Dict[str, str],
+    query_leaves_info: List[Tuple["PhyloNode", float, float]],
+    palette: JournalPalette,
+    req: PublicationFigureRequest,
+    *,
+    ring_r: float,
+    x_label_col: float,
+    ring_mid_specs: List[Tuple[float, str, str]],
+    start_deg: float,
+    span_deg: float,
+    macro_mode: bool,
+    highlight_names: Optional[Set[str]],
+    panel_label: Optional[str],
+    semicircle: bool,
+) -> Tuple[float, float, float, float]:
+    """绘制局部聚焦扇区标识弧线与宏观模式最外圈 Query 引出线，返回紧致坐标边界。"""
     max_focus_arc_r = ring_r
     if highlight_names:
-        hi_degs = sorted(
-            math.degrees(angles[id(lf)]) for lf in leaves if lf.name in highlight_names
-        )
+        hi_degs = sorted(math.degrees(angles[id(lf)]) for lf in leaves if lf.name in highlight_names)
         if hi_degs:
             clusters: List[List[float]] = [[hi_degs[0]]]
             for d in hi_degs[1:]:
@@ -524,19 +479,10 @@ def _draw_circular_on_axes(
                 if t2 > t1:
                     ax.add_patch(
                         Arc(
-                            (0.0, 0.0),
-                            arc_r * 2,
-                            arc_r * 2,
-                            angle=0,
-                            theta1=t1,
-                            theta2=t2,
-                            edgecolor="#1e293b",
-                            linewidth=1.5,
-                            linestyle="-",
-                            zorder=7,
+                            (0.0, 0.0), arc_r * 2, arc_r * 2, angle=0,
+                            theta1=t1, theta2=t2, edgecolor="#1e293b", linewidth=1.5, linestyle="-", zorder=7,
                         )
                     )
-            # 放在聚焦弧起点外侧空白区，避开 Query 放射引出线避免交叉
             clade_lbl_r = arc_r + 0.03
             lbl_ang = math.radians(max(start_deg + 1.0, main_cluster[0] - 2.0))
             _draw_text(
@@ -544,15 +490,12 @@ def _draw_circular_on_axes(
                 clade_lbl_r * math.cos(lbl_ang),
                 clade_lbl_r * math.sin(lbl_ang),
                 f"Clade b (n={len(highlight_names)})",
-                fontsize=6.5,
-                fontweight="bold",
-                color="#1e293b",
+                fontsize=6.5, fontweight="bold", color="#1e293b",
                 ha="left" if math.cos(lbl_ang) >= 0 else "right",
                 va="bottom" if math.sin(lbl_ang) >= 0 else "top",
                 zorder=9,
             )
 
-    # 7. 宏观模式最外圈 Query 株去贴纸防碰撞引出线标注 + 非对称紧致包围盒追踪
     base_pad = 0.07
     x_min = -(ring_r + base_pad)
     x_max = max(ring_r + base_pad, x_label_col + 0.25 if ring_mid_specs else ring_r + base_pad)
@@ -578,42 +521,28 @@ def _draw_circular_on_axes(
             ax.plot(
                 [r_leaf * math.cos(ang_true), r_inner_anchor * math.cos(ang_true)],
                 [r_leaf * math.sin(ang_true), r_inner_anchor * math.sin(ang_true)],
-                color=palette.query_color,
-                linewidth=0.5,
-                linestyle=":",
-                alpha=0.70,
-                zorder=4,
+                color=palette.query_color, linewidth=0.5, linestyle=":", alpha=0.70, zorder=4,
             )
             ax.plot(
                 [r_inner_anchor * math.cos(ang_true), r_callout_end * math.cos(ang_out)],
                 [r_inner_anchor * math.sin(ang_true), r_callout_end * math.sin(ang_out)],
-                color=palette.query_color,
-                linewidth=0.85,
-                linestyle="-",
-                zorder=7,
+                color=palette.query_color, linewidth=0.85, linestyle="-", zorder=7,
             )
             if req.show_query_star:
                 ax.scatter(
                     [r_inner_anchor * math.cos(ang_true)],
                     [r_inner_anchor * math.sin(ang_true)],
-                    marker="*",
-                    s=44,
-                    color=palette.query_color,
-                    edgecolor="white",
-                    linewidth=0.35,
-                    zorder=8,
+                    marker="*", s=44, color=palette.query_color, edgecolor="white", linewidth=0.35, zorder=8,
                 )
             flip = 90.0 < (deg_out % 360.0) < 270.0
             rot = (deg_out + 180.0) if flip else deg_out
             ha = "right" if flip else "left"
             lbl = display_labels.get(qlf.name, qlf.name)
             txt_r = r_callout_end + 0.018
-            tx = txt_r * math.cos(ang_out)
-            ty = txt_r * math.sin(ang_out)
             _draw_text(
                 ax,
-                tx,
-                ty,
+                txt_r * math.cos(ang_out),
+                txt_r * math.sin(ang_out),
                 lbl,
                 fontsize=6.7 if panel_label else 7.2,
                 fontweight="bold",
@@ -624,7 +553,6 @@ def _draw_circular_on_axes(
                 va="center",
                 zorder=8,
             )
-            # 精确估算旋转文本末端包络，仅在有引出线的象限扩展画布边界
             est_len = min(0.45, max(0.18, len(lbl) * 0.016))
             end_x = (txt_r + est_len) * math.cos(ang_out)
             end_y = (txt_r + est_len) * math.sin(ang_out)
@@ -633,7 +561,111 @@ def _draw_circular_on_axes(
             y_min = min(y_min, end_y - 0.04)
             y_max = max(y_max, end_y + 0.04)
 
-    # 保持 aspect="equal" 下居中对齐（取最大半跨或非对称紧凑框）
+    return x_min, x_max, y_min, y_max
+
+
+def _draw_circular_on_axes(
+    ax: plt.Axes,
+    root: "PhyloNode",
+    leaves: List["PhyloNode"],
+    node_metadata: Dict[str, Dict[str, Any]],
+    display_labels: Dict[str, str],
+    taxon_colors: Dict[str, str],
+    other_taxa: Set[str],
+    rank_field: str,
+    leaf_phylum: Dict[str, str],
+    phylum_colors: Dict[str, str],
+    clades: List[MonophyleticClade],
+    palette: JournalPalette,
+    req: PublicationFigureRequest,
+    max_len_kb: float,
+    gc_range: Tuple[float, float],
+    force_macro: bool = False,
+    highlight_names: Optional[Set[str]] = None,
+    panel_label: Optional[str] = None,
+    semicircle: bool = False,
+) -> None:
+    """在指定极坐标投影 Axes 上绘制科研期刊级环形（或 180 度半圆扇形）多环进化树。"""
+    n_leaves = len(leaves)
+    depths = _compute_node_depths(root, req.use_branch_lengths)
+    max_depth = max(depths.values()) or 1.0
+    lw_scale = _resolve_lw_scale(req.journal_width)
+    if n_leaves > 150:
+        lw_scale *= 0.76
+
+    macro_mode = force_macro or (req.label_density == "smart_query") or (
+        req.label_density == "auto" and n_leaves > 80
+    )
+
+    if semicircle:
+        start_deg = 4.0
+        span_deg = 172.0
+    else:
+        gap_deg = 30.0 if n_leaves >= 10 else 20.0
+        start_deg = gap_deg * 0.5
+        span_deg = 360.0 - gap_deg
+    angles: Dict[int, float] = {}
+    for idx, leaf in enumerate(leaves):
+        deg = start_deg + (idx + 0.5) * (span_deg / max(1, n_leaves))
+        angles[id(leaf)] = math.radians(deg)
+
+    def _assign_internal_angles(node: "PhyloNode") -> float:
+        if node.is_leaf:
+            return angles[id(node)]
+        child_angs = [_assign_internal_angles(ch) for ch in node.children]
+        mean_ang = sum(child_angs) / len(child_angs)
+        angles[id(node)] = mean_ang
+        return mean_ang
+
+    _assign_internal_angles(root)
+
+    inner_hole_r = 0.14 if n_leaves > 40 else 0.05
+    tree_r = 1.0
+    tree_span_r = tree_r - inner_hole_r
+    norm_r: Dict[int, float] = {
+        nid: inner_hole_r + (d / max_depth) * tree_span_r for nid, d in depths.items()
+    }
+    tip_r = 1.012
+
+    max_label_chars = max((len(display_labels.get(lf.name, lf.name)) for lf in leaves), default=10)
+    base_font = 205.0 / max(24, n_leaves)
+    if req.journal_width == "single_col":
+        base_font *= 0.86
+    label_font = max(4.6, min(8.0, base_font))
+
+    if macro_mode:
+        ring_start_r = tip_r + 0.025
+    else:
+        label_radial_span = min(0.84, max(0.22, max_label_chars * label_font * 0.0021))
+        ring_start_r = tip_r + 0.04 + label_radial_span
+
+    _draw_scale_and_clade_layers(
+        ax, clades, norm_r, palette, req,
+        n_leaves=n_leaves, max_depth=max_depth, inner_hole_r=inner_hole_r,
+        tree_span_r=tree_span_r, ring_start_r=ring_start_r, start_deg=start_deg, span_deg=span_deg,
+    )
+    query_leaves_info = _draw_polar_branches_and_leaves(
+        ax, root, leaves, angles, norm_r, node_metadata, display_labels,
+        taxon_colors, other_taxa, rank_field, palette, req,
+        lw_scale=lw_scale, macro_mode=macro_mode, tip_r=tip_r, ring_start_r=ring_start_r, label_font=label_font,
+    )
+    _draw_support_markers(
+        ax, root, angles, norm_r, palette, req,
+        n_leaves=n_leaves, lw_scale=lw_scale, macro_mode=macro_mode, label_font=label_font,
+    )
+    ring_r, x_label_col, ring_mid_specs = _draw_concentric_rings(
+        ax, leaves, angles, node_metadata, taxon_colors, other_taxa, rank_field,
+        leaf_phylum, phylum_colors, palette, req,
+        ring_start_r=ring_start_r, start_deg=start_deg, span_deg=span_deg,
+        max_len_kb=max_len_kb, gc_range=gc_range,
+    )
+    x_min, x_max, y_min, y_max = _draw_focus_arc_and_query_callouts(
+        ax, leaves, angles, display_labels, query_leaves_info, palette, req,
+        ring_r=ring_r, x_label_col=x_label_col, ring_mid_specs=ring_mid_specs,
+        start_deg=start_deg, span_deg=span_deg, macro_mode=macro_mode,
+        highlight_names=highlight_names, panel_label=panel_label, semicircle=semicircle,
+    )
+
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
 

@@ -30,23 +30,23 @@ if (typeof window !== 'undefined') {
   }
 }
 
-export async function apiGet(endpoint: string): Promise<any> {
+export async function apiGet<T = any>(endpoint: string): Promise<T> {
   try {
     const response = await fetch(`${API_BASE}${endpoint}`)
-    if (!response.ok) return { success: false, error: `HTTP ${response.status}`, status: response.status }
+    if (!response.ok) return { success: false, error: `HTTP ${response.status}`, status: response.status } as T
 
     const contentType = response.headers.get('content-type')
     if (contentType && contentType.includes('application/json')) {
-      return await response.json()
+      return (await response.json()) as T
     }
-    return { success: true, text: await response.text() }
+    return { success: true, text: await response.text() } as T
   } catch (err) {
     bridgeLog.error(`GET ${endpoint} 失败:`, err)
-    return { success: false, error: String(err) }
+    return { success: false, error: String(err) } as T
   }
 }
 
-export async function apiPost(endpoint: string, body?: any): Promise<any> {
+export async function apiPost<T = any>(endpoint: string, body?: unknown): Promise<T> {
   try {
     const response = await fetch(`${API_BASE}${endpoint}`, {
       method: 'POST',
@@ -59,22 +59,22 @@ export async function apiPost(endpoint: string, body?: any): Promise<any> {
 
     const contentType = response.headers.get('content-type')
     if (response.ok && contentType && contentType.includes('application/json')) {
-      return await response.json()
+      return (await response.json()) as T
     }
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown Error')
-      return { success: false, error: `HTTP ${response.status}: ${errorText}`, status: response.status }
+      return { success: false, error: `HTTP ${response.status}: ${errorText}`, status: response.status } as T
     }
 
-    return { success: true, text: await response.text() }
+    return { success: true, text: await response.text() } as T
   } catch (err) {
     bridgeLog.error(`POST ${endpoint} 失败:`, err)
-    return { success: false, error: String(err) }
+    return { success: false, error: String(err) } as T
   }
 }
 
-export async function apiDelete(endpoint: string): Promise<any> {
+export async function apiDelete<T = any>(endpoint: string): Promise<T> {
   try {
     const response = await fetch(`${API_BASE}${endpoint}`, {
       method: 'DELETE',
@@ -97,15 +97,15 @@ export async function apiDelete(endpoint: string): Promise<any> {
         success: false,
         error: detail ? `HTTP ${response.status}: ${detail}` : `HTTP ${response.status}`,
         status: response.status,
-      }
+      } as T
     }
     const contentType = response.headers.get('content-type') || ''
     if (contentType.includes('application/json')) {
-      return await response.json()
+      return (await response.json()) as T
     }
-    return { success: true }
+    return { success: true } as T
   } catch (err) {
     bridgeLog.error(`DELETE ${endpoint} 失败:`, err)
-    return { success: false, error: String(err) }
+    return { success: false, error: String(err) } as T
   }
 }

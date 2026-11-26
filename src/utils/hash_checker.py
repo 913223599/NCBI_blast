@@ -45,7 +45,7 @@ class HashChecker:
                     hash_md5.update(chunk)
             return hash_md5.hexdigest()
         except Exception as e:
-            raise RuntimeError(f"计算文件哈希值失败 {file_path}: {e}")
+            raise RuntimeError(f"计算文件哈希值失败 {file_path}: {e}") from e
     
     def get_cache_files(self, file_hash):
         """

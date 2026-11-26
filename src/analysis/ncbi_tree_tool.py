@@ -108,7 +108,7 @@ class NcbiTreeToolWrapper:
 
         except subprocess.CalledProcessError as e:
             logger.error(f"MDS execution failed: {e.stderr}")
-            raise RuntimeError(f"MDS execution failed: {e.stderr}")
+            raise RuntimeError(f"MDS execution failed: {e.stderr}") from e
         finally:
             # 清理临时文件
             if os.path.exists(dm_path):

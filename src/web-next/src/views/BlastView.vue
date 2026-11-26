@@ -307,31 +307,32 @@ onUnmounted(() => {
     <!-- 顶部工具栏 -->
     <div class="blast-toolbar-top">
       <div class="tool-items">
-        <div class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }" @click="toggleSideTool('input')">
-          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'input' && isSidebarOpen }" @click="toggleSideTool('input')">
+          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
           </svg>
           <span class="label">{{ t('blast.nav.input') }}</span>
-        </div>
+        </button>
         <div class="tool-divider"></div>
-        <div class="tool-btn" :class="{ active: activeSideTool === 'params' && isSidebarOpen }" @click="toggleSideTool('params')">
-          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'params' && isSidebarOpen }" @click="toggleSideTool('params')">
+          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <circle cx="12" cy="12" r="3" stroke-width="2"/>
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
           </svg>
           <span class="label">{{ t('blast.nav.params') }}</span>
-        </div>
+        </button>
         <div class="tool-divider"></div>
-        <div class="tool-btn" :class="{ active: activeSideTool === 'history' && isSidebarOpen }" @click="toggleSideTool('history')">
-          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <button type="button" class="tool-btn" :class="{ active: activeSideTool === 'history' && isSidebarOpen }" @click="toggleSideTool('history')">
+          <svg class="tool-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <circle cx="12" cy="12" r="9" stroke-width="2"/>
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 3"/>
           </svg>
           <span class="label">{{ t('blast.nav.history') }}</span>
-        </div>
+        </button>
       </div>
       <div class="toolbar-actions">
         <button 
+          type="button"
           class="btn-primary-run" 
           @click="launchBlast" 
           :disabled="blast.analysisTarget === 'isolate' && !blast.hasInput"
@@ -381,9 +382,15 @@ onUnmounted(() => {
             @clear-diversity-history="() => { activeDiversityTaskId = '' }"
           />
         </div>
-        <div class="sidebar-collapse-toggle" @click="isSidebarOpen = !isSidebarOpen">
+        <button
+          type="button"
+          class="sidebar-collapse-toggle"
+          :aria-expanded="isSidebarOpen"
+          aria-label="Toggle BLAST sidebar"
+          @click="isSidebarOpen = !isSidebarOpen"
+        >
            {{ isSidebarOpen ? '◀' : '▶' }}
-        </div>
+        </button>
       </div>
 
       <!-- 结果主区域: 单株鉴定结果 vs 16S多样性分析结果 (内嵌无缝切换，不再单开浮窗) -->
@@ -429,7 +436,7 @@ onUnmounted(() => {
 .blast-workspace-container { display: flex; flex-direction: column; height: 100%; background: white; overflow: hidden; }
 .blast-toolbar-top { height: 60px; background: white; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 100; }
 .tool-items { display: flex; align-items: center; gap: 8px; }
-.tool-btn { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; border-radius: 10px; color: #64748b; font-weight: 600; font-size: 0.82rem; transition: all 0.2s; }
+.tool-btn { display: flex; align-items: center; gap: 10px; padding: 8px 16px; border: none; background: transparent; cursor: pointer; border-radius: 10px; color: #64748b; font-weight: 600; font-size: 0.82rem; transition: all 0.2s; }
 .tool-btn:hover { background: #f8fafc; color: #1e293b; }
 .tool-btn.active { color: #2563eb; background: #eff6ff; }
 .tool-svg { width: 17px; height: 17px; stroke-width: 2; flex-shrink: 0; }

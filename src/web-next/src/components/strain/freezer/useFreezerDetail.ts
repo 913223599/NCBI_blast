@@ -2,11 +2,19 @@
  * useFreezerDetail - 冻存冰箱层级导航、占用率统计、拖拽框选与样本详情状态管理
  * 从 FreezerDetailPanel.vue 拆解而出，保持单一职责与完整响应式语义。
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { computed, onMounted, onUnmounted, ref, toRaw, watch } from 'vue'
 import { useI18n } from '../../../locales'
-import { useStrainStore, type StrainRecord } from '../../../stores/strain'
+import {
+  useStrainStore,
+  type FreezerBox,
+  type FreezerCabinet,
+  type FreezerDrawer,
+  type FreezerShelf,
+  type StrainRecord,
+} from '../../../stores/strain'
 import { useAppStore } from '../../../stores/app'
+
+export type FreezerBoxPosition = FreezerBox['positions'][number]
 
 export interface EntryPositionPayload {
   freezerId: string
@@ -25,9 +33,9 @@ export function useFreezerDetail() {
 
   // 层级导航状态
   const currentLevel = ref<'shelf' | 'cabinet' | 'drawer' | 'box'>('shelf')
-  const selectedShelf = ref<any>(null)
-  const selectedCabinet = ref<any>(null)
-  const selectedDrawer = ref<any>(null)
+  const selectedShelf = ref<FreezerShelf | null>(null)
+  const selectedCabinet = ref<FreezerCabinet | null>(null)
+  const selectedDrawer = ref<FreezerDrawer | null>(null)
   const activeBoxId = ref<string>('')
 
   // 对话框与悬停状态
@@ -58,9 +66,9 @@ export function useFreezerDetail() {
     return total
   })
 
-  const activeBox = computed(() => {
+  const activeBox = computed<FreezerBox | null>(() => {
     if (!selectedDrawer.value || !activeBoxId.value) return null
-    return selectedDrawer.value.boxes.find((b: any) => b.id === activeBoxId.value) || null
+    return selectedDrawer.value.boxes.find((b) => b.id === activeBoxId.value) || null
   })
 
   function getTotalCabinets(): number {
@@ -83,7 +91,7 @@ export function useFreezerDetail() {
     return total
   }
 
-  function getCabinetStats(shelf: any): string {
+  function getCabinetStats(shelf: FreezerShelf): string {
     let totalDrawers = 0
     let totalBoxes = 0
     for (const cabinet of shelf.cabinets) {
@@ -95,23 +103,23 @@ export function useFreezerDetail() {
     return `${totalDrawers} 抽屉 · ${totalBoxes} 盒`
   }
 
-  function getDrawerCount(cabinet: any): number {
+  function getDrawerCount(cabinet: FreezerCabinet): number {
     return (cabinet.drawers || []).length
   }
 
-  function getBoxUsedCountAndTotal(box: any) {
+  function getBoxUsedCountAndTotal(box: FreezerBox | null | undefined) {
     if (!box || !box.positions) return { used: 0, total: 0 }
     const total = box.rows * box.cols
-    const used = box.positions.filter((p: any) => p.occupied).length
+    const used = box.positions.filter((p) => p.occupied).length
     return { used, total }
   }
 
-  function getShelfUsage(shelf: any): number {
+  function getShelfUsage(shelf: FreezerShelf): number {
     let totalCount = 0
     let usedCount = 0
-    shelf.cabinets.forEach((c: any) => {
-      c.drawers.forEach((d: any) => {
-        d.boxes.forEach((b: any) => {
+    shelf.cabinets.forEach((c) => {
+      c.drawers.forEach((d) => {
+        d.boxes.forEach((b) => {
           const stats = getBoxUsedCountAndTotal(b)
           totalCount += stats.total
           usedCount += stats.used
@@ -121,11 +129,11 @@ export function useFreezerDetail() {
     return totalCount > 0 ? (usedCount / totalCount) * 100 : 0
   }
 
-  function getCabinetUsage(_shelfId: string, cabinet: any): number {
+  function getCabinetUsage(_shelfId: string, cabinet: FreezerCabinet): number {
     let totalCount = 0
     let usedCount = 0
-    cabinet.drawers.forEach((d: any) => {
-      d.boxes.forEach((b: any) => {
+    cabinet.drawers.forEach((d) => {
+      d.boxes.forEach((b) => {
         const stats = getBoxUsedCountAndTotal(b)
         totalCount += stats.total
         usedCount += stats.used
@@ -134,10 +142,10 @@ export function useFreezerDetail() {
     return totalCount > 0 ? (usedCount / totalCount) * 100 : 0
   }
 
-  function getDrawerUsage(_shelfId: string, _cabinetId: string, drawer: any): number {
+  function getDrawerUsage(_shelfId: string, _cabinetId: string, drawer: FreezerDrawer): number {
     let totalCount = 0
     let usedCount = 0
-    drawer.boxes.forEach((b: any) => {
+    drawer.boxes.forEach((b) => {
       const stats = getBoxUsedCountAndTotal(b)
       totalCount += stats.total
       usedCount += stats.used
@@ -145,7 +153,7 @@ export function useFreezerDetail() {
     return totalCount > 0 ? (usedCount / totalCount) * 100 : 0
   }
 
-  function getBoxUsage(_shelfId: string | undefined, _cabinetId: string | undefined, _drawerId: string | undefined, box: any): number {
+  function getBoxUsage(_shelfId: string | undefined, _cabinetId: string | undefined, _drawerId: string | undefined, box: FreezerBox): number {
     const stats = getBoxUsedCountAndTotal(box)
     return stats.total > 0 ? (stats.used / stats.total) * 100 : 0
   }
@@ -163,9 +171,9 @@ export function useFreezerDetail() {
     )
   }
 
-  function getBoxUsedCount(box: any): number {
+  function getBoxUsedCount(box: FreezerBox | null | undefined): number {
     if (!box || !box.positions) return 0
-    return box.positions.filter((p: any) => p.occupied).length
+    return box.positions.filter((p) => p.occupied).length
   }
 
   function getSteppedUsage(percentage: number): number {
@@ -181,41 +189,41 @@ export function useFreezerDetail() {
     return 'empty'
   }
 
-  function selectShelf(shelf: any) {
+  function selectShelf(shelf: FreezerShelf) {
     selectedShelf.value = shelf
     selectedCabinet.value = null
     selectedDrawer.value = null
     currentLevel.value = 'cabinet'
   }
 
-  function selectCabinet(cabinet: any) {
+  function selectCabinet(cabinet: FreezerCabinet) {
     selectedCabinet.value = cabinet
     selectedDrawer.value = null
     currentLevel.value = 'drawer'
   }
 
-  function selectDrawer(drawer: any) {
+  function selectDrawer(drawer: FreezerDrawer) {
     selectedDrawer.value = drawer
     currentLevel.value = 'box'
     hoveredSample.value = null
-    if (drawer.boxes.length > 0) {
+    if (drawer.boxes.length > 0 && drawer.boxes[0]) {
       activeBoxId.value = drawer.boxes[0].id
     }
     selectedIndices.value.clear()
   }
 
-  function handlePositionHover(position: any, _box?: any) {
+  function handlePositionHover(position: FreezerBoxPosition | null | undefined, _box?: FreezerBox | null) {
     if (position?.sampleId) {
-      hoveredSample.value = strain.records.find((r: any) => r.id === position.sampleId) || null
+      hoveredSample.value = strain.records.find((r) => r.id === position.sampleId) || null
     } else {
       hoveredSample.value = null
     }
   }
 
-  function getFilteredMetadata(metadata: any) {
+  function getFilteredMetadata(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
     if (!metadata) return {}
     const excludeKeys = ['description', 'notes', 'storageDate', 'isExpression']
-    const filtered: Record<string, any> = {}
+    const filtered: Record<string, unknown> = {}
     Object.keys(metadata).forEach((key) => {
       if (!excludeKeys.includes(key) && metadata[key]) {
         filtered[key] = metadata[key]
@@ -245,11 +253,11 @@ export function useFreezerDetail() {
     }
   }
 
-  function handlePositionLeftClick(position: any, box: any) {
+  function handlePositionLeftClick(position: FreezerBoxPosition, box: FreezerBox) {
     if (selectedIndices.value.size > 1) return
 
     if (position?.sampleId) {
-      const sample = strain.records.find((r: any) => r.id === position.sampleId)
+      const sample = strain.records.find((r) => r.id === position.sampleId)
       if (sample) {
         selectedSample.value = sample
         showDetailDialog.value = true
@@ -257,9 +265,10 @@ export function useFreezerDetail() {
       }
     }
 
+    if (!strain.activeFreezer || !selectedShelf.value || !selectedCabinet.value || !selectedDrawer.value) return
     selectedIndices.value.clear()
     entryPosition.value = {
-      freezerId: strain.activeFreezer!.id,
+      freezerId: strain.activeFreezer.id,
       shelfId: selectedShelf.value.id,
       cabinetId: selectedCabinet.value.id,
       drawerId: selectedDrawer.value.id,
@@ -269,7 +278,7 @@ export function useFreezerDetail() {
     showEntryDialog.value = true
   }
 
-  function handlePositionMouseDown(idx: number, pos: any) {
+  function handlePositionMouseDown(idx: number, pos: FreezerBoxPosition) {
     if (pos.occupied) return
     isSelecting.value = true
     selectionStartIdx.value = idx
@@ -277,12 +286,12 @@ export function useFreezerDetail() {
     selectedIndices.value.add(idx)
   }
 
-  function handlePositionMouseEnter(idx: number, pos: any) {
+  function handlePositionMouseEnter(idx: number, pos: FreezerBoxPosition) {
     if (!isSelecting.value) {
       handlePositionHover(pos, activeBox.value)
       return
     }
-    if (selectionStartIdx.value === null || !activeBox.value) return
+    if (selectionStartIdx.value === null || !activeBox.value || !selectedShelf.value || !selectedCabinet.value || !selectedDrawer.value) return
 
     const startIdx = selectionStartIdx.value
     const cols = activeBox.value.cols
@@ -317,18 +326,27 @@ export function useFreezerDetail() {
     if (!isSelecting.value) return
     isSelecting.value = false
 
-    if (selectedIndices.value.size > 1 && activeBox.value) {
+    if (
+      selectedIndices.value.size > 1 &&
+      activeBox.value &&
+      strain.activeFreezer &&
+      selectedShelf.value &&
+      selectedCabinet.value &&
+      selectedDrawer.value
+    ) {
       const positions = Array.from(selectedIndices.value)
-        .sort((a, b) => a - b)
-        .map((idx) => activeBox.value!.positions[idx].label)
+        .toSorted((a, b) => a - b)
+        .map((idx) => activeBox.value!.positions[idx]?.label)
+        .filter((lbl): lbl is string => Boolean(lbl))
 
+      if (positions.length === 0) return
       entryPosition.value = {
-        freezerId: strain.activeFreezer!.id,
+        freezerId: strain.activeFreezer.id,
         shelfId: selectedShelf.value.id,
         cabinetId: selectedCabinet.value.id,
         drawerId: selectedDrawer.value.id,
         boxId: activeBox.value.id,
-        position: positions[0],
+        position: positions[0]!,
         selectedPositions: positions,
       }
       showEntryDialog.value = true
@@ -394,7 +412,7 @@ export function useFreezerDetail() {
       if (record.freezerId !== freezerId || !record.boxId || !record.position) continue
       const box = boxMap.get(record.boxId)
       if (!box) continue
-      const pos = box.positions.find((p: any) => p.label === record.position)
+      const pos = box.positions.find((p) => p.label === record.position)
       if (pos) {
         pos.occupied = true
         pos.sampleId = record.id

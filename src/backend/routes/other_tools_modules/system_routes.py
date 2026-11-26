@@ -82,4 +82,4 @@ async def open_local_path(req: OpenPathRequest):
                 os.startfile(str(target))
         return {"status": "success", "path": str(target)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

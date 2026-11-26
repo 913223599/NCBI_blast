@@ -459,20 +459,20 @@
   color: #2563eb;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
-.badge-minor {
-  border-color: #cbd5e1 !important;
-  background: #f8fafc !important;
+.legend-badge.badge-minor {
+  border-color: #cbd5e1;
+  background: #f8fafc;
 }
-.badge-minor .text {
-  color: #475569 !important;
+.legend-badge.badge-minor .text {
+  color: #475569;
   font-weight: 600;
 }
-.badge-noise {
-  border-color: #94a3b8 !important;
-  background: #f1f5f9 !important;
+.legend-badge.badge-noise {
+  border-color: #94a3b8;
+  background: #f1f5f9;
 }
-.badge-noise .text {
-  color: #334155 !important;
+.legend-badge.badge-noise .text {
+  color: #334155;
   font-weight: 600;
 }
 
@@ -1260,9 +1260,10 @@
   border-radius: 4px;
   border: 1px solid #e2e8f0;
 }
-.row-noise td {
-  background: #fafafa !important;
-  color: #64748b !important;
+.enhanced-matrix-table tr.row-noise td,
+.sample-detail-table tr.row-noise td {
+  background: #fafafa;
+  color: #64748b;
 }
 .row-dominant td {
   background: #fafcff;
@@ -1342,9 +1343,9 @@
 .sample-start-row td {
   border-top: 2px solid #cbd5e1;
 }
-.sample-grouped-col {
-  background: #f8fafc !important;
-  border-right: 2px solid #e2e8f0 !important;
+.enhanced-matrix-table td.sample-grouped-col {
+  background: #f8fafc;
+  border-right: 2px solid #e2e8f0;
 }
 .sample-info-block-neo {
   display: flex;

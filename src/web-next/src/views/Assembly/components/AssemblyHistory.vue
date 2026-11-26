@@ -203,6 +203,11 @@ function getStatusText(status: string) {
   background: #f8faff;
   box-shadow: 0 0 0 1px #3b82f6;
 }
+/* 仅对非首折历史任务卡片启用离屏延迟渲染，配对 contain-intrinsic-size 防止滚动跳动 */
+.history-card:nth-child(n + 14) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 86px;
+}
 
 .card-top {
   display: flex;

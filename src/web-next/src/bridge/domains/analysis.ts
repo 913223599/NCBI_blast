@@ -1,11 +1,26 @@
 /**
  * 桥接域模块：组装后分析（比对对比、功能注释、前噬菌体发现、噬菌体结构预测、泛基因组、Sanger 峰图）
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { API_BASE, apiDelete, apiGet, apiPost } from '../httpClient'
 import { createLogger } from '../../utils/logger'
+import type { PhageCapabilities } from '../../views/Analysis/modules/phage_discovery/types'
+import type {
+  StructureCapabilities,
+  StructureInspectResponse,
+  StructureLinkedSources,
+} from '../../views/Analysis/modules/phage_structure/types'
 
 const log = createLogger('Bridge:Analysis')
+
+export type AnalysisRequestPayload = object
+
+export interface UploadedBatchFileItem {
+  path?: string
+  filename?: string
+  name?: string
+  size?: number
+  [key: string]: unknown
+}
 
 export const analysisDomain = {
   async fetchAnalysisHistory() {
@@ -37,35 +52,35 @@ export const analysisDomain = {
     return await apiGet(`/api/analysis/comparison/${task_id}/results`)
   },
 
-  async inspect_annotation_fasta(payload: { fasta_path?: string; fasta_content?: string }): Promise<any> {
+  async inspect_annotation_fasta(payload: { fasta_path?: string; fasta_content?: string }) {
     return await apiPost('/api/analysis/annotation/inspect', payload)
   },
 
-  async run_annotation_task(payload: any): Promise<any> {
+  async run_annotation_task(payload: AnalysisRequestPayload) {
     return await apiPost('/api/analysis/annotation/run', payload)
   },
 
-  async get_annotation_history(limit: number = 50): Promise<any> {
+  async get_annotation_history(limit: number = 50) {
     return await apiGet(`/api/analysis/annotation/history?limit=${limit}`)
   },
 
-  async get_annotation_result(taskId: string): Promise<any> {
+  async get_annotation_result(taskId: string) {
     return await apiGet(`/api/analysis/annotation/${taskId}/result`)
   },
 
-  async get_annotation_queue_status(): Promise<any> {
+  async get_annotation_queue_status() {
     return await apiGet('/api/analysis/annotation/queue/status')
   },
 
-  async reorder_annotation_queue(taskIds: string[]): Promise<any> {
+  async reorder_annotation_queue(taskIds: string[]) {
     return await apiPost('/api/analysis/annotation/queue/reorder', { task_ids: taskIds })
   },
 
-  async delete_annotation_task(taskId: string): Promise<any> {
+  async delete_annotation_task(taskId: string) {
     return await apiDelete(`/api/analysis/annotation/${taskId}`)
   },
 
-  async cancel_annotation_task(taskId: string): Promise<any> {
+  async cancel_annotation_task(taskId: string) {
     return await apiPost(`/api/analysis/annotation/${taskId}/cancel`, {})
   },
 
@@ -79,77 +94,77 @@ export const analysisDomain = {
     return paths && paths.length > 0 ? (paths[0] ?? null) : null
   },
 
-  async get_phage_discovery_models(): Promise<any> {
-    return await apiGet('/api/analysis/phage_discovery/models')
+  async get_phage_discovery_models(): Promise<PhageCapabilities> {
+    return await apiGet<PhageCapabilities>('/api/analysis/phage_discovery/models')
   },
 
   async save_phage_discovery_config(payload: {
     models_root?: string
     default_model_dir?: string
     blast_db?: string
-  }): Promise<any> {
+  }) {
     return await apiPost('/api/analysis/phage_discovery/config', payload)
   },
 
   async inspect_phage_discovery_fasta(payload: {
     fasta_path?: string
     fasta_content?: string
-  }): Promise<any> {
+  }) {
     return await apiPost('/api/analysis/phage_discovery/inspect', payload)
   },
 
-  async run_phage_discovery_task(payload: any): Promise<any> {
+  async run_phage_discovery_task(payload: AnalysisRequestPayload) {
     return await apiPost('/api/analysis/phage_discovery/run', payload)
   },
 
-  async get_phage_discovery_queue_status(): Promise<any> {
+  async get_phage_discovery_queue_status() {
     return await apiGet('/api/analysis/phage_discovery/queue/status')
   },
 
-  async get_phage_discovery_history(limit: number = 100): Promise<any> {
+  async get_phage_discovery_history(limit: number = 100) {
     return await apiGet(`/api/analysis/phage_discovery/history?limit=${limit}`)
   },
 
-  async get_phage_discovery_result(taskId: string): Promise<any> {
+  async get_phage_discovery_result(taskId: string) {
     return await apiGet(`/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/result`)
   },
 
-  async get_phage_discovery_region_gbk(taskId: string, regionIndex: number): Promise<any> {
+  async get_phage_discovery_region_gbk(taskId: string, regionIndex: number) {
     return await apiGet(
       `/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/region/${regionIndex}/gbk`
     )
   },
 
-  async get_phage_discovery_overlay(taskId: string, contigId?: string): Promise<any> {
+  async get_phage_discovery_overlay(taskId: string, contigId?: string) {
     const query = contigId ? `?contig_id=${encodeURIComponent(contigId)}` : ''
     return await apiGet(
       `/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/overlay${query}`
     )
   },
 
-  async get_phage_discovery_overlay_gbk(taskId: string, contigId?: string): Promise<any> {
+  async get_phage_discovery_overlay_gbk(taskId: string, contigId?: string) {
     const query = contigId ? `?contig_id=${encodeURIComponent(contigId)}` : ''
     return await apiGet(
       `/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/overlay-gbk${query}`
     )
   },
 
-  async get_phage_discovery_fasta_text(taskId: string, regionIndex?: number): Promise<any> {
+  async get_phage_discovery_fasta_text(taskId: string, regionIndex?: number) {
     const query = regionIndex !== undefined ? `?region_index=${regionIndex}` : ''
     return await apiGet(
       `/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/fasta-text${query}`
     )
   },
 
-  async cancel_phage_discovery_task(taskId: string): Promise<any> {
+  async cancel_phage_discovery_task(taskId: string) {
     return await apiPost(`/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/cancel`)
   },
 
-  async delete_phage_discovery_task(taskId: string): Promise<any> {
+  async delete_phage_discovery_task(taskId: string) {
     return await apiDelete(`/api/analysis/phage_discovery/${encodeURIComponent(taskId)}`)
   },
 
-  async open_phage_discovery_folder(taskId: string): Promise<any> {
+  async open_phage_discovery_folder(taskId: string) {
     return await apiPost(`/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/open-folder`)
   },
 
@@ -157,12 +172,12 @@ export const analysisDomain = {
     return `${API_BASE}/api/analysis/phage_discovery/${encodeURIComponent(taskId)}/download/${fileType}`
   },
 
-  async get_phage_structure_capabilities(): Promise<any> {
-    return await apiGet('/api/analysis/phage_structure/capabilities')
+  async get_phage_structure_capabilities(): Promise<StructureCapabilities> {
+    return await apiGet<StructureCapabilities>('/api/analysis/phage_structure/capabilities')
   },
 
-  async get_phage_structure_sources(): Promise<any> {
-    return await apiGet('/api/analysis/phage_structure/sources')
+  async get_phage_structure_sources(): Promise<StructureLinkedSources> {
+    return await apiGet<StructureLinkedSources>('/api/analysis/phage_structure/sources')
   },
 
   async inspect_phage_structure_input(payload: {
@@ -171,19 +186,19 @@ export const analysisDomain = {
     fasta_content?: string
     source_task_id?: string
     region_index?: number
-  }): Promise<any> {
-    return await apiPost('/api/analysis/phage_structure/inspect', payload)
+  }): Promise<StructureInspectResponse> {
+    return await apiPost<StructureInspectResponse>('/api/analysis/phage_structure/inspect', payload)
   },
 
-  async run_phage_structure_task(payload: any): Promise<any> {
+  async run_phage_structure_task(payload: AnalysisRequestPayload) {
     return await apiPost('/api/analysis/phage_structure/run', payload)
   },
 
-  async run_phage_structure_batch(payload: any): Promise<any> {
+  async run_phage_structure_batch(payload: AnalysisRequestPayload) {
     return await apiPost('/api/analysis/phage_structure/batch', payload)
   },
 
-  async upload_files_batch(files: File[]): Promise<any[]> {
+  async upload_files_batch(files: File[]): Promise<UploadedBatchFileItem[]> {
     try {
       const formData = new FormData()
       for (const file of files) {
@@ -193,39 +208,39 @@ export const analysisDomain = {
         method: 'POST',
         body: formData,
       })
-      const data = await response.json()
-      return Array.isArray(data) ? data : []
+      const data: unknown = await response.json()
+      return Array.isArray(data) ? (data as UploadedBatchFileItem[]) : []
     } catch (err) {
       log.error('批量上传失败:', err)
       return []
     }
   },
 
-  async get_phage_structure_queue_status(): Promise<any> {
+  async get_phage_structure_queue_status() {
     return await apiGet('/api/analysis/phage_structure/queue/status')
   },
 
-  async get_phage_structure_history(limit: number = 100): Promise<any> {
+  async get_phage_structure_history(limit: number = 100) {
     return await apiGet(`/api/analysis/phage_structure/history?limit=${limit}`)
   },
 
-  async get_phage_structure_result(taskId: string): Promise<any> {
+  async get_phage_structure_result(taskId: string) {
     return await apiGet(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}/result`)
   },
 
-  async get_phage_structure_gbk(taskId: string): Promise<any> {
+  async get_phage_structure_gbk(taskId: string) {
     return await apiGet(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}/gbk`)
   },
 
-  async cancel_phage_structure_task(taskId: string): Promise<any> {
+  async cancel_phage_structure_task(taskId: string) {
     return await apiPost(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}/cancel`)
   },
 
-  async delete_phage_structure_task(taskId: string): Promise<any> {
+  async delete_phage_structure_task(taskId: string) {
     return await apiDelete(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}`)
   },
 
-  async open_phage_structure_folder(taskId: string): Promise<any> {
+  async open_phage_structure_folder(taskId: string) {
     return await apiPost(`/api/analysis/phage_structure/${encodeURIComponent(taskId)}/open-folder`)
   },
 
@@ -236,26 +251,26 @@ export const analysisDomain = {
     return `${API_BASE}/api/analysis/phage_structure/${encodeURIComponent(taskId)}/download/${fileType}`
   },
 
-  async get_pan_genomics_samples(): Promise<any> {
+  async get_pan_genomics_samples() {
     return await apiGet('/api/analysis/pan_genomics/samples')
   },
 
-  async run_pan_genomics(params: any): Promise<any> {
+  async run_pan_genomics(params: AnalysisRequestPayload) {
     return await apiPost('/api/analysis/pan_genomics/run', params)
   },
 
-  async get_pan_genomics_result(taskId: string): Promise<any> {
+  async get_pan_genomics_result(taskId: string) {
     return await apiGet(`/api/analysis/pan_genomics/${taskId}/result`)
   },
 
-  async analyze_sanger_traces(filePaths: string[], trimThreshold: number = 20): Promise<any> {
+  async analyze_sanger_traces(filePaths: string[], trimThreshold: number = 20) {
     return await apiPost('/api/sanger/trace/analyze_path', {
       file_paths: filePaths,
       trim_threshold: trimThreshold,
     })
   },
 
-  async export_sanger_fasta(samples: any[], mode: string = 'alleles'): Promise<any> {
+  async export_sanger_fasta(samples: readonly AnalysisRequestPayload[], mode: string = 'alleles') {
     return await apiPost('/api/sanger/trace/export_fasta', {
       samples,
       mode,
@@ -274,7 +289,7 @@ export const analysisDomain = {
     matrix?: string
     gap_open?: number
     gap_extend?: number
-  }): Promise<any> {
+  }) {
     return await apiPost('/api/sanger/trace/send_to_blast', payload)
   },
 }

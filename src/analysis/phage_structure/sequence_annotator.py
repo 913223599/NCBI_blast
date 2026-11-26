@@ -27,7 +27,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
 
-import pyrodigal
+try:
+    import pyrodigal
+except ImportError:
+    pyrodigal = None  # type: ignore[assignment]
 from Bio import SeqIO
 
 from ...assembly.env.wsl_manager import WSLManager
@@ -69,8 +72,8 @@ def resolve_structural_hmm_path() -> Optional[Path]:
             info = json.loads(manifest.read_text(encoding="utf-8"))
             if info.get("version") == STRUCTURAL_INDEX_VERSION:
                 return cand
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("读取 structural_phrogs manifest 失败: %s", exc)
     # 若存在旧版缓存但本地缺失全库，则保留降级复用；若全库就绪则返回 None 触发平滑增量升级
     if resolve_all_phrogs_hmm_path() is None:
         return cand
@@ -282,8 +285,8 @@ def parse_input_contigs(
                 if gbk_transl_table is None and q.get("transl_table"):
                     try:
                         gbk_transl_table = int(str(q["transl_table"][0]).strip())
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("解析 GenBank transl_table 失败: %s", exc)
                 lt_raw = str((q.get("locus_tag") or q.get("protein_id") or q.get("gene") or [f"{cid}_CDS_{cds_idx:04d}"])[0]).strip()
                 lt = lt_raw or f"{cid}_CDS_{cds_idx:04d}"
                 if lt in seen_loci:
@@ -305,8 +308,8 @@ def parse_input_contigs(
                 if q.get("transl_table"):
                     try:
                         raw_tt = int(str(q["transl_table"][0]).strip())
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("解析 CDS transl_table 失败: %s", exc)
                 aa = str((q.get("translation") or [""])[0]).strip().upper().replace(" ", "").rstrip("*")
                 if not aa and n_bp > 0:
                     try:
@@ -704,8 +707,8 @@ def _cleanup_cuda_cache() -> None:
             torch.cuda.empty_cache()
             if hasattr(torch.cuda, "ipc_collect"):
                 torch.cuda.ipc_collect()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("清理 CUDA 显存缓存失败或未安装 torch: %s", exc)
 
 
 def enhance_with_phold_3d(

@@ -53,8 +53,8 @@ class ProcessRunner:
         if clean and self.on_log:
             try:
                 self.on_log(clean)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("ProcessRunner log callback failed: %s", exc)
 
     def _to_wsl_path(self, win_path: Path) -> str:
         try:
@@ -81,8 +81,8 @@ class ProcessRunner:
         else:
             try:
                 os.kill(pid, 9)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("os.kill failed for PID %s: %s", pid, exc)
 
     def _kill_wsl_pgid(self, pgid_file: Path) -> None:
         if not pgid_file.exists():
@@ -130,8 +130,8 @@ class ProcessRunner:
             self._kill_windows_tree(proc.pid)
             try:
                 proc.wait(timeout=3)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Process wait after termination timed out/failed: %s", exc)
 
     def run_native(
         self,
@@ -256,8 +256,8 @@ class ProcessRunner:
                     proc.stdin.write(stdin_bytes)
                     proc.stdin.flush()
                     proc.stdin.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Writing stdin to child process failed: %s", exc)
 
             with self._lock:
                 self._active_proc = proc
@@ -272,13 +272,13 @@ class ProcessRunner:
                         collector.append(line)
                         if log_output:
                             self._emit_log(line)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Stream pump interrupted: %s", exc)
                 finally:
                     try:
                         stream.close()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Closing child stream failed: %s", exc)
 
             threads: List[threading.Thread] = []
             if stdout_path is None and proc.stdout is not None:
@@ -321,8 +321,8 @@ class ProcessRunner:
             if out_file_handle is not None:
                 try:
                     out_file_handle.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Closing stdout file handle failed: %s", exc)
             with self._lock:
                 self._active_proc = None
                 self._active_wsl_pgid_file = None

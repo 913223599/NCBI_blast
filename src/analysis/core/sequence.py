@@ -35,8 +35,8 @@ class SequenceProcessor:
                 
                 return header, sequence, length
                 
-        except FileNotFoundError:
-            raise FileNotFoundError(f"序列文件不存在: {file_path}")
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(f"序列文件不存在: {file_path}") from exc
         except Exception as e:
             logger.error(f"读取序列失败: {e}")
             raise

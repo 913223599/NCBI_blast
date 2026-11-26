@@ -170,8 +170,8 @@ async def get_assembly_history():
                                     res['avg_depth'] = round(cb / res['total_length'], 1)
                                     need_update = True
                                     break
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("读取 fastp.json 估算深度失败 (%s): %s", fj_path, exc)
             if need_update and (res.get('n50', 0) > 0 or res.get('gc_percent', 0.0) > 0.0):
                 assembly_db.update_task_metrics(
                     task_id,
@@ -208,13 +208,13 @@ async def get_assembly_status(task_id: str):
     if task.get('results') and isinstance(task['results'], str):
         try:
             task['results'] = json.loads(task['results'])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("解析任务 results JSON 失败 (%s): %s", task_id, exc)
     if task.get('config') and isinstance(task['config'], str):
         try:
             task['config'] = json.loads(task['config'])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("解析任务 config JSON 失败 (%s): %s", task_id, exc)
 
     task['queue_position'] = queue_pos
     return BioResponse.ok(task)
@@ -350,8 +350,8 @@ def parse_assembly_fasta_metrics(asm_fasta: Path, task_dir: Optional[Path] = Non
                             if len(contigs) == 1 and contigs[0]["depth"] <= 0.0:
                                 contigs[0]["depth"] = avg_depth
                             break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("解析 fastp.json 补全平均深度失败 (%s): %s", fj_path, exc)
 
     stats = {
         "total_length": total_len,
@@ -435,8 +435,8 @@ async def get_assembly_result(task_id: str):
                     manifest_data = json.load(mf)
                     manifest_path = mf_path
                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("读取 assembly_manifest.json 失败 (%s): %s", mf_path, exc)
 
     if manifest_data:
         tot_bp = manifest_data.get("total_length_bp") or manifest_data.get("total_bp", 0)
@@ -541,8 +541,8 @@ async def get_assembly_result(task_id: str):
                             },
                             mf_latest.get("depth_source", "manifest"),
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("校验最新 assembly_manifest.json 深度信息失败 (%s): %s", target_mf_path, exc)
             if backfilled is None:
                 backfilled = await asyncio.to_thread(
                     backfill_manifest_contig_depths,

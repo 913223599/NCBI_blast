@@ -2,7 +2,6 @@
  * useDiversityModal - 16S 扩增子多样性还原与 rrnDB 拷贝数归一化分析状态机
  * 从 DiversityAnalysisModal.vue 拆解而出，封装任务轮询、分组聚合、堆叠柱图数据、物种翻译与 Excel 导出。
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { API_BASE, apiDelete, apiGet, apiPost } from '../../../bridge/electron-bridge'
 import { useAppStore } from '../../../stores/app'
@@ -20,6 +19,94 @@ import {
   type StackedSample,
   type StackedSegment,
 } from './diversityHelpers'
+
+export interface DetectedAmpliconPackage {
+  is_amplicon_package: boolean
+  file_name: string
+  fastq_count: number
+  [key: string]: unknown
+}
+
+export interface DiversityHistoryTask {
+  task_id: string
+  task_name: string
+  status: string
+  progress?: number
+  total_samples: number
+  total_reads: number
+  created_at?: number
+  completed_at?: number
+  [key: string]: unknown
+}
+
+export interface DiversityTaxonDetail {
+  taxon: string
+  raw_count: number
+  raw_pct: number
+  norm_pct: number
+  gcn_mean: number
+  gcn_match_level?: string
+  is_noise?: boolean
+  [key: string]: unknown
+}
+
+export interface DiversityTaxonOverviewItem {
+  taxon: string
+  raw_count?: number
+  raw_pct?: number
+  norm_pct?: number
+  overall_raw_pct?: number
+  overall_norm_pct?: number
+  gcn_mean?: number
+  sample_count?: number
+  is_noise?: boolean
+  [key: string]: unknown
+}
+
+export interface DiversitySampleItem {
+  sample_name: string
+  total_reads: number
+  is_group?: boolean
+  member_samples?: string[]
+  norm_result?: {
+    details?: DiversityTaxonDetail[]
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+export interface DiversityQcSummary {
+  total_raw_reads?: number
+  total_dropped_reads?: number
+  overall_pass_rate_pct?: number
+  [key: string]: unknown
+}
+
+export interface DiversityResultsPayload {
+  samples: DiversitySampleItem[]
+  taxa_overview?: DiversityTaxonOverviewItem[]
+  taxa_translations?: Record<string, string>
+  total_classified_reads?: number
+  total_reads?: number
+  total_samples?: number
+  qc_summary?: DiversityQcSummary
+  summary?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+interface TopBarDraftItem {
+  taxon: string
+  pct: number
+  rawCount: number
+  rawPct: number
+  normPct: number
+  gcn: number
+}
+
+function toErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message
+  return String(err)
+}
 
 export interface DiversityModalProps {
   modelValue?: boolean
@@ -42,7 +129,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
   const abundanceMode = ref<'norm' | 'raw'>('norm')
   const currentFilePath = ref<string>('')
   const isDetecting = ref(false)
-  const detectedPackage = ref<any>(null)
+  const detectedPackage = ref<DetectedAmpliconPackage | null>(null)
 
   const isGroupView = ref(false)
   const showGroupModal = ref(false)
@@ -51,7 +138,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
 
   const taxaSearchQuery = ref('')
   const showHistoryDrawer = ref(false)
-  const historyTasks = ref<any[]>([])
+  const historyTasks = ref<DiversityHistoryTask[]>([])
   const isLoadingHistory = ref(false)
 
   const isRunning = ref(false)
@@ -63,7 +150,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
   const totalReads = ref<number>(0)
   const processedSamples = ref<number>(0)
   const totalSamples = ref<number>(0)
-  const results = ref<any>(null)
+  const results = ref<DiversityResultsPayload | null>(null)
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
   const topTaxaCount = ref<number>(15)
@@ -95,7 +182,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
 
   async function translateAllTaxa() {
     if (!results.value || !results.value.taxa_overview) return
-    const taxaList = results.value.taxa_overview.map((t: any) => t.taxon).filter(Boolean)
+    const taxaList = results.value.taxa_overview.map((t) => t.taxon).filter(Boolean)
     if (taxaList.length === 0 || isTranslating.value) return
 
     isTranslating.value = true
@@ -106,7 +193,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
         translations.value = { ...translations.value, ...res.translations }
         appStore.showNotification('物种词条翻译完成', 'success')
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Batch translation error:', e)
       appStore.showNotification('词条翻译请求异常', 'error')
     } finally {
@@ -117,8 +204,8 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
   const allSampleNames = computed<string[]>(() => {
     if (!results.value || !results.value.samples) return []
     return results.value.samples
-      .map((s: any) => s.sample_name)
-      .sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+      .map((s) => s.sample_name)
+      .toSorted((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
   })
 
   function generateConsecutiveGroups(chunkSize?: number) {
@@ -183,9 +270,9 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
         const errMsg = res?.error || res?.detail || '未获取到样本数据'
         appStore.showNotification(`载入分析报告失败: ${errMsg}`, 'error')
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       isRunning.value = false
-      appStore.showNotification(`获取分析报告失败: ${e.message || e}`, 'error')
+      appStore.showNotification(`获取分析报告失败: ${toErrorMessage(e)}`, 'error')
     }
   }
 
@@ -290,7 +377,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
     if (showHistoryDrawer.value) void fetchHistoryTasks()
   }
 
-  async function selectHistoryTask(task: any) {
+  async function selectHistoryTask(task: DiversityHistoryTask) {
     if (!task || !task.task_id) return
     taskId.value = task.task_id
     showHistoryDrawer.value = false
@@ -311,7 +398,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
     }
   }
 
-  async function deleteHistoryTask(task: any, e: Event) {
+  async function deleteHistoryTask(task: DiversityHistoryTask, e: Event) {
     e.stopPropagation()
     const ok = await confirmDialog.confirm({
       title: '删除历史分析任务',
@@ -332,8 +419,8 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
       } else {
         throw new Error(res?.detail || '删除失败')
       }
-    } catch (err: any) {
-      appStore.showNotification(`删除失败: ${err.message || err}`, 'error')
+    } catch (err: unknown) {
+      appStore.showNotification(`删除失败: ${toErrorMessage(err)}`, 'error')
     }
   }
 
@@ -354,8 +441,8 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
         historyTasks.value = []
         showHistoryDrawer.value = false
       }
-    } catch (err: any) {
-      appStore.showNotification(`清空失败: ${err.message || err}`, 'error')
+    } catch (err: unknown) {
+      appStore.showNotification(`清空失败: ${toErrorMessage(err)}`, 'error')
     }
   }
 
@@ -408,20 +495,20 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
       } else {
         throw new Error(res?.detail || '任务创建失败')
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       isRunning.value = false
-      appStore.showNotification(`启动失败: ${err.message || err}`, 'error')
+      appStore.showNotification(`启动失败: ${toErrorMessage(err)}`, 'error')
     }
   }
 
   const topTaxaList = computed(() => {
     if (!results.value || !results.value.taxa_overview) return []
-    const biologicalTaxa = results.value.taxa_overview.filter((t: any) => {
+    const biologicalTaxa = results.value.taxa_overview.filter((t) => {
       const name = (t.taxon || '').toLowerCase()
       return !t.is_noise && !name.includes('噪声') && !name.includes('noise') && !name.startsWith('other')
     })
     const count = topTaxaCount.value >= 900 ? biologicalTaxa.length : topTaxaCount.value
-    return biologicalTaxa.slice(0, count).map((t: any) => t.taxon)
+    return biologicalTaxa.slice(0, count).map((t) => t.taxon)
   })
 
   function getTaxonColor(taxon: string): string {
@@ -475,18 +562,18 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
     if (!samples || samples.length === 0) return []
     const isNorm = abundanceMode.value === 'norm'
 
-    return samples.map((s: any) => {
+    return samples.map((s: DiversitySampleItem) => {
       const details = s.norm_result?.details || []
       const segments: StackedSegment[] = []
       let cumulative = 0
-      const topItems: any[] = []
+      const topItems: TopBarDraftItem[] = []
       let minorTaxaPct = 0
       let minorTaxaRaw = 0
       let minorTaxaCount = 0
       let noisePct = 0
       let noiseRaw = 0
 
-      details.forEach((d: any) => {
+      details.forEach((d: DiversityTaxonDetail) => {
         const pct = Number(isNorm ? d.norm_pct : d.raw_pct) || 0
         const nameLower = (d.taxon || '').toLowerCase()
         const isNoise = d.is_noise || nameLower.includes('噪声') || nameLower.includes('noise')
@@ -539,7 +626,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
 
   const confirmedSpeciesCount = computed(() => {
     if (!results.value || !results.value.taxa_overview) return 0
-    return results.value.taxa_overview.filter((t: any) => !isNoiseTaxon(t.taxon)).length
+    return results.value.taxa_overview.filter((t) => !isNoiseTaxon(t.taxon)).length
   })
 
   const realTaxaRanks = computed(() => {
@@ -558,17 +645,17 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
 
   const filteredTaxaOverview = computed(() => {
     if (!results.value || !results.value.taxa_overview) return []
-    const list = (results.value.taxa_overview as any[]).toSorted((a: any, b: any) => {
+    const list = results.value.taxa_overview.toSorted((a, b) => {
       const aNoise = isNoiseTaxon(a.taxon) ? 1 : 0
       const bNoise = isNoiseTaxon(b.taxon) ? 1 : 0
       if (aNoise !== bNoise) return aNoise - bNoise
       return Number(b.norm_pct ?? b.overall_norm_pct ?? 0) - Number(a.norm_pct ?? a.overall_norm_pct ?? 0)
     })
     const q = taxaSearchQuery.value.trim().toLowerCase()
-    return q ? list.filter((t: any) => t.taxon.toLowerCase().includes(q)) : list
+    return q ? list.filter((t) => t.taxon.toLowerCase().includes(q)) : list
   })
 
-  function showSegmentTooltip(e: MouseEvent, seg: any, sampleName: string) {
+  function showSegmentTooltip(e: MouseEvent, seg: StackedSegment, sampleName: string) {
     tooltip.value = {
       visible: true,
       x: e.clientX + 12,
@@ -616,7 +703,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
       document.body.removeChild(a)
       window.URL.revokeObjectURL(downloadUrl)
       appStore.showNotification('Excel 综合分析报告已成功导出', 'success')
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn('POST 导出失败，尝试 GET 回退下载:', e)
       window.open(`${API_BASE}/api/diversity/export_excel/${taskId.value}`, '_blank', 'noopener,noreferrer')
     }
@@ -630,17 +717,17 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
     collapsedSampleKeys.value.clear()
   }
   function collapseAllSamples() {
-    collapsedSampleKeys.value = new Set(activeSamples.value.map((s: any) => s.sample_name))
+    collapsedSampleKeys.value = new Set(activeSamples.value.map((s: DiversitySampleItem) => s.sample_name))
   }
   function isSampleCollapsed(sampleName: string): boolean {
     return collapsedSampleKeys.value.has(sampleName)
   }
 
-  function getDominantTaxon(s: any): { taxon: string; pct: number } | null {
+  function getDominantTaxon(s: DiversitySampleItem): { taxon: string; pct: number } | null {
     const details = s.norm_result?.details || []
-    const valid = details.filter((d: any) => !isNoiseTaxon(d.taxon))
+    const valid = details.filter((d) => !isNoiseTaxon(d.taxon))
     if (valid.length === 0) return null
-    const top = valid[0]
+    const top = valid[0]!
     const pct = abundanceMode.value === 'norm' ? top.norm_pct || 0 : top.raw_pct || 0
     return { taxon: top.taxon, pct: Number(pct) }
   }
@@ -648,11 +735,11 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
   const filteredActiveSamples = computed(() => {
     const q = detailSearchQuery.value.trim().toLowerCase()
     if (!q) return activeSamples.value
-    return activeSamples.value.filter((s: any) => {
+    return activeSamples.value.filter((s: DiversitySampleItem) => {
       if (s.sample_name && s.sample_name.toLowerCase().includes(q)) return true
       if (s.member_samples && s.member_samples.some((m: string) => m.toLowerCase().includes(q))) return true
       const details = s.norm_result?.details || []
-      return details.some((d: any) => d.taxon && d.taxon.toLowerCase().includes(q))
+      return details.some((d) => d.taxon && d.taxon.toLowerCase().includes(q))
     })
   })
 

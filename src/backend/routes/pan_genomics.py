@@ -57,7 +57,7 @@ async def run_pan_genomics(req: PanGenomicsRunRequest):
         return {"success": True, "data": result.model_dump()}
     except Exception as e:
         logger.error(f"泛基因组分析执行失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"泛基因组分析失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"泛基因组分析失败: {str(e)}") from e
 
 
 @router.get("/{task_id}/result")

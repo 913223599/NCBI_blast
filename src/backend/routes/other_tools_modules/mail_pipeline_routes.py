@@ -290,9 +290,9 @@ async def update_mail_pipeline_config(req: MailConfigUpdateRequest):
             if old_send != new_send:
                 migrations.append(await asyncio.to_thread(migrate_directory, old_send, new_send))
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except OSError as e:
-            raise HTTPException(status_code=500, detail=f"目录迁移失败: {e}")
+            raise HTTPException(status_code=500, detail=f"目录迁移失败: {e}") from e
 
     updated = {
         **existing,
@@ -401,9 +401,9 @@ async def list_mail_inbox(req: MailListRequest):
         res = await asyncio.to_thread(_do_list)
         return {"status": "success", **res}
     except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"拉取收件箱失败: {e}")
+        raise HTTPException(status_code=500, detail=f"拉取收件箱失败: {e}") from e
 
 
 @mail_router.post("/mail_pipeline/fetch")
@@ -447,7 +447,7 @@ async def trigger_mail_fetch(req: MailFetchRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @mail_router.post("/mail_pipeline/run")
@@ -685,9 +685,9 @@ async def test_mail_pipeline_send(req: Optional[MailTestSendRequest] = Body(defa
     try:
         res, final, attached_files = await asyncio.to_thread(_do_test_send)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"测试发信异常: {e}")
+        raise HTTPException(status_code=500, detail=f"测试发信异常: {e}") from e
 
     if not res.ok:
         raise HTTPException(status_code=400, detail=f"发送失败 ({res.stage}): {res.error}")
@@ -764,11 +764,11 @@ async def send_mail_pipeline_package(req: MailPackageSendRequest):
     except HTTPException:
         raise
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"发送结果压缩包异常: {e}")
+        raise HTTPException(status_code=500, detail=f"发送结果压缩包异常: {e}") from e
 
     if not res.ok:
         raise HTTPException(status_code=400, detail=f"发送失败 ({res.stage}): {res.error}")

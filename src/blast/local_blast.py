@@ -171,7 +171,7 @@ class LocalBlastExecutor:
 
         except subprocess.CalledProcessError as e:
             error_msg = f"本地BLAST执行失败 (Exit code {e.returncode}):\n{e.stderr}"
-            raise RuntimeError(error_msg)
+            raise RuntimeError(error_msg) from e
 
     def parse_result(self, result_file):
         """
@@ -190,7 +190,7 @@ class LocalBlastExecutor:
                 # 目前逻辑只处理单条序列的搜索结果
                 return blast_records[0]
         except Exception as e:
-            raise RuntimeError(f"解析BLAST结果失败: {e}")
+            raise RuntimeError(f"解析BLAST结果失败: {e}") from e
 
     def display_result_summary(self, blast_record, top_hits=5):
         """显示结果摘要"""

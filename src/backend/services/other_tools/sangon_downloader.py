@@ -130,8 +130,8 @@ class SangonBrowserSession:
         try:
             if self._pw_cm is not None:
                 self._pw_cm.__exit__(None, None, None)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("关闭 Playwright 上下文管理器异常: %s", exc)
         self._pw_cm = None
         self._pw = None
 
@@ -162,14 +162,14 @@ class SangonBrowserSession:
 
         try:
             from playwright.sync_api import sync_playwright
-        except ImportError:
+        except ImportError as exc:
             repair_rep = repair_headless_browser(
                 auto_install=True,
                 probe_launch=False,
                 progress_cb=self._log_cb,
             )
             if not repair_rep.get("python_package_ready"):
-                raise SangonOrderDownloadError("缺少 Playwright 运行环境，且自动修复安装失败")
+                raise SangonOrderDownloadError("缺少 Playwright 运行环境，且自动修复安装失败") from exc
             from playwright.sync_api import sync_playwright
             launch_opts = get_launch_options(headless_override=self.headless)
             launch_opts["timeout_ms"] = effective_timeout
@@ -214,18 +214,18 @@ class SangonBrowserSession:
         try:
             if self._ctx is not None:
                 self._ctx.close()
-        except Exception:
-            pass
+        except Exception as exc_close:
+            logger.debug("关闭浏览器上下文异常: %s", exc_close)
         try:
             if self._browser is not None:
                 self._browser.close()
-        except Exception:
-            pass
+        except Exception as exc_close:
+            logger.debug("关闭浏览器实例异常: %s", exc_close)
         try:
             if self._pw_cm is not None:
                 self._pw_cm.__exit__(exc_type, exc, tb)
-        except Exception:
-            pass
+        except Exception as exc_close:
+            logger.debug("退出 Playwright 运行时异常: %s", exc_close)
         return False
 
     def _wait_stable_order_page(self) -> None:
@@ -238,14 +238,14 @@ class SangonBrowserSession:
         for _ in range(10):
             try:
                 page.wait_for_load_state("networkidle", timeout=10000)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("等待订单页 networkidle 超时/异常: %s", exc)
             page.wait_for_timeout(350)
             try:
                 if page.url == last_url and page.locator("#cxSelectAll").count() > 0:
                     break
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("检查订单页稳定状态异常: %s", exc)
             last_url = page.url
 
     def _ensure_order_page_ready(
@@ -257,8 +257,8 @@ class SangonBrowserSession:
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         try:
             page.wait_for_load_state("networkidle", timeout=10000)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("初始导航等待 networkidle 超时/异常: %s", exc)
 
         if "passport.sangon.com" in page.url:
             gate = detect_visible_captcha(page)
@@ -296,8 +296,8 @@ class SangonBrowserSession:
                             raise SangonLoginError(f"生工账号登录被拒绝: {err_txt}")
                 except SangonLoginError:
                     raise
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("检测登录错误提示元素异常: %s", exc)
                 page.wait_for_timeout(300)
 
             if "passport.sangon.com" in page.url:
@@ -393,14 +393,14 @@ class SangonBrowserSession:
             if any(k in msg for k in ("是否现在下载", "正在生成中", "确认是否")):
                 try:
                     dialog.accept()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("自动确认下载提示对话框异常: %s", exc)
                 return
             blocking_alerts.append(msg)
             try:
                 dialog.accept()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("关闭阻断告警对话框异常: %s", exc)
 
         page.on("download", _on_download)
         page.on("dialog", _on_dialog)
@@ -425,8 +425,8 @@ class SangonBrowserSession:
                         price_el = page.locator("#Sequencing_results_batch_box .foot_price").first
                         if price_el.count() > 0:
                             fee_amount = (price_el.inner_text() or "").strip()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("读取费用确认弹窗金额文本异常: %s", exc)
 
                     fee_desc = f"明细 {fee_rows} 条" + (f"，{fee_amount}" if fee_amount else "")
                     if not auto_confirm_fee:
@@ -504,12 +504,12 @@ class SangonBrowserSession:
                     pass
             try:
                 page.remove_listener("download", _on_download)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("移除 download 监听器异常: %s", exc)
             try:
                 page.remove_listener("dialog", _on_dialog)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("移除 dialog 监听器异常: %s", exc)
 
 
 def _collect_pending_download_targets(

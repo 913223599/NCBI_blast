@@ -204,7 +204,7 @@ class QwenTranslator:
                 return text
 
             logger.error(f"调用API时出错: {err_msg}")
-            raise Exception(f"调用API时出错: {err_msg}")
+            raise Exception(f"调用API时出错: {err_msg}") from e
     
     def translate_biology_term(self, term: str) -> str:
         """
