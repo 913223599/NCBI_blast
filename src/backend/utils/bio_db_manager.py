@@ -86,8 +86,8 @@ class BioDatabase:
                         total_size += stat.st_size
                         if stat.st_mtime > latest_mtime:
                             latest_mtime = stat.st_mtime
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("BioDatabase._get_dir_info 忽略非致命异常: %s", _exc)
 
         size_mb = round(total_size / (1024 * 1024), 2)
         mtime_str = datetime.fromtimestamp(latest_mtime).strftime('%Y-%m-%d %H:%M:%S') if latest_mtime > 0 else '未知'
@@ -192,8 +192,8 @@ class SilvaDatabase(BioDatabase):
         for f in self.base_dir.glob(f"{output_name}.n*"):
             try:
                 f.unlink()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("SilvaDatabase.build_index 忽略非致命异常: %s", _exc)
 
         # 构造无空格威胁的命令
         cmd_str = f'"{tool_path}" -in "source.fasta" -dbtype {db_type} -title "{self.name} {db_ver}" -out "{output_name}"'

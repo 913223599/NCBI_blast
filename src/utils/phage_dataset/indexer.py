@@ -69,8 +69,8 @@ def _to_windows_short_path(path: Path) -> Path:
         n = ctypes.windll.kernel32.GetShortPathNameW(str(path), buf, len(buf))
         if 0 < n < len(buf) and " " not in buf.value:
             return Path(buf.value)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("_to_windows_short_path 忽略非致命异常: %s", _exc)
     return path
 
 

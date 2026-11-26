@@ -266,8 +266,8 @@ def _build_forbidden_kmer_index(
                                 if len(aa) >= 60:
                                     target_proteins.append((f"neg_valtest:{acc}", _kmer_set(aa)))
                                     added_for_acc += 1
-                    except Exception:  # noqa: BLE001
-                        pass
+                    except Exception as _exc:  # noqa: BLE001
+                        logger.debug("_build_forbidden_kmer_index 忽略非致命异常: %s", _exc)
                 if added_for_acc == 0:
                     fa_p = neg_root / row["fasta_relpath"] if row.get("fasta_relpath") else neg_root / "fasta" / f"{acc}.fasta"
                     if fa_p.is_file():
@@ -279,8 +279,8 @@ def _build_forbidden_kmer_index(
                                         aa = g.translate(include_stop=False).strip()
                                         if len(aa) >= 60 and "*" not in aa:
                                             target_proteins.append((f"neg_valtest:{acc}", _kmer_set(aa)))
-                        except Exception:  # noqa: BLE001
-                            pass
+                        except Exception as _exc:  # noqa: BLE001
+                            logger.debug("_build_forbidden_kmer_index 忽略非致命异常: %s", _exc)
 
     return forbidden_accs, target_proteins
 

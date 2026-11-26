@@ -8,6 +8,7 @@ from typing import Dict
 from .conda_resolver import CondaResolver
 
 from .wsl_manager import WSLManager
+_s110_logger = logging.getLogger(__name__)
 
 class DependencyManager:
     """
@@ -30,8 +31,8 @@ class DependencyManager:
                 cmd = ["wsl", "-d", "Ubuntu", "-u", "root", "which", tool_name]
                 res = subprocess.run(cmd, capture_output=True, encoding='utf-8', errors='ignore', timeout=5)
                 return res.returncode == 0
-            except Exception:
-                pass
+            except Exception as _exc:
+                _s110_logger.debug("DependencyManager.check_tool_installed 忽略非致命异常: %s", _exc)
         return False
 
     async def install_dependencies(self) -> Dict[str, bool]:
@@ -77,9 +78,9 @@ class DependencyManager:
                     stderr=asyncio.subprocess.PIPE
                 )
                 await process.communicate()
-        except Exception:
+        except Exception as _exc:
             # 如果是旧版 conda 可能没有 tos 命令，忽略错误继续
-            pass
+            _s110_logger.debug("DependencyManager._ensure_tos_accepted 忽略非致命异常: %s", _exc)
 
     async def _install_via_conda(self, tool_name: str) -> bool:
         """调用 Conda 进行安装 (支持 Windows 原生与 WSL 转发)"""

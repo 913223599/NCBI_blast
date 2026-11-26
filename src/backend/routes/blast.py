@@ -314,8 +314,8 @@ async def get_visualization_data(req: VisDataRequest):
                         with open(candidate_single, 'r', encoding='utf-8') as f:
                             recs = list(NCBIXML.parse(f))
                         target_record = _find_matching_record(recs, req.query_id)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("get_visualization_data 忽略非致命异常: %s", _exc)
                 
                 # 2.2 若仍未找到，遍历该任务 xml_raw 下全部 XML 检索
                 if not target_record:
@@ -340,8 +340,8 @@ async def get_visualization_data(req: VisDataRequest):
                         records = list(NCBIXML.parse(f))
                     if records:
                         target_record = records[0]
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("get_visualization_data 忽略非致命异常: %s", _exc)
 
         if not target_record:
             if req.query_id:

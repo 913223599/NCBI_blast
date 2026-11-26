@@ -52,8 +52,8 @@ class FunctionalAssigner:
             res = ctypes.windll.kernel32.GetShortPathNameW(path_str, buffer, 1024)
             if res > 0:
                 return buffer.value
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("FunctionalAssigner._get_short_path 忽略非致命异常: %s", _exc)
         return path_str
 
     @staticmethod
@@ -330,8 +330,8 @@ class FunctionalAssigner:
         try:
             out_tsv.parent.mkdir(parents=True, exist_ok=True)
             out_tsv.touch(exist_ok=True)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("FunctionalAssigner._run_blastp_query 忽略非致命异常: %s", _exc)
 
         # 1. 优先使用 Windows 本地 BLASTP (通过 8.3 短路径规避包含空格引发的 BLAST+ 路径截断)
         try:
@@ -464,8 +464,8 @@ class FunctionalAssigner:
         try:
             out_tsv.parent.mkdir(parents=True, exist_ok=True)
             out_tsv.touch(exist_ok=True)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("FunctionalAssigner._run_rpsblast_query 忽略非致命异常: %s", _exc)
 
         try:
             short_query = self._get_short_path(query_faa)

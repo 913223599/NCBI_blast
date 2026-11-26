@@ -174,8 +174,8 @@ def canonicalize_species_name(species: str) -> str:
                         canon = resolve_to_species_level(r_two_syn[0], r_two_syn[1], r_two_syn[2])
                         _canonical_species_cache[s_clean] = canon
                         return canon
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("canonicalize_species_name 忽略非致命异常: %s", _exc)
         
     _canonical_species_cache[s_clean] = s_clean
     return s_clean

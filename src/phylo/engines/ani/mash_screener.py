@@ -59,8 +59,8 @@ class MashScreener:
         if self.on_log:
             try:
                 self.on_log(msg)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("MashScreener._log 忽略非致命异常: %s", _exc)
 
     def screen_against_inphared(
         self,

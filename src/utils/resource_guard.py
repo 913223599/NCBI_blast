@@ -109,8 +109,8 @@ class GpuGuard:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
                 torch.cuda.empty_cache()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("GpuGuard.release_vram 忽略非致命异常: %s", _exc)
 
     @staticmethod
     @contextmanager

@@ -190,8 +190,8 @@ class TaxonomySyncService:
         try:
             from ..backend.routes.strains import invalidate_cache
             invalidate_cache()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("TaxonomySyncService.sync_taxonomy_from_name 忽略非致命异常: %s", _exc)
         
         return {
             "success": True,

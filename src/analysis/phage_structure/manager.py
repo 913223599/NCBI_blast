@@ -422,8 +422,8 @@ class PhageStructureManager:
                 else:
                     candidates.append((self.project_root / p_raw, False))
                 candidates.append((pd_dir / p_raw.name, False))
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("PhageStructureManager._resolve_phage_discovery_sequence_source 忽略非致命异常: %s", _exc)
 
         # 2. 标准导出命名 {task_id}_prophages.fasta 与历史 prophages.fasta
         candidates.append((pd_dir / f"{pd_task_id}_prophages.fasta", False))

@@ -21,6 +21,8 @@ from typing import Any
 
 from .fasta_parser import write_shard_fasta
 from .models import QueryProteinRecord, SearchConfig, ShardSpec, TargetSequenceRecord
+import logging
+_s110_logger = logging.getLogger(__name__)
 
 BLAST_OUTFMT_FIELDS = (
     "qseqid",
@@ -55,8 +57,8 @@ def get_windows_short_path(path: Path) -> str:
         ret = ctypes.windll.kernel32.GetShortPathNameW(abs_str, buf, len(buf))
         if ret > 0:
             return buf.value
-    except Exception:
-        pass
+    except Exception as _exc:
+        _s110_logger.debug("get_windows_short_path 忽略非致命异常: %s", _exc)
     return abs_str
 
 
@@ -117,8 +119,8 @@ def resolve_blast_executable(tool_name: str, blast_bin_dir: Path | None = None) 
         resolved = ToolConfig.resolve_bio_tool(tool_name)
         if resolved and Path(resolved).is_file():
             return str(Path(resolved).resolve())
-    except Exception:
-        pass
+    except Exception as _exc:
+        _s110_logger.debug("resolve_blast_executable 忽略非致命异常: %s", _exc)
 
     found = shutil.which(tool_name)
     if found:

@@ -3,6 +3,8 @@ import os
 import subprocess
 from pathlib import Path
 from typing import List
+import logging
+_s110_logger = logging.getLogger(__name__)
 
 class WSLManager:
     """
@@ -39,8 +41,8 @@ class WSLManager:
                 # 注意: Python 3.11 的 f-string 表达式内不允许出现反斜杠，需先转换
                 relative_posix = str(relative).replace("\\", "/")
                 return f"/ncbi_blast_link/{relative_posix}"
-        except Exception:
-            pass
+        except Exception as _exc:
+            _s110_logger.debug("WSLManager.to_wsl_path 忽略非致命异常: %s", _exc)
 
         # 2. 如果不在项目目录下，使用标准 /mnt 转换
         path = Path(windows_path).resolve()
@@ -67,8 +69,8 @@ class WSLManager:
             distro = cls.get_best_distro()
             cmd = ["wsl", "-d", distro, "-u", "root", "ln", "-sfT", target, link]
             subprocess.run(cmd, capture_output=True, timeout=5)
-        except Exception:
-            pass
+        except Exception as _exc:
+            _s110_logger.debug("WSLManager.ensure_project_link 忽略非致命异常: %s", _exc)
 
     @classmethod
     def shutdown_distro(cls):
@@ -122,6 +124,6 @@ class WSLManager:
                         if "debian" in d.lower():
                             return d
                     return distros[0]
-        except Exception:
-            pass
+        except Exception as _exc:
+            _s110_logger.debug("WSLManager.get_best_distro 忽略非致命异常: %s", _exc)
         return "Ubuntu"  # 最后的保底

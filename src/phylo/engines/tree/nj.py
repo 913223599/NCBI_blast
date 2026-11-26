@@ -552,8 +552,8 @@ class NJBioNJEngine:
         if self.on_log:
             try:
                 self.on_log(msg)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("NJBioNJEngine._log 忽略非致命异常: %s", _exc)
 
     @staticmethod
     def save_distance_csv(ids: List[str], matrix: np.ndarray, csv_path: Path) -> Path:

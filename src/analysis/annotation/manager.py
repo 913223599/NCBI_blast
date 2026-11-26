@@ -201,8 +201,8 @@ class AnnotationManager:
                         summary=t.get("summary") or {},
                         files=t.get("files") or {}
                     )
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("AnnotationManager.list_history 忽略非致命异常: %s", _exc)
             elif t.get("status") == "queued":
                 # 计算排队位置
                 if t["task_id"] in waiting_ids:
@@ -250,8 +250,8 @@ class AnnotationManager:
                     with open(audit_json_file, "r", encoding="utf-8") as f:
                         safety_audit = json.load(f)
                         task["safety_audit"] = safety_audit
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("AnnotationManager.get_task_result 忽略非致命异常: %s", _exc)
 
         if features and "summary" in task and isinstance(task["summary"], dict):
             ann_cnt = sum(1 for f in features if f.get("feature_type") == "CDS" and not AnnotationFuser.is_unannotated(f.get("product")))
@@ -278,8 +278,8 @@ class AnnotationManager:
                     files=task.get("files") or {},
                     safety_audit=safety_audit
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("AnnotationManager.get_task_result 忽略非致命异常: %s", _exc)
 
         # 读取 GBK 文本摘要或完整内容
         gbk_file = task_work_dir / f"{task_id}.gbk"

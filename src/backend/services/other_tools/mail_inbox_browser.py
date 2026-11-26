@@ -244,5 +244,5 @@ def list_whitelist_mails(
         if conn is not None:
             try:
                 conn.logout()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("list_whitelist_mails 忽略非致命异常: %s", _exc)

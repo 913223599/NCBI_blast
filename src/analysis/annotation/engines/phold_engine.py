@@ -168,8 +168,8 @@ class PholdEngine(BaseAnnotationEngine):
             if hasattr(torch, "cuda") and torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("PholdEngine._cleanup_gpu_memory 忽略非致命异常: %s", _exc)
         gc.collect()
 
     async def run(

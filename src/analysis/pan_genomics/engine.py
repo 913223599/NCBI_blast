@@ -237,16 +237,16 @@ class PanGenomicsEngine:
                     try:
                         with open(fasta_path, "r", encoding="utf-8", errors="ignore") as fa_f:
                             dna_seq = "".join(str(rec.seq) for rec in SeqIO.parse(fa_f, "fasta"))
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("PanGenomicsEngine._load_sample_features 忽略非致命异常: %s", _exc)
                 if not dna_seq:
                     gbk_files = list(task_dir.glob("*.gbk"))
                     if gbk_files:
                         try:
                             with open(gbk_files[0], "r", encoding="utf-8", errors="ignore") as gb_f:
                                 dna_seq = "".join(str(rec.seq) for rec in SeqIO.parse(gb_f, "genbank") if rec.seq)
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            logger.debug("PanGenomicsEngine._load_sample_features 忽略非致命异常: %s", _exc)
         elif s.file_path and Path(s.file_path).exists():
             f_path = Path(s.file_path)
             if s.file_type == "gbk" or f_path.suffix.lower() in [".gbk", ".gb"]:

@@ -97,8 +97,8 @@ if sys.platform.startswith("win"):
         try:
             from src.assembly.env.wsl_manager import WSLManager
             WSLManager.shutdown_distro()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("handle_exit 忽略非致命异常: %s", _exc)
         sys.exit(0)
         
     signal.signal(signal.SIGTERM, handle_exit)

@@ -77,8 +77,8 @@ class IQTreeEngine:
         if self.on_log:
             try:
                 self.on_log(msg)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("IQTreeEngine._log 忽略非致命异常: %s", _exc)
 
     @staticmethod
     def resolve_model(model: str, mol_type: str) -> str:

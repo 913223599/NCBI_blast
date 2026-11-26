@@ -101,8 +101,8 @@ class DeepSafetyAuditor:
                 res = subprocess.run(cmd, cwd=str(db_dir), capture_output=True, encoding="utf-8", errors="ignore", timeout=180)
                 if res.returncode == 0 and out_file.exists():
                     return True
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("DeepSafetyAuditor.run_safety_audit.run_local_blastp 忽略非致命异常: %s", _exc)
             return False
 
         # A. 扫描 PhageScope 安全元数据 (Acr, AMR, VF)

@@ -16,6 +16,8 @@ from ..analysis.annotation.manager import get_annotation_manager
 from ..phylo.runtime.tool_registry import get_project_root
 from ..phylo.storage.archive_store import PhyloArchiveStore
 from .models import GenomeFeatureItem, ParsedGenomeInput, StudioFigureFile, StudioHistoryItem
+import logging
+_s110_logger = logging.getLogger(__name__)
 
 
 def get_studio_root_dir() -> Path:
@@ -147,8 +149,8 @@ def list_available_sources() -> Dict[str, Any]:
                     "created_at": job.created_at,
                 }
             )
-    except Exception:
-        pass
+    except Exception as _exc:
+        _s110_logger.debug("list_available_sources 忽略非致命异常: %s", _exc)
 
     annotation_tasks: List[Dict[str, Any]] = []
     try:
@@ -166,8 +168,8 @@ def list_available_sources() -> Dict[str, Any]:
                     "created_at": t.get("created_at", ""),
                 }
             )
-    except Exception:
-        pass
+    except Exception as _exc:
+        _s110_logger.debug("list_available_sources 忽略非致命异常: %s", _exc)
 
     return {
         "phylo_jobs": phylo_jobs,

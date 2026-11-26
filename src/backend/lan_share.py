@@ -124,8 +124,8 @@ class LanShareManager:
                 primary_ip = str(s.getsockname()[0])
                 if primary_ip not in ips and not primary_ip.startswith("198.18."):
                     ips.insert(0, primary_ip)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("LanShareManager.get_local_ips 忽略非致命异常: %s", _exc)
         
         return list(set(ips)) if ips else ["127.0.0.1"]
 

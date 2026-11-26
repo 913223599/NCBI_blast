@@ -9,6 +9,8 @@ from typing import Optional
 from .qwen_translator import QwenTranslator
 from .term_extractor import TermExtractor  # 导入TermExtractor
 from ..taxonomy_provider import get_taxonomy_provider
+import logging
+_s110_logger = logging.getLogger(__name__)
 
 
 class BiologyTranslator:
@@ -164,8 +166,8 @@ class BiologyTranslator:
                                         import logging
                                         logging.getLogger(__name__).warning(f"[Taxonomy Validation] 拉丁名 '{text}' 未在分类数据库中找到，跳过存入词库。")
                                         is_valid = False
-                                except Exception:
-                                    pass # 容错处理
+                                except Exception as _exc:
+                                    _s110_logger.debug("BiologyTranslator.translate_text 忽略非致命异常: %s", _exc)
                             
                             if is_valid:
                                 # 1. 使用专用的保存方法，标记来源为 AI
@@ -178,8 +180,8 @@ class BiologyTranslator:
                                 # 2. 调用术语提取深度学习分析（如有）
                                 try:
                                     self.term_extractor.extract_and_store_key_terms(text, ai_result)
-                                except Exception:
-                                    pass
+                                except Exception as _exc:
+                                    _s110_logger.debug("BiologyTranslator.translate_text 忽略非致命异常: %s", _exc)
                         
                         # 移除原先带有的 [AI] 前缀，保证界面的清洁度和词库的标准性
                         result = ai_result
@@ -297,8 +299,8 @@ class BiologyTranslator:
                                         lineage = tax_provider.get_lineage_details(pure_text)
                                         if not lineage:
                                             is_valid = False
-                                    except Exception:
-                                        pass
+                                    except Exception as _exc:
+                                        _s110_logger.debug("BiologyTranslator.translate_batch 忽略非致命异常: %s", _exc)
                                 
                                 if is_valid:
                                     self.translation_data_manager.add_translation(
@@ -306,8 +308,8 @@ class BiologyTranslator:
                                     )
                                     try:
                                         self.term_extractor.extract_and_store_key_terms(pure_text, ai_res)
-                                    except Exception:
-                                        pass
+                                    except Exception as _exc:
+                                        _s110_logger.debug("BiologyTranslator.translate_batch 忽略非致命异常: %s", _exc)
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).error(f"Biology Batch AI Error: {e}")

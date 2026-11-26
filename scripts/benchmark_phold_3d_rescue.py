@@ -37,6 +37,8 @@ from src.analysis.phage_structure.sequence_annotator import (  # noqa: E402
 )
 from src.analysis.phage_structure.tail_finder_adapter import run_phagetailfinder_on_contigs  # noqa: E402
 from src.analysis.phage_structure.thresholds import DEFAULT_THRESHOLDS  # noqa: E402
+import logging
+_s110_logger = logging.getLogger(__name__)
 
 RESULTS_DIR = PROJECT_ROOT / "results" / "benchmarks" / "phage_structure_phold3d"
 REPORT_JSON = RESULTS_DIR / "phold_3d_rescue_report.json"
@@ -53,8 +55,8 @@ def _query_gpu_free_mb() -> Optional[int]:
         )
         if res.returncode == 0 and res.stdout.strip():
             return int(res.stdout.strip().splitlines()[0].strip())
-    except Exception:
-        pass
+    except Exception as _exc:
+        _s110_logger.debug("_query_gpu_free_mb 忽略非致命异常: %s", _exc)
     return None
 
 

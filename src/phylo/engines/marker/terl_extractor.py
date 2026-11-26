@@ -59,8 +59,8 @@ class TerlExtractor:
         if self.on_log:
             try:
                 self.on_log(msg)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("TerlExtractor._log 忽略非致命异常: %s", _exc)
 
     def load_terl_phrog_names(self) -> set[str]:
         """从 phrog_annot_v4.tsv 中提取全部 terminase large subunit PHROG 模型名。"""

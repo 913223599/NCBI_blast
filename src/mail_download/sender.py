@@ -166,8 +166,8 @@ class MailSender:
             if conn is not None:
                 try:
                     conn.quit()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("MailSender.send 忽略非致命异常: %s", _exc)
 
     # ---- 内部 ----
 

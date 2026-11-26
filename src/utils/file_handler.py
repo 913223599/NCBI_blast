@@ -66,8 +66,8 @@ class FileHandler:
                 if hasattr(result_handle, 'seek'):
                     try:
                         result_handle.seek(0)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("FileHandler.save_result_file 忽略非致命异常: %s", _exc)
                 shutil.copyfileobj(result_handle, out_handle)
         except Exception as e:
             raise RuntimeError(f"Failed to save result file to {output_file}: {e}") from e

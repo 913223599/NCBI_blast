@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 from ..engine.runner import CommandRunner
+import logging
+_s110_logger = logging.getLogger(__name__)
 
 # 全局模块级物理内存缓存，避免跨任务重复探测
 _CACHED_SYSTEM_TOTAL_MEMORY_GB = None
@@ -179,7 +181,7 @@ class BaseAssemblyStep(abc.ABC):
                 self.context.data["system_total_memory_gb"] = gb
                 _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb
                 return gb
-        except Exception:
-            pass
+        except Exception as _exc:
+            _s110_logger.debug("BaseAssemblyStep.get_total_memory_gb 忽略非致命异常: %s", _exc)
         _CACHED_SYSTEM_TOTAL_MEMORY_GB = gb or 16.0
         return _CACHED_SYSTEM_TOTAL_MEMORY_GB

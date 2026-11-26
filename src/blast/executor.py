@@ -13,6 +13,7 @@ from urllib.request import HTTPSHandler, build_opener, install_opener
 
 from Bio.Blast import NCBIWWW
 from .local_blast import LocalBlastExecutor
+_s110_logger = logging.getLogger(__name__)
 
 # Constants
 MIN_SEQUENCE_LENGTH = 5
@@ -141,8 +142,8 @@ class BlastExecutor:
                             try:
                                 if os.path.exists(p):
                                     os.unlink(p)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                _s110_logger.debug("BlastExecutor.execute_blast_search 忽略非致命异常: %s", _exc)
                 else:
                     logging.warning(f"[PhageScope] 本地库索引未就绪: {ps_index}")
 
@@ -191,8 +192,8 @@ class BlastExecutor:
                             try:
                                 if os.path.exists(p):
                                     os.unlink(p)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                _s110_logger.debug("BlastExecutor.execute_blast_search 忽略非致命异常: %s", _exc)
             
             # 回退到原有的 NCBI 联机比对逻辑 (仅在联机请求前进行限速等待)
             delay_before_request()

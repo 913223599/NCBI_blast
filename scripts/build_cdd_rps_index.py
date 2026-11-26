@@ -7,6 +7,8 @@ import shutil
 import ctypes
 import subprocess
 from pathlib import Path
+import logging
+_s110_logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -19,8 +21,8 @@ def get_short_path(long_path_str: str) -> str:
         result = ctypes.windll.kernel32.GetShortPathNameW(long_path_str, buffer, 1024)
         if result > 0:
             return buffer.value
-    except Exception:
-        pass
+    except Exception as _exc:
+        _s110_logger.debug("get_short_path 忽略非致命异常: %s", _exc)
     return long_path_str
 
 def build_cdd_rps_index():

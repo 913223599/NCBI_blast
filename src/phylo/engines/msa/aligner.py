@@ -47,8 +47,8 @@ class MultiSequenceAligner:
         if self.on_log:
             try:
                 self.on_log(msg)
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("MultiSequenceAligner._log 忽略非致命异常: %s", _exc)
 
     def _to_wsl(self, path: Path) -> str:
         from src.assembly.env.wsl_manager import WSLManager

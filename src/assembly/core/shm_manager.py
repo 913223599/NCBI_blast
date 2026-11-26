@@ -108,8 +108,8 @@ class ShmManager:
                         avail_str = parts[3].replace("G", "")
                         if avail_str.isdigit():
                             return float(avail_str)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("ShmManager._get_shm_available_gb 忽略非致命异常: %s", _exc)
         return 0.0
 
     async def _evict_expired_diagnostics(self):

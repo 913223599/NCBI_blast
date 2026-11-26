@@ -207,8 +207,8 @@ def _extract_date_prefix(date_str: str) -> str:
         try:
             dt = parsedate_to_datetime(date_str)
             return dt.strftime("%Y%m%d")
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("_extract_date_prefix 忽略非致命异常: %s", _exc)
     return datetime.now().strftime("%Y%m%d")
 
 
@@ -633,6 +633,6 @@ def scan_sangon_mails(
         if conn is not None:
             try:
                 conn.logout()
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("scan_sangon_mails 忽略非致命异常: %s", _exc)
 

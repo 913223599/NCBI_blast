@@ -4,6 +4,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any
+_s110_logger = logging.getLogger(__name__)
 
 
 class StrainDBManager:
@@ -30,8 +31,8 @@ class StrainDBManager:
         if self._conn_cache:
             try:
                 self._conn_cache.close()
-            except Exception:
-                pass
+            except Exception as _exc:
+                _s110_logger.debug("StrainDBManager._close_connection 忽略非致命异常: %s", _exc)
             finally:
                 self._conn_cache = None
 
@@ -485,16 +486,16 @@ class StrainDBManager:
                             engine = params.get("engine", "NJ").upper()
                             model = params.get("model", "JC").upper()
                             algorithm = f"{msa} / {engine} ({model})"
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            _s110_logger.debug("StrainDBManager._reconstruct_from_fs 忽略非致命异常: %s", _exc)
                     
                     # 尝试从 manifest 恢复指纹
                     manifest_file = s_dir / "sequence_manifest.json"
                     if manifest_file.exists():
                         try:
                             id_to_hash = json.loads(manifest_file.read_text(encoding='utf-8'))
-                        except Exception:
-                            pass
+                        except Exception as _exc:
+                            _s110_logger.debug("StrainDBManager._reconstruct_from_fs 忽略非致命异常: %s", _exc)
                     
                     # 如果没有 manifest 但有 FASTA，手动生成指纹
                     if not id_to_hash and fasta and fasta.exists():

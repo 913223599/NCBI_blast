@@ -137,8 +137,8 @@ async def upload_and_analyze(
                 if os.path.exists(tmp_path):
                     try:
                         os.remove(tmp_path)
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("upload_and_analyze 忽略非致命异常: %s", _exc)
         elif ext in ('.ab1', '.abi'):
             res = SangerDeconvEngine.parse_single_ab1_bytes(content, filename=fname, trim_q=trim_threshold)
             return {

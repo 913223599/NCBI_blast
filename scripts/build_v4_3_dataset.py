@@ -122,8 +122,8 @@ def _read_gbk_products_by_seq(gbk_path: Path) -> Dict[str, str]:
                 prod = str((feat.qualifiers.get("product") or [""])[0]).strip()
                 if aa and prod:
                     out[aa] = prod
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        logger.debug("_read_gbk_products_by_seq 忽略非致命异常: %s", _exc)
     return out
 
 

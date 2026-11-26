@@ -4,6 +4,7 @@ import logging
 import time
 from pathlib import Path
 from typing import List, Optional, Dict, Callable, Union
+_s110_logger = logging.getLogger(__name__)
 
 class CommandRunner:
     """
@@ -139,8 +140,8 @@ class CommandRunner:
                         read_stream(process.stdout, False),
                         read_stream(process.stderr, True)
                     )
-                except Exception:
-                    pass 
+                except Exception as _exc:
+                    _s110_logger.debug("CommandRunner.run_command._run 忽略非致命异常: %s", _exc)
                 return await process.wait()
 
             try:
@@ -152,8 +153,8 @@ class CommandRunner:
                     await asyncio.sleep(1)
                     if process.returncode is None:
                         process.kill()
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    _s110_logger.debug("CommandRunner.run_command 忽略非致命异常: %s", _exc)
                 return -9
 
             self.current_process = None

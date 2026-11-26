@@ -62,8 +62,8 @@ def _emit(cb: Optional[Callable[[str], None]], msg: str) -> None:
     if cb is not None:
         try:
             cb(msg)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("_emit 忽略非致命异常: %s", _exc)
 
 
 def _resolve_project_path(raw: str, root: Path) -> Path:
@@ -248,8 +248,8 @@ def _read_playwright_package_info() -> Dict[str, Any]:
     pkg_version = ""
     try:
         pkg_version = importlib.metadata.version("playwright")
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("_read_playwright_package_info 忽略非致命异常: %s", _exc)
 
     driver_ready = False
     revision = ""
@@ -782,8 +782,8 @@ def _cleanup_incomplete_chromium_dirs(browsers_dir: Path) -> List[str]:
                 try:
                     shutil.rmtree(sub, ignore_errors=True)
                     removed.append(sub.name)
-                except Exception:
-                    pass
+                except Exception as _exc:
+                    logger.debug("_cleanup_incomplete_chromium_dirs 忽略非致命异常: %s", _exc)
     return removed
 
 

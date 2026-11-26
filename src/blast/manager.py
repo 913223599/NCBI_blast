@@ -511,8 +511,8 @@ class BlastManager:
                         for cb in self.result_listeners:
                             try:
                                 cb(task.task_id, pending_data)
-                            except Exception:
-                                pass
+                            except Exception as _exc:
+                                logger.debug("BlastManager._run_task 忽略非致命异常: %s", _exc)
 
             seq_lookup: Dict[str, str] = {}
             for s in sequences:
@@ -652,8 +652,8 @@ class BlastManager:
                     try:
                         parsed_params = json.loads(t['params'])
                         t['task_name'] = parsed_params.get('task_name')
-                    except Exception:
-                        pass
+                    except Exception as _exc:
+                        logger.debug("BlastManager.list_tasks 忽略非致命异常: %s", _exc)
                 elif isinstance(t.get('params'), dict):
                     t['task_name'] = t['params'].get('task_name')
 

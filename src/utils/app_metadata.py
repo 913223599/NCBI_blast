@@ -8,6 +8,8 @@ import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict
+import logging
+_s110_logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 VERSION_FILE = PROJECT_ROOT / "version.json"
@@ -31,8 +33,8 @@ def get_app_metadata() -> Dict[str, str]:
                     val = raw.get(key)
                     if isinstance(val, str) and val.strip():
                         meta[key] = val.strip()
-        except Exception:
-            pass
+        except Exception as _exc:
+            _s110_logger.debug("get_app_metadata 忽略非致命异常: %s", _exc)
     return meta
 
 

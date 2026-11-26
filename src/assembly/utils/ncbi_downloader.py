@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 from ..engine.runner import CommandRunner
 from ..env.wsl_manager import WSLManager
+_s110_logger = logging.getLogger(__name__)
 
 class NCBIDownloader:
     """
@@ -123,8 +124,8 @@ class NCBIDownloader:
                 existing = json.loads(metadata_file.read_text(encoding="utf-8"))
                 if existing.get("taxid"):
                     return
-            except Exception:
-                pass
+            except Exception as _exc:
+                _s110_logger.debug("NCBIDownloader._resolve_and_save_taxid 忽略非致命异常: %s", _exc)
         
         self.logger.info(f" 正在查询 {species_name} 的真实 NCBI TaxID...")
         

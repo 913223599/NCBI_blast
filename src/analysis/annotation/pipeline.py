@@ -76,8 +76,8 @@ class AnnotationPipeline:
         logger.info(f"[流程诊断] {message}")
         try:
             self._broadcast_progress(self._current_max_progress, message, message)
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("AnnotationPipeline._record_stage 忽略非致命异常: %s", _exc)
         return entry
 
     async def execute(self, req: AnnotationRunRequest) -> Dict[str, Any]:
