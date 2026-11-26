@@ -3,11 +3,14 @@
  * MailAutoPipelineModule - 邮件收件 -> 注释 -> Word 报告 -> SMTP 回传（薄视图外壳）
  * 核心状态与接口调度已抽离至 ./mail_pipeline/useMailPipeline.ts
  */
+import { useI18n } from '../../../locales'
 import PathField from '../components/PathField.vue'
 import CleanupDialog from '../components/CleanupDialog.vue'
 import PaginationBar from '../components/PaginationBar.vue'
 import MailComposeModal from '../components/MailComposeModal.vue'
 import { useMailPipeline } from './mail_pipeline/useMailPipeline'
+
+const { t } = useI18n()
 
 const {
   openLocalPath, actionMessage, errorMessage, busy, showConfigModal, showAuthModal, showCleanup,
@@ -33,64 +36,64 @@ const {
     <div class="pipeline-steps-banner">
       <div class="step-node">
         <span class="step-idx">1</span>
-        <div class="step-info"><strong>收件</strong><span>IMAP 拉取附件，SHA256 去重</span></div>
+        <div class="step-info"><strong>{{ t('other.mail.step1_title') }}</strong><span>{{ t('other.mail.step1_desc') }}</span></div>
       </div>
       <div class="step-arrow">&rarr;</div>
       <div class="step-node">
         <span class="step-idx">2</span>
-        <div class="step-info"><strong>注释</strong><span>Pharokka / Phold</span></div>
+        <div class="step-info"><strong>{{ t('other.mail.step2_title') }}</strong><span>Pharokka / Phold</span></div>
       </div>
       <div class="step-arrow">&rarr;</div>
       <div class="step-node">
         <span class="step-idx">3</span>
-        <div class="step-info"><strong>Word 报告</strong><span>生成 .docx</span></div>
+        <div class="step-info"><strong>{{ t('other.mail.step3_title') }}</strong><span>{{ t('other.mail.step3_desc') }}</span></div>
       </div>
       <div class="step-arrow">&rarr;</div>
       <div class="step-node">
         <span class="step-idx">4</span>
-        <div class="step-info"><strong>打包</strong><span>结果文件压缩为 .zip</span></div>
+        <div class="step-info"><strong>{{ t('other.mail.step4_title') }}</strong><span>{{ t('other.mail.step4_desc') }}</span></div>
       </div>
       <div class="step-arrow">&rarr;</div>
       <div class="step-node">
         <span class="step-idx">5</span>
-        <div class="step-info"><strong>回传</strong><span>SMTP 发送至 {{ configForm.reply_to || '-' }}</span></div>
+        <div class="step-info"><strong>{{ t('other.mail.step5_title') }}</strong><span>{{ t('other.mail.step5_desc', { target: configForm.reply_to || '-' }) }}</span></div>
       </div>
     </div>
 
     <!-- 指标 -->
     <div class="metrics-row">
       <div class="metric-card">
-        <div class="metric-label">授权码</div>
-        <div class="metric-val" :class="auth.imap_ready ? 'ok' : 'warn'">{{ auth.imap_ready ? '已配置' : '未配置' }}</div>
+        <div class="metric-label">{{ t('other.mail.metric_auth') }}</div>
+        <div class="metric-val" :class="auth.imap_ready ? 'ok' : 'warn'">{{ auth.imap_ready ? t('other.mail.configured') : t('other.mail.unconfigured') }}</div>
         <div class="metric-sub">{{ configForm.account || '-' }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">去重记录</div>
+        <div class="metric-label">{{ t('other.mail.metric_dedup') }}</div>
         <div class="metric-val">{{ processedCount }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">收件批次</div>
+        <div class="metric-label">{{ t('other.mail.metric_batches') }}</div>
         <div class="metric-val">{{ batches.length }}</div>
         <div class="metric-sub">
-          <template v-if="pendingBatchesCount > 0">待注释处理: {{ pendingBatchesCount }}</template>
-          <template v-else>无待处理批次</template>
-          <template v-if="ignoredBatchesCount > 0"> · 已跳过 {{ ignoredBatchesCount }}</template>
+          <template v-if="pendingBatchesCount > 0">{{ t('other.mail.pending_batches', { count: pendingBatchesCount }) }}</template>
+          <template v-else>{{ t('other.mail.no_pending') }}</template>
+          <template v-if="ignoredBatchesCount > 0"> · {{ t('other.mail.ignored_suffix', { count: ignoredBatchesCount }) }}</template>
         </div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">Word 报告 / 回传包</div>
+        <div class="metric-label">{{ t('other.mail.metric_outputs') }}</div>
         <div class="metric-val">{{ docxReports.length }} / {{ outboundPackages.length }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">运行状态</div>
+        <div class="metric-label">{{ t('other.mail.metric_status') }}</div>
         <div
           class="metric-val"
           :class="runtime.running ? 'running' : (runtime.current_stage === 'failed' ? 'warn' : 'idle')"
         >
-          {{ runtime.running ? '运行中' : (runtime.current_stage === 'failed' ? '上次异常' : '空闲') }}
+          {{ runtime.running ? t('other.mail.status_running') : (runtime.current_stage === 'failed' ? t('other.mail.status_failed') : t('other.mail.status_idle')) }}
         </div>
         <div class="metric-sub">
-          {{ runtime.running ? stageLabel(runtime.current_stage) : (runtime.finished_at ? `上次完成: ${runtime.finished_at}` : '-') }}
+          {{ runtime.running ? stageLabel(runtime.current_stage) : (runtime.finished_at ? t('other.mail.last_finished', { time: runtime.finished_at }) : '-') }}
         </div>
       </div>
     </div>
@@ -98,14 +101,14 @@ const {
     <!-- 目录 -->
     <div class="paths-panel">
       <PathField
-        label="附件下载目录（输入）"
+        :label="t('other.mail.dir_download')"
         :path="resolvedDownloadDir"
         :busy="busy || runtime.running"
         @save="v => handleSaveDir('download_dir', v)"
         @open="openLocalPath"
       />
       <PathField
-        label="结果回传目录（输出）"
+        :label="t('other.mail.dir_send')"
         :path="resolvedSendDir"
         :busy="busy || runtime.running"
         @save="v => handleSaveDir('send_dir', v)"
@@ -117,32 +120,32 @@ const {
     <div class="control-bar">
       <div class="control-left">
         <label class="ctrl-item">
-          <span>收件天数</span>
+          <span>{{ t('other.mail.since_days') }}</span>
           <input type="number" v-model.number="runOptions.since_days" min="1" max="90" class="num-input" />
         </label>
         <label class="ctrl-item">
-          <span>回传目标</span>
+          <span>{{ t('other.mail.send_mode') }}</span>
           <select v-model="runOptions.send_mode" class="select-input">
-            <option value="config">按配置回传 ({{ configForm.reply_to || '-' }})</option>
-            <option value="self">仅发给自己测试 ({{ configForm.account || configForm.smtp_account || '本人' }})</option>
-            <option value="none">仅注释打包（不发信）</option>
+            <option value="config">{{ t('other.mail.send_config', { target: configForm.reply_to || '-' }) }}</option>
+            <option value="self">{{ t('other.mail.send_self', { target: configForm.account || configForm.smtp_account || '-' }) }}</option>
+            <option value="none">{{ t('other.mail.send_none') }}</option>
           </select>
         </label>
         <label class="ctrl-item">
-          <span>报告备注</span>
-          <input type="text" v-model="runOptions.extra_note" placeholder="可选" class="text-input" />
+          <span>{{ t('other.mail.report_note') }}</span>
+          <input type="text" v-model="runOptions.extra_note" :placeholder="t('other.mail.optional_placeholder')" class="text-input" />
         </label>
       </div>
       <div class="control-right">
-        <button class="btn-secondary" @click="handleFetchOnly" :disabled="runtime.running">仅收件</button>
-        <button class="btn-primary" @click="handleRunPipeline()" :disabled="runtime.running">
-          {{ runtime.running ? '运行中...' : '运行流水线' }}
+        <button type="button" class="btn-secondary" @click="handleFetchOnly" :disabled="runtime.running">{{ t('other.mail.btn_fetch_only') }}</button>
+        <button type="button" class="btn-primary" @click="handleRunPipeline()" :disabled="runtime.running">
+          {{ runtime.running ? t('other.mail.btn_running') : t('other.mail.btn_run') }}
         </button>
-        <button class="btn-outline" @click="openTestSendModal" :disabled="runtime.running">测试发信</button>
-        <button class="btn-outline" @click="showConfigModal = true">邮箱配置</button>
-        <button class="btn-outline" @click="openAuthModal">授权码</button>
-        <button class="btn-outline danger" @click="showCleanup = true" :disabled="runtime.running">清理历史</button>
-        <button class="btn-outline" @click="loadOverview">刷新</button>
+        <button type="button" class="btn-outline" @click="openTestSendModal" :disabled="runtime.running">{{ t('other.mail.btn_test_send') }}</button>
+        <button type="button" class="btn-outline" @click="showConfigModal = true">{{ t('other.mail.btn_config') }}</button>
+        <button type="button" class="btn-outline" @click="openAuthModal">{{ t('other.mail.btn_auth') }}</button>
+        <button type="button" class="btn-outline danger" @click="showCleanup = true" :disabled="runtime.running">{{ t('other.mail.btn_cleanup') }}</button>
+        <button type="button" class="btn-outline" @click="loadOverview">{{ t('other.mail.btn_refresh') }}</button>
       </div>
     </div>
 

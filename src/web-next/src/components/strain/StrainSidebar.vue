@@ -7,36 +7,38 @@
         <input
           v-model="searchKeyword"
           class="search-input"
-          placeholder="搜索样本..."
+          :placeholder="t('strain.sidebar.search_placeholder')"
           @input="handleSearch"
         />
-        <button v-if="searchKeyword" class="clear-btn" @click="clearSearch"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" v-if="searchKeyword" class="clear-btn" @click="clearSearch"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>
 
     <div class="sidebar-header">
-      <h3 class="sidebar-title">保藏管理</h3>
-      <button class="btn-add-freezer" @click="emit('addFreezer')">
+      <h3 class="sidebar-title">{{ t('strain.sidebar.title') }}</h3>
+      <button type="button" class="btn-add-freezer" @click="emit('addFreezer')">
         <span class="icon">+</span>
-        <span>添加冰箱</span>
+        <span>{{ t('strain.sidebar.add_freezer') }}</span>
       </button>
     </div>
 
     <!-- 视图切换 -->
     <div class="view-toggle">
       <button
+        type="button"
         class="toggle-btn"
         :class="{ active: viewMode === 'freezers' }"
         @click="viewMode = 'freezers'"
       >
-        冰箱
+        {{ t('strain.sidebar.tab_freezers') }}
       </button>
       <button
+        type="button"
         class="toggle-btn"
         :class="{ active: viewMode === 'samples' }"
         @click="viewMode = 'samples'"
       >
-        样本
+        {{ t('strain.sidebar.tab_samples') }}
       </button>
     </div>
 
@@ -44,8 +46,8 @@
     <div v-show="viewMode === 'freezers'" class="freezer-list">
       <div v-if="strain.freezers.length === 0" class="empty-state">
         <div class="empty-icon"></div>
-        <p>暂无冰箱</p>
-        <p class="empty-hint">点击"添加冰箱"开始管理</p>
+        <p>{{ t('strain.sidebar.empty_freezers') }}</p>
+        <p class="empty-hint">{{ t('strain.sidebar.empty_freezers_hint') }}</p>
       </div>
 
       <div
@@ -53,7 +55,11 @@
         :key="freezer.id"
         class="freezer-card"
         :class="{ active: strain.activeFreezerId === freezer.id }"
+        role="button"
+        tabindex="0"
         @click="selectFreezer(freezer.id)"
+        @keydown.enter.prevent="selectFreezer(freezer.id)"
+        @keydown.space.prevent="selectFreezer(freezer.id)"
       >
         <div class="freezer-icon"></div>
         <div class="freezer-info">
@@ -64,12 +70,10 @@
             <span class="meta-item">{{ freezer.location }}</span>
           </div>
           <div class="freezer-stats">
-            {{ getTotalCabinets(freezer) }} 柜 · 
-            {{ getTotalDrawers(freezer) }} 抽屉 · 
-            {{ getTotalBoxes(freezer) }} 个存储位
+            {{ t('strain.sidebar.freezer_stats', { cabinets: getTotalCabinets(freezer), drawers: getTotalDrawers(freezer), boxes: getTotalBoxes(freezer) }) }}
           </div>
         </div>
-        <button class="btn-delete" @click.stop="deleteFreezer(freezer.id)" title="删除冰箱"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button type="button" class="btn-delete" @click.stop="deleteFreezer(freezer.id)" :title="t('strain.sidebar.delete_freezer')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
       </div>
     </div>
 
@@ -77,21 +81,25 @@
     <div v-show="viewMode === 'samples'" class="sample-results">
       <div v-if="strain.filteredRecords.length === 0" class="empty-state">
         <div class="empty-icon"></div>
-        <p>没有找到匹配的样本</p>
-        <p class="empty-hint">请输入关键词搜索</p>
+        <p>{{ t('strain.sidebar.empty_samples') }}</p>
+        <p class="empty-hint">{{ t('strain.sidebar.empty_samples_hint') }}</p>
       </div>
 
       <div
         v-for="group in groupedRecords"
         :key="group.main.id"
         class="sample-card"
+        role="button"
+        tabindex="0"
         @click="handleSampleClick(group.main)"
+        @keydown.enter.prevent="handleSampleClick(group.main)"
+        @keydown.space.prevent="handleSampleClick(group.main)"
       >
         <div class="sample-icon"></div>
         <div class="sample-info">
           <div class="sample-name text-with-badge">
             {{ group.main.name }}
-            <span v-if="group.count > 1" class="aliquot-badge">x{{ group.count }} 分装</span>
+            <span v-if="group.count > 1" class="aliquot-badge">{{ t('strain.sidebar.aliquot_badge', { count: group.count }) }}</span>
           </div>
           <div class="sample-meta">
             <span class="meta-badge accession">{{ group.main.accession || 'N/A' }}</span>
@@ -102,9 +110,9 @@
           <div 
             class="sample-location tooltip-native" 
             v-if="group.count > 1"
-            :title="`所有存放点:\n${group.positions.join('\n')}`"
+            :title="t('strain.sidebar.multi_location_title', { positions: group.positions.join('\n') })"
           >
-            [多处存放] (悬停查看 {{ group.count }} 处位置)
+            {{ t('strain.sidebar.multi_location_label', { count: group.count }) }}
           </div>
           <div class="sample-location" v-else>
             {{ group.positions[0] }}
@@ -118,12 +126,14 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { useI18n } from '../../locales'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import type { StrainRecord } from '../../stores/strain'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 
+const { t } = useI18n()
 const strain = useStrainStore()
 const appStore = useAppStore()
 const confirmDialog = useConfirmDialog()
@@ -154,7 +164,7 @@ const groupedRecords = computed(() => {
      // 最多只计算前 3 个位置，避免样本太多时展开的提示框占满屏幕并消耗性能
      const posRecords = group.records.slice(0, 3)
      group.positions = posRecords.map(r => getLocationPath(r))
-     if (group.records.length > 3) group.positions.push(`... 等共 ${group.count} 个位置`)
+     if (group.records.length > 3) group.positions.push(t('strain.sidebar.more_positions', { count: group.count }))
   }
   return results
 })
@@ -181,18 +191,18 @@ function selectFreezer(id: string) {
 }
 
 async function deleteFreezer(id: string) {
-  const freezer = strain.freezers.find((f: any) => f.id === id)
+  const freezer = strain.freezers.find((f) => f.id === id)
   if (!freezer) return
   
   const ok = await confirmDialog.confirm({
-    title: '删除冰箱',
-    message: `确定要删除冰箱"${freezer.name}"吗？\n该操作将同时删除冰箱内的所有样本记录。`,
-    confirmText: '确认删除',
+    title: t('strain.sidebar.delete_freezer'),
+    message: t('strain.sidebar.delete_freezer_confirm', { name: freezer.name }),
+    confirmText: t('strain.sidebar.confirm_delete'),
     danger: true,
   })
   if (ok) {
     strain.removeFreezer(id)
-    appStore.showNotification('已删除冰箱', 'success')
+    appStore.showNotification(t('strain.sidebar.deleted_toast'), 'success')
   }
 }
 
@@ -419,8 +429,8 @@ function getTotalBoxes(freezer: any): number {
   font-size: 0.9rem;
 }
 
-.empty-hint {
-  font-size: 0.8rem !important;
+.empty-state .empty-hint {
+  font-size: 0.8rem;
   color: #cbd5e1;
 }
 
@@ -567,9 +577,9 @@ function getTotalBoxes(freezer: any): number {
   border: 1px solid #fbcfe8;
 }
 
-.tooltip-native {
+.sample-location.tooltip-native {
   cursor: help;
-  color: #2563eb !important;
+  color: #2563eb;
   text-decoration: underline dashed;
   text-underline-offset: 3px;
 }

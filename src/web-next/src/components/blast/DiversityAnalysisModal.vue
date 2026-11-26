@@ -4,8 +4,11 @@
  * 核心状态、轮询、分组聚合与导出逻辑已拆离至 ./diversity/useDiversityModal.ts
  */
 import UniversalUpload from '../common/UniversalUpload.vue'
+import { useI18n } from '../../locales'
 import { useDiversityModal } from './diversity/useDiversityModal'
 export type { SampleGroupDef } from './diversity/diversityHelpers'
+
+const { t } = useI18n()
 
 const props = withDefaults(
   defineProps<{
@@ -68,51 +71,52 @@ defineExpose({
             </svg>
           </div>
           <div>
-            <h2 class="title">16S 扩增子混样多样性还原与 rrnDB 拷贝数校正</h2>
-            <p class="subtitle">针对未纯化样本、环境混样与多采样重复点位的高通量全长群落结构解析</p>
+            <h2 class="title">{{ t('blast.diversity_modal.title') }}</h2>
+            <p class="subtitle">{{ t('blast.diversity_modal.subtitle') }}</p>
           </div>
         </div>
         <div class="header-right">
           <!-- 新建分析按钮 -->
-          <button v-if="results && !isRunning" class="btn-tool-neo" @click="resetToNewAnalysis" title="导入新测序包进行分析">
+          <button type="button" v-if="results && !isRunning" class="btn-tool-neo" @click="resetToNewAnalysis" :title="t('blast.diversity_modal.new_title')">
             <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
             </svg>
-            <span>新建分析</span>
+            <span>{{ t('blast.diversity_modal.new_btn') }}</span>
           </button>
 
           <!-- 历史记录按钮 -->
-          <button class="btn-tool-neo" :class="{ active: showHistoryDrawer }" @click="toggleHistoryDrawer" title="查看或管理历史多样性分析结果">
+          <button type="button" class="btn-tool-neo" :class="{ active: showHistoryDrawer }" @click="toggleHistoryDrawer" :title="t('blast.diversity_modal.history_title')">
             <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <circle cx="12" cy="12" r="9" stroke-width="2"/>
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v5l3 3"/>
             </svg>
-            <span>历史分析 ({{ historyTasks.length }})</span>
+            <span>{{ t('blast.diversity_modal.history_btn', { count: historyTasks.length }) }}</span>
           </button>
 
           <!-- 词条翻译按钮 (和原版 BLAST 一致) -->
           <button 
+            type="button"
             v-if="results && !isRunning" 
             class="btn-tool-neo" 
             :class="{ 'is-loading': isTranslating }" 
             @click="translateAllTaxa" 
-            title="一键将检出物种拉丁学名翻译为中文规范译名"
+            :title="t('blast.diversity_modal.translate_title')"
           >
             <svg class="btn-icon-svg" :class="{ 'spin-anim': isTranslating }" viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/>
             </svg>
-            <span>{{ isTranslating ? '正在翻译...' : '词条翻译' }}</span>
+            <span>{{ isTranslating ? t('blast.diversity_modal.translating') : t('blast.diversity_modal.translate_btn') }}</span>
           </button>
 
-          <button v-if="results" class="btn-export-neo" @click="exportExcel">
+          <button type="button" v-if="results" class="btn-export-neo" @click="exportExcel">
             <svg class="btn-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
             </svg>
-            <span>导出 Excel 报告</span>
+            <span>{{ t('blast.diversity_modal.export_excel') }}</span>
           </button>
 
           <!-- 浮窗模式下提供关闭按钮 -->
-          <button v-if="!embedded" class="btn-close-neo" @click="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          <button type="button" v-if="!embedded" class="btn-close-neo" @click="close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
       </div>
 
@@ -122,57 +126,62 @@ defineExpose({
           <UniversalUpload 
             type="fasta"
             accept=".zip,.fastq,.fastq.gz"
-            label="拖入生工测序交付压缩包 (例如: 16S_三代测序交付结果.zip) 或 FASTQ 集合"
+            :label="t('blast.diversity_modal.upload_label')"
             @success="handleUploadSuccess"
           />
         </div>
 
         <div v-if="detectedPackage" class="detect-badge-card">
-          <div class="badge-status-tag">识别成功</div>
+          <div class="badge-status-tag">{{ t('blast.diversity_modal.detected_badge') }}</div>
           <div class="detect-info">
             <span class="name">{{ detectedPackage.file_name }}</span>
             <span class="desc">
-              检测到 <strong>{{ detectedPackage.fastq_count }} 个</strong> 独立样本的单分子 FASTQ 数据（生工三代测序标准交付件）
+              {{ t('blast.diversity_modal.detected_desc', { count: detectedPackage.fastq_count }) }}
             </span>
           </div>
-          <button class="btn-start-action" @click="startAnalysis">
-            立即启动多样性还原分析
+          <button type="button" class="btn-start-action" @click="startAnalysis">
+            {{ t('blast.diversity_modal.start_now') }}
           </button>
         </div>
         <div v-else-if="currentFilePath" class="fallback-launch">
-          <button class="btn-start-action" @click="startAnalysis">
-            开始分析该文件
+          <button type="button" class="btn-start-action" @click="startAnalysis">
+            {{ t('blast.diversity_modal.start_file') }}
           </button>
         </div>
 
         <!-- 首页快捷历史记录卡片区 (类似单样本查询) -->
         <div v-if="!detectedPackage && historyTasks.length > 0" class="recent-history-section">
           <div class="recent-header">
-            <span class="recent-title">历史分析记录 (点击直接载入查看)</span>
-            <button class="recent-all-btn" @click="showHistoryDrawer = true">
-              查看全部历史 ({{ historyTasks.length }})
+            <span class="recent-title">{{ t('blast.diversity_modal.recent_title') }}</span>
+            <button type="button" class="recent-all-btn" @click="showHistoryDrawer = true">
+              {{ t('blast.diversity_modal.view_all_history', { count: historyTasks.length }) }}
             </button>
           </div>
           <div class="recent-task-grid">
             <div 
-              v-for="t in historyTasks.slice(0, 3)" 
-              :key="t.task_id" 
+              v-for="task in historyTasks.slice(0, 3)" 
+              :key="task.task_id" 
               class="recent-task-item"
-              @click="selectHistoryTask(t)"
+              role="button"
+              tabindex="0"
+              @click="selectHistoryTask(task)"
+              @keydown.enter.prevent="selectHistoryTask(task)"
+              @keydown.space.prevent="selectHistoryTask(task)"
             >
               <div class="recent-item-top">
-                <span class="item-name" :title="t.task_name">{{ t.task_name }}</span>
-                <span class="item-status" :class="t.status">{{ getStatusLabel(t.status) }}</span>
+                <span class="item-name" :title="task.task_name">{{ task.task_name }}</span>
+                <span class="item-status" :class="task.status">{{ getStatusLabel(task.status) }}</span>
               </div>
               <div class="recent-item-meta">
-                <span>{{ formatTime(t.completed_at || t.created_at) }}</span>
-                <span>{{ t.total_samples }} 点位 · {{ formatReadsCount(t.total_reads) }} Reads</span>
+                <span>{{ formatTime(task.completed_at || task.created_at) }}</span>
+                <span>{{ task.total_samples }} · {{ formatReadsCount(task.total_reads) }} Reads</span>
               </div>
               <div class="recent-item-actions">
                 <button 
+                  type="button"
                   class="btn-item-del" 
-                  title="删除此任务"
-                  @click.stop="deleteHistoryTask(t, $event)"
+                  :title="t('blast.diversity_modal.delete_task_title')"
+                  @click.stop="deleteHistoryTask(task, $event)"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />

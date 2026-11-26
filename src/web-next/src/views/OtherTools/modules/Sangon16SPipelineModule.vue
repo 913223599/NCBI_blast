@@ -4,6 +4,7 @@
  * 核心状态机与异步流水线调度已拆离至 ./sangon_16s/useSangonPipeline.ts
  */
 import { ref } from 'vue'
+import { useI18n } from '../../../locales'
 import PathField from '../components/PathField.vue'
 import CleanupDialog from '../components/CleanupDialog.vue'
 import PaginationBar from '../components/PaginationBar.vue'
@@ -14,6 +15,7 @@ import SangonAccountModal from '../components/SangonAccountModal.vue'
 import MailComposeModal from '../components/MailComposeModal.vue'
 import { useSangonPipeline } from './sangon_16s/useSangonPipeline'
 
+const { t } = useI18n()
 const mailRecordsRef = ref<InstanceType<typeof SangonMailRecords> | null>(null)
 
 const {
@@ -46,44 +48,44 @@ const {
   <div class="sangon-module">
     <!-- 流程步骤 -->
     <div class="steps-strip">
-      <div class="step-pill"><span>1</span> 检查新订单</div>
+      <div class="step-pill"><span>1</span> {{ t('other.sangon.step1') }}</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>2</span> 自动 / 网页下载</div>
+      <div class="step-pill"><span>2</span> {{ t('other.sangon.step2') }}</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>3</span> 认领下载包</div>
+      <div class="step-pill"><span>3</span> {{ t('other.sangon.step3') }}</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>4</span> 解压提取</div>
+      <div class="step-pill"><span>4</span> {{ t('other.sangon.step4') }}</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>5</span> 16S BLAST</div>
+      <div class="step-pill"><span>5</span> {{ t('other.sangon.step5') }}</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>6</span> 翻译导出</div>
+      <div class="step-pill"><span>6</span> {{ t('other.sangon.step6') }}</div>
       <div class="step-sep">&rarr;</div>
-      <div class="step-pill"><span>7</span> 邮件发送</div>
+      <div class="step-pill"><span>7</span> {{ t('other.sangon.step7') }}</div>
     </div>
 
     <!-- 指标 -->
     <div class="metrics-row">
       <div class="metric-card">
-        <div class="metric-label">数据根目录</div>
-        <div class="metric-val" :class="rootExists ? 'ok' : 'warn'">{{ rootExists ? '已就绪' : '不存在' }}</div>
+        <div class="metric-label">{{ t('other.sangon.metric_root') }}</div>
+        <div class="metric-val" :class="rootExists ? 'ok' : 'warn'">{{ rootExists ? t('other.sangon.ready') : t('other.sangon.missing_dir') }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">本地 16S 库</div>
-        <div class="metric-val" :class="db16sReady ? 'ok' : 'warn'">{{ db16sReady ? '已就绪' : '缺失' }}</div>
+        <div class="metric-label">{{ t('other.sangon.metric_db16s') }}</div>
+        <div class="metric-val" :class="db16sReady ? 'ok' : 'warn'">{{ db16sReady ? t('other.sangon.ready') : t('other.sangon.missing') }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">已完成 / 有效订单</div>
+        <div class="metric-label">{{ t('other.sangon.metric_orders') }}</div>
         <div class="metric-val">{{ completedOrdersCount }} / {{ activeOrders.length }}</div>
-        <div v-if="ignoredOrders.length > 0" class="metric-sub">已忽略 {{ ignoredOrders.length }} 个（移至已忽略标签）</div>
+        <div v-if="ignoredOrders.length > 0" class="metric-sub">{{ t('other.sangon.ignored_orders', { count: ignoredOrders.length }) }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">已鉴定样本</div>
+        <div class="metric-label">{{ t('other.sangon.metric_samples') }}</div>
         <div class="metric-val">{{ totalIdentifiedSamples }}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-label">运行状态</div>
+        <div class="metric-label">{{ t('other.sangon.metric_status') }}</div>
         <div class="metric-val" :class="runtime.running ? 'running' : 'idle'">
-          {{ runtime.running ? `运行中 (${runtime.progress}%)` : '空闲' }}
+          {{ runtime.running ? t('other.sangon.running_pct', { pct: runtime.progress }) : t('other.sangon.status_idle') }}
         </div>
         <div class="metric-sub" :title="runtime.last_message || ''">{{ runtime.last_message || '-' }}</div>
       </div>
@@ -92,40 +94,41 @@ const {
     <!-- 目录完整路径展示与修改迁移 -->
     <div class="paths-panel">
       <PathField
-        label="生工 16S 订单根目录（修改后自动迁移全部订单）"
+        :label="t('other.sangon.root_label')"
         :path="sangonRoot"
         :busy="busy || runtime.running"
         @save="handleSaveRoot"
         @open="openLocalPath"
       />
       <PathField
-        label="浏览器下载目录（扫描已下载的生工 *.zip 测序包，修改后不迁移原文件）"
+        :label="t('other.sangon.downloads_label')"
         :path="downloadsDir"
         :busy="busy || runtime.running"
-        save-label="保存目录"
-        hint="仅切换浏览器下载目录用于识别生工测序压缩包，不会移动目录中的已有文件。"
+        :save-label="t('other.sangon.save_dir')"
+        :hint="t('other.sangon.downloads_hint')"
         @save="handleSaveDownloadsDir"
         @open="openLocalPath"
       />
       <div v-if="claimableCandidates.length > 0" class="pending-dl-bar">
         <div class="pending-dl-header">
           <div class="pending-dl-title">
-            <strong>发现 {{ claimableCandidates.length }} 个未归档测序压缩包（位于浏览器下载目录）</strong>
+            <strong>{{ t('other.sangon.unclaimed_title', { count: claimableCandidates.length }) }}</strong>
             <span class="pending-dl-desc">
               “认领”是指将从生工网页手动下载的 .zip 复制归档到对应订单「原始压缩包/」目录以便自动解压比对（保留下载原文件）；已处理或无需比对可点单包右侧「忽略」。
             </span>
           </div>
           <div class="pending-dl-actions">
             <button
+              type="button"
               v-if="claimableCandidates.some(c => Boolean(c.matched_dir_name))"
               class="btn-mini primary"
               :disabled="busy || runtime.running"
               @click="handleImportDownloads(false)"
             >
-              认领已匹配订单
+              {{ t('other.sangon.claim_matched') }}
             </button>
-            <button class="btn-mini" :disabled="busy || runtime.running" @click="handleImportDownloads(true)">
-              全部新建并认领
+            <button type="button" class="btn-mini" :disabled="busy || runtime.running" @click="handleImportDownloads(true)">
+              {{ t('other.sangon.claim_all_new') }}
             </button>
           </div>
         </div>
@@ -141,18 +144,20 @@ const {
               {{ cand.matched_dir_name ? `匹配 ${cand.matched_dir_name}` : '尚无订单目录' }}
             </span>
             <button
+              type="button"
               class="chip-btn primary"
               :disabled="busy || runtime.running"
               @click="handleClaimSingleCandidate(cand)"
             >
-              {{ cand.matched_dir_name ? '归档' : '建目录并归档' }}
+              {{ cand.matched_dir_name ? t('other.sangon.archive_btn') : t('other.sangon.create_and_archive') }}
             </button>
             <button
+              type="button"
               class="chip-btn"
               :disabled="busy || runtime.running"
               @click="handleIgnoreOrders([cand.order_no], true, '从待认领下载包忽略')"
             >
-              忽略
+              {{ t('other.sangon.ignore_btn') }}
             </button>
           </div>
         </div>

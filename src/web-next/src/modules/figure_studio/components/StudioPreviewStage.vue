@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, type CSSProperties } from 'vue'
+import { useI18n } from '../../../locales'
 import { formatFileSize, isImagePreviewFormat, isPdfPreviewFormat } from '../../phylo/core/FigurePreviewHelper'
 import { studioApi } from '../api/studioApi'
 import type { StudioFigureFile, StudioRenderResponse } from '../types/studio'
 
+const { t } = useI18n()
 const MIN_SCALE = 0.08
 const MAX_SCALE = 8.0
 
@@ -175,7 +177,7 @@ function onImageLoad(e: Event): void {
 
 function onImageError(): void {
   imgLoading.value = false
-  loadError.value = '预览图加载失败，请尝试重新生成或点击重试。'
+  loadError.value = t('studio.stage.img_error')
 }
 
 function downloadFile(fname: string): void {
@@ -229,42 +231,45 @@ onUnmounted(() => {
         <div v-if="pngFile || svgFile" class="fmt-switch">
           <button
             v-if="pngFile"
+            type="button"
             class="fmt-btn"
             :class="{ active: activeFile?.filename === pngFile.filename }"
             @click="selectedFilename = pngFile.filename"
           >
-            PNG 高清位图
+            {{ t('studio.stage.png_btn') }}
           </button>
           <button
             v-if="svgFile"
+            type="button"
             class="fmt-btn"
             :class="{ active: activeFile?.filename === svgFile.filename }"
             @click="selectedFilename = svgFile.filename"
           >
-            SVG 矢量图
+            {{ t('studio.stage.svg_btn') }}
           </button>
         </div>
-        <span v-else class="tb-title-muted">出版级实时成图预览</span>
+        <span v-else class="tb-title-muted">{{ t('studio.stage.title_muted') }}</span>
       </div>
 
       <div class="tb-right">
         <template v-if="activeFile && isImage">
-          <button class="tb-btn" :disabled="imgLoading" @click="zoomByCenter(0.83)">缩小</button>
+          <button type="button" class="tb-btn" :disabled="imgLoading" @click="zoomByCenter(0.83)">{{ t('studio.stage.zoom_out') }}</button>
           <span class="zoom-readout">{{ zoomPercent }}%</span>
-          <button class="tb-btn" :disabled="imgLoading" @click="zoomByCenter(1.2)">放大</button>
-          <button class="tb-btn" :disabled="imgLoading" @click="fitToStage">适应窗口</button>
-          <button class="tb-btn" :disabled="imgLoading" @click="zoomToActual">100%</button>
+          <button type="button" class="tb-btn" :disabled="imgLoading" @click="zoomByCenter(1.2)">{{ t('studio.stage.zoom_in') }}</button>
+          <button type="button" class="tb-btn" :disabled="imgLoading" @click="fitToStage">{{ t('studio.stage.fit_window') }}</button>
+          <button type="button" class="tb-btn" :disabled="imgLoading" @click="zoomToActual">100%</button>
           <span class="tb-sep"></span>
         </template>
 
         <button
           v-for="f in figures"
           :key="f.filename"
+          type="button"
           class="tb-btn dl-btn"
-          :title="`下载 ${f.filename} (${formatFileSize(f.size_bytes)})`"
+          :title="t('studio.stage.download_title', { filename: f.filename, size: formatFileSize(f.size_bytes) })"
           @click="downloadFile(f.filename)"
         >
-          下载 {{ f.format.toUpperCase() }}
+          {{ t('studio.stage.download_fmt', { format: f.format.toUpperCase() }) }}
         </button>
       </div>
     </div>
@@ -281,7 +286,7 @@ onUnmounted(() => {
       @dblclick="toggleFitOrActual"
     >
       <div v-if="loading" class="stage-overlay">
-        <div class="overlay-card">正在后台高精度渲染 PDF / SVG / PNG 图件...</div>
+        <div class="overlay-card">{{ t('studio.stage.rendering_overlay') }}</div>
       </div>
 
       <template v-else-if="activeFile && isImage">
@@ -297,12 +302,12 @@ onUnmounted(() => {
           @error="onImageError"
         />
         <div v-if="imgLoading" class="stage-overlay">
-          <div class="overlay-card">正在载入高分辨率图像...</div>
+          <div class="overlay-card">{{ t('studio.stage.img_loading') }}</div>
         </div>
         <div v-if="loadError" class="stage-overlay">
           <div class="overlay-card">
             <div class="err-title">{{ loadError }}</div>
-            <button class="tb-btn" @click="version = Date.now()">重试加载</button>
+            <button type="button" class="tb-btn" @click="version = Date.now()">{{ t('studio.stage.retry') }}</button>
           </div>
         </div>
       </template>
@@ -312,14 +317,14 @@ onUnmounted(() => {
         :key="previewUrl"
         :src="previewUrl"
         class="pdf-frame"
-        title="PDF 出版图预览"
+        :title="t('studio.stage.pdf_title')"
       />
 
       <div v-else class="stage-overlay">
         <div class="overlay-card empty-card">
-          <div class="empty-title">{{ emptyTitle || '科研顶刊绘图舞台' }}</div>
+          <div class="empty-title">{{ emptyTitle || t('studio.stage.empty_title') }}</div>
           <div class="empty-desc">
-            {{ emptyDesc || '请在左侧配置数据源与出版版式参数，点击渲染后将自动在此处打开高清预览，支持光标定点缩放与下载 PDF / SVG / PNG。' }}
+            {{ emptyDesc || t('studio.stage.empty_desc') }}
           </div>
         </div>
       </div>
@@ -337,7 +342,7 @@ onUnmounted(() => {
           <span>{{ naturalW }} x {{ naturalH }} px</span>
         </template>
       </div>
-      <div class="meta-hint">滚轮以鼠标为中心缩放 · 左键拖拽平移 · 双击适应窗口/100%</div>
+      <div class="meta-hint">{{ t('studio.stage.hint') }}</div>
     </div>
   </div>
 </template>

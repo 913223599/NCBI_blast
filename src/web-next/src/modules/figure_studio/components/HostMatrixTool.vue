@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from '../../../locales'
 import { useAppStore } from '../../../stores/app'
 import { studioApi } from '../api/studioApi'
 import type { StudioPaletteType, StudioRenderResponse } from '../types/studio'
 import StudioPreviewStage from './StudioPreviewStage.vue'
 
+const { t } = useI18n()
 const DEFAULT_CSV = `Host_or_Serotype,T5_E1,PRD1,PRDmint,PRDjuniper,KP24_gp300,KLEO13_dep,S2_dep
 E. coli K12,92,88,76,15,5,12,8
 S. enterica LT2,85,94,82,68,8,10,4
@@ -33,7 +35,7 @@ function handleCsvUpload(ev: Event): void {
   const reader = new FileReader()
   reader.onload = () => {
     matrixCsv.value = String(reader.result || '')
-    appStore.showNotification(`已载入表型矩阵: ${file.name}`, 'info')
+    appStore.showNotification(t('studio.host.notify_loaded', { name: file.name }), 'info')
   }
   reader.readAsText(file, 'utf-8')
 }
@@ -54,9 +56,9 @@ async function handleRender(forceDemo = false): Promise<void> {
       formats: ['pdf', 'svg', 'png'],
       dpi: dpi.value,
     })
-    appStore.showNotification('已生成出版级宿主谱与特异性矩阵图', 'success')
+    appStore.showNotification(t('studio.host.notify_success'), 'success')
   } catch (e) {
-    appStore.showNotification(`渲染失败: ${String(e)}`, 'error')
+    appStore.showNotification(t('studio.common.render_failed', { error: String(e) }), 'error')
   } finally {
     loading.value = false
   }
@@ -67,43 +69,43 @@ async function handleRender(forceDemo = false): Promise<void> {
   <div class="tool-layout">
     <aside class="tool-sidebar">
       <div class="sec-head">
-        <h3>双树宿主谱热图与特异性矩阵</h3>
-        <button class="btn-link" @click="handleRender(true)">载入示例出图</button>
+        <h3>{{ t('studio.host.title') }}</h3>
+        <button type="button" class="btn-link" @click="handleRender(true)">{{ t('studio.common.load_demo') }}</button>
       </div>
       <p class="sec-desc">
-        对标 Nature Communications 2024 Fig. 4 & 2026 DepoCatalog Fig. 2：左挂宿主聚类树 + 底挂噬菌体树 + 连续梯度/对角化特异性矩阵，助力鸡尾酒配伍发表。
+        {{ t('studio.host.desc') }}
       </p>
 
       <div class="field">
-        <label>期刊版式</label>
+        <label>{{ t('studio.common.journal_layout') }}</label>
         <select v-model="mode" class="neo-select">
-          <option value="dual_tree_heatmap">双进化树联动连续抑制热图 (EOP / 生长抑制)</option>
-          <option value="sparse_specificity">对角化血清型/宿主特异性稀疏矩阵 (鸡尾酒设计)</option>
+          <option value="dual_tree_heatmap">{{ t('studio.host.mode_dual') }}</option>
+          <option value="sparse_specificity">{{ t('studio.host.mode_sparse') }}</option>
         </select>
       </div>
 
       <div class="field">
-        <label>粘贴实验 CSV / TSV 矩阵（首行为噬菌体列，首列为菌株行）</label>
+        <label>{{ t('studio.host.csv_label') }}</label>
         <textarea v-model="matrixCsv" rows="7" class="neo-textarea"></textarea>
       </div>
 
       <div class="field">
-        <label>或上传 CSV / TSV 文件</label>
+        <label>{{ t('studio.host.upload_label') }}</label>
         <input type="file" accept=".csv,.tsv,.txt" class="neo-file" @change="handleCsvUpload" />
       </div>
 
       <div class="form-row">
         <div class="field">
-          <label>期刊色板</label>
+          <label>{{ t('studio.common.palette') }}</label>
           <select v-model="palette" class="neo-select">
-            <option value="nature">Nature / 蓝紫梯度</option>
-            <option value="lancet">Lancet</option>
-            <option value="okabe_ito">Okabe-Ito</option>
-            <option value="monochrome">黑白灰阶</option>
+            <option value="nature">{{ t('studio.common.palette_nature_bp') }}</option>
+            <option value="lancet">{{ t('studio.common.palette_lancet') }}</option>
+            <option value="okabe_ito">{{ t('studio.common.palette_okabe') }}</option>
+            <option value="monochrome">{{ t('studio.common.palette_mono_gray') }}</option>
           </select>
         </div>
         <div class="field">
-          <label>PNG 分辨率</label>
+          <label>{{ t('studio.common.dpi') }}</label>
           <select v-model.number="dpi" class="neo-select">
             <option :value="300">300 DPI</option>
             <option :value="600">600 DPI</option>
@@ -112,33 +114,33 @@ async function handleRender(forceDemo = false): Promise<void> {
       </div>
 
       <div class="field">
-        <label>图件标题</label>
+        <label>{{ t('studio.common.figure_title') }}</label>
         <input v-model="title" class="neo-input" />
       </div>
 
       <label class="chk">
         <input type="checkbox" v-model="clusterRows" />
-        <span>自动聚类重排宿主菌株行</span>
+        <span>{{ t('studio.host.chk_rows') }}</span>
       </label>
       <label class="chk">
         <input type="checkbox" v-model="clusterCols" />
-        <span>自动聚类重排噬菌体列</span>
+        <span>{{ t('studio.host.chk_cols') }}</span>
       </label>
       <label class="chk">
         <input type="checkbox" v-model="showValues" />
-        <span>单元格内显示裂解/抑制分值</span>
+        <span>{{ t('studio.host.chk_values') }}</span>
       </label>
 
-      <button class="btn-primary" :disabled="loading" @click="handleRender(false)">
-        {{ loading ? '正在聚类排序并渲染...' : '生成宿主谱矩阵出版图' }}
+      <button type="button" class="btn-primary" :disabled="loading" @click="handleRender(false)">
+        {{ loading ? t('studio.host.btn_rendering') : t('studio.host.btn_submit') }}
       </button>
     </aside>
 
     <StudioPreviewStage
       :result="renderResult"
       :loading="loading"
-      empty-title="双树宿主谱热图与特异性矩阵预览区"
-      empty-desc="直接粘贴 EOP 滴度、斑点试验或生长抑制率 CSV 表格，即可生成与左侧宿主树/底部噬菌体树严丝合缝对齐的高清热图。"
+      :empty-title="t('studio.host.empty_title')"
+      :empty-desc="t('studio.host.empty_desc')"
     />
   </div>
 </template>

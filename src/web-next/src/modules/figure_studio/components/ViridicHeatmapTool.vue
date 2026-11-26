@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useI18n } from '../../../locales'
 import { useAppStore } from '../../../stores/app'
 import { studioApi } from '../api/studioApi'
 import type { StudioPaletteType, StudioPhyloSourceItem, StudioRenderResponse } from '../types/studio'
 import StudioPreviewStage from './StudioPreviewStage.vue'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 const phyloJobs = ref<StudioPhyloSourceItem[]>([])
 const selectedJobId = ref<string>('')
@@ -30,7 +32,7 @@ async function loadSources(): Promise<void> {
     }
   } catch (e) {
     useDemo.value = true
-    appStore.showNotification(`加载历史 ANI 数据源失败: ${String(e)}`, 'warning')
+    appStore.showNotification(t('studio.viridic.notify_load_fail', { error: String(e) }), 'warning')
   }
 }
 
@@ -50,9 +52,9 @@ async function handleRender(forceDemo = false): Promise<void> {
       formats: ['pdf', 'svg', 'png'],
       dpi: dpi.value,
     })
-    appStore.showNotification('已生成出版级 VIRIDIC / ANI 矩阵图', 'success')
+    appStore.showNotification(t('studio.viridic.notify_success'), 'success')
   } catch (e) {
-    appStore.showNotification(`渲染失败: ${String(e)}`, 'error')
+    appStore.showNotification(t('studio.common.render_failed', { error: String(e) }), 'error')
   } finally {
     loading.value = false
   }
@@ -67,17 +69,17 @@ onMounted(() => {
   <div class="tool-layout">
     <aside class="tool-sidebar">
       <div class="sec-head">
-        <h3>VIRIDIC 双向热图与 ANI 矩阵</h3>
-        <button class="btn-link" @click="handleRender(true)">载入示例出图</button>
+        <h3>{{ t('studio.viridic.title') }}</h3>
+        <button type="button" class="btn-link" @click="handleRender(true)">{{ t('studio.common.load_demo') }}</button>
       </div>
       <p class="sec-desc">
-        对标 ICTV 官方 VIRIDIC Fig.4 与 Nature Communications 进化树联动下三角热图，同步展示两两相似性、对齐覆盖度及基因组长度柱图。
+        {{ t('studio.viridic.desc') }}
       </p>
 
       <div class="field">
-        <label>数据来源（来自进化树步骤 1 wgANI 矩阵）</label>
+        <label>{{ t('studio.viridic.source_label') }}</label>
         <select v-model="selectedJobId" class="neo-select" @change="useDemo = !selectedJobId">
-          <option value="">内置示范数据 (Tequintavirus)</option>
+          <option value="">{{ t('studio.viridic.source_demo') }}</option>
           <option v-for="j in phyloJobs" :key="j.job_id" :value="j.job_id">
             {{ j.title || j.job_id }} ({{ j.top_hits_count }} hits)
           </option>
@@ -85,25 +87,25 @@ onMounted(() => {
       </div>
 
       <div class="field">
-        <label>期刊版式</label>
+        <label>{{ t('studio.common.journal_layout') }}</label>
         <select v-model="mode" class="neo-select">
-          <option value="viridic_dual">VIRIDIC 双三角全信息热图 (推荐)</option>
-          <option value="tree_triangle">系统发育树 + 下三角 ANI 联动热图</option>
+          <option value="viridic_dual">{{ t('studio.viridic.mode_dual') }}</option>
+          <option value="tree_triangle">{{ t('studio.viridic.mode_triangle') }}</option>
         </select>
       </div>
 
       <div class="form-row">
         <div class="field">
-          <label>期刊色板</label>
+          <label>{{ t('studio.common.palette') }}</label>
           <select v-model="palette" class="neo-select">
-            <option value="nature">Nature / NPG</option>
-            <option value="monochrome">黑白印刷</option>
-            <option value="lancet">Lancet</option>
-            <option value="okabe_ito">Okabe-Ito</option>
+            <option value="nature">{{ t('studio.common.palette_nature') }}</option>
+            <option value="monochrome">{{ t('studio.common.palette_monochrome') }}</option>
+            <option value="lancet">{{ t('studio.common.palette_lancet') }}</option>
+            <option value="okabe_ito">{{ t('studio.common.palette_okabe') }}</option>
           </select>
         </div>
         <div class="field">
-          <label>PNG 分辨率</label>
+          <label>{{ t('studio.common.dpi') }}</label>
           <select v-model.number="dpi" class="neo-select">
             <option :value="300">300 DPI</option>
             <option :value="600">600 DPI</option>
@@ -112,29 +114,29 @@ onMounted(() => {
       </div>
 
       <div class="field">
-        <label>图件标题</label>
+        <label>{{ t('studio.common.figure_title') }}</label>
         <input v-model="title" class="neo-input" />
       </div>
 
       <label class="chk">
         <input type="checkbox" v-model="clusterReorder" />
-        <span>按层次聚类/拓扑重排行列顺序</span>
+        <span>{{ t('studio.viridic.chk_reorder') }}</span>
       </label>
       <label class="chk">
         <input type="checkbox" v-model="showValues" />
-        <span>单元格内标注相似性百分比数值</span>
+        <span>{{ t('studio.viridic.chk_values') }}</span>
       </label>
 
-      <button class="btn-primary" :disabled="loading" @click="handleRender(false)">
-        {{ loading ? '正在生成 PDF / SVG / PNG...' : '生成 VIRIDIC 出版级矩阵图' }}
+      <button type="button" class="btn-primary" :disabled="loading" @click="handleRender(false)">
+        {{ loading ? t('studio.viridic.btn_rendering') : t('studio.viridic.btn_submit') }}
       </button>
     </aside>
 
     <StudioPreviewStage
       :result="renderResult"
       :loading="loading"
-      empty-title="VIRIDIC 双向相似性热图预览区"
-      empty-desc="可选择已完成第 1 步 ANI 计算的历史任务，或点击「载入示例出图」立即生成 ICTV 标准双三角相似性与覆盖度热图。"
+      :empty-title="t('studio.viridic.empty_title')"
+      :empty-desc="t('studio.viridic.empty_desc')"
     />
   </div>
 </template>

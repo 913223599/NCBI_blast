@@ -3,7 +3,10 @@
  * AssemblyProgress - 基因组组装实时运行进度与遥测日志控制台
  */
 import { ref, watch, nextTick, computed } from 'vue';
+import { useI18n } from '../../../locales';
 import type { AssemblyTaskItem } from '../types';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   task: AssemblyTaskItem;
@@ -29,29 +32,29 @@ const phases = computed(() => {
   const isHybrid = props.task.tech === 'HYBRID' || props.task.config?.params?.mode === 'hybrid';
   if (isHybrid) {
     return [
-      { id: 1, name: '双端质控', threshold: 15 },
-      { id: 2, name: 'Unitig拓扑', threshold: 40 },
-      { id: 3, name: '长读长桥接', threshold: 65 },
-      { id: 4, name: '染色体环化', threshold: 85 },
-      { id: 5, name: '产物评估', threshold: 95 }
+      { id: 1, name: t('assembly.progress.phase.hybrid_1'), threshold: 15 },
+      { id: 2, name: t('assembly.progress.phase.hybrid_2'), threshold: 40 },
+      { id: 3, name: t('assembly.progress.phase.hybrid_3'), threshold: 65 },
+      { id: 4, name: t('assembly.progress.phase.hybrid_4'), threshold: 85 },
+      { id: 5, name: t('assembly.progress.phase.hybrid_5'), threshold: 95 }
     ];
   }
   const isLongRead = props.task.tech === 'NANOPORE' || props.task.tech === 'PACBIO_HIFI';
   if (isLongRead) {
     return [
-      { id: 1, name: '数据质控', threshold: 10 },
-      { id: 2, name: '重叠图构建', threshold: 35 },
-      { id: 3, name: '骨架延伸', threshold: 65 },
-      { id: 4, name: '支架环化', threshold: 80 },
-      { id: 5, name: '序列校正', threshold: 90 }
+      { id: 1, name: t('assembly.progress.phase.long_1'), threshold: 10 },
+      { id: 2, name: t('assembly.progress.phase.long_2'), threshold: 35 },
+      { id: 3, name: t('assembly.progress.phase.long_3'), threshold: 65 },
+      { id: 4, name: t('assembly.progress.phase.long_4'), threshold: 80 },
+      { id: 5, name: t('assembly.progress.phase.long_5'), threshold: 90 }
     ];
   }
   return [
-    { id: 1, name: '数据质控', threshold: 10 },
-    { id: 2, name: 'K-mer建图', threshold: 35 },
-    { id: 3, name: '路径分解', threshold: 65 },
-    { id: 4, name: '支架构建', threshold: 80 },
-    { id: 5, name: '组装评估', threshold: 90 }
+    { id: 1, name: t('assembly.progress.phase.short_1'), threshold: 10 },
+    { id: 2, name: t('assembly.progress.phase.short_2'), threshold: 35 },
+    { id: 3, name: t('assembly.progress.phase.short_3'), threshold: 65 },
+    { id: 4, name: t('assembly.progress.phase.short_4'), threshold: 80 },
+    { id: 5, name: t('assembly.progress.phase.short_5'), threshold: 90 }
   ];
 });
 
@@ -69,20 +72,20 @@ function getPhaseClass(threshold: number, progress: number) {
       <div class="header-row">
         <div class="task-meta">
           <span class="pulse-indicator"></span>
-          <span class="task-title">NGCS 组装计算中: <b>{{ task.name }}</b></span>
+          <span class="task-title">{{ t('assembly.progress.title_prefix') }} <b>{{ task.name }}</b></span>
         </div>
-        <button class="stop-btn" @click="emit('cancel')" title="强制停止当前组装任务">
+        <button type="button" class="stop-btn" @click="emit('cancel')" :title="t('assembly.progress.stop_title')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <rect x="4" y="4" width="16" height="16" rx="2" />
           </svg>
-          <span>终止组装</span>
+          <span>{{ t('assembly.progress.stop_btn') }}</span>
         </button>
       </div>
 
       <!-- 进度条与实时步骤 -->
       <div class="progress-section">
         <div class="progress-info">
-          <span class="current-step-text">{{ task.last_step || '正在执行 NGCS 拓扑重构...' }}</span>
+          <span class="current-step-text">{{ task.last_step || t('assembly.progress.default_step') }}</span>
           <span class="percent-text">{{ Math.round(task.progress || 0) }}%</span>
         </div>
         <div class="progress-bar-bg">
@@ -119,7 +122,7 @@ function getPhaseClass(threshold: number, progress: number) {
         </div>
         <div ref="logContainer" class="console-body scroll-v">
           <div v-if="logs.length === 0" class="empty-log">
-            等待底层组装引擎流式日志输出...
+            {{ t('assembly.progress.empty_log') }}
           </div>
           <div v-for="(line, idx) in logs" :key="idx" class="log-line">
             <span class="log-prefix">&gt;</span>

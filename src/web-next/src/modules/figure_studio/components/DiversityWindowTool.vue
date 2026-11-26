@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useI18n } from '../../../locales'
 import { useAppStore } from '../../../stores/app'
 import { studioApi } from '../api/studioApi'
 import type { StudioAnnotationSourceItem, StudioPaletteType, StudioRenderResponse } from '../types/studio'
 import StudioPreviewStage from './StudioPreviewStage.vue'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 const annoTasks = ref<StudioAnnotationSourceItem[]>([])
 const refTaskId = ref<string>('')
@@ -25,10 +27,10 @@ async function loadSources(): Promise<void> {
     annoTasks.value = res.annotation_tasks
     if (annoTasks.value.length >= 2) {
       refTaskId.value = annoTasks.value[0]!.task_id
-      compareIds.value = annoTasks.value.slice(1, 5).map((t) => t.task_id)
+      compareIds.value = annoTasks.value.slice(1, 5).map((item) => item.task_id)
     }
   } catch (e) {
-    appStore.showNotification(`加载注释任务失败: ${String(e)}`, 'warning')
+    appStore.showNotification(t('studio.common.load_anno_failed', { error: String(e) }), 'warning')
   }
 }
 
@@ -59,9 +61,9 @@ async function handleRender(forceDemo = false): Promise<void> {
       formats: ['pdf', 'svg', 'png'],
       dpi: dpi.value,
     })
-    appStore.showNotification('已生成全基因组核苷酸多样性热点图', 'success')
+    appStore.showNotification(t('studio.diversity.notify_success'), 'success')
   } catch (e) {
-    appStore.showNotification(`渲染失败: ${String(e)}`, 'error')
+    appStore.showNotification(t('studio.common.render_failed', { error: String(e) }), 'error')
   } finally {
     loading.value = false
   }
@@ -76,43 +78,43 @@ onMounted(() => {
   <div class="tool-layout">
     <aside class="tool-sidebar">
       <div class="sec-head">
-        <h3>同种多株系多样性 (Pi) 热点图</h3>
-        <button class="btn-link" @click="handleRender(true)">载入示例出图</button>
+        <h3>{{ t('studio.diversity.title') }}</h3>
+        <button type="button" class="btn-link" @click="handleRender(true)">{{ t('studio.common.load_demo') }}</button>
       </div>
       <p class="sec-desc">
-        对标 Nature Communications 2024 Fig. 2c：在同种进化枝枝长极短时，用滑动窗口多样性曲线与基因内部蓝→黄→红热图精准锁定尾丝/RBP 等高变基因。
+        {{ t('studio.diversity.desc') }}
       </p>
 
       <div class="field">
-        <label>坐标参考注释基因组</label>
+        <label>{{ t('studio.diversity.ref_label') }}</label>
         <select v-model="refTaskId" class="neo-select">
-          <option value="">内置示范同种序列集</option>
-          <option v-for="t in annoTasks" :key="t.task_id" :value="t.task_id">
-            {{ t.task_name }} ({{ t.feature_count }} CDS)
+          <option value="">{{ t('studio.diversity.ref_demo') }}</option>
+          <option v-for="task in annoTasks" :key="task.task_id" :value="task.task_id">
+            {{ task.task_name }} ({{ task.feature_count }} CDS)
           </option>
         </select>
       </div>
 
       <div v-if="annoTasks.length > 1" class="field">
-        <label>加入对比的同种注释任务（已选 {{ compareIds.length }} 个）</label>
+        <label>{{ t('studio.diversity.compare_label', { count: compareIds.length }) }}</label>
         <div class="check-list">
           <label
-            v-for="t in annoTasks.filter((x) => x.task_id !== refTaskId)"
-            :key="t.task_id"
+            v-for="task in annoTasks.filter((x) => x.task_id !== refTaskId)"
+            :key="task.task_id"
             class="check-item"
           >
             <input
               type="checkbox"
-              :checked="compareIds.includes(t.task_id)"
-              @change="toggleCompare(t.task_id)"
+              :checked="compareIds.includes(task.task_id)"
+              @change="toggleCompare(task.task_id)"
             />
-            <span class="check-name">{{ t.task_name }}</span>
+            <span class="check-name">{{ task.task_name }}</span>
           </label>
         </div>
       </div>
 
       <div class="field">
-        <label>或补充粘贴多条同种 FASTA 序列（可选）</label>
+        <label>{{ t('studio.diversity.fasta_label') }}</label>
         <textarea
           v-model="fastaContent"
           rows="3"
@@ -123,25 +125,25 @@ onMounted(() => {
 
       <div class="form-row">
         <div class="field">
-          <label>滑动窗口 (bp)</label>
+          <label>{{ t('studio.diversity.window_size') }}</label>
           <input type="number" v-model.number="windowSize" min="50" max="5000" class="neo-input" />
         </div>
         <div class="field">
-          <label>步长 (bp)</label>
+          <label>{{ t('studio.diversity.step_size') }}</label>
           <input type="number" v-model.number="stepSize" min="10" max="1000" class="neo-input" />
         </div>
       </div>
 
       <div class="form-row">
         <div class="field">
-          <label>期刊色板</label>
+          <label>{{ t('studio.common.palette') }}</label>
           <select v-model="palette" class="neo-select">
-            <option value="nature">Nature / 蓝黄红</option>
-            <option value="monochrome">黑白灰阶</option>
+            <option value="nature">{{ t('studio.common.palette_nature_byr') }}</option>
+            <option value="monochrome">{{ t('studio.common.palette_mono_gray') }}</option>
           </select>
         </div>
         <div class="field">
-          <label>PNG 分辨率</label>
+          <label>{{ t('studio.common.dpi') }}</label>
           <select v-model.number="dpi" class="neo-select">
             <option :value="300">300 DPI</option>
             <option :value="600">600 DPI</option>
@@ -150,25 +152,25 @@ onMounted(() => {
       </div>
 
       <div class="field">
-        <label>图件标题</label>
+        <label>{{ t('studio.common.figure_title') }}</label>
         <input v-model="title" class="neo-input" />
       </div>
 
       <label class="chk">
         <input type="checkbox" v-model="showGeneTable" />
-        <span>底部附 4 栏基因编号-功能产物对照表</span>
+        <span>{{ t('studio.diversity.chk_gene_table') }}</span>
       </label>
 
-      <button class="btn-primary" :disabled="loading" @click="handleRender(false)">
-        {{ loading ? '正在计算滑窗 Pi 多样性...' : '生成核苷酸多样性热点图' }}
+      <button type="button" class="btn-primary" :disabled="loading" @click="handleRender(false)">
+        {{ loading ? t('studio.diversity.btn_rendering') : t('studio.diversity.btn_submit') }}
       </button>
     </aside>
 
     <StudioPreviewStage
       :result="renderResult"
       :loading="loading"
-      empty-title="全基因组核苷酸多样性 (Pi) 热点图预览区"
-      empty-desc="选用同一个属/种的多株噬菌体序列，即可量化不同基因窗口的变异速率并用红蓝梯度填入基因箭头内。"
+      :empty-title="t('studio.diversity.empty_title')"
+      :empty-desc="t('studio.diversity.empty_desc')"
     />
   </div>
 </template>

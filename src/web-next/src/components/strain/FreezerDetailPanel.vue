@@ -3,8 +3,8 @@
     <!-- 空状态 -->
     <div v-if="!strain.activeFreezer" class="empty-state">
       <div class="empty-icon"></div>
-      <h2>选择冰箱查看详情</h2>
-      <p>从左侧列表选择一个冰箱，查看其内部结构和样本分布</p>
+      <h2>{{ t('strain.freezer.empty_title') }}</h2>
+      <p>{{ t('strain.freezer.empty_desc') }}</p>
     </div>
 
     <!-- 冰箱详情 -->
@@ -20,19 +20,16 @@
               <span class="meta-text">{{ strain.activeFreezer?.location }}</span>
             </div>
             <div class="freezer-stats">
-              {{ strain.activeFreezer?.shelves.length }} 层 · 
-              {{ getTotalCabinets() }} 柜 · 
-              {{ getTotalDrawers() }} 抽屉 · 
-              {{ totalPositions }} 个存储位
+              {{ t('strain.freezer.stats', { shelves: strain.activeFreezer?.shelves.length ?? 0, cabinets: getTotalCabinets(), drawers: getTotalDrawers(), positions: totalPositions }) }}
             </div>
           </div>
         </div>
         <div class="header-actions">
-          <button class="btn-edit" @click="editFreezer">
-            编辑
+          <button type="button" class="btn-edit" @click="editFreezer">
+            {{ t('strain.freezer.edit_btn') }}
           </button>
-          <button class="btn-add-shelf" @click="addShelf">
-            + 添加层
+          <button type="button" class="btn-add-shelf" @click="addShelf">
+            {{ t('strain.freezer.add_shelf_btn') }}
           </button>
         </div>
       </div>
@@ -42,35 +39,39 @@
         <!-- 层级导航 -->
         <div class="level-navigation">
           <button
+            type="button"
             class="nav-btn"
             :class="{ active: currentLevel === 'shelf' }"
             @click="navigateToLevel('shelf')"
           >
-            {{ selectedShelf ? selectedShelf.name : '层' }}
+            {{ selectedShelf ? selectedShelf.name : t('strain.freezer.level_shelf') }}
           </button>
           <button
+            type="button"
             v-if="selectedShelf"
             class="nav-btn"
             :class="{ active: currentLevel === 'cabinet' }"
             @click="navigateToLevel('cabinet')"
           >
-            {{ selectedCabinet ? selectedCabinet.name : '柜' }}
+            {{ selectedCabinet ? selectedCabinet.name : t('strain.freezer.level_cabinet') }}
           </button>
           <button
+            type="button"
             v-if="selectedCabinet"
             class="nav-btn"
             :class="{ active: currentLevel === 'drawer' }"
             @click="navigateToLevel('drawer')"
           >
-            {{ selectedDrawer ? selectedDrawer.name : '抽屉' }}
+            {{ selectedDrawer ? selectedDrawer.name : t('strain.freezer.level_drawer') }}
           </button>
           <button
+            type="button"
             v-if="selectedDrawer"
             class="nav-btn"
             :class="{ active: currentLevel === 'box' }"
             @click="navigateToLevel('box')"
           >
-            冻存盒
+            {{ t('strain.freezer.level_box') }}
           </button>
         </div>
 
@@ -284,22 +285,22 @@
                     <div class="preview-main-scroll">
                       <div class="preview-details">
                         <div class="p-detail-item">
-                          <span class="p-label">编号</span>
+                          <span class="p-label">{{ t('strain.freezer.preview_accession') }}</span>
                           <span class="p-value">{{ hoveredSample.accession || 'N/A' }}</span>
                         </div>
                         <div class="p-detail-item">
-                          <span class="p-label">物种</span>
-                          <span class="p-value">{{ hoveredSample.species || '未知' }}</span>
+                          <span class="p-label">{{ t('strain.freezer.preview_species') }}</span>
+                          <span class="p-value">{{ hoveredSample.species || t('strain.freezer.preview_unknown') }}</span>
                         </div>
                         <div class="p-detail-item">
-                          <span class="p-label">位置</span>
+                          <span class="p-label">{{ t('strain.freezer.preview_position') }}</span>
                           <span class="p-value-pos">{{ hoveredSample.position }}</span>
                         </div>
                       </div>
 
                       <!-- 动态元数据展示 -->
                       <div class="preview-metadata-section">
-                        <h5 class="section-title">业务元数据</h5>
+                        <h5 class="section-title">{{ t('strain.freezer.preview_metadata') }}</h5>
                         <div class="p-meta-grid">
                           <div v-for="(val, key) in getFilteredMetadata(hoveredSample.metadata)" :key="key" class="p-meta-item">
                             <span class="p-meta-label">{{ translateMetadataKey(String(key)) }}</span>
@@ -309,11 +310,11 @@
                       </div>
                     </div>
 
-                    <div class="preview-hint">点击单元格修改详情</div>
+                    <div class="preview-hint">{{ t('strain.freezer.preview_click_hint') }}</div>
                   </div>
                   <div v-else class="preview-placeholder">
                     <div class="ph-icon"></div>
-                    <p>悬停在槽位上查看详情</p>
+                    <p>{{ t('strain.freezer.preview_hover_hint') }}</p>
                   </div>
                 </div>
 

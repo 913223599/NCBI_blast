@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { isKnownLocaleKey, STATIC_LOCALES, translateKey, type LocaleKey } from '../../locales'
 import { useAppStore } from '../../stores/app'
 import AnalysisView from '../AnalysisView.vue'
 import FigureStudioView from '../FigureStudioView.vue'
 import OtherToolsView from '../OtherToolsView.vue'
 import AssemblyResults from '../Assembly/components/AssemblyResults.vue'
+import AssemblyHistory from '../Assembly/components/AssemblyHistory.vue'
+import AssemblyProgress from '../Assembly/components/AssemblyProgress.vue'
+import StrainSidebar from '../../components/strain/StrainSidebar.vue'
+import ViridicHeatmapTool from '../../modules/figure_studio/components/ViridicHeatmapTool.vue'
+import HostMatrixTool from '../../modules/figure_studio/components/HostMatrixTool.vue'
 
 describe('Phase 8 Wave 2-4 全站核心业务视图中英双语即时切换测试', () => {
   beforeEach(() => {
@@ -69,6 +75,55 @@ describe('Phase 8 Wave 2-4 全站核心业务视图中英双语即时切换测�
     expect(studio.text()).not.toContain('studio.hub.title')
     expect(other.text()).not.toContain('other.hub.title')
     expect(asmResults.text()).not.toContain('assembly.results.')
+
+    appStore.setLocale('zh_CN')
+  })
+
+  it('Batch P2A 深层子组件与强类型 LocaleKey 应支持中英即时切换且无键名泄漏', async () => {
+    const appStore = useAppStore()
+    appStore.setLocale('zh_CN')
+
+    const sampleKey: LocaleKey = 'phylo.wb.mode.phage_taxonomy'
+    expect(isKnownLocaleKey(sampleKey)).toBe(true)
+    expect(isKnownLocaleKey('non.existent.key.xyz')).toBe(false)
+    expect(translateKey(sampleKey, 'en_US')).toBe('Phage Taxonomy (8-Step Pipeline)')
+    expect(Object.keys(STATIC_LOCALES.zh_CN).length).toBe(Object.keys(STATIC_LOCALES.en_US).length)
+
+    const asmHistory = mount(AssemblyHistory, {
+      props: { tasks: [], activeId: '', isLoading: false },
+    })
+    const asmProgress = mount(AssemblyProgress, {
+      props: {
+        task: { id: 'T1', name: 'Demo_Phage', status: 'running', tech: 'ILLUMINA', progress: 45 } as any,
+        logs: [],
+      },
+    })
+    const sidebar = mount(StrainSidebar)
+    const viridic = mount(ViridicHeatmapTool)
+    const hostMatrix = mount(HostMatrixTool)
+
+    expect(asmHistory.text()).toContain('暂无拼接历史')
+    expect(asmProgress.text()).toContain('终止组装')
+    expect(sidebar.text()).toContain('保藏管理')
+    expect(viridic.text()).toContain('VIRIDIC 双向热图与 ANI 矩阵')
+    expect(hostMatrix.text()).toContain('双树宿主谱热图与特异性矩阵')
+
+    appStore.setLocale('en_US')
+    await asmHistory.vm.$nextTick()
+    await asmProgress.vm.$nextTick()
+    await sidebar.vm.$nextTick()
+    await viridic.vm.$nextTick()
+    await hostMatrix.vm.$nextTick()
+
+    expect(asmHistory.text()).toContain('No assembly history yet')
+    expect(asmProgress.text()).toContain('Stop Assembly')
+    expect(sidebar.text()).toContain('Biobank Inventory')
+    expect(viridic.text()).toContain('VIRIDIC Dual Heatmap & ANI Matrix')
+    expect(hostMatrix.text()).toContain('Dual-Tree Host Range & Specificity Matrix')
+
+    expect(viridic.text()).not.toContain('studio.viridic.')
+    expect(hostMatrix.text()).not.toContain('studio.host.')
+    expect(asmHistory.text()).not.toContain('assembly.history.')
 
     appStore.setLocale('zh_CN')
   })

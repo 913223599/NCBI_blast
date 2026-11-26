@@ -5,7 +5,9 @@
  */
 import { getActivePinia } from 'pinia'
 import { useAppStore } from '../stores/app'
+import type { LocaleKey, TranslationKey } from './localeTypes'
 
+export type { LocaleKey, TranslationKey }
 export type AppLocale = 'zh_CN' | 'en_US'
 
 type JsonModule = { default?: Record<string, string> } | Record<string, string>
@@ -35,8 +37,12 @@ export const STATIC_LOCALES: Record<AppLocale, Record<string, string>> = {
   en_US: mergeLocaleModules(enModules),
 }
 
+export function isKnownLocaleKey(key: string): key is LocaleKey {
+  return Object.prototype.hasOwnProperty.call(STATIC_LOCALES.zh_CN, key)
+}
+
 export function translateKey(
-  key: string,
+  key: TranslationKey,
   locale: AppLocale = 'zh_CN',
   overrides?: Record<string, string> | null,
   params?: Record<string, unknown>
@@ -62,7 +68,7 @@ export function useI18n() {
   const activePinia = getActivePinia()
   const appStore = activePinia ? useAppStore(activePinia) : null
 
-  const t = (key: string, params?: Record<string, unknown>): string => {
+  const t = (key: TranslationKey, params?: Record<string, unknown>): string => {
     const activeLocale: AppLocale = appStore?.locale === 'en_US' ? 'en_US' : 'zh_CN'
     // 仅当后端下发的翻译包属于当前激活语种时才作为热覆盖，防止切语言后旧语种残留覆盖静态包
     const activeOverrides =

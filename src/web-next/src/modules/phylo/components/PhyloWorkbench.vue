@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from '../../../locales'
 import { useAppStore } from '../../../stores/app'
 import { usePhyloStore } from '../stores/usePhyloStore'
 import type { WorkbenchMode } from '../types/phylo'
@@ -15,6 +16,7 @@ import VisualStylePanel from './VisualStylePanel.vue'
 
 type TabType = 'intake' | 'ani' | 'refs' | 'config' | 'qc' | 'visual' | 'history'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 const store = usePhyloStore()
 const activeTab = ref<TabType>('intake')
@@ -52,8 +54,15 @@ watch(
   }
 )
 
+watch(
+  () => appStore.locale,
+  () => {
+    appStore.setPageTitle(t('phylo.wb.page_title'))
+  }
+)
+
 onMounted(async () => {
-  appStore.setPageTitle('进化树分析与噬菌体分类')
+  appStore.setPageTitle(t('phylo.wb.page_title'))
   await store.init()
 })
 
@@ -68,45 +77,45 @@ onUnmounted(() => {
     <header class="wb-topbar">
       <div class="wb-left">
         <div class="mode-switch">
-          <button class="mode-btn" :class="{ active: store.workbenchMode === 'phage_taxonomy' }"
-            @click="setMode('phage_taxonomy')">噬菌体分类 (8步科研流)</button>
-          <button class="mode-btn" :class="{ active: store.workbenchMode === 'general' }"
-            @click="setMode('general')">通用构树</button>
+          <button type="button" class="mode-btn" :class="{ active: store.workbenchMode === 'phage_taxonomy' }"
+            @click="setMode('phage_taxonomy')">{{ t('phylo.wb.mode.phage_taxonomy') }}</button>
+          <button type="button" class="mode-btn" :class="{ active: store.workbenchMode === 'general' }"
+            @click="setMode('general')">{{ t('phylo.wb.mode.general') }}</button>
         </div>
 
         <div class="wb-tabs">
-          <button class="wb-tab" :class="{ active: activeTab === 'intake' && sidebarOpen }"
-            @click="selectTab('intake')">数据导入</button>
+          <button type="button" class="wb-tab" :class="{ active: activeTab === 'intake' && sidebarOpen }"
+            @click="selectTab('intake')">{{ t('phylo.wb.tab.intake') }}</button>
 
           <template v-if="store.workbenchMode === 'phage_taxonomy'">
-            <button class="wb-tab" :class="{ active: activeTab === 'ani' && sidebarOpen }"
-              @click="selectTab('ani')">0-1. ANI预判</button>
-            <button class="wb-tab" :class="{ active: activeTab === 'refs' && sidebarOpen }"
-              @click="selectTab('refs')">2. 参考与外群</button>
-            <button class="wb-tab" :class="{ active: activeTab === 'config' && sidebarOpen }"
-              @click="selectTab('config')">3-5. 建树</button>
-            <button class="wb-tab" :class="{ active: activeTab === 'qc' && sidebarOpen }" @click="selectTab('qc')">6-8.
-              质检交付</button>
+            <button type="button" class="wb-tab" :class="{ active: activeTab === 'ani' && sidebarOpen }"
+              @click="selectTab('ani')">{{ t('phylo.wb.tab.ani') }}</button>
+            <button type="button" class="wb-tab" :class="{ active: activeTab === 'refs' && sidebarOpen }"
+              @click="selectTab('refs')">{{ t('phylo.wb.tab.refs') }}</button>
+            <button type="button" class="wb-tab" :class="{ active: activeTab === 'config' && sidebarOpen }"
+              @click="selectTab('config')">{{ t('phylo.wb.tab.build') }}</button>
+            <button type="button" class="wb-tab" :class="{ active: activeTab === 'qc' && sidebarOpen }"
+              @click="selectTab('qc')">{{ t('phylo.wb.tab.qc') }}</button>
           </template>
           <template v-else>
-            <button class="wb-tab" :class="{ active: activeTab === 'config' && sidebarOpen }"
-              @click="selectTab('config')">分析配置</button>
+            <button type="button" class="wb-tab" :class="{ active: activeTab === 'config' && sidebarOpen }"
+              @click="selectTab('config')">{{ t('phylo.wb.tab.config') }}</button>
           </template>
 
-          <button class="wb-tab" :class="{ active: activeTab === 'visual' && sidebarOpen }"
-            @click="selectTab('visual')">视图导出</button>
-          <button class="wb-tab" :class="{ active: activeTab === 'history' && sidebarOpen }"
-            @click="selectTab('history')">历史记录</button>
+          <button type="button" class="wb-tab" :class="{ active: activeTab === 'visual' && sidebarOpen }"
+            @click="selectTab('visual')">{{ t('phylo.wb.tab.visual') }}</button>
+          <button type="button" class="wb-tab" :class="{ active: activeTab === 'history' && sidebarOpen }"
+            @click="selectTab('history')">{{ t('phylo.wb.tab.history') }}</button>
         </div>
       </div>
 
       <div class="wb-right">
         <span v-if="store.profile && store.profile.sequence_count > 0" class="wb-pill">
-          {{ store.profile.sequence_count }} 条 {{ store.profile.mol_type.toUpperCase() }} 序列
+          {{ t('phylo.wb.seq_pill', { count: store.profile.sequence_count, mol: store.profile.mol_type.toUpperCase() }) }}
         </span>
-        <button v-if="store.isRunning" class="wb-stop-pill" :disabled="store.isCancelling"
+        <button type="button" v-if="store.isRunning" class="wb-stop-pill" :disabled="store.isCancelling"
           @click="store.cancelActiveJob()">
-          {{ store.isCancelling ? '终止中...' : '强制终止任务' }}
+          {{ store.isCancelling ? t('phylo.wb.cancelling') : t('phylo.wb.force_stop') }}
         </button>
       </div>
     </header>
@@ -125,7 +134,7 @@ onUnmounted(() => {
         </div>
       </aside>
 
-      <section class="wb-main" aria-label="系统发育进化树工作区">
+      <section class="wb-main" :aria-label="t('phylo.wb.workspace_aria')">
         <div v-if="store.activeJob" class="wb-banner-slot">
           <JobProgressBanner />
         </div>

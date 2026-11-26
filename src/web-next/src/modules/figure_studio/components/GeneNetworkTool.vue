@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useI18n } from '../../../locales'
 import { useAppStore } from '../../../stores/app'
 import { studioApi } from '../api/studioApi'
 import type { StudioPaletteType, StudioPhyloSourceItem, StudioRenderResponse } from '../types/studio'
 import StudioPreviewStage from './StudioPreviewStage.vue'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 const phyloJobs = ref<StudioPhyloSourceItem[]>([])
 const selectedJobId = ref<string>('')
@@ -27,7 +29,7 @@ async function loadSources(): Promise<void> {
       selectedJobId.value = phyloJobs.value[0]!.job_id
     }
   } catch (e) {
-    appStore.showNotification(`加载任务失败: ${String(e)}`, 'warning')
+    appStore.showNotification(t('studio.network.notify_load_fail', { error: String(e) }), 'warning')
   }
 }
 
@@ -49,9 +51,9 @@ async function handleRender(forceDemo = false): Promise<void> {
       formats: ['pdf', 'svg', 'png'],
       dpi: dpi.value,
     })
-    appStore.showNotification('已生成类 vConTACT2 蛋白共享网络图', 'success')
+    appStore.showNotification(t('studio.network.notify_success'), 'success')
   } catch (e) {
-    appStore.showNotification(`渲染失败: ${String(e)}`, 'error')
+    appStore.showNotification(t('studio.common.render_failed', { error: String(e) }), 'error')
   } finally {
     loading.value = false
   }
@@ -66,17 +68,17 @@ onMounted(() => {
   <div class="tool-layout">
     <aside class="tool-sidebar">
       <div class="sec-head">
-        <h3>蛋白共享网络与构成华夫格图</h3>
-        <button class="btn-link" @click="handleRender(true)">载入示例出图</button>
+        <h3>{{ t('studio.network.title') }}</h3>
+        <button type="button" class="btn-link" @click="handleRender(true)">{{ t('studio.common.load_demo') }}</button>
       </div>
       <p class="sec-desc">
-        对标 Nature Communications 2024 Fig. 2 & Nature Biotech vConTACT2：揭示噬菌体嵌合重组与跨科蛋白簇网状联系，右侧配 10×10 华夫格构成图。
+        {{ t('studio.network.desc') }}
       </p>
 
       <div class="field">
-        <label>数据来源（进化树任务或自定义边表）</label>
+        <label>{{ t('studio.network.source_label') }}</label>
         <select v-model="selectedJobId" class="neo-select">
-          <option value="">内置示范病毒簇网络</option>
+          <option value="">{{ t('studio.network.source_demo') }}</option>
           <option v-for="j in phyloJobs" :key="j.job_id" :value="j.job_id">
             {{ j.title || j.job_id }} ({{ j.top_hits_count }} hits)
           </option>
@@ -84,7 +86,7 @@ onMounted(() => {
       </div>
 
       <div class="field">
-        <label>或粘贴自定义网络边表 (source, target, weight, group)</label>
+        <label>{{ t('studio.network.edges_label') }}</label>
         <textarea
           v-model="edgesCsv"
           rows="4"
@@ -95,30 +97,30 @@ onMounted(() => {
 
       <div class="form-row">
         <div class="field">
-          <label>节点着色维度</label>
+          <label>{{ t('studio.network.color_by') }}</label>
           <select v-model="colorBy" class="neo-select">
-            <option value="family">病毒科 (ICTV Family)</option>
-            <option value="host">宿主菌 (Host)</option>
+            <option value="family">{{ t('studio.network.color_family') }}</option>
+            <option value="host">{{ t('studio.network.color_host') }}</option>
           </select>
         </div>
         <div class="field">
-          <label>连线最低权重 (0–1)</label>
+          <label>{{ t('studio.network.min_weight') }}</label>
           <input type="number" v-model.number="minWeight" step="0.05" min="0" max="0.95" class="neo-input" />
         </div>
       </div>
 
       <div class="form-row">
         <div class="field">
-          <label>期刊色板</label>
+          <label>{{ t('studio.common.palette') }}</label>
           <select v-model="palette" class="neo-select">
-            <option value="nature">Nature / NPG</option>
-            <option value="lancet">Lancet</option>
-            <option value="okabe_ito">Okabe-Ito</option>
-            <option value="monochrome">黑白灰阶</option>
+            <option value="nature">{{ t('studio.common.palette_nature') }}</option>
+            <option value="lancet">{{ t('studio.common.palette_lancet') }}</option>
+            <option value="okabe_ito">{{ t('studio.common.palette_okabe') }}</option>
+            <option value="monochrome">{{ t('studio.common.palette_mono_gray') }}</option>
           </select>
         </div>
         <div class="field">
-          <label>PNG 分辨率</label>
+          <label>{{ t('studio.common.dpi') }}</label>
           <select v-model.number="dpi" class="neo-select">
             <option :value="300">300 DPI</option>
             <option :value="600">600 DPI</option>
@@ -127,29 +129,29 @@ onMounted(() => {
       </div>
 
       <div class="field">
-        <label>图件标题</label>
+        <label>{{ t('studio.common.figure_title') }}</label>
         <input v-model="title" class="neo-input" />
       </div>
 
       <label class="chk">
         <input type="checkbox" v-model="showWaffle" />
-        <span>右侧附 10×10 类别占比华夫格图</span>
+        <span>{{ t('studio.network.chk_waffle') }}</span>
       </label>
       <label class="chk">
         <input type="checkbox" v-model="showLabels" />
-        <span>高亮标注 Query 及核心节点名</span>
+        <span>{{ t('studio.network.chk_labels') }}</span>
       </label>
 
-      <button class="btn-primary" :disabled="loading" @click="handleRender(false)">
-        {{ loading ? '正在计算力导向布局与华夫格...' : '生成基因共享网络出版图' }}
+      <button type="button" class="btn-primary" :disabled="loading" @click="handleRender(false)">
+        {{ loading ? t('studio.network.btn_rendering') : t('studio.network.btn_submit') }}
       </button>
     </aside>
 
     <StudioPreviewStage
       :result="renderResult"
       :loading="loading"
-      empty-title="蛋白基因共享网络与华夫格图预览区"
-      empty-desc="揭示水平基因转移导致的网状亲缘结构，自动分离主连通子图与底部孤立小簇。"
+      :empty-title="t('studio.network.empty_title')"
+      :empty-desc="t('studio.network.empty_desc')"
     />
   </div>
 </template>

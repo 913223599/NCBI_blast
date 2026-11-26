@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useI18n } from '../../../locales'
 import { useAppStore } from '../../../stores/app'
 import { studioApi } from '../api/studioApi'
 import type { StudioAnnotationSourceItem, StudioPaletteType, StudioRenderResponse } from '../types/studio'
 import StudioPreviewStage from './StudioPreviewStage.vue'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 const annoTasks = ref<StudioAnnotationSourceItem[]>([])
 const selectedTaskId = ref<string>('')
@@ -33,7 +35,7 @@ async function loadSources(): Promise<void> {
     }
   } catch (e) {
     useDemo.value = true
-    appStore.showNotification(`加载注释任务失败: ${String(e)}`, 'warning')
+    appStore.showNotification(t('studio.common.load_anno_failed', { error: String(e) }), 'warning')
   }
 }
 
@@ -46,7 +48,7 @@ function handleGbkUpload(ev: Event): void {
     gbkContent.value = String(reader.result || '')
     selectedTaskId.value = ''
     useDemo.value = false
-    appStore.showNotification(`已载入本地 GenBank 文件: ${file.name}`, 'info')
+    appStore.showNotification(t('studio.genome.notify_gbk_loaded', { name: file.name }), 'info')
   }
   reader.readAsText(file, 'utf-8')
 }
@@ -74,9 +76,9 @@ async function handleRender(forceDemo = false): Promise<void> {
       formats: ['pdf', 'svg', 'png'],
       dpi: dpi.value,
     })
-    appStore.showNotification('已生成出版级全基因组功能图谱', 'success')
+    appStore.showNotification(t('studio.genome.notify_success'), 'success')
   } catch (e) {
-    appStore.showNotification(`渲染失败: ${String(e)}`, 'error')
+    appStore.showNotification(t('studio.common.render_failed', { error: String(e) }), 'error')
   } finally {
     loading.value = false
   }
@@ -91,43 +93,43 @@ onMounted(() => {
   <div class="tool-layout">
     <aside class="tool-sidebar">
       <div class="sec-head">
-        <h3>全基因组功能圈图与多轨图</h3>
-        <button class="btn-link" @click="handleRender(true)">载入示例出图</button>
+        <h3>{{ t('studio.genome.title') }}</h3>
+        <button type="button" class="btn-link" @click="handleRender(true)">{{ t('studio.common.load_demo') }}</button>
       </div>
       <p class="sec-desc">
-        对标 Proksee/CGView 圈图与 NAR 2025 LoVis4u 线性多轨图：整合正负链 CDS、PHROGs 功能模块分类色、GC Content 与 GC Skew 轨道及防重叠关键蛋白引线。
+        {{ t('studio.genome.desc') }}
       </p>
 
       <div class="field">
-        <label>数据来源（已完成注释任务）</label>
+        <label>{{ t('studio.genome.source_label') }}</label>
         <select v-model="selectedTaskId" class="neo-select" @change="useDemo = !selectedTaskId">
-          <option value="">内置示范基因组 (或下方上传 GBK)</option>
-          <option v-for="t in annoTasks" :key="t.task_id" :value="t.task_id">
-            {{ t.task_name }} ({{ t.feature_count }} CDS)
+          <option value="">{{ t('studio.genome.source_demo') }}</option>
+          <option v-for="task in annoTasks" :key="task.task_id" :value="task.task_id">
+            {{ task.task_name }} ({{ task.feature_count }} CDS)
           </option>
         </select>
       </div>
 
       <div class="field">
-        <label>或上传本地 GenBank 文件 (.gbk / .gb)</label>
+        <label>{{ t('studio.genome.upload_label') }}</label>
         <input type="file" accept=".gbk,.gb,.genbank" class="neo-file" @change="handleGbkUpload" />
       </div>
 
       <div class="field">
-        <label>期刊版式</label>
+        <label>{{ t('studio.common.journal_layout') }}</label>
         <select v-model="mode" class="neo-select">
-          <option value="circular">圆形全基因组功能圈图 (CGView/pyCirclize)</option>
-          <option value="linear_multitrack">线性多轨基因图谱 (LoVis4u 风格)</option>
+          <option value="circular">{{ t('studio.genome.mode_circular') }}</option>
+          <option value="linear_multitrack">{{ t('studio.genome.mode_linear') }}</option>
         </select>
       </div>
 
       <div class="form-row">
         <div class="field">
-          <label>最大关键标注数</label>
+          <label>{{ t('studio.genome.max_labels') }}</label>
           <input type="number" v-model.number="maxLabels" min="6" max="60" class="neo-input" />
         </div>
         <div class="field">
-          <label>PNG 分辨率</label>
+          <label>{{ t('studio.common.dpi') }}</label>
           <select v-model.number="dpi" class="neo-select">
             <option :value="300">300 DPI</option>
             <option :value="600">600 DPI</option>
@@ -136,33 +138,33 @@ onMounted(() => {
       </div>
 
       <div class="field">
-        <label>自定义图题（留空自动读取样本名）</label>
-        <input v-model="title" class="neo-input" placeholder="如 Escherichia phage T5" />
+        <label>{{ t('studio.genome.custom_title_label') }}</label>
+        <input v-model="title" class="neo-input" :placeholder="t('studio.genome.custom_title_placeholder')" />
       </div>
 
       <label class="chk">
         <input type="checkbox" v-model="showLabels" />
-        <span>显示防重叠关键蛋白引线标注</span>
+        <span>{{ t('studio.genome.chk_labels') }}</span>
       </label>
       <label class="chk">
         <input type="checkbox" v-model="showGcContent" />
-        <span>显示 GC Content (%) 轨道</span>
+        <span>{{ t('studio.genome.chk_gc_content') }}</span>
       </label>
       <label class="chk">
         <input type="checkbox" v-model="showGcSkew" />
-        <span>显示 GC Skew (G-C)/(G+C) 轨道</span>
+        <span>{{ t('studio.genome.chk_gc_skew') }}</span>
       </label>
 
-      <button class="btn-primary" :disabled="loading" @click="handleRender(false)">
-        {{ loading ? '正在渲染全基因组图谱...' : '生成全基因组出版级图谱' }}
+      <button type="button" class="btn-primary" :disabled="loading" @click="handleRender(false)">
+        {{ loading ? t('studio.genome.btn_rendering') : t('studio.genome.btn_submit') }}
       </button>
     </aside>
 
     <StudioPreviewStage
       :result="renderResult"
       :loading="loading"
-      empty-title="单株全基因组功能图谱预览区"
-      empty-desc="直接选用「组装分析」中已完成的 Pharokka/Prokka 注释任务，即可一键产出发表级 Figure 1 圆形圈图与线性多轨图。"
+      :empty-title="t('studio.genome.empty_title')"
+      :empty-desc="t('studio.genome.empty_desc')"
     />
   </div>
 </template>

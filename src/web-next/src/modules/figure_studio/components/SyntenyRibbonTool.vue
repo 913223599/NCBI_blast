@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useI18n } from '../../../locales'
 import { useAppStore } from '../../../stores/app'
 import { studioApi } from '../api/studioApi'
 import type { StudioAnnotationSourceItem, StudioPaletteType, StudioRenderResponse } from '../types/studio'
 import StudioPreviewStage from './StudioPreviewStage.vue'
 
+const { t } = useI18n()
 const appStore = useAppStore()
 const annoTasks = ref<StudioAnnotationSourceItem[]>([])
 const selectedTaskIds = ref<string[]>([])
@@ -21,12 +23,12 @@ const renderResult = ref<StudioRenderResponse | null>(null)
 async function loadSources(): Promise<void> {
   try {
     const res = await studioApi.getSources()
-    annoTasks.value = res.annotation_tasks.filter((t) => t.sample_type === 'PHAGE' || t.feature_count > 0)
+    annoTasks.value = res.annotation_tasks.filter((item) => item.sample_type === 'PHAGE' || item.feature_count > 0)
     if (annoTasks.value.length >= 2) {
-      selectedTaskIds.value = annoTasks.value.slice(0, 3).map((t) => t.task_id)
+      selectedTaskIds.value = annoTasks.value.slice(0, 3).map((item) => item.task_id)
     }
   } catch (e) {
-    appStore.showNotification(`加载注释任务失败: ${String(e)}`, 'warning')
+    appStore.showNotification(t('studio.common.load_anno_failed', { error: String(e) }), 'warning')
   }
 }
 
@@ -42,7 +44,7 @@ function toggleTask(taskId: string): void {
 async function handleRender(forceDemo = false): Promise<void> {
   if (loading.value) return
   if (!forceDemo && selectedTaskIds.value.length > 0 && selectedTaskIds.value.length < 2) {
-    appStore.showNotification('请至少勾选 2 个已注释噬菌体基因组进行比较，或点击「载入示例出图」', 'warning')
+    appStore.showNotification(t('studio.synteny.notify_need_two'), 'warning')
     return
   }
   loading.value = true
@@ -59,9 +61,9 @@ async function handleRender(forceDemo = false): Promise<void> {
       formats: ['pdf', 'svg', 'png'],
       dpi: dpi.value,
     })
-    appStore.showNotification('已生成出版级比较基因组共线性丝带图', 'success')
+    appStore.showNotification(t('studio.synteny.notify_success'), 'success')
   } catch (e) {
-    appStore.showNotification(`渲染失败: ${String(e)}`, 'error')
+    appStore.showNotification(t('studio.common.render_failed', { error: String(e) }), 'error')
   } finally {
     loading.value = false
   }
@@ -76,44 +78,44 @@ onMounted(() => {
   <div class="tool-layout">
     <aside class="tool-sidebar">
       <div class="sec-head">
-        <h3>比较基因组共线性丝带图</h3>
-        <button class="btn-link" @click="handleRender(true)">载入示例出图</button>
+        <h3>{{ t('studio.synteny.title') }}</h3>
+        <button type="button" class="btn-link" @click="handleRender(true)">{{ t('studio.common.load_demo') }}</button>
       </div>
       <p class="sec-desc">
-        提供 LoVis4u 现代去噪风格（核心基因淡灰 + 尾丝/抗防御高亮 + PHROGs 底条）与 clinker 贝塞尔曲线丝带风格，清晰呈现同源模块保守与变异重排。
+        {{ t('studio.synteny.desc') }}
       </p>
 
       <div class="field">
-        <label>选择 2–8 个已注释噬菌体样本（已选 {{ selectedTaskIds.length }} 个）</label>
+        <label>{{ t('studio.synteny.select_label', { count: selectedTaskIds.length }) }}</label>
         <div v-if="annoTasks.length" class="check-list">
-          <label v-for="t in annoTasks" :key="t.task_id" class="check-item">
+          <label v-for="task in annoTasks" :key="task.task_id" class="check-item">
             <input
               type="checkbox"
-              :checked="selectedTaskIds.includes(t.task_id)"
-              @change="toggleTask(t.task_id)"
+              :checked="selectedTaskIds.includes(task.task_id)"
+              @change="toggleTask(task.task_id)"
             />
-            <span class="check-name" :title="t.task_name">{{ t.task_name }}</span>
-            <span class="check-meta">{{ t.feature_count }} CDS</span>
+            <span class="check-name" :title="task.task_name">{{ task.task_name }}</span>
+            <span class="check-meta">{{ task.feature_count }} CDS</span>
           </label>
         </div>
-        <div v-else class="empty-mini">暂无已完成的注释任务，可直接点击右上角「载入示例出图」。</div>
+        <div v-else class="empty-mini">{{ t('studio.synteny.empty_tasks') }}</div>
       </div>
 
       <div class="field">
-        <label>视觉风格</label>
+        <label>{{ t('studio.synteny.style_label') }}</label>
         <select v-model="mode" class="neo-select">
-          <option value="lovis4u">LoVis4u 现代去噪风格 (推荐)</option>
-          <option value="clinker">clinker 曲线同源丝带风格</option>
+          <option value="lovis4u">{{ t('studio.synteny.mode_lovis4u') }}</option>
+          <option value="clinker">{{ t('studio.synteny.mode_clinker') }}</option>
         </select>
       </div>
 
       <div class="form-row">
         <div class="field">
-          <label>最低蛋白一致度 (%)</label>
+          <label>{{ t('studio.synteny.min_identity') }}</label>
           <input type="number" v-model.number="minIdentity" min="15" max="95" class="neo-input" />
         </div>
         <div class="field">
-          <label>PNG 分辨率</label>
+          <label>{{ t('studio.common.dpi') }}</label>
           <select v-model.number="dpi" class="neo-select">
             <option :value="300">300 DPI</option>
             <option :value="600">600 DPI</option>
@@ -122,29 +124,29 @@ onMounted(() => {
       </div>
 
       <div class="field">
-        <label>图件标题</label>
+        <label>{{ t('studio.common.figure_title') }}</label>
         <input v-model="title" class="neo-input" />
       </div>
 
       <label class="chk">
         <input type="checkbox" v-model="showLabels" />
-        <span>显示关键基因阶梯防重叠标注</span>
+        <span>{{ t('studio.synteny.chk_labels') }}</span>
       </label>
       <label class="chk">
         <input type="checkbox" v-model="showIdentityLabels" />
-        <span>丝带中央显示蛋白一致度百分比 (clinker)</span>
+        <span>{{ t('studio.synteny.chk_identity') }}</span>
       </label>
 
-      <button class="btn-primary" :disabled="loading" @click="handleRender(false)">
-        {{ loading ? '正在计算蛋白同源并渲染...' : '生成共线性丝带比较图' }}
+      <button type="button" class="btn-primary" :disabled="loading" @click="handleRender(false)">
+        {{ loading ? t('studio.synteny.btn_rendering') : t('studio.synteny.btn_submit') }}
       </button>
     </aside>
 
     <StudioPreviewStage
       :result="renderResult"
       :loading="loading"
-      empty-title="LoVis4u / clinker 共线性丝带图预览区"
-      empty-desc="在左侧勾选多个噬菌体注释任务后点击生成，自动并行比对同源蛋白并渲染核心/变异模块共线性。"
+      :empty-title="t('studio.synteny.empty_title')"
+      :empty-desc="t('studio.synteny.empty_desc')"
     />
   </div>
 </template>

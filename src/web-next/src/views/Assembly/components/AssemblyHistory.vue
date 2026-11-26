@@ -2,7 +2,10 @@
 /**
  * AssemblyHistory - 基因组拼接历史任务与队列卡片列表
  */
+import { useI18n } from '../../../locales';
 import type { AssemblyTaskItem } from '../types';
+
+const { t } = useI18n();
 
 defineProps<{
   tasks: AssemblyTaskItem[];
@@ -41,14 +44,14 @@ function getStatusBadgeClass(status: string) {
 
 function getStatusText(status: string) {
   switch (status) {
-    case 'completed': return '已完成';
-    case 'running': return '组装中';
+    case 'completed': return t('assembly.history.status.completed');
+    case 'running': return t('assembly.history.status.running');
     case 'queued':
-    case 'pending': return '排队中';
+    case 'pending': return t('assembly.history.status.queued');
     case 'failed':
-    case 'error': return '失败';
-    case 'aborted': return '已取消';
-    default: return status || '等待中';
+    case 'error': return t('assembly.history.status.failed');
+    case 'aborted': return t('assembly.history.status.aborted');
+    default: return status || t('assembly.history.status.waiting');
   }
 }
 </script>
@@ -56,8 +59,8 @@ function getStatusText(status: string) {
 <template>
   <div class="assembly-history-container">
     <div class="history-header">
-      <span class="total-count">共 {{ tasks.length }} 条记录</span>
-      <button class="refresh-btn" :class="{ 'is-loading': isLoading }" @click="emit('refresh')" title="刷新记录">
+      <span class="total-count">{{ t('assembly.history.count', { count: tasks.length }) }}</span>
+      <button type="button" class="refresh-btn" :class="{ 'is-loading': isLoading }" @click="emit('refresh')" :title="t('assembly.history.refresh_title')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
           <path d="M23 4v6h-6M1 20v-6h6" />
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
@@ -70,7 +73,7 @@ function getStatusText(status: string) {
         <rect x="2" y="3" width="20" height="18" rx="2" />
         <line x1="8" y1="12" x2="16" y2="12" />
       </svg>
-      <p>暂无拼接历史</p>
+      <p>{{ t('assembly.history.empty') }}</p>
     </div>
 
     <div v-else class="history-list scroll-v">
@@ -79,7 +82,11 @@ function getStatusText(status: string) {
         :key="item.id" 
         class="history-card"
         :class="{ 'is-active': item.id === activeId }"
+        role="button"
+        tabindex="0"
         @click="emit('select', item)"
+        @keydown.enter.prevent="emit('select', item)"
+        @keydown.space.prevent="emit('select', item)"
       >
         <div class="card-top">
           <span class="task-name" :title="item.name || item.id">{{ item.name || item.id }}</span>
@@ -102,7 +109,7 @@ function getStatusText(status: string) {
         </div>
 
         <div class="card-actions" @click.stop>
-          <button class="delete-btn" @click="emit('delete', item.id)" title="删除记录">
+          <button type="button" class="delete-btn" @click="emit('delete', item.id)" :title="t('assembly.history.delete_title')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
