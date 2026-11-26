@@ -2,15 +2,16 @@
 """
 自动将用户下载的数据库文件导入系统、解压、构建索引并进行功能测试 (强制 UTF-8 编码)
 """
-import os
 import sys
 import shutil
 import gzip
-import tarfile
 import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from src.utils.archive_guard import safe_extract_tar
 DB_ROOT = PROJECT_ROOT / "database"
 DOWNLOAD_DIR = Path.home() / "Downloads"
 
@@ -102,14 +103,14 @@ def process_card():
             
             if "card-data" in fname:
                 print(f"  - 正在解压 {fname}...")
-                with tarfile.open(dest_file, "r:bz2") as tar:
-                    tar.extractall(path=dest_dir)
+                safe_extract_tar(dest_file, dest_dir, mode="r:bz2")
                 print("  - 解压完成。")
                 
     f_faa = dest_dir / "protein_fasta.fasta"
     if not f_faa.exists():
         cands = list(dest_dir.glob("*protein*.fasta")) + list(dest_dir.glob("*.fasta"))
-        if cands: f_faa = cands[0]
+        if cands:
+            f_faa = cands[0]
         
     if f_faa and f_faa.exists():
         print(f"  - 构建 CARD 耐药蛋白索引 (card_protein) 从 {f_faa.name}...")
@@ -128,7 +129,8 @@ def process_defense_finder():
     src_file = DOWNLOAD_DIR / "defense-finder-models-3.1.0.tar.gz"
     if not src_file.exists():
         cands = list(DOWNLOAD_DIR.glob("defense-finder-models*.tar.gz"))
-        if cands: src_file = cands[0]
+        if cands:
+            src_file = cands[0]
         
     if src_file.exists():
         dest_file = dest_dir / src_file.name
@@ -136,8 +138,7 @@ def process_defense_finder():
         shutil.copy2(src_file, dest_file)
         
         print(f"  - 解压 {dest_file.name}...")
-        with tarfile.open(dest_file, "r:gz") as tar:
-            tar.extractall(path=dest_dir)
+        safe_extract_tar(dest_file, dest_dir, mode="r:gz")
         print("  - DefenseFinder 模型解压完成！")
 
 def process_cdd():
@@ -152,8 +153,7 @@ def process_cdd():
         shutil.copy2(src_file, dest_file)
         
         print(f"  - 解压 {dest_file.name}...")
-        with tarfile.open(dest_file, "r:gz") as tar:
-            tar.extractall(path=dest_dir)
+        safe_extract_tar(dest_file, dest_dir, mode="r:gz")
         print("  - CDD 保守结构域库解压完成！")
 
 def run_tests():

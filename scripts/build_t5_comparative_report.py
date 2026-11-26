@@ -3,7 +3,6 @@
 生成标准 T5 (NC_005859.1) 与进化株 (T5-E1 / T5-E2 / T5-E5) 混合比较基因组与功能注释报告（不包括误混入的异属 WT）。
 严格遵循 ANNO_M11_20261103_112550_注释报告.docx 的排版规范、表格样式与引用锚点体系。
 """
-import os
 import re
 import sys
 import json
@@ -14,7 +13,6 @@ import subprocess
 from pathlib import Path
 from collections import Counter
 from Bio import SeqIO
-from Bio.Seq import Seq
 
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
@@ -395,7 +393,7 @@ len_rows = []
 for lo, hi, label in len_bins:
     row = [label]
     for k in keys_order:
-        cnt = sum(1 for l in S_DATA[k]["lens"] if lo <= l <= hi)
+        cnt = sum(1 for seq_len in S_DATA[k]["lens"] if lo <= seq_len <= hi)
         pct = cnt / len(S_DATA[k]["lens"]) * 100 if S_DATA[k]["lens"] else 0
         row.append(f"{cnt} ({pct:.1f}%)")
     len_rows.append(row)

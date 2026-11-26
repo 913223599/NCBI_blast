@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { isKnownLocaleKey, STATIC_LOCALES, translateKey, type LocaleKey } from '../../locales'
 import { useAppStore } from '../../stores/app'
+import { studioApi } from '../../modules/figure_studio/api/studioApi'
 import AnalysisView from '../AnalysisView.vue'
 import FigureStudioView from '../FigureStudioView.vue'
 import OtherToolsView from '../OtherToolsView.vue'
@@ -16,6 +17,10 @@ import HostMatrixTool from '../../modules/figure_studio/components/HostMatrixToo
 describe('Phase 8 Wave 2-4 全站核心业务视图中英双语即时切换测试', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.spyOn(studioApi, 'getSources').mockResolvedValue({
+      phylo_jobs: [],
+      annotation_tasks: [],
+    })
   })
 
   it('AnalysisView、FigureStudioView、OtherToolsView 与 AssemblyResults 应在切换 en_US 后完整切换为英文', async () => {

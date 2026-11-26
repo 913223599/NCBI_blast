@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 # Translate BLAST CSV reports and generate summary.
-import sys, os, csv, re
+import sys
+import os
+import csv
+import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

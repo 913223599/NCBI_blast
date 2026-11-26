@@ -7,9 +7,9 @@ from pathlib import Path
 
 def test_full_classification_logic():
     gbk_files = list(Path("results/annotations").glob("*/*.gbk"))
-    print(f"============================================================")
+    print("============================================================")
     print(f"开始全量扫描 {len(gbk_files)} 个 GBK 文件中的所有 CDS 特征...")
-    print(f"============================================================\n")
+    print("============================================================\n")
 
     all_cds = []
     for gbk in gbk_files:
@@ -45,9 +45,9 @@ def test_full_classification_logic():
 
     for cat in sorted(classified_results.keys()):
         items = classified_results[cat]
-        print(f"--------------------------------------------------")
+        print("--------------------------------------------------")
         print(f"[{cat}] Total {len(items)} CDS")
-        print(f"--------------------------------------------------")
+        print("--------------------------------------------------")
         # 去重展示 product
         unique_prods = sorted(list(set(x["product"] for x in items)))
         for p in unique_prods:

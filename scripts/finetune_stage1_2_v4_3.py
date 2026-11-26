@@ -25,7 +25,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 import torch
@@ -37,7 +37,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.phage_discovery.data.feature_dataset import iter_fasta  # noqa: E402
-from src.phage_discovery.experts.expert_c_orf import MAX_ORFS_PER_WIN, extract_contig_orf_tokens  # noqa: E402
+from src.phage_discovery.experts.expert_c_orf import extract_contig_orf_tokens  # noqa: E402
 from src.phage_discovery.experts.seq_dataset import encode_dna, reverse_complement_codes  # noqa: E402
 from src.phage_discovery.features.window_features import SUB_BINS, extract_contig_windows  # noqa: E402
 from src.phage_discovery.student.distilled_student import _focal_bce_with_logits, _sub_bce_dice_loss  # noqa: E402

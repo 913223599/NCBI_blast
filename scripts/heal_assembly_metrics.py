@@ -4,9 +4,7 @@
 功能：扫描所有历史组装产物，自动校准并自愈数据库中的 N50、GC 含量、片段数与深度指标。
 """
 
-import os
 import sys
-import json
 import logging
 from pathlib import Path
 

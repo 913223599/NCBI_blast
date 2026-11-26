@@ -16,7 +16,6 @@ import os
 import posixpath
 import re
 import stat
-import sys
 import tempfile
 import urllib.parse
 import zipfile

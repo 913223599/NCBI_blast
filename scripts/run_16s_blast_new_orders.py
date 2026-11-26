@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 # Run 16S BLAST on new Sangon orders 2140616642 and 2140616649.
-import sys, os, time
+import sys
+import os
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

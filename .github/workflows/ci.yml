@@ -22,8 +22,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff pytest fastapi httpx pydantic psutil biopython python-multipart python-docx matplotlib
 
-      - name: Ruff static check
-        run: ruff check src
+      - name: Ruff static check (src/ + tracked scripts/*.py)
+        run: |
+          ruff check src
+          mapfile -t tracked_scripts < <(git ls-files 'scripts/*.py')
+          if [ "${#tracked_scripts[@]}" -gt 0 ]; then
+            ruff check "${tracked_scripts[@]}"
+          fi
 
       - name: Core hygiene, security & offline regression suites
         env:

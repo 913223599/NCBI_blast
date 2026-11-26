@@ -29,9 +29,14 @@ try {
     node (Join-Path $ProjectRoot "scripts\sync_version.mjs") --check
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    Write-Host "=== [2/6] Python Ruff Full Lint (src/) ===" -ForegroundColor Cyan
+    Write-Host "=== [2/6] Python Ruff Full Lint (src/ + tracked scripts/*.py) ===" -ForegroundColor Cyan
     ruff check src
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $TrackedScripts = @(git ls-files "scripts/*.py")
+    if ($TrackedScripts.Count -gt 0) {
+        ruff check @TrackedScripts
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
 
     Write-Host "=== [3/6] Backend Pytest Core Guard Suites ===" -ForegroundColor Cyan
     & $PythonExe -m pytest tests/test_repo_hygiene.py tests/test_security_and_lan_guard.py tests/test_resource_guard_and_hygiene_p2.py tests/test_archive_guard.py tests/test_core_layer_and_task_db.py tests/test_other_tools_api.py tests/test_publication_renderer_layouts.py tests/test_phage_discovery_split_imports.py tests/test_phase7_structure_3d_and_docx_citations.py -q
@@ -46,7 +51,8 @@ try {
         Write-Host "=== [5/6] Frontend TypeCheck & Production Build ===" -ForegroundColor Cyan
         npm run build
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } finally {
+    }
+    finally {
         Pop-Location
     }
 
@@ -57,6 +63,7 @@ try {
     }
 
     Write-Host "ALL QUALITY GATES PASSED." -ForegroundColor Green
-} finally {
+}
+finally {
     Pop-Location
 }

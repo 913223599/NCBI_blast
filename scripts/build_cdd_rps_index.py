@@ -3,7 +3,6 @@
 自动化构建 NCBI CDD / Pfam-A 保守结构域 RPS-BLAST 索引
 """
 import os
-import sys
 import shutil
 import ctypes
 import subprocess

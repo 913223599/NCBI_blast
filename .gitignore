@@ -273,6 +273,7 @@ tools/iqtree3_win/
 tools/iqtree_new/
 tools/miniconda/
 tools/runtime/
+tools/_deprecated/
 src/resources/update_locales.py
 src/workbench/bin/
 src/web-next/src/core/tree/vendor_phylotree/

@@ -35,10 +35,6 @@ from scripts.validation_datasets import (  # noqa: E402
     sample_suite_c_unseen_local,
 )
 from src.analysis.phage_structure.manager import evaluate_single_contig_structure  # noqa: E402
-from src.analysis.phage_structure.morphotype_classifier import (  # noqa: E402
-    build_connector_profile,
-    build_module_matrix,
-)
 from src.analysis.phage_structure.sequence_annotator import (  # noqa: E402
     get_safe_workers,
     parse_input_contigs,

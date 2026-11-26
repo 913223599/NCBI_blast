@@ -33,7 +33,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.run_orf_judge_ablation import _compute_multilabel_metrics  # noqa: E402
 from src.phage_discovery.student.judge_calibration import (  # noqa: E402
-    apply_blended_logit_calibration,
     fit_logit_blend_and_calibrator,
 )
 from src.phage_discovery.student.orf_functional_judge import (  # noqa: E402

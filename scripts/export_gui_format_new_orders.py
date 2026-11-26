@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 # 导出新订单BLAST结果，对齐GUI格式。
-import sys, os, csv, re
+import sys
+import os
+import csv
+import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

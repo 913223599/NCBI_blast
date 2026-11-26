@@ -44,21 +44,22 @@ class CondaInstaller:
         """执行 Windows 静默安装 (优化带空格路径的处理)"""
         import shutil
         if self.install_dir.exists():
-             self.logger.info("清理已存在的异常安装目录...")
-             try:
-                 shutil.rmtree(str(self.install_dir))
-             except Exception:
-                 pass
+            self.logger.info("清理已存在的异常安装目录...")
+            try:
+                shutil.rmtree(str(self.install_dir))
+            except Exception as exc:
+                self.logger.debug("清理旧 Miniconda 安装目录异常: %s", exc)
 
         self.logger.info(f"正在进行静默安装至: {self.install_dir}")
-        
-        #  重要: Miniconda /D 参数后面即使有空格也不能加引号
-        # 且必须使用 shell=True 配合字符串才能正确传递
+
+        # 重要: Miniconda NSIS /D 参数必须放在末尾且不带外层引号；
+        # 在 Windows 上向 subprocess.run 传递字符串且 shell=False 会直接透传给 CreateProcessW，
+        # 既保留 /D= 含空格路径语义，又彻底避免经过 cmd.exe (shell=True) 的命令注入风险。
         cmd_str = f'"{self.installer_path}" /S /InstallationType=JustMe /D={self.install_dir}'
-        
+
         try:
             # 静默安装通常需要几分钟
-            subprocess.run(cmd_str, check=True, timeout=600, shell=True)
+            subprocess.run(cmd_str, check=True, timeout=600, shell=False)
             self.logger.info(" Miniconda 部署成功！")
             
             # 安装成功后清理安装包

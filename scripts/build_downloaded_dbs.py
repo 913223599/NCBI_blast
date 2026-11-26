@@ -4,14 +4,15 @@
 使用方法: 将下载好的数据库文件放入对应 database/ 目录后直接运行此脚本:
 python scripts/build_downloaded_dbs.py
 """
-import os
 import sys
 import gzip
-import tarfile
 import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+from src.utils.archive_guard import safe_extract_tar
 DB_ROOT = PROJECT_ROOT / "database"
 
 def get_makeblastdb_cmd():
@@ -108,8 +109,7 @@ def build_card():
         for t in tar_files:
             try:
                 print(f"[CARD] 正在解压 {t.name}...")
-                with tarfile.open(t) as tar:
-                    tar.extractall(path=card_dir)
+                safe_extract_tar(t, card_dir, mode="r:*")
                 print("[CARD] 解压完成。")
             except Exception as e:
                 print(f"[CARD] 解压异常: {e}")
@@ -141,8 +141,7 @@ def build_defense_finder():
         for t in tar_files:
             try:
                 print(f"[DefenseFinder] 正在解压 {t.name}...")
-                with tarfile.open(t) as tar:
-                    tar.extractall(path=df_dir)
+                safe_extract_tar(t, df_dir, mode="r:*")
                 print("[DefenseFinder] 解压完成，模型库已就绪！")
             except Exception as e:
                 print(f"[DefenseFinder] 解压异常: {e}")
@@ -159,8 +158,7 @@ def build_cdd():
         for t in tar_files:
             try:
                 print(f"[CDD/Pfam] 正在解压 {t.name}...")
-                with tarfile.open(t) as tar:
-                    tar.extractall(path=cdd_dir)
+                safe_extract_tar(t, cdd_dir, mode="r:*")
                 print("[CDD/Pfam] 解压完成，结构域库已就绪！")
             except Exception as e:
                 print(f"[CDD/Pfam] 解压异常: {e}")

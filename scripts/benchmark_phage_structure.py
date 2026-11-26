@@ -369,17 +369,17 @@ def evaluate_suite_a(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             })
 
     total = len(rows)
-    correct = sum(cm[l][l] for l in labels)
+    correct = sum(cm[lbl][lbl] for lbl in labels)
     per_class: Dict[str, Dict[str, float]] = {}
     f1s: List[float] = []
-    for l in labels:
-        tp = cm[l][l]
-        fn = sum(cm[l][p] for p in pred_cols if p != l)
-        fp = sum(cm[t][l] for t in labels if t != l)
+    for lbl in labels:
+        tp = cm[lbl][lbl]
+        fn = sum(cm[lbl][p] for p in pred_cols if p != lbl)
+        fp = sum(cm[t][lbl] for t in labels if t != lbl)
         prec = tp / max(1, tp + fp)
         rec = tp / max(1, tp + fn)
         f1 = (2 * prec * rec / (prec + rec)) if (prec + rec) > 0 else 0.0
-        per_class[l] = {"precision": round(prec, 4), "recall": round(rec, 4), "f1": round(f1, 4), "support": tp + fn}
+        per_class[lbl] = {"precision": round(prec, 4), "recall": round(rec, 4), "f1": round(f1, 4), "support": tp + fn}
         f1s.append(f1)
 
     return {

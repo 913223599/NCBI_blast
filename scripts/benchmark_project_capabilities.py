@@ -30,7 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts import predict_unified as cli_mod  # noqa: E402
 from src.analysis.phage_finder.exporter import inspect_sequences  # noqa: E402
 from src.analysis.phage_finder.model_registry import discover_available_models  # noqa: E402
-from src.phage_discovery.benchmark.metrics import PredictedRegion, compute_interval_iou  # noqa: E402
+from src.phage_discovery.benchmark.metrics import compute_interval_iou  # noqa: E402
 from src.phage_discovery.data.feature_dataset import iter_fasta  # noqa: E402
 from src.phage_discovery.inference.unified_model import UnifiedPhageModel  # noqa: E402
 

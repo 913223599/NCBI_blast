@@ -19,7 +19,11 @@ import datetime
 import json
 import os
 import re
+import shutil
+import sys
+import zipfile
 from collections import Counter
+from pathlib import Path
 
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
@@ -95,7 +99,7 @@ lens = [len(f['translation']) for f in cds if f.get('translation')]
 len_min, len_max = (min(lens), max(lens)) if lens else (0, 0)
 len_median = sorted(lens)[len(lens) // 2] if lens else 0
 len_mean = sum(lens) / len(lens) if lens else 0.0
-n_small = sum(1 for l in lens if l <= 100)
+n_small = sum(1 for seq_len in lens if seq_len <= 100)
 phold_n = sum(1 for f in cds if f.get('source_engine') == 'Phold AI')
 
 
@@ -154,9 +158,12 @@ def acc_short(acc):
 # ============================================================
 doc = Document()
 sec = doc.sections[0]
-sec.page_width = Cm(21.0); sec.page_height = Cm(29.7)
-sec.top_margin = Cm(2.5); sec.bottom_margin = Cm(2.5)
-sec.left_margin = Cm(2.5); sec.right_margin = Cm(2.5)
+sec.page_width = Cm(21.0)
+sec.page_height = Cm(29.7)
+sec.top_margin = Cm(2.5)
+sec.bottom_margin = Cm(2.5)
+sec.left_margin = Cm(2.5)
+sec.right_margin = Cm(2.5)
 
 
 def set_font(run, cn='宋体', en='Times New Roman', size=12, bold=False, color=RGBColor(0, 0, 0)):
@@ -173,13 +180,15 @@ def para(text='', cn='宋体', size=12, bold=False, align=None, indent2=True,
     if align is not None:
         p.alignment = align
     pf = p.paragraph_format
-    pf.space_before = Pt(space_before); pf.space_after = Pt(space_after)
+    pf.space_before = Pt(space_before)
+    pf.space_after = Pt(space_after)
     if indent2:
         pf.first_line_indent = Pt(size * 2)
     if line15:
         pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
     if text:
-        r = p.add_run(text); set_font(r, cn=cn, size=size, bold=bold)
+        r = p.add_run(text)
+        set_font(r, cn=cn, size=size, bold=bold)
     return p
 
 
@@ -187,7 +196,8 @@ def heading(level, text):
     p = doc.add_heading('', level=level)
     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
     pf = p.paragraph_format
-    pf.space_before = Pt({1: 14, 2: 11, 3: 9}[level]); pf.space_after = Pt({1: 6, 2: 5, 3: 4}[level])
+    pf.space_before = Pt({1: 14, 2: 11, 3: 9}[level])
+    pf.space_after = Pt({1: 6, 2: 5, 3: 4}[level])
     pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
     r = p.add_run(text)
     set_font(r, cn='黑体', size={1: 16, 2: 14, 3: 12}[level], bold=True)
@@ -203,11 +213,16 @@ def add_table(header, rows, col_widths_cm=None, align_cols=None, font_size=10.5,
     for j, htxt in enumerate(header):
         cell = hdr.cells[j]
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
-        p = cell.paragraphs[0]; p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p = cell.paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.first_line_indent = Pt(0)
-        p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(0)
-        r = p.add_run(htxt); set_font(r, size=font_size, bold=True)
-        shd = OxmlElement('w:shd'); shd.set(qn('w:val'), 'clear'); shd.set(qn('w:fill'), header_fill)
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        r = p.add_run(htxt)
+        set_font(r, size=font_size, bold=True)
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:val'), 'clear')
+        shd.set(qn('w:fill'), header_fill)
         cell._tc.get_or_add_tcPr().append(shd)
     for row in rows:
         cells = t.add_row().cells
@@ -216,18 +231,21 @@ def add_table(header, rows, col_widths_cm=None, align_cols=None, font_size=10.5,
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             p = cell.paragraphs[0]
             p.paragraph_format.first_line_indent = Pt(0)
-            p.paragraph_format.space_before = Pt(0); p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after = Pt(0)
             if align_cols and j < len(align_cols) and align_cols[j] == 'c':
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             elif align_cols and j < len(align_cols) and align_cols[j] == 'r':
                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             else:
                 p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            r = p.add_run(str(val)); set_font(r, size=font_size)
+            r = p.add_run(str(val))
+            set_font(r, size=font_size)
     for r_ in t.rows:
         trPr = r_._tr.get_or_add_trPr()
         trPr.append(OxmlElement('w:cantSplit'))
-    trh = OxmlElement('w:tblHeader'); trh.set(qn('w:val'), 'true')
+    trh = OxmlElement('w:tblHeader')
+    trh.set(qn('w:val'), 'true')
     t.rows[0]._tr.get_or_add_trPr().append(trh)
     if col_widths_cm:
         for j, w in enumerate(col_widths_cm):
@@ -239,9 +257,11 @@ def add_table(header, rows, col_widths_cm=None, align_cols=None, font_size=10.5,
 def data_note(text):
     p = doc.add_paragraph()
     pf = p.paragraph_format
-    pf.space_before = Pt(2); pf.space_after = Pt(8)
+    pf.space_before = Pt(2)
+    pf.space_after = Pt(8)
     pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
-    r = p.add_run('数据来源：' + text); set_font(r, cn='楷体', size=9)
+    r = p.add_run('数据来源：' + text)
+    set_font(r, cn='楷体', size=9)
     r.font.color.rgb = RGBColor(0x40, 0x40, 0x40)
     return p
 
@@ -279,13 +299,22 @@ doc.add_page_break()
 heading(1, '目  录')
 p = doc.add_paragraph()
 run = p.add_run()
-fldChar1 = OxmlElement('w:fldChar'); fldChar1.set(qn('w:fldCharType'), 'begin')
-instrText = OxmlElement('w:instrText'); instrText.set(qn('xml:space'), 'preserve')
+fldChar1 = OxmlElement('w:fldChar')
+fldChar1.set(qn('w:fldCharType'), 'begin')
+instrText = OxmlElement('w:instrText')
+instrText.set(qn('xml:space'), 'preserve')
 instrText.text = ' TOC \\o "1-2" \\h \\z \\u '
-fldChar2 = OxmlElement('w:fldChar'); fldChar2.set(qn('w:fldCharType'), 'separate')
-t_ = OxmlElement('w:t'); t_.text = '（请在 Word 中右键更新目录）'
-fldChar3 = OxmlElement('w:fldChar'); fldChar3.set(qn('w:fldCharType'), 'end')
-run._r.append(fldChar1); run._r.append(instrText); run._r.append(fldChar2); run._r.append(t_); run._r.append(fldChar3)
+fldChar2 = OxmlElement('w:fldChar')
+fldChar2.set(qn('w:fldCharType'), 'separate')
+t_ = OxmlElement('w:t')
+t_.text = '（请在 Word 中右键更新目录）'
+fldChar3 = OxmlElement('w:fldChar')
+fldChar3.set(qn('w:fldCharType'), 'end')
+run._r.append(fldChar1)
+run._r.append(instrText)
+run._r.append(fldChar2)
+run._r.append(t_)
+run._r.append(fldChar3)
 set_font(run, cn='宋体', size=12)
 doc.add_page_break()
 
@@ -342,7 +371,7 @@ para('')
 para(f'预测蛋白长度分布如下表所示（{n_cds} 个 CDS 均含完整翻译序列）：')
 len_bins = [(1, 100, '1–100'), (101, 200, '101–200'), (201, 300, '201–300'), (301, 400, '301–400'),
             (401, 600, '401–600'), (601, 800, '601–800'), (801, 1000, '801–1,000'), (1001, 2000, '1,001–2,000')]
-len_rows = [(label, str(sum(1 for l in lens if lo <= l <= hi))) for lo, hi, label in len_bins]
+len_rows = [(label, str(sum(1 for seq_len in lens if lo <= seq_len <= hi))) for lo, hi, label in len_bins]
 len_rows.append(('合计', str(len(lens))))
 add_table(['蛋白长度区间（aa）', '基因数'], len_rows, col_widths_cm=[7.0, 5.0], align_cols=['c', 'c'])
 data_note('features.json（translation 字段长度统计）。')
@@ -735,7 +764,8 @@ notes = notes + ARGS.extra_notes
 for n in notes:
     p = para('', indent2=True)
     p.add_run('· ').font.size = Pt(12)
-    r = p.add_run(n); set_font(r, size=12)
+    r = p.add_run(n)
+    set_font(r, size=12)
 doc.add_page_break()
 
 # ============================================================
@@ -786,19 +816,24 @@ else:
 footer = sec.footer
 fp = footer.paragraphs[0]
 fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
-fld1 = OxmlElement('w:fldChar'); fld1.set(qn('w:fldCharType'), 'begin')
-instr = OxmlElement('w:instrText'); instr.set(qn('xml:space'), 'preserve'); instr.text = ' PAGE '
-fld2 = OxmlElement('w:fldChar'); fld2.set(qn('w:fldCharType'), 'end')
-run = fp.add_run(); set_font(run, size=9)
-run._r.append(fld1); run._r.append(instr); run._r.append(fld2)
+fld1 = OxmlElement('w:fldChar')
+fld1.set(qn('w:fldCharType'), 'begin')
+instr = OxmlElement('w:instrText')
+instr.set(qn('xml:space'), 'preserve')
+instr.text = ' PAGE '
+fld2 = OxmlElement('w:fldChar')
+fld2.set(qn('w:fldCharType'), 'end')
+run = fp.add_run()
+set_font(run, size=9)
+run._r.append(fld1)
+run._r.append(instr)
+run._r.append(fld2)
 
 doc.save(OUT)
 print('saved:', OUT)
 print('CDS:', n_cds, 'tRNA:', n_trna, 'Swiss-Prot hits:', len(swiss_hits))
 
 # ---- 修复主题 eastAsia 语言（ja-JP → zh-CN） ----
-import zipfile
-import shutil
 TMPZ = OUT + '.tmpz'
 with zipfile.ZipFile(OUT, 'r') as zin, zipfile.ZipFile(TMPZ, 'w', zipfile.ZIP_DEFLATED) as zout:
     for item in zin.namelist():
