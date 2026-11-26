@@ -3,7 +3,6 @@
  * AssemblyResults - 基因组组装结果看板 (紧凑精致版 + Contig 分段明细)
  */
 import { ref, computed } from 'vue';
-import { API_BASE } from '../../../bridge/electron-bridge';
 import { useI18n } from '../../../locales';
 import { downloadFileFromUrl, downloadFileFromText } from '../../../utils/fileDownloader';
 import type { AssemblyResultData, AssemblyTaskItem, ContigDetailItem } from '../types';

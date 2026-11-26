@@ -2,6 +2,9 @@ import { getBridge } from '../../bridge'
 import type { StrainRecord } from './types'
 import { markRaw } from 'vue'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
+import { createLogger } from '../../utils/logger'
+
+const logger = createLogger('StrainRecords')
 
 export function useRecordsActions(state: any, autoSave: () => void) {
   const { 
@@ -197,12 +200,15 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     }
     try {
       const bridge = getBridge()
-      const result = await (bridge as any).search_strains_by_category(category)
+      const result = (await bridge.search_strains_by_category(category)) as {
+        success?: boolean
+        records?: StrainRecord[]
+      }
       if (result.success) {
         filteredRecords.value = result.records || []
       }
     } catch (e) {
-      console.error('[StrainStore] Taxonomy search failed', e)
+      logger.error('Taxonomy search failed', e)
       searchFilters.value.keyword = category
       applyFilters()
     }
@@ -276,13 +282,13 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       try {
         const bridge = getBridge()
         bridge.db_save_records_batch(processedRecords, (success: boolean) => {
-          if (!success) console.error('[StrainStore] 批量保存数据失败')
+          if (!success) logger.error('批量保存数据失败')
           // 注意：此处不再执行 setIsUpdating(false)，交给链式调用的终点处理
           resolve(success)
         })
       } catch (e) {
         setIsUpdating(false)
-        console.error('[StrainStore] 批量保存异常:', e)
+        logger.error('批量保存异常:', e)
         resolve(false)
       }
     })
@@ -314,7 +320,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       try {
         getBridge().db_save_records_batch(backupRecords.map((r: StrainRecord) => ({ ...r, ...updates })))
       } catch (e) {
-        console.error('[StrainStore] 同步更新备份菌株失败:', e)
+        logger.error('同步更新备份菌株失败:', e)
       }
       
       applyFilters()
@@ -376,7 +382,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     const toIndex = allIds.indexOf(toId)
     
     if (fromIndex === -1 || toIndex === -1) {
-      console.warn('[shiftSelectRange] ID not found in list, fallback to toggle')
+      logger.warn('[shiftSelectRange] ID not found in list, fallback to toggle')
       toggleSelect(toId)
       return
     }
@@ -457,7 +463,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     recalibrateCounters,
     async clearAll() {
       const bridge = getBridge()
-      await bridge.strain_clear_all()
+      await bridge.db_clear_all()
       records.value = []
       invalidateLookupMaps()
       applyFilters()

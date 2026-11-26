@@ -11,7 +11,7 @@ const lanShareInfo = ref<any>(null)
 async function loadLanShareInfo() {
   const result = await getBridge().get_lan_share_info()
   if (result) {
-    lanEnabled.value = result.enabled
+    lanEnabled.value = Boolean(result.enabled)
     lanShareInfo.value = result
   }
 }

@@ -30,16 +30,16 @@ const emit = defineEmits<{
 }>()
 
 const {
-  activeTab, abundanceMode, currentFilePath, isDetecting, detectedPackage, isGroupView,
+  activeTab, abundanceMode, currentFilePath, detectedPackage, isGroupView,
   showGroupModal, groupChunkSize, sampleGroups, taxaSearchQuery, showHistoryDrawer, historyTasks,
   isLoadingHistory, isRunning, taskId, progress, currentStep, currentSample, processedReads,
-  totalReads, processedSamples, totalSamples, results, topTaxaCount, tooltip, translations,
-  isTranslating, detailSearchQuery, detailViewMode, topTaxaList, allSampleNames, activeGroups,
+  totalReads, processedSamples, totalSamples, results, topTaxaCount, tooltip,
+  isTranslating, detailSearchQuery, detailViewMode, topTaxaList, allSampleNames,
   unassignedSamples, activeSamples, stackedBarData, confirmedSpeciesCount, filteredTaxaOverview,
   filteredActiveSamples, formatTime, formatReadsCount, getStatusLabel, formatPct, isNoiseTaxon,
   toggleHistoryDrawer, selectHistoryTask, deleteHistoryTask, clearAllHistory, resetToNewAnalysis,
   close, handleUploadSuccess, startAnalysis, fetchHistoryTasks, getTaxonColor, addGroup,
-  removeGroup, generateConsecutiveGroups, parseSamplePattern, setChunkSizeAndGenerate, clearAllGroups, resetDefaultGroups, getRealTaxonRank,
+  removeGroup, generateConsecutiveGroups, parseSamplePattern, setChunkSizeAndGenerate, clearAllGroups, getRealTaxonRank,
   showSegmentTooltip, hideTooltip, translateAllTaxa, getTaxonZh, exportExcel, toggleSampleCollapse,
   expandAllSamples, collapseAllSamples, isSampleCollapsed, getDominantTaxon,
 } = useDiversityModal(props, emit)
@@ -492,7 +492,7 @@ defineExpose({
               </thead>
               <tbody>
                 <tr 
-                  v-for="(t, idx) in filteredTaxaOverview" 
+                  v-for="t in filteredTaxaOverview" 
                   :key="t.taxon" 
                   class="taxa-row"
                   :class="{ 'taxa-row-noise': isNoiseTaxon(t.taxon) }"
@@ -954,7 +954,7 @@ defineExpose({
                   当前暂无合并分组规则。您可以选择上方的连续分组模式一键生成，或点击“+ 新增自定义合并组”手动创建。
                 </div>
                 <div 
-                  v-for="(grp, idx) in sampleGroups" 
+                  v-for="grp in sampleGroups" 
                   :key="grp.id"
                   class="group-rule-card"
                 >

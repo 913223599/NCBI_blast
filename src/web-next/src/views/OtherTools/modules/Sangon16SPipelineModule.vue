@@ -19,7 +19,7 @@ const { t } = useI18n()
 const mailRecordsRef = ref<InstanceType<typeof SangonMailRecords> | null>(null)
 
 const {
-  openLocalPath, sangonRoot, downloadsDir, rootExists, db16sReady, orders, downloadCandidates,
+  openLocalPath, sangonRoot, downloadsDir, rootExists, db16sReady,
   ignoredDownloadCount, ignoredOrdersMap, ignoreKeywords, showIgnoreModal, mailAccount, mailDisplayName,
   orderFilter, orderPage, orderPageSize, checkedOrderNames, selectedOrder, resultHeaders,
   resultRows, searchKeyword, resultPage, resultPageSize, forceReblast, scannedMails,
@@ -29,11 +29,11 @@ const {
   autoBlastAfterDownload, showSendModal, loadingSendDraft, sendingMail, sendOrderTarget, sendDraft,
   runtime, showLogs, cleanupOptions, activeOrders, ignoredOrders, ignoredOrdersCount,
   claimableCandidates, orderFilterTabs, filteredOrders, pagedOrders, runnableOrdersCount,
-  downloadableOrders, checkedDownloadableNames, targetDownloadCount, awaitingDownloadCount,
-  needsWebLoginCount, browserEnvShortLabel, showBrowserWarningBar, browserFirstIssueText,
+  checkedDownloadableNames, targetDownloadCount, awaitingDownloadCount,
+  browserEnvShortLabel, showBrowserWarningBar, browserFirstIssueText,
   runtimeLogsList, activeAdvancedTags, filteredResultRows, pagedResultRows, completedOrdersCount,
-  totalIdentifiedSamples, allChecked, isProcessingStatus, isOrderMarkedNew, hasOrderSourceData,
-  isOrderRunnable, hasOrderDownloadChannel, isOrderDownloadable, statusLabel, toggleCheckAll,
+  totalIdentifiedSamples, allChecked, isOrderMarkedNew,
+  statusLabel, toggleCheckAll,
   loadOverview, selectOrderAndLoadResults, handleSaveRoot, handleSaveDownloadsDir,
   handleImportDownloads, handleClaimSingleOrder, handleClaimSingleCandidate, handleIgnoreOrders,
   handleToggleMailIgnore, handleSaveIgnoreKeywords, openSendResultModal, resetSangonSendDraft,

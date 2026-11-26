@@ -80,7 +80,7 @@ export class SpeciesZoningStrategy {
   /**
    * 找寻已有同类同种的盒子
    */
-  private static findAffinityBox(species: string, sampleType: string, genus: string, index: Map<string, BoxCapacityInfo>): string | null {
+  private static findAffinityBox(species: string, _sampleType: string, _genus: string, index: Map<string, BoxCapacityInfo>): string | null {
     for (const [id, info] of index) {
       if (info.availableCount > 0 && info.occupants.has(species)) {
         // 如果物理上已有该种，大类必然也匹配（除非库数据错乱），直接允许
@@ -90,7 +90,7 @@ export class SpeciesZoningStrategy {
     return null
   }
 
-  private static findCompatibleEmptyBox(species: string, sampleType: string, genus: string, index: Map<string, BoxCapacityInfo>): string | null {
+  private static findCompatibleEmptyBox(_species: string, _sampleType: string, _genus: string, index: Map<string, BoxCapacityInfo>): string | null {
     for (const [id, info] of index) {
       if (info.usedCount === 0 && info.availableCount > 0) {
         return id

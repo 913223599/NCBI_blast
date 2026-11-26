@@ -1,9 +1,8 @@
 /**
  * BLAST 分析状态管理 (Pinia Store)
  */
-import { ref, computed, shallowRef } from 'vue'
+import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import { getBridge } from '../bridge'
 
 /** BLAST 参数 */
 export interface BlastParams {

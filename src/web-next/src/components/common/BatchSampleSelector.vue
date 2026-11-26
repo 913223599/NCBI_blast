@@ -44,7 +44,6 @@ const emit = defineEmits<{
 const searchQuery = ref('')
 const selectedCategory = ref<string>('all')
 const sortBy = ref<'default' | 'name' | 'cds_desc'>('default')
-const isSelectedExpanded = ref(false)
 const showModalSelector = ref(false)
 
 // 模态框临时选中项
@@ -135,11 +134,6 @@ function toggleSample(sample: BatchSampleItem) {
     current.push(sample)
   }
   emit('update:modelValue', current)
-}
-
-function removeSelected(sampleId: string) {
-  const next = props.modelValue.filter(s => s.sample_id !== sampleId)
-  emit('update:modelValue', next)
 }
 
 // 批量操作：全选当前筛选结果

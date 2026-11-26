@@ -12,6 +12,9 @@
  */
 
 import { API_BASE } from '../bridge/electron-bridge';
+import { createLogger } from './logger';
+
+const log = createLogger('FileDownloader');
 
 export interface DownloadResult {
   success: boolean;
@@ -109,9 +112,9 @@ export async function downloadFileFromBlob(
       } else {
         return { success: false, error: '写入本地文件失败，请检查磁盘权限' };
       }
-    } catch (e: any) {
-      console.error('[FileDownloader] Electron 原生保存异常:', e);
-      return { success: false, error: e?.message || String(e) };
+    } catch (e: unknown) {
+      log.error('Electron 原生保存异常:', e);
+      return { success: false, error: e instanceof Error ? e.message : String(e) };
     }
   }
 
@@ -134,9 +137,9 @@ export async function downloadFileFromBlob(
     }, 60000);
 
     return { success: true };
-  } catch (err: any) {
-    console.error('[FileDownloader] 浏览器 Blob 下载异常:', err);
-    return { success: false, error: err?.message || String(err) };
+  } catch (err: unknown) {
+    log.error('浏览器 Blob 下载异常:', err);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -179,11 +182,11 @@ export async function downloadFileFromUrl(
 
     const blob = await response.blob();
     return await downloadFileFromBlob(blob, finalFilename);
-  } catch (err: any) {
-    console.error(`[FileDownloader] 下载网络请求失败 [${fullUrl}]:`, err);
+  } catch (err: unknown) {
+    log.error(`下载网络请求失败 [${fullUrl}]:`, err);
     return {
       success: false,
-      error: `无法连接服务器进行下载: ${err?.message || String(err)}`
+      error: `无法连接服务器进行下载: ${err instanceof Error ? err.message : String(err)}`
     };
   }
 }

@@ -9,7 +9,7 @@
  * 3. Layer 3 (Hotspot Zoom): 尾部受体/裂解操纵子/攻防岛 局部高精 ORF 构型与序列同源梯形带
  */
 import { ref, computed } from 'vue'
-import { FUNCTIONAL_CATEGORIES, inferCategoryFromText } from '../../viewer/utils/render'
+import { inferCategoryFromText } from '../../viewer/utils/render'
 
 const props = defineProps<{
   clusters: any[]
@@ -30,29 +30,6 @@ const activeSampleIds = computed<string[]>(() => {
     return [props.selectedPair[0], props.selectedPair[1]]
   }
   return Object.keys(props.sampleNames || {})
-})
-
-// 检查内溶素是否 100% 保守
-const isLysisInvariant = computed(() => {
-  if (!props.lysisMatrix) return false
-  const ids = Object.keys(props.sampleNames || {})
-  if (ids.length < 2) return true
-
-  let allHigh = true
-  for (let i = 0; i < ids.length; i++) {
-    for (let j = i + 1; j < ids.length; j++) {
-      const s1 = ids[i]
-      const s2 = ids[j]
-      if (s1 && s2) {
-        const val = props.lysisMatrix[s1]?.[s2] ?? 0
-        if (val < 98) {
-          allHigh = false
-          break
-        }
-      }
-    }
-  }
-  return allHigh
 })
 
 import { getCatColor, inferClusterCategory } from '../utils/pangenomeVariants'

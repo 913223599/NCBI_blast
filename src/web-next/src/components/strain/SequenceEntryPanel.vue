@@ -87,7 +87,7 @@ function toggleDropdown(name: string) {
   openDropdown.value = openDropdown.value === name ? null : name
 }
 
-function handleSelect(field: string, value: string) {
+function handleSelect(_field: string, value: string) {
   emit('update:geneSeqType', value)
   openDropdown.value = null
 }

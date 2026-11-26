@@ -1,6 +1,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getBridge, onEvent } from '../../../../../bridge/electron-bridge'
 import { notifyUser } from '../../../../../utils/notify'
+import { createLogger } from '../../../../../utils/logger'
 import type {
   PhageStructureResult,
   StructureBatchRunPayload,
@@ -12,6 +13,8 @@ import type {
   StructureSourceMode,
   StructureTaskHistoryItem,
 } from '../types'
+
+const log = createLogger('PhageStructure')
 
 export interface StructureLogLine {
   time: string
@@ -121,7 +124,7 @@ export function usePhageStructure() {
     try {
       capabilities.value = await bridge.get_phage_structure_capabilities()
     } catch (err) {
-      console.warn('[PhageStructure] 读取引擎状态失败:', err)
+      log.warn('读取引擎状态失败:', err)
     } finally {
       isCapabilitiesLoading.value = false
     }
@@ -136,7 +139,7 @@ export function usePhageStructure() {
         phage_discoveries: Array.isArray(res?.phage_discoveries) ? res.phage_discoveries : [],
       }
     } catch (err) {
-      console.warn('[PhageStructure] 读取联动数据源失败:', err)
+      log.warn('读取联动数据源失败:', err)
     } finally {
       isSourcesLoading.value = false
     }
@@ -147,7 +150,7 @@ export function usePhageStructure() {
       const snap = await bridge.get_phage_structure_queue_status()
       if (snap) syncQueueSnapshot(snap)
     } catch (err) {
-      console.warn('[PhageStructure] 拉取队列状态失败:', err)
+      log.warn('拉取队列状态失败:', err)
     }
   }
 
@@ -163,7 +166,7 @@ export function usePhageStructure() {
         }
       }
     } catch (err) {
-      console.warn('[PhageStructure] 加载历史列表失败:', err)
+      log.warn('加载历史列表失败:', err)
     }
   }
 
@@ -355,11 +358,18 @@ export function usePhageStructure() {
     return await bridge.get_phage_structure_gbk(taskId)
   }
 
-  function handleWsEvent(eventType: string, data: any): void {
-    if (eventType === 'phage_structure_queue_update' && data) {
-      syncQueueSnapshot(data as StructureQueueSnapshot)
+  function handleWsEvent(eventType: string, rawData: unknown): void {
+    if (eventType === 'phage_structure_queue_update' && rawData) {
+      syncQueueSnapshot(rawData as StructureQueueSnapshot)
       return
     }
+    const data = rawData as {
+      task_id?: string
+      progress?: number
+      current_step?: string
+      status?: StructureTaskHistoryItem['status']
+      error?: unknown
+    } | null
     if (!data || !data.task_id) return
 
     const activeId = currentTask.value?.task_id

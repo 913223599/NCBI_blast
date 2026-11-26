@@ -1,0 +1,259 @@
+/* ==========================================================================
+ * NCBI Bio-Station 共享工作台设计基座样式 (workbench-shared.css)
+ * 统一沉淀全站高频复用的卡片、标签页、拖拽上传区、表单控件、按钮、徽章、
+ * KPI 看板与弹窗布局类，消除跨组件 CSS 重复并确保视觉一致性。
+ * ========================================================================== */
+
+.wb-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wb-surface-muted {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.wb-tabs-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wb-tab-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.16s, border-color 0.16s, color 0.16s;
+}
+
+.wb-tab-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.wb-tab-btn.soft {
+  border-color: transparent;
+  background: transparent;
+}
+
+.wb-tab-btn.soft.active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+
+.wb-input,
+.wb-select,
+.wb-textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.84rem;
+  color: #0f172a;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.wb-input:focus,
+.wb-select:focus,
+.wb-textarea:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+.wb-textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  resize: vertical;
+}
+
+.wb-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 18px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.16s, opacity 0.16s;
+}
+
+.wb-btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.wb-btn-primary:disabled {
+  background: #94a3b8;
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.wb-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.16s, border-color 0.16s, color 0.16s;
+}
+
+.wb-btn-outline:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #2563eb;
+}
+
+.wb-btn-outline.danger {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.wb-btn-outline.danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+}
+
+.wb-btn-link {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.wb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.wb-chip.ok {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.wb-chip.warn {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.wb-chip.info {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.wb-drop-zone {
+  border: 2px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 18px 14px;
+  text-align: center;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: border-color 0.16s, background-color 0.16s;
+}
+
+.wb-drop-zone:hover,
+.wb-drop-zone.dragging {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.wb-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.wb-kpi-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.wb-kpi-card.primary {
+  border-color: #93c5fd;
+  background: #f8faff;
+}
+
+.wb-kpi-card.success {
+  border-color: #a7f3d0;
+  background: #f0fdf4;
+}
+
+.wb-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.wb-dialog-content {
+  background: #ffffff;
+  border-radius: 12px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wb-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.wb-dialog-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+.wb-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 14px 24px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+}

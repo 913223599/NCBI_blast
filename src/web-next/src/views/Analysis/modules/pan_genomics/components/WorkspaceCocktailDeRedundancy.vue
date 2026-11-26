@@ -24,7 +24,6 @@ const {
   selectedDrawerSample,
   isDrawerOpen,
   hoveredScatterSample,
-  sampleIds,
   decisionEvaluation,
   kpis,
   tableSamples,

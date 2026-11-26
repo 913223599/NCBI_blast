@@ -165,7 +165,7 @@ async function handleUploadClick() {
   
   if (isElectron) {
     const paths = await bridge.request_file_load('fasta', false);
-    if (paths && paths.length > 0) {
+    if (paths && paths.length > 0 && paths[0]) {
       setLocalFilePath(paths[0]);
     }
   } else {

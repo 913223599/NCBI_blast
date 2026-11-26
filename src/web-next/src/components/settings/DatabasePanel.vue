@@ -18,7 +18,7 @@ async function loadBioDatabases() {
   try {
     const res = await getBridge().get_all_db_status()
     if (res && res.success) {
-      bioDatabases.value = res.data
+      bioDatabases.value = Array.isArray(res.data) ? res.data : []
     } else {
       appStore.showNotification('无法获取数据库状态', 'error')
     }

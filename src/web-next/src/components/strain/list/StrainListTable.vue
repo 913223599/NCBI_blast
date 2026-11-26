@@ -107,7 +107,7 @@
           <!-- 备份行（仅在展开时显示） -->
           <tr
             v-if="isExpanded(group.representative.accession) && getDuplicates(group).length > 0"
-            v-for="(duplicate, index) in getDuplicates(group)"
+            v-for="duplicate in getDuplicates(group)"
             :key="duplicate.id"
             class="table-row duplicate-row"
             :class="{
@@ -233,7 +233,7 @@ function isExpanded(accession: string): boolean {
 }
 
 // 处理复选框点击（包括所有备份）
-function handleCheckboxClick(event: MouseEvent, record: StrainRecord, allRecords: StrainRecord[]) {
+function handleCheckboxClick(event: MouseEvent, record: StrainRecord, _allRecords: StrainRecord[]) {
   _log.debug('[handleCheckboxClick] shiftKey:', event.shiftKey, 'activeId:', props.activeId, 'record.id:', record.id)
   
   if (event.shiftKey && props.activeId) {

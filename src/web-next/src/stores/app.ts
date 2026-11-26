@@ -17,11 +17,17 @@ function readInitialLocale(): AppLocale {
   return 'zh_CN'
 }
 
+export interface NotificationItem {
+  id: number
+  message: string
+  type: string
+}
+
 export const useAppStore = defineStore('app', () => {
   /* -------- 状态 -------- */
   const locale = ref<AppLocale>(readInitialLocale())
   const sidebarCollapsed = ref(false)
-  const notifications = ref<Array<{ id: number; message: string; type: string }>>([])
+  const notifications = ref<NotificationItem[]>([])
   const pageTitle = ref('Dashboard')
   const translations = ref<Record<string, string>>({})
   const translationsLocale = ref<AppLocale | null>(null)

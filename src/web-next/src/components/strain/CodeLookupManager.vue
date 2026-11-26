@@ -354,11 +354,7 @@ import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
 
 const codeGen = useCodeGenerator()
-const { 
-  removeLookupEntry,
-  auditWithNCBI,
-  updateLookupEntry
-} = useCodeLookup()
+const { updateLookupEntry } = useCodeLookup()
 const strain = useStrainStore()
 const appStore = useAppStore()
 const confirmDialog = useConfirmDialog()
@@ -419,10 +415,6 @@ function getSpeciesList(categoryCode: string, genusCode: string) {
 
 function getGenusCount(categoryCode: string): number {
   return codeGen.lookup.getGenusListByCategory(categoryCode as CategoryCode).length
-}
-
-function getSpeciesCount(categoryCode: string, genusCode: string): number {
-  return codeGen.lookup.getSpeciesListByGenus(categoryCode as CategoryCode, genusCode).length
 }
 
 /* ========== 新增词条 ========== */

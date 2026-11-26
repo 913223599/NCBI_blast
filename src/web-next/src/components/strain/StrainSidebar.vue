@@ -131,13 +131,11 @@ import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import type { StrainRecord } from '../../stores/strain'
-import { useCodeGenerator } from '../../composables/useCodeGenerator'
 
 const { t } = useI18n()
 const strain = useStrainStore()
 const appStore = useAppStore()
 const confirmDialog = useConfirmDialog()
-const codeGen = useCodeGenerator()
 
 const emit = defineEmits(['addFreezer', 'sampleClick'])
 

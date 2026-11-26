@@ -1,6 +1,6 @@
 /**
  * useBlastResultHandler - BLAST结果处理组合式函数
- * 
+ *
  * 职责：
  * - 获取和解析任务结果
  * - 结果数据格式化
@@ -12,6 +12,36 @@ import { useBlastStore, type BlastHit } from '../stores/blast'
 import { useAppStore } from '../stores/app'
 import { useConfirmDialog } from './useConfirmDialog'
 import { getBridge } from '../bridge'
+import { createLogger } from '../utils/logger'
+
+const log = createLogger('BlastResultHandler')
+
+interface RawBlastHit {
+  species?: string
+  genus?: string
+  strain?: string
+  gene_source?: string
+  gene_type?: string
+  seq_type?: string
+  host?: string
+  align_len?: string
+  similarity?: string | number
+  evalue?: string | number
+  acc?: string
+  title?: string
+  consensusList?: Array<{ name: string; pct: number }>
+  xml_file?: string
+  raw_sequence?: string
+}
+
+interface RawBlastTaskResult {
+  sequence_id?: string
+  csv_file?: string
+  xml_file?: string
+  raw_sequence?: string
+  status?: string
+  data?: RawBlastHit[]
+}
 
 export function useBlastResultHandler() {
   const blast = useBlastStore()
@@ -26,39 +56,40 @@ export function useBlastResultHandler() {
     try {
       getBridge().get_task_results(taskId, (resStr: string) => {
         try {
-          const resultsArray = JSON.parse(resStr)
+          const resultsArray = JSON.parse(resStr) as unknown
           if (!Array.isArray(resultsArray)) return
 
-          const hits: any[] = []
-          for (const res of resultsArray) {
+          const hits: BlastHit[] = []
+          for (const rawItem of resultsArray) {
+            const res = (rawItem || {}) as RawBlastTaskResult
             const queryId = res.sequence_id || '未知序列'
             const csvFile = res.csv_file || ''
-            
+
             if (res.status === 'pending' || res.status === 'running') {
               hits.push(createPendingHit(queryId, csvFile))
-            } else if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+            } else if (res.data && Array.isArray(res.data) && res.data.length > 0 && res.data[0]) {
               hits.push(createSuccessHit(queryId, res.data[0], csvFile, res.xml_file, res.raw_sequence))
             } else {
               hits.push(createNoHitsHit(queryId, csvFile, res.xml_file))
             }
           }
-          
+
           // 按查询序列ID排序
-          hits.sort((a, b) => 
-            a.queryTitle.localeCompare(b.queryTitle, undefined, { 
-              numeric: true, 
-              sensitivity: 'base' 
+          hits.sort((a, b) =>
+            a.queryTitle.localeCompare(b.queryTitle, undefined, {
+              numeric: true,
+              sensitivity: 'base',
             })
           )
-          
+
           blast.setResults(hits, `分析结果 (${hits.length} 项)`)
         } catch (e) {
-          console.error('[ResultHandler] Parse results error:', e)
+          log.error('Parse results error:', e)
           appStore.showNotification('解析结果失败', 'error')
         }
       })
     } catch (error) {
-      console.error('[ResultHandler] Fetch results error:', error)
+      log.error('Fetch results error:', error)
       appStore.showNotification('获取结果失败', 'error')
     }
   }
@@ -66,7 +97,7 @@ export function useBlastResultHandler() {
   /**
    * 创建等待中的结果条目
    */
-  function createPendingHit(queryId: string, csvFile: string) {
+  function createPendingHit(queryId: string, csvFile: string): BlastHit {
     return {
       queryTitle: queryId,
       speciesName: '等待比对...',
@@ -82,14 +113,20 @@ export function useBlastResultHandler() {
       translatedName: null,
       csvFile,
       rawSequence: '',
-      status: 'pending'
+      status: 'pending',
     }
   }
 
   /**
    * 创建成功的结果条目
    */
-  function createSuccessHit(queryId: string, bestHit: any, csvFile: string, xmlFile?: string, rawSequence?: string): BlastHit {
+  function createSuccessHit(
+    queryId: string,
+    bestHit: RawBlastHit,
+    csvFile: string,
+    xmlFile?: string,
+    rawSequence?: string
+  ): BlastHit {
     const hit: BlastHit = {
       queryTitle: queryId,
       speciesName: bestHit.species || 'Unknown',
@@ -98,7 +135,7 @@ export function useBlastResultHandler() {
       seqType: bestHit.seq_type || '',
       host: bestHit.host || '',
       alignLen: bestHit.align_len || '',
-      identity: parseFloat(bestHit.similarity) || 0,
+      identity: parseFloat(String(bestHit.similarity ?? '')) || 0,
       evalue: String(bestHit.evalue || 'N/A'),
       accession: bestHit.acc || 'N/A',
       hitTitle: bestHit.title || '',
@@ -106,15 +143,14 @@ export function useBlastResultHandler() {
       consensusList: bestHit.consensusList || [],
       csvFile,
       xmlFile: xmlFile || bestHit.xml_file || '',
-      rawSequence: rawSequence || bestHit.raw_sequence || ''
+      rawSequence: rawSequence || bestHit.raw_sequence || '',
+      status: 'success',
     }
 
-    // [NEW] 明确设置状态为 success
-    hit.status = 'success'
     return hit
   }
 
-  function createNoHitsHit(queryId: string, csvFile: string, xmlFile?: string) {
+  function createNoHitsHit(queryId: string, csvFile: string, xmlFile?: string): BlastHit {
     return {
       queryTitle: queryId,
       speciesName: '未找到匹配项 (No Hits)',
@@ -131,7 +167,7 @@ export function useBlastResultHandler() {
       csvFile,
       xmlFile: xmlFile || '',
       rawSequence: '',
-      status: 'no_hits'
+      status: 'no_hits',
     }
   }
 
@@ -145,10 +181,8 @@ export function useBlastResultHandler() {
     }
 
     // 检查是否存在未翻译的条目
-    const untranslatedCount = blast.results.filter(
-      h => h.speciesName && !h.translatedName
-    ).length
-    
+    const untranslatedCount = blast.results.filter((h) => h.speciesName && !h.translatedName).length
+
     if (untranslatedCount > 0) {
       const confirmMsg = `存在 ${untranslatedCount} 条未翻译的物种条目。是否翻译后再导出？\n\n点击“翻译并导出”执行批量翻译，点击“直接导出”将保留空白的翻译列。`
       const shouldTranslate = await confirmDialog.confirm({
@@ -159,22 +193,22 @@ export function useBlastResultHandler() {
       })
       if (shouldTranslate) {
         await translateAll()
-        
-        if (blast.results.filter(h => h.speciesName && !h.translatedName).length > 0) {
+
+        if (blast.results.filter((h) => h.speciesName && !h.translatedName).length > 0) {
           appStore.showNotification('部分翻译可能未完成，将执行导出。', 'info')
         }
       }
     }
 
     const csvContent = generateCsvContent()
-    
+
     try {
       // 添加 UTF-8 BOM (\uFEFF) 以防止 Excel 打开 CSV 时出现乱码
       const csvWithBom = '\uFEFF' + csvContent
       getBridge().save_file(csvWithBom, 'blast_results.csv')
       appStore.showNotification('导出指令已发送', 'success')
     } catch (error) {
-      console.error('[ResultHandler] Export error:', error)
+      log.error('Export error:', error)
       appStore.showNotification('导出失败', 'error')
     }
   }
@@ -194,26 +228,28 @@ export function useBlastResultHandler() {
       '相似度 (Identity)',
       'E值',
       '访问号',
-      '详细标题'
+      '详细标题',
     ]
-    
-    const rows = blast.results.map(hit => formatHitToRow(hit))
-    
+
+    const rows = blast.results.map((hit) => formatHitToRow(hit))
+
     return [
       headers.join(','),
-      ...rows.map(row => 
-        row.map(cell => {
-          const str = String(cell || '').replace(/"/g, '""')
-          return `"${str}"`
-        }).join(',')
-      )
+      ...rows.map((row) =>
+        row
+          .map((cell) => {
+            const str = String(cell || '').replace(/"/g, '""')
+            return `"${str}"`
+          })
+          .join(',')
+      ),
     ].join('\n')
   }
 
   /**
    * 格式化单个结果为CSV行
    */
-  function formatHitToRow(hit: any): string[] {
+  function formatHitToRow(hit: BlastHit): string[] {
     const fullTrans = hit.translatedName || ''
     let mainTrans = fullTrans
     let probTrans = '-'
@@ -251,7 +287,7 @@ export function useBlastResultHandler() {
       `${hit.identity.toFixed(1)}%`,
       hit.evalue,
       hit.accession,
-      hit.hitTitle
+      hit.hitTitle,
     ]
   }
 
@@ -261,30 +297,29 @@ export function useBlastResultHandler() {
   async function translateAll(): Promise<void> {
     if (blast.results.length === 0) return
     if (isTranslating.value) return
-    
+
     isTranslating.value = true
     appStore.showNotification(`开始翻译 ${blast.results.length} 条结果...`, 'info')
-    
+
     const bridge = getBridge()
     const wordsToTranslate = new Set<string>()
-    
-    blast.results.forEach(hit => {
+
+    blast.results.forEach((hit) => {
       if (!hit.translatedName) {
-        // [OPTIMIZATION] 始终把完整的 speciesName 加入翻译列表
-        // 这样后端可以利用其中的上下文（如共识百分比）进行整体重组，还原度更高
+        // 始终把完整的 speciesName 加入翻译列表，便于后端上下文重组
         if (hit.speciesName && hit.speciesName !== 'Unknown') {
-          wordsToTranslate.add(hit.speciesName as string)
+          wordsToTranslate.add(hit.speciesName)
         }
 
         // 同时保留拆解翻译能力，以防某些行没有走共识算法路径
         if (hit.consensusList && hit.consensusList.length > 0) {
-          hit.consensusList.forEach((c: any) => {
+          hit.consensusList.forEach((c) => {
             if (c.name) wordsToTranslate.add(c.name)
           })
         }
       }
     })
-      
+
     if (wordsToTranslate.size === 0) {
       isTranslating.value = false
       appStore.showNotification('未发现需要翻译的新条目', 'info')
@@ -294,7 +329,7 @@ export function useBlastResultHandler() {
     try {
       bridge.translate_batch(JSON.stringify(Array.from(wordsToTranslate)), 'species')
     } catch (e) {
-      console.error('[ResultHandler] Batch translation error:', e)
+      log.error('Batch translation error:', e)
       isTranslating.value = false
       return
     }
@@ -310,6 +345,6 @@ export function useBlastResultHandler() {
     isTranslating,
     fetchTaskResults,
     exportResults,
-    translateAll
+    translateAll,
   }
 }

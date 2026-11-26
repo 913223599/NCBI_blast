@@ -59,7 +59,7 @@
       <div class="divider-text">表格显示项</div>
       <!-- 平铺式列管理 -->
       <section class="column-visibility-grid">
-        <label v-for="(visible, key) in columnVisibility" :key="key" class="col-check-label">
+        <label v-for="(_visible, key) in columnVisibility" :key="key" class="col-check-label">
           <input type="checkbox" v-model="columnVisibility[String(key)]" @change="emit('updateColumns', columnVisibility)" />
           <span>{{ getColumnLabel(String(key)) }}</span>
         </label>
@@ -77,10 +77,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, reactive } from 'vue'
+import { ref, reactive } from 'vue'
 import { useStrainStore } from '../../../stores/strain'
 import { useAppStore } from '../../../stores/app'
-import { useCodeGenerator } from '../../../composables/useCodeGenerator'
 
 const props = defineProps<{
   stats: { total: number } | null,
@@ -93,25 +92,7 @@ const strainStore = useStrainStore()
 const appStore = useAppStore()
 const filters = strainStore.searchFilters as any
 
-const uniqueSpecies = computed(() => strainStore.uniqueSpecies)
 const columnVisibility = reactive<Record<string, boolean>>({ ...props.initialColumns })
-
-// 将编码对照表路径转换为显示名称的辅助函数
-function speciesPathToDisplayName(fullPath: string): string {
-  if (!fullPath) return ''
-  // 尝试从对照表中获取名称
-  const { lookup } = useCodeGenerator()
-  const entry = lookup.findByFullPath(fullPath)
-  if (entry) {
-    let label = entry.name
-    if (entry.latinName) {
-      label += ` (${entry.latinName})`
-    }
-    return label
-  }
-  // 如果找不到，直接返回原值（兼容旧数据）
-  return fullPath
-}
 
 const integrityOnly = ref(false)
 function toggleIntegrityCheck() {

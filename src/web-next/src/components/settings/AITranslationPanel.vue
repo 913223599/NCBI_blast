@@ -10,7 +10,6 @@ const selectedModel = ref('')
 const aiModels = ref<Array<{ key: string; name: string }>>([])
 const newModelKey = ref('')
 const newModelName = ref('')
-const dropdownOpen = ref(false)
 const saveStatus = ref<{ message: string; type: string } | null>(null)
 
 function loadAISettings() {

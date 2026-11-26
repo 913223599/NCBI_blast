@@ -8,7 +8,7 @@
  * 2. 顶层群体证据综合看板 (Evidence Synthesis Board)
  * 3. 底层分层证据堆栈 (Layered Evidence Stack) ↔ 科研行动决策引擎 (Action Recommendation Engine)
  */
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 
 const props = defineProps<{
   lifestyles: any[]
@@ -29,7 +29,6 @@ const emit = defineEmits<{
   (e: 'select-sample', sampleId: string): void
 }>()
 
-const sampleIds = computed(() => Object.keys(props.sampleNames || {}))
 const totalAmgCount = computed(() => props.amgGenes?.length || 0)
 
 // 样本对四维分层证据计算 (Four-Dimensional Evidence Stack)

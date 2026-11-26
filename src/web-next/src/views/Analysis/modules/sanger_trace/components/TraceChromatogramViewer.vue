@@ -17,6 +17,7 @@ const props = defineProps<{
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const containerRef = ref<HTMLDivElement | null>(null);
+void containerRef;
 
 // 显示通道控制
 const showA = ref(true);

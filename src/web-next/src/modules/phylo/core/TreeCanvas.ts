@@ -756,16 +756,11 @@ export class PhyloTreeCanvas {
           node.meta?.genus && model.genusColors.get(node.meta.genus)
             ? model.genusColors.get(node.meta.genus)!
             : null
-        let tipFill = node.cladeColor || theme.backboneColor
         let labelFill = node.cladeColor || '#0f172a'
         if (role === 'query') {
-          tipFill = theme.queryColor
           labelFill = theme.queryTextColor
         } else if (role === 'outgroup') {
-          tipFill = theme.outgroupColor
           labelFill = '#475569'
-        } else if (genusColor) {
-          tipFill = genusColor
         }
 
         // 查询株绘矢量五角星，普通参考株在导出时保持干净末端（交互视图仅留透明拾取区）

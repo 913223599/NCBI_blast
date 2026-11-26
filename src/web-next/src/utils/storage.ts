@@ -1,4 +1,5 @@
 import { createLogger } from './logger'
+
 const _log = createLogger('Storage')
 /**
  * 本地存储工具 - 用于持久化保存冰箱数据
@@ -7,8 +8,8 @@ const _log = createLogger('Storage')
 const STORAGE_KEY = 'strain_freezer_data'
 
 export interface StorageData {
-  freezers: any[]
-  records: any[]
+  freezers: unknown[]
+  records: unknown[]
   version: string
   lastSaved: string
 }
@@ -16,41 +17,41 @@ export interface StorageData {
 /**
  * 保存数据到 localStorage
  */
-export function saveToStorage(data: { freezers: any[]; records: any[] }): void {
+export function saveToStorage(data: { freezers: unknown[]; records: unknown[] }): void {
   try {
     const storageData: StorageData = {
       freezers: data.freezers,
       records: data.records,
       version: '1.0.0',
-      lastSaved: new Date().toISOString()
+      lastSaved: new Date().toISOString(),
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData))
-    _log.debug('[Storage] Data saved successfully')
+    _log.debug('Data saved successfully')
   } catch (error) {
-    console.error('[Storage] Failed to save data:', error)
+    _log.error('Failed to save data:', error)
   }
 }
 
 /**
  * 从 localStorage 加载数据
  */
-export function loadFromStorage(): { freezers: any[]; records: any[] } | null {
+export function loadFromStorage(): { freezers: unknown[]; records: unknown[] } | null {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) {
-      _log.debug('[Storage] No stored data found')
+      _log.debug('No stored data found')
       return null
     }
 
-    const data: StorageData = JSON.parse(stored)
-    _log.debug(`[Storage] Data loaded from ${data.lastSaved}`)
-    
+    const data = JSON.parse(stored) as StorageData
+    _log.debug(`Data loaded from ${data.lastSaved}`)
+
     return {
       freezers: data.freezers || [],
-      records: data.records || []
+      records: data.records || [],
     }
   } catch (error) {
-    console.error('[Storage] Failed to load data:', error)
+    _log.error('Failed to load data:', error)
     return null
   }
 }
@@ -61,8 +62,8 @@ export function loadFromStorage(): { freezers: any[]; records: any[] } | null {
 export function clearStorage(): void {
   try {
     localStorage.removeItem(STORAGE_KEY)
-    _log.debug('[Storage] Data cleared')
+    _log.debug('Data cleared')
   } catch (error) {
-    console.error('[Storage] Failed to clear data:', error)
+    _log.error('Failed to clear data:', error)
   }
 }

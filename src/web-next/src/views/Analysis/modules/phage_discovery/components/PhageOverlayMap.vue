@@ -37,19 +37,15 @@ const {
   circPanY,
   svgCanvasRef,
   totalLenBp,
-  avgGcPct,
   allRegions,
   allRejected,
   allBaseFeatures,
-  allScoreBins,
-  allBaseBins,
   isGenbankSource,
   hasIntegraseOrTransposase,
   hasRnaFeatures,
   baseLayerLabel,
   searchPlaceholder,
   activeRegion,
-  matchedFeatureIndices,
   matchedFeatureList,
   jumpToMatchedFeature,
   focusInterval,
@@ -58,8 +54,6 @@ const {
   zoomLinear,
   zoomCircular,
   linearZoomFactor,
-  getBaseFeatureColor,
-  linX,
   linearTicks,
   visibleLinearFeatures,
   visibleLinearRegions,
@@ -88,13 +82,14 @@ const {
   LIN_H,
   LIN_PAD_L,
   LIN_PAD_R,
-  LIN_PLOT_W,
   CIRC_W,
   CIRC_H,
   CIRC_CX,
   CIRC_CY,
   formatBpAxis,
 } = usePhageOverlayMap(props, emit)
+
+void svgCanvasRef
 </script>
 
 <template>

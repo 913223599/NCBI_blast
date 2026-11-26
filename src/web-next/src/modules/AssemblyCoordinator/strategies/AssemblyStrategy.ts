@@ -26,12 +26,12 @@ export abstract class BaseAssemblyStrategy implements IAssemblyStrategy {
   abstract getPreprocessingPipeline(task: AssemblyTask): string[];
   abstract getAssemblyPipeline(task: AssemblyTask): string[];
   
-  getPolishingPipeline(task: AssemblyTask): string[] {
+  getPolishingPipeline(_task: AssemblyTask): string[] {
     // 默认通用的 Racon 抛光流程
     return ['[TODO] Default Racon Polishing'];
   }
   
-  getAnnotationPipeline(task: AssemblyTask): string[] {
+  getAnnotationPipeline(_task: AssemblyTask): string[] {
     // 默认通用的 Prokka 注释流程
     return ['[TODO] Default Prokka Annotation'];
   }

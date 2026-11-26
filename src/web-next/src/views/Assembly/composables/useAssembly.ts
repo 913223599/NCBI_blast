@@ -1,105 +1,138 @@
 /**
  * useAssembly - 基因组组装 Composable 状态与逻辑编排 (纯净重构版)
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { onEvent, apiGet, apiPost, apiDelete, API_BASE } from '../../../bridge/electron-bridge';
-import { downloadFileFromUrl } from '../../../utils/fileDownloader';
-import type { 
-  AssemblyRunParams, 
-  AssemblyTaskItem, 
-  AssemblyResultData, 
-  AssemblyQueueStatus 
-} from '../types';
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { apiDelete, apiGet, apiPost, onEvent } from '../../../bridge/electron-bridge'
+import { downloadFileFromUrl } from '../../../utils/fileDownloader'
+import { createLogger } from '../../../utils/logger'
+import type {
+  AssemblyQueueStatus,
+  AssemblyResultData,
+  AssemblyRunParams,
+  AssemblyTaskItem,
+} from '../types'
+
+const logger = createLogger('Assembly')
+
+function toErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+interface AssemblyQueueEventPayload {
+  queue?: Array<{ id: string; status?: string; position?: number; name?: string; sample_type?: string }>
+  running_task?: AssemblyQueueStatus['running_task']
+  waiting_tasks?: AssemblyQueueStatus['waiting_tasks']
+  waiting_count?: number
+  is_busy?: boolean
+  current_task_id?: string | null
+}
+
+interface AssemblyLogEventPayload {
+  task_id?: string
+  line?: string
+}
+
+interface AssemblyProgressEventPayload {
+  task_id?: string
+  step?: string
+  progress?: number
+  status?: string
+  stats?: AssemblyTaskItem['results']
+}
+
+interface AssemblyRunApiResponse {
+  success?: boolean
+  code?: number
+  error?: string
+  msg?: string
+  message?: string
+  task_id?: string
+  queue_position?: number
+  is_busy?: boolean
+  status?: string
+  data?: {
+    task_id?: string
+    queue_position?: number
+    is_busy?: boolean
+    status?: string
+  }
+}
 
 export function useAssembly() {
-  const isRunning = ref<boolean>(false);
-  const currentTask = ref<AssemblyTaskItem | null>(null);
-  const resultData = ref<AssemblyResultData | null>(null);
-  const historyTasks = ref<AssemblyTaskItem[]>([]);
-  const activeTaskId = ref<string>('');
-  const error = ref<string | null>(null);
-  const consoleLogs = ref<string[]>([]);
-  const isHistoryLoading = ref<boolean>(false);
-  const queueStatus = ref<AssemblyQueueStatus | null>(null);
+  const isRunning = ref<boolean>(false)
+  const currentTask = ref<AssemblyTaskItem | null>(null)
+  const resultData = ref<AssemblyResultData | null>(null)
+  const historyTasks = ref<AssemblyTaskItem[]>([])
+  const activeTaskId = ref<string>('')
+  const error = ref<string | null>(null)
+  const consoleLogs = ref<string[]>([])
+  const isHistoryLoading = ref<boolean>(false)
+  const queueStatus = ref<AssemblyQueueStatus | null>(null)
 
-  // 引擎是否正忙（有正在运行的任务）
-  const isEngineBusy = computed(() => {
-    return !!queueStatus.value?.is_busy || historyTasks.value.some(t => t.status === 'running');
-  });
+  const isEngineBusy = computed(
+    () => Boolean(queueStatus.value?.is_busy) || historyTasks.value.some((t) => t.status === 'running')
+  )
 
-  // 1. 获取任务历史记录与队列状态
   async function fetchHistory() {
-    isHistoryLoading.value = true;
+    isHistoryLoading.value = true
     try {
       const [histRes, qRes] = await Promise.all([
-        apiGet('/api/assembly/history'),
-        apiGet('/api/assembly/queue')
-      ]);
+        apiGet<AssemblyTaskItem[] | { data?: AssemblyTaskItem[]; tasks?: AssemblyTaskItem[] }>('/api/assembly/history'),
+        apiGet<AssemblyQueueStatus & { data?: AssemblyQueueStatus }>('/api/assembly/queue'),
+      ])
 
-      // 兼容直接数组与 BioResponse.ok 结构
-      let tasks: AssemblyTaskItem[] = [];
+      let tasks: AssemblyTaskItem[] = []
       if (Array.isArray(histRes)) {
-        tasks = histRes;
+        tasks = histRes
       } else if (histRes && Array.isArray(histRes.data)) {
-        tasks = histRes.data;
+        tasks = histRes.data
       } else if (histRes && Array.isArray(histRes.tasks)) {
-        tasks = histRes.tasks;
+        tasks = histRes.tasks
       }
-
-      historyTasks.value = tasks;
+      historyTasks.value = tasks
 
       if (qRes) {
-        queueStatus.value = qRes.data || qRes;
+        queueStatus.value = qRes.data || qRes
       }
 
-      // 将后端最新任务状态与队列快照同步到当前聚焦任务，自愈 queued -> running 竞态倒退
       if (currentTask.value) {
-        const focusId = activeTaskId.value || currentTask.value.id;
-        const matched = tasks.find(t => t.id === focusId);
+        const focusId = activeTaskId.value || currentTask.value.id
+        const matched = tasks.find((t) => t.id === focusId)
         if (matched) {
-          const curStatus = currentTask.value.status;
-          const isCurTerminal = curStatus === 'completed' || curStatus === 'failed' || curStatus === 'aborted';
-          const isQueueRunningFocus = queueStatus.value?.running_task?.id === matched.id;
+          const curStatus = currentTask.value.status
+          const isCurTerminal = curStatus === 'completed' || curStatus === 'failed' || curStatus === 'aborted'
+          const isQueueRunningFocus = queueStatus.value?.running_task?.id === matched.id
 
           if (!isCurTerminal) {
             if (matched.status === 'running' || isQueueRunningFocus) {
-              currentTask.value.status = 'running';
-              isRunning.value = true;
-              currentTask.value.progress = Math.max(
-                currentTask.value.progress || 0,
-                matched.progress || 0
-              );
+              currentTask.value.status = 'running'
+              isRunning.value = true
+              currentTask.value.progress = Math.max(currentTask.value.progress || 0, matched.progress || 0)
               if (!currentTask.value.last_step || currentTask.value.last_step.includes('排队')) {
-                currentTask.value.last_step = matched.last_step || '正在运行...';
+                currentTask.value.last_step = matched.last_step || '正在运行...'
               }
-            } else if (
-              matched.status === 'completed' ||
-              matched.status === 'failed' ||
-              matched.status === 'aborted'
-            ) {
-              currentTask.value.status = matched.status;
-              currentTask.value.progress = matched.progress ?? currentTask.value.progress;
-              currentTask.value.last_step = matched.last_step || currentTask.value.last_step;
+            } else if (matched.status === 'completed' || matched.status === 'failed' || matched.status === 'aborted') {
+              currentTask.value.status = matched.status
+              currentTask.value.progress = matched.progress ?? currentTask.value.progress
+              currentTask.value.last_step = matched.last_step || currentTask.value.last_step
               if (matched.results) {
-                currentTask.value.results = { ...(currentTask.value.results || {}), ...matched.results };
+                currentTask.value.results = { ...(currentTask.value.results || {}), ...matched.results }
               }
-              isRunning.value = false;
+              isRunning.value = false
             }
           }
         }
       }
-    } catch (e: any) {
-      console.warn('[useAssembly] 获取历史记录或队列失败:', e);
+    } catch (e: unknown) {
+      logger.warn('获取历史记录或队列失败:', e)
     } finally {
-      isHistoryLoading.value = false;
+      isHistoryLoading.value = false
     }
   }
 
-  // 2. 提交新拼接任务 (0 毫秒乐观即刻跳转)
   async function submitTask(params: AssemblyRunParams) {
-    error.value = null;
-
-    const taskId = `Assembly_${Date.now()}`;
+    error.value = null
+    const taskId = `Assembly_${Date.now()}`
     const payload = {
       task_id: taskId,
       name: params.name || `Task_${taskId.slice(-6)}`,
@@ -125,12 +158,12 @@ export function useAssembly() {
           min_contig_length: params.min_contig_length || 500,
           min_containment_identity: params.min_containment_identity ?? null,
           max_reads: params.max_reads || null,
-          enable_qc: params.enable_qc ?? true
-        }
-      }
-    };
+          enable_qc: params.enable_qc ?? true,
+        },
+      },
+    }
 
-    const isQueued = isEngineBusy.value;
+    const isQueued = isEngineBusy.value
     const newTaskItem: AssemblyTaskItem = {
       id: taskId,
       name: payload.name,
@@ -143,215 +176,203 @@ export function useAssembly() {
       updated_at: Date.now() / 1000,
       config: payload.config,
       results: null,
-      queue_position: isQueued ? (queueStatus.value?.waiting_count || 0) + 1 : 1
-    };
-
-    // 0 毫秒立即更新响应式状态，驱动界面即刻跳转
-    historyTasks.value = [newTaskItem, ...historyTasks.value.filter(t => t.id !== taskId)];
-    activeTaskId.value = taskId;
-    currentTask.value = newTaskItem;
-    isRunning.value = !isQueued;
-    resultData.value = null;
-
-    consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 拼接任务已派发: ${taskId}`);
-    consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 测序平台: ${params.tech} | 模式: ${params.mode} | R1: ${params.r1_path}`);
-    if (params.r2_path) {
-      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 双端 R2: ${params.r2_path}`);
+      queue_position: isQueued ? (queueStatus.value?.waiting_count || 0) + 1 : 1,
     }
+
+    historyTasks.value = [newTaskItem, ...historyTasks.value.filter((t) => t.id !== taskId)]
+    activeTaskId.value = taskId
+    currentTask.value = newTaskItem
+    isRunning.value = !isQueued
+    resultData.value = null
+
+    consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 拼接任务已派发: ${taskId}`)
+    consoleLogs.value.push(
+      `[${new Date().toLocaleTimeString()}] 测序平台: ${params.tech} | 模式: ${params.mode} | R1: ${params.r1_path}`
+    )
+    if (params.r2_path) consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 双端 R2: ${params.r2_path}`)
     if (params.long_reads_path) {
-      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 三代长读长: ${params.long_reads_path}`);
+      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 三代长读长: ${params.long_reads_path}`)
     }
 
     try {
-      // 异步后台派发
-      const res = await apiPost('/api/assembly/run', payload);
-
+      const res = await apiPost<AssemblyRunApiResponse>('/api/assembly/run', payload)
       if (!res || (res.success === false && res.code !== 200)) {
-        throw new Error(res?.error || res?.msg || res?.message || '任务提交失败');
+        throw new Error(res?.error || res?.msg || res?.message || '任务提交失败')
       }
 
-      const assignedTaskId = res.task_id || res.data?.task_id || taskId;
-      const rawPos = res.queue_position ?? res.data?.queue_position ?? 0;
-      const queuePos = Number(rawPos) > 0 ? Number(rawPos) : 0;
-      const backendIsBusy = Boolean(res.is_busy ?? res.data?.is_busy ?? false);
-      const backendStatus = res.status || res.data?.status;
+      const assignedTaskId = res.task_id || res.data?.task_id || taskId
+      const rawPos = res.queue_position ?? res.data?.queue_position ?? 0
+      const queuePos = Number(rawPos) > 0 ? Number(rawPos) : 0
+      const backendIsBusy = Boolean(res.is_busy ?? res.data?.is_busy ?? false)
+      const backendStatus = res.status || res.data?.status
 
-      const curStatus = currentTask.value?.id === taskId ? currentTask.value.status : null;
-      const alreadyTerminal =
-        curStatus === 'completed' || curStatus === 'failed' || curStatus === 'aborted';
+      const curStatus = currentTask.value?.id === taskId ? currentTask.value.status : null
+      const alreadyTerminal = curStatus === 'completed' || curStatus === 'failed' || curStatus === 'aborted'
       const alreadyAdvancedToRunning =
         curStatus === 'running' &&
-        ((currentTask.value?.progress || 0) > 0 || queueStatus.value?.running_task?.id === assignedTaskId);
+        ((currentTask.value?.progress || 0) > 0 || queueStatus.value?.running_task?.id === assignedTaskId)
 
       const shouldWaitInQueue =
         !alreadyTerminal &&
         !alreadyAdvancedToRunning &&
         backendStatus !== 'running' &&
-        (backendIsBusy || queuePos > 1 || (isQueued && backendStatus === 'queued'));
+        (backendIsBusy || queuePos > 1 || (isQueued && backendStatus === 'queued'))
 
       if (currentTask.value && currentTask.value.id === taskId && !alreadyTerminal) {
-        currentTask.value.id = assignedTaskId;
-        currentTask.value.queue_position = queuePos;
-        currentTask.value.status = shouldWaitInQueue ? 'queued' : 'running';
+        currentTask.value.id = assignedTaskId
+        currentTask.value.queue_position = queuePos
+        currentTask.value.status = shouldWaitInQueue ? 'queued' : 'running'
         if (shouldWaitInQueue) {
-          currentTask.value.last_step = `排队中 (#${Math.max(1, queuePos)})`;
+          currentTask.value.last_step = `排队中 (#${Math.max(1, queuePos)})`
         } else if (!currentTask.value.last_step || currentTask.value.last_step.includes('排队')) {
-          currentTask.value.last_step = '正在启动 NGCS 组装调度...';
+          currentTask.value.last_step = '正在启动 NGCS 组装调度...'
         }
       }
-      if (!alreadyTerminal) {
-        isRunning.value = !shouldWaitInQueue;
-      }
-      activeTaskId.value = assignedTaskId;
+      if (!alreadyTerminal) isRunning.value = !shouldWaitInQueue
+      activeTaskId.value = assignedTaskId
 
-      // 后台静默刷新历史
-      fetchHistory();
-      return res;
-    } catch (e: any) {
-      error.value = `任务提交失败: ${e.message}`;
+      fetchHistory()
+      return res
+    } catch (e: unknown) {
+      const msg = toErrorMessage(e)
+      error.value = `任务提交失败: ${msg}`
       if (currentTask.value && currentTask.value.id === taskId) {
-        currentTask.value.status = 'failed';
-        currentTask.value.last_step = `提交失败: ${e.message}`;
+        currentTask.value.status = 'failed'
+        currentTask.value.last_step = `提交失败: ${msg}`
       }
-      isRunning.value = false;
-      throw e;
+      isRunning.value = false
+      throw e
     }
   }
 
-  // 3. 加载任务结果与详情
   async function loadTaskResult(taskId: string) {
-    if (!taskId) return;
-    activeTaskId.value = taskId;
-    error.value = null;
+    if (!taskId) return
+    activeTaskId.value = taskId
+    error.value = null
 
-    const existing = historyTasks.value.find(t => t.id === taskId);
+    const existing = historyTasks.value.find((t) => t.id === taskId)
     if (existing) {
-      currentTask.value = { ...existing };
-      isRunning.value = existing.status === 'running';
+      currentTask.value = { ...existing }
+      isRunning.value = existing.status === 'running'
     }
 
     try {
-      const res = await apiGet(`/api/assembly/result/${taskId}`);
-      // 兼容直接展开的 BioResponse.ok(dict) 或包含 data 的结构
-      const data = (res && (res.task_id || res.stats)) ? res : (res?.data || (res && res.success !== false ? res : null));
+      const res = await apiGet<
+        AssemblyResultData & { success?: boolean; data?: AssemblyResultData }
+      >(`/api/assembly/result/${taskId}`)
+      const data =
+        res && (res.task_id || res.stats)
+          ? res
+          : res?.data || (res && res.success !== false ? res : null)
       if (data && (data.task_id || data.stats || data.status)) {
-        resultData.value = data;
-        const finalStats = data.stats || currentTask.value?.results;
+        resultData.value = data
+        const finalStats = data.stats || currentTask.value?.results
         if (currentTask.value) {
-          currentTask.value.status = data.status || currentTask.value.status;
-          currentTask.value.results = finalStats;
+          currentTask.value.status = (data.status as AssemblyTaskItem['status']) || currentTask.value.status
+          currentTask.value.results = finalStats ?? null
         }
-        // 关键点：同步更新历史任务列表中的快照与深度
-        const matched = historyTasks.value.find(t => t.id === taskId);
+        const matched = historyTasks.value.find((t) => t.id === taskId)
         if (matched) {
-          matched.status = data.status || matched.status;
-          if (finalStats) {
-            matched.results = { ...(matched.results || {}), ...finalStats };
-          }
+          matched.status = (data.status as AssemblyTaskItem['status']) || matched.status
+          if (finalStats) matched.results = { ...(matched.results || {}), ...finalStats }
         }
       }
-    } catch (e: any) {
-      console.warn(`[useAssembly] 加载任务结果失败 (${taskId}):`, e);
+    } catch (e: unknown) {
+      logger.warn(`加载任务结果失败 (${taskId}):`, e)
     }
   }
 
-  // 4. 取消/终止任务
   async function cancelTask(taskId: string) {
-    if (!taskId) return;
+    if (!taskId) return
     try {
-      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 正在发送终止指令: ${taskId}...`);
-      await apiPost(`/api/assembly/stop/${taskId}`);
-      
+      consoleLogs.value.push(`[${new Date().toLocaleTimeString()}] 正在发送终止指令: ${taskId}...`)
+      await apiPost(`/api/assembly/stop/${taskId}`)
       if (currentTask.value && currentTask.value.id === taskId) {
-        currentTask.value.status = 'aborted';
-        isRunning.value = false;
+        currentTask.value.status = 'aborted'
+        isRunning.value = false
       }
-      await fetchHistory();
-    } catch (e: any) {
-      error.value = `终止任务失败: ${e.message}`;
+      await fetchHistory()
+    } catch (e: unknown) {
+      error.value = `终止任务失败: ${toErrorMessage(e)}`
     }
   }
 
-  // 5. 删除任务
   async function deleteTask(taskId: string) {
-    if (!taskId) return;
+    if (!taskId) return
     try {
-      await apiDelete(`/api/assembly/tasks/${taskId}`);
-      historyTasks.value = historyTasks.value.filter(t => t.id !== taskId);
-      
+      await apiDelete(`/api/assembly/tasks/${taskId}`)
+      historyTasks.value = historyTasks.value.filter((t) => t.id !== taskId)
       if (activeTaskId.value === taskId) {
-        activeTaskId.value = '';
-        currentTask.value = null;
-        resultData.value = null;
-        isRunning.value = false;
+        activeTaskId.value = ''
+        currentTask.value = null
+        resultData.value = null
+        isRunning.value = false
       }
-      await fetchHistory();
-    } catch (e: any) {
-      error.value = `删除任务失败: ${e.message}`;
+      await fetchHistory()
+    } catch (e: unknown) {
+      error.value = `删除任务失败: ${toErrorMessage(e)}`
     }
   }
 
-  // 6. 下载 FASTA 产物
   async function downloadFasta(taskId: string) {
-    if (!taskId) return;
-    const downloadUrl = `/api/assembly/download/${taskId}`;
-    await downloadFileFromUrl(downloadUrl, `assembly_${taskId}.fasta`);
+    if (!taskId) return
+    await downloadFileFromUrl(`/api/assembly/download/${taskId}`, `assembly_${taskId}.fasta`)
   }
 
-  // 7. 在系统资源管理器中打开产物所在目录
   async function openFolder(taskId: string) {
-    if (!taskId) return;
+    if (!taskId) return
     try {
-      await apiPost(`/api/assembly/open-folder/${taskId}`);
-    } catch (e: any) {
-      console.warn('[useAssembly] 打开产物目录失败:', e);
+      await apiPost(`/api/assembly/open-folder/${taskId}`)
+    } catch (e: unknown) {
+      logger.warn('打开产物目录失败:', e)
     }
   }
 
-  // 8. WebSocket 实时遥测事件监听
-  let unsubscribeProgress: (() => void) | null = null;
-  let pollingTimer: any = null;
+  let unsubscribeProgress: (() => void) | null = null
+  let pollingTimer: ReturnType<typeof setInterval> | null = null
 
   onMounted(async () => {
-    await fetchHistory();
+    await fetchHistory()
 
-    // 监听 assembly 广播事件 (包含队列状态、实时日志与流式进度)
-    unsubscribeProgress = onEvent((type: string, data: any) => {
-      // 0. 队列状态实时快照同步
-      if (type === 'assembly_queue_status' && data) {
-        const snapshotList: any[] = Array.isArray(data.queue) ? data.queue : [];
+    unsubscribeProgress = onEvent((type: string, rawData: unknown) => {
+      if (type === 'assembly_queue_status' && rawData) {
+        const data = rawData as AssemblyQueueEventPayload
+        const snapshotList = Array.isArray(data.queue) ? data.queue : []
         const runningItem =
           data.running_task ||
-          snapshotList.find((item: any) => item.status === 'running' || item.id === data.current_task_id) ||
-          null;
+          (snapshotList.find((item) => item.status === 'running' || item.id === data.current_task_id) as
+            | AssemblyQueueStatus['running_task']
+            | undefined) ||
+          null
         const waitingItems = Array.isArray(data.waiting_tasks)
           ? data.waiting_tasks
-          : snapshotList.filter((item: any) => item.status === 'pending' || item.status === 'queued');
+          : (snapshotList.filter((item) => item.status === 'pending' || item.status === 'queued') as AssemblyQueueStatus['waiting_tasks'])
 
         queueStatus.value = {
           running_task: runningItem,
           waiting_count: typeof data.waiting_count === 'number' ? data.waiting_count : waitingItems.length,
           waiting_tasks: waitingItems,
           is_busy: typeof data.is_busy === 'boolean' ? data.is_busy : Boolean(data.current_task_id || runningItem),
-        };
+        }
 
-        const waitingMap = new Map<string, number>();
-        waitingItems.forEach((w: any, idx: number) => {
-          waitingMap.set(w.id, typeof w.position === 'number' ? w.position : idx + 1);
-        });
+        const waitingMap = new Map<string, number>()
+        waitingItems.forEach((w, idx) => {
+          const itemPos = (w as { position?: number }).position ?? w.queue_position
+          waitingMap.set(w.id, typeof itemPos === 'number' ? itemPos : idx + 1)
+        })
 
         historyTasks.value.forEach((t) => {
           if (data.current_task_id && t.id === data.current_task_id) {
             if (t.status !== 'completed' && t.status !== 'failed' && t.status !== 'aborted') {
-              t.status = 'running';
+              t.status = 'running'
             }
           } else if (waitingMap.has(t.id)) {
-            const pos = waitingMap.get(t.id) || 1;
-            t.status = 'queued';
-            t.queue_position = pos;
-            t.last_step = `排队中 (#${pos})`;
+            const pos = waitingMap.get(t.id) || 1
+            t.status = 'queued'
+            t.queue_position = pos
+            t.last_step = `排队中 (#${pos})`
           }
-        });
+        })
 
         if (currentTask.value) {
           if (data.current_task_id && currentTask.value.id === data.current_task_id) {
@@ -360,122 +381,108 @@ export function useAssembly() {
               currentTask.value.status !== 'failed' &&
               currentTask.value.status !== 'aborted'
             ) {
-              currentTask.value.status = 'running';
-              isRunning.value = true;
+              currentTask.value.status = 'running'
+              isRunning.value = true
             }
           } else if (waitingMap.has(currentTask.value.id)) {
-            const pos = waitingMap.get(currentTask.value.id) || 1;
-            currentTask.value.status = 'queued';
-            currentTask.value.queue_position = pos;
-            currentTask.value.last_step = `排队中 (#${pos})`;
-            isRunning.value = false;
+            const pos = waitingMap.get(currentTask.value.id) || 1
+            currentTask.value.status = 'queued'
+            currentTask.value.queue_position = pos
+            currentTask.value.last_step = `排队中 (#${pos})`
+            isRunning.value = false
           }
         }
       }
 
-      // 1. 实时底层控制台输出流 (毫秒级滚屏)
-      if (type === 'assembly_log' && data) {
-        const { task_id, line } = data;
-        if (activeTaskId.value === task_id || (!activeTaskId.value && currentTask.value?.id === task_id)) {
-          // 收到当前任务实时计算日志即可确认已处于运行态，纠偏残留排队态
+      if (type === 'assembly_log' && rawData) {
+        const { task_id, line } = rawData as AssemblyLogEventPayload
+        if (task_id && (activeTaskId.value === task_id || (!activeTaskId.value && currentTask.value?.id === task_id))) {
           if (currentTask.value && (currentTask.value.status === 'queued' || currentTask.value.status === 'pending')) {
-            currentTask.value.status = 'running';
+            currentTask.value.status = 'running'
             if (!currentTask.value.last_step || currentTask.value.last_step.includes('排队')) {
-              currentTask.value.last_step = '正在运行...';
+              currentTask.value.last_step = '正在运行...'
             }
-            isRunning.value = true;
+            isRunning.value = true
           }
-          const matchedHist = historyTasks.value.find(t => t.id === task_id);
+          const matchedHist = historyTasks.value.find((t) => t.id === task_id)
           if (matchedHist && (matchedHist.status === 'queued' || matchedHist.status === 'pending')) {
-            matchedHist.status = 'running';
+            matchedHist.status = 'running'
           }
           if (line) {
-            consoleLogs.value.push(line);
-            // 内存与 DOM 保护：上限 2500 行，超出后批量切除最早 500 行
-            if (consoleLogs.value.length > 2500) {
-              consoleLogs.value.splice(0, 500);
-            }
+            consoleLogs.value.push(line)
+            if (consoleLogs.value.length > 2500) consoleLogs.value.splice(0, 500)
           }
         }
       }
 
-      // 2. 进度与步骤状态驱动 (单调递增防跳跃)
-      if (type === 'assembly_progress' && data) {
-        const { task_id, step, progress, status, stats } = data;
-        
-        // 更新历史任务列表中匹配的任务
-        const matched = historyTasks.value.find(t => t.id === task_id);
+      if (type === 'assembly_progress' && rawData) {
+        const { task_id, step, progress, status, stats } = rawData as AssemblyProgressEventPayload
+        if (!task_id) return
+        const matched = historyTasks.value.find((t) => t.id === task_id)
         if (matched) {
-          const safeProg = progress !== undefined ? Math.max(matched.progress || 0, progress) : matched.progress;
-          matched.progress = safeProg;
-          matched.last_step = step || matched.last_step;
-          matched.status = status || matched.status;
-          if (stats) matched.results = stats;
+          matched.progress = progress !== undefined ? Math.max(matched.progress || 0, progress) : matched.progress
+          matched.last_step = step || matched.last_step
+          matched.status = (status as AssemblyTaskItem['status']) || matched.status
+          if (stats) matched.results = stats
         }
 
-        // 如果是当前聚焦任务
         if (activeTaskId.value === task_id || (!activeTaskId.value && currentTask.value?.id === task_id)) {
           if (currentTask.value) {
-            const safeProg = progress !== undefined ? Math.max(currentTask.value.progress || 0, progress) : currentTask.value.progress;
-            currentTask.value.progress = safeProg;
-            currentTask.value.last_step = step || currentTask.value.last_step;
-            currentTask.value.status = status || currentTask.value.status;
-            if (stats) currentTask.value.results = stats;
+            currentTask.value.progress =
+              progress !== undefined ? Math.max(currentTask.value.progress || 0, progress) : currentTask.value.progress
+            currentTask.value.last_step = step || currentTask.value.last_step
+            currentTask.value.status = (status as AssemblyTaskItem['status']) || currentTask.value.status
+            if (stats) currentTask.value.results = stats
           }
           if (step) {
-            const timeTag = new Date().toLocaleTimeString();
-            const logEntry = `> [${timeTag}] ${step}`;
-            // 避免连续重复输出同一步骤名
-            const lastLog = consoleLogs.value[consoleLogs.value.length - 1];
+            const logEntry = `> [${new Date().toLocaleTimeString()}] ${step}`
+            const lastLog = consoleLogs.value[consoleLogs.value.length - 1]
             if (!lastLog || !lastLog.includes(step)) {
-              consoleLogs.value.push(logEntry);
-              if (consoleLogs.value.length > 2500) {
-                consoleLogs.value.splice(0, 500);
-              }
+              consoleLogs.value.push(logEntry)
+              if (consoleLogs.value.length > 2500) consoleLogs.value.splice(0, 500)
             }
           }
           if (status === 'success' || status === 'completed') {
-            isRunning.value = false;
-            loadTaskResult(task_id);
+            isRunning.value = false
+            loadTaskResult(task_id)
           } else if (status === 'failed' || status === 'aborted') {
-            isRunning.value = false;
+            isRunning.value = false
           } else if (status === 'running') {
-            isRunning.value = true;
+            isRunning.value = true
           }
         }
       }
-    });
+    })
 
-    // 智能轮询队列状态 (每 3 秒一次)
     pollingTimer = setInterval(async () => {
-      const focusStatus = currentTask.value?.status;
+      const focusStatus = currentTask.value?.status
       if (
         isRunning.value ||
         focusStatus === 'queued' ||
         focusStatus === 'pending' ||
         queueStatus.value?.is_busy ||
-        historyTasks.value.some(t => t.status === 'running' || t.status === 'queued')
+        historyTasks.value.some((t) => t.status === 'running' || t.status === 'queued')
       ) {
-        await fetchHistory();
+        await fetchHistory()
         if (activeTaskId.value) {
-          const matched = historyTasks.value.find(t => t.id === activeTaskId.value);
+          const matched = historyTasks.value.find((t) => t.id === activeTaskId.value)
           if (
             matched &&
             (matched.status === 'completed' || matched.status === 'failed') &&
             resultData.value?.task_id !== activeTaskId.value
           ) {
-            isRunning.value = false;
-            await loadTaskResult(activeTaskId.value);
+            isRunning.value = false
+            await loadTaskResult(activeTaskId.value)
           }
         }
       }
-    }, 3000);
-  });
+    }, 3000)
+  })
 
   onUnmounted(() => {
-    if (unsubscribeProgress) unsubscribeProgress();
-    if (pollingTimer) clearInterval(pollingTimer);
-  });
+    if (unsubscribeProgress) unsubscribeProgress()
+    if (pollingTimer) clearInterval(pollingTimer)
+  })
 
   return {
     isRunning,
@@ -494,6 +501,6 @@ export function useAssembly() {
     cancelTask,
     deleteTask,
     downloadFasta,
-    openFolder
-  };
+    openFolder,
+  }
 }

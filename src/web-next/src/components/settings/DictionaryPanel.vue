@@ -244,7 +244,6 @@ async function handleTaxonomyAudit() {
     if (res && res.success && res.results) {
       const results = res.results
       let count = 0
-      const total = results.length
       
       const processResults = async () => {
         for (const item of results) {
@@ -279,7 +278,7 @@ let eventCleanup: (() => void) | null = null
 onMounted(() => {
   loadDictionary()
   // 监听后台推送的消息（如异步翻译结果）
-  eventCleanup = onEvent((type, data) => {
+  eventCleanup = onEvent((type) => {
     if (type === 'data_updated') {
       loadDictionary()
     }

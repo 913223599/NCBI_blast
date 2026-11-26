@@ -6,18 +6,18 @@ import type { AssemblyTask } from '../types';
  * 侧重于环状基因组识别和完整性验证
  */
 export class PhageStrategy extends BaseAssemblyStrategy {
-  getPreprocessingPipeline(task: AssemblyTask): string[] {
+  getPreprocessingPipeline(_task: AssemblyTask): string[] {
     return ['[TODO] standard phage QC (High coverage depth normalization)'];
   }
 
-  getAssemblyPipeline(task: AssemblyTask): string[] {
+  getAssemblyPipeline(_task: AssemblyTask): string[] {
     return [
       'NGCS (Eulerian Flow & Disjoint Circular Scaffolding)',
       'Phage-specific circularity detection'
     ];
   }
 
-  override getAnnotationPipeline(task: AssemblyTask): string[] {
+  override getAnnotationPipeline(_task: AssemblyTask): string[] {
     return [
       '[TODO] Phanotate - 噬菌体基因预测',
       '[TODO] Pharokka - 综合噬菌体注释库'

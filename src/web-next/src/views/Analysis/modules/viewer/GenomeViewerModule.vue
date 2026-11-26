@@ -546,16 +546,18 @@ const props = defineProps<{
 }>()
 
 const {
-  fileName, sequenceLength, rawSequence, features, viewMode, isComputing, toastMessage,
+  fileName, sequenceLength, rawSequence, viewMode, isComputing, toastMessage,
   searchQuery, selectedCategoryFilter, strandFilter, highlightedCategory, selectedFeature, hoverFeature,
   showGC, showEnzymes, showPositions, outerRadius, innerRadius, midSplitRadius, gcBaselineR,
   skewBaselineR, centerCardRadius, zoomScale, panX, panY, tooltipX, tooltipY, svgRef,
   computedLinearWidth, overallGC, prophageOverlayFeatures, baseTrackFeatures, categoryCounts,
-  filteredFeatures, gcPaths, enzymes, renderCircularEnzymes, circularTicks, majorCircularTicks,
+  filteredFeatures, gcPaths, renderCircularEnzymes, circularTicks, majorCircularTicks,
   linearTicks, majorLinearTicks, isFeatureDimmed, selectFeature, toggleHighlightCategory,
   handleCanvasClick, handleZoom, zoomIn, zoomOut, resetView, startPan, doPan, endPan,
   handleFileUpload, copySequence, copyTranslation, exportImage,
 } = useGenomeViewer(props)
+
+void svgRef
 </script>
 
 <style scoped src="./genomeViewer.css"></style>

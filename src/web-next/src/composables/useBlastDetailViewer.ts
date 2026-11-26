@@ -4,6 +4,9 @@
 import { ref, computed, shallowRef } from 'vue'
 import { useAppStore } from '../stores/app'
 import { getBridge } from '../bridge'
+import { createLogger } from '../utils/logger'
+
+const log = createLogger('DetailViewer')
 
 export interface BlastHitDetail {
   species?: string
@@ -48,7 +51,7 @@ export function useBlastDetailViewer() {
     }
     
     if (!queryTitle || !queryTitle.trim()) {
-      console.warn('[DetailViewer] Empty queryTitle')
+      log.warn('Empty queryTitle')
       return
     }
     
@@ -73,11 +76,11 @@ export function useBlastDetailViewer() {
         if (Array.isArray(hits)) {
            allHitsData.value = hits
         } else {
-           console.error('[DetailViewer] Invalid hits format:', hits)
+           log.error('Invalid hits format:', hits)
            appStore.showNotification('解析结果格式错误', 'error')
         }
       } catch (error) {
-        console.error('[DetailViewer] Request error:', error)
+        log.error('Request error:', error)
         appStore.showNotification('获取详细比对结果失败', 'error')
         isOpenInternal.value = false
       }
@@ -86,7 +89,7 @@ export function useBlastDetailViewer() {
 
   // [优化] 注册全局接收器，处理异步返回的大量比对数据
   if (typeof window !== 'undefined') {
-    (window as any)._onDetailedResultsReady = (hits: any[]) => {
+    ;(window as unknown as { _onDetailedResultsReady?: (hits: BlastHitDetail[]) => void })._onDetailedResultsReady = (hits: BlastHitDetail[]) => {
       if (Array.isArray(hits)) {
         // 延迟注入，确保弹窗动画丝滑
         setTimeout(() => {

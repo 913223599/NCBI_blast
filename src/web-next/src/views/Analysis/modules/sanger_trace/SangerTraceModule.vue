@@ -3,7 +3,7 @@
  * SangerTraceModule.vue
  * Sanger 测序色谱峰图质量分析与智能解峰工作台
  */
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { getBridge } from '../../../../bridge';
 import { useAppStore } from '../../../../stores/app';

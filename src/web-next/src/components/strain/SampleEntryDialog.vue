@@ -141,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from '../../locales'
 import { useStrainStore, type SampleCategory } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'

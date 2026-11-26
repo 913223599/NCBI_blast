@@ -117,7 +117,7 @@ export class TrackLayoutEngine {
     return {
       getLayer: (id: string) => layoutMap.get(id),
       getOuterBoundary: () => maxOuterR,
-      getBaseRadius: (groupId: string) => {
+      getBaseRadius: (_groupId: string) => {
          // Could calculate specific baseRadius if needed
          return initialBaseRadius;
       }

@@ -1,16 +1,19 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getBridge } from '../bridge'
+import { createLogger } from '../utils/logger'
+
+const log = createLogger('SequenceStore')
 
 export interface SequenceRecord {
   id: string
   sampleId: string
   sampleCode: string
-  seqType: string  // 16S, WGS, etc.
+  seqType: string // 16S, WGS, etc.
   title: string
   sequence: string
   seqLen: number
-  metadata: Record<string, any>
+  metadata: Record<string, unknown>
   addedAt: string
 }
 
@@ -20,10 +23,10 @@ export const useSequenceStore = defineStore('sequence', () => {
   async function saveSequence(seq: Omit<SequenceRecord, 'id' | 'addedAt'>) {
     const newSeq: SequenceRecord = {
       ...seq,
-      id: `seq_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      addedAt: new Date().toISOString()
+      id: `seq_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      addedAt: new Date().toISOString(),
     }
-    
+
     return new Promise<boolean>((resolve) => {
       try {
         const bridge = getBridge()
@@ -35,7 +38,7 @@ export const useSequenceStore = defineStore('sequence', () => {
           resolve(false)
         }
       } catch (e) {
-        console.error('Failed to save sequence to DB', e)
+        log.error('Failed to save sequence to DB', e)
         resolve(false)
       }
     })
@@ -48,10 +51,10 @@ export const useSequenceStore = defineStore('sequence', () => {
         if (bridge && bridge.db_load_sequences_by_sample) {
           bridge.db_load_sequences_by_sample(sampleId, (jsonStr: string) => {
             try {
-              const data = JSON.parse(jsonStr)
+              const data = JSON.parse(jsonStr) as SequenceRecord[]
               activeSequences.value = data
               resolve(data)
-            } catch (err) {
+            } catch {
               resolve([])
             }
           })
@@ -59,7 +62,7 @@ export const useSequenceStore = defineStore('sequence', () => {
           resolve([])
         }
       } catch (e) {
-        console.error('Failed to load sequences', e)
+        log.error('Failed to load sequences', e)
         resolve([])
       }
     })
@@ -73,7 +76,7 @@ export const useSequenceStore = defineStore('sequence', () => {
           bridge.db_search_sequences(keyword, (jsonStr: string) => {
             try {
               resolve(JSON.parse(jsonStr) as SequenceRecord[])
-            } catch (err) {
+            } catch {
               resolve([])
             }
           })
@@ -81,7 +84,7 @@ export const useSequenceStore = defineStore('sequence', () => {
           resolve([])
         }
       } catch (e) {
-        console.error('Failed to search sequences', e)
+        log.error('Failed to search sequences', e)
         resolve([])
       }
     })
@@ -99,7 +102,7 @@ export const useSequenceStore = defineStore('sequence', () => {
           resolve(false)
         }
       } catch (e) {
-        console.error('Failed to delete sequence', e)
+        log.error('Failed to delete sequence', e)
         resolve(false)
       }
     })
@@ -110,6 +113,6 @@ export const useSequenceStore = defineStore('sequence', () => {
     saveSequence,
     loadSequencesBySample,
     searchSequences,
-    deleteSequence
+    deleteSequence,
   }
 })

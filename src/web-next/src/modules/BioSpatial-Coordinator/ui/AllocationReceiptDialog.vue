@@ -84,12 +84,6 @@ const stats = computed(() => {
   })
   return map
 })
-
-const getReasonClass = (reason: string) => {
-  if (reason.includes('聚类')) return 'reason-affinity'
-  if (reason.includes('新开辟')) return 'reason-new'
-  return 'reason-default'
-}
 </script>
 
 <template>

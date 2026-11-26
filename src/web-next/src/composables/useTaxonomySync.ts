@@ -1,6 +1,4 @@
-import { ref } from 'vue'
 import { useStrainStore } from '../stores/strain'
-import { useAppStore } from '../stores/app'
 import { getBridge } from '../bridge'
 
 /**
@@ -8,7 +6,6 @@ import { getBridge } from '../bridge'
  */
 export function useTaxonomySync() {
   const strain = useStrainStore()
-  const appStore = useAppStore()
 
   /**
    * 尝试根据学名自动匹配编号库中的属/种编码

@@ -395,13 +395,13 @@ import { useFreezerDetail } from './freezer/useFreezerDetail'
 const {
   t, strain, currentLevel, selectedShelf, selectedCabinet, selectedDrawer, activeBoxId,
   showEntryDialog, showDetailDialog, showEditDialog, selectedSample, hoveredSample, entryPosition,
-  isSelecting, selectedIndices, totalPositions, activeBox,
+  selectedIndices, totalPositions, activeBox,
   getTotalCabinets, getTotalDrawers, getCabinetStats, getDrawerCount,
   getShelfUsage, getCabinetUsage, getDrawerUsage, getBoxUsage, getBoxUsedCount,
   getSteppedUsage, getUsageLevel, selectShelf, selectCabinet, selectDrawer,
-  handlePositionHover, getFilteredMetadata, translateMetadataKey, navigateToLevel,
+  getFilteredMetadata, translateMetadataKey, navigateToLevel,
   handlePositionLeftClick, handlePositionMouseDown, handlePositionMouseEnter,
-  handleGlobalMouseUp, clearSelection, getSampleByPosition, handleSampleSaved,
+  handleGlobalMouseUp, clearSelection, handleSampleSaved,
   editFreezer, handleFreezerUpdated, handleSampleDeleted, closeDetail, addShelf,
 } = useFreezerDetail()
 </script>

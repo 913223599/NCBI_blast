@@ -1,4 +1,3 @@
-import { type AssemblyTask } from '../types';
 import { createLogger } from '../../../utils/logger'
 const _log = createLogger('SangerAssembler')
 
@@ -22,7 +21,7 @@ export class SangerAssembler {
    * @param forwardPath F 端文件
    * @param reversePath R 端文件
    */
-  async assembleDualReads(forwardPath: string, reversePath: string): Promise<string> {
+  async assembleDualReads(_forwardPath: string, _reversePath: string): Promise<string> {
     _log.debug('[SangerAssembler] Assembling F and R reads...');
     // TODO: 调用后端进行 Local Alignment 和 Consensus 合并
     return 'ATGC...[TODO: Consensus Sequence]';
@@ -32,7 +31,7 @@ export class SangerAssembler {
    * 自动裁剪序列末端
    * @param threshold 质量阈值 (默认 Q20)
    */
-  async autoTrim(sequence: string, qualityScores: number[], threshold: number = 20): Promise<string> {
+  async autoTrim(sequence: string, _qualityScores: number[], threshold: number = 20): Promise<string> {
     _log.debug(`[SangerAssembler] Auto-trimming with threshold: ${threshold}`);
     // TODO: 实现基于滑窗的质量裁剪算法
     return sequence;

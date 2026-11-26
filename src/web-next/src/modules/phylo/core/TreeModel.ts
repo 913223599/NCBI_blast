@@ -1,5 +1,5 @@
 import type { JournalPaletteType, LabelFormatType, NodeMetadata, SortMode } from '../types/phylo'
-import { buildTopGenusColorMap, JOURNAL_THEMES, mapHostToPhylum } from './JournalTheme'
+import { buildTopGenusColorMap, mapHostToPhylum } from './JournalTheme'
 
 const REDUNDANT_DESC_SUFFIX_RE =
   /(?:,\s*(?:complete|partial)\s+(?:genome|cds|sequence)|\b(?:complete|partial)\s+(?:genome|cds|sequence))\s*\.?$/i
@@ -28,8 +28,6 @@ export function formatNodeDisplayLabel(
   }
   return desc.includes(acc) ? desc : `${desc} (${acc})`
 }
-
-const GENUS_PALETTE = JOURNAL_THEMES.nature.taxonColors
 
 export interface PhyloTreeNode {
   id: string

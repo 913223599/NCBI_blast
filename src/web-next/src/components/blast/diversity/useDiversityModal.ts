@@ -6,6 +6,9 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { API_BASE, apiDelete, apiGet, apiPost } from '../../../bridge/electron-bridge'
 import { useAppStore } from '../../../stores/app'
 import { useConfirmDialog } from '../../../composables/useConfirmDialog'
+import { createLogger } from '../../../utils/logger'
+
+const logger = createLogger('DiversityModal')
 import {
   buildMergedGroupSamples,
   DIVERSITY_PALETTE,
@@ -194,7 +197,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
         appStore.showNotification('物种词条翻译完成', 'success')
       }
     } catch (e: unknown) {
-      console.error('Batch translation error:', e)
+      logger.error('Batch translation error:', e)
       appStore.showNotification('词条翻译请求异常', 'error')
     } finally {
       isTranslating.value = false
@@ -301,7 +304,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
           }
         }
       } catch (e) {
-        console.error('Polling status error:', e)
+        logger.error('Polling status error:', e)
       }
     }, 1000)
   }
@@ -312,7 +315,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
       const res = await apiGet('/api/diversity/tasks')
       if (Array.isArray(res)) historyTasks.value = res
     } catch (e) {
-      console.error('Fetch history tasks error:', e)
+      logger.error('Fetch history tasks error:', e)
     } finally {
       isLoadingHistory.value = false
     }
@@ -342,7 +345,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
           }
         }
       } catch (e) {
-        console.warn('Sync status failed:', e)
+        logger.warn('Sync status failed:', e)
       }
     }
 
@@ -367,7 +370,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
         }
       }
     } catch (e) {
-      console.warn('Auto probe latest task failed:', e)
+      logger.warn('Auto probe latest task failed:', e)
     }
     void fetchHistoryTasks()
   }
@@ -465,7 +468,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
       const res = await apiPost('/api/diversity/detect_package', { file_path: filePath })
       detectedPackage.value = res && res.is_amplicon_package ? res : null
     } catch (e) {
-      console.error('Detect package failed:', e)
+      logger.error('Detect package failed:', e)
     } finally {
       isDetecting.value = false
     }
@@ -704,7 +707,7 @@ export function useDiversityModal(props: DiversityModalProps, emit: DiversityMod
       window.URL.revokeObjectURL(downloadUrl)
       appStore.showNotification('Excel 综合分析报告已成功导出', 'success')
     } catch (e: unknown) {
-      console.warn('POST 导出失败，尝试 GET 回退下载:', e)
+      logger.warn('POST 导出失败，尝试 GET 回退下载:', e)
       window.open(`${API_BASE}/api/diversity/export_excel/${taskId.value}`, '_blank', 'noopener,noreferrer')
     }
   }

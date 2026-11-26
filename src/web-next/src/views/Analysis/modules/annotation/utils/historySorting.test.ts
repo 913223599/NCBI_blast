@@ -5,8 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { 
   parseDate, 
   formatDisplayTime, 
-  sortAnnotationTasks, 
-  type SortOrder 
+  sortAnnotationTasks
 } from './historySorting.ts';
 
 describe('historySorting 模块测试', () => {

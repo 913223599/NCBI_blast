@@ -1,5 +1,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getBridge, onEvent } from '../../../../../bridge/electron-bridge'
+import { createLogger } from '../../../../../utils/logger'
+
+const log = createLogger('PhageDiscovery')
 import type {
   PhageCapabilities,
   PhageContigInspectItem,
@@ -123,7 +126,7 @@ export function usePhageDiscovery() {
       const caps: PhageCapabilities = await bridge.get_phage_discovery_models()
       capabilities.value = caps
     } catch (err) {
-      console.error('[PhageDiscovery] 探测 V4.2 模型能力失败:', err)
+      log.error('探测 V4.2 模型能力失败:', err)
     } finally {
       isCapabilitiesLoading.value = false
     }
@@ -134,7 +137,7 @@ export function usePhageDiscovery() {
       const snap: PhageQueueSnapshot = await bridge.get_phage_discovery_queue_status()
       if (snap) syncQueueSnapshot(snap)
     } catch (err) {
-      console.error('[PhageDiscovery] 拉取队列状态失败:', err)
+      log.error('拉取队列状态失败:', err)
     }
   }
 
@@ -161,7 +164,7 @@ export function usePhageDiscovery() {
         }
       }
     } catch (err) {
-      console.error('[PhageDiscovery] 加载历史记录失败:', err)
+      log.error('加载历史记录失败:', err)
     }
   }
 
