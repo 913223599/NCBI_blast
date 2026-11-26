@@ -10,12 +10,18 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from ...analysis.phage_structure import (
     StructureBatchRunRequest,
     StructureInspectRequest,
     StructureRunRequest,
     get_phage_structure_manager,
+)
+from ...analysis.phage_structure.structure_3d_service import (
+    fetch_public_structure,
+    list_task_structure_files,
+    read_task_structure_file,
 )
 
 router = APIRouter(prefix="/analysis/phage_structure", tags=["PhageStructure"])
@@ -89,6 +95,48 @@ async def get_structure_queue_status():
 @router.get("/history")
 async def list_structure_history(limit: int = Query(default=100, ge=1, le=500)):
     return {"tasks": get_phage_structure_manager().list_history(limit=limit)}
+
+
+@router.get("/public-structure")
+async def get_public_protein_structure(
+    source: str = Query(default="alphafold", description="结构库来源: alphafold 或 rcsb"),
+    accession: str = Query(..., min_length=4, max_length=24, description="UniProt Accession 或 4 位 PDB ID"),
+):
+    """按 UniProt ID (AlphaFold DB) 或 PDB ID (RCSB) 拉取并本地缓存 3D 蛋白坐标。"""
+    try:
+        return await run_in_threadpool(fetch_public_structure, source, accession)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/{task_id}/structures")
+async def list_task_3d_structures(task_id: str):
+    """列出结构预测任务目录下可用的本地 .pdb / .cif 3D 结构文件。"""
+    try:
+        folder: Path = get_phage_structure_manager().resolve_task_file(task_id, "folder")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    files = list_task_structure_files(folder)
+    return {"task_id": task_id, "count": len(files), "files": files}
+
+
+@router.get("/{task_id}/structure-file")
+async def get_task_3d_structure_file(
+    task_id: str,
+    path: str = Query(..., min_length=1, max_length=260, description="任务目录内相对路径 (.pdb/.cif)"),
+):
+    """安全读取结构预测任务目录下的单个 3D 坐标文件（拦截路径穿越）。"""
+    try:
+        folder: Path = get_phage_structure_manager().resolve_task_file(task_id, "folder")
+        return read_task_structure_file(folder, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/{task_id}/result")

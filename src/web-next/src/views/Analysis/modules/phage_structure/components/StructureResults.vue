@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useAppStore } from '../../../../../stores/app'
 import type { ContigStructureResult, PhageStructureResult, StructureProteinItem, StructureTaskHistoryItem } from '../types'
 import {
@@ -12,6 +12,9 @@ import {
 import StructuralOperonTrack from './StructuralOperonTrack.vue'
 import TailMorphotypeDiagram from './TailMorphotypeDiagram.vue'
 import TmpRulerChart from './TmpRulerChart.vue'
+import type { Protein3DInitialContext } from './Protein3DViewerModal.vue'
+
+const Protein3DViewerModal = defineAsyncComponent(() => import('./Protein3DViewerModal.vue'))
 
 const props = defineProps<{
   task: StructureTaskHistoryItem
@@ -29,6 +32,18 @@ const appStore = useAppStore()
 const activeContigId = ref<string>('')
 const roleFilter = ref<'ALL' | 'STRUCTURAL'>('STRUCTURAL')
 const searchText = ref<string>('')
+const is3DViewerOpen = ref<boolean>(false)
+const viewer3DContext = ref<Protein3DInitialContext | null>(null)
+
+function open3DViewerForProtein(item?: StructureProteinItem): void {
+  viewer3DContext.value = {
+    taskId: props.result?.task_id || props.task?.task_id,
+    locusTag: item?.locus_tag,
+    product: item?.product || activeContig.value?.prediction?.morphotype_label_cn,
+    lengthAa: item?.length_aa,
+  }
+  is3DViewerOpen.value = true
+}
 
 function buildProteinFasta(item: StructureProteinItem): string {
   const header = `>${item.locus_tag} ${item.role_label_cn || item.structural_role} | ${item.product || 'hypothetical protein'} | ${item.length_aa}aa`
@@ -172,6 +187,7 @@ const filteredProteins = computed(() => {
           >
             图谱查看
           </button>
+          <button type="button" class="act-btn" @click="open3DViewerForProtein()">3D 结构预览</button>
           <button type="button" class="act-btn" @click="exportStructuralProteinsFaa">导出结构蛋白 FAA</button>
           <button type="button" class="act-btn" @click="emit('download', 'summary_tsv')">汇总 TSV</button>
           <button type="button" class="act-btn" @click="emit('download', 'features_tsv')">基因 TSV</button>
@@ -486,15 +502,25 @@ const filteredProteins = computed(() => {
                 <td>{{ p.product }}</td>
                 <td class="mono">{{ p.evidence_source }}</td>
                 <td>
-                  <button
-                    type="button"
-                    class="act-btn"
-                    :disabled="!p.translation"
-                    title="复制氨基酸 FASTA 用于 AlphaFold / ESMFold / Mol* 3D 结构分析"
-                    @click="copyProteinFasta(p)"
-                  >
-                    复制 FASTA
-                  </button>
+                  <div class="row-3d-actions">
+                    <button
+                      type="button"
+                      class="act-btn"
+                      :disabled="!p.translation"
+                      title="复制氨基酸 FASTA 用于 AlphaFold / ESMFold / Mol* 3D 结构分析"
+                      @click="copyProteinFasta(p)"
+                    >
+                      复制 FASTA
+                    </button>
+                    <button
+                      type="button"
+                      class="act-btn"
+                      title="在交互式 3D 结构检视窗查看蛋白结构或加载 PDB/AlphaFold"
+                      @click="open3DViewerForProtein(p)"
+                    >
+                      3D 预览
+                    </button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -502,6 +528,12 @@ const filteredProteins = computed(() => {
         </div>
       </div>
     </template>
+
+    <Protein3DViewerModal
+      v-if="is3DViewerOpen"
+      v-model:open="is3DViewerOpen"
+      :context="viewer3DContext"
+    />
   </div>
 </template>
 
@@ -600,6 +632,13 @@ const filteredProteins = computed(() => {
 .act-btn:hover {
   background: #eff6ff;
   border-color: #93c5fd;
+}
+
+.row-3d-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .contig-switcher {

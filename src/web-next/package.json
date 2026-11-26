@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@vueuse/core": "^14.2.1",
+    "3dmol": "^3.0.0",
     "cgview": "^1.8.2",
     "d3": "^7.9.0",
     "exceljs": "^4.4.0",

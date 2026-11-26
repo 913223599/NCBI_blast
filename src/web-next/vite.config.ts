@@ -28,6 +28,7 @@ export default defineConfig({
           if (normalized.includes('plotly.js-dist-min')) return 'vendor-plotly'
           if (normalized.includes('/igv/')) return 'vendor-igv'
           if (normalized.includes('/three/')) return 'vendor-three'
+          if (normalized.includes('/3dmol/')) return 'vendor-3dmol'
           if (normalized.includes('/cgview/')) return 'vendor-cgview'
           if (normalized.includes('/d3') || normalized.includes('/d3-')) return 'vendor-d3'
           if (normalized.includes('/exceljs/')) return 'vendor-exceljs'

@@ -649,10 +649,10 @@ data_note(f'数据目录：{DATA}')
 doc.add_page_break()
 
 # ============================================================
-# 7. 4 参考文献
+# 7. 4 参考文献（统一加载自单一事实源 src/resources/citations.json）
 # ============================================================
 heading(1, '4 参考文献')
-refs = [
+_FALLBACK_REFS = [
     ('Bouras G, Nepal R, Houtak G, et al. Pharokka: a fast scalable bacteriophage annotation tool. '
      'Bioinformatics. 2023. doi:10.1093/bioinformatics/btac776. PMID: 36453861.', 'Ref_Pharokka'),
     ('McNair K, Zhou C, Dinsdale EA, et al. PHANOTATE: a novel approach to gene identification in phage genomes. '
@@ -670,6 +670,17 @@ refs = [
     ('Eitzinger S, Asif A, Watters KE, et al. Machine learning predicts new anti-CRISPR proteins. '
      'Nucleic Acids Res. 2020. doi:10.1093/nar/gkaa219. PMID: 32286628.', 'Ref_Acranker'),
 ]
+try:
+    _repo_root = str(Path(__file__).resolve().parent.parent)
+    if _repo_root not in sys.path:
+        sys.path.insert(0, _repo_root)
+    from src.utils.docx_citation_helper import (
+        DEFAULT_ANNOTATION_REPORT_TOOL_IDS,
+        build_report_references_list,
+    )
+    refs = build_report_references_list(DEFAULT_ANNOTATION_REPORT_TOOL_IDS) or _FALLBACK_REFS
+except Exception:
+    refs = _FALLBACK_REFS
 for text, _ in refs:
     p = para(text, indent2=False, line15=True)
     p.paragraph_format.first_line_indent = Pt(0)
