@@ -130,6 +130,25 @@ def test_no_raw_extractall_in_src():
     assert not violations, "发现未经过 archive_guard 的直接 extractall() 调用:\n" + "\n".join(violations)
 
 
+def test_frontend_production_no_raw_console_log():
+    """前端生产源码禁用散落 console.log，统一使用 src/web-next/src/utils/logger.ts。"""
+    web_src = PROJECT_ROOT / "src" / "web-next" / "src"
+    violations = []
+    for p in sorted(web_src.rglob("*")):
+        if not p.is_file() or p.suffix not in (".ts", ".vue"):
+            continue
+        if "__tests__" in p.parts or p.name == "logger.ts":
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for idx, line in enumerate(text.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith(("//", "*")):
+                continue
+            if re.search(r"\bconsole\.log\(", line):
+                violations.append(f"{p.relative_to(PROJECT_ROOT)}:{idx}: {stripped[:80]}")
+    assert not violations, "发现未收敛至 logger.ts 的前端 console.log:\n" + "\n".join(violations)
+
+
 def test_legacy_pyqt_bridge_and_misplaced_web_root_files_removed():
     assert not (PROJECT_ROOT / "src" / "web-next" / "src" / "bridge" / "pyqt-bridge.ts").exists()
     assert not (PROJECT_ROOT / "src" / "web-next" / "verify_label_display_mode.js").exists()

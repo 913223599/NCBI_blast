@@ -1,4 +1,6 @@
 import { getBridge, onEvent } from '../../bridge'
+import { createLogger } from '../../utils/logger'
+const _log = createLogger('StrainSync')
 
 export function useSyncActions(state: any, recordsActions: any, freezerActions: any) {
   const { 
@@ -44,13 +46,13 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
 
           // 防护：如果后端返回了 throttled 状态，不要用空数据覆盖已有的内存状态
           if (data.status === 'throttled') {
-            console.log('[Sync] 后端节流中，保留当前内存数据')
+            _log.debug('[Sync] 后端节流中，保留当前内存数据')
             isLoading = false
             return
           }
 
           if (data.freezers) {
-            console.log('[Sync] 收到后端冰箱结构更新，准备同步数据...')
+            _log.debug('[Sync] 收到后端冰箱结构更新，准备同步数据...')
             freezers.value = data.freezers
           }
 
@@ -78,16 +80,16 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
           }
 
           // 关键修复：确保 codeLookup 数据正确挂载
-          console.log('[Sync] 检查 codeLookup 数据:', !!data.codeLookup)
+          _log.debug('[Sync] 检查 codeLookup 数据:', !!data.codeLookup)
           if (data.codeLookup) {
             const entries = data.codeLookup.entries || []
-            console.log(`[Sync] 加载 codeLookup: ${entries.length} 个条目`)
+            _log.debug(`[Sync] 加载 codeLookup: ${entries.length} 个条目`)
             
             // 调试日志：显示前几个条目的详细信息
             if (entries.length > 0) {
-              console.log('[Sync] Sample entries:')
+              _log.debug('[Sync] Sample entries:')
               entries.slice(0, 5).forEach((entry: any, idx: number) => {
-                console.log(`  [${idx}] level=${entry.level}, fullPath="${entry.fullPath}", parentPath="${entry.parentPath}", name=${entry.name}`)
+                _log.debug(`  [${idx}] level=${entry.level}, fullPath="${entry.fullPath}", parentPath="${entry.parentPath}", name=${entry.name}`)
               })
               
               // 统计各级别数量
@@ -96,7 +98,7 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
                 const level = e.level || 0
                 levelCounts[level] = (levelCounts[level] || 0) + 1
               })
-              console.log('[Sync] Entries by level:', levelCounts)
+              _log.debug('[Sync] Entries by level:', levelCounts)
             }
             
             codeLookupEntries.value = entries
@@ -116,18 +118,18 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
 
           recordsActions.applyFilters()
           
-          console.log(`[Sync] 数据加载完成: ${records.value.length} 条样本, ${freezers.value.length} 个冰箱`)
+          _log.debug(`[Sync] 数据加载完成: ${records.value.length} 条样本, ${freezers.value.length} 个冰箱`)
 
           // 关键修复：初始加载完成后，强制根据最新的 records 同步一次物理拓扑
           // 彻底解决"重启后不亮"的问题：不再依赖数据库里的 structure 状态，而是在内存中根据 records 动态重建
           if (freezerActions?.refreshFreezerOccupancy) {
-            console.log(`[Sync] 正在从 ${records.value.length} 条样本记录中恢复物理占用拓补...`)
+            _log.debug(`[Sync] 正在从 ${records.value.length} 条样本记录中恢复物理占用拓补...`)
             // 立即执行一次同步 (false 表示不写回数据库)
             freezerActions.refreshFreezerOccupancy(false)
           }
 
           isInitialized.value = true
-          console.log('[Sync] 系统初始化完成')
+          _log.debug('[Sync] 系统初始化完成')
         } catch (e) {
           console.error('[Sync] Parse Error', e)
         } finally {
@@ -149,13 +151,13 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
       // 1. 同步全量数据 (通常由其他端修改触发)
       if (type === 'data_updated' && data.module === 'strains') {
         const isLocalUpdating = state.getIsUpdating()
-        console.log(`[Sync] 收到同步信号 | 模块: strains | 本地护盾状态: ${isLocalUpdating}`)
+        _log.debug(`[Sync] 收到同步信号 | 模块: strains | 本地护盾状态: ${isLocalUpdating}`)
         
         // 如果本地正在执行原子更新，拦截来自后端的全量刷新请求，防止竞态覆盖
         if (!isLocalUpdating) {
           initFromDatabase();
         } else {
-          console.log('[Sync] 本地正在写入，跳过本次后端信号拦截')
+          _log.debug('[Sync] 本地正在写入，跳过本次后端信号拦截')
         }
       }
       
@@ -223,7 +225,7 @@ export function useSyncActions(state: any, recordsActions: any, freezerActions: 
         
         bridge.db_save_code_lookup(data, (success: boolean) => {
           if (success) {
-            console.log('[Sync] CodeLookup data persisted (debounced)');
+            _log.debug('[Sync] CodeLookup data persisted (debounced)');
           }
         })
       } catch (e) {

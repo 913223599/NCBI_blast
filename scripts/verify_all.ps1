@@ -24,6 +24,10 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     node --check (Join-Path $ProjectRoot "electron-shell\dev-runner.js")
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node --check (Join-Path $ProjectRoot "electron-shell\electron-builder.config.js")
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node (Join-Path $ProjectRoot "scripts\sync_version.mjs") --check
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     Write-Host "=== [2/6] Python Ruff Full Lint (src/) ===" -ForegroundColor Cyan
     ruff check src

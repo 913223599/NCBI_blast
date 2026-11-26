@@ -1,6 +1,8 @@
 import { type AssemblyTask, AssemblyStage } from '../types';
 import { StrategyProvider } from './StrategyProvider';
 import { getBridge, onEvent } from '../../../bridge';
+import { createLogger } from '../../../utils/logger'
+const _log = createLogger('AssemblyEngine')
 
 /**
  * AssemblyEngine - 基因组拼接核心引擎
@@ -25,7 +27,7 @@ export class AssemblyEngine {
 
   /** 启动拼接任务 */
   async startAssembly(task: AssemblyTask): Promise<void> {
-    console.log(`[AssemblyEngine] Initializing ${task.sampleType} pipeline: ${task.name}`);
+    _log.debug(`[AssemblyEngine] Initializing ${task.sampleType} pipeline: ${task.name}`);
     this.currentTask = task;
     
     // 获取对应的技术路线策略（用于前端展示或预检查）
@@ -49,7 +51,7 @@ export class AssemblyEngine {
         config: task.config
       });
       
-      console.log('[AssemblyEngine] Task sent to backend successfully.');
+      _log.debug('[AssemblyEngine] Task sent to backend successfully.');
     } catch (error) {
       this.updateState(AssemblyStage.FAILED, 0);
       console.error('[AssemblyEngine] Failed to initiate task:', error);
@@ -63,7 +65,7 @@ export class AssemblyEngine {
     }
     
     if (data.status === 'finished') {
-       console.log('[AssemblyEngine] Backend task completed:', data.results);
+       _log.debug('[AssemblyEngine] Backend task completed:', data.results);
        this.updateState(AssemblyStage.COMPLETED, 100);
        if (this.currentTask) this.currentTask.results = data.results;
     } else if (data.status === 'error') {

@@ -1,6 +1,8 @@
 import { getBridge } from '../../bridge'
 import { safeDeepClone } from '../../utils/clone'
 import type { Freezer } from './types'
+import { createLogger } from '../../utils/logger'
+const _log = createLogger('StrainFreezer')
 
 export function useFreezerActions(state: any) {
   const { freezers, activeFreezerId } = state
@@ -101,7 +103,7 @@ export function useFreezerActions(state: any) {
     // 优化后的盒子索引表：Map<"freezerId|boxId", BoxObject>
     const boxMap = new Map<string, any>()
 
-    console.log(`[TopologySync] 开始扫描拓扑... 冰箱总数: ${target.length}`)
+    _log.debug(`[TopologySync] 开始扫描拓扑... 冰箱总数: ${target.length}`)
 
     // 核心新增：清理并准备位置名称映射
     const locMap: Record<string, string> = {}
@@ -143,7 +145,7 @@ export function useFreezerActions(state: any) {
 
     // 同步到 store
     state.locationMap.value = locMap
-    console.log(`[TopologySync] 盒子索引构建完成，已更新 ${Object.keys(locMap).length} 个位置名称`)
+    _log.debug(`[TopologySync] 盒子索引构建完成，已更新 ${Object.keys(locMap).length} 个位置名称`)
 
     // 2. 第二步：根据样本记录进行精准标记 (O(N_records))
     let sampleMatchCount = 0
@@ -163,7 +165,7 @@ export function useFreezerActions(state: any) {
       
       // 诊断日志：只打印前几条或查不到的异常
       if (idx < 3) {
-        console.log(`[TopologySync] 正在尝试匹配记录: ${record.name} -> Key: ${compositeKey}`)
+        _log.debug(`[TopologySync] 正在尝试匹配记录: ${record.name} -> Key: ${compositeKey}`)
       }
 
       if (box) {
@@ -183,13 +185,13 @@ export function useFreezerActions(state: any) {
       } else if (errorCount < 10) {
         console.warn(`[TopologySync] 盒子匹配失败: Key [${compositeKey}] 不存在于索引中`)
         if (errorCount === 0) {
-          console.log('[TopologySync] 索引样例 Key:', Array.from(boxMap.keys()).slice(0, 3))
+          _log.debug('[TopologySync] 索引样例 Key:', Array.from(boxMap.keys()).slice(0, 3))
         }
         errorCount++
       }
     })
     
-    console.log(`[TopologySync] 同步流水线结束: 成功标记 ${sampleMatchCount} 个样本, 找到 ${boxMatchCount} 个有效冰箱盒`)
+    _log.debug(`[TopologySync] 同步流水线结束: 成功标记 ${sampleMatchCount} 个样本, 找到 ${boxMatchCount} 个有效冰箱盒`)
 
     // 3. 核心修复：安全剥离 Vue Proxy 后执行结构化深拷贝刷新 UI（避免 DataCloneError）
     const deepCloned = safeDeepClone(target)

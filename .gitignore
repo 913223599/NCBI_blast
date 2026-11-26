@@ -244,6 +244,7 @@ src/test_shm.py
 !/scripts/verify_label_display_mode.js
 !/scripts/README.md
 !/scripts/verify_all.ps1
+!/scripts/sync_version.mjs
 .lingma/rules/
 
 # ------------------------------------------------------------------------------

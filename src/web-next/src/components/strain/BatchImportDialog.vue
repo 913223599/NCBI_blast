@@ -204,6 +204,8 @@
 </template>
 
 <script setup lang="ts">
+import { createLogger } from '../../utils/logger'
+const _log = createLogger('BatchImport')
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import ExcelJS from 'exceljs'
 import { useStrainStore } from '../../stores/strain'
@@ -652,13 +654,13 @@ async function saveToStore(records: any[]) {
   
   importing.value = true // 使用已有的 importing 状态作为 UI 锁
   try {
-    console.log(`[Import] 开始链式入库事务... 总计 ${records.length} 条`)
+    _log.debug(`[Import] 开始链式入库事务... 总计 ${records.length} 条`)
     
     // 1. 保存样本记录 (内部会开启 setIsUpdating 护盾)
     const success = await strain.addRecords(records)
     
     if (success) {
-      console.log('[Import] 样本保存成功，同步刷新拓扑映射...')
+      _log.debug('[Import] 样本保存成功，同步刷新拓扑映射...')
       // 2. 刷新物理拓扑 (shouldSave=true)，此过程会继续持有护盾
       strain.refreshFreezerOccupancy(true)
       

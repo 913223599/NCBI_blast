@@ -114,6 +114,8 @@
 </template>
 
 <script setup lang="ts">
+import { createLogger } from '../utils/logger'
+const _log = createLogger('StrainView')
 import { ref, onMounted, onUnmounted, onActivated, onDeactivated, computed, watch } from 'vue'
 import { useI18n } from '../locales'
 import StrainSidebar from '../components/strain/StrainSidebar.vue'
@@ -148,7 +150,7 @@ watch(() => strain.activeRecord, (newVal) => {
 // 关键修复：当记录数量变化（如批量删除）时，如果身处平铺视图，强制刷新物理映射
 watch(() => strain.records.length, () => {
   if (currentView.value === 'freezer') {
-    console.log('[StrainView] 记录数发生变化，同步物理拓扑...')
+    _log.debug('[StrainView] 记录数发生变化，同步物理拓扑...')
     strain.refreshFreezerOccupancy(false)
   }
 })
@@ -156,7 +158,7 @@ watch(() => strain.records.length, () => {
 // 关键修复：当用户从列表切水平铺视图时，触发强制重绘检查
 watch(currentView, (newView) => {
   if (newView === 'freezer') {
-    console.log('[StrainView] 切换至平铺视图，执行自愈刷新...')
+    _log.debug('[StrainView] 切换至平铺视图，执行自愈刷新...')
     strain.refreshFreezerOccupancy(false)
   }
 })

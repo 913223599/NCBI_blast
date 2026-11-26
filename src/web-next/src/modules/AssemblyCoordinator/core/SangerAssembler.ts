@@ -1,4 +1,6 @@
 import { type AssemblyTask } from '../types';
+import { createLogger } from '../../../utils/logger'
+const _log = createLogger('SangerAssembler')
 
 /**
  * SangerAssembler - 一代测序组装器
@@ -10,7 +12,7 @@ export class SangerAssembler {
    * TODO: 对接后端 Python 的 Bio.SeqIO.AbiIO
    */
   async parseChromatogram(filePath: string): Promise<any> {
-    console.log(`[SangerAssembler] Parsing chromatogram: ${filePath}`);
+    _log.debug(`[SangerAssembler] Parsing chromatogram: ${filePath}`);
     // TODO: 实现桥接逻辑，返回包含峰图坐标、碱基及 Q-score 的 JSON
     return { status: 'TODO', file: filePath };
   }
@@ -21,7 +23,7 @@ export class SangerAssembler {
    * @param reversePath R 端文件
    */
   async assembleDualReads(forwardPath: string, reversePath: string): Promise<string> {
-    console.log('[SangerAssembler] Assembling F and R reads...');
+    _log.debug('[SangerAssembler] Assembling F and R reads...');
     // TODO: 调用后端进行 Local Alignment 和 Consensus 合并
     return 'ATGC...[TODO: Consensus Sequence]';
   }
@@ -31,7 +33,7 @@ export class SangerAssembler {
    * @param threshold 质量阈值 (默认 Q20)
    */
   async autoTrim(sequence: string, qualityScores: number[], threshold: number = 20): Promise<string> {
-    console.log(`[SangerAssembler] Auto-trimming with threshold: ${threshold}`);
+    _log.debug(`[SangerAssembler] Auto-trimming with threshold: ${threshold}`);
     // TODO: 实现基于滑窗的质量裁剪算法
     return sequence;
   }

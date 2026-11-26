@@ -181,6 +181,8 @@
 </template>
 
 <script setup lang="ts">
+import { createLogger } from '../../../utils/logger'
+const _log = createLogger('StrainListTable')
 import { ref, computed } from 'vue'
 import { useStrainStore } from '../../../stores/strain'
 import type { StrainRecord } from '../../../stores/strain'
@@ -232,11 +234,11 @@ function isExpanded(accession: string): boolean {
 
 // 处理复选框点击（包括所有备份）
 function handleCheckboxClick(event: MouseEvent, record: StrainRecord, allRecords: StrainRecord[]) {
-  console.log('[handleCheckboxClick] shiftKey:', event.shiftKey, 'activeId:', props.activeId, 'record.id:', record.id)
+  _log.debug('[handleCheckboxClick] shiftKey:', event.shiftKey, 'activeId:', props.activeId, 'record.id:', record.id)
   
   if (event.shiftKey && props.activeId) {
     // 触发 Shift 键多选事件，传递扁平化的所有记录列表
-    console.log('[handleCheckboxClick] Emitting shiftSelect with', flatRecords.value.length, 'records')
+    _log.debug('[handleCheckboxClick] Emitting shiftSelect with', flatRecords.value.length, 'records')
     emit('shiftSelect', props.activeId, record.id, flatRecords.value.map(r => r.id))
   } else {
     // 非 Shift 点击：先设置 activeId，然后切换选中状态

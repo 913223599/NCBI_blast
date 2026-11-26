@@ -1,3 +1,5 @@
+import { createLogger } from './logger'
+const _log = createLogger('Storage')
 /**
  * 本地存储工具 - 用于持久化保存冰箱数据
  */
@@ -23,7 +25,7 @@ export function saveToStorage(data: { freezers: any[]; records: any[] }): void {
       lastSaved: new Date().toISOString()
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData))
-    console.log('[Storage] Data saved successfully')
+    _log.debug('[Storage] Data saved successfully')
   } catch (error) {
     console.error('[Storage] Failed to save data:', error)
   }
@@ -36,12 +38,12 @@ export function loadFromStorage(): { freezers: any[]; records: any[] } | null {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) {
-      console.log('[Storage] No stored data found')
+      _log.debug('[Storage] No stored data found')
       return null
     }
 
     const data: StorageData = JSON.parse(stored)
-    console.log(`[Storage] Data loaded from ${data.lastSaved}`)
+    _log.debug(`[Storage] Data loaded from ${data.lastSaved}`)
     
     return {
       freezers: data.freezers || [],
@@ -59,7 +61,7 @@ export function loadFromStorage(): { freezers: any[]; records: any[] } | null {
 export function clearStorage(): void {
   try {
     localStorage.removeItem(STORAGE_KEY)
-    console.log('[Storage] Data cleared')
+    _log.debug('[Storage] Data cleared')
   } catch (error) {
     console.error('[Storage] Failed to clear data:', error)
   }

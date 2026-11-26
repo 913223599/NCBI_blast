@@ -1,4 +1,6 @@
 import type { SampleCategory, StrainRecord } from '../stores/strain'
+import { createLogger } from './logger'
+const _log = createLogger('MockStrain')
 
 /**
  * 模拟完整的样本业务数据
@@ -179,5 +181,5 @@ export function seedMockData(strainStore: any, codeGen: any) {
     }
   })
   
-  console.log('v6 编码系统填充测试完成。')
+  _log.debug('v6 编码系统填充测试完成。')
 }
