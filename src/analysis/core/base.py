@@ -14,11 +14,11 @@ class BaseEngine(ABC):
         pass
 
 
-class BaseParser(ABC):
+class BaseParser:
     """基础解析器接口（具体子类实现 parse 方法）"""
     pass
 
 
-class BaseService(ABC):
+class BaseService:
     """基础服务接口（具体子类实现 execute 方法）"""
     pass

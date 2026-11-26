@@ -325,7 +325,8 @@ def parse_input_contigs(
                 try:
                     start_bp = int(feat.location.start) + 1
                     end_bp = int(feat.location.end)
-                except Exception:
+                except Exception as _exc:
+                    logger.debug("解析 GenBank 特征坐标跳过异常条目: %s", _exc)
                     continue
                 prots.append(
                     StructureProteinItem(

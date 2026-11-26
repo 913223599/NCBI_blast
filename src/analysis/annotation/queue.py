@@ -12,6 +12,7 @@ import logging
 from typing import Dict, Any, Callable, Awaitable, List, Optional, Set
 
 from .db import annotation_db
+from ...core.async_tasks import spawn_tracked_task
 from ...core.broadcaster import broadcaster
 from ...core.task_db import release_gpu_memory
 
@@ -164,6 +165,17 @@ class AnnotationQueue:
                 logger.info(f"[QUEUE] Task {task_id} lifecycle finished.")
                 await self._broadcast_status()
 
+    def _schedule_broadcast(self) -> None:
+        bg_tasks: Set[asyncio.Task[Any]] = getattr(self, "_bg_tasks", None)  # type: ignore[assignment]
+        if bg_tasks is None:
+            bg_tasks = set()
+            self._bg_tasks = bg_tasks
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        spawn_tracked_task(self._broadcast_status(), bg_tasks, label="annotation_queue_broadcast", loop=loop)
+
     def remove_task_from_queue(self, task_id: str) -> bool:
         """从等待队列中移除指定任务"""
         if not task_id or not isinstance(task_id, str):
@@ -174,7 +186,7 @@ class AnnotationQueue:
         if len(self._queue) < initial_len:
             self._queued_ids.discard(task_id)
             annotation_db.mark_cancelled(task_id)
-            asyncio.create_task(self._broadcast_status())
+            self._schedule_broadcast()
             logger.info(f"[QUEUE] Task {task_id} removed from waiting queue.")
             return True
         return False
@@ -194,7 +206,7 @@ class AnnotationQueue:
                 new_queue.append(p)
 
         self._queue = new_queue
-        asyncio.create_task(self._broadcast_status())
+        self._schedule_broadcast()
         logger.info(f"[QUEUE] Waiting queue reordered: {len(self._queue)} tasks.")
 
     def pause(self):
@@ -203,7 +215,7 @@ class AnnotationQueue:
             self._paused = True
             self._resume_event.clear()
             logger.info("[QUEUE] Queue paused.")
-            asyncio.create_task(self._broadcast_status())
+            self._schedule_broadcast()
 
     def resume(self):
         """恢复队列派发"""
@@ -211,7 +223,7 @@ class AnnotationQueue:
             self._paused = False
             self._resume_event.set()
             logger.info("[QUEUE] Queue resumed.")
-            asyncio.create_task(self._broadcast_status())
+            self._schedule_broadcast()
 
     @property
     def is_paused(self) -> bool:

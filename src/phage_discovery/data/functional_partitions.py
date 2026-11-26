@@ -643,9 +643,7 @@ def classify_protein_with_p0_teachers(
         )
         func_vec = np.maximum(func_vec, np.asarray(sub["func_vec"], dtype=np.float32))
         sem4_vec = np.maximum(sem4_vec, np.asarray(sub["sem4_vec"], dtype=np.float32))
-        if np.any(func_vec[:4] > 0.5):
-            is_phage = True
-        elif not has_host_df and not has_host_phold:
+        if np.any(func_vec[:4] > 0.5) or not has_host_df and not has_host_phold:
             is_phage = True
         is_known = bool(np.any(func_vec > 0.5)) or not is_phage
     elif has_phage_complement:

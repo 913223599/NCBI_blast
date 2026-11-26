@@ -4,13 +4,16 @@
 收录权威细菌、真菌、古菌、病毒等分类单元的中文规范名称与常见机翻错误映射
 """
 
+from typing import Any, ClassVar, Dict, List, Tuple
+
+
 class TaxonomyKnowledgeBase:
     """
     权威生物分类学对照库
     """
 
     # 规范属名 -> (标准属名中文, 种名中的标准词尾, 常见错误模式列表)
-    GENUS_STANDARD_MAP = {
+    GENUS_STANDARD_MAP: ClassVar[Dict[str, Any]] = {
         # 常见细菌属
         "Pseudomonas": ("假单胞菌属", "假单胞菌", ["单胞菌", "假单细胞菌", "弧菌"]),
         "Aeromonas": ("气单胞菌属", "气单胞菌", ["单胞菌", "航单胞菌", "气单细胞菌"]),
@@ -151,7 +154,7 @@ class TaxonomyKnowledgeBase:
     }
 
     # 常见种加词标准译名库 (用于双名法纠偏)
-    EPITHET_STANDARD_MAP = {
+    EPITHET_STANDARD_MAP: ClassVar[Dict[str, str]] = {
         "aquariorum": "水族箱",
         "caseolyticus": "溶酪",
         "caseolytica": "溶酪",
@@ -204,7 +207,7 @@ class TaxonomyKnowledgeBase:
     }
 
     # 常见叠词修复模式
-    DOUBLE_WORD_PATTERNS = [
+    DOUBLE_WORD_PATTERNS: ClassVar[List[Tuple[str, str]]] = [
         ("噬菌体噬菌体", "噬菌体"),
         ("病毒病毒", "病毒"),
         ("杆菌杆菌", "杆菌"),
@@ -219,7 +222,7 @@ class TaxonomyKnowledgeBase:
     ]
 
     # 未分类/通用环境生物学修饰词
-    UNCULTURED_MAP = {
+    UNCULTURED_MAP: ClassVar[Dict[str, str]] = {
         "uncultured organism": "未培养生物",
         "uncultured bacterium": "未培养细菌",
         "uncultured archaeon": "未培养古菌",

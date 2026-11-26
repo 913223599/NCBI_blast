@@ -367,7 +367,8 @@ def _estimate_depths_kmer(
                     if file_reads >= per_file_read_cap or file_bases >= per_file_base_cap:
                         hit_cap = True
                         break
-        except Exception:
+        except Exception as _exc:
+            logger.debug("读取测序文件统计深度时跳过异常文件: %s", _exc)
             continue
 
         if fastp_total_bases <= 0 and hit_cap and not is_gz and file_bytes_read > 0 and file_size > file_bytes_read:

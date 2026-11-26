@@ -377,7 +377,8 @@ def list_render_history(limit: int = 30) -> List[StudioHistoryItem]:
                     figures=[StudioFigureFile(**f) for f in (data.get("figures") or [])],
                 )
             )
-        except Exception:
+        except Exception as _exc:
+            _s110_logger.debug("读取 FigureStudio 元数据文件跳过损坏条目: %s", _exc)
             continue
     items.sort(key=lambda x: x.created_at, reverse=True)
     return items[:limit]

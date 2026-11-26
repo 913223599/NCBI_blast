@@ -101,14 +101,16 @@ def read_task_structure_file(task_folder: Path, rel_path: str) -> Dict[str, Any]
 
 
 def _http_get_text(url: str, timeout: float = 20.0) -> str:
-    req = urllib.request.Request(
+    from ...core.http_guard import build_safe_request, safe_urlopen
+
+    req = build_safe_request(
         url,
         headers={
             "User-Agent": "NCBI-Bio-Station/2.1 (Structural-Viewer)",
             "Accept": "application/json, text/plain, */*",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with safe_urlopen(req, timeout=timeout) as resp:
         raw = resp.read(MAX_STRUCTURE_BYTES + 1)
         if len(raw) > MAX_STRUCTURE_BYTES:
             raise ValueError("远端结构文件体积超过 25 MB 限制")

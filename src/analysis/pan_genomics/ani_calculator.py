@@ -336,7 +336,7 @@ class OrthoANICalculator:
         aligned_len1 = 0
         aligned_len2 = 0
 
-        for q1_id, (s2_id, _, pid1, l1, s2_targets) in best_fwd.items():
+        for q1_id, (s2_id, _, pid1, l1, _s2_targets) in best_fwd.items():
             if s2_id in best_rev:
                 rev_targets = best_rev[s2_id][4]
                 if q1_id in rev_targets or best_rev[s2_id][0] == q1_id:

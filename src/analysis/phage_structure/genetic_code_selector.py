@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional, Tuple, cast
 
 try:
@@ -17,6 +18,8 @@ except ImportError:
     pyrodigal = None  # type: ignore[assignment]
 
 from .thresholds import DEFAULT_THRESHOLDS, GeneticCodeThresholds
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_GENETIC_CODES = (11, 4, 15)
 
@@ -97,7 +100,8 @@ def select_optimal_genetic_code(
                 code,
                 min_orf_bp=thresholds.min_orf_bp,
             )
-        except Exception:
+        except Exception as _exc:
+            logger.debug("遗传密码表 %s 预估跳过: %s", code, _exc)
             continue
 
     s11 = stats.get(11)

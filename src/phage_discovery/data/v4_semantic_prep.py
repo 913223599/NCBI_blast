@@ -193,7 +193,7 @@ def _build_hard_v4_records(
 
         archaeal_entries = []
         host_fasta_map: Dict[str, Path] = {}
-        for acc, cat, org, lbp, relp in genomes:
+        for acc, cat, org, _lbp, relp in genomes:
             if acc not in train_accs:
                 continue
             fa_p = neg_root / relp if relp else neg_root / "fasta" / f"{acc}.fasta"

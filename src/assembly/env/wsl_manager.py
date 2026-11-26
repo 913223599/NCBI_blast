@@ -108,7 +108,8 @@ class WSLManager:
                         output = res.stdout.decode(enc)
                         if "ubuntu" in output.lower() or "debian" in output.lower() or len(output.strip()) > 0:
                             break
-                    except Exception:
+                    except Exception as _exc:
+                        _s110_logger.debug("WSL 分发版输出按编码 %s 解码失败，尝试下一编码: %s", enc, _exc)
                         continue
                 
                 # 过滤空字符与空白，清除非法控制字符

@@ -278,7 +278,7 @@ class ShmManager:
           - /dev/shm 中本任务的所有残留目录
         """
         # 清理活跃空间
-        for name, ws in list(self._active.items()):
+        for _name, ws in list(self._active.items()):
             logger.info(f"全局清理: 释放活跃空间 {ws.path}")
             await self.runner.run_command(
                 ["rm", "-rf", ws.path], silence_errors=True
@@ -286,7 +286,7 @@ class ShmManager:
         self._active.clear()
 
         # 清理诊断保留
-        for name, ws in list(self._retained.items()):
+        for _name, ws in list(self._retained.items()):
             logger.info(f"全局清理: 回收诊断现场 {ws.path}")
             await self.runner.run_command(
                 ["rm", "-rf", ws.path], silence_errors=True

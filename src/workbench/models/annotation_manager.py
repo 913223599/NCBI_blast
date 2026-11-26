@@ -93,7 +93,7 @@ class AnnotationManager:
                     continue
                 
                 # 每个任务文件夹下应该有一个汇总文件或单序列 CSV
-                for csv_file in task_dir.glob("*.csv"):
+                for _csv_file in task_dir.glob("*.csv"):
                     # 如果是汇总 CSV 或者已经命名的结果
                     try:
                         # 借用解析逻辑 (注意：这里需要谨慎处理循环导入，但在脚本执行中没关系)
@@ -120,7 +120,8 @@ class AnnotationManager:
                         identity = data.get('species') or data.get('title')
                         if seq_hash and identity:
                             self.update_annotation(seq_hash, last_known_id=sid, blast_identity=identity)
-                    except Exception:
+                    except Exception as _exc:
+                        logger.debug("批量更新 BLAST 注释记录时跳过单条异常: %s", _exc)
                         continue
         except Exception as e:
             logger.error(f"Failed batch update from BLAST: {e}")

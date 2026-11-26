@@ -106,7 +106,7 @@ class ParallelOrthologClusterer:
             if is_annotated_list[idx] and prod_clean_list[idx]:
                 prod_to_indices[prod_clean_list[idx]].append(idx)
 
-        for prod_name, idx_list in prod_to_indices.items():
+        for idx_list in prod_to_indices.values():
             if len(idx_list) > 1:
                 for i_pos in range(len(idx_list)):
                     idx1 = idx_list[i_pos]
@@ -122,7 +122,7 @@ class ParallelOrthologClusterer:
                 inverted_index[k].append(idx)
 
         # 统计两两基因共享的 K-mer 数量 (稀疏矩阵候选生成)
-        for k, gene_indices in inverted_index.items():
+        for gene_indices in inverted_index.values():
             # 过滤超高频 K-mer（如出现次数大于 50% 基因总量）降低无效碰撞
             if len(gene_indices) > max(20, total_genes // 2):
                 continue

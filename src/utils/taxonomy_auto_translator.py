@@ -159,7 +159,7 @@ class TaxonomyAutoTranslator:
         print("开始进行错漏匹配检查...")
         print("=================================")
         missed = []
-        for eng_text, rank in attempted_list:
+        for eng_text, _rank in attempted_list:
             res = self.translation_mgr.get_translation(eng_text)
             if not res or res.lower() == eng_text.lower():
                 missed.append(eng_text)

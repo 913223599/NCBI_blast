@@ -8,7 +8,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Callable
+from typing import ClassVar, Dict, List, Any, Optional, Callable, Set
 
 from src.utils.file_handler import FileHandler
 from src.workbench.models.annotation_manager import get_annotation_manager
@@ -23,8 +23,8 @@ class BlastEngine:
     Modernised Unified BLAST Engine with Batching & Fingerprint Support.
     """
     
-    NUCLEOTIDE_CHARS = set('ATCGNU')
-    PROTEIN_CHARS = set('KERYWHDNQSTVRLEAICGPMF')
+    NUCLEOTIDE_CHARS: ClassVar[Set[str]] = set('ATCGNU')
+    PROTEIN_CHARS: ClassVar[Set[str]] = set('KERYWHDNQSTVRLEAICGPMF')
     
     # 批处理策略 (限制单个连接最大 10 条以防止 NCBI 拒绝解析)
     MAX_BATCH_SIZE = 10

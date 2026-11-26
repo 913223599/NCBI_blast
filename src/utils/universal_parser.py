@@ -3,7 +3,7 @@ import zipfile
 import gzip
 import logging
 from pathlib import Path
-from typing import Dict, Any, Generator, Optional
+from typing import ClassVar, Dict, Any, Generator, List, Optional, Set
 from Bio import SeqIO
 
 logger = logging.getLogger(__name__)
@@ -16,8 +16,8 @@ class UniversalParser:
     并处理字符编码探测与流式读取。
     """
     
-    VALID_EXTENSIONS = {'.fasta', '.fas', '.fa', '.fna', '.seq', '.txt', '.ab1', '.abi'}
-    TEXT_ENCODINGS = ['utf-8', 'utf-8-sig', 'latin-1']
+    VALID_EXTENSIONS: ClassVar[Set[str]] = {'.fasta', '.fas', '.fa', '.fna', '.seq', '.txt', '.ab1', '.abi'}
+    TEXT_ENCODINGS: ClassVar[List[str]] = ['utf-8', 'utf-8-sig', 'latin-1']
     
     @classmethod
     def parse_iter(cls, file_path: str) -> Generator[Dict[str, Any], None, None]:
@@ -104,7 +104,8 @@ class UniversalParser:
                 with open(file_path, 'r', encoding=enc) as f:
                     text = f.read()
                     break
-            except Exception:
+            except Exception as _exc:
+                logger.debug("编码 %s 解码失败，尝试候选编码: %s", enc, _exc)
                 continue
         
         if text:
@@ -173,6 +174,7 @@ class UniversalParser:
         for enc in cls.TEXT_ENCODINGS:
             try:
                 return content.decode(enc)
-            except Exception:
+            except Exception as _exc:
+                logger.debug("编码 %s 解码失败，尝试候选编码: %s", enc, _exc)
                 continue
         return content.decode('utf-8', errors='replace')

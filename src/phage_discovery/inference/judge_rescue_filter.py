@@ -134,10 +134,7 @@ def _passes_gray_rescue_criteria(
         morph_mods = int(np.sum(max_f10[:3] >= rescue_min_morph_prob))
         core_mods = int(np.sum(max_f10[:5] >= 0.50))
         has_lysis_pair = float(max_f10[3]) >= 0.65 and core_mods >= 2
-        if morph_mods == 0 and not has_lysis_pair:
-            passed = False
-        # 质粒/转座酶高风险标签激活时需多形态模块交叉佐证，防范孤立假结构蛋白误召
-        elif float(max_f10[8]) >= 0.55 and morph_mods < 2:
+        if morph_mods == 0 and not has_lysis_pair or float(max_f10[8]) >= 0.55 and morph_mods < 2:
             passed = False
 
     if not passed and require_structural_evidence and enable_elastic_rescue:

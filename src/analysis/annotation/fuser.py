@@ -6,7 +6,7 @@
 """
 import re
 import logging
-from typing import Dict, List, Any, Optional, Tuple
+from typing import ClassVar, Dict, List, Any, Optional, Tuple
 
 from .types import FeatureItem, AnnotationSummary
 
@@ -17,7 +17,7 @@ class AnnotationFuser:
     """注释特征融合与补全器"""
 
     # 纯占位型假定蛋白描述 (在 clean_product_text 中统一规范化为 "hypothetical protein")
-    GENERIC_HYPOTHETICAL_PATTERNS = [
+    GENERIC_HYPOTHETICAL_PATTERNS: ClassVar[List[str]] = [
         r"^(?:conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:hypothetical|hyphothetical)(?:\s+(?:phage\s+)?protein)?$",
         r"^(?:conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:uncharacterized|uncharacterised)(?:\s+(?:phage\s+)?protein)?$",
         r"^unknown(?:\s+(?:protein|function))?$",
@@ -29,7 +29,7 @@ class AnnotationFuser:
     ]
 
     # 广义未表征/未知功能蛋白模式 (含 DUF/UPF/PHA/ORF/gp 编号及未知功能家族，归类为 Hypothetical)
-    UNANNOTATED_PATTERNS = [
+    UNANNOTATED_PATTERNS: ClassVar[List[str]] = [
         r"^(?:gp\d+(?:[./_]\d+)?\s+|conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:hypothetical|hyphothetical)\b",
         r"^(?:gp\d+(?:[./_]\d+)?\s+|conserved\s+|putative\s+|phage\s+|bacteriophage\s+|predicted\s+)*(?:uncharacterized|uncharacterised)\b",
         r"\b(?:unknown|unkown|unknwon)\s+function\b",
@@ -59,7 +59,7 @@ class AnnotationFuser:
         r"^(?:none|na|unassigned|unsorted)$",
     ]
 
-    CATEGORY_RULES = [
+    CATEGORY_RULES: ClassVar[List[Any]] = [
         # 1. 尾部与尾丝吸附 (Tail & Host Interaction)
         # 优先捕获以 baseplate / tail 开头的尾部穿刺溶菌酶复合体 (如 baseplate hub subunit and tail lysozyme)，防止被 Lysis 误抓
         ("Tail & Host Interaction", [
@@ -105,7 +105,7 @@ class AnnotationFuser:
     ]
 
     # 显式结构化分类标签映射 (仅针对 Pharokka/Phold 的结构化分类字段，避免宽泛的 moron / DNA metabolism 误导)
-    EXPLICIT_NOTE_CATEGORY_MAP = {
+    EXPLICIT_NOTE_CATEGORY_MAP: ClassVar[Dict[str, str]] = {
         "head and packaging": "Head & Packaging",
         "tail": "Tail & Host Interaction",
         "connector": "Tail & Host Interaction",

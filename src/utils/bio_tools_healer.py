@@ -19,7 +19,6 @@ import site
 import subprocess
 import sys
 import tempfile
-import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 import logging
@@ -213,11 +212,13 @@ def default_external_binary_downloader(tool_key: str, dest_path: Path) -> bool:
             dl_name = "pkg.zip" if spec.get("is_zip") else tool_key
             dl_path = tmp_root / dl_name
 
-            req = urllib.request.Request(
+            from ..core.http_guard import build_safe_request, safe_urlopen
+
+            req = build_safe_request(
                 url,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) NCBI-BLAST-Pro"},
             )
-            with urllib.request.urlopen(req, timeout=60) as resp, dl_path.open("wb") as out_fh:
+            with safe_urlopen(req, timeout=60) as resp, dl_path.open("wb") as out_fh:
                 shutil.copyfileobj(resp, out_fh)
 
             dest_path.parent.mkdir(parents=True, exist_ok=True)

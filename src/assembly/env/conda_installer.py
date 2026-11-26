@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import os
 import subprocess
-import urllib.request
 import logging
 from pathlib import Path
 from typing import Optional
@@ -34,7 +33,9 @@ class CondaInstaller:
                     self.logger.info(f"下载进度: {pct}%")
                     self._last_pct = pct
 
-            urllib.request.urlretrieve(self.CONDA_URL, str(self.installer_path), progress)
+            from ...core.http_guard import safe_urlretrieve
+
+            safe_urlretrieve(self.CONDA_URL, self.installer_path, progress)
             return True
         except Exception as e:
             self.logger.error(f"下载失败: {str(e)}")

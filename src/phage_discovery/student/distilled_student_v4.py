@@ -19,6 +19,7 @@ import gc
 import json
 import logging
 import time
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -84,6 +85,7 @@ __all__ = [
     "_extract_sub_head_inputs",
     "refine_student_v4_sub_head",
     "_load_v4_part",
+    "TrainV4Config",
     "train_distilled_student_v4",
     "main",
 ]
@@ -258,6 +260,73 @@ def _load_val_eval_bundle(
     return va_w, va_c, va_bundle
 
 
+@dataclass
+class TrainV4Config:
+    """V4 三模态蒸馏学生模型与上下文精修器的全量训练超参配置。"""
+
+    # 数据分片与教师蒸馏
+    train_parts: Tuple[str, ...] = ("windows", "chimeras")
+    extra_mined_fasta: Optional[Path] = None
+    extra_fasta_map: Optional[Dict[str, Path]] = None
+    part_weights: Optional[Dict[str, float]] = None
+    teacher_oof_npz: Optional[Path] = None
+    teacher_probs_override: Optional[np.ndarray] = None
+    teacher_weights: Tuple[float, float, float] = (0.4, 0.35, 0.25)
+    sample_weights_override: Optional[np.ndarray] = None
+
+    # 优化器与网络结构
+    epochs: int = 24
+    batch_size: int = 64
+    lr: float = 8e-4
+    patience: int = 6
+    max_len: int = 5000
+    dna_channels: int = 160
+    orf_d_model: int = 128
+    orf_nhead: int = 4
+    orf_num_layers: int = 3
+    fusion_dim: int = 256
+    init_student_ckpt: Optional[Path] = None
+    backbone_lr_scale: float = 0.25
+
+    # 蒸馏与多任务损失权重
+    distill_alpha: float = 0.55
+    sub_weight: float = 0.25
+    sem_weight: float = 0.25
+    temperature: float = 2.0
+    focal_gamma: float = 2.0
+    modality_dropout_prob: float = 0.10
+    use_semantic: bool = True
+    use_functional: bool = False
+    use_homoscedastic_loss: bool = False
+    feature_profile: str = "v4"
+
+    # 精修与运行时控制
+    tune_sub_head: bool = True
+    train_refiner: bool = True
+    refiner_epochs: int = 16
+    train_subbin_refiner: bool = True
+    subbin_epochs: int = 16
+    enable_plateau_decoder: bool = True
+    workers: Optional[int] = None
+    seed: int = 42
+
+    @classmethod
+    def from_overrides(
+        cls,
+        base: Optional["TrainV4Config"] = None,
+        **overrides: Any,
+    ) -> "TrainV4Config":
+        """基于已有配置或默认配置合并关键字参数，并严格拦截未知字段名。"""
+        cfg = base if base is not None else cls()
+        if not overrides:
+            return cfg
+        valid_names = {f.name for f in fields(cls)}
+        unknown = sorted(set(overrides) - valid_names)
+        if unknown:
+            raise TypeError(f"train_distilled_student_v4() 接收到未定义参数: {', '.join(unknown)}")
+        return replace(cfg, **overrides)
+
+
 def train_distilled_student_v4(
     train_feature_dir: Path,
     train_dir: Path,
@@ -265,50 +334,18 @@ def train_distilled_student_v4(
     bench_dir: Path,
     out_dir: Path,
     *,
-    train_parts: Tuple[str, ...] = ("windows", "chimeras"),
-    extra_mined_fasta: Optional[Path] = None,
-    extra_fasta_map: Optional[Dict[str, Path]] = None,
-    part_weights: Optional[Dict[str, float]] = None,
-    teacher_oof_npz: Optional[Path] = None,
-    teacher_probs_override: Optional[np.ndarray] = None,
-    teacher_weights: Tuple[float, float, float] = (0.4, 0.35, 0.25),
-    epochs: int = 24,
-    batch_size: int = 64,
-    lr: float = 8e-4,
-    patience: int = 6,
-    max_len: int = 5000,
-    dna_channels: int = 160,
-    orf_d_model: int = 128,
-    orf_nhead: int = 4,
-    orf_num_layers: int = 3,
-    fusion_dim: int = 256,
-    distill_alpha: float = 0.55,
-    sub_weight: float = 0.25,
-    sem_weight: float = 0.25,
-    temperature: float = 2.0,
-    focal_gamma: float = 2.0,
-    modality_dropout_prob: float = 0.10,
-    tune_sub_head: bool = True,
-    train_refiner: bool = True,
-    refiner_epochs: int = 16,
-    train_subbin_refiner: bool = True,
-    subbin_epochs: int = 16,
-    enable_plateau_decoder: bool = True,
-    use_semantic: bool = True,
-    use_functional: bool = False,
-    use_homoscedastic_loss: bool = False,
-    feature_profile: str = "v4",
-    init_student_ckpt: Optional[Path] = None,
-    backbone_lr_scale: float = 0.25,
-    sample_weights_override: Optional[np.ndarray] = None,
-    workers: Optional[int] = None,
-    seed: int = 42,
+    config: Optional[TrainV4Config] = None,
+    **overrides: Any,
 ) -> Dict[str, Any]:
-    """训练 V4 高容量三模态蒸馏学生模型（可选 9D 客观功能分区蒸馏与 Kendall 自动加权）与跨窗上下文精修器并生成测试报告。"""
+    """训练 V4 高容量三模态蒸馏学生模型与跨窗上下文精修器并生成测试报告。
+
+    支持传入 `config=TrainV4Config(...)`，亦完全向后兼容直接通过关键字参数覆盖超参。
+    """
     import torch
 
-    torch.manual_seed(seed)
-    rng = np.random.default_rng(seed)
+    cfg = TrainV4Config.from_overrides(config, **overrides)
+    torch.manual_seed(cfg.seed)
+    rng = np.random.default_rng(cfg.seed)
     out_root = Path(out_dir).resolve()
     out_root.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -318,44 +355,46 @@ def train_distilled_student_v4(
         _load_v4_part,
         train_feature_dir,
         train_dir,
-        train_parts=train_parts,
+        train_parts=cfg.train_parts,
         contig_ref_parts=CONTIG_REF_PARTS,
-        extra_mined_fasta=extra_mined_fasta,
-        extra_fasta_map=extra_fasta_map,
-        part_weights=part_weights,
-        sample_weights_override=sample_weights_override,
-        max_len=max_len,
-        workers=workers,
-        use_semantic=use_semantic,
-        use_functional=use_functional,
-        feature_profile=feature_profile,
+        extra_mined_fasta=cfg.extra_mined_fasta,
+        extra_fasta_map=cfg.extra_fasta_map,
+        part_weights=cfg.part_weights,
+        sample_weights_override=cfg.sample_weights_override,
+        max_len=cfg.max_len,
+        workers=cfg.workers,
+        use_semantic=cfg.use_semantic,
+        use_functional=cfg.use_functional,
+        feature_profile=cfg.feature_profile,
     )
     teacher_probs_all, oof_sec = resolve_teacher_oof_probs(
         bundle["clean_y_all"],
         bundle["feats_all"],
         bundle["cids_all"],
         bundle["sw_all"],
-        teacher_probs_override=teacher_probs_override,
-        teacher_oof_npz=teacher_oof_npz,
-        teacher_weights=teacher_weights,
+        teacher_probs_override=cfg.teacher_probs_override,
+        teacher_oof_npz=cfg.teacher_oof_npz,
+        teacher_weights=cfg.teacher_weights,
     )
-    va_w, va_c, va_bundle = _load_val_eval_bundle(eval_feature_dir, bench_dir, max_len, workers, feature_profile)
+    va_w, va_c, va_bundle = _load_val_eval_bundle(
+        eval_feature_dir, bench_dir, cfg.max_len, cfg.workers, cfg.feature_profile
+    )
     tr = slice_effective_train_data(bundle, teacher_probs_all)
 
     setup = setup_v4_model_and_optimizer(
         tr,
         device,
-        epochs=epochs,
-        batch_size=batch_size,
-        lr=lr,
-        dna_channels=dna_channels,
-        orf_d_model=orf_d_model,
-        orf_nhead=orf_nhead,
-        orf_num_layers=orf_num_layers,
-        fusion_dim=fusion_dim,
-        use_homoscedastic_loss=use_homoscedastic_loss,
-        init_student_ckpt=init_student_ckpt,
-        backbone_lr_scale=backbone_lr_scale,
+        epochs=cfg.epochs,
+        batch_size=cfg.batch_size,
+        lr=cfg.lr,
+        dna_channels=cfg.dna_channels,
+        orf_d_model=cfg.orf_d_model,
+        orf_nhead=cfg.orf_nhead,
+        orf_num_layers=cfg.orf_num_layers,
+        fusion_dim=cfg.fusion_dim,
+        use_homoscedastic_loss=cfg.use_homoscedastic_loss,
+        init_student_ckpt=cfg.init_student_ckpt,
+        backbone_lr_scale=cfg.backbone_lr_scale,
     )
     ckpt_path = out_root / "student_v4.pt"
     loop_res = run_v4_training_loop(
@@ -365,21 +404,21 @@ def train_distilled_student_v4(
         ckpt_path,
         device,
         rng,
-        epochs=epochs,
-        patience=patience,
-        batch_size=batch_size,
-        max_len=max_len,
-        modality_dropout_prob=modality_dropout_prob,
-        distill_alpha=distill_alpha,
-        sub_weight=sub_weight,
-        sem_weight=sem_weight,
-        temperature=temperature,
-        focal_gamma=focal_gamma,
+        epochs=cfg.epochs,
+        patience=cfg.patience,
+        batch_size=cfg.batch_size,
+        max_len=cfg.max_len,
+        modality_dropout_prob=cfg.modality_dropout_prob,
+        distill_alpha=cfg.distill_alpha,
+        sub_weight=cfg.sub_weight,
+        sem_weight=cfg.sem_weight,
+        temperature=cfg.temperature,
+        focal_gamma=cfg.focal_gamma,
     )
 
     model = setup["model"]
     sub_tune_info: Dict[str, Any] = {"enabled": False}
-    if tune_sub_head:
+    if cfg.tune_sub_head:
         sub_tune_info = {
             "enabled": True,
             **refine_student_v4_sub_head(
@@ -399,7 +438,7 @@ def train_distilled_student_v4(
                 va_c["arrs"]["sub_mask"].astype(np.float32),
                 out_ckpt_path=ckpt_path,
                 device=device,
-                seed=seed,
+                seed=cfg.seed,
                 tr_labels=tr["y_tr"],
             ),
         }
@@ -417,12 +456,12 @@ def train_distilled_student_v4(
         model, va_c["codes"], va_c["lengths"], va_c["arrs"]["features"], va_c["tokens"], va_c["counts"], device
     )
     te_w = _load_v4_part(
-        eval_feature_dir, bench_dir, "test", "windows", max_len, workers,
-        use_semantic=False, feature_profile=feature_profile,
+        eval_feature_dir, bench_dir, "test", "windows", cfg.max_len, cfg.workers,
+        use_semantic=False, feature_profile=cfg.feature_profile,
     )
     te_c = _load_v4_part(
-        eval_feature_dir, bench_dir, "test", "chimeras", max_len, workers,
-        use_semantic=False, feature_profile=feature_profile,
+        eval_feature_dir, bench_dir, "test", "chimeras", cfg.max_len, cfg.workers,
+        use_semantic=False, feature_profile=cfg.feature_profile,
     )
     t_inf0 = time.perf_counter()
     te_w_pred = _predict_v4_all(
@@ -442,12 +481,12 @@ def train_distilled_student_v4(
         te_c_pred,
         out_root,
         device,
-        max_len=max_len,
-        seed=seed,
-        train_refiner=train_refiner,
-        refiner_epochs=refiner_epochs,
-        train_subbin_refiner=train_subbin_refiner,
-        subbin_epochs=subbin_epochs,
+        max_len=cfg.max_len,
+        seed=cfg.seed,
+        train_refiner=cfg.train_refiner,
+        refiner_epochs=cfg.refiner_epochs,
+        train_subbin_refiner=cfg.train_subbin_refiner,
+        subbin_epochs=cfg.subbin_epochs,
     )
 
     for k in ("codes_all", "len_all", "feats_all", "tokens_all", "counts_all", "sub_all"):
@@ -458,17 +497,17 @@ def train_distilled_student_v4(
 
     meta_cfg = {
         "model_version": "v4",
-        "feature_profile": feature_profile,
+        "feature_profile": cfg.feature_profile,
         "feat_dim": int(setup["feat_std"].shape[0]),
         "orf_feat_dim": setup["orf_feat_dim"],
-        "max_len": max_len,
-        "dna_channels": dna_channels,
-        "orf_d_model": orf_d_model,
-        "orf_nhead": orf_nhead,
-        "orf_num_layers": orf_num_layers,
-        "fusion_dim": fusion_dim,
+        "max_len": cfg.max_len,
+        "dna_channels": cfg.dna_channels,
+        "orf_d_model": cfg.orf_d_model,
+        "orf_nhead": cfg.orf_nhead,
+        "orf_num_layers": cfg.orf_num_layers,
+        "fusion_dim": cfg.fusion_dim,
         "func_dim": func_dim,
-        "use_homoscedastic_loss": bool(use_homoscedastic_loss),
+        "use_homoscedastic_loss": bool(cfg.use_homoscedastic_loss),
     }
     summary_ctx = {
         "warm_started_from": setup["warm_started_from"],
@@ -498,7 +537,7 @@ def train_distilled_student_v4(
         ref_out,
         meta_cfg,
         summary_ctx,
-        enable_plateau_decoder=enable_plateau_decoder,
+        enable_plateau_decoder=cfg.enable_plateau_decoder,
     )
 
 

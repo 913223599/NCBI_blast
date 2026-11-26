@@ -5,6 +5,7 @@ import time
 from typing import Dict, Any, Callable, Awaitable, List, Optional, Set, Tuple
 from .assembly_db import assembly_db
 from ..broadcaster import broadcaster
+from ...core.async_tasks import spawn_tracked_task
 
 logger = logging.getLogger("Assembly.Queue")
 
@@ -41,6 +42,7 @@ class PersistentAssemblyQueue:
             cls._instance._resume_event = None  # 延迟初始化
             cls._instance._new_task_event = None
             cls._instance._current_task_id = None
+            cls._instance._bg_tasks = set()
         return cls._instance
 
     def _ensure_queue(self):
@@ -150,7 +152,11 @@ class PersistentAssemblyQueue:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self._broadcast_status())
+        bg_tasks: Set[asyncio.Task[Any]] = getattr(self, "_bg_tasks", None)  # type: ignore[assignment]
+        if bg_tasks is None:
+            bg_tasks = set()
+            self._bg_tasks = bg_tasks
+        spawn_tracked_task(self._broadcast_status(), bg_tasks, label="assembly_queue_broadcast", loop=loop)
 
     def remove_task_from_queue(self, task_id: str) -> bool:
         """从等待队列中移除指定任务（原地切片修改，保持 self._queue 引用不变）"""

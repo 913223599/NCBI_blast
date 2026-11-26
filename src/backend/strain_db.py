@@ -527,7 +527,8 @@ class StrainDBManager:
                         "time": int(mtime * 1000)
                     }
                     history_map[p_id].append(items_data)
-                except Exception:
+                except Exception as _exc:
+                    _s110_logger.debug("解析菌株历史任务条目跳过异常记录: %s", _exc)
                     continue
         
         if not history_map:

@@ -165,7 +165,7 @@ async def process_blast_files(req: ProcessBlastFilesRequest):
                             prio = priority_cfg.get(m_path.suffix.lower(), 0)
                             if stem not in m_map or prio > m_map[stem][0]:
                                 m_map[stem] = (prio, name)
-                    for _, (_, name) in m_map.items():
+                    for _, name in m_map.values():
                         target = session_dir / Path(name).name
                         with zf.open(name) as s, open(target, 'wb') as t:
                             shutil.copyfileobj(s, t)
@@ -329,7 +329,8 @@ async def get_visualization_data(req: VisDataRequest):
                             if match:
                                 target_record = match
                                 break
-                        except Exception:
+                        except Exception as _exc:
+                            logger.debug("扫描 BLAST 输入文件匹配记录时跳过异常文件: %s", _exc)
                             continue
 
         # 3. 如果仍未找到

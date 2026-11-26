@@ -7,8 +7,9 @@ import json
 import logging
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
+from .async_tasks import spawn_tracked_task
 from .json_encoder import BioJsonEncoder
 
 logger = logging.getLogger("broadcaster")
@@ -21,6 +22,7 @@ class EventBroadcaster:
         self.connections: Dict[Any, str] = {}
         self._lock = threading.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._bg_tasks: Set[asyncio.Task[Any]] = set()
 
     async def connect(self, websocket: Any, client_id: str = "unknown") -> None:
         """处理新连接进入，记录其唯一的 client_id。"""
@@ -90,7 +92,12 @@ class EventBroadcaster:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.ensure_future(self.broadcast(event_type, data, exclude_id))
+                spawn_tracked_task(
+                    self.broadcast(event_type, data, exclude_id),
+                    self._bg_tasks,
+                    label=f"broadcast:{event_type}",
+                    loop=loop,
+                )
             else:
                 loop.run_until_complete(self.broadcast(event_type, data, exclude_id))
         except RuntimeError:
@@ -135,7 +142,12 @@ class EventBroadcaster:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.ensure_future(self.broadcast_to_client(client_id, event_type, data))
+                spawn_tracked_task(
+                    self.broadcast_to_client(client_id, event_type, data),
+                    self._bg_tasks,
+                    label=f"broadcast_to_client:{event_type}",
+                    loop=loop,
+                )
             else:
                 loop.run_until_complete(self.broadcast_to_client(client_id, event_type, data))
         except RuntimeError:

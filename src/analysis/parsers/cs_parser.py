@@ -5,7 +5,7 @@ CS标签解析器
 
 import logging
 import re
-from typing import List, Dict, Any
+from typing import ClassVar, List, Dict, Any, Set, Tuple
 
 from ..core.base import BaseParser
 
@@ -19,7 +19,7 @@ class CSParser(BaseParser):
     """
     
     # 转换类型定义
-    TRANSITIONS = {('A', 'G'), ('G', 'A'), ('C', 'T'), ('T', 'C')}
+    TRANSITIONS: ClassVar[Set[Tuple[str, str]]] = {('A', 'G'), ('G', 'A'), ('C', 'T'), ('T', 'C')}
     
     # CS标签正则
     CS_PATTERN = re.compile(r'(:[0-9]+|\*[a-z][a-z]|\+[a-z]+|-[a-z]+)')

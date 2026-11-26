@@ -420,7 +420,7 @@ def scan_and_mask_negative_prophages(
     for acc, meta in sorted(targets.items()):
         raw_regions: List[Tuple[int, int]] = []
         sources: Set[str] = set()
-        for s_pos, e_pos, src in blast_hits.get(acc, []):
+        for s_pos, e_pos, _src in blast_hits.get(acc, []):
             raw_regions.append((s_pos, e_pos))
             sources.add("blastn")
         for s_pos, e_pos, src in cds_clusters.get(acc, []):

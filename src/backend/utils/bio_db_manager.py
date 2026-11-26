@@ -3,7 +3,7 @@ import logging
 import asyncio
 import subprocess
 import urllib.request
-from typing import Dict, Any, Optional, List
+from typing import ClassVar, Dict, Any, Optional, List
 import time
 from datetime import datetime
 from ...workbench.models.tool_config import ToolConfig
@@ -66,7 +66,7 @@ class BioDatabase:
             logger.error(f"持久化更新版本号失败: {e}")
 
     _DIR_INFO_TTL = 120.0
-    _dir_info_cache: Dict[str, tuple] = {}
+    _dir_info_cache: ClassVar[Dict[str, tuple]] = {}
 
     def _get_dir_info(self) -> tuple[float, str]:
         """统计库目录体积与最近修改时间（带 2 分钟缓存，避免设置页反复扫描数十万文件）"""

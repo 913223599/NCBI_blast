@@ -102,7 +102,7 @@ def split_negative_genomes_by_category(
             by_cat[str(cat or "unknown")].append(str(acc))
 
     acc_to_split: Dict[str, str] = {}
-    for cat, accs in sorted(by_cat.items()):
+    for _cat, accs in sorted(by_cat.items()):
         shuffled = list(accs)
         rng.shuffle(shuffled)
         n = len(shuffled)

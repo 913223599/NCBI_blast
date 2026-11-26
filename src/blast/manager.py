@@ -228,7 +228,7 @@ class TaskScheduler:
             missing = self.max_workers - len(self._workers)
             if missing > 0:
                 logger.warning(f"Detected {missing} missing/dead BLAST workers. Reviving...")
-                for i in range(missing):
+                for _ in range(missing):
                     t = threading.Thread(target=self._worker_loop, name=f"BlastWorker-Revived-{time.time()}", daemon=True)
                     self._workers.append(t)
                     t.start()
@@ -445,8 +445,8 @@ class BlastManager:
                         dir_groups[parent][stem] = []
                     dir_groups[parent][stem].append(f_path)
                 
-                for parent, stems in dir_groups.items():
-                    for stem, paths in stems.items():
+                for stems in dir_groups.values():
+                    for paths in stems.values():
                         if len(paths) == 1:
                             target_files.append(paths[0])
                         else:

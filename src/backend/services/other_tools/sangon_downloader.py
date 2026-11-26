@@ -81,7 +81,8 @@ def detect_visible_captcha(page: Any) -> str:
             loc = page.locator(sel)
             if loc.count() > 0 and loc.first.is_visible():
                 return sel
-        except Exception:
+        except Exception as _exc:
+            logger.debug("探查生工页面选择器 %s 跳过: %s", sel, _exc)
             continue
     return ""
 

@@ -473,9 +473,7 @@ class PanGenomicsEngine:
                 p_lower = f["product"].lower()
                 
                 # A. 关键整合酶 (Integrase / Tyrosine-Serine Recombinase / Site-specific Recombinase)
-                if re.search(r"\b(?:integrase|site-specific\s+recombinase|tyrosine(?:-type)?\s+recombinase|serine\s+recombinase)\b", p_lower):
-                    essential_integrases.append(f)
-                elif re.search(r"\brecombinase\b", p_lower) and not re.search(r"\b(?:exonuclease|endonuclease|nuclease|junction|holliday|rusa|ruvc|recu|uvsx|reca|rad51|homologous)\b", p_lower):
+                if re.search(r"\b(?:integrase|site-specific\s+recombinase|tyrosine(?:-type)?\s+recombinase|serine\s+recombinase)\b", p_lower) or re.search(r"\brecombinase\b", p_lower) and not re.search(r"\b(?:exonuclease|endonuclease|nuclease|junction|holliday|rusa|ruvc|recu|uvsx|reca|rad51|homologous)\b", p_lower):
                     essential_integrases.append(f)
                 # B. 关键溶原阻遏蛋白 (CI / CII / Cro / Imm / Lysogeny Repressor)
                 elif re.search(r"\b(?:ci\s+repressor|cro\s+repressor|cii(?:-like)?\s+regulator|lysogeny\s+repressor|imm\s+repressor|c1\s+repressor|temperate\s+repressor|prophage\s+repressor)\b", p_lower):

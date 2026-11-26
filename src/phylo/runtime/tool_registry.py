@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import threading
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import ClassVar, Dict, List, Optional
 
 from ..models.schemas import ToolDescriptor
 
@@ -26,7 +26,7 @@ class ToolRegistry:
     _instance: Optional["ToolRegistry"] = None
     _lock = threading.Lock()
 
-    NATIVE_CANDIDATE_NAMES: Dict[str, List[str]] = {
+    NATIVE_CANDIDATE_NAMES: ClassVar[Dict[str, List[str]]] = {
         "fasttree": ["FastTree.exe", "fasttree.exe", "FastTree", "fasttree"],
         "mafft": ["mafft.bat", "mafft"],
         "muscle": ["muscle.exe", "muscle"],
@@ -38,7 +38,7 @@ class ToolRegistry:
         "blastp": ["blastp.exe", "blastp"],
     }
 
-    WSL_CANDIDATE_NAMES: Dict[str, List[str]] = {
+    WSL_CANDIDATE_NAMES: ClassVar[Dict[str, List[str]]] = {
         "mash": ["mash"],
         "mafft": ["mafft"],
         "muscle": ["muscle"],

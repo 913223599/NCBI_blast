@@ -5,7 +5,7 @@ import shutil
 import sys
 from pathlib import Path
 from ...utils.resource_guard import get_safe_cpu_budget
-from typing import Dict, Any, Optional
+from typing import ClassVar, Dict, Any, Optional
 
 logger = logging.getLogger("ToolConfig")
 
@@ -30,14 +30,14 @@ class ToolConfig:
     # 历史遗留：部分安装把参考库放进了 database/database 之下（多套了一层）。
     # 读取时统一通过 get_db_dir() 解析，两处均可命中，避免"库存在却显示未部署"。
     LEGACY_DATABASE_ROOT = DATABASE_ROOT / "database"
-    AMPLICON_DATABASES = {
+    AMPLICON_DATABASES: ClassVar[Dict[str, Path]] = {
         "silva": DATABASE_ROOT / "16s" / "silva_138.fasta",
         "greengenes": DATABASE_ROOT / "16s" / "gg_13_8.fasta",
         "rdp": DATABASE_ROOT / "16s" / "rdp_train_18.fasta"
     }
 
     # Common Primers (V3-V4 etc)
-    PRIMERS = {
+    PRIMERS: ClassVar[Dict[str, str]] = {
         "V3-V4_F": "CCTACGGGNGGCWGCAG",
         "V3-V4_R": "GACTACHVGGGTATCTAATCC"
     }

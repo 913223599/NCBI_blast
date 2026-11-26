@@ -13,7 +13,7 @@ import threading
 import time
 import zipfile
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, ClassVar, List, Optional, Set
 
 from ..models.schemas import PhyloJobRecord, WorkspaceFileItem
 from ..runtime.tool_registry import get_project_root
@@ -78,7 +78,7 @@ def _rmtree_readonly(path: Path, retries: int = 3, retry_delay: float = 0.15) ->
 class PhyloArchiveStore:
     """管理 results/phylo/ 下的工作区文件、作业目录、缓存目录及 SQLite 任务表。"""
 
-    VALID_SEQ_EXTS = {".fasta", ".fas", ".fa", ".fna", ".seq", ".txt", ".ab1", ".abi"}
+    VALID_SEQ_EXTS: ClassVar[Set[str]] = {".fasta", ".fas", ".fa", ".fna", ".seq", ".txt", ".ab1", ".abi"}
 
     def __init__(self, base_dir: Optional[Path] = None) -> None:
         self.base_dir = (base_dir or (get_project_root() / "results" / "phylo")).resolve()
@@ -253,7 +253,8 @@ class PhyloArchiveStore:
             for r in rows:
                 try:
                     out.append(PhyloJobRecord.model_validate_json(r["record_json"]))
-                except Exception:
+                except Exception as _exc:
+                    logger.debug("反序列化 PhyloJobRecord 跳过损坏记录: %s", _exc)
                     continue
             return out
 
@@ -293,7 +294,8 @@ class PhyloArchiveStore:
                         ("failed", now, rec.model_dump_json(), rec.job_id),
                     )
                     recovered += 1
-                except Exception:
+                except Exception as _exc:
+                    logger.debug("反序列化 PhyloJobRecord 跳过损坏记录: %s", _exc)
                     continue
             if recovered > 0:
                 conn.commit()

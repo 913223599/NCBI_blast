@@ -229,28 +229,24 @@ class PhageTaxonomyWorkflow:
     """在 PhyloJobExecutor 线程内执行完整 8 步噬菌体分类鉴定与交付。"""
 
     @staticmethod
-    def execute(
+    def _stage1_ani_screening(
         record: PhyloJobRecord,
-        records: List[Tuple[str, str]],
+        norm_queries: List[Tuple[str, str]],
+        dedup_ids: List[str],
+        scope: DeliveryScopeConfig,
         job_dir: Path,
-        ckp: CheckpointManager,
-        cache: StageCache,
         cancel_ev: threading.Event,
         log_fn: Callable[[str], None],
         stage_fn: Callable[..., None],
         set_runner: Callable[[Any], None],
-    ) -> None:
-        cfg: PhyloJobConfig = record.config
-        scope = cfg.phage_scope or DeliveryScopeConfig()
-        dedup_ids = IdCodec.deduplicate_ids([r[0] for r in records])
-        norm_queries = [(qid, r[1]) for qid, r in zip(dedup_ids, records, strict=True)]
-        commands_used: List[str] = []
-
-        # ─── Stage 1: ANI 快速预判 (若前端已运行预判且查询集一致则直接复用) ─────
+        commands_used: List[str],
+    ) -> AniScreenResult:
+        """Stage 1：复用前端已算 ANI 或重新执行 Mash + VIRIDIC-wgANI 预判并落盘。"""
+        cfg = record.config
         t1 = time.time()
-        ani_dir = job_dir / "step1_ani"
         ani_json_path = job_dir / "ani_screen.json"
         pre = cfg.precomputed_ani_result
+
         if pre is not None and set(pre.query_ids) == set(dedup_ids):
             ani_result = pre
             record.ani_result = ani_result
@@ -271,35 +267,53 @@ class PhageTaxonomyWorkflow:
                 elapsed=time.time() - t1,
                 artifact=str(ani_json_path),
             )
-        else:
-            stage_fn("ani_screen", "running", 12, "第 1 步：执行 INPHARED Mash 初筛与 VIRIDIC-wgANI 预判...")
-            ani_result = run_ani_screening(
-                query_records=norm_queries,
-                scope=scope,
-                ani_engine=cfg.ani_engine,
-                work_dir=ani_dir,
-                threads=cfg.threads,
-                cancel_event=cancel_ev,
-                on_log=log_fn,
-                set_runner=set_runner,
-            )
-            record.ani_result = ani_result
-            if ani_result.command_preview:
-                commands_used.append(ani_result.command_preview)
-            ani_json_path.write_text(
-                json.dumps(ani_result.model_dump(), ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            record.artifacts["ani_json"] = str(ani_json_path)
-            log_fn(f"[ANI 结论] {ani_result.summary_call}")
-            for w in ani_result.warnings:
-                log_fn(f"[ANI 提示] {w}")
-            stage_fn("ani_screen", "completed", 25, "ANI 预判完成", elapsed=time.time() - t1, artifact=str(ani_json_path))
+            return ani_result
 
-        if cancel_ev.is_set():
-            raise PhyloCancelledError("任务在 ANI 预判后已取消")
+        stage_fn("ani_screen", "running", 12, "第 1 步：执行 INPHARED Mash 初筛与 VIRIDIC-wgANI 预判...")
+        ani_result = run_ani_screening(
+            query_records=norm_queries,
+            scope=scope,
+            ani_engine=cfg.ani_engine,
+            work_dir=job_dir / "step1_ani",
+            threads=cfg.threads,
+            cancel_event=cancel_ev,
+            on_log=log_fn,
+            set_runner=set_runner,
+        )
+        record.ani_result = ani_result
+        if ani_result.command_preview:
+            commands_used.append(ani_result.command_preview)
+        ani_json_path.write_text(
+            json.dumps(ani_result.model_dump(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        record.artifacts["ani_json"] = str(ani_json_path)
+        log_fn(f"[ANI 结论] {ani_result.summary_call}")
+        for w in ani_result.warnings:
+            log_fn(f"[ANI 提示] {w}")
+        stage_fn(
+            "ani_screen",
+            "completed",
+            25,
+            "ANI 预判完成",
+            elapsed=time.time() - t1,
+            artifact=str(ani_json_path),
+        )
+        return ani_result
 
-        # ─── Stage 2: 构建参考序列集、获取、去冗余与 Treemmer 降采样 ─────────────
+    @staticmethod
+    def _stage2_curate_and_dereplicate(
+        cfg: PhyloJobConfig,
+        norm_queries: List[Tuple[str, str]],
+        ani_result: AniScreenResult,
+        scope: DeliveryScopeConfig,
+        job_dir: Path,
+        cancel_ev: threading.Event,
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+        set_runner: Callable[[Any], None],
+    ) -> Tuple[List[ReferenceCandidate], Dict[str, Path], Optional[str]]:
+        """Stage 2：策展参考集、获取基因组、CheckV 过滤、dRep 去冗余与 Treemmer 降采样。"""
         t2 = time.time()
         stage_fn("curate_derep", "running", 32, "第 2 步：组装代表性参考集、去冗余与外群校准...")
         curator = PhageReferenceCurator(cancel_event=cancel_ev, on_log=log_fn)
@@ -308,26 +322,18 @@ class PhageTaxonomyWorkflow:
             if cfg.selected_references
             else curator.curate_candidates(norm_queries, ani_result, scope)
         )
-        # 确保前端指定外群生效
-        for og in cfg.outgroup_ids:
-            for c in candidates:
-                if c.accession == og:
-                    c.role = "outgroup"
-                    c.selected = True
-
-        # 回填 ANI top_hits 元数据
+        outgroup_set = set(cfg.outgroup_ids)
         ani_hit_map = {h.accession: h for h in ani_result.top_hits}
         for c in candidates:
+            if c.accession in outgroup_set:
+                c.role = "outgroup"
+                c.selected = True
             if c.accession in ani_hit_map:
                 h = ani_hit_map[c.accession]
-                if c.wg_ani is None:
-                    c.wg_ani = h.wg_ani or h.mash_ani
-                if not c.genus:
-                    c.genus = h.genus
-                if not c.family:
-                    c.family = h.family
-                if not c.host:
-                    c.host = h.host
+                c.wg_ani = c.wg_ani if c.wg_ani is not None else (h.wg_ani or h.mash_ani)
+                c.genus = c.genus or h.genus
+                c.family = c.family or h.family
+                c.host = c.host or h.host
 
         ref_dir = job_dir / "step2_references"
         set_runner(curator)
@@ -357,7 +363,6 @@ class PhageTaxonomyWorkflow:
                 f"有效可用基因组不足 3 条（当前仅获取 {len(genome_paths)} 条），请检查网络、本地参考目录或调整筛选条件。"
             )
 
-        # 去冗余 (dRep / 等效聚类)
         derep = PhageDereplicator(cancel_event=cancel_ev, on_log=log_fn)
         set_runner(derep)
         ani_mat_tuple = (
@@ -377,7 +382,6 @@ class PhageTaxonomyWorkflow:
         set_runner(None)
         log_fn(f"[去冗余] {derep_stats['tool']}: {derep_stats['before']} -> {derep_stats['after']} 条")
 
-        # Treemmer 系统发育冗余降采样
         pruner = TreemmerPruner(cancel_event=cancel_ev, on_log=log_fn)
         set_runner(pruner)
         genome_paths, trim_ref_stats = pruner.prune_if_needed(
@@ -389,224 +393,281 @@ class PhageTaxonomyWorkflow:
         )
         set_runner(None)
         if int(trim_ref_stats.get("removed", 0)) > 0:
-            log_fn(f"[Treemmer] {trim_ref_stats['tool']}: {trim_ref_stats['before']} -> {trim_ref_stats['after']} 条")
+            log_fn(
+                f"[Treemmer] {trim_ref_stats['tool']}: {trim_ref_stats['before']} -> {trim_ref_stats['after']} 条"
+            )
 
-        stage_fn("curate_derep", "completed", 45, f"参考集最终保留 {len(genome_paths)} 条基因组", elapsed=time.time() - t2)
-
-        if cancel_ev.is_set():
-            raise PhyloCancelledError("任务在参考集构建后已取消")
-
-        # 确定外群名称（取第一个有效外群用于 IQ-TREE -o 与定根）
+        stage_fn(
+            "curate_derep",
+            "completed",
+            45,
+            f"参考集最终保留 {len(genome_paths)} 条基因组",
+            elapsed=time.time() - t2,
+        )
         active_outgroups = [
             c.accession for c in candidates if c.selected and c.role == "outgroup" and c.accession in genome_paths
         ]
-        primary_outgroup = active_outgroups[0] if active_outgroups else None
+        return candidates, genome_paths, (active_outgroups[0] if active_outgroups else None)
 
-        # ─── Stage 3-5 分流：TerL ML 标准流 vs 备选全基因组蛋白质组树 ───────────
-        trim_stats: Optional[Dict[str, Any]] = None
-        best_model: Optional[str] = None
-        best_model_bic: Optional[float] = None
-        iqtree_cmd: Optional[str] = None
-        treefile_path: Optional[Path] = None
-        trimmed_msa_path: Optional[Path] = None
-        raw_nwk_path = job_dir / "tree_raw.nwk"
-
-        # 构造参考集哈希用于 StageCache
+    @staticmethod
+    def _compute_dataset_hash(genome_paths: Dict[str, Path]) -> str:
         ref_hasher = hashlib.sha256()
         for acc in sorted(genome_paths.keys()):
             ref_hasher.update(acc.encode("utf-8"))
             ref_hasher.update(genome_paths[acc].read_bytes()[:4096])
-        dataset_hash = ref_hasher.hexdigest()
+        return ref_hasher.hexdigest()
 
-        if cfg.marker_mode == "proteome":
-            # 备选全基因组蛋白质组树 (DIAMOND S_G + BioNJ/UPGMA)
-            t_m = time.time()
-            tree_method = scope.proteome_tree_method
-            dist_mode = "one_minus_sg" if tree_method == "upgma" else "log_sg"
-            stage_fn(
-                "marker_extract",
-                "running",
-                62,
-                f"第 3 步 (备选)：计算全基因组共享蛋白质组矩阵 (ViPTree S_G, {tree_method.upper()})...",
+    @staticmethod
+    def _stage3_to_5_proteome_branch(
+        record: PhyloJobRecord,
+        scope: DeliveryScopeConfig,
+        genome_paths: Dict[str, Path],
+        job_dir: Path,
+        raw_nwk_path: Path,
+        cancel_ev: threading.Event,
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+        set_runner: Callable[[Any], None],
+    ) -> Dict[str, Any]:
+        """备选分支：全基因组共享蛋白质组树 (DIAMOND S_G + BioNJ/UPGMA)。"""
+        cfg = record.config
+        t_m = time.time()
+        tree_method = scope.proteome_tree_method
+        dist_mode = "one_minus_sg" if tree_method == "upgma" else "log_sg"
+        stage_fn(
+            "marker_extract",
+            "running",
+            62,
+            f"第 3 步 (备选)：计算全基因组共享蛋白质组矩阵 (ViPTree S_G, {tree_method.upper()})...",
+        )
+        prot_engine = ProteomeTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
+        set_runner(prot_engine)
+        dist_csv = job_dir / "distance_matrix.csv"
+        _, marker_report = prot_engine.build_proteome_tree(
+            genome_fastas=genome_paths,
+            work_dir=job_dir / "step3_proteome",
+            output_nwk=raw_nwk_path,
+            dist_npy=job_dir / "proteome_dist.npy",
+            dist_csv=dist_csv,
+            threads=cfg.threads,
+            tree_method=tree_method,
+            distance_mode=dist_mode,
+            use_gpu=cfg.use_gpu,
+        )
+        set_runner(None)
+        record.marker_report = marker_report
+        record.artifacts["distance_csv"] = str(dist_csv)
+        stage_fn(
+            "marker_extract",
+            "completed",
+            82,
+            "全基因组蛋白质组树构建完成",
+            elapsed=time.time() - t_m,
+            artifact=str(raw_nwk_path),
+        )
+        stage_fn("msa", "skipped", 84, "蛋白质组树路径已跳过单基因比对")
+        stage_fn("trim", "skipped", 86, "蛋白质组树路径无需 MSA 修剪")
+        stage_fn("tree", "completed", 90, f"DIAMOND S_G + {tree_method.upper()} 建树完成", artifact=str(raw_nwk_path))
+        return {
+            "trim_stats": None,
+            "best_model": None,
+            "best_model_bic": None,
+            "iqtree_cmd": None,
+            "treefile_path": None,
+            "trimmed_msa_path": None,
+        }
+
+    @staticmethod
+    def _stage3_to_5_terl_branch(
+        record: PhyloJobRecord,
+        genome_paths: Dict[str, Path],
+        dataset_hash: str,
+        primary_outgroup: Optional[str],
+        job_dir: Path,
+        raw_nwk_path: Path,
+        cache: StageCache,
+        cancel_ev: threading.Event,
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+        set_runner: Callable[[Any], None],
+    ) -> Dict[str, Any]:
+        """标准分支：TerL 提取 -> MAFFT -> ClipKIT -> IQ-TREE / FastTree。"""
+        cfg = record.config
+        t_m = time.time()
+        stage_fn("marker_extract", "running", 54, "第 3 步：批量预测 ORF 并精确提取大末端酶亚基 (TerL)...")
+        terl_dir = job_dir / "step3_terl"
+        terl_faa = terl_dir / "terl_proteins.faa"
+        extractor = TerlExtractor(cancel_event=cancel_ev, on_log=log_fn)
+        set_runner(extractor)
+        _, marker_report = extractor.extract_terl(
+            genome_fastas=genome_paths,
+            work_dir=terl_dir,
+            output_faa=terl_faa,
+            threads=cfg.threads,
+        )
+        set_runner(None)
+        record.marker_report = marker_report
+        record.artifacts["terl_fasta"] = str(terl_faa)
+        if marker_report.extracted_count < 3:
+            raise PhyloError(
+                f"成功提取到 TerL 的基因组不足 3 条（仅 {marker_report.extracted_count}/{marker_report.total_genomes} 条），"
+                "建议切换为「全基因组蛋白质组树 (DIAMOND S_G)」进行宏观定位。"
             )
-            prot_engine = ProteomeTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
-            set_runner(prot_engine)
-            dist_npy = job_dir / "proteome_dist.npy"
-            dist_csv = job_dir / "distance_matrix.csv"
-            _, marker_report = prot_engine.build_proteome_tree(
-                genome_fastas=genome_paths,
-                work_dir=job_dir / "step3_proteome",
-                output_nwk=raw_nwk_path,
-                dist_npy=dist_npy,
-                dist_csv=dist_csv,
-                threads=cfg.threads,
-                tree_method=tree_method,
-                distance_mode=dist_mode,
-                use_gpu=cfg.use_gpu,
-            )
-            set_runner(None)
-            record.marker_report = marker_report
-            record.artifacts["distance_csv"] = str(dist_csv)
-            stage_fn("marker_extract", "completed", 82, "全基因组蛋白质组树构建完成", elapsed=time.time() - t_m, artifact=str(raw_nwk_path))
-            stage_fn("msa", "skipped", 84, "蛋白质组树路径已跳过单基因比对")
-            stage_fn("trim", "skipped", 86, "蛋白质组树路径无需 MSA 修剪")
-            stage_fn("tree", "completed", 90, f"DIAMOND S_G + {tree_method.upper()} 建树完成", artifact=str(raw_nwk_path))
+        stage_fn(
+            "marker_extract",
+            "completed",
+            62,
+            f"TerL 提取完成 ({marker_report.extracted_count}/{marker_report.total_genomes})",
+            elapsed=time.time() - t_m,
+            artifact=str(terl_faa),
+        )
+
+        terl_records = [
+            (str(rec.id).strip(), str(rec.seq).strip().upper())
+            for rec in iter_fasta_records(terl_faa)
+            if str(rec.id).strip() and str(rec.seq).strip()
+        ]
+        sanitized_terl = job_dir / "sanitized_terl.fasta"
+        _, codec = SequenceProfiler.write_sanitized_fasta(terl_records, sanitized_terl, job_dir / "id_map.json")
+        short_outgroup = next(
+            (sid for sid, orig in codec.short_to_orig.items() if primary_outgroup and orig == primary_outgroup),
+            None,
+        )
+
+        # Step 4A: MSA
+        t_msa = time.time()
+        msa_strategy = cfg.msa_strategy
+        msa_tool = cfg.msa if cfg.msa != "none" else "mafft"
+        stage_fn("msa", "running", 70, f"第 4 步：执行 {msa_tool.upper()} ({msa_strategy}) 蛋白多序列比对...")
+        msa_fasta = job_dir / "terl_aligned.fasta"
+        msa_key = cache.make_key(dataset_hash, f"phage_msa_{msa_tool}", {"strategy": msa_strategy, "mode": "terl"})
+        if cfg.use_cache and cache.restore_files("msa", msa_key, {"terl_aligned.fasta": msa_fasta}):
+            log_fn(f"[Cache Hit] 命中 TerL 比对缓存 ({msa_key})")
+            stage_fn("msa", "cached", 75, "命中 TerL 比对缓存", cached=True, elapsed=time.time() - t_msa, artifact=str(msa_fasta))
         else:
-            # 标准路径：TerL 提取 -> MAFFT (L-INS-i/E-INS-i) -> ClipKIT (kpic) -> IQ-TREE
-            t_m = time.time()
-            stage_fn("marker_extract", "running", 54, "第 3 步：批量预测 ORF 并精确提取大末端酶亚基 (TerL)...")
-            terl_dir = job_dir / "step3_terl"
-            terl_faa = terl_dir / "terl_proteins.faa"
-            extractor = TerlExtractor(cancel_event=cancel_ev, on_log=log_fn)
-            set_runner(extractor)
-            _, marker_report = extractor.extract_terl(
-                genome_fastas=genome_paths,
-                work_dir=terl_dir,
-                output_faa=terl_faa,
+            aligner = MultiSequenceAligner(cancel_event=cancel_ev, on_log=log_fn)
+            set_runner(aligner)
+            aligner.align(
+                input_fasta=sanitized_terl,
+                output_fasta=msa_fasta,
+                tool=msa_tool,
+                strategy=msa_strategy,  # type: ignore[arg-type]
+                threads=cfg.threads,
+                max_seq_len=0,
+            )
+            set_runner(None)
+            if cfg.use_cache:
+                cache.store_files("msa", msa_key, {"terl_aligned.fasta": msa_fasta})
+            stage_fn("msa", "completed", 75, f"{msa_tool.upper()} ({msa_strategy}) 比对完成", elapsed=time.time() - t_msa, artifact=str(msa_fasta))
+        record.artifacts["aligned_fasta"] = str(msa_fasta)
+
+        # Step 4B: ClipKIT 修剪
+        t_trim = time.time()
+        trim_mode = cfg.trim_mode if cfg.trim_mode != "none" else "kpic"
+        stage_fn("trim", "running", 78, f"第 4 步：执行比对后修剪 ({trim_mode})...")
+        trimmed_msa_path = job_dir / "terl_trimmed.fasta"
+        _, trim_stats = AlignmentTrimmer.trim_with_mode(
+            input_msa=msa_fasta,
+            output_msa=trimmed_msa_path,
+            mode=trim_mode,  # type: ignore[arg-type]
+            max_gap_ratio=cfg.trim_gap_threshold or 0.5,
+            cancel_event=cancel_ev,
+            on_log=log_fn,
+        )
+        record.artifacts["trimmed_fasta"] = str(trimmed_msa_path)
+        log_fn(
+            f"[Trimmer] ({trim_stats['tool']}) 保留 {trim_stats['kept_cols']}/{trim_stats['original_cols']} 列, "
+            f"简约信息位点 PI={trim_stats['parsimony_informative_sites']}"
+        )
+        stage_fn("trim", "completed", 82, f"比对修剪完成 ({trim_stats['kept_cols']} 列)", elapsed=time.time() - t_trim, artifact=str(trimmed_msa_path))
+
+        # Step 5: ML 建树
+        t_tree = time.time()
+        best_model: Optional[str] = None
+        best_model_bic: Optional[float] = None
+        iqtree_cmd: Optional[str] = None
+        treefile_path: Optional[Path] = None
+
+        if cfg.engine == "fasttree":
+            stage_fn("tree", "running", 86, "第 5 步：运行 FastTree 近似最大似然推断...")
+            ft = FastTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
+            set_runner(ft)
+            ft.build(
+                msa_fasta=trimmed_msa_path,
+                output_nwk=raw_nwk_path,
+                mol_type="protein",
+                model=cfg.model or "lg",
                 threads=cfg.threads,
             )
             set_runner(None)
-            record.marker_report = marker_report
-            record.artifacts["terl_fasta"] = str(terl_faa)
-
-            if marker_report.extracted_count < 3:
-                raise PhyloError(
-                    f"成功提取到 TerL 的基因组不足 3 条（仅 {marker_report.extracted_count}/{marker_report.total_genomes} 条），"
-                    "建议切换为「全基因组蛋白质组树 (DIAMOND S_G)」进行宏观定位。"
-                )
-            stage_fn(
-                "marker_extract",
-                "completed",
-                62,
-                f"TerL 提取完成 ({marker_report.extracted_count}/{marker_report.total_genomes})",
-                elapsed=time.time() - t_m,
-                artifact=str(terl_faa),
-            )
-
-            # 编解码短 ID 防止外链字符冲突（直接读取纯净 FASTA 记录，避免被通用解析器追加文件名前缀）
-            terl_records = [
-                (str(rec.id).strip(), str(rec.seq).strip().upper())
-                for rec in iter_fasta_records(terl_faa)
-                if str(rec.id).strip() and str(rec.seq).strip()
-            ]
-            sanitized_terl = job_dir / "sanitized_terl.fasta"
-            id_map_path = job_dir / "id_map.json"
-            _, codec = SequenceProfiler.write_sanitized_fasta(terl_records, sanitized_terl, id_map_path)
-            short_outgroup = None
-            if primary_outgroup:
-                for sid, orig in codec.short_to_orig.items():
-                    if orig == primary_outgroup:
-                        short_outgroup = sid
-                        break
-
-            # Step 4A: MSA (MAFFT L-INS-i / E-INS-i / --auto)
-            t_msa = time.time()
-            msa_strategy = cfg.msa_strategy
-            msa_tool = cfg.msa if cfg.msa != "none" else "mafft"
-            stage_fn("msa", "running", 70, f"第 4 步：执行 {msa_tool.upper()} ({msa_strategy}) 蛋白多序列比对...")
-            msa_fasta = job_dir / "terl_aligned.fasta"
-            msa_key = cache.make_key(dataset_hash, f"phage_msa_{msa_tool}", {"strategy": msa_strategy, "mode": "terl"})
-            if cfg.use_cache and cache.restore_files("msa", msa_key, {"terl_aligned.fasta": msa_fasta}):
-                log_fn(f"[Cache Hit] 命中 TerL 比对缓存 ({msa_key})")
-                stage_fn("msa", "cached", 75, "命中 TerL 比对缓存", cached=True, elapsed=time.time() - t_msa, artifact=str(msa_fasta))
-            else:
-                aligner = MultiSequenceAligner(cancel_event=cancel_ev, on_log=log_fn)
-                set_runner(aligner)
-                aligner.align(
-                    input_fasta=sanitized_terl,
-                    output_fasta=msa_fasta,
-                    tool=msa_tool,
-                    strategy=msa_strategy,  # type: ignore[arg-type]
-                    threads=cfg.threads,
-                    max_seq_len=0,  # 蛋白序列不触发长序列降级
-                )
-                set_runner(None)
-                if cfg.use_cache:
-                    cache.store_files("msa", msa_key, {"terl_aligned.fasta": msa_fasta})
-                stage_fn("msa", "completed", 75, f"{msa_tool.upper()} ({msa_strategy}) 比对完成", elapsed=time.time() - t_msa, artifact=str(msa_fasta))
-            record.artifacts["aligned_fasta"] = str(msa_fasta)
-
-            # Step 4B: 比对修剪 (ClipKIT -m kpic 默认首选)
-            t_trim = time.time()
-            trim_mode = cfg.trim_mode if cfg.trim_mode != "none" else "kpic"
-            stage_fn("trim", "running", 78, f"第 4 步：执行比对后修剪 ({trim_mode})...")
-            trimmed_msa_path = job_dir / "terl_trimmed.fasta"
-            _, trim_stats = AlignmentTrimmer.trim_with_mode(
-                input_msa=msa_fasta,
-                output_msa=trimmed_msa_path,
-                mode=trim_mode,  # type: ignore[arg-type]
-                max_gap_ratio=cfg.trim_gap_threshold or 0.5,
-                cancel_event=cancel_ev,
-                on_log=log_fn,
-            )
-            record.artifacts["trimmed_fasta"] = str(trimmed_msa_path)
-            log_fn(
-                f"[Trimmer] ({trim_stats['tool']}) 保留 {trim_stats['kept_cols']}/{trim_stats['original_cols']} 列, "
-                f"简约信息位点 PI={trim_stats['parsimony_informative_sites']}"
-            )
-            stage_fn("trim", "completed", 82, f"比对修剪完成 ({trim_stats['kept_cols']} 列)", elapsed=time.time() - t_trim, artifact=str(trimmed_msa_path))
-
-            # Step 5: IQ-TREE 发表级推断
-            t_tree = time.time()
+        else:
             ufboot = cfg.bootstrap if cfg.bootstrap >= 1000 or cfg.bootstrap == 0 else 1000
             iq_model = cfg.model if cfg.model and cfg.model.lower() not in ("jc69", "k2p", "p-distance") else "MFP"
-            if cfg.engine == "fasttree":
-                stage_fn("tree", "running", 86, "第 5 步：运行 FastTree 近似最大似然推断...")
-                ft = FastTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
-                set_runner(ft)
-                ft.build(
-                    msa_fasta=trimmed_msa_path,
-                    output_nwk=raw_nwk_path,
-                    mol_type="protein",
-                    model=cfg.model or "lg",
-                    threads=cfg.threads,
-                )
-                set_runner(None)
-            else:
-                model_hint = "MFP 核心蛋白快速集" if iq_model.strip().lower() in ("auto", "mfp") else iq_model
-                stage_fn(
-                    "tree",
-                    "running",
-                    86,
-                    f"第 5 步：运行 IQ-TREE 最大似然推断 (-m {model_hint} -B {ufboot} -alrt {cfg.iqtree_alrt})...",
-                )
-                iq = IQTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
-                set_runner(iq)
-                iq.build(
-                    msa_fasta=trimmed_msa_path,
-                    output_nwk=raw_nwk_path,
-                    work_dir=job_dir,
-                    mol_type="protein",
-                    model=iq_model,
-                    bootstrap=ufboot,
-                    threads=cfg.threads,
-                    bnni=cfg.iqtree_bnni,
-                    alrt=cfg.iqtree_alrt,
-                    seed=cfg.iqtree_seed,
-                    outgroup=short_outgroup,
-                )
-                set_runner(None)
-                best_model = iq.last_best_model
-                best_model_bic = iq.last_best_model_bic
-                iqtree_cmd = iq.last_command
-                raw_tf = job_dir / "iqtree_run" / "phylo.treefile"
-                if raw_tf.is_file():
-                    restored_tf = IdCodec.restore_newick(
-                        raw_tf.read_text(encoding="utf-8", errors="replace"),
-                        codec.short_to_orig,
-                    )
-                    treefile_path = job_dir / "final.treefile"
-                    treefile_path.write_text(restored_tf + "\n", encoding="utf-8")
-                    record.artifacts["treefile"] = str(treefile_path)
-
-            raw_restored = IdCodec.restore_newick(
-                raw_nwk_path.read_text(encoding="utf-8", errors="replace").strip(),
-                codec.short_to_orig,
+            model_hint = "MFP 核心蛋白快速集" if iq_model.strip().lower() in ("auto", "mfp") else iq_model
+            stage_fn(
+                "tree",
+                "running",
+                86,
+                f"第 5 步：运行 IQ-TREE 最大似然推断 (-m {model_hint} -B {ufboot} -alrt {cfg.iqtree_alrt})...",
             )
-            raw_nwk_path.write_text(raw_restored + "\n", encoding="utf-8")
-            stage_fn("tree", "completed", 92, "最大似然系统发育树构建完成", elapsed=time.time() - t_tree, artifact=str(raw_nwk_path))
+            iq = IQTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
+            set_runner(iq)
+            iq.build(
+                msa_fasta=trimmed_msa_path,
+                output_nwk=raw_nwk_path,
+                work_dir=job_dir,
+                mol_type="protein",
+                model=iq_model,
+                bootstrap=ufboot,
+                threads=cfg.threads,
+                bnni=cfg.iqtree_bnni,
+                alrt=cfg.iqtree_alrt,
+                seed=cfg.iqtree_seed,
+                outgroup=short_outgroup,
+            )
+            set_runner(None)
+            best_model = iq.last_best_model
+            best_model_bic = iq.last_best_model_bic
+            iqtree_cmd = iq.last_command
+            raw_tf = job_dir / "iqtree_run" / "phylo.treefile"
+            if raw_tf.is_file():
+                restored_tf = IdCodec.restore_newick(
+                    raw_tf.read_text(encoding="utf-8", errors="replace"),
+                    codec.short_to_orig,
+                )
+                treefile_path = job_dir / "final.treefile"
+                treefile_path.write_text(restored_tf + "\n", encoding="utf-8")
+                record.artifacts["treefile"] = str(treefile_path)
 
-        # ─── Stage 6 & 7: 外群定根 + 元数据映射 + iTOL 模板生成 ───────────────────
+        raw_restored = IdCodec.restore_newick(
+            raw_nwk_path.read_text(encoding="utf-8", errors="replace").strip(),
+            codec.short_to_orig,
+        )
+        raw_nwk_path.write_text(raw_restored + "\n", encoding="utf-8")
+        stage_fn("tree", "completed", 92, "最大似然系统发育树构建完成", elapsed=time.time() - t_tree, artifact=str(raw_nwk_path))
+        return {
+            "trim_stats": trim_stats,
+            "best_model": best_model,
+            "best_model_bic": best_model_bic,
+            "iqtree_cmd": iqtree_cmd,
+            "treefile_path": treefile_path,
+            "trimmed_msa_path": trimmed_msa_path,
+        }
+
+    @staticmethod
+    def _stage6_7_reroot_and_itol(
+        record: PhyloJobRecord,
+        candidates: List[ReferenceCandidate],
+        primary_outgroup: Optional[str],
+        raw_nwk_path: Path,
+        job_dir: Path,
+        best_model: Optional[str],
+        best_model_bic: Optional[float],
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+    ) -> Tuple[str, Path, Any, Dict[str, Dict[str, Any]], List[str], Path, List[str]]:
+        """Stage 6-7：外群/中点定根、节点元数据增强与 iTOL 模板生成。"""
+        cfg = record.config
         t_post = time.time()
         stage_fn("postprocess", "running", 94, "第 7 步：执行外群定根并生成 iTOL 注释模板套件...")
         raw_text = raw_nwk_path.read_text(encoding="utf-8", errors="replace").strip()
@@ -622,31 +683,26 @@ class PhageTaxonomyWorkflow:
 
         final_nwk_path = job_dir / "final_tree.nwk"
         final_nwk_path.write_text(final_nwk + "\n", encoding="utf-8")
-        metrics = compute_tree_metrics(
-            final_nwk, best_model=best_model, best_model_bic=best_model_bic
-        )
+        metrics = compute_tree_metrics(final_nwk, best_model=best_model, best_model_bic=best_model_bic)
 
-        # 生成节点元数据供前端渲染角色/宿主/属色带与发表级叶节点名称
-        node_meta: Dict[str, Dict[str, Any]] = {}
-        for c in candidates:
-            if c.selected:
-                node_meta[c.accession] = {
-                    "role": c.role,
-                    "description": clean_phage_description(c.description),
-                    "genus": c.genus,
-                    "family": c.family,
-                    "host": c.host,
-                    "genome_length": c.genome_length,
-                    "gc_content": c.gc_content,
-                    "wg_ani": c.wg_ani,
-                }
+        node_meta: Dict[str, Dict[str, Any]] = {
+            c.accession: {
+                "role": c.role,
+                "description": clean_phage_description(c.description),
+                "genus": c.genus,
+                "family": c.family,
+                "host": c.host,
+                "genome_length": c.genome_length,
+                "gc_content": c.gc_content,
+                "wg_ani": c.wg_ani,
+            }
+            for c in candidates
+            if c.selected
+        }
         node_meta = enrich_node_metadata(node_meta)
         record.node_metadata = node_meta
 
-        # 精确提取树中真实叶节点名称，避免子串误匹配并供 iTOL 与自动出图复用
         leaf_names = extract_leaf_names(final_nwk)
-
-        # 生成 iTOL 注释模板文件
         itol_dir = job_dir / "itol"
         itol_files = ItolTemplateGenerator.generate(
             candidates=candidates,
@@ -655,54 +711,56 @@ class PhageTaxonomyWorkflow:
         )
         record.artifacts["itol_dir"] = str(itol_dir)
         record.artifacts["itol_files"] = itol_files
-        stage_fn("postprocess", "completed", 97, "定根与 iTOL 注释模板生成完成", elapsed=time.time() - t_post, artifact=str(final_nwk_path))
-
-        # ─── Stage 8: 6 项质检审计与交付 ZIP 打包 ────────────────────────────────
-        t_qc = time.time()
-        stage_fn("qc_delivery", "running", 98, "第 8 步：执行交付前 6 项质检审计并打包交付归档...")
-        qc_report = PhageDeliveryQcAuditor.audit(
-            newick=final_nwk,
-            metrics=metrics,
-            candidates=candidates,
-            ani_result=ani_result,
-            marker_report=record.marker_report,
-            trim_stats=trim_stats,
-            iqtree_cmd=iqtree_cmd,
-            best_model=best_model,
-            best_model_bic=best_model_bic,
-            itol_files=itol_files,
+        stage_fn(
+            "postprocess",
+            "completed",
+            97,
+            "定根与 iTOL 注释模板生成完成",
+            elapsed=time.time() - t_post,
+            artifact=str(final_nwk_path),
         )
-        record.qc_report = qc_report
+        return final_nwk, final_nwk_path, metrics, node_meta, leaf_names, itol_dir, itol_files
 
-        # 若 trimmed_msa 含短 ID，输出可读 ID 版本供交付包使用
-        delivery_msa_path: Optional[Path] = None
-        if trimmed_msa_path and trimmed_msa_path.is_file():
-            id_map_file = job_dir / "id_map.json"
-            if id_map_file.is_file():
-                s2o = json.loads(id_map_file.read_text(encoding="utf-8"))
-                delivery_msa_path = job_dir / "trimmed_alignment_named.fasta"
-                with open(delivery_msa_path, "w", encoding="utf-8", newline="\n") as dfh:
-                    for r in iter_fasta_records(trimmed_msa_path):
-                        rid = r.id or ""
-                        orig_name = s2o.get(rid, rid)
-                        dfh.write(f">{orig_name}\n{str(r.seq)}\n")
-            else:
-                delivery_msa_path = trimmed_msa_path
+    @staticmethod
+    def _build_named_delivery_msa(trimmed_msa_path: Optional[Path], job_dir: Path) -> Optional[Path]:
+        if not (trimmed_msa_path and trimmed_msa_path.is_file()):
+            return None
+        id_map_file = job_dir / "id_map.json"
+        if not id_map_file.is_file():
+            return trimmed_msa_path
+        s2o = json.loads(id_map_file.read_text(encoding="utf-8"))
+        delivery_msa_path = job_dir / "trimmed_alignment_named.fasta"
+        with open(delivery_msa_path, "w", encoding="utf-8", newline="\n") as dfh:
+            for r in iter_fasta_records(trimmed_msa_path):
+                rid = r.id or ""
+                dfh.write(f">{s2o.get(rid, rid)}\n{str(r.seq)}\n")
+        return delivery_msa_path
 
-        # 自动离线生成发表级矢量出图 (Circular + Rectangular；超过 60 叶自动追加 Composite)
-        figures_dir = job_dir / "figures"
-        pub_items: List[Dict[str, Any]] = []
+    @staticmethod
+    def _render_offline_publication_figures(
+        record: PhyloJobRecord,
+        final_nwk: str,
+        node_meta: Dict[str, Dict[str, Any]],
+        leaf_names: List[str],
+        figures_dir: Path,
+        best_model: Optional[str],
+        best_model_bic: Optional[float],
+        trim_stats: Optional[Dict[str, Any]],
+        log_fn: Callable[[str], None],
+    ) -> List[Dict[str, Any]]:
         subtitle_parts: List[str] = []
         if best_model:
             subtitle_parts.append(
                 f"Model: {best_model}" + (f" (BIC={best_model_bic})" if best_model_bic is not None else "")
             )
         if trim_stats and trim_stats.get("kept_cols"):
-            subtitle_parts.append(f"ClipKIT sites: {trim_stats.get('kept_cols')} (PI={trim_stats.get('parsimony_informative_sites', 0)})")
+            subtitle_parts.append(
+                f"ClipKIT sites: {trim_stats.get('kept_cols')} (PI={trim_stats.get('parsimony_informative_sites', 0)})"
+            )
         fig_subtitle = " | ".join(subtitle_parts)
 
-        layouts_to_render = _select_publication_layouts(len(leaf_names))
-        for layout_mode in layouts_to_render:
+        pub_items: List[Dict[str, Any]] = []
+        for layout_mode in _select_publication_layouts(len(leaf_names)):
             try:
                 out_paths = PublicationTreeRenderer.render(
                     newick=final_nwk,
@@ -718,19 +776,75 @@ class PhageTaxonomyWorkflow:
                     file_prefix="publication",
                     subtitle=fig_subtitle,
                 )
-                for fp in out_paths:
-                    pub_items.append(
-                        {
-                            "filename": fp.name,
-                            "format": fp.suffix.lstrip(".").lower(),
-                            "layout": layout_mode,
-                            "size_bytes": fp.stat().st_size,
-                            "download_url": f"/api/phylo/jobs/{record.job_id}/export/figure/{fp.name}",
-                        }
-                    )
+                pub_items.extend(
+                    {
+                        "filename": fp.name,
+                        "format": fp.suffix.lstrip(".").lower(),
+                        "layout": layout_mode,
+                        "size_bytes": fp.stat().st_size,
+                        "download_url": f"/api/phylo/jobs/{record.job_id}/export/figure/{fp.name}",
+                    }
+                    for fp in out_paths
+                )
             except Exception as exc:
                 log_fn(f"[PublicationFigure] {layout_mode} 离线出图跳过: {exc}")
+        return pub_items
 
+    @staticmethod
+    def _stage8_qc_and_delivery(
+        record: PhyloJobRecord,
+        candidates: List[ReferenceCandidate],
+        ani_result: AniScreenResult,
+        final_nwk: str,
+        final_nwk_path: Path,
+        metrics: Any,
+        node_meta: Dict[str, Dict[str, Any]],
+        leaf_names: List[str],
+        itol_dir: Path,
+        itol_files: List[str],
+        tree_ctx: Dict[str, Any],
+        commands_used: List[str],
+        job_dir: Path,
+        ckp: CheckpointManager,
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+    ) -> None:
+        """Stage 8：6 项质检审计、发表级离线出图与交付 ZIP 归档。"""
+        t_qc = time.time()
+        stage_fn("qc_delivery", "running", 98, "第 8 步：执行交付前 6 项质检审计并打包交付归档...")
+        trim_stats = tree_ctx["trim_stats"]
+        best_model = tree_ctx["best_model"]
+        best_model_bic = tree_ctx["best_model_bic"]
+
+        qc_report = PhageDeliveryQcAuditor.audit(
+            newick=final_nwk,
+            metrics=metrics,
+            candidates=candidates,
+            ani_result=ani_result,
+            marker_report=record.marker_report,
+            trim_stats=trim_stats,
+            iqtree_cmd=tree_ctx["iqtree_cmd"],
+            best_model=best_model,
+            best_model_bic=best_model_bic,
+            itol_files=itol_files,
+        )
+        record.qc_report = qc_report
+
+        delivery_msa_path = PhageTaxonomyWorkflow._build_named_delivery_msa(
+            tree_ctx["trimmed_msa_path"], job_dir
+        )
+        figures_dir = job_dir / "figures"
+        pub_items = PhageTaxonomyWorkflow._render_offline_publication_figures(
+            record=record,
+            final_nwk=final_nwk,
+            node_meta=node_meta,
+            leaf_names=leaf_names,
+            figures_dir=figures_dir,
+            best_model=best_model,
+            best_model_bic=best_model_bic,
+            trim_stats=trim_stats,
+            log_fn=log_fn,
+        )
         if pub_items:
             record.artifacts["figures_dir"] = str(figures_dir)
             record.artifacts["publication_figures"] = pub_items
@@ -744,7 +858,7 @@ class PhageTaxonomyWorkflow:
             ani_result=ani_result,
             marker_report=record.marker_report,
             trimmed_msa_path=delivery_msa_path,
-            treefile_path=treefile_path,
+            treefile_path=tree_ctx["treefile_path"],
             itol_dir=itol_dir,
             commands_used=commands_used,
             figures_dir=figures_dir if pub_items else None,
@@ -758,7 +872,6 @@ class PhageTaxonomyWorkflow:
         if best_model_bic is not None:
             record.artifacts["best_model_bic"] = best_model_bic
 
-        # 清理阶段大临时文件（保留精选交付物与缓存引用）
         for tmp_sub in (job_dir / "step2_references" / "drep_run" / "inputs",):
             if tmp_sub.is_dir():
                 shutil.rmtree(tmp_sub, ignore_errors=True)
@@ -771,4 +884,83 @@ class PhageTaxonomyWorkflow:
             f"质检 ({qc_report.overall_status.upper()}) 与交付包生成完成",
             elapsed=time.time() - t_qc,
             artifact=str(zip_path),
+        )
+
+    @staticmethod
+    def execute(
+        record: PhyloJobRecord,
+        records: List[Tuple[str, str]],
+        job_dir: Path,
+        ckp: CheckpointManager,
+        cache: StageCache,
+        cancel_ev: threading.Event,
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+        set_runner: Callable[[Any], None],
+    ) -> None:
+        cfg: PhyloJobConfig = record.config
+        scope = cfg.phage_scope or DeliveryScopeConfig()
+        dedup_ids = IdCodec.deduplicate_ids([r[0] for r in records])
+        norm_queries = [(qid, r[1]) for qid, r in zip(dedup_ids, records, strict=True)]
+        commands_used: List[str] = []
+
+        # Stage 1: ANI 预判
+        ani_result = PhageTaxonomyWorkflow._stage1_ani_screening(
+            record, norm_queries, dedup_ids, scope, job_dir, cancel_ev, log_fn, stage_fn, set_runner, commands_used
+        )
+        if cancel_ev.is_set():
+            raise PhyloCancelledError("任务在 ANI 预判后已取消")
+
+        # Stage 2: 参考集策展、去冗余与 Treemmer 降采样
+        candidates, genome_paths, primary_outgroup = PhageTaxonomyWorkflow._stage2_curate_and_dereplicate(
+            cfg, norm_queries, ani_result, scope, job_dir, cancel_ev, log_fn, stage_fn, set_runner
+        )
+        if cancel_ev.is_set():
+            raise PhyloCancelledError("任务在参考集构建后已取消")
+
+        # Stage 3-5: 蛋白质组树 vs TerL ML 建树分流
+        raw_nwk_path = job_dir / "tree_raw.nwk"
+        dataset_hash = PhageTaxonomyWorkflow._compute_dataset_hash(genome_paths)
+        if cfg.marker_mode == "proteome":
+            tree_ctx = PhageTaxonomyWorkflow._stage3_to_5_proteome_branch(
+                record, scope, genome_paths, job_dir, raw_nwk_path, cancel_ev, log_fn, stage_fn, set_runner
+            )
+        else:
+            tree_ctx = PhageTaxonomyWorkflow._stage3_to_5_terl_branch(
+                record, genome_paths, dataset_hash, primary_outgroup, job_dir, raw_nwk_path, cache, cancel_ev, log_fn, stage_fn, set_runner
+            )
+
+        # Stage 6-7: 定根、节点元数据与 iTOL 模板
+        final_nwk, final_nwk_path, metrics, node_meta, leaf_names, itol_dir, itol_files = (
+            PhageTaxonomyWorkflow._stage6_7_reroot_and_itol(
+                record,
+                candidates,
+                primary_outgroup,
+                raw_nwk_path,
+                job_dir,
+                tree_ctx["best_model"],
+                tree_ctx["best_model_bic"],
+                log_fn,
+                stage_fn,
+            )
+        )
+
+        # Stage 8: 质检、离线发表级出图与交付打包
+        PhageTaxonomyWorkflow._stage8_qc_and_delivery(
+            record,
+            candidates,
+            ani_result,
+            final_nwk,
+            final_nwk_path,
+            metrics,
+            node_meta,
+            leaf_names,
+            itol_dir,
+            itol_files,
+            tree_ctx,
+            commands_used,
+            job_dir,
+            ckp,
+            log_fn,
+            stage_fn,
         )

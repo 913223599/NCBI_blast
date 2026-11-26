@@ -3,13 +3,13 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import ClassVar, List, Optional
 
 class CondaResolver:
     """
     负责在不同操作系统环境下深度搜寻 Conda 执行程序
     """
-    DEFAULT_WINDOWS_PATHS = [
+    DEFAULT_WINDOWS_PATHS: ClassVar[List[str]] = [
         "miniconda3/Scripts/conda.exe",
         "anaconda3/Scripts/conda.exe",
         "Miniconda3/Scripts/conda.exe",

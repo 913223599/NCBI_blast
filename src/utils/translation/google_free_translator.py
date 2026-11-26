@@ -33,8 +33,10 @@ class GoogleFreeTranslator:
         url = f"{self.base_url}?{query_string}"
         
         try:
-            req = urllib.request.Request(url, headers=self.headers)
-            with urllib.request.urlopen(req, timeout=10) as response:
+            from ...core.http_guard import build_safe_request, safe_urlopen
+
+            req = build_safe_request(url, headers=self.headers)
+            with safe_urlopen(req, timeout=10) as response:
                 result = json.loads(response.read().decode('utf-8'))
                 # result[0] 包含一个列表，其中每个元素的第一项是翻译的片段
                 if result and isinstance(result, list) and len(result) > 0 and result[0]:

@@ -209,9 +209,7 @@ class PhrogCatalog:
         self.ensure_loaded()
         out: set[str] = set()
         for pid, (cat, ann) in self._records.items():
-            if cat in STRUCTURAL_PHROG_CATEGORIES or bool(_EXTRA_INDEX_ANNOT_RE.search(ann or "")):
-                out.add(pid)
-            elif cat in NON_TAIL_GUARD_CATEGORIES and ann and ann.lower() not in {"hypothetical protein", "unknown function"}:
+            if cat in STRUCTURAL_PHROG_CATEGORIES or bool(_EXTRA_INDEX_ANNOT_RE.search(ann or "")) or cat in NON_TAIL_GUARD_CATEGORIES and ann and ann.lower() not in {"hypothetical protein", "unknown function"}:
                 out.add(pid)
         return out
 

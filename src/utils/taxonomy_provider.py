@@ -261,13 +261,13 @@ class TaxonomyProvider:
 
     def _download_taxdump(self, dest_path: Path):
         """从 NCBI FTP 下载 taxdump.tar.gz，支持进度报告。"""
-        import urllib.request
+        from ..core.http_guard import build_safe_request, safe_urlopen
 
         # 先下载到临时文件，完成后替换
         tmp_path = dest_path.with_suffix(".tmp")
         try:
-            req = urllib.request.Request(NCBI_TAXDUMP_URL)
-            with urllib.request.urlopen(req, timeout=120) as response:
+            req = build_safe_request(NCBI_TAXDUMP_URL)
+            with safe_urlopen(req, timeout=120) as response:
                 total = int(response.headers.get("Content-Length", 0))
                 downloaded = 0
                 chunk_size = 256 * 1024  # 256 KB
@@ -294,9 +294,10 @@ class TaxonomyProvider:
 
     def _fetch_remote_md5(self) -> str:
         """从 NCBI FTP 下载 taxdump.tar.gz.md5（几字节），提取 MD5 哈希值。"""
-        import urllib.request
-        req = urllib.request.Request(NCBI_TAXDUMP_MD5_URL)
-        with urllib.request.urlopen(req, timeout=15) as response:
+        from ..core.http_guard import build_safe_request, safe_urlopen
+
+        req = build_safe_request(NCBI_TAXDUMP_MD5_URL)
+        with safe_urlopen(req, timeout=15) as response:
             content = response.read().decode("utf-8").strip()
             # 格式: "<md5hash>  taxdump.tar.gz"
             md5_hash = content.split()[0]

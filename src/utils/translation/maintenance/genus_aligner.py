@@ -73,19 +73,7 @@ class GenusAligner:
 
         # 2. 如果没有命中已知错误，但以泛称结尾进行纠正
         if not replaced:
-            if modified_chinese.endswith("菌属"):
-                prefix = modified_chinese[:-2]
-                modified_chinese = prefix + std_species_tail
-                replaced = True
-            elif modified_chinese.endswith("细菌"):
-                prefix = modified_chinese[:-2]
-                modified_chinese = prefix + std_species_tail
-                replaced = True
-            elif modified_chinese.endswith("杆菌") and std_species_tail != "杆菌":
-                prefix = modified_chinese[:-2]
-                modified_chinese = prefix + std_species_tail
-                replaced = True
-            elif modified_chinese.endswith("球菌") and std_species_tail != "球菌":
+            if modified_chinese.endswith("菌属") or modified_chinese.endswith("细菌") or modified_chinese.endswith("杆菌") and std_species_tail != "杆菌" or modified_chinese.endswith("球菌") and std_species_tail != "球菌":
                 prefix = modified_chinese[:-2]
                 modified_chinese = prefix + std_species_tail
                 replaced = True

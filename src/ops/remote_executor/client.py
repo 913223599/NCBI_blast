@@ -31,9 +31,11 @@ def _http_json(
     req_headers = {"Accept": "application/json", **(headers or {})}
     if data is not None:
         req_headers.setdefault("Content-Type", "application/json; charset=utf-8")
-    req = urllib.request.Request(url, data=data, method=method.upper(), headers=req_headers)
+    from ...core.http_guard import build_safe_request, safe_urlopen
+
+    req = build_safe_request(url, data=data, method=method.upper(), headers=req_headers)
     try:
-        with opener.open(req, timeout=timeout) as resp:
+        with safe_urlopen(req, timeout=timeout, opener=opener) as resp:
             text = resp.read().decode("utf-8", errors="replace")
             return resp.status, (json.loads(text) if text.strip() else {})
     except urllib.error.HTTPError as err:

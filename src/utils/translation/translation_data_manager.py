@@ -423,7 +423,7 @@ class TranslationDataManager:
             results["total"] = len(others)
             
             updates = []
-            for english, chinese in others:
+            for english, _chinese in others:
                 # 重新判定分类
                 new_cat = extractor._determine_category(english)
                 if new_cat != 'other':

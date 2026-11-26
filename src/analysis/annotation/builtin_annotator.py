@@ -248,7 +248,7 @@ class BuiltinAnnotator:
         # 遍历每条 Contig 进行预测
         locus_idx = 1
 
-        for c_idx, record in enumerate(records):
+        for _c_idx, record in enumerate(records):
             contig_id = record.id
             seq_str = str(record.seq)
             

@@ -13,6 +13,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from ...core.async_tasks import spawn_tracked_task
 from ...core.broadcaster import broadcaster
 from ...core.task_db import release_gpu_memory
 from .db import PhageStructureDB, phage_structure_db
@@ -31,6 +32,7 @@ class PhageStructureQueue:
         self.running_ids: List[str] = []
         self.cancelled_ids: set[str] = set()
         self._workers: List[asyncio.Task[None]] = []
+        self._bg_tasks: set[asyncio.Task[Any]] = set()
         self._executor: Optional[Callable[[str, Any, Dict[str, Any]], Awaitable[None]]] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._started = False
@@ -95,9 +97,14 @@ class PhageStructureQueue:
         if removed:
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._broadcast_snapshot())
+                spawn_tracked_task(
+                    self._broadcast_snapshot(),
+                    self._bg_tasks,
+                    label="phage_structure_queue_snapshot",
+                    loop=loop,
+                )
             except RuntimeError:
-                pass
+                logger.debug("remove_from_waiting: 无运行中事件循环，跳过快照广播")
         return removed
 
     async def cancel_task(self, task_id: str) -> Dict[str, Any]:

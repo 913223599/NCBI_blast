@@ -511,7 +511,8 @@ def _repair_windows_integrity(paths: List[str]) -> List[str]:
             )
             if proc.returncode == 0:
                 repaired.append(raw)
-        except Exception:
+        except Exception as _exc:
+            logger.debug("修复浏览器文件完整性标签跳过异常项: %s", _exc)
             continue
     return repaired
 

@@ -42,7 +42,8 @@ class PholdEngine(BaseAnnotationEngine):
                 if isinstance(data, dict):
                     data.setdefault("ok", True)
                     return data
-            except Exception:
+            except Exception as _exc:
+                logger.debug("phold_engine JSON 行解析跳过: %s", _exc)
                 continue
         return {"ok": False, "error": text[:200]}
 
