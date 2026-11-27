@@ -1,9 +1,17 @@
 <script setup lang="ts">
 
+export interface BlastDetailHitItem {
+  species?: string
+  similarity: string
+  evalue?: string | number
+  acc?: string
+  title?: string
+}
+
 defineProps<{
   show: boolean
   title: string
-  data: any[]
+  data: BlastDetailHitItem[]
 }>()
 
 const emit = defineEmits<{

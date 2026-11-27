@@ -2,13 +2,14 @@
 import { ref, onMounted } from 'vue'
 import { getBridge } from '../../bridge'
 import { useAppStore } from '../../stores/app'
+import type { AppLocale } from '../../locales'
 
 const appStore = useAppStore()
-const selectedLocale = ref('zh_CN')
+const selectedLocale = ref<AppLocale>('zh_CN')
 
 function saveLanguage() {
   getBridge().save_ui_language(selectedLocale.value)
-  appStore.setLocale(selectedLocale.value as any)
+  appStore.setLocale(selectedLocale.value)
   appStore.showNotification('界面显示语言已动态切换', 'success')
 }
 

@@ -155,11 +155,11 @@ function handleShiftSelect(fromId: string, toId: string, allIds: string[]) {
   strainStore.shiftSelectRange(fromId, toId, allIds)
 }
 
-function handleRowClick(record: any) {
+function handleRowClick(record: StrainRecord) {
   strainStore.setActiveRecord(record)
 }
 
-function handleViewDetail(record: any) {
+function handleViewDetail(record: StrainRecord) {
   strainStore.setActiveRecord(record)
 }
 

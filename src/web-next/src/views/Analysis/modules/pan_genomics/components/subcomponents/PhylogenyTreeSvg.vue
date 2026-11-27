@@ -4,13 +4,14 @@
  * 基于全基因组 ANI 矩阵进行 UPGMA 层次聚类几何布局，严格与表格行高进行物理级对齐。
  */
 import { computed } from 'vue'
+import type { ClusteringTreeNodeLike } from '../../types'
 
 const props = defineProps<{
   visibleSampleIds: string[]
   aniMatrix?: Record<string, Record<string, number | null>>
   rowHeight: number
   displayDensity: 'spacious' | 'comfortable' | 'compact' | 'ultra'
-  treeRoot?: any
+  treeRoot?: ClusteringTreeNodeLike | null
   sortOrder?: 'natural' | 'cluster'
 }>()
 
@@ -87,7 +88,7 @@ const treeSvgLayout = computed(() => {
     const visibleSet = new Set(ids)
 
     // 1. 剪枝递归: 过滤掉已隐藏样本，折叠单子树节点
-    function prune(node: any): PrunedNode | null {
+    function prune(node?: ClusteringTreeNodeLike | null): PrunedNode | null {
       if (!node) return null
       const isLeafNode = !node.left && !node.right
       if (isLeafNode) {

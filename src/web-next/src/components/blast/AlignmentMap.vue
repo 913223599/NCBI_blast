@@ -8,7 +8,7 @@
  */
 import { ref, computed } from 'vue'
 
-interface Mismatch {
+export interface Mismatch {
   q_pos: number
   s_pos: number
   q_base: string
@@ -16,7 +16,7 @@ interface Mismatch {
   type: 'snp' | 'insertion' | 'deletion'
 }
 
-interface HSP {
+export interface HSP {
   query_start: number
   query_end: number
   sbjct_start?: number
@@ -35,7 +35,7 @@ interface HSP {
   midline?: string
 }
 
-interface Hit {
+export interface Hit {
   title: string
   length: number
   hsps: HSP[]

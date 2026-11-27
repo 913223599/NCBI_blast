@@ -12,7 +12,7 @@ import { AllocationCoordinator } from '../../modules/BioSpatial-Coordinator'
 import type { AllocationResult } from '../../modules/BioSpatial-Coordinator/strategies/SpeciesZoningStrategy'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 import { TopologyScanner } from '../../modules/BioSpatial-Coordinator/core/TopologyScanner'
-import type { CategoryCode } from '../../types/codeSystem'
+import type { CategoryCode, CodeLookupEntry } from '../../types/codeSystem'
 import { ImportTemplateManager } from '../../modules/BioSpatial-Coordinator/core/ImportTemplateManager'
 
 const _log = createLogger('BatchImport')
@@ -286,18 +286,26 @@ export function useBatchImport(emit: {
       const speciesName = species.replace(genusName, '').trim() || 'sp.'
       const categoryCode: CategoryCode = SAMPLE_TYPE_TO_CATEGORY[rawType] || '9'
 
-      let genusEntry = strain.codeLookupEntries.find(
+      let genusEntry: CodeLookupEntry | null | undefined = strain.codeLookupEntries.find(
         (e) => e.level === 2 && e.parentPath === categoryCode && e.name === genusName
       )
       if (!genusEntry) {
         genusEntry = codeGen.lookup.addLookupEntry(2, categoryCode, genusName, genusName)
       }
+      if (!genusEntry) {
+        _log.warn(`无法创建属级编码目录: ${genusName}`)
+        continue
+      }
 
-      let speciesEntry = strain.codeLookupEntries.find(
+      let speciesEntry: CodeLookupEntry | null | undefined = strain.codeLookupEntries.find(
         (e) => e.level === 3 && e.parentPath === genusEntry.fullPath && e.name === speciesName
       )
       if (!speciesEntry) {
         speciesEntry = codeGen.lookup.addLookupEntry(3, genusEntry.fullPath, speciesName, speciesName)
+      }
+      if (!speciesEntry) {
+        _log.warn(`无法创建种级编码目录: ${speciesName}`)
+        continue
       }
 
       let sourceCode = 'XX'

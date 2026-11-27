@@ -90,7 +90,7 @@ const emit = defineEmits(['close', 'updateColumns'])
 
 const strainStore = useStrainStore()
 const appStore = useAppStore()
-const filters = strainStore.searchFilters as any
+const filters = strainStore.searchFilters
 
 const columnVisibility = reactive<Record<string, boolean>>({ ...props.initialColumns })
 

@@ -248,7 +248,7 @@ onMounted(async () => {
       }
     }
 
-    const match = attemptTaxonomicMatch(draft.species); const consensus = match?.consensus || draft.species
+    const match = attemptTaxonomicMatch(draft.species || ''); const consensus = match?.consensus || draft.species || ''
 
     // 深度合并草稿信息，确保 BLAST 的 identity, evalue 等 metadata 不丢失
     Object.assign(form.value, {

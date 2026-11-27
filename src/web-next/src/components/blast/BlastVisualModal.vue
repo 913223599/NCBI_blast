@@ -1,10 +1,17 @@
 <script setup lang="ts">
-import AlignmentMap from './AlignmentMap.vue'
+import AlignmentMap, { type Hit } from './AlignmentMap.vue'
+
+export interface BlastVisualData {
+  query_name: string
+  query_length: number
+  hits: Hit[]
+  error?: string
+}
 
 defineProps<{
   show: boolean
   loading: boolean
-  data: any
+  data: BlastVisualData | null
   sortMode: string
 }>()
 

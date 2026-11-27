@@ -21,7 +21,13 @@ export interface AssemblyTaskItem {
   status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'aborted' | string;
   last_step?: string;
   progress: number;
-  config?: any;
+  config?: {
+    params?: {
+      mode?: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
   results?: AssemblyStats | null;
   created_at: number;
   updated_at: number;

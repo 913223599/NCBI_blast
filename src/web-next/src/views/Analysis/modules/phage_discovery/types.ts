@@ -99,7 +99,7 @@ export interface PhageRegionItem {
     unified_core_sum?: number
     unified_core_active_count?: number
     unified_max_p9?: number
-    [key: string]: any
+    [key: string]: unknown
   }
 }
 
@@ -176,7 +176,7 @@ export interface PhageScanSummary {
   routing_stats?: {
     protein_skip_ratio?: number
     unified_judge_mode?: boolean
-    [key: string]: any
+    [key: string]: unknown
   }
 }
 

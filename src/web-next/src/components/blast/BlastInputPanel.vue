@@ -16,8 +16,15 @@ const emit = defineEmits<{
   (e: 'openDiversityModal', path?: string, openHistory?: boolean): void
 }>()
 
+interface DetectedPackageInfo {
+  is_amplicon_package?: boolean
+  fastq_count?: number | string
+  file_name?: string
+  [key: string]: unknown
+}
+
 const detectedZip = ref<string | null>(null)
-const detectedPackageInfo = ref<any>(null)
+const detectedPackageInfo = ref<DetectedPackageInfo | null>(null)
 
 /**
  * 处理单株模式上传成功的路径

@@ -4,9 +4,15 @@ import { getBridge } from '../../bridge'
 import { useAppStore } from '../../stores/app'
 import HeadlessBrowserPanel from './HeadlessBrowserPanel.vue'
 
+interface LanShareInfo {
+  enabled?: boolean
+  ip?: string
+  port?: number | string
+}
+
 const appStore = useAppStore()
 const lanEnabled = ref(false)
-const lanShareInfo = ref<any>(null)
+const lanShareInfo = ref<LanShareInfo | null>(null)
 
 async function loadLanShareInfo() {
   const result = await getBridge().get_lan_share_info()

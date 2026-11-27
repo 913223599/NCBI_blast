@@ -57,20 +57,22 @@ export function useTaxonomySync() {
       
       if (genusEntries.length > 0) {
         const matchedGenus = genusEntries[0]
-        selections.genus = matchedGenus.code
-        selections.category = matchedGenus.parentPath 
-        
-        if (cleanSpecies) {
-          const lowerSpecies = cleanSpecies.toLowerCase()
-          const parentPath = matchedGenus.fullPath
-          const speciesEntries = strain.codeLookupEntries.filter(
-            e => e.level === 3 && 
-            e.parentPath === parentPath &&
-            (e.latinName?.toLowerCase() === lowerSpecies || e.name === cleanSpecies)
-          )
-          if (speciesEntries.length > 0) {
+        if (matchedGenus) {
+          selections.genus = matchedGenus.code
+          selections.category = matchedGenus.parentPath
+
+          if (cleanSpecies) {
+            const lowerSpecies = cleanSpecies.toLowerCase()
+            const parentPath = matchedGenus.fullPath
+            const speciesEntries = strain.codeLookupEntries.filter(
+              e => e.level === 3 &&
+              e.parentPath === parentPath &&
+              (e.latinName?.toLowerCase() === lowerSpecies || e.name === cleanSpecies)
+            )
             const matchedSpecies = speciesEntries[0]
-            selections.species = matchedSpecies.code
+            if (matchedSpecies) {
+              selections.species = matchedSpecies.code
+            }
           }
         }
       }

@@ -5,9 +5,12 @@
  */
 import { ref, watch } from 'vue'
 import { getCatColor, getCategoryChinese, getAminoAcidVariation } from '../../utils/pangenomeVariants'
+import type { EnrichedOrthologCluster, GenePresenceEntry } from '../../types'
+
+type ClusterDrawerModel = EnrichedOrthologCluster | (Partial<EnrichedOrthologCluster> & { group_id?: string })
 
 const props = defineProps<{
-  cluster: any | null
+  cluster: ClusterDrawerModel | null
   visibleSampleIds: string[]
   sampleNames: Record<string, string>
   selectedPair: [string, string] | null
@@ -16,8 +19,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'locate-synteny', cluster: any): void
+  (e: 'locate-synteny', cluster: ClusterDrawerModel): void
 }>()
+
+function getPresence(cluster: ClusterDrawerModel | null, sid: string): GenePresenceEntry | null {
+  const entry = cluster?.presence_map?.[sid]
+  return entry && typeof entry === 'object' ? (entry as GenePresenceEntry) : null
+}
 
 const selectedBaselineSampleId = ref<string>('')
 
@@ -43,9 +51,9 @@ watch(
       <div class="dh-left">
         <span
           class="chip-cat"
-          :style="{ backgroundColor: getCatColor(cluster._inferredCategory || cluster.category) }"
+          :style="{ backgroundColor: getCatColor(cluster._inferredCategory || cluster.category || '') }"
         >
-          {{ getCategoryChinese(cluster._inferredCategory || cluster.category) }}
+          {{ getCategoryChinese(cluster._inferredCategory || cluster.category || '') }}
         </span>
         <strong>{{ cluster.group_id }}</strong>
         <span class="dh-prod">{{ cluster.representative_product }}</span>
@@ -57,7 +65,7 @@ watch(
           <select v-model="selectedBaselineSampleId" class="baseline-select">
             <option v-for="sid in visibleSampleIds" :key="'opt-bl-' + sid" :value="sid">
               {{ sampleNames[sid] || sid }}
-              {{ cluster.presence_map?.[sid] ? `(${cluster.presence_map[sid].length_aa} aa)` : '(缺失)' }}
+              {{ getPresence(cluster, sid) ? `(${getPresence(cluster, sid)?.length_aa ?? 0} aa)` : '(缺失)' }}
             </option>
           </select>
         </div>
@@ -85,8 +93,8 @@ watch(
             :key="'drawer-s-' + sid"
             :class="{
               'row-baseline-highlight': sid === selectedBaselineSampleId,
-              'row-present': !!cluster.presence_map?.[sid],
-              'row-absent': !cluster.presence_map?.[sid]
+              'row-present': !!getPresence(cluster, sid),
+              'row-absent': !getPresence(cluster, sid)
             }"
           >
             <td>
@@ -94,7 +102,7 @@ watch(
               <span v-if="sid === selectedBaselineSampleId" class="badge-ref-tag">参考株</span>
             </td>
             <td>
-              <span class="status-pill status-present" v-if="cluster.presence_map?.[sid]">存在</span>
+              <span class="status-pill status-present" v-if="getPresence(cluster, sid)">存在</span>
               <span class="status-pill status-absent" v-else>缺失</span>
             </td>
             <td>
@@ -111,25 +119,25 @@ watch(
               </div>
             </td>
             <td>
-              <code>{{ cluster.presence_map?.[sid]?.locus_tag || '—' }}</code>
+              <code>{{ getPresence(cluster, sid)?.locus_tag || '—' }}</code>
             </td>
             <td>
-              <span v-if="cluster.presence_map?.[sid]">
-                {{ cluster.presence_map[sid].start }} .. {{ cluster.presence_map[sid].end }} bp
+              <span v-if="getPresence(cluster, sid)">
+                {{ getPresence(cluster, sid)?.start }} .. {{ getPresence(cluster, sid)?.end }} bp
               </span>
               <span v-else class="text-slate">—</span>
             </td>
             <td>
-              <code>{{ cluster.presence_map?.[sid]?.strand || '—' }}</code>
+              <code>{{ getPresence(cluster, sid)?.strand || '—' }}</code>
             </td>
             <td>
-              <span v-if="cluster.presence_map?.[sid]" class="font-mono-val">
-                {{ cluster.presence_map[sid].length_aa }} aa
+              <span v-if="getPresence(cluster, sid)" class="font-mono-val">
+                {{ getPresence(cluster, sid)?.length_aa }} aa
               </span>
               <span v-else class="text-slate">—</span>
             </td>
-            <td class="td-prod-text" :title="cluster.presence_map?.[sid]?.product">
-              {{ cluster.presence_map?.[sid]?.product || '—' }}
+            <td class="td-prod-text" :title="getPresence(cluster, sid)?.product">
+              {{ getPresence(cluster, sid)?.product || '—' }}
             </td>
           </tr>
         </tbody>

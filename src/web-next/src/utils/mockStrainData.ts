@@ -1,4 +1,6 @@
-import type { SampleCategory, StrainRecord } from '../stores/strain'
+import type { SampleCategory, StrainRecord, useStrainStore } from '../stores/strain'
+import type { useCodeGenerator } from '../composables/useCodeGenerator'
+import type { CategoryCode } from '../types/codeSystem'
 import { createLogger } from './logger'
 const _log = createLogger('MockStrain')
 
@@ -104,10 +106,19 @@ export const MOCK_SAMPLES: Partial<StrainRecord>[] = [
   }
 ]
 
+interface TaxonSeedEntry {
+  cat: CategoryCode
+  gen: string
+  spc: string
+}
+
 /**
  * 自动填充脚本 - 适配 v6 编码系统
  */
-export function seedMockData(strainStore: any, codeGen: any) {
+export function seedMockData(
+  strainStore: ReturnType<typeof useStrainStore>,
+  codeGen: ReturnType<typeof useCodeGenerator>
+) {
   // 查找一个可用的空槽位
   const freezer = strainStore.freezers[0]
   if (!freezer) {
@@ -120,10 +131,10 @@ export function seedMockData(strainStore: any, codeGen: any) {
   const drawer = cabinet?.drawers[0]
   const box = drawer?.boxes[0]
   
-  if (!box) return
+  if (!shelf || !cabinet || !drawer || !box) return
 
   // 预设一些分类映射 (与 builtinCodes.ts 中的内置代码对应)
-  const taxonMap: Record<string, any> = {
+  const taxonMap: Record<string, TaxonSeedEntry> = {
     'Bacteria': { cat: '1', gen: 'AKF', spc: 'BXM' },
     'Phage':    { cat: '3', gen: 'PHG', spc: 'TFA' }, // T04 -> TFA
     'Virus':    { cat: '2', gen: 'COV', spc: 'SAR' }, // S02 -> SAR
@@ -140,7 +151,7 @@ export function seedMockData(strainStore: any, codeGen: any) {
     
     const pos = positionObj.label
     const taxon = taxonMap[mock.sampleType as string] || { cat: '9', gen: 'OTH', spc: '001' }
-    const source = sources[index % sources.length]
+    const source = sources[index % sources.length] ?? 'ZC'
 
     try {
       const sampleCode = codeGen.commit({
@@ -155,7 +166,17 @@ export function seedMockData(strainStore: any, codeGen: any) {
       const serial = codeGen.counter.getCurrentValue(taxonomyPath)
 
       const record = strainStore.addRecord({
-        ...mock,
+        name: mock.name || 'Unnamed Sample',
+        species: mock.species || '',
+        strain: mock.strain || '',
+        sampleType: mock.sampleType || 'Other',
+        sequenceType: mock.sequenceType || 'DNA',
+        sequence: mock.sequence,
+        source,
+        host: mock.host || '',
+        country: mock.country || '',
+        collectionDate: mock.collectionDate || '',
+        metadata: mock.metadata || {},
         sampleCode,
         codeSource: source,
         codeCategory: taxon.cat,

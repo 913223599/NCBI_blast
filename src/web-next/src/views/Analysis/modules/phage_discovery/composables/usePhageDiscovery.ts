@@ -402,34 +402,46 @@ export function usePhageDiscovery() {
     }
   }
 
-  function handleWsEvent(eventType: string, data: any): void {
-    if (eventType === 'phage_discovery_queue_update' && data) {
+  interface PhageWsEventData {
+    task_id?: string
+    progress?: number
+    message?: string
+    status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+    line?: string
+    level?: string
+    error?: string
+  }
+
+  function handleWsEvent(eventType: string, data: unknown): void {
+    if (eventType === 'phage_discovery_queue_update' && data && typeof data === 'object') {
       syncQueueSnapshot(data as PhageQueueSnapshot)
       return
     }
-    if (!data || !data.task_id) return
+    if (!data || typeof data !== 'object') return
+    const payload = data as PhageWsEventData
+    if (!payload.task_id) return
 
     const activeId = currentTask.value?.task_id
     if (eventType === 'phage_discovery_progress') {
-      const targetInHist = historyList.value.find((t) => t.task_id === data.task_id)
+      const targetInHist = historyList.value.find((t) => t.task_id === payload.task_id)
       if (targetInHist) {
-        if (typeof data.progress === 'number' && data.progress >= 0) targetInHist.progress = data.progress
-        if (data.message) targetInHist.current_step = data.message
-        if (data.status) targetInHist.status = data.status
+        if (typeof payload.progress === 'number' && payload.progress >= 0) targetInHist.progress = payload.progress
+        if (payload.message) targetInHist.current_step = payload.message
+        if (payload.status) targetInHist.status = payload.status
       }
-      if (activeId === data.task_id && currentTask.value) {
-        if (typeof data.progress === 'number' && data.progress >= 0) {
-          currentTask.value.progress = data.progress
+      if (activeId === payload.task_id && currentTask.value) {
+        if (typeof payload.progress === 'number' && payload.progress >= 0) {
+          currentTask.value.progress = payload.progress
         }
-        if (data.message) currentTask.value.current_step = data.message
-        if (data.status) currentTask.value.status = data.status
+        if (payload.message) currentTask.value.current_step = payload.message
+        if (payload.status) currentTask.value.status = payload.status
       }
     } else if (eventType === 'phage_discovery_log') {
-      if (activeId === data.task_id) {
+      if (activeId === payload.task_id) {
         consoleLogs.value.push({
           time: formatNowTime(),
-          line: String(data.line || ''),
-          level: String(data.level || 'info'),
+          line: String(payload.line || ''),
+          level: String(payload.level || 'info'),
         })
         if (consoleLogs.value.length > 300) {
           consoleLogs.value.splice(0, consoleLogs.value.length - 300)
@@ -438,15 +450,15 @@ export function usePhageDiscovery() {
     } else if (eventType === 'phage_discovery_done') {
       loadHistory()
       loadQueueStatus()
-      if (activeId === data.task_id) {
-        loadTaskResult(data.task_id)
+      if (activeId === payload.task_id) {
+        loadTaskResult(payload.task_id)
       }
     } else if (eventType === 'phage_discovery_error') {
       loadHistory()
       loadQueueStatus()
-      if (activeId === data.task_id && currentTask.value) {
-        currentTask.value.status = data.status || 'failed'
-        currentTask.value.error_msg = String(data.error || '扫描任务执行异常')
+      if (activeId === payload.task_id && currentTask.value) {
+        currentTask.value.status = payload.status || 'failed'
+        currentTask.value.error_msg = String(payload.error || '扫描任务执行异常')
         currentTask.value.current_step =
           currentTask.value.status === 'cancelled' ? '任务已中止' : '扫描失败'
       }

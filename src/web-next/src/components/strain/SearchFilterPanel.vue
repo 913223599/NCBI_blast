@@ -128,8 +128,8 @@ function toggleDropdown(name: string) {
   openDropdown.value = openDropdown.value === name ? null : name
 }
 
-function selectFilter(field: keyof typeof localFilters.value, value: string) {
-  (localFilters.value as any)[field] = value
+function selectFilter(field: 'keyword' | 'sequenceType' | 'country' | 'dateFrom' | 'dateTo', value: string) {
+  localFilters.value[field] = value
   openDropdown.value = null
   applyFilters()
 }
@@ -144,8 +144,8 @@ function handleSearch() {
 
 function applyFilters() {
   // 更新 store 中的筛选条件
-  Object.entries(localFilters.value).forEach(([key, value]) => {
-    strain.setSearchFilter(key as any, value)
+  ;(Object.entries(localFilters.value) as Array<[keyof typeof localFilters.value, string]>).forEach(([key, value]) => {
+    strain.setSearchFilter(key, value)
   })
   emit('update', localFilters.value)
 }

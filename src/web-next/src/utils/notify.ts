@@ -12,7 +12,8 @@ export function notifyUser(message: string, type: NotifyLevel = 'info'): void {
     useAppStore().showNotification(message, type)
     return
   }
-  const winApp = (globalThis as any)?.window?.app
+  const globalWin = (globalThis as { window?: { app?: { showNotification?: (msg: string, level: NotifyLevel) => void } } }).window
+  const winApp = globalWin?.app
   if (typeof winApp?.showNotification === 'function') {
     winApp.showNotification(message, type)
   }

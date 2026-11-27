@@ -5,7 +5,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { MailComposeSubmitPayload, MailDraftPayload } from '../../components/MailComposeModal.vue'
 import type { CleanupOption } from '../../components/CleanupDialog.vue'
-import { describeMigration, getJson, openLocalPath, postJson } from '../../api'
+import { describeMigration, getJson, openLocalPath, postJson, type MigrationInfo } from '../../api'
 import { useConfirmDialog } from '../../../../composables/useConfirmDialog'
 import {
   extractLastLine,
@@ -29,6 +29,93 @@ export interface MailPipelineRuntime {
   last_command: string
   last_output: string
   current_stage: string
+}
+
+interface MailPipelineConfigApi {
+  imap_server?: string
+  imap_port?: number
+  account?: string
+  sender_whitelist?: string[]
+  since_days?: number
+  download_dir?: string
+  smtp_server?: string
+  smtp_port?: number
+  smtp_account?: string
+  smtp_display_name?: string
+  reply_to?: string
+  send_dir?: string
+}
+
+interface MailOverviewResponse {
+  auth?: AuthInfo
+  runtime?: MailPipelineRuntime
+  batches?: BatchItem[]
+  pending_batches_count?: number
+  ignored_batches_count?: number
+  outbound_packages?: OutboundPackage[]
+  docx_reports?: DocxReportItem[]
+  processed_items?: ProcessedItem[]
+  processed_count?: number
+  pipeline_logs?: string[]
+  resolved_download_dir?: string
+  resolved_send_dir?: string
+  config?: MailPipelineConfigApi
+}
+
+interface MailListResponse {
+  items?: InboxMailItem[]
+  scanned?: number
+  raw_total?: number
+  unique_total?: number
+  dedup_removed?: number
+  processed_skipped?: number
+  page?: number
+  page_size?: number
+  total?: number
+  total_pages?: number
+}
+
+interface MailFetchResponse {
+  scanned: number
+  matched: number
+  saved_count: number
+  skipped_processed: number
+  skipped_dup_mails?: number
+}
+
+interface MailRunResponse {
+  runtime: MailPipelineRuntime
+}
+
+interface MailAuthResponse {
+  auth: AuthInfo
+}
+
+interface MailConfigResponse {
+  migrations?: MigrationInfo[]
+}
+
+interface MailCleanupResponse {
+  removed_count: number
+  freed_mb: number
+  index_removed?: number
+}
+
+interface MailSendPreviewResponse {
+  attached_files?: string[]
+  to?: string
+  reply_to?: string
+  from_name?: string
+  cc?: string
+  subject?: string
+  body?: string
+  attachment_name?: string
+}
+
+interface MailSendExecResponse {
+  to: string
+  attachment: string
+  attachment_size: number
 }
 
 function getErrorMessage(err: unknown): string {
@@ -227,7 +314,7 @@ export function useMailPipeline() {
 
   async function loadOverview(): Promise<void> {
     try {
-      const data = await getJson(`${API}/overview`)
+      const data = await getJson<MailOverviewResponse>(`${API}/overview`)
       if (data.auth) auth.value = data.auth
       const nextRuntime = data.runtime || runtime.value
       runtime.value = nextRuntime
@@ -285,7 +372,7 @@ export function useMailPipeline() {
   async function loadInboxMails(page = 1, pageSize = inboxStats.value.pageSize): Promise<void> {
     inboxLoading.value = true
     try {
-      const data = await postJson(`${API}/list_mails`, {
+      const data = await postJson<MailListResponse>(`${API}/list_mails`, {
         page,
         page_size: pageSize,
         since_days: runOptions.value.since_days,
@@ -315,7 +402,7 @@ export function useMailPipeline() {
   async function handleFetchOnly(): Promise<void> {
     setInfo('正在收件...')
     try {
-      const data = await postJson(`${API}/fetch`, { since_days: runOptions.value.since_days })
+      const data = await postJson<MailFetchResponse>(`${API}/fetch`, { since_days: runOptions.value.since_days })
       const dupMailsPart = data.skipped_dup_mails ? `，邮件级去重 ${data.skipped_dup_mails} 封` : ''
       setInfo(
         `收件完成：扫描 ${data.scanned} 封，命中 ${data.matched} 封${dupMailsPart}，新保存 ${data.saved_count} 个附件，跳过已处理 ${data.skipped_processed} 个`
@@ -351,7 +438,7 @@ export function useMailPipeline() {
         extra_note: runOptions.value.extra_note || null,
       }
       if (mode === 'self') payload.to = 'self'
-      const data = await postJson(`${API}/run`, payload)
+      const data = await postJson<MailRunResponse>(`${API}/run`, payload)
       runtime.value = data.runtime
       trackingRun.value = true
       setInfo(`流水线已在后台启动${modeTip}`)
@@ -392,7 +479,7 @@ export function useMailPipeline() {
     }
     setInfo(`启动批次重跑: ${batchName}`)
     try {
-      const data = await postJson(`${API}/run`, payload)
+      const data = await postJson<MailRunResponse>(`${API}/run`, payload)
       runtime.value = data.runtime
       trackingRun.value = true
       showBatchRunModal.value = false
@@ -422,12 +509,12 @@ export function useMailPipeline() {
       else if (authForm.value.smtp.trim()) authPayload.smtp_auth_code = authForm.value.smtp.trim()
 
       if (authPayload.imap_auth_code !== null || authPayload.smtp_auth_code !== null) {
-        const authRes = await postJson(`${API}/auth`, authPayload)
+        const authRes = await postJson<MailAuthResponse>(`${API}/auth`, authPayload)
         auth.value = authRes.auth
         authForm.value = { imap: '', smtp: '', clearSmtp: false }
       }
 
-      const data = await postJson(`${API}/config`, buildConfigPayload())
+      const data = await postJson<MailConfigResponse>(`${API}/config`, buildConfigPayload())
       const msgs = (data.migrations || []).map(describeMigration).filter(Boolean)
       runOptions.value.since_days = configForm.value.since_days ?? 7
       showConfigModal.value = false
@@ -444,7 +531,7 @@ export function useMailPipeline() {
     busy.value = true
     setInfo('正在迁移目录...')
     try {
-      const data = await postJson(`${API}/config`, buildConfigPayload({ [field]: value }))
+      const data = await postJson<MailConfigResponse>(`${API}/config`, buildConfigPayload({ [field]: value }))
       const msgs = (data.migrations || []).map(describeMigration).filter(Boolean)
       setInfo(msgs.length ? `目录已更新。${msgs.join('；')}` : '目录已更新')
       await loadOverview()
@@ -470,7 +557,7 @@ export function useMailPipeline() {
       return
     }
     try {
-      const data = await postJson(`${API}/auth`, payload)
+      const data = await postJson<MailAuthResponse>(`${API}/auth`, payload)
       auth.value = data.auth
       showAuthModal.value = false
       setInfo('授权码已更新')
@@ -482,7 +569,7 @@ export function useMailPipeline() {
   async function runCleanup(targets: string[], olderThanDays: number | null, names: string[] = []): Promise<void> {
     busy.value = true
     try {
-      const data = await postJson(`${API}/cleanup`, { targets, older_than_days: olderThanDays, names })
+      const data = await postJson<MailCleanupResponse>(`${API}/cleanup`, { targets, older_than_days: olderThanDays, names })
       showCleanup.value = false
       const idxPart = data.index_removed ? `，去重记录 ${data.index_removed} 条` : ''
       setInfo(`已清理 ${data.removed_count} 项${idxPart}，释放 ${data.freed_mb} MB`)
@@ -530,7 +617,7 @@ export function useMailPipeline() {
   async function loadTestSendDraft(attachReport: boolean): Promise<void> {
     loadingTestSendDraft.value = true
     try {
-      const data = await postJson(`${API}/test_send_preview`, {
+      const data = await postJson<MailSendPreviewResponse>(`${API}/test_send_preview`, {
         note: '桌面工作台自检发信验证',
         attach_latest_report: attachReport,
       })
@@ -578,7 +665,7 @@ export function useMailPipeline() {
     testingSend.value = true
     try {
       const targetTo = payload.toSelf ? 'self' : payload.to.trim() || 'self'
-      const data = await postJson(`${API}/test_send`, {
+      const data = await postJson<MailSendExecResponse>(`${API}/test_send`, {
         to: targetTo,
         cc: payload.cc.trim() || null,
         from_name: payload.fromName.trim() || null,
@@ -599,7 +686,7 @@ export function useMailPipeline() {
   async function loadPkgSendDraft(pkg: OutboundPackage): Promise<void> {
     loadingPkgDraft.value = true
     try {
-      const data = await postJson(`${API}/send_package_preview`, { zip_name: pkg.zip_name })
+      const data = await postJson<MailSendPreviewResponse>(`${API}/send_package_preview`, { zip_name: pkg.zip_name })
       pkgSendDraft.value = {
         to: data.to || configForm.value.account || configForm.value.smtp_account || '',
         replyTo: data.reply_to || configForm.value.reply_to || '',
@@ -641,7 +728,7 @@ export function useMailPipeline() {
     sendingPkg.value = true
     try {
       const targetTo = payload.toSelf ? 'self' : payload.to.trim() || 'self'
-      const data = await postJson(`${API}/send_package`, {
+      const data = await postJson<MailSendExecResponse>(`${API}/send_package`, {
         zip_name: pkgSendTarget.value.zip_name,
         to: targetTo,
         cc: payload.cc.trim() || null,

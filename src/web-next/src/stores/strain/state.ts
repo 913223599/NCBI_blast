@@ -1,10 +1,12 @@
 import { ref, shallowRef } from 'vue'
-import type { 
-  Freezer, 
-  StrainRecord, 
-  SearchFilters, 
-  ImportTask 
+import type {
+  Freezer,
+  StrainRecord,
+  SearchFilters,
+  ImportTask,
+  PendingBlastDraft,
 } from './types'
+import type { CodeLookupEntry, SourceEntry, SerialCounter } from '../../types/codeSystem'
 
 export function useStrainState() {
   /* ======== 冰箱管理 ======== */
@@ -15,9 +17,9 @@ export function useStrainState() {
   const records = shallowRef<StrainRecord[]>([])
   
   // === 编码系统状态 ===
-  const codeLookupEntries = ref<any[]>([]) 
-  const sourceEntries = ref<any[]>([])      
-  const serialCounters = ref<any[]>([])     
+  const codeLookupEntries = ref<CodeLookupEntry[]>([]) 
+  const sourceEntries = ref<SourceEntry[]>([])      
+  const serialCounters = ref<SerialCounter[]>([])     
   const codeConfig = ref({
     assignMode: 'sequential',
     serialDigits: 4,
@@ -50,7 +52,7 @@ export function useStrainState() {
   /* ======== 选择状态 ======== */
   const selectedRecords = ref<Set<string>>(new Set())
   const activeRecord = ref<StrainRecord | null>(null)
-  const pendingBlastDraft = ref<any>(null)
+  const pendingBlastDraft = ref<PendingBlastDraft | null>(null)
   const locationMap = ref<Record<string, string>>({}) // ID -> Name 快速索引
   const serverTotalCount = ref<number>(0) // 后端返回的真实数据总量
 
@@ -87,3 +89,5 @@ export function useStrainState() {
     }
   }
 }
+
+export type StrainState = ReturnType<typeof useStrainState>

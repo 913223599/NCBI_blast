@@ -131,6 +131,7 @@ import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
 import type { StrainRecord } from '../../stores/strain'
+import { getTotalCabinets, getTotalDrawers, getTotalBoxes } from '../../stores/strain/freezerStats'
 
 const { t } = useI18n()
 const strain = useStrainStore()
@@ -224,38 +225,6 @@ function getLocationPath(record: StrainRecord): string {
   ].filter(Boolean)
   
   return parts.length > 0 ? parts.join(' → ') : '-'
-}
-
-function getTotalCabinets(freezer: any): number {
-  let total = 0
-  for (const shelf of freezer.shelves) {
-    total += shelf.cabinets.length
-  }
-  return total
-}
-
-function getTotalDrawers(freezer: any): number {
-  let total = 0
-  for (const shelf of freezer.shelves) {
-    for (const cabinet of shelf.cabinets) {
-      total += cabinet.drawers.length
-    }
-  }
-  return total
-}
-
-function getTotalBoxes(freezer: any): number {
-  let total = 0
-  for (const shelf of freezer.shelves) {
-    for (const cabinet of shelf.cabinets) {
-      for (const drawer of cabinet.drawers) {
-        for (const box of drawer.boxes) {
-          total += box.rows * box.cols
-        }
-      }
-    }
-  }
-  return total
 }
 </script>
 

@@ -9,7 +9,7 @@ export interface SampleOption {
   length?: number
   createdAt?: string
   isExternal?: boolean
-  raw?: any
+  raw?: unknown
 }
 
 interface Props {

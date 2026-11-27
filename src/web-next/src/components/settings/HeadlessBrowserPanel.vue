@@ -58,8 +58,8 @@ async function loadBrowserEnv(probe = false): Promise<void> {
     }
     statusData.value = res as BrowserEnvStatus
     syncInputsFromReport(statusData.value)
-  } catch (err: any) {
-    lastError.value = err?.message || String(err)
+  } catch (err: unknown) {
+    lastError.value = err instanceof Error ? err.message : String(err)
   } finally {
     loading.value = false
   }
@@ -90,8 +90,8 @@ async function handleRepair(probeLaunch = true): Promise<void> {
     } else {
       appStore.showNotification('已执行自修复，但浏览器仍未完全就绪，请查看详情', 'warning')
     }
-  } catch (err: any) {
-    lastError.value = err?.message || String(err)
+  } catch (err: unknown) {
+    lastError.value = err instanceof Error ? err.message : String(err)
     appStore.showNotification(`无头浏览器检查失败: ${lastError.value}`, 'error')
   } finally {
     repairing.value = false

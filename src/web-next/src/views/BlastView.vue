@@ -17,7 +17,7 @@ import BlastInputPanel from '../components/blast/BlastInputPanel.vue'
 import BlastParamsPanel from '../components/blast/BlastParamsPanel.vue'
 import BlastHistoryPanel from '../components/blast/BlastHistoryPanel.vue'
 import BlastResultsTable from '../components/blast/BlastResultsTable.vue'
-import BlastVisualModal from '../components/blast/BlastVisualModal.vue'
+import BlastVisualModal, { type BlastVisualData } from '../components/blast/BlastVisualModal.vue'
 import BlastDetailDialog from '../components/blast/BlastDetailDialog.vue'
 import DiversityAnalysisModal from '../components/blast/DiversityAnalysisModal.vue'
 import { createLogger } from '../utils/logger'
@@ -52,7 +52,7 @@ const historyPanelRef = ref<InstanceType<typeof BlastHistoryPanel> | null>(null)
 
 /* -------- 可视化状态 -------- */
 const showVisualModal = ref(false)
-const visualData = ref<Record<string, unknown> | null>(null)
+const visualData = ref<BlastVisualData | null>(null)
 const visualLoading = ref(false)
 const visualSortMode = ref('evalue')
 const currentXmlPath = ref('')

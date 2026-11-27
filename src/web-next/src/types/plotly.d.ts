@@ -1,11 +1,11 @@
 declare module 'plotly.js-dist-min' {
   const Plotly: {
-    newPlot(root: HTMLElement, data: any[], layout?: any, config?: any): Promise<any>;
-    react(root: HTMLElement, data: any[], layout?: any, config?: any): Promise<any>;
+    newPlot(root: HTMLElement, data: object[], layout?: object, config?: object): Promise<HTMLElement>;
+    react(root: HTMLElement, data: object[], layout?: object, config?: object): Promise<HTMLElement>;
     purge(root: HTMLElement): void;
-    relayout(root: HTMLElement, update: any): Promise<any>;
-    restyle(root: HTMLElement, update: any, traces?: number[]): Promise<any>;
-    downloadImage(root: HTMLElement, opts: any): Promise<string>;
+    relayout(root: HTMLElement, update: object): Promise<HTMLElement>;
+    restyle(root: HTMLElement, update: object, traces?: number[]): Promise<HTMLElement>;
+    downloadImage(root: HTMLElement, opts: object): Promise<string>;
   };
   export default Plotly;
 }

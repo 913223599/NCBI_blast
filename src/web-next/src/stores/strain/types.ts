@@ -66,6 +66,15 @@ export interface Freezer {
   updatedAt: string
 }
 
+export interface PendingBlastDraft {
+  species?: string
+  sequence?: string
+  accession?: string
+  strain?: string
+  metadata?: Record<string, unknown>
+  [key: string]: unknown
+}
+
 export interface StrainRecord {
   id: string
   name: string
@@ -79,7 +88,7 @@ export interface StrainRecord {
   host: string
   country: string
   collectionDate: string
-  metadata: Record<string, any>
+  metadata: Record<string, unknown>
   freezerId?: string
   shelfId?: string
   cabinetId?: string

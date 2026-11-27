@@ -1,12 +1,13 @@
 import { getBridge } from '../../bridge'
 import type { StrainRecord } from './types'
+import type { StrainState } from './state'
 import { markRaw } from 'vue'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 import { createLogger } from '../../utils/logger'
 
 const logger = createLogger('StrainRecords')
 
-export function useRecordsActions(state: any, autoSave: () => void) {
+export function useRecordsActions(state: StrainState, autoSave: () => void) {
   const { 
     records, 
     filteredRecords, 
@@ -40,6 +41,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
     const accessionMap = new Map<string, string[]>()
     for (let i = 0, len = records.value.length; i < len; i++) {
       const record = records.value[i]
+      if (!record) continue
       recordById.set(record.id, record)
       const acc = record.accession
       if (acc) {
@@ -71,11 +73,11 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       }
 
       // 核心业务：序列长度区间筛选
-      if (minLength !== null && minLength !== undefined && minLength !== '') {
+      if (minLength !== null && minLength !== undefined) {
         const len = record.sequence?.length || 0
         if (len < Number(minLength)) return false
       }
-      if (maxLength !== null && maxLength !== undefined && maxLength !== '') {
+      if (maxLength !== null && maxLength !== undefined) {
         const len = record.sequence?.length || 0
         if (len > Number(maxLength)) return false
       }

@@ -4,7 +4,7 @@
       <label>核酸浓度</label>
       <div class="input-with-unit">
         <input 
-          :value="modelValue.concentration" 
+          :value="readFormText(modelValue, 'concentration')" 
           @input="updateField('concentration', ($event.target as HTMLInputElement).value)"
           class="text-input" 
           placeholder="如：500" 
@@ -15,7 +15,7 @@
     <div class="form-group">
       <label>宿主菌株 (E.coli Host)</label>
       <input 
-        :value="modelValue.hostStrain" 
+        :value="readFormText(modelValue, 'hostStrain')" 
         @input="updateField('hostStrain', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：DH5α, BL21(DE3)" 
@@ -24,7 +24,7 @@
     <div class="form-group">
       <label>骨架 (Backbone)</label>
       <input 
-        :value="modelValue.backbone" 
+        :value="readFormText(modelValue, 'backbone')" 
         @input="updateField('backbone', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：pET28a" 
@@ -33,7 +33,7 @@
     <div class="form-group">
       <label>插入片段 (Insert)</label>
       <input 
-        :value="modelValue.insertName" 
+        :value="readFormText(modelValue, 'insertName')" 
         @input="updateField('insertName', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：GFP" 
@@ -43,7 +43,7 @@
       <label>质粒大小</label>
       <div class="input-with-unit">
         <input 
-          :value="modelValue.plasmidSize" 
+          :value="readFormText(modelValue, 'plasmidSize')" 
           @input="updateField('plasmidSize', ($event.target as HTMLInputElement).value)"
           class="text-input" 
           placeholder="如：5400" 
@@ -54,7 +54,7 @@
     <div class="form-group">
       <label>筛选标记 (Markers)</label>
       <input 
-        :value="modelValue.markerText" 
+        :value="readFormText(modelValue, 'markerText')" 
         @input="handleMarkerInput(($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：Kan, Zeo" 
@@ -63,7 +63,7 @@
     <div class="form-group">
       <label>启动子 (Promoter)</label>
       <input 
-        :value="modelValue.promoter" 
+        :value="readFormText(modelValue, 'promoter')" 
         @input="updateField('promoter', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：T7, CMV" 
@@ -72,7 +72,7 @@
     <div class="form-group">
       <label>是表达载体吗？</label>
       <div class="select-box-neo" @click.stop="isOpen = !isOpen">
-        {{ modelValue.isExpression ? '是 (Yes)' : '否 (No)' }} <span class="arrow">▼</span>
+        {{ readFormFlag(modelValue, 'isExpression') ? '是 (Yes)' : '否 (No)' }} <span class="arrow">▼</span>
         <div v-if="isOpen" class="dropdown-list">
           <div 
             class="opt" 
@@ -92,15 +92,21 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import {
+  readFormFlag,
+  readFormText,
+  type StrainMetadataFieldValue,
+  type StrainMetadataFormModel,
+} from './formTypes'
 
 const props = defineProps<{
-  modelValue: any
+  modelValue: StrainMetadataFormModel
 }>()
 
 const emit = defineEmits(['update:modelValue'])
 const isOpen = ref(false)
 
-function updateField(key: string, value: any) {
+function updateField(key: string, value: StrainMetadataFieldValue) {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
 

@@ -1,6 +1,7 @@
 import type { ImportTask } from './types'
+import type { StrainState } from './state'
 
-export function useImportActions(state: any) {
+export function useImportActions(state: StrainState) {
   const { files, importTasks, activeTaskId, inputMode, importText } = state
 
   function addFile(file: string) {

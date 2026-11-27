@@ -240,6 +240,13 @@ export function getFeatureColor(type: string, category?: string, product?: strin
   return "#64748b";
 }
 
+export interface ViewerRenderFeature {
+  start: number;
+  end: number;
+  strand?: string | number;
+  labelLevel?: number;
+}
+
 export function polarToCartesian(centerX: number, centerY: number, radius: number, angleInDegrees: number) {
   const angleInRadians = (angleInDegrees - 90) * Math.PI / 180.0;
   return {
@@ -248,7 +255,7 @@ export function polarToCartesian(centerX: number, centerY: number, radius: numbe
   };
 }
 
-export function getCircularPath(f: any, sequenceLength: number, bounds: { innerR: number; outerR: number }) {
+export function getCircularPath(f: ViewerRenderFeature, sequenceLength: number, bounds: { innerR: number; outerR: number }) {
   if (!sequenceLength || !bounds) return "";
   
   const startAngle = (f.start / sequenceLength) * 360;
@@ -286,7 +293,7 @@ export function getCircularPath(f: any, sequenceLength: number, bounds: { innerR
   }
 }
 
-export function getLinearPath(f: any, sequenceLength: number, linearWidth: number, bounds: { linearY: number; rowHeight: number }) {
+export function getLinearPath(f: ViewerRenderFeature, sequenceLength: number, linearWidth: number, bounds: { linearY: number; rowHeight: number }) {
   if (!sequenceLength || !bounds) return "";
   const sx = (f.start / sequenceLength) * linearWidth;
   const ex = (f.end / sequenceLength) * linearWidth;
@@ -309,7 +316,7 @@ export function getLinearPath(f: any, sequenceLength: number, linearWidth: numbe
   }
 }
 
-export function getEnzymeCircularLabel(f: any, sequenceLength: number, baseRadius: number, absoluteOuterBound: number = 0) {
+export function getEnzymeCircularLabel(f: ViewerRenderFeature, sequenceLength: number, baseRadius: number, absoluteOuterBound: number = 0) {
   if (!sequenceLength) return null;
   const angle = ((f.start + f.end) / 2 / sequenceLength) * 360;
   const rad = (angle - 90) * Math.PI / 180;
@@ -340,7 +347,7 @@ export function getEnzymeCircularLabel(f: any, sequenceLength: number, baseRadiu
   };
 }
 
-export function getEnzymeLinearLabel(f: any, sequenceLength: number, linearWidth: number) {
+export function getEnzymeLinearLabel(f: ViewerRenderFeature, sequenceLength: number, linearWidth: number) {
   if (!sequenceLength) return null;
   const x = ((f.start + f.end) / 2 / sequenceLength) * linearWidth;
   const level = f.labelLevel || 0;

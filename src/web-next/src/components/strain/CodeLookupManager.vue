@@ -352,7 +352,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { CategoryCode, ResolvedCode } from '../../types/codeSystem'
+import type { CategoryCode, CodeLookupEntry, ResolvedCode, SourceEntry } from '../../types/codeSystem'
 import { CATEGORY_MAP } from '../../types/codeSystem'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 import { useCodeLookup } from '../../composables/useCodeLookup'
@@ -387,10 +387,10 @@ function toggleExpand(nodeKey: string): void {
 
 /* ========== 编辑逻辑 ========== */
 const isEditModalOpen = ref(false)
-const editingEntry = ref<any>(null)
+const editingEntry = ref<CodeLookupEntry | null>(null)
 const editForm = ref({ name: '', latinName: '' })
 
-function startEdit(entry: any) {
+function startEdit(entry: CodeLookupEntry) {
   editingEntry.value = entry
   editForm.value = {
     name: entry.name,
@@ -502,7 +502,7 @@ const editingSourceCode = ref('')
 const editSrcName = ref('')
 const editSrcDesc = ref('')
 
-function startEditSource(source: any): void {
+function startEditSource(source: SourceEntry): void {
   editingSourceCode.value = source.code
   editSrcName.value = source.name
   editSrcDesc.value = source.description || ''

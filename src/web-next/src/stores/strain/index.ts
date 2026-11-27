@@ -5,7 +5,7 @@ import { useSyncActions } from './actions-sync'
 import { useRecordsActions } from './actions-records'
 import { useFreezerActions } from './actions-freezer'
 import { useImportActions } from './actions-import'
-import type { StrainRecord } from './types'
+import type { PendingBlastDraft, SearchFilters, StrainRecord } from './types'
 
 export const useStrainStore = defineStore('strain', () => {
   // 1. 初始化基础状态
@@ -72,8 +72,8 @@ export const useStrainStore = defineStore('strain', () => {
     s.activeFreezerId.value = id
   }
 
-  function setSearchFilter(key: keyof typeof s.searchFilters.value, value: any) {
-    (s.searchFilters.value as any)[key] = value
+  function setSearchFilter<K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) {
+    s.searchFilters.value[key] = value
     recordsModule.applyFilters()
   }
 
@@ -86,7 +86,7 @@ export const useStrainStore = defineStore('strain', () => {
     s.files.value = []
   }
 
-  function setPendingBlastDraft(draft: any) {
+  function setPendingBlastDraft(draft: PendingBlastDraft | null) {
     s.pendingBlastDraft.value = draft
   }
 

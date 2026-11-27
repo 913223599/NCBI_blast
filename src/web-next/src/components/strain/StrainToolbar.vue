@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-import { inject } from 'vue'
+import { inject, type Ref } from 'vue'
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
@@ -64,8 +64,8 @@ const appStore = useAppStore()
 const confirmDialog = useConfirmDialog()
 
 // 从父组件注入状态
-const activePanel = inject('activePanel') as any
-const isSidebarOpen = inject('isSidebarOpen') as any
+const activePanel = inject<Ref<'import' | 'filter' | 'history'>>('activePanel')!
+const isSidebarOpen = inject<Ref<boolean>>('isSidebarOpen')!
 
 function togglePanel(panel: 'import' | 'filter' | 'history') {
   if (activePanel.value === panel && isSidebarOpen.value) {

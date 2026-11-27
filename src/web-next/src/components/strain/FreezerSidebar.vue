@@ -49,6 +49,7 @@
 import { useStrainStore } from '../../stores/strain'
 import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
+import { getTotalCabinets, getTotalDrawers, getTotalBoxes } from '../../stores/strain/freezerStats'
 
 const strain = useStrainStore()
 const appStore = useAppStore()
@@ -74,38 +75,6 @@ async function deleteFreezer(id: string) {
     strain.removeFreezer(id)
     appStore.showNotification('已删除冰箱', 'success')
   }
-}
-
-function getTotalCabinets(freezer: any): number {
-  let total = 0
-  for (const shelf of freezer.shelves) {
-    total += shelf.cabinets.length
-  }
-  return total
-}
-
-function getTotalDrawers(freezer: any): number {
-  let total = 0
-  for (const shelf of freezer.shelves) {
-    for (const cabinet of shelf.cabinets) {
-      total += cabinet.drawers.length
-    }
-  }
-  return total
-}
-
-function getTotalBoxes(freezer: any): number {
-  let total = 0
-  for (const shelf of freezer.shelves) {
-    for (const cabinet of shelf.cabinets) {
-      for (const drawer of cabinet.drawers) {
-        for (const box of drawer.boxes) {
-          total += box.rows * box.cols
-        }
-      }
-    }
-  }
-  return total
 }
 </script>
 

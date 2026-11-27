@@ -4,7 +4,7 @@
       <label>细胞密度/浓度</label>
       <div class="input-with-unit">
         <input 
-          :value="modelValue.concentration" 
+          :value="readFormText(modelValue, 'concentration')" 
           @input="updateField('concentration', ($event.target as HTMLInputElement).value)"
           class="text-input" 
           placeholder="如：1x10^6" 
@@ -15,7 +15,7 @@
     <div class="form-group">
       <label>细胞类型</label>
       <input 
-        :value="modelValue.cellType" 
+        :value="readFormText(modelValue, 'cellType')" 
         @input="updateField('cellType', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：Adherent, Suspension" 
@@ -24,7 +24,7 @@
     <div class="form-group">
       <label>培养基 (Medium)</label>
       <input 
-        :value="modelValue.medium" 
+        :value="readFormText(modelValue, 'medium')" 
         @input="updateField('medium', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：DMEM + 10% FBS" 
@@ -34,7 +34,7 @@
       <label>倍增时间</label>
       <div class="input-with-unit">
         <input 
-          :value="modelValue.doublingTime" 
+          :value="readFormText(modelValue, 'doublingTime')" 
           @input="updateField('doublingTime', ($event.target as HTMLInputElement).value)"
           class="text-input" 
           placeholder="如：24" 
@@ -45,7 +45,7 @@
     <div class="form-group">
       <label>STR 鉴定编号</label>
       <input 
-        :value="modelValue.authentication" 
+        :value="readFormText(modelValue, 'authentication')" 
         @input="updateField('authentication', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="STR 报告 ID" 
@@ -55,13 +55,19 @@
 </template>
 
 <script setup lang="ts">
+import {
+  readFormText,
+  type StrainMetadataFieldValue,
+  type StrainMetadataFormModel,
+} from './formTypes'
+
 const props = defineProps<{
-  modelValue: any
+  modelValue: StrainMetadataFormModel
 }>()
 
 const emit = defineEmits(['update:modelValue'])
 
-function updateField(key: string, value: any) {
+function updateField(key: string, value: StrainMetadataFieldValue) {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
 </script>

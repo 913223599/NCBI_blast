@@ -132,7 +132,17 @@ export function calculateGC(
   };
 }
 
-export function calculateEnzymes(rawSequence: string) {
+export interface EnzymeSiteFeature {
+  name: string;
+  type: "Enzyme";
+  start: number;
+  end: number;
+  color: string;
+  strand: "+";
+  labelLevel?: number;
+}
+
+export function calculateEnzymes(rawSequence: string): EnzymeSiteFeature[] {
   const seq = rawSequence.toUpperCase();
   const enzymesList = [
     { name: "EcoRI", site: "GAATTC", color: "#ef4444" },
@@ -145,7 +155,7 @@ export function calculateEnzymes(rawSequence: string) {
     { name: "SalI", site: "GTCGAC", color: "#ec4899" }
   ];
 
-  const results: any[] = [];
+  const results: EnzymeSiteFeature[] = [];
   for (const enz of enzymesList) {
     let pos = seq.indexOf(enz.site);
     let count = 0;

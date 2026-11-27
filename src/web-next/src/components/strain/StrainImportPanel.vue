@@ -78,11 +78,11 @@ const canDownloadNCBI = computed(() => {
 })
 
 const pendingTasks = computed(() => {
-  return (strain.importTasks as any[]).filter(t => ['queued', 'running'].includes(t.status)).length
+  return strain.importTasks.filter(t => ['queued', 'running'].includes(t.status)).length
 })
 
 const completedTasks = computed(() => {
-  return (strain.importTasks as any[]).filter(t => t.status === 'done').length
+  return strain.importTasks.filter(t => t.status === 'done').length
 })
 
 async function onFilesUploaded(filePaths: string[]) {
@@ -97,9 +97,7 @@ async function onFilesUploaded(filePaths: string[]) {
       if (res && res.success) {
         appStore.showNotification(`导入成功: 新增 ${res.count} 条记录`, 'success')
         // 刷新列表
-        if (typeof (strain as any).fetchStrains === 'function') {
-          (strain as any).fetchStrains()
-        }
+        await strain.initFromDatabase()
       } else {
         appStore.showNotification(`导入失败: ${res?.error || '处理异常'}`, 'error')
       }

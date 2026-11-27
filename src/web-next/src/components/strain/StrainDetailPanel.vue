@@ -66,7 +66,7 @@
           <div class="sequence-display">
             <pre class="sequence-text">{{ record.sequence }}</pre>
             <div class="sequence-stats">
-              <span>长度: {{ record.sequence.length }} bp</span>
+              <span>长度: {{ record.sequence?.length ?? 0 }} bp</span>
               <button type="button" class="btn-copy" @click="copySequence">复制序列</button>
             </div>
           </div>
@@ -88,11 +88,12 @@
 
 <script setup lang="ts">
 import { useStrainStore } from '../../stores/strain'
+import type { StrainRecord } from '../../stores/strain/types'
 import { useAppStore } from '../../stores/app'
 import { useConfirmDialog } from '../../composables/useConfirmDialog'
 
 interface Props {
-  record: any
+  record: StrainRecord
 }
 
 const props = defineProps<Props>()
@@ -115,7 +116,8 @@ function formatDate(isoString: string): string {
 }
 
 function copySequence() {
-  navigator.clipboard.writeText(props.record.sequence).then(() => {
+  const seq = props.record.sequence || ''
+  navigator.clipboard.writeText(seq).then(() => {
     appStore.showNotification('序列已复制到剪贴板', 'success')
   }).catch(() => {
     appStore.showNotification('复制失败', 'error')

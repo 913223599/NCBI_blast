@@ -51,7 +51,7 @@ export interface BlastHit {
     showOriginal?: boolean
     /** 是否正在翻译中（用于 UI 加载动画） */
     isTranslating?: boolean
-    consensusList?: {name: string, pct: number}[]
+    consensusList?: { name: string; pct: number; translated?: string }[]
     /** 查看详情所用的结果 CSV 路径 */
     csvFile?: string
     /** 可视化所用的 XML 路径 */
@@ -233,7 +233,7 @@ export const useBlastStore = defineStore('blast', () => {
             // B. 结构化共识列表驱动重组 (支持容错归一化比对)
             if (hit.consensusList && hit.consensusList.length > 0) {
                 let hitMatched = false
-                hit.consensusList.forEach((c: any) => {
+                hit.consensusList.forEach((c) => {
                     if (c.name && norm(c.name) === origNorm) {
                         c.translated = trans
                         hitMatched = true
@@ -243,7 +243,7 @@ export const useBlastStore = defineStore('blast', () => {
                 if (hitMatched) {
                     // 基于所有已翻译/未翻译的 consensus 项重新组合出完整字符串
                     const reassembled = hit.consensusList
-                        .map((c: any) => `${c.translated || c.name}(${c.pct}%)`)
+                        .map((c) => `${c.translated || c.name}(${c.pct}%)`)
                         .join(', ')
                     
                     if (hit.translatedName !== reassembled) {
@@ -276,7 +276,35 @@ export const useBlastStore = defineStore('blast', () => {
         }
     }
 
-    function appendSingleResult(resultObj: any): void {
+    interface BlastSingleHitItem {
+        title?: string
+        species?: string
+        genus?: string
+        strain?: string
+        gene_source?: string
+        gene_type?: string
+        seq_type?: string
+        host?: string
+        align_len?: string
+        similarity?: string
+        evalue?: string | number
+        acc?: string
+        consensusList?: { name: string; pct: number; translated?: string }[]
+    }
+
+    interface BlastSingleResultPayload {
+        task_id: string
+        result?: {
+            sequence_id?: string
+            status?: string
+            data?: BlastSingleHitItem[]
+            csv_file?: string
+            xml_file?: string
+            raw_sequence?: string
+        }
+    }
+
+    function appendSingleResult(resultObj: BlastSingleResultPayload): void {
         const taskId = resultObj.task_id
         if (activeTaskId.value !== taskId) return // Only update currently viewed task
 
@@ -307,9 +335,9 @@ export const useBlastStore = defineStore('blast', () => {
             return
         }
         
-        let updatedHit = null
-        if (resData.data && Array.isArray(resData.data) && resData.data.length > 0) {
-            const bestHit = resData.data[0]
+        let updatedHit: BlastHit
+        const bestHit = resData.data?.[0]
+        if (bestHit) {
             updatedHit = {
                 queryTitle: queryId,
                 hitTitle: bestHit.title || '',
@@ -319,7 +347,7 @@ export const useBlastStore = defineStore('blast', () => {
                 seqType: bestHit.seq_type || '',
                 host: bestHit.host || '',
                 alignLen: bestHit.align_len || '',
-                identity: parseFloat(bestHit.similarity) || 0,
+                identity: parseFloat(bestHit.similarity || '0') || 0,
                 evalue: String(bestHit.evalue || 'N/A'),
                 accession: bestHit.acc || 'N/A',
                 translatedName: null,

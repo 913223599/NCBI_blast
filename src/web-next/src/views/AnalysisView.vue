@@ -121,10 +121,20 @@ function handleOpenViewerFromAnnotation(payload: { gbkText: string; taskName: st
   activeTool.value = 'viewer'
 }
 
+const VALID_ANNOTATION_SAMPLE_TYPES = ['PHAGE', 'BACTERIA', 'VIRUS', 'GENERAL'] as const
+type AnnotationSampleType = (typeof VALID_ANNOTATION_SAMPLE_TYPES)[number]
+
+function toAnnotationSampleType(raw?: string): AnnotationSampleType {
+  if (raw && (VALID_ANNOTATION_SAMPLE_TYPES as readonly string[]).includes(raw)) {
+    return raw as AnnotationSampleType
+  }
+  return 'PHAGE'
+}
+
 function handleOpenAnnotationFromPhage(payload: { fastaText: string; taskName: string; sampleType?: string }) {
   annotationInitialFasta.value = payload.fastaText
   annotationInitialName.value = payload.taskName
-  annotationInitialSampleType.value = (payload.sampleType as any) || 'PHAGE'
+  annotationInitialSampleType.value = toAnnotationSampleType(payload.sampleType)
   activeTool.value = 'annotation'
 }
 

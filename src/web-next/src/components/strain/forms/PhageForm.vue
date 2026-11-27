@@ -4,7 +4,7 @@
       <label>噬菌体效价</label>
       <div class="input-with-unit">
         <input 
-          :value="modelValue.potency" 
+          :value="readFormText(modelValue, 'potency')" 
           @input="updateField('potency', ($event.target as HTMLInputElement).value)"
           class="text-input" 
           placeholder="如：1x10^12" 
@@ -15,7 +15,7 @@
     <div class="form-group">
       <label>宿主菌株 (Host)</label>
       <input 
-        :value="modelValue.hostStrain" 
+        :value="readFormText(modelValue, 'hostStrain')" 
         @input="updateField('hostStrain', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：E. coli MG1655" 
@@ -42,7 +42,7 @@
     <div class="form-group">
       <label>形态分类</label>
       <input 
-        :value="modelValue.morphology" 
+        :value="readFormText(modelValue, 'morphology')" 
         @input="updateField('morphology', ($event.target as HTMLInputElement).value)"
         class="text-input" 
         placeholder="如：Myoviridae" 
@@ -52,7 +52,7 @@
       <label>潜伏期</label>
       <div class="input-with-unit">
         <input 
-          :value="modelValue.latentPeriod" 
+          :value="readFormText(modelValue, 'latentPeriod')" 
           @input="updateField('latentPeriod', ($event.target as HTMLInputElement).value)"
           class="text-input" 
           placeholder="如：20" 
@@ -64,7 +64,7 @@
       <label>平均裂解量</label>
       <div class="input-with-unit">
         <input 
-          :value="modelValue.burstSize" 
+          :value="readFormText(modelValue, 'burstSize')" 
           @input="updateField('burstSize', ($event.target as HTMLInputElement).value)"
           class="text-input" 
           placeholder="如：100" 
@@ -77,15 +77,20 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import {
+  readFormText,
+  type StrainMetadataFieldValue,
+  type StrainMetadataFormModel,
+} from './formTypes'
 
 const props = defineProps<{
-  modelValue: any
+  modelValue: StrainMetadataFormModel
 }>()
 
 const emit = defineEmits(['update:modelValue'])
 const isOpen = ref(false)
 
-function updateField(key: string, value: any) {
+function updateField(key: string, value: StrainMetadataFieldValue) {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
 

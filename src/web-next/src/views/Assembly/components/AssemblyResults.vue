@@ -5,7 +5,7 @@
 import { ref, computed } from 'vue';
 import { useI18n } from '../../../locales';
 import { downloadFileFromUrl, downloadFileFromText } from '../../../utils/fileDownloader';
-import type { AssemblyResultData, AssemblyTaskItem, ContigDetailItem } from '../types';
+import type { AssemblyResultData, AssemblyStats, AssemblyTaskItem, ContigDetailItem } from '../types';
 
 const { t } = useI18n();
 
@@ -26,9 +26,9 @@ const stats = computed(() => {
   const tResults = props.task?.results;
 
   // 优先选取有效数值 (>0)，防御某一方为 0 脏数据时的覆写
-  const getSafeNum = (k: string, defaultVal: number = 0): number => {
-    const rVal = rStats ? Number((rStats as any)[k]) : NaN;
-    const tVal = tResults ? Number((tResults as any)[k]) : NaN;
+  const getSafeNum = (k: keyof AssemblyStats, defaultVal: number = 0): number => {
+    const rVal = rStats ? Number(rStats[k]) : NaN;
+    const tVal = tResults ? Number(tResults[k]) : NaN;
     if (!isNaN(rVal) && rVal > 0) return rVal;
     if (!isNaN(tVal) && tVal > 0) return tVal;
     if (!isNaN(rVal)) return rVal;
