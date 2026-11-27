@@ -466,50 +466,18 @@ def reconcile_tentative_siblings(
                     })
     return kept_out
 
-def rescue_and_filter_regions_with_judge(
+def _filter_base_regions(
     base_regions: Sequence[PredictedRegion],
-    relaxed_regions: Sequence[PredictedRegion],
     orfs_by_contig: Dict[str, List[Tuple[int, int, int, str]]],
     scored_by_contig: Dict[str, Dict[str, np.ndarray]],
     *,
-    rescue_min_orfs: int = 6,
-    rescue_min_mean_phage: float = 0.58,
-    rescue_min_frac_phage: float = 0.60,
-    rescue_min_active_modules: int = 2,
-    rescue_max_mean_p9: float = 0.35,
-    rescue_min_morph_prob: float = 0.55,
-    require_structural_evidence: bool = True,
-    min_base_clearance_bp: int = 10000,
-    strict_veto_max_mean_phage: float = 0.22,
-    morph_veto_max_mean_phage: float = 0.48,
-    merge_gap_bp: int = 3000,
-    enable_cross_head_mge_veto: bool = True,
-    enable_elastic_rescue: bool = True,
-    enable_tailocin_guard: bool = True,
-    enable_topology_postprocess: bool = True,
-    enable_sibling_arm_rescue: bool = True,
-    max_bridge_gap_bp: int = 20000,
-    suppressed_out: Optional[List[Dict[str, Any]]] = None,
-    tentative_siblings_out: Optional[List[Dict[str, Any]]] = None,
-) -> Tuple[List[PredictedRegion], Dict[str, int]]:
-    """
-    主干双通道区段级仲裁与拓扑精修：
-      1. 保留高置信主干区段，联合 Head A/B 拦截强防御岛、质粒 MGE 与复合接合耐药移动岛；
-      2. 对远离主区段 (>= min_base_clearance_bp) 的 SubBin 灰区候选执行弹性梯度审核，并拦截纯尾簇细菌素；
-      3. 协同挽救紧邻已知前噬菌体的互补分离子臂并执行两级互补半臂桥接及严格双芯串联拆分。
-    """
+    strict_veto_max_mean_phage: float,
+    morph_veto_max_mean_phage: float,
+    enable_cross_head_mge_veto: bool,
+    stats: Dict[str, int],
+    suppressed_out: Optional[List[Dict[str, Any]]],
+) -> List[PredictedRegion]:
     kept: List[PredictedRegion] = []
-    stats = {
-        "base_kept": 0,
-        "base_vetoed": 0,
-        "gray_candidates": 0,
-        "gray_rescued": 0,
-        "gray_rejected": 0,
-        "sibling_rescued": 0,
-        "topology_bridged": 0,
-        "topology_split": 0,
-    }
-
     for reg in base_regions:
         orfs = orfs_by_contig.get(reg.contig_id, [])
         sc = scored_by_contig.get(reg.contig_id)
@@ -543,12 +511,36 @@ def rescue_and_filter_regions_with_judge(
                 continue
         kept.append(reg)
         stats["base_kept"] += 1
+    return kept
 
-    deferred_gray_rejects: List[Tuple[PredictedRegion, Optional[np.ndarray], Optional[np.ndarray], int, bool]] = []
+
+def _evaluate_gray_candidates(
+    base_regions: Sequence[PredictedRegion],
+    relaxed_regions: Sequence[PredictedRegion],
+    orfs_by_contig: Dict[str, List[Tuple[int, int, int, str]]],
+    scored_by_contig: Dict[str, Dict[str, np.ndarray]],
+    kept: List[PredictedRegion],
+    stats: Dict[str, int],
+    *,
+    rescue_min_orfs: int,
+    rescue_min_mean_phage: float,
+    rescue_min_frac_phage: float,
+    rescue_min_active_modules: int,
+    rescue_max_mean_p9: float,
+    rescue_min_morph_prob: float,
+    require_structural_evidence: bool,
+    min_base_clearance_bp: int,
+    enable_elastic_rescue: bool,
+    enable_tailocin_guard: bool,
+    enable_sibling_arm_rescue: bool,
+) -> List[Tuple[PredictedRegion, Optional[np.ndarray], Optional[np.ndarray], int, bool]]:
+    deferred: List[Tuple[PredictedRegion, Optional[np.ndarray], Optional[np.ndarray], int, bool]] = []
     for cand in relaxed_regions:
         if _region_overlaps_any(cand, base_regions, min_overlap_bp=500, min_clearance_bp=0):
             continue
-        in_clearance_shadow = _region_overlaps_any(cand, base_regions, min_overlap_bp=500, min_clearance_bp=min_base_clearance_bp)
+        in_clearance_shadow = _region_overlaps_any(
+            cand, base_regions, min_overlap_bp=500, min_clearance_bp=min_base_clearance_bp
+        )
         if not in_clearance_shadow:
             stats["gray_candidates"] += 1
         elif not enable_sibling_arm_rescue:
@@ -563,7 +555,7 @@ def rescue_and_filter_regions_with_judge(
         idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if cand.start_bp <= 0.5 * (gs + ge) <= cand.end_bp]
         if len(idxs) < rescue_min_orfs:
             if enable_sibling_arm_rescue and len(idxs) >= 3 and (cand.end_bp - cand.start_bp) >= 4000:
-                deferred_gray_rejects.append((cand, sc["phage_probs"][idxs], sc["func10_probs"][idxs], len(idxs), in_clearance_shadow))
+                deferred.append((cand, sc["phage_probs"][idxs], sc["func10_probs"][idxs], len(idxs), in_clearance_shadow))
             elif not in_clearance_shadow:
                 stats["gray_rejected"] += 1
             continue
@@ -571,8 +563,7 @@ def rescue_and_filter_regions_with_judge(
         ph_sub = sc["phage_probs"][idxs]
         f10_sub = sc["func10_probs"][idxs]
         if in_clearance_shadow:
-            # 紧邻 base 区段的碎片仅允许进入暂存兄弟臂判定，绝不放行成为独立区段
-            deferred_gray_rejects.append((cand, ph_sub, f10_sub, len(idxs), True))
+            deferred.append((cand, ph_sub, f10_sub, len(idxs), True))
             continue
 
         r2_sub = _get_r2_core_probs(sc)[idxs]
@@ -596,45 +587,140 @@ def rescue_and_filter_regions_with_judge(
             kept.append(cand)
             stats["gray_rescued"] += 1
         else:
-            deferred_gray_rejects.append((cand, ph_sub, f10_sub, len(idxs), False))
+            deferred.append((cand, ph_sub, f10_sub, len(idxs), False))
+    return deferred
 
+
+def _collect_tentative_siblings(
+    deferred_gray_rejects: Sequence[Tuple[PredictedRegion, Optional[np.ndarray], Optional[np.ndarray], int, bool]],
+    kept: Sequence[PredictedRegion],
+    stats: Dict[str, int],
+    *,
+    enable_sibling_arm_rescue: bool,
+    max_bridge_gap_bp: int,
+    suppressed_out: Optional[List[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
     tentative_siblings: List[Dict[str, Any]] = []
-    if deferred_gray_rejects:
-        kept_by_cid: Dict[str, List[PredictedRegion]] = defaultdict(list)
-        if enable_sibling_arm_rescue and kept:
-            for kr in kept:
-                kept_by_cid[kr.contig_id].append(kr)
+    if not deferred_gray_rejects:
+        return tentative_siblings
 
-        for cand, ph_sub, f10_sub, n_orfs, is_shadow in deferred_gray_rejects:
-            assert ph_sub is not None and f10_sub is not None
-            mean_ph_v = round(float(np.mean(ph_sub)), 4)
-            max_p9_v = round(float(np.max(f10_sub[:, 9])), 4)
-            queued_sibling = False
-            if enable_sibling_arm_rescue and (cand.end_bp - cand.start_bp) >= 4000 and n_orfs >= 3:
-                anchors = kept_by_cid.get(cand.contig_id, [])
-                near_anchor = any(
-                    0 <= max(a.start_bp - cand.end_bp, cand.start_bp - a.end_bp) <= max_bridge_gap_bp
-                    for a in anchors
-                )
-                if near_anchor and mean_ph_v >= 0.70 and max_p9_v < 0.55 and float(np.max(f10_sub[:, :5])) >= 0.50:
-                    tentative_siblings.append({
-                        "region": cand,
-                        "mean_phage_prob": mean_ph_v,
-                        "max_p9": max_p9_v,
-                        "is_shadow": is_shadow,
-                    })
-                    queued_sibling = True
-            if not queued_sibling and not is_shadow:
-                stats["gray_rejected"] += 1
-                if suppressed_out is not None:
-                    suppressed_out.append({
-                        "contig_id": cand.contig_id,
-                        "start_bp": cand.start_bp,
-                        "end_bp": cand.end_bp,
-                        "reason": "gray_rejected",
-                        "mean_phage_prob": mean_ph_v,
-                        "max_p9": max_p9_v,
-                    })
+    kept_by_cid: Dict[str, List[PredictedRegion]] = defaultdict(list)
+    if enable_sibling_arm_rescue and kept:
+        for kr in kept:
+            kept_by_cid[kr.contig_id].append(kr)
+
+    for cand, ph_sub, f10_sub, n_orfs, is_shadow in deferred_gray_rejects:
+        assert ph_sub is not None and f10_sub is not None
+        mean_ph_v = round(float(np.mean(ph_sub)), 4)
+        max_p9_v = round(float(np.max(f10_sub[:, 9])), 4)
+        queued_sibling = False
+        if enable_sibling_arm_rescue and (cand.end_bp - cand.start_bp) >= 4000 and n_orfs >= 3:
+            anchors = kept_by_cid.get(cand.contig_id, [])
+            near_anchor = any(
+                0 <= max(a.start_bp - cand.end_bp, cand.start_bp - a.end_bp) <= max_bridge_gap_bp
+                for a in anchors
+            )
+            if near_anchor and mean_ph_v >= 0.70 and max_p9_v < 0.55 and float(np.max(f10_sub[:, :5])) >= 0.50:
+                tentative_siblings.append({
+                    "region": cand,
+                    "mean_phage_prob": mean_ph_v,
+                    "max_p9": max_p9_v,
+                    "is_shadow": is_shadow,
+                })
+                queued_sibling = True
+        if not queued_sibling and not is_shadow:
+            stats["gray_rejected"] += 1
+            if suppressed_out is not None:
+                suppressed_out.append({
+                    "contig_id": cand.contig_id,
+                    "start_bp": cand.start_bp,
+                    "end_bp": cand.end_bp,
+                    "reason": "gray_rejected",
+                    "mean_phage_prob": mean_ph_v,
+                    "max_p9": max_p9_v,
+                })
+    return tentative_siblings
+
+
+def rescue_and_filter_regions_with_judge(
+    base_regions: Sequence[PredictedRegion],
+    relaxed_regions: Sequence[PredictedRegion],
+    orfs_by_contig: Dict[str, List[Tuple[int, int, int, str]]],
+    scored_by_contig: Dict[str, Dict[str, np.ndarray]],
+    *,
+    rescue_min_orfs: int = 6,
+    rescue_min_mean_phage: float = 0.58,
+    rescue_min_frac_phage: float = 0.60,
+    rescue_min_active_modules: int = 2,
+    rescue_max_mean_p9: float = 0.35,
+    rescue_min_morph_prob: float = 0.55,
+    require_structural_evidence: bool = True,
+    min_base_clearance_bp: int = 10000,
+    strict_veto_max_mean_phage: float = 0.22,
+    morph_veto_max_mean_phage: float = 0.48,
+    merge_gap_bp: int = 3000,
+    enable_cross_head_mge_veto: bool = True,
+    enable_elastic_rescue: bool = True,
+    enable_tailocin_guard: bool = True,
+    enable_topology_postprocess: bool = True,
+    enable_sibling_arm_rescue: bool = True,
+    max_bridge_gap_bp: int = 20000,
+    suppressed_out: Optional[List[Dict[str, Any]]] = None,
+    tentative_siblings_out: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[List[PredictedRegion], Dict[str, int]]:
+    """
+    主干双通道区段级仲裁与拓扑精修：
+      1. 保留高置信主干区段，联合 Head A/B 拦截强防御岛、质粒 MGE 与复合接合耐药移动岛；
+      2. 对远离主区段 (>= min_base_clearance_bp) 的 SubBin 灰区候选执行弹性梯度审核，并拦截纯尾簇细菌素；
+      3. 协同挽救紧邻已知前噬菌体的互补分离子臂并执行两级互补半臂桥接及严格双芯串联拆分。
+    """
+    stats = {
+        "base_kept": 0,
+        "base_vetoed": 0,
+        "gray_candidates": 0,
+        "gray_rescued": 0,
+        "gray_rejected": 0,
+        "sibling_rescued": 0,
+        "topology_bridged": 0,
+        "topology_split": 0,
+    }
+    kept = _filter_base_regions(
+        base_regions,
+        orfs_by_contig,
+        scored_by_contig,
+        strict_veto_max_mean_phage=strict_veto_max_mean_phage,
+        morph_veto_max_mean_phage=morph_veto_max_mean_phage,
+        enable_cross_head_mge_veto=enable_cross_head_mge_veto,
+        stats=stats,
+        suppressed_out=suppressed_out,
+    )
+    deferred_gray_rejects = _evaluate_gray_candidates(
+        base_regions,
+        relaxed_regions,
+        orfs_by_contig,
+        scored_by_contig,
+        kept,
+        stats,
+        rescue_min_orfs=rescue_min_orfs,
+        rescue_min_mean_phage=rescue_min_mean_phage,
+        rescue_min_frac_phage=rescue_min_frac_phage,
+        rescue_min_active_modules=rescue_min_active_modules,
+        rescue_max_mean_p9=rescue_max_mean_p9,
+        rescue_min_morph_prob=rescue_min_morph_prob,
+        require_structural_evidence=require_structural_evidence,
+        min_base_clearance_bp=min_base_clearance_bp,
+        enable_elastic_rescue=enable_elastic_rescue,
+        enable_tailocin_guard=enable_tailocin_guard,
+        enable_sibling_arm_rescue=enable_sibling_arm_rescue,
+    )
+    tentative_siblings = _collect_tentative_siblings(
+        deferred_gray_rejects,
+        kept,
+        stats,
+        enable_sibling_arm_rescue=enable_sibling_arm_rescue,
+        max_bridge_gap_bp=max_bridge_gap_bp,
+        suppressed_out=suppressed_out,
+    )
 
     # 重要：仅正式通过单岛核验的区段走邻接合并，暂存兄弟臂严禁靠 merge_nearby_regions 粘合，
     # 必须直接进入互补拓扑桥接验证并在未成功并入主臂时安全剔除。
@@ -642,22 +728,10 @@ def rescue_and_filter_regions_with_judge(
     if enable_topology_postprocess:
         bridge_input = list(merged) + [ent["region"] for ent in tentative_siblings]
         merged, stats["topology_bridged"] = bridge_complementary_phage_fragments(
-            bridge_input,
-            orfs_by_contig,
-            scored_by_contig,
-            max_bridge_gap_bp=max_bridge_gap_bp,
+            bridge_input, orfs_by_contig, scored_by_contig, max_bridge_gap_bp=max_bridge_gap_bp
         )
-        merged = reconcile_tentative_siblings(
-            merged,
-            tentative_siblings,
-            stats=stats,
-            suppressed_out=suppressed_out,
-        )
-        merged, stats["topology_split"] = split_tandem_prophage_regions(
-            merged,
-            orfs_by_contig,
-            scored_by_contig,
-        )
+        merged = reconcile_tentative_siblings(merged, tentative_siblings, stats=stats, suppressed_out=suppressed_out)
+        merged, stats["topology_split"] = split_tandem_prophage_regions(merged, orfs_by_contig, scored_by_contig)
     elif tentative_siblings:
         if tentative_siblings_out is not None:
             tentative_siblings_out.extend(tentative_siblings)

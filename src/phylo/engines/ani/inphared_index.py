@@ -9,7 +9,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ...delivery.host_taxonomy import map_host_to_phylum
 from ...runtime.tool_registry import get_project_root
@@ -493,6 +493,82 @@ class InpharedIndex:
             idx += 1
         return ordered
 
+    def _fetch_macro_raw_pool(
+        self,
+        target_count: int,
+        excl: set[str],
+        preferred_class: str,
+        min_genome_length: int,
+    ) -> List[InpharedRecord]:
+        pool_limit = max(target_count * 12, 8000)
+        raw_pool: List[InpharedRecord] = []
+        seen_raw: set[str] = set()
+
+        def _collect_rows(rows: List[Any]) -> None:
+            for row in rows:
+                rec = self._row_to_record(row)
+                if rec.accession in excl or rec.accession in seen_raw:
+                    continue
+                seen_raw.add(rec.accession)
+                raw_pool.append(rec)
+
+        with sqlite3.connect(str(self.db_path), timeout=20) as conn:
+            if preferred_class:
+                rows_cls = conn.execute(
+                    """
+                    SELECT * FROM inphared
+                    WHERE class_name = ? AND genome_length >= ?
+                    ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC
+                    LIMIT ?
+                    """,
+                    (preferred_class, min_genome_length, pool_limit),
+                ).fetchall()
+                _collect_rows(rows_cls)
+
+            if len(raw_pool) < target_count * 2:
+                rows_all = conn.execute(
+                    """
+                    SELECT * FROM inphared
+                    WHERE genome_length >= ?
+                    ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC
+                    LIMIT ?
+                    """,
+                    (min_genome_length, pool_limit),
+                ).fetchall()
+                _collect_rows(rows_all)
+
+        return raw_pool
+
+    @staticmethod
+    def _round_robin_pick(
+        ordered_keys: Sequence[str],
+        buckets: Dict[str, List[InpharedRecord]],
+        limit: int,
+        selected: List[InpharedRecord],
+        picked: set[str],
+    ) -> Dict[str, int]:
+        idxs: Dict[str, int] = {k: 0 for k in ordered_keys}
+        while len(selected) < limit and ordered_keys:
+            progressed = False
+            for key in ordered_keys:
+                pos = idxs[key]
+                grp = buckets[key]
+                while pos < len(grp) and grp[pos].accession in picked:
+                    pos += 1
+                if pos < len(grp):
+                    rec = grp[pos]
+                    idxs[key] = pos + 1
+                    picked.add(rec.accession)
+                    selected.append(rec)
+                    progressed = True
+                    if len(selected) >= limit:
+                        break
+                else:
+                    idxs[key] = pos
+            if not progressed:
+                break
+        return idxs
+
     def sample_macro_background(
         self,
         target_count: int,
@@ -507,45 +583,7 @@ class InpharedIndex:
         self.ensure_built()
 
         excl = set(exclude_accessions) | {x.split(".")[0] for x in exclude_accessions}
-        pool_limit = max(target_count * 12, 8000)
-        raw_pool: List[InpharedRecord] = []
-        seen_raw: set[str] = set()
-
-        with sqlite3.connect(str(self.db_path), timeout=20) as conn:
-            if preferred_class:
-                rows_cls = conn.execute(
-                    """
-                    SELECT * FROM inphared
-                    WHERE class_name = ? AND genome_length >= ?
-                    ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC
-                    LIMIT ?
-                    """,
-                    (preferred_class, min_genome_length, pool_limit),
-                ).fetchall()
-                for row in rows_cls:
-                    rec = self._row_to_record(row)
-                    if rec.accession in excl or rec.accession in seen_raw:
-                        continue
-                    seen_raw.add(rec.accession)
-                    raw_pool.append(rec)
-
-            if len(raw_pool) < target_count * 2:
-                rows_all = conn.execute(
-                    """
-                    SELECT * FROM inphared
-                    WHERE genome_length >= ?
-                    ORDER BY CASE WHEN accession LIKE 'NC_%' THEN 0 ELSE 1 END, genome_length DESC
-                    LIMIT ?
-                    """,
-                    (min_genome_length, pool_limit),
-                ).fetchall()
-                for row in rows_all:
-                    rec = self._row_to_record(row)
-                    if rec.accession in excl or rec.accession in seen_raw:
-                        continue
-                    seen_raw.add(rec.accession)
-                    raw_pool.append(rec)
-
+        raw_pool = self._fetch_macro_raw_pool(target_count, excl, preferred_class, min_genome_length)
         if not raw_pool:
             return []
 
@@ -571,66 +609,18 @@ class InpharedIndex:
 
         pref_set = [_clean_tax(f) for f in preferred_families if _clean_tax(f)]
         ordered_fams: List[str] = [f for f in pref_set if f in fam_buckets]
-        remaining_fams = sorted(
-            (f for f in fam_buckets if f not in ordered_fams),
-            key=lambda f: (-len(fam_buckets[f]), f),
+        ordered_fams.extend(
+            sorted((f for f in fam_buckets if f not in ordered_fams), key=lambda f: (-len(fam_buckets[f]), f))
         )
-        ordered_fams.extend(remaining_fams)
-
-        ordered_hosts = sorted(
-            host_buckets.keys(),
-            key=lambda h: (-len(host_buckets[h]), h),
-        )
+        ordered_hosts = sorted(host_buckets.keys(), key=lambda h: (-len(host_buckets[h]), h))
 
         selected: List[InpharedRecord] = []
         picked: set[str] = set()
 
-        # 阶段 A：按病毒科分层 Round-Robin 抽取约 60% 配额
         fam_quota = min(len(raw_pool), max(1, int(target_count * 0.6))) if ordered_fams else 0
-        fam_idx: Dict[str, int] = {f: 0 for f in ordered_fams}
-        while len(selected) < fam_quota and ordered_fams:
-            progressed = False
-            for fam in ordered_fams:
-                pos = fam_idx[fam]
-                grp = fam_buckets[fam]
-                while pos < len(grp) and grp[pos].accession in picked:
-                    pos += 1
-                if pos < len(grp):
-                    rec = grp[pos]
-                    fam_idx[fam] = pos + 1
-                    picked.add(rec.accession)
-                    selected.append(rec)
-                    progressed = True
-                    if len(selected) >= fam_quota:
-                        break
-                else:
-                    fam_idx[fam] = pos
-            if not progressed:
-                break
+        fam_idx = self._round_robin_pick(ordered_fams, fam_buckets, fam_quota, selected, picked)
+        self._round_robin_pick(ordered_hosts, host_buckets, target_count, selected, picked)
 
-        # 阶段 B：按宿主门分层 Round-Robin 抽取剩余配额直至 target_count
-        host_idx: Dict[str, int] = {h: 0 for h in ordered_hosts}
-        while len(selected) < target_count and ordered_hosts:
-            progressed = False
-            for h_key in ordered_hosts:
-                pos = host_idx[h_key]
-                grp = host_buckets[h_key]
-                while pos < len(grp) and grp[pos].accession in picked:
-                    pos += 1
-                if pos < len(grp):
-                    rec = grp[pos]
-                    host_idx[h_key] = pos + 1
-                    picked.add(rec.accession)
-                    selected.append(rec)
-                    progressed = True
-                    if len(selected) >= target_count:
-                        break
-                else:
-                    host_idx[h_key] = pos
-            if not progressed:
-                break
-
-        # 阶段 C：若仍不足 target_count，从剩余科桶与备用池补足
         for fam in ordered_fams:
             if len(selected) >= target_count:
                 break

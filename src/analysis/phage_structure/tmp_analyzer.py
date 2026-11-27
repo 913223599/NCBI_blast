@@ -461,6 +461,93 @@ def _biophysical_plausibility(aa_seq: str) -> float:
     return bonus
 
 
+def _collect_operon_neighbors(
+    sorted_prots: Sequence[StructureProteinItem],
+    pos: int,
+    *,
+    contig_length_bp: int,
+    window: int,
+    thresholds: TmpSelectionThresholds,
+) -> List[Tuple[int, int]]:
+    n = len(sorted_prots)
+    neighbor_indices: List[Tuple[int, int]] = []
+    seen_idx = {pos}
+    edge_gap = (
+        (sorted_prots[0].start - 1) + max(0, contig_length_bp - sorted_prots[-1].end)
+        if n > 0 and contig_length_bp > 0
+        else 0
+    )
+    allow_circular = n > window * 2 + 2 and contig_length_bp > 0 and edge_gap <= thresholds.circular_edge_max_gap_bp
+
+    for d in range(1, window + 1):
+        for sgn in (-1, 1):
+            raw = pos + sgn * d
+            if 0 <= raw < n:
+                idx = raw
+            elif allow_circular:
+                idx = raw % n
+            else:
+                continue
+            if idx not in seen_idx:
+                seen_idx.add(idx)
+                neighbor_indices.append((idx, sgn * d))
+    return neighbor_indices
+
+
+def _score_anchor_syntax(
+    sorted_prots: Sequence[StructureProteinItem],
+    anchor: StructureProteinItem,
+    ti: int,
+    signed_step: int,
+    same_strand: bool,
+) -> Tuple[bool, float]:
+    n = len(sorted_prots)
+    dist = abs(signed_step)
+    expected_step = 1 if anchor.strand == "+" else -1
+    if anchor.structural_role == "TAP" and same_strand:
+        if signed_step == -expected_step:
+            return True, 8.2
+        if signed_step == -2 * expected_step:
+            mid = sorted_prots[(ti + expected_step) % n]
+            if mid.structural_role in {"OTHER", "TAP"} and mid.length_aa <= 220:
+                return True, 7.2
+        if dist <= 3:
+            return False, 4.8
+    elif anchor.structural_role in {"MTP", "TTP", "DIT", "TSP"}:
+        if dist <= 2:
+            return False, 4.4 if same_strand else 2.2
+        if dist <= 4:
+            return False, 2.8 if same_strand else 1.4
+    elif anchor.structural_role == "BASEPLATE_MYO" and dist <= 3:
+        return False, 3.0 if same_strand else 1.6
+    elif anchor.structural_role == "TAIL_OTHER" and same_strand and dist <= 3:
+        return False, 2.6
+    return False, 0.0
+
+
+def _is_head_sandwich_conflict(
+    sorted_prots: Sequence[StructureProteinItem],
+    neighbor_indices: Sequence[Tuple[int, int]],
+    tail_trunk_anchors: int,
+) -> bool:
+    if tail_trunk_anchors != 0:
+        return False
+    left_roles = [
+        sorted_prots[idx].structural_role
+        for idx, step in neighbor_indices
+        if step < 0 and abs(step) <= 3 and sorted_prots[idx].structural_role != "OTHER"
+    ]
+    right_roles = [
+        sorted_prots[idx].structural_role
+        for idx, step in neighbor_indices
+        if step > 0 and abs(step) <= 3 and sorted_prots[idx].structural_role != "OTHER"
+    ]
+    return (
+        any(r in _HEAD_OR_NON_LONGTAIL_ROLES for r in left_roles)
+        and any(r in _HEAD_OR_NON_LONGTAIL_ROLES for r in right_roles)
+    )
+
+
 def _inspect_operon_context(
     sorted_prots: Sequence[StructureProteinItem],
     pos: int,
@@ -473,28 +560,14 @@ def _inspect_operon_context(
     审计候选蛋白在基因组局部操作子 (±window ORF，兼容窄间距环状边界) 中的结构邻域：
     识别核心长尾干基因、基板蛋白、紧邻 TAP 直接下游信号、以及纯头部/非长尾包装模块三明治冲突。
     """
-    n = len(sorted_prots)
     cand = sorted_prots[pos]
-    neighbor_indices: List[Tuple[int, int]] = []  # (index, signed_step)
-    seen_idx = {pos}
-    for d in range(1, window + 1):
-        for sgn in (-1, 1):
-            raw = pos + sgn * d
-            if 0 <= raw < n:
-                idx = raw
-            elif n > window * 2 + 2 and contig_length_bp > 0:
-                idx = raw % n
-                # 只有当跨端点环绕真实基因间区较紧凑时才视作环状连续操纵子
-                edge_gap = (
-                    (sorted_prots[0].start - 1) + max(0, contig_length_bp - sorted_prots[-1].end)
-                )
-                if edge_gap > thresholds.circular_edge_max_gap_bp:
-                    continue
-            else:
-                continue
-            if idx not in seen_idx:
-                seen_idx.add(idx)
-                neighbor_indices.append((idx, sgn * d))
+    neighbor_indices = _collect_operon_neighbors(
+        sorted_prots,
+        pos,
+        contig_length_bp=contig_length_bp,
+        window=window,
+        thresholds=thresholds,
+    )
 
     tail_trunk_anchors = 0
     same_strand_tail_anchors = 0
@@ -508,63 +581,31 @@ def _inspect_operon_context(
 
     for ti, signed_step in neighbor_indices:
         anchor = sorted_prots[ti]
-        dist = abs(signed_step)
         same_strand = anchor.strand == cand.strand
-        expected_step = 1 if anchor.strand == "+" else -1
+        role = anchor.structural_role
 
-        if anchor.structural_role in _CORE_TAIL_TRUNK_ROLES:
+        if role in _CORE_TAIL_TRUNK_ROLES:
             tail_trunk_anchors += 1
             if same_strand:
                 same_strand_tail_anchors += 1
-        if anchor.structural_role == "BASEPLATE_MYO":
+        if role == "BASEPLATE_MYO":
             baseplate_anchors += 1
             if same_strand:
                 same_strand_tail_anchors += 1
-        if anchor.structural_role in {"TAIL_OTHER", "TAIL_FIBER_RBP"} and same_strand:
+        if role in {"TAIL_OTHER", "TAIL_FIBER_RBP"} and same_strand:
             same_strand_minor_tail_anchors += 1
         if anchor.ptf_is_tail and anchor.ptf_tail_prob >= thresholds.ptf_backbone_prob and anchor.length_aa >= thresholds.ptf_neighbor_min_aa:
             neighbor_ptf_anchors += 1
-        if anchor.structural_role in _HEAD_OR_NON_LONGTAIL_ROLES:
+        if role in _HEAD_OR_NON_LONGTAIL_ROLES:
             head_internal_anchors += 1
             if same_strand:
                 same_strand_head_anchors += 1
 
-        if anchor.structural_role == "TAP" and same_strand:
-            # signed_step = ti - pos：当 anchor 位于候选上游第1位时，signed_step == -expected_step
-            if signed_step == -expected_step:
-                immediate_tap_downstream = True
-                best_syntax_score = max(best_syntax_score, 8.2)
-            elif signed_step == -2 * expected_step:
-                mid = sorted_prots[(ti + expected_step) % n]
-                if mid.structural_role in {"OTHER", "TAP"} and mid.length_aa <= 220:
-                    immediate_tap_downstream = True
-                    best_syntax_score = max(best_syntax_score, 7.2)
-            elif dist <= 3:
-                best_syntax_score = max(best_syntax_score, 4.8)
-        elif anchor.structural_role in {"MTP", "TTP", "DIT", "TSP"}:
-            if dist <= 2:
-                best_syntax_score = max(best_syntax_score, 4.4 if same_strand else 2.2)
-            elif dist <= 4:
-                best_syntax_score = max(best_syntax_score, 2.8 if same_strand else 1.4)
-        elif anchor.structural_role == "BASEPLATE_MYO" and dist <= 3:
-            best_syntax_score = max(best_syntax_score, 3.0 if same_strand else 1.6)
-        elif anchor.structural_role == "TAIL_OTHER" and same_strand and dist <= 3:
-            best_syntax_score = max(best_syntax_score, 2.6)
-
-    # 检测两侧夹心冲突（如 MCP — [假TMP/通道蛋白] — PORTAL 且局部无任何长尾干核心）
-    left_roles = [
-        sorted_prots[idx].structural_role
-        for idx, step in neighbor_indices
-        if step < 0 and abs(step) <= 3 and sorted_prots[idx].structural_role != "OTHER"
-    ]
-    right_roles = [
-        sorted_prots[idx].structural_role
-        for idx, step in neighbor_indices
-        if step > 0 and abs(step) <= 3 and sorted_prots[idx].structural_role != "OTHER"
-    ]
-    has_left_head = any(r in _HEAD_OR_NON_LONGTAIL_ROLES for r in left_roles)
-    has_right_head = any(r in _HEAD_OR_NON_LONGTAIL_ROLES for r in right_roles)
-    immediate_head_sandwich = (has_left_head and has_right_head and tail_trunk_anchors == 0)
+        is_tap_down, syn_score = _score_anchor_syntax(sorted_prots, anchor, ti, signed_step, same_strand)
+        if is_tap_down:
+            immediate_tap_downstream = True
+        if syn_score > best_syntax_score:
+            best_syntax_score = syn_score
 
     return {
         "tail_trunk_anchors": tail_trunk_anchors,
@@ -574,7 +615,7 @@ def _inspect_operon_context(
         "neighbor_ptf_anchors": neighbor_ptf_anchors,
         "head_internal_anchors": head_internal_anchors,
         "same_strand_head_anchors": same_strand_head_anchors,
-        "immediate_head_sandwich": immediate_head_sandwich,
+        "immediate_head_sandwich": _is_head_sandwich_conflict(sorted_prots, neighbor_indices, tail_trunk_anchors),
         "immediate_tap_downstream": immediate_tap_downstream,
         "best_syntax_score": best_syntax_score,
         "ptf_support": neighbor_ptf_anchors >= 1,

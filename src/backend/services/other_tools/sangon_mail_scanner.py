@@ -161,7 +161,9 @@ class SangonMailIndex:
             ono = (order_no or "").strip()
             if not ono:
                 continue
-            prev = self._data["seen_orders"].get(ono) or {"order_no": ono, "first_seen": now_iso}
+            prev: Dict[str, Any] = dict(
+                self._data["seen_orders"].get(ono) or {"order_no": ono, "first_seen": now_iso}
+            )
             prev["cleaned"] = True
             prev["cleaned_at"] = now_iso
             prev["last_seen"] = now_iso
@@ -334,6 +336,230 @@ def _order_needs_download(order_path: Path) -> bool:
     return not (has_zip or has_raw)
 
 
+def _empty_scan_result(page_size: int) -> Dict[str, Any]:
+    return {
+        "page": 1,
+        "page_size": page_size,
+        "total": 0,
+        "total_pages": 1,
+        "raw_total": 0,
+        "unique_total": 0,
+        "dedup_removed": 0,
+        "skipped_known": 0,
+        "new_count": 0,
+        "created_count": 0,
+        "existing_count": 0,
+        "non_sequencing_count": 0,
+        "ignored_count": 0,
+        "scanned_count": 0,
+        "created_dirs": [],
+        "created_order_nos": [],
+        "mails": [],
+    }
+
+
+def _fetch_sangon_headers(
+    conn: Any,
+    fetcher: MailFetcher,
+    seq_ids: List[bytes],
+    batch: int,
+) -> List[Dict[str, Any]]:
+    headers_by_seq: List[Dict[str, Any]] = []
+    for rng in MailFetcher._chunk_ranges(seq_ids, batch):
+        htyp, msg_data = conn.fetch(
+            rng.decode("ascii"), "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"
+        )
+        if htyp != "OK" or not msg_data:
+            continue
+        for seq, head in fetcher._iter_messages(msg_data):
+            sender = _parse_address(_decode_header(head.get("From")))
+            if not _is_sangon_sender(sender):
+                continue
+            subj = _decode_header(head.get("Subject"))
+            date_str = _to_str(head.get("Date"))
+            message_id = _to_str(head.get("Message-ID")).strip()
+            m_order = _ORDER_NO_RE.search(subj)
+            order_no = m_order.group(1) if m_order else ""
+            headers_by_seq.append(
+                {
+                    "seq": seq,
+                    "sender": sender,
+                    "subject": subj,
+                    "date": date_str,
+                    "date_prefix": _extract_date_prefix(date_str),
+                    "message_id": message_id,
+                    "order_no": order_no,
+                    "duplicate_count": 1,
+                }
+            )
+    headers_by_seq.sort(key=lambda x: x["seq"], reverse=True)
+    return headers_by_seq
+
+
+def _dedup_sangon_headers(
+    headers_by_seq: List[Dict[str, Any]],
+    dedup: bool,
+) -> tuple[List[Dict[str, Any]], int]:
+    if not dedup:
+        return headers_by_seq, 0
+    buckets: Dict[str, Dict[str, Any]] = {}
+    ordered_items: List[Dict[str, Any]] = []
+    dedup_removed = 0
+    for item in headers_by_seq:
+        if item["order_no"]:
+            key = f"order:{item['order_no']}"
+        elif item["message_id"]:
+            key = f"mid:{item['message_id']}"
+        else:
+            key = f"subj:{item['subject']}|{item['date_prefix']}"
+
+        if key in buckets:
+            buckets[key]["duplicate_count"] += 1
+            dedup_removed += 1
+            continue
+        buckets[key] = item
+        ordered_items.append(item)
+    return ordered_items, dedup_removed
+
+
+def _classify_sangon_items(
+    root_dir: Path,
+    ordered_items: List[Dict[str, Any]],
+    existing_map: Dict[str, str],
+    index: SangonMailIndex,
+    resolved_ignored: set[str],
+    *,
+    auto_create: bool,
+    ignore_history: bool,
+    ignore_keywords: Optional[Iterable[str]],
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    stats: Dict[str, Any] = {
+        "created_dirs": [],
+        "created_order_nos": [],
+        "skipped_known": 0,
+        "existing_count": 0,
+        "non_sequencing_count": 0,
+        "ignored_count": 0,
+        "created_count": 0,
+        "new_count": 0,
+    }
+    processed_items: List[Dict[str, Any]] = []
+
+    for item in ordered_items:
+        order_no = item["order_no"]
+        message_id = item["message_id"]
+        date_prefix = item["date_prefix"]
+        is_seq_mail = _is_sequencing_notice_subject(item["subject"], ignore_keywords=ignore_keywords)
+        dir_name = existing_map.get(order_no) or (f"{date_prefix}_{order_no}" if (order_no and is_seq_mail) else "")
+        in_disk = bool(order_no and order_no in existing_map)
+        is_ignored = bool(order_no and normalize_order_key(order_no) in resolved_ignored)
+        in_history = (not ignore_history) and index.is_known(order_no, message_id)
+
+        if not is_seq_mail:
+            dir_ready, dedup_status = False, "non_sequencing"
+            stats["non_sequencing_count"] += 1
+        elif is_ignored:
+            dir_ready, dedup_status = in_disk, "ignored"
+            stats["ignored_count"] += 1
+        elif in_disk:
+            dir_ready, dedup_status = True, "existing"
+            stats["existing_count"] += 1
+            if order_no:
+                index.record(
+                    order_no=order_no,
+                    message_id=message_id,
+                    dir_name=dir_name,
+                    subject=item["subject"],
+                    date_text=item["date"],
+                    cleaned=False,
+                )
+        elif in_history:
+            dir_ready, dedup_status = False, "history_skipped"
+            stats["skipped_known"] += 1
+        elif auto_create and order_no and root_dir.exists():
+            create_sangon_subdirs(root_dir / dir_name)
+            existing_map[order_no] = dir_name
+            stats["created_dirs"].append(dir_name)
+            stats["created_order_nos"].append(order_no)
+            dir_ready, dedup_status = True, "created"
+            stats["created_count"] += 1
+            stats["new_count"] += 1
+            index.record(
+                order_no=order_no,
+                message_id=message_id,
+                dir_name=dir_name,
+                subject=item["subject"],
+                date_text=item["date"],
+                cleaned=False,
+                created=True,
+            )
+        else:
+            dir_ready, dedup_status = False, "new"
+            stats["new_count"] += 1
+
+        processed_items.append(
+            {
+                "seq": item["seq"],
+                "message_id": message_id,
+                "subject": item["subject"],
+                "date": item["date"],
+                "order_no": order_no,
+                "dir_name": dir_name,
+                "is_sequencing": is_seq_mail,
+                "ignored": is_ignored,
+                "legacy_dir_exists": in_disk if not is_seq_mail else False,
+                "cx_order_id": "",
+                "download_url": "",
+                "dir_ready": dir_ready,
+                "dedup_status": dedup_status,
+                "duplicate_count": item["duplicate_count"],
+            }
+        )
+    return processed_items, stats
+
+
+def _enrich_page_mail_bodies(
+    conn: Any,
+    fetcher: MailFetcher,
+    page_items: List[Dict[str, Any]],
+    root_dir: Path,
+    index: SangonMailIndex,
+) -> None:
+    for item in page_items:
+        if item["dedup_status"] in ("non_sequencing", "ignored"):
+            continue
+        cached = index.get_order(item["order_no"]) if item["order_no"] else {}
+        if cached.get("download_url"):
+            item["cx_order_id"] = cached.get("cx_order_id", "")
+            item["download_url"] = cached.get("download_url", "")
+            continue
+        needs_body = (not item["order_no"]) or (
+            bool(item["dir_name"]) and _order_needs_download(root_dir / item["dir_name"])
+        )
+        if not needs_body:
+            continue
+        full = fetcher._fetch_full(conn, item["seq"])
+        if full is None:
+            continue
+        details = _extract_body_details(full)
+        item["cx_order_id"] = details["cx_order_id"]
+        item["download_url"] = details["download_url"]
+        if not item["order_no"] and details["body_order_no"]:
+            item["order_no"] = details["body_order_no"]
+            item["dir_name"] = f"{_extract_date_prefix(item['date'])}_{item['order_no']}"
+        if item["order_no"] and (item["dir_ready"] or item["dedup_status"] in ("existing", "created")):
+            index.record(
+                order_no=item["order_no"],
+                message_id=item["message_id"],
+                dir_name=item["dir_name"],
+                subject=item["subject"],
+                date_text=item["date"],
+                cx_order_id=item["cx_order_id"],
+                download_url=item["download_url"],
+                cleaned=False,
+            )
+
+
 def scan_sangon_mails(
     root_dir: Path,
     cfg: Any,
@@ -377,89 +603,15 @@ def scan_sangon_mails(
 
         seq_ids = data[0].split() if (data and data[0]) else []
         if not seq_ids:
-            return {
-                "page": 1,
-                "page_size": page_size,
-                "total": 0,
-                "total_pages": 1,
-                "raw_total": 0,
-                "unique_total": 0,
-                "dedup_removed": 0,
-                "skipped_known": 0,
-                "new_count": 0,
-                "created_count": 0,
-                "existing_count": 0,
-                "non_sequencing_count": 0,
-                "ignored_count": 0,
-                "scanned_count": 0,
-                "created_dirs": [],
-                "created_order_nos": [],
-                "mails": [],
-            }
+            return _empty_scan_result(page_size)
 
-        # 阶段 1：分批抓轻量头部（含 MESSAGE-ID）
-        headers_by_seq: List[Dict[str, Any]] = []
-        batch = getattr(cfg, "batch_size", 200)
-        for rng in MailFetcher._chunk_ranges(seq_ids, batch):
-            htyp, msg_data = conn.fetch(
-                rng.decode("ascii"), "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE MESSAGE-ID)])"
-            )
-            if htyp != "OK" or not msg_data:
-                continue
-            for seq, head in fetcher._iter_messages(msg_data):
-                sender = _parse_address(_decode_header(head.get("From")))
-                if not _is_sangon_sender(sender):
-                    continue
-                subj = _decode_header(head.get("Subject"))
-                date_str = _to_str(head.get("Date"))
-                message_id = _to_str(head.get("Message-ID")).strip()
-                m_order = _ORDER_NO_RE.search(subj)
-                order_no = m_order.group(1) if m_order else ""
-                date_prefix = _extract_date_prefix(date_str)
-                headers_by_seq.append(
-                    {
-                        "seq": seq,
-                        "sender": sender,
-                        "subject": subj,
-                        "date": date_str,
-                        "date_prefix": date_prefix,
-                        "message_id": message_id,
-                        "order_no": order_no,
-                        "duplicate_count": 1,
-                    }
-                )
-
-        # 按序号倒序（最新邮件优先保留）
-        headers_by_seq.sort(key=lambda x: x["seq"], reverse=True)
+        headers_by_seq = _fetch_sangon_headers(conn, fetcher, seq_ids, getattr(cfg, "batch_size", 200))
         raw_total = len(headers_by_seq)
-
-        # 批内去重（按订单号 -> Message-ID -> 主题+日期归并）
-        dedup_removed = 0
-        if dedup:
-            buckets: Dict[str, Dict[str, Any]] = {}
-            ordered_items: List[Dict[str, Any]] = []
-            for item in headers_by_seq:
-                if item["order_no"]:
-                    key = f"order:{item['order_no']}"
-                elif item["message_id"]:
-                    key = f"mid:{item['message_id']}"
-                else:
-                    key = f"subj:{item['subject']}|{item['date_prefix']}"
-
-                if key in buckets:
-                    buckets[key]["duplicate_count"] += 1
-                    dedup_removed += 1
-                    continue
-                buckets[key] = item
-                ordered_items.append(item)
-        else:
-            ordered_items = headers_by_seq
+        ordered_items, dedup_removed = _dedup_sangon_headers(headers_by_seq, dedup)
 
         existing_map = _scan_existing_orders(root_dir)
         index = SangonMailIndex(root_dir)
         index.load()
-
-        # 把当前已存在的目录写入索引基线，确保后续清理能记为 cleaned
         for exist_no, exist_dir in existing_map.items():
             if not index.is_known(exist_no, ""):
                 index.record(
@@ -471,143 +623,29 @@ def scan_sangon_mails(
                     cleaned=False,
                 )
 
-        created_dirs: List[str] = []
-        created_order_nos: List[str] = []
-        skipped_known = 0
-        existing_count = 0
-        non_sequencing_count = 0
-        ignored_count = 0
-        created_count = 0
-        new_count = 0
-        processed_items: List[Dict[str, Any]] = []
+        processed_items, stats = _classify_sangon_items(
+            root_dir,
+            ordered_items,
+            existing_map,
+            index,
+            resolved_ignored,
+            auto_create=auto_create,
+            ignore_history=ignore_history,
+            ignore_keywords=ignore_keywords,
+        )
 
-        for item in ordered_items:
-            order_no = item["order_no"]
-            message_id = item["message_id"]
-            date_prefix = item["date_prefix"]
-            is_seq_mail = _is_sequencing_notice_subject(item["subject"], ignore_keywords=ignore_keywords)
-            dir_name = existing_map.get(order_no) or (f"{date_prefix}_{order_no}" if (order_no and is_seq_mail) else "")
-
-            in_disk = bool(order_no and order_no in existing_map)
-            is_ignored = bool(order_no and normalize_order_key(order_no) in resolved_ignored)
-            in_history = (not ignore_history) and index.is_known(order_no, message_id)
-
-            if not is_seq_mail:
-                dir_ready = False
-                dedup_status = "non_sequencing"
-                non_sequencing_count += 1
-            elif is_ignored:
-                dir_ready = in_disk
-                dedup_status = "ignored"
-                ignored_count += 1
-            elif in_disk:
-                dir_ready = True
-                dedup_status = "existing"
-                existing_count += 1
-                if order_no:
-                    index.record(
-                        order_no=order_no,
-                        message_id=message_id,
-                        dir_name=dir_name,
-                        subject=item["subject"],
-                        date_text=item["date"],
-                        cleaned=False,
-                    )
-            elif in_history:
-                dir_ready = False
-                dedup_status = "history_skipped"
-                skipped_known += 1
-            elif auto_create and order_no and root_dir.exists():
-                order_path = root_dir / dir_name
-                create_sangon_subdirs(order_path)
-                existing_map[order_no] = dir_name
-                created_dirs.append(dir_name)
-                created_order_nos.append(order_no)
-                dir_ready = True
-                dedup_status = "created"
-                created_count += 1
-                new_count += 1
-                index.record(
-                    order_no=order_no,
-                    message_id=message_id,
-                    dir_name=dir_name,
-                    subject=item["subject"],
-                    date_text=item["date"],
-                    cleaned=False,
-                    created=True,
-                )
-            else:
-                dir_ready = False
-                dedup_status = "new"
-                new_count += 1
-
-            item_view = {
-                "seq": item["seq"],
-                "message_id": message_id,
-                "subject": item["subject"],
-                "date": item["date"],
-                "order_no": order_no,
-                "dir_name": dir_name,
-                "is_sequencing": is_seq_mail,
-                "ignored": is_ignored,
-                "legacy_dir_exists": in_disk if not is_seq_mail else False,
-                "cx_order_id": "",
-                "download_url": "",
-                "dir_ready": dir_ready,
-                "dedup_status": dedup_status,
-                "duplicate_count": item["duplicate_count"],
-            }
-            processed_items.append(item_view)
-
-        # 过滤仅看新增邮件
-        if only_new:
-            filtered_items = [
-                it for it in processed_items if it["dedup_status"] in ("new", "created")
-            ]
-        else:
-            filtered_items = processed_items
-
+        filtered_items = (
+            [it for it in processed_items if it["dedup_status"] in ("new", "created")]
+            if only_new
+            else processed_items
+        )
         total = len(filtered_items)
         total_pages = max(1, (total + page_size - 1) // page_size)
         current_page = min(page, total_pages)
         start = (current_page - 1) * page_size
         page_items = filtered_items[start : start + page_size]
 
-        # 阶段 2：仅对当前页中需要下载链接的邮件拉取全文（优先复用索引缓存）
-        for item in page_items:
-            if item["dedup_status"] in ("non_sequencing", "ignored"):
-                continue
-            cached = index.get_order(item["order_no"]) if item["order_no"] else {}
-            if cached.get("download_url"):
-                item["cx_order_id"] = cached.get("cx_order_id", "")
-                item["download_url"] = cached.get("download_url", "")
-                continue
-            needs_body = (not item["order_no"]) or (
-                bool(item["dir_name"]) and _order_needs_download(root_dir / item["dir_name"])
-            )
-            if not needs_body:
-                continue
-            full = fetcher._fetch_full(conn, item["seq"])
-            if full is None:
-                continue
-            details = _extract_body_details(full)
-            item["cx_order_id"] = details["cx_order_id"]
-            item["download_url"] = details["download_url"]
-            if not item["order_no"] and details["body_order_no"]:
-                item["order_no"] = details["body_order_no"]
-                item["dir_name"] = f"{_extract_date_prefix(item['date'])}_{item['order_no']}"
-            if item["order_no"] and (item["dir_ready"] or item["dedup_status"] in ("existing", "created")):
-                index.record(
-                    order_no=item["order_no"],
-                    message_id=item["message_id"],
-                    dir_name=item["dir_name"],
-                    subject=item["subject"],
-                    date_text=item["date"],
-                    cx_order_id=item["cx_order_id"],
-                    download_url=item["download_url"],
-                    cleaned=False,
-                )
-
+        _enrich_page_mail_bodies(conn, fetcher, page_items, root_dir, index)
         index.save()
 
         return {
@@ -618,15 +656,15 @@ def scan_sangon_mails(
             "raw_total": raw_total,
             "unique_total": len(ordered_items),
             "dedup_removed": dedup_removed,
-            "skipped_known": skipped_known,
-            "new_count": new_count,
-            "created_count": created_count,
-            "existing_count": existing_count,
-            "non_sequencing_count": non_sequencing_count,
-            "ignored_count": ignored_count,
+            "skipped_known": stats["skipped_known"],
+            "new_count": stats["new_count"],
+            "created_count": stats["created_count"],
+            "existing_count": stats["existing_count"],
+            "non_sequencing_count": stats["non_sequencing_count"],
+            "ignored_count": stats["ignored_count"],
             "scanned_count": raw_total,
-            "created_dirs": created_dirs,
-            "created_order_nos": created_order_nos,
+            "created_dirs": stats["created_dirs"],
+            "created_order_nos": stats["created_order_nos"],
             "mails": page_items,
         }
     finally:

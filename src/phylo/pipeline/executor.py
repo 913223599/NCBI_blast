@@ -436,6 +436,275 @@ class PhyloJobExecutor:
         self._run_job_worker(job_id, records, handle)
         return self.store.get_job(job_id) or record
 
+    def _execute_genome_track(
+        self,
+        *,
+        record: PhyloJobRecord,
+        job_dir: Path,
+        cache: StageCache,
+        prof: Any,
+        codec: IdCodec,
+        sanitized_fasta: Path,
+        raw_nwk_path: Path,
+        dist_npy_path: Path,
+        dist_csv_path: Path,
+        ids_json_path: Path,
+        handle: _ActiveJobHandle,
+        cancel_ev: threading.Event,
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+    ) -> None:
+        cfg = record.config
+        t_mash = time.time()
+        stage_fn("mash", "running", 35, "运行 Mash 全基因组 MinHash 距离计算...")
+        mash_cache_key = cache.make_key(
+            prof.content_hash,
+            "mash",
+            {"kmer": cfg.mash_kmer, "sketch": cfg.mash_sketch},
+        )
+        hit_cache = cfg.use_cache and cache.restore_files(
+            "mash",
+            mash_cache_key,
+            {
+                "distance_matrix.npy": dist_npy_path,
+                "distance_matrix.csv": dist_csv_path,
+                "distance_ids.json": ids_json_path,
+            },
+        )
+        import numpy as np
+
+        if hit_cache:
+            ids = json.loads(ids_json_path.read_text(encoding="utf-8"))
+            dist_mat = np.load(str(dist_npy_path))
+            log_fn(f"[Cache Hit] 命中 Mash 全基因组距离矩阵缓存 ({mash_cache_key})")
+            stage_fn("mash", "cached", 65, "命中 Mash 距离矩阵缓存", cached=True, elapsed=time.time() - t_mash, artifact=str(dist_csv_path))
+        else:
+            mash_engine = MashDistanceEngine(cancel_event=cancel_ev, on_log=log_fn)
+            self._set_active_runner(handle, mash_engine)
+            ids, dist_mat = mash_engine.compute_distance_matrix(
+                sanitized_fasta=sanitized_fasta,
+                work_dir=job_dir,
+                kmer=cfg.mash_kmer,
+                sketch_size=cfg.mash_sketch,
+                threads=cfg.threads,
+            )
+            self._set_active_runner(handle, None)
+            MashDistanceEngine.save_matrix_artifacts(
+                ids=ids,
+                matrix=dist_mat,
+                id_map=codec.short_to_orig,
+                npy_path=dist_npy_path,
+                csv_path=dist_csv_path,
+                ids_json_path=ids_json_path,
+            )
+            if cfg.use_cache:
+                cache.store_files(
+                    "mash",
+                    mash_cache_key,
+                    {
+                        "distance_matrix.npy": dist_npy_path,
+                        "distance_matrix.csv": dist_csv_path,
+                        "distance_ids.json": ids_json_path,
+                    },
+                )
+            stage_fn("mash", "completed", 65, "Mash 距离矩阵计算完成", elapsed=time.time() - t_mash, artifact=str(dist_csv_path))
+
+        record.artifacts["distance_csv"] = str(dist_csv_path)
+        t_tree = time.time()
+        tree_method = "nj" if cfg.engine == "nj" else "bionj"
+        stage_fn("tree", "running", 75, f"基于 Mash 距离矩阵构建 {tree_method.upper()} 树...")
+        nj_engine = NJBioNJEngine(cancel_event=cancel_ev, on_log=log_fn)
+        nj_engine.build_from_matrix(ids, dist_mat, raw_nwk_path, method=tree_method, use_gpu=cfg.use_gpu)
+        stage_fn("tree", "completed", 88, f"{tree_method.upper()} 构树完成", elapsed=time.time() - t_tree, artifact=str(raw_nwk_path))
+
+    def _run_msa_and_trim_stage(
+        self,
+        *,
+        record: PhyloJobRecord,
+        job_dir: Path,
+        cache: StageCache,
+        prof: Any,
+        sanitized_fasta: Path,
+        handle: _ActiveJobHandle,
+        cancel_ev: threading.Event,
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+    ) -> Path:
+        cfg = record.config
+        t_msa = time.time()
+        msa_fasta = job_dir / "aligned.fasta"
+        stage_fn("msa", "running", 30, f"执行 {cfg.msa.upper()} 多序列比对...")
+
+        if cfg.msa == "none":
+            aligner = MultiSequenceAligner(cancel_event=cancel_ev, on_log=log_fn)
+            aligner.align(sanitized_fasta, msa_fasta, tool="none", threads=cfg.threads, max_seq_len=prof.max_length)
+            stage_fn("msa", "skipped", 50, "输入已对齐，跳过比对阶段", elapsed=time.time() - t_msa, artifact=str(msa_fasta))
+        else:
+            msa_key = cache.make_key(prof.content_hash, f"msa_{cfg.msa}", {"strategy": cfg.msa_strategy})
+            if cfg.use_cache and cache.restore_files("msa", msa_key, {"aligned.fasta": msa_fasta}):
+                log_fn(f"[Cache Hit] 命中 {cfg.msa.upper()} 多序列比对缓存 ({msa_key})")
+                stage_fn("msa", "cached", 50, f"命中 {cfg.msa.upper()} 比对缓存", cached=True, elapsed=time.time() - t_msa, artifact=str(msa_fasta))
+            else:
+                aligner = MultiSequenceAligner(cancel_event=cancel_ev, on_log=log_fn)
+                self._set_active_runner(handle, aligner)
+                aligner.align(
+                    sanitized_fasta,
+                    msa_fasta,
+                    tool=cfg.msa,
+                    strategy=cfg.msa_strategy,
+                    threads=cfg.threads,
+                    max_seq_len=prof.max_length,
+                )
+                self._set_active_runner(handle, None)
+                if cfg.use_cache:
+                    cache.store_files("msa", msa_key, {"aligned.fasta": msa_fasta})
+                stage_fn("msa", "completed", 50, f"{cfg.msa.upper()} 比对完成", elapsed=time.time() - t_msa, artifact=str(msa_fasta))
+
+        record.artifacts["aligned_fasta"] = str(msa_fasta)
+        use_trim = (cfg.trim_mode != "none") or (
+            cfg.trim_gap_threshold is not None and cfg.trim_gap_threshold < 1.0
+        )
+        if not use_trim:
+            return msa_fasta
+
+        t_trim = time.time()
+        eff_trim_mode = cfg.trim_mode if cfg.trim_mode != "none" else "gap"
+        stage_fn("trim", "running", 58, f"执行位点修剪 ({eff_trim_mode})...")
+        trimmed_fasta = job_dir / "aligned_trimmed.fasta"
+        _, trim_stats = AlignmentTrimmer.trim_with_mode(
+            msa_fasta,
+            trimmed_fasta,
+            mode=eff_trim_mode,
+            max_gap_ratio=cfg.trim_gap_threshold or 0.5,
+            cancel_event=cancel_ev,
+            on_log=log_fn,
+        )
+        log_fn(f"[Trimmer] ({trim_stats.get('tool')}) 保留列 {trim_stats['kept_cols']}/{trim_stats['original_cols']}")
+        stage_fn("trim", "completed", 64, f"位点修剪完成 ({trim_stats['kept_cols']} 列)", elapsed=time.time() - t_trim, artifact=str(trimmed_fasta))
+        return trimmed_fasta
+
+    def _run_tree_inference_stage(
+        self,
+        *,
+        record: PhyloJobRecord,
+        job_dir: Path,
+        prof: Any,
+        codec: IdCodec,
+        effective_msa: Path,
+        raw_nwk_path: Path,
+        dist_npy_path: Path,
+        dist_csv_path: Path,
+        handle: _ActiveJobHandle,
+        cancel_ev: threading.Event,
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+    ) -> None:
+        cfg = record.config
+        t_tree = time.time()
+        stage_fn("tree", "running", 70, f"执行 {cfg.engine.upper()} 系统发育推断...")
+        if cfg.engine in ("nj", "bionj"):
+            nj_engine = NJBioNJEngine(cancel_event=cancel_ev, on_log=log_fn)
+            nj_engine.build_from_msa(
+                msa_fasta=effective_msa,
+                output_nwk=raw_nwk_path,
+                work_dir=job_dir,
+                mol_type=prof.mol_type,
+                model=cfg.model,
+                method=cfg.engine,
+                bootstrap=cfg.bootstrap,
+                threads=cfg.threads,
+                use_gpu=cfg.use_gpu,
+                dist_matrix_npy=dist_npy_path,
+                dist_matrix_csv=dist_csv_path,
+                id_map=codec.short_to_orig,
+            )
+            record.artifacts["distance_csv"] = str(dist_csv_path)
+        elif cfg.engine == "fasttree":
+            ft_engine = FastTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
+            self._set_active_runner(handle, ft_engine)
+            ft_engine.build(
+                msa_fasta=effective_msa,
+                output_nwk=raw_nwk_path,
+                mol_type=prof.mol_type,
+                model=cfg.model,
+                threads=cfg.threads,
+            )
+            self._set_active_runner(handle, None)
+        elif cfg.engine == "iqtree":
+            iq_engine = IQTreeEngine(cancel_event=cancel_ev, on_log=log_fn)
+            self._set_active_runner(handle, iq_engine)
+            iq_engine.build(
+                msa_fasta=effective_msa,
+                output_nwk=raw_nwk_path,
+                work_dir=job_dir,
+                mol_type=prof.mol_type,
+                model=cfg.model,
+                bootstrap=cfg.bootstrap,
+                threads=cfg.threads,
+                bnni=cfg.iqtree_bnni,
+                alrt=cfg.iqtree_alrt,
+                seed=cfg.iqtree_seed,
+            )
+            self._set_active_runner(handle, None)
+            if iq_engine.last_best_model:
+                record.artifacts["best_model"] = iq_engine.last_best_model
+            if iq_engine.last_best_model_bic is not None:
+                record.artifacts["best_model_bic"] = iq_engine.last_best_model_bic
+        elif cfg.engine == "mrbayes":
+            mb_engine = MrBayesEngine(cancel_event=cancel_ev, on_log=log_fn)
+            self._set_active_runner(handle, mb_engine)
+            mb_engine.build(
+                msa_fasta=effective_msa,
+                output_nwk=raw_nwk_path,
+                work_dir=job_dir,
+                mol_type=prof.mol_type,
+                ngen=cfg.mrbayes_ngen,
+            )
+            self._set_active_runner(handle, None)
+        else:
+            raise InvalidInputError(f"不支持的建树引擎: {cfg.engine}")
+
+        stage_fn("tree", "completed", 90, f"{cfg.engine.upper()} 建树完成", elapsed=time.time() - t_tree, artifact=str(raw_nwk_path))
+
+    def _finalize_standard_tree_job(
+        self,
+        *,
+        record: PhyloJobRecord,
+        job_id: str,
+        job_dir: Path,
+        codec: IdCodec,
+        raw_nwk_path: Path,
+        start_ts: float,
+        clear_eta_fn: Callable[[], None],
+        log_fn: Callable[[str], None],
+        stage_fn: Callable[..., None],
+    ) -> None:
+        t_post = time.time()
+        stage_fn("postprocess", "running", 95, "还原序列 ID 并计算拓扑质量指标...")
+        raw_nwk_text = raw_nwk_path.read_text(encoding="utf-8", errors="replace").strip()
+        restored_nwk = IdCodec.restore_newick(raw_nwk_text, codec.short_to_orig)
+        final_nwk = reroot_midpoint(restored_nwk) if record.config.midpoint_root else restored_nwk
+
+        final_nwk_path = job_dir / "final_tree.nwk"
+        final_nwk_path.write_text(final_nwk + "\n", encoding="utf-8")
+        metrics = compute_tree_metrics(
+            final_nwk,
+            best_model=record.artifacts.get("best_model"),
+            best_model_bic=record.artifacts.get("best_model_bic"),
+        )
+
+        record.newick = final_nwk
+        record.metrics = metrics
+        record.artifacts["final_nwk"] = str(final_nwk_path)
+        record.status = "completed"
+        record.finished_at = time.time()
+        record.elapsed_sec = round(record.finished_at - start_ts, 2)
+        clear_eta_fn()
+        stage_fn("postprocess", "completed", 100, "分析完成", elapsed=time.time() - t_post, artifact=str(final_nwk_path))
+
+        log_fn(f"任务完成，共 {metrics.leaf_count} 个叶节点，总耗时 {record.elapsed_sec:.2f}s")
+        self._emit("phylo_finished", {"job_id": job_id, "record": record.model_dump()})
+
     def _run_job_worker(
         self,
         job_id: str,
@@ -492,10 +761,7 @@ class PhyloJobExecutor:
                         record.eta_updated_at = snap.eta_updated_at
                         record.substage_label = snap.substage_label
                         record.rate_text = snap.rate_text
-                    next_has_eta = snap.eta_seconds is not None
-                    sub_changed = prev_sub != snap.substage_label
-                    eta_toggled = prev_has_eta != next_has_eta
-                    if sub_changed or eta_toggled or (now_ts - last_eta_emit_ts >= 0.8):
+                    if prev_sub != snap.substage_label or prev_has_eta != (snap.eta_seconds is not None) or (now_ts - last_eta_emit_ts >= 0.8):
                         last_eta_emit_ts = now_ts
                         emit_payload = {
                             "job_id": job_id,
@@ -553,7 +819,6 @@ class PhyloJobExecutor:
 
         try:
             cancel_ev = handle.cancel_event
-            cfg = record.config
             prof = record.profile or SequenceProfiler.profile_records(records)
 
             if record.resolved_track == "phage_taxonomy":
@@ -578,7 +843,6 @@ class PhyloJobExecutor:
                 self._emit("phylo_finished", {"job_id": job_id, "record": record.model_dump()})
                 return
 
-            # 1. 预处理与短 ID 编码
             t0 = time.time()
             _stage_update("preprocess", "running", 10, "执行序列质控与安全短 ID 编码...")
             sanitized_fasta = job_dir / "sanitized.fasta"
@@ -597,223 +861,61 @@ class PhyloJobExecutor:
             dist_csv_path = job_dir / "distance_matrix.csv"
             ids_json_path = job_dir / "distance_ids.json"
 
-            # 2A. Track A: 全基因组无对齐模式 (Mash + NJ/BioNJ)
             if record.resolved_track == "genome":
-                t_mash = time.time()
-                _stage_update("mash", "running", 35, "运行 Mash 全基因组 MinHash 距离计算...")
-                mash_cache_key = cache.make_key(
-                    prof.content_hash,
-                    "mash",
-                    {"kmer": cfg.mash_kmer, "sketch": cfg.mash_sketch},
+                self._execute_genome_track(
+                    record=record,
+                    job_dir=job_dir,
+                    cache=cache,
+                    prof=prof,
+                    codec=codec,
+                    sanitized_fasta=sanitized_fasta,
+                    raw_nwk_path=raw_nwk_path,
+                    dist_npy_path=dist_npy_path,
+                    dist_csv_path=dist_csv_path,
+                    ids_json_path=ids_json_path,
+                    handle=handle,
+                    cancel_ev=cancel_ev,
+                    log_fn=_log,
+                    stage_fn=_stage_update,
                 )
-                hit_cache = cfg.use_cache and cache.restore_files(
-                    "mash",
-                    mash_cache_key,
-                    {
-                        "distance_matrix.npy": dist_npy_path,
-                        "distance_matrix.csv": dist_csv_path,
-                        "distance_ids.json": ids_json_path,
-                    },
-                )
-                import numpy as np
-
-                if hit_cache:
-                    ids = json.loads(ids_json_path.read_text(encoding="utf-8"))
-                    dist_mat = np.load(str(dist_npy_path))
-                    _log(f"[Cache Hit] 命中 Mash 全基因组距离矩阵缓存 ({mash_cache_key})")
-                    _stage_update("mash", "cached", 65, "命中 Mash 距离矩阵缓存", cached=True, elapsed=time.time() - t_mash, artifact=str(dist_csv_path))
-                else:
-                    mash_engine = MashDistanceEngine(cancel_event=cancel_ev, on_log=_log)
-                    self._set_active_runner(handle, mash_engine)
-                    ids, dist_mat = mash_engine.compute_distance_matrix(
-                        sanitized_fasta=sanitized_fasta,
-                        work_dir=job_dir,
-                        kmer=cfg.mash_kmer,
-                        sketch_size=cfg.mash_sketch,
-                        threads=cfg.threads,
-                    )
-                    self._set_active_runner(handle, None)
-                    MashDistanceEngine.save_matrix_artifacts(
-                        ids=ids,
-                        matrix=dist_mat,
-                        id_map=codec.short_to_orig,
-                        npy_path=dist_npy_path,
-                        csv_path=dist_csv_path,
-                        ids_json_path=ids_json_path,
-                    )
-                    if cfg.use_cache:
-                        cache.store_files(
-                            "mash",
-                            mash_cache_key,
-                            {
-                                "distance_matrix.npy": dist_npy_path,
-                                "distance_matrix.csv": dist_csv_path,
-                                "distance_ids.json": ids_json_path,
-                            },
-                        )
-                    _stage_update("mash", "completed", 65, "Mash 距离矩阵计算完成", elapsed=time.time() - t_mash, artifact=str(dist_csv_path))
-
-                record.artifacts["distance_csv"] = str(dist_csv_path)
-
-                t_tree = time.time()
-                tree_method = "nj" if cfg.engine == "nj" else "bionj"
-                _stage_update("tree", "running", 75, f"基于 Mash 距离矩阵构建 {tree_method.upper()} 树...")
-                nj_engine = NJBioNJEngine(cancel_event=cancel_ev, on_log=_log)
-                nj_engine.build_from_matrix(ids, dist_mat, raw_nwk_path, method=tree_method, use_gpu=cfg.use_gpu)
-                _stage_update("tree", "completed", 88, f"{tree_method.upper()} 构树完成", elapsed=time.time() - t_tree, artifact=str(raw_nwk_path))
-
-            # 2B. Track B: 经典比对构树模式
             else:
-                t_msa = time.time()
-                msa_fasta = job_dir / "aligned.fasta"
-                _stage_update("msa", "running", 30, f"执行 {cfg.msa.upper()} 多序列比对...")
-
-                if cfg.msa == "none":
-                    aligner = MultiSequenceAligner(cancel_event=cancel_ev, on_log=_log)
-                    aligner.align(sanitized_fasta, msa_fasta, tool="none", threads=cfg.threads, max_seq_len=prof.max_length)
-                    _stage_update("msa", "skipped", 50, "输入已对齐，跳过比对阶段", elapsed=time.time() - t_msa, artifact=str(msa_fasta))
-                else:
-                    msa_key = cache.make_key(
-                        prof.content_hash,
-                        f"msa_{cfg.msa}",
-                        {"strategy": cfg.msa_strategy},
-                    )
-                    if cfg.use_cache and cache.restore_files("msa", msa_key, {"aligned.fasta": msa_fasta}):
-                        _log(f"[Cache Hit] 命中 {cfg.msa.upper()} 多序列比对缓存 ({msa_key})")
-                        _stage_update("msa", "cached", 50, f"命中 {cfg.msa.upper()} 比对缓存", cached=True, elapsed=time.time() - t_msa, artifact=str(msa_fasta))
-                    else:
-                        aligner = MultiSequenceAligner(cancel_event=cancel_ev, on_log=_log)
-                        self._set_active_runner(handle, aligner)
-                        aligner.align(
-                            sanitized_fasta,
-                            msa_fasta,
-                            tool=cfg.msa,
-                            strategy=cfg.msa_strategy,
-                            threads=cfg.threads,
-                            max_seq_len=prof.max_length,
-                        )
-                        self._set_active_runner(handle, None)
-                        if cfg.use_cache:
-                            cache.store_files("msa", msa_key, {"aligned.fasta": msa_fasta})
-                        _stage_update("msa", "completed", 50, f"{cfg.msa.upper()} 比对完成", elapsed=time.time() - t_msa, artifact=str(msa_fasta))
-
-                effective_msa = msa_fasta
-                record.artifacts["aligned_fasta"] = str(msa_fasta)
-
-                # 可选修剪（支持 ClipKIT KPIC 与 gap 比例）
-                use_trim = (cfg.trim_mode != "none") or (
-                    cfg.trim_gap_threshold is not None and cfg.trim_gap_threshold < 1.0
+                effective_msa = self._run_msa_and_trim_stage(
+                    record=record,
+                    job_dir=job_dir,
+                    cache=cache,
+                    prof=prof,
+                    sanitized_fasta=sanitized_fasta,
+                    handle=handle,
+                    cancel_ev=cancel_ev,
+                    log_fn=_log,
+                    stage_fn=_stage_update,
                 )
-                if use_trim:
-                    t_trim = time.time()
-                    eff_trim_mode = cfg.trim_mode if cfg.trim_mode != "none" else "gap"
-                    _stage_update("trim", "running", 58, f"执行位点修剪 ({eff_trim_mode})...")
-                    trimmed_fasta = job_dir / "aligned_trimmed.fasta"
-                    _, trim_stats = AlignmentTrimmer.trim_with_mode(
-                        msa_fasta,
-                        trimmed_fasta,
-                        mode=eff_trim_mode,
-                        max_gap_ratio=cfg.trim_gap_threshold or 0.5,
-                        cancel_event=cancel_ev,
-                        on_log=_log,
-                    )
-                    effective_msa = trimmed_fasta
-                    _log(f"[Trimmer] ({trim_stats.get('tool')}) 保留列 {trim_stats['kept_cols']}/{trim_stats['original_cols']}")
-                    _stage_update("trim", "completed", 64, f"位点修剪完成 ({trim_stats['kept_cols']} 列)", elapsed=time.time() - t_trim, artifact=str(trimmed_fasta))
+                self._run_tree_inference_stage(
+                    record=record,
+                    job_dir=job_dir,
+                    prof=prof,
+                    codec=codec,
+                    effective_msa=effective_msa,
+                    raw_nwk_path=raw_nwk_path,
+                    dist_npy_path=dist_npy_path,
+                    dist_csv_path=dist_csv_path,
+                    handle=handle,
+                    cancel_ev=cancel_ev,
+                    log_fn=_log,
+                    stage_fn=_stage_update,
+                )
 
-                # 建树引擎路由
-                t_tree = time.time()
-                _stage_update("tree", "running", 70, f"执行 {cfg.engine.upper()} 系统发育推断...")
-                if cfg.engine in ("nj", "bionj"):
-                    nj_engine = NJBioNJEngine(cancel_event=cancel_ev, on_log=_log)
-                    nj_engine.build_from_msa(
-                        msa_fasta=effective_msa,
-                        output_nwk=raw_nwk_path,
-                        work_dir=job_dir,
-                        mol_type=prof.mol_type,
-                        model=cfg.model,
-                        method=cfg.engine,
-                        bootstrap=cfg.bootstrap,
-                        threads=cfg.threads,
-                        use_gpu=cfg.use_gpu,
-                        dist_matrix_npy=dist_npy_path,
-                        dist_matrix_csv=dist_csv_path,
-                        id_map=codec.short_to_orig,
-                    )
-                    record.artifacts["distance_csv"] = str(dist_csv_path)
-                elif cfg.engine == "fasttree":
-                    ft_engine = FastTreeEngine(cancel_event=cancel_ev, on_log=_log)
-                    self._set_active_runner(handle, ft_engine)
-                    ft_engine.build(
-                        msa_fasta=effective_msa,
-                        output_nwk=raw_nwk_path,
-                        mol_type=prof.mol_type,
-                        model=cfg.model,
-                        threads=cfg.threads,
-                    )
-                    self._set_active_runner(handle, None)
-                elif cfg.engine == "iqtree":
-                    iq_engine = IQTreeEngine(cancel_event=cancel_ev, on_log=_log)
-                    self._set_active_runner(handle, iq_engine)
-                    iq_engine.build(
-                        msa_fasta=effective_msa,
-                        output_nwk=raw_nwk_path,
-                        work_dir=job_dir,
-                        mol_type=prof.mol_type,
-                        model=cfg.model,
-                        bootstrap=cfg.bootstrap,
-                        threads=cfg.threads,
-                        bnni=cfg.iqtree_bnni,
-                        alrt=cfg.iqtree_alrt,
-                        seed=cfg.iqtree_seed,
-                    )
-                    self._set_active_runner(handle, None)
-                    if iq_engine.last_best_model:
-                        record.artifacts["best_model"] = iq_engine.last_best_model
-                    if iq_engine.last_best_model_bic is not None:
-                        record.artifacts["best_model_bic"] = iq_engine.last_best_model_bic
-                elif cfg.engine == "mrbayes":
-                    mb_engine = MrBayesEngine(cancel_event=cancel_ev, on_log=_log)
-                    self._set_active_runner(handle, mb_engine)
-                    mb_engine.build(
-                        msa_fasta=effective_msa,
-                        output_nwk=raw_nwk_path,
-                        work_dir=job_dir,
-                        mol_type=prof.mol_type,
-                        ngen=cfg.mrbayes_ngen,
-                    )
-                    self._set_active_runner(handle, None)
-                else:
-                    raise InvalidInputError(f"不支持的建树引擎: {cfg.engine}")
-
-                _stage_update("tree", "completed", 90, f"{cfg.engine.upper()} 建树完成", elapsed=time.time() - t_tree, artifact=str(raw_nwk_path))
-
-            # 3. 后处理：ID 无损还原、可选中点定根与统计指标
-            t_post = time.time()
-            _stage_update("postprocess", "running", 95, "还原序列 ID 并计算拓扑质量指标...")
-            raw_nwk_text = raw_nwk_path.read_text(encoding="utf-8", errors="replace").strip()
-            restored_nwk = IdCodec.restore_newick(raw_nwk_text, codec.short_to_orig)
-            final_nwk = reroot_midpoint(restored_nwk) if cfg.midpoint_root else restored_nwk
-
-            final_nwk_path = job_dir / "final_tree.nwk"
-            final_nwk_path.write_text(final_nwk + "\n", encoding="utf-8")
-            metrics = compute_tree_metrics(
-                final_nwk,
-                best_model=record.artifacts.get("best_model"),
-                best_model_bic=record.artifacts.get("best_model_bic"),
+            self._finalize_standard_tree_job(
+                record=record,
+                job_id=job_id,
+                job_dir=job_dir,
+                codec=codec,
+                raw_nwk_path=raw_nwk_path,
+                start_ts=start_ts,
+                clear_eta_fn=_clear_eta_fields,
+                log_fn=_log,
+                stage_fn=_stage_update,
             )
-
-            record.newick = final_nwk
-            record.metrics = metrics
-            record.artifacts["final_nwk"] = str(final_nwk_path)
-            record.status = "completed"
-            record.finished_at = time.time()
-            record.elapsed_sec = round(record.finished_at - start_ts, 2)
-            _clear_eta_fields()
-            _stage_update("postprocess", "completed", 100, "分析完成", elapsed=time.time() - t_post, artifact=str(final_nwk_path))
-
-            _log(f"任务完成，共 {metrics.leaf_count} 个叶节点，总耗时 {record.elapsed_sec:.2f}s")
-            self._emit("phylo_finished", {"job_id": job_id, "record": record.model_dump()})
 
         except PhyloCancelledError as exc:
             record.status = "cancelled"

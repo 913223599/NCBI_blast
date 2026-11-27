@@ -57,272 +57,235 @@ class BiologyTranslator:
         self._translation_cache = {}
         self._lock = threading.Lock()  # 线程安全锁
 
+    def _translate_consensus_text(
+        self,
+        text: str,
+        category: str,
+        use_ai_override: Optional[bool],
+    ) -> Optional[str]:
+        import re
+
+        if '(' not in text or '%' not in text:
+            return None
+        matches = list(re.finditer(r'([^,()]+)\s*\(\s*(\d+)%\s*\)', text))
+        if not matches:
+            return None
+
+        translated_entries = []
+        fully_translated = True
+        for match in matches:
+            pure_name = match.group(1).strip()
+            try:
+                pct_val = int(match.group(2))
+            except Exception:
+                pct_val = 100
+            translated_name = self.translate_text(pure_name, category=category, use_ai_override=use_ai_override)
+            if translated_name == pure_name:
+                fully_translated = False
+            translated_entries.append((translated_name, pct_val))
+
+        merged_dict: dict[str, int] = {}
+        for name, pct in translated_entries:
+            merged_dict[name] = merged_dict.get(name, 0) + pct
+
+        sorted_merged = sorted(merged_dict.items(), key=lambda x: x[1], reverse=True)
+        if len(sorted_merged) == 1:
+            final_text = f"{sorted_merged[0][0]}(100%)"
+        else:
+            final_text = ", ".join(f"{name}({pct}%)" for name, pct in sorted_merged)
+
+        if final_text == text:
+            return None
+        if fully_translated:
+            with self._lock:
+                self._translation_cache[text] = final_text
+        return final_text
+
+    def _is_valid_taxonomy_term(self, text: str, category: str) -> bool:
+        if category not in ('species', 'genus'):
+            return True
+        try:
+            lineage = get_taxonomy_provider().get_lineage_details(text)
+            if not lineage:
+                logging.getLogger(__name__).warning(
+                    f"[Taxonomy Validation] 拉丁名 '{text}' 未在分类数据库中找到，跳过存入词库。"
+                )
+                return False
+        except Exception as exc:
+            logger.debug("物种校验查询失败，跳过该校验步骤 (%s): %s", text, exc)
+        return True
+
+    def _persist_ai_translation(self, source_text: str, translated_text: str, category: str, source_tag: str) -> None:
+        if not self.translation_data_manager:
+            return
+        if not self._is_valid_taxonomy_term(source_text, category):
+            return
+        self.translation_data_manager.add_translation(
+            source_text,
+            translated_text,
+            category=category or 'species',
+            source=source_tag,
+        )
+        try:
+            self.term_extractor.extract_and_store_key_terms(source_text, translated_text)
+        except Exception as exc:
+            logger.debug("术语提取与落库跳过异常 (%s): %s", source_text, exc)
+
+    def _lookup_local_translation(self, text: str, original_text: str, category: str) -> Optional[str]:
+        if not self.translation_data_manager:
+            return None
+        normalized_text = self.term_extractor.normalize_term(text)
+        candidates = [normalized_text, text] if normalized_text != text else [text]
+        for cand in candidates:
+            local_result = self.translation_data_manager.get_translation(cand, category=category)
+            if local_result and local_result != cand:
+                with self._lock:
+                    self._translation_cache[original_text] = str(local_result)
+                return str(local_result)
+        return None
+
     def translate_text(self, text: str, category: str = 'other', use_ai_override: Optional[bool] = None) -> str:
         """
         [SMART] 翻译整段文本 - 增加共识字符串拆解逻辑
         """
         if not text:
             return text
-        
-        # 0. 线程安全的快速缓存访问 (全匹配优先)
+
         with self._lock:
             if text in self._translation_cache:
                 return self._translation_cache[text]
-        
-        # 1. [核心优化] 识别并处理共识概率字符串 (例如: "Species A(90%), Species B(10%)" 或 "Species A(100%)")
-        import re
-        # 匹配模式: 文本(百分比%)
-        consensus_pattern = r'([^,()]+)\s*\(\s*(\d+)%\s*\)'
-        if '(' in text and '%' in text:
-            matches = list(re.finditer(consensus_pattern, text))
-            if matches:
-                # 这是一个共识字符串，逐个拆解翻译并合并同名中文物种
-                translated_entries = []
-                fully_translated = True
-                for match in matches:
-                    pure_name = match.group(1).strip()
-                    try:
-                        pct_val = int(match.group(2))
-                    except Exception:
-                        pct_val = 100
-                    
-                    # 翻译纯名称 (允许递归，但会被全匹配缓存拦截)
-                    translated_name = self.translate_text(pure_name, category=category, use_ai_override=use_ai_override)
-                    if translated_name == pure_name:
-                        fully_translated = False
-                    
-                    translated_entries.append((translated_name, pct_val))
-                
-                # 合并同名项（例如不同拉丁菌株均翻译成了同一中文物种名）
-                merged_dict = {}
-                for name, pct in translated_entries:
-                    merged_dict[name] = merged_dict.get(name, 0) + pct
-                
-                # 重新按百分比降序排序
-                sorted_merged = sorted(merged_dict.items(), key=lambda x: x[1], reverse=True)
-                
-                if len(sorted_merged) == 1:
-                    final_text = f"{sorted_merged[0][0]}(100%)"
-                else:
-                    final_text = ", ".join([f"{name}({pct}%)" for name, pct in sorted_merged])
-                
-                if final_text != text:
-                    if fully_translated:
-                        with self._lock:
-                            self._translation_cache[text] = final_text
-                    return final_text
 
-        # 使用覆盖配置或默认配置
+        consensus_res = self._translate_consensus_text(text, category, use_ai_override)
+        if consensus_res is not None:
+            return consensus_res
+
+        local_hit = self._lookup_local_translation(text, text, category)
+        if local_hit is not None:
+            return local_hit
+
         active_use_ai = use_ai_override if use_ai_override is not None else self.use_ai
-        
-        original_text = text
-        
-        # 1. 对输入文本进行规范化
-        normalized_text = self.term_extractor.normalize_term(text)
-        
-        # 2. 如果文本被规范化了，先尝试从数据库中查找规范化后的版本
-        if normalized_text != text and self.translation_data_manager:
-            # 传递 category 以优化查询
-            local_result = self.translation_data_manager.get_translation(normalized_text, category=category)
-            if local_result and local_result != normalized_text:
-                result = f"{local_result}"
-                with self._lock:
-                    self._translation_cache[original_text] = result
-                return result
-        
-        # 3. 尝试本地数据库匹配原始文本
-        if self.translation_data_manager:
-            local_result = self.translation_data_manager.get_translation(text, category=category)
-            if local_result and local_result != text:
-                result = f"{local_result}"
-                with self._lock:
-                    self._translation_cache[original_text] = result
-                return result
-
-        # 4. 尝试 AI 翻译 (如果启用且可用)
         if active_use_ai:
             if not self.ai_translator:
-                # 如果明确要求了 AI 翻译，但未配置，给予提示
                 if use_ai_override:
-                    import logging
                     logging.getLogger(__name__).warning("请求了 AI 翻译，但尚未配置有效 API Key。")
             else:
                 try:
-                    import logging
-                    log = logging.getLogger(__name__)
-                    log.info(f"[AI] 正在调用模型 '{self.ai_model}' 翻译: {text}")
-                    
+                    logging.getLogger(__name__).info(f"[AI] 正在调用模型 '{self.ai_model}' 翻译: {text}")
                     ai_result = self.ai_translator.translate_text(text)
                     if ai_result and ai_result != text:
-                        # 恢复并加强自动保存机制：AI 翻译成功后应记录，下次可从本地库秒级返回
-                        if self.translation_data_manager:
-                            # [VALIDATION] 如果分类目录为物种或属，强制从离线分类数据库校验其拉丁名合法性
-                            is_valid = True
-                            if category in ('species', 'genus'):
-                                try:
-                                    tax_provider = get_taxonomy_provider()
-                                    lineage = tax_provider.get_lineage_details(text)
-                                    if not lineage:
-                                        import logging
-                                        logging.getLogger(__name__).warning(f"[Taxonomy Validation] 拉丁名 '{text}' 未在分类数据库中找到，跳过存入词库。")
-                                        is_valid = False
-                                except Exception as exc:
-                                    logger.debug("物种校验查询失败，跳过该校验步骤 (%s): %s", text, exc)
-                            
-                            if is_valid:
-                                # 1. 使用专用的保存方法，标记来源为 AI
-                                self.translation_data_manager.add_translation(
-                                    text, 
-                                    ai_result, 
-                                    category=category if category else 'species', 
-                                    source="ai"
-                                )
-                                # 2. 调用术语提取深度学习分析（如有）
-                                try:
-                                    self.term_extractor.extract_and_store_key_terms(text, ai_result)
-                                except Exception as exc:
-                                    logger.debug("物种校验查询失败，跳过该校验步骤 (%s): %s", text, exc)
-                        
-                        # 移除原先带有的 [AI] 前缀，保证界面的清洁度和词库的标准性
-                        result = ai_result
+                        self._persist_ai_translation(text, ai_result, category, "ai")
                         with self._lock:
-                            self._translation_cache[original_text] = result
-                        return result
+                            self._translation_cache[text] = ai_result
+                        return ai_result
                 except Exception as e:
-                    import logging
                     logging.getLogger(__name__).error(f"[AITranslator] AI翻译异常: {e}")
-                    # AI 失败降级为原文，无需特殊处理，继续向下执行
 
-        # 5. 默认返回原文
-        # 注意：如果是只查询本地 (use_ai_override == False)，不要把英文原文存入缓存，
-        # 否则后续真正的 AI 后台线程调用时，会在第 0 步直接命中这个原文缓存，导致 AI 彻底失效！
-        # 修改：为了防止 AI 调用失败（欠费/网络异常）后把原文存入缓存导致假死，移除这里的自动原文缓存逻辑。
-        return original_text
+        return text
 
-    def translate_batch(self, texts: list, category: str = 'species', on_result_ready=None) -> dict:
-        """
-        [OPTIMIZED] 整合批量翻译：本地库优先 + AI 批量补偿 (修复复合文本AI乱翻译问题)
-        """
-        import re
-        # 匹配模式: 文本(百分比%)
-        consensus_pattern = r'([^,()]+)\s*\(\s*\d+%\s*\)'
-        
-        pure_components = set()
-        
-        # 1. 扁平化：解析出所有的子结构，收集所有需要翻译的最基础词汇
-        for text in texts:
-            if not text:
-                continue
-            
-            if ',' in text and '(' in text and '%' in text:
-                matches = list(re.finditer(consensus_pattern, text))
-                if matches:
-                    for match in matches:
-                        pure_name = match.group(1).strip()
-                        pure_components.add(pure_name)
-                else:
-                    pure_components.add(text)
-            else:
-                pure_components.add(text)
-                    
-        # 2. 差集计算：对收集到的基础词汇检查本地缓存，选出未命中的移交 AI，同时对已命中的纯词条即时通知
-        to_ai_set = set()
-        for pure_text in pure_components:
-            clean_text = pure_text.strip()
-            # 基础词本身不再分割，如果在本地没找到直接返回原文说明必须走AI
-            part_res = self.translate_text(clean_text, category=category, use_ai_override=False)
-            if part_res == clean_text:
-                to_ai_set.add(clean_text)
-            else:
-                # 本地命中的纯原子词条，直接触发即时通知
-                if on_result_ready:
-                    on_result_ready(clean_text, part_res)
-
-        # 2.5 优化：立刻挑选出不需要 AI 即可完成翻译的文本，并尽早返回
-        results = {}
-        pending_texts = []
-        for text in texts:
-            if not text:
-                continue
-            
-            needs_ai = False
-            if ',' in text and '(' in text and '%' in text:
-                matches = list(re.finditer(consensus_pattern, text))
-                if matches:
-                    for match in matches:
-                        if match.group(1).strip() in to_ai_set:
-                            needs_ai = True
-                            break
-                elif text in to_ai_set:
-                    needs_ai = True
-            elif text in to_ai_set:
-                needs_ai = True
-                
-            if not needs_ai:
-                # 纯本地即可完成
-                res = self.translate_text(text, category=category, use_ai_override=False)
-                results[text] = res
-                if on_result_ready:
-                    on_result_ready(text, res)
-            else:
-                pending_texts.append(text)
-
-        # 3. 对未命中的最细粒度纯词条进行 AI 批量翻译
-        to_ai_list = list(to_ai_set)
-        if to_ai_list and self.use_ai and self.ai_translator:
-            try:
-                CHUNK_SIZE = 30
-                ai_results = []
-                
-                for i in range(0, len(to_ai_list), CHUNK_SIZE):
-                    chunk = to_ai_list[i:i + CHUNK_SIZE]
-                    chunk_res = self.ai_translator.batch_translate(chunk)
-                    ai_results.extend(chunk_res)
-                    
-                for i, pure_text in enumerate(to_ai_list):
-                    if i < len(ai_results):
-                        ai_res = ai_results[i]
-                        # 自动存入本地库，以便下一阶段重新组装时可以直接命中
-                        if ai_res and ai_res != pure_text:
-                            with self._lock:
-                                self._translation_cache[pure_text] = ai_res
-                            
-                            # AI 翻译成功的纯词条，即刻触发通知
-                            if on_result_ready:
-                                on_result_ready(pure_text, ai_res)
-
-                            if self.translation_data_manager:
-                                is_valid = True
-                                if category in ('species', 'genus'):
-                                    try:
-                                        tax_provider = get_taxonomy_provider()
-                                        lineage = tax_provider.get_lineage_details(pure_text)
-                                        if not lineage:
-                                            is_valid = False
-                                    except Exception as exc:
-                                        logger.debug("批量翻译物种校验查询失败 (%s): %s", pure_text, exc)
-                                
-                                if is_valid:
-                                    self.translation_data_manager.add_translation(
-                                        pure_text, ai_res, category=category, source="ai_batch"
-                                    )
-                                    try:
-                                        self.term_extractor.extract_and_store_key_terms(pure_text, ai_res)
-                                    except Exception as exc:
-                                        logger.debug("批量翻译物种校验查询失败 (%s): %s", pure_text, exc)
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).error(f"Biology Batch AI Error: {e}")
-
-        # 4. 再一次完成全量组装
-        for text in pending_texts:
-            res = self.translate_text(text, category=category, use_ai_override=False)
-            results[text] = res
-            if on_result_ready:
-                on_result_ready(text, res)
-
-        return results
-
+    @staticmethod
+    def _extract_batch_components(texts: list) -> set[str]:
+        import re
+
+        consensus_pattern = r'([^,()]+)\s*\(\s*(\d+)%\s*\)'
+        pure_components: set[str] = set()
+        for text in texts:
+            if not text:
+                continue
+            if "," in text and "(" in text and "%" in text:
+                matches = list(re.finditer(consensus_pattern, text))
+                if matches:
+                    for match in matches:
+                        pure_components.add(match.group(1).strip())
+                    continue
+            pure_components.add(text)
+        return pure_components
+
+    def _partition_batch_texts(
+        self,
+        texts: list,
+        to_ai_set: set[str],
+        category: str,
+        on_result_ready,
+    ) -> tuple[dict, list]:
+        import re
+
+        consensus_pattern = r'([^,()]+)\s*\(\s*(\d+)%\s*\)'
+        results: dict = {}
+        pending_texts: list = []
+        for text in texts:
+            if not text:
+                continue
+            needs_ai = False
+            if "," in text and "(" in text and "%" in text:
+                matches = list(re.finditer(consensus_pattern, text))
+                if matches:
+                    needs_ai = any(m.group(1).strip() in to_ai_set for m in matches)
+                elif text in to_ai_set:
+                    needs_ai = True
+            elif text in to_ai_set:
+                needs_ai = True
+
+            if not needs_ai:
+                res = self.translate_text(text, category=category, use_ai_override=False)
+                results[text] = res
+                if on_result_ready:
+                    on_result_ready(text, res)
+            else:
+                pending_texts.append(text)
+        return results, pending_texts
+
+    def _run_ai_batch_translation(
+        self,
+        to_ai_list: list[str],
+        category: str,
+        on_result_ready,
+    ) -> None:
+        if not (to_ai_list and self.use_ai and self.ai_translator):
+            return
+        try:
+            chunk_size = 30
+            ai_results = []
+            for i in range(0, len(to_ai_list), chunk_size):
+                ai_results.extend(self.ai_translator.batch_translate(to_ai_list[i : i + chunk_size]))
+
+            for i, pure_text in enumerate(to_ai_list):
+                if i >= len(ai_results):
+                    break
+                ai_res = ai_results[i]
+                if not ai_res or ai_res == pure_text:
+                    continue
+                with self._lock:
+                    self._translation_cache[pure_text] = ai_res
+                if on_result_ready:
+                    on_result_ready(pure_text, ai_res)
+                self._persist_ai_translation(pure_text, ai_res, category, "ai_batch")
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Biology Batch AI Error: {e}")
+
+    def translate_batch(self, texts: list, category: str = "species", on_result_ready=None) -> dict:
+        """
+        [OPTIMIZED] 整合批量翻译：本地库优先 + AI 批量补偿 (修复复合文本AI乱翻译问题)
+        """
+        pure_components = self._extract_batch_components(texts)
+        to_ai_set: set[str] = set()
+        for pure_text in pure_components:
+            clean_text = pure_text.strip()
+            part_res = self.translate_text(clean_text, category=category, use_ai_override=False)
+            if part_res == clean_text:
+                to_ai_set.add(clean_text)
+            elif on_result_ready:
+                on_result_ready(clean_text, part_res)
+
+        results, pending_texts = self._partition_batch_texts(texts, to_ai_set, category, on_result_ready)
+        self._run_ai_batch_translation(list(to_ai_set), category, on_result_ready)
+
+        for text in pending_texts:
+            res = self.translate_text(text, category=category, use_ai_override=False)
+            results[text] = res
+            if on_result_ready:
+                on_result_ready(text, res)
+        return results
+
     def search_translations(self, query: str, limit: int = 50) -> list:
         """透传搜索请求"""
         if self.translation_data_manager:

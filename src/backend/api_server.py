@@ -132,22 +132,21 @@ def install_process_runtime_hooks() -> None:
 # ─── 资源监控 (已模块化抽离至 src/utils/system_monitor.py) ──
 from ..utils.system_monitor import log_resources  # noqa: E402, F401
 
-# ─── 4. 生命周期管理 ────────────────────────────────────
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """应用启动与清理钩子"""
-    install_uvicorn_access_filter()
-    silence_noisy_third_party_loggers()
-    logger.info("Bio-Station API 启动中...")
-    
-    # A. 预热翻译词库 (Sqlite 缓存)
+def _spawn_managed_bg_task(bg_tasks: set[asyncio.Task], coro, label: str) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    bg_tasks.add(task)
+    task.add_done_callback(bg_tasks.discard)
+    logger.debug(f"[INIT] 已托管后台任务: {label}")
+    return task
+
+
+def _start_core_engines_and_queues(app: FastAPI, bg_tasks: set[asyncio.Task]) -> None:
     try:
         from ..utils.translation.translation_data_manager import get_translation_data_manager
         get_translation_data_manager().preload()
     except Exception as exc:
         logger.warning(f"翻译库加载警告: {exc}")
 
-    # B. 强制启动 BLAST 引擎 (防止冷启动导致的鉴定任务无响应)
     try:
         from ..blast.manager import get_blast_manager
         mgr = get_blast_manager()
@@ -156,57 +155,33 @@ async def lifespan(app: FastAPI):
     except Exception as eb:
         logger.error(f"BLAST 引擎启动失败: {eb}")
 
-    # 托管后台异步任务引用，防止被 GC 静默回收并在退出时优雅取消
-    bg_tasks: set[asyncio.Task] = set()
-
-    def _spawn_bg_task(coro, label: str):
-        task = asyncio.create_task(coro)
-        bg_tasks.add(task)
-        task.add_done_callback(bg_tasks.discard)
-        logger.debug(f"[INIT] 已托管后台任务: {label}")
-        return task
-
-    app.state.bg_tasks = bg_tasks
-
-    # B2. 初始化组装任务队列工作线程 (持久化串行队列)
     from .routes.assembly import execute_assembly_pipeline
     from .utils.persistent_queue import persistent_queue
-    _spawn_bg_task(persistent_queue.start_workers(execute_assembly_pipeline), "assembly_queue")
+    _spawn_managed_bg_task(bg_tasks, persistent_queue.start_workers(execute_assembly_pipeline), "assembly_queue")
     logger.info("Assembly 持久化串行队列引擎已启动 (max_workers=1)")
 
-    # B3. 初始化功能注释任务队列调度工作者
-    try:
-        from src.analysis.annotation.manager import get_annotation_manager
-        _spawn_bg_task(get_annotation_manager().initialize_queue_worker(), "annotation_queue")
-        logger.info("[INIT] Annotation 持久化任务队列引擎已启动 (max_workers=1)")
-    except Exception as ea:
-        logger.error(f"Annotation 队列引擎启动失败: {ea}")
+    queue_registrations = (
+        ("src.analysis.annotation.manager", "get_annotation_manager", "annotation_queue", "Annotation 持久化任务队列引擎已启动 (max_workers=1)"),
+        ("src.analysis.phage_finder.manager", "get_phage_discovery_manager", "phage_discovery_queue", "PhageDiscovery (V4.2) 队列引擎已启动 (max_workers=1)"),
+        ("src.analysis.phage_structure.manager", "get_phage_structure_manager", "phage_structure_queue", "PhageStructure 结构预测队列引擎已启动 (max_workers=1)"),
+    )
+    for mod_path, getter_name, task_label, ready_msg in queue_registrations:
+        try:
+            mod = __import__(mod_path, fromlist=[getter_name])
+            _spawn_managed_bg_task(bg_tasks, getattr(mod, getter_name)().initialize_queue_worker(), task_label)
+            logger.info(f"[INIT] {ready_msg}")
+        except Exception as exc:
+            logger.error(f"{task_label} 队列引擎启动失败: {exc}")
 
-    # B4. 初始化前噬菌体发现 (V4.2) 队列调度工作者
-    try:
-        from src.analysis.phage_finder.manager import get_phage_discovery_manager
-        _spawn_bg_task(get_phage_discovery_manager().initialize_queue_worker(), "phage_discovery_queue")
-        logger.info("[INIT] PhageDiscovery (V4.2) 队列引擎已启动 (max_workers=1)")
-    except Exception as ep:
-        logger.error(f"PhageDiscovery 队列引擎启动失败: {ep}")
 
-    # B5. 初始化噬菌体结构与尾部形态预测队列调度工作者
-    try:
-        from src.analysis.phage_structure.manager import get_phage_structure_manager
-        _spawn_bg_task(get_phage_structure_manager().initialize_queue_worker(), "phage_structure_queue")
-        logger.info("[INIT] PhageStructure 结构预测队列引擎已启动 (max_workers=1)")
-    except Exception as eps:
-        logger.error(f"PhageStructure 队列引擎启动失败: {eps}")
-
-    # D. 打印局域网共享地址与初始化 WSL 环境
+def _init_lan_and_wsl(app: FastAPI) -> None:
     try:
         from .lan_share import LanShareManager
         from ..utils.config_manager import get_config_manager
         lan_mgr = LanShareManager(app)
         if get_config_manager().get_config_value("lan_share", False):
             lan_mgr.print_share_info(port=8765)
-            
-        # 核心增强：预热 WSL 软链接 (解决 Windows 目录带空格导致的分析失败)
+
         from src.assembly.env.wsl_manager import WSLManager
         if WSLManager.is_available():
             WSLManager.ensure_project_link()
@@ -214,7 +189,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"WSL/局域网共享初始化失败: {e}")
 
-    # E. 无头浏览器配置启动检查与非阻塞自修复
+
+def _init_headless_browser_on_startup(bg_tasks: set[asyncio.Task]) -> None:
     try:
         from starlette.concurrency import run_in_threadpool
         from src.utils.headless_browser_manager import (
@@ -241,11 +217,9 @@ async def lifespan(app: FastAPI):
                 hb_state.get("expected_version") or hb_state.get("playwright_version") or "-",
             )
         elif hb_state.get("enabled", True):
-            logger.warning(
-                "[HeadlessBrowser] 检测到无头浏览器未就绪，已调度后台非阻塞自修复..."
-            )
+            logger.warning("[HeadlessBrowser] 检测到无头浏览器未就绪，已调度后台非阻塞自修复...")
 
-            async def _bg_heal_browser():
+            async def _bg_heal_browser() -> None:
                 try:
                     rep = await run_in_threadpool(
                         repair_headless_browser,
@@ -255,10 +229,7 @@ async def lifespan(app: FastAPI):
                         probe_launch=True,
                     )
                     if rep.get("ready"):
-                        logger.info(
-                            "[HeadlessBrowser] 后台自修复完成 (模式: %s)",
-                            rep.get("mode"),
-                        )
+                        logger.info("[HeadlessBrowser] 后台自修复完成 (模式: %s)", rep.get("mode"))
                     else:
                         logger.warning(
                             "[HeadlessBrowser] 后台自修复未完全就绪: %s",
@@ -268,13 +239,12 @@ async def lifespan(app: FastAPI):
                 except Exception as exc_bg:
                     logger.error(f"[HeadlessBrowser] 后台自修复异常: {exc_bg}")
 
-            _spawn_bg_task(_bg_heal_browser(), "headless_browser_heal")
+            _spawn_managed_bg_task(bg_tasks, _bg_heal_browser(), "headless_browser_heal")
     except Exception as hb_exc:
         logger.warning(f"[HeadlessBrowser] 启动检查异常（不影响主服务启动）: {hb_exc}")
 
-    yield
 
-    # 取消仍在运行的后台协程，防止进程挂起
+async def _shutdown_runtime_services(bg_tasks: set[asyncio.Task]) -> None:
     for task in list(bg_tasks):
         if not task.done():
             task.cancel()
@@ -282,15 +252,13 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*bg_tasks, return_exceptions=True)
         bg_tasks.clear()
 
-    # C. 退出清理
     try:
         from ..utils.translation.translation_data_manager import get_translation_data_manager
         get_translation_data_manager().prepare_shutdown()
         logger.info("资源已安全回收")
     except Exception as e:
         logger.warning(f"翻译库关闭失败: {e}")
-    
-    # D. 清理数据库连接池
+
     try:
         from .strain_db import get_strain_db_manager
         get_strain_db_manager().cleanup()
@@ -298,7 +266,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"StrainDB 清理失败: {e}")
 
-    # E. 清理 WSL 运行环境 (释放内存与后台进程)
     try:
         from ..assembly.env.wsl_manager import WSLManager
         if WSLManager.is_available():
@@ -306,6 +273,26 @@ async def lifespan(app: FastAPI):
             WSLManager.shutdown_distro()
     except Exception as e:
         logger.warning(f"WSL 关闭失败: {e}")
+
+
+# ─── 4. 生命周期管理 ────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用启动与清理钩子"""
+    install_uvicorn_access_filter()
+    silence_noisy_third_party_loggers()
+    logger.info("Bio-Station API 启动中...")
+
+    bg_tasks: set[asyncio.Task] = set()
+    app.state.bg_tasks = bg_tasks
+
+    _start_core_engines_and_queues(app, bg_tasks)
+    _init_lan_and_wsl(app)
+    _init_headless_browser_on_startup(bg_tasks)
+
+    yield
+
+    await _shutdown_runtime_services(bg_tasks)
 
 def _on_blast_result(task_id: str, data: dict):
     """处理 BLAST 实时任务结果的回调钩子"""

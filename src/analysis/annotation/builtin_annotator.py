@@ -308,6 +308,188 @@ class BuiltinAnnotator:
             on_progress=on_progress
         )
 
+    @staticmethod
+    def _build_cds_seq_feature(feat: FeatureItem) -> SeqFeature:
+        strand_val = 1 if feat.strand == "+" else -1
+        cds_feat = SeqFeature(
+            FeatureLocation(ExactPosition(feat.start - 1), ExactPosition(feat.end), strand=strand_val),
+            type=feat.feature_type,
+            qualifiers={
+                "locus_tag": [feat.locus_tag],
+                "protein_id": [feat.protein_id or f"{feat.locus_tag}_prot"],
+                "product": [feat.product],
+                "translation": [feat.translation] if feat.translation else [],
+            },
+        )
+        optional_fields = (
+            ("gene", feat.gene_name),
+            ("category", feat.category),
+            ("phrog", str(feat.phrog) if feat.phrog else None),
+            ("function", str(feat.function) if feat.function else None),
+            ("score", str(feat.score) if feat.score else None),
+            ("inference", str(feat.inference) if feat.inference else None),
+            ("transl_table", str(feat.transl_table) if feat.transl_table else None),
+            ("EC_number", feat.ec_number),
+            ("note", feat.notes),
+        )
+        for q_key, q_val in optional_fields:
+            if q_val:
+                cds_feat.qualifiers[q_key] = [q_val]
+
+        if feat.extra_qualifiers:
+            reserved = {"translation", "product", "locus_tag", "protein_id"}
+            for eq_k, eq_v in feat.extra_qualifiers.items():
+                if eq_k not in cds_feat.qualifiers and eq_k not in reserved:
+                    cds_feat.qualifiers[eq_k] = (
+                        [str(x) for x in eq_v] if isinstance(eq_v, list) else [str(eq_v)]
+                    )
+        return cds_feat
+
+    def _build_gbk_records(
+        self,
+        records: List[SeqRecord],
+        all_features: List[FeatureItem],
+        first_contig_id: str,
+    ) -> List[SeqRecord]:
+        features_by_contig: Dict[str, List[FeatureItem]] = {
+            (r.id if r.id else f"Contig_{idx}"): [] for idx, r in enumerate(records)
+        }
+        for feat in all_features:
+            c_id = feat.contig_id if feat.contig_id else first_contig_id
+            features_by_contig.setdefault(c_id, []).append(feat)
+
+        gbk_records: List[SeqRecord] = []
+        for record in records:
+            contig_id = record.id or "Contig"
+            seq_str = str(record.seq) if record.seq is not None else ""
+            rec_id = contig_id[:16] if contig_id else "Contig"
+
+            gbk_rec = SeqRecord(
+                Seq(seq_str),
+                id=rec_id,
+                name=rec_id,
+                description=f"{contig_id} annotated by NCBI Blast Workbench",
+                annotations={"molecule_type": "DNA", "data_file_division": "BCT"},
+            )
+            gbk_rec.features.append(
+                SeqFeature(
+                    FeatureLocation(ExactPosition(0), ExactPosition(len(seq_str))),
+                    type="source",
+                    qualifiers={"organism": "Unspecified Organism", "mol_type": "genomic DNA"},
+                )
+            )
+            for feat in features_by_contig.get(contig_id, []):
+                gbk_rec.features.append(self._build_cds_seq_feature(feat))
+            gbk_records.append(gbk_rec)
+        return gbk_records
+
+    @staticmethod
+    def _write_gff3_file(
+        gff_file: Path,
+        all_features: List[FeatureItem],
+        first_contig_id: str,
+    ) -> None:
+        with open(gff_file, "w", encoding="utf-8") as f:
+            f.write("##gff-version 3\n")
+            for feat in all_features:
+                c_name = feat.contig_id or first_contig_id
+                src = feat.source_engine or "Workbench"
+                attrs = [
+                    f"ID={feat.id}",
+                    f"locus_tag={feat.locus_tag}",
+                    f"product={feat.product}",
+                ]
+                for attr_k, attr_v in (
+                    ("gene", feat.gene_name),
+                    ("EC_number", feat.ec_number),
+                    ("category", feat.category),
+                    ("phrog", feat.phrog),
+                    ("function", feat.function),
+                    ("note", feat.notes),
+                ):
+                    if attr_v:
+                        attrs.append(f"{attr_k}={attr_v}")
+                attr_str = ";".join(attrs)
+                f.write(
+                    f"{c_name}\t{src}\t{feat.feature_type}\t{feat.start}\t{feat.end}\t.\t{feat.strand}\t0\t{attr_str}\n"
+                )
+
+    @staticmethod
+    def _write_fasta_and_tsv_files(
+        records: List[SeqRecord],
+        all_features: List[FeatureItem],
+        faa_file: Path,
+        ffn_file: Path,
+        tsv_file: Path,
+        first_contig_id: str,
+    ) -> None:
+        with open(faa_file, "w", encoding="utf-8") as f:
+            for feat in all_features:
+                if feat.translation:
+                    f.write(
+                        f">{feat.locus_tag} {feat.product} "
+                        f"[len={feat.protein_length_aa}aa, MW={feat.molecular_weight_kda}kDa, "
+                        f"engine={feat.source_engine or 'Auto'}]\n{feat.translation}\n"
+                    )
+
+        record_seq_map = {r.id: str(r.seq) for r in records if r.seq is not None}
+        default_seq = str(records[0].seq) if (records and records[0].seq is not None) else ""
+        with open(ffn_file, "w", encoding="utf-8") as f:
+            for feat in all_features:
+                nuc_seq = feat.nucleotide_seq
+                if not nuc_seq:
+                    parent_seq = record_seq_map.get(feat.contig_id or "", default_seq)
+                    if parent_seq and feat.start > 0 and feat.end <= len(parent_seq) and feat.start <= feat.end:
+                        extracted = parent_seq[feat.start - 1 : feat.end]
+                        nuc_seq = str(Seq(extracted).reverse_complement()) if feat.strand == "-" else extracted
+                        feat.nucleotide_seq = nuc_seq
+                if nuc_seq:
+                    f.write(
+                        f">{feat.locus_tag} {feat.product} "
+                        f"[location={feat.start}..{feat.end}({feat.strand})]\n{nuc_seq}\n"
+                    )
+
+        with open(tsv_file, "w", encoding="utf-8") as f:
+            f.write(
+                "Locus_Tag\tContig\tType\tStart\tEnd\tStrand\tLength_bp\tLength_aa\tMW_kDa\tGene\tProduct\tCategory\tEngine\tEC_Number\tEvidence\n"
+            )
+            for feat in all_features:
+                c_name = feat.contig_id or first_contig_id
+                f.write(
+                    f"{feat.locus_tag}\t{c_name}\t{feat.feature_type}\t{feat.start}\t{feat.end}\t{feat.strand}\t"
+                    f"{feat.length_bp}\t{feat.protein_length_aa or 0}\t{feat.molecular_weight_kda or 0.0}\t"
+                    f"{feat.gene_name or ''}\t{feat.product}\t{feat.category or ''}\t"
+                    f"{feat.source_engine or ''}\t{feat.ec_number or ''}\t{feat.notes or ''}\n"
+                )
+
+    def _build_export_summary(
+        self,
+        records: List[SeqRecord],
+        all_features: List[FeatureItem],
+        total_length: int,
+        num_contigs: int,
+    ) -> AnnotationSummary:
+        full_all_seq = "".join(str(r.seq) for r in records if r.seq is not None)
+        gc_val = self.calculate_gc(full_all_seq)
+        cds_cnt = sum(1 for f in all_features if f.feature_type == "CDS")
+        total_coding_bp = sum(f.length_bp for f in all_features if f.feature_type == "CDS")
+        density = round((total_coding_bp / max(1, total_length)) * 100.0, 2) if total_length > 0 else 0.0
+        avg_len = round(total_coding_bp / max(1, cds_cnt), 1) if cds_cnt > 0 else 0.0
+        return AnnotationSummary(
+            total_length=total_length,
+            num_contigs=num_contigs,
+            gc_content=gc_val,
+            cds_count=cds_cnt,
+            trna_count=sum(1 for f in all_features if f.feature_type == "tRNA"),
+            rrna_count=sum(1 for f in all_features if f.feature_type == "rRNA"),
+            tmrna_count=sum(1 for f in all_features if f.feature_type == "tmRNA"),
+            crispr_count=sum(1 for f in all_features if f.feature_type == "CRISPR"),
+            other_count=len(all_features) - cds_cnt,
+            total_features=len(all_features),
+            coding_density_pct=density,
+            avg_gene_length=avg_len,
+        )
+
     def export_features_to_files(
         self,
         records: List[SeqRecord],
@@ -324,83 +506,9 @@ class BuiltinAnnotator:
 
         total_length = sum(len(r.seq) for r in records if r.seq is not None)
         num_contigs = len(records)
-
-        # 1. 组装按 Contig 分组的 GenBank SeqRecord 结构
         first_contig_id = records[0].id if (records and records[0].id) else "Contig"
+        gbk_records = self._build_gbk_records(records, all_features, first_contig_id)
 
-        # 分组映射
-        features_by_contig: Dict[str, List[FeatureItem]] = {
-            (r.id if r.id else f"Contig_{idx}"): [] for idx, r in enumerate(records)
-        }
-        for feat in all_features:
-            c_id = feat.contig_id if feat.contig_id else first_contig_id
-            if c_id not in features_by_contig:
-                features_by_contig[c_id] = []
-            features_by_contig[c_id].append(feat)
-
-        gbk_records: List[SeqRecord] = []
-
-        for record in records:
-            contig_id = record.id or "Contig"
-            seq_str = str(record.seq) if record.seq is not None else ""
-            rec_id = contig_id[:16] if contig_id else "Contig"
-
-            gbk_rec = SeqRecord(
-                Seq(seq_str),
-                id=rec_id,
-                name=rec_id,
-                description=f"{contig_id} annotated by NCBI Blast Workbench",
-                annotations={"molecule_type": "DNA", "data_file_division": "BCT"}
-            )
-
-            source_feat = SeqFeature(
-                FeatureLocation(ExactPosition(0), ExactPosition(len(seq_str))),
-                type="source",
-                qualifiers={"organism": "Unspecified Organism", "mol_type": "genomic DNA"}
-            )
-            gbk_rec.features.append(source_feat)
-
-            contig_feats = features_by_contig.get(contig_id, [])
-            for feat in contig_feats:
-                strand_val = 1 if feat.strand == "+" else -1
-                cds_feat = SeqFeature(
-                    FeatureLocation(ExactPosition(feat.start - 1), ExactPosition(feat.end), strand=strand_val),
-                    type=feat.feature_type,
-                    qualifiers={
-                        "locus_tag": [feat.locus_tag],
-                        "protein_id": [feat.protein_id or f"{feat.locus_tag}_prot"],
-                        "product": [feat.product],
-                        "translation": [feat.translation] if feat.translation else []
-                    }
-                )
-                if feat.gene_name:
-                    cds_feat.qualifiers["gene"] = [feat.gene_name]
-                if feat.category:
-                    cds_feat.qualifiers["category"] = [feat.category]
-                if feat.phrog:
-                    cds_feat.qualifiers["phrog"] = [str(feat.phrog)]
-                if feat.function:
-                    cds_feat.qualifiers["function"] = [str(feat.function)]
-                if feat.score:
-                    cds_feat.qualifiers["score"] = [str(feat.score)]
-                if feat.inference:
-                    cds_feat.qualifiers["inference"] = [str(feat.inference)]
-                if feat.transl_table:
-                    cds_feat.qualifiers["transl_table"] = [str(feat.transl_table)]
-                if feat.ec_number:
-                    cds_feat.qualifiers["EC_number"] = [feat.ec_number]
-                if feat.extra_qualifiers:
-                    for eq_k, eq_v in feat.extra_qualifiers.items():
-                        if eq_k not in cds_feat.qualifiers and eq_k not in ["translation", "product", "locus_tag", "protein_id"]:
-                            cds_feat.qualifiers[eq_k] = [str(x) for x in eq_v] if isinstance(eq_v, list) else [str(eq_v)]
-                if feat.notes:
-                    cds_feat.qualifiers["note"] = [feat.notes]
-
-                gbk_rec.features.append(cds_feat)
-
-            gbk_records.append(gbk_rec)
-
-        # 文件路径定义
         gbk_file = output_dir / f"{self.prefix}.gbk"
         gff_file = output_dir / f"{self.prefix}.gff"
         faa_file = output_dir / f"{self.prefix}.faa"
@@ -408,97 +516,13 @@ class BuiltinAnnotator:
         tsv_file = output_dir / f"{self.prefix}.tsv"
         summary_file = output_dir / "summary.json"
 
-        # 1. 保存 GenBank
         with open(gbk_file, "w", encoding="utf-8") as f:
             SeqIO.write(gbk_records, f, "genbank")
 
-        # 2. 保存 GFF3
-        with open(gff_file, "w", encoding="utf-8") as f:
-            f.write("##gff-version 3\n")
-            for feat in all_features:
-                c_name = feat.contig_id or first_contig_id
-                src = feat.source_engine or "Workbench"
-                attrs = [
-                    f"ID={feat.id}",
-                    f"locus_tag={feat.locus_tag}",
-                    f"product={feat.product}"
-                ]
-                if feat.gene_name:
-                    attrs.append(f"gene={feat.gene_name}")
-                if feat.ec_number:
-                    attrs.append(f"EC_number={feat.ec_number}")
-                if feat.category:
-                    attrs.append(f"category={feat.category}")
-                if feat.phrog:
-                    attrs.append(f"phrog={feat.phrog}")
-                if feat.function:
-                    attrs.append(f"function={feat.function}")
-                if feat.notes:
-                    attrs.append(f"note={feat.notes}")
-                attr_str = ";".join(attrs)
-                f.write(f"{c_name}\t{src}\t{feat.feature_type}\t{feat.start}\t{feat.end}\t.\t{feat.strand}\t0\t{attr_str}\n")
+        self._write_gff3_file(gff_file, all_features, first_contig_id)
+        self._write_fasta_and_tsv_files(records, all_features, faa_file, ffn_file, tsv_file, first_contig_id)
 
-        # 3. 保存蛋白质 FASTA (.faa)
-        with open(faa_file, "w", encoding="utf-8") as f:
-            for feat in all_features:
-                if feat.translation:
-                    f.write(f">{feat.locus_tag} {feat.product} [len={feat.protein_length_aa}aa, MW={feat.molecular_weight_kda}kDa, engine={feat.source_engine or 'Auto'}]\n{feat.translation}\n")
-
-        # 4. 保存核酸基因 FASTA (.ffn)
-        record_seq_map = {r.id: str(r.seq) for r in records if r.seq is not None}
-        default_seq = str(records[0].seq) if (records and records[0].seq is not None) else ""
-        
-        with open(ffn_file, "w", encoding="utf-8") as f:
-            for feat in all_features:
-                nuc_seq = feat.nucleotide_seq
-                if not nuc_seq:
-                    parent_seq = record_seq_map.get(feat.contig_id or "", default_seq)
-                    if parent_seq and feat.start > 0 and feat.end <= len(parent_seq) and feat.start <= feat.end:
-                        extracted = parent_seq[feat.start - 1 : feat.end]
-                        if feat.strand == "-":
-                            nuc_seq = str(Seq(extracted).reverse_complement())
-                        else:
-                            nuc_seq = extracted
-                        feat.nucleotide_seq = nuc_seq
-
-                if nuc_seq:
-                    f.write(f">{feat.locus_tag} {feat.product} [location={feat.start}..{feat.end}({feat.strand})]\n{nuc_seq}\n")
-
-        # 5. 保存详细 TSV 表格
-        with open(tsv_file, "w", encoding="utf-8") as f:
-            f.write("Locus_Tag\tContig\tType\tStart\tEnd\tStrand\tLength_bp\tLength_aa\tMW_kDa\tGene\tProduct\tCategory\tEngine\tEC_Number\tEvidence\n")
-            for feat in all_features:
-                c_name = feat.contig_id or first_contig_id
-                gene = feat.gene_name or ""
-                cat = feat.category or ""
-                eng = feat.source_engine or ""
-                ec = feat.ec_number or ""
-                ev = feat.notes or ""
-                f.write(f"{feat.locus_tag}\t{c_name}\t{feat.feature_type}\t{feat.start}\t{feat.end}\t{feat.strand}\t{feat.length_bp}\t{feat.protein_length_aa or 0}\t{feat.molecular_weight_kda or 0.0}\t{gene}\t{feat.product}\t{cat}\t{eng}\t{ec}\t{ev}\n")
-
-        # 统计指标
-        full_all_seq = "".join(str(r.seq) for r in records if r.seq is not None)
-        gc_val = self.calculate_gc(full_all_seq)
-        cds_cnt = sum(1 for f in all_features if f.feature_type == "CDS")
-        total_coding_bp = sum(f.length_bp for f in all_features if f.feature_type == "CDS")
-        density = round((total_coding_bp / max(1, total_length)) * 100.0, 2) if total_length > 0 else 0.0
-        avg_len = round(total_coding_bp / max(1, cds_cnt), 1) if cds_cnt > 0 else 0.0
-
-        summary = AnnotationSummary(
-            total_length=total_length,
-            num_contigs=num_contigs,
-            gc_content=gc_val,
-            cds_count=cds_cnt,
-            trna_count=sum(1 for f in all_features if f.feature_type == "tRNA"),
-            rrna_count=sum(1 for f in all_features if f.feature_type == "rRNA"),
-            tmrna_count=sum(1 for f in all_features if f.feature_type == "tmRNA"),
-            crispr_count=sum(1 for f in all_features if f.feature_type == "CRISPR"),
-            other_count=len(all_features) - cds_cnt,
-            total_features=len(all_features),
-            coding_density_pct=density,
-            avg_gene_length=avg_len
-        )
-
+        summary = self._build_export_summary(records, all_features, total_length, num_contigs)
         with open(summary_file, "w", encoding="utf-8") as f:
             f.write(summary.model_dump_json())
 
@@ -508,7 +532,6 @@ class BuiltinAnnotator:
             "faa": str(faa_file.resolve()),
             "ffn": str(ffn_file.resolve()),
             "tsv": str(tsv_file.resolve()),
-            "summary": str(summary_file.resolve())
+            "summary": str(summary_file.resolve()),
         }
-
         return summary, all_features, output_files

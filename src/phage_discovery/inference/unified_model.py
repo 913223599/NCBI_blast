@@ -1116,26 +1116,13 @@ class UnifiedPhageModel:
             del seg_res
             _release_accelerator_memory()
 
-    def scan_fasta_streaming(
-        self,
-        fasta_path: Path,
-        out_dir: Path,
+    @staticmethod
+    def _load_or_reset_streaming_state(
+        ckpt_path: Path,
+        chunks_jsonl: Path,
         *,
-        chunk_max_bp: int = 10_000_000,
-        long_contig_overlap_bp: Optional[int] = None,
-        active_experts: Optional[Sequence[str]] = None,
-        resume: bool = True,
-        export_outputs: bool = True,
-    ) -> UnifiedScanResult:
-        """
-        流式分片扫描大体积 FASTA 并持久复用进程池，支持超长单 Contig 序列内切片、断点续跑与标准产物导出。
-        """
-        fa_path = Path(fasta_path)
-        out_root = Path(out_dir)
-        out_root.mkdir(parents=True, exist_ok=True)
-        chunks_jsonl = out_root / "chunks.jsonl"
-        ckpt_path = out_root / "checkpoint.json"
-
+        resume: bool,
+    ) -> Tuple[Set[str], Dict[str, Set[int]], Dict[str, float]]:
         completed_set: Set[str] = set()
         completed_segments: Dict[str, Set[int]] = {}
         timings_acc: Dict[str, float] = {
@@ -1146,7 +1133,7 @@ class UnifiedPhageModel:
         }
         if resume and ckpt_path.is_file() and chunks_jsonl.is_file():
             ckpt_obj = json.loads(ckpt_path.read_text(encoding="utf-8"))
-            completed_set = set(str(x) for x in ckpt_obj.get("completed_contigs", []))
+            completed_set = {str(x) for x in ckpt_obj.get("completed_contigs", [])}
             raw_segs = ckpt_obj.get("completed_segments", {})
             if isinstance(raw_segs, dict):
                 completed_segments = {
@@ -1160,20 +1147,27 @@ class UnifiedPhageModel:
                 chunks_jsonl.unlink()
             if ckpt_path.exists():
                 ckpt_path.unlink()
+        return completed_set, completed_segments, timings_acc
 
-        experts = set(active_experts) if active_experts is not None else set(self.active_experts)
-        safe_workers = _resolve_safe_workers(self.dna_scanner.workers)
-
+    def _dispatch_streaming_fasta(
+        self,
+        fa_path: Path,
+        *,
+        chunk_max_bp: int,
+        long_contig_overlap_bp: Optional[int],
+        active_experts: Optional[Sequence[str]],
+        safe_workers: int,
+        chunks_jsonl: Path,
+        ckpt_path: Path,
+        completed_set: Set[str],
+        completed_segments: Dict[str, Set[int]],
+        timings_acc: Dict[str, float],
+    ) -> None:
         pool_ctx: Any = None
         pool: Any = None
-
-        def _ensure_pool() -> Any:
-            nonlocal pool_ctx, pool
-            if pool is None and safe_workers > 1:
-                pool_ctx = concurrent.futures.ProcessPoolExecutor(max_workers=safe_workers)
-                pool = pool_ctx.__enter__()
-            return pool
-
+        if safe_workers > 1:
+            pool_ctx = concurrent.futures.ProcessPoolExecutor(max_workers=safe_workers)
+            pool = pool_ctx.__enter__()
         try:
             cur_chunk: Dict[str, str] = {}
             cur_bp = 0
@@ -1181,12 +1175,12 @@ class UnifiedPhageModel:
                 if cid in completed_set:
                     continue
                 seq_len = len(seq)
-                if seq_len > chunk_max_bp:
+                if seq_len > chunk_max_bp or (cur_chunk and (cur_bp + seq_len) > chunk_max_bp):
                     if cur_chunk:
                         self._flush_streaming_chunk(
                             cur_chunk,
                             active_experts=active_experts,
-                            executor=_ensure_pool(),
+                            executor=pool,
                             chunks_jsonl=chunks_jsonl,
                             ckpt_path=ckpt_path,
                             completed_set=completed_set,
@@ -1195,13 +1189,14 @@ class UnifiedPhageModel:
                         )
                         cur_chunk = {}
                         cur_bp = 0
+                if seq_len > chunk_max_bp:
                     self._stream_long_single_contig(
                         cid,
                         seq,
                         chunk_max_bp=chunk_max_bp,
                         overlap_bp=long_contig_overlap_bp,
                         active_experts=active_experts,
-                        executor=_ensure_pool(),
+                        executor=pool,
                         chunks_jsonl=chunks_jsonl,
                         ckpt_path=ckpt_path,
                         completed_set=completed_set,
@@ -1209,26 +1204,13 @@ class UnifiedPhageModel:
                         timings_acc=timings_acc,
                     )
                     continue
-                if cur_chunk and (cur_bp + seq_len) > chunk_max_bp:
-                    self._flush_streaming_chunk(
-                        cur_chunk,
-                        active_experts=active_experts,
-                        executor=_ensure_pool(),
-                        chunks_jsonl=chunks_jsonl,
-                        ckpt_path=ckpt_path,
-                        completed_set=completed_set,
-                        completed_segments=completed_segments,
-                        timings_acc=timings_acc,
-                    )
-                    cur_chunk = {}
-                    cur_bp = 0
                 cur_chunk[cid] = seq
                 cur_bp += seq_len
             if cur_chunk:
                 self._flush_streaming_chunk(
                     cur_chunk,
                     active_experts=active_experts,
-                    executor=_ensure_pool(),
+                    executor=pool,
                     chunks_jsonl=chunks_jsonl,
                     ckpt_path=ckpt_path,
                     completed_set=completed_set,
@@ -1239,6 +1221,21 @@ class UnifiedPhageModel:
             if pool_ctx is not None:
                 pool_ctx.__exit__(None, None, None)
 
+    def _aggregate_streaming_chunks(
+        self,
+        chunks_jsonl: Path,
+        completed_set: Set[str],
+    ) -> Tuple[
+        Dict[str, int],
+        int,
+        int,
+        int,
+        List[PredictedRegion],
+        List[PredictedRegion],
+        Dict[str, Dict[str, Any]],
+        List[Dict[str, Any]],
+        Dict[str, int],
+    ]:
         contigs_bp: Dict[str, int] = {}
         total_windows = 0
         activated_cnt = 0
@@ -1269,8 +1266,7 @@ class UnifiedPhageModel:
                     if completed_set and cid not in completed_set:
                         continue
                     if rec.get("record_type") == "segment" or "segment_idx" in rec:
-                        s_idx = int(rec.get("segment_idx", 0))
-                        segmented_records_by_cid.setdefault(cid, {})[s_idx] = rec
+                        segmented_records_by_cid.setdefault(cid, {})[int(rec.get("segment_idx", 0))] = rec
                         continue
                     if cid in seen_cids:
                         continue
@@ -1286,9 +1282,7 @@ class UnifiedPhageModel:
                     for rk in rescue_acc:
                         rescue_acc[rk] += int(rec.get("chunk_rescue_stats", {}).get(rk, 0))
 
-        segmented_long_contigs = 0
         for cid, seg_map in segmented_records_by_cid.items():
-            segmented_long_contigs += 1
             seg_list = [seg_map[k] for k in sorted(seg_map.keys())]
             contigs_bp[cid] = int(seg_list[0].get("contig_total_bp") or max(int(r.get("seg_end", 0)) for r in seg_list))
             total_windows += sum(int(r.get("windows", 0)) for r in seg_list)
@@ -1298,14 +1292,75 @@ class UnifiedPhageModel:
                 for rk in rescue_acc:
                     rescue_acc[rk] += int(r.get("chunk_rescue_stats", {}).get(rk, 0))
             seg_base, seg_final, seg_anns, seg_supp = _reconcile_segmented_contig_results(
-                cid,
-                seg_list,
-                merge_gap_bp=self.dna_scanner.merge_gap_bp,
+                cid, seg_list, merge_gap_bp=self.dna_scanner.merge_gap_bp
             )
             base_regions.extend(seg_base)
             final_regions.extend(seg_final)
             region_annotations.update(seg_anns)
             suppressed_all.extend(seg_supp)
+
+        return (
+            contigs_bp,
+            total_windows,
+            activated_cnt,
+            len(segmented_records_by_cid),
+            base_regions,
+            final_regions,
+            region_annotations,
+            suppressed_all,
+            rescue_acc,
+        )
+
+    def scan_fasta_streaming(
+        self,
+        fasta_path: Path,
+        out_dir: Path,
+        *,
+        chunk_max_bp: int = 10_000_000,
+        long_contig_overlap_bp: Optional[int] = None,
+        active_experts: Optional[Sequence[str]] = None,
+        resume: bool = True,
+        export_outputs: bool = True,
+    ) -> UnifiedScanResult:
+        """
+        流式分片扫描大体积 FASTA 并持久复用进程池，支持超长单 Contig 序列内切片、断点续跑与标准产物导出。
+        """
+        fa_path = Path(fasta_path)
+        out_root = Path(out_dir)
+        out_root.mkdir(parents=True, exist_ok=True)
+        chunks_jsonl = out_root / "chunks.jsonl"
+        ckpt_path = out_root / "checkpoint.json"
+
+        completed_set, completed_segments, timings_acc = self._load_or_reset_streaming_state(
+            ckpt_path, chunks_jsonl, resume=resume
+        )
+        experts = set(active_experts) if active_experts is not None else set(self.active_experts)
+        safe_workers = _resolve_safe_workers(self.dna_scanner.workers)
+
+        self._dispatch_streaming_fasta(
+            fa_path,
+            chunk_max_bp=chunk_max_bp,
+            long_contig_overlap_bp=long_contig_overlap_bp,
+            active_experts=active_experts,
+            safe_workers=safe_workers,
+            chunks_jsonl=chunks_jsonl,
+            ckpt_path=ckpt_path,
+            completed_set=completed_set,
+            completed_segments=completed_segments,
+            timings_acc=timings_acc,
+        )
+
+        (
+            contigs_bp,
+            total_windows,
+            activated_cnt,
+            segmented_long_contigs,
+            base_regions,
+            final_regions,
+            region_annotations,
+            suppressed_all,
+            rescue_acc,
+        ) = self._aggregate_streaming_chunks(chunks_jsonl, completed_set)
 
         total_bp = sum(contigs_bp.values())
         total_contigs = max(1, len(contigs_bp))

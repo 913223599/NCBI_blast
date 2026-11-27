@@ -56,6 +56,87 @@ def merge_nearby_regions(
         merged_all.extend(cur)
     return merged_all
 
+def _has_window_backbone_support(
+    c_wps: Sequence[WindowPrediction],
+    gs: int,
+    ge: int,
+    min_ext_backbone_score: float,
+) -> bool:
+    if not c_wps:
+        return True
+    best_s = 0.0
+    for wp in c_wps:
+        if wp.end_bp > gs and wp.start_bp < ge and wp.score > best_s:
+            best_s = wp.score
+    return best_s >= min_ext_backbone_score
+
+
+def _trim_host_edges(
+    reg: PredictedRegion,
+    orfs: Sequence[Tuple[int, int, int, str]],
+    ph_probs: np.ndarray,
+    f10_probs: np.ndarray,
+    first_i: int,
+    last_i: int,
+) -> Tuple[int, int, int, int]:
+    new_start = reg.start_bp
+    new_end = reg.end_bp
+    for _ in range(2):
+        if (last_i - first_i) < 4 or not _is_strong_host_edge_orf(float(ph_probs[first_i]), f10_probs[first_i]):
+            break
+        first_i += 1
+        new_start = max(reg.start_bp, orfs[first_i][0])
+    for _ in range(2):
+        if (last_i - first_i) < 4 or not _is_strong_host_edge_orf(float(ph_probs[last_i]), f10_probs[last_i]):
+            break
+        last_i -= 1
+        new_end = min(reg.end_bp, orfs[last_i][1])
+    return first_i, last_i, new_start, new_end
+
+
+def _extend_boundary_direction(
+    orfs: Sequence[Tuple[int, int, int, str]],
+    ph_probs: np.ndarray,
+    f10_probs: np.ndarray,
+    c_wps: Optional[Sequence[WindowPrediction]],
+    *,
+    start_idx: int,
+    step: int,
+    initial_edge: int,
+    anchor_bp: int,
+    boundary_bp: int,
+    max_flank_bp: int,
+    max_step_gap_bp: int,
+    min_ext_backbone_score: float,
+    min_ext_phage_prob: float,
+    max_host_gap_orfs: int,
+) -> int:
+    cur_edge = initial_edge
+    gap_cnt = 0
+    idx = start_idx
+    while 0 <= idx < len(orfs):
+        gs, ge, _, _ = orfs[idx]
+        flank_dist = (anchor_bp - gs) if step < 0 else (ge - anchor_bp)
+        step_gap = (cur_edge - ge) if step < 0 else (gs - cur_edge)
+        if flank_dist > max_flank_bp or step_gap > max_step_gap_bp:
+            break
+        if c_wps is not None and not _has_window_backbone_support(c_wps, gs, ge, min_ext_backbone_score):
+            break
+        if _is_phage_extension_orf(float(ph_probs[idx]), f10_probs[idx], min_phage_prob=min_ext_phage_prob):
+            boundary_bp = min(boundary_bp, gs) if step < 0 else max(boundary_bp, ge)
+            cur_edge = gs if step < 0 else ge
+            gap_cnt = 0
+        else:
+            if _is_strong_host_edge_orf(float(ph_probs[idx]), f10_probs[idx]):
+                break
+            gap_cnt += 1
+            if gap_cnt > max_host_gap_orfs:
+                break
+            cur_edge = gs if step < 0 else ge
+        idx += step
+    return boundary_bp
+
+
 def refine_region_boundaries_with_judge(
     regions: Sequence[PredictedRegion],
     orfs_by_contig: Dict[str, List[Tuple[int, int, int, str]]],
@@ -81,19 +162,6 @@ def refine_region_boundaries_with_judge(
         for wp in window_preds:
             wp_by_cid[wp.contig_id].append(wp)
 
-    def _has_backbone_support(cid: str, gs: int, ge: int) -> bool:
-        if window_preds is None:
-            return True
-        c_wps = wp_by_cid.get(cid, [])
-        if not c_wps:
-            return True
-        best_s = 0.0
-        for wp in c_wps:
-            if wp.end_bp > gs and wp.start_bp < ge:
-                if wp.score > best_s:
-                    best_s = wp.score
-        return best_s >= min_ext_backbone_score
-
     refined: List[PredictedRegion] = []
     for reg in regions:
         cid = reg.contig_id
@@ -106,88 +174,45 @@ def refine_region_boundaries_with_judge(
         ph_probs = sc["phage_probs"]
         f10_probs = sc["func10_probs"]
         c_len = contigs_bp.get(cid, orfs[-1][1])
-
         in_idxs = [i for i, (gs, ge, _, _) in enumerate(orfs) if reg.start_bp <= 0.5 * (gs + ge) <= reg.end_bp]
         if not in_idxs:
             refined.append(reg)
             continue
 
         first_i, last_i = in_idxs[0], in_idxs[-1]
-        new_start = reg.start_bp
-        new_end = reg.end_bp
-
-        # 1. 可选边缘温和裁边
+        new_start, new_end = reg.start_bp, reg.end_bp
         if allow_edge_trim and len(in_idxs) >= 5:
-            trim_l = 0
-            while trim_l < 2 and (last_i - first_i) >= 4:
-                if _is_strong_host_edge_orf(float(ph_probs[first_i]), f10_probs[first_i]):
-                    first_i += 1
-                    trim_l += 1
-                    new_start = max(reg.start_bp, orfs[first_i][0])
-                else:
-                    break
-            trim_r = 0
-            while trim_r < 2 and (last_i - first_i) >= 4:
-                if _is_strong_host_edge_orf(float(ph_probs[last_i]), f10_probs[last_i]):
-                    last_i -= 1
-                    trim_r += 1
-                    new_end = min(reg.end_bp, orfs[last_i][1])
-                else:
-                    break
+            first_i, last_i, new_start, new_end = _trim_host_edges(
+                reg, orfs, ph_probs, f10_probs, first_i, last_i
+            )
 
-        # 2. 向左语义外延（受 DNA 主干过渡带与 max_host_gap_orfs 约束）
-        cur_left_edge = orfs[first_i][0] if trim_triggered(new_start, reg.start_bp) else new_start
-        anchor_start = reg.start_bp
-        gap_cnt = 0
-        li = first_i - 1
-        while li >= 0:
-            gs, ge, _, _ = orfs[li]
-            if (anchor_start - gs) > max_flank_bp:
-                break
-            if (cur_left_edge - ge) > max_step_gap_bp:
-                break
-            if not _has_backbone_support(cid, gs, ge):
-                break
-            if _is_phage_extension_orf(float(ph_probs[li]), f10_probs[li], min_phage_prob=min_ext_phage_prob):
-                new_start = min(new_start, gs)
-                cur_left_edge = gs
-                gap_cnt = 0
-                li -= 1
-            else:
-                if _is_strong_host_edge_orf(float(ph_probs[li]), f10_probs[li]):
-                    break
-                gap_cnt += 1
-                if gap_cnt > max_host_gap_orfs:
-                    break
-                cur_left_edge = gs
-                li -= 1
-
-        # 3. 向右语义外延（受 DNA 主干过渡带约束）
-        cur_right_edge = orfs[last_i][1] if new_end < reg.end_bp else new_end
-        anchor_end = reg.end_bp
-        gap_cnt = 0
-        ri = last_i + 1
-        while ri < len(orfs):
-            gs, ge, _, _ = orfs[ri]
-            if (ge - anchor_end) > max_flank_bp:
-                break
-            if (gs - cur_right_edge) > max_step_gap_bp:
-                break
-            if not _has_backbone_support(cid, gs, ge):
-                break
-            if _is_phage_extension_orf(float(ph_probs[ri]), f10_probs[ri], min_phage_prob=min_ext_phage_prob):
-                new_end = max(new_end, ge)
-                cur_right_edge = ge
-                gap_cnt = 0
-                ri += 1
-            else:
-                if _is_strong_host_edge_orf(float(ph_probs[ri]), f10_probs[ri]):
-                    break
-                gap_cnt += 1
-                if gap_cnt > max_host_gap_orfs:
-                    break
-                cur_right_edge = ge
-                ri += 1
+        c_wps = wp_by_cid.get(cid, []) if window_preds is not None else None
+        new_start = _extend_boundary_direction(
+            orfs, ph_probs, f10_probs, c_wps,
+            start_idx=first_i - 1,
+            step=-1,
+            initial_edge=orfs[first_i][0] if trim_triggered(new_start, reg.start_bp) else new_start,
+            anchor_bp=reg.start_bp,
+            boundary_bp=new_start,
+            max_flank_bp=max_flank_bp,
+            max_step_gap_bp=max_step_gap_bp,
+            min_ext_backbone_score=min_ext_backbone_score,
+            min_ext_phage_prob=min_ext_phage_prob,
+            max_host_gap_orfs=max_host_gap_orfs,
+        )
+        new_end = _extend_boundary_direction(
+            orfs, ph_probs, f10_probs, c_wps,
+            start_idx=last_i + 1,
+            step=1,
+            initial_edge=orfs[last_i][1] if new_end < reg.end_bp else new_end,
+            anchor_bp=reg.end_bp,
+            boundary_bp=new_end,
+            max_flank_bp=max_flank_bp,
+            max_step_gap_bp=max_step_gap_bp,
+            min_ext_backbone_score=min_ext_backbone_score,
+            min_ext_phage_prob=min_ext_phage_prob,
+            max_host_gap_orfs=max_host_gap_orfs,
+        )
 
         refined.append(
             PredictedRegion(

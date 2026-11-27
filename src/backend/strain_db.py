@@ -3,7 +3,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
@@ -431,109 +431,84 @@ class StrainDBManager:
             self.logger.error(f"Error loading tree history: {e}")
             return []
 
-    def _reconstruct_from_fs(self):
-        """内部方法：从文件系统物理扫描并填充索引数据库"""
-        import re
-        import os
+    @staticmethod
+    def _find_first_seq_file(directory: Path, exts: Tuple[str, ...]) -> Optional[Path]:
+        for ext in exts:
+            f_list = list(directory.glob(ext))
+            if f_list:
+                return f_list[0]
+        return None
+
+    def _generate_fasta_fingerprints(self, fasta: Path, session_name: str) -> Dict[str, str]:
         import hashlib
-        results_dir = self.db_path.parent.parent / "results" / "tree_results"
-        if not results_dir.exists():
-            return
-        
-        history_map = {}
-        for p_dir in results_dir.iterdir():
-            if not p_dir.is_dir():
-                continue
-            p_id = p_dir.name
-            if p_id not in history_map:
-                history_map[p_id] = []
-            # 预提取：尝试在父文件夹找通用的 FASTA (针对同一比对任务的不同构树 Session)
-            parent_fasta = None
-            for ext in ("*.fasta", "*.fa", "*.seq", "*.fna"):
-                f_list = list(p_dir.glob(ext))
-                if f_list:
-                    parent_fasta = f_list[0]
-                    break
 
-            for s_dir in p_dir.iterdir():
-                if not s_dir.is_dir():
+        id_to_hash: Dict[str, str] = {}
+        try:
+            self.logger.info(f"Generating fingerprints from: {fasta}")
+            content = fasta.read_text(encoding='utf-8', errors='ignore')
+            for sec in content.split('>'):
+                if not sec.strip():
                     continue
-                nwk = next(s_dir.glob("*.nwk"), None)
-                if not nwk:
-                    continue
-                
-                # 优先在 session 目录找，找不到用父目录的
-                fasta = None
-                for ext in ("*.fasta", "*.fa", "*.seq", "*.fna", "*.txt"):
-                    f_list = list(s_dir.glob(ext))
-                    if f_list:
-                        fasta = f_list[0]
-                        break
-                if not fasta:
-                    fasta = parent_fasta
-                
+                lines = sec.split('\n')
+                seq_id = lines[0].strip().split()[0].replace("'", "").replace('"', '').strip()
+                seq_body = "".join(lines[1:]).strip().upper()
+                if seq_id and seq_body:
+                    id_to_hash[seq_id] = hashlib.md5(seq_body.encode()).hexdigest()
+            self.logger.info(f"Generated {len(id_to_hash)} fingerprints for {session_name}")
+        except Exception as e:
+            self.logger.warning(f"Fingerprint generation failed for {fasta}: {e}")
+        return id_to_hash
+
+    def _build_reconstructed_session_item(
+        self,
+        p_id: str,
+        s_dir: Path,
+        nwk: Path,
+        fasta: Optional[Path],
+    ) -> Optional[Dict[str, Any]]:
+        import os
+
+        try:
+            mtime = s_dir.stat().st_mtime
+            algorithm = "Archived Task"
+            params_file = s_dir / "analysis_params.json"
+            if params_file.exists():
                 try:
-                    mtime = s_dir.stat().st_mtime
-                    id_to_hash = {}
-                    algorithm = "Archived Task"
-                    
-                    # 优先从 metadata 恢复参数命名
-                    params_file = s_dir / "analysis_params.json"
-                    if params_file.exists():
-                        try:
-                            params = json.loads(params_file.read_text(encoding='utf-8'))
-                            msa = params.get("msa", "Rapid").upper()
-                            engine = params.get("engine", "NJ").upper()
-                            model = params.get("model", "JC").upper()
-                            algorithm = f"{msa} / {engine} ({model})"
-                        except Exception as exc:
-                            self.logger.debug("读取历史进化树任务参数 metadata.json 失败 (%s): %s", params_file, exc)
-                    
-                    # 尝试从 manifest 恢复指纹
-                    manifest_file = s_dir / "sequence_manifest.json"
-                    if manifest_file.exists():
-                        try:
-                            id_to_hash = json.loads(manifest_file.read_text(encoding='utf-8'))
-                        except Exception as exc:
-                            self.logger.debug("读取历史进化树 manifest.json 失败 (%s): %s", manifest_file, exc)
-                    
-                    # 如果没有 manifest 但有 FASTA，手动生成指纹
-                    if not id_to_hash and fasta and fasta.exists():
-                        try:
-                            self.logger.info(f"Generating fingerprints from: {fasta}")
-                            content = fasta.read_text(encoding='utf-8', errors='ignore')
-                            sections = content.split('>')
-                            for sec in sections:
-                                if not sec.strip():
-                                    continue
-                                lines = sec.split('\n')
-                                header = lines[0].strip()
-                                seq_id = header.split()[0].replace("'", "").replace('"', '').strip()
-                                seq_body = "".join(lines[1:]).strip().upper()
-                                if seq_id and seq_body:
-                                    md5 = hashlib.md5(seq_body.encode()).hexdigest()
-                                    id_to_hash[seq_id] = md5
-                            self.logger.info(f"Generated {len(id_to_hash)} fingerprints for {s_dir.name}")
-                        except Exception as e:
-                            self.logger.warning(f"Fingerprint generation failed for {fasta}: {e}")
-
-                    items_data = {
-                        "id": os.urandom(4).hex(),
-                        "algorithm": algorithm,
-                        "nwk": nwk.read_text(encoding='utf-8', errors='ignore'),
-                        "filePath": str(fasta) if fasta else "",
-                        "archiveFile": f"{p_id}/{s_dir.name}/{fasta.name}" if fasta else "",
-                        "idToHash": id_to_hash if id_to_hash else None,
-                        "time": int(mtime * 1000)
-                    }
-                    history_map[p_id].append(items_data)
+                    params = json.loads(params_file.read_text(encoding='utf-8'))
+                    msa = params.get("msa", "Rapid").upper()
+                    engine = params.get("engine", "NJ").upper()
+                    model = params.get("model", "JC").upper()
+                    algorithm = f"{msa} / {engine} ({model})"
                 except Exception as exc:
-                    self.logger.warning("解析菌株历史任务条目跳过异常记录: %s", exc)
-                    continue
-        
-        if not history_map:
-            return
-        
+                    self.logger.debug("读取历史进化树任务参数 metadata.json 失败 (%s): %s", params_file, exc)
+
+            id_to_hash: Dict[str, str] = {}
+            manifest_file = s_dir / "sequence_manifest.json"
+            if manifest_file.exists():
+                try:
+                    id_to_hash = json.loads(manifest_file.read_text(encoding='utf-8'))
+                except Exception as exc:
+                    self.logger.debug("读取历史进化树 manifest.json 失败 (%s): %s", manifest_file, exc)
+
+            if not id_to_hash and fasta and fasta.exists():
+                id_to_hash = self._generate_fasta_fingerprints(fasta, s_dir.name)
+
+            return {
+                "id": os.urandom(4).hex(),
+                "algorithm": algorithm,
+                "nwk": nwk.read_text(encoding='utf-8', errors='ignore'),
+                "filePath": str(fasta) if fasta else "",
+                "archiveFile": f"{p_id}/{s_dir.name}/{fasta.name}" if fasta else "",
+                "idToHash": id_to_hash if id_to_hash else None,
+                "time": int(mtime * 1000),
+            }
+        except Exception as exc:
+            self.logger.warning("解析菌株历史任务条目跳过异常记录: %s", exc)
+            return None
+
+    def _persist_reconstructed_history(self, history_map: Dict[str, List[Dict[str, Any]]]) -> None:
+        import re
+
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -543,18 +518,51 @@ class StrainDBManager:
                 items.sort(key=lambda x: x['time'], reverse=True)
                 logical_id = re.sub(r'^Tree_\d+_\d+_', '', p_id)
                 display_name = logical_id.replace(".fasta", "").replace(".seq", "")
-                
-                # 提取基准源文件路径 (取最近一次分析的归档路径)
                 base_source = items[0].get("archiveFile", "")
-                
-                cursor.execute('''
+                cursor.execute(
+                    '''
                     INSERT OR REPLACE INTO tree_history (id, source_file, name, items_json, updated_at)
                     VALUES (?, ?, ?, ?, ?)
-                ''', (p_id, base_source, display_name, 
-                       json.dumps(items), datetime.fromtimestamp(items[0]['time']/1000).strftime('%Y-%m-%d %H:%M:%S')))
+                    ''',
+                    (
+                        p_id,
+                        base_source,
+                        display_name,
+                        json.dumps(items),
+                        datetime.fromtimestamp(items[0]['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                    ),
+                )
             conn.commit()
         except Exception as e:
             self.logger.error(f"Failed to save reconstructed history: {e}")
+
+    def _reconstruct_from_fs(self):
+        """内部方法：从文件系统物理扫描并填充索引数据库"""
+        results_dir = self.db_path.parent.parent / "results" / "tree_results"
+        if not results_dir.exists():
+            return
+
+        history_map: Dict[str, List[Dict[str, Any]]] = {}
+        for p_dir in results_dir.iterdir():
+            if not p_dir.is_dir():
+                continue
+            p_id = p_dir.name
+            history_map.setdefault(p_id, [])
+            parent_fasta = self._find_first_seq_file(p_dir, ("*.fasta", "*.fa", "*.seq", "*.fna"))
+
+            for s_dir in p_dir.iterdir():
+                if not s_dir.is_dir():
+                    continue
+                nwk = next(s_dir.glob("*.nwk"), None)
+                if not nwk:
+                    continue
+                fasta = self._find_first_seq_file(s_dir, ("*.fasta", "*.fa", "*.seq", "*.fna", "*.txt")) or parent_fasta
+                item_data = self._build_reconstructed_session_item(p_id, s_dir, nwk, fasta)
+                if item_data is not None:
+                    history_map[p_id].append(item_data)
+
+        if history_map:
+            self._persist_reconstructed_history(history_map)
 
     def delete_tree_history_group(self, group_id):
         """删除进化树项目组"""

@@ -287,137 +287,142 @@ def _find_matching_record(records: List[Any], query_id: Optional[str]) -> Option
 
     return None
 
+def _parse_xml_matching_record(xml_file: Path, query_id: Optional[str]):
+    with open(xml_file, 'r', encoding='utf-8') as f:
+        records = list(NCBIXML.parse(f))
+    return _find_matching_record(records, query_id)
+
+
+def _resolve_visualization_record(xml_path_obj: Optional[Path], query_id: Optional[str]):
+    target_record = None
+    if xml_path_obj and xml_path_obj.exists():
+        try:
+            target_record = _parse_xml_matching_record(xml_path_obj, query_id)
+        except Exception as parse_err:
+            logger.warning(f"Failed to parse initial xml {xml_path_obj}: {parse_err}")
+
+    if not target_record and query_id and xml_path_obj:
+        xml_parent = xml_path_obj.parent
+        if xml_parent.exists() and xml_parent.is_dir():
+            safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', query_id)
+            candidate_single = xml_parent / f"{safe_id}.xml"
+            if candidate_single.exists() and candidate_single != xml_path_obj:
+                try:
+                    target_record = _parse_xml_matching_record(candidate_single, query_id)
+                except Exception as _exc:
+                    logger.warning("解析指定 Query 的 BLAST XML 可视化记录失败: %s", _exc)
+
+            if not target_record:
+                for alt_xml in xml_parent.glob("*.xml"):
+                    if alt_xml in (xml_path_obj, candidate_single):
+                        continue
+                    try:
+                        match = _parse_xml_matching_record(alt_xml, query_id)
+                        if match:
+                            target_record = match
+                            break
+                    except Exception as _exc:
+                        logger.debug("扫描 BLAST 输入文件匹配记录时跳过异常文件: %s", _exc)
+
+    if not target_record and not query_id and xml_path_obj and xml_path_obj.exists():
+        try:
+            with open(xml_path_obj, 'r', encoding='utf-8') as f:
+                records = list(NCBIXML.parse(f))
+            if records:
+                target_record = records[0]
+        except Exception as _exc:
+            logger.warning("解析默认 BLAST XML 可视化首条记录失败: %s", _exc)
+
+    return target_record
+
+
+def _extract_hsp_mismatches(
+    q_seq: str,
+    s_seq: str,
+    midline: str,
+    q_start: int,
+    s_start: int,
+) -> list:
+    if not (q_seq and s_seq):
+        return []
+    mismatches = []
+    q_pos = q_start
+    s_pos = s_start
+    for q_b, s_b, m_c in zip(q_seq, s_seq, midline or q_seq):
+        if q_b != s_b or m_c == ' ' or q_b == '-' or s_b == '-':
+            m_type = 'insertion' if q_b == '-' else ('deletion' if s_b == '-' else 'snp')
+            mismatches.append({
+                'q_pos': q_pos,
+                's_pos': s_pos,
+                'q_base': q_b,
+                's_base': s_b,
+                'type': m_type,
+            })
+        if q_b != '-':
+            q_pos += 1
+        if s_b != '-':
+            s_pos += 1
+    return mismatches
+
+
+def _build_visualization_hits(record, sort_mode: Optional[str]) -> list:
+    hits = []
+    for alignment in record.alignments:
+        parsed_hsps = []
+        for h in alignment.hsps:
+            q_seq = getattr(h, 'query', '') or ''
+            s_seq = getattr(h, 'sbjct', '') or ''
+            midline = getattr(h, 'match', '') or ''
+            mismatches = _extract_hsp_mismatches(q_seq, s_seq, midline, h.query_start, h.sbjct_start)
+            identity_ratio = (h.identities / h.align_length) if (h.align_length and h.align_length > 0) else 0
+            parsed_hsps.append({
+                'query_start': h.query_start,
+                'query_end': h.query_end,
+                'sbjct_start': h.sbjct_start,
+                'sbjct_end': h.sbjct_end,
+                'score': float(h.score) if h.score is not None else 0,
+                'evalue': float(h.expect) if h.expect is not None else 0,
+                'identity': identity_ratio,
+                'identity_pct': round(identity_ratio * 100, 2),
+                'identities': getattr(h, 'identities', 0),
+                'align_length': getattr(h, 'align_length', 0),
+                'gaps': getattr(h, 'gaps', 0),
+                'mismatch_count': len(mismatches),
+                'mismatches': mismatches,
+                'query_seq': q_seq,
+                'sbjct_seq': s_seq,
+                'midline': midline,
+            })
+        hits.append({
+            'title': alignment.title,
+            'length': alignment.length,
+            'hsps': parsed_hsps,
+        })
+
+    if sort_mode == "evalue":
+        hits.sort(key=lambda x: min([h['evalue'] for h in x['hsps']] + [1.0]))
+    elif sort_mode == "score":
+        hits.sort(key=lambda x: max([h['score'] for h in x['hsps']] + [0]), reverse=True)
+    elif sort_mode == "start":
+        hits.sort(key=lambda x: min([h['query_start'] for h in x['hsps']] + [0]))
+    return hits
+
+
 @router.post("/api/blast/visualization/data")
 async def get_visualization_data(req: VisDataRequest):
     xml_path_obj = Path(req.xml_path) if req.xml_path else None
-    target_record = None
-
     try:
-        # 1. 尝试直接从指定的 XML 文件中解析并精准匹配
-        if xml_path_obj and xml_path_obj.exists():
-            try:
-                with open(xml_path_obj, 'r', encoding='utf-8') as f:
-                    records = list(NCBIXML.parse(f))
-                target_record = _find_matching_record(records, req.query_id)
-            except Exception as parse_err:
-                logger.warning(f"Failed to parse initial xml {req.xml_path}: {parse_err}")
-
-        # 2. 若在指定的 XML 中未找到匹配项，且给定了 query_id，在同级 xml_raw 目录中检索
-        if not target_record and req.query_id and xml_path_obj:
-            xml_parent = xml_path_obj.parent
-            if xml_parent.exists() and xml_parent.is_dir():
-                # 2.1 优先查找单序列专属 XML: {safe_id}.xml
-                safe_id = re.sub(r'[^a-zA-Z0-9_\-]', '_', req.query_id)
-                candidate_single = xml_parent / f"{safe_id}.xml"
-                if candidate_single.exists() and candidate_single != xml_path_obj:
-                    try:
-                        with open(candidate_single, 'r', encoding='utf-8') as f:
-                            recs = list(NCBIXML.parse(f))
-                        target_record = _find_matching_record(recs, req.query_id)
-                    except Exception as _exc:
-                        logger.warning("解析指定 Query 的 BLAST XML 可视化记录失败: %s", _exc)
-                
-                # 2.2 若仍未找到，遍历该任务 xml_raw 下全部 XML 检索
-                if not target_record:
-                    for alt_xml in xml_parent.glob("*.xml"):
-                        if alt_xml == xml_path_obj or alt_xml == candidate_single:
-                            continue
-                        try:
-                            with open(alt_xml, 'r', encoding='utf-8') as f:
-                                recs = list(NCBIXML.parse(f))
-                            match = _find_matching_record(recs, req.query_id)
-                            if match:
-                                target_record = match
-                                break
-                        except Exception as _exc:
-                            logger.debug("扫描 BLAST 输入文件匹配记录时跳过异常文件: %s", _exc)
-                            continue
-
-        # 3. 如果仍未找到
-        if not target_record:
-            if not req.query_id and xml_path_obj and xml_path_obj.exists():
-                try:
-                    with open(xml_path_obj, 'r', encoding='utf-8') as f:
-                        records = list(NCBIXML.parse(f))
-                    if records:
-                        target_record = records[0]
-                except Exception as _exc:
-                    logger.warning("解析默认 BLAST XML 可视化首条记录失败: %s", _exc)
-
+        target_record = _resolve_visualization_record(xml_path_obj, req.query_id)
         if not target_record:
             if req.query_id:
                 return {"error": f"未在比对结果中找到序列 [{req.query_id}] 的原始比对记录"}
             return {"error": "未在比对结果中发现有效的记录"}
 
-        record = target_record
-        hits = []
-        for alignment in record.alignments:
-            parsed_hsps = []
-            for h in alignment.hsps:
-                mismatches = []
-                q_pos = h.query_start
-                s_pos = h.sbjct_start
-                q_seq = getattr(h, 'query', '') or ''
-                s_seq = getattr(h, 'sbjct', '') or ''
-                midline = getattr(h, 'match', '') or ''
-                
-                if q_seq and s_seq:
-                    for q_b, s_b, m_c in zip(q_seq, s_seq, midline if midline else q_seq):
-                        if q_b != s_b or m_c == ' ' or q_b == '-' or s_b == '-':
-                            m_type = 'snp'
-                            if q_b == '-':
-                                m_type = 'insertion'
-                            elif s_b == '-':
-                                m_type = 'deletion'
-                            mismatches.append({
-                                'q_pos': q_pos,
-                                's_pos': s_pos,
-                                'q_base': q_b,
-                                's_base': s_b,
-                                'type': m_type
-                            })
-                        if q_b != '-':
-                            q_pos += 1
-                        if s_b != '-':
-                            s_pos += 1
-
-                identity_ratio = (h.identities / h.align_length) if (h.align_length and h.align_length > 0) else 0
-                parsed_hsps.append({
-                    'query_start': h.query_start,
-                    'query_end': h.query_end,
-                    'sbjct_start': h.sbjct_start,
-                    'sbjct_end': h.sbjct_end,
-                    'score': float(h.score) if h.score is not None else 0,
-                    'evalue': float(h.expect) if h.expect is not None else 0,
-                    'identity': identity_ratio,
-                    'identity_pct': round(identity_ratio * 100, 2),
-                    'identities': getattr(h, 'identities', 0),
-                    'align_length': getattr(h, 'align_length', 0),
-                    'gaps': getattr(h, 'gaps', 0),
-                    'mismatch_count': len(mismatches),
-                    'mismatches': mismatches,
-                    'query_seq': q_seq,
-                    'sbjct_seq': s_seq,
-                    'midline': midline
-                })
-
-            hits.append({
-                'title': alignment.title,
-                'length': alignment.length,
-                'hsps': parsed_hsps
-            })
-
-        if req.sort_mode == "evalue":
-            hits.sort(key=lambda x: min([h['evalue'] for h in x['hsps']] + [1.0]))
-        elif req.sort_mode == "score":
-            hits.sort(key=lambda x: max([h['score'] for h in x['hsps']] + [0]), reverse=True)
-        elif req.sort_mode == "start":
-            hits.sort(key=lambda x: min([h['query_start'] for h in x['hsps']] + [0]))
-
+        hits = _build_visualization_hits(target_record, req.sort_mode)
         return {
-            "query_name": record.query,
-            "query_length": record.query_length,
-            "hits": hits[:100]
+            "query_name": target_record.query,
+            "query_length": target_record.query_length,
+            "hits": hits[:100],
         }
     except Exception as e:
         logger.error(f"Visualization parse error: {e}", exc_info=True)

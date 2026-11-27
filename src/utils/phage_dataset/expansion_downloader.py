@@ -522,6 +522,120 @@ class ExpansionDownloader:
         self.excluded_base.add(_normalize_base_acc(acc))
         return acc
 
+    @staticmethod
+    def _build_interleaved_batches(
+        pending: Sequence[Tuple[str, ExpansionQuery]],
+    ) -> List[List[Tuple[str, ExpansionQuery]]]:
+        batches: List[List[Tuple[str, ExpansionQuery]]] = []
+        small_buf: List[Tuple[str, ExpansionQuery]] = []
+        normal_buf: List[Tuple[str, ExpansionQuery]] = []
+        for uid, q in pending:
+            bsize = max(1, q[4])
+            if bsize <= 2:
+                small_buf.append((uid, q))
+                if len(small_buf) >= bsize:
+                    batches.append(small_buf)
+                    small_buf = []
+            else:
+                normal_buf.append((uid, q))
+                if len(normal_buf) >= 15:
+                    batches.append(normal_buf)
+                    normal_buf = []
+        if small_buf:
+            batches.append(small_buf)
+        if normal_buf:
+            batches.append(normal_buf)
+
+        small_batches = [b for b in batches if len(b) <= 2 and b[0][1][4] <= 2]
+        normal_batches = [b for b in batches if not (len(b) <= 2 and b[0][1][4] <= 2)]
+        scheduled: List[List[Tuple[str, ExpansionQuery]]] = []
+        for i in range(max(len(small_batches), len(normal_batches))):
+            if i < len(small_batches):
+                scheduled.append(small_batches[i])
+            if i < len(normal_batches):
+                scheduled.append(normal_batches[i])
+        return scheduled
+
+    @staticmethod
+    def _fetch_expansion_batch(
+        client: NegativeDatasetDownloader,
+        batch_item: List[Tuple[str, ExpansionQuery]],
+        expect_phage: bool,
+    ) -> Tuple[List[Tuple[str, ExpansionQuery]], bool, Optional[str], Optional[str]]:
+        uids = [x[0] for x in batch_item]
+        is_fast = (not expect_phage) and (batch_item[0][1][4] <= 2)
+        rtype = "fasta" if is_fast else "gbwithparts"
+        try:
+            resp = client._request_with_retry(
+                f"{EUTILS_BASE}/efetch.fcgi",
+                {
+                    "db": "nuccore",
+                    "id": ",".join(uids),
+                    "rettype": rtype,
+                    "retmode": "text",
+                },
+                max_retries=2,
+            )
+            return batch_item, is_fast, resp.text, None
+        except Exception as exc:
+            return batch_item, is_fast, None, str(exc)
+
+    def _consume_expansion_batch_result(
+        self,
+        *,
+        client: NegativeDatasetDownloader,
+        pool_label: str,
+        target_count: int,
+        queries: Sequence[ExpansionQuery],
+        expect_phage: bool,
+        state: Dict[str, Any],
+        batch: List[Tuple[str, ExpansionQuery]],
+        is_fast_fasta_batch: bool,
+        raw_text: Optional[str],
+        err_msg: Optional[str],
+    ) -> int:
+        batch_uids = [item[0] for item in batch]
+        uid_to_q = {item[0]: item[1] for item in batch}
+        if err_msg or not raw_text:
+            logger.warning(f"[{pool_label}] 批次拉取失败(跳过 {len(batch_uids)} 条): {err_msg}")
+            for uid in batch_uids:
+                state["skipped_ids"][uid] = f"batch_fetch_error:{err_msg}"
+            client.save_checkpoint(state)
+            return 0
+
+        newly_added = 0
+        if is_fast_fasta_batch:
+            for idx, rec in enumerate(SeqIO.parse(io.StringIO(raw_text), "fasta")):
+                if len(state["saved_records"]) >= target_count:
+                    break
+                fb_uid = batch_uids[idx] if idx < len(batch_uids) else ""
+                acc = self._persist_chromosome_fasta(
+                    client=client, rec=rec, uid=fb_uid, query_meta=uid_to_q.get(fb_uid, queries[0]), state=state
+                )
+                if acc:
+                    newly_added += 1
+        else:
+            for idx, entry_text in enumerate(split_genbank_entries(raw_text)):
+                if len(state["saved_records"]) >= target_count:
+                    break
+                fb_uid = batch_uids[idx] if idx < len(batch_uids) else ""
+                acc = self._persist_validated_record(
+                    client=client,
+                    entry_text=entry_text,
+                    uid=fb_uid,
+                    query_meta=uid_to_q.get(fb_uid, queries[0]),
+                    expect_phage=expect_phage,
+                    state=state,
+                )
+                if acc:
+                    newly_added += 1
+
+        for uid in batch_uids:
+            if uid not in state["uid_to_accession"] and uid not in state["skipped_ids"]:
+                state["skipped_ids"][uid] = "batch_processed_or_filtered"
+        client.save_checkpoint(state)
+        return newly_added
+
     def _run_expansion_pool(
         self,
         *,
@@ -552,120 +666,37 @@ class ExpansionDownloader:
         )
         done_uids = set(state.get("uid_to_accession", {}).keys()) | set(state.get("skipped_ids", {}).keys())
         pending = [item for item in candidates if item[0] not in done_uids]
-
-        # 按同批最大允许 batch_size 分批打包，染色体(bsize<=2)单/双条拉 FASTA，其余批量拉 GenBank
-        batches: List[List[Tuple[str, ExpansionQuery]]] = []
-        small_buf: List[Tuple[str, ExpansionQuery]] = []
-        normal_buf: List[Tuple[str, ExpansionQuery]] = []
-        for uid, q in pending:
-            bsize = max(1, q[4])
-            if bsize <= 2:
-                small_buf.append((uid, q))
-                if len(small_buf) >= bsize:
-                    batches.append(small_buf)
-                    small_buf = []
-            else:
-                normal_buf.append((uid, q))
-                if len(normal_buf) >= 15:
-                    batches.append(normal_buf)
-                    normal_buf = []
-        if small_buf:
-            batches.append(small_buf)
-        if normal_buf:
-            batches.append(normal_buf)
-
-        # 交错调度确保高/低 GC 染色体配额不被纯小质粒先跑完（优先少量多批染色体）
-        small_batches = [b for b in batches if len(b) <= 2 and b[0][1][4] <= 2]
-        normal_batches = [b for b in batches if not (len(b) <= 2 and b[0][1][4] <= 2)]
-        scheduled: List[List[Tuple[str, ExpansionQuery]]] = []
-        for i in range(max(len(small_batches), len(normal_batches))):
-            if i < len(small_batches):
-                scheduled.append(small_batches[i])
-            if i < len(normal_batches):
-                scheduled.append(normal_batches[i])
-
-        def _fetch_one_batch(batch_item: List[Tuple[str, ExpansionQuery]]) -> Tuple[List[Tuple[str, ExpansionQuery]], bool, Optional[str], Optional[str]]:
-            uids = [x[0] for x in batch_item]
-            is_fast = (not expect_phage) and (batch_item[0][1][4] <= 2)
-            rtype = "fasta" if is_fast else "gbwithparts"
-            try:
-                resp = client._request_with_retry(
-                    f"{EUTILS_BASE}/efetch.fcgi",
-                    {
-                        "db": "nuccore",
-                        "id": ",".join(uids),
-                        "rettype": rtype,
-                        "retmode": "text",
-                    },
-                    max_retries=2,
-                )
-                return batch_item, is_fast, resp.text, None
-            except Exception as exc:
-                return batch_item, is_fast, None, str(exc)
+        scheduled = self._build_interleaved_batches(pending)
 
         newly_downloaded = 0
         eff_workers = 1 if self._custom_session else self.max_workers
         pos = 0
         while pos < len(scheduled) and len(state["saved_records"]) < target_count:
-            chunk = scheduled[pos:pos + eff_workers]
+            chunk = scheduled[pos : pos + eff_workers]
             pos += len(chunk)
             if eff_workers > 1 and len(chunk) > 1:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(chunk)) as ex:
-                    fetched_results = list(ex.map(_fetch_one_batch, chunk))
+                    fetched_results = list(
+                        ex.map(lambda b: self._fetch_expansion_batch(client, b, expect_phage), chunk)
+                    )
             else:
-                fetched_results = [_fetch_one_batch(b) for b in chunk]
+                fetched_results = [self._fetch_expansion_batch(client, b, expect_phage) for b in chunk]
 
             for batch, is_fast_fasta_batch, raw_text, err_msg in fetched_results:
                 if len(state["saved_records"]) >= target_count:
                     break
-                batch_uids = [item[0] for item in batch]
-                uid_to_q = {item[0]: item[1] for item in batch}
-                if err_msg or not raw_text:
-                    logger.warning(f"[{pool_label}] 批次拉取失败(跳过 {len(batch_uids)} 条): {err_msg}")
-                    for uid in batch_uids:
-                        state["skipped_ids"][uid] = f"batch_fetch_error:{err_msg}"
-                    client.save_checkpoint(state)
-                    continue
-
-                if is_fast_fasta_batch:
-                    fa_records = list(SeqIO.parse(io.StringIO(raw_text), "fasta"))
-                    for idx, rec in enumerate(fa_records):
-                        if len(state["saved_records"]) >= target_count:
-                            break
-                        fb_uid = batch_uids[idx] if idx < len(batch_uids) else ""
-                        q_meta = uid_to_q.get(fb_uid, queries[0])
-                        acc = self._persist_chromosome_fasta(
-                            client=client,
-                            rec=rec,
-                            uid=fb_uid,
-                            query_meta=q_meta,
-                            state=state,
-                        )
-                        if acc:
-                            newly_downloaded += 1
-                else:
-                    entries = split_genbank_entries(raw_text)
-                    for idx, entry_text in enumerate(entries):
-                        if len(state["saved_records"]) >= target_count:
-                            break
-                        fb_uid = batch_uids[idx] if idx < len(batch_uids) else ""
-                        q_meta = uid_to_q.get(fb_uid, queries[0])
-                        acc = self._persist_validated_record(
-                            client=client,
-                            entry_text=entry_text,
-                            uid=fb_uid,
-                            query_meta=q_meta,
-                            expect_phage=expect_phage,
-                            state=state,
-                        )
-                        if acc:
-                            newly_downloaded += 1
-
-                for uid in batch_uids:
-                    if uid not in state["uid_to_accession"] and uid not in state["skipped_ids"]:
-                        state["skipped_ids"][uid] = "batch_processed_or_filtered"
-
-                client.save_checkpoint(state)
+                newly_downloaded += self._consume_expansion_batch_result(
+                    client=client,
+                    pool_label=pool_label,
+                    target_count=target_count,
+                    queries=queries,
+                    expect_phage=expect_phage,
+                    state=state,
+                    batch=batch,
+                    is_fast_fasta_batch=is_fast_fasta_batch,
+                    raw_text=raw_text,
+                    err_msg=err_msg,
+                )
                 cur = len(state["saved_records"])
                 logger.info(f"[{pool_label}] 落盘进度: {cur}/{target_count} (本轮新增 {newly_downloaded})")
                 if progress_cb:

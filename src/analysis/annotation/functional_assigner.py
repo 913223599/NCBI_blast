@@ -11,7 +11,7 @@ import subprocess
 import shutil
 import ctypes
 from pathlib import Path
-from typing import Dict, Any, Optional, Set, Callable
+from typing import Dict, Any, Optional, Set, Callable, Tuple
 
 from .fuser import AnnotationFuser
 from ...workbench.models.tool_config import ToolConfig
@@ -132,6 +132,166 @@ class FunctionalAssigner:
         cleaned = re.sub(r"\s+OS=.*$", "", cleaned).strip()
         return cleaned or "hypothetical protein"
 
+    @staticmethod
+    def _parse_blastp_hits(
+        out_tsv: Path,
+        identity_threshold: float,
+    ) -> Tuple[Dict[str, Dict[str, Any]], Set[str]]:
+        hits_map: Dict[str, Dict[str, Any]] = {}
+        target_ids: Set[str] = set()
+        if not out_tsv.exists() or out_tsv.stat().st_size == 0:
+            return hits_map, target_ids
+
+        with open(out_tsv, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                parts = line.strip().split("\t")
+                if len(parts) < 7:
+                    continue
+                qid, tid, pident, _length, evalue, bitscore, stitle = parts[:7]
+                try:
+                    pident_val = float(pident)
+                except ValueError:
+                    pident_val = 0.0
+                if pident_val >= identity_threshold:
+                    hits_map[qid] = {
+                        "target_id": tid,
+                        "identity": pident_val,
+                        "evalue": evalue,
+                        "bitscore": bitscore,
+                        "stitle": stitle,
+                    }
+                    target_ids.add(tid)
+        return hits_map, target_ids
+
+    def _assemble_phagescope_results(
+        self,
+        hits_map: Dict[str, Dict[str, Any]],
+        metadata_map: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        functional_results: Dict[str, Dict[str, Any]] = {}
+        for qid, hit in hits_map.items():
+            tid = hit["target_id"]
+            if tid in metadata_map:
+                meta = metadata_map[tid]
+                functional_results[qid] = {
+                    "product": self._clean_product_name(meta.get("product", "")),
+                    "category": meta.get("category", "general"),
+                    "gene_name": meta.get("gene"),
+                    "evalue": hit["evalue"],
+                    "identity": hit["identity"],
+                    "target_id": tid,
+                    "source_db": "PhageScope",
+                }
+                continue
+            stitle = hit.get("stitle", "")
+            if stitle and not stitle.startswith(tid):
+                cleaned_prod = self._clean_product_name(stitle)
+                if not AnnotationFuser.is_unannotated(cleaned_prod):
+                    functional_results[qid] = {
+                        "product": cleaned_prod,
+                        "category": "general",
+                        "gene_name": None,
+                        "evalue": hit["evalue"],
+                        "identity": hit["identity"],
+                        "target_id": tid,
+                        "source_db": "PhageScope",
+                    }
+        return functional_results
+
+    def _cascade_swissprot_annotation(
+        self,
+        query_faa: Path,
+        work_dir: Path,
+        functional_results: Dict[str, Dict[str, Any]],
+        threads: int,
+        evalue_threshold: float,
+        identity_threshold: float,
+        on_progress: Optional[Callable[[int, str, Optional[str]], None]],
+    ) -> None:
+        swissprot_dir = ToolConfig.get_db_dir("swissprot")
+        swissprot_ready = swissprot_dir.exists() and any(swissprot_dir.glob("swissprot.p*"))
+        self.diagnostics["swissprot"] = {"path": str(swissprot_dir), "ready": swissprot_ready}
+        if not swissprot_ready:
+            logger.warning(f"Swiss-Prot 数据库未就绪 (期望目录: {swissprot_dir})，跳过二级打捞")
+            return
+
+        sp_before = len(functional_results)
+        try:
+            if on_progress:
+                on_progress(60, "正在通过 UniProt/Swiss-Prot 金标准库二次深度打捞...", None)
+            sp_out = work_dir / "swissprot_hits.tsv"
+            self._run_blastp_query(query_faa, swissprot_dir, "swissprot", sp_out, threads, evalue_threshold)
+            if sp_out.exists() and sp_out.stat().st_size > 0:
+                with open(sp_out, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        parts = line.strip().split("\t")
+                        if len(parts) < 7:
+                            continue
+                        qid, tid, pident, _length, evalue, _bitscore, stitle = parts[:7]
+                        if qid not in functional_results and float(pident) >= identity_threshold:
+                            prod_name = self._clean_product_name(stitle)
+                            if not AnnotationFuser.is_unannotated(prod_name):
+                                functional_results[qid] = {
+                                    "product": prod_name,
+                                    "category": "general",
+                                    "gene_name": None,
+                                    "evalue": evalue,
+                                    "identity": float(pident),
+                                    "target_id": tid,
+                                    "source_db": "Swiss-Prot",
+                                }
+        except Exception as e:
+            logger.warning(f"Swiss-Prot cascade annotation failed: {e}")
+            self.diagnostics["swissprot"]["error"] = str(e)
+        self.diagnostics["swissprot"]["added"] = len(functional_results) - sp_before
+
+    def _cascade_cdd_annotation(
+        self,
+        query_faa: Path,
+        work_dir: Path,
+        functional_results: Dict[str, Dict[str, Any]],
+        threads: int,
+        evalue_threshold: float,
+        on_progress: Optional[Callable[[int, str, Optional[str]], None]],
+    ) -> None:
+        cdd_dir = ToolConfig.get_db_dir("cdd_pfam")
+        cdd_ready = cdd_dir.exists() and (any(cdd_dir.glob("cdd_pfam.pal")) or any(cdd_dir.glob("cdd_pfam.*.rps")))
+        self.diagnostics["cdd_pfam"] = {"path": str(cdd_dir), "ready": cdd_ready}
+        if not cdd_ready:
+            logger.warning(f"NCBI CDD/Pfam 数据库未就绪 (期望目录: {cdd_dir})，跳过结构域打捞")
+            return
+
+        cdd_before = len(functional_results)
+        try:
+            if on_progress:
+                on_progress(75, "正在通过 36GB NCBI CDD / Pfam-A 结构域模型库打捞基序特征...", None)
+            cdd_out = work_dir / "cdd_hits.tsv"
+            self._run_rpsblast_query(query_faa, cdd_dir, "cdd_pfam", cdd_out, threads, evalue_threshold)
+            if cdd_out.exists() and cdd_out.stat().st_size > 0:
+                with open(cdd_out, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        parts = line.strip().split("\t")
+                        if len(parts) < 7:
+                            continue
+                        qid, tid, pident, _length, evalue, _bitscore, stitle = parts[:7]
+                        if qid in functional_results:
+                            continue
+                        prod_name, cat_name = self._parse_cdd_domain_product(stitle)
+                        if prod_name and not AnnotationFuser.is_unannotated(prod_name):
+                            functional_results[qid] = {
+                                "product": prod_name,
+                                "category": cat_name,
+                                "gene_name": None,
+                                "evalue": evalue,
+                                "identity": float(pident),
+                                "target_id": tid,
+                                "source_db": "CDD/Pfam",
+                            }
+        except Exception as e:
+            logger.warning(f"CDD/Pfam cascade annotation failed: {e}")
+            self.diagnostics["cdd_pfam"]["error"] = str(e)
+        self.diagnostics["cdd_pfam"]["added"] = len(functional_results) - cdd_before
+
     def run_blastp_annotation(
         self,
         query_faa: Path,
@@ -153,19 +313,14 @@ class FunctionalAssigner:
             on_progress(10, "正在构建 BLASTP 同源检索任务 (多核并行)...", None)
 
         out_tsv = work_dir / "blastp_functional_hits.tsv"
-
         phagescope_ready = self.phagescope_dir.exists() and any(self.phagescope_dir.glob("phagescope_proteins.p*"))
-        phagescope_diag: Dict[str, Any] = {
-            "path": str(self.phagescope_dir),
-            "ready": phagescope_ready,
-        }
-        self.diagnostics["phagescope"] = phagescope_diag
+        self.diagnostics["phagescope"] = {"path": str(self.phagescope_dir), "ready": phagescope_ready}
         if not phagescope_ready:
             logger.error(
                 f"PhageScope 数据库索引不可用 (期望目录: {self.phagescope_dir}，"
                 f"需要 phagescope_proteins.p* 索引文件)，跳过同源打捞"
             )
-        if phagescope_ready:
+        else:
             if on_progress:
                 on_progress(35, "正在比对 105 万条 PhageScope 权威噬菌体蛋白库...", None)
             ok = self._run_blastp_query(query_faa, self.phagescope_dir, "phagescope_proteins", out_tsv, threads, evalue_threshold)
@@ -174,148 +329,22 @@ class FunctionalAssigner:
         if on_progress:
             on_progress(85, "BLASTP 检索完成，正在解析同源注释与可信度评分...", None)
 
-        # 1. 读取所有比对命中的目标序列 ID
-        hits_map: Dict[str, Dict[str, Any]] = {}
-        target_ids: Set[str] = set()
-
-        if out_tsv.exists() and out_tsv.stat().st_size > 0:
-            with open(out_tsv, "r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    parts = line.strip().split("\t")
-                    if len(parts) >= 7:
-                        qid, tid, pident, length, evalue, bitscore, stitle = parts[:7]
-                        try:
-                            pident_val = float(pident)
-                        except ValueError:
-                            pident_val = 0.0
-
-                        if pident_val >= identity_threshold:
-                            hits_map[qid] = {
-                                "target_id": tid,
-                                "identity": pident_val,
-                                "evalue": evalue,
-                                "bitscore": bitscore,
-                                "stitle": stitle
-                            }
-                            target_ids.add(tid)
-
+        hits_map, target_ids = self._parse_blastp_hits(out_tsv, identity_threshold)
         logger.info(f"BLASTP produced {len(hits_map)} hits exceeding identity threshold ({identity_threshold}%)")
-        self.diagnostics["phagescope"].update({
-            "hits": len(hits_map),
-            "unique_targets": len(target_ids),
-        })
+        self.diagnostics["phagescope"].update({"hits": len(hits_map), "unique_targets": len(target_ids)})
 
-        # 2. 匹配真实功能描述元数据 (Tier 1: PhageScope)
         metadata_map = self._load_metadata_for_ids(target_ids)
         self.diagnostics["phagescope"]["metadata_matched"] = len(metadata_map)
 
-        # 3. 组装最终注释映射
-        functional_results: Dict[str, Dict[str, Any]] = {}
-        for qid, hit in hits_map.items():
-            tid = hit["target_id"]
-            if tid in metadata_map:
-                meta = metadata_map[tid]
-                prod = self._clean_product_name(meta.get("product", ""))
-                functional_results[qid] = {
-                    "product": prod,
-                    "category": meta.get("category", "general"),
-                    "gene_name": meta.get("gene"),
-                    "evalue": hit["evalue"],
-                    "identity": hit["identity"],
-                    "target_id": tid,
-                    "source_db": "PhageScope"
-                }
-            else:
-                stitle = hit.get("stitle", "")
-                if stitle and not stitle.startswith(tid):
-                    cleaned_prod = self._clean_product_name(stitle)
-                    if not AnnotationFuser.is_unannotated(cleaned_prod):
-                        functional_results[qid] = {
-                            "product": cleaned_prod,
-                            "category": "general",
-                            "gene_name": None,
-                            "evalue": hit["evalue"],
-                            "identity": hit["identity"],
-                            "target_id": tid,
-                            "source_db": "PhageScope"
-                        }
-
-        # 4. Tier 2: Swiss-Prot 金标准蛋白库二次打捞 (对仍为假定蛋白或未命中的 CDS)
+        functional_results = self._assemble_phagescope_results(hits_map, metadata_map)
         self.diagnostics.setdefault("phagescope", {})["assigned"] = len(functional_results)
-        swissprot_dir = ToolConfig.get_db_dir("swissprot")
-        swissprot_ready = swissprot_dir.exists() and any(swissprot_dir.glob("swissprot.p*"))
-        sp_diag: Dict[str, Any] = {"path": str(swissprot_dir), "ready": swissprot_ready}
-        self.diagnostics["swissprot"] = sp_diag
-        sp_before = len(functional_results)
-        if swissprot_ready:
-            try:
-                if on_progress:
-                    on_progress(60, "正在通过 UniProt/Swiss-Prot 金标准库二次深度打捞...", None)
-                sp_out = work_dir / "swissprot_hits.tsv"
-                self._run_blastp_query(query_faa, swissprot_dir, "swissprot", sp_out, threads, evalue_threshold)
-                if sp_out.exists() and sp_out.stat().st_size > 0:
-                    with open(sp_out, "r", encoding="utf-8", errors="ignore") as f:
-                        for line in f:
-                            parts = line.strip().split("\t")
-                            if len(parts) >= 7:
-                                qid, tid, pident, length, evalue, bitscore, stitle = parts[:7]
-                                if qid not in functional_results and float(pident) >= identity_threshold:
-                                    prod_name = self._clean_product_name(stitle)
-                                    if not AnnotationFuser.is_unannotated(prod_name):
-                                        functional_results[qid] = {
-                                            "product": prod_name,
-                                            "category": "general",
-                                            "gene_name": None,
-                                            "evalue": evalue,
-                                            "identity": float(pident),
-                                            "target_id": tid,
-                                            "source_db": "Swiss-Prot"
-                                        }
-            except Exception as e:
-                logger.warning(f"Swiss-Prot cascade annotation failed: {e}")
-                self.diagnostics["swissprot"]["error"] = str(e)
-            self.diagnostics["swissprot"]["added"] = len(functional_results) - sp_before
-        else:
-            logger.warning(f"Swiss-Prot 数据库未就绪 (期望目录: {swissprot_dir})，跳过二级打捞")
 
-        # 5. Tier 4: NCBI CDD / Pfam-A 保守结构域与基序深度打捞 (RPS-BLAST)
-        cdd_dir = ToolConfig.get_db_dir("cdd_pfam")
-        cdd_ready = cdd_dir.exists() and (any(cdd_dir.glob("cdd_pfam.pal")) or any(cdd_dir.glob("cdd_pfam.*.rps")))
-        cdd_diag: Dict[str, Any] = {"path": str(cdd_dir), "ready": cdd_ready}
-        self.diagnostics["cdd_pfam"] = cdd_diag
-        cdd_before = len(functional_results)
-        if cdd_ready:
-            try:
-                if on_progress:
-                    on_progress(75, "正在通过 36GB NCBI CDD / Pfam-A 结构域模型库打捞基序特征...", None)
-                cdd_out = work_dir / "cdd_hits.tsv"
-                self._run_rpsblast_query(query_faa, cdd_dir, "cdd_pfam", cdd_out, threads, evalue_threshold)
-                if cdd_out.exists() and cdd_out.stat().st_size > 0:
-                    with open(cdd_out, "r", encoding="utf-8", errors="ignore") as f:
-                        for line in f:
-                            parts = line.strip().split("\t")
-                            if len(parts) >= 7:
-                                qid, tid, pident, length, evalue, bitscore, stitle = parts[:7]
-                                if qid not in functional_results:
-                                    prod_name, cat_name = self._parse_cdd_domain_product(stitle)
-                                    if prod_name and not AnnotationFuser.is_unannotated(prod_name):
-                                        functional_results[qid] = {
-                                            "product": prod_name,
-                                            "category": cat_name,
-                                            "gene_name": None,
-                                            "evalue": evalue,
-                                            "identity": float(pident),
-                                            "target_id": tid,
-                                            "source_db": "CDD/Pfam"
-                                        }
-            except Exception as e:
-                logger.warning(f"CDD/Pfam cascade annotation failed: {e}")
-                self.diagnostics["cdd_pfam"]["error"] = str(e)
-            self.diagnostics["cdd_pfam"]["added"] = len(functional_results) - cdd_before
-        else:
-            logger.warning(f"NCBI CDD/Pfam 数据库未就绪 (期望目录: {cdd_dir})，跳过结构域打捞")
-
-        # 6. Tier 3: 毒力 (VFDB) 与耐药 (CARD) 安全性专项标记
+        self._cascade_swissprot_annotation(
+            query_faa, work_dir, functional_results, threads, evalue_threshold, identity_threshold, on_progress
+        )
+        self._cascade_cdd_annotation(
+            query_faa, work_dir, functional_results, threads, evalue_threshold, on_progress
+        )
         self._annotate_safety_flags(query_faa, work_dir, functional_results, threads, evalue_threshold)
 
         logger.info(f"Successfully assigned {len(functional_results)} real biological functions to CDS features across multi-tier databases")

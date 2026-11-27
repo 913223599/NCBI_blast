@@ -178,23 +178,9 @@ def run_batch_phrog_mmseqs(
     return best_all
 
 
-def enrich_semantic_targets_with_phrog(
+def _load_phrog_part_rows(
     part_specs: Sequence[Tuple[str, Path, Path, Optional[Path]]],
-    out_dir: Path,
-    *,
-    annot_tsv: Path,
-    phrogs_profile_db: Optional[Path] = None,
-    workers: Optional[int] = None,
-    hit_fetcher: Optional[Callable[[Sequence[Tuple[str, str]]], Dict[str, Any]]] = None,
-) -> Dict[str, Dict[str, Any]]:
-    """
-    在独立目标目录 `out_dir` 生成增强版 `train_{part}_semantic.npz`（绝不覆写源语义缓存）：
-    part_specs: [(part_name, train_part_npz, fasta_path, base_semantic_npz_or_None), ...]
-    """
-    out_root = Path(out_dir).resolve()
-    out_root.mkdir(parents=True, exist_ok=True)
-    annots = load_phrog_annotations(annot_tsv)
-
+) -> Tuple[Dict[str, str], Dict[str, Dict[str, Any]]]:
     unique_contigs: Dict[str, str] = {}
     part_rows: Dict[str, Dict[str, Any]] = {}
     for pname, npz_p, fa_p, base_sem_p in part_specs:
@@ -237,7 +223,17 @@ def enrich_semantic_targets_with_phrog(
             "transposase_counts": transp_cnts,
             "clean_labels": clean_labels,
         }
+    return unique_contigs, part_rows
 
+
+def _extract_orfs_and_phrog_classes(
+    unique_contigs: Dict[str, str],
+    annots: Dict[str, Any],
+    *,
+    phrogs_profile_db: Optional[Path],
+    workers: Optional[int],
+    hit_fetcher: Optional[Callable[[Sequence[Tuple[str, str]]], Dict[str, Any]]],
+) -> Dict[str, List[Tuple[int, int, str]]]:
     n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
     contig_orfs: Dict[str, List[Tuple[int, int, str]]] = {}
     items = list(unique_contigs.items())
@@ -250,12 +246,12 @@ def enrich_semantic_targets_with_phrog(
             cid, orfs = _extract_contig_orfs_raw(it)
             contig_orfs[cid] = orfs
 
-    orf_records: List[Tuple[str, str]] = []
-    for cid, orfs in contig_orfs.items():
-        for oi, (_, _, aa) in enumerate(orfs):
-            if len(aa) >= 25:
-                orf_records.append((f"{cid}__orf{oi}", aa))
-
+    orf_records = [
+        (f"{cid}__orf{oi}", aa)
+        for cid, orfs in contig_orfs.items()
+        for oi, (_, _, aa) in enumerate(orfs)
+        if len(aa) >= 25
+    ]
     if hit_fetcher is not None:
         raw_hits = hit_fetcher(orf_records)
     elif phrogs_profile_db is not None:
@@ -270,83 +266,125 @@ def enrich_semantic_targets_with_phrog(
             hit = raw_hits.get(f"{cid}__orf{oi}")
             if hit is None:
                 continue
-            tid = str(hit[1])
-            cls = classify_phrog_category(tid, annots)
+            cls = classify_phrog_category(str(hit[1]), annots)
             if cls in ("phrog_hallmark", "phrog_tail_lysis", "transposase"):
                 lst.append((s0, e0, cls))
         lst.sort(key=lambda t: t[0])
         contig_phrog_cls[cid] = lst
+    return contig_phrog_cls
 
-    summary: Dict[str, Dict[str, Any]] = {}
-    for pname, item in part_rows.items():
-        cids = item["contig_ids"]
-        starts = item["starts"]
-        ends = item["ends"]
-        sem_targets = item["sem_targets"]
-        hall_cnts = item["hallmark_counts"]
-        transp_cnts = item["transposase_counts"]
-        n = len(cids)
 
-        backfill_hall = 0
-        backfill_tl = 0
-        for idx in range(n):
-            cid = str(cids[idx])
-            ws = int(starts[idx])
-            we = int(ends[idx])
-            ph_hall = 0
-            ph_tl = 0
-            ph_tr = 0
-            for gs, ge, cls in contig_phrog_cls.get(cid, ()):
-                if ge <= ws:
-                    continue
-                if gs >= we:
-                    break
-                mid = (gs + ge) // 2
-                if ws <= mid < we:
-                    if cls == "phrog_hallmark":
-                        ph_hall += 1
-                    elif cls == "phrog_tail_lysis":
-                        ph_tl += 1
-                    elif cls == "transposase":
-                        ph_tr += 1
+def _count_window_phrog_hits(
+    intervals: Sequence[Tuple[int, int, str]],
+    ws: int,
+    we: int,
+) -> Tuple[int, int, int]:
+    ph_hall = 0
+    ph_tl = 0
+    ph_tr = 0
+    for gs, ge, cls in intervals:
+        if ge <= ws:
+            continue
+        if gs >= we:
+            break
+        mid = (gs + ge) // 2
+        if ws <= mid < we:
+            if cls == "phrog_hallmark":
+                ph_hall += 1
+            elif cls == "phrog_tail_lysis":
+                ph_tl += 1
+            elif cls == "transposase":
+                ph_tr += 1
+    return ph_hall, ph_tl, ph_tr
 
-            if ph_hall > 0:
-                prev_h = float(sem_targets[idx, 0])
-                new_h = 1.0 if ph_hall >= 2 else 0.65
-                if prev_h < 0.5 and max(prev_h, new_h) >= 0.5:
-                    backfill_hall += 1
-                sem_targets[idx, 0] = max(prev_h, new_h)
-                hall_cnts[idx] = np.int16(int(hall_cnts[idx]) + ph_hall)
-            if ph_tl > 0:
-                prev_tl = float(sem_targets[idx, 3])
-                new_tl = 1.0 if ph_tl >= 2 else 0.60
-                if prev_tl < 0.5 and max(prev_tl, new_tl) >= 0.5:
-                    backfill_tl += 1
-                sem_targets[idx, 3] = max(prev_tl, new_tl)
-            if ph_tr > 0 and ph_hall == 0 and float(sem_targets[idx, 0]) < 0.5:
-                sem_targets[idx, 2] = max(float(sem_targets[idx, 2]), 0.8 if ph_tr == 1 else 1.0)
-                transp_cnts[idx] = np.int16(int(transp_cnts[idx]) + ph_tr)
 
-        sem_out = out_root / f"train_{pname}_semantic.npz"
-        tmp_sem = sem_out.with_name(f".{sem_out.stem}.tmp.npz")
-        np.savez_compressed(
-            tmp_sem,
-            sem_targets=sem_targets,
-            sem_valid_mask=item["sem_valid_mask"],
-            hallmark_counts=hall_cnts,
-            transposase_counts=transp_cnts,
-            clean_labels=item["clean_labels"],
+def _apply_phrog_backfill_to_part(
+    pname: str,
+    item: Dict[str, Any],
+    contig_phrog_cls: Dict[str, List[Tuple[int, int, str]]],
+    out_root: Path,
+) -> Dict[str, Any]:
+    cids = item["contig_ids"]
+    starts = item["starts"]
+    ends = item["ends"]
+    sem_targets = item["sem_targets"]
+    hall_cnts = item["hallmark_counts"]
+    transp_cnts = item["transposase_counts"]
+    n = len(cids)
+
+    backfill_hall = 0
+    backfill_tl = 0
+    for idx in range(n):
+        ph_hall, ph_tl, ph_tr = _count_window_phrog_hits(
+            contig_phrog_cls.get(str(cids[idx]), ()), int(starts[idx]), int(ends[idx])
         )
-        tmp_sem.replace(sem_out)
-        summary[pname] = {
-            "rows": n,
-            "backfilled_hallmark_windows": backfill_hall,
-            "backfilled_tail_lysis_windows": backfill_tl,
-            "total_hallmark_pos_windows": int(np.sum(sem_targets[:, 0] >= 0.5)),
-            "total_tail_lysis_windows": int(np.sum(sem_targets[:, 3] >= 0.5)),
-            "semantic_npz": str(sem_out),
-        }
-        logger.info(f"PHROGs 遥远同源语义补全 train_{pname}: {summary[pname]}")
+        if ph_hall > 0:
+            prev_h = float(sem_targets[idx, 0])
+            new_h = 1.0 if ph_hall >= 2 else 0.65
+            if prev_h < 0.5 and max(prev_h, new_h) >= 0.5:
+                backfill_hall += 1
+            sem_targets[idx, 0] = max(prev_h, new_h)
+            hall_cnts[idx] = np.int16(int(hall_cnts[idx]) + ph_hall)
+        if ph_tl > 0:
+            prev_tl = float(sem_targets[idx, 3])
+            new_tl = 1.0 if ph_tl >= 2 else 0.60
+            if prev_tl < 0.5 and max(prev_tl, new_tl) >= 0.5:
+                backfill_tl += 1
+            sem_targets[idx, 3] = max(prev_tl, new_tl)
+        if ph_tr > 0 and ph_hall == 0 and float(sem_targets[idx, 0]) < 0.5:
+            sem_targets[idx, 2] = max(float(sem_targets[idx, 2]), 0.8 if ph_tr == 1 else 1.0)
+            transp_cnts[idx] = np.int16(int(transp_cnts[idx]) + ph_tr)
 
-    return summary
+    sem_out = out_root / f"train_{pname}_semantic.npz"
+    tmp_sem = sem_out.with_name(f".{sem_out.stem}.tmp.npz")
+    np.savez_compressed(
+        tmp_sem,
+        sem_targets=sem_targets,
+        sem_valid_mask=item["sem_valid_mask"],
+        hallmark_counts=hall_cnts,
+        transposase_counts=transp_cnts,
+        clean_labels=item["clean_labels"],
+    )
+    tmp_sem.replace(sem_out)
+    part_summary = {
+        "rows": n,
+        "backfilled_hallmark_windows": backfill_hall,
+        "backfilled_tail_lysis_windows": backfill_tl,
+        "total_hallmark_pos_windows": int(np.sum(sem_targets[:, 0] >= 0.5)),
+        "total_tail_lysis_windows": int(np.sum(sem_targets[:, 3] >= 0.5)),
+        "semantic_npz": str(sem_out),
+    }
+    logger.info(f"PHROGs 遥远同源语义补全 train_{pname}: {part_summary}")
+    return part_summary
+
+
+def enrich_semantic_targets_with_phrog(
+    part_specs: Sequence[Tuple[str, Path, Path, Optional[Path]]],
+    out_dir: Path,
+    *,
+    annot_tsv: Path,
+    phrogs_profile_db: Optional[Path] = None,
+    workers: Optional[int] = None,
+    hit_fetcher: Optional[Callable[[Sequence[Tuple[str, str]]], Dict[str, Any]]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    在独立目标目录 `out_dir` 生成增强版 `train_{part}_semantic.npz`（绝不覆写源语义缓存）：
+    part_specs: [(part_name, train_part_npz, fasta_path, base_semantic_npz_or_None), ...]
+    """
+    out_root = Path(out_dir).resolve()
+    out_root.mkdir(parents=True, exist_ok=True)
+    annots = load_phrog_annotations(annot_tsv)
+
+    unique_contigs, part_rows = _load_phrog_part_rows(part_specs)
+    contig_phrog_cls = _extract_orfs_and_phrog_classes(
+        unique_contigs,
+        annots,
+        phrogs_profile_db=phrogs_profile_db,
+        workers=workers,
+        hit_fetcher=hit_fetcher,
+    )
+    return {
+        pname: _apply_phrog_backfill_to_part(pname, item, contig_phrog_cls, out_root)
+        for pname, item in part_rows.items()
+    }
 

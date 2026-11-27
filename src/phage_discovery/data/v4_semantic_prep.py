@@ -154,6 +154,72 @@ def run_batch_diamond_blastp(
     return best_hits
 
 
+def _collect_archaeal_hard_records(
+    archaeal_entries: Sequence[Tuple[str, Path]],
+    rng: np.random.Generator,
+) -> List[Tuple[str, str]]:
+    records: List[Tuple[str, str]] = []
+    for acc, fa_p in archaeal_entries:
+        seqs = [s for _, s in iter_fasta(fa_p)]
+        if not seqs:
+            continue
+        full_seq = "".join(seqs).upper()
+        if len(full_seq) < 1000:
+            continue
+        records.append((f"HARDV4_ARCH_{acc}_FULL", full_seq))
+        for k_idx in range(min(8, max(2, len(full_seq) // 5000))):
+            slen = int(rng.choice([800, 1000, 3000]))
+            if len(full_seq) > slen:
+                st = int(rng.integers(0, len(full_seq) - slen))
+                records.append((f"HARDV4_ARCH_{acc}_S{slen}_{k_idx}", full_seq[st : st + slen]))
+    return records
+
+
+def _collect_transposase_island_records(
+    conn: sqlite3.Connection,
+    host_fasta_map: Dict[str, Path],
+    mask_map: Dict[str, List[Tuple[int, int]]],
+    max_transposase_loci: int,
+    rng: np.random.Generator,
+) -> List[Tuple[str, str]]:
+    cand_loci: List[Tuple[str, int, int]] = []
+    for acc, s_pos, e_pos, prod in conn.execute("SELECT accession, start_pos, end_pos, product FROM cds_features").fetchall():
+        if acc not in host_fasta_map or not prod or not TRANSPOSASE_SQL_RE.search(prod):
+            continue
+        s0 = max(0, int(s_pos) - 1)
+        e0 = int(e_pos)
+        if not any(not (e0 <= ms or s0 >= me) for ms, me in mask_map.get(acc, [])):
+            cand_loci.append((acc, s0, e0))
+
+    rng.shuffle(cand_loci)
+    chosen_by_acc: Dict[str, List[Tuple[int, int]]] = {}
+    kept_cnt = 0
+    for acc, s0, e0 in cand_loci:
+        if kept_cnt >= max_transposase_loci:
+            break
+        prev_list = chosen_by_acc.setdefault(acc, [])
+        if any(abs((s0 + e0) // 2 - (ps + pe) // 2) < 6000 for ps, pe in prev_list):
+            continue
+        prev_list.append((s0, e0))
+        kept_cnt += 1
+
+    records: List[Tuple[str, str]] = []
+    for acc, loci in chosen_by_acc.items():
+        full_seq = "".join(s for _, s in iter_fasta(host_fasta_map[acc])).upper()
+        n_seq = len(full_seq)
+        for li, (s0, e0) in enumerate(loci):
+            mid = (s0 + e0) // 2
+            w5_s = max(0, min(n_seq - 5000, mid - 2500))
+            w5_e = min(n_seq, w5_s + 5000)
+            if w5_e - w5_s >= 3000:
+                records.append((f"HARDV4_IS_{acc}_{li}_5K", full_seq[w5_s:w5_e]))
+            if li % 3 == 0 and n_seq >= 900:
+                slen = int(rng.choice([800, 1000]))
+                w1_s = max(0, min(n_seq - slen, mid - slen // 2))
+                records.append((f"HARDV4_IS_{acc}_{li}_S{slen}", full_seq[w1_s : w1_s + slen]))
+    return records
+
+
 def _build_hard_v4_records(
     neg_dir: Path,
     splits_json: Path,
@@ -175,8 +241,6 @@ def _build_hard_v4_records(
         raise ValueError(f"negative_splits.json 中未找到 train 分片: {splits_json}")
 
     db_path = neg_root / "index" / "negative_index.sqlite"
-    records: List[Tuple[str, str]] = []
-
     with closing(sqlite3.connect(db_path)) as conn:
         genomes = conn.execute(
             "SELECT accession, negative_category, organism, length_bp, fasta_relpath FROM genomes WHERE is_valid_negative=1"
@@ -184,14 +248,12 @@ def _build_hard_v4_records(
 
         mask_map: Dict[str, List[Tuple[int, int]]] = {}
         for acc, s_pos, e_pos in conn.execute("SELECT accession, start_pos, end_pos FROM prophage_masks").fetchall():
-            if acc in non_train_accs:
-                continue
-            mask_map.setdefault(acc, []).append((int(s_pos), int(e_pos)))
-
+            if acc not in non_train_accs:
+                mask_map.setdefault(acc, []).append((int(s_pos), int(e_pos)))
         for acc in list(mask_map.keys()):
             mask_map[acc] = merge_intervals(mask_map[acc], flank_bp=flank_buffer_bp)
 
-        archaeal_entries = []
+        archaeal_entries: List[Tuple[str, Path]] = []
         host_fasta_map: Dict[str, Path] = {}
         for acc, cat, org, _lbp, relp in genomes:
             if acc not in train_accs:
@@ -204,62 +266,10 @@ def _build_hard_v4_records(
             elif cat in ("bacterial_chromosome", "plasmid"):
                 host_fasta_map[acc] = fa_p
 
-        # 1. 全量古菌病毒 + 3000bp / 800bp 短片采样（零泄露）
-        for acc, fa_p in archaeal_entries:
-            seqs = [s for _, s in iter_fasta(fa_p)]
-            if not seqs:
-                continue
-            full_seq = "".join(seqs).upper()
-            if len(full_seq) >= 1000:
-                records.append((f"HARDV4_ARCH_{acc}_FULL", full_seq))
-                for k_idx in range(min(8, max(2, len(full_seq) // 5000))):
-                    slen = int(rng.choice([800, 1000, 3000]))
-                    if len(full_seq) > slen:
-                        st = int(rng.integers(0, len(full_seq) - slen))
-                        records.append((f"HARDV4_ARCH_{acc}_S{slen}_{k_idx}", full_seq[st:st + slen]))
-
-        # 2. 孤立转座酶短岛：避开 prophage_masks 与相邻噬菌体，仅采纯细菌/质粒 IS 位点
-        cand_loci: List[Tuple[str, int, int]] = []
-        cds_rows = conn.execute(
-            "SELECT accession, start_pos, end_pos, product FROM cds_features"
-        ).fetchall()
-        for acc, s_pos, e_pos, prod in cds_rows:
-            if acc not in host_fasta_map or not prod:
-                continue
-            if not TRANSPOSASE_SQL_RE.search(prod):
-                continue
-            s0 = max(0, int(s_pos) - 1)
-            e0 = int(e_pos)
-            blocked = any(not (e0 <= ms or s0 >= me) for ms, me in mask_map.get(acc, []))
-            if not blocked:
-                cand_loci.append((acc, s0, e0))
-
-        rng.shuffle(cand_loci)
-        chosen_by_acc: Dict[str, List[Tuple[int, int]]] = {}
-        kept_cnt = 0
-        for acc, s0, e0 in cand_loci:
-            if kept_cnt >= max_transposase_loci:
-                break
-            prev_list = chosen_by_acc.setdefault(acc, [])
-            if any(abs((s0 + e0) // 2 - (ps + pe) // 2) < 6000 for ps, pe in prev_list):
-                continue
-            prev_list.append((s0, e0))
-            kept_cnt += 1
-
-        for acc, loci in chosen_by_acc.items():
-            fa_p = host_fasta_map[acc]
-            full_seq = "".join(s for _, s in iter_fasta(fa_p)).upper()
-            n_seq = len(full_seq)
-            for li, (s0, e0) in enumerate(loci):
-                mid = (s0 + e0) // 2
-                w5_s = max(0, min(n_seq - 5000, mid - 2500))
-                w5_e = min(n_seq, w5_s + 5000)
-                if w5_e - w5_s >= 3000:
-                    records.append((f"HARDV4_IS_{acc}_{li}_5K", full_seq[w5_s:w5_e]))
-                if li % 3 == 0 and n_seq >= 900:
-                    slen = int(rng.choice([800, 1000]))
-                    w1_s = max(0, min(n_seq - slen, mid - slen // 2))
-                    records.append((f"HARDV4_IS_{acc}_{li}_S{slen}", full_seq[w1_s:w1_s + slen]))
+        records = _collect_archaeal_hard_records(archaeal_entries, rng)
+        records.extend(
+            _collect_transposase_island_records(conn, host_fasta_map, mask_map, max_transposase_loci, rng)
+        )
 
     # 最后严防死守：任何一条产出 ID 都禁止包含非 train accession
     for rec_id, _ in records:
@@ -353,6 +363,148 @@ def mine_hard_transposase_and_archaeal_windows(
     return {"fasta_path": str(out_fasta), "npz_path": str(out_npz), "records": len(records), "rows": total_rows}
 
 
+def _extract_diamond_orf_classes(
+    unique_contigs: Dict[str, str],
+    *,
+    dmnd_db: Optional[Path],
+    workers: Optional[int],
+    hit_fetcher: Optional[Callable[[Sequence[Tuple[str, str]]], Dict[str, Tuple[float, str]]]],
+) -> Dict[str, List[Tuple[int, int, str, str]]]:
+    n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
+    contig_orfs: Dict[str, List[Tuple[int, int, str]]] = {}
+    items = list(unique_contigs.items())
+    if n_workers > 1 and len(items) > 4:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as ex:
+            for cid, orfs in ex.map(_extract_contig_orfs_raw, items, chunksize=8):
+                contig_orfs[cid] = orfs
+    else:
+        for it in items:
+            cid, orfs = _extract_contig_orfs_raw(it)
+            contig_orfs[cid] = orfs
+
+    orf_records = [
+        (f"{cid}__orf{oi}", aa)
+        for cid, orfs in contig_orfs.items()
+        for oi, (_, _, aa) in enumerate(orfs)
+    ]
+    if hit_fetcher is not None:
+        best_hits = hit_fetcher(orf_records)
+    elif dmnd_db is not None:
+        best_hits = run_batch_diamond_blastp(orf_records, dmnd_db=dmnd_db, threads=n_workers)
+    else:
+        best_hits = {}
+
+    contig_orf_cls: Dict[str, List[Tuple[int, int, str, str]]] = {}
+    for cid, orfs in contig_orfs.items():
+        lst = []
+        for oi, (s0, e0, _) in enumerate(orfs):
+            hit = best_hits.get(f"{cid}__orf{oi}")
+            title = hit[1] if hit is not None else ""
+            cls = _classify_hit_title(title) if hit is not None else "no_hit"
+            lst.append((s0, e0, cls, title))
+        lst.sort(key=lambda t: t[0])
+        contig_orf_cls[cid] = lst
+    return contig_orf_cls
+
+
+def _count_diamond_window_hits(
+    intervals: Sequence[Tuple[int, int, str, str]],
+    ws: int,
+    we: int,
+) -> Tuple[int, int, int, int, int]:
+    h_cnt = t_cnt = int_cnt = tl_cnt = other_phage_cnt = 0
+    for gs, ge, cls, title in intervals:
+        if ge <= ws:
+            continue
+        if gs >= we:
+            break
+        mid = (gs + ge) // 2
+        if not (ws <= mid < we):
+            continue
+        if cls == "hallmark":
+            h_cnt += 1
+        elif cls == "transposase":
+            t_cnt += 1
+        elif cls == "non_amg_phage":
+            other_phage_cnt += 1
+        if title and INTEGRASE_SEM_RE.search(title):
+            int_cnt += 1
+        if title and TAIL_LYSIS_SEM_RE.search(title):
+            tl_cnt += 1
+    return h_cnt, t_cnt, int_cnt, tl_cnt, other_phage_cnt
+
+
+def _annotate_part_with_diamond(
+    pname: str,
+    arrs: Dict[str, np.ndarray],
+    npz_p: Path,
+    contig_orf_cls: Dict[str, List[Tuple[int, int, str, str]]],
+    clean_neg_set: set[str],
+) -> Dict[str, Any]:
+    cids = arrs["contig_ids"]
+    starts = arrs["starts"]
+    ends = arrs["ends"]
+    labels = arrs["labels"].astype(np.int8)
+    n = len(labels)
+
+    sem_targets = np.zeros((n, 4), dtype=np.float32)
+    sem_valid_mask = np.ones(n, dtype=np.float32)
+    hallmark_cnts = np.zeros(n, dtype=np.int16)
+    transp_cnts = np.zeros(n, dtype=np.int16)
+    clean_labels = labels.copy()
+    cleaned_neg_cnt = 0
+
+    for idx in range(n):
+        cid = str(cids[idx])
+        h_cnt, t_cnt, int_cnt, tl_cnt, other_phage_cnt = _count_diamond_window_hits(
+            contig_orf_cls.get(cid, ()), int(starts[idx]), int(ends[idx])
+        )
+        hallmark_cnts[idx] = h_cnt
+        transp_cnts[idx] = t_cnt
+        sem_targets[idx, 0] = min(1.0, 0.65 if h_cnt == 1 else (1.0 if h_cnt >= 2 else 0.0))
+        sem_targets[idx, 1] = 1.0 if int_cnt >= 1 else 0.0
+        if t_cnt >= 1 and h_cnt == 0 and other_phage_cnt == 0:
+            sem_targets[idx, 2] = 1.0
+        elif t_cnt >= 2 and h_cnt == 0:
+            sem_targets[idx, 2] = 0.5
+        if tl_cnt >= 2 or other_phage_cnt >= 2:
+            sem_targets[idx, 3] = 1.0
+        elif tl_cnt == 1 or other_phage_cnt == 1:
+            sem_targets[idx, 3] = 0.6
+
+        if (
+            pname in clean_neg_set
+            and not cid.startswith("HARDV4_ARCH_")
+            and labels[idx] == 0
+            and (h_cnt >= 2 or (h_cnt >= 1 and other_phage_cnt >= 2))
+        ):
+            clean_labels[idx] = -1
+            cleaned_neg_cnt += 1
+
+    sem_path = npz_p.with_name(f"train_{pname}_semantic.npz")
+    tmp_sem = sem_path.with_name(f".{sem_path.stem}.tmp.npz")
+    np.savez_compressed(
+        tmp_sem,
+        sem_targets=sem_targets,
+        sem_valid_mask=sem_valid_mask,
+        hallmark_counts=hallmark_cnts,
+        transposase_counts=transp_cnts,
+        clean_labels=clean_labels,
+    )
+    tmp_sem.replace(sem_path)
+    part_summary = {
+        "rows": n,
+        "hallmark_pos_windows": int(np.sum(hallmark_cnts > 0)),
+        "integrase_windows": int(np.sum(sem_targets[:, 1] > 0.5)),
+        "transposase_risk_windows": int(np.sum(sem_targets[:, 2] > 0.5)),
+        "tail_lysis_windows": int(np.sum(sem_targets[:, 3] > 0.5)),
+        "cleaned_contradictory_negatives": cleaned_neg_cnt,
+        "semantic_npz": str(sem_path),
+    }
+    logger.info(f"语义标注完成 train_{pname}: {part_summary}")
+    return part_summary
+
+
 def annotate_train_semantics_with_diamond(
     part_specs: Sequence[Tuple[str, Path, Path]],
     dmnd_db: Optional[Path] = None,
@@ -384,131 +536,14 @@ def annotate_train_semantics_with_diamond(
         part_arrays[pname] = arrs
         part_npz_paths[pname] = npz_path
 
-    n_workers = get_safe_cpu_budget(requested=workers or 0, reserve_cores=2)
-    contig_orfs: Dict[str, List[Tuple[int, int, str]]] = {}
-    items = list(unique_contigs.items())
-    if n_workers > 1 and len(items) > 4:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as ex:
-            for cid, orfs in ex.map(_extract_contig_orfs_raw, items, chunksize=8):
-                contig_orfs[cid] = orfs
-    else:
-        for it in items:
-            cid, orfs = _extract_contig_orfs_raw(it)
-            contig_orfs[cid] = orfs
-
-    orf_records: List[Tuple[str, str]] = []
-    for cid, orfs in contig_orfs.items():
-        for oi, (_, _, aa) in enumerate(orfs):
-            orf_records.append((f"{cid}__orf{oi}", aa))
-
-    if hit_fetcher is not None:
-        best_hits = hit_fetcher(orf_records)
-    elif dmnd_db is not None:
-        best_hits = run_batch_diamond_blastp(orf_records, dmnd_db=dmnd_db, threads=n_workers)
-    else:
-        best_hits = {}
-
-    contig_orf_cls: Dict[str, List[Tuple[int, int, str, str]]] = {}
-    for cid, orfs in contig_orfs.items():
-        lst = []
-        for oi, (s0, e0, _) in enumerate(orfs):
-            hit = best_hits.get(f"{cid}__orf{oi}")
-            title = hit[1] if hit is not None else ""
-            cls = _classify_hit_title(title) if hit is not None else "no_hit"
-            lst.append((s0, e0, cls, title))
-        lst.sort(key=lambda t: t[0])
-        contig_orf_cls[cid] = lst
-
+    contig_orf_cls = _extract_diamond_orf_classes(
+        unique_contigs, dmnd_db=dmnd_db, workers=workers, hit_fetcher=hit_fetcher
+    )
     clean_neg_set = set(clean_negative_parts)
-    summary: Dict[str, Dict[str, Any]] = {}
-
-    for pname, arrs in part_arrays.items():
-        cids = arrs["contig_ids"]
-        starts = arrs["starts"]
-        ends = arrs["ends"]
-        labels = arrs["labels"].astype(np.int8)
-        n = len(labels)
-
-        # 4维语义软目标: [sem_phage_hallmark, sem_integrase, sem_transp, sem_tail_lysis]
-        sem_targets = np.zeros((n, 4), dtype=np.float32)
-        sem_valid_mask = np.ones(n, dtype=np.float32)
-        hallmark_cnts = np.zeros(n, dtype=np.int16)
-        transp_cnts = np.zeros(n, dtype=np.int16)
-        clean_labels = labels.copy()
-        cleaned_neg_cnt = 0
-
-        for idx in range(n):
-            cid = str(cids[idx])
-            ws = int(starts[idx])
-            we = int(ends[idx])
-            h_cnt = 0
-            t_cnt = 0
-            int_cnt = 0
-            tl_cnt = 0
-            other_phage_cnt = 0
-            for gs, ge, cls, title in contig_orf_cls.get(cid, ()):
-                if ge <= ws:
-                    continue
-                if gs >= we:
-                    break
-                mid = (gs + ge) // 2
-                if ws <= mid < we:
-                    if cls == "hallmark":
-                        h_cnt += 1
-                    elif cls == "transposase":
-                        t_cnt += 1
-                    elif cls == "non_amg_phage":
-                        other_phage_cnt += 1
-                    if title and INTEGRASE_SEM_RE.search(title):
-                        int_cnt += 1
-                    if title and TAIL_LYSIS_SEM_RE.search(title):
-                        tl_cnt += 1
-
-            hallmark_cnts[idx] = h_cnt
-            transp_cnts[idx] = t_cnt
-            sem_targets[idx, 0] = min(1.0, 0.65 if h_cnt == 1 else (1.0 if h_cnt >= 2 else 0.0))
-            sem_targets[idx, 1] = 1.0 if int_cnt >= 1 else 0.0
-            if t_cnt >= 1 and h_cnt == 0 and other_phage_cnt == 0:
-                sem_targets[idx, 2] = 1.0
-            elif t_cnt >= 2 and h_cnt == 0:
-                sem_targets[idx, 2] = 0.5
-            if tl_cnt >= 2 or other_phage_cnt >= 2:
-                sem_targets[idx, 3] = 1.0
-            elif tl_cnt == 1 or other_phage_cnt == 1:
-                sem_targets[idx, 3] = 0.6
-
-            # 仅清洗细菌/嵌合/挖掘库中标签为 0 但实际富含核心噬菌体基因的矛盾负样本（不动古菌/非噬菌体病毒）
-            is_arch_or_npv = cid.startswith("HARDV4_ARCH_")
-            if pname in clean_neg_set and not is_arch_or_npv and labels[idx] == 0:
-                if h_cnt >= 2 or (h_cnt >= 1 and other_phage_cnt >= 2):
-                    clean_labels[idx] = -1
-                    cleaned_neg_cnt += 1
-
-        npz_p = part_npz_paths[pname]
-        sem_path = npz_p.with_name(f"train_{pname}_semantic.npz")
-        tmp_sem = sem_path.with_name(f".{sem_path.stem}.tmp.npz")
-        np.savez_compressed(
-            tmp_sem,
-            sem_targets=sem_targets,
-            sem_valid_mask=sem_valid_mask,
-            hallmark_counts=hallmark_cnts,
-            transposase_counts=transp_cnts,
-            clean_labels=clean_labels,
-        )
-        tmp_sem.replace(sem_path)
-
-        summary[pname] = {
-            "rows": n,
-            "hallmark_pos_windows": int(np.sum(hallmark_cnts > 0)),
-            "integrase_windows": int(np.sum(sem_targets[:, 1] > 0.5)),
-            "transposase_risk_windows": int(np.sum(sem_targets[:, 2] > 0.5)),
-            "tail_lysis_windows": int(np.sum(sem_targets[:, 3] > 0.5)),
-            "cleaned_contradictory_negatives": cleaned_neg_cnt,
-            "semantic_npz": str(sem_path),
-        }
-        logger.info(f"语义标注完成 train_{pname}: {summary[pname]}")
-
-    return summary
+    return {
+        pname: _annotate_part_with_diamond(pname, arrs, part_npz_paths[pname], contig_orf_cls, clean_neg_set)
+        for pname, arrs in part_arrays.items()
+    }
 
 
 def ensure_v4_orf_tokens(

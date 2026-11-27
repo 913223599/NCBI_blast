@@ -16,7 +16,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
@@ -77,86 +77,79 @@ class PhageReferenceCurator:
             except Exception as _exc:
                 logger.debug("PhageReferenceCurator 日志回调执行失败: %s", _exc)
 
-    def curate_candidates(
+    def _build_candidate_from_record(self, rec: Any, role: str) -> ReferenceCandidate:
+        return ReferenceCandidate(
+            accession=rec.accession,
+            name=f"{rec.accession} ({rec.genus})" if rec.genus else rec.accession,
+            description=rec.description,
+            role=role,
+            source=(
+                "inphared_cache"
+                if (self.cache_dir / f"{_safe_acc(rec.accession)}.fasta").is_file()
+                else "ncbi_download"
+            ),
+            selected=True,
+            genome_length=rec.genome_length,
+            gc_content=rec.gc_content,
+            host=rec.host,
+            genus=rec.genus,
+            family=rec.family,
+            order=rec.order_name,
+            is_ictv_classified=rec.is_ictv_classified,
+        )
+
+    def _collect_local_ref_candidates(
         self,
-        query_records: List[Tuple[str, str]],
+        scope: DeliveryScopeConfig,
+        manual_og_set: set[str],
+        candidates: List[ReferenceCandidate],
+        seen_acc: set[str],
+    ) -> None:
+        if not scope.local_ref_dir:
+            return
+        local_dir = Path(scope.local_ref_dir)
+        if not local_dir.is_dir():
+            return
+        for fp in sorted(local_dir.iterdir()):
+            if not fp.is_file() or fp.suffix.lower() not in (".fasta", ".fas", ".fa", ".fna"):
+                continue
+            recs = read_fasta_records(fp)
+            for rec in recs:
+                raw_id = (rec.id or "").strip()
+                acc = raw_id if (len(recs) > 1 and raw_id) else fp.stem
+                if acc in seen_acc:
+                    continue
+                seen_acc.add(acc)
+                candidates.append(
+                    ReferenceCandidate(
+                        accession=acc,
+                        name=acc,
+                        role="outgroup" if acc in manual_og_set else "neighbor",
+                        source="local_dir",
+                        selected=True,
+                        genome_length=len(rec.seq) if rec.seq is not None else 0,
+                        local_path=str(fp.resolve()),
+                    )
+                )
+
+    def _collect_outgroup_candidates(
+        self,
         ani_result: Optional[AniScreenResult],
         scope: DeliveryScopeConfig,
-    ) -> List[ReferenceCandidate]:
-        """根据第 1 步 ANI 预判结果和第 0 步边界参数生成带角色标记的候选参考集。"""
-        candidates: List[ReferenceCandidate] = []
-        seen_acc: set[str] = set()
-
-        # 1. 查询基因组 (不可剔除)
-        for qid, qseq in query_records:
-            clean_seq = qseq.strip().upper()
-            gc = 0.0
-            if clean_seq:
-                gc = round(((clean_seq.count("G") + clean_seq.count("C")) / len(clean_seq)) * 100.0, 2)
-            candidates.append(
-                ReferenceCandidate(
-                    accession=qid,
-                    name=qid,
-                    role="query",
-                    source="workspace",
-                    selected=True,
-                    genome_length=len(clean_seq),
-                    gc_content=gc,
-                    is_ictv_classified=False,
-                )
-            )
-            seen_acc.add(qid)
-
-        manual_og = list(dict.fromkeys(x.strip() for x in scope.outgroup_ids if x and x.strip()))
-        manual_og_set = set(manual_og)
-
-        # 2. 扫描本地自定义离线参考目录 (若有)
-        if scope.local_ref_dir:
-            local_dir = Path(scope.local_ref_dir)
-            if local_dir.is_dir():
-                for fp in sorted(local_dir.iterdir()):
-                    if not fp.is_file() or fp.suffix.lower() not in (".fasta", ".fas", ".fa", ".fna"):
-                        continue
-                    recs = read_fasta_records(fp)
-                    for rec in recs:
-                        raw_id = (rec.id or "").strip()
-                        acc = raw_id if (len(recs) > 1 and raw_id) else fp.stem
-                        if acc in seen_acc:
-                            continue
-                        seen_acc.add(acc)
-                        candidates.append(
-                            ReferenceCandidate(
-                                accession=acc,
-                                name=acc,
-                                role="outgroup" if acc in manual_og_set else "neighbor",
-                                source="local_dir",
-                                selected=True,
-                                genome_length=len(rec.seq) if rec.seq is not None else 0,
-                                local_path=str(fp.resolve()),
-                            )
-                        )
-
-        # 3. 纳入外群 (优先用户手动指定，再按 outgroup_count 额度自动补足推荐外群)
-        target_genera: List[str] = []
-        target_families: List[str] = []
-        auto_og_pool: List[str] = []
-        if ani_result:
-            base_genera = max(1, scope.max_target_genera)
-            target_genera = list(ani_result.candidate_genera[:base_genera])
-            target_families = list(ani_result.candidate_families[:2])
-            if ani_result.ambiguous_zone:
-                # 65%-75% 模糊带时扩充至更多邻近属以展示边缘拓扑位置
-                target_genera = list(
-                    ani_result.candidate_genera[: min(200, max(base_genera, base_genera * 2))]
-                )
-            auto_og_pool = list(ani_result.recommended_outgroup_accessions)
-
+        manual_og: List[str],
+        target_genera: List[str],
+        target_families: List[str],
+        candidates: List[ReferenceCandidate],
+        seen_acc: set[str],
+    ) -> None:
+        auto_og_pool = list(ani_result.recommended_outgroup_accessions) if ani_result else []
         need_auto = max(0, scope.outgroup_count - len(manual_og))
         if need_auto > len(auto_og_pool) and self.index.is_available() and (target_genera or target_families):
+            excl = [h.accession for h in ani_result.top_hits[:15]] + manual_og if ani_result else manual_og
             extra_ogs = self.index.find_outgroup_candidates(
                 target_genera=target_genera[:3],
                 target_families=target_families[:2],
-                exclude_accessions=[h.accession for h in ani_result.top_hits[:15]] + manual_og if ani_result else manual_og,
+                exclude_accessions=excl,
                 limit=scope.outgroup_count,
             )
             for og in extra_ogs:
@@ -174,107 +167,146 @@ class PhageReferenceCurator:
                 continue
             seen_acc.add(og_acc)
             meta = outgroup_meta.get(og_acc)
+            if meta is not None:
+                candidates.append(self._build_candidate_from_record(meta, "outgroup"))
+            else:
+                candidates.append(
+                    ReferenceCandidate(
+                        accession=og_acc,
+                        name=og_acc,
+                        description="",
+                        role="outgroup",
+                        source="inphared_cache" if (self.cache_dir / f"{_safe_acc(og_acc)}.fasta").is_file() else "ncbi_download",
+                        selected=True,
+                        is_ictv_classified=False,
+                    )
+                )
+
+    def _append_ictv_reps(
+        self,
+        scope: DeliveryScopeConfig,
+        target_genera: List[str],
+        target_families: List[str],
+        per_genus_limit: int,
+        max_rep_cap: int,
+        candidates: List[ReferenceCandidate],
+        seen_acc: set[str],
+    ) -> None:
+        if len(candidates) >= scope.ref_max_count or max_rep_cap <= 0 or per_genus_limit <= 0:
+            return
+        ictv_reps = self.index.find_ictv_representatives(
+            genera=target_genera,
+            families=target_families,
+            exclude_accessions=list(seen_acc),
+            per_genus=per_genus_limit,
+            max_total=max_rep_cap,
+        )
+        for rep in ictv_reps:
+            if rep.accession in seen_acc or len(candidates) >= scope.ref_max_count:
+                continue
+            seen_acc.add(rep.accession)
+            candidates.append(self._build_candidate_from_record(rep, "ictv_rep"))
+
+    def _append_ani_top_hits(
+        self,
+        ani_result: AniScreenResult,
+        scope: DeliveryScopeConfig,
+        candidates: List[ReferenceCandidate],
+        seen_acc: set[str],
+    ) -> None:
+        for hit in ani_result.top_hits:
+            if len(candidates) >= scope.ref_max_count:
+                break
+            if hit.accession in seen_acc:
+                continue
+            seen_acc.add(hit.accession)
+            is_rep = bool(hit.genus)
             candidates.append(
                 ReferenceCandidate(
-                    accession=og_acc,
-                    name=f"{og_acc} ({meta.genus})" if meta and meta.genus else og_acc,
-                    description=meta.description if meta else "",
-                    role="outgroup",
-                    source="inphared_cache" if (self.cache_dir / f"{_safe_acc(og_acc)}.fasta").is_file() else "ncbi_download",
+                    accession=hit.accession,
+                    name=f"{hit.accession} ({hit.genus})" if hit.genus else hit.accession,
+                    description=hit.description,
+                    role="ictv_rep" if is_rep else "neighbor",
+                    source="inphared_cache" if (self.cache_dir / f"{_safe_acc(hit.accession)}.fasta").is_file() else "ncbi_download",
                     selected=True,
-                    genome_length=meta.genome_length if meta else 0,
-                    gc_content=meta.gc_content if meta else 0.0,
-                    host=meta.host if meta else "",
-                    genus=meta.genus if meta else "",
-                    family=meta.family if meta else "",
-                    order=meta.order_name if meta else "",
-                    is_ictv_classified=bool(meta and meta.is_ictv_classified),
+                    genome_length=hit.genome_length,
+                    gc_content=hit.gc_content,
+                    host=hit.host,
+                    genus=hit.genus,
+                    family=hit.family,
+                    order=hit.order,
+                    wg_ani=hit.wg_ani if hit.wg_ani > 0 else hit.mash_ani,
+                    is_ictv_classified=is_rep,
                 )
             )
 
-        if ani_result:
-            def _append_ictv_reps(per_genus_limit: int, max_rep_cap: int) -> None:
-                if len(candidates) >= scope.ref_max_count or max_rep_cap <= 0 or per_genus_limit <= 0:
-                    return
-                ictv_reps = self.index.find_ictv_representatives(
-                    genera=target_genera,
-                    families=target_families,
-                    exclude_accessions=list(seen_acc),
-                    per_genus=per_genus_limit,
-                    max_total=max_rep_cap,
+    def curate_candidates(
+        self,
+        query_records: List[Tuple[str, str]],
+        ani_result: Optional[AniScreenResult],
+        scope: DeliveryScopeConfig,
+    ) -> List[ReferenceCandidate]:
+        """根据第 1 步 ANI 预判结果和第 0 步边界参数生成带角色标记的候选参考集。"""
+        candidates: List[ReferenceCandidate] = []
+        seen_acc: set[str] = set()
+
+        for qid, qseq in query_records:
+            clean_seq = qseq.strip().upper()
+            gc = round(((clean_seq.count("G") + clean_seq.count("C")) / len(clean_seq)) * 100.0, 2) if clean_seq else 0.0
+            candidates.append(
+                ReferenceCandidate(
+                    accession=qid,
+                    name=qid,
+                    role="query",
+                    source="workspace",
+                    selected=True,
+                    genome_length=len(clean_seq),
+                    gc_content=gc,
+                    is_ictv_classified=False,
                 )
-                for rep in ictv_reps:
-                    if rep.accession in seen_acc or len(candidates) >= scope.ref_max_count:
-                        continue
-                    seen_acc.add(rep.accession)
-                    candidates.append(
-                        ReferenceCandidate(
-                            accession=rep.accession,
-                            name=f"{rep.accession} ({rep.genus})" if rep.genus else rep.accession,
-                            description=rep.description,
-                            role="ictv_rep",
-                            source="inphared_cache" if (self.cache_dir / f"{_safe_acc(rep.accession)}.fasta").is_file() else "ncbi_download",
-                            selected=True,
-                            genome_length=rep.genome_length,
-                            gc_content=rep.gc_content,
-                            host=rep.host,
-                            genus=rep.genus,
-                            family=rep.family,
-                            order=rep.order_name,
-                            is_ictv_classified=rep.is_ictv_classified,
-                        )
-                    )
+            )
+            seen_acc.add(qid)
 
-            def _append_top_hits() -> None:
-                for hit in ani_result.top_hits:
-                    if len(candidates) >= scope.ref_max_count:
-                        break
-                    if hit.accession in seen_acc:
-                        continue
-                    seen_acc.add(hit.accession)
-                    is_rep = bool(hit.genus)
-                    candidates.append(
-                        ReferenceCandidate(
-                            accession=hit.accession,
-                            name=f"{hit.accession} ({hit.genus})" if hit.genus else hit.accession,
-                            description=hit.description,
-                            role="ictv_rep" if is_rep else "neighbor",
-                            source="inphared_cache" if (self.cache_dir / f"{_safe_acc(hit.accession)}.fasta").is_file() else "ncbi_download",
-                            selected=True,
-                            genome_length=hit.genome_length,
-                            gc_content=hit.gc_content,
-                            host=hit.host,
-                            genus=hit.genus,
-                            family=hit.family,
-                            order=hit.order,
-                            wg_ani=hit.wg_ani if hit.wg_ani > 0 else hit.mash_ani,
-                            is_ictv_classified=is_rep,
-                        )
-                    )
+        manual_og = list(dict.fromkeys(x.strip() for x in scope.outgroup_ids if x and x.strip()))
+        self._collect_local_ref_candidates(scope, set(manual_og), candidates, seen_acc)
 
+        target_genera: List[str] = []
+        target_families: List[str] = []
+        if ani_result:
+            base_genera = max(1, scope.max_target_genera)
+            target_genera = list(ani_result.candidate_genera[:base_genera])
+            target_families = list(ani_result.candidate_families[:2])
+            if ani_result.ambiguous_zone:
+                target_genera = list(ani_result.candidate_genera[: min(200, max(base_genera, base_genera * 2))])
+
+        self._collect_outgroup_candidates(
+            ani_result, scope, manual_og, target_genera, target_families, candidates, seen_acc
+        )
+
+        if ani_result:
             if scope.target_rank == "species":
-                # 种内精细分辨模式：先确保目标属有轻量 ICTV 核心锚点，随后优先倾斜配额给高相似同种与近缘株
                 anchor_cap = max(2, int(scope.ref_max_count * 0.25))
-                _append_ictv_reps(min(scope.ictv_reps_per_genus, 2), anchor_cap)
-                _append_top_hits()
+                self._append_ictv_reps(
+                    scope, target_genera, target_families, min(scope.ictv_reps_per_genus, 2), anchor_cap, candidates, seen_acc
+                )
+                self._append_ani_top_hits(ani_result, scope, candidates, seen_acc)
                 remaining = scope.ref_max_count - len(candidates)
                 if remaining > 0:
-                    _append_ictv_reps(scope.ictv_reps_per_genus, remaining)
+                    self._append_ictv_reps(
+                        scope, target_genera, target_families, scope.ictv_reps_per_genus, remaining, candidates, seen_acc
+                    )
             else:
                 max_rep_total = (
                     max(1, scope.ref_max_count - len(candidates))
                     if scope.ref_max_count < 15
                     else max(10, int(scope.ref_max_count * 0.7))
                 )
-                _append_ictv_reps(scope.ictv_reps_per_genus, max_rep_total)
-                _append_top_hits()
+                self._append_ictv_reps(
+                    scope, target_genera, target_families, scope.ictv_reps_per_genus, max_rep_total, candidates, seen_acc
+                )
+                self._append_ani_top_hits(ani_result, scope, candidates, seen_acc)
 
-        # 7. 宏观分层抽样模式：补足跨病毒科 × 跨宿主门千株级背景参考集（无 ANI 结果时同样可用）
-        if (
-            scope.sampling_mode == "macro_family_host"
-            and len(candidates) < scope.ref_max_count
-            and self.index.is_available()
-        ):
+        if scope.sampling_mode == "macro_family_host" and len(candidates) < scope.ref_max_count and self.index.is_available():
             need_macro = scope.ref_max_count - len(candidates)
             macro_min_len = max(5000, min(scope.derep_min_len, 15000))
             macro_recs = self.index.sample_macro_background(
@@ -287,27 +319,7 @@ class PhageReferenceCurator:
                 if rec.accession in seen_acc or len(candidates) >= scope.ref_max_count:
                     continue
                 seen_acc.add(rec.accession)
-                candidates.append(
-                    ReferenceCandidate(
-                        accession=rec.accession,
-                        name=f"{rec.accession} ({rec.genus})" if rec.genus else rec.accession,
-                        description=rec.description,
-                        role="ictv_rep" if rec.is_ictv_classified else "neighbor",
-                        source=(
-                            "inphared_cache"
-                            if (self.cache_dir / f"{_safe_acc(rec.accession)}.fasta").is_file()
-                            else "ncbi_download"
-                        ),
-                        selected=True,
-                        genome_length=rec.genome_length,
-                        gc_content=rec.gc_content,
-                        host=rec.host,
-                        genus=rec.genus,
-                        family=rec.family,
-                        order=rec.order_name,
-                        is_ictv_classified=rec.is_ictv_classified,
-                    )
-                )
+                candidates.append(self._build_candidate_from_record(rec, "ictv_rep" if rec.is_ictv_classified else "neighbor"))
 
         return candidates
 

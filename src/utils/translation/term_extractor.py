@@ -91,6 +91,80 @@ class TermExtractor:
     # _extract_features_from_term, _update_classification_rules_with_learned_patterns
     # for simplicity and reliability as requested by user.
 
+    @staticmethod
+    def _match_keep_keyword_exact(word: str, lower_word: str, keep_keywords: list[str]) -> Optional[str]:
+        word_lower = word.lower()
+        for k in keep_keywords:
+            if lower_word == k.strip('.') or word_lower == k:
+                return word
+            if k == 'sp.' and lower_word.startswith('sp.') and lower_word[3:].isdigit():
+                return 'sp.'
+        return None
+
+    @staticmethod
+    def _match_taxonomic_modifier(word: str) -> Optional[str]:
+        modifiers = ('cf.', 'aff.', 'var.', 'subsp.', 'ssp.', 'f.', 'sp.')
+        word_l = word.lower()
+        for mod in modifiers:
+            if word_l == mod or (word_l.startswith(mod) and word_l[len(mod):].isdigit()):
+                return mod
+        return None
+
+    @staticmethod
+    def _match_keep_keyword_suffix(word: str, lower_word: str) -> Optional[str]:
+        suffix_keywords = (
+            'bacterium', 'virus', 'archaeon', 'fungus', 'symbiont', 'phage',
+            'vector', 'plasmid', 'element', 'transposon', 'integron',
+            'plasposon', 'operon', 'promoter', 'enhancer',
+        )
+        for k in suffix_keywords:
+            k_pattern = ''.join(f"[{c.upper()}{c.lower()}]" for c in k)
+            pattern = r"^(.*?" + k_pattern + r")([-_]+([0-9]+.*|[A-Z]+.*)|[0-9]+.*|[A-Z]{2,}.*|[A-Z][0-9]+.*)$"
+            match = re.search(pattern, word)
+            if match:
+                return match.group(1)
+            if lower_word.endswith(k):
+                return word
+        return None
+
+    @staticmethod
+    def _strip_trailing_ids(normalized_term: str) -> str:
+        patterns = (
+            (r'\s+v?B_[A-Za-z0-9_]+$', re.IGNORECASE),
+            (r'\s+\(ex\b.*$', re.IGNORECASE),
+            (r'\s+\(in:\s.*?\)$', re.IGNORECASE),
+            (r'\s+clone[_\-].*$', re.IGNORECASE),
+            (r'\s+=$', 0),
+            (r'\s+(DSM|ATCC|KCTC|LMG|JCM|CBS|NRRL|CCUG|CECT|NCTC|CIP|NBRC|BCCM)\s*\d+.*$', re.IGNORECASE),
+            (r'\s+[A-Z\d_\-\/\#\:]{2,}$', 0),
+            (r'\s+[A-Za-z0-9]+[-_]+[A-Za-z0-9\-_]*\d+[\w\.\-\/\#\:]*$', 0),
+            (r'\s+[A-Za-z]*\d+[\w\.\-\/\#\:]*$', 0),
+            (r'\s+[A-Z][a-z]*\-\d+$', 0),
+            (r'\s+(bv|biovar|serovar|pv|str|strain|subsp|var)\b.*$', re.IGNORECASE),
+        )
+        while True:
+            new_term = normalized_term
+            for pattern, flags in patterns:
+                new_term = re.sub(pattern, '', new_term, flags=flags)
+            if new_term == normalized_term:
+                return normalized_term
+            normalized_term = new_term
+
+    @staticmethod
+    def _trim_uncultured_prefix(normalized_term: str) -> str:
+        norm_lower = normalized_term.lower()
+        if not (norm_lower.startswith('uncultured ') or norm_lower.startswith('unidentified ')):
+            return normalized_term
+        words = normalized_term.split()
+        if len(words) <= 1:
+            return normalized_term
+        kept_words = [words[0]]
+        for word in words[1:]:
+            if re.search(r'\d', word) or '_' in word or (word.isupper() and len(word) > 1):
+                break
+            kept_words.append(word)
+        return ' '.join(kept_words)
+
     def normalize_term(self, term: str) -> str:
         """
         规范化术语，移除编号部分，如phiCP39-O, DOBBIE2, XP41-N3, strain WS02等
@@ -98,152 +172,66 @@ class TermExtractor:
         """
         if not term:
             return term
-            
-        # 1. 首先处理方括号等特殊字符
+
         term = term.strip()
         if term.startswith('[') and term.endswith(']'):
             term = term[1:-1].strip()
         elif term.startswith('['):
             term = term[1:].strip()
-            
-        # 2. 预处理特殊连写（如 "gen. 1 sp." 缩减为 "gen. sp."）
-        # 保留可能存在的前缀 "n. "
-        term = re.sub(r'(?i)\b(n\.\s+)?gen\..*?(n\.\s+)?sp\.$', 
-                      lambda m: (m.group(1) or '') + 'gen. ' + (m.group(2) or '') + 'sp.', term)
-                      
-        # 3. 定义必须彻底裁剪关键字（遇到即断）
-        # 这些词通常是实验编号、株系名的开始
-        strip_keywords = [
-            'strain', 'isolate', 'clone', 'serotype', 'subtype', 
+
+        term = re.sub(
+            r'(?i)\b(n\.\s+)?gen\..*?(n\.\s+)?sp\.$',
+            lambda m: (m.group(1) or '') + 'gen. ' + (m.group(2) or '') + 'sp.',
+            term,
+        )
+
+        strip_keywords = {
+            'strain', 'isolate', 'clone', 'serotype', 'subtype',
             'str.', 'str', 'sp.', 'sp', 'isolate:', 'type:', 'sample', 'accession',
             'mixed', 'library', 'environmental', 'enrichment', 'culture',
-            'bv', 'bv.', 'biovar', 'serovar', 'pv', 'pv.', 'pathovar'
-        ]
-        
-        # 3. 定义需要保留但需要裁剪后续编号的关键字
+            'bv', 'bv.', 'biovar', 'serovar', 'pv', 'pv.', 'pathovar',
+        }
         keep_keywords = [
-            'phage', 
+            'phage',
             'bacterium', 'archaeon', 'crenarchaeote', 'thaumarchaeote', 'euryarchaeote', 'virus', 'endosymbiont', 'symbiont',
             'microorganism', 'prokaryote', 'cyanobacterium', 'actinobacterium',
             'vector', 'plasmid', 'cosmid', 'phagemid', 'replicon', 'element',
             'transposon', 'integron', 'plasposon', 'operon', 'promoter', 'enhancer',
             'fungus', 'yeast', 'template', 'driver', 'construct',
-            'clone', 'isolate', 'strain', 'sample', 'tip', 'cell'
+            'clone', 'isolate', 'strain', 'sample', 'tip', 'cell',
         ]
 
-        # 4. 执行基于关键字的裁剪
         words = term.split()
-        normalized_words = []
-        
+        normalized_words: list[str] = []
         for i, word in enumerate(words):
             lower_word = word.lower().rstrip(',;:').strip('.')
-            
-            # 如果遇到彻底裁剪关键字，直接停止并返回之前的部分
             if lower_word in strip_keywords:
                 break
-                
-            is_keep = False
-            for k in keep_keywords:
-                if lower_word == k.strip('.') or word.lower() == k:
-                    is_keep = True
-                    break
-                
-                # 处理 sp.1 这种连写的情况
-                if k == 'sp.':
-                    if lower_word.startswith('sp.') and lower_word[3:].isdigit():
-                        word = 'sp.'
-                        is_keep = True
-                        break
-                        
-            if is_keep:
-                normalized_words.append(word)
+
+            exact_keep = self._match_keep_keyword_exact(word, lower_word, keep_keywords)
+            if exact_keep is not None:
+                normalized_words.append(exact_keep)
                 break
-                
-            # 处理带有特定种加词/亚种加词的分类学修饰符 (如 cf., aff., var., subsp., ssp., f.)
-            # 我们需要保留这个修饰符，以及紧跟在它后面的一个单词，然后截断剩余的所有后缀（例如实验编号）
-            modifiers = ['cf.', 'aff.', 'var.', 'subsp.', 'ssp.', 'f.', 'sp.']
-            matched_mod = None
-            word_l = word.lower()
-            for mod in modifiers:
-                if word_l == mod or (word_l.startswith(mod) and word_l[len(mod):].isdigit()):
-                    matched_mod = mod
-                    break
-            
+
+            matched_mod = self._match_taxonomic_modifier(word)
             if matched_mod:
-                if matched_mod == 'sp.':
-                    break
-                normalized_words.append(matched_mod)
-                # 如果这个修饰符后面还有单词，那么保留下一个单词（即种加词/变种名）
-                if i + 1 < len(words):
-                    normalized_words.append(words[i + 1])
+                if matched_mod != 'sp.':
+                    normalized_words.append(matched_mod)
+                    if i + 1 < len(words):
+                        normalized_words.append(words[i + 1])
                 break
-                
-            is_keep = False
-            for k in keep_keywords:
-                        
-                # 特殊后缀及连体数字匹配：遇到类似 proteobacterium, kirkovirus, 或者 virus-10, vectorXYZ 的情况
-                if k in ['bacterium', 'virus', 'archaeon', 'fungus', 'symbiont', 'phage', 'vector', 'plasmid', 'element', 'transposon', 'integron', 'plasposon', 'operon', 'promoter', 'enhancer']:
-                    # 匹配 "core_noun" + "可选连字符/下划线" + "数字/大写字母标识符"
-                    # 放弃 re.IGNORECASE，改为手动构建忽略大小写的关键字前缀，避免污染后缀大写字母的严格校验
-                    k_pattern = ''.join([f"[{c.upper()}{c.lower()}]" for c in k])
-                    pattern = r"^(.*?" + k_pattern + r")([-_]+([0-9]+.*|[A-Z]+.*)|[0-9]+.*|[A-Z]{2,}.*|[A-Z][0-9]+.*)$"
-                    match = re.search(pattern, word)
-                    if match:
-                        word = match.group(1) # 剔除垃圾后缀，保留纯学术词根
-                        is_keep = True
-                        break
-                    elif lower_word.endswith(k):
-                        is_keep = True
-                        break
 
-            if is_keep:
-                normalized_words.append(word)
-                break # 保留关键字通常是名称的最后有效部分（如 xxx phage），其后的内容皆为随机编号
+            suffix_keep = self._match_keep_keyword_suffix(word, lower_word)
+            if suffix_keep is not None:
+                normalized_words.append(suffix_keep)
+                break
 
-            # 如果单词本身没有被 is_keep 拦截，也没有被 modifier 拦截，才加进去
             normalized_words.append(word)
-            
-        # 重新组合
+
         normalized_term = ' '.join(normalized_words).strip().rstrip(',;: ')
-        
         if normalized_term == term:
-            # 强化正则：必须包含数字或特定的 ID 格式，避免误删普通单词
-            patterns = [
-                (r'\s+v?B_[A-Za-z0-9_]+$', re.IGNORECASE),
-                (r'\s+\(ex\b.*$', re.IGNORECASE),                 # 剔除 (ex Author 2020) 等文献命名痕迹
-                (r'\s+\(in:\s.*?\)$', re.IGNORECASE),             # 剔除 NCBI 特有的 (in: cyanobacteria) 备注
-                (r'\s+clone[_\-].*$', re.IGNORECASE),             # 剔除 clone_xxx 变种
-                (r'\s+=$', 0),                                    # 剔除末尾孤立的等号
-                (r'\s+(DSM|ATCC|KCTC|LMG|JCM|CBS|NRRL|CCUG|CECT|NCTC|CIP|NBRC|BCCM)\s*\d+.*$', re.IGNORECASE), # 培养物保藏中心编号
-                (r'\s+[A-Z\d_\-\/\#\:]{2,}$', 0),                 # 匹配带有 /, #, : 的大写或数字混合 ID
-                (r'\s+[A-Za-z0-9]+[-_]+[A-Za-z0-9\-_]*\d+[\w\.\-\/\#\:]*$', 0), # 匹配类似 MRSA-Lux-17, Rs-09-161 这种连字符数字混合物
-                (r'\s+[A-Za-z]*\d+[\w\.\-\/\#\:]*$', 0),          # 匹配包含数字并可能带有特殊字符的 ID
-                (r'\s+[A-Z][a-z]*\-\d+$', 0),                     # 匹配类似 Jan-44 这种格式
-                (r'\s+(bv|biovar|serovar|pv|str|strain|subsp|var)\b.*$', re.IGNORECASE), # 匹配尾随遗漏的修饰符
-            ]
-            
-            while True:
-                new_term = normalized_term
-                for pattern, flags in patterns:
-                    new_term = re.sub(pattern, '', new_term, flags=flags)
-                if new_term == normalized_term:
-                    break
-                normalized_term = new_term
-        
-        # 5. 动态智能环境样本 (uncultured / unidentified) 裁剪
-        # 抛弃硬编码，改为动态识别：只要遇到包含数字、下划线、或者是全大写字母(如 XYZ)的单词，即视为进入了随机编号/采样区
-        norm_lower_check = normalized_term.lower()
-        if norm_lower_check.startswith('uncultured ') or norm_lower_check.startswith('unidentified '):
-            words = normalized_term.split()
-            if len(words) > 1:
-                kept_words = [words[0]]
-                for word in words[1:]:
-                    # 判断当前单词是否为编号特征：包含数字、包含下划线、或是大于1个字符的全大写(如 A01, BD_contig, XYZ)
-                    if re.search(r'\d', word) or '_' in word or (word.isupper() and len(word) > 1):
-                        break
-                    kept_words.append(word)
-                normalized_term = ' '.join(kept_words)
-                
+            normalized_term = self._strip_trailing_ids(normalized_term)
+        normalized_term = self._trim_uncultured_prefix(normalized_term)
         return normalized_term.strip()
 
     def _normalize_chinese_term(self, chinese_term: str, original_english: str) -> str:
@@ -524,6 +512,47 @@ class TermExtractor:
         except Exception as e:
             print(f"提取 BLAST 结果术语时出错: {e}")
 
+    @staticmethod
+    def _is_valid_binomial_species(words: list[str]) -> Optional[str]:
+        if len(words) < 2:
+            return None
+        genus = words[0].strip()
+        species = words[1].strip()
+        if len(genus) > 6 and genus.lower().endswith(('ase', 'zyme', 'in', 'ogen', 'one', 'an', 'ate', 'ide')):
+            return 'other'
+        biochem_descriptors = {
+            'precursor', 'receptor', 'complex', 'factor', 'family', 'domain',
+            'subunit', 'enzyme', 'protein', 'kinase', 'binding', 'inhibitor',
+        }
+        if species.lower() in biochem_descriptors:
+            return 'gene'
+        is_genus = genus[0].isupper() and all(c.islower() or c in '.-_' for c in genus[1:])
+        is_species = all(c.islower() or c in '.-_0123456789' for c in species)
+        return 'species' if (is_genus and is_species) else None
+
+    def _classify_by_genus_or_phage(self, original_lower: str, original_lower_clean: str, words: list[str]) -> Optional[str]:
+        for genus in self.classification_rules["common_genera"]:
+            if genus not in original_lower_clean:
+                continue
+            if len(words) <= 1:
+                return 'genus'
+            species_word = words[1].lower()
+            if (species_word[0].islower() if species_word else False) or 'sp' in species_word or 'subsp' in species_word:
+                return 'species'
+
+        if len(words) == 1:
+            word = words[0].strip()
+            if word[0].isupper() and len(word) > 2:
+                if any(word.lower().endswith(suffix) for suffix in self.classification_rules["genus_suffixes"]):
+                    return 'genus'
+
+        if any(vt in original_lower for vt in self.classification_rules["virus_terms"]):
+            return 'other'
+
+        if any(pt in original_lower for pt in self.classification_rules["phage_terms"]):
+            return 'species'
+        return None
+
     def _determine_category(self, original: str) -> str:
         """
         确定术语的分类
@@ -536,115 +565,31 @@ class TermExtractor:
         """
         original_lower = original.lower().strip()
         words = original.split()
-        
-        # Determination based on static rules and predefined patterns
-        # Removed dynamic learning patterns lookup for reliability.
-        
-        # 检查基因/蛋白质模式
-        for pattern in self.classification_rules["gene_patterns"]:
-            if pattern in original_lower:
-                return 'gene'
-        
-        # 检查序列模式
-        for pattern in self.classification_rules["sequence_patterns"]:
-            if pattern in original_lower:
-                return 'sequence'
-        
-        # 检查菌株模式
-        for pattern in self.classification_rules["strain_patterns"]:
-            if pattern in original_lower:
-                return 'strain'
-        
-        # 检查是否为物种名称（双名法：属+种 或 属+种+其他）
-        if len(words) >= 2:
-            genus = words[0].strip()
-            species = words[1].strip()
-            
-            # [优化] 拦截明显的生化描述后缀 (仅对长单词)，防止 mis-id 为属名
-            # 如 Hydrolase (9) 拦截, Base (4) 放行
-            if len(genus) > 6 and genus.lower().endswith(('ase', 'zyme', 'in', 'ogen', 'one', 'an', 'ate', 'ide')):
-                return 'other'
-            
-            # [优化] 上下文种加词拦截
-            # 如果第二个词本身就是生化名词后缀，则它一定不是物种名
-            biochem_descriptors = [
-                'precursor', 'receptor', 'complex', 'factor', 'family', 'domain', 
-                'subunit', 'enzyme', 'protein', 'kinase', 'binding', 'inhibitor'
-            ]
-            if species.lower() in biochem_descriptors:
-                return 'gene'
 
-            # 检查属名是否符合生物学命名规范（首字母大写，其余小写或特殊字符）
-            if (genus[0].isupper() and 
-                all(c.islower() or c in ['.', '-', '_'] for c in genus[1:])):
-                # 检查种名是否主要为小写字符
-                if all(c.islower() or c in ['.', '-', '_', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] for c in species):
-                    return 'species'
-        
-        # 检查是否包含常见属名（改进的属名识别逻辑）
+        rule_category_map = (
+            ("gene_patterns", "gene"),
+            ("sequence_patterns", "sequence"),
+            ("strain_patterns", "strain"),
+        )
+        for rule_key, cat in rule_category_map:
+            if any(pat in original_lower for pat in self.classification_rules[rule_key]):
+                return cat
+
+        binomial_cat = self._is_valid_binomial_species(words)
+        if binomial_cat is not None:
+            return binomial_cat
+
         original_lower_clean = original_lower.replace('.', '').replace('-', '').replace('_', '')
-        for genus in self.classification_rules["common_genera"]:
-            if genus in original_lower_clean:
-                # 如果包含属名且有多个单词，则可能是物种名
-                if len(words) > 1:
-                    # 检查第二个词是否看起来像物种名
-                    species_word = words[1].lower()
-                    if (species_word[0].islower() if species_word else False) or 'sp' in species_word or 'subsp' in species_word:
-                        return 'species'
-                else:
-                    # 单个词可能是属名
-                    return 'genus'
-        
-        # 检查是否为属名（单个词，以生物学后缀结尾，但先检查常见属名列表）
-        if len(words) == 1:
-            # 检查是否为单个单词的属名
-            word = words[0].strip()
-            if word[0].isupper() and len(word) > 2:
-                # 检查是否以常见的属名后缀结尾
-                for suffix in self.classification_rules["genus_suffixes"]:
-                    if word.lower().endswith(suffix):
-                        return 'genus'
-        
-        # 检查是否为噬菌体或病毒
-        for virus_term in self.classification_rules["virus_terms"]:
-            if virus_term in original_lower:
-                return 'other'  # 病毒归入other类
-        
-        # 噬菌体通常是针对特定细菌的，应视为物种级别的分类
-        for phage_term in self.classification_rules["phage_terms"]:
-            if phage_term in original_lower:
-                # 如果是噬菌体，检查是否遵循属+种的模式
-                if len(words) >= 2:
-                    genus = words[0].strip()
-                    species_part = words[1].strip()
-                    if (genus[0].isupper() and 
-                        all(c.islower() or c in ['.', '-', '_', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] for c in species_part)):
-                        return 'species'
-                # 对于以Clostridium phage开头的，视为物种
-                if original_lower.startswith('clostridium phage'):
-                    return 'species'
-                # 检查是否包含常见属名
-                for genus in self.classification_rules["common_genera"]:
-                    if genus in original_lower_clean:
-                        return 'species'
-                # 默认情况下，噬菌体也可以视为物种
-                return 'species'
-        
-        # 检查是否为分类单元（如门、纲、目等）
-        for rank in self.classification_rules["taxonomic_ranks"]:
-            if rank in original_lower:
-                return 'other'
-        
-        # 检查是否为特殊术语
-        for term in self.classification_rules["special_terms"]:
-            if term in original_lower:
-                return 'species'  # 包含这些词的通常表示物种
-        
-        # 检查是否为未培养或环境样本术语
-        if 'uncultured' in original_lower or 'environmental' in original_lower or 'sample' in original_lower:
+        genus_or_phage_cat = self._classify_by_genus_or_phage(original_lower, original_lower_clean, words)
+        if genus_or_phage_cat is not None:
+            return genus_or_phage_cat
+
+        if any(rank in original_lower for rank in self.classification_rules["taxonomic_ranks"]):
             return 'other'
-        
-        # 默认返回 'other'
+        if any(term in original_lower for term in self.classification_rules["special_terms"]):
+            return 'species'
+        if any(kw in original_lower for kw in ('uncultured', 'environmental', 'sample')):
+            return 'other'
         return 'other'
 
     def _translate_term_from_db(self, term: str, category: Optional[str] = None) -> str:

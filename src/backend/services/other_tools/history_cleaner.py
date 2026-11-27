@@ -56,6 +56,141 @@ def _remove(path: Path) -> int:
     return size
 
 
+def _pick_target(path: Path, name_set: set[str], cutoff: Optional[float]) -> bool:
+    if name_set and path.name not in name_set:
+        return False
+    return _older_than(path, cutoff)
+
+
+def _cleanup_mail_batches(
+    download_dir: Path,
+    name_set: set[str],
+    cutoff: Optional[float],
+    removed: List[str],
+) -> int:
+    freed = 0
+    if not download_dir.exists():
+        return 0
+    for b in download_dir.glob("up_*"):
+        if b.is_dir() and _pick_target(b, name_set, cutoff):
+            freed += _remove(b)
+            removed.append(str(b))
+    return freed
+
+
+def _cleanup_mail_outbound(
+    send_dir: Path,
+    annotations_dir: Path,
+    targets: set[str],
+    name_set: set[str],
+    cutoff: Optional[float],
+    removed: List[str],
+) -> int:
+    if not ("outbound" in targets or "annotations" in targets) or not send_dir.exists():
+        return 0
+    freed = 0
+    for mf in send_dir.glob("*.manifest.json"):
+        zip_name = ""
+        task_id = mf.name[: -len(".manifest.json")]
+        try:
+            data = json.loads(mf.read_text(encoding="utf-8"))
+            zip_name = data.get("zip", "")
+            task_id = data.get("task_id", task_id)
+        except (OSError, json.JSONDecodeError):
+            pass
+        zip_path = send_dir / zip_name if zip_name else None
+        key_match = (not name_set) or (zip_name in name_set) or (task_id in name_set) or (mf.name in name_set)
+        if not key_match or not _older_than(mf, cutoff):
+            continue
+        if "annotations" in targets and task_id:
+            anno = annotations_dir / task_id
+            if anno.is_dir():
+                freed += _remove(anno)
+                removed.append(str(anno))
+        if "outbound" in targets:
+            if zip_path and zip_path.exists():
+                freed += _remove(zip_path)
+                removed.append(str(zip_path))
+            freed += _remove(mf)
+            removed.append(str(mf))
+    return freed
+
+
+def _cleanup_mail_docx(
+    send_dir: Path,
+    annotations_dir: Path,
+    name_set: set[str],
+    cutoff: Optional[float],
+    removed: List[str],
+) -> int:
+    freed = 0
+    if send_dir.exists():
+        for d in send_dir.glob("*.docx"):
+            if _pick_target(d, name_set, cutoff):
+                freed += _remove(d)
+                removed.append(str(d))
+    if name_set and annotations_dir.exists():
+        for sub in annotations_dir.iterdir():
+            if not sub.is_dir():
+                continue
+            for d in sub.glob("*.docx"):
+                if d.name in name_set and _older_than(d, cutoff):
+                    freed += _remove(d)
+                    removed.append(str(d))
+    return freed
+
+
+def _cleanup_mail_index(
+    download_dir: Path,
+    name_set: set[str],
+    cutoff: Optional[float],
+) -> int:
+    idx_file = download_dir / "processed_index.json"
+    if not idx_file.exists():
+        return 0
+    try:
+        idx = json.loads(idx_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    if not isinstance(idx, dict):
+        return 0
+
+    index_removed = 0
+    if not name_set and cutoff is None:
+        index_removed = len(idx)
+        idx = {}
+    else:
+        keep = {}
+        for sha, meta in idx.items():
+            batch = meta.get("batch", "") if isinstance(meta, dict) else ""
+            seen = meta.get("first_seen", "") if isinstance(meta, dict) else ""
+            hit_name = (not name_set) or batch in name_set or sha in name_set
+            hit_time = True
+            if cutoff is not None and seen:
+                try:
+                    hit_time = time.mktime(time.strptime(seen[:19], "%Y-%m-%dT%H:%M:%S")) < cutoff
+                except ValueError:
+                    hit_time = False
+            if hit_name and hit_time:
+                index_removed += 1
+            else:
+                keep[sha] = meta
+        idx = keep
+    idx_file.write_text(json.dumps(idx, ensure_ascii=False, indent=2), encoding="utf-8")
+    return index_removed
+
+
+def _cleanup_mail_logs(download_dir: Path, removed: List[str]) -> int:
+    freed = 0
+    for log_name in ("pipeline.log", "run_errors.log"):
+        lf = download_dir / log_name
+        if lf.exists():
+            freed += lf.stat().st_size
+            lf.write_text("", encoding="utf-8")
+            removed.append(str(lf))
+    return freed
+
+
 def cleanup_mail_history(
     download_dir: Path,
     send_dir: Path,
@@ -65,104 +200,23 @@ def cleanup_mail_history(
     names: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """清理邮件流水线历史数据；names 非空时仅删除指定的批次名 / 文件名。"""
-    targets = set(targets) & MAIL_TARGETS
+    target_set = set(targets) & MAIL_TARGETS
     cutoff = time.time() - older_than_days * 86400 if older_than_days else None
     name_set = set(names or [])
     removed: List[str] = []
     freed = 0
 
-    def _pick(p: Path) -> bool:
-        if name_set and p.name not in name_set:
-            return False
-        return _older_than(p, cutoff)
+    if "batches" in target_set:
+        freed += _cleanup_mail_batches(download_dir, name_set, cutoff, removed)
+    freed += _cleanup_mail_outbound(send_dir, annotations_dir, target_set, name_set, cutoff, removed)
+    if "docx" in target_set:
+        freed += _cleanup_mail_docx(send_dir, annotations_dir, name_set, cutoff, removed)
 
-    removed_batches: List[str] = []
-    if "batches" in targets and download_dir.exists():
-        for b in download_dir.glob("up_*"):
-            if b.is_dir() and _pick(b):
-                freed += _remove(b)
-                removed.append(str(b))
-                removed_batches.append(b.name)
-
-    if ("outbound" in targets or "annotations" in targets) and send_dir.exists():
-        for mf in send_dir.glob("*.manifest.json"):
-            zip_name = ""
-            task_id = mf.name[: -len(".manifest.json")]
-            try:
-                data = json.loads(mf.read_text(encoding="utf-8"))
-                zip_name = data.get("zip", "")
-                task_id = data.get("task_id", task_id)
-            except (OSError, json.JSONDecodeError):
-                pass
-            zip_path = send_dir / zip_name if zip_name else None
-            key_match = (not name_set) or (zip_name in name_set) or (task_id in name_set) or (mf.name in name_set)
-            if not key_match or not _older_than(mf, cutoff):
-                continue
-            if "annotations" in targets and task_id:
-                anno = annotations_dir / task_id
-                if anno.is_dir():
-                    freed += _remove(anno)
-                    removed.append(str(anno))
-            if "outbound" in targets:
-                if zip_path and zip_path.exists():
-                    freed += _remove(zip_path)
-                    removed.append(str(zip_path))
-                freed += _remove(mf)
-                removed.append(str(mf))
-
-    if "docx" in targets:
-        if send_dir.exists():
-            for d in send_dir.glob("*.docx"):
-                if _pick(d):
-                    freed += _remove(d)
-                    removed.append(str(d))
-        if name_set and annotations_dir.exists():
-            for sub in annotations_dir.iterdir():
-                if not sub.is_dir():
-                    continue
-                for d in sub.glob("*.docx"):
-                    if d.name in name_set and _older_than(d, cutoff):
-                        freed += _remove(d)
-                        removed.append(str(d))
-
-    index_removed = 0
-    idx_file = download_dir / "processed_index.json"
     # 注意：仅删除批次时保留去重指纹，避免已处理附件被重新下载
-    if idx_file.exists() and "index" in targets:
-        try:
-            idx = json.loads(idx_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            idx = {}
-        if isinstance(idx, dict):
-            if "index" in targets and not name_set and cutoff is None:
-                index_removed = len(idx)
-                idx = {}
-            elif "index" in targets:
-                keep = {}
-                for sha, meta in idx.items():
-                    batch = meta.get("batch", "") if isinstance(meta, dict) else ""
-                    seen = meta.get("first_seen", "") if isinstance(meta, dict) else ""
-                    hit_name = (not name_set) or batch in name_set or sha in name_set
-                    hit_time = True
-                    if cutoff is not None and seen:
-                        try:
-                            hit_time = time.mktime(time.strptime(seen[:19], "%Y-%m-%dT%H:%M:%S")) < cutoff
-                        except ValueError:
-                            hit_time = False
-                    if hit_name and hit_time:
-                        index_removed += 1
-                    else:
-                        keep[sha] = meta
-                idx = keep
-            idx_file.write_text(json.dumps(idx, ensure_ascii=False, indent=2), encoding="utf-8")
+    index_removed = _cleanup_mail_index(download_dir, name_set, cutoff) if "index" in target_set else 0
 
-    if "logs" in targets:
-        for log_name in ("pipeline.log", "run_errors.log"):
-            lf = download_dir / log_name
-            if lf.exists():
-                freed += lf.stat().st_size
-                lf.write_text("", encoding="utf-8")
-                removed.append(str(lf))
+    if "logs" in target_set:
+        freed += _cleanup_mail_logs(download_dir, removed)
 
     return {
         "removed": removed,

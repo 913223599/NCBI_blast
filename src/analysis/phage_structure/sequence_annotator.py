@@ -184,6 +184,161 @@ def _open_maybe_gz(path: Path):
     return open(path, "r", encoding="utf-8", errors="ignore")
 
 
+def _load_input_records(
+    *,
+    fasta_path: Optional[str] = None,
+    fasta_content: Optional[str] = None,
+) -> Tuple[List[Any], bool, str]:
+    if fasta_content and fasta_content.strip():
+        raw = fasta_content.strip()
+        if raw.startswith("LOCUS "):
+            return list(SeqIO.parse(io.StringIO(raw), "genbank")), True, "genbank"
+        if not raw.startswith(">"):
+            raw = f">Sequence_1\n{raw}"
+        return list(SeqIO.parse(io.StringIO(raw), "fasta")), False, "fasta"
+
+    if fasta_path:
+        p = Path(fasta_path)
+        if not p.is_file():
+            raise FileNotFoundError(f"输入文件不存在: {fasta_path}")
+        if p.name.lower().endswith(_GBK_EXTS):
+            with _open_maybe_gz(p) as fh:
+                return list(SeqIO.parse(fh, "genbank")), True, "genbank"
+        with _open_maybe_gz(p) as fh:
+            return list(SeqIO.parse(fh, "fasta")), False, "fasta"
+
+    return [], False, "fasta"
+
+
+def _build_protein_fasta_contigs(records: Sequence[Any]) -> Dict[str, Dict[str, Any]]:
+    prots: List[StructureProteinItem] = []
+    cursor = 1
+    for idx, rec in enumerate(records, start=1):
+        aa = str(rec.seq).strip().upper().rstrip("*")
+        if not aa:
+            continue
+        desc = rec.description[len(rec.id):].strip() if rec.description.startswith(rec.id) else rec.description
+        prod = desc or "hypothetical protein"
+        role, role_cn = classify_structural_role(prod)
+        end_bp = cursor + len(aa) * 3 - 1
+        prots.append(
+            StructureProteinItem(
+                locus_tag=rec.id or f"PROT_{idx:04d}",
+                contig_id="Uploaded_Proteins",
+                start=cursor,
+                end=end_bp,
+                strand="+",
+                length_aa=len(aa),
+                product=prod,
+                raw_product=prod,
+                structural_role=role,
+                role_label_cn=role_cn,
+                evidence_source="faa_header",
+                translation=aa,
+            )
+        )
+        cursor = end_bp + 50
+    return {
+        "Uploaded_Proteins": {
+            "length_bp": cursor,
+            "gc_percent": 0.0,
+            "dna_seq": "",
+            "proteins": prots,
+            "input_type": "faa",
+        }
+    }
+
+
+def _extract_cds_translation(feat: Any, rec_seq: Any, n_bp: int, raw_tt: int) -> str:
+    q = feat.qualifiers or {}
+    aa = str((q.get("translation") or [""])[0]).strip().upper().replace(" ", "").rstrip("*")
+    if aa or n_bp <= 0:
+        return aa
+    try:
+        return str(feat.extract(rec_seq).translate(table=raw_tt, to_stop=True)).upper()
+    except Exception:
+        try:
+            return str(feat.extract(rec_seq).translate(table=raw_tt)).split("*")[0].upper()
+        except Exception:
+            return ""
+
+
+def _parse_gbk_cds_features(
+    rec: Any,
+    cid: str,
+    n_bp: int,
+) -> Tuple[List[StructureProteinItem], Optional[int]]:
+    prots: List[StructureProteinItem] = []
+    gbk_transl_table: Optional[int] = None
+    cds_idx = 0
+    seen_loci: set[str] = set()
+
+    for feat in getattr(rec, "features", []):
+        if feat.type != "CDS":
+            continue
+        cds_idx += 1
+        q = feat.qualifiers or {}
+        if gbk_transl_table is None and q.get("transl_table"):
+            try:
+                gbk_transl_table = int(str(q["transl_table"][0]).strip())
+            except Exception as exc:
+                logger.debug("解析 GenBank transl_table 失败: %s", exc)
+
+        lt_raw = str((q.get("locus_tag") or q.get("protein_id") or q.get("gene") or [f"{cid}_CDS_{cds_idx:04d}"])[0]).strip()
+        lt = lt_raw or f"{cid}_CDS_{cds_idx:04d}"
+        if lt in seen_loci:
+            lt = f"{lt}_{cds_idx:04d}"
+        seen_loci.add(lt)
+
+        prod_vals = [str(x).strip() for x in (q.get("product") or []) if str(x).strip()]
+        func_vals = [str(x).strip() for x in (q.get("function") or []) if str(x).strip()]
+        prod = prod_vals[0] if prod_vals else (func_vals[0] if func_vals else "hypothetical protein")
+
+        phrog_raw = str((q.get("phrog") or [""])[0]).strip()
+        if not phrog_raw:
+            note_blob = " ".join(str(x) for x in (q.get("note", []) + q.get("db_xref", []) + q.get("inference", [])))
+            m_ph = re.search(r"phrog[\s_:#-]*(\d+)", note_blob, re.I)
+            if m_ph:
+                phrog_raw = f"phrog_{m_ph.group(1)}"
+
+        raw_tt = gbk_transl_table or 11
+        if q.get("transl_table"):
+            try:
+                raw_tt = int(str(q["transl_table"][0]).strip())
+            except Exception as exc:
+                logger.debug("解析 CDS transl_table 失败: %s", exc)
+
+        aa = _extract_cds_translation(feat, rec.seq, n_bp, raw_tt)
+        if not aa:
+            continue
+        role, role_cn = classify_structural_role(prod, phrog_id=phrog_raw)
+        try:
+            start_bp = int(feat.location.start) + 1
+            end_bp = int(feat.location.end)
+        except Exception as _exc:
+            logger.debug("解析 GenBank 特征坐标跳过异常条目: %s", _exc)
+            continue
+
+        prots.append(
+            StructureProteinItem(
+                locus_tag=lt,
+                contig_id=cid,
+                start=start_bp,
+                end=end_bp,
+                strand="+" if (feat.location.strand or 1) >= 0 else "-",
+                length_aa=len(aa),
+                product=prod,
+                raw_product=prod,
+                phrog_id=phrog_raw,
+                structural_role=role,
+                role_label_cn=role_cn,
+                evidence_source="genbank",
+                translation=aa,
+            )
+        )
+    return prots, gbk_transl_table
+
+
 def parse_input_contigs(
     *,
     fasta_path: Optional[str] = None,
@@ -194,77 +349,18 @@ def parse_input_contigs(
     统一解析 FASTA / GenBank / 蛋白 FAA 输入，提取 Contig 序列元信息与已有 CDS 注解（如有）。
     返回: {contig_id: {"length_bp": int, "gc_percent": float, "dna_seq": str, "proteins": List[StructureProteinItem], "input_type": str}}
     """
-    records = []
-    input_type = "fasta"
-    is_gbk = False
-
-    if fasta_content and fasta_content.strip():
-        raw = fasta_content.strip()
-        if raw.startswith("LOCUS "):
-            is_gbk = True
-            input_type = "genbank"
-            records = list(SeqIO.parse(io.StringIO(raw), "genbank"))
-        else:
-            if not raw.startswith(">"):
-                raw = f">Sequence_1\n{raw}"
-            records = list(SeqIO.parse(io.StringIO(raw), "fasta"))
-    elif fasta_path:
-        p = Path(fasta_path)
-        if not p.is_file():
-            raise FileNotFoundError(f"输入文件不存在: {fasta_path}")
-        if p.name.lower().endswith(_GBK_EXTS):
-            is_gbk = True
-            input_type = "genbank"
-            with _open_maybe_gz(p) as fh:
-                records = list(SeqIO.parse(fh, "genbank"))
-        else:
-            with _open_maybe_gz(p) as fh:
-                records = list(SeqIO.parse(fh, "fasta"))
-
+    records, is_gbk, input_type = _load_input_records(
+        fasta_path=fasta_path,
+        fasta_content=fasta_content,
+    )
     if not records:
         raise ValueError("未解析到有效的 FASTA 或 GenBank 序列记录")
 
+    if not is_gbk and _is_protein_fasta_records(records):
+        return _build_protein_fasta_contigs(records)
+
     selected_set = set(selected_contigs) if selected_contigs else None
     out: Dict[str, Dict[str, Any]] = {}
-
-    if not is_gbk and _is_protein_fasta_records(records):
-        # 将蛋白多条序列聚合为单虚拟 Contig 供形态预测
-        prots: List[StructureProteinItem] = []
-        cursor = 1
-        for idx, rec in enumerate(records, start=1):
-            aa = str(rec.seq).strip().upper().rstrip("*")
-            if not aa:
-                continue
-            desc = rec.description[len(rec.id):].strip() if rec.description.startswith(rec.id) else rec.description
-            prod = desc or "hypothetical protein"
-            role, role_cn = classify_structural_role(prod)
-            end_bp = cursor + len(aa) * 3 - 1
-            prots.append(
-                StructureProteinItem(
-                    locus_tag=rec.id or f"PROT_{idx:04d}",
-                    contig_id="Uploaded_Proteins",
-                    start=cursor,
-                    end=end_bp,
-                    strand="+",
-                    length_aa=len(aa),
-                    product=prod,
-                    raw_product=prod,
-                    structural_role=role,
-                    role_label_cn=role_cn,
-                    evidence_source="faa_header",
-                    translation=aa,
-                )
-            )
-            cursor = end_bp + 50
-        out["Uploaded_Proteins"] = {
-            "length_bp": cursor,
-            "gc_percent": 0.0,
-            "dna_seq": "",
-            "proteins": prots,
-            "input_type": "faa",
-        }
-        return out
-
     for rec in records:
         cid = str(rec.id or f"contig_{len(out) + 1}")
         if selected_set is not None and cid not in selected_set:
@@ -272,79 +368,7 @@ def parse_input_contigs(
         seq_str = str(rec.seq).upper()
         n_bp = len(seq_str)
         gc_pct = round((seq_str.count("G") + seq_str.count("C")) * 100.0 / max(1, n_bp), 2)
-        prots = []
-        gbk_transl_table: Optional[int] = None
-        if is_gbk:
-            cds_idx = 0
-            seen_loci: set[str] = set()
-            for feat in getattr(rec, "features", []):
-                if feat.type != "CDS":
-                    continue
-                cds_idx += 1
-                q = feat.qualifiers or {}
-                if gbk_transl_table is None and q.get("transl_table"):
-                    try:
-                        gbk_transl_table = int(str(q["transl_table"][0]).strip())
-                    except Exception as exc:
-                        logger.debug("解析 GenBank transl_table 失败: %s", exc)
-                lt_raw = str((q.get("locus_tag") or q.get("protein_id") or q.get("gene") or [f"{cid}_CDS_{cds_idx:04d}"])[0]).strip()
-                lt = lt_raw or f"{cid}_CDS_{cds_idx:04d}"
-                if lt in seen_loci:
-                    lt = f"{lt}_{cds_idx:04d}"
-                seen_loci.add(lt)
-
-                prod_vals = [str(x).strip() for x in (q.get("product") or []) if str(x).strip()]
-                func_vals = [str(x).strip() for x in (q.get("function") or []) if str(x).strip()]
-                prod = prod_vals[0] if prod_vals else (func_vals[0] if func_vals else "hypothetical protein")
-
-                phrog_raw = str((q.get("phrog") or [""])[0]).strip()
-                if not phrog_raw:
-                    note_blob = " ".join(str(x) for x in (q.get("note", []) + q.get("db_xref", []) + q.get("inference", [])))
-                    m_ph = re.search(r"phrog[\s_:#-]*(\d+)", note_blob, re.I)
-                    if m_ph:
-                        phrog_raw = f"phrog_{m_ph.group(1)}"
-
-                raw_tt = gbk_transl_table or 11
-                if q.get("transl_table"):
-                    try:
-                        raw_tt = int(str(q["transl_table"][0]).strip())
-                    except Exception as exc:
-                        logger.debug("解析 CDS transl_table 失败: %s", exc)
-                aa = str((q.get("translation") or [""])[0]).strip().upper().replace(" ", "").rstrip("*")
-                if not aa and n_bp > 0:
-                    try:
-                        aa = str(feat.extract(rec.seq).translate(table=raw_tt, to_stop=True)).upper()
-                    except Exception:
-                        try:
-                            aa = str(feat.extract(rec.seq).translate(table=raw_tt)).split("*")[0].upper()
-                        except Exception:
-                            aa = ""
-                if not aa:
-                    continue
-                role, role_cn = classify_structural_role(prod, phrog_id=phrog_raw)
-                try:
-                    start_bp = int(feat.location.start) + 1
-                    end_bp = int(feat.location.end)
-                except Exception as _exc:
-                    logger.debug("解析 GenBank 特征坐标跳过异常条目: %s", _exc)
-                    continue
-                prots.append(
-                    StructureProteinItem(
-                        locus_tag=lt,
-                        contig_id=cid,
-                        start=start_bp,
-                        end=end_bp,
-                        strand="+" if (feat.location.strand or 1) >= 0 else "-",
-                        length_aa=len(aa),
-                        product=prod,
-                        raw_product=prod,
-                        phrog_id=phrog_raw,
-                        structural_role=role,
-                        role_label_cn=role_cn,
-                        evidence_source="genbank",
-                        translation=aa,
-                    )
-                )
+        prots, gbk_transl_table = _parse_gbk_cds_features(rec, cid, n_bp) if is_gbk else ([], None)
         out[cid] = {
             "length_bp": n_bp,
             "gc_percent": gc_pct,

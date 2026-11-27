@@ -306,6 +306,154 @@ class SangonBrowserSession:
 
         self._wait_stable_order_page()
 
+    def _prepare_pack_modal(
+        self,
+        page: Any,
+        order_no: str,
+        dir_name: str,
+        url: str,
+        log_cb: Optional[Callable[[str], None]],
+    ) -> tuple[Optional[Dict[str, Any]], Any]:
+        self._ensure_order_page_ready(url, log_cb=log_cb)
+        sel_all = page.locator("#cxSelectAll")
+        if sel_all.count() == 0:
+            return {
+                "order_no": order_no,
+                "dir_name": dir_name,
+                "status": "skipped_unavailable",
+                "message": "订单页未找到样品全选控件，可能尚未上传结果或页面改版",
+            }, None
+        sel_all.wait_for(state="visible", timeout=15000)
+
+        if sel_all.is_disabled():
+            return {
+                "order_no": order_no,
+                "dir_name": dir_name,
+                "status": "skipped_unavailable",
+                "message": "该订单全选框已禁用（全部样品可能测序失败或结果尚未上传完成）",
+            }, None
+
+        if not sel_all.is_checked():
+            sel_all.click()
+        checked_cnt = page.locator(".cxids:checked").count()
+        if checked_cnt <= 0:
+            return {
+                "order_no": order_no,
+                "dir_name": dir_name,
+                "status": "skipped_unavailable",
+                "message": "订单内没有可勾选的测序结果明细",
+            }, None
+        if log_cb:
+            log_cb(f"订单 {dir_name} 已选中 {checked_cnt} 条测序明细，正在打开打包弹窗...")
+
+        pack_btn = page.locator("a:has-text('测序结果打包下载'):visible").first
+        if pack_btn.count() == 0:
+            raise SangonOrderDownloadError("页面中未找到「测序结果打包下载」按钮")
+        pack_btn.click()
+
+        agreement = page.locator("#agreement")
+        agreement.wait_for(state="visible", timeout=10000)
+        if not agreement.is_checked():
+            agreement.check()
+
+        confirm_btn = page.locator(
+            "xpath=//input[@id='agreement']/following::*[self::button or self::a or self::input]"
+            "[normalize-space(.)='确定' or @value='确定'][1]"
+        ).first
+        if confirm_btn.count() == 0 or not confirm_btn.is_visible():
+            confirm_btn = page.locator(
+                "#x_resultModel_Box button:has-text('确定'):visible, .shoppingModalFooter button.primaryBtn:visible"
+            ).last
+        return None, confirm_btn
+
+    def _handle_fee_confirm_modal(
+        self,
+        page: Any,
+        order_no: str,
+        dir_name: str,
+        auto_confirm_fee: bool,
+        log_cb: Optional[Callable[[str], None]],
+        captured_downloads: List[Any],
+        blocking_alerts: List[str],
+    ) -> tuple[bool, Optional[Dict[str, Any]]]:
+        modal_deadline = time.monotonic() + 18.0
+        fee_box_handled = False
+        while time.monotonic() < modal_deadline:
+            if captured_downloads or blocking_alerts:
+                break
+            fee_box = page.locator("#Sequencing_results_batch_box")
+            if not fee_box_handled and fee_box.count() > 0 and fee_box.first.is_visible():
+                fee_box_handled = True
+                fee_rows = page.locator("#Sequencing_results_batch_box .seq_table tr.appendChild").count()
+                fee_amount = ""
+                try:
+                    price_el = page.locator("#Sequencing_results_batch_box .foot_price").first
+                    if price_el.count() > 0:
+                        fee_amount = (price_el.inner_text() or "").strip()
+                except Exception as exc:
+                    logger.debug("读取费用确认弹窗金额文本异常: %s", exc)
+
+                fee_desc = f"明细 {fee_rows} 条" + (f"，{fee_amount}" if fee_amount else "")
+                if not auto_confirm_fee:
+                    close_btn = fee_box.locator("[onclick*='close'], button:has-text('取消'), a:has-text('取消')").first
+                    if close_btn.count() > 0 and close_btn.is_visible():
+                        close_btn.click()
+                    return False, {
+                        "order_no": order_no,
+                        "dir_name": dir_name,
+                        "status": "fee_confirm_required",
+                        "fee_confirmed": False,
+                        "message": f"检测到 KBSeq 费用确认弹窗 ({fee_desc})，已按设置暂停下载",
+                    }
+
+                if log_cb:
+                    log_cb(f"订单 {dir_name} 弹出 KBSeq 费用确认框 ({fee_desc})，已按设定自动确认下载")
+                fee_box.locator("[onclick*='determine'], button:has-text('确定'), a:has-text('确定')").first.click()
+                return True, None
+            page.wait_for_timeout(200)
+        return False, None
+
+    @staticmethod
+    def _save_and_verify_order_zip(
+        dl: Any,
+        order_path: Path,
+        order_no: str,
+        dir_name: str,
+        fee_confirmed: bool,
+        notice_dialogs: List[str],
+    ) -> tuple[Path, Dict[str, Any]]:
+        suggested = sanitize_zip_filename(getattr(dl, "suggested_filename", ""), order_no)
+        zip_dir = order_path / "原始压缩包"
+        zip_dir.mkdir(parents=True, exist_ok=True)
+        tmp_zip = zip_dir / f".downloading_{order_no}_{int(time.time())}.tmp"
+        final_zip = zip_dir / suggested
+
+        dl.save_as(str(tmp_zip))
+        try:
+            entry_count = _validate_zip_file(tmp_zip)
+            tmp_zip.replace(final_zip)
+        except Exception:
+            if tmp_zip.exists():
+                try:
+                    tmp_zip.unlink()
+                except OSError:
+                    pass
+            raise
+
+        size_bytes = final_zip.stat().st_size
+        return final_zip, {
+            "order_no": order_no,
+            "dir_name": dir_name,
+            "status": "downloaded",
+            "zip_name": final_zip.name,
+            "dest_path": str(final_zip),
+            "size_bytes": size_bytes,
+            "entry_count": entry_count,
+            "fee_confirmed": fee_confirmed,
+            "dialogs": notice_dialogs,
+            "message": f"下载并校验完成 ({final_zip.name}, {size_bytes / (1024 * 1024):.2f} MB, {entry_count} 项)",
+        }
+
     def download_order(
         self,
         order_meta: Dict[str, Any],
@@ -330,55 +478,9 @@ class SangonBrowserSession:
                 "message": "缺少 cxOrderID 与订单下载链接（请先执行一次检查新订单）",
             }
 
-        self._ensure_order_page_ready(url, log_cb=log_cb)
-
-        sel_all = page.locator("#cxSelectAll")
-        if sel_all.count() == 0:
-            return {
-                "order_no": order_no,
-                "dir_name": dir_name,
-                "status": "skipped_unavailable",
-                "message": "订单页未找到样品全选控件，可能尚未上传结果或页面改版",
-            }
-        sel_all.wait_for(state="visible", timeout=15000)
-
-        if sel_all.is_disabled():
-            return {
-                "order_no": order_no,
-                "dir_name": dir_name,
-                "status": "skipped_unavailable",
-                "message": "该订单全选框已禁用（全部样品可能测序失败或结果尚未上传完成）",
-            }
-
-        if not sel_all.is_checked():
-            sel_all.click()
-        checked_cnt = page.locator(".cxids:checked").count()
-        if checked_cnt <= 0:
-            return {
-                "order_no": order_no,
-                "dir_name": dir_name,
-                "status": "skipped_unavailable",
-                "message": "订单内没有可勾选的测序结果明细",
-            }
-        if log_cb:
-            log_cb(f"订单 {dir_name} 已选中 {checked_cnt} 条测序明细，正在打开打包弹窗...")
-
-        pack_btn = page.locator("a:has-text('测序结果打包下载'):visible").first
-        if pack_btn.count() == 0:
-            raise SangonOrderDownloadError("页面中未找到「测序结果打包下载」按钮")
-        pack_btn.click()
-
-        agreement = page.locator("#agreement")
-        agreement.wait_for(state="visible", timeout=10000)
-        if not agreement.is_checked():
-            agreement.check()
-
-        confirm_btn = page.locator(
-            "xpath=//input[@id='agreement']/following::*[self::button or self::a or self::input]"
-            "[normalize-space(.)='确定' or @value='确定'][1]"
-        ).first
-        if confirm_btn.count() == 0 or not confirm_btn.is_visible():
-            confirm_btn = page.locator("#x_resultModel_Box button:has-text('确定'):visible, .shoppingModalFooter button.primaryBtn:visible").last
+        early_result, confirm_btn = self._prepare_pack_modal(page, order_no, dir_name, url, log_cb)
+        if early_result is not None:
+            return early_result
 
         captured_downloads: List[Any] = []
         blocking_alerts: List[str] = []
@@ -390,67 +492,25 @@ class SangonBrowserSession:
         def _on_dialog(dialog: Any) -> None:
             msg = str(dialog.message or "").strip()
             notice_dialogs.append(msg)
-            # 生工 /isDownloadAttach 返回 msg=="500011" 时弹出 confirm("...峰图正在生成中，请确认是否现在下载?")
-            if any(k in msg for k in ("是否现在下载", "正在生成中", "确认是否")):
-                try:
-                    dialog.accept()
-                except Exception as exc:
-                    logger.debug("自动确认下载提示对话框异常: %s", exc)
-                return
-            blocking_alerts.append(msg)
+            if not any(k in msg for k in ("是否现在下载", "正在生成中", "确认是否")):
+                blocking_alerts.append(msg)
             try:
                 dialog.accept()
             except Exception as exc:
-                logger.debug("关闭阻断告警对话框异常: %s", exc)
+                logger.debug("处理下载确认对话框异常: %s", exc)
 
         page.on("download", _on_download)
         page.on("dialog", _on_dialog)
-        fee_confirmed = False
         tmp_zip: Optional[Path] = None
 
         try:
             confirm_btn.click()
+            fee_confirmed, paused_result = self._handle_fee_confirm_modal(
+                page, order_no, dir_name, auto_confirm_fee, log_cb, captured_downloads, blocking_alerts
+            )
+            if paused_result is not None:
+                return paused_result
 
-            # 阶段 A：等待直接开始下载、报错提示或弹出 KBSeq 费用确认对话框 (#Sequencing_results_batch_box)
-            modal_deadline = time.monotonic() + 18.0
-            fee_box_handled = False
-            while time.monotonic() < modal_deadline:
-                if captured_downloads or blocking_alerts:
-                    break
-                fee_box = page.locator("#Sequencing_results_batch_box")
-                if not fee_box_handled and fee_box.count() > 0 and fee_box.first.is_visible():
-                    fee_box_handled = True
-                    fee_rows = page.locator("#Sequencing_results_batch_box .seq_table tr.appendChild").count()
-                    fee_amount = ""
-                    try:
-                        price_el = page.locator("#Sequencing_results_batch_box .foot_price").first
-                        if price_el.count() > 0:
-                            fee_amount = (price_el.inner_text() or "").strip()
-                    except Exception as exc:
-                        logger.debug("读取费用确认弹窗金额文本异常: %s", exc)
-
-                    fee_desc = f"明细 {fee_rows} 条" + (f"，{fee_amount}" if fee_amount else "")
-                    if not auto_confirm_fee:
-                        close_btn = fee_box.locator("[onclick*='close'], button:has-text('取消'), a:has-text('取消')").first
-                        if close_btn.count() > 0 and close_btn.is_visible():
-                            close_btn.click()
-                        return {
-                            "order_no": order_no,
-                            "dir_name": dir_name,
-                            "status": "fee_confirm_required",
-                            "fee_confirmed": False,
-                            "message": f"检测到 KBSeq 费用确认弹窗 ({fee_desc})，已按设置暂停下载",
-                        }
-
-                    if log_cb:
-                        log_cb(f"订单 {dir_name} 弹出 KBSeq 费用确认框 ({fee_desc})，已按设定自动确认下载")
-                    fee_ok_btn = fee_box.locator("[onclick*='determine'], button:has-text('确定'), a:has-text('确定')").first
-                    fee_ok_btn.click()
-                    fee_confirmed = True
-                    break
-                page.wait_for_timeout(200)
-
-            # 阶段 B：等待下载事件到达
             dl_wait_deadline = time.monotonic() + max(15.0, self._resolved_timeout_ms / 1000.0)
             while time.monotonic() < dl_wait_deadline:
                 if captured_downloads or blocking_alerts:
@@ -465,52 +525,26 @@ class SangonBrowserSession:
                     "fee_confirmed": fee_confirmed,
                     "message": f"生工提示暂不可下载: {' | '.join(blocking_alerts)}",
                 }
-
             if not captured_downloads:
                 raise SangonOrderDownloadError(
                     f"点击确认后 {int(self._resolved_timeout_ms / 1000)}s 内未收到浏览器下载流"
                 )
 
-            dl = captured_downloads[0]
-            suggested = sanitize_zip_filename(getattr(dl, "suggested_filename", ""), order_no)
-            zip_dir = order_path / "原始压缩包"
-            zip_dir.mkdir(parents=True, exist_ok=True)
-            tmp_zip = zip_dir / f".downloading_{order_no}_{int(time.time())}.tmp"
-            final_zip = zip_dir / suggested
-
-            # 等待下载完成并流式保存至临时文件，校验完整后再原子替换正式目录文件
-            dl.save_as(str(tmp_zip))
-            entry_count = _validate_zip_file(tmp_zip)
-            tmp_zip.replace(final_zip)
-            tmp_zip = None
-
-            size_bytes = final_zip.stat().st_size
-            return {
-                "order_no": order_no,
-                "dir_name": dir_name,
-                "status": "downloaded",
-                "zip_name": final_zip.name,
-                "dest_path": str(final_zip),
-                "size_bytes": size_bytes,
-                "entry_count": entry_count,
-                "fee_confirmed": fee_confirmed,
-                "dialogs": notice_dialogs,
-                "message": f"下载并校验完成 ({final_zip.name}, {size_bytes / (1024 * 1024):.2f} MB, {entry_count} 项)",
-            }
+            _, res_payload = self._save_and_verify_order_zip(
+                captured_downloads[0], order_path, order_no, dir_name, fee_confirmed, notice_dialogs
+            )
+            return res_payload
         finally:
             if tmp_zip is not None and tmp_zip.exists():
                 try:
                     tmp_zip.unlink()
                 except OSError:
                     pass
-            try:
-                page.remove_listener("download", _on_download)
-            except Exception as exc:
-                logger.debug("移除 download 监听器异常: %s", exc)
-            try:
-                page.remove_listener("dialog", _on_dialog)
-            except Exception as exc:
-                logger.debug("移除 dialog 监听器异常: %s", exc)
+            for evt, handler in (("download", _on_download), ("dialog", _on_dialog)):
+                try:
+                    page.remove_listener(evt, handler)
+                except Exception as exc:
+                    logger.debug("移除 %s 监听器异常: %s", evt, exc)
 
 
 def _collect_pending_download_targets(

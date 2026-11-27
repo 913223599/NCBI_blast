@@ -6,7 +6,7 @@ Query 邻域局部聚焦子树提取器（Subtree Extractor）
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Set, Tuple
 
 if TYPE_CHECKING:
     from ..pipeline.postprocess import PhyloNode
@@ -96,105 +96,84 @@ def _is_ancestor(
     return False
 
 
-def extract_query_focus_subtree(
-    root: "PhyloNode",
-    node_metadata: Dict[str, Dict[str, Any]],
-    max_leaves: int = 32,
-    min_leaves: int = 12,
+def _extract_single_cluster_subtree(
+    mrca: "PhyloNode",
+    parent_map: Dict[int, Optional["PhyloNode"]],
+    leaf_count_map: Dict[int, int],
+    max_leaves: int,
+    min_leaves: int,
 ) -> Tuple["PhyloNode", Set[str]]:
-    """
-    围绕待鉴定 Query 节点向上回溯提取可读性最优的聚焦局部子树：
-    - 若全树叶数 <= max_leaves，直接深拷贝整棵树返回；
-    - 若 Query 集中在单个大支系（MRCA 叶数 <= max_leaves），从 MRCA 向上扩展到不超过 max_leaves 的最高祖先；
-    - 若多个 Query 分散在远缘支系，为每个 Query 聚类独立截取近缘微支并挂接局部外群，保证所有 Query 全部入镜。
-    """
     from ..pipeline.postprocess import PhyloNode
 
-    all_leaves = _collect_leaves(root)
-    if len(all_leaves) <= max_leaves:
-        cloned = _clone_node(root)
-        return cloned, {lf.name for lf in all_leaves}
+    chosen = mrca
+    while True:
+        p = parent_map.get(id(chosen))
+        if p is None or leaf_count_map[id(p)] > max_leaves:
+            break
+        chosen = p
 
-    parent_map, leaf_count_map = _build_parent_and_leaf_maps(root)
-    query_leaves = [
-        lf
-        for lf in all_leaves
-        if str((node_metadata.get(lf.name) or {}).get("role") or "").strip().lower() == "query"
-    ]
-    if not query_leaves:
-        query_leaves = [all_leaves[0]]
+    cloned_chosen = _clone_node(chosen)
+    chosen_names = {lf.name for lf in _collect_leaves(cloned_chosen)}
 
-    outgroup_leaves = [
-        lf
-        for lf in all_leaves
-        if str((node_metadata.get(lf.name) or {}).get("role") or "").strip().lower() == "outgroup"
-    ]
+    if len(chosen_names) < min_leaves:
+        p = parent_map.get(id(chosen))
+        if p is not None and p.children:
+            sibling_leaves: List["PhyloNode"] = []
+            for sib in p.children:
+                if sib is not chosen:
+                    sibling_leaves.extend(_collect_leaves(sib))
+            need = max(1, min(max_leaves - len(chosen_names), min_leaves - len(chosen_names)))
+            sampled = sibling_leaves[:need]
+            if sampled:
+                wrapper = PhyloNode(name=p.name, length=0.0)
+                cloned_chosen.parent = wrapper
+                wrapper.children.append(cloned_chosen)
+                for slf in sampled:
+                    wrapper.children.append(
+                        PhyloNode(name=slf.name, length=max(0.02, slf.length), parent=wrapper)
+                    )
+                    chosen_names.add(slf.name)
+                cloned_chosen = wrapper
 
-    # 策略 1：所有 Query 的公共祖先不超过上限
-    mrca = _find_mrca(query_leaves, parent_map)
-    if leaf_count_map.get(id(mrca), 0) <= max_leaves:
-        chosen = mrca
-        while True:
-            p = parent_map.get(id(chosen))
-            if p is None:
-                break
-            if leaf_count_map[id(p)] <= max_leaves:
-                chosen = p
-            else:
-                break
+    return cloned_chosen, chosen_names
 
-        # 若仍过小且父节点仅略超上限，可适当吸纳或附加 1 个近缘外群
-        cloned_chosen = _clone_node(chosen)
-        chosen_names = {lf.name for lf in _collect_leaves(cloned_chosen)}
 
-        if len(chosen_names) < min_leaves:
-            p = parent_map.get(id(chosen))
-            if p is not None and p.children:
-                # 从紧邻姐妹支抽样补足参考上下文，保持有效分支结构
-                sibling_leaves: List["PhyloNode"] = []
-                for sib in p.children:
-                    if sib is not chosen:
-                        sibling_leaves.extend(_collect_leaves(sib))
-                need = max(1, min(max_leaves - len(chosen_names), min_leaves - len(chosen_names)))
-                sampled = sibling_leaves[:need]
-                if sampled:
-                    wrapper = PhyloNode(name=p.name, length=0.0)
-                    cloned_chosen.parent = wrapper
-                    wrapper.children.append(cloned_chosen)
-                    for slf in sampled:
-                        s_clone = PhyloNode(name=slf.name, length=max(0.02, slf.length), parent=wrapper)
-                        wrapper.children.append(s_clone)
-                        chosen_names.add(slf.name)
-                    cloned_chosen = wrapper
-
-        return cloned_chosen, chosen_names
-
-    # 策略 2：多个 Query 分散在远缘支系，各自向上取局部祖先簇并聚合
-    per_quota = max(5, (max_leaves - min(2, len(outgroup_leaves))) // max(1, len(query_leaves)))
+def _collect_dispersed_anchors(
+    query_leaves: Sequence["PhyloNode"],
+    parent_map: Dict[int, Optional["PhyloNode"]],
+    leaf_count_map: Dict[int, int],
+    per_quota: int,
+) -> List["PhyloNode"]:
     anchor_nodes: List["PhyloNode"] = []
     for qlf in query_leaves:
         cur = qlf
         while True:
             p = parent_map.get(id(cur))
-            if p is None:
+            if p is None or leaf_count_map[id(p)] > per_quota:
                 break
-            if leaf_count_map[id(p)] <= per_quota:
-                cur = p
-            else:
-                break
+            cur = p
         if cur.is_leaf:
             p = parent_map.get(id(cur))
             if p is not None and leaf_count_map[id(p)] <= max(per_quota + 4, 10):
                 cur = p
         anchor_nodes.append(cur)
 
-    # 去除被更大局部祖先包含的重复节点
     unique_anchors: List["PhyloNode"] = []
     for cand in anchor_nodes:
         if any(a is not cand and _is_ancestor(a, cand, parent_map) for a in anchor_nodes):
             continue
         if all(u is not cand for u in unique_anchors):
             unique_anchors.append(cand)
+    return unique_anchors
+
+
+def _assemble_dispersed_subtree(
+    unique_anchors: Sequence["PhyloNode"],
+    outgroup_leaves: Sequence["PhyloNode"],
+    node_metadata: Dict[str, Dict[str, Any]],
+    max_leaves: int,
+) -> Tuple["PhyloNode", Set[str]]:
+    from ..pipeline.postprocess import PhyloNode
 
     composite_root = PhyloNode(name="", length=0.0)
     focused_names: Set[str] = set()
@@ -207,20 +186,20 @@ def extract_query_focus_subtree(
             if sub_clone.length <= 0:
                 sub_clone.length = 0.05
             composite_root.children.append(sub_clone)
-            for lf in sub_leaves:
+            focused_names.update(lf.name for lf in sub_leaves)
+            continue
+        for lf in sub_leaves:
+            if str((node_metadata.get(lf.name) or {}).get("role") or "").lower() == "query":
+                composite_root.children.append(
+                    PhyloNode(name=lf.name, length=max(0.02, lf.length), parent=composite_root)
+                )
                 focused_names.add(lf.name)
-        else:
-            # 超出配额时只保留其中 query 及其紧邻参考
-            for lf in sub_leaves:
-                if str((node_metadata.get(lf.name) or {}).get("role") or "").lower() == "query":
-                    q_clone = PhyloNode(name=lf.name, length=max(0.02, lf.length), parent=composite_root)
-                    composite_root.children.append(q_clone)
-                    focused_names.add(lf.name)
 
     for og in outgroup_leaves[:2]:
         if og.name not in focused_names:
-            og_clone = PhyloNode(name=og.name, length=max(0.05, og.length), parent=composite_root)
-            composite_root.children.append(og_clone)
+            composite_root.children.append(
+                PhyloNode(name=og.name, length=max(0.05, og.length), parent=composite_root)
+            )
             focused_names.add(og.name)
 
     if len(composite_root.children) == 1:
@@ -229,3 +208,40 @@ def extract_query_focus_subtree(
         return only, focused_names
 
     return composite_root, focused_names
+
+
+def extract_query_focus_subtree(
+    root: "PhyloNode",
+    node_metadata: Dict[str, Dict[str, Any]],
+    max_leaves: int = 32,
+    min_leaves: int = 12,
+) -> Tuple["PhyloNode", Set[str]]:
+    """
+    围绕待鉴定 Query 节点向上回溯提取可读性最优的聚焦局部子树：
+    - 若全树叶数 <= max_leaves，直接深拷贝整棵树返回；
+    - 若 Query 集中在单个大支系（MRCA 叶数 <= max_leaves），从 MRCA 向上扩展到不超过 max_leaves 的最高祖先；
+    - 若多个 Query 分散在远缘支系，为每个 Query 聚类独立截取近缘微支并挂接局部外群，保证所有 Query 全部入镜。
+    """
+    all_leaves = _collect_leaves(root)
+    if len(all_leaves) <= max_leaves:
+        return _clone_node(root), {lf.name for lf in all_leaves}
+
+    parent_map, leaf_count_map = _build_parent_and_leaf_maps(root)
+    query_leaves = [
+        lf
+        for lf in all_leaves
+        if str((node_metadata.get(lf.name) or {}).get("role") or "").strip().lower() == "query"
+    ] or [all_leaves[0]]
+    outgroup_leaves = [
+        lf
+        for lf in all_leaves
+        if str((node_metadata.get(lf.name) or {}).get("role") or "").strip().lower() == "outgroup"
+    ]
+
+    mrca = _find_mrca(query_leaves, parent_map)
+    if leaf_count_map.get(id(mrca), 0) <= max_leaves:
+        return _extract_single_cluster_subtree(mrca, parent_map, leaf_count_map, max_leaves, min_leaves)
+
+    per_quota = max(5, (max_leaves - min(2, len(outgroup_leaves))) // max(1, len(query_leaves)))
+    unique_anchors = _collect_dispersed_anchors(query_leaves, parent_map, leaf_count_map, per_quota)
+    return _assemble_dispersed_subtree(unique_anchors, outgroup_leaves, node_metadata, max_leaves)

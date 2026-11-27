@@ -12,8 +12,8 @@ select = [
 ]
 
 [lint.mccabe]
-# 阶梯式复杂度红线：已从 51 -> 40 进一步压降至 35，随后续迭代持续压低至 <= 25
-max-complexity = 35
+# 阶梯式复杂度红线：已从 51 -> 40 -> 35 进一步压降至 25，全仓 27 个超限热点已拆解
+max-complexity = 25
 
 [lint.per-file-ignores]
 "scripts/*.py" = ["E402", "C901", "S310", "RUF012", "B007", "SIM114", "PERF102"]
