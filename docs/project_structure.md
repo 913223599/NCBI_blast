@@ -467,7 +467,6 @@
 |   |   |   |-- tree_sequence_processor.py
 |   |   |   \-- __init__.py
 |   |   \-- __init__.py
-|   |-- pyrightconfig.json
 |   |-- __init__.py
 |   \-- __main__.py
 |-- storage
@@ -1106,14 +1105,7 @@
 |   |   |-- xml2schema.exe
 |   |   |-- xml_schema2ddl.exe
 |   |   \-- xml_schema2flat.exe
-|   |-- 1.py
-|   |-- fix_imports_batch.py
-|   |-- fix_init_files.py
-|   |-- fix_json_comments.py
-|   |-- fix_ncbi_component.py
 |   |-- generate_help_docs.py
-|   |-- project_fixer.py
-|   |-- quick_fix_component.py
 |   \-- scan_docs_errors.py
 |-- vendor
 |   |-- ete4

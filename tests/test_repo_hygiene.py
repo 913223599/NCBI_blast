@@ -357,11 +357,23 @@ def test_version_single_source_brand_citations_and_three_types_alignment():
 
 
 def test_dead_zombie_modules_and_backend_maintenance_scripts_cleaned():
-    """防止已清理的零引用僵尸模块与生产包运维脚本回流。"""
+    """防止已清理的零引用僵尸模块、重复配置与生产包运维脚本回流。"""
     assert not (PROJECT_ROOT / "src" / "modules" / "tooltip").exists()
     assert not (PROJECT_ROOT / "src" / "web-next" / "src" / "modules" / "AssemblyCoordinator").exists()
     assert not (PROJECT_ROOT / "src" / "workbench" / "pipelines").exists()
     assert not (PROJECT_ROOT / "src" / "workbench" / "wrappers").exists()
+    assert not (PROJECT_ROOT / "src" / "pyrightconfig.json").exists()
+    assert not (PROJECT_ROOT / "third_party" / "PhageTailFinder" / "scripts").exists()
+    for obsolete_tool in (
+        "1.py",
+        "fix_imports_batch.py",
+        "fix_init_files.py",
+        "fix_json_comments.py",
+        "fix_ncbi_component.py",
+        "project_fixer.py",
+        "quick_fix_component.py",
+    ):
+        assert not (PROJECT_ROOT / "tools" / obsolete_tool).exists()
     for legacy_script in (
         "cleanup_translations.py",
         "diag_db.py",
