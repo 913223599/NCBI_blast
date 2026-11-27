@@ -20,4 +20,9 @@ norecursedirs = [
     "tools",
     "vendor",
 ]
-addopts = "-ra"
+addopts = "-ra --strict-markers"
+markers = [
+    "offline: 可在 CI 极简依赖环境中离线独立运行的单元与守护测试（无 torch/scipy/pandas/pyrodigal/外网依赖）",
+    "ml: 依赖 PyTorch/XGBoost/Pyrodigal/SciPy 等重型科学计算或深度学习环境的测试",
+    "integration: 依赖本地外部生物信息学工具、完整数据集、数据库或网络服务的集成测试",
+]

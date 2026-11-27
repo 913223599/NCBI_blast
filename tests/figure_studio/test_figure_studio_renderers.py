@@ -25,6 +25,8 @@ from src.figure_studio.renderers.network_renderer import GeneNetworkRenderer
 from src.figure_studio.renderers.synteny_renderer import SyntenyRibbonRenderer
 from src.figure_studio.renderers.viridic_renderer import ViridicHeatmapRenderer
 
+pytestmark = pytest.mark.offline
+
 
 def _make_sample_genomes() -> list[ParsedGenomeInput]:
     seqs = [

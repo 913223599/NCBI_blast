@@ -11,6 +11,9 @@ from fastapi.testclient import TestClient
 from src.backend.routes import phylo as phylo_route
 from src.phylo.pipeline.executor import get_phylo_executor
 from src.phylo.storage.archive_store import PhyloArchiveStore
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def test_phylo_api_full_lifecycle(tmp_path: Path, monkeypatch):

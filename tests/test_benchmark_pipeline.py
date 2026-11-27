@@ -18,6 +18,9 @@ from src.phage_discovery.benchmark.metrics import (
     decode_window_scores_to_regions,
 )
 from src.phage_discovery.benchmark.runner import run_composition_baseline
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def test_compute_clean_intervals_and_negative_split_isolation(tmp_path: Path):

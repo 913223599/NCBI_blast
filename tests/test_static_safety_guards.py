@@ -18,6 +18,8 @@ import pytest
 from src.core.async_tasks import spawn_tracked_task
 from src.core.http_guard import build_safe_request, safe_urlopen, validate_http_url
 
+pytestmark = pytest.mark.offline
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -84,7 +86,7 @@ def test_no_create_subprocess_shell_or_is_shell_true_in_src() -> None:
     src_root = PROJECT_ROOT / "src"
     violations: list[str] = []
     for py_file in sorted(src_root.rglob("*.py")):
-        if "__pycache__" in py_file.parts:
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in py_file.parts):
             continue
         tree = ast.parse(py_file.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -145,12 +147,25 @@ def test_no_legacy_s110_logger_in_src() -> None:
     src_root = PROJECT_ROOT / "src"
     violations: list[str] = []
     for py_file in sorted(src_root.rglob("*.py")):
-        if "__pycache__" in py_file.parts:
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in py_file.parts):
             continue
         text = py_file.read_text(encoding="utf-8")
         if "_s110_logger" in text:
             violations.append(str(py_file.relative_to(PROJECT_ROOT)))
     assert not violations, "检测到遗留 _s110_logger:\n" + "\n".join(violations)
+
+
+def test_no_generic_nonfatal_exception_template_in_src() -> None:
+    """全仓 src/ 不应残留空泛的 '忽略非致命异常' 模板日志文案。"""
+    src_root = PROJECT_ROOT / "src"
+    violations: list[str] = []
+    for py_file in sorted(src_root.rglob("*.py")):
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in py_file.parts):
+            continue
+        for lineno, line in enumerate(py_file.read_text(encoding="utf-8").splitlines(), 1):
+            if "忽略非致命异常" in line:
+                violations.append(f"{py_file.relative_to(PROJECT_ROOT)}:{lineno}: {line.strip()}")
+    assert not violations, "检测到空泛异常日志模板:\n" + "\n".join(violations)
 
 
 def test_phage_finder_protein_gate_call_uses_threads_kwarg() -> None:

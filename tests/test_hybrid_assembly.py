@@ -16,6 +16,9 @@ if str(repo_root) not in sys.path:
 
 from src.assembly.steps.assembler import AssemblerStep
 from src.assembly.core.base import PipelineContext
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 class TestHybridAssemblyOrchestration(unittest.IsolatedAsyncioTestCase):

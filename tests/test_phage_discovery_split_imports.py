@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Phase 6C 模块拆解向后兼容与门面重导出一致性测试。"""
 from __future__ import annotations
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def test_distilled_student_v4_facade_exports():

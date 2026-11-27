@@ -12,6 +12,9 @@ from src.phage_discovery.benchmark.chimera_builder import build_benchmark_suite
 from src.phage_discovery.data.feature_dataset import build_extra_chimera_features, build_split_features, load_split_arrays
 from src.phage_discovery.experts.expert_a_xgb import summarize_report, train_expert_a
 from src.phage_discovery.features.window_features import FEATURE_NAMES, SUB_BINS, extract_contig_windows
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def _random_seq(rng: random.Random, length: int, gc: float) -> str:

@@ -14,6 +14,8 @@ from src.phylo.models.errors import PhyloCancelledError
 from src.phylo.runtime.process_runner import ProcessRunner
 from src.phylo.runtime.tool_registry import get_tool_registry
 
+pytestmark = pytest.mark.offline
+
 
 def test_native_process_cancel_fast():
     cancel_ev = threading.Event()

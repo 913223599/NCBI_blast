@@ -29,6 +29,9 @@ from Bio import SeqIO
 from src.analysis.annotation.pipeline import AnnotationPipeline
 from src.analysis.annotation.types import AnnotationRunRequest, FeatureItem
 from src.analysis.annotation.fuser import AnnotationFuser
+import pytest
+
+pytestmark = pytest.mark.offline
 
 random.seed(20261028)
 _BASES = ["A", "C", "G", "T"]

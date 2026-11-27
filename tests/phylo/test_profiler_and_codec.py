@@ -12,6 +12,9 @@ from src.phylo.pipeline.postprocess import (
     reroot_midpoint,
     reroot_outgroup,
 )
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_id_codec_dedup_and_restore():

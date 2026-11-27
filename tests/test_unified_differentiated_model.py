@@ -15,6 +15,9 @@ from src.phage_discovery.student.orf_functional_judge import (
     build_orf_functional_judge,
     predict_contig_orfs_with_judge,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def test_unified_judge_differentiated_experts_on_demand_and_grad_firewall():

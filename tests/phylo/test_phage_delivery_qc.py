@@ -20,6 +20,9 @@ from src.phylo.models.schemas import (
     ReferenceCandidate,
 )
 from src.phylo.pipeline.postprocess import compute_tree_metrics
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def _sample_candidates() -> list[ReferenceCandidate]:

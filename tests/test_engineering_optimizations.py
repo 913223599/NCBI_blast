@@ -34,6 +34,9 @@ from src.backend.services.other_tools.schemas import (
     SangonRunRequest,
 )
 from src.blast.manager import BlastStore, BlastTask
+import pytest
+
+pytestmark = pytest.mark.integration
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 COLOR_EMOJI_RE = re.compile(

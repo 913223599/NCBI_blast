@@ -8,6 +8,9 @@ import tempfile
 from pathlib import Path
 
 from src.assembly.utils.file_handler import AssemblyFileHandler
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_is_zip_archive():

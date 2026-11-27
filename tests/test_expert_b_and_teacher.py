@@ -12,6 +12,9 @@ from src.phage_discovery.data.feature_dataset import build_split_features
 from src.phage_discovery.experts.expert_b_cnn import train_expert_b
 from src.phage_discovery.experts.seq_dataset import encode_dna, reverse_complement_codes
 from src.phage_discovery.teachers.checkv_teacher import parse_checkv_viral_regions, to_wsl_path
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def test_seq_dataset_encode_and_rc():

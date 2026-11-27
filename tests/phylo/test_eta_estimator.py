@@ -6,6 +6,8 @@ import pytest
 
 from src.phylo.core.eta_estimator import PhyloEtaEstimator
 
+pytestmark = pytest.mark.offline
+
 
 def test_ref_download_and_orf_rate_eta():
     est = PhyloEtaEstimator(start_ts=100.0)

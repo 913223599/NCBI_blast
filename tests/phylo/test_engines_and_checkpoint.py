@@ -12,6 +12,8 @@ from src.phylo.pipeline.executor import PhyloJobExecutor
 from src.phylo.runtime.tool_registry import get_project_root, get_tool_registry
 from src.phylo.storage.archive_store import PhyloArchiveStore
 
+pytestmark = pytest.mark.integration
+
 
 def _make_synthetic_gene_fasta(path: Path) -> None:
     seqs = {

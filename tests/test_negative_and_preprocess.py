@@ -24,6 +24,9 @@ from src.utils.phage_dataset.preprocessor import (
     compute_canonical_4mer_freq,
     preprocess_phage_dataset,
 )
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def _make_gbk_text(

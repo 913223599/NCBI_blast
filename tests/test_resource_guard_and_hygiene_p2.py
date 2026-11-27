@@ -8,6 +8,9 @@
 import ast
 from pathlib import Path
 from unittest.mock import patch
+import pytest
+
+pytestmark = pytest.mark.offline
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -39,7 +42,7 @@ def test_gpu_guard_managed_session_runs_cleanly():
 def test_no_bare_except_in_src():
     violations = []
     for p in (PROJECT_ROOT / "src").rglob("*.py"):
-        if "__pycache__" in p.parts:
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in p.parts):
             continue
         text = p.read_text(encoding="utf-8")
         tree = ast.parse(text)
@@ -52,7 +55,7 @@ def test_no_bare_except_in_src():
 def test_all_subprocess_run_have_explicit_timeout():
     violations = []
     for p in (PROJECT_ROOT / "src").rglob("*.py"):
-        if "__pycache__" in p.parts:
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in p.parts):
             continue
         text = p.read_text(encoding="utf-8")
         if "subprocess.run" not in text:
@@ -78,7 +81,7 @@ def test_cpu_count_centralized_through_resource_guard():
         PROJECT_ROOT / "src" / "utils" / "resource_guard.py",
     }
     for p in (PROJECT_ROOT / "src").rglob("*.py"):
-        if "__pycache__" in p.parts or p in allowed:
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in p.parts) or p in allowed:
             continue
         text = p.read_text(encoding="utf-8")
         if "cpu_count" not in text:

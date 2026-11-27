@@ -9,6 +9,9 @@ import numpy as np
 from src.phylo.engines.distance.matrix_gpu import DistanceMatrixCalculator, encode_alignment
 from src.phylo.engines.tree.nj import NJBioNJEngine
 from src.phylo.pipeline.postprocess import compute_tree_metrics
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def _write_aligned_dna_fasta(path: Path) -> None:

@@ -6,6 +6,9 @@ UTF-8 / Windows GBK 安全回归测试：
 """
 import ast
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.offline
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 

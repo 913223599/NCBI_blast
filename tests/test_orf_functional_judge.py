@@ -19,6 +19,9 @@ from src.phage_discovery.student.orf_functional_judge import (
     predict_contig_orfs_with_judge,
     slice_contig_orf_windows,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def test_judge_constants_and_aa_encoding():

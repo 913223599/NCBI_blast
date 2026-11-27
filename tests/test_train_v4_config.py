@@ -12,6 +12,8 @@ from src.phage_discovery.student.distilled_student_v4 import (
     train_distilled_student_v4,
 )
 
+pytestmark = pytest.mark.ml
+
 
 def test_train_v4_signature_is_concise_and_supports_config() -> None:
     sig = inspect.signature(train_distilled_student_v4)

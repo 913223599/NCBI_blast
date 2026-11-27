@@ -27,6 +27,9 @@ from src.mail_download.fetcher import (
     _subject_matches,
     sanitize_filename,
 )
+import pytest
+
+pytestmark = pytest.mark.offline
 
 FASTA_BODY = ">contig_1\nACGTACGTACGTACGTACGT\n>contig_2\nTTTTGGGGAAAACCCC\n"
 

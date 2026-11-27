@@ -9,6 +9,9 @@ import base64
 from pathlib import Path
 
 from src.backend.utils.assembly_report_export import ReportExporter
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def _build_sample_report_data(cds_count: int = 3) -> dict:

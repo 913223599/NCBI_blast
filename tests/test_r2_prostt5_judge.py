@@ -25,6 +25,9 @@ from src.phage_discovery.teachers.prostt5_embed_teacher import (
     run_chunked_prostt5_embedding,
     select_priority_training_aas,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def test_resolve_local_prostt5_and_priority_selection(tmp_path: Path) -> None:

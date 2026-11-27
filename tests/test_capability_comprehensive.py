@@ -27,6 +27,9 @@ from src.phage_discovery.features.window_features import (
 )
 from src.phage_discovery.inference.att_boundary_refiner import refine_regions_with_att_sites
 from src.phage_discovery.inference.unified_model import UnifiedPhageModel
+import pytest
+
+pytestmark = pytest.mark.ml
 
 _COMP = str.maketrans("ACGTNacgtn", "TGCANtgcan")
 

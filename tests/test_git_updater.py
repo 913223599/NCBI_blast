@@ -11,6 +11,9 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from src.backend.utils import git_updater  # noqa: E402
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def _run_git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:

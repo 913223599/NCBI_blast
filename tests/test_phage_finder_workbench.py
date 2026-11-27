@@ -36,6 +36,9 @@ from src.phage_discovery.inference.scanner import (
     WindowPrediction,
     _collect_contig_score_tracks,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def _create_mock_v4_2_dir(model_dir: Path) -> None:

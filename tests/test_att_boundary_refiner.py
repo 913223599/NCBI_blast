@@ -9,6 +9,9 @@ from src.phage_discovery.inference.att_boundary_refiner import (
     AttAlignmentHit,
     refine_regions_with_att_sites,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def _deterministic_dna(length: int, seed: int = 7) -> str:

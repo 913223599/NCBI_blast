@@ -44,6 +44,9 @@ from src.backend.services.other_tools.secret_store import (
 from src.mail_download.config import MailConfig
 from src.mail_download.downloader import AttachmentSaver
 from src.mail_download.fetcher import MailFetcher
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_mail_pipeline_overview_structure():

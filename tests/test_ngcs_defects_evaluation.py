@@ -24,6 +24,9 @@ if _NGCS_ROOT not in sys.path:
 
 from ngcs.consensus.post_processor import AssemblyPostProcessor
 from ngcs.spectral.circular_trimmer import trim_circular_wrap
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def generate_pseudo_random_dna(length: int, seed: int = 42) -> str:

@@ -48,6 +48,9 @@ from src.phage_discovery.features.window_features import (
 from src.phage_discovery.inference.scanner import GenomeScanner
 from src.phage_discovery.student.distilled_student_v4 import SEMANTIC_DIM, build_distilled_student_v4
 from src.phage_discovery.student.subbin_refiner import extract_per_orf_viral_scores, project_orf_to_25bins
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def _reverse_complement(seq: str) -> str:

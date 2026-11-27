@@ -30,6 +30,9 @@ from src.figure_studio.palette import (  # noqa: E402
     save_publication_figure,
 )
 from src.utils import system_monitor  # noqa: E402
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_strains_route_does_not_import_api_server() -> None:

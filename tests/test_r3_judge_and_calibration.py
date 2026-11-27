@@ -21,6 +21,9 @@ from src.phage_discovery.student.orf_functional_judge import (
     build_orf_functional_judge,
     predict_contig_orfs_with_judge,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def test_r3_judge_macro_gate_padding_invariance_and_win_core_head():

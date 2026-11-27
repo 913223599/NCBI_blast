@@ -20,6 +20,9 @@ if str(project_root) not in sys.path:
 from src.analysis.annotation.types import FeatureItem
 from src.analysis.annotation.fuser import AnnotationFuser
 from src.analysis.annotation.builtin_annotator import BuiltinAnnotator
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 class TestAnnotationFixes(unittest.TestCase):

@@ -23,6 +23,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.mail_download.config import MailConfig
 from src.mail_download.packer import ResultPacker
 from src.mail_download.sender import MailSender, SendResult
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def make_product_dir(base: Path) -> Path:

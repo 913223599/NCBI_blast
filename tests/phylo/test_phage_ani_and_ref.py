@@ -14,6 +14,9 @@ from src.phylo.engines.ani.viridic_ani import (
 from src.phylo.engines.reference.dereplicator import PhageDereplicator
 from src.phylo.engines.reference.treemmer_pruner import TreemmerPruner
 from src.phylo.models.schemas import ReferenceCandidate
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def test_inphared_index_build_and_query():

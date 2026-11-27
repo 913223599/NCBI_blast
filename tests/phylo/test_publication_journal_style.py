@@ -25,6 +25,9 @@ from src.phylo.delivery.publication_renderer import PublicationTreeRenderer
 from src.phylo.delivery.subtree_extractor import extract_query_focus_subtree
 from src.phylo.models.schemas import PublicationFigureRequest, ReferenceCandidate
 from src.phylo.pipeline.postprocess import parse_newick
+import pytest
+
+pytestmark = pytest.mark.integration
 
 _SLOW_EVOLUTION_NEWICK = (
     "(((Q_Phage_1:0.0012,(AY587007:0.0015,EF204940:0.0018)'99/100':0.0022)'96/98':0.0031,"

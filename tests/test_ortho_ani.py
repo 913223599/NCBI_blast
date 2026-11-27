@@ -14,6 +14,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 from src.analysis.pan_genomics.ani_calculator import OrthoANICalculator
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 class TestOrthoANI(unittest.TestCase):

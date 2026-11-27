@@ -14,6 +14,8 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+pytestmark = pytest.mark.offline
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 

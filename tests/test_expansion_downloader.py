@@ -18,6 +18,9 @@ from src.utils.phage_dataset.expansion_downloader import (
     ExpansionDownloader,
     collect_excluded_accessions,
 )
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def _make_genbank_text(

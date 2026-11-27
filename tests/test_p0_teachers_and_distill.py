@@ -30,6 +30,8 @@ from src.phage_discovery.teachers.phold_teacher import (
     run_chunked_phold_teacher,
 )
 
+pytestmark = pytest.mark.ml
+
 
 def _write_fake_dataset(root: Path, n_pos: int = 8, n_neg: int = 8) -> Tuple[Path, Path, Path, Path]:
     import json

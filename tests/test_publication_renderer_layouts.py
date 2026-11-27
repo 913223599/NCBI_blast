@@ -10,6 +10,8 @@ import pytest
 from src.phylo.delivery.publication_renderer import PublicationTreeRenderer
 from src.phylo.models.schemas import PublicationFigureRequest
 
+pytestmark = pytest.mark.offline
+
 SAMPLE_NEWICK = (
     "(((Query_Phage_1:0.05,Ref_T4_A:0.08)95:0.04,(Ref_T4_B:0.06,Ref_T4_C:0.07)88:0.05)99:0.06,"
     "(Ref_Lambda_1:0.12,Ref_Lambda_2:0.14)92:0.09);"

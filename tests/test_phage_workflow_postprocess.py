@@ -41,6 +41,8 @@ from src.phylo.pipeline.phage_workflow import (
 )
 from src.phylo.pipeline.postprocess import extract_leaf_names
 
+pytestmark = pytest.mark.offline
+
 
 def test_extract_leaf_names_exact_and_quoted() -> None:
     """精确解析常规标签、单引号转义标签，并避免子串重叠标签误判。"""

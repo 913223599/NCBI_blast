@@ -15,6 +15,9 @@ from src.analysis.protein_search.fasta_parser import (
     classify_file_sequences,
     parse_query_proteins,
 )
+import pytest
+
+pytestmark = pytest.mark.offline
 
 # 简单反向翻译密码子表（用于合成可控一致性的测试 DNA）
 _AA_TO_CODON = {

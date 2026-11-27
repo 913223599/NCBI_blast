@@ -32,6 +32,9 @@ from src.phage_discovery.student.distilled_student_v4 import (
     train_context_refiner,
     train_distilled_student_v4,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def _synth_dna(length: int, seed: int = 0, gc: float = 0.50) -> str:

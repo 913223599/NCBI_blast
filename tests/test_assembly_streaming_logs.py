@@ -7,6 +7,9 @@ import tempfile
 
 from src.assembly.core.base import PipelineContext
 from src.assembly.steps.assembler import AssemblerStep
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_assembler_step_streaming_log_callback():

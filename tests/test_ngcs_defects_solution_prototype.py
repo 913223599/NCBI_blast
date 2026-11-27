@@ -28,6 +28,9 @@ if _NGCS_ROOT not in sys.path:
     sys.path.append(_NGCS_ROOT)
 
 from ngcs.utils.edlib_compat import edlib
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def _load_dna_generator() -> Callable[..., str]:

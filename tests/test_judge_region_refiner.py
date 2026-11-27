@@ -12,6 +12,9 @@ from src.phage_discovery.inference.judge_region_refiner import (
     rescue_and_filter_regions_with_judge,
     summarize_region_with_judge,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def _make_fake_orfs(n: int, step_bp: int = 1000) -> list[tuple[int, int, int, str]]:

@@ -5,6 +5,9 @@
 """
 import re
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.offline
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -99,7 +102,9 @@ def test_rule2_no_personal_hardcoded_paths_in_core_files():
             tracked_script_py_files = sorted(scripts_dir.rglob("*.py"))
     # 全量扫描 src/**/*.py 与受 Git 跟踪的 scripts/**/*.py，杜绝白名单盲区漏检个人盘符路径
     src_py_files = sorted(
-        p for p in (PROJECT_ROOT / "src").rglob("*.py") if "__pycache__" not in p.parts
+        p
+        for p in (PROJECT_ROOT / "src").rglob("*.py")
+        if not any(part in {"__pycache__", "node_modules", "dist"} for part in p.parts)
     )
     all_checked = list(dict.fromkeys([*checked_files, *src_py_files, *tracked_script_py_files]))
     drive_pattern = re.compile(r"(?i)(?<![A-Za-z0-9_])([C-Z]:[\\/][^\s\"'<>|]{2,})")
@@ -130,7 +135,7 @@ def test_no_raw_extractall_in_src():
     """除 archive_guard.py 内部实现外，src/ 禁止直接调用未受控的 extractall()。"""
     violations = []
     for p in sorted((PROJECT_ROOT / "src").rglob("*.py")):
-        if "__pycache__" in p.parts or p.name == "archive_guard.py":
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in p.parts) or p.name == "archive_guard.py":
             continue
         text = p.read_text(encoding="utf-8", errors="replace")
         for idx, line in enumerate(text.splitlines(), 1):
@@ -186,7 +191,7 @@ def test_rule11_src_python_files_utf8_clean():
     )
     violations = []
     for p in (PROJECT_ROOT / "src").rglob("*.py"):
-        if "__pycache__" in p.parts:
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in p.parts):
             continue
         raw = p.read_bytes()
         if raw.startswith(b"\xef\xbb\xbf"):
@@ -271,7 +276,7 @@ def test_subprocess_text_calls_specify_utf8_and_routes_forbid_shell_true():
         if not base.exists():
             continue
         for p in base.rglob("*.py"):
-            if "__pycache__" in p.parts:
+            if any(part in {"__pycache__", "node_modules", "dist"} for part in p.parts):
                 continue
             tree = ast.parse(p.read_text(encoding="utf-8"))
             for node in ast.walk(tree):

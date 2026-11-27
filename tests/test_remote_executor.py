@@ -27,6 +27,8 @@ from src.ops.remote_executor import (  # noqa: E402
     create_agent_server,
 )
 
+pytestmark = pytest.mark.offline
+
 
 def _run_git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     res = subprocess.run(

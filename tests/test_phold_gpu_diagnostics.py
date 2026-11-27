@@ -16,6 +16,9 @@ if str(project_root) not in sys.path:
 from src.analysis.annotation.engines.phold_engine import PholdEngine  # noqa: E402
 from src.analysis.annotation.types import FeatureItem  # noqa: E402
 from src.analysis.phage_structure import sequence_annotator  # noqa: E402
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_parse_gpu_probe_output_valid_and_invalid() -> None:

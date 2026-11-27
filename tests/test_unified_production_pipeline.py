@@ -12,6 +12,9 @@ import numpy as np
 from src.phage_discovery.benchmark.metrics import PredictedRegion
 from src.phage_discovery.inference.report_exporter import export_unified_scan_outputs
 from src.phage_discovery.inference.unified_model import UnifiedPhageModel, plan_long_contig_segments
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 class _FakeStreamingScanner:

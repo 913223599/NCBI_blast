@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.offline
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -108,7 +111,7 @@ def test_zero_bidirectional_package_cycles_in_src():
     edges: dict[tuple[str, str], list[str]] = collections.defaultdict(list)
 
     for py_file in sorted(src_root.rglob("*.py")):
-        if "__pycache__" in py_file.parts:
+        if any(part in {"__pycache__", "node_modules", "dist"} for part in py_file.parts):
             continue
         rel = py_file.relative_to(PROJECT_ROOT)
         if len(rel.parts) <= 2:
@@ -158,3 +161,87 @@ def test_zero_bidirectional_package_cycles_in_src():
         if src_p == "core" and tgt in {"utils", "backend", "analysis", "assembly", "blast", "phylo", "workbench"}
     )
     assert not forbidden_core_deps, "src/core 违规依赖上层包:\n" + "\n".join(forbidden_core_deps)
+
+
+def test_serial_queue_base_classes_lifecycle():
+    """验证共享串行队列基座 BaseAsyncTaskQueue 与 BasePausableSerialQueue 的核心契约与继承关系。"""
+    import asyncio
+
+    from src.analysis.annotation.queue import AnnotationQueue, annotation_queue
+    from src.analysis.phage_finder.queue import PhageDiscoveryQueue, phage_discovery_queue
+    from src.analysis.phage_structure.queue import PhageStructureQueue, phage_structure_queue
+    from src.backend.utils.persistent_queue import PersistentAssemblyQueue, persistent_queue
+    from src.core.serial_queue import BaseAsyncTaskQueue, BasePausableSerialQueue
+
+    assert issubclass(PhageDiscoveryQueue, BaseAsyncTaskQueue)
+    assert issubclass(PhageStructureQueue, BaseAsyncTaskQueue)
+    assert issubclass(AnnotationQueue, BasePausableSerialQueue)
+    assert issubclass(PersistentAssemblyQueue, BasePausableSerialQueue)
+    assert isinstance(phage_discovery_queue, BaseAsyncTaskQueue)
+    assert isinstance(phage_structure_queue, BaseAsyncTaskQueue)
+    assert isinstance(annotation_queue, BasePausableSerialQueue)
+    assert isinstance(persistent_queue, BasePausableSerialQueue)
+
+    class _DummyAsyncQueue(BaseAsyncTaskQueue):
+        async def _broadcast_snapshot(self) -> None:
+            return None
+
+    class _DummyPausableQueue(BasePausableSerialQueue):
+        def __init__(self) -> None:
+            self._init_base_state()
+            self.executed: list[str] = []
+
+        async def _broadcast_status(self) -> None:
+            return None
+
+    async def _scenario() -> None:
+        aq = _DummyAsyncQueue(max_workers=1)
+        async_seen: list[str] = []
+        done_evt = asyncio.Event()
+
+        async def _exec(tid: str, req, ctx) -> None:
+            async_seen.append(tid)
+            if tid == "a3":
+                done_evt.set()
+
+        aq.set_executor(_exec)
+        await aq.start()
+        await aq.enqueue("a1", None, {})
+        await aq.enqueue("a2", None, {})
+        await aq.enqueue("a3", None, {})
+        assert (await aq.cancel_task("a2"))["status"] == "cancelled"
+        await asyncio.wait_for(done_evt.wait(), timeout=2.0)
+        assert async_seen == ["a1", "a3"]
+        for w in aq._workers:
+            w.cancel()
+        await asyncio.gather(*aq._workers, return_exceptions=True)
+
+        pq = _DummyPausableQueue()
+        pq.pause()
+        assert pq.is_paused is True
+        q_ref = pq._queue
+        pq._queue.extend([{"task_id": "p1"}, {"task_id": "p2"}, {"task_id": "p3"}])
+        pq._queued_ids.update({"p1", "p2", "p3"})
+        pq.reorder_queue(["p3", "p1", "p2"])
+        assert pq._remove_task_inplace("p1")
+        assert pq._queue is q_ref
+        assert pq.get_waiting_ids() == ["p3", "p2"]
+        assert pq.get_queue_position("p3") == 1
+        assert pq.get_queue_position("p2") == 2
+
+        p_done = asyncio.Event()
+
+        async def _proc(payload) -> None:
+            pq.executed.append(str(payload["task_id"]))
+            if len(pq.executed) == 2:
+                p_done.set()
+
+        pq._processor = _proc
+        pq._worker_task = asyncio.create_task(pq._worker_loop())
+        pq.resume()
+        await asyncio.wait_for(p_done.wait(), timeout=2.0)
+        assert pq.executed == ["p3", "p2"]
+        pq._worker_task.cancel()
+        await asyncio.gather(pq._worker_task, return_exceptions=True)
+
+    asyncio.run(_scenario())

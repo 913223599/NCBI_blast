@@ -9,6 +9,9 @@ from typing import Any, Dict, List
 from src.backend.routes import assembly as assembly_route
 from src.backend.utils.assembly_db import assembly_db
 from src.backend.utils.persistent_queue import PersistentAssemblyQueue
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_assembly_run_returns_queued_when_engine_busy(tmp_path: Path, monkeypatch):

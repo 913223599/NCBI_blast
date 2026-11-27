@@ -8,6 +8,9 @@ from src.analysis.pan_genomics.types import (
     PanGenomicsRunRequest
 )
 from src.analysis.pan_genomics.engine import PanGenomicsEngine
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 class TestPanGenomicsEngine(unittest.TestCase):

@@ -30,6 +30,8 @@ from src.phylo.models.schemas import (
 )
 from src.phylo.storage.archive_store import PhyloArchiveStore
 
+pytestmark = pytest.mark.offline
+
 _SAMPLE_NEWICK = (
     "(((T5-E1_asm:0.01,(T5-E2_asm:0.005,AY587007:0.02)'99.7/100':0.03)'94.6/96':0.08,"
     "(T5-WT_asm:0.002,MK373780:0.004)'100/100':0.15)'88/95':0.22,"

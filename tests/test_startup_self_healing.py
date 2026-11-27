@@ -16,6 +16,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.ml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:

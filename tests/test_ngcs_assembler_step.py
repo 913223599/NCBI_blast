@@ -18,6 +18,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.assembly.core.base import PipelineContext
 from src.assembly.steps.assembler import AssemblerStep
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 class TestNGCSAssemblerStep(unittest.IsolatedAsyncioTestCase):

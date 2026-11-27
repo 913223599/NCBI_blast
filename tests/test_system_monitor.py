@@ -19,6 +19,9 @@ from src.backend.utils.access_log_filter import (  # noqa: E402
     install_uvicorn_access_filter,
 )
 from src.utils import system_monitor  # noqa: E402
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_parse_nvidia_smi_csv_valid_and_na() -> None:

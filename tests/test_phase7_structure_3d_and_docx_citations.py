@@ -20,6 +20,8 @@ from src.utils.docx_citation_helper import (
     build_report_references_list,
 )
 
+pytestmark = pytest.mark.offline
+
 
 SAMPLE_PDB = (
     "ATOM      1  N   ALA A   1       1.458   0.000   0.000  1.00 92.50           N\n"

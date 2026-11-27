@@ -14,6 +14,8 @@ from src.backend.utils import persistent_queue as pq_mod
 from src.backend.utils.assembly_db import AssemblyDB
 from src.backend.utils.persistent_queue import PersistentAssemblyQueue
 
+pytestmark = pytest.mark.offline
+
 
 def _init_temp_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> AssemblyDB:
     db_file = tmp_path / "assembly_test.db"

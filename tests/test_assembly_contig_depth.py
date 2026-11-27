@@ -22,6 +22,9 @@ from src.assembly.utils.contig_depth import (
     estimate_contig_depths,
 )
 from src.backend.routes import assembly as assembly_routes
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def _make_seq(rng: random.Random, length: int) -> str:

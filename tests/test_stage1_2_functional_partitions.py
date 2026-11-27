@@ -25,6 +25,8 @@ from src.phage_discovery.student.distilled_student_v4 import (
     train_distilled_student_v4,
 )
 
+pytestmark = pytest.mark.ml
+
 
 def test_functional_partition_schema_and_three_source_classifier() -> None:
     """验证 9 大客观功能分区定义、三源合一分类器及 unknown function 掩码豁免。"""

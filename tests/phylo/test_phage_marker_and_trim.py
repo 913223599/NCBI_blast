@@ -13,6 +13,9 @@ from src.phylo.pipeline.postprocess import (
     reroot_outgroup,
 )
 from src.phylo.runtime.tool_registry import get_tool_registry
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def test_tool_registry_detects_phage_research_tools():

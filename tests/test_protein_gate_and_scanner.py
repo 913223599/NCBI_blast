@@ -16,6 +16,9 @@ from src.phage_discovery.inference.protein_gate import (
 )
 from src.phage_discovery.inference.scanner import GenomeScanner
 from src.phage_discovery.student.distilled_student import build_distilled_student
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def _synthetic_coding_dna(length_bp: int, gc_high: bool = False) -> str:

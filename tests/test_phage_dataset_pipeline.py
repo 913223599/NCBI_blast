@@ -26,6 +26,9 @@ from src.utils.phage_dataset.ncbi_downloader import (
     split_genbank_entries,
 )
 from src.utils.phage_dataset.validator import validate_dataset_parallel
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 def _build_synthetic_gbk(

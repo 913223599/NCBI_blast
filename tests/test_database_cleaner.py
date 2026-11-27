@@ -13,6 +13,9 @@ from src.utils.phage_dataset.cleaner import (
 )
 from src.utils.phage_dataset.indexer import build_phage_dataset_indexes, remove_redundant_blast_fasta
 from src.utils.phage_dataset.validator import PhageCDSRecord, PhageRecordValidation
+import pytest
+
+pytestmark = pytest.mark.offline
 
 
 def test_merge_intervals_flank_and_clamp():

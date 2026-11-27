@@ -29,6 +29,9 @@ if str(NGCS_DIR) not in sys.path:
 from src.assembly.core.base import PipelineContext
 from src.assembly.steps.assembler import AssemblerStep
 from ngcs.consensus.post_processor import AssemblyPostProcessor
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 class TestAssemblyPostprocAndDepth(unittest.TestCase):

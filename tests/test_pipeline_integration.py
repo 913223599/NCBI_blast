@@ -15,6 +15,9 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from src.analysis.pan_genomics.engine import PanGenomicsEngine
 from src.analysis.pan_genomics.types import PanGenomicsRunRequest, SampleInputItem
+import pytest
+
+pytestmark = pytest.mark.integration
 
 
 class TestPipelineIntegration(unittest.TestCase):

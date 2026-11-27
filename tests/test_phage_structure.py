@@ -31,6 +31,8 @@ from src.analysis.phage_structure.tmp_analyzer import (
 )
 from src.analysis.phage_structure.types import StructureProteinItem
 
+pytestmark = pytest.mark.ml
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

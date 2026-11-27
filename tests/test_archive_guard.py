@@ -11,6 +11,8 @@ import pytest
 
 from src.utils.archive_guard import safe_extract_tar, safe_extract_zip
 
+pytestmark = pytest.mark.offline
+
 
 def test_safe_extract_zip_valid_and_blocks_zip_slip(tmp_path: Path):
     good_zip = tmp_path / "good.zip"

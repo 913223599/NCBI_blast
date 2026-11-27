@@ -18,6 +18,9 @@ from src.phage_discovery.student.distilled_student import (
     evaluate_expert_ensemble,
     train_distilled_student,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def _rand_seq(rng: random.Random, length: int, gc: float) -> str:

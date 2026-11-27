@@ -9,6 +9,9 @@ from src.phage_discovery.teachers.prophage_miner import (
     curate_checkv_mined_dataset,
     extract_train_prophage_candidates,
 )
+import pytest
+
+pytestmark = pytest.mark.ml
 
 
 def test_prophage_miner_only_extracts_train_split_and_curates(tmp_path: Path):
