@@ -254,7 +254,7 @@ export function mapHostToPhylum(host?: string): string {
   if (UNKNOWN_TOKENS.has(raw.toLowerCase())) return ''
   const tokens = raw
     .split(/\s+/)
-    .map((t) => t.replace(/^[\[\](),;]+|[\[\](),;]+$/g, ''))
+    .map((t) => t.replace(/^[[\](),;]+|[[\](),;]+$/g, ''))
     .filter(Boolean)
   if (tokens.length === 0) return ''
   const target =

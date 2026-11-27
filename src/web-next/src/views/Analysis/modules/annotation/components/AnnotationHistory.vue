@@ -30,7 +30,7 @@ try {
   if (saved === 'asc' || saved === 'desc') {
     sortOrder.value = saved;
   }
-} catch (e) {
+} catch {
   // 本地存储不可用时忽略
 }
 
@@ -38,7 +38,7 @@ function toggleSortOrder() {
   sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc';
   try {
     localStorage.setItem('annotation_history_sort_order', sortOrder.value);
-  } catch (e) {
+  } catch {
     // 忽略
   }
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AlignmentMap from './AlignmentMap.vue'
 
-const props = defineProps<{
+defineProps<{
   show: boolean
   loading: boolean
   data: any

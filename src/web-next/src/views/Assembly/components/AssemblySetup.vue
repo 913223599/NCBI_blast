@@ -18,7 +18,7 @@ const logger = createLogger('AssemblySetup')
 
 const { t } = useI18n();
 
-const props = defineProps<{
+defineProps<{
   isRunning: boolean;
   isBusy: boolean;
 }>();

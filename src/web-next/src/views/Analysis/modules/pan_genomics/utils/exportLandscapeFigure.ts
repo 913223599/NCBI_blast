@@ -230,7 +230,7 @@ function computeExportTreeLayout(params: {
       depth: number
     }
 
-    let clusters: AdjCluster[] = ids.map((id, idx) => ({
+    const clusters: AdjCluster[] = ids.map((id, idx) => ({
       ids: [id],
       y: startY + (idx + 0.5) * rowHeight,
       x: tipX,
@@ -834,7 +834,7 @@ function buildFigureSvg(options: ExportFigureOptions, dims: ExportFigureDimensio
 
   // 2. 表头与行
   let curY = paddingY + headerHeight + legendHeight
-  let startX = paddingX
+  const startX = paddingX
 
   // 表头背景
   svg += `  <rect x="${startX}" y="${curY}" width="${totalWidth - paddingX * 2}" height="${tableHeaderHeight}" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2" />\n`

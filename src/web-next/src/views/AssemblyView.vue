@@ -51,7 +51,7 @@ async function onRunTask(params: AssemblyRunParams) {
   showSetupForm.value = false;
   try {
     await submitTask(params);
-  } catch (e) {
+  } catch {
     // 错误已在 composable 中处理
   }
 }

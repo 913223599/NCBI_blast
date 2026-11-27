@@ -16,8 +16,6 @@ const props = defineProps<{
 }>();
 
 const canvasRef = ref<HTMLCanvasElement | null>(null);
-const containerRef = ref<HTMLDivElement | null>(null);
-void containerRef;
 
 // 显示通道控制
 const showA = ref(true);
@@ -210,7 +208,7 @@ watch([() => props.sample, zoomLevel, verticalScale, canvasHeight, showA, showC,
 </script>
 
 <template>
-  <div class="chromatogram-container" ref="containerRef">
+  <div class="chromatogram-container">
     <!-- 顶部控制栏 -->
     <div class="trace-toolbar">
       <div class="channel-toggles">

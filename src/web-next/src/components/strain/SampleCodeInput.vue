@@ -2,33 +2,18 @@
   <div class="sample-code-input">
     <!-- 模式切换 -->
     <div class="mode-switch">
-      <button
-        type="button"
-        class="mode-btn"
-        :class="{ active: mode === 'auto' }"
-        @click="mode = 'auto'"
-      >
+      <button type="button" class="mode-btn" :class="{ active: mode === 'auto' }" @click="mode = 'auto'">
         自动编号
       </button>
-      <button
-        type="button"
-        class="mode-btn"
-        :class="{ active: mode === 'manual' }"
-        @click="mode = 'manual'"
-      >
+      <button type="button" class="mode-btn" :class="{ active: mode === 'manual' }" @click="mode = 'manual'">
         手动输入
       </button>
     </div>
 
     <!-- 手动模式：自由输入 -->
     <div v-if="mode === 'manual'" class="manual-area">
-      <input
-        v-model="manualCode"
-        class="code-text-input"
-        placeholder="输入14位样本编号"
-        maxlength="14"
-        @input="handleManualInput"
-      />
+      <input v-model="manualCode" class="code-text-input" placeholder="输入14位样本编号" maxlength="14"
+        @input="handleManualInput" />
       <div v-if="manualCode && !manualValid" class="validation-error">
         {{ manualErrors.join('；') }}
       </div>
@@ -47,20 +32,10 @@
             <span class="arrow-icon">▼</span>
             <!-- 来源下拉 -->
             <div v-if="openPanel === 'source'" class="dropdown-panel" @click.stop>
-              <input
-                v-model="sourceSearch"
-                class="search-input"
-                placeholder="搜索或输入新来源..."
-                @click.stop
-              />
+              <input v-model="sourceSearch" class="search-input" placeholder="搜索或输入新来源..." @click.stop />
               <div class="dropdown-list">
-                <div
-                  v-for="source in filteredSources"
-                  :key="source.code"
-                  class="dropdown-item"
-                  :class="{ selected: selectedSource === source.code }"
-                  @click.stop="selectSource(source.code)"
-                >
+                <div v-for="source in filteredSources" :key="source.code" class="dropdown-item"
+                  :class="{ selected: selectedSource === source.code }" @click.stop="selectSource(source.code)">
                   <span class="item-code">{{ source.code }}</span>
                   <span class="item-name">{{ source.name }}</span>
                 </div>
@@ -75,7 +50,11 @@
               <div v-if="showAddSource" class="inline-add-form" @click.stop>
                 <input v-model="newSourceCode" class="mini-input" placeholder="编码(2位)" maxlength="2" />
                 <input v-model="newSourceName" class="mini-input grow" placeholder="名称" />
-                <button type="button" class="confirm-add-btn" @click.stop="handleAddSource"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+                <button type="button" class="confirm-add-btn" @click.stop="handleAddSource"><svg width="14" height="14"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+                    stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg></button>
               </div>
             </div>
           </div>
@@ -90,13 +69,8 @@
             <span class="arrow-icon">▼</span>
             <div v-if="openPanel === 'category'" class="dropdown-panel" @click.stop>
               <div class="dropdown-list">
-                <div
-                  v-for="(name, code) in CATEGORY_MAP"
-                  :key="code"
-                  class="dropdown-item"
-                  :class="{ selected: selectedCategory === code }"
-                  @click.stop="selectCategory(code)"
-                >
+                <div v-for="(name, code) in CATEGORY_MAP" :key="code" class="dropdown-item"
+                  :class="{ selected: selectedCategory === code }" @click.stop="selectCategory(code)">
                   <span class="item-code">{{ code }}</span>
                   <span class="item-name">{{ name }}</span>
                 </div>
@@ -110,30 +84,17 @@
       <div class="cascade-row">
         <div class="cascade-field">
           <label class="field-label">属 (BBB)</label>
-          <div
-            class="selector-box"
-            :class="{ disabled: !selectedCategory }"
-            @click.stop="selectedCategory && (openPanel = openPanel === 'genus' ? '' : 'genus')"
-          >
+          <div class="selector-box" :class="{ disabled: !selectedCategory }"
+            @click.stop="selectedCategory && (openPanel = openPanel === 'genus' ? '' : 'genus')">
             <span :class="{ placeholder: !selectedGenus }">
               {{ selectedGenus ? getGenusLabel() : '选择属' }}
             </span>
             <span class="arrow-icon">▼</span>
             <div v-if="openPanel === 'genus'" class="dropdown-panel" @click.stop>
-              <input
-                v-model="genusSearch"
-                class="search-input"
-                placeholder="搜索属名或学名..."
-                @click.stop
-              />
+              <input v-model="genusSearch" class="search-input" placeholder="搜索属名或学名..." @click.stop />
               <div class="dropdown-list">
-                <div
-                  v-for="entry in filteredGenus"
-                  :key="entry.code"
-                  class="dropdown-item"
-                  :class="{ selected: selectedGenus === entry.code }"
-                  @click.stop="selectGenus(entry.code)"
-                >
+                <div v-for="entry in filteredGenus" :key="entry.code" class="dropdown-item"
+                  :class="{ selected: selectedGenus === entry.code }" @click.stop="selectGenus(entry.code)">
                   <span class="item-code">{{ entry.code }}</span>
                   <span class="item-name">{{ entry.name }}</span>
                   <span v-if="entry.latinName" class="item-latin">{{ entry.latinName }}</span>
@@ -148,7 +109,11 @@
               <div v-if="showAddGenus" class="inline-add-form" @click.stop>
                 <input v-model="newGenusName" class="mini-input grow" placeholder="中文名" />
                 <input v-model="newGenusLatin" class="mini-input grow" placeholder="学名(可选)" />
-                <button type="button" class="confirm-add-btn" @click.stop="handleAddGenus"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+                <button type="button" class="confirm-add-btn" @click.stop="handleAddGenus"><svg width="14" height="14"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+                    stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg></button>
               </div>
             </div>
           </div>
@@ -156,30 +121,17 @@
 
         <div class="cascade-field">
           <label class="field-label">种 (CCC)</label>
-          <div
-            class="selector-box"
-            :class="{ disabled: !selectedGenus }"
-            @click.stop="selectedGenus && (openPanel = openPanel === 'species' ? '' : 'species')"
-          >
+          <div class="selector-box" :class="{ disabled: !selectedGenus }"
+            @click.stop="selectedGenus && (openPanel = openPanel === 'species' ? '' : 'species')">
             <span :class="{ placeholder: !selectedSpecies }">
               {{ selectedSpecies ? getSpeciesLabel() : '选择种' }}
             </span>
             <span class="arrow-icon">▼</span>
             <div v-if="openPanel === 'species'" class="dropdown-panel" @click.stop>
-              <input
-                v-model="speciesSearch"
-                class="search-input"
-                placeholder="搜索种名或学名..."
-                @click.stop
-              />
+              <input v-model="speciesSearch" class="search-input" placeholder="搜索种名或学名..." @click.stop />
               <div class="dropdown-list">
-                <div
-                  v-for="entry in filteredSpecies"
-                  :key="entry.code"
-                  class="dropdown-item"
-                  :class="{ selected: selectedSpecies === entry.code }"
-                  @click.stop="selectSpecies(entry.code)"
-                >
+                <div v-for="entry in filteredSpecies" :key="entry.code" class="dropdown-item"
+                  :class="{ selected: selectedSpecies === entry.code }" @click.stop="selectSpecies(entry.code)">
                   <span class="item-code">{{ entry.code }}</span>
                   <span class="item-name">{{ entry.name }}</span>
                   <span v-if="entry.latinName" class="item-latin">{{ entry.latinName }}</span>
@@ -194,7 +146,11 @@
               <div v-if="showAddSpecies" class="inline-add-form" @click.stop>
                 <input v-model="newSpeciesName" class="mini-input grow" placeholder="中文名" />
                 <input v-model="newSpeciesLatin" class="mini-input grow" placeholder="学名(可选)" />
-                <button type="button" class="confirm-add-btn" @click.stop="handleAddSpecies"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg></button>
+                <button type="button" class="confirm-add-btn" @click.stop="handleAddSpecies"><svg width="14" height="14"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+                    stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg></button>
               </div>
             </div>
           </div>
@@ -205,25 +161,18 @@
       <div class="cascade-row">
         <div class="cascade-field narrow">
           <label class="field-label">传代 (P)</label>
-          <div
-            class="selector-box"
-            @click.stop="openPanel = openPanel === 'passage' ? '' : 'passage'"
-          >
-            <div class="selector-value">{{ selectedPassage === 0 ? '0 (原始株)' : `${selectedPassage} (P${selectedPassage})` }}</div>
+          <div class="selector-box" @click.stop="openPanel = openPanel === 'passage' ? '' : 'passage'">
+            <div class="selector-value">{{ selectedPassage === 0 ? '0 (原始株)' : `${selectedPassage}
+              (P${selectedPassage})` }}</div>
             <div class="selector-arrow">▾</div>
 
             <!-- 传代下拉面板 -->
             <div v-if="openPanel === 'passage'" class="dropdown-panel mini" @click.stop>
               <div class="dropdown-list">
-                <div
-                  v-for="p in 10"
-                  :key="p-1"
-                  class="dropdown-item"
-                  :class="{ selected: selectedPassage === p-1 }"
-                  @click.stop="selectedPassage = p-1; openPanel = ''"
-                >
-                  <span class="item-code">{{ p-1 }}</span>
-                  <span class="item-name">{{ p-1 === 0 ? '原始株' : `第 ${p-1} 代 (P${p-1})` }}</span>
+                <div v-for="p in 10" :key="p - 1" class="dropdown-item" :class="{ selected: selectedPassage === p - 1 }"
+                  @click.stop="selectedPassage = p - 1; openPanel = ''">
+                  <span class="item-code">{{ p - 1 }}</span>
+                  <span class="item-name">{{ p - 1 === 0 ? '原始株' : `第 ${p - 1} 代 (P${p - 1})` }}</span>
                 </div>
               </div>
             </div>
@@ -253,6 +202,13 @@ import type { CategoryCode, CodeLookupEntry } from '../../types/codeSystem'
 import { CATEGORY_MAP } from '../../types/codeSystem'
 import { useCodeGenerator } from '../../composables/useCodeGenerator'
 import { createLogger } from '../../utils/logger'
+import {
+  type SampleCodeUpdatePayload,
+  buildManualLengthError,
+  filterSourcesByKeyword,
+  filterTaxonomyEntriesByKeyword,
+  replacePassageDigit,
+} from './sampleCodeHelpers'
 const logger = createLogger('SampleCodeInput')
 
 const props = defineProps<{
@@ -269,16 +225,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: 'update', data: {
-    sampleCode: string,
-    codeSource: string,
-    codeCategory: string,
-    codeGenus: string,
-    codeSpecies: string,
-    codePassage: number,
-    codeSerial: number,
-    generationRequest?: any // 原始生成请求，用于最终 commit
-  }): void
+  (event: 'update', data: SampleCodeUpdatePayload): void
 }>()
 
 const codeGen = useCodeGenerator()
@@ -324,31 +271,18 @@ const generatedCode = ref('')
 
 /* ========== 计算属性 ========== */
 
-const filteredSources = computed(() => {
-  const keyword = sourceSearch.value.toLowerCase()
-  const all = codeGen.lookup.enabledSources.value
-  if (!keyword) return all
-  return all.filter(
-    (entry) =>
-      entry.code.toLowerCase().includes(keyword) ||
-      entry.name.toLowerCase().includes(keyword)
-  )
-})
+const filteredSources = computed(() =>
+  filterSourcesByKeyword(codeGen.lookup.enabledSources.value, sourceSearch.value)
+)
 
 const genusList = computed<CodeLookupEntry[]>(() => {
   if (!selectedCategory.value) return []
   return codeGen.lookup.getGenusListByCategory(selectedCategory.value as CategoryCode)
 })
 
-const filteredGenus = computed(() => {
-  const keyword = genusSearch.value.toLowerCase()
-  if (!keyword) return genusList.value
-  return genusList.value.filter(
-    (entry) =>
-      entry.name.toLowerCase().includes(keyword) ||
-      (entry.latinName?.toLowerCase().includes(keyword) ?? false)
-  )
-})
+const filteredGenus = computed(() =>
+  filterTaxonomyEntriesByKeyword(genusList.value, genusSearch.value)
+)
 
 const speciesList = computed<CodeLookupEntry[]>(() => {
   if (!selectedCategory.value || !selectedGenus.value) return []
@@ -358,15 +292,9 @@ const speciesList = computed<CodeLookupEntry[]>(() => {
   )
 })
 
-const filteredSpecies = computed(() => {
-  const keyword = speciesSearch.value.toLowerCase()
-  if (!keyword) return speciesList.value
-  return speciesList.value.filter(
-    (entry) =>
-      entry.name.toLowerCase().includes(keyword) ||
-      (entry.latinName?.toLowerCase().includes(keyword) ?? false)
-  )
-})
+const filteredSpecies = computed(() =>
+  filterTaxonomyEntriesByKeyword(speciesList.value, speciesSearch.value)
+)
 
 const canGenerate = computed(() =>
   !!(selectedSource.value && selectedCategory.value && selectedGenus.value && selectedSpecies.value)
@@ -512,15 +440,15 @@ function tryGenerate(): void {
       speciesCode: selectedSpecies.value,
       passage: selectedPassage.value,
     }
-    
+
     // 仅执行预览
     const code = codeGen.preview(request)
     generatedCode.value = code
-    
+
     // 发送预览数据和请求凭据
     const taxonomyPath = `${selectedCategory.value}${selectedGenus.value}${selectedSpecies.value}`
     const serial = codeGen.counter.getCurrentValue(taxonomyPath) + 1 // 预览值
-    
+
     emit('update', {
       sampleCode: code,
       codeSource: selectedSource.value,
@@ -565,7 +493,7 @@ function handleManualInput(): void {
     }
   } else {
     manualValid.value = false
-    manualErrors.value = code.length > 0 ? [`已输入${code.length}位，需14位`] : []
+    manualErrors.value = buildManualLengthError(code.length)
     generatedCode.value = ''
   }
 }
@@ -576,12 +504,12 @@ watch(selectedPassage, () => {
     // 传代变化不消耗新流水号，只替换P位
     const base = generatedCode.value
     if (base.length === 14) {
-      const updated = base.substring(0, 9) + String(selectedPassage.value) + base.substring(10)
+      const updated = replacePassageDigit(base, selectedPassage.value)
       generatedCode.value = updated
-      
+
       const taxonomyPath = `${selectedCategory.value}${selectedGenus.value}${selectedSpecies.value}`
       const serial = codeGen.counter.getCurrentValue(taxonomyPath)
-      
+
       const request = {
         sourceCode: selectedSource.value,
         categoryCode: selectedCategory.value as CategoryCode,
@@ -589,7 +517,7 @@ watch(selectedPassage, () => {
         speciesCode: selectedSpecies.value,
         passage: selectedPassage.value,
       }
-      
+
       emit('update', {
         sampleCode: updated,
         codeSource: selectedSource.value,
@@ -628,7 +556,7 @@ onMounted(() => {
     if (props.initialSelections.genus) selectedGenus.value = props.initialSelections.genus
     if (props.initialSelections.species) selectedSpecies.value = props.initialSelections.species
     if (props.initialSelections.passage !== undefined) selectedPassage.value = props.initialSelections.passage
-    
+
     // 立即尝试生成编号
     setTimeout(() => {
       // 关键修复：如果来源为空，自动选择第一个可用来源（XX）
@@ -654,7 +582,7 @@ watch(() => props.initialSelections, (newVal) => {
     if (newVal.genus) selectedGenus.value = newVal.genus
     if (newVal.species) selectedSpecies.value = newVal.species
     if (newVal.passage !== undefined) selectedPassage.value = newVal.passage
-    
+
     setTimeout(tryGenerate, 0)
   }
 }, { deep: true })
@@ -668,334 +596,4 @@ function closeAllPanels(): void {
 }
 </script>
 
-<style scoped>
-.sample-code-input {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* 模式切换 */
-.mode-switch {
-  display: flex;
-  gap: 6px;
-}
-
-.mode-btn {
-  padding: 6px 14px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  background: #f8fafc;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #64748b;
-  cursor: pointer;
-}
-
-.mode-btn.active {
-  background: #2563eb;
-  border-color: #2563eb;
-  color: white;
-}
-
-/* 手动输入 */
-.manual-area {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.code-text-input {
-  padding: 10px 12px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 1rem;
-  font-family: 'Consolas', 'Monaco', monospace;
-  letter-spacing: 2px;
-  background: #f8fafc;
-  text-transform: uppercase;
-}
-
-.code-text-input:focus {
-  outline: none;
-  border-color: #2563eb;
-}
-
-.validation-error {
-  font-size: 0.75rem;
-  color: #dc2626;
-  padding: 4px 0;
-}
-
-/* 级联选择 */
-.cascade-area {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.cascade-row {
-  display: flex;
-  gap: 10px;
-}
-
-.cascade-field {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  position: relative;
-}
-
-.cascade-field.narrow {
-  flex: 0 0 auto;
-  min-width: 120px;
-}
-
-.field-label {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-/* 选择框 */
-.selector-box {
-  padding: 8px 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: white;
-  font-size: 0.82rem;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  position: relative;
-  min-height: 36px;
-}
-
-.selector-box:hover {
-  border-color: #cbd5e1;
-}
-
-.selector-box.disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-.placeholder {
-  color: #94a3b8;
-}
-
-.arrow-icon {
-  font-size: 0.6rem;
-  color: #94a3b8;
-  margin-left: 6px;
-}
-
-/* 下拉面板 */
-.dropdown-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  z-index: 1500;
-  padding: 6px;
-  min-width: 240px;
-}
-
-.dropdown-panel.mini {
-  min-width: 160px;
-  right: 0;
-  left: auto;
-}
-
-.search-input {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  margin-bottom: 6px;
-  box-sizing: border-box;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: #2563eb;
-}
-
-.dropdown-list {
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.dropdown-item {
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.82rem;
-}
-
-.dropdown-item:hover {
-  background: #f1f5f9;
-}
-
-.dropdown-item.selected {
-  background: #eff6ff;
-  color: #2563eb;
-  font-weight: 700;
-}
-
-.item-code {
-  font-family: 'Consolas', monospace;
-  font-size: 0.7rem;
-  background: #f1f5f9;
-  padding: 2px 6px;
-  border-radius: 4px;
-  color: #475569;
-  font-weight: 700;
-  min-width: 30px;
-  text-align: center;
-}
-
-.item-name {
-  flex: 1;
-  color: #1e293b;
-}
-
-.item-latin {
-  font-size: 0.7rem;
-  color: #94a3b8;
-  font-style: italic;
-}
-
-.dropdown-empty {
-  padding: 12px;
-  text-align: center;
-  color: #94a3b8;
-  font-size: 0.8rem;
-}
-
-/* 新增区域 */
-.add-entry-area {
-  border-top: 1px solid #f1f5f9;
-  padding-top: 6px;
-  margin-top: 4px;
-}
-
-.add-btn {
-  width: 100%;
-  padding: 6px;
-  background: none;
-  border: 1px dashed #cbd5e1;
-  border-radius: 6px;
-  color: #64748b;
-  font-size: 0.8rem;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.add-btn:hover {
-  border-color: #2563eb;
-  color: #2563eb;
-}
-
-.inline-add-form {
-  display: flex;
-  gap: 6px;
-  padding-top: 6px;
-}
-
-.mini-input {
-  padding: 6px 8px;
-  border: 1px solid #e2e8f0;
-  border-radius: 6px;
-  font-size: 0.8rem;
-  min-width: 60px;
-}
-
-.mini-input.grow {
-  flex: 1;
-}
-
-.mini-input:focus {
-  outline: none;
-  border-color: #2563eb;
-}
-
-.confirm-add-btn {
-  padding: 6px 10px;
-  background: #2563eb;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 700;
-}
-
-/* 传代选择 */
-.passage-select {
-  padding: 8px 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  font-size: 0.82rem;
-  background: white;
-  cursor: pointer;
-}
-
-.passage-select:focus {
-  outline: none;
-  border-color: #2563eb;
-}
-
-/* 流水号展示 */
-.serial-display {
-  padding: 8px 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #f8fafc;
-  font-family: 'Consolas', monospace;
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: #475569;
-  text-align: center;
-  min-height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 结果展示 */
-.result-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 8px;
-}
-
-.result-label {
-  font-size: 0.75rem;
-  color: #16a34a;
-  font-weight: 600;
-}
-
-.result-code {
-  font-family: 'Consolas', 'Monaco', monospace;
-  font-size: 1.1rem;
-  font-weight: 800;
-  color: #15803d;
-  letter-spacing: 1.5px;
-}
-</style>
+<style scoped src="./sampleCodeInput.css"></style>

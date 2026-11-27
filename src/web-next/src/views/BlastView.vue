@@ -180,11 +180,11 @@ function launchBlast(): void {
         } else {
           appStore.showNotification('启动失败: ' + (res.error || '未知错误'), 'error')
         }
-      } catch (e) {
+      } catch {
         appStore.showNotification('解析返回失败', 'error')
       }
     })
-  } catch (error) {
+  } catch {
     appStore.showNotification('启动失败', 'error')
   }
 }

@@ -160,7 +160,7 @@ export class ImportTemplateManager {
 
     const workbook = new ExcelJS.Workbook();
     // 关键修复：Excel 工作表名称不能包含 / \ ? * : [ ] 等非法字符
-    const safeLabel = config.label.replace(/[\/\\?*:[\]]/g, '_');
+    const safeLabel = config.label.replace(/[/\\?*:[\]]/g, '_');
     const worksheet = workbook.addWorksheet(`导入模板-${safeLabel}`);
 
     // 1. 设置表头
@@ -209,7 +209,7 @@ export class ImportTemplateManager {
       
       if (validations[lowerKey]) {
         const colLetter = worksheet.getColumn(colIndex).letter;
-        let options = validations[lowerKey];
+        const options = validations[lowerKey];
         
         // 关键修复：Excel 公式限制 255 字符，如果来源列表太长，会导致生成失败
         // 目前简单的解决方法是截断，或者后续建议用户使用定义名称（Name Range）

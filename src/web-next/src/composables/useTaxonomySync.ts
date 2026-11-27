@@ -32,7 +32,7 @@ export function useTaxonomySync() {
   function attemptTaxonomicMatch(fullIdentification: string) {
     if (!fullIdentification) return null
     
-    const consensusMatch = fullIdentification.trim().match(/^[\*\s]*([A-Za-z]+)\s+([A-Za-z\.\-_0-9]+)/)
+    const consensusMatch = fullIdentification.trim().match(/^[*\s]*([A-Za-z]+)\s+([A-Za-z.\-_0-9]+)/)
     if (!consensusMatch) return null
     
     const genusPart = consensusMatch[1]
@@ -46,7 +46,7 @@ export function useTaxonomySync() {
       passage: 0
     }
 
-    const cleanSpecies = speciesPart.replace(/[,\(\)].*$/, '')
+    const cleanSpecies = speciesPart.replace(/[,()].*$/, '')
 
     try {
       const lowerGenus = genusPart.toLowerCase()

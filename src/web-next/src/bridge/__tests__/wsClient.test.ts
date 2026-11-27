@@ -48,7 +48,7 @@ describe('wsClient & bridge event routing', () => {
     const globalEventSpy = vi.fn()
 
     const unsubBlast = bridgeSignals.blast_event.connect(blastSpy)
-    const unsubSync = bridgeSignals.sync_event.connect(syncSpy)
+    const _unsubSync = bridgeSignals.sync_event.connect(syncSpy)
     const unsubRecall = bridgeSignals.recall_event.connect(recallSpy)
     const unsubPhylo = bridgeSignals.phylo_event.connect(phyloSpy)
     const unsubGlobal = onEvent(globalEventSpy)

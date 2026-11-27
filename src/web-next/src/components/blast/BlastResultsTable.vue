@@ -8,7 +8,7 @@ import { getBridge } from '../../bridge'
 import { useI18n } from '../../locales'
 import TranslateSplicer from '../common/TranslateSplicer.vue'
 
-const props = defineProps<{
+defineProps<{
   isTranslating: boolean
 }>()
 
@@ -125,7 +125,7 @@ function openNcbi(accession: string): void {
   const url = `https://www.ncbi.nlm.nih.gov/nuccore/${accession}`
   try {
     getBridge().open_external_url(url)
-  } catch (e) {
+  } catch {
     window.open(url, '_blank', 'noopener,noreferrer')
   }
 }

@@ -83,7 +83,7 @@ async function triggerBioDbUpdate(dbId: string) {
     } else {
       appStore.showNotification(res?.error || '启动失败', 'error')
     }
-  } catch (err) {
+  } catch {
     appStore.showNotification('通信异常，请检查后端状态', 'error')
   }
 }
@@ -131,7 +131,7 @@ async function triggerTaxUpdate() {
   try {
     await getBridge().taxonomy_update()
     refreshTaxStatus()
-  } catch (e) {
+  } catch {
     appStore.showNotification('更新指令发送失败', 'error')
   }
 }

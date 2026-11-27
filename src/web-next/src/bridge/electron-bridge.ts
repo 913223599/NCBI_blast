@@ -28,7 +28,7 @@ let bridgeReadyPromise: Promise<typeof electronBridge> | null = null
 async function initBridge(): Promise<typeof electronBridge> {
   if (bridgeReadyPromise) return bridgeReadyPromise
 
-  bridgeReadyPromise = new Promise(async (resolve) => {
+  bridgeReadyPromise = (async () => {
     bridgeLog.debug('正在验证 API Server 连通性...')
 
     let apiStarted = false
@@ -53,8 +53,8 @@ async function initBridge(): Promise<typeof electronBridge> {
     connectWebSocket()
     bridgeInstance = electronBridge
     bridgeLog.debug('桥接准备完成')
-    resolve(electronBridge)
-  })
+    return electronBridge
+  })()
 
   return bridgeReadyPromise
 }

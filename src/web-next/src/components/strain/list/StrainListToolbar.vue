@@ -51,7 +51,7 @@
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{
+defineProps<{
   selectedCount: number
   totalCount: number
   filteredCount: number

@@ -10,7 +10,7 @@ interface Variant {
   len: number;
 }
 
-const props = defineProps<{
+defineProps<{
   variants: Variant[];
   totalCount: number;
 }>();

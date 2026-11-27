@@ -6,7 +6,7 @@ import { useI18n } from '../../locales'
 import { createLogger } from '../../utils/logger'
 const logger = createLogger('BlastParamsPanel')
 
-const props = defineProps<{
+defineProps<{
   openDropdown: string | null
 }>()
 

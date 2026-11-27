@@ -107,7 +107,7 @@ async function onFilesUploaded(filePaths: string[]) {
       // 临时方案：如果后端还没准备好批量路径接口，提示用户
       appStore.showNotification('后端批量导入接口对接中，请先使用文本模式', 'warning')
     }
-  } catch (e) {
+  } catch {
     appStore.showNotification('导入过程出错', 'error')
   }
 }

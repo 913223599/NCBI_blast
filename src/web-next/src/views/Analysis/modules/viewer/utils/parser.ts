@@ -28,7 +28,7 @@ export function parseGenBank(text: string): { sequence: string; features: Genome
   let currentFeat: GenomeFeature | null = null;
   let currentKey = "";
 
-  for (let line of lines) {
+  for (const line of lines) {
     if (line.startsWith("FEATURES")) {
       inFeatures = true;
       continue;
@@ -84,7 +84,7 @@ export function parseGenBank(text: string): { sequence: string; features: Genome
         const match = line.trim().match(/\/(\w+)=(.*)/);
         if (match && match[1] && currentFeat) {
           currentKey = match[1];
-          let val = match[2] ? match[2].replace(/^"|"$/g, "") : "";
+          const val = match[2] ? match[2].replace(/^"|"$/g, "") : "";
           if (currentFeat.qualifiers) {
             currentFeat.qualifiers[currentKey] = val;
           }
@@ -201,7 +201,7 @@ function finalizeFeature(feat: GenomeFeature) {
 export function parseFasta(text: string): { sequence: string; features: GenomeFeature[] } {
   const lines = text.split("\n");
   let seq = "";
-  for (let line of lines) {
+  for (const line of lines) {
     if (!line.startsWith(">")) seq += line.trim();
   }
   return { sequence: seq, features: [] };

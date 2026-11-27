@@ -105,65 +105,66 @@
           </tr>
           
           <!-- 备份行（仅在展开时显示） -->
-          <tr
-            v-if="isExpanded(group.representative.accession) && getDuplicates(group).length > 0"
-            v-for="duplicate in getDuplicates(group)"
-            :key="duplicate.id"
-            class="table-row duplicate-row"
-            :class="{
-              selected: props.selectedIds.has(duplicate.id),
-              active: props.activeId === duplicate.id
-            }"
-            @click="emit('rowClick', duplicate)"
-            @dblclick="emit('viewDetail', duplicate)"
-          >
-            <td class="col-checkbox">
-              <input
-                type="checkbox"
-                :checked="props.selectedIds.has(duplicate.id)"
-                @click.stop="handleCheckboxClick($event, duplicate, [group.representative, ...getDuplicates(group)])"
-              />
-            </td>
-            <td v-if="visibility.accession" class="col-accession">
-              <span class="accession-tag" @click.stop="emit('viewDetail', duplicate)">
-                {{ duplicate.accession }}
-              </span>
-            </td>
-            <td class="col-name" :title="duplicate.name">{{ duplicate.name }}</td>
-            <td v-if="visibility.species" class="col-species">
-              <span class="species-badge">{{ duplicate.species }}</span>
-            </td>
-            <td v-if="visibility.strain" class="col-strain">{{ duplicate.strain || '-' }}</td>
-            <td v-if="visibility.sequenceType" class="col-type">
-              <span v-if="duplicate.sequenceType" class="type-badge" :class="duplicate.sequenceType.toLowerCase()">
-                {{ duplicate.sequenceType }}
-              </span>
-              <span v-else>-</span>
-            </td>
-            <td v-if="visibility.source" class="col-source" :title="duplicate.source">{{ duplicate.source || '-' }}</td>
-            <td v-if="visibility.host" class="col-host">{{ duplicate.host || '-' }}</td>
-            <td v-if="visibility.country" class="col-country">{{ duplicate.country || '-' }}</td>
-            <td v-if="visibility.collectionDate" class="col-date">{{ duplicate.collectionDate || '-' }}</td>
-            <td v-if="visibility.addedAt" class="col-date">{{ duplicate.addedAt ? new Date(duplicate.addedAt).toLocaleDateString() : '-' }}</td>
-            <td v-if="visibility.location" class="col-location" :title="getLocationString(duplicate)">
-              {{ getLocationString(duplicate) }}
-            </td>
-            <td class="col-actions">
-              <div class="action-btns">
-                <button type="button" class="action-btn-mini edit" @click.stop="emit('viewDetail', duplicate)" title="编辑详情">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
-                  </svg>
-                </button>
-                <button type="button" class="action-btn-mini delete" @click.stop="emit('deleteRow', duplicate.id)" title="移除样本">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  </svg>
-                </button>
-              </div>
-            </td>
-          </tr>
+          <template v-if="isExpanded(group.representative.accession) && getDuplicates(group).length > 0">
+            <tr
+              v-for="duplicate in getDuplicates(group)"
+              :key="duplicate.id"
+              class="table-row duplicate-row"
+              :class="{
+                selected: props.selectedIds.has(duplicate.id),
+                active: props.activeId === duplicate.id
+              }"
+              @click="emit('rowClick', duplicate)"
+              @dblclick="emit('viewDetail', duplicate)"
+            >
+              <td class="col-checkbox">
+                <input
+                  type="checkbox"
+                  :checked="props.selectedIds.has(duplicate.id)"
+                  @click.stop="handleCheckboxClick($event, duplicate, [group.representative, ...getDuplicates(group)])"
+                />
+              </td>
+              <td v-if="visibility.accession" class="col-accession">
+                <span class="accession-tag" @click.stop="emit('viewDetail', duplicate)">
+                  {{ duplicate.accession }}
+                </span>
+              </td>
+              <td class="col-name" :title="duplicate.name">{{ duplicate.name }}</td>
+              <td v-if="visibility.species" class="col-species">
+                <span class="species-badge">{{ duplicate.species }}</span>
+              </td>
+              <td v-if="visibility.strain" class="col-strain">{{ duplicate.strain || '-' }}</td>
+              <td v-if="visibility.sequenceType" class="col-type">
+                <span v-if="duplicate.sequenceType" class="type-badge" :class="duplicate.sequenceType.toLowerCase()">
+                  {{ duplicate.sequenceType }}
+                </span>
+                <span v-else>-</span>
+              </td>
+              <td v-if="visibility.source" class="col-source" :title="duplicate.source">{{ duplicate.source || '-' }}</td>
+              <td v-if="visibility.host" class="col-host">{{ duplicate.host || '-' }}</td>
+              <td v-if="visibility.country" class="col-country">{{ duplicate.country || '-' }}</td>
+              <td v-if="visibility.collectionDate" class="col-date">{{ duplicate.collectionDate || '-' }}</td>
+              <td v-if="visibility.addedAt" class="col-date">{{ duplicate.addedAt ? new Date(duplicate.addedAt).toLocaleDateString() : '-' }}</td>
+              <td v-if="visibility.location" class="col-location" :title="getLocationString(duplicate)">
+                {{ getLocationString(duplicate) }}
+              </td>
+              <td class="col-actions">
+                <div class="action-btns">
+                  <button type="button" class="action-btn-mini edit" @click.stop="emit('viewDetail', duplicate)" title="编辑详情">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                    </svg>
+                  </button>
+                  <button type="button" class="action-btn-mini delete" @click.stop="emit('deleteRow', duplicate.id)" title="移除样本">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </template>
         </template>
       </tbody>
     </table>

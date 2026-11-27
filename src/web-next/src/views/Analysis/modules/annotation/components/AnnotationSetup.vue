@@ -7,6 +7,16 @@ import { getBridge } from '../../../../../bridge';
 import { useAppStore } from '../../../../../stores/app';
 import type { AnnotationRunParams, ContigMetaItem, FastaInspectResult } from '../types';
 import ContigSelector from './ContigSelector.vue';
+import {
+  type AssemblyHistoryItem,
+  SAMPLE_FASTA,
+  buildAnnotationTaskName,
+  extractCompletedAssemblyHistory,
+  formatHistoryTime,
+  getAssemblyTaskId,
+  resolveAssemblyFastaFallbackPath,
+  validateAnnotationSubmit,
+} from './annotationSetupHelpers';
 import { createLogger } from '../../../../../utils/logger'
 const logger = createLogger('AnnotationSetup')
 
@@ -56,46 +66,10 @@ const inspectGc = ref<number>(0);
 const isInspecting = ref<boolean>(false);
 const selectedContigIds = ref<string[]>([]);
 
-interface AssemblyHistoryItem {
-  task_id?: string;
-  id?: string;
-  name?: string;
-  status?: string;
-  sample_type?: 'PHAGE' | 'BACTERIA' | 'VIRUS' | 'GENERAL';
-  fasta_path?: string;
-  assembly_fasta?: string;
-  contigs_path?: string;
-  output_fasta?: string;
-  created_at?: string | number;
-}
-
 // 组装历史列表 (从拼接管线导入)
 const assemblyHistory = ref<AssemblyHistoryItem[]>([]);
 const selectedAssemblyTask = ref<string>('');
 const isAssemblyLoading = ref<boolean>(false);
-
-function getAssemblyTaskId(t: AssemblyHistoryItem): string {
-  return String(t?.task_id || t?.id || '');
-}
-
-function formatHistoryTime(val: unknown): string {
-  if (typeof val === 'number' && Number.isFinite(val)) {
-    const ms = val < 1e12 ? val * 1000 : val;
-    const d = new Date(ms);
-    if (!Number.isNaN(d.getTime())) {
-      const pad = (n: number) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    }
-  }
-  if (typeof val === 'string') {
-    const trimmed = val.trim();
-    if (/^\d+(\.\d+)?$/.test(trimmed)) {
-      return formatHistoryTime(Number(trimmed));
-    }
-    return trimmed.slice(0, 16);
-  }
-  return '';
-}
 
 // 高级参数折叠开关
 const showAdvanced = ref<boolean>(false);
@@ -112,13 +86,6 @@ watch(
   },
   { immediate: true }
 );
-
-// 预设示例数据
-const SAMPLE_FASTA = `>NC_005816.1 Yersinia pestis KIM 10 plasmid pPCP1, complete sequence
-ATGAAACGCATTAGCACCACCATTACCACCACCATCACCATTACCACAGGTAACGGTGCGGGCTGA
-CGTATCGCGATCATGGCGATGCTGGCGTGCCTGGCTATCACCGTGATCGTCGCGATCCTGGTGCGT
-AAACCGGTTCTGCCGAACAAAGTTGTTGGTGTGACCACCCTGACCGATGACATCCTGCTGCTGAAA
-TAG`;
 
 function loadSampleData() {
   inputMode.value = 'paste';
@@ -259,14 +226,9 @@ async function fetchAssemblyHistory() {
     } else if (typeof bridge.get_assembly_history === 'function') {
       res = await bridge.get_assembly_history();
     }
-    const resObj = (res && typeof res === 'object' ? res : null) as
-      | { data?: unknown; history?: unknown; tasks?: unknown }
-      | null;
-    const list = Array.isArray(res) ? res : (resObj?.data || resObj?.history || resObj?.tasks || []);
-    if (Array.isArray(list)) {
-      assemblyHistory.value = (list as AssemblyHistoryItem[]).filter(
-        (t) => t.status === 'SUCCESS' || t.status === 'completed' || t.status === 'success'
-      );
+    const completed = extractCompletedAssemblyHistory(res);
+    if (completed.length > 0 || Array.isArray(res)) {
+      assemblyHistory.value = completed;
     }
   } catch (e) {
     logger.warn('[AnnotationSetup] 获取组装历史失败:', e);
@@ -290,11 +252,11 @@ async function onAssemblyTaskSelected() {
             resolvedPath = data.fasta_path;
           }
         }
-      } catch {
-        // 忽略结果接口回退错误，使用默认相对路径
+      } catch (err) {
+        logger.debug('[AnnotationSetup] 读取组装产物结果接口回退默认路径:', err);
       }
     }
-    form.fasta_path = resolvedPath || `results/assembly/${tid}/assemblerstep/assembly_run/assembly.fasta`;
+    form.fasta_path = resolvedPath || resolveAssemblyFastaFallbackPath(task, tid);
     form.task_name = `${task.name || tid}_Anno`;
     form.sample_type = task.sample_type || 'BACTERIA';
     inspectCurrentFasta();
@@ -306,22 +268,14 @@ const isSubmitting = ref<boolean>(false);
 async function onSubmit() {
   if (isSubmitting.value || isUploading.value || isInspecting.value) return;
 
-  if (inputMode.value === 'upload' && !form.fasta_path) {
-    appStore.showNotification('请先上传或选择 FASTA 文件', 'warning');
-    return;
-  }
-  if (inputMode.value === 'paste' && (!form.fasta_content || !form.fasta_content.trim())) {
-    appStore.showNotification('请在文本框中粘贴 FASTA 序列', 'warning');
-    return;
-  }
-  if (inputMode.value === 'assembly' && !form.fasta_path) {
-    appStore.showNotification('请选择一个有效的组装历史任务', 'warning');
-    return;
-  }
-
-  // 检查 Contig 勾选
-  if (inspectedContigs.value.length > 1 && selectedContigIds.value.length === 0) {
-    appStore.showNotification('检测到多条 Contig，请在序列列表中至少勾选 1 条序列进行分析', 'warning');
+  const validationError = validateAnnotationSubmit(
+    inputMode.value,
+    form,
+    inspectedContigs.value.length,
+    selectedContigIds.value.length
+  );
+  if (validationError) {
+    appStore.showNotification(validationError, 'warning');
     return;
   }
 
@@ -347,10 +301,7 @@ function resetFormAfterSubmit() {
   form.fasta_content = '';
   inspectedContigs.value = [];
   selectedContigIds.value = [];
-  const now = new Date();
-  const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, '');
-  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-  form.task_name = `Annotation_${dateStr}_${timeStr}`;
+  form.task_name = buildAnnotationTaskName();
 }
 
 onMounted(() => {
@@ -622,398 +573,4 @@ onMounted(() => {
   </div>
 </template>
 
-<style scoped>
-.annotation-setup-card {
-  background: white;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-}
-
-.setup-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.title-with-icon {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.title-with-icon h2 {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1e293b;
-  margin: 0;
-}
-
-.sample-btn {
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
-  color: #475569;
-  padding: 5px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.sample-btn:hover {
-  background: #eff6ff;
-  border-color: #93c5fd;
-  color: #2563eb;
-}
-
-.source-tabs {
-  display: flex;
-  gap: 8px;
-  border-bottom: 1px solid #e2e8f0;
-  padding-bottom: 10px;
-  margin-bottom: 16px;
-}
-
-.tab-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.tab-btn:hover {
-  color: #1e293b;
-  background: #f1f5f9;
-}
-
-.tab-btn.active {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #2563eb;
-}
-
-.source-content {
-  margin-bottom: 20px;
-}
-
-.inspect-loading-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 8px;
-  padding: 10px 16px;
-  color: #1d4ed8;
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 16px;
-}
-
-.spin-icon {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.drop-zone {
-  border: 2px dashed #cbd5e1;
-  border-radius: 10px;
-  padding: 24px;
-  text-align: center;
-  background: #f8fafc;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.drop-zone.dragging {
-  border-color: #3b82f6;
-  background: #eff6ff;
-}
-
-.drop-zone.has-file {
-  border-color: #10b981;
-  background: #f0fdf4;
-}
-
-.drop-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-}
-
-.drop-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.file-name-highlight {
-  font-size: 14px;
-  font-weight: 700;
-  color: #065f46;
-}
-
-.file-path-hint {
-  font-size: 11px;
-  color: #047857;
-  background: #d1fae5;
-  padding: 2px 8px;
-  border-radius: 4px;
-  max-width: 460px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin: 2px auto 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.main-tip {
-  font-size: 13px;
-  color: #334155;
-  font-weight: 500;
-}
-
-.browse-link {
-  color: #2563eb;
-  text-decoration: underline;
-  font-weight: 600;
-}
-
-.sub-tip {
-  font-size: 11px;
-  color: #94a3b8;
-}
-
-.paste-zone {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.paste-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.paste-tip {
-  font-size: 12px;
-  color: #64748b;
-}
-
-.paste-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.char-count {
-  font-size: 11px;
-  color: #94a3b8;
-  font-weight: 600;
-}
-
-.clear-btn {
-  background: transparent;
-  border: none;
-  color: #ef4444;
-  font-size: 11px;
-  cursor: pointer;
-  font-weight: 600;
-}
-
-.fasta-textarea {
-  width: 100%;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #1e293b;
-  resize: vertical;
-  outline: none;
-}
-
-.fasta-textarea:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
-}
-
-.assembly-zone {
-  padding: 12px;
-  background: #f8fafc;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-}
-
-.assembly-select-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.select-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #475569;
-}
-
-.selected-path-hint {
-  font-size: 11px;
-  color: #059669;
-  background: #ecfdf5;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-
-.params-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-group label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #475569;
-}
-
-.text-input, .custom-select {
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #1e293b;
-  background: white;
-  outline: none;
-}
-
-.text-input:focus, .custom-select:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
-}
-
-.advanced-section {
-  margin-bottom: 20px;
-  border-top: 1px dashed #e2e8f0;
-  padding-top: 12px;
-}
-
-.toggle-advanced-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: none;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 4px 0;
-}
-
-.toggle-advanced-btn:hover {
-  color: #2563eb;
-}
-
-.advanced-body {
-  margin-top: 12px;
-  padding: 12px;
-  background: #f8fafc;
-  border-radius: 8px;
-}
-
-.waterfall-options-box {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed #cbd5e1;
-}
-
-.opt-box-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: #334155;
-  margin-bottom: 8px;
-}
-
-.opt-checkbox-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 8px;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: #475569;
-  cursor: pointer;
-}
-
-.checkbox-label input[type="checkbox"] {
-  cursor: pointer;
-  accent-color: #2563eb;
-}
-
-.setup-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.submit-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: #2563eb;
-  color: white;
-  border: none;
-  padding: 10px 24px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
-}
-
-.submit-btn:hover:not(:disabled) {
-  background: #1d4ed8;
-  transform: translateY(-1px);
-}
-
-.submit-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-</style>
+<style scoped src="./annotationSetup.css"></style>

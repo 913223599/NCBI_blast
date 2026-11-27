@@ -67,7 +67,7 @@ async function onDiversityUploadSuccess(filePaths: string[]) {
     } else {
       detectedPackageInfo.value = { file_name: path.split(/[/\\]/).pop(), fastq_count: '多' }
     }
-  } catch (e) {
+  } catch {
     detectedPackageInfo.value = { file_name: path.split(/[/\\]/).pop(), fastq_count: '多' }
   }
 }

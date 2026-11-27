@@ -97,7 +97,7 @@ function parseSupportValue(label: string): {
 
 function quoteNewickLabel(label: string): string {
   if (!label) return ''
-  if (/[():,;\[\]'\s]/.test(label)) {
+  if (/[():,;[\]'\s]/.test(label)) {
     return "'" + label.replace(/'/g, "''") + "'"
   }
   return label

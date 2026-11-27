@@ -68,7 +68,7 @@ async function onRunTask(params: AnnotationRunParams) {
   try {
     await submitTask(params);
     showSetupForm.value = false;
-  } catch (e) {
+  } catch {
     // 错误已在 useAnnotation 中捕获
   }
 }

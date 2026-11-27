@@ -228,7 +228,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       getBridge().db_save_record(newRecord, () => {
         setIsUpdating(false)
       })
-    } catch (e) {
+    } catch {
       setIsUpdating(false)
     }
 
@@ -449,7 +449,7 @@ export function useRecordsActions(state: any, autoSave: () => void) {
       currentValue: maxVal,
       updatedAt: now
     }))
-    autoSave && autoSave()
+    if (autoSave) autoSave()
   }
 
   return {
