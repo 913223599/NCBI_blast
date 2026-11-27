@@ -208,7 +208,7 @@ def _extract_date_prefix(date_str: str) -> str:
             dt = parsedate_to_datetime(date_str)
             return dt.strftime("%Y%m%d")
         except Exception as _exc:
-            logger.debug("_extract_date_prefix 忽略非致命异常: %s", _exc)
+            logger.debug("解析邮件日期头失败，回退当天日期前缀: %s", _exc)
     return datetime.now().strftime("%Y%m%d")
 
 
@@ -634,5 +634,5 @@ def scan_sangon_mails(
             try:
                 conn.logout()
             except Exception as _exc:
-                logger.debug("scan_sangon_mails 忽略非致命异常: %s", _exc)
+                logger.debug("生工邮件扫描关闭 IMAP 连接 logout 失败: %s", _exc)
 

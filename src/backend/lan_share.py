@@ -125,7 +125,7 @@ class LanShareManager:
                 if primary_ip not in ips and not primary_ip.startswith("198.18."):
                     ips.insert(0, primary_ip)
         except Exception as _exc:
-            logger.debug("LanShareManager.get_local_ips 忽略非致命异常: %s", _exc)
+            logger.debug("UDP 探测本机首选网卡 IP 失败: %s", _exc)
         
         return list(set(ips)) if ips else ["127.0.0.1"]
 

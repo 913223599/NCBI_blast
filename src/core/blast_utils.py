@@ -172,7 +172,7 @@ def canonicalize_species_name(species: str) -> str:
                         _canonical_species_cache[s_clean] = canon
                         return canon
     except Exception as _exc:
-        logger.debug("canonicalize_species_name 忽略非致命异常: %s", _exc)
+        logger.debug("物种名称规范化检索回退原始名称: %s", _exc)
         
     _canonical_species_cache[s_clean] = s_clean
     return s_clean

@@ -109,7 +109,7 @@ class ShmManager:
                         if avail_str.isdigit():
                             return float(avail_str)
         except Exception as _exc:
-            logger.debug("ShmManager._get_shm_available_gb 忽略非致命异常: %s", _exc)
+            logger.debug("探测 /dev/shm 可用共享内存空间失败: %s", _exc)
         return 0.0
 
     async def _evict_expired_diagnostics(self):

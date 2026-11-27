@@ -56,7 +56,7 @@ class ProteomeTreeEngine:
             try:
                 self.on_log(msg)
             except Exception as _exc:
-                logger.debug("ProteomeTreeEngine._log 忽略非致命异常: %s", _exc)
+                logger.debug("ProteomeTreeEngine 日志回调执行失败: %s", _exc)
 
     @staticmethod
     def accumulate_blastp_tsv_streaming(

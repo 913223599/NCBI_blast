@@ -70,7 +70,7 @@ def _to_windows_short_path(path: Path) -> Path:
         if 0 < n < len(buf) and " " not in buf.value:
             return Path(buf.value)
     except Exception as _exc:
-        logger.debug("_to_windows_short_path 忽略非致命异常: %s", _exc)
+        logger.debug("数据集索引器转换 Windows 短路径失败，回退原路径: %s", _exc)
     return path
 
 

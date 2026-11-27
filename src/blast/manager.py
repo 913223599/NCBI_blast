@@ -617,7 +617,7 @@ class BlastManager:
                         parsed_params = json.loads(t['params'])
                         t['task_name'] = parsed_params.get('task_name')
                     except Exception as _exc:
-                        logger.debug("BlastManager.list_tasks 忽略非致命异常: %s", _exc)
+                        logger.warning("解析 BLAST 历史任务 params JSON 失败: %s", _exc)
                 elif isinstance(t.get('params'), dict):
                     t['task_name'] = t['params'].get('task_name')
 

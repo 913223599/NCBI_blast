@@ -46,7 +46,7 @@ class PhageDereplicator:
             try:
                 self.on_log(msg)
             except Exception as _exc:
-                logger.debug("PhageDereplicator._log 忽略非致命异常: %s", _exc)
+                logger.debug("PhageDereplicator 日志回调执行失败: %s", _exc)
 
     def dereplicate(
         self,

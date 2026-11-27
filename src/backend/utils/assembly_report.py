@@ -395,7 +395,7 @@ class AssemblyReportParser:
                 with open(bf_json, "r", encoding="utf-8") as f:
                     result["phagescope_backfill"] = json.load(f)
             except Exception as _exc:
-                logger.debug("AssemblyReportParser._parse_annotation 忽略非致命异常: %s", _exc)
+                logger.warning("读取组装注释报告 phagescope_backfill.json 失败: %s", _exc)
 
         # 3. 基因组图谱
         plot_dir = anno_dir / "phage_plot"

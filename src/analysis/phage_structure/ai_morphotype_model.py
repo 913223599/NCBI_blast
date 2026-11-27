@@ -141,7 +141,7 @@ def _resolve_unified_judge_dir(project_root: Optional[Path] = None) -> Optional[
                 if (p / "unified_judge_seq.pt").is_file():
                     return p
     except Exception as _exc:
-        logger.debug("_resolve_unified_judge_dir 忽略非致命异常: %s", _exc)
+        logger.debug("探测 UnifiedJudge 模型目录候选路径失败: %s", _exc)
 
     sibling_data = root.parent / "Phage data"
     for cand in (
@@ -179,7 +179,7 @@ def release_ai_judge_memory() -> None:
             if hasattr(torch.cuda, "ipc_collect"):
                 torch.cuda.ipc_collect()
     except Exception as _exc:
-        logger.debug("release_ai_judge_memory 忽略非致命异常: %s", _exc)
+        logger.debug("释放 AI 形态判别显存缓存失败（已忽略）: %s", _exc)
 
 
 def load_unified_judge_seq_model(
@@ -221,7 +221,7 @@ def load_unified_judge_seq_model(
             if isinstance(loaded, dict):
                 uni_meta = loaded
         except Exception as _exc:
-            logger.debug("load_unified_judge_seq_model 忽略非致命异常: %s", _exc)
+            logger.warning("加载 UnifiedJudge 模型元数据 JSON 失败: %s", _exc)
     version_tag = resolve_unified_version_tag(uni_meta, {})
 
     _JUDGE_RUNTIME_CACHE.clear()

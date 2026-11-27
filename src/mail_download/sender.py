@@ -167,7 +167,7 @@ class MailSender:
                 try:
                     conn.quit()
                 except Exception as _exc:
-                    logger.debug("MailSender.send 忽略非致命异常: %s", _exc)
+                    logger.debug("MailSender 关闭 SMTP 连接 quit 失败: %s", _exc)
 
     # ---- 内部 ----
 

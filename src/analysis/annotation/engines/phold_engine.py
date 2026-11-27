@@ -170,7 +170,7 @@ class PholdEngine(BaseAnnotationEngine):
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
         except Exception as _exc:
-            logger.debug("PholdEngine._cleanup_gpu_memory 忽略非致命异常: %s", _exc)
+            logger.debug("PholdEngine 回收 GPU 显存缓存失败（已忽略）: %s", _exc)
         gc.collect()
 
     async def run(

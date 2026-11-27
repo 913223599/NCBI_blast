@@ -99,9 +99,9 @@ class AnnotationManager:
                         # 借用解析逻辑 (注意：这里需要谨慎处理循环导入，但在脚本执行中没关系)
                         pass
                     except Exception as _exc:
-                        logger.debug("AnnotationManager.full_sync_from_disk 忽略非致命异常: %s", _exc)
+                        logger.warning("磁盘注释结果单条特征同步失败: %s", _exc)
         except Exception as _exc:
-            logger.debug("AnnotationManager.full_sync_from_disk 忽略非致命异常: %s", _exc)
+            logger.warning("磁盘注释结果全量同步遍历目录失败: %s", _exc)
         return count
 
     def batch_update_from_blast(self, task_id: str):

@@ -124,7 +124,7 @@ class UniversalParser:
                     found_any = True
                     yield cls._format_record(record, display_name)
         except Exception as _exc:
-            logger.debug("UniversalParser._parse_text_content 忽略非致命异常: %s", _exc)
+            logger.warning("UniversalParser 解析文本序列内容失败: %s", _exc)
             
         # 2. 如果 FASTA 没读到，尝试作为单条纯文本序列解析 (仅包含 A-Z)
         if not found_any:

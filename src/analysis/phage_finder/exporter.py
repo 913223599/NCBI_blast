@@ -6,11 +6,13 @@
 并将扫描命中的前噬菌体区域及其 200bp 边界分布序列化落盘（FASTA/TSV/GFF3/GBK/JSON），
 支持生成带宿主侧翼微区域的 GenBank 以直连 GenomeViewer 图谱浏览器。
 """
+from __future__ import annotations
+
 import gzip
 import io
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -22,8 +24,10 @@ except ImportError:
     pyrodigal = None  # type: ignore[assignment]
 
 from ...phage_discovery.inference.protein_gate import RegionGateResult
-from ...phage_discovery.inference.scanner import PredictedRegion, ScanResult
 from .model_registry import PROJECT_ROOT, _normalize_storage_path, _resolve_user_path
+
+if TYPE_CHECKING:
+    from ...phage_discovery.inference.scanner import PredictedRegion, ScanResult
 
 _GBK_EXTENSIONS = {".gbk", ".gb", ".genbank", ".gbff", ".gbk.gz", ".gb.gz", ".gbff.gz"}
 

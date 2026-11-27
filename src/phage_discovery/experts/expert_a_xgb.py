@@ -157,7 +157,7 @@ def train_expert_a(
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except Exception as _exc:
-        logger.debug("train_expert_a 忽略非致命异常: %s", _exc)
+        logger.debug("Expert A 训练后释放 CUDA 显存缓存失败（已忽略）: %s", _exc)
 
     def _predict(arrs: Dict[str, np.ndarray]) -> np.ndarray:
         return np.asarray(model.predict_proba(arrs["features"]))[:, 1].astype(np.float32)

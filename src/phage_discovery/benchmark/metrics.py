@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
-from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
 
 
 @dataclass
@@ -81,6 +80,8 @@ def compute_window_metrics(
     fpr_at_tpr_95pct = None
 
     if n_pos > 0 and n_neg > 0:
+        from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
+
         auroc = float(roc_auc_score(yt, ys))
         auprc = float(average_precision_score(yt, ys))
         fpr_arr, tpr_arr, _ = roc_curve(yt, ys)

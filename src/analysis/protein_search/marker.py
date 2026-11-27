@@ -181,35 +181,12 @@ def _is_better_hit(candidate: BlastHitRecord, cur_pident: float, cur_bitscore: f
     return candidate.bitscore > cur_bitscore
 
 
-def aggregate_and_export(
-    queries: list[QueryProteinRecord],
-    target_records: list[TargetSequenceRecord],
-    empty_files: list[tuple[str, Path]],
-    specs: list[ShardSpec],
-    config: SearchConfig,
-    shards_resumed: int,
-) -> tuple[
-    list[FileMarkSummary],
-    list[SequenceMarkSummary],
-    dict[str, Path],
-    int,
-    int,
-]:
-    """
-    流式聚合全部分片结果，写出所有结构化标记表格、带标记 FASTA 及简体中文分析报告。
-    """
-    out_dir = config.output_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    query_by_safe = {q.safe_id: q for q in queries}
-    target_by_safe = {t.safe_id: t for t in target_records}
-
-    # 初始化序列级汇总
+def _init_seq_summaries(target_records: list[TargetSequenceRecord]) -> dict[str, SequenceMarkSummary]:
+    """根据目标序列索引初始化每条序列的初始标记摘要。"""
     seq_summaries: dict[str, SequenceMarkSummary] = {}
     for t in target_records:
-        init_label: EntityMarkLabel
         if t.kind == "3di":
-            init_label = "[SKIPPED_3DI]"
+            init_label: EntityMarkLabel = "[SKIPPED_3DI]"
         elif t.kind == "empty":
             init_label = "[EMPTY]"
         else:
@@ -225,17 +202,57 @@ def aggregate_and_export(
             length=t.length,
             mark_label=init_label,
         )
+    return seq_summaries
 
-    # 查询蛋白命中统计
+
+def _update_best_hit_fields(sm: SequenceMarkSummary, hit: BlastHitRecord) -> None:
+    """若候选 HSP 优于当前最佳命中，刷新序列摘要的最佳指标字段。"""
+    if not _is_better_hit(hit, sm.max_pident, sm.max_bitscore):
+        return
+    sm.best_query_id = hit.query_id
+    sm.max_pident = hit.pident
+    sm.max_ppos = hit.ppos
+    sm.min_evalue = hit.evalue
+    sm.max_bitscore = hit.bitscore
+    sm.best_align_len = hit.align_len
+    sm.best_qcov_hsp = hit.qcov_hsp
+    sm.best_program = hit.program
+    sm.best_sstart = hit.sstart
+    sm.best_send = hit.send
+    sm.best_sframe = hit.sframe
+
+
+def _write_hit_tsv(out_path: Path, hits: list[BlastHitRecord]) -> None:
+    """将排好序的命中明细写入制表符分隔结果表。"""
+    with out_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(HIT_TSV_HEADERS)
+        for hit in hits:
+            writer.writerow(_hit_to_row(hit))
+
+
+def _stream_and_classify_hits(
+    specs: list[ShardSpec],
+    queries: list[QueryProteinRecord],
+    target_by_safe: dict[str, TargetSequenceRecord],
+    seq_summaries: dict[str, SequenceMarkSummary],
+    config: SearchConfig,
+    all_hits_path: Path,
+) -> tuple[
+    list[BlastHitRecord],
+    list[BlastHitRecord],
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, float],
+    dict[str, str],
+    set[str],
+]:
+    """流式读取分片命中、写出全量明细并实时分类更新序列与查询蛋白统计。"""
+    query_by_safe = {q.safe_id: q for q in queries}
     query_hit_files: dict[str, set[str]] = {q.query_id: set() for q in queries}
     query_hit_seqs: dict[str, set[str]] = {q.query_id: set() for q in queries}
     query_best_pident: dict[str, float] = {q.query_id: 0.0 for q in queries}
     query_best_target: dict[str, str] = {q.query_id: "" for q in queries}
-
-    all_hits_path = out_dir / "blast_hits_all.tsv"
-    gt30_hits_path = out_dir / "blast_hits_gt30.tsv"
-    borderline_hits_path = out_dir / "blast_hits_borderline_gt30.tsv"
-
     gt30_hits: list[BlastHitRecord] = []
     borderline_hits: list[BlastHitRecord] = []
     ppos_only_gt30_files: set[str] = set()
@@ -248,9 +265,13 @@ def aggregate_and_export(
             all_writer.writerow(_hit_to_row(hit))
             sm = seq_summaries[hit.target_safe_id]
 
-            if hit.ppos > config.min_pident and hit.pident <= config.min_pident:
-                if hit.evalue <= config.max_evalue and hit.align_len >= config.min_align_len:
-                    ppos_only_gt30_files.add(hit.target_rel_path)
+            if (
+                hit.ppos > config.min_pident
+                and hit.pident <= config.min_pident
+                and hit.evalue <= config.max_evalue
+                and hit.align_len >= config.min_align_len
+            ):
+                ppos_only_gt30_files.add(hit.target_rel_path)
 
             if hit.mark_status == "HIT_GT_30":
                 gt30_hits.append(hit)
@@ -258,25 +279,13 @@ def aggregate_and_export(
                 sm.mark_label = "[HIT>30%]"
                 if hit.query_id not in sm.matched_query_ids:
                     sm.matched_query_ids.append(hit.query_id)
-                if _is_better_hit(hit, sm.max_pident, sm.max_bitscore):
-                    sm.best_query_id = hit.query_id
-                    sm.max_pident = hit.pident
-                    sm.max_ppos = hit.ppos
-                    sm.min_evalue = hit.evalue
-                    sm.max_bitscore = hit.bitscore
-                    sm.best_align_len = hit.align_len
-                    sm.best_qcov_hsp = hit.qcov_hsp
-                    sm.best_program = hit.program
-                    sm.best_sstart = hit.sstart
-                    sm.best_send = hit.send
-                    sm.best_sframe = hit.sframe
+                _update_best_hit_fields(sm, hit)
 
                 query_hit_files[hit.query_id].add(hit.target_rel_path)
                 query_hit_seqs[hit.query_id].add(hit.target_safe_id)
                 if hit.pident > query_best_pident[hit.query_id]:
                     query_best_pident[hit.query_id] = hit.pident
                     query_best_target[hit.query_id] = f"{hit.target_file}:{hit.target_seq_id}"
-
             elif hit.mark_status == "BORDERLINE_GT_30":
                 borderline_hits.append(hit)
                 sm.borderline_gt30_count += 1
@@ -284,36 +293,57 @@ def aggregate_and_export(
                     sm.borderline_query_ids.append(hit.query_id)
                 if sm.mark_label != "[HIT>30%]":
                     sm.mark_label = "[BORDERLINE>30%]"
-                    if _is_better_hit(hit, sm.max_pident, sm.max_bitscore):
-                        sm.best_query_id = hit.query_id
-                        sm.max_pident = hit.pident
-                        sm.max_ppos = hit.ppos
-                        sm.min_evalue = hit.evalue
-                        sm.max_bitscore = hit.bitscore
-                        sm.best_align_len = hit.align_len
-                        sm.best_qcov_hsp = hit.qcov_hsp
-                        sm.best_program = hit.program
-                        sm.best_sstart = hit.sstart
-                        sm.best_send = hit.send
-                        sm.best_sframe = hit.sframe
+                    _update_best_hit_fields(sm, hit)
 
-    # 按相似度与 bitscore 降序写出 >30% 明细表与边缘候选表
-    gt30_hits.sort(key=lambda h: (-h.pident, -h.bitscore, h.evalue, h.target_rel_path))
-    borderline_hits.sort(key=lambda h: (-h.pident, -h.bitscore, h.evalue, h.target_rel_path))
+    return (
+        gt30_hits,
+        borderline_hits,
+        query_hit_files,
+        query_hit_seqs,
+        query_best_pident,
+        query_best_target,
+        ppos_only_gt30_files,
+    )
 
-    with gt30_hits_path.open("w", encoding="utf-8", newline="") as f_gt30:
-        w = csv.writer(f_gt30, delimiter="\t", lineterminator="\n")
-        w.writerow(HIT_TSV_HEADERS)
-        for hit in gt30_hits:
-            w.writerow(_hit_to_row(hit))
 
-    with borderline_hits_path.open("w", encoding="utf-8", newline="") as f_bl:
-        w = csv.writer(f_bl, delimiter="\t", lineterminator="\n")
-        w.writerow(HIT_TSV_HEADERS)
-        for hit in borderline_hits:
-            w.writerow(_hit_to_row(hit))
+def _resolve_file_kind_and_label(
+    sms: list[SequenceMarkSummary],
+    hit_sms: list[SequenceMarkSummary],
+    bl_sms: list[SequenceMarkSummary],
+    config: SearchConfig,
+) -> tuple[SequenceKind, EntityMarkLabel, str]:
+    kinds = [s.kind for s in sms]
+    if "dna" in kinds:
+        dom_kind: SequenceKind = "dna"
+    elif "protein" in kinds:
+        dom_kind = "protein"
+    elif "3di" in kinds:
+        dom_kind = "3di"
+    else:
+        dom_kind = "empty"
 
-    # 聚合文件级汇总
+    if dom_kind == "3di":
+        return dom_kind, "[SKIPPED_3DI]", "Foldseek/Phold 3Di 结构状态字母表序列，非核酸/蛋白序列，已自动跳过"
+    if dom_kind == "empty":
+        return dom_kind, "[EMPTY]", "空序列文件"
+    if hit_sms:
+        return dom_kind, "[HIT>30%]", f"含 {len(hit_sms)}/{len(sms)} 条序列匹配相似度 > {config.min_pident:.0f}%"
+    if bl_sms:
+        return (
+            dom_kind,
+            "[BORDERLINE>30%]",
+            f"仅含边缘匹配（pident > {config.min_pident:.0f}% 但 evalue > {config.max_evalue:.0e} "
+            f"或 align_len < {config.min_align_len} aa）",
+        )
+    return dom_kind, "[NO_HIT]", "未检出相似度 > 30% 的同源区域"
+
+
+def _build_file_summaries(
+    seq_summaries: dict[str, SequenceMarkSummary],
+    empty_files: list[tuple[str, Path]],
+    config: SearchConfig,
+) -> list[FileMarkSummary]:
+    """聚合文件级标记摘要并追加空文件清单。"""
     file_groups: dict[str, list[SequenceMarkSummary]] = {}
     for sm in seq_summaries.values():
         file_groups.setdefault(sm.rel_path, []).append(sm)
@@ -321,55 +351,15 @@ def aggregate_and_export(
     file_summaries: list[FileMarkSummary] = []
     for rel_path in sorted(file_groups.keys(), key=str.lower):
         sms = file_groups[rel_path]
-        kinds = [s.kind for s in sms]
-        if "dna" in kinds:
-            dom_kind: SequenceKind = "dna"
-        elif "protein" in kinds:
-            dom_kind = "protein"
-        elif "3di" in kinds:
-            dom_kind = "3di"
-        else:
-            dom_kind = "empty"
-
         hit_sms = [s for s in sms if s.mark_label == "[HIT>30%]"]
         bl_sms = [s for s in sms if s.mark_label == "[BORDERLINE>30%]"]
+        dom_kind, f_label, note = _resolve_file_kind_and_label(sms, hit_sms, bl_sms, config)
 
-        if dom_kind == "3di":
-            f_label: EntityMarkLabel = "[SKIPPED_3DI]"
-            note = "Foldseek/Phold 3Di 结构状态字母表序列，非核酸/蛋白序列，已自动跳过"
-        elif dom_kind == "empty":
-            f_label = "[EMPTY]"
-            note = "空序列文件"
-        elif hit_sms:
-            f_label = "[HIT>30%]"
-            note = f"含 {len(hit_sms)}/{len(sms)} 条序列匹配相似度 > {config.min_pident:.0f}%"
-        elif bl_sms:
-            f_label = "[BORDERLINE>30%]"
-            note = (
-                f"仅含边缘匹配（pident > {config.min_pident:.0f}% 但 evalue > {config.max_evalue:.0e} "
-                f"或 align_len < {config.min_align_len} aa）"
-            )
-        else:
-            f_label = "[NO_HIT]"
-            note = "未检出相似度 > 30% 的同源区域"
-
-        matched_q: list[str] = []
-        borderline_q: list[str] = []
-        for s in hit_sms:
-            for qid in s.matched_query_ids:
-                if qid not in matched_q:
-                    matched_q.append(qid)
-        for s in sms:
-            for qid in s.borderline_query_ids:
-                if qid not in borderline_q:
-                    borderline_q.append(qid)
+        matched_q = list(dict.fromkeys(qid for s in hit_sms for qid in s.matched_query_ids))
+        borderline_q = list(dict.fromkeys(qid for s in sms for qid in s.borderline_query_ids))
 
         best_pool = hit_sms if hit_sms else bl_sms
-        best_sm = (
-            max(best_pool, key=lambda s: (s.max_pident, s.max_bitscore))
-            if best_pool
-            else None
-        )
+        best_sm = max(best_pool, key=lambda s: (s.max_pident, s.max_bitscore)) if best_pool else None
 
         file_summaries.append(
             FileMarkSummary(
@@ -409,8 +399,146 @@ def aggregate_and_export(
                 note="文件不含 FASTA 序列记录",
             )
         )
+    return file_summaries
 
-    # 排序：先 [HIT>30%] 按最高相似度降序，再边缘，再未命中，再跳过
+
+def _write_summary_tsvs(
+    out_dir: Path,
+    queries: list[QueryProteinRecord],
+    file_summaries: list[FileMarkSummary],
+    ordered_seq_summaries: list[SequenceMarkSummary],
+    query_hit_files: dict[str, set[str]],
+    query_hit_seqs: dict[str, set[str]],
+    query_best_pident: dict[str, float],
+    query_best_target: dict[str, str],
+) -> tuple[Path, Path, Path]:
+    """导出查询蛋白、文件级标记与序列级标记 3 张 TSV 汇总表。"""
+    query_tsv_path = out_dir / "query_proteins.tsv"
+    with query_tsv_path.open("w", encoding="utf-8", newline="") as qf:
+        w = csv.writer(qf, delimiter="\t", lineterminator="\n")
+        w.writerow(
+            [
+                "index", "safe_id", "query_id", "length_aa", "sha256_prefix",
+                "hit_target_files_gt30", "hit_target_seqs_gt30", "best_pident", "best_target", "header",
+            ]
+        )
+        for q in queries:
+            w.writerow(
+                [
+                    q.index, q.safe_id, q.query_id, q.length, q.sha256_prefix,
+                    len(query_hit_files[q.query_id]), len(query_hit_seqs[q.query_id]),
+                    f"{query_best_pident[q.query_id]:.2f}", query_best_target[q.query_id], q.header,
+                ]
+            )
+
+    files_tsv_path = out_dir / "marked_files_summary.tsv"
+    with files_tsv_path.open("w", encoding="utf-8", newline="") as ff:
+        w = csv.writer(ff, delimiter="\t", lineterminator="\n")
+        w.writerow(
+            [
+                "mark_label", "file_name", "rel_path", "sequence_kind", "total_records",
+                "hit_records_gt30", "total_length", "matched_query_count", "matched_query_ids",
+                "best_query_id", "best_target_seq_id", "max_pident", "max_ppos", "min_evalue",
+                "max_bitscore", "best_align_len", "best_qcov_hsp", "program", "note",
+            ]
+        )
+        for fs in file_summaries:
+            w.writerow(
+                [
+                    fs.mark_label, fs.file_name, fs.rel_path, fs.dominant_kind, fs.total_records,
+                    fs.hit_record_count, fs.total_length, len(fs.matched_query_ids),
+                    ";".join(fs.matched_query_ids), fs.best_query_id, fs.best_target_seq_id,
+                    f"{fs.max_pident:.2f}" if fs.max_pident > 0 else "",
+                    f"{fs.max_ppos:.2f}" if fs.max_ppos > 0 else "",
+                    f"{fs.min_evalue:.3e}" if fs.min_evalue is not None else "",
+                    f"{fs.max_bitscore:.1f}" if fs.max_bitscore > 0 else "",
+                    fs.best_align_len if fs.best_align_len > 0 else "",
+                    f"{fs.best_qcov_hsp:.2f}" if fs.best_qcov_hsp > 0 else "",
+                    fs.best_program, fs.note,
+                ]
+            )
+
+    seqs_tsv_path = out_dir / "marked_sequences_summary.tsv"
+    with seqs_tsv_path.open("w", encoding="utf-8", newline="") as sf:
+        w = csv.writer(sf, delimiter="\t", lineterminator="\n")
+        w.writerow(
+            [
+                "mark_label", "safe_id", "file_name", "rel_path", "record_index", "seq_id",
+                "sequence_kind", "length", "hit_gt30_hsps", "matched_query_count",
+                "matched_query_ids", "best_query_id", "max_pident", "max_ppos", "min_evalue",
+                "max_bitscore", "best_align_len", "best_qcov_hsp", "best_sstart", "best_send",
+                "best_sframe", "program", "header",
+            ]
+        )
+        for sm in ordered_seq_summaries:
+            w.writerow(
+                [
+                    sm.mark_label, sm.safe_id, sm.file_name, sm.rel_path, sm.record_index,
+                    sm.seq_id, sm.kind, sm.length, sm.hit_gt30_count, len(sm.matched_query_ids),
+                    ";".join(sm.matched_query_ids), sm.best_query_id,
+                    f"{sm.max_pident:.2f}" if sm.max_pident > 0 else "",
+                    f"{sm.max_ppos:.2f}" if sm.max_ppos > 0 else "",
+                    f"{sm.min_evalue:.3e}" if sm.min_evalue is not None else "",
+                    f"{sm.max_bitscore:.1f}" if sm.max_bitscore > 0 else "",
+                    sm.best_align_len if sm.best_align_len > 0 else "",
+                    f"{sm.best_qcov_hsp:.2f}" if sm.best_qcov_hsp > 0 else "",
+                    sm.best_sstart if sm.best_sstart > 0 else "",
+                    sm.best_send if sm.best_send > 0 else "",
+                    sm.best_sframe if sm.best_program == "tblastn" else "",
+                    sm.best_program, sm.header,
+                ]
+            )
+    return query_tsv_path, files_tsv_path, seqs_tsv_path
+
+
+def aggregate_and_export(
+    queries: list[QueryProteinRecord],
+    target_records: list[TargetSequenceRecord],
+    empty_files: list[tuple[str, Path]],
+    specs: list[ShardSpec],
+    config: SearchConfig,
+    shards_resumed: int,
+) -> tuple[
+    list[FileMarkSummary],
+    list[SequenceMarkSummary],
+    dict[str, Path],
+    int,
+    int,
+]:
+    """流式聚合全部分片结果，写出结构化标记表格、带标记 FASTA 及简体中文分析报告。"""
+    out_dir = config.output_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    target_by_safe = {t.safe_id: t for t in target_records}
+    seq_summaries = _init_seq_summaries(target_records)
+
+    all_hits_path = out_dir / "blast_hits_all.tsv"
+    gt30_hits_path = out_dir / "blast_hits_gt30.tsv"
+    borderline_hits_path = out_dir / "blast_hits_borderline_gt30.tsv"
+
+    (
+        gt30_hits,
+        borderline_hits,
+        query_hit_files,
+        query_hit_seqs,
+        query_best_pident,
+        query_best_target,
+        ppos_only_gt30_files,
+    ) = _stream_and_classify_hits(
+        specs=specs,
+        queries=queries,
+        target_by_safe=target_by_safe,
+        seq_summaries=seq_summaries,
+        config=config,
+        all_hits_path=all_hits_path,
+    )
+
+    gt30_hits.sort(key=lambda h: (-h.pident, -h.bitscore, h.evalue, h.target_rel_path))
+    borderline_hits.sort(key=lambda h: (-h.pident, -h.bitscore, h.evalue, h.target_rel_path))
+    _write_hit_tsv(gt30_hits_path, gt30_hits)
+    _write_hit_tsv(borderline_hits_path, borderline_hits)
+
+    file_summaries = _build_file_summaries(seq_summaries, empty_files, config)
     label_rank = {
         "[HIT>30%]": 0,
         "[BORDERLINE>30%]": 1,
@@ -421,7 +549,6 @@ def aggregate_and_export(
     file_summaries.sort(
         key=lambda f: (label_rank[f.mark_label], -f.max_pident, -f.max_bitscore, f.rel_path.lower())
     )
-
     ordered_seq_summaries = sorted(
         seq_summaries.values(),
         key=lambda s: (
@@ -433,153 +560,17 @@ def aggregate_and_export(
         ),
     )
 
-    # 1. 导出查询蛋白解析清单
-    query_tsv_path = out_dir / "query_proteins.tsv"
-    with query_tsv_path.open("w", encoding="utf-8", newline="") as qf:
-        w = csv.writer(qf, delimiter="\t", lineterminator="\n")
-        w.writerow(
-            [
-                "index",
-                "safe_id",
-                "query_id",
-                "length_aa",
-                "sha256_prefix",
-                "hit_target_files_gt30",
-                "hit_target_seqs_gt30",
-                "best_pident",
-                "best_target",
-                "header",
-            ]
-        )
-        for q in queries:
-            w.writerow(
-                [
-                    q.index,
-                    q.safe_id,
-                    q.query_id,
-                    q.length,
-                    q.sha256_prefix,
-                    len(query_hit_files[q.query_id]),
-                    len(query_hit_seqs[q.query_id]),
-                    f"{query_best_pident[q.query_id]:.2f}",
-                    query_best_target[q.query_id],
-                    q.header,
-                ]
-            )
+    query_tsv_path, files_tsv_path, seqs_tsv_path = _write_summary_tsvs(
+        out_dir=out_dir,
+        queries=queries,
+        file_summaries=file_summaries,
+        ordered_seq_summaries=ordered_seq_summaries,
+        query_hit_files=query_hit_files,
+        query_hit_seqs=query_hit_seqs,
+        query_best_pident=query_best_pident,
+        query_best_target=query_best_target,
+    )
 
-    # 2. 导出文件级标记汇总表
-    files_tsv_path = out_dir / "marked_files_summary.tsv"
-    with files_tsv_path.open("w", encoding="utf-8", newline="") as ff:
-        w = csv.writer(ff, delimiter="\t", lineterminator="\n")
-        w.writerow(
-            [
-                "mark_label",
-                "file_name",
-                "rel_path",
-                "sequence_kind",
-                "total_records",
-                "hit_records_gt30",
-                "total_length",
-                "matched_query_count",
-                "matched_query_ids",
-                "best_query_id",
-                "best_target_seq_id",
-                "max_pident",
-                "max_ppos",
-                "min_evalue",
-                "max_bitscore",
-                "best_align_len",
-                "best_qcov_hsp",
-                "program",
-                "note",
-            ]
-        )
-        for fs in file_summaries:
-            w.writerow(
-                [
-                    fs.mark_label,
-                    fs.file_name,
-                    fs.rel_path,
-                    fs.dominant_kind,
-                    fs.total_records,
-                    fs.hit_record_count,
-                    fs.total_length,
-                    len(fs.matched_query_ids),
-                    ";".join(fs.matched_query_ids),
-                    fs.best_query_id,
-                    fs.best_target_seq_id,
-                    f"{fs.max_pident:.2f}" if fs.max_pident > 0 else "",
-                    f"{fs.max_ppos:.2f}" if fs.max_ppos > 0 else "",
-                    f"{fs.min_evalue:.3e}" if fs.min_evalue is not None else "",
-                    f"{fs.max_bitscore:.1f}" if fs.max_bitscore > 0 else "",
-                    fs.best_align_len if fs.best_align_len > 0 else "",
-                    f"{fs.best_qcov_hsp:.2f}" if fs.best_qcov_hsp > 0 else "",
-                    fs.best_program,
-                    fs.note,
-                ]
-            )
-
-    # 3. 导出序列条目级标记汇总表
-    seqs_tsv_path = out_dir / "marked_sequences_summary.tsv"
-    with seqs_tsv_path.open("w", encoding="utf-8", newline="") as sf:
-        w = csv.writer(sf, delimiter="\t", lineterminator="\n")
-        w.writerow(
-            [
-                "mark_label",
-                "safe_id",
-                "file_name",
-                "rel_path",
-                "record_index",
-                "seq_id",
-                "sequence_kind",
-                "length",
-                "hit_gt30_hsps",
-                "matched_query_count",
-                "matched_query_ids",
-                "best_query_id",
-                "max_pident",
-                "max_ppos",
-                "min_evalue",
-                "max_bitscore",
-                "best_align_len",
-                "best_qcov_hsp",
-                "best_sstart",
-                "best_send",
-                "best_sframe",
-                "program",
-                "header",
-            ]
-        )
-        for sm in ordered_seq_summaries:
-            w.writerow(
-                [
-                    sm.mark_label,
-                    sm.safe_id,
-                    sm.file_name,
-                    sm.rel_path,
-                    sm.record_index,
-                    sm.seq_id,
-                    sm.kind,
-                    sm.length,
-                    sm.hit_gt30_count,
-                    len(sm.matched_query_ids),
-                    ";".join(sm.matched_query_ids),
-                    sm.best_query_id,
-                    f"{sm.max_pident:.2f}" if sm.max_pident > 0 else "",
-                    f"{sm.max_ppos:.2f}" if sm.max_ppos > 0 else "",
-                    f"{sm.min_evalue:.3e}" if sm.min_evalue is not None else "",
-                    f"{sm.max_bitscore:.1f}" if sm.max_bitscore > 0 else "",
-                    sm.best_align_len if sm.best_align_len > 0 else "",
-                    f"{sm.best_qcov_hsp:.2f}" if sm.best_qcov_hsp > 0 else "",
-                    sm.best_sstart if sm.best_sstart > 0 else "",
-                    sm.best_send if sm.best_send > 0 else "",
-                    sm.best_sframe if sm.best_program == "tblastn" else "",
-                    sm.best_program,
-                    sm.header,
-                ]
-            )
-
-    # 4. 流式导出带标记头的阳性命中 FASTA 序列集合
     marked_fasta_path = out_dir / "marked_hit_sequences.fasta"
     _export_marked_hit_fasta(
         ordered_seq_summaries=ordered_seq_summaries,
@@ -587,7 +578,6 @@ def aggregate_and_export(
         dest_fasta=marked_fasta_path,
     )
 
-    # 5. 生成简体中文 Markdown 汇总分析报告
     report_md_path = out_dir / "search_report.md"
     _write_markdown_report(
         report_path=report_md_path,

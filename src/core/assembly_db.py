@@ -129,12 +129,12 @@ class AssemblyDB:
                     try:
                         r['config'] = json.loads(r['config'])
                     except Exception as _exc:
-                        logger.debug("AssemblyDB.get_history 忽略非致命异常: %s", _exc)
+                        logger.warning("反序列化组装历史记录 config JSON 失败: %s", _exc)
                 if r.get('results') and isinstance(r['results'], str):
                     try:
                         r['results'] = json.loads(r['results'])
                     except Exception as _exc:
-                        logger.debug("AssemblyDB.get_history 忽略非致命异常: %s", _exc)
+                        logger.warning("反序列化组装历史记录 results JSON 失败: %s", _exc)
             return rows
 
     def delete_task(self, task_id: str):

@@ -37,14 +37,6 @@ from .morphotype_classifier import (
 )
 from .phrog_catalog import classify_structural_role
 from .queue import phage_structure_queue, release_gpu_memory
-from .ai_morphotype_model import (
-    check_ai_classifier_ready,
-    check_unified_judge_ready,
-    load_ai_predictor_bundle,
-    load_unified_judge_seq_model,
-    predict_contig_morphotype_ai,
-    release_ai_judge_memory,
-)
 from .sequence_annotator import (
     check_phold_ready,
     check_wsl_pyhmmer_ready,
@@ -231,14 +223,30 @@ class PhageStructureManager:
             "wsl_pyhmmer_ready": wsl_pyhmmer,
             "phold_ready": check_phold_ready(),
             "phagetailfinder_ready": is_phagetailfinder_ready(),
-            "unified_judge_ready": check_unified_judge_ready(self.project_root),
-            "ai_classifier_ready": check_ai_classifier_ready(self.project_root),
+            "unified_judge_ready": self._check_unified_judge_ready(),
+            "ai_classifier_ready": self._check_ai_classifier_ready(),
             "structural_hmm_cached": struct_hmm is not None,
             "structural_hmm_path": str(struct_hmm) if struct_hmm else "",
             "all_phrogs_available": all_hmm is not None,
             "cpu_cores": cpu_cores,
             "safe_workers": get_safe_workers(),
         }
+
+    def _check_unified_judge_ready(self) -> bool:
+        try:
+            from .ai_morphotype_model import check_unified_judge_ready
+
+            return bool(check_unified_judge_ready(self.project_root))
+        except ImportError:
+            return False
+
+    def _check_ai_classifier_ready(self) -> bool:
+        try:
+            from .ai_morphotype_model import check_ai_classifier_ready
+
+            return bool(check_ai_classifier_ready(self.project_root))
+        except ImportError:
+            return False
 
     def _attach_ai_predictions(
         self,
@@ -247,8 +255,15 @@ class PhageStructureManager:
         target_cids: Sequence[str],
     ) -> None:
         """为指定 Contig 集合附加双轨 AI 形态概率校准，结束后强制释放 PyTorch 显存。"""
-        if not target_cids or not check_ai_classifier_ready(self.project_root):
+        if not target_cids or not self._check_ai_classifier_ready():
             return
+        from .ai_morphotype_model import (
+            load_ai_predictor_bundle,
+            load_unified_judge_seq_model,
+            predict_contig_morphotype_ai,
+            release_ai_judge_memory,
+        )
+
         release_gpu_memory()
         try:
             ai_bundle = load_ai_predictor_bundle(project_root=self.project_root)
@@ -423,7 +438,7 @@ class PhageStructureManager:
                     candidates.append((self.project_root / p_raw, False))
                 candidates.append((pd_dir / p_raw.name, False))
         except Exception as _exc:
-            logger.debug("PhageStructureManager._resolve_phage_discovery_sequence_source 忽略非致命异常: %s", _exc)
+            logger.warning("解析前噬菌体发现来源序列路径失败: %s", _exc)
 
         # 2. 标准导出命名 {task_id}_prophages.fasta 与历史 prophages.fasta
         candidates.append((pd_dir / f"{pd_task_id}_prophages.fasta", False))
@@ -789,7 +804,7 @@ class PhageStructureManager:
                     thresholds=DEFAULT_THRESHOLDS,
                 )
 
-            if req.enable_ai_classifier and check_ai_classifier_ready(self.project_root):
+            if req.enable_ai_classifier and self._check_ai_classifier_ready():
                 _emit_progress(77, "正在运行 UnifiedJudge V4.3 双轨 AI 形态分类与校准...")
                 self._attach_ai_predictions(eval_by_cid, cmap, list(eval_by_cid.keys()))
 
@@ -840,7 +855,7 @@ class PhageStructureManager:
                             phold_trigger_reason=reason,
                             phold_rescued_orfs=rescued_map.get(cid, 0),
                         )
-                    if req.enable_ai_classifier and check_ai_classifier_ready(self.project_root):
+                    if req.enable_ai_classifier and self._check_ai_classifier_ready():
                         _emit_progress(86, "正在结合 3D 复核补注释刷新双轨 AI 预测概率...")
                         self._attach_ai_predictions(eval_by_cid, cmap, list(triggered_reasons.keys()))
 

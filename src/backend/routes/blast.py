@@ -315,7 +315,7 @@ async def get_visualization_data(req: VisDataRequest):
                             recs = list(NCBIXML.parse(f))
                         target_record = _find_matching_record(recs, req.query_id)
                     except Exception as _exc:
-                        logger.debug("get_visualization_data 忽略非致命异常: %s", _exc)
+                        logger.warning("解析指定 Query 的 BLAST XML 可视化记录失败: %s", _exc)
                 
                 # 2.2 若仍未找到，遍历该任务 xml_raw 下全部 XML 检索
                 if not target_record:
@@ -342,7 +342,7 @@ async def get_visualization_data(req: VisDataRequest):
                     if records:
                         target_record = records[0]
                 except Exception as _exc:
-                    logger.debug("get_visualization_data 忽略非致命异常: %s", _exc)
+                    logger.warning("解析默认 BLAST XML 可视化首条记录失败: %s", _exc)
 
         if not target_record:
             if req.query_id:

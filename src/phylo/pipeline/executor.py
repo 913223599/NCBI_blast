@@ -855,7 +855,7 @@ class PhyloJobExecutor:
                 try:
                     log_fh.close()
                 except Exception as _exc:
-                    logger.debug("PhyloJobExecutor._run_job_worker 忽略非致命异常: %s", _exc)
+                    logger.debug("关闭系统发育任务日志文件句柄失败: %s", _exc)
             GpuGuard.release_vram()
             with handle.lock:
                 handle.live_record = None

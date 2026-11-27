@@ -60,7 +60,7 @@ class MashScreener:
             try:
                 self.on_log(msg)
             except Exception as _exc:
-                logger.debug("MashScreener._log 忽略非致命异常: %s", _exc)
+                logger.debug("MashScreener 日志回调执行失败: %s", _exc)
 
     def screen_against_inphared(
         self,

@@ -47,7 +47,7 @@ class MashDistanceEngine:
             try:
                 self.on_log(msg)
             except Exception as _exc:
-                logger.debug("MashDistanceEngine._log 忽略非致命异常: %s", _exc)
+                logger.debug("MashDistanceEngine 日志回调执行失败: %s", _exc)
 
     def _to_wsl(self, path: Path) -> str:
         from src.assembly.env.wsl_manager import WSLManager

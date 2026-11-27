@@ -202,7 +202,7 @@ class AnnotationManager:
                         files=t.get("files") or {}
                     )
                 except Exception as _exc:
-                    logger.debug("AnnotationManager.list_history 忽略非致命异常: %s", _exc)
+                    logger.warning("注释历史任务状态同步至 DB 失败: %s", _exc)
             elif t.get("status") == "queued":
                 # 计算排队位置
                 if t["task_id"] in waiting_ids:
@@ -219,7 +219,7 @@ class AnnotationManager:
 
         # 性能极速优化：如果任务处于排队或等待中，无需进行任何磁盘扫描，直接秒级返回
         if task.get("status") in ("queued", "pending"):
-            waiting_ids = [p.get("task_id") for p in annotation_queue._queue]
+            waiting_ids = annotation_queue.get_waiting_ids()
             if task_id in waiting_ids:
                 task["position"] = waiting_ids.index(task_id) + 1
             else:
@@ -251,7 +251,7 @@ class AnnotationManager:
                         safety_audit = json.load(f)
                         task["safety_audit"] = safety_audit
                 except Exception as _exc:
-                    logger.debug("AnnotationManager.get_task_result 忽略非致命异常: %s", _exc)
+                    logger.warning("读取生物安全审计结果 safety_audit.json 失败: %s", _exc)
 
         if features and "summary" in task and isinstance(task["summary"], dict):
             ann_cnt = sum(1 for f in features if f.get("feature_type") == "CDS" and not AnnotationFuser.is_unannotated(f.get("product")))
@@ -279,7 +279,7 @@ class AnnotationManager:
                     safety_audit=safety_audit
                 )
             except Exception as _exc:
-                logger.debug("AnnotationManager.get_task_result 忽略非致命异常: %s", _exc)
+                logger.warning("回填注释结果摘要至 DB 失败: %s", _exc)
 
         # 读取 GBK 文本摘要或完整内容
         gbk_file = task_work_dir / f"{task_id}.gbk"
@@ -304,7 +304,7 @@ class AnnotationManager:
 
         # 计算排队位置
         if task.get("status") in ("queued", "pending"):
-            waiting_ids = [p.get("task_id") for p in annotation_queue._queue]
+            waiting_ids = annotation_queue.get_waiting_ids()
             if task_id in waiting_ids:
                 task["position"] = waiting_ids.index(task_id) + 1
             else:

@@ -5,8 +5,10 @@
 将深度学习 Student V4.2 边界精修模型与可选蛋白门控封装为异步持久化队列任务、
 零硬编码 V4.2 模型发现器与多格式科研产物导出器。
 """
+from __future__ import annotations
 
-from .manager import PhageDiscoveryManager, get_phage_discovery_manager
+from typing import TYPE_CHECKING, Any
+
 from .model_registry import (
     detect_compute_environment,
     discover_available_models,
@@ -14,6 +16,9 @@ from .model_registry import (
     resolve_protein_gate_resources,
 )
 from .types import PhageConfigPathRequest, PhageScanInspectRequest, PhageScanRunRequest
+
+if TYPE_CHECKING:
+    from .manager import PhageDiscoveryManager, get_phage_discovery_manager
 
 __all__ = [
     "PhageDiscoveryManager",
@@ -26,3 +31,11 @@ __all__ = [
     "resolve_model_dir",
     "resolve_protein_gate_resources",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in ("PhageDiscoveryManager", "get_phage_discovery_manager"):
+        from . import manager
+
+        return getattr(manager, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

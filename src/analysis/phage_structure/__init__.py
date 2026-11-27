@@ -4,12 +4,8 @@
 """
 from __future__ import annotations
 
-from .manager import (
-    PhageStructureManager,
-    evaluate_single_contig_structure,
-    get_phage_structure_manager,
-    should_trigger_phold_3d,
-)
+from typing import TYPE_CHECKING, Any
+
 from .thresholds import (
     DEFAULT_THRESHOLDS,
     PhageStructureThresholds,
@@ -39,12 +35,6 @@ from .tmp_analyzer import (
     detect_tandem_repeats,
     select_and_analyze_tmps,
 )
-from .ai_morphotype_model import (
-    check_ai_classifier_ready,
-    check_unified_judge_ready,
-    predict_contig_morphotype_ai,
-    release_ai_judge_memory,
-)
 from .types import (
     AiMorphotypePrediction,
     ConnectorProfile,
@@ -62,6 +52,33 @@ from .types import (
     TandemRepeatUnit,
     TmpAnalysisItem,
 )
+
+if TYPE_CHECKING:
+    from .ai_morphotype_model import (
+        check_ai_classifier_ready,
+        check_unified_judge_ready,
+        predict_contig_morphotype_ai,
+        release_ai_judge_memory,
+    )
+    from .manager import (
+        PhageStructureManager,
+        evaluate_single_contig_structure,
+        get_phage_structure_manager,
+        should_trigger_phold_3d,
+    )
+
+_MANAGER_EXPORTS = {
+    "PhageStructureManager",
+    "evaluate_single_contig_structure",
+    "get_phage_structure_manager",
+    "should_trigger_phold_3d",
+}
+_AI_MODEL_EXPORTS = {
+    "check_ai_classifier_ready",
+    "check_unified_judge_ready",
+    "predict_contig_morphotype_ai",
+    "release_ai_judge_memory",
+}
 
 __all__ = [
     "ROLE_LABELS_CN",
@@ -107,3 +124,15 @@ __all__ = [
     "decode_tail_sequence",
     "run_phagetailfinder_on_contigs",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in _MANAGER_EXPORTS:
+        from . import manager
+
+        return getattr(manager, name)
+    if name in _AI_MODEL_EXPORTS:
+        from . import ai_morphotype_model
+
+        return getattr(ai_morphotype_model, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

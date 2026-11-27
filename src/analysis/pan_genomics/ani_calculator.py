@@ -354,7 +354,7 @@ class OrthoANICalculator:
                 if f_tmp.exists():
                     f_tmp.unlink()
             except Exception as _exc:
-                logger.debug("OrthoANICalculator._calculate_ani_with_blastn 忽略非致命异常: %s", _exc)
+                logger.debug("清理 OrthoANI 临时 BLAST 文件失败: %s", _exc)
 
         return self._summarize_ani_metrics(
             s1=s1,

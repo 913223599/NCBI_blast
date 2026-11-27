@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
 """双阶段高精度噬菌体基因组扫描与蛋白门控验证包。"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from .att_boundary_refiner import AttAlignmentHit, refine_regions_with_att_sites
 from .protein_gate import (
     ProteinGateConfig,
@@ -7,8 +11,10 @@ from .protein_gate import (
     evaluate_regions_with_protein_gate,
 )
 from .report_exporter import export_unified_scan_outputs
-from .scanner import GenomeScanner, ScanResult
-from .unified_model import ALL_UNIFIED_EXPERTS, UnifiedPhageModel, UnifiedScanResult
+
+if TYPE_CHECKING:
+    from .scanner import GenomeScanner, ScanResult
+    from .unified_model import ALL_UNIFIED_EXPERTS, UnifiedPhageModel, UnifiedScanResult
 
 __all__ = [
     "AttAlignmentHit",
@@ -24,3 +30,14 @@ __all__ = [
     "export_unified_scan_outputs",
 ]
 
+
+def __getattr__(name: str) -> Any:
+    if name in ("GenomeScanner", "ScanResult"):
+        from . import scanner
+
+        return getattr(scanner, name)
+    if name in ("ALL_UNIFIED_EXPERTS", "UnifiedPhageModel", "UnifiedScanResult"):
+        from . import unified_model
+
+        return getattr(unified_model, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

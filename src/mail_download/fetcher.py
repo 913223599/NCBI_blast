@@ -216,7 +216,7 @@ class MailFetcher:
                 try:
                     conn.logout()
                 except Exception as _exc:
-                    logger.debug("MailFetcher.fetch 忽略非致命异常: %s", _exc)
+                    logger.debug("MailFetcher 关闭 IMAP 连接 logout 失败: %s", _exc)
 
     def _build_search_criteria(self, since_dt: datetime) -> str:
         """服务端搜索条件构造（通用化）：

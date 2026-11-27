@@ -101,7 +101,7 @@ class BioDatabase:
                         if stat.st_mtime > latest_mtime:
                             latest_mtime = stat.st_mtime
         except Exception as _exc:
-            logger.debug("BioDatabase._get_dir_info 忽略非致命异常: %s", _exc)
+            logger.debug("扫描生物数据库目录统计元数据失败: %s", _exc)
 
         size_mb = round(total_size / (1024 * 1024), 2)
         mtime_str = datetime.fromtimestamp(latest_mtime).strftime('%Y-%m-%d %H:%M:%S') if latest_mtime > 0 else '未知'
@@ -208,7 +208,7 @@ class SilvaDatabase(BioDatabase):
             try:
                 f.unlink()
             except Exception as _exc:
-                logger.debug("SilvaDatabase.build_index 忽略非致命异常: %s", _exc)
+                logger.debug("构建 SILVA 索引前清理旧分片文件失败: %s", _exc)
 
         # 构造安全参数列表，避免经由 shell 解析
         cmd_args = [

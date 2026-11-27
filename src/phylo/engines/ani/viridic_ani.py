@@ -170,7 +170,7 @@ class ViridicAniCalculator:
             try:
                 self.on_log(msg)
             except Exception as _exc:
-                logger.debug("ViridicAniCalculator._log 忽略非致命异常: %s", _exc)
+                logger.debug("ViridicAniCalculator 日志回调执行失败: %s", _exc)
 
     def compute_matrix_from_fastas(
         self,

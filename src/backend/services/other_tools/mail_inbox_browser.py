@@ -245,4 +245,4 @@ def list_whitelist_mails(
             try:
                 conn.logout()
             except Exception as _exc:
-                logger.debug("list_whitelist_mails 忽略非致命异常: %s", _exc)
+                logger.debug("收件箱浏览关闭 IMAP 连接 logout 失败: %s", _exc)

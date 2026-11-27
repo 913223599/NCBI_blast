@@ -53,7 +53,7 @@ class FunctionalAssigner:
             if res > 0:
                 return buffer.value
         except Exception as _exc:
-            logger.debug("FunctionalAssigner._get_short_path 忽略非致命异常: %s", _exc)
+            logger.debug("Windows 短路径转换失败，回退使用原始路径: %s", _exc)
         return path_str
 
     @staticmethod
@@ -331,7 +331,7 @@ class FunctionalAssigner:
             out_tsv.parent.mkdir(parents=True, exist_ok=True)
             out_tsv.touch(exist_ok=True)
         except Exception as _exc:
-            logger.debug("FunctionalAssigner._run_blastp_query 忽略非致命异常: %s", _exc)
+            logger.warning("创建 BLASTP 空结果占位文件失败: %s", _exc)
 
         # 1. 优先使用 Windows 本地 BLASTP (通过 8.3 短路径规避包含空格引发的 BLAST+ 路径截断)
         try:
@@ -465,7 +465,7 @@ class FunctionalAssigner:
             out_tsv.parent.mkdir(parents=True, exist_ok=True)
             out_tsv.touch(exist_ok=True)
         except Exception as _exc:
-            logger.debug("FunctionalAssigner._run_rpsblast_query 忽略非致命异常: %s", _exc)
+            logger.warning("创建 RPSBLAST 空结果占位文件失败: %s", _exc)
 
         try:
             short_query = self._get_short_path(query_faa)

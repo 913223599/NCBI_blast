@@ -5,6 +5,8 @@
 负责任务提交、输入验证与持久化、异步调度执行、V4.2 模型与蛋白门控调度、
 显存生命周期控制、扫描结果与区域微基因组 GBK 检索以及安全删除。
 """
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -18,10 +20,7 @@ from typing import Any, Dict, List, Optional
 from starlette.concurrency import run_in_threadpool
 
 from ...core.broadcaster import broadcaster
-from ...phage_discovery.inference.judge_region_refiner import load_judge_ensemble_bundle
 from ...phage_discovery.inference.protein_gate import evaluate_regions_with_protein_gate
-from ...phage_discovery.inference.scanner import GenomeScanner, ScanResult
-from ...phage_discovery.inference.unified_model import UnifiedPhageModel
 from .db import phage_discovery_db
 from .exporter import (
     build_contig_overlay_gbk,
@@ -43,6 +42,12 @@ from .model_registry import (
 )
 from .queue import phage_discovery_queue, release_gpu_memory
 from .types import PhageScanRunRequest
+
+# 为测试 monkeypatch 预留模块级占位符；实际运行按需懒加载，避免 FastAPI 启动时强依赖 PyTorch
+GenomeScanner: Any = None
+load_judge_ensemble_bundle: Any = None
+ScanResult: Any = None
+UnifiedPhageModel: Any = None
 
 logger = logging.getLogger("PhageDiscoveryManager")
 
@@ -193,7 +198,7 @@ class PhageDiscoveryManager:
         try:
             asyncio.run_coroutine_threadsafe(broadcaster.broadcast(event, payload), loop)
         except Exception as _exc:
-            logger.debug("PhageDiscoveryManager._emit_sync 忽略非致命异常: %s", _exc)
+            logger.debug("前噬菌体扫描线程同步事件广播失败: %s", _exc)
 
     async def execute_pipeline_task(
         self,
@@ -296,11 +301,17 @@ class PhageDiscoveryManager:
                 f"[STEP 2/5] 加载模型目录: {model_info['path']} ({model_disp}, SubBinRefiner={model_info['has_subbin_refiner']})",
             )
 
-            scanner: Optional[GenomeScanner] = None
+            scanner: Any = None
             judge_bundle: Optional[Dict[str, Any]] = None
-            upm: Optional[UnifiedPhageModel] = None
+            upm: Any = None
             try:
-                scanner = GenomeScanner.from_model_dir(
+                scanner_cls = GenomeScanner
+                if scanner_cls is None:
+                    from ...phage_discovery.inference.scanner import GenomeScanner as _RealGenomeScanner
+
+                    scanner_cls = _RealGenomeScanner
+
+                scanner = scanner_cls.from_model_dir(
                     Path(str(model_info["path"])),
                     blast_db=blast_db_path,
                     blastp_bin=blastp_bin,
@@ -323,14 +334,36 @@ class PhageDiscoveryManager:
                 unified_routing_stats: Optional[Dict[str, Any]] = None
 
                 if use_unified:
+                    load_bundle_fn = load_judge_ensemble_bundle
+                    if load_bundle_fn is None:
+                        from ...phage_discovery.inference.judge_region_refiner import (
+                            load_judge_ensemble_bundle as _real_load_judge_ensemble_bundle,
+                        )
+
+                        load_bundle_fn = _real_load_judge_ensemble_bundle
+
+                    scan_result_cls = ScanResult
+                    if scan_result_cls is None:
+                        from ...phage_discovery.inference.scanner import ScanResult as _RealScanResult
+
+                        scan_result_cls = _RealScanResult
+
+                    unified_model_cls = UnifiedPhageModel
+                    if unified_model_cls is None:
+                        from ...phage_discovery.inference.unified_model import (
+                            UnifiedPhageModel as _RealUnifiedPhageModel,
+                        )
+
+                        unified_model_cls = _RealUnifiedPhageModel
+
                     uni_root_raw = str(model_info.get("unified_models_root") or "").strip()
                     uni_root = Path(uni_root_raw) if uni_root_raw else Path(str(model_info["unified_judge_dir"])).parent
-                    judge_bundle = load_judge_ensemble_bundle(
+                    judge_bundle = load_bundle_fn(
                         uni_root,
                         device=resolved_dev,
                         prefer_unified=True,
                     )
-                    upm = UnifiedPhageModel(dna_scanner=scanner, judge_bundle=judge_bundle)
+                    upm = unified_model_cls(dna_scanner=scanner, judge_bundle=judge_bundle)
                     emit_progress(
                         38,
                         f"正在执行 Unified 分化按需扫描与 200bp 精细边界切割 ({total_bp:,} bp)...",
@@ -376,7 +409,7 @@ class PhageDiscoveryManager:
                             threads=workers,
                         )
 
-                    scan_result = ScanResult(
+                    scan_result = scan_result_cls(
                         contigs_bp=unified_res.contigs_bp,
                         total_bp=unified_res.total_bp,
                         total_windows=unified_res.total_windows,
