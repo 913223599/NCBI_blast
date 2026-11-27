@@ -695,4 +695,3 @@ def test_taxonomy_provider_multi_source_download_and_cancel(tmp_path: Path) -> N
     assert st["building"] is False
     assert st["status"] == "cancelled"
     assert "已取消" in st["progress"]
-
