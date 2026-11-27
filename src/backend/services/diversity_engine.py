@@ -722,7 +722,7 @@ class DiversityEngine:
         beta_result = self._calc_beta_diversity(all_samples_data)
         taxa_overview = self._calc_global_taxa_overview(all_samples_data)
 
-        qc_list = [s.get("qc_stats") for s in all_samples_data if s.get("qc_stats")]
+        qc_list = [s["qc_stats"] for s in all_samples_data if isinstance(s.get("qc_stats"), dict)]
         tot_raw = (
             sum(q.get("total_raw_reads", 0) for q in qc_list)
             if qc_list

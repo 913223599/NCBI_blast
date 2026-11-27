@@ -245,6 +245,7 @@ src/test_shm.py
 !/scripts/README.md
 !/scripts/verify_all.ps1
 !/scripts/sync_version.mjs
+!/scripts/lint_electron.mjs
 !/scripts/maintenance/
 !/scripts/maintenance/*.py
 .lingma/rules/

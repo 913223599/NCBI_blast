@@ -80,8 +80,9 @@ async def run_comparison(req: ComparisonRequest):
     
     try:
         # 【存档模式】
-        if opts.get("mode") == "save_only" and opts.get("instant_data"):
-            data = opts.get("instant_data")
+        instant_data = opts.get("instant_data")
+        if opts.get("mode") == "save_only" and isinstance(instant_data, dict):
+            data = instant_data
             from src.analysis.comparison.manager import get_comparison_manager
             get_comparison_manager().record_task(
                 task_id=data.get("task_id", task_id),

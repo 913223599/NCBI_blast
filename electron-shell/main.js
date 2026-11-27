@@ -24,8 +24,8 @@ function rotateLogIfNeeded() {
         if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > LOG_MAX_BYTES) {
             fs.renameSync(LOG_FILE, `${LOG_FILE}.old`);
         }
-    } catch (e) {
-        // 忽略日志轮转失败
+    } catch (err) {
+        process.stderr.write(`[Electron] 日志轮转失败: ${err && err.message ? err.message : err}\n`);
     }
 }
 
@@ -33,12 +33,12 @@ function writeLogLine(level, args) {
     const text = args.map((arg) => {
         if (typeof arg === 'string') return arg;
         if (arg instanceof Error) return arg.stack || arg.message;
-        try { return JSON.stringify(arg); } catch (e) { return String(arg); }
+        try { return JSON.stringify(arg); } catch (_err) { return String(arg); }
     }).join(' ');
     try {
         fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] [${level}] ${text}\r\n`);
-    } catch (e) {
-        // 忽略日志写入失败
+    } catch (err) {
+        process.stderr.write(`[Electron] 写入 dev.log 失败: ${err && err.message ? err.message : err}\n`);
     }
 }
 
@@ -64,8 +64,8 @@ function loadAppMetadata() {
                 version: typeof parsed.version === 'string' && parsed.version.trim() ? parsed.version.trim() : fallback.version,
             };
         }
-    } catch (e) {
-        // 回退默认元信息
+    } catch (err) {
+        console.warn('[Electron] 读取 version.json 失败，使用默认元信息:', err && err.message ? err.message : err);
     }
     return fallback;
 }
@@ -201,8 +201,8 @@ function killPortProcess(port) {
                         try {
                             execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
                             console.log(`[Electron] 成功释放端口 ${port} (已终止进程 PID ${pid})`);
-                        } catch (e) {
-                            // 忽略单个杀进程失败
+                        } catch (err) {
+                            console.warn(`[Electron] 清理端口 ${port} 进程 PID ${pid} 失败:`, err && err.message ? err.message : err);
                         }
                     }
                 }
@@ -316,8 +316,8 @@ function stopPythonSidecar() {
         console.log(`[Electron] 正在响应生命周期事件，停止 Python Sidecar (PID=${targetPid})...`);
         try {
             targetProc.kill('SIGTERM');
-        } catch (e) {
-            // 忽略信号发送异常
+        } catch (err) {
+            console.warn(`[Electron] 发送 SIGTERM 停止 Sidecar (PID=${targetPid}) 失败:`, err && err.message ? err.message : err);
         }
 
         // 不再无差别执行全机 wsl --terminate（避免误杀用户本机其他 WSL 环境），
@@ -331,8 +331,8 @@ function stopPythonSidecar() {
                     } else {
                         targetProc.kill('SIGKILL');
                     }
-                } catch (e) {
-                    // 进程已退出
+                } catch (err) {
+                    console.debug(`[Electron] 兜底终止 Sidecar (PID=${targetPid}) 状态:`, err && err.message ? err.message : err);
                 }
             }
         }, 1500);
@@ -525,7 +525,8 @@ ipcMain.handle('fs:readFile', async (event, filePath) => {
     }
     try {
         return await fs.promises.readFile(path.resolve(filePath), 'utf-8');
-    } catch {
+    } catch (err) {
+        console.warn(`[Electron] 读取文件失败 (${String(filePath)}):`, err && err.message ? err.message : err);
         return null;
     }
 });
@@ -594,8 +595,8 @@ app.whenReady().then(async () => {
                     '后端服务启动失败',
                     `Python API 服务器未能在 30 秒内就绪。\n\n请检查 electron-shell\\dev.log 与终端输出中的 [Python:ERR] 行。`
                 );
-            } catch (e) {
-                // 忽略对话框失败
+            } catch (err) {
+                console.error('[Electron] 弹出启动失败错误框异常:', err && err.message ? err.message : err);
             }
             isQuitting = true;
             stopPythonSidecar();

@@ -1,0 +1,19 @@
+{
+  "include": [
+    "src/backend/routes",
+    "src/backend/services"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    ".venv",
+    "node_modules"
+  ],
+  "extraPaths": [
+    ".",
+    "./src"
+  ],
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.11",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none"
+}

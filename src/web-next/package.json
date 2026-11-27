@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "lint": "eslint src",
+    "lint:electron": "node ../../scripts/lint_electron.mjs",
     "preview": "vite preview",
     "test": "vitest"
   },

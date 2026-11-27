@@ -44,8 +44,8 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
         if (!child.killed) {
             try {
                 child.kill(sig);
-            } catch {
-                // 忽略已退出子进程的信号转发错误
+            } catch (err) {
+                process.stderr.write(`[dev-runner] 转发信号 ${sig} 失败: ${err && err.message ? err.message : err}\n`);
             }
         }
     });
