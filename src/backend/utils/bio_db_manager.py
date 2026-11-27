@@ -1,643 +1,84 @@
-import os
-import logging
+# -*- coding: utf-8 -*-
+"""
+生物数据库统一门面 (bio_db_manager)
+
+底层实现已按单一职责原则拆解至 src/backend/utils/bio_db/ 子包，
+对外保持 100% 向后兼容的导出符号、单例注册与调用契约。
+"""
+from __future__ import annotations
+
 import asyncio
-import re
-import subprocess
-import urllib.request
-from typing import ClassVar, Dict, Any, Optional, List
-import time
-from datetime import datetime
-from ...core.http_guard import validate_http_url
+import logging
+import threading
+from typing import Any, Coroutine, Dict, List, Optional, Tuple
+
 from ...workbench.models.tool_config import ToolConfig
-from .compat import get_short_path_name
+from .bio_db.providers import (
+    BioDatabase,
+    CardDatabase,
+    CddPfamDatabase,
+    DefenseFinderDatabase,
+    FastaProtDatabase,
+    Ncbi16SDatabase,
+    PhageScopeDatabase,
+    PharokkaDatabase,
+    PholdDatabase,
+    ProgressReporter,
+    RdpDatabase,
+    SilvaDatabase,
+    create_database_provider,
+)
+from .bio_db.state_registry import DbUpdateStateRegistry
+from .bio_db.subprocess_runner import build_wsl_script_argv, build_wsl_script_command
 
 logger = logging.getLogger("api_server")
 
-_SAFE_SCRIPT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
-
-
-def build_wsl_script_argv(script_name: str) -> Optional[List[str]]:
-    """
-    构造在 WSL 中执行部署脚本的安全参数列表（避免拼接 shell 字符串）。
-    """
-    if not _SAFE_SCRIPT_NAME_RE.match(script_name or "") or ".." in script_name:
-        raise ValueError(f"非法脚本名称: {script_name!r}")
-
-    from ...assembly.env.wsl_manager import WSLManager
-
-    project_root = str(ToolConfig.PROJECT_ROOT).replace('\\', '/')
-    m = re.match(r"^([A-Za-z]):/(.*)", project_root)
-    if not m:
-        return None
-    distro = WSLManager.get_best_distro()
-    mnt_path = f"/mnt/{m.group(1).lower()}/{m.group(2)}/scripts/{script_name}"
-    return ["wsl", "-d", distro, "-u", "root", "bash", mnt_path]
-
-
-def build_wsl_script_command(script_name: str) -> Optional[str]:
-    """
-    兼容旧调用：构造在 WSL 中执行部署脚本的完整命令字符串。
-    """
-    argv = build_wsl_script_argv(script_name)
-    if not argv:
-        return None
-    distro, mnt_path = argv[2], argv[6]
-    return f'wsl -d "{distro}" -u root bash "{mnt_path}"'
-
-class BioDatabase:
-    """
-    通用生物数据库管理基类
-    符合单一职责原则：专门处理数据库的下载、校验、索引与状态查询
-    """
-    def __init__(self, db_id: str, config: Dict[str, Any]):
-        self.db_id = db_id
-        self.config = config
-        self.name = config.get("name", db_id)
-        self.last_error: Optional[str] = None
-        
-        # 从中心配置计算物理路径（自动兼容 database/ 与历史 database/database/ 布局）
-        self.base_dir = ToolConfig.get_db_dir(config.get("local_folder", db_id))
-        self.base_dir.mkdir(parents=True, exist_ok=True)
-
-    def _update_registry_version(self, new_version: str):
-        """
-        更新本地注册表中的版本号，写回 registry.json 并同步当前实例 config
-        """
-        registry_path = ToolConfig.DATABASE_ROOT / "registry.json"
-        try:
-            import json
-            data = {"remotes": ToolConfig.get_remote_registry()}
-            if "remotes" in data and self.db_id in data["remotes"]:
-                data["remotes"][self.db_id]["version"] = new_version
-
-                registry_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(registry_path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-
-                self.config["version"] = new_version
-                logger.info(f"已成功持久化更新 {self.db_id} 的版本号为: {new_version}")
-        except Exception as e:
-            logger.error(f"持久化更新版本号失败: {e}")
-
-    _DIR_INFO_TTL = 120.0
-    _dir_info_cache: ClassVar[Dict[str, tuple]] = {}
-
-    def _get_dir_info(self) -> tuple[float, str]:
-        """统计库目录体积与最近修改时间（带 2 分钟缓存，避免设置页反复扫描数十万文件）"""
-        cache_key = str(self.base_dir)
-        cached = BioDatabase._dir_info_cache.get(cache_key)
-        now = time.time()
-        if cached and (now - cached[2]) < BioDatabase._DIR_INFO_TTL:
-            return cached[0], cached[1]
-
-        total_size = 0
-        latest_mtime = 0
-        try:
-            if self.base_dir.exists():
-                for f in self.base_dir.rglob('*'):
-                    if f.is_file():
-                        stat = f.stat()
-                        total_size += stat.st_size
-                        if stat.st_mtime > latest_mtime:
-                            latest_mtime = stat.st_mtime
-        except Exception as _exc:
-            logger.debug("扫描生物数据库目录统计元数据失败: %s", _exc)
-
-        size_mb = round(total_size / (1024 * 1024), 2)
-        mtime_str = datetime.fromtimestamp(latest_mtime).strftime('%Y-%m-%d %H:%M:%S') if latest_mtime > 0 else '未知'
-        BioDatabase._dir_info_cache[cache_key] = (size_mb, mtime_str, now)
-        return size_mb, mtime_str
-
-    def get_status(self) -> Dict[str, Any]:
-        """获取当前本地库状态 (基础实现)"""
-        size_mb, mtime_str = self._get_dir_info()
-        return {
-            "db_id": self.db_id,
-            "name": self.name,
-            "installed": False,
-            "version": self.config.get("version", "Unknown"),
-            "size_mb": size_mb,
-            "last_modified": mtime_str,
-            "category": self.config.get("category", "未分类数据库"),
-            "url": self.config.get("url", "local_only")
-        }
-
-    async def update_database(self) -> bool:
-        """异步更新数据库（由具体子类实现）。"""
-        raise NotImplementedError(f"{self.__class__.__name__} 未实现 update_database")
-
-class SilvaDatabase(BioDatabase):
-    """
-    SILVA 数据库专用管理器
-    """
-    
-    def get_status(self) -> Dict[str, Any]:
-        # 从配置中动态获取预期的索引文件名
-        db_name = self.config.get("version", "silva")
-        is_indexed = (self.base_dir / f"silva_{db_name}.nsq").exists()
-        
-        status = super().get_status()
-        status.update({
-            "installed": is_indexed,
-            "path": str(self.base_dir) if is_indexed else None,
-        })
-        return status
-
-    async def update_database(self):
-        """
-        全自动化更新流程：下载 -> 解压 -> 构建索引
-        """
-        download_url = self.config.get("url")
-        if not download_url:
-            raise ValueError(f"No download URL configured for {self.db_id}")
-        safe_url = validate_http_url(str(download_url))
-
-        try:
-            target_gz = self.base_dir / "download.fasta.gz"
-            target_fasta = self.base_dir / "source.fasta"
-
-            # 1. 下载 (在后台线程池中运行以防止阻塞 asyncio 事件循环)
-            logger.info(f">>> [Download] 开始载入 {self.name}: {safe_url}")
-            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_gz)
-            
-            # 2. 解压 (在后台线程池中运行)
-            def _extract_gz():
-                import gzip
-                with gzip.open(target_gz, 'rb') as f_in:
-                    with open(target_fasta, 'wb') as f_out:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            assert isinstance(chunk, bytes)
-                            f_out.write(chunk)
-            
-            await asyncio.to_thread(_extract_gz)
-            
-            # 3. 构建 BLAST 索引
-            await self.build_index(str(target_fasta))
-            
-            return True
-        except Exception as e:
-            logger.error(f"{self.name} 更新失败: {e}")
-            return False
-
-    async def build_index(self, fasta_path: str):
-        """调用本地 makeblastdb 进行索引"""
-        if not os.path.exists(fasta_path):
-            raise FileNotFoundError(f"FASTA source not found: {fasta_path}")
-            
-        # 1. 记录源文件大小
-        fasta_size = os.path.getsize(fasta_path) / (1024 * 1024)
-        logger.info(f"待索引文件大小: {fasta_size:.2f} MB")
-        
-        # 2. 核心避让逻辑：等待 2s 让 OS 释放文件锁定（如杀毒软件扫描）
-        logger.info("等待系统就绪 (2s)...")
-        await asyncio.sleep(2)
-
-        db_ver = self.config.get("version", "latest")
-        db_type = str(self.config.get("db_type", "nucl"))
-        
-        # 3. 核心修复：转换为 8.3 短路径名，规避一切空格引发的内存映射问题
-        tool_path = get_short_path_name(str(ToolConfig.get_tool_path("makeblastdb")))
-        short_base_dir = get_short_path_name(str(self.base_dir))
-        output_name = f"silva_{db_ver}"
-        
-        # 清理旧索引残余
-        for f in self.base_dir.glob(f"{output_name}.n*"):
-            try:
-                f.unlink()
-            except Exception as _exc:
-                logger.debug("构建 SILVA 索引前清理旧分片文件失败: %s", _exc)
-
-        # 构造安全参数列表，避免经由 shell 解析
-        cmd_args = [
-            tool_path,
-            "-in",
-            "source.fasta",
-            "-dbtype",
-            db_type,
-            "-title",
-            f"{self.name} {db_ver}",
-            "-out",
-            output_name,
-        ]
-
-        logger.info(f"执行构建索引 (CWD 短路径: {short_base_dir}): {' '.join(cmd_args)}")
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd_args,
-            cwd=short_base_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate()
-        
-        if process.returncode != 0:
-            err_msg = stderr.decode(errors='ignore').strip()
-            logger.error(f"makeblastdb 失败 (退出码 {process.returncode}): {err_msg}")
-            raise RuntimeError(f"Index build failed: {err_msg}")
-
-class Ncbi16SDatabase(BioDatabase):
-    """
-    NCBI RefSeq 16S 数据库专用管理器
-    """
-    def get_status(self) -> Dict[str, Any]:
-        # NCBI 库特有的索引文件后缀
-        is_indexed = (self.base_dir / "16S_ribosomal_RNA.nsq").exists()
-        status = super().get_status()
-        status.update({
-            "installed": is_indexed,
-            "path": str(self.base_dir) if is_indexed else None
-        })
-        return status
-
-    async def update_database(self):
-        """
-        利用之前编写的修复/下载逻辑进行更新
-        """
-        download_url = self.config.get("url")
-        if not download_url:
-            raise ValueError(f"No download URL configured for {self.db_id}")
-        safe_url = validate_http_url(str(download_url))
-        target_gz = self.base_dir / "16S_ribosomal_RNA.tar.gz"
-
-        try:
-            # 下载与校验逻辑 (在后台线程池中运行以防止阻塞 asyncio 事件循环)
-            logger.info(">>> [NCBI] 正在同步 16S 官方库...")
-            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, str(target_gz) + ".tmp")
-            
-            # (简写校验步骤...)
-            os.replace(str(target_gz) + ".tmp", target_gz)
-            
-            # 提取 tar 压缩文件 (在后台线程池中运行，强制防 Tar-Slip 安全校验)
-            def _extract_tar():
-                from ...utils.archive_guard import safe_extract_tar
-                safe_extract_tar(target_gz, self.base_dir)
-            
-            await asyncio.to_thread(_extract_tar)
-            
-            # 同步更新本地注册表的版本号为当前的年月
-            current_version = datetime.now().strftime("%Y-%m")
-            self._update_registry_version(current_version)
-            
-            return True
-        except Exception as e:
-            logger.error(f"NCBI 同步失败: {e}")
-            return False
-
-class PhageScopeDatabase(BioDatabase):
-    """
-    PhageScope 噬菌体高精度注释库专用管理器
-    """
-    def get_status(self) -> Dict[str, Any]:
-        is_indexed = (self.base_dir / "phagescope_proteins.psq").exists()
-        status = super().get_status()
-        status.update({
-            "installed": is_indexed,
-            "path": str(self.base_dir) if is_indexed else None
-        })
-        return status
-
-    async def update_database(self):
-        try:
-            import sys
-            script_path = ToolConfig.PROJECT_ROOT / "database" / "fetch_phagescope.py"
-            
-            logger.info(f">>> [PhageScope] 启动本地抓取与构建脚本: {script_path}")
-            proc = await asyncio.create_subprocess_exec(
-                sys.executable, str(script_path),
-                cwd=str(ToolConfig.PROJECT_ROOT)
-            )
-            await proc.communicate()
-            
-            if proc.returncode == 0:
-                current_version = f"v1.0-{datetime.now().strftime('%Y-%m')}"
-                self._update_registry_version(current_version)
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"PhageScope 同步失败: {e}")
-            return False
-
-class PharokkaDatabase(BioDatabase):
-    """Pharokka 10GB 综合数据库"""
-    def get_status(self) -> Dict[str, Any]:
-        is_installed = self.base_dir.exists() and any(self.base_dir.iterdir())
-        status = super().get_status()
-        status.update({
-            "installed": is_installed,
-            "path": str(self.base_dir) if is_installed else None
-        })
-        return status
-
-    async def update_database(self):
-        try:
-            from ...assembly.env.wsl_manager import WSLManager
-            if not WSLManager.is_available():
-                self.last_error = "未检测到可用的 WSL(Ubuntu) 发行版，Pharokka 需要 WSL 才能运行与部署"
-                logger.error(self.last_error)
-                return False
-
-            argv = build_wsl_script_argv("setup_pharokka.sh")
-            if not argv:
-                self.last_error = "无法解析项目在 WSL 中的挂载路径"
-                logger.error(self.last_error)
-                return False
-
-            logger.info(f">>> [Pharokka] 启动底层部署脚本: {' '.join(argv)}")
-            proc = await asyncio.create_subprocess_exec(*argv)
-            await proc.communicate()
-            
-            if proc.returncode == 0:
-                current_version = f"{datetime.now().strftime('%Y-%m')} (Latest)"
-                self._update_registry_version(current_version)
-                return True
-            logger.error(f"Pharokka 部署脚本退出码异常: {proc.returncode}")
-            return False
-        except Exception as e:
-            logger.error(f"Pharokka 同步失败: {e}")
-            return False
-
-class PholdDatabase(BioDatabase):
-    """Phold AI 结构数据库"""
-    def get_status(self) -> Dict[str, Any]:
-        is_installed = self.base_dir.exists() and any(self.base_dir.iterdir())
-        status = super().get_status()
-        status.update({
-            "installed": is_installed,
-            "path": str(self.base_dir) if is_installed else None
-        })
-        return status
-
-    async def update_database(self):
-        try:
-            from ...assembly.env.wsl_manager import WSLManager
-            if not WSLManager.is_available():
-                self.last_error = "未检测到可用的 WSL(Ubuntu) 发行版，Phold 需要 WSL + GPU 环境才能运行与部署"
-                logger.error(self.last_error)
-                return False
-
-            argv = build_wsl_script_argv("setup_phold.sh")
-            if not argv:
-                self.last_error = "无法解析项目在 WSL 中的挂载路径"
-                logger.error(self.last_error)
-                return False
-
-            logger.info(f">>> [Phold] 启动底层部署脚本: {' '.join(argv)}")
-            proc = await asyncio.create_subprocess_exec(*argv)
-            await proc.communicate()
-            
-            if proc.returncode == 0:
-                current_version = f"{datetime.now().strftime('%Y-%m')} (Latest)"
-                self._update_registry_version(current_version)
-                return True
-            logger.error(f"Phold 部署脚本退出码异常: {proc.returncode}")
-            return False
-        except Exception as e:
-            logger.error(f"Phold 同步失败: {e}")
-            return False
-
-class FastaProtDatabase(BioDatabase):
-    """
-    通用蛋白 FASTA 数据库管理器 (SwissProt / VFDB 等)
-    自动执行: 下载 -> gzip解压 -> makeblastdb -dbtype prot
-    """
-    def get_status(self) -> Dict[str, Any]:
-        prefix = self.config.get("index_prefix", self.db_id)
-        is_indexed = (self.base_dir / f"{prefix}.psq").exists() or (self.base_dir / f"{prefix}.pin").exists()
-        status = super().get_status()
-        status.update({
-            "installed": is_indexed,
-            "path": str(self.base_dir) if is_indexed else None
-        })
-        return status
-
-    async def update_database(self):
-        download_url = self.config.get("url")
-        if not download_url or download_url.startswith("local_"):
-            return False
-
-        try:
-            target_gz = self.base_dir / "download.fasta.gz"
-            target_fasta = self.base_dir / "source.fasta"
-            prefix = self.config.get("index_prefix", self.db_id)
-
-            safe_url = validate_http_url(str(download_url))
-            logger.info(f">>> [{self.name}] 开始下载: {safe_url}")
-            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_gz)
-
-            # 解压
-            def _extract():
-                import gzip
-                with gzip.open(target_gz, 'rb') as f_in:
-                    with open(target_fasta, 'wb') as f_out:
-                        while True:
-                            chunk = f_in.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            f_out.write(chunk)
-
-            await asyncio.to_thread(_extract)
-
-            # 构建 BLAST 蛋白索引
-            tool_path = get_short_path_name(str(ToolConfig.get_tool_path("makeblastdb")))
-            short_base_dir = get_short_path_name(str(self.base_dir))
-            cmd_args = [tool_path, "-in", "source.fasta", "-dbtype", "prot", "-title", str(self.name), "-out", str(prefix)]
-
-            logger.info(f"[{self.name}] 构建蛋白索引: {' '.join(cmd_args)}")
-            proc = await asyncio.create_subprocess_exec(
-                *cmd_args, cwd=short_base_dir,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            await proc.communicate()
-
-            if proc.returncode == 0:
-                current_version = datetime.now().strftime("%Y-%m")
-                self._update_registry_version(current_version)
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"{self.name} 同步失败: {e}")
-            return False
-
-class DefenseFinderDatabase(BioDatabase):
-    """DefenseFinder & AcrDB 抗防御与原核免疫模型库"""
-    def get_status(self) -> Dict[str, Any]:
-        is_installed = (self.base_dir / "defense-finder-models").exists() or any(self.base_dir.rglob("*.hmm*"))
-        status = super().get_status()
-        status.update({
-            "installed": is_installed,
-            "path": str(self.base_dir) if is_installed else None
-        })
-        return status
-
-    async def update_database(self):
-        try:
-            download_url = self.config.get("url")
-            if not isinstance(download_url, str) or not download_url:
-                raise ValueError("DefenseFinder 缺少有效的下载 URL")
-            safe_url = validate_http_url(download_url)
-            target_tar = self.base_dir / "defense_finder_models.tar.gz"
-            logger.info(">>> [DefenseFinder] 开始同步模型库...")
-            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_tar)
-
-            def _extract():
-                from ...utils.archive_guard import safe_extract_tar
-                safe_extract_tar(target_tar, self.base_dir)
-
-            await asyncio.to_thread(_extract)
-            current_version = f"v1.3-{datetime.now().strftime('%Y-%m')}"
-            self._update_registry_version(current_version)
-            return True
-        except Exception as e:
-            logger.error(f"DefenseFinder 同步失败: {e}")
-            return False
-
-class CardDatabase(BioDatabase):
-    """CARD 耐药基因数据库"""
-    def get_status(self) -> Dict[str, Any]:
-        is_installed = (self.base_dir / "card_protein.psq").exists() or (self.base_dir / "card_protein.pin").exists() or (self.base_dir / "card.json").exists()
-        status = super().get_status()
-        status.update({
-            "installed": is_installed,
-            "path": str(self.base_dir) if is_installed else None
-        })
-        return status
-
-    async def update_database(self):
-        try:
-            safe_url = validate_http_url("https://card.mcmaster.ca/latest/data")
-            target_tar = self.base_dir / "card_data.tar.bz2"
-            logger.info(">>> [CARD] 正在同步耐药数据库...")
-            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_tar)
-
-            def _extract_and_build():
-                from ...utils.archive_guard import safe_extract_tar
-                safe_extract_tar(target_tar, self.base_dir, mode="r:bz2")
-                # 寻找 protein_fasta 蛋白序列
-                f_faa = self.base_dir / "protein_fasta.fasta"
-                if not f_faa.exists():
-                    f_cand = list(self.base_dir.glob("*protein*.fasta"))
-                    if f_cand:
-                        f_faa = f_cand[0]
-
-                if f_faa.exists():
-                    tool_path = get_short_path_name(str(ToolConfig.get_tool_path("makeblastdb")))
-                    subprocess.run(
-                        [tool_path, "-in", f_faa.name, "-dbtype", "prot", "-title", "CARD Resistome", "-out", "card_protein"],
-                        cwd=str(self.base_dir),
-                        check=True,
-                        timeout=1800,
-                    )
-
-            await asyncio.to_thread(_extract_and_build)
-            current_version = f"v3.2-{datetime.now().strftime('%Y-%m')}"
-            self._update_registry_version(current_version)
-            return True
-        except Exception as e:
-            logger.error(f"CARD 同步失败: {e}")
-            return False
-
-class CddPfamDatabase(BioDatabase):
-    """NCBI CDD / Pfam-A 结构域数据库"""
-    def get_status(self) -> Dict[str, Any]:
-        is_installed = any(self.base_dir.glob("*.smp")) or any(self.base_dir.glob("*.rps*")) or (self.base_dir / "Cdd.rps").exists()
-        status = super().get_status()
-        status.update({
-            "installed": is_installed,
-            "path": str(self.base_dir) if is_installed else None
-        })
-        return status
-
-    async def update_database(self):
-        try:
-            download_url = self.config.get("url")
-            if not isinstance(download_url, str) or not download_url:
-                raise ValueError("CDD/Pfam 缺少有效的下载 URL")
-            safe_url = validate_http_url(download_url)
-            target_tar = self.base_dir / "cdd.tar.gz"
-            logger.info(">>> [CDD/Pfam] 正在同步保守结构域数据库...")
-            await asyncio.to_thread(urllib.request.urlretrieve, safe_url, target_tar)
-
-            def _extract():
-                from ...utils.archive_guard import safe_extract_tar
-                safe_extract_tar(target_tar, self.base_dir)
-
-            await asyncio.to_thread(_extract)
-            current_version = f"v3.21-{datetime.now().strftime('%Y-%m')}"
-            self._update_registry_version(current_version)
-            return True
-        except Exception as e:
-            logger.error(f"CDD/Pfam 同步失败: {e}")
-            return False
 
 class BioDbManager:
-    """
-    数据库管理门面 (Facade)
-    负责汇聚所有类型的生物数据库
-    """
-    def __init__(self):
-        # 自动从 ToolConfig 动态加载注册表并实例化对应的数据库管理器
+    """生物数据库管理门面 (Facade)：汇聚所有数据库实例与更新状态中心。"""
+
+    def __init__(self) -> None:
         self.dbs: Dict[str, BioDatabase] = {}
-        
-        # [Migration] 核心逻辑：将散落在 16S 目录下的 NCBI 文件归位到 16S/ncbi
+        self.state_registry = DbUpdateStateRegistry()
+
+        # [Migration] 将散落在 16S 目录下的 NCBI 文件归位到 16S/ncbi
         self._perform_migration()
 
-        # 合并主注册表与历史 legacy 注册表（补齐 Swiss-Prot/CDD/VFDB/CARD 等条目）
+        # 合并主注册表与历史 legacy 注册表
         ToolConfig.sync_registry()
 
         registry = ToolConfig.get_remote_registry()
         for db_id, config in registry.items():
-            db_id_lower = db_id.lower()
-            if "silva" in db_id_lower:
-                self.dbs[db_id] = SilvaDatabase(db_id, config)
-            elif "ncbi_16s" in db_id_lower or "16s_ribosomal" in db_id_lower:
-                self.dbs[db_id] = Ncbi16SDatabase(db_id, config)
-            elif "phagescope" in db_id_lower:
-                self.dbs[db_id] = PhageScopeDatabase(db_id, config)
-            elif "pharokka" in db_id_lower:
-                self.dbs[db_id] = PharokkaDatabase(db_id, config)
-            elif "phold" in db_id_lower:
-                self.dbs[db_id] = PholdDatabase(db_id, config)
-            elif "swissprot" in db_id_lower or "vfdb" in db_id_lower:
-                self.dbs[db_id] = FastaProtDatabase(db_id, config)
-            elif "defense_finder" in db_id_lower or "anti_crispr" in db_id_lower:
-                self.dbs[db_id] = DefenseFinderDatabase(db_id, config)
-            elif "card" in db_id_lower:
-                self.dbs[db_id] = CardDatabase(db_id, config)
-            elif "cdd" in db_id_lower or "pfam" in db_id_lower:
-                self.dbs[db_id] = CddPfamDatabase(db_id, config)
-            else:
-                self.dbs[db_id] = BioDatabase(db_id, config)
+            self.dbs[db_id] = create_database_provider(db_id, config)
 
         logger.info(
             "生物数据库注册完成: %s 个条目 %s（database 根目录: %s）",
-            len(self.dbs), sorted(self.dbs.keys()), ToolConfig.DATABASE_ROOT
+            len(self.dbs),
+            sorted(self.dbs.keys()),
+            ToolConfig.DATABASE_ROOT,
         )
         if ToolConfig.LEGACY_DATABASE_ROOT.exists():
             legacy_used = sorted(
-                name for name, db in self.dbs.items()
+                name
+                for name, db in self.dbs.items()
                 if str(db.base_dir).startswith(str(ToolConfig.LEGACY_DATABASE_ROOT))
             )
             if legacy_used:
                 logger.warning(
                     "检测到历史遗留的 database/database 布局，以下库已自动回退到该目录: %s",
-                    legacy_used
+                    legacy_used,
                 )
 
-    def _perform_migration(self):
-        """处理 NCBI 16S 目录不规范的历史遗留问题"""
+    def _perform_migration(self) -> None:
+        """处理 NCBI 16S 目录不规范的历史遗留问题。"""
         source_dir = ToolConfig.DATABASE_ROOT / "16S"
         target_dir = source_dir / "ncbi"
-        
         if not source_dir.exists():
             return
-        
-        # 识别散落的文件 (16S_ribosomal_RNA.*)
+
         scattered_files = list(source_dir.glob("16S_ribosomal_RNA*"))
         if scattered_files:
-            logger.info(f"发现散落的 NCBI 文件 ({len(scattered_files)}个)，正在迁移至: {target_dir}")
+            logger.info("发现散落的 NCBI 文件 (%s个)，正在迁移至: %s", len(scattered_files), target_dir)
             target_dir.mkdir(parents=True, exist_ok=True)
             for f in scattered_files:
                 try:
@@ -647,14 +88,67 @@ class BioDbManager:
                     else:
                         f.rename(dest)
                 except Exception as e:
-                    logger.error(f"迁移文件 {f.name} 失败: {e}")
+                    logger.error("迁移文件 %s 失败: %s", f.name, e)
+
+    # ────────── 状态中心与任务编排委托 API ──────────
+
+    def is_updating(self, db_id: str) -> bool:
+        return self.state_registry.is_updating(db_id)
+
+    def get_update_state(self, db_id: str) -> Optional[Dict[str, Any]]:
+        return self.state_registry.get_state(db_id)
+
+    def begin_update(self, db_id: str, message: str) -> Tuple[bool, Dict[str, Any], Optional[threading.Event]]:
+        return self.state_registry.begin_update(db_id, message)
+
+    def report_progress(self, db_id: str, progress: int, message: str) -> Dict[str, Any]:
+        return self.state_registry.report_progress(db_id, progress, message)
+
+    def finish_update(self, db_id: str, status: str, progress: int, message: str) -> Dict[str, Any]:
+        return self.state_registry.finish_update(db_id, status, progress, message)
+
+    def cancel_update(self, db_id: str) -> Tuple[bool, str]:
+        return self.state_registry.cancel_update(db_id)
+
+    def spawn_update_task(self, db_id: str, coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
+        return self.state_registry.spawn_task(db_id, coro)
+
+    async def wait_active_updates(self) -> None:
+        await self.state_registry.wait_all_tasks()
+
+    def clear_update_state(self, db_id: str) -> None:
+        self.state_registry.clear_state(db_id)
 
     def list_all_status(self) -> List[Dict[str, Any]]:
-        return [db.get_status() for db in self.dbs.values()]
+        results: List[Dict[str, Any]] = []
+        for db_id, db in self.dbs.items():
+            status = db.get_status()
+            status["update_state"] = self.get_update_state(db_id)
+            results.append(status)
+        return results
 
-# 全局单例（同步注册至 src/core 服务注册表，供 blast 等领域引擎无循环调用）
+
 bio_db_manager = BioDbManager()
 
 from ...core.service_registry import register_bio_db_manager  # noqa: E402
 
 register_bio_db_manager(bio_db_manager)
+
+__all__ = [
+    "BioDatabase",
+    "BioDbManager",
+    "CardDatabase",
+    "CddPfamDatabase",
+    "DefenseFinderDatabase",
+    "FastaProtDatabase",
+    "Ncbi16SDatabase",
+    "PhageScopeDatabase",
+    "PharokkaDatabase",
+    "PholdDatabase",
+    "ProgressReporter",
+    "RdpDatabase",
+    "SilvaDatabase",
+    "bio_db_manager",
+    "build_wsl_script_argv",
+    "build_wsl_script_command",
+]

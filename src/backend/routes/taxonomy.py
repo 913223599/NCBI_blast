@@ -24,6 +24,19 @@ async def trigger_taxonomy_update():
         logger.error(f"Failed to trigger taxonomy update: {e}")
         return {"success": False, "error": str(e)}
 
+
+@router.post("/api/taxonomy/cancel")
+async def cancel_taxonomy_update():
+    """取消正在运行的 NCBI 分类数据库更新任务（保留已下载分片以便断点续传）"""
+    try:
+        ok, msg = get_taxonomy_provider().cancel_update()
+        if not ok:
+            return {"success": False, "error": msg}
+        return {"success": True, "message": msg}
+    except Exception as e:
+        logger.error(f"Failed to cancel taxonomy update: {e}")
+        return {"success": False, "error": str(e)}
+
 @router.get("/api/taxonomy/check")
 async def check_taxonomy_update():
     """检查 NCBI FTP 上是否有更新版本"""

@@ -27,8 +27,19 @@ export interface DbStatusResponse {
   [key: string]: unknown
 }
 
+export interface DbUpdateState {
+  db_id?: string
+  status?: string
+  progress?: number
+  message?: string
+  updated_at?: number
+}
+
 export interface DbUpdateResponse {
   success?: boolean
+  already_running?: boolean
+  state?: DbUpdateState
+  message?: string
   error?: string
   [key: string]: unknown
 }
@@ -200,6 +211,12 @@ export const settingsAndStrainDomain = {
     return result
   },
 
+  async taxonomy_cancel<T = DbUpdateResponse>(callback?: (res: T) => void) {
+    const result = await apiPost<T>('/api/taxonomy/cancel', {})
+    callback?.(result)
+    return result
+  },
+
   async taxonomy_check<T = Record<string, unknown>>(callback?: (res: T) => void) {
     const result = await apiGet<T>('/api/taxonomy/check')
     callback?.(result)
@@ -274,6 +291,12 @@ export const settingsAndStrainDomain = {
 
   async trigger_db_update<T = DbUpdateResponse>(dbId: string, callback?: (res: T) => void) {
     const result = await apiPost<T>(`/api/database/update/${dbId}`)
+    callback?.(result)
+    return result
+  },
+
+  async cancel_db_update<T = DbUpdateResponse>(dbId: string, callback?: (res: T) => void) {
+    const result = await apiPost<T>(`/api/database/cancel/${dbId}`)
     callback?.(result)
     return result
   },

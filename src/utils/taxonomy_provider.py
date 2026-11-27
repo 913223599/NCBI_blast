@@ -9,9 +9,26 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-# NCBI 在线 taxdump 下载地址
+# NCBI 在线 taxdump 下载地址（多源优先级：直连高速源 -> DDBJ 官方镜像 -> 代理兜底）
 NCBI_TAXDUMP_URL = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz"
 NCBI_TAXDUMP_MD5_URL = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump.tar.gz.md5"
+
+TAXDUMP_SOURCES = (
+    ("NCBI 高速直连源", "https://ftp.ncbi.nih.gov/pub/taxonomy/taxdump.tar.gz", True, 6),
+    (
+        "DDBJ 日本官方镜像",
+        "https://ddbj.nig.ac.jp/public/mirror_database/ftp.ncbi.nih.gov/ncbi_taxonomy/taxonomydb/taxdump.tar.gz",
+        True,
+        6,
+    ),
+    ("NCBI 官方代理源", NCBI_TAXDUMP_URL, False, 4),
+    (
+        "DDBJ 代理镜像",
+        "https://ddbj.nig.ac.jp/public/mirror_database/ftp.ncbi.nih.gov/ncbi_taxonomy/taxonomydb/taxdump.tar.gz",
+        False,
+        4,
+    ),
+)
 
 class TaxonomyProvider:
     """
@@ -26,6 +43,11 @@ class TaxonomyProvider:
     """
     _instance = None
     _lock = threading.Lock()
+    _local: threading.local
+    _is_building: bool
+    _build_progress: str
+    _status_code: str
+    _cancel_event: threading.Event
 
     def __new__(cls):
         with cls._lock:
@@ -34,6 +56,8 @@ class TaxonomyProvider:
                 inst._local = threading.local()
                 inst._is_building = False
                 inst._build_progress = ""
+                inst._status_code = "idle"
+                inst._cancel_event = threading.Event()
                 cls._instance = inst
         return cls._instance
 
@@ -83,6 +107,7 @@ class TaxonomyProvider:
             "ready": self.is_ready,
             "building": self._is_building,
             "progress": self._build_progress,
+            "status": self._status_code,
         }
 
         if self.is_ready:
@@ -170,12 +195,23 @@ class TaxonomyProvider:
             logger.error(f"Check for update failed: {exc}")
         return result
 
+    def cancel_update(self) -> tuple[bool, str]:
+        """向正在运行的 NCBI 物种分类库更新任务发送取消信号。"""
+        with self._lock:
+            if not self._is_building:
+                return False, "当前没有正在进行的 NCBI 物种库更新任务"
+            self._cancel_event.set()
+            self._build_progress = "正在取消更新任务..."
+            return True, "已发送取消指令，正在停止下载..."
+
     def _launch_build_thread(self, force_download: bool, skip_if_same: bool = False):
         with self._lock:
             if self._is_building:
                 logger.warning("Taxonomy build already in progress, skipping.")
                 return
             self._is_building = True
+            self._status_code = "building"
+            self._cancel_event = threading.Event()
             self._build_progress = "准备中..."
 
         thread = threading.Thread(
@@ -185,10 +221,19 @@ class TaxonomyProvider:
         )
         thread.start()
 
+    def _check_cancelled(self) -> None:
+        from ..core.download import DownloadCancelledError
+
+        if self._cancel_event.is_set():
+            raise DownloadCancelledError("用户已取消更新")
+
     def _build_worker(self, force_download: bool, skip_if_same: bool = False):
-        """后台线程工作函数：MD5 预检（可选）+ 下载（可选）+ 编译 taxa.sqlite。"""
+        """后台线程工作函数：MD5 预检（可选）+ 多线程加速下载（可选）+ 编译 taxa.sqlite。"""
+        from ..core.download import DownloadCancelledError
+
         try:
             self._ensure_ete4_path()
+            self._check_cancelled()
 
             taxdump_tgz = self._taxdump_tgz_path
             taxdmp_folder = self._taxdmp_folder
@@ -204,22 +249,25 @@ class TaxonomyProvider:
 
                     if remote_md5 and remote_md5 == local_md5:
                         self._build_progress = "已是最新版本，无需更新。"
+                        self._status_code = "completed"
                         logger.info(f"Taxonomy DB is up-to-date (MD5: {local_md5[:12]}...). Skipping.")
                         return
-                    else:
-                        logger.info(f"Update available: local={local_md5[:12] or 'N/A'} remote={remote_md5[:12]}")
+                    logger.info(f"Update available: local={local_md5[:12] or 'N/A'} remote={remote_md5[:12]}")
                 except Exception as md5_err:
                     logger.warning(f"MD5 pre-check failed ({md5_err}), proceeding with full download.")
 
+            self._check_cancelled()
+
             # ── 步骤 1：联网下载（仅 force_download 时） ──
             if force_download:
-                self._build_progress = "正在从 NCBI FTP 下载 taxdump.tar.gz ..."
-                logger.info(f"Downloading taxdump from {NCBI_TAXDUMP_URL} ...")
+                self._build_progress = "正在探测高速下载源并准备拉取 taxdump.tar.gz ..."
+                logger.info("Downloading taxdump via multi-source Range downloader...")
                 self._download_taxdump(taxdump_tgz)
                 logger.info("Download complete.")
-
-                # 下载完成后，计算并保存本地 MD5
+                self._check_cancelled()
                 self._save_local_md5(taxdump_tgz)
+
+            self._check_cancelled()
 
             # ── 步骤 2：如果只有 taxdmp/ 目录，打包为 tar.gz ──
             if not taxdump_tgz.exists() and taxdmp_folder.exists() and taxdmp_folder.is_dir():
@@ -232,6 +280,8 @@ class TaxonomyProvider:
                         if filepath.is_file():
                             tar.add(filepath, arcname=filename)
                 logger.info("Packaging complete.")
+
+            self._check_cancelled()
 
             # ── 步骤 3：编译 SQLite ──
             self._build_progress = "正在编译 taxa.sqlite（可能耗时数分钟）..."
@@ -252,45 +302,69 @@ class TaxonomyProvider:
                 self._local = threading.local()
             self._local.ncbi = tmp_ncbi
             self._build_progress = "构建完成！"
+            self._status_code = "completed"
             logger.info("Taxonomy DB built successfully.")
+        except DownloadCancelledError:
+            self._build_progress = "已取消更新（已下载分片已保留用于续传）"
+            self._status_code = "cancelled"
+            logger.info("Taxonomy DB update cancelled by user.")
         except Exception as exc:
             self._build_progress = f"构建失败: {exc}"
+            self._status_code = "error"
             logger.error(f"Taxonomy DB build failed: {exc}")
         finally:
             self._is_building = False
 
     def _download_taxdump(self, dest_path: Path):
-        """从 NCBI FTP 下载 taxdump.tar.gz，支持进度报告。"""
-        from ..core.http_guard import build_safe_request, safe_urlopen
+        """多源多线程 HTTP Range 并发下载 taxdump.tar.gz，支持断点续传、速率显示与取消。"""
+        from ..core.download import (
+            DownloadCancelledError,
+            DownloadConfig,
+            format_download_progress,
+            stream_download_file,
+        )
 
-        # 先下载到临时文件，完成后替换
-        tmp_path = dest_path.with_suffix(".tmp")
-        try:
-            req = build_safe_request(NCBI_TAXDUMP_URL)
-            with safe_urlopen(req, timeout=120) as response:
-                total = int(response.headers.get("Content-Length", 0))
-                downloaded = 0
-                chunk_size = 256 * 1024  # 256 KB
+        errors: List[str] = []
+        for idx, (source_label, url, bypass_proxy, num_threads) in enumerate(TAXDUMP_SOURCES, 1):
+            self._check_cancelled()
+            self._build_progress = f"正在连接 {source_label}..."
+            cfg = DownloadConfig(
+                connect_timeout=12.0,
+                read_timeout=25.0,
+                max_retries=2,
+                log_label=f"ncbi_taxonomy:{source_label}",
+                num_threads=num_threads,
+                min_parallel_size=4 * 1024 * 1024,
+                bypass_proxy=bypass_proxy,
+            )
 
-                with open(tmp_path, "wb") as fout:
-                    while True:
-                        chunk = response.read(chunk_size)
-                        if not chunk:
-                            break
-                        fout.write(chunk)
-                        downloaded += len(chunk)
-                        if total > 0:
-                            pct = round(downloaded / total * 100, 1)
-                            self._build_progress = f"下载中... {pct}% ({downloaded // 1024 // 1024}MB / {total // 1024 // 1024}MB)"
+            def _on_progress(downloaded: int, total: int, speed_bps: float, src: str = source_label) -> None:
+                pct = round(downloaded / total * 100, 1) if total > 0 else 0.0
+                detail = format_download_progress(downloaded, total, speed_bps)
+                self._build_progress = f"下载中 ({src})... {pct}% ({detail})"
 
-            # 下载完成，替换旧文件
-            if dest_path.exists():
-                dest_path.unlink()
-            tmp_path.rename(dest_path)
-        except Exception:
-            if tmp_path.exists():
-                tmp_path.unlink()
-            raise
+            try:
+                stream_download_file(
+                    url,
+                    dest_path,
+                    progress_cb=_on_progress,
+                    cancel_event=self._cancel_event,
+                    config=cfg,
+                )
+                return
+            except DownloadCancelledError:
+                raise
+            except Exception as exc:
+                errors.append(f"{source_label}: {exc}")
+                logger.warning(
+                    "[Taxonomy] %s 下载失败 (%s/%s): %s",
+                    source_label,
+                    idx,
+                    len(TAXDUMP_SOURCES),
+                    exc,
+                )
+
+        raise RuntimeError("全部 Taxonomy 下载源均失败: " + " | ".join(errors))
 
     def _fetch_remote_md5(self) -> str:
         """从 NCBI FTP 下载 taxdump.tar.gz.md5（几字节），提取 MD5 哈希值。"""
@@ -338,6 +412,8 @@ class TaxonomyProvider:
                 taxid = int(name_or_id)
 
             lineage_ids = self.ncbi.get_lineage(taxid)
+            if not lineage_ids:
+                return []
             names = self.ncbi.get_taxid_translator(lineage_ids)
             ranks = self.ncbi.get_rank(lineage_ids)
 

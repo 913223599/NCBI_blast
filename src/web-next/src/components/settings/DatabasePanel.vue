@@ -1,276 +1,29 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getBridge, onEvent } from '../../bridge'
-import { useAppStore } from '../../stores/app'
-import { useConfirmDialog } from '../../composables/useConfirmDialog'
-import { createLogger } from '../../utils/logger'
-const logger = createLogger('DatabasePanel')
+import { useDatabasePanel } from './useDatabasePanel'
 
-const appStore = useAppStore()
-const confirmDialog = useConfirmDialog()
-let eventCleanup: (() => void) | null = null
-
-interface BioDatabaseItem {
-  db_id: string
-  name: string
-  version: string
-  category?: string
-  size_mb?: number
-  last_modified?: string
-  installed: boolean
-  path?: string
-  url?: string
-}
-
-interface DbUpdateProgress {
-  db_id?: string
-  status?: string
-  progress?: number
-  message?: string
-}
-
-interface TaxonomyDbStatus {
-  ready?: boolean
-  building?: boolean
-  fileSizeMB?: number
-  lastModified?: string
-}
-
-interface UnifiedDbCardItem {
-  id: string
-  name: string
-  version: string
-  size_mb: number
-  last_modified: string
-  installed: boolean
-  path: string
-  url?: string
-  type: 'bio' | 'tax'
-  building: boolean
-  progress: number
-  message: string
-}
-
-/* -------- 1. 16S/18S 参考数据库状态 -------- */
-const bioDatabases = ref<BioDatabaseItem[]>([])
-const loadingBioDbs = ref(false)
-const dbUpdates = ref<Record<string, DbUpdateProgress>>({})
-
-async function loadBioDatabases() {
-  loadingBioDbs.value = true
-  try {
-    const res = await getBridge().get_all_db_status()
-    if (res && res.success) {
-      bioDatabases.value = Array.isArray(res.data) ? (res.data as BioDatabaseItem[]) : []
-    } else {
-      appStore.showNotification('无法获取数据库状态', 'error')
-    }
-  } catch (err) {
-    logger.error('Failed to load databases:', err)
-  } finally {
-    loadingBioDbs.value = false
-  }
-}
-
-async function triggerBioDbUpdate(dbId: string) {
-  if (dbUpdates.value[dbId]?.status === 'updating') return
-
-  try {
-    const res = await getBridge().trigger_db_update(dbId)
-    if (res && res.success) {
-      appStore.showNotification(`已启动 ${dbId} 同步任务`, 'success')
-      dbUpdates.value[dbId] = { status: 'updating', progress: 5, message: '正在启动...' }
-    } else {
-      appStore.showNotification(res?.error || '启动失败', 'error')
-    }
-  } catch {
-    appStore.showNotification('通信异常，请检查后端状态', 'error')
-  }
-}
-
-/* -------- 2. NCBI 物种库状态 -------- */
-const taxStatus = ref<TaxonomyDbStatus | null>(null)
-let taxPollTimer: ReturnType<typeof setInterval> | null = null
-
-async function refreshTaxStatus() {
-  try {
-    const result = (await getBridge().taxonomy_status()) as TaxonomyDbStatus | null
-    taxStatus.value = result
-
-    // 如果正在构建中，启动轮询
-    if (result?.building && !taxPollTimer) {
-      taxPollTimer = setInterval(async () => {
-        try {
-          const updated = (await getBridge().taxonomy_status()) as TaxonomyDbStatus | null
-          taxStatus.value = updated
-          if (!updated?.building) {
-            if (taxPollTimer) clearInterval(taxPollTimer)
-            taxPollTimer = null
-            loadBioDatabases() // 刷新相关数据
-          }
-        } catch (pollErr) {
-          logger.warn('轮询 NCBI 物种库状态失败:', pollErr)
-        }
-      }, 2000)
-    }
-  } catch (e) {
-    logger.warn('获取 NCBI 物种库状态失败:', e)
-  }
-}
-
-async function triggerTaxUpdate() {
-  if (taxStatus.value?.building) return
-  const ok = await confirmDialog.confirm({
-    title: '更新 NCBI 物种库',
-    message: 'NCBI 物种库更新涉及大量数据下载与解压，建议在网络环境良好时进行，是否继续？',
-    confirmText: '开始更新',
-  })
-  if (!ok) return
-
-  appStore.showNotification('启动 NCBI 物种库增量更新', 'info')
-  try {
-    await getBridge().taxonomy_update()
-    refreshTaxStatus()
-  } catch {
-    appStore.showNotification('更新指令发送失败', 'error')
-  }
-}
-
-const groupedDatabases = computed(() => {
-  const groups: Record<string, UnifiedDbCardItem[]> = {}
-
-  // 1. 常规生物学数据库 (16S, PhageScope等)
-  for (const db of bioDatabases.value) {
-    const cat = db.category || '未分类数据库'
-    if (!groups[cat]) groups[cat] = []
-    groups[cat].push({
-      id: db.db_id,
-      name: db.name,
-      version: db.version,
-      size_mb: db.size_mb || 0,
-      last_modified: db.last_modified || '未知',
-      installed: db.installed,
-      path: db.path || '',
-      url: db.url || 'local_only',
-      type: 'bio',
-      building: dbUpdates.value[db.db_id]?.status === 'updating',
-      progress: dbUpdates.value[db.db_id]?.progress || 0,
-      message: dbUpdates.value[db.db_id]?.message || ''
-    })
-  }
-
-  // 2. 特殊的分类学数据库
-  if (taxStatus.value) {
-    const cat = 'NCBI 物种分类数据库'
-    if (!groups[cat]) groups[cat] = []
-    groups[cat].push({
-      id: 'taxonomy',
-      name: 'NCBI Taxonomy (ETE4)',
-      version: 'Latest',
-      size_mb: taxStatus.value.fileSizeMB || 0,
-      last_modified: taxStatus.value.lastModified || '未知',
-      installed: Boolean(taxStatus.value.ready),
-      path: 'database/ncbi_taxonomy',
-      type: 'tax',
-      building: Boolean(taxStatus.value.building),
-      progress: taxStatus.value.building ? 50 : 0,
-      message: taxStatus.value.building ? '正在后台构建/同步中...' : ''
-    })
-  }
-
-  // 分类排序权重
-  const categoryOrder = [
-    '噬菌体注释与分析',
-    '功能注释与 AI 预测库',
-    '结构域与特征家族库',
-    '病原毒力与安全性数据库',
-    '16S/18S 参考数据库',
-    'NCBI 物种分类数据库'
-  ]
-
-  return Object.keys(groups)
-    .sort((a, b) => {
-      const idxA = categoryOrder.indexOf(a)
-      const idxB = categoryOrder.indexOf(b)
-      if (idxA !== -1 && idxB !== -1) return idxA - idxB
-      if (idxA !== -1) return -1
-      if (idxB !== -1) return 1
-      return a.localeCompare(b, 'zh-CN')
-    })
-    .map(cat => ({
-      category: cat,
-      dbs: groups[cat]
-    }))
-})
-
-async function triggerUpdate(db: UnifiedDbCardItem) {
-  if (db.type === 'tax') {
-    await triggerTaxUpdate()
-  } else {
-    if (db.installed) {
-      const ok = await confirmDialog.confirm({
-        title: '确认覆盖更新数据库',
-        message: `【${db.name}】当前已完整就绪。\n\n系统暂未检测到必须的远端版本变更。强制更新将重新下载并构建庞大的数据库文件（可能耗时较长），是否确定要继续覆盖更新？`,
-        confirmText: '强制更新',
-        danger: true,
-      })
-      if (!ok) {
-        return
-      }
-    }
-    triggerBioDbUpdate(db.id)
-  }
-}
-
-function refreshAll() {
-  refreshTaxStatus()
-  loadBioDatabases()
-}
-
-function formatSizeMB(mb: number | string) {
-  const v = Number(mb)
-  if (isNaN(v) || v === 0) return '0 MB'
-  if (v >= 1024) {
-    return (v / 1024).toFixed(2) + ' GB'
-  }
-  return v.toFixed(2) + ' MB'
-}
-
-onMounted(() => {
-  refreshTaxStatus()
-  loadBioDatabases()
-
-  // 订阅广播事件
-  eventCleanup = onEvent((type, data) => {
-    if (type === 'db_update_event' && data && typeof data === 'object' && 'db_id' in data) {
-      const progress = data as DbUpdateProgress
-      if (!progress.db_id) return
-      dbUpdates.value[progress.db_id] = progress
-      if (progress.status === 'success') {
-        loadBioDatabases()
-        appStore.showNotification(`${progress.db_id} 更新完成`, 'success')
-      }
-    }
-  })
-})
-
-onUnmounted(() => {
-  if (eventCleanup) eventCleanup()
-  if (taxPollTimer) clearInterval(taxPollTimer)
-})
+const {
+  loadingBioDbs,
+  taxStatus,
+  cancellingDbIds,
+  groupedDatabases,
+  triggerUpdate,
+  cancelUpdate,
+  refreshAll,
+  formatSizeMB,
+} = useDatabasePanel()
 </script>
 
 <template>
   <div class="panel">
     <header class="panel-header">
-      <div style="display: flex; justify-content: space-between; align-items: flex-end; width: 100%;">
+      <div class="panel-header-row">
         <div>
           <h2>生物分析数据库管理</h2>
           <p class="desc">集中管理各个分析流水线所需的数据库版本与状态。</p>
         </div>
-        <button type="button" class="p-btn p-btn-outline" @click="refreshAll"
-          style="font-size: 0.8rem; padding: 6px 12px;">
-          全局刷新</button>
+        <button type="button" class="p-btn p-btn-outline refresh-all-btn" @click="refreshAll">
+          全局刷新
+        </button>
       </div>
     </header>
 
@@ -281,28 +34,28 @@ onUnmounted(() => {
 
     <!-- 动态渲染数据库分类 -->
     <div v-for="group in groupedDatabases" :key="group.category" class="p-card">
-      <h3 style="margin-bottom: 20px;">{{ group.category }}</h3>
+      <h3 class="db-group-title">{{ group.category }}</h3>
 
       <div class="db-unified-list">
         <div v-for="db in group.dbs" :key="db.id" class="db-item-row">
-
           <div class="db-row-main">
             <!-- Left: Name & Version -->
             <div class="db-name-col">
               <span class="p-status-dot" :class="{ active: db.installed }"></span>
               <div class="name-text">
                 <span class="name">{{ db.name }}</span>
-                <span class="p-badge" style="margin-left: 8px;">{{ db.version }}</span>
+                <span class="p-badge db-version-badge">{{ db.version }}</span>
               </div>
-              <div class="db-meta-path" v-if="db.installed && db.path">{{ db.path }}</div>
+              <div v-if="db.installed && db.path" class="db-meta-path">{{ db.path }}</div>
             </div>
 
             <!-- Middle: Stats -->
             <div class="db-stats-col">
               <div class="meta-item"><label>数据大小</label><span>{{ formatSizeMB(db.size_mb) }}</span></div>
               <div class="meta-item"><label>更新时间</label><span>{{ db.last_modified }}</span></div>
-              <div class="meta-item"><label>当前状态</label>
-                <span :class="db.installed ? 'status-ok' : 'status-err'" style="font-weight: 700; font-size: 0.9rem;">
+              <div class="meta-item">
+                <label>当前状态</label>
+                <span class="db-status-label" :class="db.installed ? 'status-ok' : 'status-err'">
                   {{ db.building ? '构建中...' : db.installed ? '完整就绪' : '尚未部署' }}
                 </span>
               </div>
@@ -310,14 +63,28 @@ onUnmounted(() => {
 
             <!-- Right: Actions -->
             <div class="db-action-col">
-              <button type="button" v-if="db.url !== 'local_only' && db.url !== 'none'" class="p-btn p-btn-primary"
-                :disabled="db.building" @click="triggerUpdate(db)">
+              <button
+                v-if="db.building"
+                type="button"
+                class="p-btn p-btn-outline db-cancel-btn"
+                :disabled="Boolean(cancellingDbIds[db.id])"
+                @click="cancelUpdate(db)"
+              >
+                {{ cancellingDbIds[db.id] ? '取消中...' : '取消' }}
+              </button>
+              <button
+                v-if="db.url !== 'local_only' && db.url !== 'none'"
+                type="button"
+                class="p-btn p-btn-primary"
+                :disabled="db.building"
+                @click="triggerUpdate(db)"
+              >
                 {{ db.installed ? '检查更新' : '一键部署' }}
               </button>
             </div>
           </div>
 
-          <!-- Progress Bar Row (Conditionally shown below) -->
+          <!-- Progress Bar Row -->
           <div v-if="db.building" class="db-prog-row">
             <div class="p-progress-bar">
               <div class="fill" :style="{ width: db.progress + '%' }"></div>
@@ -325,161 +92,14 @@ onUnmounted(() => {
             <span class="prog-msg">{{ db.message }} ({{ db.progress }}%)</span>
           </div>
 
+          <!-- Error Feedback Row -->
+          <div v-else-if="db.updateStatus === 'error' && db.message" class="db-error-row">
+            <span>{{ db.message }}</span>
+          </div>
         </div>
       </div>
     </div>
-
   </div>
 </template>
 
-<style scoped>
-.db-unified-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.db-item-row {
-  background: #fdfdfd;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 16px 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-.db-item-row:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-  border-color: #cbd5e1;
-}
-
-.db-row-main {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-}
-
-.db-name-col {
-  flex: 0 0 35%;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  position: relative;
-  padding-left: 16px;
-}
-
-.p-status-dot {
-  position: absolute;
-  left: 0;
-  top: 8px;
-}
-
-.name-text {
-  display: flex;
-  align-items: center;
-}
-
-.name {
-  font-weight: 700;
-  color: #1e293b;
-  font-size: 1.05rem;
-}
-
-.db-stats-col {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 40px;
-  background: #f8fafc;
-  padding: 10px 24px;
-  border-radius: 8px;
-  border: 1px solid #f1f5f9;
-}
-
-.db-action-col {
-  flex: 0 0 auto;
-}
-
-.meta-item label {
-  display: block;
-  font-size: 0.65rem;
-  color: #94a3b8;
-  margin-bottom: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.meta-item span {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #334155;
-}
-
-.status-ok {
-  color: #10b981 !important;
-}
-
-.status-err {
-  color: #f59e0b !important;
-}
-
-.db-meta-path {
-  font-size: 0.72rem;
-  color: #94a3b8;
-  word-break: break-all;
-  margin-top: 4px;
-}
-
-.prog-msg {
-  font-size: 0.8rem;
-  color: #64748b;
-  margin-top: 6px;
-  display: block;
-}
-
-.db-prog-row {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px dashed #e2e8f0;
-}
-
-.db-loading-state,
-.db-empty-state {
-  padding: 40px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  color: #64748b;
-  background: #f8fafc;
-  border-radius: 12px;
-  border: 1px dashed #e2e8f0;
-}
-
-.empty-icon {
-  font-size: 2.5rem;
-  opacity: 0.5;
-}
-
-.db-empty-state p {
-  font-size: 0.85rem;
-  font-style: italic;
-}
-
-.spinner {
-  width: 28px;
-  height: 28px;
-  border: 3px solid #e2e8f0;
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-</style>
+<style scoped src="./databasePanel.css"></style>
